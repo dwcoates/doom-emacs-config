@@ -5396,6 +5396,9 @@ html[data-page-unshown] {
   white-space: pre;
   animation: pfooter-status-color 3.64s ease-in-out infinite alternate;
 }
+/* A HELD MERGE'S STEP IS GREY AND STILL (frontend.v1.FooterStatusMerging.held):
+   its merge is suspended at it, or its queue holds every merge in it. */
+.footer-status[data-held] { color: var(--muted); }
 .pfooter-wave-letter {
   display: inline-block;
   transform-origin: 50% 100%;

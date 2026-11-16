@@ -27,6 +27,7 @@ import {
 import { CHIP_PANELS, type FooterPanel } from "../../src/footer/expanded.js";
 import {
   STATUS_COLOR_CYCLE_MS,
+  STATUS_WAVE_ATTRIBUTE,
   STATUS_WAVE_CYCLE_MS,
   STATUS_WAVE_LETTER_OFFSET_MS,
   STILL_STATUS_STEPS,
@@ -234,6 +235,19 @@ describe("drawFooterStatus: a step is drawn as the status", () => {
     const { row } = drawStrip({ status: withSubStatus("vendorFault", "auth") });
     const cell = row.querySelector(".footer-status");
     expect([cell?.getAttribute("data-arm"), cell?.getAttribute("data-substatus")]).toEqual(["vendorFault", "auth"]);
+  });
+
+  it.each([
+    { name: "a held merge's step stands still, marked held", held: true, wantHeld: true, wantWaves: false },
+    { name: "a running merge's step waves, unmarked", held: false, wantHeld: false, wantWaves: true },
+  ])("$name", ({ held, wantHeld, wantWaves }) => {
+    const value = held ? { substatus: { case: "testing", value: {} }, held: {} } : { substatus: { case: "testing", value: {} } };
+    const { row } = drawStrip({ status: status("merging", value) });
+    const cell = row.querySelector(".footer-status")!;
+    expect([cell.hasAttribute("data-held"), cell.querySelector("[" + STATUS_WAVE_ATTRIBUTE + "]") !== null || cell.hasAttribute(STATUS_WAVE_ATTRIBUTE)]).toEqual([
+      wantHeld,
+      wantWaves,
+    ]);
   });
 
   it("names no step on the cell of an arm whose substatus is unset", () => {

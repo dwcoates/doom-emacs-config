@@ -83,21 +83,39 @@ func (b *bubbles) keep(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *f
 	return pb.hold
 }
 
-// moved sets LEASE's bubble's hold to HOLD and answers its tabs to redraw,
-// none when the hold did not move or the bubble published nothing.
-func (b *bubbles) moved(lease ids.LeaseID, hold bubbleHold) (ids.WorkspaceID, []publishedTab) {
+// moved sets the hold of LEASE's bubble, drawn in WS, to HOLD, and answers
+// whether it moved and its tabs to redraw. A bubble that published nothing
+// yet records its hold too, so the footer reads it (holdOfLease).
+func (b *bubbles) moved(ws ids.WorkspaceID, lease ids.LeaseID, hold bubbleHold) (bool, []publishedTab) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.by == nil {
+		b.by = map[ids.LeaseID]*publishedBubble{}
+	}
 	pb, ok := b.by[lease]
-	if !ok || pb.hold == hold {
-		return "", nil
+	if !ok {
+		pb = &publishedBubble{ws: ws, tabs: map[string]publishedTab{}}
+		b.by[lease] = pb
+	}
+	if pb.hold == hold {
+		return false, nil
 	}
 	pb.hold = hold
 	out := make([]publishedTab, 0, len(pb.order))
 	for _, id := range pb.order {
 		out = append(out, pb.tabs[id])
 	}
-	return pb.ws, out
+	return true, out
+}
+
+// holdOfLease answers the hold LEASE's bubble was last drawn under.
+func (b *bubbles) holdOfLease(lease ids.LeaseID) bubbleHold {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if pb, ok := b.by[lease]; ok {
+		return pb.hold
+	}
+	return bubbleHold{}
 }
 
 // forget drops LEASE's bubble: its merge ended, or moved to another daemon.
@@ -153,9 +171,20 @@ func (o *orchestrator) republishBubbles(ctx context.Context, entries []wsm.Merge
 		// A MERGE OUT OF LINE RUNS ITS REPAIR TURN whatever its queue does: only
 		// its own suspension holds it.
 		hold := holdOf(lease, queueHeld && entry.State != wsm.MergeRemediating, heldRounds)
-		ws, tabs := o.bubbleTabs.moved(lease, hold)
+		changed, tabs := o.bubbleTabs.moved(entry.Workspace, lease, hold)
+		if !changed {
+			continue
+		}
 		for _, t := range tabs {
-			o.upsertTab(ws, lease, t.key, renderTab(t.tab, hold))
+			o.upsertTab(entry.Workspace, lease, t.key, renderTab(t.tab, hold))
+		}
+		// THE FOOTER'S STEP IS DRAWN FROM THE SAME HOLD: its facts are
+		// published again under it (publish).
+		o.mu.Lock()
+		facts, has := o.facts[entry.Workspace]
+		o.mu.Unlock()
+		if has && (facts.State == StateMerging || facts.State == StateQueued) {
+			o.publish(entry.Repo, entry.Workspace, facts)
 		}
 	}
 }

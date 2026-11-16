@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -159,5 +160,26 @@ func TestTheBubbleAndTheRosterAgreeOnEveryGeneratedLedger(t *testing.T) {
 		if (stateArm(drawn) == "on_hold") != viewHeld {
 			t.Fatalf("case %d: the bubble drew %s, the roster's view holds a stage held: %v", i, stateArm(drawn), viewHeld)
 		}
+	}
+}
+
+func TestAQueueThatHoldsItsMergesPublishesTheirStepsHeld(t *testing.T) {
+	// Arrange: a merging workspace's facts, then its queue paused.
+	h := newHarness(t)
+	seedQueue(h, h.repoKey(), false)
+	h.o.mu.Lock()
+	h.o.ledgerOf[theWorkspace] = "lease-footer"
+	h.o.mu.Unlock()
+	h.o.publish(h.repoKey(), theWorkspace, MergeFacts{State: StateMerging, Step: footer.StepTesting, QueuedAt: h.clock()})
+	h.db.mu.Lock()
+	h.db.paused[h.repoKey()] = true
+	h.db.mu.Unlock()
+
+	// Act
+	h.o.publishRosterQueue(context.Background(), h.repoKey())
+
+	// Assert
+	if facts := h.footer.last(); facts.State != StateMerging || !facts.Held {
+		t.Fatalf("footer facts = %+v, want the testing step published held", facts)
 	}
 }

@@ -509,6 +509,11 @@ func (o *orchestrator) Facts(ws ids.WorkspaceID) (MergeFacts, bool) {
 // step can never be reported against no queue.
 func (o *orchestrator) publish(repo wsm.RepoKey, ws ids.WorkspaceID, facts MergeFacts) {
 	checkQueuedAt(o.log(context.Background(), ws), ws, facts)
+	// THE STEP'S HOLD IS THE BUBBLE'S (bubbleview.go), never the step's own.
+	facts.Held = false
+	if lease, ok := o.leaseOf(ws); ok && (facts.State == StateMerging || facts.State == StateQueued) {
+		facts.Held = o.bubbleTabs.holdOfLease(lease).held
+	}
 	o.mu.Lock()
 	_, hadFacts := o.facts[ws]
 	o.facts[ws] = facts
