@@ -206,6 +206,8 @@ tree_stamp_path() {
         daemon)  printf '%s' "$1/daemon/bin/.source-tree" ;;
         shim)    printf '%s' "$1/agent-shim/claude/shim/dist/.source-tree" ;;
         webapp)  printf '%s' "$1/webapp/dist/.source-tree" ;;
+        # The notifier's stamps are named for its bundle, Zettel.app.
+        notifier) printf '%s' "$1/home/.cache/agent-repl/bin/.Zettel.app.source-tree" ;;
         *)       printf '%s' "$1/home/.cache/agent-repl/bin/.$2.source-tree" ;;
     esac
 }
@@ -491,8 +493,7 @@ t_notifier_is_reported_on_macos_from_its_stamps() {
     cache="$root/home/.cache/agent-repl/bin"
     mkdir -p "$cache"
     stamp "$cache/.Zettel.app.built-sha" "$(head_sha "$root")"
-    write_source_tree "$cache/.Zettel.app.source-tree" \
-        "$(source_tree_id "$root" $(deploy_stamp_system_paths notifier ""))"
+    stamp_tree "$root" notifier
     run_report "$root"
     if [ "$(jq_get "$OUT" 'sysmap["notifier"]["ready"]')" = "True" ] \
        && [ "$(jq_get "$OUT" 'sysmap["notifier"]["deployed_sha"]')" = "$(head_sha "$root")" ]; then
