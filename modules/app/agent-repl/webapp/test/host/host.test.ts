@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   IN_TURN_BOUND_MS,
+  REPLACEMENT_BOUND_MS,
   FRAME_OVERLAY_ATTRIBUTE,
   FRAME_SHOWN_ATTRIBUTE,
   FRAME_WORKSPACE_ATTRIBUTE,
@@ -1924,7 +1925,7 @@ describe("a shown page re-pointed at another daemon", () => {
         const [, fresh] = framesOf("b");
 
         // Act
-        vi.advanceTimersByTime(IN_TURN_BOUND_MS);
+        vi.advanceTimersByTime(REPLACEMENT_BOUND_MS);
 
         // Assert
         const notes = parsed(timed.ids()).notes as {
@@ -1945,6 +1946,43 @@ describe("a shown page re-pointed at another daemon", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("keeps the shown page past the in-turn bound while its replacement waits on the adoption", () => {
+    // Arrange
+    vi.useFakeTimers();
+    try {
+      const timed = createHost({
+        daemon: createDaemonOrigin("http://host.localhost:1"),
+        doc: document,
+        win: window,
+        level: LevelWindow.fixed("info"),
+      });
+      try {
+        timed.ensure("b", "http://ws-b.localhost:1/");
+        timed.show("b");
+        timed.ensure("b", "http://ws-b.localhost:2/");
+        const [old, fresh] = framesOf("b");
+
+        // Act
+        vi.advanceTimersByTime(IN_TURN_BOUND_MS);
+
+        // Assert
+        const notes = parsed(timed.ids()).notes as { level: string }[];
+        expect(framesOf("b")).toEqual([old, fresh]);
+        expect(old.hasAttribute(FRAME_SHOWN_ATTRIBUTE)).toBe(true);
+        expect(notes.some((n) => n.level === "warn")).toBe(false);
+      } finally {
+        timed.dispose();
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("bounds a replacement above the in-turn bound", () => {
+    // Assert
+    expect(REPLACEMENT_BOUND_MS).toBeGreaterThan(IN_TURN_BOUND_MS);
   });
 
   it("hands the replacement every call the page is given while it waits", () => {
