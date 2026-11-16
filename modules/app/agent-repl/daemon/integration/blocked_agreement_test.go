@@ -142,8 +142,6 @@ func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) 
 	t.Parallel()
 	// Arrange: a running turn whose call the vendor is retrying.
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared record is the vendor failure the test feeds, stated once by its owner.
-	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	f.submit("go", "k-api-retry-recovers", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

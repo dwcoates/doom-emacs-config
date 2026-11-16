@@ -404,10 +404,11 @@ func TestRouteResponseRevision(t *testing.T) {
 	}
 }
 
-// TestRouteApiErrorIsWarnedOnceByTheWatcher covers the failure's ONE owner: the
-// watcher states it at WARN, with the agent and the vendor's message, as it
-// routes it; the sinks it routes to record their own outcomes below WARN.
-func TestRouteApiErrorIsWarnedOnceByTheWatcher(t *testing.T) {
+// TestRouteApiErrorIsRecordedOnceByTheWatcher covers the failure's ONE owner:
+// the watcher states it at INFO, with the agent and the vendor's message, as
+// it routes it. INFO because the vendor retries its own failed request and no
+// one in agent-repl can act on it; the sinks it routes to draw it for the user.
+func TestRouteApiErrorIsRecordedOnceByTheWatcher(t *testing.T) {
 	// Arrange.
 	h := newHarness(t, Session{Started: sessionStarted("turn-1")})
 	h.quiet()
@@ -416,14 +417,14 @@ func TestRouteApiErrorIsWarnedOnceByTheWatcher(t *testing.T) {
 	h.route(h.main, entryFrame(frameUpdate("main-1", apiErrorUpdate("529 overloaded"))))
 
 	// Assert.
-	var warned []map[string]any
+	var recorded []dlog.Record
 	for _, r := range h.log.Records() {
-		if r.Level == "warn" && r.Operation == "daemon.sessionwatcher.api_error" {
-			warned = append(warned, r.Context)
+		if r.Operation == "daemon.sessionwatcher.api_error" {
+			recorded = append(recorded, r)
 		}
 	}
-	if len(warned) != 1 || warned[0]["agent_id"] != "main-1" || warned[0]["message"] != "529 overloaded" {
-		t.Fatalf("api_error WARN records = %v, want exactly one naming main-1 and the vendor's message", warned)
+	if len(recorded) != 1 || recorded[0].Level != "info" || recorded[0].Context["agent_id"] != "main-1" || recorded[0].Context["message"] != "529 overloaded" {
+		t.Fatalf("api_error records = %+v, want exactly one at INFO naming main-1 and the vendor's message", recorded)
 	}
 }
 

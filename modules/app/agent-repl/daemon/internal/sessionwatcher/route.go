@@ -1089,7 +1089,10 @@ func (w *watcher) routeUpdateLocked(agent *conversationv1.AgentId, update *conve
 
 	case update.GetApiError() != nil:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeUpdateLocked", "branch": "case update.GetApiError() != nil"})
-		w.log.Warn("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
+		// INFO, NOT WARN: the vendor's own request failed and the vendor
+		// retries it; nobody in agent-repl can act on it, and the feed, the
+		// footer and the sidebar draw it for the user (AGENTS.md, levels).
+		w.log.Info("daemon.sessionwatcher.api_error", "a vendor request failed mid-turn", dlog.Context{
 			"agent_id": agent.GetValue(), "message": update.GetApiError().GetMessage(),
 		})
 		w.sinks.Feed.OnApiError(w.ws, agent, update.GetApiError(), turn, place)
