@@ -5305,13 +5305,15 @@ Binds `buf', `first', `second' and `records', the INFO records made, newest firs
 (ert-deftest agent-repl-test-panels-frontend-in-a-second-window-is-recorded ()
   "Showing a frontend buffer in a second window names the buffer, both windows and the command."
   (agent-repl-test-panels--with-second-window "*agent-frontend-second-ws*"
-    ;; Act
-    (let ((this-command 'agent-repl-test-switch))
-      (set-window-buffer second buf))
-    ;; Assert
-    (should (equal records
-                   (list (format "elisp.panels.frontend-second-window: buffer=*agent-frontend-second-ws* showing=%S target=%S command=agent-repl-test-switch"
-                                 (list first) second))))))
+    ;; Arrange: the windows as printed when the record is made, BEFORE the
+    ;; second one shows the buffer (a window prints with its buffer).
+    (let ((want (format "elisp.panels.frontend-second-window: buffer=*agent-frontend-second-ws* showing=%S target=%S command=agent-repl-test-switch"
+                        (list first) second)))
+      ;; Act
+      (let ((this-command 'agent-repl-test-switch))
+        (set-window-buffer second buf))
+      ;; Assert
+      (should (equal records (list want))))))
 
 (ert-deftest agent-repl-test-panels-frontend-in-a-second-window-is-still-shown ()
   "The record changes nothing: the second window still shows the buffer."
