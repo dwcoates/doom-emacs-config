@@ -275,7 +275,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -321,7 +321,7 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -366,7 +366,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -412,7 +412,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -443,7 +443,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -476,7 +476,7 @@
                 "newMarkdown": "I will not"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -509,7 +509,7 @@
                 "newMarkdown": " run that."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -561,7 +561,7 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
               "name": "fake-opus-4-8"
             }
