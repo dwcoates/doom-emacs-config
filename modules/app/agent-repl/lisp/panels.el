@@ -1357,6 +1357,39 @@ Cancels any pending timer and schedules `agent-repl--on-window-change'.")
 (add-hook 'window-configuration-change-hook
           #'agent-repl--debounced-on-window-change)
 
+;;;; A frontend buffer about to be shown in a second window
+
+;; INSTRUMENTATION ONLY: nothing here changes what is displayed.  A frontend
+;; buffer holds the host xwidget, which one window at a time can show, and
+;; Emacs answers a second window with "You can't share an xwidget (webkit2)
+;; among windows" in *Messages* alone.  On 2026-10-26 that message came
+;; twice right after a picker switch while `webview-on-switch' reported
+;; `windows=2', and no record said which path put the buffer in the second
+;; window.  Every display path (switch-to-buffer, display-buffer, a
+;; window-state restore, frontend.el's mount) ends in `set-window-buffer',
+;; so the record is made there, before the window changes.
+
+(defun agent-repl--panels-note-frontend-second-window (window buffer-or-name &rest _)
+  "Record that a frontend BUFFER-OR-NAME is about to be shown in WINDOW too.
+A `:before' advice on `set-window-buffer': it records, and changes
+nothing.  The record is made only when the buffer is a live frontend
+buffer (`agent-repl--frontend-buffer-re') already shown in a window other
+than WINDOW (nil: the selected window), and names the buffer, the windows
+already showing it, WINDOW and the calling command."
+  (let ((buf (get-buffer buffer-or-name)))
+    (when (and buf (buffer-live-p buf)
+               (string-match-p agent-repl--frontend-buffer-re (buffer-name buf)))
+      (let* ((target (or window (selected-window)))
+             (showing (delq target (get-buffer-window-list buf nil t))))
+        (when showing
+          (agent-repl--info
+           (or (agent-repl--buffer-owner buf)
+               '(:agent-repl-context "a frontend buffer can be shown outside its workspace"))
+           "elisp.panels.frontend-second-window: buffer=%s showing=%S target=%S command=%S"
+           (buffer-name buf) showing target this-command))))))
+
+(advice-add 'set-window-buffer :before #'agent-repl--panels-note-frontend-second-window)
+
 ;;;; Buffer creation
 
 (defun agent-repl--initialize-input-buffer (ws)
