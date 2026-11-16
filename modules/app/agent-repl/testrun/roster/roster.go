@@ -700,8 +700,9 @@ var daemonUnitInputs = map[string][]string{
 	// Its successor-environment test reads the real module root's requirements
 	// manifest, the path paths.Checkout names.
 	"cmd/agent-repld": {"skills/", "prompts/", "bin/agent-repld", "requirements.json"},
-	// gitclient pins the markers the merge queue's hook spells.
-	"internal/gitclient": {"/.githooks/reference-transaction"},
+	// gitclient pins the markers the merge queue's hook spells, and its
+	// StoppedBy scan walks the daemon's tree.
+	"internal/gitclient": {"daemon/", "/.githooks/reference-transaction"},
 	// lifecycleconfig pins the repository's own lifecycle config to the
 	// pipeline its queue runs, and to the scripts it names.
 	"internal/lifecycleconfig": {"daemon/", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/"},

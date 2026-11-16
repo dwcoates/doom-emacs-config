@@ -31,6 +31,13 @@
 // A KEPT BRANCH IS RECORDED AT INFO: a branch the daemon leaves behind is a
 // name a later create refuses, so why it was kept is always in the persisted
 // log.
+//
+// A RETIREMENT THE DAEMON STOPPED IS NOT A FAILURE: a git cancelled by the
+// daemon's own exit (gitclient.StoppedBy) is recorded at INFO and returned,
+// so the caller stops too. It was recorded at ERROR, and every handover that
+// exited mid-sweep left a false error in the log (2026-11-16: the reaper's
+// probe of `footer-drag-handle-removal` cancelled as the handing-over daemon
+// exited).
 package landedbranch
 
 import (
@@ -89,20 +96,28 @@ const (
 // LANDING judges it. OP and FIELDS are the caller's operation and context:
 // every outcome is recorded under them, a deletion and a kept branch at INFO
 // (an absent one at DEBUG: nothing is left behind), and every git that could
-// not answer or act at ERROR, once, here. An error leaves the branch as it
-// was.
+// not answer or act at ERROR, once, here, except a git the daemon stopped,
+// at INFO. An error leaves the branch as it was.
 func Retire(ctx context.Context, git Git, log dlog.Logger, op, repoDir, branch string, landing Landing, fields dlog.Context) (Outcome, error) {
 	record := dlog.Context{"repo": repoDir, "branch": branch, "into": landing.Into, "landed_head": landing.Head}
 	maps.Copy(record, fields)
+	refuse := func(err error) (Outcome, error) {
+		log.Error(op, "could not retire the landed branch: check the request; the branch is kept", dlog.WithCause(record, err))
+		return "", fmt.Errorf("landedbranch: check the request %s in %s: %w", branch, repoDir, err)
+	}
 	fail := func(what string, err error) (Outcome, error) {
-		log.Error(op, "could not retire the landed branch: "+what+"; the branch is kept", dlog.WithCause(record, err))
+		if gitclient.StoppedBy(ctx, err) {
+			log.Info(op, "stopped retiring the landed branch with the daemon: "+what+"; the branch is kept", dlog.WithCause(record, err))
+		} else {
+			log.Error(op, "could not retire the landed branch: "+what+"; the branch is kept", dlog.WithCause(record, err))
+		}
 		return "", fmt.Errorf("landedbranch: %s %s in %s: %w", what, branch, repoDir, err)
 	}
 	if branch == "" || landing.Into == "" {
-		return fail("check the request", fmt.Errorf("the branch (%q) and the ref it landed into (%q) are both required", branch, landing.Into))
+		return refuse(fmt.Errorf("the branch (%q) and the ref it landed into (%q) are both required", branch, landing.Into))
 	}
 	if branch == landing.Into {
-		return fail("check the request", fmt.Errorf("the branch %q is the ref it landed into", branch))
+		return refuse(fmt.Errorf("the branch %q is the ref it landed into", branch))
 	}
 	exists, err := git.BranchExists(ctx, repoDir, branch)
 	if err != nil {

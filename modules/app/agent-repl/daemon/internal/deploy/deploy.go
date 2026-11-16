@@ -847,13 +847,19 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 				if err := in.dir(s.WifiApp(), live.WifiApp); err != nil {
 					return err
 				}
+				// THE STOP IS TIMED, so every install records what its bound
+				// (persistentwifi.StopAsks) is measured against.
+				asking := d.deps.Clock.Now()
 				stopped, err := d.deps.StopWifiAsks(ctx)
+				took := d.deps.Clock.Now().Sub(asking)
 				if err != nil {
-					return fmt.Errorf("stop the replaced Wi-Fi helper's waiting asks: %w", err)
+					return fmt.Errorf("stop the replaced Wi-Fi helper's waiting asks: %w (after %s)", err, took.Round(time.Millisecond))
 				}
+				fields := dlog.Context{"app": live.WifiApp, "took_ms": took.Milliseconds()}
 				if stopped {
-					d.log.Info(opInstall, "stopped the replaced Wi-Fi helper's ask waiting on the owner; the next scan asks again from the installed helper",
-						dlog.Context{"app": live.WifiApp})
+					d.log.Info(opInstall, "stopped the replaced Wi-Fi helper's ask waiting on the owner; the next scan asks again from the installed helper", fields)
+				} else {
+					d.log.Info(opInstall, "no ask of the replaced Wi-Fi helper was waiting on the owner", fields)
 				}
 				return nil
 			}, writes: []string{live.WifiApp}, tree: true})

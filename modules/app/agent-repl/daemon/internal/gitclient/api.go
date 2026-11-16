@@ -328,6 +328,16 @@ func IsCancelled(err error) bool {
 	return errors.As(err, &cancelled)
 }
 
+// StoppedBy reports whether ERR ended a step because the daemon stopped it
+// rather than because the step failed: CTX, the context the step ran under,
+// is done (the daemon's exit or a caller calling the step off), or ERR is a
+// git this daemon cancelled. A stopped step is recorded at INFO and counted
+// as no failure by every caller that asks this, so none of them restates the
+// classification.
+func StoppedBy(ctx context.Context, err error) bool {
+	return ctx.Err() != nil || IsCancelled(err)
+}
+
 // New builds the git client. It holds no state beyond its log surfaces: every
 // method's truth is the repository on disk, read fresh each time.
 func New(log dlog.Surfaces) (Git, error) {

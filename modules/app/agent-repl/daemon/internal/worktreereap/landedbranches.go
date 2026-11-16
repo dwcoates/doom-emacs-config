@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/landedbranch"
 	"agent-repld/internal/wsm"
 )
@@ -37,6 +38,10 @@ const opLandedBranch = "daemon.worktreereap.landed_branch"
 // `fix/successor-role-flags`). The target is probed as any ref, not as a
 // local branch, because a landing target may be a remote-tracking ref such
 // as `origin/master`, which is present though no local branch is named so.
+//
+// A RETIREMENT THE DAEMON STOPPED IS NO FAILURE: the daemon's exit cancels
+// the sweep's git mid-pass, and the next pass, in the successor, judges the
+// branch again (2026-11-16: `footer-drag-handle-removal`).
 //
 // A dry run judges nothing here: a deletion is the one thing the pass does,
 // and Retire judges and deletes in one step.
@@ -75,10 +80,9 @@ func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
 		} else if landing.Into != s.defaultBranch {
 			present, err := s.r.deps.Git.RefExists(ctx, s.repo.Dir, landing.Into)
 			if err != nil {
-				s.r.deps.Log.Error(opLandedBranch, "could not probe the branch a landed branch landed into; the branch is kept",
-					dlog.WithCause(dlog.Context{"repo": s.repo.Dir, "branch": branch, "into": landing.Into,
-						"workspace": string(ws.ID), "repo_id": string(s.repo.ID)}, err))
-				s.report.Failures++
+				s.fail(ctx, opLandedBranch, "could not probe the branch a landed branch landed into; the branch is kept",
+					dlog.Context{"repo": s.repo.Dir, "branch": branch, "into": landing.Into,
+						"workspace": string(ws.ID), "repo_id": string(s.repo.ID)}, err)
 				continue
 			}
 			if !present {
@@ -94,7 +98,11 @@ func (s *repoSweep) sweepLandedBranches(ctx context.Context) {
 		outcome, err := landedbranch.Retire(ctx, s.r.deps.Git, s.r.deps.Log, opLandedBranch, s.repo.Dir, branch, landing,
 			dlog.Context{"workspace": string(ws.ID), "repo_id": string(s.repo.ID)})
 		if err != nil {
-			s.report.Failures++
+			// Retire recorded the error, at INFO when the daemon stopped
+			// it; a stopped retirement is counted as no failure.
+			if !gitclient.StoppedBy(ctx, err) {
+				s.report.Failures++
+			}
 			continue
 		}
 		if outcome == landedbranch.Deleted {

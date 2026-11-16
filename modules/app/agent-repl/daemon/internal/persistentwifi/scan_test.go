@@ -286,7 +286,7 @@ func TestAStopAsksThatOutlivesItsBoundSaysSo(t *testing.T) {
 	_, err := StopAsks(context.Background(), r, Tools{Pkill: "/t/pkill", WifiApp: "/t/AgentReplWifi.app"})
 
 	// Assert
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not end within 40ms (measured 17ms)") {
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not end within 140ms (expected 56ms)") {
 		t.Fatalf("StopAsks error = %v, want the bound and its measurement named", err)
 	}
 }
