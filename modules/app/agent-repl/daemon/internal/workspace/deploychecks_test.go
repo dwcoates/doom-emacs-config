@@ -191,3 +191,49 @@ func TestADeployCheckWorkspaceThatCannotBeMarkedClosedIsNotKilled(t *testing.T) 
 		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
 	}
 }
+
+func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+
+	// Act
+	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err != nil || len(f.shim.killedSession) != 1 || !f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
+		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, hidden and still open", err, f.shim.killedSession, f.db.workspaces[ws])
+	}
+}
+
+func TestADeployCheckWorkspaceThatCannotBeHiddenIsNotStoodBy(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	f.db.setHiddenErr = errors.New("disk gone")
+
+	// Act
+	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err == nil || len(f.shim.killedSession) != 0 {
+		t.Fatalf("StandByDeployCheck = %v, kills %v; want a refusal and its session left", err, f.shim.killedSession)
+	}
+}
+
+func TestAResumedDeployCheckWorkspaceIsShownAgain(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	if err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := f.verbs.(*verbs).ResumeDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err != nil || f.db.workspaces[ws].Hidden {
+		t.Fatalf("ResumeDeployCheck = %v, record %+v; want it shown again", err, f.db.workspaces[ws])
+	}
+}

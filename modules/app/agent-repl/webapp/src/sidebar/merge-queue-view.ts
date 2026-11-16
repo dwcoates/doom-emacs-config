@@ -531,7 +531,9 @@ export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
  * repository's name in its group header (owner rulings, 2026-11-14): `hot
  * reloading` while the landing's build rolls out, `assessing reload` while
  * the chain's intake checks it, `fixing reload` while a remediation
- * workspace fixes what the intake found. A click on it selects the workspace
+ * workspace fixes what the intake found, `finishing reload` while a
+ * remediation's or an escalation's fix is gated, landed and deployed, its
+ * workspace standing by hidden (owner requirement, 2026-11-16). A click on it selects the workspace
  * at work (`frontend.v1.RosterMergeQueueMediationTarget`), showing the hidden
  * intake for the visit as a click on any hidden workspace's link does; a
  * chain's first rollout names none, and its label selects nothing.
@@ -548,6 +550,9 @@ export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: Sideba
     case "fixing":
       return mediationLabel(sc, "fixing reload", "a remediation is fixing what the last landing's reload broke; the queue waits for its fix",
         requireMessage(standing.value.target, `${path}.standing.fixing.target`), `${path}.standing.fixing.target`);
+    case "finishing":
+      return mediationLabel(sc, "finishing reload", "a fix finished; it is being gated, landed and deployed, and the queue waits for it",
+        requireMessage(standing.value.target, `${path}.standing.finishing.target`), `${path}.standing.finishing.target`);
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);

@@ -132,6 +132,15 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 		return err
 	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation finished; its gate runs", withField(fields, "gate_rounds", f.GateRounds))
+	// THE WORKSPACE STANDS BY THE MOMENT ITS FINISH IS ACCEPTED (owner
+	// requirement, 2026-11-16): its session ends before its turn can write a
+	// reply, and it leaves the working rows for its repository's
+	// `finishing reload` label. A stand-by that fails is recorded and the
+	// finish goes on: the fix still lands, with the workspace still drawn.
+	if err := o.deps.DeployChecks.StandBy(ctx, ws); err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace could not stand by; its session runs on and it stays among the working rows", withField(fields, "error", err.Error()))
+	}
+	o.republishMediation(ctx, repo)
 	o.startRemediationFinish(f)
 	return nil
 }
@@ -334,6 +343,12 @@ func (o *orchestrator) resumeRemediation(ctx context.Context, f wsm.RemediationF
 	if err != nil {
 		return err
 	}
+	// IT RETURNS ONLY WITH WORK: shown again for the brief, whose prompt
+	// brings its session up.
+	if err := o.deps.DeployChecks.Resume(ctx, f.Workspace); err != nil {
+		return err
+	}
+	defer o.republishMediation(ctx, f.Repo)
 	if _, err := o.submitCheckPrompt(ctx, f.Workspace, wsm.NewTurnID(), text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
 		return err
 	}
@@ -346,6 +361,11 @@ func (o *orchestrator) resumeRemediation(ctx context.Context, f wsm.RemediationF
 // never left held by a remediation that cannot land.
 func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateGivenUp, f.GateRounds)
+	// A REMEDIATION GIVEN UP IS SHOWN AGAIN, beside the escalation it hands
+	// its chain to: nothing finishes it now.
+	if err := o.deps.DeployChecks.Resume(ctx, f.Workspace); err != nil {
+		return err
+	}
 	name, err := o.workspaceName(ctx, opRemediationFinish, f.Workspace)
 	if err != nil {
 		return err

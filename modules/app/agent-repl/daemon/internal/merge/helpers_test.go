@@ -4494,6 +4494,10 @@ type fakeDeployChecks struct {
 	// stopped records each deploy check stopped at once; stopErr fails it.
 	stopped []ids.WorkspaceID
 	stopErr error
+	// stoodBy and resumed record each finish's stand-by and each return to
+	// work; standByErr fails a stand-by.
+	stoodBy, resumed []ids.WorkspaceID
+	standByErr       error
 	// efforts records each effort set, "ROLE:WS", and
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
@@ -4548,6 +4552,20 @@ func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
 	defer f.mu.Unlock()
 	f.reopened = append(f.reopened, ws)
 	return f.reopenErr
+}
+
+func (f *fakeDeployChecks) StandBy(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stoodBy = append(f.stoodBy, ws)
+	return f.standByErr
+}
+
+func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumed = append(f.resumed, ws)
+	return nil
 }
 
 func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {

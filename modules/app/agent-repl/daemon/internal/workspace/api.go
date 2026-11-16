@@ -472,6 +472,11 @@ type Verbs interface {
 	// StopDeployCheck ends deploy check workspace WS at once, its session
 	// killed mid-turn (deploychecks.go).
 	StopDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
+	// StandByDeployCheck hides a finished deploy check workspace and ends
+	// its session at once, keeping it open (deploychecks.go).
+	StandByDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
+	// ResumeDeployCheck shows a standing-by deploy check workspace again.
+	ResumeDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// CloseSelf is the workspace's own agent closing it: the asking turn is
 	// never a blocker, and a workspace whose turn still runs is marked to
 	// close when that turn ends, answering true (close.go). A workspace with

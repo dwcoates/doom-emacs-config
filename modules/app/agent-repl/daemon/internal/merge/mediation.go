@@ -773,6 +773,20 @@ func owedFrom(repo ids.RepoID, m wsm.Mediation) (*OwedMediation, error) {
 // rosterMediation is the deploy check REPO's queue waits on as the roster
 // draws it, beside the repository's name: nil while it owes none.
 func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
+	// A DIRECT FINISH UNDER WAY IS DRAWN FIRST, owed check or none: the
+	// workspace that finished stands by hidden, and the label is where it is
+	// shown (an escalation's finish runs after its chain ended).
+	finishing, err := o.finishingIn(ctx, repo)
+	if err != nil {
+		return nil, err
+	}
+	if finishing != "" {
+		q, ok, err := o.checkedQueueOf(ctx, repo)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationFinishing, Remediation: finishing}, nil
+	}
 	owed, err := o.owedMediation(ctx, repo)
 	if err != nil || owed == nil {
 		return nil, err
@@ -904,4 +918,24 @@ func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm
 		return
 	}
 	o.ownProblems(ctx, q.key, made, problems, escalatedKeys(window), fields)
+}
+
+// finishingIn answers the workspace whose direct finish is under way in
+// REPO's queue: gating, landing or deploying, its workspace standing by.
+// Empty when none is.
+func (o *orchestrator) finishingIn(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, error) {
+	finishes, err := o.deps.DB.RemediationFinishes(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, f := range finishes {
+		if !sameQueue(f.Repo, repo) {
+			continue
+		}
+		switch f.Step {
+		case wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying:
+			return f.Workspace, nil
+		}
+	}
+	return "", nil
 }

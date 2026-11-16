@@ -137,6 +137,42 @@ func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	return nil
 }
 
+// StandByDeployCheck implements Verbs: a remediation or escalation workspace
+// WS whose finish the daemon accepted is hidden and its session ended at
+// once, its turn cut, before it can write a reply; the workspace stays open,
+// shown by its repository's deploy check label as finishing (owner
+// requirement, 2026-11-16). A gate that sends it back brings it back
+// (ResumeDeployCheck); its fix's deploy closes it.
+func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
+	_, log, err := v.owned(ctx, "StandByDeployCheck", ws)
+	if err != nil {
+		return err
+	}
+	if err := v.recordHidden(ctx, log, ws, true); err != nil {
+		return fmt.Errorf("stand the deploy check %s by: hide: %w", ws, err)
+	}
+	if _, err := v.endSession(ctx, log, ws); err != nil {
+		return fmt.Errorf("stand the deploy check %s by: %w", ws, err)
+	}
+	log.Info(opDeployChecks, "the finished deploy check workspace stands by: hidden, its session ended, open until its fix deploys", nil)
+	return nil
+}
+
+// ResumeDeployCheck implements Verbs: shows standing-by deploy check
+// workspace WS again, for the brief that sends it back to work; the brief's
+// prompt brings its session up.
+func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
+	_, log, err := v.owned(ctx, "ResumeDeployCheck", ws)
+	if err != nil {
+		return err
+	}
+	if err := v.recordHidden(ctx, log, ws, false); err != nil {
+		return fmt.Errorf("resume the deploy check %s: show: %w", ws, err)
+	}
+	log.Info(opDeployChecks, "the deploy check workspace is shown again; its brief brings its session up", nil)
+	return nil
+}
+
 // withWorkspace is FIELDS naming workspace WS.
 func withWorkspace(fields dlog.Context, ws wsm.WorkspaceID) dlog.Context {
 	fields["workspace"] = string(ws)

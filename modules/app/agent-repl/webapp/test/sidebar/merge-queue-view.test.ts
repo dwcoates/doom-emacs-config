@@ -705,6 +705,7 @@ describe("drawQueueMediationLabel", () => {
     ["hot reloading", { case: "waiting" as const, value: {} }],
     ["assessing reload", { case: "checking" as const, value: { target: target("intake") } }],
     ["fixing reload", { case: "fixing" as const, value: { target: target("remedy") } }],
+    ["finishing reload", { case: "finishing" as const, value: { target: target("remedy") } }],
   ])("reads %s for its standing", (want, standing) => {
     const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), daemon().sc, "m");
     expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual([want, true]);
@@ -714,6 +715,7 @@ describe("drawQueueMediationLabel", () => {
     ["a rollout's label selects the chain's intake", { case: "waiting" as const, value: { target: target("intake") } }, "intake"],
     ["an assessment's label selects the intake", { case: "checking" as const, value: { target: target("intake") } }, "intake"],
     ["a fix's label selects the remediation", { case: "fixing" as const, value: { target: target("remedy") } }, "remedy"],
+    ["a finish's label selects the workspace standing by", { case: "finishing" as const, value: { target: target("remedy") } }, "remedy"],
   ])("%s on a click", async (_name, standing, want) => {
     const { asked, sc } = selecting();
     drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), sc, "m").click();
@@ -733,6 +735,7 @@ describe("drawQueueMediationLabel", () => {
     ["no standing", create(RosterMergeQueueMediationSchema, {})],
     ["an assessment with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "checking", value: {} } })],
     ["a fix with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "fixing", value: {} } })],
+    ["a finish with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "finishing", value: {} } })],
   ])("refuses %s as a malformed view", (_name, malformed) => {
     expect(() => drawQueueMediationLabel(malformed, daemon().sc, "m")).toThrow(MalformedView);
   });
