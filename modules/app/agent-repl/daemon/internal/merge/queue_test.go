@@ -1595,16 +1595,28 @@ func TestAfterARestartAHeadThatTheChainHoldsLeavesTheResumesBehindIt(t *testing.
 	}
 }
 
-func TestAfterARestartAMergeStillWaitingInLineIsNoHead(t *testing.T) {
+// A MERGE WAITING IN LINE AHEAD OF THE ONE TO RESUME IS ITS HEAD (owner
+// ruling, 2026-11-16): it was the head the restart sent back, so nothing
+// behind it resumes ahead of it. This test once pinned the opposite ("a
+// waiting merge is nobody's head"), which let merges behind a cut head land
+// first.
+func TestAfterARestartAMergeStillWaitingInLineIsTheHead(t *testing.T) {
 	// Arrange: a merge waiting in line stands ahead of the admitted one.
-	h := resumeWorld(t, []wsm.MergeQueueEntry{{Workspace: "ws-queued", State: wsm.MergeQueued}, admittedEntry("ws-head")}, "ws-head")
+	queued, admitted := wsm.MergeQueueEntry{Workspace: "ws-queued", State: wsm.MergeQueued, EnqueuedAt: time.UnixMilli(1_000)}, admittedEntry("ws-head")
+	admitted.EnqueuedAt = time.UnixMilli(2_000)
+	h := resumeWorld(t, []wsm.MergeQueueEntry{queued, admitted}, "ws-head")
+	h.register("ws-queued", "queued")
+	h.register("ws-head", "head")
+	h.db.mu.Lock()
+	h.db.leases["ws-head"] = wsm.Lease{ID: "lease-head", Workspace: "ws-head", Holder: wsm.HolderMerge}
+	h.db.mu.Unlock()
 
 	// Act.
 	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
 
 	// Assert.
-	if err != nil || !resuming || ws != "ws-head" {
-		t.Fatalf("resumeIn = (%s, %v, %v), want ws-head: a waiting merge is nobody's head", ws, resuming, err)
+	if err != nil || resuming || ws != "" {
+		t.Fatalf("resumeIn = (%s, %v, %v), want nothing resumed ahead of the waiting merge", ws, resuming, err)
 	}
 }
 
@@ -3077,5 +3089,82 @@ func TestNextInLineNamesWhyEachMergeAheadWasPassedOver(t *testing.T) {
 	if !found || front.Workspace != "ws-next" || len(passed) != 2 ||
 		passed[0].reason != passHeldBehind || passed[1].reason != passServedElsewhere {
 		t.Fatalf("nextInLine = %v, %v, %+v; want ws-next past the held and the served-elsewhere merges", front.Workspace, found, passed)
+	}
+}
+
+func TestStartsOverBehindFindsTheMergesToResumeBehindAWaitingHead(t *testing.T) {
+	served := func(ids.WorkspaceID) bool { return true }
+	tests := []struct {
+		name        string
+		entries     []wsm.MergeQueueEntry
+		resuming    []ids.WorkspaceID
+		served      func(ids.WorkspaceID) bool
+		wantWaiting ids.WorkspaceID
+		wantBehind  []ids.WorkspaceID
+	}{
+		{name: "a merge to resume at the head resumes",
+			entries:  []wsm.MergeQueueEntry{admittedEntry("ws-a"), queuedEntry("ws-b")},
+			resuming: []ids.WorkspaceID{"ws-a"}, served: served},
+		{name: "merges to resume behind a waiting head go back behind it",
+			entries:  []wsm.MergeQueueEntry{queuedEntry("ws-head"), admittedEntry("ws-a"), queuedEntry("ws-c"), admittedEntry("ws-b")},
+			resuming: []ids.WorkspaceID{"ws-a", "ws-b"}, served: served,
+			wantWaiting: "ws-head", wantBehind: []ids.WorkspaceID{"ws-a", "ws-b"}},
+		{name: "a waiting merge served elsewhere is no head to start over behind",
+			entries:  []wsm.MergeQueueEntry{queuedEntry("ws-away"), admittedEntry("ws-a")},
+			resuming: []ids.WorkspaceID{"ws-a"}, served: func(ws ids.WorkspaceID) bool { return ws != "ws-away" }},
+		{name: "a waiting merge held behind another is no head to start over behind",
+			entries:  []wsm.MergeQueueEntry{{Workspace: "ws-held", State: wsm.MergeQueued, WaitsOn: "ws-x"}, admittedEntry("ws-a")},
+			resuming: []ids.WorkspaceID{"ws-a"}, served: served},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			resuming := map[ids.WorkspaceID]bool{}
+			for _, ws := range tt.resuming {
+				resuming[ws] = true
+			}
+
+			// Act
+			waiting, behind := startsOverBehind(tt.entries, resuming, tt.served)
+
+			// Assert
+			if waiting != tt.wantWaiting || !slices.Equal(behind, tt.wantBehind) {
+				t.Fatalf("startsOverBehind = (%q, %v), want (%q, %v)", waiting, behind, tt.wantWaiting, tt.wantBehind)
+			}
+		})
+	}
+}
+
+func TestAMergeToResumeBehindAHeadTheRestartSentBackGoesBackToItsPlace(t *testing.T) {
+	// Arrange: the restart sent the head back waiting; the merge behind it
+	// was admitted in its chain and waits to resume.
+	head, behind := queuedEntry("ws-head"), admittedEntry("ws-behind")
+	head.EnqueuedAt, behind.EnqueuedAt = time.UnixMilli(1_000), time.UnixMilli(2_000)
+	h := resumeWorld(t, []wsm.MergeQueueEntry{head, behind}, "ws-behind")
+	h.register("ws-head", "head")
+	h.register("ws-behind", "behind")
+	h.db.mu.Lock()
+	h.db.leases["ws-behind"] = wsm.Lease{ID: "lease-behind", Workspace: "ws-behind", Holder: wsm.HolderMerge}
+	h.db.mu.Unlock()
+
+	// Act
+	ws, resuming, err := h.o.resumeIn(context.Background(), h.repoKey())
+
+	// Assert
+	if err != nil || resuming || ws != "" {
+		t.Fatalf("resumeIn = (%q, %v, %v), want nothing resumed ahead of the waiting head", ws, resuming, err)
+	}
+	h.db.mu.Lock()
+	line := slices.Clone(h.db.queues[h.repoKey()])
+	_, held := h.db.leases["ws-behind"]
+	h.db.mu.Unlock()
+	if line[0].Workspace != "ws-head" || line[1].State != wsm.MergeQueued || held {
+		t.Fatalf("line = %+v, lease held %v; want the merge behind back waiting at its place, its lease dropped", line, held)
+	}
+	h.o.mu.Lock()
+	_, still := h.o.resumes["ws-behind"]
+	h.o.mu.Unlock()
+	if still {
+		t.Fatal("the merge behind is still remembered as a resume")
 	}
 }

@@ -1711,6 +1711,28 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 	if err != nil {
 		return "", false, err
 	}
+	// A MERGE A RESTART SENT BACK IN LINE STILL STANDS AHEAD OF EVERY MERGE
+	// BEHIND IT (owner ruling, 2026-11-16). A head the restart cut before
+	// its first step is put back waiting at its own place (recoverEntry),
+	// and the merges behind it were admitted in its chain, rebased onto its
+	// branch: resuming them first landed them ahead of it, on a base it no
+	// longer has. So when a merge the admission would take waits ahead of
+	// the first merge to resume, every merge to resume behind it goes back
+	// to its place too, and the line starts over from its head, in order.
+	if waiting, behind := startsOverBehind(entries, o.resumesOf(repo), func(ws ids.WorkspaceID) bool {
+		return !o.movedAway(ws) && o.deps.Standing.ServesWorkspace(ws)
+	}); waiting != "" {
+		for _, ws := range behind {
+			if err := o.requeueAdmitted(ctx, op, repo, ws, requeueWhy{
+				unleased: "the merge to resume behind a merge that starts over has no merge lease to drop; nothing of the repository is admitted until it is settled",
+				failed:   "the merge to resume behind a merge that starts over could not be put back in line; nothing of the repository is admitted until it is settled",
+				done:     "a merge to resume stands behind a merge the restart put back in line, so it goes back to its own place and starts again behind it",
+			}); err != nil {
+				return "", false, err
+			}
+		}
+		return "", false, nil
+	}
 	o.mu.Lock()
 	for _, entry := range entries {
 		if entry.State != wsm.MergeAdmitted {
@@ -1746,6 +1768,43 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 		}
 	}
 	return "", false, nil
+}
+
+// resumesOf answers the workspaces whose merges in REPO wait to resume.
+func (o *orchestrator) resumesOf(repo wsm.RepoKey) map[ids.WorkspaceID]bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	out := map[ids.WorkspaceID]bool{}
+	for ws, doc := range o.resumes {
+		if doc.Repo == string(repo) {
+			out[ws] = true
+		}
+	}
+	return out
+}
+
+// startsOverBehind answers the merge the admission would take that waits
+// ahead of the first merge to resume in ENTRIES, and every admitted merge to
+// resume (RESUMING) behind it, in line order; "" when the first merge to
+// resume stands ahead of every merge waiting that the admission would take.
+func startsOverBehind(entries []wsm.MergeQueueEntry, resuming map[ids.WorkspaceID]bool, servedHere func(ids.WorkspaceID) bool) (ids.WorkspaceID, []ids.WorkspaceID) {
+	var waiting ids.WorkspaceID
+	var behind []ids.WorkspaceID
+	for _, entry := range entries {
+		switch {
+		case entry.State == wsm.MergeQueued && waiting == "" && !entry.HeldBehind() && !entry.AheadFailed() && servedHere(entry.Workspace):
+			waiting = entry.Workspace
+		case entry.State == wsm.MergeAdmitted && resuming[entry.Workspace]:
+			if waiting == "" {
+				return "", nil
+			}
+			behind = append(behind, entry.Workspace)
+		}
+	}
+	if len(behind) == 0 {
+		return "", nil
+	}
+	return waiting, behind
 }
 
 // passReason is why the admission passed a merge waiting in line over.
