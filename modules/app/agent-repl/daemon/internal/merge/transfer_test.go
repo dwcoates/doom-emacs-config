@@ -884,3 +884,80 @@ func TestAPausedMergeOfAWorkspaceThatStaysGoesBackToItsPlaceInLine(t *testing.T)
 		})
 	}
 }
+
+// liveRoundOf answers the live round of the harness workspace's ledger, nil
+// when none stands live.
+func liveRoundOf(t *testing.T, h *harness) *wsm.TabInterval {
+	t.Helper()
+	ledgers, err := h.db.MergeLedger(context.Background(), theWorkspace)
+	if err != nil {
+		t.Fatalf("MergeLedger: %v", err)
+	}
+	for _, ledger := range ledgers {
+		for _, round := range ledger.Intervals {
+			if round.EndedAt == nil {
+				return &round
+			}
+		}
+	}
+	return nil
+}
+
+func TestAMergeIsHeldFromItsTakeBackUntilItsResumeRuns(t *testing.T) {
+	// Arrange: a merge suspended in its gate for a transfer that did not land.
+	h := newHarness(t)
+	release, done := heldInGateForTransfer(t, h)
+	t.Cleanup(func() { close(release) })
+	if err := h.o.SuspendForTransfer(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("SuspendForTransfer: %v", err)
+	}
+	<-done
+	h.runner.mu.Lock()
+	h.runner.before = nil
+	h.runner.mu.Unlock()
+	h.gatePasses("daemon")
+	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
+
+	// Act: the take-back.
+	if err := h.o.AdoptWorkspace(context.Background(), theWorkspace); err != nil {
+		t.Fatalf("AdoptWorkspace: %v", err)
+	}
+
+	// Assert: held while it waits for its resume.
+	if round := liveRoundOf(t, h); round == nil || round.HeldSince == nil {
+		t.Fatalf("live round = %+v, want it held once taken back", round)
+	}
+
+	// Act: the resume.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the resumed merge ended on: %v", err)
+	}
+
+	// Assert: the resume released the hold before it ran on.
+	if rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Operation: opHold, Message: "recorded whether the merge's live round is held"}); !ok || rec.Context["held"] != true {
+		t.Fatalf("records = %+v, want the hold recorded", h.logs.Records())
+	}
+	released := false
+	for _, rec := range h.logs.Records() {
+		if rec.Operation == opHold && rec.Context["held"] == false {
+			released = true
+		}
+	}
+	if !released {
+		t.Fatalf("records = %+v, want the resume's release of the hold", h.logs.Records())
+	}
+}
+
+func TestAHoldThatCannotBeWrittenIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.db.holdErr = errors.New("disk gone")
+
+	// Act
+	h.o.holdRound(context.Background(), theWorkspace, "lease-1", true)
+
+	// Assert
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opHold}); !ok {
+		t.Fatalf("records = %+v, want the failed hold at ERROR", h.logs.Records())
+	}
+}

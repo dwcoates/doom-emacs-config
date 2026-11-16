@@ -440,6 +440,8 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	o.ledgerOf[ws] = lease.ID
 	o.resumes[ws] = doc
 	o.mu.Unlock()
+	// THE MERGE IS HELD from here until its resume runs (holdRound).
+	o.holdRound(ctx, ws, lease.ID, true)
 	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
