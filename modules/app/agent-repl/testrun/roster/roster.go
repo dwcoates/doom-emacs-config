@@ -262,6 +262,7 @@ var Suites = []Suite{
 	{Name: "fake-git-fixture-lib-harness", Kind: Script, Path: "bin/test-lib-fake-git-fixture.sh", Harness: true, Reuse: scripts(fakeGitScripts)},
 	{Name: "wifi-helper-harness", Kind: Script, Path: "bin/test-wifi-helper.sh", Harness: true, Reuse: scripts(moduleScripts, "wifi-helper/")},
 	{Name: "harness-report-lib-harness", Kind: Script, Path: "bin/test-lib-harness-report.sh", Harness: true, Reuse: scripts(moduleScripts)},
+	{Name: "harness-stub-lib-harness", Kind: Script, Path: "bin/test-lib-harness-stub.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "runtime-harness", Kind: Script, Path: "bin/test-agent-repl-runtime.sh", Harness: true, Reuse: scripts(moduleScripts, "lisp/elisp-build.el")},
 	{Name: "contract-check-harness", Kind: Script, Path: "bin/test-daemon-contract-current.sh", Harness: true, Reuse: scripts(moduleScripts)},
 	{Name: "readiness-harness", Kind: SplitScript, Path: "bin/test-readiness-report.sh", Harness: true, Reuse: scripts(moduleScripts)},

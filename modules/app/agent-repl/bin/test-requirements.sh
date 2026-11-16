@@ -26,6 +26,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=lib-harness-report.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
+# shellcheck source=lib-harness-stub.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-stub.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +74,6 @@ case "$1" in
 esac'
 }
 
-# write_stub NAME BODY: a stub on PATH that records its argv, then runs BODY.
-write_stub() {
-  printf '#!/bin/bash\nprintf "%%s %%s\\n" "%s" "$*" >>"$STUB_DIR/../transcript"\n%s\n' "$1" "$2" >"$CASE/stubs/$1"
-  chmod +x "$CASE/stubs/$1"
-}
 
 # tool NAME OUTPUT [EXIT]: a stub program that prints OUTPUT and exits EXIT.
 tool() {
@@ -107,7 +104,6 @@ run() {
 }
 
 has() { grep -qF -- "$1" <<<"$OUT"; }
-ran() { grep -qF -- "$1" "$CASE/transcript"; }
 
 PROGRAM='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["darwin"], "command": "tool", "install": {"brew": "tool"}}'
 VERSIONED='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["darwin"], "command": "tool", "version": {"args": ["--version"], "min": "3.0"}, "install": {"brew": "tool"}}'

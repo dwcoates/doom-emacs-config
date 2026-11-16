@@ -18,13 +18,10 @@ trap 'rm -rf "$TMP"' EXIT
 
 # shellcheck source=lib-harness-report.sh
 . "$THIS_DIR/lib-harness-report.sh"
+# shellcheck source=lib-harness-stub.sh
+. "$THIS_DIR/lib-harness-stub.sh"
 
 COMMIT=0123456789abcdef0123456789abcdef01234567
-
-write_stub() {
-  printf '#!/usr/bin/env bash\nprintf "%%s %%s\\n" "%s" "$*" >>"$STUB_DIR/../transcript"\n%s\n' "$1" "$2" >"$CASE/stubs/$1"
-  chmod +x "$CASE/stubs/$1"
-}
 
 # new_case: fresh stubs for a VM that exists, is stopped, and shares nothing.
 new_case() {
@@ -63,7 +60,6 @@ run() {
     ${EXTRA_ENV:-} bash "$THIS_DIR/linux-vm.sh" "$@" 2>&1)" || RC=$?
 }
 
-ran() { grep -qF -- "$1" "$CASE/transcript"; }
 status() { cat "$CASE/status"; }
 
 test_a_smoke_pushes_the_commit_installs_and_stops_the_vm() {
