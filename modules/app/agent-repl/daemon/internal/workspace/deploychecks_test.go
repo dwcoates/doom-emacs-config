@@ -117,10 +117,11 @@ func TestASessionlessDeployCheckWorkspaceHasItsEffortPickedForItsStart(t *testin
 }
 
 func TestADeployCheckWorkspaceWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
-	// Arrange: the live session serves no level the role asks for.
+	// Arrange: the live session serves no level the role asks for; only the
+	// escalation's medium, never the intake's low.
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
-	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{remediationEffort}, true
+	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{escalationEffort}, true
 
 	// Act
 	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, merge.DeployCheckIntake)
