@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -144,5 +145,42 @@ func TestStatusFailsHardWhenTheRegistryCannotBeRead(t *testing.T) {
 	}
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.status", text: "could not read the repository registry"}) {
 		t.Errorf("no error record: %+v", h.logs.Records())
+	}
+}
+
+func TestStatusAnswersAMergeBackInLineFromItsRepairAsWaiting(t *testing.T) {
+	tests := []struct {
+		name        string
+		backInLine  bool
+		wantStarted bool
+	}{
+		{name: "an admitted merge being worked on is started", wantStarted: true},
+		{name: "an admitted merge back in line from its repair waits", backInLine: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the head is admitted with a progress record.
+			h := statusHarness(t)
+			doc := progressDoc{Version: progressVersion, Repo: string(h.repoKey()), Step: TabTests,
+				Subject: subjectDoc{TargetDir: h.repoRoot}, Active: roundDoc{Kind: TabTests, N: 1}, BackInLine: tt.backInLine}
+			encoded, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.db.mu.Lock()
+			h.db.progress[theWorkspace] = wsm.MergeProgress{Workspace: theWorkspace, Document: encoded}
+			h.db.mu.Unlock()
+
+			// Act
+			got, err := h.o.Status(context.Background(), nil)
+
+			// Assert
+			if err != nil || len(got) != 1 {
+				t.Fatalf("Status = %+v, %v", got, err)
+			}
+			if head := got[0].Queue.Members[0]; head.Started != tt.wantStarted || (head.Step != "") != tt.wantStarted {
+				t.Fatalf("head = %+v, want started %v with a step only when started", head, tt.wantStarted)
+			}
+		})
 	}
 }

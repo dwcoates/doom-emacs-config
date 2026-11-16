@@ -481,6 +481,14 @@ func (g *gatedGit) AbortRebase(ctx context.Context, dir string) error {
 	return g.inner.AbortRebase(ctx, dir)
 }
 
+func (g *gatedGit) RestoreBranchHead(ctx context.Context, dir, head string) error {
+	if err := g.enter("RestoreBranchHead"); err != nil {
+		return err
+	}
+	defer g.leave()
+	return g.inner.RestoreBranchHead(ctx, dir, head)
+}
+
 func (g *gatedGit) RebaseInProgress(ctx context.Context, dir string) (bool, error) {
 	if err := g.enter("RebaseInProgress"); err != nil {
 		return false, err

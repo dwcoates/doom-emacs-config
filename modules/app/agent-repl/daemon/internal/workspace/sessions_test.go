@@ -581,6 +581,19 @@ type fakeWatcher struct {
 	// free answers AwaitFree: each call takes the next value sent on it. Nil
 	// leaves AwaitFree unanswerable, which no fixture that calls it does.
 	free chan error
+	// turnEnded answers AwaitTurnEnd: each call takes the next close sent on
+	// it.
+	turnEnded chan wsm.TurnClose
+}
+
+// AwaitTurnEnd answers the next close the fixture sends on turnEnded.
+func (w *fakeWatcher) AwaitTurnEnd(ctx context.Context, _ ids.TurnID) (wsm.TurnClose, error) {
+	select {
+	case close := <-w.turnEnded:
+		return close, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
 }
 
 // AwaitFree answers the next value the fixture sends on free.

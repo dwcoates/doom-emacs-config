@@ -135,10 +135,9 @@ type QueueMember struct {
 	Branch string
 	// Mode is how the merge was asked for.
 	Mode MergeMode
-	// Started reports whether the merge is being worked on
-	// (wsm.MergeQueueEntry.WorkedOn): admitted, and not back from a repair
-	// out of line waiting to be taken up. Only a started merge carries a
-	// step.
+	// Started reports whether the merge is being worked on: admitted, and
+	// not back from a repair out of line waiting to be taken up
+	// (backInLine). Only a started merge carries a step.
 	Started bool
 	// Front reports that the merge asked to be put at the front of its queue.
 	Front bool
@@ -536,9 +535,38 @@ func (o *orchestrator) queueMembers(ctx context.Context, db wsm.DB, entries []ws
 		if err != nil {
 			return nil, fmt.Errorf("merge: reading the workspace %s in line: %w", entry.Workspace, err)
 		}
-		members = append(members, memberOf(entry, record))
+		member := memberOf(entry, record)
+		if member.Started {
+			back, err := backInLine(ctx, db, entry.Workspace)
+			if err != nil {
+				return nil, err
+			}
+			member.Started = !back
+		}
+		members = append(members, member)
 	}
 	return members, nil
+}
+
+// backInLine reports whether WS's admitted merge is back in line from its
+// repair out of line, waiting to be taken up at the head: its progress record
+// says so (progressDoc.BackInLine), the one durable fact the bubble's waiting
+// draw reads too (drawBackInLine). Such a merge is admitted but not being
+// worked on, so no surface calls it running (2026-11-15: `merge-queue
+// status` drew one as running with no step).
+func backInLine(ctx context.Context, db wsm.DB, ws ids.WorkspaceID) (bool, error) {
+	stored, found, err := db.MergeProgressOf(ctx, ws)
+	if err != nil {
+		return false, fmt.Errorf("merge: reading the progress of %s's merge in line: %w", ws, err)
+	}
+	if !found {
+		return false, nil
+	}
+	doc, err := decodeProgress(stored)
+	if err != nil {
+		return false, err
+	}
+	return doc.BackInLine, nil
 }
 
 // memberOf describes one in-line entry. A request an earlier build recorded

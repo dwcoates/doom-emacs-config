@@ -168,7 +168,7 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 	if tip == "" || targetBranch == "" {
 		return *r.contradiction(ctx, fmt.Sprintf("the record of its %s step names no tip or target branch", res.Step)), false, nil
 	}
-	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed}
+	p := &replay{round: r.activeRound(), commits: fromCommitDocs(res.Commits), done: res.Replayed, head: res.BranchHead}
 	finish := func(gaveUp *outcome, err error) (outcome, bool, error, bool) {
 		if gaveUp != nil {
 			return *gaveUp, false, nil, true
@@ -247,6 +247,10 @@ type replay struct {
 	round   tabRound
 	commits []gitclient.Commit
 	done    int
+	// head is the branch's head before the rebase began (progressDoc
+	// .BranchHead): where a rebase that dropped every commit puts it back
+	// (keptCommits).
+	head string
 }
 
 // rebase replays the branch onto tip, commit by commit, in the branch's
@@ -386,6 +390,7 @@ func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcom
 	if err != nil {
 		return nil, fmt.Errorf("merge: resolving %s before its rebase: %w", branch, err)
 	}
+	p.head = head
 	replaying, err := r.replaying(ctx, len(commits), branch, targetBranch, tip)
 	if err != nil {
 		return nil, err
@@ -475,6 +480,11 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 			continue
 		}
 		resolvedAt = -1
+		if step.Done {
+			if err := r.keptCommits(ctx, p, tip, targetBranch); err != nil {
+				return nil, err
+			}
+		}
 		r.replayed(ctx, p, step.Done)
 		if step.Done {
 			return nil, nil
@@ -487,6 +497,41 @@ func (r *run) replayLoop(ctx context.Context, p *replay, step gitclient.RebaseSt
 		}
 		step, err = r.git.ContinueRebase(ctx, dir)
 	}
+}
+
+// keptCommits refuses a finished rebase that left the branch with no commit
+// of its own, putting the branch back at P's head, where it stood before the
+// rebase: a replay that drops every commit lands nothing, and finishing it
+// threw the branch's work away (2026-11-16: github-outage-notices-off's two
+// commits were dropped by its conflict resolution, and its merge then failed
+// on a branch left empty on master's tip). The merge fails loudly naming
+// both; nothing is lost.
+func (r *run) keptCommits(ctx context.Context, p *replay, tip, targetBranch string) error {
+	dir, branch := r.subject.dir, r.subject.branch
+	if len(p.commits) == 0 {
+		return nil
+	}
+	empty, err := r.git.IsAncestor(ctx, dir, branch, tip)
+	if err != nil {
+		return fmt.Errorf("merge: asking whether the rebase left %s any commit beyond %s: %w", branch, short(tip), err)
+	}
+	if !empty {
+		return nil
+	}
+	fields := dlog.Context{"workspace": string(r.ws), "branch": branch, "worktree": dir, "tip": tip, "head": p.head, "commits": len(p.commits)}
+	if p.head == "" {
+		r.o.log(ctx, r.ws).Error("daemon.merge.rebase", "the rebase dropped every commit of the branch, and no head before it was recorded to put it back at", fields)
+		r.rebaseFailed(ctx, p, errors.New("the rebase dropped every commit"))
+		return fmt.Errorf("merge: the rebase of %s onto %s dropped all %d of its commits, and no head before it was recorded", branch, targetBranch, len(p.commits))
+	}
+	if err := r.git.RestoreBranchHead(ctx, dir, p.head); err != nil {
+		r.o.log(ctx, r.ws).Error("daemon.merge.rebase", "the rebase dropped every commit of the branch, and the branch could not be put back where it stood", withField(fields, "error", err.Error()))
+		r.rebaseFailed(ctx, p, err)
+		return fmt.Errorf("merge: the rebase of %s onto %s dropped all %d of its commits, and putting it back at %s failed: %w", branch, targetBranch, len(p.commits), short(p.head), err)
+	}
+	r.o.log(ctx, r.ws).Error("daemon.merge.rebase", "the rebase dropped every commit of the branch; the branch is put back where it stood before the rebase and the merge fails", fields)
+	r.rebaseFailed(ctx, p, errors.New("the rebase dropped every commit"))
+	return fmt.Errorf("merge: the rebase of %s onto %s dropped all %d of its commits; %s is put back at %s", branch, targetBranch, len(p.commits), branch, short(p.head))
 }
 
 // resumeRebase goes on with a rebase a restart interrupted, from where GIT
@@ -544,6 +589,9 @@ func (r *run) resumeRebase(ctx context.Context, p *replay, tip, targetBranch, br
 			"workspace": string(r.ws), "worktree": dir, "total": len(p.commits)})
 		p.done = max(len(p.commits)-1, 0)
 		r.resumeReplay(p)
+		if err := r.keptCommits(ctx, p, tip, targetBranch); err != nil {
+			return nil, err
+		}
 		r.replayed(ctx, p, true)
 		return nil, nil
 	}

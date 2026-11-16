@@ -616,29 +616,53 @@ func (o *orchestrator) ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceI
 			if entry.Workspace != ws || entry.State != wsm.MergeAdmitted {
 				continue
 			}
-			repoFields := withField(fields, "repo", string(repo))
-			lease, held, err := o.deps.DB.Lease(ctx, ws)
-			if err == nil && (!held || lease.Holder != wsm.HolderMerge) {
-				err = fmt.Errorf("merge: the admitted merge of %q holds no merge lease (held %v, holder %v)", ws, held, lease.Holder)
-				repoFields["invariant_violation"] = "an admitted merge holds its merge lease"
-			}
-			if err != nil {
-				o.deps.Log.Global().Error(op, "the paused merge's lease could not be read; it holds its queue until the workspace moves", withField(repoFields, "error", err.Error()))
-				return err
-			}
-			ledger := o.mintLedger(ws)
-			if err := o.deps.DB.RequeuePausedMerge(ctx, repo, ws, lease.ID, ledger); err != nil {
-				o.deps.Log.Global().Error(op, "the paused merge could not be put back in line; it holds its queue until the workspace moves", withField(repoFields, "error", err.Error()))
-				return err
-			}
-			o.mu.Lock()
-			delete(o.resumes, ws)
-			o.mu.Unlock()
-			o.deps.Log.Global().Info(op, "the workspace waits here for its work to end, so the merge a handover paused goes back to its place in line; it starts again once its workspace moves", withField(repoFields, "ledger", string(ledger)))
-			if err := o.republishQueue(ctx, repo); err != nil {
+			if err := o.requeueAdmitted(ctx, op, repo, ws, requeueWhy{
+				unleased: "the paused merge's lease could not be read; it holds its queue until the workspace moves",
+				failed:   "the paused merge could not be put back in line; it holds its queue until the workspace moves",
+				done:     "the workspace waits here for its work to end, so the merge a handover paused goes back to its place in line; it starts again once its workspace moves",
+			}); err != nil {
 				return err
 			}
 		}
 	}
 	return nil
+}
+
+// requeueWhy is what one requeue of an admitted merge records: its failure
+// and its success.
+type requeueWhy struct {
+	// unleased is recorded when the merge's lease cannot be read or stands
+	// not as a merge's, failed when the requeue's write fails, and done on
+	// the requeue.
+	unleased, failed, done string
+}
+
+// requeueAdmitted puts WS's ADMITTED merge in REPO back at its own place in
+// line, waiting under the same bubble, and drops its merge lease and progress
+// in one write (wsm.RequeuePausedMerge); this daemon forgets its resume. It
+// is the one way an admitted merge with no run goes back in line to start
+// over, for every cause that sends one (ReturnPausedMerges, resumeIn). A
+// merge admitted with no merge lease standing is a broken store: refused at
+// ERROR, nothing moved.
+func (o *orchestrator) requeueAdmitted(ctx context.Context, op string, repo wsm.RepoKey, ws ids.WorkspaceID, why requeueWhy) error {
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo)}
+	lease, held, err := o.deps.DB.Lease(ctx, ws)
+	if err == nil && (!held || lease.Holder != wsm.HolderMerge) {
+		err = fmt.Errorf("merge: the admitted merge of %q holds no merge lease (held %v, holder %v)", ws, held, lease.Holder)
+		fields["invariant_violation"] = "an admitted merge holds its merge lease"
+	}
+	if err != nil {
+		o.deps.Log.Global().Error(op, why.unleased, withField(fields, "error", err.Error()))
+		return err
+	}
+	ledger := o.mintLedger(ws)
+	if err := o.deps.DB.RequeuePausedMerge(ctx, repo, ws, lease.ID, ledger); err != nil {
+		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
+		return err
+	}
+	o.mu.Lock()
+	delete(o.resumes, ws)
+	o.mu.Unlock()
+	o.deps.Log.Global().Info(op, why.done, withField(fields, "ledger", string(ledger)))
+	return o.republishQueue(ctx, repo)
 }
