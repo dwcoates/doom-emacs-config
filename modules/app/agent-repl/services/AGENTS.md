@@ -27,7 +27,10 @@ or unit is checked in, so the two can never disagree about a service.
   past three minutes while launchd waited).
 - The daemon restarts these services through the same service manager
   (`daemon/internal/deploy`, `ServiceManager`: `Launchctl`, `SystemdUser`),
-  finding each installed definition by its label.
+  finding each installed definition by its label. A service the manager does
+  not hold and whose definition is missing (one added since the machine's
+  install) has its definition written by `bin/requirements.sh define-service
+  <label>`, the same renderer, before the deploy starts it.
 - A systemd unit logs by appending to the same files launchd writes
   (`StandardOutput=append:`), because the daemon reads the store's error log
   to tell a slow boot from a wedged one.

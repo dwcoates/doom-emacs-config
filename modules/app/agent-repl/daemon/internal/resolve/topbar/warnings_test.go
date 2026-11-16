@@ -926,3 +926,19 @@ func TestRaisingADaemonWarningAgainRestatesItsOverlay(t *testing.T) {
 		t.Fatalf("overlay = %v, want the restated warning's (none)", got)
 	}
 }
+
+func TestACallToAToolTheSessionDoesNotOfferRaisesNoWarning(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	call := unmodeledStart("u1", "bash", nil)
+	call.GetUnmodeled().GetStart().NotOffered = true
+
+	// Act
+	h.r.OnActivity(testWS, nil, call)
+
+	// Assert
+	if got := warnings(t, h); len(got) != 0 {
+		t.Fatalf("warnings = %+v, want none for a tool the vendor refuses", got)
+	}
+}

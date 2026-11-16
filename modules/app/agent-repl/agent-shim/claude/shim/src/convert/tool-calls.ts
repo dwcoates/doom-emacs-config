@@ -72,6 +72,12 @@ export interface PendingCall {
    * all, which the proto distinguishes from an empty declared set.
    */
   readonly retainedAllowedTools?: readonly string[] | undefined;
+  /**
+   * The session offers no tool by this name (CallRegistry.offers): set by
+   * convertToolUse on an unmodeled call, which the agent made to a tool that
+   * does not exist.
+   */
+  readonly notOffered?: boolean;
 }
 
 /** What the vendor said when a call returned. */
@@ -276,6 +282,13 @@ export const CALL_REGISTRY_CAPACITY = 512;
  *   - the QUERY ENDS ({@link drain} again): nothing it announced can settle.
  */
 export interface CallRegistry {
+  /** Record the tools the session offers, as the vendor's init names them. */
+  offer(tools: readonly string[]): void;
+  /**
+   * Whether the session offers the tool `toolName`; UNSET before an init named
+   * the session's tools.
+   */
+  offers(toolName: string): boolean | undefined;
   /**
    * Hold a call that was just announced, answering whether it is held.
    *
@@ -314,6 +327,7 @@ export interface CallRegistry {
 export function createCallRegistry(): CallRegistry {
   const calls = new Map<string, PendingCall>();
   const detached = new Set<string>();
+  let offered: ReadonlySet<string> | undefined;
 
   const holds = (spawningCall: string | undefined): boolean =>
     spawningCall === undefined || (calls.has(spawningCall) && !detached.has(spawningCall));
@@ -339,6 +353,11 @@ export function createCallRegistry(): CallRegistry {
   };
 
   return {
+    offer(tools) {
+      offered = new Set(tools);
+      LOGGER.logVerbose({ tools: tools.length }, "the session's offered tools are recorded");
+    },
+    offers: (toolName) => offered?.has(toolName),
     remember(call) {
       if (!holds(call.spawningCall)) return false;
       if (calls.size >= CALL_REGISTRY_CAPACITY && !calls.has(call.toolUseId)) {
@@ -507,7 +526,16 @@ export function convertToolUse(
       if (unmodeled === undefined) {
         throw new Error("shim convert: the unmodeled converter is missing from the registry");
       }
-      const item = unmodeled.start(call, environmentOf(context));
+      // A NAME THE SESSION NEVER OFFERED is no tool the schema lacks: the
+      // agent called one that does not exist, and the vendor refuses it.
+      const notOffered = registry.offers(call.toolName) === false;
+      if (notOffered) {
+        LOGGER.info(
+          { tool: call.toolName, tool_use_id: call.toolUseId },
+          "the agent called a tool the session does not offer; the vendor refuses it",
+        );
+      }
+      const item = unmodeled.start(notOffered ? { ...call, notOffered } : call, environmentOf(context));
       if (item === undefined) {
         throw new Error("shim convert: the unmodeled converter produced no start frame");
       }

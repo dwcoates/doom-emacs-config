@@ -87,6 +87,10 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, b
 	if err != nil {
 		return err
 	}
+	// The session is gone, and with it, often, the request that asked for
+	// the kill: the close is recorded whatever became of that request
+	// (endSession).
+	ctx = context.WithoutCancel(ctx)
 
 	// A killed workspace's roster row carries closed = true: Emacs derives its
 	// tab set from that flag, and a killed workspace has no editor state left.
@@ -136,6 +140,14 @@ func (v *verbs) endSession(ctx context.Context, log dlog.Logger, ws ids.Workspac
 		return wsm.OrphanReport{}, fmt.Errorf("kill %q: stop the shim: %w", ws, err)
 	}
 
+	// THE BOOKKEEPING OUTLIVES ITS CALLER: a kill is often asked by the very
+	// session it just ended (a deploy check's stand-by or stop, a decision
+	// that ends its chain), and ending that session cancels the request's
+	// context. On the request's context the orphaned turns were never
+	// closed (2026-11-16, four times: "wsm: begin transaction: context
+	// canceled"), so the steps after the stop run on one the session's end
+	// cannot cancel. The store bounds each of them itself.
+	ctx = context.WithoutCancel(ctx)
 	at := v.now()
 	report, err := v.deps.Queue.CloseOrphans(ctx, ws, at, wsm.LeaveCut)
 	if err != nil {

@@ -16,6 +16,7 @@ import { logRecordsDuring, type LogRecord } from "../log-records.js";
 import { createFold } from "../../src/convert/fold.js";
 import {
   convertAssistantMessage,
+  freshBlockState,
   responseEnvelope,
   responseModel,
   StreamBlocks,
@@ -977,7 +978,7 @@ describe("a stream's block state", () => {
     streams.beginResponse(null, MAIN_ID);
 
     // Act.
-    streams.endTurn();
+    streams.endTurn("completed");
 
     // Assert.
     expect(streams.openStreams).toBe(0);
@@ -989,7 +990,7 @@ describe("a stream's block state", () => {
     streams.beginResponse(SPAWN, SUB_ID);
 
     // Act.
-    streams.endTurn();
+    streams.endTurn("completed");
 
     // Assert.
     expect(streams.openResponse(SPAWN)?.messageId).toBe(SUB_ID);
@@ -1023,7 +1024,11 @@ describe("a stream's block state", () => {
     // Arrange.
     const streams = new StreamBlocks();
     const state = streams.beginResponse(null, MAIN_ID);
-    state.unsettled.set(1, create(conversationv1.AgentActivityIdSchema, { value: `${MAIN_ID}:1` }));
+    state.unsettled.set(1, {
+      activityId: create(conversationv1.AgentActivityIdSchema, { value: `${MAIN_ID}:1` }),
+      kind: "response",
+      prose: "",
+    });
 
     // Act.
     streams.settledBelow(null, 1);
@@ -1087,11 +1092,13 @@ describe("a streamed unit its stream started and never settled", () => {
   });
 
   it("names the main stream as `main`", () => {
-    // Arrange, Act.
+    // Arrange, Act: the main stream's message_stop holds the unit for the
+    // turn's end, which a completed turn reports.
     const reports = unsettledReports([
       eventOn(null, start(MAIN_ID), "u-m-start"),
       eventOn(null, blockStart(0, "thinking"), "u-m-b0"),
       eventOn(null, STOP, "u-m-stop"),
+      { type: "result", subtype: "success", is_error: false, result: "done", uuid: "u-r", session_id: "session-1" } as unknown as SdkMessage,
     ]);
 
     // Assert.
@@ -1228,5 +1235,28 @@ describe("a tool call's stream", () => {
 
     // Assert
     expect(registry.peek("toolu_main")?.spawningCall).toBeUndefined();
+  });
+});
+
+describe("freshBlockState", () => {
+  it("begins a response numbering from block 0 with no usage attached and nothing started", () => {
+    // Act.
+    const state = freshBlockState(MAIN_ID);
+
+    // Assert.
+    expect(state).toEqual({ messageId: MAIN_ID, nextIndex: 0, usageAttached: false, unsettled: new Map() });
+  });
+
+  it("is the shape both of a stream's ways to begin a response take", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+
+    // Act.
+    const begun = streams.beginResponse(null, MAIN_ID);
+    const met = streams.responseFor(SPAWN, SUB_ID);
+
+    // Assert.
+    expect(begun).toEqual(freshBlockState(MAIN_ID));
+    expect(met).toEqual(freshBlockState(SUB_ID));
   });
 });

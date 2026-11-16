@@ -49,3 +49,19 @@ func mustTool(ctx context.Context, r Runner, dir, binary string, args ...string)
 func toolExited(binary string, args []string, code int, out string) error {
 	return fmt.Errorf("deploy: %s %s exited %d: %s", filepath.Base(binary), strings.Join(args, " "), code, strings.TrimSpace(out))
 }
+
+// ScriptDefiner writes a service's definition from its requirements entry by
+// running bin/requirements.sh define-service in ModuleRoot: the one renderer
+// install uses, so a deploy and an install can never write different
+// definitions. Restarter.Define is its Define.
+type ScriptDefiner struct {
+	// ModuleRoot is the checkout holding bin/requirements.sh.
+	ModuleRoot string
+	Runner     Runner
+}
+
+// Define writes label's definition; a non-zero exit is a failure in the
+// script's own words.
+func (d ScriptDefiner) Define(ctx context.Context, label string) error {
+	return mustTool(ctx, d.Runner, d.ModuleRoot, filepath.Join(d.ModuleRoot, "bin", "requirements.sh"), "define-service", label)
+}

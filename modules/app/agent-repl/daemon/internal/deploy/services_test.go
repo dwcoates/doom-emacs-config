@@ -135,6 +135,23 @@ type restarterHarness struct {
 	exits   map[int]chan struct{}
 	// awaiting receives each pid ProcessExit begins waiting on.
 	awaiting chan int
+	// defineErr is what Define answers; nil writes the definition.
+	defineErr error
+	// defineWritesNothing makes a successful Define leave no definition.
+	defineWritesNothing bool
+}
+
+// define is the harness's Define: it records "define <label>" among the
+// service manager's calls and writes the label's plist.
+func (h *restarterHarness) define(_ context.Context, label string) error {
+	h.services.record("define " + label)
+	if h.defineErr != nil {
+		return h.defineErr
+	}
+	if h.defineWritesNothing {
+		return nil
+	}
+	return os.WriteFile(filepath.Join(h.services.dir, label+".plist"), []byte("<plist/>"), 0o644)
 }
 
 // processExit is the harness's ProcessExit: it waits on the pid's entry in
@@ -201,6 +218,7 @@ func newRestarter(t *testing.T) *restarterHarness {
 		Log:         log,
 		Restarts:    h.restarts,
 		ProcessExit: h.processExit,
+		Define:      h.define,
 	}
 	return h
 }
@@ -690,17 +708,24 @@ func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testi
 	}
 }
 
-func TestEnsureLoadedRefusesAnUnloadedServiceWithNoPlist(t *testing.T) {
+// An unloaded service with no plist has its definition written before it is
+// started (ensureLoaded); one whose definition cannot be written is refused,
+// and nothing is started.
+func TestEnsureLoadedRefusesAnUnloadedServiceWhosePlistCannotBeWritten(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
 	h.services.loaded[StoreLabel] = false
+	h.defineErr = errors.New("define-service exited 1")
 
 	// Act.
 	err := h.r.EnsureLoaded(context.Background())
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "install.sh") {
-		t.Fatalf("EnsureLoaded = %v, want a refusal naming the reinstall", err)
+	if err == nil || !strings.Contains(err.Error(), "write the definition of "+StoreLabel) {
+		t.Fatalf("EnsureLoaded = %v, want a refusal naming the definition write", err)
+	}
+	if slices.Contains(h.services.Calls(), "start "+StoreLabel) {
+		t.Fatalf("calls = %v, want nothing started", h.services.Calls())
 	}
 }
 
@@ -1149,6 +1174,7 @@ func TestEnsureStandaloneLoadedNeverRestartsARunningOne(t *testing.T) {
 func TestEnsureStandalonesTriesEveryOneWhateverAnotherAnswers(t *testing.T) {
 	// Arrange: the first standalone's definition is missing, the second's loads.
 	h := newRestarter(t)
+	h.defineErr = errors.New("define-service exited 1")
 	h.services.loaded[Standalones[0].Label] = false
 	writeFile(t, filepath.Join(h.services.dir, Standalones[1].Label+".plist"), "<plist/>")
 	h.services.loaded[Standalones[1].Label] = false
@@ -1157,7 +1183,51 @@ func TestEnsureStandalonesTriesEveryOneWhateverAnotherAnswers(t *testing.T) {
 	err := h.r.EnsureStandalonesLoaded(context.Background())
 
 	// Assert
-	if err == nil || fmt.Sprint(h.acts()) != fmt.Sprint([]string{"start " + Standalones[1].Label}) {
+	if want := []string{"define " + Standalones[0].Label, "start " + Standalones[1].Label}; err == nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureStandalonesLoaded = %v, acts %v; want the first's failure and the second started", err, h.acts())
+	}
+}
+
+func TestEnsureLoadedWritesAMissingDefinitionBeforeStartingTheService(t *testing.T) {
+	cases := []struct {
+		name          string
+		defineErr     error
+		writesNothing bool
+		wantErr       string
+		wantActs      []string
+		wantLog       string
+		level         string
+	}{
+		{name: "a written definition starts the service",
+			wantActs: []string{"define " + TestsLabel, "start " + TestsLabel},
+			wantLog:  "a service is not loaded and has no definition; writing it from its requirements entry", level: "info"},
+		{name: "a definition that cannot be written starts nothing", defineErr: errors.New("define-service exited 1"),
+			wantErr: "write the definition of " + TestsLabel, wantActs: []string{"define " + TestsLabel},
+			wantLog: "a service's definition could not be written from its requirements entry", level: "error"},
+		{name: "a definition still missing once written starts nothing", writesNothing: true,
+			wantErr: "is still unreadable", wantActs: []string{"define " + TestsLabel},
+			wantLog: "a service's definition is still missing after it was written", level: "error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the test service is unloaded and has no plist.
+			h := newRestarter(t)
+			h.defineErr, h.defineWritesNothing = tc.defineErr, tc.writesNothing
+			h.services.loaded[TestsLabel] = false
+
+			// Act
+			err := h.r.EnsureStandaloneLoaded(context.Background(), Tests)
+
+			// Assert
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("EnsureStandaloneLoaded = %v, want error containing %q", err, tc.wantErr)
+			}
+			if fmt.Sprint(h.acts()) != fmt.Sprint(tc.wantActs) {
+				t.Fatalf("acts = %v, want %v", h.acts(), tc.wantActs)
+			}
+			if !loggedTo(h.log, tc.level, tc.wantLog) {
+				t.Fatalf("records = %+v, want %s %q", h.log.Records(), tc.level, tc.wantLog)
+			}
+		})
 	}
 }

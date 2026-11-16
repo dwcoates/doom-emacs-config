@@ -1362,6 +1362,9 @@ export function createFakeQuery(
         "ReportFindings", "ScheduleWakeup", "SendMessage", "Skill", "TaskCreate", "TaskGet",
         "TaskList", "TaskOutput", "TaskStop", "TaskUpdate", "ToolSearch", "WebFetch", "WebSearch",
         "Workflow", "Write", "AskUserQuestion", "Artifact", "mcp__echo__echo",
+        // Offered and unmodeled: the `unmodeled` scenario calls it, so a call to
+        // it is a schema gap, never a call to a tool the session lacks.
+        "StructuredOutput",
       ],
       mcp_servers: FAKE_MCP_SERVERS.map((s) => ({ name: s.name, status: s.status })),
       model,

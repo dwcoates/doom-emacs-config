@@ -621,8 +621,6 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
-	// The sweep covers every test; the declared record is the vendor failure the test feeds, stated once by its owner.
-	f.d.ExpectWarnings("daemon.sessionwatcher.api_error")
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-api-error", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {

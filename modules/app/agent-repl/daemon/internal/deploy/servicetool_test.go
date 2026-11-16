@@ -106,3 +106,35 @@ func TestEveryServiceManagerReportsAFailedVerbTheSameWay(t *testing.T) {
 		})
 	}
 }
+
+func TestScriptDefinerRunsDefineServiceInTheModuleRoot(t *testing.T) {
+	const argv = "/m/bin/requirements.sh define-service com.agentrepl.tests"
+	cases := []struct {
+		name    string
+		answer  runAnswer
+		wantErr string
+	}{
+		{name: "a zero exit writes the definition", answer: runAnswer{code: 0}},
+		{name: "a non-zero exit is a failure in the script's words", answer: runAnswer{out: "define-service: no service entry", code: 1},
+			wantErr: "requirements.sh define-service com.agentrepl.tests exited 1: define-service: no service entry"},
+		{name: "a script that could not run is a failure", answer: runAnswer{err: errors.New("exec: not found")},
+			wantErr: "exec: not found"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			runner := &scriptedRunner{answers: map[string]runAnswer{argv: tc.answer}}
+
+			// Act
+			err := ScriptDefiner{ModuleRoot: "/m", Runner: runner}.Define(context.Background(), TestsLabel)
+
+			// Assert
+			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Fatalf("Define = %v, want error containing %q", err, tc.wantErr)
+			}
+			if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != argv || runner.dirs[0] != "/m" {
+				t.Fatalf("ran %v in %v, want %q in /m", runner.calls, runner.dirs, argv)
+			}
+		})
+	}
+}

@@ -123,6 +123,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		if errors.Is(err, wsm.ErrNotFound) {
 			k.forget(ws)
 			delete(k.noBeat, ws)
+			delete(k.owedFrom, ws)
 			return beatPlan{}, false
 		}
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace to time its keep-alive", "could not read the workspace; its keep-alive is not armed", nil, err)
@@ -247,6 +248,7 @@ func (k *Keeper) owesAgain(log dlog.Logger, ws ids.WorkspaceID) {
 		return
 	}
 	delete(k.noBeat, ws)
+	k.owedFrom[ws] = k.deps.Clock.Now()
 	log.Info(opDrive, "the workspace owes keep-alives again", dlog.Context{"owed_none_because": was})
 }
 

@@ -83,8 +83,20 @@ func (k *Keeper) delivered(ctx context.Context, log dlog.Logger, ws ids.Workspac
 // running, or the session was not brought back). A cache that lapsed before
 // its beat came due (a tier the cadence cannot keep, a request that left the
 // context uncached) was never the keeper's to keep.
+//
+// A BEAT DUE WHILE THE WORKSPACE OWED NONE WAS NEVER THE KEEPER'S EITHER
+// (2026-11-16: a workspace withheld from 13:32 was selected at 18:47, its
+// beat was timed from its 13:29 cache clock, and the lapse at 13:37 was
+// judged a miss): a due before the workspace began owing keep-alives again
+// fell while nothing was owed.
 func (k *Keeper) missed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, due, lapsed time.Time) bool {
 	if lapsed.Before(due) {
+		return false
+	}
+	if from, ok := k.owedFrom[ws]; ok && due.Before(from) {
+		log.Info(opDrive, "the cache lapsed while the workspace owed no keep-alive; the keeper missed nothing", dlog.Merge(dueField(due), dlog.Context{
+			"lapsed_at": lapsed, "owed_from": from,
+		}))
 		return false
 	}
 	cause := fmt.Sprintf("the cache lapsed at %s, %s after its keep-alive came due at %s, before the keep-alive went out",

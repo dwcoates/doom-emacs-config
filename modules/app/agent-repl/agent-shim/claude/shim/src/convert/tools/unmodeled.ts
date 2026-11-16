@@ -60,6 +60,7 @@ export const unmodeledConverter: ToolConverter = {
             toolName: call.toolName,
             arguments: argumentsOf(call),
             startedAt: startedAt(call.startedAtMs),
+            notOffered: call.notOffered === true,
           }),
         },
       }),

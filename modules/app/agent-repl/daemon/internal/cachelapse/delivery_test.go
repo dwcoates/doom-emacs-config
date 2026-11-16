@@ -263,6 +263,54 @@ func TestACacheThatLapsedBeforeItsKeepaliveCameDueWasNotMissed(t *testing.T) {
 	}
 }
 
+func TestACacheThatLapsedWhileTheWorkspaceOwedNoKeepaliveWasNotMissed(t *testing.T) {
+	// Arrange: due a minute ago, the cache lapsed thirty seconds ago, and the
+	// workspace began owing keep-alives again only after the due (it was
+	// withheld until then).
+	due := now.Add(-time.Minute)
+	h := dueHarness(t, lapsedAt(due.Add(30*time.Second)))
+	h.keeper.owedFrom[theWorkspace] = due.Add(time.Second)
+
+	// Act
+	h.keeper.sendBeat(context.Background(), theWorkspace, now)
+
+	// Assert
+	if standing := h.faults.standing(t, health.KindKeepaliveUndelivered); len(standing) != 0 || h.found(dlog.RecordQuery{Level: "error"}) {
+		t.Fatalf("faults %+v, records %+v; want no miss", standing, h.log.Records())
+	}
+	if !h.found(dlog.RecordQuery{Level: "info", Operation: opDrive, Message: "the cache lapsed while the workspace owed no keep-alive; the keeper missed nothing"}) {
+		t.Fatalf("records = %+v, want the lapse recorded at INFO", h.log.Records())
+	}
+}
+
+func TestAWorkspaceOwingKeepalivesAgainIsOwedFromThatInstant(t *testing.T) {
+	// Arrange: the workspace owed none, then owes them again.
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	log := dlog.NewTestLogger()
+	h.keeper.owesNone(log, theWorkspace, "it is withheld, so it runs no session")
+
+	// Act
+	h.keeper.owesAgain(log, theWorkspace)
+
+	// Assert
+	if from, ok := h.keeper.owedFrom[theWorkspace]; !ok || !from.Equal(h.clock.Now()) {
+		t.Fatalf("owedFrom = %v (%v), want the clock's %v", from, ok, h.clock.Now())
+	}
+}
+
+func TestAWorkspaceThatOwedKeepalivesAllAlongHasNoOwedFrom(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+
+	// Act
+	h.keeper.owesAgain(dlog.NewTestLogger(), theWorkspace)
+
+	// Assert
+	if from, ok := h.keeper.owedFrom[theWorkspace]; ok {
+		t.Fatalf("owedFrom = %v, want none for a workspace that owed keep-alives all along", from)
+	}
+}
+
 func TestAParkedSessionThatCouldNotBeRestoredIsUndelivered(t *testing.T) {
 	// Arrange
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
