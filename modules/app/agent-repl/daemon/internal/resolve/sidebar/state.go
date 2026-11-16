@@ -522,13 +522,12 @@ func (r *rosterState) asyncMerging(ws ids.WorkspaceID) bool {
 }
 
 // pausedMergeQueue answers the paused repository queue that holds a merge the
-// row of WS draws, and false when none does. The row draws its own merge on
-// a `merging` or `merge_queued` ARM, which is the queue WS has a row on, and
-// an async merge of its branch when it carries the async_merging marker
-// (ASYNC), which is the queue that names WS as a requester. A row drawing
-// neither draws no merge for a pause to change.
-func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, arm string, async bool) (wsm.RepoKey, bool) {
-	ownMerge := arm == "merging" || arm == "merge_queued"
+// row of WS draws, and false when none does. The row draws its own merge
+// (OWNMERGE, ownMergeDrawn), which is on the queue WS has a row on, and an
+// async merge of its branch when it carries the async_merging marker (ASYNC),
+// which is the queue that names WS as a requester. A row drawing neither
+// draws no merge for a pause to change.
+func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, ownMerge, async bool) (wsm.RepoKey, bool) {
 	for repo, q := range r.queues {
 		if q.pause == nil {
 			continue

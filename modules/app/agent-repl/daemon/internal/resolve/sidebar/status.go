@@ -9,6 +9,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/protoarm"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/wsm"
 )
@@ -312,19 +313,45 @@ func idleAsyncUnreadMarker(s *wsState, arm string, log dlog.Logger) *frontendv1.
 	return marker
 }
 
+// mergeTurnMarker answers the row's `merge_turn` marker: present exactly
+// while the workspace's own merge is in flight (FACTS stand on the ladder's
+// merging rung) and the row's ARM is a turn's, on the thinking rung (owner
+// request, 2026-11-15). The footer draws the turn the merge's session runs,
+// so the arm and the name's color are the turn's; the marker keeps the merge
+// glyph on the sidebar beside them.
+func mergeTurnMarker(facts footer.MergeFacts, arm string, log dlog.Logger) *frontendv1.RosterRowMergeTurn {
+	if ladder.MergeClaim(facts.State) != ladder.Merging {
+		return nil
+	}
+	if claim, _ := ladder.RosterArmClaim(arm); claim != ladder.Thinking {
+		return nil
+	}
+	log.Debug("daemon.sidebar.merge_turn_marker",
+		"the workspace's merge is in flight and its session runs a turn, so the row carries the merge_turn marker beside the turn's arm",
+		dlog.Context{"status": arm, "merge_state": facts.State, "step": string(facts.Step)})
+	return &frontendv1.RosterRowMergeTurn{}
+}
+
+// ownMergeDrawn reports a row drawing its OWN merge: a `merging` or
+// `merge_queued` arm, or the merge_turn marker (MERGETURN) beside a turn's
+// arm. The async_merging marker is the requester's merge, drawn apart.
+func ownMergeDrawn(arm string, mergeTurn bool) bool {
+	return arm == "merging" || arm == "merge_queued" || mergeTurn
+}
+
 // mergePausedMarker answers the row's `merge_paused` marker: present exactly
-// while a merge indicator the row draws -- its own `merging` or
-// `merge_queued` arm, or its async_merging marker (ASYNC) -- is on a paused
+// while a merge indicator the row draws -- its own merge (OWNMERGE,
+// ownMergeDrawn), or its async_merging marker (ASYNC) -- is on a paused
 // repository queue (owner ruling, 2026-10-14). The arm and its color stand;
 // the marker changes only how the merge indicator is drawn.
-func mergePausedMarker(state *rosterState, ws ids.WorkspaceID, arm string, async bool, log dlog.Logger) *frontendv1.RosterRowMergePaused {
-	repo, paused := state.pausedMergeQueue(ws, arm, async)
+func mergePausedMarker(state *rosterState, ws ids.WorkspaceID, arm string, ownMerge, async bool, log dlog.Logger) *frontendv1.RosterRowMergePaused {
+	repo, paused := state.pausedMergeQueue(ws, ownMerge, async)
 	if !paused {
 		return nil
 	}
 	log.Debug("daemon.sidebar.merge_paused_marker",
 		"the merge the row draws is on a paused queue, so the row carries the merge_paused marker beside its merge indicator",
-		dlog.Context{"status": arm, "async_merging": async, "repo": string(repo)})
+		dlog.Context{"status": arm, "own_merge": ownMerge, "async_merging": async, "repo": string(repo)})
 	return &frontendv1.RosterRowMergePaused{}
 }
 

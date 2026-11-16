@@ -24,7 +24,15 @@
 //     outranks the link because it is the DAEMON's own fact, knowable
 //     whatever the route to the shim is doing, and "the merge pipeline owns
 //     the row while it runs" (the roster's standing ruling). Nothing parks
-//     (owner ruling, 2026-09-29): a merge that gives up FAILS.
+//     (owner ruling, 2026-09-29): a merge that gives up FAILS. A TURN THE
+//     SESSION RUNS while the merge is in flight (the merge's configured
+//     prompts, conflict resolution, fixing) is drawn as the turn (owner
+//     request, 2026-11-15): the rung makes no claim while it runs, so the
+//     walk goes on to the turn's own rung, and the merge's claim returns
+//     the moment the turn ends. A merge still awaiting the workspace falling
+//     free keeps the claim: the turn is what it waits on, and it says so.
+//     The roster keeps the merge glyph beside the turn's arm
+//     (frontend.v1.RosterRowMergeTurn).
 //  2. agent_repl_fault  one of agent-repl's OWN services does not serve THE
 //     SESSION: the route to it is severed, dead or failed to start, or its
 //     last turn died with agent-repl's machinery. A daemon that is impaired

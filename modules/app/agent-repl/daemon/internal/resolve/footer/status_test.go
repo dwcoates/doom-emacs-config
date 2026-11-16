@@ -1727,6 +1727,112 @@ func TestAMergeOnAStepOutranksWaiting(t *testing.T) {
 	}
 }
 
+// TestATurnTheMergeRunsIsDrawnAsWorking covers the merging rung yielding to a
+// turn the merge's session runs (owner request, 2026-11-15): the strip draws
+// the turn, on every merge step in flight.
+func TestATurnTheMergeRunsIsDrawnAsWorking(t *testing.T) {
+	tests := []struct {
+		name  string
+		facts MergeFacts
+	}{
+		{"a sync merge fixing", MergeFacts{State: "merging", Step: StepFixing, Attempt: 1, MaxAttempts: 3}},
+		{"a sync merge resolving conflicts", MergeFacts{State: "merging", Step: StepConflictResolution}},
+		{"a merge running its pre-deploy prompts", MergeFacts{State: "merging", Step: StepPreDeploy}},
+		{"a merge waiting in line", MergeFacts{State: "queued", Step: StepEnqueued, QueuePlace: 1, QueueWaiting: 1}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			h.r.SetMerge(testWS, tt.facts)
+
+			// Act
+			h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+			// Assert
+			if got := h.status(t); got != "working" {
+				t.Fatalf("status = %q, want working", got)
+			}
+		})
+	}
+}
+
+func TestAMergeAwaitingTheTurnItWaitsOnKeepsDrawingIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepAwaitingFree})
+
+	// Act
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Assert
+	if !h.view(t).GetStrip().GetStatus().GetMerging().GetAwaitingFree().GetTurnInFlight() {
+		t.Fatalf("status = %q, want merging · awaiting_free naming the turn", h.status(t))
+	}
+}
+
+func TestTheMergeStepReturnsWhenTheMergesTurnEnds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	turn := testTurnID
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepFixing, Attempt: 1, MaxAttempts: 3})
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetMerging().GetFixing() == nil {
+		t.Fatalf("status = %q, want merging · fixing", h.status(t))
+	}
+}
+
+func TestAnAskTheMergesTurnOpensStaysTheMergeWaitingOnTheUser(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: StepConflictResolution})
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+
+	// Act
+	h.r.OnPermission(testWS, mainAgent, permissionStart("p-1", "rm -rf build"))
+
+	// Assert
+	if h.view(t).GetStrip().GetStatus().GetMerging().GetWaitingOnUser() == nil {
+		t.Fatalf("status = %q, want merging · waiting_on_user", h.status(t))
+	}
+}
+
+func TestTurnRunningHoldsForAnOpenTurnOrAVendorCompaction(t *testing.T) {
+	tests := []struct {
+		name       string
+		turn       *TurnStarted
+		compacting bool
+		want       bool
+	}{
+		{"an open turn", &TurnStarted{At: instant}, false, true},
+		{"a vendor compaction before its turn opens", nil, true, true},
+		{"neither", nil, false, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := &wsState{turn: tt.turn, compacting: tt.compacting}
+
+			// Act
+			got := s.turnRunning()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("turnRunning = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 	tests := []struct {
 		name  string

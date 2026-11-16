@@ -457,11 +457,13 @@ type Resolver interface {
 	// (resolve/sidebar), so no surface resolves a status of its own. Each
 	// change of its arm or step is told to WithStatusChanged's sink.
 	Status(ws ids.WorkspaceID) *frontendv1.FooterStatus
-	// MergeStartedAt answers when the merge the workspace's strip shows
-	// started, in epoch ms: its MergeFacts.QueuedAt while the published status
-	// is the merging arm, nil under any other arm. The roster's when-column
-	// counts a sync merge from it. A merge workspace's footer is never told
-	// its merge (an async merge runs there), so it answers nil there.
+	// MergeStartedAt answers when the workspace's merge in flight started,
+	// in epoch ms: its MergeFacts.QueuedAt while the merge is queued or
+	// merging, nil while none is. A turn the merge runs is drawn as the turn,
+	// so this, never the drawn arm, is what says a merge is in flight. The
+	// roster's when-column counts a sync merge from it, and the workspace
+	// status reports the merge by it. A merge workspace's footer is never
+	// told its merge (an async merge runs there), so it answers nil there.
 	MergeStartedAt(ws ids.WorkspaceID) *int64
 	// TurnClock answers the turn clock the workspace's strip shows. The
 	// roster's when-column counts from its start, so each change of it is

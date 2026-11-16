@@ -47,6 +47,7 @@ import type {
   RosterRowOpening,
   RosterRowAsyncMerging,
   RosterRowMergePaused,
+  RosterRowMergeTurn,
   RosterRowPriorityBadge,
   RosterRowWhen,
   RosterRowWhenHidden,
@@ -228,10 +229,12 @@ export function drawRosterRow(
   // PRESENCE IS THE FACT: only a one-shot carries the mark, and its glyph
   // replaces the dot while the one-shot works; an async merge of the
   // workspace's own branch draws the purple merge glyph in place of a plain
-  // dot (`tones.rosterRowMark`).
+  // dot, and a merge in flight running a turn draws the merge glyph in place
+  // of the turn's mark (`tones.rosterRowMark`).
   const markers: RowMarkers = {
     oneShot: u.oneShot !== undefined && drawRosterRowOneShot(u.oneShot, `${path}.oneShot`),
     asyncMerging: u.asyncMerging !== undefined && drawRosterRowAsyncMerging(u.asyncMerging, `${path}.asyncMerging`),
+    mergeTurn: u.mergeTurn !== undefined && drawRosterRowMergeTurn(u.mergeTurn, `${path}.mergeTurn`),
     mergePaused: u.mergePaused !== undefined && drawRosterRowMergePaused(u.mergePaused, `${path}.mergePaused`),
   };
   const mark = rosterRowMark(status.case, markers);
@@ -661,6 +664,18 @@ export function drawRosterRowAsyncMerging(u: RosterRowAsyncMerging, path: string
 }
 
 /**
+ * The MERGE-TURN marker: the workspace's own merge is in flight and its
+ * session runs a turn, which the row's arm draws. EMPTY -- presence is the
+ * fact -- so this answers `true` for a marker that is there at all; what it
+ * changes is `tones.rosterRowMark`'s.
+ */
+export function drawRosterRowMergeTurn(u: RosterRowMergeTurn, path: string): boolean {
+  void u;
+  void path;
+  return true;
+}
+
+/**
  * The MERGE-PAUSED marker: the merge queue holding the row's merge is paused.
  * EMPTY -- presence is the fact -- so this answers `true` for a marker that is
  * there at all; what it changes is `tones.rosterRowMark`'s.
@@ -962,6 +977,7 @@ export function drawStatusMark(arm: RosterStatusCase, path: string, markers: Row
       arm,
       one_shot: markers.oneShot,
       async_merging: markers.asyncMerging,
+      merge_turn: markers.mergeTurn,
       merge_paused: markers.mergePaused,
       glyph: mark.glyph,
       tone: mark.toneClass,

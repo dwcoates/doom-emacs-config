@@ -70,6 +70,7 @@ status arm and whatever else the case is about."
                    :opening nil
                    :async-merging nil
                    :merge-paused nil
+                   :merge-turn nil
                    :last-selected nil
                    :last-turn-ended nil
                    :last-turn-boundary nil
@@ -184,6 +185,25 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"merging\":{}" "\"mergePaused\":{\"repo\":{}}"))
                  '("RosterRowMergePaused" repo "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-merge-turn-marker ()
+  "A row carrying `mergeTurn\=' decodes it as PRESENT, beside the turn\='s arm."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row "\"thinking\":{}" "\"mergeTurn\":{}"))))
+    ;; Assert
+    (should (eq (plist-get row :merge-turn) t))
+    (should (equal (plist-get row :status) '(:arm :thinking :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-merge-turn-marker-carries-no-payload ()
+  "`RosterRowMergeTurn\=' is EMPTY: a field inside it is an unknown field."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"thinking\":{}" "\"mergeTurn\":{\"step\":{}}"))
+                 '("RosterRowMergeTurn" step "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
   "A row carrying `opening' decodes it as PRESENT, beside its status arm."

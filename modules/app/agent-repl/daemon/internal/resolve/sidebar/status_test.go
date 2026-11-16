@@ -2308,6 +2308,15 @@ func TestMergePausedMarker(t *testing.T) {
 			want:    true,
 		},
 		{
+			name: "a merge-turn row on a paused queue",
+			arrange: func(r sidebarResolver) {
+				r.SetMerge(theWS, mergingFacts())
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+			},
+			queue: sidebar.MergeQueue{Pause: pausedBy(), Workspaces: []ids.WorkspaceID{theWS}},
+			want:  true,
+		},
+		{
 			name:    "a merging row on a running queue",
 			arrange: func(r sidebarResolver) { r.SetMerge(theWS, mergingFacts()) },
 			queue:   sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{theWS}},
@@ -2352,6 +2361,112 @@ func TestMergePausedMarker(t *testing.T) {
 				t.Fatalf("merge_paused present = %v, want %v (status %q)", got, tc.want, statusName(onlyRow(t, r)))
 			}
 		})
+	}
+}
+
+// TestMergeTurnMarker walks which rows carry the `merge_turn` marker
+// (frontend.v1.RosterRowMergeTurn, owner request 2026-11-15): exactly a row
+// whose own merge is in flight while its arm is the turn's.
+func TestMergeTurnMarker(t *testing.T) {
+	turn := func(r sidebarResolver) { r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt}) }
+	tests := []struct {
+		name     string
+		facts    footer.MergeFacts
+		turn     bool
+		wantArm  string
+		wantMark bool
+	}{
+		{name: "a merging workspace running a turn", facts: mergingFacts(), turn: true, wantArm: "submitting", wantMark: true},
+		{name: "a queued merge's workspace running a turn", facts: queuedFacts(), turn: true, wantArm: "submitting", wantMark: true},
+		{name: "a merging workspace between turns", facts: mergingFacts(), wantArm: "merging", wantMark: false},
+		{name: "a turn with no merge", facts: footer.MergeFacts{State: "none"}, turn: true, wantArm: "submitting", wantMark: false},
+		{name: "a turn under a failed merge", facts: footer.MergeFacts{State: "failed", FailedArea: footer.FailedTests}, turn: true, wantArm: "merge_failed", wantMark: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t))
+			r.SetMerge(theWS, tc.facts)
+
+			// Act.
+			if tc.turn {
+				turn(r)
+			}
+
+			// Assert.
+			row := onlyRow(t, r)
+			if got := statusName(row); got != tc.wantArm {
+				t.Fatalf("status = %q, want %q", got, tc.wantArm)
+			}
+			if got := row.GetMergeTurn() != nil; got != tc.wantMark {
+				t.Fatalf("merge_turn present = %v, want %v", got, tc.wantMark)
+			}
+		})
+	}
+}
+
+func TestOwnMergeDrawn(t *testing.T) {
+	tests := []struct {
+		name      string
+		arm       string
+		mergeTurn bool
+		want      bool
+	}{
+		{name: "the merging arm", arm: "merging", want: true},
+		{name: "the merge_queued arm", arm: "merge_queued", want: true},
+		{name: "a turn's arm under the merge_turn marker", arm: "thinking", mergeTurn: true, want: true},
+		{name: "a turn's arm alone", arm: "thinking", want: false},
+		{name: "the merge_failed arm", arm: "merge_failed", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := sidebar.OwnMergeDrawn(tc.arm, tc.mergeTurn)
+
+			// Assert.
+			if got != tc.want {
+				t.Fatalf("OwnMergeDrawn(%q, %v) = %v, want %v", tc.arm, tc.mergeTurn, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTheMergeTurnMarkerDropsWhenTheMergesTurnEnds(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, mergingFacts())
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+
+	// Act.
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+
+	// Assert.
+	row := onlyRow(t, r)
+	if row.GetMergeTurn() != nil {
+		t.Fatal("the merge_turn marker stands after the merge's turn ended")
+	}
+	if got := statusName(row); got != "merging" {
+		t.Fatalf("status = %q, want merging", got)
+	}
+}
+
+func TestMergeTurnMarkerIsLogged(t *testing.T) {
+	// Arrange.
+	r := live(t, arrange(t))
+	r.SetMerge(theWS, mergingFacts())
+
+	// Act.
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	onlyRow(t, r)
+
+	// Assert.
+	got := dlog.FilterRecords(r.surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.merge_turn_marker"})
+	if len(got) == 0 {
+		t.Fatal("no daemon.sidebar.merge_turn_marker record for a row carrying the marker")
+	}
+	last := got[len(got)-1].Context
+	if last["status"] != "submitting" || last["merge_state"] != "merging" {
+		t.Fatalf("record context = %v, want status submitting and merge_state merging", last)
 	}
 }
 

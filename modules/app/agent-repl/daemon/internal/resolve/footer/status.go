@@ -482,10 +482,21 @@ func (r *resolver) vendorFault(s *wsState, log dlog.Logger) *frontendv1.FooterSt
 // THE STEP IS THE ORCHESTRATOR'S FACT; the footer never guesses one. A merge
 // in flight whose facts name no step it knows is an orchestrator defect,
 // recorded at ERROR and drawn with no substatus rather than a made-up one.
+//
+// A TURN THE SESSION RUNS IS DRAWN AS THE TURN (owner request, 2026-11-15):
+// while one is in flight the rung makes no claim, so the ladder walks on to
+// the turn's own rung, and the merge's step comes back the moment the turn
+// ends. Two exceptions stay here: an ask the merge's own turn opens is the
+// merge waiting on the user, and a merge awaiting the workspace falling free
+// waits on that very turn, which its `awaiting_free · turn_in_flight` names.
 func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
 	if held := mergeWaitingOnUser(s); held != nil {
 		log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging waiting on user", "step": string(s.merge.Step)})
 		return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: held}}
+	}
+	if s.turnRunning() && s.merge.Step != StepAwaitingFree {
+		log.Debug("daemon.footer.status_decision", "the merge's session runs a turn, so the merging rung yields to it", dlog.Context{"function": "status", "branch": "merging yields to a turn", "step": string(s.merge.Step)})
+		return nil
 	}
 	arm := &frontendv1.FooterStatusMerging{Activity: r.mergingActivity(s)}
 	m := s.merge
@@ -748,7 +759,7 @@ const interruptingLine = "stopping the current turn…"
 // draws `compacting` from that same fact the moment it does. Answering nil
 // there left the strip reading idle beside a rail reading compacting.
 func (r *resolver) thinking(s *wsState, log dlog.Logger) *frontendv1.FooterStatus {
-	if s.turn == nil && !s.compacting {
+	if !s.turnRunning() {
 		return nil
 	}
 	arm := &frontendv1.FooterStatusWorking{}

@@ -663,11 +663,11 @@ type wsState struct {
 	// TurnClock answers, so the roster's when-column counts from exactly the
 	// instant this strip's clock does.
 	publishedClock *frontendv1.FooterClock
-	// publishedMergeStart is when the merge the last published view's
-	// merging arm draws started (mergeStartedAt): what MergeStartedAt
-	// answers, so the roster's when-column counts a merge exactly while this
-	// strip draws one. Nil before the first publication; its ms is nil under
-	// any other arm.
+	// publishedMergeStart is when the merge in flight at the last
+	// publication started (mergeStartedAt): what MergeStartedAt answers, so
+	// the roster's when-column counts a merge for exactly as long as it is in
+	// flight, the turns it runs included. Nil before the first publication;
+	// its ms is nil while no merge is in flight.
 	publishedMergeStart *mergeStart
 
 	// resumeWaits are the background subagents the shim is waiting to resume
@@ -760,6 +760,14 @@ func newWSState() *wsState {
 // which reads the watcher's set — said was over.
 func (s *wsState) detachedLive() bool {
 	return s.detachedCount() > 0
+}
+
+// turnRunning reports a turn in flight in the session: an opened turn, or a
+// vendor compaction whose turn-open edge has not landed yet (thinking). The
+// thinking rung draws exactly while it holds, and the merging rung yields to
+// it.
+func (s *wsState) turnRunning() bool {
+	return s.turn != nil || s.compacting
 }
 
 // detachedCount is how many detached items are running right now, read from
