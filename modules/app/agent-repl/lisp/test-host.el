@@ -242,6 +242,7 @@ unary rpc can produce, which the contract never collapses into one."
          (agent-repl-host--confirming nil)
          (agent-repl--recency-walk-landing nil)
          (agent-repl--workspace-history nil)
+         (agent-repl--current-visit nil)
          (agent-repl-host-last-request nil)
          (agent-repl-host--editor-switches 0)
          (agent-repl-host-automatic-switch nil)
@@ -1317,11 +1318,13 @@ says now rather than wait for a push that will never come."
     (agent-repl-test-host--subscribe-three)
     (setq agent-repl--workspace-history '("ws-2" "ws-1"))
     (setq agent-repl--recency-walk-landing "ws-1")
+    (setq agent-repl--current-visit (list :name "ws-1" :began 100.0 :ahead nil))
     (let ((seen :unset))
       (cl-letf (((symbol-function 'agent-repl-host--move-on-request)
                  (lambda (_ws _shown) (setq seen agent-repl--workspace-history))))
         ;; Act
-        (agent-repl-host-request-switch "ws-3" 'picker))
+        (cl-letf (((symbol-function 'agent-repl--now) (lambda () 110.0)))
+          (agent-repl-host-request-switch "ws-3" 'picker)))
       ;; Assert
       (should (equal seen '("ws-1" "ws-2"))))))
 
