@@ -38,6 +38,7 @@
 (declare-function agent-repl-wire-decode-user-said "wire-common")
 (declare-function agent-repl-wire--decode-optional-uint32 "wire-common")
 (declare-function agent-repl-wire--decode-repeated "wire-common")
+(declare-function agent-repl-wire--decode-repeated-string "wire-common")
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decode-required-string "wire-common")
 (declare-function agent-repl-wire--require-string "wire-common")
@@ -701,7 +702,7 @@ Each is a list of names, the most recently mentioned first: COMMANDS
 without their slash, WORKSPACES as the roster names them."
   (let* ((message "HostWorkspaceMentions")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(commands workspaces))
+    (agent-repl-wire--check-keys "HostWorkspaceMentions" object '(commands workspaces))
     (agent-repl-wire--decoded
      message
      (list :commands (agent-repl-wire--decode-repeated-string message 'commands object)

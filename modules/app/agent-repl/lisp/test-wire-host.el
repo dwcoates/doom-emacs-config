@@ -1833,7 +1833,7 @@ opens are OpenTabs streams."
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
-                             "responseQuestion")
+                             "responseQuestion" "mentions")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()
