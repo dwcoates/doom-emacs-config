@@ -451,6 +451,7 @@ func (d Deps) validate() error {
 	check(d.SelfAddress != "", "SelfAddress")
 	check(d.Painter != nil, "Painter")
 	check(d.TestRunner != nil, "TestRunner")
+	check(d.Tests != nil, "Tests")
 	check(d.AwaitTurnEnd != nil, "AwaitTurnEnd")
 	check(d.Occupy != nil, "Occupy")
 	check(d.StartSession != nil, "StartSession")

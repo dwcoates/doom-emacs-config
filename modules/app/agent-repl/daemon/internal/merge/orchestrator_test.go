@@ -30,6 +30,7 @@ func TestNewRefusesAnIncompleteDependencySet(t *testing.T) {
 		{name: "no brief loader", drop: func(d *Deps) { d.Briefs = nil }, want: "Briefs"},
 		{name: "no painter", drop: func(d *Deps) { d.Painter = nil }, want: "Painter"},
 		{name: "no test runner", drop: func(d *Deps) { d.TestRunner = nil }, want: "TestRunner"},
+		{name: "no test service", drop: func(d *Deps) { d.Tests = nil }, want: "Tests"},
 		{name: "no session stop", drop: func(d *Deps) { d.StopSession = nil }, want: "StopSession"},
 		{name: "no freeness", drop: func(d *Deps) { d.Freeness = nil }, want: "Freeness"},
 		{name: "no rollout trigger", drop: func(d *Deps) { d.Rollout = nil }, want: "Rollout"},

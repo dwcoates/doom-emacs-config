@@ -30,6 +30,7 @@ import (
 	"agent-repld/internal/envc"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/stateroot"
+	"agent-repld/internal/testsclient"
 	"agent-repld/internal/wsm"
 	"agent-repld/internal/zettelclient"
 )
@@ -92,6 +93,10 @@ type options struct {
 	// zettelSocket is the zettel service's unix socket. This flag BEATS
 	// $AGENT_REPL_ZETTEL_SOCKET, which in turn beats the default.
 	zettelSocket string
+	// testsSocket is the test service's unix socket, which every merge
+	// queue gate runs on. This flag BEATS $AGENT_REPL_TESTS_SOCKET, which in
+	// turn beats the default.
+	testsSocket string
 	// promptsDir is the prompts/ directory the briefs are read from at use
 	// time.
 	promptsDir string
@@ -202,6 +207,11 @@ var processStarted = time.Now()
 // the environment (zettelclient.EnvSocket) names one: the zettel service's own
 // default.
 const defaultZettelSocket = "~/.cache/agent-repl/sock/zettel.sock"
+
+// defaultTestsSocket is the test service's socket when neither the flag nor
+// the environment (testsclient.EnvSocket) names one: the test service's own
+// default.
+const defaultTestsSocket = "~/.cache/agent-repl/sock/tests.sock"
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == thawGuardVerb {
@@ -319,6 +329,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
 	config.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
 	config.StringVar(&opts.zettelSocket, "zettel-socket", "", "zettel unix socket, overriding $"+zettelclient.EnvSocket)
+	config.StringVar(&opts.testsSocket, "tests-socket", "", "test service unix socket, overriding $"+testsclient.EnvSocket)
 	config.StringVar(&opts.promptsDir, "prompts-dir", "", "prompts directory the briefs are read from")
 	config.StringVar(&opts.multiRepoConfigDir, "multi-repo-config-dir", "", "account config root for workspaces under the multi-repo root")
 	config.StringVar(&opts.defaultConfigDir, "default-config-dir", "", "account config root for every other workspace")
@@ -378,6 +389,11 @@ func parseFlags(program string, args []string) (options, error) {
 		return options{}, err
 	}
 	opts.zettelSocket = zettelSocket
+	testsSocket, err := resolveSocket("tests", opts.testsSocket, os.Getenv(testsclient.EnvSocket), defaultTestsSocket, os.UserHomeDir)
+	if err != nil {
+		return options{}, err
+	}
+	opts.testsSocket = testsSocket
 	retention, err := resolveFeedTailRetention(opts.feedTailRetention, os.Getenv(envFeedTailRetention))
 	if err != nil {
 		return options{}, err

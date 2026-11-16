@@ -91,6 +91,7 @@ import (
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
+	"agent-repld/internal/testsclient"
 	"agent-repld/internal/turnlatch"
 	"agent-repld/internal/userenv"
 	"agent-repld/internal/viewquiet"
@@ -1435,6 +1436,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestCommand:     merge.TestCommandFor,
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
+		Tests:           testsclient.New(p.Opts.testsSocket),
 		HookRunner:      scripts,
 		Builtins:        lifecycleconfig.Builtins{CheckoutRoot: paths.Checkout},
 		SelfAddress:     p.Claim.Address(),

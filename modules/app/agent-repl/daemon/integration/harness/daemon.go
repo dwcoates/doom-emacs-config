@@ -517,6 +517,9 @@ type Daemon struct {
 	MultiRepoRoot string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
+	// TestsSocket is the socket of the real test service its merge gates run
+	// on, shared by every daemon over its state root (TestsSocketFor).
+	TestsSocket string
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
@@ -783,6 +786,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 			t.Fatalf("harness: mkdir %s: %v", dir, err)
 		}
 	}
+	d.TestsSocket = ensureTestService(t, d.StateDir, d.LockDir)
 	mainJS := filepath.Join(root, "main.js")
 	writeFile(t, mainJS, "// placeholder shim module\n")
 	if opts.ShimMain != "" {
@@ -843,6 +847,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"--shim-main", mainJS,
 		"--webapp-dist", d.WebappDir,
 		"--store-socket", d.StoreSocket,
+		"--tests-socket", d.TestsSocket,
 		"--prompts-dir", d.PromptsDir,
 		"--default-config-dir", d.DefaultConfigDir,
 		"--multi-repo-config-dir", d.MultiRepoConfigDir,

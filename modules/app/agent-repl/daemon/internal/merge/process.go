@@ -193,6 +193,9 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 		return r.goOnAfterResumedStep(ctx, tip, targetBranch, r.fixesUsed)
 	case TabTests:
 		if gaveUp, err := r.rebaseSettled(ctx, tip, targetBranch); err != nil || gaveUp != nil {
+			if gaveUp != nil {
+				r.retireTestRun(ctx, "the resumed merge gave up before its gate")
+			}
 			out, again, err, _ := finish(gaveUp, err)
 			return out, again, err
 		}
@@ -205,10 +208,11 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 			// back to the rebase step first (owner ruling, 2026-10-12).
 			round := r.activeRound()
 			const moved = "the daemon restarted under this run and the target moved; the branch rebases onto its new tip first"
+			r.retireTestRun(ctx, moved)
 			r.endRun(ctx, round, moved, nil, nil, "restarted")
 			return r.rebaseOntoMoved(ctx, tip, now, targetBranch, res.FixAttempt)
 		}
-		r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the test gate the restart cut runs again from its start", dlog.Context{
+		r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the test gate the restart cut watches its run on the test service again, or starts one", dlog.Context{
 			"workspace": string(r.ws), "lease": string(r.lease.ID), "round": r.activeRound().n, "attempt": res.FixAttempt})
 		return r.afterRebase(ctx, tip, targetBranch, res.FixAttempt, true)
 	case TabFixes:

@@ -78,6 +78,7 @@ var (
 	daemonBinary   string
 	fakeshimBinary string
 	gitBinary      string
+	testsBinary    string
 	buildErr       error
 	pinnedCheckout string
 )
@@ -175,7 +176,9 @@ func mainIn(m *testing.M, module, root string) int {
 	for _, b := range []struct {
 		path      *string
 		name, pkg string
-		covered   bool
+		// dir is the module the build runs in, the daemon's when empty.
+		dir     string
+		covered bool
 		// links are the -ldflags -X bindings the build sets, read when it
 		// runs.
 		links func() []string
@@ -183,8 +186,8 @@ func mainIn(m *testing.M, module, root string) int {
 		// The scripted `git`, FIRST: the daemon is linked to it. It is built
 		// under its real name because it is placed first on the daemon's
 		// PATH: nothing in a test ever reaches the real binary.
-		{&gitBinary, "git", "./integration/fakegit/git", false, nil},
-		{&fakeshimBinary, "fakeshim", "./integration/fakeshim", false, nil},
+		{&gitBinary, "git", "./integration/fakegit/git", "", false, nil},
+		{&fakeshimBinary, "fakeshim", "./integration/fakeshim", "", false, nil},
 		// ONLY THE DAEMON IS INSTRUMENTED. The two fakes are harness
 		// scaffolding, not a system under test, and both inherit the
 		// daemon's environment when they run — an instrumented fake would
@@ -193,7 +196,10 @@ func mainIn(m *testing.M, module, root string) int {
 		// THE DAEMON RUNS THE MOCKED GIT BY CONSTRUCTION: it is linked in as
 		// the daemon's git binary, so no PATH a test or a child sets can
 		// reach the host's git.
-		{&daemonBinary, "agent-repld", "./cmd/agent-repld", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink} }},
+		{&daemonBinary, "agent-repld", "./cmd/agent-repld", "", true, func() []string { return []string{MockedGitLink(gitBinary), NoGitHubLink} }},
+		// THE TEST SERVICE EVERY DAEMON'S MERGE GATES RUN ON (testservice.go):
+		// a real one, as our own system, never the owner's.
+		{&testsBinary, "agent-repl-tests", ".", filepath.Join(filepath.Dir(module), "testservice"), false, nil},
 	} {
 		path, err := testenv.ProgramOr(os.Getenv, b.name, func() (string, error) {
 			d, err := binDir()
@@ -216,6 +222,9 @@ func mainIn(m *testing.M, module, root string) int {
 			buildArgs = append(buildArgs, "-o", out, b.pkg)
 			cmd := exec.Command("go", buildArgs...)
 			cmd.Dir = module
+			if b.dir != "" {
+				cmd.Dir = b.dir
+			}
 			cmd.Stderr = os.Stderr
 			cmd.Stdout = os.Stderr
 			if _, err := TimedStep(os.Stderr, "harness", "go build "+b.pkg, func() (struct{}, error) { return struct{}{}, cmd.Run() }); err != nil {
@@ -375,6 +384,15 @@ func FakeShimBinary(t testing.TB) string {
 		t.Fatal("harness: the suite's TestMain must call harness.Main")
 	}
 	return fakeshimBinary
+}
+
+// TestServiceBinary is the built test service.
+func TestServiceBinary(t testing.TB) string {
+	t.Helper()
+	if testsBinary == "" {
+		t.Fatal("harness: the suite's TestMain must call harness.Main")
+	}
+	return testsBinary
 }
 
 // FakeGitBinary is the built scripted `git`.

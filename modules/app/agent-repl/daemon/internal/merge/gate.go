@@ -1,7 +1,6 @@
 package merge
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -216,6 +215,12 @@ func (g *gateRun) hostFault(ctx context.Context, result GateResult, cause string
 	r.o.log(ctx, r.ws).Error("daemon.merge.tests", "the test gate's runner could not be built or started on this host; nothing of the branch was judged, no fixing attempt is spent, and the queue is held until it is resumed", dlog.Context{
 		"workspace": string(r.ws), "round": g.round.n, "cause": cause, "exit_code": result.ExitCode,
 		"archive": result.ArchivePath, "verdict": "host_fault", "total_seconds": g.since()})
+	// THE FAULTED RUN IS NEVER WATCHED AGAIN: the queue's resume runs the
+	// gate again from its start, on a host whose fault was fixed, so the
+	// record drops the run before the hold suspends the merge.
+	if err := r.checkpoint(ctx, TabTests, func(d *progressDoc) { d.TestRun = "" }); err != nil {
+		return g.unrun(ctx, err)
+	}
 	held := make(chan error, 1)
 	inflight.Go(func() { held <- r.o.holdForHostFault(context.WithoutCancel(ctx), r.repo, cause) })
 	// THE HOLD'S PAUSE CUTS THIS RUN before it finishes: the pause suspends
@@ -322,56 +327,50 @@ func (g *gateRun) link() *frontendv1.FeedMergeTestLog {
 	return g.r.o.testLogLink(g.log)
 }
 
-// run runs the script, writing its output to the round's log and following
-// its suites' edges as the script writes them, and answers the classified
-// result. An error means the run could not be CLASSIFIED: the script could not
-// be spawned, or its log could not be written.
+// run runs the script on the test service (runOnService), writing its
+// output to the round's log and following its suites' edges as the script
+// writes them, and answers the classified result. An error means the run
+// could not be CLASSIFIED: the script could not be started, or its log could
+// not be written.
 func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) (GateResult, error) {
-	file, err := createLog(g.log.path)
-	if err != nil {
-		return GateResult{}, err
-	}
-	g.written = true
-	writer := bufio.NewWriter(file)
-	var writeErr error
-	g.publishLive(nil)
-	measured, runErr := g.r.o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(line string) {
-		if _, err := writer.WriteString(line + "\n"); err != nil && writeErr == nil {
-			writeErr = err
+	for {
+		measured, lost, err := g.runOnService(ctx, dir, argv)
+		if err != nil {
+			return GateResult{}, err
 		}
-		g.edge(line)
-	})
-	if runErr == nil {
+		if lost != "" {
+			// THE SERVICE ITSELF RESTARTED UNDER THE RUN: nothing the run
+			// would have written is known, so the gate runs again from its
+			// start, its tab and its log drawn afresh.
+			g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the test service lost the gate's run; the gate runs again from its start", dlog.Context{
+				"workspace": string(g.r.ws), "round": g.round.n, "lost": lost})
+			g.reset()
+			continue
+		}
 		g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test runner finished", dlog.Context{
 			"workspace": string(g.r.ws), "round": g.round.n, "exit_code": measured.ExitCode,
 			"run_seconds": measured.Wall.Seconds(), "since_gate_start_seconds": g.since()})
+		suites, err := g.r.o.paintSuites(selected, measured.Output)
+		if err != nil {
+			return GateResult{}, err
+		}
+		return GateResult{
+			Passed:      measured.ExitCode == 0,
+			Suites:      suites,
+			Tail:        clampTail(measured.Output, tailBytes),
+			ArchivePath: g.log.path,
+			ExitCode:    measured.ExitCode,
+		}, nil
 	}
-	output, code := measured.Output, measured.ExitCode
-	if err := writer.Flush(); err != nil && writeErr == nil {
-		writeErr = err
-	}
-	if err := file.Close(); err != nil && writeErr == nil {
-		writeErr = err
-	}
-	if runErr != nil {
-		return GateResult{}, &gateUnstartedError{err: runErr}
-	}
-	// A GATE WHOSE LOG FAILED IS AN UNRUNNABLE GATE rather than a lost log,
-	// because the file is the only account of a failure that survives the run.
-	if writeErr != nil {
-		return GateResult{}, fmt.Errorf("merge: writing the test log %s: %w", g.log.path, writeErr)
-	}
-	suites, err := g.r.o.paintSuites(selected, output)
-	if err != nil {
-		return GateResult{}, err
-	}
-	return GateResult{
-		Passed:      code == 0,
-		Suites:      suites,
-		Tail:        clampTail(output, tailBytes),
-		ArchivePath: g.log.path,
-		ExitCode:    code,
-	}, nil
+}
+
+// reset puts the gate run back to its start: no suite seen, no runner line,
+// no seat wait.
+func (g *gateRun) reset() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.suites, g.states, g.sources, g.counts = nil, map[string]suiteState{}, map[string]string{}, newSuiteCounts()
+	g.seatWait, g.runnerSeen, g.written = nil, false, false
 }
 
 // edge follows one line of the script: a suite starting, passing or failing
