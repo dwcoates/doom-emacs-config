@@ -1514,3 +1514,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-16 deploy-remediation-20261116-165301 (landed in queue bypass mode): webapp: a deploy handover's quiesced refusal of ReportPageDrawn logs at info instead of two warns
 - 2026-11-16 deploy-remediation-20261116-165834 (landed in queue bypass mode): A finished deploy remediation stands by on the mediation's lifetime, so ending its own session no longer cancels the stand-by; a held prompt waits until this daemon serves its workspace
 - 2026-11-16 deploy-remediation-20261116-165834 (landed in queue bypass mode): A remediation finish refused while one runs is recorded as the expected answer, not an error; a test run selecting a Go subtest plans instead of stopping
+- 2026-11-16 deploy-remediation-20261116-165834 (landed in queue bypass mode): Network loss in git and a response retired before its interim re-push are no longer recorded as errors
