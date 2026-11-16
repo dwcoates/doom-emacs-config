@@ -2993,14 +2993,15 @@ type fakeStallBeat struct {
 }
 
 type observedStall struct {
+	document  string
 	at        time.Time
 	blockedMS int64
 }
 
-func (f *fakeStallBeat) Observe(at time.Time, blockedMS int64) {
+func (f *fakeStallBeat) Observe(document string, at time.Time, blockedMS int64) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.observed = append(f.observed, observedStall{at: at, blockedMS: blockedMS})
+	f.observed = append(f.observed, observedStall{document: document, at: at, blockedMS: blockedMS})
 }
 
 func (f *fakeStallBeat) stalls() []observedStall {

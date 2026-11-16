@@ -1,7 +1,8 @@
 package stallbeat
 
 import (
-	"slices"
+	"fmt"
+	"sort"
 	"testing"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 
 // base is a moment on phase 0 of the cycle.
 var base = time.Unix(1_800_000_000, 0)
+
+// The webhost's two documents, each its own web content process.
+const (
+	host    = "host"
+	sidebar = "sidebar"
+)
 
 // onBeat answers N moments one Period apart from START, each shifted by OFF.
 func onBeat(start time.Time, n int, off time.Duration) []time.Time {
@@ -64,7 +71,7 @@ func TestObserveRaisesOnlyAtTheBeatThreshold(t *testing.T) {
 
 			// Act
 			for _, at := range tt.stalls {
-				d.Observe(at, 300)
+				d.Observe(host, at, 300)
 			}
 
 			// Assert
@@ -79,11 +86,11 @@ func TestObserveForgetsStallsOlderThanTheWindow(t *testing.T) {
 	// Arrange: Beat-1 stalls, then one on the same phase long after the window.
 	d, log := newDetector(t)
 	for _, at := range onBeat(base, Beat-1, 0) {
-		d.Observe(at, 300)
+		d.Observe(host, at, 300)
 	}
 
 	// Act
-	d.Observe(base.Add(Window+time.Duration(Beat)*Period), 300)
+	d.Observe(host, base.Add(Window+time.Duration(Beat)*Period), 300)
 
 	// Assert
 	if got := len(raisedErrors(log)); got != 0 {
@@ -97,7 +104,7 @@ func TestObserveRaisesOncePerWindowWhileThePatternHolds(t *testing.T) {
 
 	// Act: a beat on every cycle for one window and a half.
 	for _, at := range onBeat(base, int((Window+Window/2)/Period), 0) {
-		d.Observe(at, 300)
+		d.Observe(host, at, 300)
 	}
 
 	// Assert
@@ -112,7 +119,7 @@ func TestObserveRecordsTheBeatsDiagnosis(t *testing.T) {
 
 	// Act
 	for _, at := range onBeat(base, Beat, 2*time.Second) {
-		d.Observe(at, 250)
+		d.Observe(host, at, 250)
 	}
 
 	// Assert
@@ -122,7 +129,7 @@ func TestObserveRecordsTheBeatsDiagnosis(t *testing.T) {
 	}
 	got := raised[0]
 	want := dlog.Context{
-		"stalls_on_beat": Beat, "stalls_in_window": Beat, "blocked_ms_on_beat": int64(250 * Beat),
+		"document": host, "stalls_on_beat": Beat, "stalls_in_window": Beat, "stalls_by_chance": chanceBound(Beat) - 1, "blocked_ms_on_beat": int64(250 * Beat),
 		"phase_ms": int64(2000), "window_s": int(Window.Seconds()), "period_s": int(Period.Seconds()),
 	}
 	if got.Operation != op {
@@ -145,12 +152,12 @@ func TestNewRequiresALogger(t *testing.T) {
 	}
 }
 
-func TestRecentCountsTheWindowsStallsAndTheirBlockedTime(t *testing.T) {
+func TestRecentCountsEveryDocumentsStallsAndTheirBlockedTime(t *testing.T) {
 	// Arrange
 	d, _ := newDetector(t)
 	start := time.Unix(1_800_000_000, 0)
-	d.Observe(start, 100)
-	d.Observe(start.Add(time.Minute), 250)
+	d.Observe(host, start, 100)
+	d.Observe(sidebar, start.Add(time.Minute), 250)
 
 	// Act
 	count, blocked := d.Recent(start.Add(2 * time.Minute))
@@ -165,8 +172,8 @@ func TestRecentLeavesOutAStallOlderThanTheWindow(t *testing.T) {
 	// Arrange
 	d, _ := newDetector(t)
 	start := time.Unix(1_800_000_000, 0)
-	d.Observe(start, 100)
-	d.Observe(start.Add(9*time.Minute), 250)
+	d.Observe(host, start, 100)
+	d.Observe(host, start.Add(9*time.Minute), 250)
 
 	// Act
 	count, blocked := d.Recent(start.Add(Window + time.Second))
@@ -177,60 +184,80 @@ func TestRecentLeavesOutAStallOlderThanTheWindow(t *testing.T) {
 	}
 }
 
-func TestChanceOnPhase(t *testing.T) {
+// cyclesInWindow is how many whole cycles one window holds.
+const cyclesInWindow = int(Window / Period)
+
+// spread answers N moments across one window whose phases lie evenly across
+// 2s to 28s of the cycle, clear of phase 0, a few to any one phase, and
+// whose cycles take turns, so every stretch of the window is as busy.
+func spread(n int) []time.Time {
+	out := make([]time.Time, n)
+	for j := range out {
+		cycle := time.Duration(j%cyclesInWindow) * Period
+		phase := 2*time.Second + time.Duration(j)*26*time.Second/time.Duration(n)
+		out[j] = base.Add(cycle + phase)
+	}
+	return out
+}
+
+// beatsAcross answers N moments on phase 0 in cycles spaced evenly across one
+// window, at most cyclesInWindow of them, so the beat builds as the window
+// fills rather than ahead of it.
+func beatsAcross(n int) []time.Time {
+	out := make([]time.Time, n)
+	for i := range out {
+		out[i] = base.Add(time.Duration(i*cyclesInWindow/n) * Period)
+	}
+	return out
+}
+
+func TestChanceBoundIsWhatUniformStallsReachOnOnePhaseOnlyRarely(t *testing.T) {
 	tests := []struct {
-		name string
-		n    int
-		want int
+		stalls int
+		want   int
 	}{
-		{name: "no stalls put none on a phase", n: 0, want: 0},
-		{name: "a quiet window rounds to none", n: 14, want: 0},
-		{name: "half a stall rounds up", n: 15, want: 1},
-		{name: "a window of 59 puts two on a phase", n: 59, want: 2},
-		{name: "a busy window of 364 puts twelve on a phase", n: 364, want: 12},
+		{stalls: 0, want: 1},
+		{stalls: 20, want: 7},
+		{stalls: 67, want: 11},
+		{stalls: 92, want: 13},
+		{stalls: 368, want: 30},
 	}
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(fmt.Sprintf("%d stalls", tt.stalls), func(t *testing.T) {
 			// Act
-			got := ChanceOnPhase(tt.n)
+			got := chanceBound(tt.stalls)
 
 			// Assert
 			if got != tt.want {
-				t.Fatalf("ChanceOnPhase(%d) = %d, want %d", tt.n, got, tt.want)
+				t.Fatalf("chanceBound(%d) = %d, want %d", tt.stalls, got, tt.want)
 			}
 		})
 	}
 }
 
-// spread answers N stalls in one window, their phases walking the cycle in
-// even steps, so no phase holds more than chance puts there.
-func spread(n int) []time.Time {
-	out := make([]time.Time, n)
-	step := Window / time.Duration(n+1)
-	for i := range out {
-		out[i] = base.Add(time.Duration(i) * step)
-	}
-	return out
-}
-
-func TestObserveJudgesABusyWindowAgainstChance(t *testing.T) {
+func TestObserveRaisesABusyWindowOnlyAboveChance(t *testing.T) {
 	tests := []struct {
 		name   string
-		stalls []time.Time
+		onBeat int
+		spread int
 		raised int
 	}{
-		{name: "stays quiet for a busy window whose phases hold only chance's share", stalls: spread(360), raised: 0},
-		{name: "raises for a beat that stands Beat above a busy window's chance", stalls: append(spread(300), onBeat(base.Add(250*time.Millisecond), 20, 0)...), raised: 1},
+		{name: "stays quiet for Beat on one phase of a busy window, as chance puts there", onBeat: Beat, spread: 84, raised: 0},
+		{name: "stays quiet one stall short of chance's bound", onBeat: chanceBound(92) - 1, spread: 92 - (chanceBound(92) - 1), raised: 0},
+		{name: "raises at chance's bound", onBeat: chanceBound(92), spread: 92 - chanceBound(92), raised: 1},
+		{name: "stays quiet for 19 on one phase of 364, as a busy window put there on 2026-11-16", onBeat: 19, spread: 364 - 19, raised: 0},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
+			// Arrange: the beat and the busy stalls across one window, in
+			// the order the webhost reports them.
 			d, log := newDetector(t)
-			sortTimes(tt.stalls)
+			stalls := append(spread(tt.spread), beatsAcross(tt.onBeat)...)
+			sort.Slice(stalls, func(a, b int) bool { return stalls[a].Before(stalls[b]) })
 
 			// Act
-			for _, at := range tt.stalls {
-				d.Observe(at, 300)
+			for _, at := range stalls {
+				d.Observe(host, at, 300)
 			}
 
 			// Assert
@@ -241,7 +268,38 @@ func TestObserveJudgesABusyWindowAgainstChance(t *testing.T) {
 	}
 }
 
-// sortTimes orders stalls as the webhost reports them, oldest first.
-func sortTimes(ts []time.Time) {
-	slices.SortFunc(ts, func(a, b time.Time) int { return a.Compare(b) })
+func TestObserveCountsEachDocumentsStallsAgainstItsOwnBeat(t *testing.T) {
+	tests := []struct {
+		name      string
+		documents []string
+		perDoc    int
+		raised    []string
+	}{
+		{name: "two documents' stalls on one phase never add up to a beat", documents: []string{host, sidebar}, perDoc: Beat / 2, raised: nil},
+		{name: "each document's own beat raises once, naming it", documents: []string{host, sidebar}, perDoc: Beat, raised: []string{host, sidebar}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d, log := newDetector(t)
+
+			// Act
+			for _, at := range onBeat(base, tt.perDoc, 0) {
+				for _, document := range tt.documents {
+					d.Observe(document, at, 300)
+				}
+			}
+
+			// Assert
+			raised := raisedErrors(log)
+			if len(raised) != len(tt.raised) {
+				t.Fatalf("raised %d errors, want %d: %+v", len(raised), len(tt.raised), raised)
+			}
+			for i, document := range tt.raised {
+				if raised[i].Context["document"] != document || raised[i].Context["stalls_in_window"] != tt.perDoc {
+					t.Fatalf("error %d context = %+v, want document %q with %d stalls", i, raised[i].Context, document, tt.perDoc)
+				}
+			}
+		})
+	}
 }
