@@ -18,12 +18,14 @@ import { DiscardMergeResponseSchema, type DiscardMergeRequest } from "../../../p
 import {
   RosterMergeQueueGithubEntrySchema,
   RosterMergeQueueOffQueueSchema,
+  RosterMergeQueueHeadClockSchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueueMediationSchema,
   RosterMergeQueuePausedSchema,
   RosterMergeQueueFixingTestsSchema,
   RosterMergeQueueStageSchema,
   RosterMergeQueueSubjectSchema,
+  RosterMergeQueueWaitingSchema,
   RosterRepoMergeQueueSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { RepositoryRefSchema as WorkspaceRepositorySchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -34,8 +36,11 @@ import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord, forwardedRecords, recordFor } from "../log-capture.js";
 import { UPDATE_MERGE_QUEUE_SENTENCES } from "../../src/rpc/merge-queue-refusal.js";
 import {
+  activeClockStartMs,
   drawCardLine,
   drawHeadClock,
+  headClockStartMs,
+  waitingClockStartMs,
   drawQueueControlLine,
   MERGE_QUEUE_CONTROL_CLASS,
   MERGE_QUEUE_GLYPH_CLASS,
@@ -79,6 +84,8 @@ import { COLD_GATED_NAME_CLASS, NONE_COLD_GATED } from "../../src/sidebar/cold-g
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
+  activeClock,
+  activeHeadClock,
   appContext,
   fakeTicker,
   mergeQueueBand,
@@ -90,6 +97,9 @@ import {
   resolvingConflictsMerge,
   awaitingFixingTestsMerge,
   sidebarContext,
+  waitingClock,
+  waitingHead,
+  waitingHeadClock,
   waitingMerge,
 } from "./harness.js";
 
@@ -727,9 +737,31 @@ describe("drawRosterMergeQueue", () => {
     expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .${MERGE_QUEUE_REASON_CLASS}`)?.textContent).toBe(want);
   });
 
+  it.each([
+    { name: "the merge fixing its tests, from when it became active", slots: () => ({ fixingTests: fixingTestsMerge("w2", NOW - 4_000) }), want: 4_000 },
+    { name: "a merge resolving conflicts, from when it became active", slots: () => ({ resolvingConflicts: [resolvingConflictsMerge("w2", NOW - 6_000)] }), want: 6_000 },
+    {
+      name: "a merge awaiting the fixing-tests slot, with the waiting before its active stretch",
+      slots: () => ({ awaitingFixingTests: [awaitingFixingTestsMerge("w2", NOW - 2_000, 40 * 60_000)] }),
+      want: 40 * 60_000 + 2_000,
+    },
+  ])("counts the clock of $name", ({ slots, want }) => {
+    const { sc } = daemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), ...slots() }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
+    expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .sb-mq-clock`)?.textContent).toBe(formatTickedElapsed(want));
+  });
+
+  it("refuses a repair slot's holder that carries no clock as malformed", () => {
+    const { sc } = daemon();
+    const unclocked = create(RosterMergeQueueFixingTestsSchema, { subject: queueSubject("w2") });
+    expect(() =>
+      drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), fixingTests: unclocked }), REPOSITORY, sc, "queue", NONE_COLD_GATED),
+    ).toThrow(MalformedView);
+  });
+
   it("refuses a repair slot's holder that carries no subject as malformed", () => {
     const { sc } = daemon();
-    const subjectless = create(RosterMergeQueueFixingTestsSchema, { sinceMs: BigInt(NOW) });
+    const subjectless = create(RosterMergeQueueFixingTestsSchema, { clock: activeClock(NOW) });
     expect(() =>
       drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), fixingTests: subjectless }), REPOSITORY, sc, "queue", NONE_COLD_GATED),
     ).toThrow(MalformedView);
@@ -949,13 +981,13 @@ describe("drawRosterMergeQueueHead", () => {
     { name: "a merging head on a stopped queue", head: () => mergingHead("w1", { stages: [stage("tests", "live")] }), pause: paused({ hard: true }), want: ["sb-mq-head-line", "sb-mq-stages"] },
     {
       name: "a waiting head",
-      head: () => create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW) } } }),
+      head: () => waitingHead("w1"),
       pause: undefined,
       want: ["sb-mq-head-line"],
     },
     {
       name: "a waiting head on a paused queue",
-      head: () => create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW) } } }),
+      head: () => waitingHead("w1"),
       pause: paused(),
       want: ["sb-mq-head-line"],
     },
@@ -967,7 +999,7 @@ describe("drawRosterMergeQueueHead", () => {
   it("stops a paused head's clock at the pause", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
-    const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))], headSinceMs: BigInt(NOW - 5_000) });
+    const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))], clock: activeHeadClock(NOW - 5_000) });
     const card = drawRosterMergeQueueHead(head, paused({ atMs: NOW - 2_000 }), glyph(), sc, "head", NONE_COLD_GATED);
     ticker.tick(NOW + 60_000);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatElapsed(3_000));
@@ -984,35 +1016,59 @@ describe("drawRosterMergeQueueHead", () => {
     { name: "a waiting head", standing: "waiting" },
   ])("states its standing for $name", ({ standing }) => {
     const { sc } = daemon();
-    const value = standing === "waiting" ? { queuedAtMs: 0n } : {};
-    const head = create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: standing, value } as never });
+    const head = create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), clock: activeHeadClock(NOW), standing: { case: standing, value: {} } as never });
     expect(drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED).getAttribute("data-standing")).toBe(standing);
   });
 
-  it("ticks a merging head's clock from when it reached the head, not its first stage", () => {
+  it("ticks an active head's clock from when it became active, not its first stage", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
     const head = mergingHead("w1", {
       stages: [stage("rebasing", "succeeded", 1, BigInt(NOW - 3 * 3_600_000)), stage("tests", "live", 1, BigInt(NOW - 1_000))],
-      headSinceMs: BigInt(NOW - 5_000),
+      clock: activeHeadClock(NOW - 5_000),
     });
     const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED);
     ticker.tick(NOW + 60_000);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(65_000));
   });
 
-  it("ticks a waiting head's clock from when it reached the head, not when it was put in line", () => {
+  it("counts a waiting head's whole wait: the waiting before its last active stretch and the waiting since", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
-    const head = create(RosterMergeQueueHeadSchema, {
-      subject: queueSubject("w1"),
-      headSinceMs: BigInt(NOW - 2_000),
-      standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW - 3 * 3_600_000) } },
-    });
-    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED);
-    expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(2_000));
+    const card = drawRosterMergeQueueHead(waitingHead("w1", waitingHeadClock(NOW - 2_000, 40 * 60_000)), undefined, glyph(), sc, "head", NONE_COLD_GATED);
+    ticker.tick(NOW + 60_000);
+    expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(40 * 60_000 + 62_000));
   });
 
+});
+
+describe("merge clock starts", () => {
+  it("counts an active clock from when its active stretch began", () => {
+    expect(activeClockStartMs(activeClock(NOW - 5_000), "clock")).toBe(NOW - 5_000);
+  });
+
+  it.each([
+    { name: "a clock with nothing waited before", waited: 0, want: NOW - 5_000 },
+    { name: "a clock carrying the waiting before its last active stretch", waited: 40 * 60_000, want: NOW - 5_000 - 40 * 60_000 },
+  ])("counts $name back by that waiting", ({ waited, want }) => {
+    expect(waitingClockStartMs(waitingClock(NOW - 5_000, waited), "clock")).toBe(want);
+  });
+
+  it.each([
+    { name: "an active head", clock: activeHeadClock(NOW - 5_000), want: NOW - 5_000 },
+    { name: "a waiting head", clock: waitingHeadClock(NOW - 5_000, 60_000), want: NOW - 65_000 },
+  ])("counts $name's clock from its stretch", ({ clock, want }) => {
+    expect(headClockStartMs(clock, "clock")).toBe(want);
+  });
+
+  it.each([
+    { name: "an unset active clock", start: () => activeClockStartMs(undefined, "clock") },
+    { name: "an unset waiting clock", start: () => waitingClockStartMs(undefined, "clock") },
+    { name: "an unset head clock", start: () => headClockStartMs(undefined, "clock") },
+    { name: "a head clock in no stretch", start: () => headClockStartMs(create(RosterMergeQueueHeadClockSchema, {}), "clock") },
+  ])("refuses $name as a malformed view", ({ start }) => {
+    expect(start).toThrow(MalformedView);
+  });
 });
 
 describe("drawHeadClock", () => {
@@ -1033,7 +1089,16 @@ describe("drawHeadClock", () => {
 describe("drawRosterMergeQueueHead's refusals", () => {
   it("refuses a head with no standing as a malformed view", () => {
     const { sc } = daemon();
-    expect(() => drawRosterMergeQueueHead(create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1") }), undefined, glyph(), sc, "head", NONE_COLD_GATED)).toThrow(MalformedView);
+    expect(() => drawRosterMergeQueueHead(create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), clock: activeHeadClock(NOW) }), undefined, glyph(), sc, "head", NONE_COLD_GATED)).toThrow(MalformedView);
+  });
+
+  it.each([
+    { name: "no clock", clock: undefined },
+    { name: "a clock in no stretch", clock: create(RosterMergeQueueHeadClockSchema, {}) },
+  ])("refuses a head with $name as a malformed view", ({ clock }) => {
+    const { sc } = daemon();
+    const head = create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), clock, standing: { case: "merging", value: {} } });
+    expect(() => drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it("refuses a head with no subject as a malformed view", () => {
@@ -1076,7 +1141,7 @@ describe("drawRosterMergeQueueStage", () => {
 describe("drawRosterMergeQueueWaiting", () => {
   it("draws its position, its name and how long it has waited", () => {
     const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), 1, sc, "w", NONE_COLD_GATED);
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { clock: waitingClock(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), 1, sc, "w", NONE_COLD_GATED);
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
       ["sb-mq-position", "1"],
       ["sb-mq-name", "one"],
@@ -1087,7 +1152,7 @@ describe("drawRosterMergeQueueWaiting", () => {
   it("notes an async merge's requester after its name, whole on the line's hover", () => {
     const { sc } = daemon();
     const line = drawRosterMergeQueueWaiting(
-      waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "fix-it", async: true, requester: "triage" }) }),
+      waitingMerge("w1", { clock: waitingClock(NOW - 3_000), subject: queueSubject("w1", { name: "fix-it", async: true, requester: "triage" }) }),
       1,
       sc,
       "w",
@@ -1114,6 +1179,18 @@ describe("drawRosterMergeQueueWaiting", () => {
       workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "async", value: {} } }, merge: { id: "w1" },
     });
     expect(() => drawRosterMergeQueueWaiting(waitingMerge("w1", { subject }), 1, sc, "w", NONE_COLD_GATED)).toThrow(MalformedView);
+  });
+
+  it("counts a waiting merge's waiting before its last active stretch, and no active stretch", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { clock: waitingClock(NOW - 3_000, 40 * 60_000) }), 1, sc, "w", NONE_COLD_GATED);
+    expect(line.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(40 * 60_000 + 3_000));
+  });
+
+  it("refuses a waiting merge with no clock as a malformed view", () => {
+    const { sc } = daemon();
+    const unclocked = create(RosterMergeQueueWaitingSchema, { subject: queueSubject("w1") });
+    expect(() => drawRosterMergeQueueWaiting(unclocked, 1, sc, "w", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it("draws no front mark on a waiting merge", () => {

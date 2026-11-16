@@ -23,8 +23,11 @@ import {
   RosterMergeQueueRepoGroupSchema,
   RosterMergeQueueSectionSchema,
   RosterRepoEntrySchema,
+  RosterMergeQueueActiveClockSchema,
+  RosterMergeQueueHeadClockSchema,
   RosterMergeQueueHeadSchema,
   RosterMergeQueueSubjectSchema,
+  RosterMergeQueueWaitingClockSchema,
   RosterMergeQueueWaitingSchema,
   RosterMergeQueueFixingTestsSchema,
   RosterMergeQueueResolvingConflictsSchema,
@@ -35,6 +38,7 @@ import {
   WorkspaceRosterSchema,
   type RosterHiddenSection,
   type RosterMergeQueueHead,
+  type RosterMergeQueueHeadClock,
   type RosterMergeQueueSubject,
   type RosterMergeQueueWaiting,
   type RosterOpenSection,
@@ -604,45 +608,70 @@ export function queueSubject(id: string, init: { name?: string; async?: boolean;
   });
 }
 
-/** A merge queue head being worked on, credited to ID, with STAGES, at the head since HEAD_SINCE_MS (NOW by default). */
+/** The clock of a merge active since SINCE_MS. */
+export function activeClock(sinceMs: number) {
+  return create(RosterMergeQueueActiveClockSchema, { activeSinceMs: BigInt(sinceMs) });
+}
+
+/** The clock of a merge waiting since SINCE_MS, having waited WAITED_MS before. */
+export function waitingClock(sinceMs: number, waitedMs = 0) {
+  return create(RosterMergeQueueWaitingClockSchema, { waitingSinceMs: BigInt(sinceMs), waitedBeforeMs: BigInt(waitedMs) });
+}
+
+/** The head's clock, active since SINCE_MS. */
+export function activeHeadClock(sinceMs: number): RosterMergeQueueHeadClock {
+  return create(RosterMergeQueueHeadClockSchema, { stretch: { case: "active", value: activeClock(sinceMs) } });
+}
+
+/** The head's clock, waiting since SINCE_MS, having waited WAITED_MS before. */
+export function waitingHeadClock(sinceMs: number, waitedMs = 0): RosterMergeQueueHeadClock {
+  return create(RosterMergeQueueHeadClockSchema, { stretch: { case: "waiting", value: waitingClock(sinceMs, waitedMs) } });
+}
+
+/** A merge queue head being worked on, credited to ID, with STAGES, on CLOCK (active since NOW by default). */
 export function mergingHead(
   id: string,
   init: {
     stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"];
     subject?: RosterMergeQueueSubject;
-    headSinceMs?: bigint;
+    clock?: RosterMergeQueueHeadClock;
   } = {},
 ): RosterMergeQueueHead {
   return create(RosterMergeQueueHeadSchema, {
     subject: init.subject ?? queueSubject(id),
     stages: init.stages ?? [],
-    headSinceMs: init.headSinceMs ?? BigInt(NOW),
+    clock: init.clock ?? activeHeadClock(NOW),
     standing: { case: "merging", value: {} },
   });
 }
 
-/** The merge holding the fixing-tests slot, since SINCE. */
+/** A merge queue head waiting to be admitted, credited to ID, on CLOCK (waiting since NOW by default). */
+export function waitingHead(id: string, clock: RosterMergeQueueHeadClock = waitingHeadClock(NOW)): RosterMergeQueueHead {
+  return create(RosterMergeQueueHeadSchema, { subject: queueSubject(id), clock, standing: { case: "waiting", value: {} } });
+}
+
+/** The merge holding the fixing-tests slot, active since SINCE. */
 export function fixingTestsMerge(ws: string, since: number) {
-  return create(RosterMergeQueueFixingTestsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
+  return create(RosterMergeQueueFixingTestsSchema, { subject: queueSubject(ws), clock: activeClock(since) });
 }
 
-/** The merge holding the resolving-conflicts slot, since SINCE. */
+/** A merge resolving its conflicts, active since SINCE. */
 export function resolvingConflictsMerge(ws: string, since: number) {
-  return create(RosterMergeQueueResolvingConflictsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
+  return create(RosterMergeQueueResolvingConflictsSchema, { subject: queueSubject(ws), clock: activeClock(since) });
 }
 
-/** A merge awaiting the fixing-tests slot, since SINCE. */
-export function awaitingFixingTestsMerge(ws: string, since: number) {
-  return create(RosterMergeQueueAwaitingFixingTestsSchema, { subject: queueSubject(ws), sinceMs: BigInt(since) });
+/** A merge awaiting the fixing-tests slot, waiting since SINCE, having waited WAITED before. */
+export function awaitingFixingTestsMerge(ws: string, since: number, waited = 0) {
+  return create(RosterMergeQueueAwaitingFixingTestsSchema, { subject: queueSubject(ws), clock: waitingClock(since, waited) });
 }
 
-/** A merge waiting in line, credited to ID, queued at QUEUED_AT_MS. */
+/** A merge waiting in line, credited to ID, on CLOCK (waiting since 0 by default). */
 export function waitingMerge(
   id: string,
-  init: { queuedAtMs?: bigint; subject?: RosterMergeQueueSubject } = {},
+  init: { clock?: ReturnType<typeof waitingClock>; subject?: RosterMergeQueueSubject } = {},
 ): RosterMergeQueueWaiting {
   return create(RosterMergeQueueWaitingSchema, {
     subject: init.subject ?? queueSubject(id),
-    queuedAtMs: init.queuedAtMs ?? 0n,
+    clock: init.clock ?? waitingClock(0),
   });
 }
