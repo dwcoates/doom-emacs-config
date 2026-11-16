@@ -109,6 +109,13 @@ func (o *orchestrator) remediationFor(ctx context.Context, q checkedQueue, m wsm
 			o.deps.Log.Global().Error(opMediation, "the chain's last remediation workspace could not be reopened; the queue stays held for the intake", withField(withField(fields, "remediation", string(m.Remediation)), "error", err.Error()))
 			return "", fmt.Errorf("merge: reopen the remediation workspace %s: %w", m.Remediation, err)
 		}
+		// A RESTORED REMEDIATION WORKS IN SIGHT, as a fresh one does: its
+		// finish stood it by hidden, and a reopen leaves it so (2026-11-16:
+		// a restored remediation worked hidden after its fix's deploy failed).
+		if err := o.deps.DeployChecks.Resume(ctx, m.Remediation); err != nil {
+			o.deps.Log.Global().Error(opMediation, "the restored remediation workspace could not be shown; the queue stays held for the intake", withField(withField(fields, "remediation", string(m.Remediation)), "error", err.Error()))
+			return "", fmt.Errorf("merge: show the restored remediation workspace %s: %w", m.Remediation, err)
+		}
 		return m.Remediation, nil
 	}
 	name := "deploy-remediation-" + o.deps.Now().UTC().Format("20060102-150405")

@@ -4602,6 +4602,8 @@ type fakeDeployChecks struct {
 	// work; standByErr fails a stand-by.
 	stoodBy, resumed []ids.WorkspaceID
 	standByErr       error
+	// resumeErr fails every Resume.
+	resumeErr error
 	// onStopNow runs inside each stop, as ending the stopped session does.
 	onStopNow func()
 	// createCtxErrs records each check workspace's creation context error.
@@ -4682,7 +4684,7 @@ func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumed = append(f.resumed, ws)
-	return nil
+	return f.resumeErr
 }
 
 func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {
