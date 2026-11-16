@@ -244,9 +244,10 @@ export function drawHeldPrompt(
   // left arrow ABOVE the status line, and folds at two lines of its content as
   // an agent-to-agent prompt does: the strip and the controls are outside the
   // fold, so they always show.
+  const { capLines } = look;
   const cap =
     u.sender === undefined
-      ? ({ capLines: look.capLines } as const)
+      ? ({ capLines } as const)
       : ({ capLines: AGENT_PROMPT_CAP_LINES, more: BUBBLE_MORE_ELLIPSIS } as const);
   // THE CONTROLS ARE ALWAYS SHOWN (owner request, 2026-10-13), in ONE footer
   // element, so a refusal an action draws beside its row lands in it too.
