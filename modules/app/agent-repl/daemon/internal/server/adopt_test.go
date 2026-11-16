@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -388,5 +389,49 @@ func TestAdoptionAnswerRecordNamesItsCall(t *testing.T) {
 				t.Errorf("held_ms = %v (%T), want 1500", answer.Context["held_ms"], answer.Context["held_ms"])
 			}
 		})
+	}
+}
+
+func TestAcceptHandedWorkspaceArmsTheMoveOrRefusesIt(t *testing.T) {
+	tests := []struct {
+		name      string
+		acceptErr error
+		wantArm   func(*agentreplv1.AcceptHandedWorkspaceResponse) bool
+	}{
+		{name: "the newest daemon arms the move", wantArm: func(r *agentreplv1.AcceptHandedWorkspaceResponse) bool { return r.GetSuccess() != nil }},
+		{name: "a daemon handing over itself is no longer the newest", acceptErr: rollout.ErrNotNewest,
+			wantArm: func(r *agentreplv1.AcceptHandedWorkspaceResponse) bool { return r.GetError().GetNotNewest() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Rollout.acceptErr = tt.acceptErr
+
+			// Act.
+			resp, err := h.Client.AcceptHandedWorkspace(context.Background(), connect.NewRequest(&agentreplv1.AcceptHandedWorkspaceRequest{
+				Workspace: ref(), OutgoingDaemon: "elder", ExpectedHost: true}))
+
+			// Assert.
+			if err != nil || !tt.wantArm(resp.Msg) {
+				t.Fatalf("AcceptHandedWorkspace = (%v, %v)", resp, err)
+			}
+			if len(h.Rollout.accepted) != 1 || !strings.HasSuffix(h.Rollout.accepted[0], " from elder host=true web=false") {
+				t.Fatalf("accepted = %v, want the move from elder with its host expected", h.Rollout.accepted)
+			}
+		})
+	}
+}
+
+func TestAcceptHandedWorkspaceNamingNoOutgoingDaemonIsInvalid(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.AcceptHandedWorkspace(context.Background(), connect.NewRequest(&agentreplv1.AcceptHandedWorkspaceRequest{Workspace: ref()}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Rollout.accepted) != 0 {
+		t.Fatalf("AcceptHandedWorkspace = %v, accepted %v; want invalid_argument and nothing armed", err, h.Rollout.accepted)
 	}
 }

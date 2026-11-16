@@ -154,6 +154,14 @@ type controller struct {
 	// tookOver closes once this daemon stops JOINING and becomes the only
 	// daemon (becomeIncumbent). Made lazily under mu (tookOverSignal).
 	tookOver chan struct{}
+	// eldersGone closes once no daemon older than this one runs on its state
+	// root: at the takeover when none did, or when the last of them ended
+	// (afterElders). Nil until first asked for (eldersGoneSignalLocked).
+	eldersGone chan struct{}
+	// eldersRunning is true from a takeover that found older daemons still
+	// running until the last of them ended: what this daemon has not adopted
+	// is theirs meanwhile (IncumbentAddress).
+	eldersRunning bool
 	// takeoverOwned marks that a becomeIncumbent call has flipped joining
 	// mode off and so OWNS the takeover: it alone closes tookOver, once its
 	// takeover has run. Two boot-claim waiters (awaitIncumbentExit,

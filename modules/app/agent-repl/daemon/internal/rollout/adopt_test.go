@@ -1445,7 +1445,7 @@ func TestAWorkspaceMidAdoptionAtTheTakeoverIsOwnedAtOnce(t *testing.T) {
 	h.c.mu.Unlock()
 
 	// Act
-	h.c.adoptStragglers(nil)
+	h.c.adoptStragglers(&h.c.stragglerAdoptions, nil)
 	h.c.stragglerAdoptions.Wait()
 
 	// Assert
@@ -2589,7 +2589,7 @@ func TestTheTakeoverStopsTheRosterMirror(t *testing.T) {
 	awaitIncumbentArms(t, h, "an empty mirror", func(arms map[ids.WorkspaceID]string) bool { return len(arms) == 0 })
 	rec, err := h.log.Await(context.Background(), dlog.RecordQuery{Level: "info", Operation: rostermirror.Op,
 		Message: "the mirror stopped; every row is this daemon's own"})
-	if err != nil || rec.Context["stopped_because"] != "the incumbent exited; this daemon took over" {
+	if err != nil || rec.Context["stopped_because"] != "no older daemon serves anything; this daemon took over" {
 		t.Fatalf("stop record = %v (%v), want the takeover named", rec, err)
 	}
 	select {
@@ -2709,5 +2709,111 @@ func TestATakeoverWhoseContractStepsFailSaysSoAndGoesOn(t *testing.T) {
 	}
 	if calls := h.merges.called(); !slices.Contains(calls, "review") {
 		t.Fatalf("merge calls = %v, want the takeover to go on past the failed contracts", calls)
+	}
+}
+
+// withElder wires one older daemon, "elder", still running at the takeover,
+// which ends when RELEASE closes.
+func withElder(release <-chan struct{}) func(d *Deps) {
+	return func(d *Deps) {
+		d.LiveElders = func() ([]string, error) { return []string{"elder"}, nil }
+		d.AwaitElders = func(ctx context.Context, elders []string) error {
+			select {
+			case <-release:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+	}
+}
+
+func TestATakeoverWithAnElderRunningDefersWhatOnlyTheLastDaemonMayDo(t *testing.T) {
+	// Arrange
+	release := make(chan struct{})
+	var db *contractsDB
+	h := newHarness(t, withElder(release), func(d *Deps) {
+		db = &contractsDB{DB: d.DB}
+		d.DB = db
+	})
+
+	// Act: the takeover, with the elder still running.
+	takeOver(h)
+
+	// Assert: nothing only the last daemon may do has run.
+	db.mu.Lock()
+	applied := db.applied
+	db.mu.Unlock()
+	if applied != 0 || h.queuedCreates.count() != 0 {
+		t.Fatalf("contracts applied %d, held creates taken %d; want neither while the elder runs", applied, h.queuedCreates.count())
+	}
+
+	// Act: the elder ends.
+	close(release)
+	<-h.c.eldersGoneSignal()
+
+	// Assert: both run once.
+	db.mu.Lock()
+	applied = db.applied
+	db.mu.Unlock()
+	if applied != 1 || h.queuedCreates.count() != 1 {
+		t.Fatalf("contracts applied %d, held creates taken %d; want each once after the elder ended", applied, h.queuedCreates.count())
+	}
+	if !hasRecord(h, opAdopt, "info", "every older daemon has ended; this daemon now does what only the last daemon may") {
+		t.Fatal("the elders' end was not recorded")
+	}
+}
+
+func TestATakeoverWithAnElderRunningLeavesItsHoldoutsTheElders(t *testing.T) {
+	// Arrange: FIRST was handed here and not adopted; the elder still runs.
+	release := make(chan struct{})
+	h := newHarness(t, withElder(release))
+	first, _ := joinedWithOneOfTwo(t, h)
+
+	// Act
+	h.incumbentExits()
+	<-h.c.tookOverSignal()
+	h.c.stragglerAdoptions.Wait()
+
+	// Assert: it stays the elder's until it moves here.
+	if standing := h.c.Standing(first); standing != StandingNotYetAdopted {
+		t.Fatalf("standing = %v, want not_yet_adopted while the elder serves it", standing)
+	}
+	if h.c.ServesWorkspace(first) {
+		t.Fatal("ServesWorkspace = true for a workspace the elder still serves")
+	}
+	h.c.mu.Lock()
+	running := h.c.eldersRunning
+	h.c.mu.Unlock()
+	if !running {
+		t.Fatal("the takeover did not record the elder as running")
+	}
+	close(release)
+	<-h.c.eldersGoneSignal()
+	if standing := h.c.Standing(first); standing != StandingOwned {
+		t.Fatalf("standing = %v after the elder ended, want owned", standing)
+	}
+}
+
+func TestATakeoverWhoseEldersCannotBeReadRunsAsIfNoneRan(t *testing.T) {
+	// Arrange
+	var db *contractsDB
+	h := newHarness(t, func(d *Deps) {
+		d.LiveElders = func() ([]string, error) { return nil, errors.New("the life locks' directory is unreadable") }
+		db = &contractsDB{DB: d.DB}
+		d.DB = db
+	})
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if db.applied != 1 {
+		t.Fatalf("contracts applied %d, want once at the takeover", db.applied)
+	}
+	if !hasRecord(h, opAdopt, "error", "could not read which older daemons still run; the takeover runs as if none did") {
+		t.Fatal("the unreadable elders were not recorded at ERROR")
 	}
 }

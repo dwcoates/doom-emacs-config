@@ -1847,6 +1847,18 @@ func validateQueuedFinishPlacement(req *agentreplv1.FinishWorkspaceRequest) *con
 	return nil
 }
 
+// validateAcceptHandedWorkspaceRequest is AcceptHandedWorkspaceRequest's base
+// function: the workspace's ref and the outgoing daemon's instance.
+func validateAcceptHandedWorkspaceRequest(req *agentreplv1.AcceptHandedWorkspaceRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if strings.TrimSpace(req.GetOutgoingDaemon()) == "" {
+		return invalid("outgoing_daemon", "the older daemon moving the workspace is required")
+	}
+	return nil
+}
+
 // validateSendLoginInputRequest is SendLoginInputRequest's base function.
 func validateSendLoginInputRequest(req *agentreplv1.SendLoginInputRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {

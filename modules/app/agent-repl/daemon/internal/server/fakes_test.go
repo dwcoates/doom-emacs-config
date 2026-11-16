@@ -1503,6 +1503,10 @@ type fakeRollout struct {
 	rollout.Controller
 	adoptHostErr error
 	adoptWebErr  error
+	// accepted records each AcceptHanded as "WS from OUTGOING host=H web=W",
+	// answering acceptErr.
+	accepted  []string
+	acceptErr error
 	// adopting, when set, runs inside each adoption, as the daemon's own
 	// adoption runs while the call is held.
 	adopting func()
@@ -1581,6 +1585,11 @@ func (f *fakeRollout) AdoptHost(context.Context, ids.WorkspaceID) error {
 		f.adopting()
 	}
 	return f.adoptHostErr
+}
+
+func (f *fakeRollout) AcceptHanded(_ context.Context, ws ids.WorkspaceID, outgoing ids.InstanceID, expected rollout.Participants) error {
+	f.accepted = append(f.accepted, fmt.Sprintf("%s from %s host=%v web=%v", ws, outgoing, expected.Host, expected.Web))
+	return f.acceptErr
 }
 
 func (f *fakeRollout) AdoptWeb(context.Context, ids.WorkspaceID) error {

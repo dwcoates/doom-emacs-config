@@ -162,6 +162,10 @@ type FleetDeps struct {
 	// claimServing. Required: a fleet that cannot claim serves sessions its
 	// own handover would never hand over.
 	Instance ids.InstanceID
+	// InstanceRunning answers whether the daemon INSTANCE still runs on this
+	// state root (daemonaddr.Alive): its life lock is held. Nil in tests
+	// with no other daemon.
+	InstanceRunning func(instance ids.InstanceID) (bool, error)
 	// Accounts routes a workspace to its config root and locates a
 	// conversation's transcript, which is what the resume guard checks.
 	Accounts account.Resolver
@@ -2064,6 +2068,26 @@ func (f *Fleet) heldHostSessionID(ws ids.WorkspaceID, fallback string) string {
 // that holds it or SPAWNS a new one. A probe that could not tell is never read
 // as free: spawning a second shim onto one conversation is the failure the lock
 // exists to prevent.
+// servedByElder answers the older daemon still serving WS, empty when none
+// does: its serving row names another instance whose life lock is held.
+func (f *Fleet) servedByElder(ctx context.Context, ws ids.WorkspaceID) (ids.InstanceID, error) {
+	if f.deps.InstanceRunning == nil {
+		return "", nil
+	}
+	owner, err := f.deps.DB.Serving(ctx, ws)
+	if err != nil {
+		return "", err
+	}
+	if owner == nil || *owner == "" || *owner == f.deps.Instance {
+		return "", nil
+	}
+	running, err := f.deps.InstanceRunning(*owner)
+	if err != nil || !running {
+		return "", err
+	}
+	return *owner, nil
+}
+
 func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, dir, udsPath, configDir, hostSessionID string, src source) (shimclient.Client, bringUpPath, error) {
 	// A DEPARTING DAEMON BRINGS NOTHING UP, and it says so BEFORE it probes or
 	// spawns. The supervisor already refuses the spawn -- that is the latch's
@@ -2108,6 +2132,26 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 		})
 		return nil, pathNone, refuse(log, "OpenWorkspace", ArmTransferringAway,
 			fmt.Sprintf("workspace %q is served by the successor daemon", ws), false)
+	}
+	// A WORKSPACE AN OLDER DAEMON STILL SERVES IS NEVER TAKEN FROM IT
+	// (docs/investigations/2026-11-16-several-daemons-plan.md). An older
+	// daemon keeps the workspaces busy at its handover until each is free to
+	// move, and its serving row names it while it does; one that moves a
+	// workspace releases the row first. So a row naming another instance
+	// whose life lock is held is a live shim of a live daemon, which a boot
+	// that found the boot claim free (the newest daemon died) would otherwise
+	// adopt as an orphan and drive beside its owner.
+	if elder, err := f.servedByElder(ctx, ws); err != nil {
+		log.Error(opBringUp, "could not read whether an older daemon still serves the workspace; nothing is brought up", dlog.Context{
+			"workspace": string(ws), "cause": err.Error(),
+		})
+		return nil, pathNone, fmt.Errorf("start session for %q: elder standing: %w", ws, err)
+	} else if elder != "" {
+		log.Info(opBringUp, "no shim is brought up: an older daemon still serves the workspace, and it moves it here once it is free", dlog.Context{
+			"workspace": string(ws), "socket": udsPath, "elder": string(elder),
+		})
+		return nil, pathNone, refuse(log, "OpenWorkspace", ArmNotYetAdopted,
+			fmt.Sprintf("workspace %q is still served by the older daemon %s", ws, elder), false)
 	}
 	lockPath := f.deps.LockDir
 	state, err := f.probe(lockPath, dir)

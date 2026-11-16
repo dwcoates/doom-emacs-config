@@ -59,19 +59,22 @@ func (c *controller) followCarriedLocked(ws ids.WorkspaceID, e *entry, carried P
 }
 
 // followCarries keeps every armed, unadopted workspace's expectations on its
-// newest transfer's carry for as long as this daemon is joining, and adopts
-// any workspace a transfer left with no participant to call. It looks at each
+// newest transfer's carry, and adopts
+// any workspace a transfer left with no participant to call, until no older
+// daemon runs (eldersGoneSignal). It looks at each
 // change CHANGES reports; the watch was taken before Join's own read of the
 // manifest, which is the first look.
 func (c *controller) followCarries(ctx context.Context, changes <-chan error, stop func()) {
 	defer stop()
-	tookOver := c.tookOverSignal()
+	// AN OLDER DAEMON STILL MOVES ITS HOLDOUTS HERE after the takeover, each
+	// the moment it is free, so the carries are followed until no older daemon
+	// runs; the last daemon's straggler pass takes whatever is left then.
+	eldersGone := c.eldersGoneSignal()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tookOver:
-			// adoptStragglers takes whatever is left at the takeover.
+		case <-eldersGone:
 			return
 		case err := <-changes:
 			if err != nil {

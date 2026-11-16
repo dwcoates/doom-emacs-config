@@ -470,6 +470,18 @@ func (d *fakeDB) ClaimServing(_ context.Context, id ids.WorkspaceID, instance id
 	return nil
 }
 
+// Serving answers the instance the latest ClaimServing of ID named, nil when
+// none was made.
+func (d *fakeDB) Serving(_ context.Context, id ids.WorkspaceID) (*ids.InstanceID, error) {
+	for i := len(d.claims) - 1; i >= 0; i-- {
+		if d.claims[i].ws == id {
+			instance := d.claims[i].instance
+			return &instance, nil
+		}
+	}
+	return nil, nil
+}
+
 func (d *fakeDB) SetSpawnedShimPID(_ context.Context, id ids.WorkspaceID, pid *int) error {
 	if d.spawnedPIDErr != nil {
 		return d.spawnedPIDErr

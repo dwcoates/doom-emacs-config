@@ -183,6 +183,11 @@ type Controller interface {
 	// has called; a headless daemon expects zero participants and completes at
 	// once.
 	AdoptHost(ctx context.Context, ws ids.WorkspaceID) error
+	// AcceptHanded arms this daemon's rendezvous for WS, a workspace the
+	// older daemon OUTGOING is about to move here, with the participants it
+	// expects (AcceptHandedWorkspace). A daemon itself handing over is no
+	// longer the newest and refuses with ErrNotNewest.
+	AcceptHanded(ctx context.Context, ws ids.WorkspaceID, outgoing ids.InstanceID, expected Participants) error
 	// AdoptWeb is the webview's half of the same rendezvous. THE WEB SIDE NEVER
 	// REDIALS: the reloaded page calls this once at boot, so
 	// ErrNoTransferAnnounced is the ORDINARY answer on every non-handover page
@@ -396,6 +401,27 @@ type Deps struct {
 	// so the takeover follows the incumbent's exit at once. Required whenever
 	// WriteDaemonAddr is set.
 	AwaitBootClaim AwaitBootClaimFunc
+	// YieldBootClaim gives the boot claim to the successor once this daemon's
+	// handover has finished its transfer pass, while this daemon keeps
+	// serving what is still busy here (daemonaddr.Claim.Yield). Nil in tests
+	// that observe no yield.
+	YieldBootClaim func() error
+	// LiveElders answers the daemons older than this one still running on
+	// its state root (daemonaddr.LiveOthers), and AwaitElders returns once
+	// each of them has ended (daemonaddr.AwaitGone). What only the last
+	// daemon may do waits on them: contract steps, recovering shims no daemon
+	// owns, the creates an outgoing daemon held for the network. Nil in tests
+	// with no elders.
+	LiveElders  func() ([]string, error)
+	AwaitElders func(ctx context.Context, elders []string) error
+	// NewestDaemon answers the address daemon.addr advertises now: the newest
+	// daemon of the state root (daemonaddr.ReadAdvertisement). AnnounceHanded
+	// tells the daemon at an address that OUTGOING, this daemon, is about to
+	// move WS there with EXPECTED participants (AcceptHandedWorkspace); it
+	// answers ErrNotNewest when that daemon hands over itself. Both nil in
+	// tests whose handovers have one successor.
+	NewestDaemon   func() (string, error)
+	AnnounceHanded func(ctx context.Context, address string, ws wsm.Workspace, outgoing ids.InstanceID, expected Participants) error
 	// ShimBuild answers the INSTALLED shim bundle's build: the content hash a
 	// fresh spawn would report. It is the staleness authority every reported
 	// build is judged against.
@@ -777,6 +803,10 @@ var (
 	// ErrReclaimed settles a rendezvous whose workspace the incumbent took
 	// back: its adoption window expired, or its transfer failed.
 	ErrReclaimed = errors.New("rollout: the incumbent took this workspace back; it is not being handed over")
+	// ErrNotNewest refuses a workspace an older daemon would move here while
+	// this daemon is handing over itself: a newer daemon serves the state
+	// root, and the caller moves the workspace there instead.
+	ErrNotNewest = errors.New("rollout: this daemon is handing over itself, so it is no longer the newest")
 )
 
 // New builds the controller.
