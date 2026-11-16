@@ -39,6 +39,7 @@ import { stopTicking } from "../ticking.js";
 import { drawFeedMergeTestsRunTally, updateFeedMergeTestsRunTally } from "./tests-tab.js";
 import type {
   FeedMergeTab,
+  FeedMergeTabHeld,
   FeedMergeTabLabel,
   FeedMergeTabLive,
   FeedMergeTabSettled,
@@ -106,7 +107,7 @@ export interface MergeTab {
   label: FeedMergeTabLabel;
   /** The `kind` oneof arm ("queue", "hookPrompt", …). */
   kind: string;
-  /** The `state` oneof arm within that kind ("pending", "live", "waitingOnUser", "settled"). */
+  /** The `state` oneof arm within that kind ("pending", "live", "onHold", "waitingOnUser", "settled"). */
   state: string;
   /** For a settled tab, the `outcome` arm ("succeeded" | "failed"). */
   outcome?: string;
@@ -160,6 +161,25 @@ export function readMergeTab(row: FeedRow, tab: FeedMergeTab): MergeTab {
   // same off whichever kind this is; a pending commit has begun nothing.
   const leaf = state.value as FeedMergeTabLive | FeedMergeTabSettled;
   const statePath = `${PATH}.${kind.case}.${state.case}`;
+  if (state.case === "onHold") {
+    // A TAB ON HOLD STANDS STILL (frontend.v1.FeedMergeTabHeld): it shows how
+    // long it ran before it was held, fixed, or nothing when its queue's hold
+    // holds it, which names no instant of its own.
+    const held = state.value as FeedMergeTabHeld;
+    const heldMs = msOf(held.heldSinceMs, `${statePath}.held_since_ms`);
+    return {
+      row,
+      id: requireMessage(row.id, "FeedRow.id").value,
+      tab,
+      label: requireMessage(tab.label, `${PATH}.label`),
+      kind: kind.case,
+      state: state.case,
+      outcome: undefined,
+      startedMs: heldMs === 0 ? undefined : msOf(held.startedAtMs, `${statePath}.started_at_ms`),
+      endedMs: heldMs === 0 ? undefined : heldMs,
+      value,
+    };
+  }
   return {
     row,
     id: requireMessage(row.id, "FeedRow.id").value,
@@ -362,6 +382,10 @@ function tabGlyphOf(tab: MergeTab): [string | null, string] {
       return ["is-pending", ""];
     case "live":
       return ["is-live", STATE_GLYPHS.live];
+    case "onHold":
+      // The merge is suspended at the tab, or its queue holds every merge in
+      // it: the live dot, grey and still.
+      return ["is-held", STATE_GLYPHS.live];
     case "waitingOnUser":
       // The merge's agent has a permission ask or a question open: the tab
       // says so for exactly as long as the footer reads "waiting on user".

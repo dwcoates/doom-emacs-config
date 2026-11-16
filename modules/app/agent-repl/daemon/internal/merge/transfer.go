@@ -443,6 +443,9 @@ func (o *orchestrator) awaitOwnEnd(log dlog.Logger, op string, ws ids.WorkspaceI
 func (o *orchestrator) forgetMoved(ws ids.WorkspaceID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if lease, ok := o.ledgerOf[ws]; ok {
+		o.bubbleTabs.forget(lease)
+	}
 	delete(o.ledgerOf, ws)
 	delete(o.repoOf, ws)
 	delete(o.resumes, ws)

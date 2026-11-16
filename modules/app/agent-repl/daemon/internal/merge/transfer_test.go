@@ -954,7 +954,7 @@ func TestAHoldThatCannotBeWrittenIsAnError(t *testing.T) {
 	h.db.holdErr = errors.New("disk gone")
 
 	// Act
-	h.o.holdRound(context.Background(), theWorkspace, "lease-1", true)
+	h.o.holdRound(context.Background(), h.repoKey(), theWorkspace, "lease-1", true)
 
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opHold}); !ok {

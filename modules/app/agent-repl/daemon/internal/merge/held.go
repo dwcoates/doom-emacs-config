@@ -6,6 +6,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // A MERGE IS HELD exactly while a resume record waits for it: from the
@@ -22,7 +23,10 @@ const opHold = "daemon.merge.hold"
 // now when HELD, or running again when not. A hold that cannot be written is
 // an ERROR: the merge is still held or resumed, and only its drawing is
 // wrong until the next hold write.
-func (o *orchestrator) holdRound(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, held bool) {
+//
+// THE HOLD IS REDRAWN AT ONCE: the roster's republish of REPO's queue draws
+// its stages and its bubble from it (publishRosterQueue).
+func (o *orchestrator) holdRound(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lease ids.LeaseID, held bool) {
 	fields := dlog.Context{"workspace": string(ws), "lease": string(lease), "held": held}
 	var at *time.Time
 	if held {
@@ -35,4 +39,5 @@ func (o *orchestrator) holdRound(ctx context.Context, ws ids.WorkspaceID, lease 
 		return
 	}
 	o.log(ctx, ws).Debug(opHold, "recorded whether the merge's live round is held", withField(fields, "live_round", marked))
+	o.publishRosterQueue(context.WithoutCancel(ctx), repo)
 }

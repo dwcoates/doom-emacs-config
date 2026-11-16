@@ -86,6 +86,9 @@ type orchestrator struct {
 	lockDir string
 	// rosterQueue serializes the roster's queues (publishRosterQueue).
 	rosterQueue rosterQueuePublisher
+	// bubbleTabs is every bubble's tabs as their steps last published them,
+	// redrawn whenever the bubble's hold moves (bubbleview.go).
+	bubbleTabs bubbles
 	// offQueueLanded is which merges off their queues have work on master
 	// already, judged off every lock (offqueuelanded.go).
 	offQueueLanded offQueueLanded

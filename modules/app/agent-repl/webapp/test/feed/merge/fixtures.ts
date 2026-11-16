@@ -47,7 +47,9 @@ export interface TabSpec {
    * commit, resolving conflicts, a conflict resolution, tests, fixing tests,
    * a fixing attempt); `pending` only for a commit.
    */
-  state: "live" | "settled" | "waitingOnUser" | "pending";
+  state: "live" | "settled" | "waitingOnUser" | "pending" | "onHold";
+  /** For `onHold`, when the merge was held; 0 when its queue's hold holds it. */
+  heldSinceMs?: bigint;
   /** For `settled`. */
   outcome?: "succeeded" | "failed";
   /** For a settled failure. */
@@ -113,7 +115,9 @@ export function tabRow(rowId: string, spec: TabSpec): FeedRow {
       ? { case: "live" as const, value: { startedAtMs } }
       : spec.state === "waitingOnUser"
         ? { case: "waitingOnUser" as const, value: { startedAtMs } }
-        : {
+        : spec.state === "onHold"
+          ? { case: "onHold" as const, value: { startedAtMs, heldSinceMs: spec.heldSinceMs ?? 0n } }
+          : {
           case: "settled" as const,
           value: {
             startedAtMs,

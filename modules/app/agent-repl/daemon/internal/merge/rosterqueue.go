@@ -196,6 +196,18 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
 		return
 	}
+	heldRounds, err := o.deps.DB.HeldMergeRounds(ctx)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not read which merges are held, so the roster is not told the queue",
+			"the holds' read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
+	held := make(map[wsm.LeaseID]int64, len(heldRounds))
+	for lease, at := range heldRounds {
+		held[lease] = at.UnixMilli()
+	}
+	o.republishBubbles(ctx, entries, queueHeld, held)
 	line, err := o.rosterLine(ctx, inLine(entries), true, queueHeld)
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges in line as the roster draws them, so the roster is not told the queue",

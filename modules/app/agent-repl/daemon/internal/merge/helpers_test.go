@@ -790,6 +790,22 @@ func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease ws
 	return nil
 }
 
+func (f *fakeDB) HeldMergeRounds(context.Context) (map[wsm.LeaseID]time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[wsm.LeaseID]time.Time{}
+	for _, entries := range f.ledger {
+		for _, entry := range entries {
+			for _, round := range entry.Intervals {
+				if round.EndedAt == nil && round.HeldSince != nil {
+					out[entry.Lease] = *round.HeldSince
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeDB) HoldMergeRound(_ context.Context, lease wsm.LeaseID, at *time.Time) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
