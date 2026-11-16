@@ -64,6 +64,7 @@ import {
   killTurnKilled,
   killTurnRefused,
   notFound,
+  storeUnavailable,
   emptyOpeningPage,
   startTurnAccepted,
   startTurnRefused,
@@ -1726,6 +1727,13 @@ export class TurnEngine {
         yield create(shimv1.WatchBashResponseSchema, { bash: frame });
       }
     } catch (err) {
+      if (err instanceof PersistenceError && err.kind === "store_unavailable") {
+        LOGGER.info(
+          { work_id: work.value, detail: err.message },
+          "WatchBash could not be served: the store stayed unreachable through the read retry schedule",
+        );
+        throw storeUnavailable(`WatchBash(${work.value}): ${err.message}`);
+      }
       if (err instanceof PersistenceError) {
         LOGGER.debug(
           { work_id: work.value, kind: err.kind },
