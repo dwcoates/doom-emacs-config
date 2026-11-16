@@ -1896,7 +1896,54 @@ to be stable, so the BARE format string travels here separately."
       (puthash "pseudo_workspace" pseudo-ws record))
     (when unroutable-ws
       (puthash "unroutable_workspace" unroutable-ws record))
-    (json-serialize record)))
+    (agent-repl--log-record-bounded record)))
+
+;; A RECORD IS BOUNDED AT ITS WRITER.  One error recorded a whole undecodable
+;; roster push, 1.4MB (2026-10-30), and the log reader once dropped a whole
+;; generation over a record past its 16MB line cap (todo 2026-11-10).  No
+;; record needs that: the largest healthy one measured on 2026-11-16 was
+;; 11.7KB in the central log, so the bound is a little over five times it.  A
+;; record past the bound is written cut, at ERROR, naming its full size, so
+;; the caller that wrote it is found and fixed rather than silently clipped.
+(defcustom agent-repl-log-record-max-bytes (* 64 1024)
+  "Maximum bytes of one serialized Emacs log record.
+A record past it is written with its message and arguments cut, raised to
+ERROR, and its full size recorded as `context.oversize_bytes'."
+  :type 'integer
+  :group 'agent-repl)
+
+(defconst agent-repl--log-oversize-excerpt-chars 2048
+  "Characters of an oversized record's message and of each argument kept.")
+
+(defun agent-repl--log-excerpt (text)
+  "Answer TEXT cut to `agent-repl--log-oversize-excerpt-chars', marked when cut."
+  (if (<= (length text) agent-repl--log-oversize-excerpt-chars)
+      text
+    (format "%s...[%d more chars]"
+            (substring text 0 agent-repl--log-oversize-excerpt-chars)
+            (- (length text) agent-repl--log-oversize-excerpt-chars))))
+
+(defun agent-repl--log-record-bounded (record)
+  "Serialize RECORD, cutting it when it passes `agent-repl-log-record-max-bytes'.
+A record within the bound is serialized as is.  One past it has its message
+and each argument cut (`agent-repl--log-excerpt'), its level raised to
+\"error\", and `oversize_bytes' set in its context to the full size.  A cut
+record still past the bound is an invariant breach and signals."
+  (let* ((line (json-serialize record))
+         (bytes (string-bytes line)))
+    (if (<= bytes agent-repl-log-record-max-bytes)
+        line
+      (let ((context (gethash "context" record)))
+        (puthash "level" "error" record)
+        (puthash "message" (agent-repl--log-excerpt (gethash "message" record)) record)
+        (puthash "arguments" (vconcat (mapcar #'agent-repl--log-excerpt (gethash "arguments" context)))
+                 context)
+        (puthash "oversize_bytes" bytes context)
+        (let ((cut (json-serialize record)))
+          (when (> (string-bytes cut) agent-repl-log-record-max-bytes)
+            (error "agent-repl log record still %d bytes after cutting its message and arguments (operation %s)"
+                   (string-bytes cut) (gethash "operation" record)))
+          cut)))))
 
 (defun agent-repl--workspace-emacs-log-path (project-dir)
   "Return the canonical `emacs.log' symlink path below PROJECT-DIR."

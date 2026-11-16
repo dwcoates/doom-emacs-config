@@ -1821,6 +1821,63 @@ own run log, never in the OS temporary root the system may sweep."
 
 ;;;; ---- Tests: JSONL workspace logging contract ----
 
+;;;; A record is bounded at its writer
+
+(ert-deftest agent-repl-test-log-record-within-the-bound-is-written-as-is ()
+  "A record within `agent-repl-log-record-max-bytes' keeps its level and text."
+  ;; Act
+  (let ((record (json-parse-string
+                 (agent-repl--log-record nil "info" "normal" "elisp.test.small value=%s" '("v"))
+                 :object-type 'alist)))
+    ;; Assert
+    (should (equal (alist-get 'level record) "info"))
+    (should (equal (alist-get 'message record) "elisp.test.small value=v"))
+    (should-not (alist-get 'oversize_bytes (alist-get 'context record)))))
+
+(ert-deftest agent-repl-test-log-record-past-the-bound-is-cut-to-it ()
+  "A record past the bound is written within it."
+  ;; Arrange
+  (let ((agent-repl-log-record-max-bytes 16384)
+        (big (make-string 100000 ?x)))
+    ;; Act
+    (let ((line (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big))))
+      ;; Assert
+      (should (<= (string-bytes line) agent-repl-log-record-max-bytes)))))
+
+(ert-deftest agent-repl-test-log-record-past-the-bound-is-an-error-naming-its-size ()
+  "A cut record is raised to ERROR and names its full size and operation."
+  ;; Arrange
+  (let ((agent-repl-log-record-max-bytes 16384)
+        (big (make-string 100000 ?x)))
+    ;; Act
+    (let* ((full (string-bytes (let ((agent-repl-log-record-max-bytes most-positive-fixnum))
+                                 (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big)))))
+           (record (json-parse-string
+                    (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s" (list big))
+                    :object-type 'alist)))
+      ;; Assert
+      (should (equal (alist-get 'level record) "error"))
+      (should (equal (alist-get 'oversize_bytes (alist-get 'context record)) full))
+      (should (string-match-p "\\`elisp.test.big body=x+\\.\\.\\.\\[[0-9]+ more chars\\]\\'"
+                              (alist-get 'message record))))))
+
+(ert-deftest agent-repl-test-log-record-cut-still-past-the-bound-signals ()
+  "A record its cut cannot bring within the bound is an invariant breach."
+  ;; Arrange: a bound below what a record's fixed fields alone take.
+  (let ((agent-repl-log-record-max-bytes 64))
+    ;; Act / Assert
+    (should-error (agent-repl--log-record nil "info" "normal" "elisp.test.big body=%s"
+                                          (list (make-string 10000 ?x))))))
+
+(ert-deftest agent-repl-test-log-excerpt-names-what-it-left-out ()
+  "An excerpt keeps the head of a long text and names the characters cut."
+  ;; Act
+  (let ((cut (agent-repl--log-excerpt (make-string (+ agent-repl--log-oversize-excerpt-chars 10) ?y)))
+        (kept (agent-repl--log-excerpt "short")))
+    ;; Assert
+    (should (equal kept "short"))
+    (should (string-suffix-p "...[10 more chars]" cut))))
+
 (defun agent-repl-test--workspace-log-record (ws)
   "Return the LAST JSONL record written to WS's durable Emacs log sink."
   (let ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target)))
