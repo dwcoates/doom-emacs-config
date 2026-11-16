@@ -91,6 +91,12 @@ type DeploySources struct {
 	// staged cache-bin carries placeholder bytes whose reports the harness
 	// states itself (Daemon.StageDeployBuild). Both or neither.
 	Store, Sidecar string
+	// Tests, when set, is the test service binary the world really runs
+	// (TestServiceBinary): every harness daemon runs one, which reports its
+	// own build into the lock dir, so the staged cache-bin carries a copy of
+	// it and a deploy judges it up to date. Unset, the staged test service
+	// is a placeholder whose report the harness states itself.
+	Tests string
 }
 
 // realServices reports whether the staged services are real binaries.
@@ -98,13 +104,18 @@ func (s DeploySources) realServices() bool { return s.Store != "" }
 
 // placeholderServices are the cache-bin services this build stages as
 // placeholder bytes, whose reports the harness states itself
-// (Daemon.StateServiceBuilds): zettel and the test service always, and the
-// store and the sidecar when the world runs no real ones.
+// (Daemon.StateServiceBuilds): zettel always, the store and the sidecar when
+// the world runs no real ones, and the test service when it runs none.
 func (s DeploySources) placeholderServices() []string {
-	if s.realServices() {
-		return []string{buildreport.ServiceZettel, buildreport.ServiceTests}
+	var out []string
+	if !s.realServices() {
+		out = append(out, buildreport.ServiceStore, buildreport.ServiceSidecar)
 	}
-	return []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests}
+	out = append(out, buildreport.ServiceZettel)
+	if s.Tests == "" {
+		out = append(out, buildreport.ServiceTests)
+	}
+	return out
 }
 
 // DeployBuilder is the deploy's fake build: a Recorder, so a test can count
@@ -167,7 +178,7 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   ` + service(buildreport.ServiceStore, src.Store) + `
   ` + service(buildreport.ServiceSidecar, src.Sidecar) + `
   ` + service(buildreport.ServiceZettel, "") + `
-  ` + service(buildreport.ServiceTests, "") + `
+  ` + service(buildreport.ServiceTests, src.Tests) + `
   printf 'harness shim-lock\n' > "$out/cache-bin/shim-lock"
   mkdir -p "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources"
   printf 'harness\n' > "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources/source-sha256"

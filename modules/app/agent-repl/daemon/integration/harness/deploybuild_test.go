@@ -22,23 +22,28 @@ import (
 // global only Main sets, which this test points at a stand-in.
 func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 	tests := []struct {
-		name    string
-		real    bool
-		service string
-		want    func(store, sidecar string) string
+		name      string
+		real      bool
+		realTests bool
+		service   string
+		want      func(store, sidecar, tests string) string
 	}{
 		{name: "a real store is staged as a copy of its binary", real: true, service: "shim-store",
-			want: func(store, _ string) string { return readOrFail(t, store) }},
+			want: func(store, _, _ string) string { return readOrFail(t, store) }},
 		{name: "a real sidecar is staged as a copy of its binary", real: true, service: "shim-claude-sidecar",
-			want: func(_, sidecar string) string { return readOrFail(t, sidecar) }},
+			want: func(_, sidecar, _ string) string { return readOrFail(t, sidecar) }},
 		{name: "no real store stages the placeholder", service: "shim-store",
-			want: func(_, _ string) string { return fakeServiceBinary("shim-store") }},
+			want: func(_, _, _ string) string { return fakeServiceBinary("shim-store") }},
 		{name: "no real sidecar stages the placeholder", service: "shim-claude-sidecar",
-			want: func(_, _ string) string { return fakeServiceBinary("shim-claude-sidecar") }},
+			want: func(_, _, _ string) string { return fakeServiceBinary("shim-claude-sidecar") }},
 		{name: "zettel stages the placeholder beside real services", real: true, service: "zettel",
-			want: func(_, _ string) string { return fakeServiceBinary("zettel") }},
+			want: func(_, _, _ string) string { return fakeServiceBinary("zettel") }},
+		{name: "a real test service is staged as a copy of its binary", realTests: true, service: "agent-repl-tests",
+			want: func(_, _, tests string) string { return readOrFail(t, tests) }},
+		{name: "no real test service stages the placeholder", service: "agent-repl-tests",
+			want: func(_, _, _ string) string { return fakeServiceBinary("agent-repl-tests") }},
 		{name: "zettel stages the placeholder beside placeholder services", service: "zettel",
-			want: func(_, _ string) string { return fakeServiceBinary("zettel") }},
+			want: func(_, _, _ string) string { return fakeServiceBinary("zettel") }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,6 +65,10 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			if tc.real {
 				src.Store, src.Sidecar = store, sidecar
 			}
+			tests := writeStandIn(t, dir, "real-tests", "the real test service\n")
+			if tc.realTests {
+				src.Tests = tests
+			}
 			b := NewFakeDeployBuilder(t, filepath.Join(dir, "bin"), src)
 			b.Stage(DeployCurrent)
 			out := filepath.Join(dir, "staging")
@@ -70,7 +79,7 @@ func TestFakeDeployBuilderStagesTheServicesTheWorldRuns(t *testing.T) {
 			}
 
 			// Assert.
-			if got, want := readOrFail(t, filepath.Join(out, "cache-bin", tc.service)), tc.want(store, sidecar); got != want {
+			if got, want := readOrFail(t, filepath.Join(out, "cache-bin", tc.service)), tc.want(store, sidecar, tests); got != want {
 				t.Fatalf("staged %s = %q, want %q", tc.service, got, want)
 			}
 		})
@@ -123,7 +132,8 @@ func TestStateServiceBuildsNamesThePidItIsGiven(t *testing.T) {
 
 // TestPlaceholderServicesAreTheOnesNoWorldRunsForReal pins which services the
 // harness states the builds of: zettel in every world, the store and the
-// sidecar only in a world that runs no real ones.
+// sidecar only in a world that runs no real ones, and the test service only
+// in a world that runs none.
 func TestPlaceholderServicesAreTheOnesNoWorldRunsForReal(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -132,6 +142,8 @@ func TestPlaceholderServicesAreTheOnesNoWorldRunsForReal(t *testing.T) {
 	}{
 		{name: "no real services", sources: DeploySources{}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests}},
 		{name: "a real store and sidecar", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar"}, want: []string{buildreport.ServiceZettel, buildreport.ServiceTests}},
+		{name: "a real test service", sources: DeploySources{Tests: "/bin/tests"}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel}},
+		{name: "every service real but zettel", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar", Tests: "/bin/tests"}, want: []string{buildreport.ServiceZettel}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -796,6 +796,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	d.Deploy = NewFakeDeployBuilder(t, fakeBin, DeploySources{
 		ShimMain: mainJS, WebappDist: d.WebappDir,
 		Store: opts.ServiceBinaries.Store, Sidecar: opts.ServiceBinaries.Sidecar,
+		Tests: TestServiceBinary(t),
 	})
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
