@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -377,6 +379,50 @@ func TestARestoredLinkWithNoBoundReporterIsRecordedAtError(t *testing.T) {
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.cmd.lifecycle",
 		Message: "a link was restored before the health reporter existed; its severing fault was not closed"}); !ok {
 		t.Fatalf("records = %v, want the unbound reporter at ERROR", log.Records())
+	}
+}
+
+func TestCloseOnEdgeClosesTheWorkspacesFaultsTheEdgeEnds(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     wsm.WorkspaceID
+		closes bool
+	}{
+		{"the workspace's fault the edge ends", "ws-1", true},
+		{"another workspace's fault", "ws-2", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ws := tt.ws
+			reporter := &fakeReporter{standing: []wsm.Fault{{ID: "f-standing", Workspace: &ws, Kind: health.KindLinkSevered}}}
+			sink := newDiagnosticsSink(t, reporter)
+
+			// Act
+			sink.closeOnEdge("ws-1", health.EdgeLinkRestored, "unbound")
+
+			// Assert
+			closed := len(reporter.closed) == 1 && reporter.closed[0] == "f-standing"
+			if closed != tt.closes {
+				t.Fatalf("closed %v, want closed = %v", reporter.closed, tt.closes)
+			}
+		})
+	}
+}
+
+// TestEveryLifecycleEdgeCloseGoesThroughCloseOnEdge keeps the sink's
+// stand-alone recovery edges on one helper: each is named once in
+// lifecycle.go, in its closeOnEdge call, so a hand-rolled close of either
+// fails here.
+func TestEveryLifecycleEdgeCloseGoesThroughCloseOnEdge(t *testing.T) {
+	src, err := os.ReadFile("lifecycle.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, edge := range []string{"health.EdgeWatchOpened", "health.EdgeLinkRestored"} {
+		if all, viaHelper := strings.Count(string(src), edge), strings.Count(string(src), "s.closeOnEdge(ws, "+edge); all != 1 || viaHelper != 1 {
+			t.Fatalf("lifecycle.go names %s %d times, %d through closeOnEdge; want once, through it", edge, all, viaHelper)
+		}
 	}
 }
 
