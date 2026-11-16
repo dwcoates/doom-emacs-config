@@ -3458,8 +3458,8 @@ describe("WatchBash's durability barrier", () => {
     // Act.
     const refused = openOnce(h);
 
-    // Assert.
-    await expect(refused).rejects.toMatchObject({ code: Code.NotFound });
+    // Assert: Unavailable, since a store that is down refuses no handle.
+    await expect(refused).rejects.toMatchObject({ code: Code.Unavailable });
   });
 
   it("never opens the run when the start could not be made durable", async () => {
@@ -3814,6 +3814,16 @@ describe("WatchBash's failure arms", () => {
 
     await expect(drain(h.turns.watchBash(request))).rejects.toMatchObject({
       code: Code.NotFound,
+    });
+  });
+
+  it("closes the stream with Unavailable, never NotFound, when the store stayed unreachable", async () => {
+    const h = await harness(
+      new FailingBashStore(new PersistenceError("store_unavailable", "connect ENOENT store.sock")),
+    );
+
+    await expect(drain(h.turns.watchBash(request))).rejects.toMatchObject({
+      code: Code.Unavailable,
     });
   });
 

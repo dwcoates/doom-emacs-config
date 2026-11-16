@@ -22,7 +22,8 @@ import {
   reportClientFailure,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
+import { SUCCESSOR_HEADER, successorOf, watchStream, type StreamEnd } from "../../src/rpc/streams.js";
+import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import { createDaemonOrigin, type DaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { beginPage, endPage } from "../../src/page-teardown.js";
 
@@ -1328,5 +1329,63 @@ describe("noteStreamCost: every frame's handling is timed", () => {
     // Assert
     expect(costs.map(([stream]) => stream)).toEqual(["WatchFooter", "WatchFooter"]);
     expect(costs.every(([, ms]) => ms >= 0)).toBe(true);
+  });
+});
+
+describe("watchStream: a close that names the successor", () => {
+  /** The daemon's transferring_away close, naming its successor. */
+  function handedOver(address: string): ConnectError {
+    return new ConnectError(
+      `transferring_away: workspace "ws-1" has been handed to a successor daemon`,
+      Code.FailedPrecondition,
+      { [SUCCESSOR_HEADER]: address },
+    );
+  }
+
+  it("raises the move notice with the successor's address and files nothing", async () => {
+    // Arrange.
+    const sink = new RecordingSink();
+    const moved: string[] = [];
+    const unregister = registerWorkspaceMoved((address) => moved.push(address));
+    const { client, state } = scriptedClient([handedOver("127.0.0.1:65338")]);
+
+    // Act.
+    const handle = open(contextFor(client, sink), () => {});
+    await advance(BACKOFF.initialMs * 4);
+    handle.cancel();
+    unregister();
+
+    // Assert.
+    expect(moved).toEqual(["127.0.0.1:65338"]);
+    expect(sink.reported).not.toContain("daemonUnreachable");
+    expect(state.openCount).toBe(1);
+  });
+
+  it("still files daemonUnreachable for a close that names no successor", async () => {
+    // Arrange.
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([new ConnectError("gone", Code.FailedPrecondition)]);
+
+    // Act.
+    const handle = open(contextFor(client, sink), () => {});
+    await settle();
+    handle.cancel();
+
+    // Assert.
+    expect(sink.reported).toContain("daemonUnreachable");
+  });
+});
+
+describe("successorOf", () => {
+  it("reads the successor a ConnectError's metadata names", () => {
+    expect(successorOf(new ConnectError("x", Code.FailedPrecondition, { [SUCCESSOR_HEADER]: "127.0.0.1:1" }))).toBe("127.0.0.1:1");
+  });
+
+  it("answers undefined for a ConnectError with no successor", () => {
+    expect(successorOf(new ConnectError("x", Code.Unavailable))).toBeUndefined();
+  });
+
+  it("answers undefined for an error that is not a ConnectError", () => {
+    expect(successorOf(new Error("x"))).toBeUndefined();
   });
 });

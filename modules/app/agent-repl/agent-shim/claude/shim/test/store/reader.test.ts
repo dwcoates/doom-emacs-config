@@ -1929,6 +1929,53 @@ describe("openBashRun against a store that misbehaves", () => {
     });
   });
 
+  it("replays an open the store's restart cut before the first row, and follows the run", async () => {
+    // Arrange: the store's socket is down for the first two opens.
+    let asks = 0;
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          asks += 1;
+          if (asks <= 2) throw new Error("connect ENOENT store.sock");
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+        },
+      }),
+    });
+
+    // Act.
+    const arms: string[] = [];
+    for await (const frame of await reader.openBashRun(WORK, NO_WAIT)) arms.push(String(frame.result.case));
+
+    // Assert.
+    expect(asks).toBe(3);
+    expect(arms).toEqual(["start"]);
+  });
+
+  it("does not replay a run the store cut after its first row", async () => {
+    // Arrange: a row was served, so a replay would repeat it.
+    let asks = 0;
+    const reader = readerOver({
+      watchBashRun: () => ({
+        async *[Symbol.asyncIterator]() {
+          asks += 1;
+          yield create(storev1.WatchBashRunResponseSchema, {
+            row: create(storev1.StoreAgentBashSchema, { frame: bashStartFrame() }),
+          });
+          throw new Error("the socket reset");
+        },
+      }),
+    });
+
+    // Act.
+    const ended = drain(await reader.openBashRun(WORK, NO_WAIT));
+
+    // Assert.
+    await expect(ended).rejects.toMatchObject({ kind: "store_unavailable" });
+    expect(asks).toBe(1);
+  });
+
   it("asks the store exactly once for a run it refuses", async () => {
     // Arrange.
     let asks = 0;
