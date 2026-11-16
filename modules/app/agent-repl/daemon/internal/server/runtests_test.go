@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/encoding/protodelim"
@@ -1049,5 +1050,40 @@ func TestATestRunReadsItsScriptThroughTheDeployConfigReader(t *testing.T) {
 	// Assert
 	if err != nil || script != "bin/test-all.sh" || len(config.asked) != 1 || config.asked[0] != "/w/worktree" {
 		t.Fatalf("testScriptOf = (%q, %v), asked %v; want the reader's script for the worktree", script, err, config.asked)
+	}
+}
+
+func TestRunTestsWhoseCallerLeftIsStoppedWithoutAnError(t *testing.T) {
+	// Arrange: a run that lasts until its context ends.
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ref := testsWorkspace(t, h, testsDeploy)
+	h.Tests.events = []*testrunv1.TestRunEvent{{Event: &testrunv1.TestRunEvent_Planned{Planned: &testrunv1.TestRunPlanned{}}}}
+	h.Tests.running = make(chan struct{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	stream, err := h.Client.RunTests(ctx, connect.NewRequest(&agentreplv1.RunTestsRequest{Workspace: ref, Run: oneHarness(), Requester: agent()}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	if !stream.Receive() {
+		t.Fatalf("first frame: %v, want the run's plan", stream.Err())
+	}
+
+	// Act: the caller leaves.
+	cancel()
+
+	// Assert: the stop is recorded at INFO once the server has seen it.
+	query := dlog.RecordQuery{Level: "info", Operation: opRunTests, Message: "a test run's caller went away, so its run was stopped"}
+	// Bound: the same 2s the page stream's departure record is awaited under
+	// (page_test.go); the fake run ends the instant its context does.
+	stopped, endWait := context.WithTimeout(context.Background(), 2*time.Second)
+	defer endWait()
+	if _, err := log.Await(stopped, query); err != nil {
+		t.Fatalf("records = %+v, want the stop at INFO: %v", log.Records(), err)
+	}
+	if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError}); found {
+		t.Fatalf("records = %+v, want no error for a caller that left", log.Records())
 	}
 }
