@@ -121,13 +121,8 @@ func (s *server) FindWorkspaces(
 // repository the listing does not hold is an invariant violation (the
 // registry's foreign key forbids it) and panics.
 func (s *server) loginRepos(repositories []wsm.Repository, ws wsm.Workspace) map[wsm.RepoID]bool {
-	var own *wsm.Repository
-	for i := range repositories {
-		if repositories[i].ID == ws.Repo {
-			own = &repositories[i]
-		}
-	}
-	if own == nil {
+	own, ok := wsm.RepositoryWithID(repositories, ws.Repo)
+	if !ok {
 		panic(fmt.Sprintf("server: workspace %s names repository %s, which the registry listing does not hold", ws.ID, ws.Repo))
 	}
 	root := s.deps.AccountRootFor(own.Dir)
