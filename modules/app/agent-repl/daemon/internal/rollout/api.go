@@ -199,6 +199,12 @@ type Controller interface {
 	// non-owned standings are the two the rollout itself creates: a workspace
 	// transferred away, and one a joining daemon has not adopted yet.
 	Standing(ws ids.WorkspaceID) Standing
+	// AwaitAdopted waits, within Deps.AdoptionWaitBound, until WS's standing is
+	// no longer not_yet_adopted, and answers the standing it reached. A
+	// request the incumbent sent on to this daemon mid-adoption waits for
+	// the adoption rather than being refused. A bound that fires is an
+	// ERROR, answered with the standing still not_yet_adopted.
+	AwaitAdopted(ctx context.Context, ws ids.WorkspaceID) (Standing, error)
 	// SuccessorAddress answers the address a transferred workspace moved to,
 	// empty when no handover is in flight.
 	SuccessorAddress() string
@@ -440,6 +446,9 @@ type Deps struct {
 	// teardown worst case; it is a field so a hung shim is exercised without
 	// waiting the real bound out.
 	StandDownCallBound time.Duration
+	// AdoptionWaitBound bounds AwaitAdopted (DefaultAdoptionWaitBound when
+	// zero).
+	AdoptionWaitBound time.Duration
 	// ReadyBound bounds the wait for a spawned successor to prove it is
 	// serving (Successor.Ready). Zero means DefaultReadyBound.
 	ReadyBound time.Duration
@@ -855,6 +864,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StandDownCallBound <= 0 {
 		deps.StandDownCallBound = drain.DefaultStandBound
+	}
+	if deps.AdoptionWaitBound <= 0 {
+		deps.AdoptionWaitBound = DefaultAdoptionWaitBound
 	}
 	if deps.ReadyBound <= 0 {
 		deps.ReadyBound = DefaultReadyBound

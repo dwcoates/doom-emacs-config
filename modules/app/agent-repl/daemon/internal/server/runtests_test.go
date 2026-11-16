@@ -25,6 +25,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -697,6 +698,71 @@ func TestTestWorktreeOf(t *testing.T) {
 			if _, found := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: opRunTests}); err != nil && !found {
 				t.Fatalf("records = %+v, want the refusal recorded", log.Records())
 			}
+		})
+	}
+}
+
+func TestATestRunForAWorkspaceStillBeingAdoptedWaitsForTheAdoption(t *testing.T) {
+	errNotAdopted := errors.New("not adopted within the bound")
+	cases := []struct {
+		name string
+		// adopted is what the wait does: it adopts the workspace, or fails.
+		adopted func(h *harness) error
+		assert  func(t *testing.T, w testWorktree, err error, ref *workspacev1.WorkspaceRef, log *dlog.TestLogger)
+	}{
+		{name: "the run resolves its worktree once the workspace is adopted",
+			adopted: func(h *harness) error { h.Ownership.standing = workspace.StandingOwned; return nil },
+			assert: func(t *testing.T, w testWorktree, err error, ref *workspacev1.WorkspaceRef, _ *dlog.TestLogger) {
+				if err != nil || w.dir != ref.GetDir() {
+					t.Fatalf("testWorktreeOf = %+v, %v, want the adopted workspace's worktree", w, err)
+				}
+			}},
+		{name: "an adopted workspace's run is no unlanded-arm warning",
+			adopted: func(h *harness) error { h.Ownership.standing = workspace.StandingOwned; return nil },
+			assert: func(t *testing.T, _ testWorktree, _ error, _ *workspacev1.WorkspaceRef, log *dlog.TestLogger) {
+				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelWarn}); ok {
+					t.Fatalf("records = %+v, want no warning", log.Records())
+				}
+			}},
+		{name: "a wait that ends without the adoption answers its error",
+			adopted: func(*harness) error { return errNotAdopted },
+			assert: func(t *testing.T, w testWorktree, err error, _ *workspacev1.WorkspaceRef, _ *dlog.TestLogger) {
+				if !errors.Is(err, errNotAdopted) || w.dir != "" {
+					t.Fatalf("testWorktreeOf = %+v, %v, want the wait's error and no worktree", w, err)
+				}
+			}},
+		{name: "a wait that ends without the adoption is recorded",
+			adopted: func(*harness) error { return errNotAdopted },
+			assert: func(t *testing.T, _ testWorktree, _ error, _ *workspacev1.WorkspaceRef, log *dlog.TestLogger) {
+				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRunTests,
+					Message: "a test run's wait for its workspace's adoption ended without it"}); !ok {
+					t.Fatalf("records = %+v, want the ended wait recorded", log.Records())
+				}
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			rollouts := &fakeRollout{}
+			h := newHarness(t, func(deps *Deps) {
+				deps.Log = &fakeSurfaces{global: log, workspace: log}
+				deps.Rollout = rollouts
+			})
+			ref := testsWorkspace(t, h, testsDeploy)
+			h.Ownership.standing = workspace.StandingNotYetAdopted
+			rollouts.awaitAdopted = func(ids.WorkspaceID) (rollout.Standing, error) {
+				if err := tc.adopted(h); err != nil {
+					return rollout.StandingNotYetAdopted, err
+				}
+				return rollout.StandingOwned, nil
+			}
+
+			// Act
+			w, err := h.Server.(*server).testWorktreeOf(context.Background(), "RunTests", opRunTests, ref)
+
+			// Assert
+			tc.assert(t, w, err, ref, log)
 		})
 	}
 }

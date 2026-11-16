@@ -1506,6 +1506,15 @@ type fakeRollout struct {
 	// adopting, when set, runs inside each adoption, as the daemon's own
 	// adoption runs while the call is held.
 	adopting func()
+	// awaitAdopted, when set, answers AwaitAdopted; unset, it answers owned.
+	awaitAdopted func(ws ids.WorkspaceID) (rollout.Standing, error)
+}
+
+func (f *fakeRollout) AwaitAdopted(_ context.Context, ws ids.WorkspaceID) (rollout.Standing, error) {
+	if f.awaitAdopted == nil {
+		return rollout.StandingOwned, nil
+	}
+	return f.awaitAdopted(ws)
 }
 
 // fakeMakers answers which workspace spawned a subagent: the workspace
