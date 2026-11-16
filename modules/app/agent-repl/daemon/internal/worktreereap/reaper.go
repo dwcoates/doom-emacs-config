@@ -736,7 +736,7 @@ func (s *repoSweep) fail(ctx context.Context, operation, message string, fields 
 	for k, v := range fields {
 		record[k] = v
 	}
-	if ctx.Err() != nil || gitclient.IsCancelled(err) {
+	if gitclient.StoppedBy(ctx, err) {
 		s.r.deps.Log.Info(operation, "the step stopped with the daemon", record)
 		return
 	}
