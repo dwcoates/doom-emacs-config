@@ -296,4 +296,19 @@ describe("callUnary and the client's link verdict", () => {
     await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
     expect(standingClientFailure()).toBeNull();
   });
+
+  it("records a call refused locally by a quiesced page at info", async () => {
+    // Arrange
+    const lines = captureLog();
+    const ctx: UnaryContext = {
+      ...ctxAnswering(() => create(OpenExternalResponseSchema, {})),
+      isQuiesced: () => true,
+    };
+
+    // Act
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+
+    // Assert
+    expect(lines.filter(([, line]) => line.includes("rpc.unary-quiesced")).map(([level]) => level)).toEqual(["info"]);
+  });
 });
