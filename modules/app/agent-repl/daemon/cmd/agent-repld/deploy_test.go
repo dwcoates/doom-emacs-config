@@ -372,3 +372,24 @@ func TestTheClientsForwarderHandsOnTheWebhostPages(t *testing.T) {
 		})
 	}
 }
+
+func TestTheWifiHelperIsInstalledOnlyWhereThePlatformHasOne(t *testing.T) {
+	tests := []struct {
+		goos string
+		want string
+	}{
+		{goos: "darwin", want: "/home/.cache/agent-repl/AgentReplWifi.app"},
+		{goos: "linux", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.goos, func(t *testing.T) {
+			// Act
+			got := wifiAppOn(tc.goos, "/home")
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("wifiAppOn(%q) = %q, want %q", tc.goos, got, tc.want)
+			}
+		})
+	}
+}

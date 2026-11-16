@@ -7,6 +7,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
@@ -27,13 +28,13 @@ func (s *skipCounter) CountViewRenderSkipped(view string) {
 
 // quietResolver is a live one-workspace roster behind a quiet gate, recording
 // every status change it reports.
-func quietResolver(t *testing.T) (sidebar.Resolver, *viewquiet.Gate, *skipCounter, func() []ids.WorkspaceID) {
+func quietResolver(t *testing.T) (sidebar.Resolver, *viewquiet.Gate, *skipCounter, func() []ids.WorkspaceID, *dlog.TestSurfaces) {
 	t.Helper()
 	counter := &skipCounter{skipped: map[string]int{}}
 	gate := viewquiet.New(counter)
 	var mu sync.Mutex
 	var changes []ids.WorkspaceID
-	r, _ := newResolver(t, sidebar.WithQuiet(gate),
+	r, surfaces := newResolver(t, sidebar.WithQuiet(gate),
 		sidebar.WithStatusChangeSink(func(ws ids.WorkspaceID, _ time.Time) {
 			mu.Lock()
 			defer mu.Unlock()
@@ -49,12 +50,12 @@ func quietResolver(t *testing.T) (sidebar.Resolver, *viewquiet.Gate, *skipCounte
 		mu.Lock()
 		defer mu.Unlock()
 		return append([]ids.WorkspaceID(nil), changes...)
-	}
+	}, surfaces
 }
 
 func TestAQuietRosterPublishesNothingButStillReportsTheStatusChange(t *testing.T) {
 	// Arrange
-	r, gate, counter, changes := quietResolver(t)
+	r, gate, counter, changes, _ := quietResolver(t)
 	before := latest(t, r).GetRevision()
 	gate.Set(true)
 
@@ -75,7 +76,7 @@ func TestAQuietRosterPublishesNothingButStillReportsTheStatusChange(t *testing.T
 
 func TestLeavingTheQuietStatePublishesTheCurrentRosterOnce(t *testing.T) {
 	// Arrange
-	r, gate, _, changes := quietResolver(t)
+	r, gate, _, changes, _ := quietResolver(t)
 	before := latest(t, r).GetRevision()
 	gate.Set(true)
 	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
@@ -106,7 +107,7 @@ func TestLeavingTheQuietStatePublishesTheCurrentRosterOnce(t *testing.T) {
 
 func TestLeavingAQuietStateThatSkippedNothingPublishesNothing(t *testing.T) {
 	// Arrange
-	r, gate, _, _ := quietResolver(t)
+	r, gate, _, _, _ := quietResolver(t)
 	before := latest(t, r).GetRevision()
 	gate.Set(true)
 
@@ -116,5 +117,100 @@ func TestLeavingAQuietStateThatSkippedNothingPublishesNothing(t *testing.T) {
 	// Assert
 	if got := latest(t, r).GetRevision(); got != before {
 		t.Fatalf("revision = %d, want %d: nothing moved", got, before)
+	}
+}
+
+func TestAQuietRosterPublishesARowMovingOntoADepartureArm(t *testing.T) {
+	tests := []struct {
+		name  string
+		merge []string
+		want  string
+	}{
+		{name: "a merge starting", merge: []string{"queued", "merging"}, want: "merging"},
+		{name: "a merge landing", merge: []string{"queued", "merging", "merged"}, want: "merged"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: every merge state before the last is set while the lid is open.
+			r, gate, _, _, surfaces := quietResolver(t)
+			for _, state := range tt.merge[:len(tt.merge)-1] {
+				r.SetMerge(theWS, mergeStates[state])
+			}
+			before := latest(t, r).GetRevision()
+			gate.Set(true)
+
+			// Act
+			r.SetMerge(theWS, mergeStates[tt.merge[len(tt.merge)-1]])
+
+			// Assert
+			if got := latest(t, r).GetRevision(); got != before+1 {
+				t.Fatalf("revision = %d, want %d: a departure is published while quiet", got, before+1)
+			}
+			if got := statusName(onlyRow(t, r)); got != tt.want {
+				t.Fatalf("status = %q, want %q", got, tt.want)
+			}
+			if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sidebar.quiet_departure"}); !ok {
+				t.Fatalf("no daemon.sidebar.quiet_departure record: %v", surfaces.Records())
+			}
+		})
+	}
+}
+
+func TestAQuietRosterHoldsBackAMergeThatHasNotStarted(t *testing.T) {
+	// Arrange
+	r, gate, _, _, surfaces := quietResolver(t)
+	before := latest(t, r).GetRevision()
+	gate.Set(true)
+
+	// Act: the merge is only queued, so no worktree is leaving yet.
+	r.SetMerge(theWS, mergeStates["queued"])
+
+	// Assert
+	if got := latest(t, r).GetRevision(); got != before {
+		t.Fatalf("revision = %d, want %d: a queued merge is not a departure", got, before)
+	}
+	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Operation: "daemon.sidebar.quiet_departure"}); ok {
+		t.Fatal("a queued merge was recorded as a departure")
+	}
+}
+
+func TestLeavingTheQuietStateAfterAPublishedDepartureRepublishesNothing(t *testing.T) {
+	// Arrange
+	r, gate, _, _, _ := quietResolver(t)
+	r.SetMerge(theWS, mergeStates["queued"])
+	gate.Set(true)
+	r.SetMerge(theWS, mergeStates["merging"])
+	published := latest(t, r).GetRevision()
+
+	// Act
+	gate.Set(false)
+
+	// Assert
+	if got := latest(t, r).GetRevision(); got != published {
+		t.Fatalf("revision = %d, want %d: the departure's roster was already current", got, published)
+	}
+}
+
+func TestDepartureArmNamesTheArmsAMergeRemovesAWorktreeUnder(t *testing.T) {
+	tests := []struct {
+		arm  string
+		want bool
+	}{
+		{arm: "merging", want: true},
+		{arm: "merged", want: true},
+		{arm: "merge_queued", want: false},
+		{arm: "merge_failed", want: false},
+		{arm: "thinking", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.arm, func(t *testing.T) {
+			// Act
+			got := sidebar.DepartureArm(tt.arm)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("DepartureArm(%q) = %v, want %v", tt.arm, got, tt.want)
+			}
+		})
 	}
 }

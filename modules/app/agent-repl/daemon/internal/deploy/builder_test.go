@@ -122,6 +122,7 @@ func TestStagedNamesTheBuildFrontendLayout(t *testing.T) {
 		s.WebappDist():          "/s/webapp/dist",
 		s.DaemonBin():           "/s/daemon/bin/agent-repld",
 		s.CacheBin("shim-lock"): "/s/cache-bin/shim-lock",
+		s.WifiApp():             "/s/wifi-helper/AgentReplWifi.app",
 	} {
 		if got != want {
 			t.Fatalf("staged path = %q, want %q", got, want)
@@ -164,3 +165,88 @@ func TestAFailedOverrideIsTheBuildStep(t *testing.T) {
 		t.Fatalf("records = %+v, want the failure at ERROR", log.Records())
 	}
 }
+
+func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.T) {
+	tests := []struct {
+		name       string
+		wifiHelper bool
+		want       string
+	}{
+		{name: "the platform with a helper builds it", wifiHelper: true,
+			want: "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app"},
+		{name: "a platform with none does not", wifiHelper: false,
+			want: "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 " + Targets[len(Targets)-1]},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			b, runner, _ := newScriptBuilder(t, map[string]runAnswer{})
+			b.WifiHelper = tc.wifiHelper
+
+			// Act
+			if err := b.Build(context.Background(), "/staging/1"); err != nil {
+				t.Fatalf("Build: %v", err)
+			}
+
+			// Assert
+			calls := runner.Calls()
+			if got := strings.Join(calls[len(calls)-1], " "); got != tc.want {
+				t.Fatalf("last step = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAFailedWifiHelperBuildNamesItsStep(t *testing.T) {
+	// Arrange
+	step := "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app"
+	b, _, _ := newScriptBuilder(t, map[string]runAnswer{step: {out: "swiftc: error: no such module", code: 1}})
+	b.WifiHelper = true
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert
+	var failed *BuildFailed
+	if !errors.As(err, &failed) || failed.Step != "wifi" || !strings.Contains(failed.Detail, "no such module") {
+		t.Fatalf("Build = %v, want the wifi step named with swiftc's words", err)
+	}
+}
+
+func TestWifiSourceHash(t *testing.T) {
+	tests := []struct {
+		name    string
+		content *string
+		want    string
+		wantErr string
+	}{
+		{name: "the hash the build wrote, without its newline", content: ptr("abc123\n"), want: "abc123"},
+		{name: "an app naming no hash", content: ptr("  \n"), wantErr: "names no source hash"},
+		{name: "an app with no hash file", content: nil, wantErr: "read the Wi-Fi helper's source hash"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			app := filepath.Join(t.TempDir(), "AgentReplWifi.app")
+			if tc.content != nil {
+				writeFile(t, filepath.Join(app, "Contents", "Resources", "source-sha256"), *tc.content)
+			}
+
+			// Act
+			got, err := wifiSourceHash(app)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("wifiSourceHash = %q, %v; want an error saying %q", got, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want {
+				t.Fatalf("wifiSourceHash = %q, %v; want %q", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func ptr(s string) *string { return &s }

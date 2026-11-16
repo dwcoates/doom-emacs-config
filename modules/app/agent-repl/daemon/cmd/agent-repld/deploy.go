@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 )
@@ -86,6 +87,19 @@ type deployerParams struct {
 // deployPaths are the host locations a deploy works against.
 type deployPaths struct {
 	cacheBin, plistDir, unitDir, storeLog, reportDir string
+	// wifiApp is where the deploy installs the Wi-Fi helper app; empty on a
+	// platform with no helper (wifiAppOn).
+	wifiApp string
+}
+
+// wifiAppOn is where a deploy on GOOS installs the Wi-Fi helper app under
+// HOME: the failover's own (persistentwifi.WifiAppIn) on macOS, the one
+// platform the helper is built for, and nowhere elsewhere.
+func wifiAppOn(goos, home string) string {
+	if goos != "darwin" {
+		return ""
+	}
+	return persistentwifi.WifiAppIn(home)
 }
 
 // resolveDeployPaths answers the host locations, the operator overrides first.
@@ -104,6 +118,7 @@ func resolveDeployPaths(getenv func(string) string) (deployPaths, error) {
 		unitDir:   firstNonEmpty(getenv(envSystemdUserDir), filepath.Join(firstNonEmpty(getenv("XDG_CONFIG_HOME"), filepath.Join(home, ".config")), "systemd", "user")),
 		storeLog:  filepath.Join(home, ".cache", "agent-repl", "log", "shim-store.err.log"),
 		reportDir: reportDir,
+		wifiApp:   wifiAppOn(runtime.GOOS, home),
 	}, nil
 }
 
@@ -153,6 +168,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		ModuleRoot: p.Checkout,
 		LogDir:     filepath.Join(deployDir, "logs"),
 		Override:   p.Getenv(envDeployBuilder),
+		WifiHelper: where.wifiApp != "",
 		Runner:     p.Runner,
 		Clock:      rollout.SystemClock{},
 		Log:        log,
@@ -177,7 +193,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Reconnects: p.Reconnects,
 		Live: deploy.Live{
 			ModuleRoot: p.Checkout, CacheBin: where.cacheBin,
-			Shim: p.ShimMain, Webapp: p.WebappDist,
+			Shim: p.ShimMain, Webapp: p.WebappDist, WifiApp: where.wifiApp,
 		},
 		StagingRoot: filepath.Join(deployDir, "staging"),
 		Builder:     builder,

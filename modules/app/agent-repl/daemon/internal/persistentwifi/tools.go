@@ -100,11 +100,12 @@ func DefaultTools() Tools {
 // WifiAppIn is where agent-repl installs its Wi-Fi helper app under HOME
 // (wifi-helper/build.sh's default).
 func WifiAppIn(home string) string {
-	return filepath.Join(home, ".cache", "agent-repl", wifiAppName)
+	return filepath.Join(home, ".cache", "agent-repl", WifiAppName)
 }
 
-// wifiAppName is the Wi-Fi helper app's bundle name.
-const wifiAppName = "AgentReplWifi.app"
+// WifiAppName is the Wi-Fi helper app's bundle name, installed by the deploy
+// (deploy.Live.WifiApp) and launched by the failover.
+const WifiAppName = "AgentReplWifi.app"
 
 // ToolsIn is every tool resolved from one directory by its base name.
 func ToolsIn(dir string) Tools {
@@ -120,7 +121,7 @@ func ToolsIn(dir string) Tools {
 		Brightness:   in(d.Brightness),
 		Ps:           in(d.Ps),
 		Open:         in(d.Open),
-		WifiApp:      filepath.Join(dir, wifiAppName),
+		WifiApp:      filepath.Join(dir, WifiAppName),
 	}
 }
 

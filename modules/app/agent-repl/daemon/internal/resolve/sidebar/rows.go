@@ -91,6 +91,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if armChanged {
 		r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
 		r.noteStatusChange(rec.ID, s, !mirrored)
+		if departureArm(armName) {
+			r.departures = append(r.departures, departure{ws: rec.ID, arm: armName})
+		}
 	}
 	if r.factsOnly {
 		// A FACTS-ONLY RENDER (renderFacts) stops here: everything above is
@@ -536,6 +539,14 @@ func (r *resolver) noteStatusChange(ws ids.WorkspaceID, s *wsState, durable bool
 		return
 	}
 	r.pendingStatusChanges = append(r.pendingStatusChanges, statusChange{ws: ws, at: at})
+}
+
+// departureArm reports whether ARM says a merge is taking the row's
+// workspace: `merging` from the merge's start, `merged` once it landed. The
+// merge removes the workspace's worktree, so the editor must hold one of
+// these before the directory goes (applyBatch publishes them while quiet).
+func departureArm(arm string) bool {
+	return arm == "merging" || arm == "merged"
 }
 
 // logArmChange records a row's PUBLISHED status arm whenever it changes, and

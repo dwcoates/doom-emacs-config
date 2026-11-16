@@ -12,6 +12,10 @@ var SortHiddenNewestFirst = sortHiddenNewestFirst
 // running" off the footer clock.
 var RunningTurnStart = runningTurnStart
 
+// DepartureArm exports departureArm, the arms a quiet roster still
+// publishes.
+var DepartureArm = departureArm
+
 // ProjectArm exports projectArm, the one projection of the footer's status
 // onto a roster arm.
 var ProjectArm = projectArm

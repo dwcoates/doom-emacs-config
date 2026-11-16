@@ -30,6 +30,16 @@ func lostClosed(t *testing.T) *harness {
 // argScan is the prefix of every Wi-Fi scan's argv; its answer file follows.
 const argScan = "/t/open -W -n -g -a /t/AgentReplWifi.app --args scan --out "
 
+// argAuthorize is the prefix of the helper's authorize launch; its answer
+// file follows.
+const argAuthorize = "/t/open -n -g -a /t/AgentReplWifi.app --args authorize --out "
+
+// launchesAuthorize scripts the helper's authorize launch to succeed.
+func (h *harness) launchesAuthorize() *harness {
+	h.r.onPrefix(argAuthorize, func([]string) answer { return answer{} })
+	return h
+}
+
 // sight scripts every scan to answer SCANS in turn, repeating the last: the
 // helper's answer written to the file the scan names.
 func (h *harness) sight(scans ...wifiScan) *harness {
@@ -200,7 +210,7 @@ func TestAScanThatNamesNoNetworkIsAnErrorOnceAndTheHotspotIsStillTried(t *testin
 			// Arrange: a saved network, and scans that name nothing on both attempts.
 			h := lostClosed(t)
 			h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
-			h.sight(tc.scan)
+			h.sight(tc.scan).launchesAuthorize()
 
 			// Act: two attempts.
 			h.tickAt(0)

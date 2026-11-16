@@ -102,6 +102,17 @@ func logged(log *dlog.TestSurfaces, level, operation, substr string) bool {
 // artifacts are the bytes one fake build stages, per artifact.
 type artifacts struct {
 	shim, webappEntry, daemon, store, sidecar, zettel, lock string
+	// wifi is the Wi-Fi helper app's source hash; empty stages and installs
+	// no helper.
+	wifi string
+}
+
+// writeWifiApp writes a Wi-Fi helper app at APP built from the sources HASH
+// names, with a signature file whose bytes say which build it is.
+func writeWifiApp(t *testing.T, app, hash string) {
+	t.Helper()
+	writeFile(t, filepath.Join(app, "Contents", "Resources", "source-sha256"), hash+"\n")
+	writeFile(t, filepath.Join(app, "Contents", "_CodeSignature", "CodeResources"), "signed "+hash)
 }
 
 // stageInto writes a build's artifacts in build-frontend's staging layout.
@@ -118,6 +129,9 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	writeFile(t, s.CacheBin(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, s.CacheBin(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, s.CacheBin("shim-lock"), a.lock)
+	if a.wifi != "" {
+		writeWifiApp(t, s.WifiApp(), a.wifi)
+	}
 }
 
 // installInto writes the same artifacts at their live locations.
@@ -130,6 +144,9 @@ func (a artifacts) installInto(t *testing.T, live Live) {
 	writeFile(t, live.CacheBinPath(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceZettel), a.zettel)
 	writeFile(t, live.CacheBinPath("shim-lock"), a.lock)
+	if live.WifiApp != "" && a.wifi != "" {
+		writeWifiApp(t, live.WifiApp, a.wifi)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
@@ -618,11 +635,17 @@ const runningLayout = 11
 // theFresh is the build every harness stages; theOld is what is installed and
 // running before it.
 var (
-	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", lock: "lock-2"}
-	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", lock: "lock-1"}
+	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", lock: "lock-2", wifi: "wifi-2"}
+	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", lock: "lock-1", wifi: "wifi-1"}
 )
 
-func newHarness(t *testing.T) *harness {
+// withWifiHelper is a harness on the platform with a Wi-Fi helper: its live
+// layout names the app (Live.WifiApp), and the old build installed one.
+func withWifiHelper(t *testing.T) func(*Live) {
+	return func(l *Live) { l.WifiApp = filepath.Join(t.TempDir(), "AgentReplWifi.app") }
+}
+
+func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, filepath.Join(root, "config.el"), "(agent-repl--load-module \"core\")\n")
@@ -632,6 +655,9 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	live := Live{ModuleRoot: root, CacheBin: filepath.Join(t.TempDir(), "bin")}
+	for _, opt := range opts {
+		opt(&live)
+	}
 	theOld.installInto(t, live)
 	h := &harness{
 		live:      live,
