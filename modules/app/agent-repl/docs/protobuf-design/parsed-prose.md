@@ -369,3 +369,13 @@ wrong labels). That needs one parse, in one place, that every program reads.
   - **A previous sibling is named itself, not its last descendant**, as the
     owner's ask reads, so `C-i` never jumps down into a sibling's subtree.
   - **The first root keeps its label**, and the composer flashes why.
+
+### 13. The step keys swap: `C-i` steps on, `C-o` steps back
+
+- **What:** no wire change. The composer binds `[C-i]` to `step-on` and `C-o`
+  to `step-back`, where sections 9 to 12 name them the other way round. Read
+  those sections with the keys exchanged.
+- **Why:** the owner found the bindings backwards.
+- **Decisions inside the shape:**
+  - **`[C-i]` stays the key bound only on an entry line**, so `TAB` keeps its
+    meaning off an entry line.

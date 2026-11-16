@@ -5225,8 +5225,8 @@ The success is empty; the error is one of the four handover arms."
   "Encode FindEntryNeighborRequest from plist REQUEST.
 \(:workspace REF :label LABEL :direction DIRECTION): DIRECTION (:arm :next)
 for the node below (`o'), (:arm :previous) for the node above (`O') or the node
-`C-i' steps back to, or (:arm :following) for the node read after it
-\(`C-o').  All three keys are required."
+`C-o' steps back to, or (:arm :following) for the node read after it
+\(`C-i').  All three keys are required."
   (let ((message "FindEntryNeighborRequest"))
     (list (cons 'workspace
                 (agent-repl-wire-encode-workspace-ref

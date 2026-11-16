@@ -96,7 +96,7 @@ export type EntryNeighborDirection = Message<"agentrepl.v1.EntryNeighborDirectio
   } | {
     /**
      * The node a line opened above the entry line answers (`O`), and the
-     * node the entry answers instead once it steps back (`C-i`).
+     * node the entry answers instead once it steps back (`C-o`).
      *
      * @generated from field: agentrepl.v1.EntryNeighborPrevious previous = 2;
      */
@@ -104,7 +104,7 @@ export type EntryNeighborDirection = Message<"agentrepl.v1.EntryNeighborDirectio
     case: "previous";
   } | {
     /**
-     * The node the entry answers instead once it steps on (`C-o`).
+     * The node the entry answers instead once it steps on (`C-i`).
      *
      * @generated from field: agentrepl.v1.EntryNeighborFollowing following = 4;
      */

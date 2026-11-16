@@ -672,7 +672,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (should (cl-some (lambda (m) (string-match-p "neighbor-unknown-arm ws=ws-1 arm=:mystery" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-entry-keys-are-bound ()
-  "`o'/`O' bind in command mode, `C-o'/`C-i' in command and insert mode, `M-j'/`M-k' in insert mode."
+  "`o'/`O' bind in command mode, `C-i'/`C-o' in command and insert mode, `M-j'/`M-k' in insert mode."
   (let (bound)
     (cl-letf (((symbol-function 'evil-define-key*)
                (lambda (state map &rest bindings) (push (list state (eq map agent-repl-input-mode-map) bindings) bound))))
@@ -680,9 +680,9 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (should (equal (nreverse bound)
                    (list (list 'normal t (list "o" #'agent-repl-prompt-entries-open-below
                                                "O" #'agent-repl-prompt-entries-open-above))
-                         (list '(normal insert) t (list (kbd "C-o") (agent-repl-prompt-entries--on-entry-binding
-                                                                    #'agent-repl-prompt-entries-step-on)))
                          (list '(normal insert) t (list [C-i] (agent-repl-prompt-entries--on-entry-binding
+                                                                    #'agent-repl-prompt-entries-step-on)))
+                         (list '(normal insert) t (list (kbd "C-o") (agent-repl-prompt-entries--on-entry-binding
                                                               #'agent-repl-prompt-entries-step-back)))
                          (list 'insert t (list (kbd "M-j") (agent-repl-prompt-entries--on-entry-binding
                                                           #'agent-repl-prompt-entries-open-sibling-above)))
@@ -807,8 +807,8 @@ is recorded on `flashed'."
   '(:arm :success :value (:neighbor (:arm :none :value nil)))
   "The daemon naming no neighbor that way.")
 
-(ert-deftest agent-repl-test-prompt-entries-C-o-relabels-the-entry-to-the-following-node ()
-  "`C-o' on an entry relabels it to the node read after its own, its words kept."
+(ert-deftest agent-repl-test-prompt-entries-C-i-relabels-the-entry-to-the-following-node ()
+  "`C-i' on an entry relabels it to the node read after its own, its words kept."
   (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.2")
     ;; Arrange
     (goto-char 10)
@@ -818,8 +818,8 @@ is recorded on `flashed'."
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
                    '("1.2 - yes" (:arm :following) "1.1")))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-i-relabels-the-entry-to-the-previous-node ()
-  "`C-i' on an entry relabels it to the node `O' would answer, its words kept."
+(ert-deftest agent-repl-test-prompt-entries-C-o-relabels-the-entry-to-the-previous-node ()
+  "`C-o' on an entry relabels it to the node `O' would answer, its words kept."
   (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1")
     ;; Arrange
     (goto-char 10)
@@ -829,7 +829,7 @@ is recorded on `flashed'."
     (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
                    '("1 - yes" (:arm :previous) "1.1")))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-o-keeps-point-after-the-label ()
+(ert-deftest agent-repl-test-prompt-entries-C-i-keeps-point-after-the-label ()
   "Point after the label stays as far from the line's end; in the label it goes to the new label's end."
   ;; Each case: where point stands in `1.1 - yes', and its column after the
   ;; label grows by two: the line's end, just past the separator, inside `1.1'.
@@ -842,8 +842,8 @@ is recorded on `flashed'."
       ;; Assert
       (should (equal (list (car case) (- (point) (line-beginning-position))) case)))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-o-at-the-last-node-keeps-the-label-and-says-so ()
-  "The tree's last node keeps its label under `C-o'; the composer flashes why, recorded at info."
+(ert-deftest agent-repl-test-prompt-entries-C-i-at-the-last-node-keeps-the-label-and-says-so ()
+  "The tree's last node keeps its label under `C-i'; the composer flashes why, recorded at info."
   (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
     ;; Arrange
     (goto-char 10)
@@ -854,8 +854,8 @@ is recorded on `flashed'."
                    '("1.1 - yes" (("ws-1" "1.1 is the last node to answer")))))
     (should (cl-some (lambda (m) (string-match-p "step-none ws=ws-1 label=1.1 way=:following" m)) logs))))
 
-(ert-deftest agent-repl-test-prompt-entries-C-i-at-the-first-node-keeps-the-label-and-says-so ()
-  "The tree's first node keeps its label under `C-i'; the composer flashes why, recorded at info."
+(ert-deftest agent-repl-test-prompt-entries-C-o-at-the-first-node-keeps-the-label-and-says-so ()
+  "The tree's first node keeps its label under `C-o'; the composer flashes why, recorded at info."
   (agent-repl-test-prompt-entries--stepping agent-repl-test-prompt-entries--none
     ;; Arrange
     (goto-char 10)
@@ -957,9 +957,9 @@ is recorded on `flashed'."
                      case)))))
 
 (ert-deftest agent-repl-test-prompt-entries-entry-keys-fall-through-off-an-entry-line ()
-  "Looked up through the active keymaps, `C-o' and `C-i' step on an entry line and keep their own bindings elsewhere."
-  (pcase-dolist (`(,key ,command) `((,(kbd "C-o") agent-repl-prompt-entries-step-on)
-                                    ([C-i] agent-repl-prompt-entries-step-back)))
+  "Looked up through the active keymaps, `C-i' and `C-o' step on an entry line and keep their own bindings elsewhere."
+  (pcase-dolist (`(,key ,command) `(([C-i] agent-repl-prompt-entries-step-on)
+                                    (,(kbd "C-o") agent-repl-prompt-entries-step-back)))
     (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1.1.1")
       ;; Arrange: the composer's map above a map binding the key as it always was.
       (let ((ours (make-sparse-keymap))

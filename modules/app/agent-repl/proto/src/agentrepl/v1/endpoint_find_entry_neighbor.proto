@@ -50,9 +50,9 @@ message EntryNeighborDirection {
     // The node a line opened below the entry line answers (`o`).
     EntryNeighborNext next = 1;
     // The node a line opened above the entry line answers (`O`), and the
-    // node the entry answers instead once it steps back (`C-i`).
+    // node the entry answers instead once it steps back (`C-o`).
     EntryNeighborPrevious previous = 2;
-    // The node the entry answers instead once it steps on (`C-o`).
+    // The node the entry answers instead once it steps on (`C-i`).
     EntryNeighborFollowing following = 4;
   }
   // `first_child` (3) was `C-o`'s way until `C-o` went on past a childless

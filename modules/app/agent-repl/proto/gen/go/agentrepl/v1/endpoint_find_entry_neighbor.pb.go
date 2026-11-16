@@ -202,12 +202,12 @@ type EntryNeighborDirection_Next struct {
 
 type EntryNeighborDirection_Previous struct {
 	// The node a line opened above the entry line answers (`O`), and the
-	// node the entry answers instead once it steps back (`C-i`).
+	// node the entry answers instead once it steps back (`C-o`).
 	Previous *EntryNeighborPrevious `protobuf:"bytes,2,opt,name=previous,proto3,oneof"`
 }
 
 type EntryNeighborDirection_Following struct {
-	// The node the entry answers instead once it steps on (`C-o`).
+	// The node the entry answers instead once it steps on (`C-i`).
 	Following *EntryNeighborFollowing `protobuf:"bytes,4,opt,name=following,proto3,oneof"`
 }
 
