@@ -691,6 +691,20 @@ still says where the question stands."
     (agent-repl-verb-interrupt "ws-one")
     (should (agent-repl-test-verbs--messaged-p "3 agents also ended"))))
 
+(ert-deftest agent-repl-verbs-interrupt-revisions-stopped-is-stated ()
+  "A stop that ended response rewrites says so, never that a turn stopped."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-revisions :value (:count 2))))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "response updates stopped"))))
+
+(ert-deftest agent-repl-verbs-interrupt-one-revision-stopped-is-singular ()
+  "A stop that ended one response rewrite names it in the singular."
+  (agent-repl-test-verbs--with
+      '((:interrupt . (:response (:arm :success :value (:arm :interrupted-revisions :value (:count 1))))))
+    (agent-repl-verb-interrupt "ws-one")
+    (should (agent-repl-test-verbs--messaged-p "response update stopped"))))
+
 (ert-deftest agent-repl-verbs-interrupt-confirm-yes-resends-with-confirm-agents ()
   "Confirming the challenge re-sends the identical stop with `confirm_agents'."
   (agent-repl-test-verbs--with nil

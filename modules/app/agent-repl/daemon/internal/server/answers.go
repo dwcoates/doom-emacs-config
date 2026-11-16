@@ -82,6 +82,12 @@ func (s *server) interruptMergeTab(ctx context.Context, rpc string, subject reso
 		success.Outcome = &agentreplv1.InterruptSuccess_NothingRunning{NothingRunning: &agentreplv1.InterruptNothingRunning{}}
 	}
 	subject.Log.Debug("daemon.server.interrupt", "answered what the merge-tab interrupt stopped", dlog.Context{"running": running})
+	return interruptSucceeded(resp, success)
+}
+
+// interruptSucceeded is THE ONE way Interrupt answers a stop: RESP carrying
+// SUCCESS, whatever the stop did.
+func interruptSucceeded(resp *agentreplv1.InterruptResponse, success *agentreplv1.InterruptSuccess) (*connect.Response[agentreplv1.InterruptResponse], error) {
 	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
 	return connect.NewResponse(resp), nil
 }
@@ -146,6 +152,17 @@ func (s *server) Interrupt(
 	var unanswered *rollbackPlan
 	switch {
 	case req.Msg.GetTurn() != nil:
+		// A RESPONSE REVISION IS STOPPED FIRST, and nothing else is: a turn
+		// in flight runs on, and the next press stops it.
+		if stopped := s.deps.Revisions.Stop(subject.Record.ID); stopped > 0 {
+			subject.Log.Debug("daemon.server.interrupt", "answered that the stop stopped the workspace's response revisions",
+				dlog.Context{"revisions": stopped})
+			return interruptSucceeded(resp, &agentreplv1.InterruptSuccess{
+				Outcome: &agentreplv1.InterruptSuccess_InterruptedRevisions{
+					InterruptedRevisions: &agentreplv1.InterruptedRevisions{Count: int64(stopped)},
+				},
+			})
+		}
 		target.Turn = true
 		if req.Msg.GetTurn().GetRollBackUnanswered() != nil {
 			// A PROMPT HELD BEHIND THE RUNNING TURN THAT NOTHING HAS ANSWERED
@@ -230,8 +247,7 @@ func (s *server) Interrupt(
 	subject.Log.Debug("daemon.server.interrupt", "answered what the interrupt stopped",
 		dlog.Context{"nothing_running": outcome.NothingRunning, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount,
 			"rolled_back": outcome.RolledBack, "rollback_refused": outcome.RollbackRefused != nil})
-	resp.Result = &agentreplv1.InterruptResponse_Success{Success: success}
-	return connect.NewResponse(resp), nil
+	return interruptSucceeded(resp, success)
 }
 
 // rolledBackHeld answers a turn stop that took back the held prompt HELD
@@ -240,10 +256,7 @@ func (s *server) Interrupt(
 func (s *server) rolledBackHeld(log dlog.Logger, held wsm.HeldPrompt, resp *agentreplv1.InterruptResponse) (*connect.Response[agentreplv1.InterruptResponse], error) {
 	log.Debug("daemon.server.interrupt", "answered that the stop took back a held prompt and left the turn running",
 		dlog.Context{"turn": string(held.Turn)})
-	resp.Result = &agentreplv1.InterruptResponse_Success{Success: &agentreplv1.InterruptSuccess{
-		Outcome: rolledBackUnanswered(held.Said),
-	}}
-	return connect.NewResponse(resp), nil
+	return interruptSucceeded(resp, &agentreplv1.InterruptSuccess{Outcome: rolledBackUnanswered(held.Said)})
 }
 
 // rolledBackUnanswered is the ONE answer to a stop that took a prompt back,

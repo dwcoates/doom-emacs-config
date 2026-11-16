@@ -3103,6 +3103,17 @@ func (f *fakeFeed) ReadNewest(_ context.Context, ws ids.WorkspaceID) error {
 type fakeRevisions struct {
 	asks []revision.Ask
 	err  error
+	// running is how many revisions Stop finds and stops.
+	running int
+	// stops records the workspace of every Stop.
+	stops []ids.WorkspaceID
+}
+
+func (f *fakeRevisions) Stop(ws ids.WorkspaceID) int {
+	f.stops = append(f.stops, ws)
+	stopped := f.running
+	f.running = 0
+	return stopped
 }
 
 func (f *fakeRevisions) Revise(_ ids.WorkspaceID, ask revision.Ask) error {

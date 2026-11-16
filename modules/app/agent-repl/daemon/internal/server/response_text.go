@@ -30,6 +30,9 @@ type Revisions interface {
 	// revision.ErrNotRevisable refuses a row that is no settled final
 	// response.
 	Revise(ws ids.WorkspaceID, ask revision.Ask) error
+	// Stop stops the workspace's running and queued revisions, answering how
+	// many it stopped (a turn stop, agentrepl.v1.InterruptTurn).
+	Stop(ws ids.WorkspaceID) int
 }
 
 // responseHighlight is one workspace's held highlight.

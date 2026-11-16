@@ -27,6 +27,13 @@
 // 2026-10-30): the lane raises the status fact when it starts and lowers it
 // when it drains, both under the lane's own lock, so a lane started just as
 // another drained can never have its raise undone by the old lane's lower.
+//
+// A TURN STOP STOPS A WORKSPACE'S REVISIONS (agentrepl.v1.InterruptTurn):
+// Stop cancels the running one and drops every one queued behind it, and each
+// stopped response's revision state is cleared, so the response stands as it
+// was. The running revision's own outcome is written under the same lock Stop
+// clears under, and a stopped run writes none, so a stop is never undone by a
+// failure the cancel itself caused.
 package revision
 
 import (
@@ -62,6 +69,7 @@ const Brief = "response-revision-from-highlight"
 const (
 	opRevise = "daemon.revision.revise"
 	opRun    = "daemon.revision.run"
+	opStop   = "daemon.revision.stop"
 )
 
 // Shims finds a workspace's live shim.
@@ -127,11 +135,30 @@ type Ask struct {
 // response.
 var ErrNotRevisable = fmt.Errorf("the highlighted row is not a settled final response")
 
+// errStopped is the cause a stopped revision's context is cancelled with.
+var errStopped = errors.New("the revision was stopped by a turn stop")
+
+// lane is one workspace's revisions: the one running and those queued behind
+// it. A lane exists exactly while its drain runs.
+type lane struct {
+	// queued are the revisions not yet started, in the order asked.
+	queued []Ask
+	// running is the revision the drain is running, nil between two.
+	running *runningAsk
+}
+
+// runningAsk is the revision a lane runs, with the cancel that stops it.
+type runningAsk struct {
+	ask    Ask
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+}
+
 // Reviser runs every workspace's revisions, one lane per workspace.
 type Reviser struct {
 	deps  Deps
 	mu    sync.Mutex
-	lanes map[ids.WorkspaceID][]Ask
+	lanes map[ids.WorkspaceID]*lane
 	// done, when set, is told each time a lane finishes a revision (tests).
 	done func()
 }
@@ -142,7 +169,7 @@ func New(deps Deps) *Reviser {
 	if deps.Bound <= 0 || deps.Owed == nil || deps.Now == nil {
 		panic(fmt.Sprintf("revision: New needs a positive Bound, Owed and Now (bound %v, owed set %v, now set %v)", deps.Bound, deps.Owed != nil, deps.Now != nil))
 	}
-	return &Reviser{deps: deps, lanes: map[ids.WorkspaceID][]Ask{}}
+	return &Reviser{deps: deps, lanes: map[ids.WorkspaceID]*lane{}}
 }
 
 // Revise marks the response pending and queues ASK on the workspace's lane.
@@ -152,56 +179,127 @@ func (r *Reviser) Revise(ws ids.WorkspaceID, ask Ask) error {
 	if _, ok := r.deps.Feed.RevisableFinalResponse(ws, ask.Row); !ok {
 		return ErrNotRevisable
 	}
+	// PENDING IS MARKED UNDER THE LANE'S LOCK with the ask queued, so a Stop
+	// either sees the ask and clears its mark or runs before both.
+	r.mu.Lock()
 	r.deps.Feed.SetResponseRevision(ws, ask.Row, &frontendv1.FeedResponseRevision{
 		State: &frontendv1.FeedResponseRevision_Pending{Pending: &frontendv1.FeedResponseRevisionPending{}},
 	})
-	r.mu.Lock()
-	queued := r.lanes[ws]
-	r.lanes[ws] = append(queued, ask)
-	start := len(queued) == 0
-	if start {
+	l, draining := r.lanes[ws]
+	if !draining {
+		l = &lane{}
+		r.lanes[ws] = l
 		r.deps.Status.SetUpdating(ws, true)
 	}
+	ahead := len(l.queued)
+	if l.running != nil {
+		ahead++
+	}
+	l.queued = append(l.queued, ask)
 	r.mu.Unlock()
 	r.deps.Log.Info(opRevise, "a revision of a final response was asked for", dlog.Context{
-		"workspace": string(ws), "row": ask.Row.GetValue(), "words": len(ask.Words), "queued_ahead": len(queued),
+		"workspace": string(ws), "row": ask.Row.GetValue(), "words": len(ask.Words), "queued_ahead": ahead,
 	})
-	if start {
+	if !draining {
 		inflight.Go(func() { r.drain(ws) })
 	}
 	return nil
 }
 
+// Stop stops WS's revisions: the running one is cancelled and every queued
+// one dropped, and each one's response has its revision state cleared. It
+// answers how many it stopped; 0 when none runs, including one already
+// stopped whose call has not yet returned.
+func (r *Reviser) Stop(ws ids.WorkspaceID) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	l, ok := r.lanes[ws]
+	if !ok {
+		return 0
+	}
+	stopped := l.queued
+	l.queued = nil
+	if run := l.running; run != nil && run.ctx.Err() == nil {
+		run.cancel(errStopped)
+		stopped = append([]Ask{run.ask}, stopped...)
+	}
+	for _, ask := range stopped {
+		r.deps.Feed.SetResponseRevision(ws, ask.Row, nil)
+	}
+	if len(stopped) > 0 {
+		r.deps.Log.Info(opStop, "a turn stop stopped the workspace's response revisions; each response stands as it was", dlog.Context{
+			"workspace": string(ws), "stopped": len(stopped), "running": l.running != nil,
+		})
+	}
+	return len(stopped)
+}
+
 // drain runs WS's lane until it is empty.
 func (r *Reviser) drain(ws ids.WorkspaceID) {
 	for {
-		r.mu.Lock()
-		next := r.lanes[ws][0]
-		r.mu.Unlock()
-		r.run(ws, next)
-		r.mu.Lock()
-		rest := r.lanes[ws][1:]
-		if len(rest) == 0 {
-			delete(r.lanes, ws)
-			r.deps.Status.SetUpdating(ws, false)
-		} else {
-			r.lanes[ws] = rest
+		run, ok := r.take(ws)
+		if !ok {
+			return
 		}
-		r.mu.Unlock()
+		r.run(run.ctx, ws, run.ask)
+		run.cancel(nil)
+		drained := r.finish(ws)
 		if r.done != nil {
 			r.done()
 		}
-		if len(rest) == 0 {
+		if drained {
 			return
 		}
 	}
 }
 
+// take starts the next queued revision of WS's lane, or ends the lane when
+// none is queued (a Stop dropped them all).
+func (r *Reviser) take(ws ids.WorkspaceID) (*runningAsk, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	l := r.lanes[ws]
+	if len(l.queued) == 0 {
+		r.end(ws)
+		return nil, false
+	}
+	ctx, cancel := context.WithCancelCause(r.deps.Life)
+	l.running = &runningAsk{ask: l.queued[0], ctx: ctx, cancel: cancel}
+	l.queued = l.queued[1:]
+	return l.running, true
+}
+
+// finish records that WS's running revision ended, ending the lane when
+// nothing is queued behind it. It answers whether the lane ended.
+func (r *Reviser) finish(ws ids.WorkspaceID) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	l := r.lanes[ws]
+	l.running = nil
+	if len(l.queued) > 0 {
+		return false
+	}
+	r.end(ws)
+	return true
+}
+
+// end removes WS's lane and lowers its updating fact. The caller holds r.mu.
+func (r *Reviser) end(ws ids.WorkspaceID) {
+	delete(r.lanes, ws)
+	r.deps.Status.SetUpdating(ws, false)
+}
+
 // run runs one revision to its outcome, marking the response failed on any
-// failure.
-func (r *Reviser) run(ws ids.WorkspaceID, ask Ask) {
+// failure. A revision CTX was stopped on marks nothing: Stop cleared it.
+func (r *Reviser) run(ctx context.Context, ws ids.WorkspaceID, ask Ask) {
 	log := r.deps.Log.With(dlog.Context{"workspace": string(ws), "row": ask.Row.GetValue()})
 	fail := func(cause, arm string) {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		if errors.Is(context.Cause(ctx), errStopped) {
+			log.Info(opRun, "a stopped revision ended; the response stands as it was", dlog.Context{"cause": cause, "arm": arm})
+			return
+		}
 		log.Error(opRun, "a final response's revision failed; the response stands as it was", dlog.Context{"cause": cause, "arm": arm})
 		r.deps.Feed.SetResponseRevision(ws, ask.Row, &frontendv1.FeedResponseRevision{
 			State: &frontendv1.FeedResponseRevision_Failed{Failed: &frontendv1.FeedResponseRevisionFailed{Text: "Couldn't revise: " + cause}},
@@ -225,15 +323,17 @@ func (r *Reviser) run(ws ids.WorkspaceID, ask Ask) {
 		return
 	}
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(r.deps.Life, r.deps.Bound)
+	// THE CALL IS BOUNDED UNDER THE LANE'S STOP, so a Stop or the bound
+	// ends it, whichever comes first.
+	call, cancel := context.WithTimeout(ctx, r.deps.Bound)
 	defer cancel()
-	answer, err := client.ReviseResponse(ctx, &shimv1.ReviseResponseRequest{
+	answer, err := client.ReviseResponse(call, &shimv1.ReviseResponseRequest{
 		Response:    &conversationv1.AgentActivityId{Value: response.Unit},
 		Instruction: instruction,
 	})
 	elapsed := time.Since(started).Milliseconds()
 	if err != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		if errors.Is(call.Err(), context.DeadlineExceeded) {
 			fail(fmt.Sprintf("the session did not answer within %v (its healthy worst case was 53.5s on 2026-11-13; it ran %dms)", r.deps.Bound, elapsed), "timed_out")
 			return
 		}

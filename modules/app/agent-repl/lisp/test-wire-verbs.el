@@ -4182,6 +4182,19 @@ arm, never an error."
                     (agent-repl-test-wire-verbs--parse "{\"success\":{\"interruptedDetached\":{\"count\":3}}}"))
                    '(:arm :success :value (:arm :interrupted-detached :value (:count 3)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-interrupt-response-interrupted-revisions ()
+  "The interrupted_revisions arm carries how many revisions the stop ended."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-interrupt-response
+                    (agent-repl-test-wire-verbs--parse "{\"success\":{\"interruptedRevisions\":{\"count\":2}}}"))
+                   '(:arm :success :value (:arm :interrupted-revisions :value (:count 2)))))))
+
+(ert-deftest agent-repl-test-wire-verbs-interrupt-interrupted-revisions-rejects-unknown-keys ()
+  "An InterruptedRevisions carrying a key the schema does not declare is a breach."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-interrupt-interrupted-revisions
+                   (agent-repl-test-wire-verbs--parse "{\"count\":1,\"bogus\":1}")))))
+
 (ert-deftest agent-repl-test-wire-verbs-interrupt-success-unset-outcome ()
   "A success with no outcome arm set is a contract breach."
   (agent-repl-test-wire-verbs--with-common
@@ -4255,12 +4268,12 @@ Emacs encodes two of them and refuses the FeedId-bearing `detached' and
                  (sort (list "turn" "detached" "allAgents" "mergeTab") #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-success-arms-pinned ()
-  "InterruptSuccess's outcome oneof has exactly the five arms decoded here."
+  "InterruptSuccess's outcome oneof has exactly the six arms decoded here."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_interrupt.pb.go" "InterruptSuccess")
                        #'string<)
                  (sort (list "interruptedTurn" "interruptedDetached" "nothingRunning"
-                             "mergeQueueOffered" "rolledBackUnanswered")
+                             "mergeQueueOffered" "rolledBackUnanswered" "interruptedRevisions")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-interrupt-error-arms-pinned ()

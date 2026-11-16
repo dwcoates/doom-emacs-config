@@ -4702,6 +4702,13 @@ COUNT is how many detached agents the stop reached."
     (agent-repl-wire-verbs--check-keys message json '(count))
     (list :count (agent-repl-wire--decode-int64 message 'count json))))
 
+(defun agent-repl-wire-decode-interrupt-interrupted-revisions (json)
+  "Decode InterruptedRevisions from JSON into a plist (`:count').
+COUNT is how many response revisions the turn stop ended."
+  (let ((message "InterruptedRevisions"))
+    (agent-repl-wire-verbs--check-keys message json '(count))
+    (list :count (agent-repl-wire--decode-int64 message 'count json))))
+
 (defun agent-repl-wire-decode-interrupt-nothing-running-rollback-immediate (json)
   "Decode InterruptNothingRunningRollbackImmediate from JSON into (:token TOKEN).
 TOKEN is a rollback plan's opaque token, handed to RollBack unchanged."
@@ -4740,7 +4747,7 @@ is one of them, not a failure smuggled into success."
   (let ((message "InterruptSuccess"))
     (agent-repl-wire-verbs--check-keys
      message json '(interruptedTurn interruptedDetached nothingRunning mergeQueueOffered
-                    rolledBackUnanswered))
+                    rolledBackUnanswered interruptedRevisions))
     (agent-repl-wire-verbs--decode-oneof
      message "outcome" json
      (list (list 'interruptedTurn :interrupted-turn
@@ -4752,7 +4759,9 @@ is one of them, not a failure smuggled into success."
            (list 'mergeQueueOffered :merge-queue-offered
                  (agent-repl-wire-verbs--empty-arm "InterruptMergeQueueOffered"))
            (list 'rolledBackUnanswered :rolled-back-unanswered
-                 #'agent-repl-wire-decode-interrupt-rolled-back-unanswered)))))
+                 #'agent-repl-wire-decode-interrupt-rolled-back-unanswered)
+           (list 'interruptedRevisions :interrupted-revisions
+                 #'agent-repl-wire-decode-interrupt-interrupted-revisions)))))
 
 (defun agent-repl-wire-decode-interrupt-confirm-required (json)
   "Decode InterruptConfirmRequired from JSON into a plist (`:live-agent-count').

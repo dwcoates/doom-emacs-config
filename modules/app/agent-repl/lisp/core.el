@@ -3291,6 +3291,19 @@ side never spell the same span two ways."
      ((< seconds 86400) (format "%dh ago" (/ seconds 3600)))
      (t (format "%dd ago" (/ seconds 86400))))))
 
+;;;; ---- User-facing copy: a count of something ----
+
+(defun agent-repl-plural-noun (n one &optional many)
+  "Return ONE when N is 1, else MANY, which defaults to ONE with an \"s\".
+THE ONE way Emacs words a count's noun, so no message spells the
+singular-or-s rule for itself and gets it wrong (\"1 agents\", \"0 agent\")."
+  (if (eql n 1) one (or many (concat one "s"))))
+
+(defun agent-repl-count-noun (n one &optional many)
+  "Return N followed by its noun: \"1 agent\", \"3 agents\", \"0 agents\".
+ONE and MANY are as `agent-repl-plural-noun' takes them."
+  (format "%d %s" n (agent-repl-plural-noun n one many)))
+
 ;;;; ---- User-facing copy: the annotation column ----
 
 (defun agent-repl-annotation-column (names gap)

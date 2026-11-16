@@ -507,7 +507,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
      "tells the user the spell checker stopped answering and was reset")
     ("status.el" agent-repl-tabbar-apply-row-count
-     "agent-repl: tab-bar set to %d line%s on this frame"
+     "agent-repl: tab-bar set to %s on this frame"
      "confirms the interactive tab-bar layout command")
     ("terminal.el" agent-repl-terminal-finished
      "agent-repl: the command exited with status %s; SPC o t shows its output"
@@ -556,7 +556,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their interrupt stopped the turn but could not roll its prompt back, and why")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: nothing to interrupt"
      "tells the user there was no running turn to interrupt")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s agent%s also ended"
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: %s stopped"
+     "confirms the user's interrupt stopped the response updates and how many")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s also ended"
      "confirms the interrupt stopped the turn and how many agents it also ended")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: the interrupt answer could not be read"
      "tells the user the interrupt outcome could not be read")
@@ -7625,6 +7627,51 @@ A module with a PATH lookup of its own is a boundary the harness cannot guard."
             (should (equal (mapcar (lambda (r) (alist-get 'level r)) records) '("info")))
             (should (string-match-p "reverted to info"
                                     (alist-get 'message (car records))))))))))
+
+;;;; ---- Tests: a count of something ----
+
+(ert-deftest agent-repl-test-core-count-noun-of-one-is-singular ()
+  "Exactly one takes the singular."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 1 "agent") "1 agent")))
+
+(ert-deftest agent-repl-test-core-count-noun-of-many-adds-s ()
+  "More than one takes the noun with an s."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 3 "agent") "3 agents")))
+
+(ert-deftest agent-repl-test-core-count-noun-of-zero-is-plural ()
+  "Zero takes the plural, never the singular."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 0 "agent") "0 agents")))
+
+(ert-deftest agent-repl-test-core-count-noun-takes-an-irregular-plural ()
+  "A noun whose plural is no added s names it."
+  ;; Arrange, Act, Assert.
+  (should (equal (agent-repl-count-noun 2 "shell or agent" "shells and agents") "2 shells and agents")))
+
+(ert-deftest agent-repl-test-core-plural-noun-without-the-count ()
+  "The noun alone follows the same rule."
+  ;; Arrange, Act, Assert.
+  (should (equal (list (agent-repl-plural-noun 1 "update") (agent-repl-plural-noun 2 "update"))
+                 '("update" "updates"))))
+
+(ert-deftest agent-repl-test-core-no-source-hand-rolls-the-plural ()
+  "No source file spells the singular-or-s rule itself: every count's noun
+goes through `agent-repl-plural-noun'."
+  ;; Arrange.
+  (let* ((dir agent-repl-test-core--lisp-dir)
+         (sources (seq-remove (lambda (f) (string-prefix-p "test-" (file-name-nondirectory f)))
+                              (directory-files dir t "\\.el\\'")))
+         (hand-rolled (rx " 1) \"\" \"s\")")))
+    ;; Act.
+    (let ((offenders (seq-filter (lambda (f)
+                                   (with-temp-buffer
+                                     (insert-file-contents f)
+                                     (re-search-forward hand-rolled nil t)))
+                                 sources)))
+      ;; Assert.
+      (should (null (mapcar #'file-name-nondirectory offenders))))))
 
 ;;;; ---- Tests: how long ago ----
 

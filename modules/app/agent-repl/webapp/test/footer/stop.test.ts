@@ -117,6 +117,22 @@ describe("drawTurnStopControl", () => {
     expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("nothing running");
   });
 
+  it("notes a stop that ended one response update", async () => {
+    const h = harness({ interrupt: () => interruptSuccess("interruptedRevisions", 1n) });
+    const control = turnStop(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("stopped 1 response update");
+  });
+
+  it("notes a stop that ended several response updates by count", async () => {
+    const h = harness({ interrupt: () => interruptSuccess("interruptedRevisions", 2n) });
+    const control = turnStop(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("stopped 2 response updates");
+  });
+
   it("notes a stop that raised the merge-queue question — an ANSWER, not a refusal", async () => {
     const h = harness({ interrupt: () => interruptSuccess("mergeQueueOffered") });
     const control = turnStop(h.ctx);

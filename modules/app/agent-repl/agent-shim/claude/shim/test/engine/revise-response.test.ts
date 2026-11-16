@@ -131,6 +131,57 @@ describe("revising a response", () => {
     expect(answered.result.case).toBe("error");
     expect(h.written).toEqual([]);
   });
+
+  it("writes nothing when the caller goes away after the side query answered", async () => {
+    // Arrange
+    const h = harness(answering("revised"));
+    const caller = new AbortController();
+    const deps: ReviseResponseDeps = {
+      ...h.deps,
+      build: async (spec, prompt, controller) => {
+        const built = await h.deps.build(spec, prompt, controller);
+        caller.abort();
+        return built;
+      },
+    };
+    const mark = logSinkMark();
+    // Act
+    const answered = await reviseResponse(deps, request(), caller.signal);
+    // Assert
+    expect(answered.result).toMatchObject({ case: "error", value: { cause: { case: "vendorFailed", value: { detail: "the caller stopped the revision" } } } });
+    expect(h.written).toEqual([]);
+    expect(logRecordsSince(mark).filter((r) => r.level === "error")).toEqual([]);
+  });
+
+  it("aborts the side query at once when the caller is already gone", async () => {
+    // Arrange
+    const h = harness(answering("revised"));
+    const caller = new AbortController();
+    caller.abort();
+    // Act
+    await reviseResponse(h.deps, request(), caller.signal);
+    // Assert
+    expect(h.built[0]?.controller.signal.aborted).toBe(true);
+    expect(h.written).toEqual([]);
+  });
+
+  it("records a stopped revision without an error", async () => {
+    // Arrange
+    const query = new ScriptedQuery();
+    const h = harness(query);
+    const caller = new AbortController();
+    const mark = logSinkMark();
+    // Act
+    const pending = reviseResponse(h.deps, request(), caller.signal);
+    await Promise.resolve();
+    caller.abort();
+    query.fail(new Error("aborted"));
+    await pending;
+    // Assert
+    const records = logRecordsSince(mark);
+    expect(records.filter((r) => r.level === "error")).toEqual([]);
+    expect(records.map((r) => r.message)).toContain("the caller stopped the revision; no revision was written");
+  });
 });
 
 describe("a revision that cannot be written", () => {

@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"os"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -37,6 +39,119 @@ func TestInterruptAnswersNothingRunningAsASuccess(t *testing.T) {
 	}
 	if resp.Msg.GetSuccess().GetNothingRunning() == nil {
 		t.Fatalf("result = %v, want nothing_running", resp.Msg.GetResult())
+	}
+}
+
+// TestInterruptOfATurnStopsTheWorkspacesRevisionsFirst pins that a turn stop
+// with response revisions running stops those and nothing else: the verbs
+// never see the stop, so a turn in flight runs on.
+func TestInterruptOfATurnStopsTheWorkspacesRevisionsFirst(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Revisions.running = 2
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target: &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{
+				RollBackUnanswered: &agentreplv1.InterruptTurnRollBackUnanswered{},
+			}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetInterruptedRevisions(); got == nil || got.GetCount() != 2 {
+		t.Fatalf("result = %v, want interrupted_revisions count 2", resp.Msg.GetResult())
+	}
+	if h.Verbs.interruptTarget.Turn {
+		t.Fatalf("the verbs were asked to stop the turn %+v; the revisions are stopped instead", h.Verbs.interruptTarget)
+	}
+}
+
+// TestInterruptOfATurnWithNoRevisionStopsTheTurn pins that a turn stop finding
+// no revision goes on to stop the turn.
+func TestInterruptOfATurnWithNoRevisionStopsTheTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{Turn: true}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_Turn{Turn: &agentreplv1.InterruptTurn{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if len(h.Revisions.stops) != 1 || h.Revisions.stops[0] != testWorkspaceID {
+		t.Fatalf("revision stops = %v, want one for the workspace", h.Revisions.stops)
+	}
+	if !h.Verbs.interruptTarget.Turn || resp.Msg.GetSuccess().GetInterruptedTurn() == nil {
+		t.Fatalf("target = %+v, result = %v, want the turn stopped", h.Verbs.interruptTarget, resp.Msg.GetResult())
+	}
+}
+
+// TestInterruptOfAgentsLeavesRevisionsRunning pins that only the turn stop
+// reaches revisions: the fan-wide agent stop leaves them running.
+func TestInterruptOfAgentsLeavesRevisionsRunning(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Revisions.running = 1
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{DetachedCount: 1}
+
+	// Act.
+	_, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if len(h.Revisions.stops) != 0 {
+		t.Fatalf("revision stops = %v, want none", h.Revisions.stops)
+	}
+}
+
+// TestInterruptSucceededAnswersTheSuccessItIsGiven pins the one success
+// answer: the response carries exactly the success handed to it.
+func TestInterruptSucceededAnswersTheSuccessItIsGiven(t *testing.T) {
+	// Arrange.
+	success := &agentreplv1.InterruptSuccess{Outcome: &agentreplv1.InterruptSuccess_NothingRunning{NothingRunning: &agentreplv1.InterruptNothingRunning{}}}
+
+	// Act.
+	answered, err := interruptSucceeded(&agentreplv1.InterruptResponse{}, success)
+
+	// Assert.
+	if err != nil || answered.Msg.GetSuccess() != success {
+		t.Fatalf("interruptSucceeded() = %v, %v, want the given success", answered.Msg, err)
+	}
+}
+
+// TestInterruptAnswersEverySuccessThroughInterruptSucceeded pins that no
+// Interrupt site hand-builds its success answer.
+func TestInterruptAnswersEverySuccessThroughInterruptSucceeded(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("answers.go")
+	if err != nil {
+		t.Fatalf("read answers.go: %v", err)
+	}
+
+	// Act.
+	sites := strings.Count(string(src), "InterruptResponse_Success{")
+
+	// Assert.
+	if sites != 1 {
+		t.Fatalf("answers.go builds InterruptResponse_Success at %d sites, want only interruptSucceeded", sites)
 	}
 }
 
