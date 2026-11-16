@@ -607,11 +607,12 @@ func (v *verbs) tellRequesterDequeued(ctx context.Context, log dlog.Logger, spec
 	if err != nil {
 		return
 	}
-	submission := deferredBrief(*spec.Requester, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE)
-	if _, err := v.queueBrief(ctx, log, opPendingCreate, "the requesting workspace's", "the held create's outcome", submission); err != nil {
+	turn, _, err := v.queueDeferredBrief(ctx, log, opPendingCreate, *spec.Requester, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		"the requesting workspace's", "the held create's outcome")
+	if err != nil {
 		return
 	}
-	log.Info(opPendingCreate, "told the requesting workspace how the held create ended", dlog.Context{"turn": string(submission.Turn)})
+	log.Info(opPendingCreate, "told the requesting workspace how the held create ended", dlog.Context{"turn": string(turn)})
 }
 
 // entryProgress relays a pending create's stages to every caller attached to

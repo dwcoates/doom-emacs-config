@@ -218,11 +218,12 @@ func (v *verbs) tellSelfCloseRefused(ctx context.Context, log dlog.Logger, ws id
 	if err != nil {
 		return
 	}
-	submission := deferredBrief(ws, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE)
-	if _, err := v.queueBrief(ctx, log, opClose, "the workspace's", "the refused self-close's notice", submission); err != nil {
+	turn, _, err := v.queueDeferredBrief(ctx, log, opClose, ws, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		"the workspace's", "the refused self-close's notice")
+	if err != nil {
 		return
 	}
-	log.Info(opClose, "told the workspace its close was refused", dlog.Context{"turn": string(submission.Turn)})
+	log.Info(opClose, "told the workspace its close was refused", dlog.Context{"turn": string(turn)})
 }
 
 // turnRunning reports whether a turn runs in WS now.

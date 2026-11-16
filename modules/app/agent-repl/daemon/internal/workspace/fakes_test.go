@@ -357,9 +357,9 @@ type fakeDB struct {
 	// noOpenChildrenAsked every workspace it was asked about.
 	noOpenChildrenErr   error
 	noOpenChildrenAsked []ids.WorkspaceID
-	priorities   map[ids.WorkspaceID]*wsm.Priority
-	attention    map[ids.WorkspaceID]bool
-	currentAt    time.Time
+	priorities          map[ids.WorkspaceID]*wsm.Priority
+	attention           map[ids.WorkspaceID]bool
+	currentAt           time.Time
 	// keptHistorySelects are the selections SetCurrentKeepingLastSelected
 	// recorded, in order.
 	keptHistorySelects []ids.WorkspaceID
