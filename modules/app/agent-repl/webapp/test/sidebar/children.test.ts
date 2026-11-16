@@ -55,7 +55,7 @@ describe("placeChildren", () => {
     // Arrange
     const roster = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", "roster.ts"), "utf8"));
     const sidebar = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", "sidebar.ts"), "utf8"));
-    const draw = roster.slice(roster.indexOf("draw(u: WorkspaceRoster): HTMLElement {"), roster.indexOf("dispose(): void {", roster.indexOf("draw(u: WorkspaceRoster)")));
+    const draw = roster.slice(roster.indexOf("draw(u: RosterStreams): HTMLElement {"), roster.indexOf("dispose(): void {", roster.indexOf("draw(u: RosterStreams)")));
     const drawNow = sidebar.slice(sidebar.indexOf("function drawRosterNow("), sidebar.indexOf("return {", sidebar.indexOf("function drawRosterNow(")));
 
     // Act / Assert

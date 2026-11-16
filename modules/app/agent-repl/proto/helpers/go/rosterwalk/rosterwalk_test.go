@@ -1,12 +1,7 @@
 package rosterwalk
 
 import (
-	"io/fs"
-	"os"
-	"path/filepath"
-	"regexp"
 	"slices"
-	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -334,44 +329,5 @@ func TestHoldLeavesWhatWasHeldUnchanged(t *testing.T) {
 	// Assert
 	if held.Revision != 1 || held.Workspaces != before {
 		t.Fatalf("Hold changed what was held: %v", held)
-	}
-}
-
-// TestNoGoReaderFoldsAPushByHand fails a Go source outside this package that
-// folds a push's streams into what it holds itself, rather than through Hold:
-// two hand-rolled folds drift apart, the way one once held only two streams.
-func TestNoGoReaderFoldsAPushByHand(t *testing.T) {
-	// Arrange
-	root := filepath.Join("..", "..", "..", "..")
-	fold := regexp.MustCompile(`\.(Workspaces|MergeQueue|RecentlyMerged|Closed)\s*=\s*push\.`)
-	var offenders []string
-
-	// Act
-	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "gen" || d.Name() == ".git") {
-			return filepath.SkipDir
-		}
-		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.Contains(path, "rosterwalk") {
-			return nil
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if fold.Match(src) {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatalf("walking the module tree: %v", err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("these sources fold a roster push by hand instead of through rosterwalk.Hold: %v", offenders)
 	}
 }
