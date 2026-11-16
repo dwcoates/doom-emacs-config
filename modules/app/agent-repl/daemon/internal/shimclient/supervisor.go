@@ -606,9 +606,16 @@ func (c *client) abandonBringUp(ctx context.Context, cause error) {
 		c.cancelMonitor()
 		return
 	}
-	c.log.Warn("daemon.shimclient.spawn", "bring-up failed; stopping the spawned shim", dlog.Context{
-		"pid": c.PID(), "error": cause.Error(),
-	})
+	// A CANCELLED BRING-UP WAS WITHDRAWN BY WHOEVER ASKED FOR IT (a daemon
+	// handing the workspace to its successor cancels the open it was serving):
+	// nothing about the shim failed, so the stop is recorded at INFO. A
+	// deadline is still a failure, because the shim was too slow to come up.
+	fields := dlog.Context{"pid": c.PID(), "error": cause.Error()}
+	if errors.Is(cause, context.Canceled) {
+		c.log.Info("daemon.shimclient.spawn", "the bring-up was cancelled; stopping the spawned shim", fields)
+	} else {
+		c.log.Warn("daemon.shimclient.spawn", "bring-up failed; stopping the spawned shim", fields)
+	}
 	// THE ABANDONMENT GETS ITS OWN BUDGET, DETACHED FROM THE BRING-UP'S. The
 	// commonest reason a bring-up fails is that ITS context ended, and a kill
 	// handed that same dead context would SIGKILL a shim the grace would have

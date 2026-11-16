@@ -161,3 +161,56 @@ func TestASpawnRefusedByAStandingDownSupervisorIsNotAFailure(t *testing.T) {
 		}
 	}
 }
+
+// A BRING-UP ITS CALLER CANCELLED is withdrawn, not failed: a daemon handing
+// the workspace to its successor cancels the open it was serving (the
+// 2026-11-16 deploy's keepalive-warmth-cap), so no fault is filed and no ERROR
+// recorded, while a spawn that failed for its own reason still files both.
+func TestABringUpCancelledByItsCallerIsNotAFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		spawnErr  error
+		cancel    bool
+		wantFault int
+		wantError bool
+	}{
+		{name: "the caller cancelled the bring-up", spawnErr: context.Canceled, cancel: true},
+		{name: "a cancellation the caller did not ask for", spawnErr: context.Canceled, wantFault: 1, wantError: true},
+		{name: "a spawn that failed on its own", spawnErr: errors.New("exec: node: not found"), wantFault: 1, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			f.supervisor.onSpawn = func() {
+				if tt.cancel {
+					cancel()
+				}
+			}
+			f.supervisor.spawnErr = tt.spawnErr
+
+			// Act.
+			err := f.fleet.Start(ctx, ws.ID)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("Start = nil, want the bring-up's refusal")
+			}
+			if got := openKinds(f)[health.KindShimStartFailed]; got != tt.wantFault {
+				t.Fatalf("shim_start_failed faults = %d, want %d", got, tt.wantFault)
+			}
+			sawError := false
+			for _, r := range f.log.logger.Records() {
+				if r.Level == dlog.LevelError {
+					sawError = true
+				}
+			}
+			if sawError != tt.wantError {
+				t.Fatalf("an ERROR recorded = %t, want %t: %+v", sawError, tt.wantError, f.log.logger.Records())
+			}
+		})
+	}
+}
