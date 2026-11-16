@@ -1776,18 +1776,21 @@ func TestADeployInstallsAWifiHelperBuiltFromOtherSources(t *testing.T) {
 
 func TestADeployThatInstallsAWifiHelperStopsTheReplacedBuildsAsks(t *testing.T) {
 	cases := []struct {
-		name       string
-		stopped    bool
-		wantRecord bool
+		name        string
+		stopped     bool
+		wantMessage string
 	}{
-		{name: "an ask that was waiting is stopped and recorded", stopped: true, wantRecord: true},
-		{name: "no ask waiting records nothing", stopped: false, wantRecord: false},
+		{name: "an ask that was waiting is stopped and recorded with the stop's time", stopped: true,
+			wantMessage: "stopped the replaced Wi-Fi helper's ask waiting on the owner; the next scan asks again from the installed helper"},
+		{name: "no ask waiting is recorded with the stop's time", stopped: false,
+			wantMessage: "no ask of the replaced Wi-Fi helper was waiting on the owner"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			h := newHarness(t, withWifiHelper(t))
 			h.wifiAsks.stopped = tc.stopped
+			h.wifiAsks.took = 23 * time.Millisecond
 
 			// Act
 			if _, err := h.d.Deploy(context.Background(), false); err != nil {
@@ -1798,14 +1801,14 @@ func TestADeployThatInstallsAWifiHelperStopsTheReplacedBuildsAsks(t *testing.T) 
 			if h.wifiAsks.calls != 1 {
 				t.Fatalf("StopWifiAsks calls = %d, want one after the helper's install", h.wifiAsks.calls)
 			}
-			var stopped []map[string]any
+			var stops []map[string]any
 			for _, r := range records(h.log, opInstall) {
-				if r.Level == "info" && strings.HasPrefix(r.Message, "stopped the replaced Wi-Fi helper's ask waiting on the owner") {
-					stopped = append(stopped, r.Context)
+				if r.Level == "info" && r.Message == tc.wantMessage {
+					stops = append(stops, r.Context)
 				}
 			}
-			if (len(stopped) == 1) != tc.wantRecord || (tc.wantRecord && stopped[0]["app"] != h.live.WifiApp) {
-				t.Fatalf("stopped records = %+v, want one naming the helper: %v", stopped, tc.wantRecord)
+			if len(stops) != 1 || stops[0]["app"] != h.live.WifiApp || stops[0]["took_ms"] != int64(23) {
+				t.Fatalf("stop records = %+v, want one %q naming the helper and took_ms 23", stops, tc.wantMessage)
 			}
 		})
 	}
@@ -1831,13 +1834,14 @@ func TestAWifiAskThatCannotBeStoppedFailsTheInstallAndPutsTheHelperBack(t *testi
 	// Arrange
 	h := newHarness(t, withWifiHelper(t))
 	h.wifiAsks.err = errors.New("pkill exited 2: bad pattern")
+	h.wifiAsks.took = 41 * time.Millisecond
 
 	// Act
 	_, err := h.d.Deploy(context.Background(), false)
 
 	// Assert
 	var failed *InstallFailed
-	if !errors.As(err, &failed) || failed.Component != ComponentDaemon || !strings.Contains(failed.Detail, "stop the replaced Wi-Fi helper's waiting asks: pkill exited 2") {
+	if !errors.As(err, &failed) || failed.Component != ComponentDaemon || !strings.Contains(failed.Detail, "stop the replaced Wi-Fi helper's waiting asks: pkill exited 2: bad pattern (after 41ms)") {
 		t.Fatalf("Deploy = %v, want the helper's install failure naming the stop", err)
 	}
 	if got := h.wifiHash(t); got != theOld.wifi {

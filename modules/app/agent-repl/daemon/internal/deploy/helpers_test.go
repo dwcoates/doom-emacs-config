@@ -485,16 +485,21 @@ type harness struct {
 	wifiAsks *fakeWifiAsks
 }
 
-// fakeWifiAsks answers the deploy's StopWifiAsks with stopped and err, and
-// counts its calls.
+// fakeWifiAsks answers the deploy's StopWifiAsks with stopped and err after
+// moving the deploy's clock by took, and counts its calls.
 type fakeWifiAsks struct {
 	calls   int
 	stopped bool
 	err     error
+	took    time.Duration
+	clock   *stepClock
 }
 
 func (f *fakeWifiAsks) stop(context.Context) (bool, error) {
 	f.calls++
+	f.clock.mu.Lock()
+	f.clock.now = f.clock.now.Add(f.took)
+	f.clock.mu.Unlock()
 	return f.stopped, f.err
 }
 
@@ -691,7 +696,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		progress:      &fakeProgress{},
 		faults:        newFakeFaults(),
 		restarts:      &restarttimingtest.Recorder{},
-		wifiAsks:      &fakeWifiAsks{},
+		wifiAsks:      &fakeWifiAsks{clock: newStepClock()},
 	}
 	h.reports = &fakeReports{builder: h.builder}
 	// Both services run the FRESH build unless a test says otherwise.
@@ -716,7 +721,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		Alive: func(pid int) bool {
 			return h.alive[pid]
 		},
-		Clock:    newStepClock(),
+		Clock:    h.wifiAsks.clock,
 		Progress: h.progress,
 		Faults:   h.faults,
 		Log:      h.log,
