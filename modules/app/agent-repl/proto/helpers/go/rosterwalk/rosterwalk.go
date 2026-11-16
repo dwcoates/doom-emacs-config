@@ -147,3 +147,32 @@ func AllRows(push *frontendv1.RosterPush) []*frontendv1.RosterRow {
 	out = append(out, HiddenRows(push.GetWorkspaces())...)
 	return append(out, ClosedRows(push.GetClosed())...)
 }
+
+// Hold answers the roster HELD with PUSH applied: PUSH's revision, and each
+// stream PUSH carries in place of the one held, every stream it leaves out
+// kept as held (frontend.v1.RosterPush: an absent stream is unchanged, never
+// empty). HELD is not changed, so a value taken from an earlier push stays as
+// it was. A nil HELD holds nothing yet. It is the ONE place a Go reader of
+// the roster stream folds a push into what it holds.
+func Hold(held, push *frontendv1.RosterPush) *frontendv1.RosterPush {
+	out := &frontendv1.RosterPush{
+		Revision:       push.GetRevision(),
+		Workspaces:     held.GetWorkspaces(),
+		MergeQueue:     held.GetMergeQueue(),
+		RecentlyMerged: held.GetRecentlyMerged(),
+		Closed:         held.GetClosed(),
+	}
+	if w := push.GetWorkspaces(); w != nil {
+		out.Workspaces = w
+	}
+	if q := push.GetMergeQueue(); q != nil {
+		out.MergeQueue = q
+	}
+	if m := push.GetRecentlyMerged(); m != nil {
+		out.RecentlyMerged = m
+	}
+	if c := push.GetClosed(); c != nil {
+		out.Closed = c
+	}
+	return out
+}

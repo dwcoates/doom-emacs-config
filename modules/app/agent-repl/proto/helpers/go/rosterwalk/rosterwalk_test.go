@@ -1,7 +1,12 @@
 package rosterwalk
 
 import (
+	"io/fs"
+	"os"
+	"path/filepath"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -280,5 +285,93 @@ func TestClosedRowsListsTheClosedStreamInOrder(t *testing.T) {
 	// Act / Assert.
 	if got, want := ids(ClosedRows(closed)), []string{"a", "b"}; !slices.Equal(got, want) {
 		t.Fatalf("ClosedRows = %v, want %v", got, want)
+	}
+}
+
+func TestHold(t *testing.T) {
+	open := &frontendv1.WorkspaceRoster{Open: &frontendv1.RosterOpenSection{}}
+	reopen := &frontendv1.WorkspaceRoster{Hidden: &frontendv1.RosterHiddenSection{}}
+	queue := &frontendv1.RosterMergeQueueSection{}
+	merged := &frontendv1.RosterMergedSection{}
+	closed := &frontendv1.RosterClosedRows{}
+	full := &frontendv1.RosterPush{Revision: 3, Workspaces: open, MergeQueue: queue, RecentlyMerged: merged, Closed: closed}
+	tests := []struct {
+		name string
+		held *frontendv1.RosterPush
+		push *frontendv1.RosterPush
+		want *frontendv1.RosterPush
+	}{
+		{"nothing held takes every stream of the first push", nil, full, full},
+		{"a partial push replaces only what it carries", full,
+			&frontendv1.RosterPush{Revision: 4, Workspaces: reopen},
+			&frontendv1.RosterPush{Revision: 4, Workspaces: reopen, MergeQueue: queue, RecentlyMerged: merged, Closed: closed}},
+		{"a push with no stream keeps every stream and takes its revision", full,
+			&frontendv1.RosterPush{Revision: 5},
+			&frontendv1.RosterPush{Revision: 5, Workspaces: open, MergeQueue: queue, RecentlyMerged: merged, Closed: closed}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := Hold(tt.held, tt.push)
+
+			// Assert
+			if got.Revision != tt.want.Revision || got.Workspaces != tt.want.Workspaces || got.MergeQueue != tt.want.MergeQueue ||
+				got.RecentlyMerged != tt.want.RecentlyMerged || got.Closed != tt.want.Closed {
+				t.Fatalf("Hold = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestHoldLeavesWhatWasHeldUnchanged(t *testing.T) {
+	// Arrange
+	before := &frontendv1.WorkspaceRoster{}
+	held := &frontendv1.RosterPush{Revision: 1, Workspaces: before}
+
+	// Act
+	Hold(held, &frontendv1.RosterPush{Revision: 2, Workspaces: &frontendv1.WorkspaceRoster{}})
+
+	// Assert
+	if held.Revision != 1 || held.Workspaces != before {
+		t.Fatalf("Hold changed what was held: %v", held)
+	}
+}
+
+// TestNoGoReaderFoldsAPushByHand fails a Go source outside this package that
+// folds a push's streams into what it holds itself, rather than through Hold:
+// two hand-rolled folds drift apart, the way one once held only two streams.
+func TestNoGoReaderFoldsAPushByHand(t *testing.T) {
+	// Arrange
+	root := filepath.Join("..", "..", "..", "..")
+	fold := regexp.MustCompile(`\.(Workspaces|MergeQueue|RecentlyMerged|Closed)\s*=\s*push\.`)
+	var offenders []string
+
+	// Act
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() && (d.Name() == "node_modules" || d.Name() == "gen" || d.Name() == ".git") {
+			return filepath.SkipDir
+		}
+		if d.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.Contains(path, "rosterwalk") {
+			return nil
+		}
+		src, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if fold.Match(src) {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("walking the module tree: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("these sources fold a roster push by hand instead of through rosterwalk.Hold: %v", offenders)
 	}
 }

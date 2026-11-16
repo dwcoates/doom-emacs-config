@@ -107,13 +107,13 @@ type Mirror struct {
 	// undecodable are the rows of the last roster whose status this build
 	// cannot read, so each is logged when it becomes so, not on every push.
 	undecodable map[ids.WorkspaceID]bool
-	// workspaces and closed are the latest snapshot of each stream the
-	// incumbent's pushes carry rows on. A push carries only the streams it
-	// changed (frontend.v1.RosterPush), so a stream it leaves out keeps the
-	// snapshot held here. A merged workspace is in no stream, and the
-	// incumbent serves none, so none is mirrored.
-	workspaces *frontendv1.WorkspaceRoster
-	closed     *frontendv1.RosterClosedRows
+	// held is the incumbent's roster as its pushes so far fold together
+	// (rosterwalk.Hold): a push carries only the streams it changed
+	// (frontend.v1.RosterPush), so a stream it leaves out keeps the snapshot
+	// held here. Rows are read off its open, hidden and closed rows. A merged
+	// workspace is in no stream, and the incumbent serves none, so none is
+	// mirrored. nil before the first push and after the end.
+	held *frontendv1.RosterPush
 	// ended is set once, at the mirror's end; nothing is mirrored after it.
 	ended bool
 	// cancel ends Run's subscription; nil until Run starts.
@@ -250,7 +250,7 @@ func (m *Mirror) withdraw() {
 	m.ended = true
 	m.arms = nil
 	m.undecodable = nil
-	m.workspaces, m.closed = nil, nil
+	m.held = nil
 	m.mu.Unlock()
 	m.publish()
 }
@@ -270,13 +270,8 @@ func (m *Mirror) take(push *frontendv1.RosterPush, fields dlog.Context) {
 		m.mu.Unlock()
 		return
 	}
-	if push.Workspaces != nil {
-		m.workspaces = push.Workspaces
-	}
-	if push.Closed != nil {
-		m.closed = push.Closed
-	}
-	for _, row := range rosterwalk.AllRows(&frontendv1.RosterPush{Workspaces: m.workspaces, Closed: m.closed}) {
+	m.held = rosterwalk.Hold(m.held, push)
+	for _, row := range rosterwalk.AllRows(m.held) {
 		ws := ids.WorkspaceID(row.GetWorkspace().GetWorkspace().GetId())
 		arm, problem := statusOf(row)
 		if problem != "" {

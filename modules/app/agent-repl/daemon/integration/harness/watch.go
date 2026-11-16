@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"agentrepl/protohelpers/rosterwalk"
 	"context"
 	"net/http"
 	"testing"
@@ -354,7 +355,7 @@ type rosterClient interface {
 //
 // EACH VALUE IS THE WHOLE ROSTER AS OF ITS FRAME, as a client holds it: a
 // frame carries only the streams it changed, so every stream it leaves out
-// is the one an earlier frame carried (HoldRosterStreams). A frame that
+// is the one an earlier frame carried (rosterwalk.Hold). A frame that
 // carries no stream on a subscription's first frame is a contract break the
 // test fails on (the first frame carries every stream).
 func (d *Daemon) WatchRosterOn(client rosterClient) *Stream[*frontendv1.RosterPush] {
@@ -369,33 +370,12 @@ func (d *Daemon) WatchRosterOn(client rosterClient) *Stream[*frontendv1.RosterPu
 			if push == nil {
 				return nil, false
 			}
-			held = HoldRosterStreams(held, push)
+			held = rosterwalk.Hold(held, push)
 			if held.Workspaces == nil || held.MergeQueue == nil || held.RecentlyMerged == nil || held.Closed == nil {
 				d.t.Errorf("the roster stream's frames so far leave a stream unset (%v): the first frame carries every stream", held)
 			}
 			return held, true
 		})
-}
-
-// HoldRosterStreams answers the roster HELD with PUSH applied: its revision,
-// and each stream PUSH carries in place of the one held. HELD is not
-// changed, so a value an earlier frame yielded stays as it was.
-func HoldRosterStreams(held, push *frontendv1.RosterPush) *frontendv1.RosterPush {
-	out := &frontendv1.RosterPush{Revision: push.GetRevision(),
-		Workspaces: held.GetWorkspaces(), MergeQueue: held.GetMergeQueue(), RecentlyMerged: held.GetRecentlyMerged(), Closed: held.GetClosed()}
-	if push.Workspaces != nil {
-		out.Workspaces = push.Workspaces
-	}
-	if push.MergeQueue != nil {
-		out.MergeQueue = push.MergeQueue
-	}
-	if push.RecentlyMerged != nil {
-		out.RecentlyMerged = push.RecentlyMerged
-	}
-	if push.Closed != nil {
-		out.Closed = push.Closed
-	}
-	return out
 }
 
 // WatchChat opens a zettel chat thread's chat view stream, each push the
