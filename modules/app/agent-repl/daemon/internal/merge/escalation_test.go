@@ -450,3 +450,63 @@ func TestRouteEscalationSortsEachGroupAndFinding(t *testing.T) {
 		})
 	}
 }
+
+func TestADecisionThatStopsItsIntakeRunsOnALiveContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision Decision
+	}{
+		{name: "an escalation", decision: Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}},
+		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "nothing new"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: stopping the intake ends the session that sent the
+			// decision, cancelling its request.
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			h.checks.onStopNow = cancel
+
+			// Act
+			err := h.o.DecideMediation(ctx, "ws-intake", tt.decision)
+
+			// Assert
+			if err != nil || !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
+				t.Fatalf("DecideMediation = %v, stopped %v; want the intake stopped", err, h.checks.stopped)
+			}
+			if ctx.Err() == nil {
+				t.Fatal("the stop did not cancel the request, so the test proves nothing")
+			}
+			if !slices.Equal(h.checks.createCtxErrs, map[bool][]error{true: {nil}, false: nil}[tt.decision.Kind == MediationEscalate]) {
+				t.Fatalf("escalation creation context errors %v, want one on a live context for an escalation", h.checks.createCtxErrs)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error"}); ok {
+				t.Fatalf("records = %v, want no error", h.logs.Records())
+			}
+		})
+	}
+}
+
+func TestADecisionWhileTheDaemonStopsLeavesTheCheckOwed(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	if idle := h.o.stopMediation(); idle != nil {
+		<-idle
+	}
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "nothing new"})
+
+	// Assert
+	if !errors.Is(err, errMediationStopped) || owedCheck(t, h) == nil {
+		t.Fatalf("DecideMediation = %v, want it refused with the check still owed", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: mediationNotRun}); !ok {
+		t.Fatalf("records = %v, want the refused decision recorded", h.logs.Records())
+	}
+}

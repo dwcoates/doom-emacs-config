@@ -566,10 +566,23 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		_, err = o.reattachTurn(ctx, ws, fields, m.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
 	}
 	if err != nil {
-		o.mediationFailed(ctx, fields, "the intake's turn could not be awaited; the queue stays held until the next round", err)
+		o.awaitFailed(ctx, q, m.OwedAt, fields, "the intake's turn could not be awaited; the queue stays held until the next round", err)
 		return
 	}
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
+}
+
+// awaitFailed settles a failed await of the intake's turn on the check owed
+// at OWED. THE DECISION RELEASES ITS CHECK BEFORE IT STOPS THE INTAKE
+// (releaseCheck, then endChain), so an await cut by that stop finds the
+// check no longer owed: that is the decision's end, recorded at INFO. Any
+// other failure holds the queue and is the round's failure, MESSAGE.
+func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed time.Time, fields dlog.Context, message string, err error) {
+	if now, readErr := o.deps.DB.MediationOf(ctx, q.key); readErr == nil && (now == nil || !now.OwedAt.Equal(owed)) {
+		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its session, which its own decision stopped; the check is decided", withField(fields, "cause", err.Error()))
+		return
+	}
+	o.mediationFailed(ctx, fields, message, err)
 }
 
 // intakeOf answers the intake of the chain check M belongs to, making it,
@@ -705,6 +718,11 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 	o.kick(q.key)
 }
 
+// errMediationStopped answers a decision made while this daemon stops: the
+// check stays owed, and the daemon that serves the queues next tells the
+// intake again.
+var errMediationStopped = errors.New("merge: this daemon is stopping; the check stays owed for the daemon that serves the queues next")
+
 // BriefDeployIntakeResumed resumes an intake whose turn ended undecided.
 const BriefDeployIntakeResumed = "deploy-intake-resumed"
 
@@ -743,7 +761,7 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 	}
 	o.deps.Log.Global().Warn(opMediation, "the intake's turn ended deciding nothing about the deploy; it is resumed once to decide it, the queue still held", fields)
 	if _, err := o.deps.AwaitTurnEnd(ctx, ws, turn); err != nil {
-		o.mediationFailed(ctx, fields, "the resumed intake's turn could not be awaited; the queue stays held until the next round", err)
+		o.awaitFailed(ctx, q, m.OwedAt, fields, "the resumed intake's turn could not be awaited; the queue stays held until the next round", err)
 		return
 	}
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
@@ -764,6 +782,18 @@ func mediationVersion(m wsm.Mediation) string {
 // remediation workspace and keeps the queue held (dispatch.go).
 func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error {
 	fields := dlog.Context{"workspace": string(ws), "decision": d.Kind.String(), "summary": d.Summary}
+	// A DECISION RUNS ON THE MEDIATION'S LIFETIME, NEVER ITS REQUEST'S: the
+	// request comes from the intake's own session, and an approval or an
+	// escalation ends the chain, which stops that session and cancels the
+	// request mid-decision (2026-11-16 17:55: an escalation's workspace was
+	// made on the cancelled request, failed, and the user was never told).
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, fields)
+		return errMediationStopped
+	}
+	defer leave()
+	ctx = life
 	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read the role of the workspace a decision came from", withField(fields, "error", err.Error()))

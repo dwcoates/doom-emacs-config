@@ -4602,6 +4602,10 @@ type fakeDeployChecks struct {
 	// work; standByErr fails a stand-by.
 	stoodBy, resumed []ids.WorkspaceID
 	standByErr       error
+	// onStopNow runs inside each stop, as ending the stopped session does.
+	onStopNow func()
+	// createCtxErrs records each check workspace's creation context error.
+	createCtxErrs []error
 	// onStandBy runs inside each stand-by, as ending the finishing session
 	// does; standByCtxErrs records the stand-by context's error after it.
 	onStandBy      func()
@@ -4645,9 +4649,10 @@ func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name st
 	return f.make("ws-remedy", name)
 }
 
-func (f *fakeDeployChecks) CreateDeployEscalation(_ context.Context, _, name string) (wsm.Workspace, error) {
+func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name string) (wsm.Workspace, error) {
 	f.mu.Lock()
 	err := f.escalationErr
+	f.createCtxErrs = append(f.createCtxErrs, ctx.Err())
 	f.mu.Unlock()
 	if err != nil {
 		return wsm.Workspace{}, err
@@ -4681,6 +4686,9 @@ func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
 }
 
 func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {
+	if f.onStopNow != nil {
+		f.onStopNow()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, ws)

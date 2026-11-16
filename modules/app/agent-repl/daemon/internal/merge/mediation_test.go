@@ -1246,3 +1246,42 @@ func TestEveryCheckReleaseGoesThroughReleaseCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestAnAwaitCutByTheIntakesOwnDecisionIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		decide    bool
+		wantLevel string
+		message   string
+	}{
+		{name: "a decision released the check, then stopped the intake", decide: true, wantLevel: "info",
+			message: "the intake's turn ended with its session, which its own decision stopped; the check is decided"},
+		{name: "the session ended with the check still owed", wantLevel: "error",
+			message: "the intake's turn could not be awaited; the queue stays held until the next round"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the await fails as a stopped session's does, after
+			// the intake decided or not.
+			h := checked(t)
+			owe(t, h)
+			if tt.decide {
+				decideInTurn(t, h, Decision{Kind: MediationApprove, Summary: "nothing new"})
+			}
+			h.mu.Lock()
+			h.awaitErr = errors.New("workspace has no live session to await the turn on")
+			h.mu.Unlock()
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: opMediation, Message: tt.message}); !ok {
+				t.Fatalf("records = %v, want %q at %s", h.logs.Records(), tt.message, tt.wantLevel)
+			}
+			if released := owedCheck(t, h) == nil; released != tt.decide {
+				t.Fatalf("released %v, want %v", released, tt.decide)
+			}
+		})
+	}
+}
