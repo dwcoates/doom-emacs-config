@@ -555,13 +555,16 @@ var exitCauses = map[string]string{
 	"causePickFailed":         causePickFailed,
 	"causeDetachedForkFailed": causeDetachedForkFailed,
 	"causeFinishFailed":       causeFinishFailed,
-	"causeHiddenAtColdGate":   causeHiddenAtColdGate,
+	"CauseColdGate":           string(CauseColdGate),
+	"CauseHiddenAtColdGate":   string(CauseHiddenAtColdGate),
 }
 
 // notQueueExits are the causes that never take a queue row off: an async
 // request dropped before it was handed to a merge workspace
-// (wsm.DropAsyncMergeRequest) stood in no queue.
-var notQueueExits = map[string]bool{causeDetachedForkFailed: true}
+// (wsm.DropAsyncMergeRequest) stood in no queue, and a run taken off at its
+// workspace's cold gate leaves its run only, its entry staying at its place
+// (wsm.RequeueColdGatedMerge).
+var notQueueExits = map[string]bool{causeDetachedForkFailed: true, string(CauseColdGate): true}
 
 // declaredCauseNames reads, from the package's production sources, the name
 // of every constant that is a cause: typed AbandonCause, or named cause*.
