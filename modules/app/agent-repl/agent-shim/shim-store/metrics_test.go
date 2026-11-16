@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -110,8 +111,10 @@ func TestTheStoreSurfaceServesItsDatabaseSize(t *testing.T) {
 type fakeEnds struct {
 	mu      sync.Mutex
 	answers []endsAnswer
-	// deadlines records whether each call's context carried a deadline.
+	// deadlines records whether each call's context carried a deadline, and
+	// remaining how long each bounded call had left of it when it began.
 	deadlines []bool
+	remaining []time.Duration
 }
 
 type endsAnswer struct {
@@ -121,8 +124,11 @@ type endsAnswer struct {
 
 func (f *fakeEnds) PeerMessageEnds(ctx context.Context) (map[string]int64, error) {
 	f.mu.Lock()
-	_, bounded := ctx.Deadline()
+	deadline, bounded := ctx.Deadline()
 	f.deadlines = append(f.deadlines, bounded)
+	if bounded {
+		f.remaining = append(f.remaining, time.Until(deadline))
+	}
 	answer := f.answers[0]
 	if len(f.answers) > 1 {
 		f.answers = f.answers[1:]
@@ -185,6 +191,30 @@ func TestThePeerMessageCountIsServedByEnd(t *testing.T) {
 	}
 }
 
+func TestThePeerMessageBoundIsTwoToThreeTimesItsMeasurement(t *testing.T) {
+	// Arrange
+	ratio := float64(peerMessagesTimeout) / float64(peerMessagesMeasured)
+
+	// Assert
+	if ratio < 2 || ratio > 3 {
+		t.Fatalf("peerMessagesTimeout = %v is %.2f times peerMessagesMeasured = %v, want 2 to 3 times", peerMessagesTimeout, ratio, peerMessagesMeasured)
+	}
+}
+
+func TestAScrapeGivesTheCountItsMeasuredWorstCase(t *testing.T) {
+	// Arrange
+	log, _ := storePprofLogger()
+	ends := &fakeEnds{answers: []endsAnswer{{ends: map[string]int64{"sender": 1, "recipient": 1}}}}
+
+	// Act
+	gatherPeerMessages(t, newPeerMessages(ends, log, peerMessagesTimeout))
+
+	// Assert
+	if len(ends.remaining) != 1 || ends.remaining[0] < peerMessagesMeasured {
+		t.Fatalf("remaining = %v, want the one count given at least the measured %v", ends.remaining, peerMessagesMeasured)
+	}
+}
+
 func TestAFailedPeerMessageCountOmitsOnlyItsSeriesAndIsRecorded(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -208,8 +238,9 @@ func TestAFailedPeerMessageCountOmitsOnlyItsSeriesAndIsRecorded(t *testing.T) {
 				t.Fatalf("series = %v, want none while the count fails", got)
 			}
 			records := peerMessageRecords(t, durable, "error")
-			if len(records) != 1 || !strings.Contains(records[0].Message, "cause="+tt.cause) || !strings.Contains(records[0].Message, "timeout_ms=1") {
-				t.Fatalf("records = %+v, want one error naming the cause %q and the bound", records, tt.cause)
+			if len(records) != 1 || !strings.Contains(records[0].Message, "cause="+tt.cause) || !strings.Contains(records[0].Message, "timeout_ms=1 ") ||
+				!strings.Contains(records[0].Message, fmt.Sprintf("expected_ms=%d ", peerMessagesMeasured.Milliseconds())) {
+				t.Fatalf("records = %+v, want one error naming the cause %q, the bound and its expected time", records, tt.cause)
 			}
 		})
 	}
