@@ -16,6 +16,7 @@ import { logRecordsDuring, type LogRecord } from "../log-records.js";
 import { createFold } from "../../src/convert/fold.js";
 import {
   convertAssistantMessage,
+  freshBlockState,
   responseEnvelope,
   responseModel,
   StreamBlocks,
@@ -1234,5 +1235,28 @@ describe("a tool call's stream", () => {
 
     // Assert
     expect(registry.peek("toolu_main")?.spawningCall).toBeUndefined();
+  });
+});
+
+describe("freshBlockState", () => {
+  it("begins a response numbering from block 0 with no usage attached and nothing started", () => {
+    // Act.
+    const state = freshBlockState(MAIN_ID);
+
+    // Assert.
+    expect(state).toEqual({ messageId: MAIN_ID, nextIndex: 0, usageAttached: false, unsettled: new Map() });
+  });
+
+  it("is the shape both of a stream's ways to begin a response take", () => {
+    // Arrange.
+    const streams = new StreamBlocks();
+
+    // Act.
+    const begun = streams.beginResponse(null, MAIN_ID);
+    const met = streams.responseFor(SPAWN, SUB_ID);
+
+    // Assert.
+    expect(begun).toEqual(freshBlockState(MAIN_ID));
+    expect(met).toEqual(freshBlockState(SUB_ID));
   });
 });

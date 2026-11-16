@@ -142,6 +142,14 @@ export interface CutUnit {
  */
 export type TurnEnding = "completed" | "user_stop" | "failed";
 
+/**
+ * A response just begun on a stream: numbering from block 0, no usage
+ * attached, nothing started. The ONE shape every response begins in.
+ */
+export function freshBlockState(messageId: string): BlockState {
+  return { messageId, nextIndex: 0, usageAttached: false, unsettled: new Map() };
+}
+
 /** The key of the MAIN stream; a spawning call's id is never empty. */
 const MAIN_STREAM = "";
 
@@ -230,7 +238,7 @@ export class StreamBlocks {
     const key = streamKeyOf(parentToolUseId);
     const held = this.#open.get(key);
     if (held !== undefined) reportUnsettled(key, held, "message_start");
-    const state: BlockState = { messageId, nextIndex: 0, usageAttached: false, unsettled: new Map() };
+    const state = freshBlockState(messageId);
     this.#open.set(key, state);
     return state;
   }
@@ -245,7 +253,7 @@ export class StreamBlocks {
     const held = this.#open.get(key);
     if (held?.messageId === messageId) return held;
     if (held !== undefined) reportUnsettled(key, held, "assistant");
-    const state: BlockState = { messageId, nextIndex: 0, usageAttached: false, unsettled: new Map() };
+    const state = freshBlockState(messageId);
     this.#open.set(key, state);
     return state;
   }
