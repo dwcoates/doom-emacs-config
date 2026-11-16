@@ -74,6 +74,7 @@ const (
 	DeployComponent_DEPLOY_COMPONENT_SIDECAR     DeployComponent = 5
 	DeployComponent_DEPLOY_COMPONENT_ELISP       DeployComponent = 6
 	DeployComponent_DEPLOY_COMPONENT_ZETTEL      DeployComponent = 7
+	DeployComponent_DEPLOY_COMPONENT_TESTS       DeployComponent = 8
 )
 
 // Enum value maps for DeployComponent.
@@ -87,6 +88,7 @@ var (
 		5: "DEPLOY_COMPONENT_SIDECAR",
 		6: "DEPLOY_COMPONENT_ELISP",
 		7: "DEPLOY_COMPONENT_ZETTEL",
+		8: "DEPLOY_COMPONENT_TESTS",
 	}
 	DeployComponent_value = map[string]int32{
 		"DEPLOY_COMPONENT_UNSPECIFIED": 0,
@@ -97,6 +99,7 @@ var (
 		"DEPLOY_COMPONENT_SIDECAR":     5,
 		"DEPLOY_COMPONENT_ELISP":       6,
 		"DEPLOY_COMPONENT_ZETTEL":      7,
+		"DEPLOY_COMPONENT_TESTS":       8,
 	}
 )
 
@@ -1590,7 +1593,7 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\x06detail\x18\x02 \x01(\tR\x06detail\"j\n" +
 	"\x13DeployInstallFailed\x12;\n" +
 	"\tcomponent\x18\x01 \x01(\x0e2\x1d.agentrepl.v1.DeployComponentR\tcomponent\x12\x16\n" +
-	"\x06detail\x18\x02 \x01(\tR\x06detail*\xfb\x01\n" +
+	"\x06detail\x18\x02 \x01(\tR\x06detail*\x97\x02\n" +
 	"\x0fDeployComponent\x12 \n" +
 	"\x1cDEPLOY_COMPONENT_UNSPECIFIED\x10\x00\x12\x1b\n" +
 	"\x17DEPLOY_COMPONENT_DAEMON\x10\x01\x12\x19\n" +
@@ -1599,7 +1602,8 @@ const file_agentrepl_v1_endpoint_deploy_proto_rawDesc = "" +
 	"\x16DEPLOY_COMPONENT_STORE\x10\x04\x12\x1c\n" +
 	"\x18DEPLOY_COMPONENT_SIDECAR\x10\x05\x12\x1a\n" +
 	"\x16DEPLOY_COMPONENT_ELISP\x10\x06\x12\x1b\n" +
-	"\x17DEPLOY_COMPONENT_ZETTEL\x10\aB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x17DEPLOY_COMPONENT_ZETTEL\x10\a\x12\x1a\n" +
+	"\x16DEPLOY_COMPONENT_TESTS\x10\bB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_deploy_proto_rawDescOnce sync.Once
