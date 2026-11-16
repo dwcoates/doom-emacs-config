@@ -482,10 +482,16 @@ describe("mountTopbar", () => {
     // ARRANGE
     const host = document.createElement("div");
     document.body.replaceChildren(host);
+    // The second push waits for the test to open the reveal: an event the
+    // test releases, never a delay.
+    let releaseSecondPush!: () => void;
+    const secondPush = new Promise<void>((resolve) => {
+      releaseSecondPush = resolve;
+    });
     const ctx = appContext({
       watchTopbar: async function* () {
         yield create(WatchTopbarResponseSchema, { topbar: view() });
-        await new Promise((resolve) => setTimeout(resolve, 50));
+        await secondPush;
         yield create(WatchTopbarResponseSchema, {
           topbar: view({ sessionLine: create(TopbarViewSchema, { sessionLine: { text: "session xyz" } }).sessionLine }),
         });
@@ -498,7 +504,7 @@ describe("mountTopbar", () => {
     // the login options.
     host.querySelector(".topbar-title")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     // ACT
-    await vi.advanceTimersByTimeAsync(50);
+    releaseSecondPush();
     await settle();
     // ASSERT
     expect(openPanel(host)?.textContent).toBe("session xyz");

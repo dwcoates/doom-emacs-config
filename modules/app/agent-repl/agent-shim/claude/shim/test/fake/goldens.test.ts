@@ -5,27 +5,20 @@
  * the goldens directory holds a golden for no scenario the table does not
  * drive. `AGENT_REPL_SCENARIO_GOLDENS_WRITE=1` rewrites them instead.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
 import { driveGolden, GOLDEN_SCENARIOS, goldenName, GOLDENS_DIR, GOLDENS_WRITE_ENV, renderMeta, type GoldenOutput } from "./goldens.js";
+import { filesUnder } from "../files-under.js";
 
 const writing = process.env[GOLDENS_WRITE_ENV] === "1";
 
-/** Every file under dir, by its path relative to dir. */
-function filesUnder(dir: string): Map<string, string> {
-  const files = new Map<string, string>();
-  const walk = (at: string): void => {
-    for (const name of readdirSync(at).sort()) {
-      const path = join(at, name);
-      if (statSync(path).isDirectory()) walk(path);
-      else files.set(relative(dir, path), readFileSync(path, "utf8"));
-    }
-  };
-  if (existsSync(dir)) walk(dir);
-  return files;
+/** Every file under dir, by its path relative to dir (files-under.ts). */
+function filesUnderByPath(dir: string): Map<string, string> {
+  if (!existsSync(dir)) return new Map();
+  return new Map(filesUnder(dir).map((path) => [relative(dir, path), readFileSync(path, "utf8")]));
 }
 
 /** The seam a golden's meta.json already states, or null when there is none yet. */
@@ -63,7 +56,7 @@ describe("the scenario goldens", () => {
       }
       expect(readFileSync(join(dir, "frames.json"), "utf8")).toEqual(output.frames);
       expect(readFileSync(join(dir, "meta.json"), "utf8")).toEqual(renderMeta(output, existingSeam(dir)));
-      expect(filesUnder(join(dir, "tree"))).toEqual(new Map(output.tree));
+      expect(filesUnderByPath(join(dir, "tree"))).toEqual(new Map(output.tree));
     },
   );
 

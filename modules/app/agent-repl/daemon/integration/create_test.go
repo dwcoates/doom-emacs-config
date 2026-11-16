@@ -234,10 +234,7 @@ func TestCreateWorkspaceOneShotCarriesTheDaemonsDirectiveNotTheRepositorys(t *te
 	d := newDaemon(t, harness.Opts{})
 	repo := harness.NewRepo(t)
 	directive := filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")
-	if err := os.WriteFile(directive,
-		[]byte("<!-- used by: the daemon; placeholders: none -->\nfile a report in the ledger.\n"), 0o644); err != nil {
-		t.Fatalf("write the repository's completion directive: %v", err)
-	}
+	harness.ReplacePrompt(t, directive, "<!-- used by: the daemon; placeholders: none -->\nfile a report in the ledger.\n")
 	repository := createRepositoryRef(t, d, repo)
 
 	// Act

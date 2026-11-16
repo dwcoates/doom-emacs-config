@@ -40,7 +40,7 @@ func anyBatch(*storev1.WriteBatchRequest) bool { return true }
 // the store is still not answering.
 func signalAndTime(t *testing.T, p *sidecarProc, budget time.Duration) time.Duration {
 	t.Helper()
-	p.stopped = true // this subject owns the stop; the cleanup must not repeat it
+	p.stopped.Store(true) // this subject owns the stop; the cleanup must not repeat it
 	start := time.Now()
 	if err := p.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Fatalf("signalling the sidecar: %v", err)

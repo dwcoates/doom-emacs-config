@@ -2,6 +2,7 @@
  * The listener: the stale/live judgement, the preface sniff, and both dialects
  * reaching the SAME handlers over one unix socket.
  */
+import { logSinkMark, untilLogged } from "../log-records.js";
 import { createClient, Code, ConnectError } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
@@ -1063,6 +1064,7 @@ describe("an h2c stream this server resets", () => {
     const { engine, entered } = heldHibernateEngine();
     const server = await serve(sock, shimRoutes(engine));
     started.push(server);
+    const mark = logSinkMark();
     const pending = client(sock, "2")
       .hibernate(create(shimv1.HibernateRequestSchema, {}), { signal: AbortSignal.timeout(1) })
       .catch(() => undefined);
@@ -1071,13 +1073,10 @@ describe("an h2c stream this server resets", () => {
     // Act
     await pending;
 
-    // Assert
-    await vi.waitFor(() => {
-      const reset = mirroredRecords(written).find(
-        (record) => record.context.rst_code !== undefined,
-      );
-      expect(reset?.context.path).toBe("/shim.v1.Shim/Hibernate");
-    });
+    // Assert: the reset's record is the event (untilLogged), never a poll.
+    const records = await untilLogged(mark, (all) => all.some((record) => record.context.rst_code !== undefined));
+    const reset = records.find((record) => record.context.rst_code !== undefined);
+    expect(reset?.context.path).toBe("/shim.v1.Shim/Hibernate");
   });
 
   // THE PEER'S OWN CANCEL IS NOT THIS SERVER'S DEFECT. Every daemon that gave
@@ -1092,6 +1091,7 @@ describe("an h2c stream this server resets", () => {
     const { engine, entered } = heldHibernateEngine();
     const server = await serve(sock, shimRoutes(engine));
     started.push(server);
+    const mark = logSinkMark();
     const pending = client(sock, "2")
       .hibernate(create(shimv1.HibernateRequestSchema, {}), { signal: AbortSignal.timeout(1) })
       .catch(() => undefined);
@@ -1100,16 +1100,13 @@ describe("an h2c stream this server resets", () => {
     // Act
     await pending;
 
-    // Assert
-    await vi.waitFor(() => {
-      const reset = mirroredRecords(written).find(
-        (record) => record.context.rst_code !== undefined,
-      );
-      expect(reset?.level).toBe("info");
-      expect(reset?.context.reason).toBe(
-        "the peer cancelled the stream; it stopped consuming what this server was serving",
-      );
-    });
+    // Assert: the reset's record is the event (untilLogged), never a poll.
+    const records = await untilLogged(mark, (all) => all.some((record) => record.context.rst_code !== undefined));
+    const reset = records.find((record) => record.context.rst_code !== undefined);
+    expect(reset?.level).toBe("info");
+    expect(reset?.context.reason).toBe(
+      "the peer cancelled the stream; it stopped consuming what this server was serving",
+    );
   });
 });
 

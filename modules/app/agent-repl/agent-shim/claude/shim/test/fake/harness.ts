@@ -17,6 +17,7 @@ import { createFakeQuery } from "../../src/fake/index.js";
 import type { FakeQueryOpts } from "../../src/fake/index.js";
 
 import { testTempDir } from "../temp-dir.js";
+import { Waiters } from "../waiters.js";
 import type { CanUseToolLike, QueryLike, SdkMessage } from "../../src/sdk/types.js";
 import { cwdSlug, projectDir } from "../../src/engine/vendor-paths.js";
 
@@ -82,6 +83,7 @@ export interface DriveOptions {
     prompts: PromptFeeder,
     messages: Line[],
     roots: { readonly cwd: string; readonly configDir: string; readonly spoolRoot: string; readonly sessionId: string },
+    untilMessage: UntilMessage,
   ) => Promise<void> | void;
   /**
    * Called with each message AS IT ARRIVES, before the next is read: a caller
@@ -206,11 +208,13 @@ export async function driveScenario(
 
   const messages: SdkMessage[] = [];
   let failure: unknown;
+  const arrivals = messageArrivals(messages);
   const collect = (async () => {
     try {
       for await (const message of query) {
         messages.push(message);
         options.onMessage?.(message);
+        arrivals.arrived(message);
       }
     } catch (err) {
       // A scenario that FAILS its iterable is a fact under test, not a suite
@@ -220,10 +224,11 @@ export async function driveScenario(
       // handful of messages that arrived before the failure.
       failure = err;
     }
+    arrivals.ended(failure === undefined ? "its iterable closed" : `it failed: ${failure instanceof Error ? failure.message : JSON.stringify(failure)}`);
   })();
 
   if (options.during !== undefined) {
-    await options.during(query, feeder, messages, { cwd, configDir, spoolRoot, sessionId });
+    await options.during(query, feeder, messages, { cwd, configDir, spoolRoot, sessionId }, arrivals.until);
   }
   feeder.close();
   await collect;
@@ -321,4 +326,26 @@ export function theResult(driven: Driven): Line {
 /** The `toolUseResult` values the transcript's user records carried, in order. */
 export function toolUseResults(lines: Line[]): unknown[] {
   return lines.filter((l) => l.toolUseResult !== undefined).map((l) => l.toolUseResult);
+}
+
+/**
+ * Resolves once a message ACCEPT takes has arrived: at once if one already
+ * has, else at its arrival. It rejects at once, naming WHAT, when the drive
+ * ends first, since no message can arrive after that. The arrival is the
+ * event; nothing polls for it.
+ */
+export type UntilMessage = (what: string, accept: (message: SdkMessage) => boolean) => Promise<void>;
+
+/** The arrivals of one drive's messages, and the waits on them (UntilMessage). */
+export function messageArrivals(messages: readonly SdkMessage[]): {
+  arrived: (message: SdkMessage) => void;
+  ended: (how: string) => void;
+  until: UntilMessage;
+} {
+  const waiters = new Waiters("the drive");
+  return {
+    arrived: () => waiters.notify(),
+    ended: (how) => waiters.end(how),
+    until: (what, accept) => waiters.until(what, () => messages.some(accept)),
+  };
 }

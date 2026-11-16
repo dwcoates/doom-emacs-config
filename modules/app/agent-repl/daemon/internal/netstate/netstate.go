@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"agent-repld/internal/changesignal"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -112,8 +113,8 @@ type Monitor struct {
 	// observations counts the outages the daemon observed, so a beat whose
 	// probe answered while a newer observation arrived does not end it.
 	observations uint64
-	// restored is closed at the next edge from down to up.
-	restored chan struct{}
+	// restored announces the next edge from down to up.
+	restored changesignal.Signal
 }
 
 // New answers a Monitor whose probe beat ends with LIFE.
@@ -121,7 +122,7 @@ func New(life context.Context, deps Deps) *Monitor {
 	if deps.Log == nil || deps.Probe == nil || deps.After == nil {
 		panic("netstate: a Monitor needs its log, its probe and its clock")
 	}
-	return &Monitor{life: life, deps: deps, faults: map[ids.FaultID]struct{}{}, restored: make(chan struct{})}
+	return &Monitor{life: life, deps: deps, faults: map[ids.FaultID]struct{}{}}
 }
 
 // downLocked reports whether the network is down. The caller holds m.mu.
@@ -134,8 +135,7 @@ func (m *Monitor) restoreIfUpLocked() bool {
 	if m.downLocked() {
 		return false
 	}
-	close(m.restored)
-	m.restored = make(chan struct{})
+	m.restored.Notify()
 	return true
 }
 
@@ -184,7 +184,7 @@ func (m *Monitor) Restored() <-chan struct{} {
 		close(done)
 		return done
 	}
-	return m.restored
+	return m.restored.Changed()
 }
 
 // Classify decides whether a failure whose own account is WORDS was the

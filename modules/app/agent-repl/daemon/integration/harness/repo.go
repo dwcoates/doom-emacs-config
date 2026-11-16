@@ -102,7 +102,7 @@ func NewRepoAt(t testing.TB, dir string) *Repo {
 	// states none refuses a one-shot create outright (the owner's 2026-09-12
 	// ruling), so a fixture repository carries a copy of the shipped corpus
 	// as its policy exactly as a real repository's author would write one.
-	CopyPrompts(t, r.PolicyDir())
+	LinkPrompts(t, r.PolicyDir())
 	r.WriteDeployConfig(HooksOnlyDeploy)
 	return r
 }

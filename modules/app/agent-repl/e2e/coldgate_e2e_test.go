@@ -127,6 +127,7 @@
 package e2e
 
 import (
+	"context"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -434,32 +435,16 @@ func killShimProcesses(t *testing.T, d *harness.Daemon) []int {
 // loop ends the moment the pid is gone.
 const coldGateReapBound = 5 * time.Second
 
-// awaitPIDsGone blocks until none of pids names a live process, failing loudly
-// with whatever is left when the bound expires.
+// awaitPIDsGone blocks until every pid in pids has exited, failing loudly
+// with whatever is left when the bound expires. The shims were the FIRST
+// daemon's children and were reparented when it was killed, so the wait is on
+// each one's kernel exit event (stack.AwaitPIDsGone), not a Wait.
 func awaitPIDsGone(t *testing.T, pids []int, bound time.Duration) {
 	t.Helper()
-	// POLLED, because a pid this process did not fork gives no event to wait
-	// on: the shim was the FIRST daemon's child and was reparented when that
-	// daemon was killed, so there is no Wait to block in and no descriptor to
-	// select on. The cadence matches awaitWorldStraysGone's, which polls the
-	// same kernel fact for the same reason.
-	deadline := time.Now().Add(bound)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		alive := []int{}
-		for _, pid := range pids {
-			if syscall.Kill(pid, 0) == nil {
-				alive = append(alive, pid)
-			}
-		}
-		if len(alive) == 0 {
-			return
-		}
-		if !time.Now().Before(deadline) {
-			t.Fatalf("SIGKILLed shim(s) %v were still alive after %s; the successor's boot would probe their workspace lock as HELD, try to adopt a shim that is going away, and fail the boot", alive, bound)
-		}
-		<-ticker.C
+	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
+	defer cancel()
+	if err := stack.AwaitPIDsGone(ctx, pids); err != nil {
+		t.Fatalf("SIGKILLed shim(s) %v were not all gone: %v; the successor's boot would probe their workspace lock as HELD, try to adopt a shim that is going away, and fail the boot", pids, err)
 	}
 }
 

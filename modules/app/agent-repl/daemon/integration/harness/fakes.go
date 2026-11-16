@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 
 	"agent-repld/internal/shellword"
@@ -349,17 +351,112 @@ func NewConfigRoot(t testing.TB, dir, email string) string {
 	return dir
 }
 
-// CopyPrompts copies the shipped prompts/ directory into the test's own tree,
-// so a test can edit a brief or delete one without touching the repository.
-func CopyPrompts(t testing.TB, dst string) string {
+// LinkPrompts stages prompts/ at dst as hard links to the one read-only copy
+// this test process made (promptsTemplateDir), and answers dst.
+//
+// THE PROMPTS ARE A FIXTURE, NOT THE SUBJECT, so they are copied once per
+// process rather than once per daemon (the agent-repl-tests skill, "A
+// resource that is not the subject is built once"): every daemon start used
+// to write all of prompts/ again. A daemon or test that removes or replaces
+// a prompt (atomicfile.Replace makes a new inode) changes only its own
+// directory; the copy is read-only, so a write INTO a linked file, which would
+// change every daemon's prompt at once, fails loudly instead.
+func LinkPrompts(t testing.TB, dst string) string {
 	t.Helper()
-	src := filepath.Join(RepoRoot(t), "prompts")
-	entries, err := os.ReadDir(src)
+	template := promptsTemplateDir(t)
+	entries, err := os.ReadDir(template)
 	if err != nil {
-		t.Fatalf("harness: read %s: %v", src, err)
+		t.Fatalf("harness: read the prompts template %s: %v", template, err)
 	}
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", dst, err)
+	}
+	// A LINK CANNOT CROSS A FILESYSTEM, and a test may stage its prompts on
+	// another one (a repository under /tmp while the run's root is a RAM
+	// disk): there is no shared copy on that device to link, so each file is
+	// copied there, read-only like the template, for the same semantics.
+	same, err := sameDevice(template, dst)
+	if err != nil {
+		t.Fatalf("harness: compare the devices of %s and %s: %v", template, dst, err)
+	}
+	for _, e := range entries {
+		from, to := filepath.Join(template, e.Name()), filepath.Join(dst, e.Name())
+		if same {
+			err = os.Link(from, to)
+		} else {
+			err = copyReadOnly(from, to)
+		}
+		if err != nil {
+			t.Fatalf("harness: stage the prompt %s: %v", e.Name(), err)
+		}
+	}
+	return dst
+}
+
+// sameDevice reports whether paths a and b are on one filesystem.
+func sameDevice(a, b string) (bool, error) {
+	ai, err := os.Stat(a)
+	if err != nil {
+		return false, err
+	}
+	bi, err := os.Stat(b)
+	if err != nil {
+		return false, err
+	}
+	return ai.Sys().(*syscall.Stat_t).Dev == bi.Sys().(*syscall.Stat_t).Dev, nil
+}
+
+// copyReadOnly copies from to a new read-only file at to.
+func copyReadOnly(from, to string) error {
+	body, err := os.ReadFile(from)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(to, body, 0o444)
+}
+
+// ReplacePrompt gives the prompt at path, one of a LinkPrompts directory's,
+// the content body: it replaces the link with a file of the test's own, the
+// way the daemon itself replaces a prompt (atomicfile.Replace), because a
+// write INTO the link would change every daemon's copy at once and is
+// refused by the template's read-only mode.
+func ReplacePrompt(t testing.TB, path, body string) {
+	t.Helper()
+	writeFile(t, path, body)
+}
+
+// promptsTemplate is the one read-only copy of prompts/ a test process
+// stages (promptsTemplateDir).
+var promptsTemplate struct {
+	once sync.Once
+	dir  string
+	err  error
+}
+
+// promptsTemplateDir answers the read-only copy of the repository's prompts/
+// this process made at its first use.
+func promptsTemplateDir(t testing.TB) string {
+	t.Helper()
+	src := filepath.Join(RepoRoot(t), "prompts")
+	promptsTemplate.once.Do(func() {
+		promptsTemplate.dir, promptsTemplate.err = stagePromptsTemplate(src)
+	})
+	if promptsTemplate.err != nil {
+		t.Fatalf("harness: stage the prompts template: %v", promptsTemplate.err)
+	}
+	return promptsTemplate.dir
+}
+
+// stagePromptsTemplate copies every file directly under src into a fresh
+// directory, each read-only, and answers that directory.
+func stagePromptsTemplate(src string) (string, error) {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", src, err)
+	}
+	dir, err := os.MkdirTemp("", "agent-repl-prompts-template-")
+	if err != nil {
+		return "", fmt.Errorf("make the template directory: %w", err)
 	}
 	for _, e := range entries {
 		if e.IsDir() {
@@ -367,17 +464,28 @@ func CopyPrompts(t testing.TB, dst string) string {
 		}
 		body, err := os.ReadFile(filepath.Join(src, e.Name()))
 		if err != nil {
-			t.Fatalf("harness: read %s: %v", e.Name(), err)
+			return "", fmt.Errorf("read %s: %w", e.Name(), err)
 		}
-		writeFile(t, filepath.Join(dst, e.Name()), string(body))
+		if err := os.WriteFile(filepath.Join(dir, e.Name()), body, 0o444); err != nil {
+			return "", fmt.Errorf("write %s: %w", e.Name(), err)
+		}
 	}
-	return dst
+	return dir, nil
 }
 
+// writeFile writes content at path. A READ-ONLY file there is a staged
+// prompt, a link every daemon of the process shares (LinkPrompts), so it is
+// replaced rather than written into; any other file is written in place, as
+// a daemon watching it expects.
 func writeFile(t testing.TB, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatalf("harness: mkdir %s: %v", filepath.Dir(path), err)
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode().Perm()&0o200 == 0 {
+		if err := os.Remove(path); err != nil {
+			t.Fatalf("harness: replace the staged prompt %s: %v", path, err)
+		}
 	}
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("harness: write %s: %v", path, err)

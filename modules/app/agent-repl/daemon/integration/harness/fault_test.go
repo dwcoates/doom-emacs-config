@@ -293,3 +293,48 @@ func TestSweepIsTheSubjectStandsOnlyTheRecordLatchAside(t *testing.T) {
 		t.Fatalf("UnexpectedWarnings = %v, want the sweep to still name daemon.boom", got)
 	}
 }
+
+func TestFailOnUnaskedExitClosesTheProcessLatchOnlyForAnUnaskedExit(t *testing.T) {
+	cases := []struct {
+		name      string
+		asked     bool
+		wantFault bool
+	}{
+		{name: "an unasked exit closes it", wantFault: true},
+		{name: "an asked exit leaves it open", asked: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			d := &Daemon{t: t, daemonProc: newDaemonProc(nil)}
+			exited := make(chan struct{})
+			watched := NewRecordingTB(t, t.Name())
+			d.t = watched
+
+			// Act
+			d.FailOnUnaskedExit("the store", exited, func() bool { return tc.asked }, func() string { return "exit status 2" })
+			close(exited)
+			if tc.wantFault {
+				// The fault is an event: wait for the latch itself, so the
+				// cleanup below cannot win the watch's select instead.
+				select {
+				case <-d.fault.ctx.Done():
+				case <-time.After(DefaultTimeout):
+					t.Fatal("the latch did not close for an unasked exit")
+				}
+			}
+			// The cleanup waits out the watch, so the latch is settled either
+			// way the watch's select went.
+			watched.RunCleanups()
+
+			// Assert
+			cause := context.Cause(d.fault.ctx)
+			if tc.wantFault != (cause != nil) {
+				t.Fatalf("latch cause = %v, want a fault: %v", cause, tc.wantFault)
+			}
+			if tc.wantFault && cause.Error() != "the store exited unasked, exit status 2" {
+				t.Fatalf("latch cause = %q, want the store's unasked exit", cause)
+			}
+		})
+	}
+}

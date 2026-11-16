@@ -717,7 +717,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	d := &Daemon{
 		StateDir:           opts.StateDir,
 		ProfileDir:         opts.ProfileDir,
-		PromptsDir:         CopyPrompts(t, filepath.Join(root, "prompts")),
+		PromptsDir:         LinkPrompts(t, filepath.Join(root, "prompts")),
 		WebappDir:          NewFakeWebappDist(t, filepath.Join(root, "dist")),
 		DefaultConfigDir:   NewConfigRoot(t, filepath.Join(root, "config-default"), accountEmail(opts.DefaultAccountEmail, "default@example.invalid")),
 		MultiRepoConfigDir: NewConfigRoot(t, filepath.Join(root, "config-multi"), accountEmail(opts.MultiRepoAccountEmail, "multi@example.invalid")),

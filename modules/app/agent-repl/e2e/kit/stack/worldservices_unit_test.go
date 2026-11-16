@@ -2,6 +2,7 @@ package stack
 
 import (
 	"errors"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -71,6 +72,47 @@ func TestAZettelThatDiedOnItsOwnFailsTheTest(t *testing.T) {
 			// Assert
 			if got := strings.Contains(r.Failures(), "zettel exited before test cleanup"); got != tc.wantFail {
 				t.Fatalf("failures = %q, want zettel's death reported %v", r.Failures(), tc.wantFail)
+			}
+		})
+	}
+}
+
+func TestStopProcessMarksTheStopAskedSoTheLatchIgnoresIt(t *testing.T) {
+	cases := []struct {
+		name string
+		// stop stops the process through stopProcess; otherwise it leaves on
+		// its own.
+		stop      bool
+		wantAsked bool
+	}{
+		{name: "a stop through stopProcess is asked", stop: true, wantAsked: true},
+		{name: "a process that left on its own is unasked"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			cmd := exec.Command("/bin/sh", "-c", "read _")
+			stdin, err := cmd.StdinPipe()
+			if err != nil {
+				t.Fatalf("stdin: %v", err)
+			}
+			if err := cmd.Start(); err != nil {
+				t.Fatalf("start: %v", err)
+			}
+			exit := watchProcess(cmd)
+			t.Cleanup(func() { _ = stdin.Close(); <-exit.done })
+
+			// Act
+			if tc.stop {
+				stopProcess(t, "store", cmd, exit, "")
+			} else {
+				_ = stdin.Close()
+				<-exit.done
+			}
+
+			// Assert
+			if got := exit.asked.Load(); got != tc.wantAsked {
+				t.Fatalf("asked = %v, want %v", got, tc.wantAsked)
 			}
 		})
 	}

@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -314,6 +315,14 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	assertOneSpoolRoot(t, daemonOpts.ExtraEnv, sidecar)
 
 	w := &World{Daemon: d, Store: store, Sidecar: sidecar, Zettel: zettel}
+	// Every wait on the world's daemon ends the moment a service the world
+	// runs exits unasked: no wait could be satisfied without it.
+	store.latched, sidecar.latched = d, d
+	latchExit(d, "the store", store.exit)
+	latchExit(d, "the sidecar", sidecar.exit)
+	if zettel != nil {
+		latchExit(d, "zettel", zettel.exit)
+	}
 
 	// Registered LAST, so t.Cleanup's LIFO unwind runs this FIRST — before
 	// the store/sidecar/daemon Stop cleanups above ever touch the
@@ -638,6 +647,15 @@ const reapGrace = 2 * time.Second
 type processExit struct {
 	done chan struct{}
 	err  error // written once, before done is closed; read only after it is
+	// asked reports that the process's stop was asked for (stopProcess), so
+	// its exit is no fault (latchExit).
+	asked atomic.Bool
+}
+
+// latchExit makes exit's unasked exit end every wait on D, the daemon of the
+// world WHAT serves (harness.Daemon.FailOnUnaskedExit).
+func latchExit(d *harness.Daemon, what string, exit *processExit) {
+	d.FailOnUnaskedExit(what, exit.done, exit.asked.Load, exit.status)
 }
 
 // watchProcess reaps cmd in the background and answers its exit through the
@@ -705,6 +723,7 @@ func (p *processExit) awaitWithin(budget time.Duration) bool {
 // a temp directory deleted with the test.
 func stopProcess(t testing.TB, name string, cmd *exec.Cmd, exit *processExit, logPath string) {
 	t.Helper()
+	exit.asked.Store(true)
 	if cmd.Process == nil || exit.exited() {
 		return
 	}
@@ -745,6 +764,9 @@ type Store struct {
 	cmd     *exec.Cmd
 	exit    *processExit
 	stopped bool
+	// latched is the daemon a restart's new process is latched to
+	// (latchExit), once the world has one.
+	latched *harness.Daemon
 	// shared is set while the suite's shared World holds this store: no test
 	// may stop or restart it (sharedworld.go).
 	shared bool
@@ -896,6 +918,9 @@ func (s *Store) StartSameDB(t testing.TB) {
 	s.cmd = cmd
 	s.stopped = false
 	s.exit = watchProcess(cmd)
+	if s.latched != nil {
+		latchExit(s.latched, "the store", s.exit)
+	}
 	t.Cleanup(func() {
 		if !s.Exited() {
 			s.Stop()
@@ -941,6 +966,9 @@ type Sidecar struct {
 	cmd     *exec.Cmd
 	exit    *processExit
 	stopped bool
+	// latched is the daemon a restart's new process is latched to
+	// (latchExit), once the world has one.
+	latched *harness.Daemon
 	// shared is set while the suite's shared World holds this sidecar: no
 	// test may stop or restart it (sharedworld.go).
 	shared bool
@@ -1130,6 +1158,9 @@ func (s *Sidecar) Restart(t testing.TB) {
 	// has not been stopped.
 	s.stopped = false
 	s.exit = watchProcess(cmd)
+	if s.latched != nil {
+		latchExit(s.latched, "the sidecar", s.exit)
+	}
 }
 
 // storeSocketOf reads the socket back out of a sidecar's own argv, so a

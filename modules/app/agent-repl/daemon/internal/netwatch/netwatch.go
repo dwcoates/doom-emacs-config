@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"sync"
 
+	"agent-repld/internal/changesignal"
 	"agent-repld/internal/dlog"
 )
 
@@ -63,8 +64,8 @@ type Watcher struct {
 	log  dlog.Logger
 
 	mu sync.Mutex
-	// changed is closed, and replaced, at every change.
-	changed chan struct{}
+	// changed announces every change.
+	changed changesignal.Signal
 }
 
 // New builds the watcher over the source open answers when Run starts.
@@ -75,7 +76,7 @@ func New(open func() (Source, error), log dlog.Logger) (*Watcher, error) {
 	case log == nil:
 		return nil, errors.New("netwatch: the watcher needs a logger")
 	}
-	return &Watcher{open: open, log: log, changed: make(chan struct{})}, nil
+	return &Watcher{open: open, log: log}, nil
 }
 
 // Changed answers a channel that is closed at the next change. A caller that
@@ -84,7 +85,7 @@ func New(open func() (Source, error), log dlog.Logger) (*Watcher, error) {
 func (w *Watcher) Changed() <-chan struct{} {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	return w.changed
+	return w.changed.Changed()
 }
 
 // Run reads the source until ctx ends. A source that cannot be opened, or
@@ -139,8 +140,7 @@ func (w *Watcher) Run(ctx context.Context) error {
 // announce closes the standing channel and stands a fresh one.
 func (w *Watcher) announce(change Change) {
 	w.mu.Lock()
-	close(w.changed)
-	w.changed = make(chan struct{})
+	w.changed.Notify()
 	w.mu.Unlock()
 	w.log.Info(opWatch, "the network changed; whatever waits on it is checked now", dlog.Context{
 		"kind": change.Kind, "interface": change.Interface, "detail": change.Detail,

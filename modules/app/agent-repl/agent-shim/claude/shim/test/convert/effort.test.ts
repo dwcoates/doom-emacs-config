@@ -1,9 +1,10 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { appliedEffortOf, effortLevelOf, vendorEffortLevel } from "../../src/convert/effort.js";
 import { conversationv1 } from "../../src/proto.js";
+import { filesUnder } from "../files-under.js";
 
 describe("effortLevelOf", () => {
   it("maps low", () => {
@@ -72,13 +73,8 @@ describe("the effort mapping is shared", () => {
     // Arrange
     const srcDir = fileURLToPath(new URL("../../src", import.meta.url));
     const home = path.join(srcDir, "convert", "effort.ts");
-    const walk = (dir: string): string[] =>
-      readdirSync(dir).flatMap((entry) => {
-        const full = path.join(dir, entry);
-        return statSync(full).isDirectory() ? walk(full) : [full];
-      });
     // Act
-    const offenders = walk(srcDir).filter(
+    const offenders = filesUnder(srcDir).filter(
       (file) =>
         file !== home &&
         !file.includes(`${path.sep}fake${path.sep}`) &&

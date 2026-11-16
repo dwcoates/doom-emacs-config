@@ -1004,13 +1004,16 @@ describe("descendantPids and vendorChildPids", () => {
   // Spawns a REAL, harmless child process (its own subtree, torn down at the
   // end of the test) to prove the pid-walk itself, since `pgrep`/`ps` are OS
   // utilities the harness already relies on directly — never the vendor.
+  // The child REPORTS that it runs, on stdout, before RUN looks for it: its
+  // own first statement is evidence the exec landed and its command line is
+  // the script's, so RUN reads the process table once, never in a retry loop.
   function withSleepingChild(scriptDir, run) {
     const dir = mkdtempSync(path.join(tmpdir(), scriptDir));
     const script = path.join(dir, "child.mjs");
-    writeFileSync(script, "setTimeout(() => {}, 30000);\n", "utf8");
-    const child = spawn(process.execPath, [script], { stdio: "ignore" });
+    writeFileSync(script, 'process.stdout.write("ready\\n");\nsetTimeout(() => {}, 30000);\n', "utf8");
+    const child = spawn(process.execPath, [script], { stdio: ["ignore", "pipe", "ignore"] });
     return new Promise((resolve, reject) => {
-      child.once("spawn", async () => {
+      child.stdout.once("data", async () => {
         try {
           await run(child.pid);
           resolve();
@@ -1020,6 +1023,7 @@ describe("descendantPids and vendorChildPids", () => {
           child.kill("SIGKILL");
         }
       });
+      child.once("exit", (code, signal) => reject(new Error(`the child exited before it reported (code ${code}, signal ${signal})`)));
       child.once("error", reject);
     });
   }
@@ -1031,11 +1035,6 @@ describe("descendantPids and vendorChildPids", () => {
     "descendantPids finds a real spawned child of this process",
     () =>
       withSleepingChild("capture-descendant-", async (childPid) => {
-        // Give the OS a moment to register the fork before pgrep looks for it.
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          if (descendantPids(process.pid).includes(childPid)) return;
-          await new Promise((r) => setTimeout(r, 50));
-        }
         expect(descendantPids(process.pid)).toContain(childPid);
       }),
     5000,
@@ -1045,10 +1044,9 @@ describe("descendantPids and vendorChildPids", () => {
     "vendorChildPids ignores a descendant that is not the vendor binary",
     () =>
       withSleepingChild("capture-nonvendor-", async (childPid) => {
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          if (descendantPids(process.pid).includes(childPid)) break;
-          await new Promise((r) => setTimeout(r, 50));
-        }
+        // The child is a descendant, so the exclusion below is the vendor
+        // filter's, not the child's absence.
+        expect(descendantPids(process.pid)).toContain(childPid);
         expect(vendorChildPids(process.pid)).not.toContain(childPid);
       }),
     5000,
@@ -1058,10 +1056,6 @@ describe("descendantPids and vendorChildPids", () => {
     "vendorChildPids finds a descendant whose command line names the marker",
     () =>
       withSleepingChild(`capture-${VENDOR_CHILD_MARKER}-`, async (childPid) => {
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          if (vendorChildPids(process.pid).includes(childPid)) return;
-          await new Promise((r) => setTimeout(r, 50));
-        }
         expect(vendorChildPids(process.pid)).toContain(childPid);
       }),
     5000,

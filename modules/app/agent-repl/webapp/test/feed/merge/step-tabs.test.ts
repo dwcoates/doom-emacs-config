@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
+import { recorded } from "../../events.js";
 import { create } from "@bufbuild/protobuf";
 import {
   OpenInEditorResponseSchema,
@@ -194,19 +195,28 @@ describe("drawFeedMergeTabRebaseCommit", () => {
 describe("drawFeedMergeRebaseReplaying", () => {
   /** The rebasing tab drawn over one replay header, in a page that answers both clicks. */
   function header(replaying: typeof REPLAYING = REPLAYING) {
-    const calls = { openWorkspace: [] as OpenWorkspaceRequest[], selectInEditor: [] as SelectInEditorRequest[], openInEditor: [] as OpenInEditorRequest[] };
+    const recorders = {
+      openWorkspace: recorded<OpenWorkspaceRequest>(),
+      selectInEditor: recorded<SelectInEditorRequest>(),
+      openInEditor: recorded<OpenInEditorRequest>(),
+    };
+    const calls = {
+      openWorkspace: recorders.openWorkspace.calls,
+      selectInEditor: recorders.selectInEditor.calls,
+      openInEditor: recorders.openInEditor.calls,
+    };
     const ctx = scriptedAppContext(
       {
         openWorkspace: (req) => {
-          calls.openWorkspace.push(req);
+          recorders.openWorkspace.record(req);
           return create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } });
         },
         selectInEditor: (req) => {
-          calls.selectInEditor.push(req);
+          recorders.selectInEditor.record(req);
           return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
         },
         openInEditor: (req) => {
-          calls.openInEditor.push(req);
+          recorders.openInEditor.record(req);
           return create(OpenInEditorResponseSchema, { result: { case: "success", value: {} } });
         },
       },
@@ -218,7 +228,7 @@ describe("drawFeedMergeRebaseReplaying", () => {
       lines: [{ line: { case: "replaying", value: replaying } }],
     });
     const el = drawFeedMergeTabRebasing(u, "rebasing", rowContext(ctx, mergeRow("m1")));
-    return { line: el.querySelector<HTMLElement>('[data-merge-line="replaying"]')!, calls };
+    return { line: el.querySelector<HTMLElement>('[data-merge-line="replaying"]')!, calls, recorders };
   }
 
   it("reads as the replay's sentence, the tip by its short hash", () => {
@@ -236,9 +246,9 @@ describe("drawFeedMergeRebaseReplaying", () => {
   });
 
   it("opens the target branch's log at the full tip when the tip is clicked", async () => {
-    const { line, calls } = header();
+    const { line, calls, recorders } = header();
     line.querySelector<HTMLElement>(".merge-commit-link")!.click();
-    await vi.waitFor(() => expect(calls.openInEditor).toHaveLength(1));
+    await recorders.openInEditor.reached(1);
     const target = calls.openInEditor[0]?.target;
     expect(target?.case === "commitLog" ? [target.value.repositoryDir, target.value.branch, target.value.commit] : null).toEqual([
       "/r/main",
@@ -248,9 +258,9 @@ describe("drawFeedMergeRebaseReplaying", () => {
   });
 
   it("opens the target's workspace and then switches to it when the target is clicked", async () => {
-    const { line, calls } = header();
+    const { line, calls, recorders } = header();
     line.querySelector<HTMLElement>("[data-merge-target]")!.click();
-    await vi.waitFor(() => expect(calls.selectInEditor).toHaveLength(1));
+    await recorders.selectInEditor.reached(1);
     expect([calls.openWorkspace.map((r) => r.workspace?.id), calls.selectInEditor.map((r) => r.workspace?.id)]).toEqual([
       ["ws-main"],
       ["ws-main"],

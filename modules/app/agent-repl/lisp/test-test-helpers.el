@@ -534,9 +534,16 @@ test-popup.el tests the popup module itself and records one level lower."
          (process (make-process :name "agent-repl-reap-test" :buffer buffer
                                 :command (list "/bin/sh" "-c" "sleep 30 & echo $!; wait")
                                 :connection-type 'pipe :noquery t)))
-    (while (not (with-current-buffer buffer
-                  (string-match-p "[0-9]+\n" (buffer-string))))
-      (accept-process-output process 0.05))
+    ;; The child's pid is the shell's output, the event this waits on: it
+    ;; ends at the shell's death and at a bound rather than looping forever.
+    (let ((deadline (+ (float-time) 5)))
+      (while (not (with-current-buffer buffer
+                    (string-match-p "[0-9]+\n" (buffer-string))))
+        (unless (process-live-p process)
+          (error "The shell exited before it printed its child's pid"))
+        (when (> (float-time) deadline)
+          (error "The shell printed no child pid within 5s"))
+        (accept-process-output process 0.05)))
     (cons process (string-to-number (with-current-buffer buffer (buffer-string))))))
 
 (defun agent-repl-test-helpers--pid-gone-p (pid)

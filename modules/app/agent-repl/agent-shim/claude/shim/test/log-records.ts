@@ -40,3 +40,30 @@ export function logRecordsDuring(act: () => unknown): LogRecord[] {
   act();
   return logRecordsSince(before);
 }
+
+/**
+ * Resolves with the records since BEFORE once CHECK accepts them: judged at
+ * once and again at every record the sink takes, which is the event (the
+ * agent-repl-tests skill, "Synchronization: events, never time"). It wraps
+ * the mocked sink while it waits and restores it after.
+ */
+export function untilLogged(before: number, check: (records: LogRecord[]) => boolean): Promise<LogRecord[]> {
+  const now = logRecordsSince(before);
+  if (check(now)) return Promise.resolve(now);
+  const sink = vi.mocked(writeSync);
+  // log-setup.ts gives the mocked sink its one implementation; a sink with
+  // none is a broken setup, not a case to cope with.
+  const previous = sink.getMockImplementation();
+  if (previous === undefined) throw new Error("untilLogged: the mocked log sink has no implementation (test/log-setup.ts)");
+  return new Promise<LogRecord[]>((resolve) => {
+    sink.mockImplementation((...args: Parameters<typeof writeSync>) => {
+      const written = previous(...args);
+      const records = logRecordsSince(before);
+      if (check(records)) {
+        sink.mockImplementation(previous);
+        resolve(records);
+      }
+      return written;
+    });
+  });
+}

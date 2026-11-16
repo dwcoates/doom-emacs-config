@@ -129,8 +129,13 @@ if grep -qx "sample 606 1800 1 -mayDie -file $W/root/$session/emacs-606.cpu.samp
 else
     fail "start samples Emacs's CPU from outside, for the contract's window, into the session" "$(cat "$W/log")"
 fi
+# A poll, because a file's first bytes announce nothing to a shell, but one
+# that ends at the sampler's death rather than waiting out its bound.
 for _ in $(seq 1 100); do
     [ -s "$W/root/$session/samples.jsonl" ] && break
+    if [ -s "$W/root/$session/sampler.pid" ] && ! kill -0 "$(cat "$W/root/$session/sampler.pid")" 2>/dev/null; then
+        break
+    fi
     sleep 0.05
 done
 if grep -q '"pid":606,"cpu_s":180.00,"rss_kb":40960,"name":"emacs"' "$W/root/$session/samples.jsonl" &&

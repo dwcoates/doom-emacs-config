@@ -864,8 +864,6 @@ func New(deps Deps) (Controller, error) {
 		staleInFlight: make(map[ids.WorkspaceID]bool),
 		reported:      make(map[ids.WorkspaceID]string),
 		settled:       make(chan struct{}),
-		intake:        newAnswerLatch(),
-		queue:         newAnswerLatch(),
 	}
 	c.intake.answer = c.servesIntakeLocked()
 	c.queue.answer = c.servesQueueLocked()

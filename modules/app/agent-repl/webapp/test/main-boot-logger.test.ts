@@ -35,6 +35,7 @@
  * from the file the daemon serves.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { awaitDom } from "./events.js";
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -99,26 +100,16 @@ const BOOT_SETTLE_MS = 2000;
  * heading's warning list is opened and the `bootFailed` row's detail read back.
  */
 async function awaitBootFailureChip(): Promise<string> {
-  const deadline = Date.now() + BOOT_SETTLE_MS;
-  for (;;) {
-    const chip = document.querySelector<HTMLElement>(
-      '#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]',
-    );
-    if (chip !== null) {
-      chip.click();
-      document
-        .querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')
-        ?.click();
-      return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";
-    }
-    if (Date.now() > deadline) {
-      throw new Error(
-        `the boot listed no failure in the warning chip within ${BOOT_SETTLE_MS}ms; ` +
-          `the topbar holds ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
-      );
-    }
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  const chip = await awaitDom(
+    document,
+    "the boot listing a failure in the warning chip",
+    () => document.querySelector<HTMLElement>('#topbar .topbar-heading-warnings[data-local-arms~="bootFailed"]'),
+    () => `the topbar ${document.querySelector("#topbar")?.innerHTML ?? "<no topbar>"}`,
+    BOOT_SETTLE_MS,
+  );
+  chip.click();
+  document.querySelector<HTMLElement>('#topbar [data-reveal] [data-local][data-arm="bootFailed"]')?.click();
+  return document.querySelector("#topbar [data-reveal]")?.textContent ?? "";
 }
 
 /**

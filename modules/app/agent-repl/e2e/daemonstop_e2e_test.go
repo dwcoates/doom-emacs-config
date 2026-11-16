@@ -22,6 +22,7 @@
 package e2e
 
 import (
+	"context"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -43,7 +44,7 @@ import (
 // the daemon's own exit.
 //
 // MEASURED: with the stand-down in place the stray set reads empty on the
-// first poll every time across this test's -count=10 run. Two seconds is a
+// first read every time across this test's -count=10 run. Two seconds is a
 // hundred times that; anything still standing after it is a leak, not a slow
 // reap.
 const straySettleBound = 2 * time.Second
@@ -268,18 +269,35 @@ func assertStoreHeldNoOutstandingTokens(t *testing.T, w *stack.World) {
 	t.Fatalf("the store wrote no shutdown record stating its outstanding tokens; its log holds %d records", len(harness.ReadLog(t, w.Store.LogPath)))
 }
 
-// awaitWorldStraysGone polls until nothing but the test's own spared processes// awaitWorldStraysGone polls until nothing but the test's own spared processes
-// names the world's state root, answering whatever is left at the bound.
+// awaitWorldStraysGone waits until nothing but the test's own spared
+// processes names the world's state root, answering whatever is left at the
+// bound. Each round waits on the exit events of the strays it has not yet seen
+// exit (stack.AwaitPIDsGone), then reads the table again for any a stray
+// started; one seen to exit is never waited on again, so an exited stray its
+// new parent has not reaped yet ends no round early and costs no spin.
 func awaitWorldStraysGone(t *testing.T, w *stack.World, bound time.Duration) []int {
 	t.Helper()
-	deadline := time.Now().Add(bound)
-	ticker := time.NewTicker(10 * time.Millisecond)
-	defer ticker.Stop()
+	ctx, cancel := grantedclock.WithBound(context.Background(), bound)
+	defer cancel()
+	exited := map[int]bool{}
 	for {
-		left := w.StrayPIDs()
-		if len(left) == 0 || time.Now().After(deadline) {
+		var left []int
+		for _, pid := range w.StrayPIDs() {
+			if !exited[pid] {
+				left = append(left, pid)
+			}
+		}
+		if len(left) == 0 {
+			return nil
+		}
+		if err := stack.AwaitPIDsGone(ctx, left); err != nil {
+			if ctx.Err() == nil {
+				t.Fatalf("await the strays %v: %v", left, err)
+			}
 			return left
 		}
-		<-ticker.C
+		for _, pid := range left {
+			exited[pid] = true
+		}
 	}
 }

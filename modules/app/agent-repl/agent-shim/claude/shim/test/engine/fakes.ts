@@ -43,6 +43,7 @@ import type { TaskAgentKnowledge, TaskAwaitingKind } from "../../src/convert/det
 import type { EngineFold, EngineFoldOutput, FoldContext } from "../../src/engine/fold-context.js";
 import type { KeepaliveScheduler } from "../../src/engine/keepalive.js";
 import type { ReachabilityProbe } from "../../src/engine/network-resume.js";
+import { Waiters } from "../waiters.js";
 
 /** A query whose message stream a suite pushes into, one message at a time. */
 export class ScriptedQuery implements QueryLike {
@@ -255,8 +256,18 @@ export class ScriptedQuery implements QueryLike {
    * from `calls`, so the suites that pin `calls` exactly are not about it.
    */
   planUsageOptions: Array<{ skipBehaviors: true }> = [];
+  private readonly planUsageReads = new Waiters("the query");
+  /**
+   * Resolves once READS plan-usage reads have been made: at once if they
+   * have, else at the read that makes them. The read is the event; nothing
+   * polls for it.
+   */
+  untilPlanUsageReads(reads: number): Promise<void> {
+    return this.planUsageReads.until(`${reads} plan-usage reads`, () => this.planUsageOptions.length >= reads);
+  }
   usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(opts: { skipBehaviors: true }): Promise<PlanUsageLike> {
     this.planUsageOptions.push(opts);
+    this.planUsageReads.notify();
     return this.planUsage instanceof Error ? Promise.reject(this.planUsage) : Promise.resolve(this.planUsage);
   }
   accountInfo(): Promise<AccountInfoLike> {
@@ -495,7 +506,21 @@ export class RecordingPersistence implements Persistence {
     if (this.writeThrows !== undefined) throw this.writeThrows;
     this.wroteUnderProducer = true;
     this.buffered.push(...entries);
+    this.bufferWaits.notify();
   }
+  private readonly bufferWaits = new Waiters("the persistence");
+  /**
+   * Resolves with the first buffered entry PREDICATE accepts: one already
+   * buffered, or the next one written. The write is the event a test waits
+   * on, never a poll of `buffered`.
+   */
+  async untilBuffered(predicate: (entry: PersistEntry) => boolean): Promise<PersistEntry> {
+    await this.bufferWaits.until("a buffered entry the predicate accepts", () => this.buffered.some(predicate));
+    const entry = this.buffered.find(predicate);
+    if (entry === undefined) throw new Error("untilBuffered: the wait ended with no entry the predicate accepts");
+    return entry;
+  }
+
   /** Every pointer a reading session was asked to conclude through. */
   readonly concludedThrough: string[] = [];
   /** The pointer every page's tail reports it served through; absent by default. */
