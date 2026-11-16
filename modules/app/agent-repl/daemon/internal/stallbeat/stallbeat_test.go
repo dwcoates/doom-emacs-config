@@ -1,6 +1,7 @@
 package stallbeat
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -174,4 +175,73 @@ func TestRecentLeavesOutAStallOlderThanTheWindow(t *testing.T) {
 	if count != 1 || blocked != 250 {
 		t.Fatalf("Recent = (%d, %d), want only the stall inside the window", count, blocked)
 	}
+}
+
+func TestChanceOnPhase(t *testing.T) {
+	tests := []struct {
+		name string
+		n    int
+		want int
+	}{
+		{name: "no stalls put none on a phase", n: 0, want: 0},
+		{name: "a quiet window rounds to none", n: 14, want: 0},
+		{name: "half a stall rounds up", n: 15, want: 1},
+		{name: "a window of 59 puts two on a phase", n: 59, want: 2},
+		{name: "a busy window of 364 puts twelve on a phase", n: 364, want: 12},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := ChanceOnPhase(tt.n)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("ChanceOnPhase(%d) = %d, want %d", tt.n, got, tt.want)
+			}
+		})
+	}
+}
+
+// spread answers N stalls in one window, their phases walking the cycle in
+// even steps, so no phase holds more than chance puts there.
+func spread(n int) []time.Time {
+	out := make([]time.Time, n)
+	step := Window / time.Duration(n+1)
+	for i := range out {
+		out[i] = base.Add(time.Duration(i) * step)
+	}
+	return out
+}
+
+func TestObserveJudgesABusyWindowAgainstChance(t *testing.T) {
+	tests := []struct {
+		name   string
+		stalls []time.Time
+		raised int
+	}{
+		{name: "stays quiet for a busy window whose phases hold only chance's share", stalls: spread(360), raised: 0},
+		{name: "raises for a beat that stands Beat above a busy window's chance", stalls: append(spread(300), onBeat(base.Add(250*time.Millisecond), 20, 0)...), raised: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d, log := newDetector(t)
+			sortTimes(tt.stalls)
+
+			// Act
+			for _, at := range tt.stalls {
+				d.Observe(at, 300)
+			}
+
+			// Assert
+			if got := len(raisedErrors(log)); got != tt.raised {
+				t.Fatalf("raised %d errors, want %d: %+v", got, tt.raised, log.Records())
+			}
+		})
+	}
+}
+
+// sortTimes orders stalls as the webhost reports them, oldest first.
+func sortTimes(ts []time.Time) {
+	slices.SortFunc(ts, func(a, b time.Time) int { return a.Compare(b) })
 }
