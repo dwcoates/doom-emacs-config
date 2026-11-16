@@ -235,9 +235,9 @@ describe("drawBubble: the uncapped mode", () => {
     expect(BUBBLE_CAP_LINES.every((cap) => isCapped(cap))).toBe(true);
   });
 
-  it("folds a subagent prompt with no line limit", () => {
+  it("folds an agent-to-agent prompt at two lines", () => {
     // Arrange / Act / Assert
-    expect(AGENT_PROMPT_CAP_LINES).toBe(BUBBLE_FOLD_UNBOUNDED);
+    expect(AGENT_PROMPT_CAP_LINES).toBe(2);
   });
 
   it("folds a user prompt with no line limit", () => {

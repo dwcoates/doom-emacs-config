@@ -3929,6 +3929,7 @@ html[data-page-unshown] {
    the SCROLL BOX, so the strip above it never scrolls away from the text it
    labels, and it is counted in the one bubble leading. */
 .bubble[data-cap-lines="feed"] { --bubble-cap-lines: var(--feed-cap-lines); }
+.bubble[data-cap-lines="2"] { --bubble-cap-lines: 2; }
 .bubble[data-cap-lines="1"] { --bubble-cap-lines: 1; }
 .bubble[data-cap-lines="0"] { --bubble-cap-lines: 0; }
 .tool-read-output { --cap-lines: 10; --cap-extra: calc(0.35rem + 1px); }
@@ -4234,8 +4235,8 @@ html[data-page-unshown] {
    `has-more`, which still measures the body structurally (bubble-more.ts reads
    the clamped body's `scrollHeight`), so the measurer changes no layout. The
    clamp is lifted with the one toggle's `.expanded`, which shows everything.
-   The spec types allow the ellipsis at a one-line cap only, a whole line
-   count the clamp can state. The clamp's shape is the title fold's (THE
+   The spec types allow the ellipsis at a one-line or two-line cap only, whole
+   line counts the clamp can state. The clamp's shape is the title fold's (THE
    ONE-LINE CLAMP'S SHAPE, above); this states only its line count. */
 .bubble[data-more="ellipsis"] > .bubble-scroll:not(.expanded) > .bubble-body {
   -webkit-line-clamp: var(--bubble-cap-lines);

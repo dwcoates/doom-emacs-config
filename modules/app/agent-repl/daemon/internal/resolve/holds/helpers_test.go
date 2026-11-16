@@ -80,7 +80,7 @@ func (r *renderer) SetRelaunching(_ ids.WorkspaceID, relaunching bool) {
 // render draws the cards from what the renderer was told, as the feed
 // resolver does on every change.
 func (r *renderer) render() {
-	r.cards = holds.Prompts(r.held, r.editing, holds.StartOf(r.loading, r.relaunching), textBody, r.log)
+	r.cards = holds.Prompts(r.held, r.editing, holds.StartOf(r.loading, r.relaunching), textBody, noSender, r.log)
 }
 
 // newRenderer builds a renderer plus the surfaces its records land in.
@@ -156,3 +156,6 @@ func hasError(records []dlog.Record, operation string) bool {
 	}
 	return false
 }
+
+// noSender is the SenderHeader of a renderer whose holds no agent sent.
+func noSender(wsm.HeldPrompt) *frontendv1.FeedAgentPromptAddress { return nil }

@@ -8,6 +8,9 @@
  * whichever feed it resolved. So this reuses the prompt bubble's own shape and
  * body vocabulary.
  *
+ * EVERY AGENT-TO-AGENT BUBBLE FOLDS AT TWO LINES (owner request, 2026-11-12): its
+ * collapsed text is clamped to two lines ending in `…`, and a click opens it.
+ *
  * EVERY AGENT-TO-AGENT BUBBLE IS HEADED ONE WAY (owner spec, 2026-10-17): no
  * border, and a header of the other end's name and an arrow icon. A prompt
  * that went OUT reads the name then a right arrow; one that came IN reads a
@@ -20,7 +23,7 @@
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
 import { log } from "../../log.js";
-import { AGENT_PROMPT_CAP_LINES, drawBubble } from "../../bubble/draw.js";
+import { AGENT_PROMPT_CAP_LINES, BUBBLE_MORE_ELLIPSIS, drawBubble } from "../../bubble/draw.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedAgentPrompt,
@@ -63,6 +66,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
       corner: [drawPromptCopyControl(body.blocks, `${PATH}.body.blocks`)],
       content,
       capLines: AGENT_PROMPT_CAP_LINES,
+      more: BUBBLE_MORE_ELLIPSIS,
     },
     previous,
   ).bubble;

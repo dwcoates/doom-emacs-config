@@ -41,6 +41,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { SessionCommand } from "../../../proto/gen/ts/conversation/v1/slash_command_pb";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { receivedFromWorkspace } from "../feed/addresses.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
@@ -297,6 +298,72 @@ describe("drawHeldPrompt identity", () => {
     expect(card.querySelector(".prompt-block-text")?.textContent).toContain(
       "fix the test",
     );
+  });
+});
+
+describe("drawHeldPrompt: a prompt another workspace's agent sent", () => {
+  const sentPrompt = (): HeldPrompt => {
+    const prompt = heldPrompt();
+    prompt.sender = receivedFromWorkspace("parser-fix");
+    return prompt;
+  };
+
+  it("heads the card with the sending workspace, a left arrow then its name", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(sentPrompt(), tc);
+    // Assert
+    const address = card.querySelector(".prompt-address");
+    expect(address?.textContent).toBe("parser-fix");
+    expect(address?.firstElementChild?.classList.contains("peer-arrow")).toBe(true);
+  });
+
+  it("draws the sender ABOVE the status strip that holds the badge", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(sentPrompt(), tc);
+    // Assert
+    const strip = [...card.querySelectorAll(".bubble-strip")];
+    expect(strip.map((el) => el.classList.contains("prompt-address") ? "sender" : el.className.includes("queued-head") ? "status" : "other")).toEqual(["sender", "status"]);
+  });
+
+  it("folds the content at two lines ended in the ellipsis", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(sentPrompt(), tc);
+    // Assert
+    expect([card.getAttribute("data-cap-lines"), card.getAttribute("data-more")]).toEqual(["2", "ellipsis"]);
+  });
+
+  it("keeps the action buttons outside the folded content", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(sentPrompt(), tc);
+    // Assert
+    const scroll = card.querySelector(".bubble-scroll");
+    expect(scroll?.contains(card.querySelector(".queued-controls") ?? null)).toBe(false);
+  });
+
+  it("draws no sender header on a prompt no agent sent", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.querySelector(".prompt-address")).toBeNull();
+  });
+
+  it("leaves a prompt no agent sent folded at the user prompt's unbounded fold", () => {
+    // Arrange
+    const { tc } = trayContext();
+    // Act
+    const card = drawHeldPrompt(heldPrompt(), tc);
+    // Assert
+    expect(card.getAttribute("data-cap-lines")).toBe("unbounded");
   });
 });
 

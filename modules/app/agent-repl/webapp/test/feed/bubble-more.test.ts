@@ -84,6 +84,7 @@ function bubbleBox(opts: {
 function clampedBox(more: string, lines: number): HTMLElement {
   const scroll = bubbleBox({ lines, cap: 1 });
   scroll.parentElement?.setAttribute(BUBBLE_MORE_ATTRIBUTE, more);
+  scroll.parentElement?.setAttribute("data-cap-lines", "1");
   const body = scroll.querySelector<HTMLElement>(`.${BUBBLE_BODY_CLASS}`);
   if (body === null) throw new Error("fixture: no body");
   Object.defineProperty(body, "offsetHeight", { configurable: true, value: LINE_PX });
@@ -357,6 +358,20 @@ describe("refreshHasMore: a clamp's ellipsis follows a word character", () => {
     // Assert
     expect([body.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY), scroll.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)])
       .toEqual([PLACED_TRIM, ""]);
+  });
+
+  it("trims nothing on an ellipsis bubble clamped to two lines", () => {
+    // Arrange
+    layOutClamps();
+    const scroll = clampedBox(BUBBLE_MORE_ELLIPSIS, 3);
+    scroll.parentElement?.setAttribute("data-cap-lines", "2");
+    const body = ellipsisBody(scroll);
+
+    // Act
+    refreshHasMore(scroll);
+
+    // Assert
+    expect(body.style.getPropertyValue(ELLIPSIS_TRIM_PROPERTY)).toBe("");
   });
 
   it("clears a stale trim from a title whose fold is open", () => {

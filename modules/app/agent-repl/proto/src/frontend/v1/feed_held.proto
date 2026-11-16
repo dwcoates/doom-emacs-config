@@ -262,6 +262,14 @@ message HeldPrompt {
   // held prompt but an interjection under way. Absent otherwise. It claims
   // the card's badge after the edit and before the hold (HeldPrompt.badge).
   HeldPromptSentNow sent_now = 28;
+  // PRESENT WHEN ANOTHER WORKSPACE'S AGENT SENT THIS PROMPT
+  // (conversation.v1.PromptOrigin PROMPT_ORIGIN_AGENT_SENT), absent for every
+  // other origin. The header the prompt's feed row will carry once it settles
+  // (FeedAgentPrompt.address), so the held card is headed exactly as its row:
+  // a left arrow, then the sending workspace's name, drawn above the card's
+  // status strip. DAEMON-RESOLVED: the card draws it verbatim and derives
+  // nothing from the prompt's text.
+  optional FeedAgentPromptAddress sender = 29;
 }
 
 // The user's "Send now" waiting on what keeps the prompt.

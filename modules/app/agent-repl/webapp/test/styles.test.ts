@@ -1337,9 +1337,12 @@ describe("the thinking bubble", () => {
     expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*1\s*;?$/);
   });
 
-  it("maps no two-line cap now that no bubble collapses at two lines", () => {
-    // Arrange / Act / Assert
-    expect(declarationsOf('.bubble[data-cap-lines="2"]')).toBeUndefined();
+  it("maps the two-line cap an agent-to-agent prompt collapses at", () => {
+    // Arrange / Act
+    const rule = declarationsOf('.bubble[data-cap-lines="2"]');
+
+    // Assert
+    expect(rule?.trim()).toMatch(/^--bubble-cap-lines:\s*2\s*;?$/);
   });
 });
 

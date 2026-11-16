@@ -67,14 +67,15 @@ export const BUBBLE_VARIANTS = {
 
 /**
  * A CAPPED bubble's collapsed line limit: the shared feed cap, no limit at all
- * (`BUBBLE_FOLD_UNBOUNDED`: a user, held or subagent prompt), one line (a
+ * (`BUBBLE_FOLD_UNBOUNDED`: a user or held user prompt), two lines (an
+ * agent-to-agent prompt), one line (a
  * thinking or interim response), or none past the header strip (a peer message). Each kind states
  * its limit itself, never through another kind's constant, so changing one
  * kind's cap never moves another's. A closed set, because the stylesheet maps
  * each value to its line count, or lifts the cap for the unbounded fold
  * (`.bubble[data-cap-lines=…]`), and styles.test.ts holds the two together.
  */
-export type CappedLines = "feed" | typeof BUBBLE_FOLD_UNBOUNDED | 1 | 0;
+export type CappedLines = "feed" | typeof BUBBLE_FOLD_UNBOUNDED | 2 | 1 | 0;
 
 /**
  * THE UNBOUNDED FOLD (owner request, 2026-10-19): a bubble that is still a
@@ -102,7 +103,7 @@ export const BUBBLE_UNCAPPED = "none";
 export type BubbleCapLines = CappedLines | typeof BUBBLE_UNCAPPED;
 
 /** Every CAPPED value, each of which the stylesheet must map to a line count. */
-export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", BUBBLE_FOLD_UNBOUNDED, 1, 0];
+export const BUBBLE_CAP_LINES: readonly CappedLines[] = ["feed", BUBBLE_FOLD_UNBOUNDED, 2, 1, 0];
 
 /** Whether CAP limits the bubble at all (anything but `BUBBLE_UNCAPPED`). */
 export function isCapped(cap: BubbleCapLines): cap is CappedLines {
@@ -126,19 +127,22 @@ export { BUBBLE_MORE_ATTRIBUTE, BUBBLE_MORE_ELLIPSIS, BUBBLE_MORE_FADE };
 export type BubbleMore = typeof BUBBLE_MORE_FADE | typeof BUBBLE_MORE_ELLIPSIS;
 
 /**
- * The only line limit the ellipsis is drawn at: ONE line. A clamp counts whole
- * text lines, and the shared feed cap (27.5 lines, or the 50vh ceiling) is no
- * whole count, so the spec types make an ellipsis at any other cap
- * unrepresentable rather than drawn inexactly.
+ * The line limits the ellipsis is drawn at: ONE line, or TWO (an
+ * agent-to-agent prompt). A clamp counts whole text lines, and the shared feed
+ * cap (27.5 lines, or the 50vh ceiling) is no whole count, so the spec types
+ * make an ellipsis at any other cap unrepresentable rather than drawn
+ * inexactly.
  */
 export const ELLIPSIS_CAP_LINES = 1 satisfies CappedLines;
+export const ELLIPSIS_TWO_CAP_LINES = 2 satisfies CappedLines;
 
 /**
- * A subagent prompt's collapsed line limit (owner request, 2026-10-19): NONE,
- * the unbounded fold, so the folded prompt shows its whole text and the fold
- * hides only a reply's quote.
+ * An agent-to-agent prompt's collapsed line limit (owner request, 2026-11-12):
+ * TWO lines, ended in the ellipsis when more follows, so a long prompt one
+ * agent sent another takes two lines of the feed until a click opens it. Held
+ * and settled alike (src/held/held-prompt.ts, src/feed/rows/agent-prompt.ts).
  */
-export const AGENT_PROMPT_CAP_LINES = BUBBLE_FOLD_UNBOUNDED satisfies CappedLines;
+export const AGENT_PROMPT_CAP_LINES = ELLIPSIS_TWO_CAP_LINES satisfies CappedLines;
 
 /**
  * A user prompt's collapsed line limit (owner request, 2026-10-19): NONE, the
@@ -204,7 +208,7 @@ interface FadeSpec extends CappedSpecBase {
 
 /** A capped bubble that signals more with the one-line ellipsis. */
 interface EllipsisSpec extends CappedSpecBase {
-  capLines: typeof ELLIPSIS_CAP_LINES;
+  capLines: typeof ELLIPSIS_CAP_LINES | typeof ELLIPSIS_TWO_CAP_LINES;
   more: typeof BUBBLE_MORE_ELLIPSIS;
 }
 

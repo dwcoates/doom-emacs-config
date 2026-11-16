@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // senderWorkspace is the workspace whose agent sends the prompts these tests
@@ -215,5 +216,85 @@ func TestASentPromptIsRecordedDurably(t *testing.T) {
 	// Assert
 	if _, ok := store.recorded(testWorkspace, sentRowID(testWorkspace, "k-1")); !ok {
 		t.Fatal("the sent row was not recorded durably")
+	}
+}
+
+// agentSentHold is a standing hold of TURN that SENDER's agent sent.
+func agentSentHold(turn string, sender *ids.WorkspaceID) wsm.HeldPrompt {
+	held := standingHold(turn, "please review the parser", 0)
+	held.Origin = conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT.String()
+	held.SentBy = sender
+	return held
+}
+
+// heldSender is the sender header of the held section's one card.
+func (h *harness) heldSender() *frontendv1.FeedAgentPromptAddress {
+	h.t.Helper()
+	items := h.heldNow().GetItems()
+	if len(items) != 1 {
+		h.t.Fatalf("held items = %v, want exactly one", items)
+	}
+	return items[0].GetPrompt().GetSender()
+}
+
+func TestAHeldAgentSentPromptIsHeadedByTheWorkspaceThatSentIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.names = map[ids.WorkspaceID]string{senderWorkspace: "parser-fix"}
+	sender := senderWorkspace
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{agentSentHold("t1", &sender)})
+
+	// Assert
+	if got := addressLine(h.heldSender()); got != "← workspace parser-fix" {
+		t.Fatalf("sender = %q, want the sending workspace", got)
+	}
+}
+
+func TestAHeldAgentSentPromptWhoseSenderCannotBeNamedIsHeadedUnnamed(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.nameErr = errors.New("database is locked")
+	sender := senderWorkspace
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{agentSentHold("t1", &sender)})
+
+	// Assert
+	if got := addressLine(h.heldSender()); got != "← unnamed workspace "+unnamedWorkspaceSender {
+		t.Fatalf("sender = %q, want the unnamed stand-in", got)
+	}
+	if !h.hasRecordWith("error", "daemon.feed.peer_workspace_name_failed", "other_workspace", string(senderWorkspace)) {
+		t.Fatalf("records = %+v, want the unreadable name at ERROR", h.records())
+	}
+}
+
+func TestAHeldAgentSentPromptWithNoRecordedSenderIsHeadedUnnamedAndIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{agentSentHold("t1", nil)})
+
+	// Assert
+	if got := addressLine(h.heldSender()); got != "← unnamed workspace "+unnamedWorkspaceSender {
+		t.Fatalf("sender = %q, want the unnamed stand-in", got)
+	}
+	if !h.hasRecordWith("error", "daemon.feed.turn_sender_missing", "turn", "t1") {
+		t.Fatalf("records = %+v, want the missing sender at ERROR", h.records())
+	}
+}
+
+func TestAHeldPromptNoAgentSentHasNoSenderHeader(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.resolver.SetHeldPrompts(testWorkspace, []wsm.HeldPrompt{standingHold("t1", "a person typed this", 0)})
+
+	// Assert
+	if got := h.heldSender(); got != nil {
+		t.Fatalf("sender = %v, want none", got)
 	}
 }
