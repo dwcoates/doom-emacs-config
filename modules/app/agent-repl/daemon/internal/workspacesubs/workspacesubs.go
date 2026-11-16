@@ -102,6 +102,10 @@ type edge struct {
 	// pr is the pull request a WorkspaceEventPullRequest edge names; zero for
 	// every other event.
 	pr wsm.PullRequestKey
+	// detail is what the edge says beyond its kind: how a close ended
+	// (closed, killed or nuked), why a merge was evicted, why a deploy failed
+	// (empty for a build that is running). Empty for every other event.
+	detail string
 }
 
 // Service is the notifier. It implements wsedges.Observer.
@@ -144,8 +148,23 @@ func (s *Service) Landed(ws ids.WorkspaceID) {
 }
 
 // Closed implements wsedges.Observer.
-func (s *Service) Closed(before wsm.Workspace) {
-	s.loop.Report(edge{ws: before.ID, event: wsm.WorkspaceEventClosed})
+func (s *Service) Closed(before wsm.Workspace, how wsm.CloseHow) {
+	s.loop.Report(edge{ws: before.ID, event: wsm.WorkspaceEventClosed, detail: how.String()})
+}
+
+// Deployed implements wsedges.Observer.
+func (s *Service) Deployed(ws ids.WorkspaceID, failure string) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventDeployed, detail: failure})
+}
+
+// Evicted implements wsedges.Observer.
+func (s *Service) Evicted(ws ids.WorkspaceID, reason string) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventEvicted, detail: reason})
+}
+
+// ColdGated implements wsedges.Observer.
+func (s *Service) ColdGated(ws ids.WorkspaceID) {
+	s.loop.Report(edge{ws: ws, event: wsm.WorkspaceEventColdGated})
 }
 
 // PullRequestOwned implements wsedges.Observer.
@@ -194,9 +213,9 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 	log := s.deps.Log.Global()
 	subscriber := sub.Subscriber
 	fields := dlog.Merge(edgeFields, dlog.Context{"subscriber": string(subscriber), "parent_follows": sub.ParentFollows})
-	sentences := append(s.carried(ctx, subscriber, e.ws), EventSentence(status.GetName(), e.event, e.pr))
+	sentences := append(s.carried(ctx, subscriber, e.ws), EventSentence(status.GetName(), e.event, e.pr, e.detail))
 	fields["changes"] = len(sentences)
-	turn, failure, err := s.submit(ctx, prompts, sub, e.event, sentences, status)
+	turn, failure, err := s.submit(ctx, prompts, sub, e, sentences, status)
 	if err != nil {
 		log.Error(op, failure, dlog.WithCause(fields, err))
 	} else {
@@ -216,12 +235,12 @@ func (s *Service) notify(ctx context.Context, prompts prompthandler.Submitter, s
 	}
 }
 
-// submit composes the notice of SENTENCES, the latest being EVENT's, about the
+// submit composes the notice of SENTENCES, the latest being E's, about the
 // workspace standing STATUS, and submits it to SUBSCRIBER, answering the turn
 // it was submitted as, or the record a failure is written with and why.
-func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
+func (s *Service) submit(ctx context.Context, prompts prompthandler.Submitter, sub wsm.WorkspaceSubscription, e edge, sentences []string, status *agentreplv1.WorkspaceStatus) (ids.TurnID, string, error) {
 	turn, err := briefprompt.Composer{Briefs: s.deps.Briefs, MintKey: s.deps.MintKey, Meter: s.deps.Notices}.
-		Submit(ctx, prompts, sub.Subscriber, BriefNotice, NoticeValues(event, sentences, status, sub.ParentFollows), "workspace-notice", Origin)
+		Submit(ctx, prompts, sub.Subscriber, BriefNotice, NoticeValues(e.event, e.detail, sentences, status, sub.ParentFollows), "workspace-notice", Origin)
 	switch briefprompt.StepOf(err) {
 	case briefprompt.StepCompose:
 		return "", "could not compose a workspace notice; the subscriber is not told of the edge", err
@@ -253,7 +272,7 @@ func (s *Service) carried(ctx context.Context, subscriber, followed ids.Workspac
 // A PARENT IS TOLD AS THE PARENT (PARENTFOLLOWS): it follows its child without
 // subscribing, coordinates the child's work, and cannot unsubscribe from it --
 // the notices end when the child closes or stops being its child.
-func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentreplv1.WorkspaceStatus, parentFollows bool) map[string]string {
+func NoticeValues(event wsm.WorkspaceEvent, detail string, sentences []string, status *agentreplv1.WorkspaceStatus, parentFollows bool) map[string]string {
 	name := status.GetName()
 	why := "A workspace you subscribed to changed."
 	stop := "Act on it only as far as the work you subscribed for calls for, and otherwise carry on with whatever you were doing. To stop these notices, unsubscribe through `agent-repld workspace unsubscribe`."
@@ -262,7 +281,7 @@ func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentrep
 		stop = "Act on the conclusion as your own work calls for, and otherwise carry on with whatever you were doing. Only if you drive the child's work turn by turn, follow it continually with `agent-repld workspace subscribe " + name + " -events turn_ended,needs_input`."
 	}
 	return map[string]string{
-		"label":  "workspace `" + name + "`: " + strings.ReplaceAll(event.String(), "_", " "),
+		"label":  "workspace `" + name + "`: " + labelWords(event, detail),
 		"why":    why,
 		"event":  untoldnotice.Sentences(sentences),
 		"status": StatusWords(status),
@@ -270,16 +289,39 @@ func NoticeValues(event wsm.WorkspaceEvent, sentences []string, status *agentrep
 	}
 }
 
+// labelWords is the notice's headline words for EVENT: its name, except that a
+// close says how it ended (closed, killed or nuked) and a deploy says whether
+// it failed.
+func labelWords(event wsm.WorkspaceEvent, detail string) string {
+	switch {
+	case event == wsm.WorkspaceEventClosed:
+		return detail
+	case event == wsm.WorkspaceEventDeployed && detail != "":
+		return "deploy failed"
+	}
+	return strings.ReplaceAll(event.String(), "_", " ")
+}
+
 // EventSentence states EVENT of the workspace named NAME as a sentence that
 // stands alone in a list of changes. PR is the pull request a
-// WorkspaceEventPullRequest names, and zero for every other event.
+// WorkspaceEventPullRequest names, and zero for every other event. DETAIL is
+// what the event says beyond its kind: how a close ended (closed, killed or
+// nuked), why a merge was evicted, and why a deploy failed (empty for a build
+// that is running); it is empty for every other event.
 //
 // A PULL REQUEST IS TOLD WITH HOW TO FOLLOW IT. The follower is usually in
 // another repository, waiting on the followed workspace's change to merge
 // there, and this sentence is the first it hears of the pull request.
-func EventSentence(name string, event wsm.WorkspaceEvent, pr wsm.PullRequestKey) string {
+func EventSentence(name string, event wsm.WorkspaceEvent, pr wsm.PullRequestKey, detail string) string {
 	if (event == wsm.WorkspaceEventPullRequest) != pr.Valid() {
 		panic(fmt.Sprintf("workspacesubs: event %s told with pull request %q", event, pr))
+	}
+	carriesDetail := event == wsm.WorkspaceEventClosed || event == wsm.WorkspaceEventEvicted || event == wsm.WorkspaceEventDeployed
+	if !carriesDetail && detail != "" {
+		panic(fmt.Sprintf("workspacesubs: event %s told with detail %q", event, detail))
+	}
+	if (event == wsm.WorkspaceEventClosed || event == wsm.WorkspaceEventEvicted) && detail == "" {
+		panic(fmt.Sprintf("workspacesubs: event %s told with no detail", event))
 	}
 	subject := "`" + name + "` "
 	switch event {
@@ -292,7 +334,24 @@ func EventSentence(name string, event wsm.WorkspaceEvent, pr wsm.PullRequestKey)
 	case wsm.WorkspaceEventLanded:
 		return subject + "landed its branch."
 	case wsm.WorkspaceEventClosed:
-		return subject + "closed."
+		switch detail {
+		case wsm.HowClosed.String():
+			return subject + "closed."
+		case wsm.HowKilled.String():
+			return subject + "was killed: its session was force-stopped, and its worktree, branch and records are kept."
+		case wsm.HowNuked.String():
+			return subject + "was nuked: its worktree, branch and record are destroyed, so it can no longer be read."
+		}
+		panic(fmt.Sprintf("workspacesubs: a close told with how %q", detail))
+	case wsm.WorkspaceEventDeployed:
+		if detail != "" {
+			return subject + "landed, but its deploy failed (" + detail + "): master holds the change and the running build does not carry it."
+		}
+		return subject + "deployed: the running build carries its landing."
+	case wsm.WorkspaceEventEvicted:
+		return subject + "had its merge leave the queue without landing (" + detail + ")."
+	case wsm.WorkspaceEventColdGated:
+		return subject + "parked at its cold gate: nothing runs there until the gate is answered."
 	case wsm.WorkspaceEventPullRequest:
 		url := prwatch.URLOf(pr)
 		return subject + "owns pull request " + url + "; to be told when it merges, follow it with `agent-repld workspace pr-subscribe here -pr " + url + "`."
@@ -351,6 +410,9 @@ func edgeFields(e edge) dlog.Context {
 	if e.pr.Valid() {
 		fields["pull_request"] = e.pr.String()
 	}
+	if e.detail != "" {
+		fields["detail"] = e.detail
+	}
 	return fields
 }
 
@@ -371,23 +433,39 @@ func EventProto(e wsm.WorkspaceEvent) agentreplv1.WorkspaceNoticeEvent {
 		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED
 	case wsm.WorkspaceEventPullRequest:
 		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST
+	case wsm.WorkspaceEventDeployed:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_DEPLOYED
+	case wsm.WorkspaceEventEvicted:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_EVICTED
+	case wsm.WorkspaceEventColdGated:
+		return agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_COLD_GATED
 	}
 	panic(fmt.Sprintf("workspacesubs: event %d has no contract spelling", int(e)))
 }
 
-// EventsOf reads a subscription's contract events as the store's. A request's
-// validation refused an unspecified or undeclared one, so an event with no
-// store event is a contract arm added without its mapping, and fails hard.
+// EventsOf reads a subscription's contract events as the store's. A request
+// naming none holds the LIFECYCLE bundle, and a bundle named is expanded into
+// its events. A request's validation refused an unspecified or undeclared
+// one, so an event with no store event is a contract arm added without its
+// mapping, and fails hard.
 func EventsOf(events []agentreplv1.WorkspaceNoticeEvent) wsm.WorkspaceEvents {
+	if len(events) == 0 {
+		return wsm.LifecycleWorkspaceEvents()
+	}
+	set := wsm.WorkspaceEvents(0)
 	var out []wsm.WorkspaceEvent
 	for _, e := range events {
+		if e == agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE {
+			set |= wsm.LifecycleWorkspaceEvents()
+			continue
+		}
 		stored, ok := storeEvents[e]
 		if !ok {
 			panic(fmt.Sprintf("workspacesubs: workspace notice event %s has no store event", e))
 		}
 		out = append(out, stored)
 	}
-	return wsm.NewWorkspaceEvents(out...)
+	return set | wsm.NewWorkspaceEvents(out...)
 }
 
 // storeEvents is EventProto inverted, so the two spellings have one mapping.

@@ -307,8 +307,12 @@ func TestAFailedMergeIsReportedFailed(t *testing.T) {
 	admitted(t, h)
 
 	// Assert.
-	if change := lastChange(t, h); change.Kind != QueueChangeFailed || change.Subject.Workspace != theWorkspace {
+	change := lastChange(t, h)
+	if change.Kind != QueueChangeFailed || change.Subject.Workspace != theWorkspace {
 		t.Fatalf("last change = %+v, want the merge failed", change)
+	}
+	if change.Cause != causeFailed {
+		t.Fatalf("cause = %q, want the failed merge's recorded cause %q, which tells a follower why it was evicted", change.Cause, causeFailed)
 	}
 }
 
@@ -780,21 +784,6 @@ func TestEachChangeTakesTheNextPlaceInTheOrder(t *testing.T) {
 	}
 }
 
-func TestADeploysEndTakesItsPlaceInTheOrder(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	enqueue(t, h)
-	before := lastChange(t, h).Seq
-
-	// Act.
-	h.o.ReportDeploy(context.Background(), h.targetD, DeployEnd{})
-
-	// Assert.
-	if got := lastChange(t, h); got.Kind != QueueChangeDeployed || got.Seq != before+1 {
-		t.Fatalf("change = %+v, want the deploy's end at %d", got, before+1)
-	}
-}
-
 func TestSubscribeRefusesAnUnknownRepository(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -941,58 +930,5 @@ func TestQueueObserversTellEveryObserverEachChange(t *testing.T) {
 	want := []QueueChangeKind{QueueChangeLanded, QueueChangePaused}
 	if !reflect.DeepEqual(a.kinds, want) || !reflect.DeepEqual(b.kinds, want) {
 		t.Fatalf("told %v and %v, want both %v", a.kinds, b.kinds, want)
-	}
-}
-
-func TestADeployEndIsReportedWithTheQueueAsItStands(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	enqueue(t, h)
-	end := DeployEnd{Carried: []string{"one-land"}}
-
-	// Act.
-	h.o.ReportDeploy(context.Background(), h.targetD, end)
-
-	// Assert.
-	change := lastChange(t, h)
-	if change.Kind != QueueChangeDeployed || !reflect.DeepEqual(change.Deploy, end) {
-		t.Fatalf("change = %v %+v, want deployed %+v", change.Kind, change.Deploy, end)
-	}
-	if change.Queue.Repo != h.repoKey() || len(change.Queue.Members) != 1 || change.Queue.Members[0].Workspace != theWorkspace {
-		t.Fatalf("queue = %+v, want the checkout's queue with its one merge", change.Queue)
-	}
-	if change.Kind.Leaves() {
-		t.Fatal("a deploy's end reads as a merge leaving the queue")
-	}
-}
-
-func TestADeployEndIsRecordedAndNotReportedWhenItsQueueCannotBeRead(t *testing.T) {
-	cases := []struct {
-		name    string
-		arrange func(h *harness)
-		text    string
-	}{
-		{name: "a checkout that cannot be keyed", arrange: func(h *harness) { h.git.commonDirErr = errors.New("not a repository") },
-			text: "could not key the deployed checkout's queue"},
-		{name: "a queue that cannot be read", arrange: func(h *harness) { h.db.queueReadErr = errors.New("the store is gone") },
-			text: "could not read the deployed checkout's queue"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			h := newHarness(t)
-			tc.arrange(h)
-
-			// Act.
-			h.o.ReportDeploy(context.Background(), h.targetD, DeployEnd{Failure: "the build failed"})
-
-			// Assert.
-			if kinds := h.events.kinds(); len(kinds) != 0 {
-				t.Fatalf("changes = %v, want none reported", kinds)
-			}
-			if !loggedLike(h, logLike{level: "error", op: opQueueEvents, text: tc.text, context: map[string]string{"failure": "the build failed"}}) {
-				t.Fatalf("no error record: %+v", h.logs.Records())
-			}
-		})
 	}
 }

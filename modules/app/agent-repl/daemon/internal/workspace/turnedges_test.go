@@ -17,7 +17,7 @@ func TestTurnEdgeRunnerCarriesOutOnlyItsOwnEdge(t *testing.T) {
 		"a turn ending unobserved": func(r *TurnEdgeRunner) { r.TurnEndedUnobserved("w1") },
 		"an ask opening":           func(r *TurnEdgeRunner) { r.NeedsInput("w1") },
 		"a landing":                func(r *TurnEdgeRunner) { r.Landed("w1") },
-		"a close":                  func(r *TurnEdgeRunner) { r.Closed(wsm.Workspace{ID: "w1"}) },
+		"a close":                  func(r *TurnEdgeRunner) { r.Closed(wsm.Workspace{ID: "w1"}, wsm.HowClosed) },
 		"a pull request owned":     func(r *TurnEdgeRunner) { r.PullRequestOwned("w1", wsm.PullRequestKey{}) },
 	}
 	tests := []struct {

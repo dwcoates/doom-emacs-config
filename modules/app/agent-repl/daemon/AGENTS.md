@@ -3350,6 +3350,32 @@ and its commit (or the open item). Test-performance lessons also go into the
 - The merge pump read a run's lease and chain base from its own goroutine while the run wrote them (a data race the race detector caught 2 in 6 runs); they are read under the run's lock (db277cff6).
 - Tests: fake git hard-linked, not copied (~3GB per daemon suite, da3219969); test logs stay in files: the log pipe (49cfaafc6) was reverted (4e5d4c563) because one collector in the test process became the bottleneck under load, even with non-blocking daemon writes (see /agent-repl-tests pitfall 2); test state in memory unless a test restarts on the same root (DurableState); isZombie reads the kernel in process instead of spawning ps (409602c36).
 
+## A workspace subscription tells the agent a workspace's outcomes, under the hood
+
+`SubscribeWorkspace` (`/agent-repl-workspaces subscribe`) holds a DURABLE set of
+`wsm.WorkspaceEvents` per (subscriber, followed). A subscription naming no
+events, or the `LIFECYCLE` bundle, holds `wsm.LifecycleWorkspaceEvents()`:
+landed, closed, deployed, evicted, cold_gated. Turn events, `needs_input` and
+`pull_request` are NOT in it; each notice wakes the subscriber at the cost of a
+full read of its context, so they are asked for by name. Every edge has ONE
+origin (`internal/wsedges`) and reaches `internal/workspacesubs`:
+
+- `deployed` is `wsedges.Hub.DeployEnded`, called from `mergeworkspace.Service.PayOwed`
+  with `merge.DeployEnd.Landed`: the merge workspace each paid report names (the
+  landed workspace itself for a merge in place). A failed deploy is told as
+  such, and says the running build does not carry the landing. A landing with
+  no owed report (a landing into a parent workspace) has no deploy to tell.
+- `evicted` is a `merge.QueueChangeFailed` or `QueueChangeDequeued` change,
+  whose `Cause` is the reason a follower reads.
+- `cold_gated` is a gate a shim judged just now (`workspace.Deps.ColdGateRaised`
+  with `judged`), not a recorded gate raised again.
+- `closed` carries how: `wsm.Closure.How` (closed, killed or nuked), set by
+  `workspace/teardown.go`'s `markClosedFirst` and told with the close edge. It
+  is never stored, so a closure read back carries the zero value. A nuke
+  forgets the workspace right after its close edge, so a nuked notice is told
+  only if the notifier reaches the edge before the forget deletes the
+  subscription.
+
 ## A merge queue subscription tells the agent, under the hood
 
 `UpdateMergeQueue.subscribe` (the `/agent-repl-merge-queue subscribe` verb) records a
@@ -3362,8 +3388,9 @@ deletes only the row as read, so one taken again since stands) before it
 submits the depletion's notice, whose `{{lifetime}}` then says it is the
 last. Each end is an INFO `daemon.mergenotice` record; an end that failed is
 an ERROR, and that notice says the subscription stands. Every queue change the orchestrator reports reaches
-`internal/mergenotice`, which drops all but the three a subscriber waits on (a
-merge put in line, a merge leaving, a deploy's end: `Admits`) and tells each
+`internal/mergenotice`, which drops all but the three a subscriber of the queue
+as a whole waits on (the queue depleting, being paused, being resumed:
+`Admits`; what one merge does is the per-workspace subscription's, below) and tells each
 subscriber in the change's scope ONCE, in ONE short line (the queue, the
 change, the queue's state in a few words; never a listing), through the prompt handler as a deferred prompt of origin
 `PROMPT_ORIGIN_MERGE_QUEUE_NOTICE` (the handback's path); the feed draws no

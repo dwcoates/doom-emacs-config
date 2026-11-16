@@ -202,9 +202,6 @@ type Orchestrator interface {
 	// republished, so its entry's label and the line naming the merge ahead
 	// read the new name. A workspace on no queue is no change.
 	Relabel(ctx context.Context, ws ids.WorkspaceID) error
-	// ReportDeploy tells the subscribers of CHECKOUT's queue that a deploy of
-	// it ended (QueueChangeDeployed).
-	ReportDeploy(ctx context.Context, checkout string, end DeployEnd)
 	// Unsubscribe ends SUBSCRIBER's subscription in SCOPE, and only there. A
 	// subscriber holding none there is refused (ArmNotSubscribed).
 	Unsubscribe(ctx context.Context, subscriber ids.WorkspaceID, scope *RepositoryScope) error

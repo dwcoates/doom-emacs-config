@@ -185,7 +185,7 @@ func TestSelfClosesCarriesOutEachTurnEnd(t *testing.T) {
 		{name: "a turn starting", edge: func(s *TurnEdgeRunner) { s.TurnStarted("w1") }},
 		{name: "an ask opening", edge: func(s *TurnEdgeRunner) { s.NeedsInput("w1") }},
 		{name: "a landing", edge: func(s *TurnEdgeRunner) { s.Landed("w1") }},
-		{name: "a close", edge: func(s *TurnEdgeRunner) { s.Closed(wsm.Workspace{ID: "w1"}) }},
+		{name: "a close", edge: func(s *TurnEdgeRunner) { s.Closed(wsm.Workspace{ID: "w1"}, wsm.HowClosed) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

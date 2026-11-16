@@ -958,6 +958,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PayColdGate: verbsRef.answerColdGate,
 		ColdGateRaised: func(ws ids.WorkspaceID, judged bool) {
 			cacheKeeper.ColdGateRaised(ws, judged)
+			// A GATE A SHIM JUDGED JUST NOW IS NEWS to the workspace's
+			// followers; one raised again from its record is not.
+			if judged {
+				edges.ColdGated(ws)
+			}
 			if eject := ejectCold; eject != nil {
 				inflight.Go(func() { eject(ws) })
 			}
@@ -1372,8 +1377,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 
 	ownership = workspace.NewOwnership(rolloutController)
 	// THE MERGE QUEUE'S SUBSCRIPTION NOTICES are told every queue change the
-	// orchestrator makes; they only buffer until their loop runs, which is
-	// handed the prompt handler built below.
+	// orchestrator makes (and keep the three a queue-wide subscriber waits on:
+	// depleted, paused, resumed); they only buffer until their loop runs,
+	// which is handed the prompt handler built below.
 	queueNotices := mergenotice.New(mergenotice.Deps{
 		Notices:       p.Metrics,
 		Subscriptions: p.DB,
@@ -1608,9 +1614,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE REAPER'S OWN LOCK: a requester is retired only while the
 		// landed-worktree reaper is not sweeping.
 		WorktreeLock: worktreeLockPath(paths.RunDir),
-		// EVERY DEPLOY ENDS IN THE REPORTS' PAYMENT, so that is where the
-		// queue's subscribers are told of it.
-		Deploys: queueNotices,
+		// EVERY DEPLOY ENDS IN THE REPORTS' PAYMENT, so that is where each
+		// workspace whose landing the build carries is told of it
+		// (wsedges.Hub.DeployEnded).
+		Deploys: edges,
 		// A JOINING SUCCESSOR SWEEPS ONLY ONCE IT HAS TAKEN OVER: until then
 		// its handle is read-only.
 		Owned: func() <-chan struct{} {

@@ -204,8 +204,11 @@ func sub(ws ids.WorkspaceID, repo wsm.RepoKey) wsm.MergeQueueSubscription {
 // landedLast is the last merge of doom's queue landing.
 var landedLast = change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""))
 
-// queuedFix is fix's merge put in line, alone in it.
-var queuedFix = change(merge.QueueChangeEnqueued, repoDoom, member("ws-fix", "fix", false, ""), member("ws-fix", "fix", false, ""))
+// pausedDoom is doom's queue paused with fix's merge in line, a change told.
+var pausedDoom = change(merge.QueueChangePaused, repoDoom, merge.QueueMember{}, member("ws-fix", "fix", false, ""))
+
+// resumedDoom is the same queue resumed.
+var resumedDoom = change(merge.QueueChangeResumed, repoDoom, merge.QueueMember{}, member("ws-fix", "fix", false, ""))
 
 // steppedFix is fix's merge moving to its testing step, a change never told.
 var steppedFix = change(merge.QueueChangeStepped, repoDoom, member("ws-fix", "fix", true, footer.StepTesting),
@@ -222,7 +225,7 @@ func fieldsOf(t *testing.T, text string) []string {
 	return parts
 }
 
-func TestAdmitsOnlyTheChangesASubscriberWaitsOn(t *testing.T) {
+func TestAdmitsOnlyTheChangesASubscriberOfTheQueueAsAWholeWaitsOn(t *testing.T) {
 	other := member("ws-other", "other", false, "")
 	fix := member("ws-fix", "fix", true, "")
 	tests := []struct {
@@ -230,18 +233,19 @@ func TestAdmitsOnlyTheChangesASubscriberWaitsOn(t *testing.T) {
 		change merge.QueueChange
 		want   bool
 	}{
-		{name: "a merge put in line", change: change(merge.QueueChangeEnqueued, repoDoom, other, other), want: true},
-		{name: "a merge landing with merges left", change: change(merge.QueueChangeLanded, repoDoom, fix, other), want: true},
 		{name: "a merge landing that empties the line", change: landedLast, want: true},
-		{name: "a merge failing", change: change(merge.QueueChangeFailed, repoDoom, fix, other), want: true},
-		{name: "a merge taken off the queue", change: change(merge.QueueChangeDequeued, repoDoom, other), want: true},
-		{name: "a deploy's end", change: deployed(merge.DeployEnd{Carried: []string{"fix-land"}}), want: true},
+		{name: "a merge failing that empties the line", change: change(merge.QueueChangeFailed, repoDoom, fix), want: true},
+		{name: "a merge taken off the queue that empties the line", change: change(merge.QueueChangeDequeued, repoDoom, other), want: true},
+		{name: "a pause", change: pausedDoom, want: true},
+		{name: "a resume", change: resumedDoom, want: true},
+		{name: "a merge put in line", change: change(merge.QueueChangeEnqueued, repoDoom, other, other), want: false},
+		{name: "a merge landing with merges left", change: change(merge.QueueChangeLanded, repoDoom, fix, other), want: false},
+		{name: "a merge failing with merges left", change: change(merge.QueueChangeFailed, repoDoom, fix, other), want: false},
+		{name: "a merge taken off the queue with merges left", change: change(merge.QueueChangeDequeued, repoDoom, fix, other), want: false},
 		{name: "a merge a restart put back in line", change: change(merge.QueueChangeRequeued, repoDoom, other, other), want: false},
 		{name: "a merge starting", change: change(merge.QueueChangeStarted, repoDoom, fix, fix), want: false},
 		{name: "a merge's new step", change: steppedFix, want: false},
 		{name: "a reorder", change: change(merge.QueueChangeReordered, repoDoom, other, other), want: false},
-		{name: "a pause", change: change(merge.QueueChangePaused, repoDoom, merge.QueueMember{}, other), want: false},
-		{name: "a resume", change: change(merge.QueueChangeResumed, repoDoom, merge.QueueMember{}, other), want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -328,7 +332,7 @@ func TestDeliverSubmitsOneDeferredHiddenNoticePerSubscriber(t *testing.T) {
 	if got[0].key == got[1].key {
 		t.Fatalf("keys = %q and %q, want one per notice", got[0].key, got[1].key)
 	}
-	if want := "merge queue of doom|`fix` landed.| Queue empty.| Subscription ended."; got[0].text != want {
+	if want := "merge queue of doom|queue depleted: `fix` landed and none is left in line.| Queue empty.| Subscription ended."; got[0].text != want {
 		t.Fatalf("text = %q, want %q", got[0].text, want)
 	}
 }
@@ -468,7 +472,7 @@ func TestRunDeliversEveryToldChangeInOrder(t *testing.T) {
 	go func() { f.s.Run(ctx, f.prompts); close(done) }()
 
 	// Act: the start between the two is never told.
-	f.s.QueueChanged(change(merge.QueueChangeEnqueued, repoDoom, fix, fix))
+	f.s.QueueChanged(pausedDoom)
 	f.s.QueueChanged(change(merge.QueueChangeStarted, repoDoom, fix, fix))
 	f.s.QueueChanged(landedLast)
 	var changes []string
@@ -480,7 +484,7 @@ func TestRunDeliversEveryToldChangeInOrder(t *testing.T) {
 	<-done
 
 	// Assert.
-	want := []string{"`fix` put in line.", "`fix` landed."}
+	want := []string{"queue paused.", "queue depleted: `fix` landed and none is left in line."}
 	if !reflect.DeepEqual(changes, want) {
 		t.Fatalf("changes = %q, want %q", changes, want)
 	}
@@ -536,10 +540,11 @@ func TestSentenceStatesEachToldChangeInAFewWords(t *testing.T) {
 		change merge.QueueChange
 		want   string
 	}{
-		{"enqueued", change(merge.QueueChangeEnqueued, repoDoom, fix, fix), "`fix` put in line"},
-		{"landed", change(merge.QueueChangeLanded, repoDoom, fix), "`fix` landed"},
-		{"failed", change(merge.QueueChangeFailed, repoDoom, fix), "`fix` failed"},
-		{"dequeued", dequeued, "`fix` taken off (workspace closed)"},
+		{"paused", pausedDoom, "queue paused"},
+		{"resumed", resumedDoom, "queue resumed"},
+		{"depleted by a landing", change(merge.QueueChangeLanded, repoDoom, fix), "queue depleted: `fix` landed and none is left in line"},
+		{"depleted by a failure", change(merge.QueueChangeFailed, repoDoom, fix), "queue depleted: `fix` failed and none is left in line"},
+		{"depleted by a merge taken off", dequeued, "queue depleted: `fix` was taken off (workspace closed) and none is left in line"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -567,6 +572,20 @@ func TestSentenceFailsHardOnAChangeNeverTold(t *testing.T) {
 	Sentence(steppedFix)
 }
 
+func TestSentenceFailsHardOnAMergeLeavingWithOthersInLine(t *testing.T) {
+	// Arrange.
+	fix, next := member("ws-fix", "fix", true, ""), member("ws-next", "next", false, "")
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("Sentence stated a leaving that depleted nothing")
+		}
+	}()
+
+	// Act.
+	Sentence(change(merge.QueueChangeLanded, repoDoom, fix, next))
+}
+
 func TestChangesStatesOneChangeAsItsSentence(t *testing.T) {
 	// Act.
 	got := Changes([]string{"`fix` landed"})
@@ -579,10 +598,10 @@ func TestChangesStatesOneChangeAsItsSentence(t *testing.T) {
 
 func TestChangesCountsAndJoinsSeveralChangesOldestFirst(t *testing.T) {
 	// Act.
-	got := Changes([]string{"`fix` put in line", "`old` landed", "deploy finished"})
+	got := Changes([]string{"queue paused", "queue resumed", "queue depleted: `old` landed and none is left in line"})
 
 	// Assert.
-	if want := "3 changes: `fix` put in line; `old` landed; deploy finished."; got != want {
+	if want := "3 changes: queue paused; queue resumed; queue depleted: `old` landed and none is left in line."; got != want {
 		t.Fatalf("Changes = %q, want %q", got, want)
 	}
 }
@@ -663,13 +682,13 @@ func TestTheShippedBriefSplicesANoticeIntoOneLine(t *testing.T) {
 		latest    merge.QueueChange
 		want      string
 	}{
-		{name: "a landing with merges left", sentences: []string{"`fix` landed"},
-			latest: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), member("ws-next", "next", true, footer.StepTesting)),
-			want:   "merge queue of doom: `fix` landed. 1 in line; `next` testing."},
+		{name: "a pause with a merge testing", sentences: []string{"queue paused"},
+			latest: change(merge.QueueChangePaused, repoDoom, merge.QueueMember{}, member("ws-next", "next", true, footer.StepTesting)),
+			want:   "merge queue of doom: queue paused. 1 in line; `next` testing."},
+		{name: "a resume", sentences: []string{Sentence(resumedDoom)}, latest: resumedDoom,
+			want: "merge queue of doom: queue resumed. 1 in line; `fix` next."},
 		{name: "the last notice", ended: true, sentences: []string{Sentence(landedLast)}, latest: landedLast,
-			want: "merge queue of doom: `fix` landed. Queue empty. Subscription ended."},
-		{name: "a deploy's end", sentences: []string{"deploy finished, carries `fix`"}, latest: deployed(merge.DeployEnd{Carried: []string{"fix"}}),
-			want: "merge queue: deploy finished, carries `fix`."},
+			want: "merge queue of doom: queue depleted: `fix` landed and none is left in line. Queue empty. Subscription ended."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -690,7 +709,7 @@ func TestANoticeOfALongQueueStaysOneShortLine(t *testing.T) {
 	for i := range 12 {
 		members = append(members, member(ids.WorkspaceID(fmt.Sprintf("ws-%d", i)), fmt.Sprintf("a-fairly-long-merge-name-%d", i), i == 0, footer.StepTesting))
 	}
-	latest := change(merge.QueueChangeEnqueued, repoDoom, members[len(members)-1], members...)
+	latest := change(merge.QueueChangePaused, repoDoom, merge.QueueMember{}, members...)
 
 	// Act.
 	got := strings.TrimSpace(spliced(t, false, []string{Sentence(latest)}, latest))
@@ -704,7 +723,7 @@ func TestANoticeOfALongQueueStaysOneShortLine(t *testing.T) {
 func TestANewChangeSupersedesTheSubscribersUntoldNotice(t *testing.T) {
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Act.
 	f.s.deliver(context.Background(), f.prompts, landedLast)
@@ -718,7 +737,7 @@ func TestANewChangeSupersedesTheSubscribersUntoldNotice(t *testing.T) {
 func TestTheSupersedingNoticeSaysEveryChangeOldestFirstThenTheQueueAsItNowStands(t *testing.T) {
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Act.
 	f.s.deliver(context.Background(), f.prompts, landedLast)
@@ -726,7 +745,7 @@ func TestTheSupersedingNoticeSaysEveryChangeOldestFirstThenTheQueueAsItNowStands
 	// Assert.
 	got := f.prompts.submissions()
 	fields := fieldsOf(t, got[len(got)-1].text)
-	want := []string{"merge queue of doom", "2 changes: `fix` put in line; `fix` landed.", " Queue empty."}
+	want := []string{"merge queue of doom", "2 changes: queue paused; queue depleted: `fix` landed and none is left in line.", " Queue empty."}
 	if !reflect.DeepEqual(fields[:3], want) {
 		t.Fatalf("notice = %q, want %q", fields[:3], want)
 	}
@@ -735,7 +754,7 @@ func TestTheSupersedingNoticeSaysEveryChangeOldestFirstThenTheQueueAsItNowStands
 func TestASupersessionIsRecordedWithWhatItCarries(t *testing.T) {
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Act.
 	f.s.deliver(context.Background(), f.prompts, landedLast)
@@ -751,7 +770,7 @@ func TestANoticeAfterOneAlreadyToldSaysOnlyTheNewChange(t *testing.T) {
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
 	f.holds.retired = false
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Act.
 	f.s.deliver(context.Background(), f.prompts, landedLast)
@@ -770,7 +789,7 @@ func TestANoticeThatCannotBeSupersededStandsAndTheNextSaysOnlyTheNewChange(t *te
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
 	f.holds.err = errors.New("the store is gone")
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Act.
 	f.s.deliver(context.Background(), f.prompts, landedLast)
@@ -817,7 +836,7 @@ func TestANoticeThatWasNeverSubmittedIsSaidByTheNextWithoutAskingTheQueue(t *tes
 			// Arrange.
 			f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
 			tt.fail(f)
-			f.s.deliver(context.Background(), f.prompts, queuedFix)
+			f.s.deliver(context.Background(), f.prompts, pausedDoom)
 			tt.heal(f)
 
 			// Act.
@@ -828,7 +847,7 @@ func TestANoticeThatWasNeverSubmittedIsSaidByTheNextWithoutAskingTheQueue(t *tes
 			if len(got) != 1 || len(f.holds.asked) != 0 {
 				t.Fatalf("submissions = %+v, superseded = %v; want one notice and no supersession", got, f.holds.asked)
 			}
-			if changes := fieldsOf(t, got[0].text)[1]; !strings.Contains(changes, Sentence(queuedFix)) || !strings.Contains(changes, Sentence(landedLast)) {
+			if changes := fieldsOf(t, got[0].text)[1]; !strings.Contains(changes, Sentence(pausedDoom)) || !strings.Contains(changes, Sentence(landedLast)) {
 				t.Fatalf("changes = %q, want both changes said", changes)
 			}
 		})
@@ -838,7 +857,7 @@ func TestANoticeThatWasNeverSubmittedIsSaidByTheNextWithoutAskingTheQueue(t *tes
 func TestEachQueuesNoticesSupersedeOnlyTheirOwn(t *testing.T) {
 	// Arrange.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, wsm.EveryRepository)}})
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Act.
 	f.s.deliver(context.Background(), f.prompts, change(merge.QueueChangeLanded, repoOther, member("ws-o", "o", true, "")))
@@ -865,7 +884,7 @@ func TestTheUntoldNoticeSurvivesARestartAndIsSuperseded(t *testing.T) {
 	// Arrange: the first daemon tells a change, then a restart builds a new
 	// service over the same durable store.
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 	restarted := New(f.s.deps)
 
 	// Act
@@ -873,7 +892,7 @@ func TestTheUntoldNoticeSurvivesARestartAndIsSuperseded(t *testing.T) {
 
 	// Assert
 	got := f.prompts.submissions()
-	if !reflect.DeepEqual(f.holds.asked, []ids.TurnID{"turn-ws-alice"}) || !strings.Contains(got[len(got)-1].text, Sentence(queuedFix)) {
+	if !reflect.DeepEqual(f.holds.asked, []ids.TurnID{"turn-ws-alice"}) || !strings.Contains(got[len(got)-1].text, Sentence(pausedDoom)) {
 		t.Fatalf("superseded = %v, last notice = %q; want the first daemon's notice superseded and said again", f.holds.asked, got[len(got)-1].text)
 	}
 }
@@ -883,11 +902,11 @@ func TestEachNoticeIsRecordedAsTheSubscribersUntoldNotice(t *testing.T) {
 	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
 
 	// Act
-	f.s.deliver(context.Background(), f.prompts, queuedFix)
+	f.s.deliver(context.Background(), f.prompts, pausedDoom)
 
 	// Assert
 	n, ok := f.untold.rows[[2]string{string(alice), string(repoDoom)}]
-	if !ok || n.Turn != "turn-ws-alice" || !reflect.DeepEqual(n.Sentences, []string{Sentence(queuedFix)}) {
+	if !ok || n.Turn != "turn-ws-alice" || !reflect.DeepEqual(n.Sentences, []string{Sentence(pausedDoom)}) {
 		t.Fatalf("untold = %+v (%v), want the notice's turn and its one sentence", n, ok)
 	}
 }
@@ -926,77 +945,6 @@ func TestAnUnrecordableUntoldNoticeIsRecordedAndTheNoticeStillTold(t *testing.T)
 	record, ok := dlog.FindRecord(f.logs.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "could not record the subscriber's untold notice; the next notice cannot supersede it"})
 	if !ok || record.Context["cause"] != "disk full" {
 		t.Fatalf("no error record of the unrecorded notice: %+v", f.logs.Records())
-	}
-}
-
-// deployed is a deploy's end, as DeployEnded reports it: no queue's.
-func deployed(end merge.DeployEnd) merge.QueueChange {
-	return merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end}
-}
-
-func TestADeploysEndIsToldInAFewWords(t *testing.T) {
-	tests := []struct {
-		name string
-		end  merge.DeployEnd
-		want string
-	}{
-		{name: "a deploy whose build runs", end: merge.DeployEnd{Carried: []string{"fix-land", "docs-land"}},
-			want: "deploy finished, carries `fix-land`, `docs-land`"},
-		{name: "a deploy carrying no landing", end: merge.DeployEnd{}, want: "deploy finished"},
-		{name: "a deploy that failed", end: merge.DeployEnd{Failure: "the build failed"},
-			want: "deploy failed (the build failed); the running build does not carry it"},
-		{name: "a fresh boot", end: merge.DeployEnd{Boot: true, Carried: []string{"fix-land"}}, want: "daemon booted on a new build, carries `fix-land`"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act.
-			got := Sentence(deployed(tt.end))
-
-			// Assert.
-			if got != tt.want {
-				t.Fatalf("Sentence = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestADeploysEndReachesEverySubscriptionWhateverItsScope(t *testing.T) {
-	// Arrange: subscriptions of every scope.
-	subs := []wsm.MergeQueueSubscription{sub(alice, repoDoom), sub(bob, wsm.EveryRepository), sub("ws-carol", repoOther)}
-
-	// Act.
-	got := Recipients(subs, deployed(merge.DeployEnd{}))
-
-	// Assert.
-	if want := []ids.WorkspaceID{alice, bob, "ws-carol"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("Recipients = %v, want every scope's subscriber", got)
-	}
-}
-
-func TestADeploysNoticeNamesNoQueue(t *testing.T) {
-	// Act.
-	values := Values(false, []string{Sentence(deployed(merge.DeployEnd{}))}, deployed(merge.DeployEnd{}))
-
-	// Assert.
-	if values["scope"] != "merge queue" || values["queue"] != "" {
-		t.Fatalf("scope = %q, queue = %q; want no repository and no queue state", values["scope"], values["queue"])
-	}
-}
-
-func TestDeployEndedIsDeliveredToItsSubscribers(t *testing.T) {
-	// Arrange.
-	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoOther)}})
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Act: the end is reported, then the loop runs it and drains.
-	f.s.DeployEnded(merge.DeployEnd{Carried: []string{"fix-land"}})
-	cancel()
-	f.s.Run(ctx, f.prompts)
-
-	// Assert.
-	got := f.prompts.submissions()
-	if len(got) != 1 || got[0].ws != alice || !strings.Contains(got[0].text, "`fix-land`") {
-		t.Fatalf("submissions = %+v, want alice told of the deploy carrying fix-land", got)
 	}
 }
 
@@ -1052,12 +1000,14 @@ func TestADepletionRecordsEachSubscriptionItEnds(t *testing.T) {
 
 func TestAQueueLeftNonEmptyKeepsItsSubscriptions(t *testing.T) {
 	tests := []struct {
-		name   string
-		change merge.QueueChange
+		name      string
+		change    merge.QueueChange
+		wantTold  int
+		wantEnded bool
 	}{
-		{name: "a merge left with another in line", change: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), member("ws-next", "next", false, ""))},
-		{name: "a merge put in line", change: queuedFix},
-		{name: "a deploy ended", change: deployed(merge.DeployEnd{})},
+		{name: "a merge left with another in line, which is told to nobody", change: change(merge.QueueChangeLanded, repoDoom, member("ws-fix", "fix", true, ""), member("ws-next", "next", false, ""))},
+		{name: "a pause, which is told and ends nothing", change: pausedDoom, wantTold: 1},
+		{name: "a resume, which is told and ends nothing", change: resumedDoom, wantTold: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1072,8 +1022,11 @@ func TestAQueueLeftNonEmptyKeepsItsSubscriptions(t *testing.T) {
 				t.Fatalf("ended = %+v, want none", f.subs.ended)
 			}
 			got := f.prompts.submissions()
-			if len(got) != 1 || fieldsOf(t, got[0].text)[3] != Lifetime(false) {
-				t.Fatalf("submissions = %+v, want one notice saying nothing of an end", got)
+			if len(got) != tt.wantTold {
+				t.Fatalf("submissions = %+v, want %d told", got, tt.wantTold)
+			}
+			if tt.wantTold == 1 && fieldsOf(t, got[0].text)[3] != Lifetime(false) {
+				t.Fatalf("notice %q, want one saying nothing of an end", got[0].text)
 			}
 		})
 	}
@@ -1151,7 +1104,6 @@ func TestInScopeIsTheChangesQueueOrEveryQueue(t *testing.T) {
 		{name: "the change's own queue", sub: sub(alice, repoDoom), change: landedLast, want: true},
 		{name: "every queue", sub: sub(alice, wsm.EveryRepository), change: landedLast, want: true},
 		{name: "another queue", sub: sub(alice, repoOther), change: landedLast, want: false},
-		{name: "a deploy, from another queue", sub: sub(alice, repoOther), change: deployed(merge.DeployEnd{}), want: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1214,19 +1166,5 @@ func TestASubscriptionThisDaemonNeverSawTakenIsToldEveryChange(t *testing.T) {
 	// Assert.
 	if got := f.prompts.submissions(); len(got) != 1 || got[0].ws != alice {
 		t.Fatalf("submissions = %+v, want alice told", got)
-	}
-}
-
-func TestADeploysEndNoQueueWriteMadeIsToldToEverySubscription(t *testing.T) {
-	// Arrange: the deploy's end carries no place in the changes' order.
-	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
-	f.s.Subscribed(alice, repoDoom, 9)
-
-	// Act.
-	f.s.deliver(context.Background(), f.prompts, merge.QueueChange{Kind: merge.QueueChangeDeployed})
-
-	// Assert.
-	if got := f.prompts.submissions(); len(got) != 1 {
-		t.Fatalf("submissions = %+v, want the deploy's end told", got)
 	}
 }

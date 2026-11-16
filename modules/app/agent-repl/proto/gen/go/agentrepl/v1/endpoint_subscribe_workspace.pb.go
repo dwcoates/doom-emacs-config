@@ -61,7 +61,9 @@ const (
 	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_NEEDS_INPUT WorkspaceNoticeEvent = 3
 	// The followed workspace's branch landed in its merge target.
 	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED WorkspaceNoticeEvent = 4
-	// The followed workspace closed, however it closed.
+	// The followed workspace closed, however it closed. The notice says HOW:
+	// closed (the user's or an agent's close, or the daemon's own), killed
+	// (the forced stop), or nuked (its worktree, branch and record destroyed).
 	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_CLOSED WorkspaceNoticeEvent = 5
 	// The followed workspace took a GitHub pull request as its own: it stored
 	// an owned link to one (agentrepl.v1.WorkspaceLinkOwned). The notice names
@@ -69,18 +71,47 @@ const (
 	// merge (agentrepl.v1.SubscribePullRequestRequest) without knowing it
 	// beforehand.
 	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_PULL_REQUEST WorkspaceNoticeEvent = 6
+	// The build that carries the followed workspace's landing is running, or
+	// its deploy failed and the running build does NOT carry it. This is a
+	// different moment from LANDED: master holds the change at the landing, and
+	// the runtime holds it only after the deploy. Told only for a landing on a
+	// repository whose deploy the daemon runs (agent-repl's own master); a
+	// landing into a parent workspace has no deploy.
+	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_DEPLOYED WorkspaceNoticeEvent = 7
+	// The followed workspace's merge left its merge queue WITHOUT landing: its
+	// tests failed out of their attempts, its conflicts went unresolved, a
+	// person took it off the queue, or a restart or a close abandoned it. The
+	// notice carries the reason, so a follower can tell a merge that may be
+	// requested again from one that must be repaired first.
+	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_EVICTED WorkspaceNoticeEvent = 8
+	// The followed workspace's session parked at its COLD GATE (resuming its
+	// large, uncached conversation would cost more than the gate allows), so
+	// nothing runs there until the gate is answered. NEEDS_INPUT does not
+	// cover it: that event is only an open question or permission. Told when a
+	// shim judges the gate, not when a recorded gate is raised again.
+	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_COLD_GATED WorkspaceNoticeEvent = 9
+	// A request-only BUNDLE, never sent in a notice: LANDED, CLOSED, DEPLOYED,
+	// EVICTED and COLD_GATED, the outcomes of a workspace's work. Turn events
+	// (TURN_STARTED, TURN_ENDED) and NEEDS_INPUT are NOT in it: each notice
+	// wakes the subscriber at the cost of a full read of its context, and a
+	// turn-by-turn follower must ask for those by name.
+	WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE WorkspaceNoticeEvent = 10
 )
 
 // Enum value maps for WorkspaceNoticeEvent.
 var (
 	WorkspaceNoticeEvent_name = map[int32]string{
-		0: "WORKSPACE_NOTICE_EVENT_UNSPECIFIED",
-		1: "WORKSPACE_NOTICE_EVENT_TURN_STARTED",
-		2: "WORKSPACE_NOTICE_EVENT_TURN_ENDED",
-		3: "WORKSPACE_NOTICE_EVENT_NEEDS_INPUT",
-		4: "WORKSPACE_NOTICE_EVENT_LANDED",
-		5: "WORKSPACE_NOTICE_EVENT_CLOSED",
-		6: "WORKSPACE_NOTICE_EVENT_PULL_REQUEST",
+		0:  "WORKSPACE_NOTICE_EVENT_UNSPECIFIED",
+		1:  "WORKSPACE_NOTICE_EVENT_TURN_STARTED",
+		2:  "WORKSPACE_NOTICE_EVENT_TURN_ENDED",
+		3:  "WORKSPACE_NOTICE_EVENT_NEEDS_INPUT",
+		4:  "WORKSPACE_NOTICE_EVENT_LANDED",
+		5:  "WORKSPACE_NOTICE_EVENT_CLOSED",
+		6:  "WORKSPACE_NOTICE_EVENT_PULL_REQUEST",
+		7:  "WORKSPACE_NOTICE_EVENT_DEPLOYED",
+		8:  "WORKSPACE_NOTICE_EVENT_EVICTED",
+		9:  "WORKSPACE_NOTICE_EVENT_COLD_GATED",
+		10: "WORKSPACE_NOTICE_EVENT_LIFECYCLE",
 	}
 	WorkspaceNoticeEvent_value = map[string]int32{
 		"WORKSPACE_NOTICE_EVENT_UNSPECIFIED":  0,
@@ -90,6 +121,10 @@ var (
 		"WORKSPACE_NOTICE_EVENT_LANDED":       4,
 		"WORKSPACE_NOTICE_EVENT_CLOSED":       5,
 		"WORKSPACE_NOTICE_EVENT_PULL_REQUEST": 6,
+		"WORKSPACE_NOTICE_EVENT_DEPLOYED":     7,
+		"WORKSPACE_NOTICE_EVENT_EVICTED":      8,
+		"WORKSPACE_NOTICE_EVENT_COLD_GATED":   9,
+		"WORKSPACE_NOTICE_EVENT_LIFECYCLE":    10,
 	}
 )
 
@@ -128,8 +163,11 @@ type SubscribeWorkspaceRequest struct {
 	// The workspace followed. May be the subscriber's own child, its owner, or
 	// any workspace of any registered repository; may not be the subscriber.
 	Followed *v1.WorkspaceRef `protobuf:"bytes,2,opt,name=followed,proto3" json:"followed,omitempty"`
-	// The changes that produce a notice. REQUIRED: at least one; repeats are
-	// ignored.
+	// The changes that produce a notice. EMPTY MEANS LIFECYCLE: the bundle
+	// WORKSPACE_NOTICE_EVENT_LIFECYCLE names, which is what an agent waiting for
+	// a workspace's work to land, deploy, fail or end wants. Repeats are
+	// ignored, and a bundle is expanded into its events, so naming one beside
+	// an event it holds changes nothing.
 	Events        []WorkspaceNoticeEvent `protobuf:"varint,3,rep,packed,name=events,proto3,enum=agentrepl.v1.WorkspaceNoticeEvent" json:"events,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -783,7 +821,7 @@ const file_agentrepl_v1_endpoint_subscribe_workspace_proto_rawDesc = "" +
 	"#SubscribeWorkspaceUnknownSubscriber\"#\n" +
 	"!SubscribeWorkspaceUnknownFollowed\"$\n" +
 	"\"SubscribeWorkspaceSubscriberClosed\"!\n" +
-	"\x1fSubscribeWorkspaceFollowsItself*\xa5\x02\n" +
+	"\x1fSubscribeWorkspaceFollowsItself*\xbb\x03\n" +
 	"\x14WorkspaceNoticeEvent\x12&\n" +
 	"\"WORKSPACE_NOTICE_EVENT_UNSPECIFIED\x10\x00\x12'\n" +
 	"#WORKSPACE_NOTICE_EVENT_TURN_STARTED\x10\x01\x12%\n" +
@@ -791,7 +829,12 @@ const file_agentrepl_v1_endpoint_subscribe_workspace_proto_rawDesc = "" +
 	"\"WORKSPACE_NOTICE_EVENT_NEEDS_INPUT\x10\x03\x12!\n" +
 	"\x1dWORKSPACE_NOTICE_EVENT_LANDED\x10\x04\x12!\n" +
 	"\x1dWORKSPACE_NOTICE_EVENT_CLOSED\x10\x05\x12'\n" +
-	"#WORKSPACE_NOTICE_EVENT_PULL_REQUEST\x10\x06B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"#WORKSPACE_NOTICE_EVENT_PULL_REQUEST\x10\x06\x12#\n" +
+	"\x1fWORKSPACE_NOTICE_EVENT_DEPLOYED\x10\a\x12\"\n" +
+	"\x1eWORKSPACE_NOTICE_EVENT_EVICTED\x10\b\x12%\n" +
+	"!WORKSPACE_NOTICE_EVENT_COLD_GATED\x10\t\x12$\n" +
+	" WORKSPACE_NOTICE_EVENT_LIFECYCLE\x10\n" +
+	"B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_subscribe_workspace_proto_rawDescOnce sync.Once

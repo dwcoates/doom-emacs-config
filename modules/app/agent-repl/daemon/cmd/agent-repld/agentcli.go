@@ -1786,11 +1786,18 @@ func workspaceList(c *cliCall, args []string) int {
 	return exitSuccess
 }
 
+// lifecycleEventsName is the -events spelling of the bundle of a workspace's
+// outcomes (agentrepl.v1.WorkspaceNoticeEvent.WORKSPACE_NOTICE_EVENT_LIFECYCLE),
+// which a subscribe naming no events holds.
+const lifecycleEventsName = "lifecycle"
+
 // noticeEvents are the -events spellings of workspace subscribe: each event
-// the store declares, by the name it records it under, so a new event is
-// spelled here with no second list to keep in step.
+// the store declares, by the name it records it under, and the lifecycle
+// bundle, so a new event is spelled here with no second list to keep in step.
 var noticeEvents = func() map[string]agentreplv1.WorkspaceNoticeEvent {
-	out := map[string]agentreplv1.WorkspaceNoticeEvent{}
+	out := map[string]agentreplv1.WorkspaceNoticeEvent{
+		lifecycleEventsName: agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE,
+	}
 	for _, e := range wsm.AllWorkspaceEvents().Members() {
 		out[e.String()] = workspacesubs.EventProto(e)
 	}
@@ -1798,22 +1805,18 @@ var noticeEvents = func() map[string]agentreplv1.WorkspaceNoticeEvent {
 }()
 
 // allNoticeEvents names every -events spelling, for the usage.
-var allNoticeEvents = wsm.AllWorkspaceEvents().String()
+var allNoticeEvents = lifecycleEventsName + "," + wsm.AllWorkspaceEvents().String()
 
 func workspaceSubscribe(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	events := fs.String("events", "", "comma-separated: "+strings.ReplaceAll(allNoticeEvents, ",", ", "))
+	events := fs.String("events", "", "comma-separated: "+strings.ReplaceAll(allNoticeEvents, ",", ", ")+"; none means "+lifecycleEventsName+" (landed, closed, deployed, evicted, cold_gated)")
 	followed, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok || len(rest) != 0 {
 		return exitFailure
 	}
-	var wanted []agentreplv1.WorkspaceNoticeEvent
-	for _, name := range strings.Split(*events, ",") {
-		event, ok := noticeEvents[strings.TrimSpace(name)]
-		if !ok {
-			return c.usageFailed("%q is no event", name)
-		}
-		wanted = append(wanted, event)
+	wanted, ok := parseNoticeEvents(c, *events)
+	if !ok {
+		return exitFailure
 	}
 	subscriber, ok := c.calling()
 	if !ok {
@@ -1821,6 +1824,25 @@ func workspaceSubscribe(c *cliCall, args []string) int {
 	}
 	resp, err := c.client.SubscribeWorkspace(c.ctx, connect.NewRequest(&agentreplv1.SubscribeWorkspaceRequest{Subscriber: subscriber, Followed: followed, Events: wanted}))
 	return answer(c, resp, err)
+}
+
+// parseNoticeEvents reads workspace subscribe's -events: nothing for an
+// unnamed list (the daemon holds the lifecycle bundle then), otherwise each
+// comma-separated name as its event, refusing a name that is none.
+func parseNoticeEvents(c *cliCall, events string) ([]agentreplv1.WorkspaceNoticeEvent, bool) {
+	if strings.TrimSpace(events) == "" {
+		return nil, true
+	}
+	var wanted []agentreplv1.WorkspaceNoticeEvent
+	for _, name := range strings.Split(events, ",") {
+		event, ok := noticeEvents[strings.TrimSpace(name)]
+		if !ok {
+			c.usageFailed("%q is no event; the events are %s", name, strings.ReplaceAll(allNoticeEvents, ",", ", "))
+			return nil, false
+		}
+		wanted = append(wanted, event)
+	}
+	return wanted, true
 }
 
 func workspaceUnsubscribe(c *cliCall, args []string) int {

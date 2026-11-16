@@ -400,6 +400,55 @@ func TestSubscribeWorkspaceRecordsTheEventsAndAnswersTheStatus(t *testing.T) {
 	}
 }
 
+func TestSubscribeWorkspaceHoldsTheEventsItsRequestNames(t *testing.T) {
+	const (
+		bundle = agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE
+		turn   = agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_TURN_ENDED
+		landed = agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LANDED
+	)
+	tests := []struct {
+		name   string
+		events []agentreplv1.WorkspaceNoticeEvent
+		want   wsm.WorkspaceEvents
+	}{
+		{name: "no events hold the lifecycle bundle", want: wsm.LifecycleWorkspaceEvents()},
+		{name: "the bundle named", events: []agentreplv1.WorkspaceNoticeEvent{bundle}, want: wsm.LifecycleWorkspaceEvents()},
+		{name: "the bundle beside a turn event", events: []agentreplv1.WorkspaceNoticeEvent{bundle, turn},
+			want: wsm.LifecycleWorkspaceEvents() | wsm.NewWorkspaceEvents(wsm.WorkspaceEventTurnEnded)},
+		{name: "one event holds only itself", events: []agentreplv1.WorkspaceNoticeEvent{landed}, want: wsm.NewWorkspaceEvents(wsm.WorkspaceEventLanded)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := followHarness(t)
+
+			// Act
+			_, err := h.Client.SubscribeWorkspace(context.Background(), followRequest(tt.events...))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SubscribeWorkspace: %v", err)
+			}
+			if len(h.DB.subscribed) != 1 || h.DB.subscribed[0].Events != tt.want {
+				t.Fatalf("subscribed = %+v, want events %s", h.DB.subscribed, tt.want)
+			}
+		})
+	}
+}
+
+func TestSubscribeWorkspaceWithAnUndeclaredEventIsInvalid(t *testing.T) {
+	// Arrange
+	h := followHarness(t)
+
+	// Act
+	_, err := h.Client.SubscribeWorkspace(context.Background(), followRequest(agentreplv1.WorkspaceNoticeEvent(99)))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.DB.subscribed) != 0 {
+		t.Fatalf("SubscribeWorkspace = %v, subscribed %+v; want invalid_argument and nothing", err, h.DB.subscribed)
+	}
+}
+
 func TestSubscribeWorkspaceIsRefused(t *testing.T) {
 	tests := []struct {
 		name    string

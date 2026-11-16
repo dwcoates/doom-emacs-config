@@ -64,12 +64,47 @@ func (c CloseCause) isGesture() bool {
 	return c == CloseByUser || c == CloseByAgent
 }
 
+// CloseHow says how a workspace ended, as the edge that tells its followers
+// puts it: closed, killed or nuked. THE ZERO VALUE IS A CLOSE, so a close
+// path that names nothing (a landing's close, the daemon's housekeeping, the
+// user's close) is told as a close.
+type CloseHow int
+
+// The ways a workspace ends.
+const (
+	// HowClosed is every close that is not a kill or a nuke.
+	HowClosed CloseHow = iota
+	// HowKilled is the forced stop (KillWorkspace): the session is killed and
+	// the workspace closes, with its worktree, branch and records kept.
+	HowKilled
+	// HowNuked is NukeWorkspace: the session is killed, the worktree and
+	// branch destroyed, and the record forgotten.
+	HowNuked
+)
+
+// String names how in a notice.
+func (h CloseHow) String() string {
+	switch h {
+	case HowClosed:
+		return "closed"
+	case HowKilled:
+		return "killed"
+	case HowNuked:
+		return "nuked"
+	}
+	return fmt.Sprintf("CloseHow(%d)", int(h))
+}
+
 // Closure is a closed workspace's close record.
 type Closure struct {
 	// At is when the workspace was closed.
 	At time.Time
 	// By is who closed it.
 	By CloseCause
+	// How is how it ended. IT IS TOLD WITH THE CLOSE EDGE AND NEVER STORED: a
+	// record read back (decodeClosure) carries the zero value, and the one
+	// consumer is the notice to the workspace's followers (wsedges).
+	How CloseHow
 }
 
 // decodeClosure rebuilds a row's close record. The instant and the cause are

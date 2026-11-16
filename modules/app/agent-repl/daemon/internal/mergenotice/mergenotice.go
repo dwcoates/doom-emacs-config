@@ -7,12 +7,14 @@
 // subscriptions at delivery time, picks each subscriber with a subscription in
 // the change's scope, and submits ONE notice per subscriber.
 //
-// ONLY THREE CHANGES ARE TOLD: a merge put in line, a merge leaving the queue,
-// and a deploy ending (Admits). A notice wakes its subscriber and costs it a
-// full read of its context, and a merge's start, its steps, a reorder, a
-// pause and a restart's requeue are changes nobody waits on, so the
-// orchestrator still reports them (other observers read them) and this
-// package drops them.
+// ONLY THREE CHANGES ARE TOLD: the queue DEPLETING, being PAUSED, and being
+// RESUMED (Admits). A queue-wide subscriber waits on the queue as a whole. A
+// notice wakes its subscriber and costs it a full read of its context, and
+// what one merge does (put in line, started, stepped, landed, failed, taken
+// off, deployed) is told by the per-workspace subscription to that merge's
+// workspace (agentrepl.v1.SubscribeWorkspace), so the orchestrator still
+// reports those changes (other observers read them) and this package drops
+// them.
 //
 // A NOTICE IS ONE SHORT LINE: the queue, the change, and the queue's state in
 // a few words (Notice). It never lists the queue; `merge-queue status` does.
@@ -177,13 +179,6 @@ func (s *Service) QueueChanged(change merge.QueueChange) {
 	s.loop.Report(change)
 }
 
-// DeployEnded is told each deploy's end (mergeworkspace.Service.PayOwed). A
-// DEPLOY IS THE DAEMON'S OWN, not one queue's: it is told to every
-// subscription, whatever repository it scopes, with no queue read for it. It appends, as QueueChanged does, and never blocks.
-func (s *Service) DeployEnded(end merge.DeployEnd) {
-	s.loop.Report(merge.QueueChange{Kind: merge.QueueChangeDeployed, Deploy: end})
-}
-
 // Run delivers every reported change, in order, through PROMPTS until ctx
 // ends, and then delivers every change still pending before it returns. The
 // daemon ends it only after its merge drain, so a merge landing inside the
@@ -258,16 +253,15 @@ func (s *Service) endDepleted(ctx context.Context, subs []wsm.MergeQueueSubscrip
 }
 
 // InScope reports whether SUB watches the queue CHANGE is about: its own
-// repository's, or every repository's. A deploy belongs to no one queue, so
-// every scope hears it.
+// repository's, or every repository's.
 func InScope(sub wsm.MergeQueueSubscription, change merge.QueueChange) bool {
-	return change.Kind == merge.QueueChangeDeployed || sub.Repo == wsm.EveryRepository || sub.Repo == change.Queue.Repo
+	return sub.Repo == wsm.EveryRepository || sub.Repo == change.Queue.Repo
 }
 
 // Recipients answers who is told CHANGE: every subscriber holding a
 // subscription in the change's queue's scope (that repository, or every
-// repository; a deploy's end, every subscriber), ONCE each, in the
-// subscriptions' order, and nobody for a change no subscription is told.
+// repository), ONCE each, in the subscriptions' order, and nobody for a change
+// no subscription is told.
 func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []ids.WorkspaceID {
 	if !Admits(change) {
 		return nil
@@ -285,19 +279,19 @@ func Recipients(subs []wsm.MergeQueueSubscription, change merge.QueueChange) []i
 }
 
 // Admits reports whether CHANGE is told to the subscriptions in its scope: a
-// merge put in line, a merge leaving the queue, or a deploy ending. A
-// merge's start, its steps, a reorder, a pause, a resume and a restart's
-// requeue (a merge that never left the line) are not.
+// merge leaving that left no merge in line (the queue DEPLETED), a pause, or
+// a resume. A merge put in line, a merge leaving while others wait, a
+// merge's start, its steps, a reorder and a restart's requeue (a merge that
+// never left the line) are not.
 func Admits(change merge.QueueChange) bool {
 	switch change.Kind {
-	case merge.QueueChangeEnqueued, merge.QueueChangeDeployed:
+	case merge.QueueChangePaused, merge.QueueChangeResumed:
 		return true
-	case merge.QueueChangeRequeued, merge.QueueChangeStarted, merge.QueueChangeStepped, merge.QueueChangeReordered,
-		merge.QueueChangePaused, merge.QueueChangeResumed:
+	case merge.QueueChangeEnqueued, merge.QueueChangeRequeued, merge.QueueChangeStarted, merge.QueueChangeStepped, merge.QueueChangeReordered:
 		return false
 	}
 	if change.Kind.Leaves() {
-		return true
+		return change.Depleted
 	}
 	panic(fmt.Sprintf("mergenotice: a queue change of undeclared kind %d", int(change.Kind)))
 }
@@ -360,20 +354,15 @@ func (s *Service) carried(ctx context.Context, subscriber ids.WorkspaceID, repo 
 // first, the last being LATEST's, all on one line: the queue the notice is
 // about, every change, the queue's state as the latest change left it in a
 // few words, and, when ENDED says LATEST ended the subscription, that it
-// ended. A deploy is the daemon's own, not one queue's, so its notice names
-// no repository and says nothing of a queue.
+// ended.
 func Values(ended bool, sentences []string, latest merge.QueueChange) map[string]string {
 	if len(sentences) == 0 {
 		panic("mergenotice: a notice was composed of no change")
 	}
-	scope, queue := "merge queue of "+repositoryName(latest.Queue.Repo), " "+QueueState(latest.Queue)
-	if latest.Kind == merge.QueueChangeDeployed {
-		scope, queue = "merge queue", ""
-	}
 	return map[string]string{
-		"scope":    scope,
+		"scope":    "merge queue of " + repositoryName(latest.Queue.Repo),
 		"changes":  Changes(sentences),
-		"queue":    queue,
+		"queue":    " " + QueueState(latest.Queue),
 		"lifetime": Lifetime(ended),
 	}
 }
@@ -400,45 +389,33 @@ func Changes(sentences []string) string {
 	return fmt.Sprintf("%d changes: %s.", len(sentences), strings.Join(sentences, "; "))
 }
 
-// Sentence states one change in a few words, with no closing stop: Changes
-// joins and closes them.
+// Sentence states one told change in a few words, with no closing stop:
+// Changes joins and closes them. A depletion names the merge whose leaving
+// emptied the queue, and how it left.
 func Sentence(change merge.QueueChange) string {
-	subject := "`" + change.Subject.Name + "`"
 	switch change.Kind {
-	case merge.QueueChangeEnqueued:
-		return subject + " put in line"
-	case merge.QueueChangeLanded:
-		return subject + " landed"
-	case merge.QueueChangeFailed:
-		return subject + " failed"
-	case merge.QueueChangeDequeued:
-		return subject + " taken off (" + strings.ReplaceAll(change.Cause, "_", " ") + ")"
-	case merge.QueueChangeDeployed:
-		return DeploySentence(change.Deploy)
+	case merge.QueueChangePaused:
+		return "queue paused"
+	case merge.QueueChangeResumed:
+		return "queue resumed"
+	case merge.QueueChangeLanded, merge.QueueChangeFailed, merge.QueueChangeDequeued:
+		if !change.Depleted {
+			break
+		}
+		return "queue depleted: `" + change.Subject.Name + "` " + leftWords(change) + " and none is left in line"
 	}
-	panic(fmt.Sprintf("mergenotice: a queue change of kind %s is never told", change.Kind))
+	panic(fmt.Sprintf("mergenotice: a queue change of kind %s, depleting %t, is never told", change.Kind, change.Depleted))
 }
 
-// DeploySentence states how a deploy ended, and the reported landings its
-// build carries, in a few words.
-func DeploySentence(end merge.DeployEnd) string {
-	var line string
-	switch {
-	case end.Failure != "":
-		line = "deploy failed (" + end.Failure + "); the running build does not carry it"
-	case end.Boot:
-		line = "daemon booted on a new build"
-	default:
-		line = "deploy finished"
+// leftWords states how the merge whose leaving depleted the queue left it.
+func leftWords(change merge.QueueChange) string {
+	switch change.Kind {
+	case merge.QueueChangeLanded:
+		return "landed"
+	case merge.QueueChangeFailed:
+		return "failed"
 	}
-	if len(end.Carried) == 0 {
-		return line
-	}
-	names := make([]string, len(end.Carried))
-	for i, n := range end.Carried {
-		names[i] = "`" + n + "`"
-	}
-	return line + ", carries " + strings.Join(names, ", ")
+	return "was taken off (" + strings.ReplaceAll(change.Cause, "_", " ") + ")"
 }
 
 // QueueState states the queue as it stands in a few words: how many merges

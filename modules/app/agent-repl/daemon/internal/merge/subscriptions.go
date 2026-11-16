@@ -59,9 +59,6 @@ const (
 	QueueChangePaused
 	// QueueChangeResumed is the queue resumed.
 	QueueChangeResumed
-	// QueueChangeDeployed is a deploy of the daemon's own checkout ended
-	// (QueueChange.Deploy says how), told on that checkout's queue.
-	QueueChangeDeployed
 )
 
 // String names the kind in log records.
@@ -87,8 +84,6 @@ func (k QueueChangeKind) String() string {
 		return "paused"
 	case QueueChangeResumed:
 		return "resumed"
-	case QueueChangeDeployed:
-		return "deployed"
 	}
 	return fmt.Sprintf("QueueChangeKind(%d)", int(k))
 }
@@ -181,19 +176,18 @@ type QueueChange struct {
 	// Subject is the merge the change is about, as it stood when it changed;
 	// the zero value for a pause or a resume.
 	Subject QueueMember
-	// Cause is the recorded reason a dequeued merge left; empty for every
-	// other kind.
+	// Cause is the recorded reason a failed or dequeued merge left (its
+	// queue cause: "failed", "pick_failed", "restart_failed", an eviction, a
+	// dequeue); empty for every other kind.
 	Cause string
 	// Depleted reports that a merge leaving the queue left no merge in line.
 	Depleted bool
 	// Queue is the queue as it stands after the change.
 	Queue QueueSnapshot
-	// Deploy is how the deploy ended, for QueueChangeDeployed alone.
-	Deploy DeployEnd
 	// Seq is the change's place in the one order this daemon makes queue
 	// changes and takes subscriptions in (queueEvents.seq): a subscription
 	// taken at Seq or later was taken after the change, and is never told
-	// it. Zero for a change no queue write made (a deploy's end).
+	// it. Zero for a change no queue write made.
 	Seq uint64
 }
 
@@ -205,37 +199,12 @@ type DeployEnd struct {
 	// Boot marks a fresh boot on a new build (the daemon restarted), rather
 	// than a deploy a running daemon carried out.
 	Boot bool
-	// Carried are the landings this deploy's build carries, by the name of
-	// the workspace each merge ran in: every one, whether or not a report
-	// waited on it (wsm undeployed_landings).
-	Carried []string
-}
-
-// ReportDeploy tells the subscribers of the queue of CHECKOUT's repository
-// that a deploy of it ended, with the queue as it now stands. A queue that
-// cannot be read is recorded, and its subscribers are not told of that
-// deploy; the deploy itself has ended either way.
-func (o *orchestrator) ReportDeploy(ctx context.Context, checkout string, end DeployEnd) {
-	fields := dlog.Context{"checkout": checkout, "failure": end.Failure, "boot": end.Boot, "carried": len(end.Carried)}
-	repo, err := o.repoKeyFor(ctx, checkout)
-	if err != nil {
-		recordFailed(o.deps.Log.Global(), opQueueEvents, "could not key the deployed checkout's queue; its subscribers are not told of the deploy",
-			"keying the deployed checkout's queue ended when its context was cancelled; its subscribers are not told of the deploy", fields, err)
-		return
-	}
-	o.events.mu.Lock()
-	queue, err := o.readQueue(ctx, o.deps.DB, repo)
-	change := QueueChange{Kind: QueueChangeDeployed, Queue: queue, Deploy: end}
-	if err == nil {
-		o.events.stamp(&change)
-	}
-	o.events.mu.Unlock()
-	if err != nil {
-		recordFailed(o.deps.Log.Global(), opQueueEvents, "could not read the deployed checkout's queue; its subscribers are not told of the deploy",
-			"the deployed checkout's queue read ended when its context was cancelled; its subscribers are not told of the deploy", dlog.Merge(fields, dlog.Context{"repo": string(repo)}), err)
-		return
-	}
-	o.tell(change)
+	// Landed are the workspaces whose landing this deploy's build carries
+	// (or, for a failed deploy, would have carried): the merge workspace of
+	// every landing waiting for the deploy, which is the workspace itself for
+	// a merge in place, a one-shot's landing as much as an async merge's.
+	// Each is told its landing's deploy (WORKSPACE_NOTICE_EVENT_DEPLOYED).
+	Landed []ids.WorkspaceID
 }
 
 // QueueObserver is told every change of every merge queue this daemon makes,
@@ -518,7 +487,7 @@ func (d queueEventsDB) describe(ctx context.Context, repo wsm.RepoKey, w queueWr
 			return QueueChange{}, false, nil
 		}
 		change.Subject, change.Depleted = subject, len(queue.Members) == 0
-		if w.kind == QueueChangeDequeued {
+		if w.kind == QueueChangeDequeued || w.kind == QueueChangeFailed {
 			change.Cause = w.cause
 		}
 	case w.subject != "":

@@ -37,7 +37,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_subscribe_workspace.proto.
  */
 export const file_agentrepl_v1_endpoint_subscribe_workspace: GenFile = /*@__PURE__*/
-  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3Vic2NyaWJlX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIq0BChlTdWJzY3JpYmVXb3Jrc3BhY2VSZXF1ZXN0Ei4KCnN1YnNjcmliZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiwKCGZvbGxvd2VkGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIyCgZldmVudHMYAyADKA4yIi5hZ2VudHJlcGwudjEuV29ya3NwYWNlTm90aWNlRXZlbnQimgEKGlN1YnNjcmliZVdvcmtzcGFjZVJlc3BvbnNlEjoKB3N1Y2Nlc3MYASABKAsyJy5hZ2VudHJlcGwudjEuU3Vic2NyaWJlV29ya3NwYWNlU3VjY2Vzc0gAEjYKBWVycm9yGAIgASgLMiUuYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IocBChlTdWJzY3JpYmVXb3Jrc3BhY2VTdWNjZXNzEjsKBXRha2VuGAEgASgLMiwuYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVN1Y2Nlc3NUYWtlbhItCgZzdGF0dXMYAiABKAsyHS5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzIskBCh5TdWJzY3JpYmVXb3Jrc3BhY2VTdWNjZXNzVGFrZW4STAoKc3Vic2NyaWJlZBgBIAEoCzI2LmFnZW50cmVwbC52MS5TdWJzY3JpYmVXb3Jrc3BhY2VTdWNjZXNzVGFrZW5TdWJzY3JpYmVkSAASUAoMcmVzdWJzY3JpYmVkGAIgASgLMjguYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVN1Y2Nlc3NUYWtlblJlc3Vic2NyaWJlZEgAQgcKBXRha2VuIioKKFN1YnNjcmliZVdvcmtzcGFjZVN1Y2Nlc3NUYWtlblN1YnNjcmliZWQiLAoqU3Vic2NyaWJlV29ya3NwYWNlU3VjY2Vzc1Rha2VuUmVzdWJzY3JpYmVkItgCChdTdWJzY3JpYmVXb3Jrc3BhY2VFcnJvchJPChJ1bmtub3duX3N1YnNjcmliZXIYASABKAsyMS5hZ2VudHJlcGwudjEuU3Vic2NyaWJlV29ya3NwYWNlVW5rbm93blN1YnNjcmliZXJIABJLChB1bmtub3duX2ZvbGxvd2VkGAIgASgLMi8uYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVVua25vd25Gb2xsb3dlZEgAEk0KEXN1YnNjcmliZXJfY2xvc2VkGAMgASgLMjAuYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVN1YnNjcmliZXJDbG9zZWRIABJHCg5mb2xsb3dzX2l0c2VsZhgEIAEoCzItLmFnZW50cmVwbC52MS5TdWJzY3JpYmVXb3Jrc3BhY2VGb2xsb3dzSXRzZWxmSABCBwoFY2F1c2UiJQojU3Vic2NyaWJlV29ya3NwYWNlVW5rbm93blN1YnNjcmliZXIiIwohU3Vic2NyaWJlV29ya3NwYWNlVW5rbm93bkZvbGxvd2VkIiQKIlN1YnNjcmliZVdvcmtzcGFjZVN1YnNjcmliZXJDbG9zZWQiIQofU3Vic2NyaWJlV29ya3NwYWNlRm9sbG93c0l0c2VsZiqlAgoUV29ya3NwYWNlTm90aWNlRXZlbnQSJgoiV09SS1NQQUNFX05PVElDRV9FVkVOVF9VTlNQRUNJRklFRBAAEicKI1dPUktTUEFDRV9OT1RJQ0VfRVZFTlRfVFVSTl9TVEFSVEVEEAESJQohV09SS1NQQUNFX05PVElDRV9FVkVOVF9UVVJOX0VOREVEEAISJgoiV09SS1NQQUNFX05PVElDRV9FVkVOVF9ORUVEU19JTlBVVBADEiEKHVdPUktTUEFDRV9OT1RJQ0VfRVZFTlRfTEFOREVEEAQSIQodV09SS1NQQUNFX05PVElDRV9FVkVOVF9DTE9TRUQQBRInCiNXT1JLU1BBQ0VfTk9USUNFX0VWRU5UX1BVTExfUkVRVUVTVBAGQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_status, file_workspace_v1_workspace]);
+  fileDesc("Ci9hZ2VudHJlcGwvdjEvZW5kcG9pbnRfc3Vic2NyaWJlX3dvcmtzcGFjZS5wcm90bxIMYWdlbnRyZXBsLnYxIq0BChlTdWJzY3JpYmVXb3Jrc3BhY2VSZXF1ZXN0Ei4KCnN1YnNjcmliZXIYASABKAsyGi53b3Jrc3BhY2UudjEuV29ya3NwYWNlUmVmEiwKCGZvbGxvd2VkGAIgASgLMhoud29ya3NwYWNlLnYxLldvcmtzcGFjZVJlZhIyCgZldmVudHMYAyADKA4yIi5hZ2VudHJlcGwudjEuV29ya3NwYWNlTm90aWNlRXZlbnQimgEKGlN1YnNjcmliZVdvcmtzcGFjZVJlc3BvbnNlEjoKB3N1Y2Nlc3MYASABKAsyJy5hZ2VudHJlcGwudjEuU3Vic2NyaWJlV29ya3NwYWNlU3VjY2Vzc0gAEjYKBWVycm9yGAIgASgLMiUuYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZUVycm9ySABCCAoGcmVzdWx0IocBChlTdWJzY3JpYmVXb3Jrc3BhY2VTdWNjZXNzEjsKBXRha2VuGAEgASgLMiwuYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVN1Y2Nlc3NUYWtlbhItCgZzdGF0dXMYAiABKAsyHS5hZ2VudHJlcGwudjEuV29ya3NwYWNlU3RhdHVzIskBCh5TdWJzY3JpYmVXb3Jrc3BhY2VTdWNjZXNzVGFrZW4STAoKc3Vic2NyaWJlZBgBIAEoCzI2LmFnZW50cmVwbC52MS5TdWJzY3JpYmVXb3Jrc3BhY2VTdWNjZXNzVGFrZW5TdWJzY3JpYmVkSAASUAoMcmVzdWJzY3JpYmVkGAIgASgLMjguYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVN1Y2Nlc3NUYWtlblJlc3Vic2NyaWJlZEgAQgcKBXRha2VuIioKKFN1YnNjcmliZVdvcmtzcGFjZVN1Y2Nlc3NUYWtlblN1YnNjcmliZWQiLAoqU3Vic2NyaWJlV29ya3NwYWNlU3VjY2Vzc1Rha2VuUmVzdWJzY3JpYmVkItgCChdTdWJzY3JpYmVXb3Jrc3BhY2VFcnJvchJPChJ1bmtub3duX3N1YnNjcmliZXIYASABKAsyMS5hZ2VudHJlcGwudjEuU3Vic2NyaWJlV29ya3NwYWNlVW5rbm93blN1YnNjcmliZXJIABJLChB1bmtub3duX2ZvbGxvd2VkGAIgASgLMi8uYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVVua25vd25Gb2xsb3dlZEgAEk0KEXN1YnNjcmliZXJfY2xvc2VkGAMgASgLMjAuYWdlbnRyZXBsLnYxLlN1YnNjcmliZVdvcmtzcGFjZVN1YnNjcmliZXJDbG9zZWRIABJHCg5mb2xsb3dzX2l0c2VsZhgEIAEoCzItLmFnZW50cmVwbC52MS5TdWJzY3JpYmVXb3Jrc3BhY2VGb2xsb3dzSXRzZWxmSABCBwoFY2F1c2UiJQojU3Vic2NyaWJlV29ya3NwYWNlVW5rbm93blN1YnNjcmliZXIiIwohU3Vic2NyaWJlV29ya3NwYWNlVW5rbm93bkZvbGxvd2VkIiQKIlN1YnNjcmliZVdvcmtzcGFjZVN1YnNjcmliZXJDbG9zZWQiIQofU3Vic2NyaWJlV29ya3NwYWNlRm9sbG93c0l0c2VsZiq7AwoUV29ya3NwYWNlTm90aWNlRXZlbnQSJgoiV09SS1NQQUNFX05PVElDRV9FVkVOVF9VTlNQRUNJRklFRBAAEicKI1dPUktTUEFDRV9OT1RJQ0VfRVZFTlRfVFVSTl9TVEFSVEVEEAESJQohV09SS1NQQUNFX05PVElDRV9FVkVOVF9UVVJOX0VOREVEEAISJgoiV09SS1NQQUNFX05PVElDRV9FVkVOVF9ORUVEU19JTlBVVBADEiEKHVdPUktTUEFDRV9OT1RJQ0VfRVZFTlRfTEFOREVEEAQSIQodV09SS1NQQUNFX05PVElDRV9FVkVOVF9DTE9TRUQQBRInCiNXT1JLU1BBQ0VfTk9USUNFX0VWRU5UX1BVTExfUkVRVUVTVBAGEiMKH1dPUktTUEFDRV9OT1RJQ0VfRVZFTlRfREVQTE9ZRUQQBxIiCh5XT1JLU1BBQ0VfTk9USUNFX0VWRU5UX0VWSUNURUQQCBIlCiFXT1JLU1BBQ0VfTk9USUNFX0VWRU5UX0NPTERfR0FURUQQCRIkCiBXT1JLU1BBQ0VfTk9USUNFX0VWRU5UX0xJRkVDWUNMRRAKQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_agentrepl_v1_workspace_status, file_workspace_v1_workspace]);
 
 /**
  * @generated from message agentrepl.v1.SubscribeWorkspaceRequest
@@ -60,8 +60,11 @@ export type SubscribeWorkspaceRequest = Message<"agentrepl.v1.SubscribeWorkspace
   followed?: WorkspaceRef | undefined;
 
   /**
-   * The changes that produce a notice. REQUIRED: at least one; repeats are
-   * ignored.
+   * The changes that produce a notice. EMPTY MEANS LIFECYCLE: the bundle
+   * WORKSPACE_NOTICE_EVENT_LIFECYCLE names, which is what an agent waiting for
+   * a workspace's work to land, deploy, fail or end wants. Repeats are
+   * ignored, and a bundle is expanded into its events, so naming one beside
+   * an event it holds changes nothing.
    *
    * @generated from field: repeated agentrepl.v1.WorkspaceNoticeEvent events = 3;
    */
@@ -347,7 +350,9 @@ export enum WorkspaceNoticeEvent {
   LANDED = 4,
 
   /**
-   * The followed workspace closed, however it closed.
+   * The followed workspace closed, however it closed. The notice says HOW:
+   * closed (the user's or an agent's close, or the daemon's own), killed
+   * (the forced stop), or nuked (its worktree, branch and record destroyed).
    *
    * @generated from enum value: WORKSPACE_NOTICE_EVENT_CLOSED = 5;
    */
@@ -363,6 +368,51 @@ export enum WorkspaceNoticeEvent {
    * @generated from enum value: WORKSPACE_NOTICE_EVENT_PULL_REQUEST = 6;
    */
   PULL_REQUEST = 6,
+
+  /**
+   * The build that carries the followed workspace's landing is running, or
+   * its deploy failed and the running build does NOT carry it. This is a
+   * different moment from LANDED: master holds the change at the landing, and
+   * the runtime holds it only after the deploy. Told only for a landing on a
+   * repository whose deploy the daemon runs (agent-repl's own master); a
+   * landing into a parent workspace has no deploy.
+   *
+   * @generated from enum value: WORKSPACE_NOTICE_EVENT_DEPLOYED = 7;
+   */
+  DEPLOYED = 7,
+
+  /**
+   * The followed workspace's merge left its merge queue WITHOUT landing: its
+   * tests failed out of their attempts, its conflicts went unresolved, a
+   * person took it off the queue, or a restart or a close abandoned it. The
+   * notice carries the reason, so a follower can tell a merge that may be
+   * requested again from one that must be repaired first.
+   *
+   * @generated from enum value: WORKSPACE_NOTICE_EVENT_EVICTED = 8;
+   */
+  EVICTED = 8,
+
+  /**
+   * The followed workspace's session parked at its COLD GATE (resuming its
+   * large, uncached conversation would cost more than the gate allows), so
+   * nothing runs there until the gate is answered. NEEDS_INPUT does not
+   * cover it: that event is only an open question or permission. Told when a
+   * shim judges the gate, not when a recorded gate is raised again.
+   *
+   * @generated from enum value: WORKSPACE_NOTICE_EVENT_COLD_GATED = 9;
+   */
+  COLD_GATED = 9,
+
+  /**
+   * A request-only BUNDLE, never sent in a notice: LANDED, CLOSED, DEPLOYED,
+   * EVICTED and COLD_GATED, the outcomes of a workspace's work. Turn events
+   * (TURN_STARTED, TURN_ENDED) and NEEDS_INPUT are NOT in it: each notice
+   * wakes the subscriber at the cost of a full read of its context, and a
+   * turn-by-turn follower must ask for those by name.
+   *
+   * @generated from enum value: WORKSPACE_NOTICE_EVENT_LIFECYCLE = 10;
+   */
+  LIFECYCLE = 10,
 }
 
 /**

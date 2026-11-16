@@ -1,7 +1,13 @@
 // endpoint_subscribe_merge_queue.proto — SubscribeMergeQueue: tell one
-// workspace's agent about a merge queue's changes as they happen, so it can
-// wait on the queue (land after the queue drains, report a landing to the
-// user) without polling it. AGENT API section.
+// workspace's agent when a merge queue DEPLETES, is PAUSED, or is RESUMED, so
+// it can wait on the queue as a whole (land after the queue drains, hold work
+// while it is paused) without polling it. AGENT API section.
+//
+// TO FOLLOW ONE WORKSPACE'S MERGE, USE SubscribeWorkspace. A subscriber
+// waiting for a specific workspace to land, deploy or be evicted names that
+// workspace (WORKSPACE_NOTICE_EVENT_LANDED, DEPLOYED, EVICTED, or the
+// LIFECYCLE bundle). This subscription is for the queue as a whole and is not
+// told what any one merge does.
 //
 // DELIVERY: each notice is submitted to the subscriber's session as a
 // deferred prompt of origin
@@ -9,23 +15,22 @@
 // path an async merge's handback takes: it waits behind a running turn, wakes
 // an idle agent, and the feed draws no row for it.
 //
-// WHAT IS TOLD: a merge put in line, a merge leaving the queue (landed,
-// failed, or taken off it: evicted, dequeued, or abandoned under its closing
-// workspace or a restart), and a deploy of the daemon's own checkout ending
-// (its build running, or failed), naming the reported landings its build
-// carries. NOTHING ELSE IS TOLD: not a merge starting or moving to a new step,
-// not a reorder, not a pause or a resume, and not a merge a restart cut short
-// being put back in line, which never left it. A notice wakes the subscriber
-// and costs it a full read of its context, and none of those is a change a
-// subscriber waits on. A deploy is the daemon's own, not one queue's, so it is
-// told to every subscription, whatever repository it scopes.
+// WHAT IS TOLD: a queue DEPLETING (a merge left it and none is left in line,
+// so nothing runs), a queue being PAUSED, and a queue being RESUMED. NOTHING
+// ELSE IS TOLD: not a merge put in line, not a merge leaving while others
+// wait, not a merge starting or moving to a new step, not a reorder, not a
+// deploy, and not a merge a restart cut short being put back in line. A
+// notice wakes the subscriber and costs it a full read of its context, and
+// none of those is a change a subscriber of the queue as a whole waits on.
+// A subscriber that heard the queue paused hears it resumed, so it never waits
+// on a queue that is already running.
 //
-// A NOTICE IS ONE SHORT LINE: the queue, the change, and how the queue stands
-// after it in a few words (how many merges are in line, the running merge and
-// its step, whether it is paused). It never lists the queue: `merge-queue
-// status` reads it. A notice still waiting behind the subscriber's turn when
-// the next change comes is superseded by one that names every change it
-// named, then the new one, still on one line.
+// A NOTICE NAMES ITS QUEUE and is one short line: the repository, the change,
+// and how the queue stands after it in a few words (how many merges are in
+// line, the running merge and its step, whether it is paused). It never lists
+// the queue: `merge-queue status` reads it. A notice still waiting behind the
+// subscriber's turn when the next change comes is superseded by one that names
+// every change it named, then the new one, still on one line.
 //
 // SCOPE: a workspace holds AT MOST ONE subscription per scope -- one
 // repository's queue, or every repository's -- and subscribing again in a
@@ -42,8 +47,7 @@
 // its notice is the subscription's LAST and says the subscription has ended.
 // Following the queue's next work takes a new subscription; one taken after
 // the last notice stands, even one taken before the daemon finished
-// delivering it. A deploy ending after the depletion is told only to a
-// subscription taken again.
+// delivering it.
 // It is DURABLE across a daemon restart and a handover: a landing's own deploy
 // restarts the daemon, so a subscription that a restart dropped would end at
 // the very change it exists to report. A change made while no daemon serves
@@ -72,7 +76,7 @@ message SubscribeMergeQueueRequest {
   optional workspace.v1.RepositoryRef repository = 2;
   // Retired: a subscription once chose how much of a queue's change it was
   // told (every change, advances, deploys or depletes). Every subscription is
-  // now told the same three changes (WHAT IS TOLD).
+  // now told the same three changes (WHAT IS TOLD): depleted, paused, resumed.
   reserved 3;
   reserved "detail";
 }

@@ -94,8 +94,8 @@ type Deps struct {
 	// (worktreereap.Deps.LockPath). The requesters are retired under it, so
 	// the reaper never judges a worktree a retirement is removing.
 	WorktreeLock string
-	// Deploys tells the merge queue's subscribers each deploy's end
-	// (mergenotice.Service.DeployEnded). Every deploy ends in PayOwed, so
+	// Deploys tells each deploy's end to the workspaces whose landing it
+	// carries (wsedges.Hub.DeployEnded). Every deploy ends in PayOwed, so
 	// this is the one place a deploy's end is told.
 	Deploys DeployReporter
 	// Owned answers the channel that closes once this daemon owns the state
@@ -104,7 +104,8 @@ type Deps struct {
 	Owned func() <-chan struct{}
 }
 
-// DeployReporter tells the merge queue's subscribers a deploy ended.
+// DeployReporter tells the workspaces whose landing a deploy carries that it
+// ended.
 type DeployReporter interface {
 	DeployEnded(end merge.DeployEnd)
 }
@@ -278,9 +279,8 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 	if deployErr != nil {
 		end.Failure = deployErr.Error()
 	}
-	// THE DEPLOY HAS ENDED, whatever becomes of its reports: the queue's
-	// subscribers are told once the reports are handed back, naming the
-	// landings it carries.
+	// THE DEPLOY HAS ENDED, whatever becomes of its reports: the workspaces
+	// whose landings it carries are told once the reports are handed back.
 	defer func() { s.deps.Deploys.DeployEnded(end) }()
 	// THE NOTICE NAMES EVERY LANDING THE BUILD CARRIES, whether or not a
 	// report waits on it: a one-shot's landing owes none (wsm
@@ -290,7 +290,7 @@ func (s *Service) PayOwed(ctx context.Context, coveredOnly bool, deployErr error
 		failedUnlessStoodDown(ctx, log, log.Error, "payment", "could not take the landings the deploy carries; its notice names none of them", dlog.Context{"covered_only": coveredOnly}, err)
 	}
 	for _, landing := range landings {
-		end.Carried = append(end.Carried, landing.MergeName)
+		end.Landed = append(end.Landed, landing.MergeWorkspace)
 	}
 	owed, err := s.deps.DB.OwedHandBacks(ctx, coveredOnly)
 	if err != nil {

@@ -1413,13 +1413,18 @@ func TestPromptFromNoWorkspaceSendsNothing(t *testing.T) {
 
 func TestSubscribeReadsItsEvents(t *testing.T) {
 	tests := []struct {
-		name   string
-		events string
-		code   int
+		name       string
+		events     []string
+		code       int
+		wantEvents int
 	}{
-		{name: "known events", events: "landed, closed", code: exitSuccess},
-		{name: "the pull request event", events: "pull_request,landed", code: exitSuccess},
-		{name: "an unknown event", events: "landed,exploded", code: exitFailure},
+		{name: "known events", events: []string{"-events", "landed, closed"}, code: exitSuccess, wantEvents: 2},
+		{name: "the pull request event", events: []string{"-events", "pull_request,landed"}, code: exitSuccess, wantEvents: 2},
+		{name: "the new outcome events", events: []string{"-events", "deployed,evicted,cold_gated"}, code: exitSuccess, wantEvents: 3},
+		{name: "the lifecycle bundle", events: []string{"-events", "lifecycle"}, code: exitSuccess, wantEvents: 1},
+		{name: "the bundle beside a turn event", events: []string{"-events", "lifecycle,turn_ended"}, code: exitSuccess, wantEvents: 2},
+		{name: "no events names none, which the daemon reads as the lifecycle bundle", code: exitSuccess, wantEvents: 0},
+		{name: "an unknown event", events: []string{"-events", "landed,exploded"}, code: exitFailure},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1427,7 +1432,7 @@ func TestSubscribeReadsItsEvents(t *testing.T) {
 			f := newCLIFixture()
 
 			// Act
-			code := f.run(workspaceNoun, "subscribe", "peer", "-events", tt.events)
+			code := f.run(workspaceNoun, append([]string{"subscribe", "peer"}, tt.events...)...)
 
 			// Assert
 			if code != tt.code {
@@ -1435,11 +1440,23 @@ func TestSubscribeReadsItsEvents(t *testing.T) {
 			}
 			if tt.code == exitSuccess {
 				req := only[*agentreplv1.SubscribeWorkspaceRequest](t, f)
-				if len(req.GetEvents()) != 2 || req.GetSubscriber().GetId() != "ws-caller" || req.GetFollowed().GetId() != "ws-peer" {
-					t.Errorf("subscription = %v, want the caller following peer's two events", req)
+				if len(req.GetEvents()) != tt.wantEvents || req.GetSubscriber().GetId() != "ws-caller" || req.GetFollowed().GetId() != "ws-peer" {
+					t.Errorf("subscription = %v, want the caller following peer with %d events", req, tt.wantEvents)
 				}
+			} else if !strings.Contains(f.errOut.String(), "lifecycle") {
+				t.Errorf("stderr %q, want the refusal to list the events, the lifecycle bundle among them", f.errOut.String())
 			}
 		})
+	}
+}
+
+func TestSubscribeSpellsTheLifecycleBundleAsItsContractArm(t *testing.T) {
+	// Act
+	got, ok := noticeEvents["lifecycle"]
+
+	// Assert
+	if !ok || got != agentreplv1.WorkspaceNoticeEvent_WORKSPACE_NOTICE_EVENT_LIFECYCLE {
+		t.Errorf("-events lifecycle = %v (%v), want the contract's lifecycle bundle", got, ok)
 	}
 }
 
@@ -1455,8 +1472,8 @@ func TestSubscribeSpellsEveryStoreEventByItsStoreName(t *testing.T) {
 			}
 		})
 	}
-	if len(noticeEvents) != len(wsm.AllWorkspaceEvents().Members()) {
-		t.Errorf("noticeEvents spells %d events, want exactly the store's %d", len(noticeEvents), len(wsm.AllWorkspaceEvents().Members()))
+	if want := len(wsm.AllWorkspaceEvents().Members()) + 1; len(noticeEvents) != want {
+		t.Errorf("noticeEvents spells %d names, want the store's events and the lifecycle bundle, %d", len(noticeEvents), want)
 	}
 }
 

@@ -423,8 +423,8 @@ func TestTheEdgesReportOnlyTheDerivedEvents(t *testing.T) {
 		{name: "a turn ending unobserved reports nothing", edge: func(s *Service) { s.TurnEndedUnobserved(child) }},
 		{name: "an ask opening reports nothing", edge: func(s *Service) { s.NeedsInput(child) }},
 		{name: "a landing reports the landing", edge: func(s *Service) { s.Landed(child) }, want: []Kind{Landed}},
-		{name: "a close after a landing reports nothing more", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child, MergedAt: &landedAt}) }},
-		{name: "a close without a landing reports it", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child}) }, want: []Kind{ClosedWithoutLanding}},
+		{name: "a close after a landing reports nothing more", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child, MergedAt: &landedAt}, wsm.HowClosed) }},
+		{name: "a close without a landing reports it", edge: func(s *Service) { s.Closed(wsm.Workspace{ID: child}, wsm.HowClosed) }, want: []Kind{ClosedWithoutLanding}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

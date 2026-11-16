@@ -37,8 +37,11 @@ message SubscribeWorkspaceRequest {
   // The workspace followed. May be the subscriber's own child, its owner, or
   // any workspace of any registered repository; may not be the subscriber.
   workspace.v1.WorkspaceRef followed = 2;
-  // The changes that produce a notice. REQUIRED: at least one; repeats are
-  // ignored.
+  // The changes that produce a notice. EMPTY MEANS LIFECYCLE: the bundle
+  // WORKSPACE_NOTICE_EVENT_LIFECYCLE names, which is what an agent waiting for
+  // a workspace's work to land, deploy, fail or end wants. Repeats are
+  // ignored, and a bundle is expanded into its events, so naming one beside
+  // an event it holds changes nothing.
   repeated WorkspaceNoticeEvent events = 3;
 }
 
@@ -56,7 +59,9 @@ enum WorkspaceNoticeEvent {
   WORKSPACE_NOTICE_EVENT_NEEDS_INPUT = 3;
   // The followed workspace's branch landed in its merge target.
   WORKSPACE_NOTICE_EVENT_LANDED = 4;
-  // The followed workspace closed, however it closed.
+  // The followed workspace closed, however it closed. The notice says HOW:
+  // closed (the user's or an agent's close, or the daemon's own), killed
+  // (the forced stop), or nuked (its worktree, branch and record destroyed).
   WORKSPACE_NOTICE_EVENT_CLOSED = 5;
   // The followed workspace took a GitHub pull request as its own: it stored
   // an owned link to one (agentrepl.v1.WorkspaceLinkOwned). The notice names
@@ -64,6 +69,31 @@ enum WorkspaceNoticeEvent {
   // merge (agentrepl.v1.SubscribePullRequestRequest) without knowing it
   // beforehand.
   WORKSPACE_NOTICE_EVENT_PULL_REQUEST = 6;
+  // The build that carries the followed workspace's landing is running, or
+  // its deploy failed and the running build does NOT carry it. This is a
+  // different moment from LANDED: master holds the change at the landing, and
+  // the runtime holds it only after the deploy. Told only for a landing on a
+  // repository whose deploy the daemon runs (agent-repl's own master); a
+  // landing into a parent workspace has no deploy.
+  WORKSPACE_NOTICE_EVENT_DEPLOYED = 7;
+  // The followed workspace's merge left its merge queue WITHOUT landing: its
+  // tests failed out of their attempts, its conflicts went unresolved, a
+  // person took it off the queue, or a restart or a close abandoned it. The
+  // notice carries the reason, so a follower can tell a merge that may be
+  // requested again from one that must be repaired first.
+  WORKSPACE_NOTICE_EVENT_EVICTED = 8;
+  // The followed workspace's session parked at its COLD GATE (resuming its
+  // large, uncached conversation would cost more than the gate allows), so
+  // nothing runs there until the gate is answered. NEEDS_INPUT does not
+  // cover it: that event is only an open question or permission. Told when a
+  // shim judges the gate, not when a recorded gate is raised again.
+  WORKSPACE_NOTICE_EVENT_COLD_GATED = 9;
+  // A request-only BUNDLE, never sent in a notice: LANDED, CLOSED, DEPLOYED,
+  // EVICTED and COLD_GATED, the outcomes of a workspace's work. Turn events
+  // (TURN_STARTED, TURN_ENDED) and NEEDS_INPUT are NOT in it: each notice
+  // wakes the subscriber at the cost of a full read of its context, and a
+  // turn-by-turn follower must ask for those by name.
+  WORKSPACE_NOTICE_EVENT_LIFECYCLE = 10;
 }
 
 // THE ARM IS THE OUTCOME.
