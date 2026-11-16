@@ -86,7 +86,7 @@ func TestConcurrentDeploysRunTheirDeployHooksTogetherAndPostDeployInQueueOrder(t
 	first.shim.ExpectStartTurn()
 	d.AwaitWorkspaceLogOperationCount(first.ws.GetDir(), harness.OpTurnOpened, 3)
 	pushConcludedTurn(first.shim, mainAgent, "first-post-deploy")
-	awaitRoster(t, d, roster, "the first deploy merged", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the first deploy merged", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, first.ws.GetId())
 		return row == nil || row.GetMerged() != nil
 	})
@@ -95,7 +95,7 @@ func TestConcurrentDeploysRunTheirDeployHooksTogetherAndPostDeployInQueueOrder(t
 	second.shim.ExpectStartTurn()
 	d.AwaitWorkspaceLogOperationCount(second.ws.GetDir(), harness.OpTurnOpened, 3)
 	pushConcludedTurn(second.shim, mainAgent, "second-post-deploy")
-	awaitRoster(t, d, roster, "the second deploy merged", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the second deploy merged", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, second.ws.GetId())
 		return row == nil || row.GetMerged() != nil
 	})

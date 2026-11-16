@@ -3,7 +3,6 @@
 package integration
 
 import (
-	"agentrepl/protohelpers/rosterwalk"
 	"database/sql"
 	"path/filepath"
 	"strings"
@@ -151,7 +150,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages, the queued merge the test abandons.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.drop_queued", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
-	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
 	})
 
@@ -162,7 +161,7 @@ func TestUpdateMergeQueueEvictRemovesOneWorkspacesQueuedMerge(t *testing.T) {
 	requireRPCSuccess(t, "UpdateMergeQueue(evict)", resp, err)
 
 	// Assert: the roster no longer shows it queued.
-	got := awaitRoster(t, behind.d, roster, "the evicted workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, behind.d, roster, "the evicted workspace off the queue", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() == nil
 	})
 	if row := rosterRow(got, behind.ws.GetId()); row.GetMergeQueued() != nil {
@@ -193,7 +192,7 @@ func TestInterruptOnAQueuedWorkspaceRaisesTheMergeQueueQuestion(t *testing.T) {
 	// The sweep covers every test; the declared records are evidence of the merge conflict the test stages.
 	behind.d.ExpectWarnings("daemon.gitclient.merge_no_ff", "daemon.merge.merge_tab")
 	roster := behind.d.WatchRoster()
-	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, behind.d, roster, "the behind workspace queued", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, behind.ws.GetId()).GetMergeQueued() != nil
 	})
 	feed := behind.watchRootFeed()
@@ -390,17 +389,16 @@ func TestALandedMergeIsSeenByEveryObserver(t *testing.T) {
 			return v.GetStrip().GetStatus().GetMerged() != nil
 		})
 	})
-	t.Run("the roster lists it under recently merged, stated merged", func(t *testing.T) {
-		// THE STATUS IS PART OF THE PREDICATE: the row enters recently_merged
-		// as MERGED and is closed out a moment later, so matching on presence
-		// alone would read whichever snapshot arrived first.
-		awaitRoster(t, f.d, roster, "the merged workspace under recently_merged, stated merged", func(r *frontendv1.WorkspaceRoster) bool {
-			for _, row := range rosterwalk.MergedRows(r) {
-				if row.GetWorkspace().GetWorkspace().GetId() == f.ws.GetId() {
-					return row.GetMerged() != nil
-				}
-			}
-			return false
+	t.Run("the roster lists it under recently merged, its page row merged or settled", func(t *testing.T) {
+		// A MERGED ROW IS IN NO STREAM: the push takes the workspace out of the
+		// workspaces stream into the summary, and its page draws the arm the
+		// roster last derived, which is MERGED until the session ends and
+		// INACTIVE after. A merged workspace's arm move publishes no push, so
+		// the page is read once the push has moved it.
+		awaitRoster(t, f.d, roster, "the merged workspace under recently_merged", func(r *frontendv1.RosterPush) bool {
+			return leftForMerged(t, f.d, r, f.ws.GetId(), func(row *frontendv1.RosterRow) bool {
+				return row.GetMerged() != nil || row.GetInactive() != nil
+			})
 		})
 	})
 	t.Run("only the queued and landed banners rose", func(t *testing.T) {
@@ -627,7 +625,7 @@ func TestALocalMergeIntoAParentWorktreeRunsNoDeployHook(t *testing.T) {
 		t.Fatalf("FinishWorkspace(child) = error %v, want the merge enqueued", err)
 	}
 	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the child's merge landed", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, child.GetId())
 		return row != nil && row.GetMerged() != nil
 	})
@@ -686,7 +684,7 @@ func TestAHooksOnlyDeployNeverTriggersTheRollout(t *testing.T) {
 
 	// Assert: the deploy succeeds (a hooks-only config with no hooks has
 	// nothing to run, so it reaches "merged" straight away).
-	awaitRoster(t, d, roster, "the one-shot's merge landed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the one-shot's merge landed", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, ws.GetId())
 		return row != nil && row.GetMerged() != nil
 	})
@@ -1136,7 +1134,7 @@ func mergeRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *wo
 	t.Helper()
 	harness.Register(t, d, repo.Dir)
 	roster := d.WatchRoster()
-	got := awaitRoster(t, d, roster, "the repository's roster section", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, d, roster, "the repository's roster section", func(r *frontendv1.RosterPush) bool {
 		return mergeFindRepoKey(r, repo.Dir) != nil
 	})
 	ref := mergeFindRepoKey(got, repo.Dir)
@@ -1151,8 +1149,8 @@ func mergeRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *wo
 // A repository is keyed by its COMMON DIR -- registration derives it from git
 // and it is `<worktree>/.git` for an ordinary checkout -- so a worktree's
 // section is found under either spelling rather than the worktree's alone.
-func mergeFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
-	for _, s := range r.GetRepository().GetSections() {
+func mergeFindRepoKey(r *frontendv1.RosterPush, dir string) *workspacev1.RepositoryRef {
+	for _, s := range r.GetWorkspaces().GetRepository().GetSections() {
 		switch s.GetKey().GetRepository().GetDir() {
 		case dir, filepath.Join(dir, ".git"):
 			return s.GetKey().GetRepository()
@@ -1328,7 +1326,7 @@ func TestAQueuedMergeWhoseSessionParksAtItsColdGateKeepsItsPlaceInTheQueue(t *te
 	d2.AwaitWorkspaceLogRecordInState("the cold gate keeping the merge's place", func(r harness.LogRecord) bool {
 		return r.Level == "info" && r.Operation == "daemon.merge.cold_gate" && r.Context["workspace"] == behind.ws.GetId()
 	})
-	awaitRoster(t, d2, roster, "the cold workspace still in the queue", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d2, roster, "the cold workspace still in the queue", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, behind.ws.GetId())
 		return row != nil && row.GetMergeQueued() != nil
 	})

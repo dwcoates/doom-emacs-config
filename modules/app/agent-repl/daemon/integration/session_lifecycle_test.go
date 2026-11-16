@@ -881,7 +881,7 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	// goes the moment the verb is accepted (BeginKill); a closed workspace with
 	// nothing live behind it is `inactive`, which sits above every session
 	// state (sidebar status.go), so the session's death never reads `dead`.
-	awaitRoster(t, f.d, roster, "the roster row inactive and closed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the roster row inactive and closed", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetInactive() != nil && row.GetClosed().GetClosed()
 	})
@@ -919,7 +919,7 @@ func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
 	dir := worktreeOf(t, repo, "nuke-me")
 	ws := harness.Register(t, d, dir)
 	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "the registered row", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the registered row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, ws.GetId()) != nil
 	})
 
@@ -939,7 +939,7 @@ func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
 	if repo.HasBranch("nuke-me") {
 		t.Fatalf("branch %q still exists after NukeWorkspace, want it removed", "nuke-me")
 	}
-	awaitRoster(t, d, roster, "the row gone", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the row gone", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, ws.GetId()) == nil
 	})
 }
@@ -1015,7 +1015,7 @@ func TestHibernationParksAnIdleSessionAndRevivesOnPrompt(t *testing.T) {
 	// Assert: the roster keeps an IDLE arm. A hibernation is a park, not a
 	// fault: the frontend must not be able to tell a parked workspace from an
 	// idle one, so `severed` and `dead` are both wrong here.
-	awaitRoster(t, f.d, roster, "the parked roster row staying idle", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the parked roster row staying idle", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && (row.GetReady() != nil || row.GetDone() != nil)
 	})
@@ -2060,7 +2060,7 @@ func TestAParkedRowIsIdleOnEveryRosterResolvedAfterTheHibernationRecord(t *testi
 
 	// Assert: the row settles on an IDLE arm. `dead` and `severed` both report
 	// a fault, and there is none: the daemon put the route down itself.
-	settled := awaitRoster(t, f.d, roster, "the parked row settling on an idle arm", func(r *frontendv1.WorkspaceRoster) bool {
+	settled := awaitRoster(t, f.d, roster, "the parked row settling on an idle arm", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && (row.GetReady() != nil || row.GetDone() != nil)
 	})
@@ -2230,8 +2230,8 @@ func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 		"daemon.shimclient.exit", "daemon.workspace.bring_up")
 	f.shim.ExpectStartSession()
 	roster := f.d.WatchRoster()
-	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.WorkspaceRoster) bool {
-		return func(r *frontendv1.WorkspaceRoster) bool {
+	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.RosterPush) bool {
+		return func(r *frontendv1.RosterPush) bool {
 			row := rosterRow(r, f.ws.GetId())
 			return row != nil && pred(row)
 		}

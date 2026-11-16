@@ -36,7 +36,7 @@ func TestTheCLIRenamesAWorkspace(t *testing.T) {
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
 	roster := f.d.WatchRoster()
-	before := awaitRoster(t, f.d, roster, "the workspace's row", func(r *frontendv1.WorkspaceRoster) bool {
+	before := awaitRoster(t, f.d, roster, "the workspace's row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()) != nil
 	})
 	oldName := rosterRow(before, f.ws.GetId()).GetName().GetText()
@@ -51,7 +51,7 @@ func TestTheCLIRenamesAWorkspace(t *testing.T) {
 	if err != nil || !strings.Contains(out, "better-name") {
 		t.Fatalf("workspace set -name = (%v, %q), want success naming better-name", err, out)
 	}
-	awaitRoster(t, f.d, roster, "the renamed row", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the renamed row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()).GetName().GetText() == "better-name"
 	})
 	if out, err := runWorkspaceCLI(t, ctx, f.d, "status", "better-name"); err != nil || !strings.Contains(out, f.ws.GetId()) {

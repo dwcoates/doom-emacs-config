@@ -214,7 +214,7 @@ func TestANewEmacsStreamStartsNoWorkspace(t *testing.T) {
 	d := newDaemon(t, harness.Opts{})
 	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
 	roster := d.WatchRoster()
-	awaitRoster(t, d, roster, "the registered workspace's row", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the registered workspace's row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, ws.GetId()) != nil
 	})
 
@@ -245,7 +245,7 @@ func TestANetworkTheShimCannotReachIsANetworkFaultOnTheFooterAndTheRoster(t *tes
 	if got := view.GetStrip().GetStatus().GetNetworkFault().GetActivity().GetSalient().GetOffline().GetText(); got != "cannot reach api.anthropic.com: no route to host" {
 		t.Fatalf("offline line = %q, want the shim's own observation", got)
 	}
-	awaitRoster(t, f.d, f.d.WatchRoster(), "the roster's network fault", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, f.d.WatchRoster(), "the roster's network fault", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()).GetNetworkFault() != nil
 	})
 }

@@ -74,16 +74,16 @@ func footerDisconnected(v *frontendv1.FooterView) bool {
 }
 
 // rosterLost is the workspace's roster row in a link-loss arm.
-func rosterLost(f *fixture) func(*frontendv1.WorkspaceRoster) bool {
-	return func(r *frontendv1.WorkspaceRoster) bool {
+func rosterLost(f *fixture) func(*frontendv1.RosterPush) bool {
+	return func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && (row.GetDead() != nil || row.GetSevered() != nil)
 	}
 }
 
 // rosterServing is the workspace's roster row out of every link-loss arm.
-func rosterServing(f *fixture) func(*frontendv1.WorkspaceRoster) bool {
-	return func(r *frontendv1.WorkspaceRoster) bool {
+func rosterServing(f *fixture) func(*frontendv1.RosterPush) bool {
+	return func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetDead() == nil && row.GetSevered() == nil && row.GetInit() == nil
 	}
@@ -239,7 +239,7 @@ func TestAResumptionWhoseShimDiesLeavesTheRowOnTurnDied(t *testing.T) {
 	killShim(t, f, revived)
 
 	// Assert
-	got := awaitRoster(t, f.d, roster, "turn_died once the resumption died", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, f.d, roster, "turn_died once the resumption died", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetTurnDied() != nil
 	})
@@ -271,7 +271,7 @@ func TestAShimThatDiesAgainBeforeAnyTurnEndsIsLeftDownUntilTheNextPrompt(t *test
 	f.d.AwaitWorkspaceLogRecord(f.repo.Dir, "the WARN leaving the looping shim down", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.promptqueue.revive" && r.Level == "warn"
 	})
-	awaitRoster(t, f.d, roster, "the roster row dead", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the roster row dead", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetDead() != nil
 	})

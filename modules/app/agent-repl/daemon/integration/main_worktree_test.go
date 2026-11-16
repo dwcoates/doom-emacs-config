@@ -16,8 +16,8 @@ import (
 
 // closedRowAt answers the roster's closed row for the workspace at dir, nil
 // when the closed list carries none.
-func closedRowAt(r *frontendv1.WorkspaceRoster, dir string) *frontendv1.RosterRow {
-	for _, row := range rosterwalk.ClosedRows(r) {
+func closedRowAt(r *frontendv1.RosterPush, dir string) *frontendv1.RosterRow {
+	for _, row := range rosterwalk.ClosedRows(r.GetClosed()) {
 		if row.GetWorkspace().GetWorkspace().GetDir() == dir {
 			return row
 		}
@@ -42,7 +42,7 @@ func TestRegisteringALinkedWorktreeRegistersItsMainWorktreeClosed(t *testing.T) 
 
 	// Assert
 	awaitRoster(t, d, roster, "a roster carrying the main worktree as a closed row",
-		func(r *frontendv1.WorkspaceRoster) bool { return closedRowAt(r, repo.Dir) != nil })
+		func(r *frontendv1.RosterPush) bool { return closedRowAt(r, repo.Dir) != nil })
 }
 
 // TestForgetRefusesTheMainWorktreeWhileALinkedWorktreeIsRegistered pins the
@@ -57,7 +57,7 @@ func TestForgetRefusesTheMainWorktreeWhileALinkedWorktreeIsRegistered(t *testing
 	roster := d.WatchRoster()
 	harness.Register(t, d, linked)
 	main := closedRowAt(awaitRoster(t, d, roster, "a roster carrying the main worktree as a closed row",
-		func(r *frontendv1.WorkspaceRoster) bool { return closedRowAt(r, repo.Dir) != nil }), repo.Dir)
+		func(r *frontendv1.RosterPush) bool { return closedRowAt(r, repo.Dir) != nil }), repo.Dir)
 
 	// Act
 	resp, err := d.Client().ForgetWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{

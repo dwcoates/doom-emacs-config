@@ -96,7 +96,7 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 				awaitFooter(t, f, footer, "the footer paints blocked", func(v *frontendv1.FooterView) bool {
 					return v.GetStrip().GetStatus().GetVendorFault() != nil
 				})
-				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.WorkspaceRoster) bool {
+				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.RosterPush) bool {
 					return rosterRow(r, f.ws.GetId()).GetVendorBlocked() != nil
 				})
 			case "vendor_turn":
@@ -105,7 +105,7 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 				awaitFooter(t, f, footer, "the footer draws vendor_fault · vendor_error", func(v *frontendv1.FooterView) bool {
 					return v.GetStrip().GetStatus().GetVendorFault().GetVendorError() != nil
 				})
-				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.WorkspaceRoster) bool {
+				awaitRoster(t, f.d, roster, "the roster paints vendor_blocked", func(r *frontendv1.RosterPush) bool {
 					return rosterRow(r, f.ws.GetId()).GetVendorBlocked() != nil
 				})
 			case "agent_repl":
@@ -114,14 +114,14 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 				awaitFooter(t, f, footer, "the footer draws agent_repl_fault · turn_died", func(v *frontendv1.FooterView) bool {
 					return v.GetStrip().GetStatus().GetAgentReplFault().GetTurnDied() != nil
 				})
-				awaitRoster(t, f.d, roster, "the roster paints turn_died", func(r *frontendv1.WorkspaceRoster) bool {
+				awaitRoster(t, f.d, roster, "the roster paints turn_died", func(r *frontendv1.RosterPush) bool {
 					return rosterRow(r, f.ws.GetId()).GetTurnDied() != nil
 				})
 			case "expected":
 				awaitFooter(t, f, footer, "the footer draws idle · done", func(v *frontendv1.FooterView) bool {
 					return v.GetStrip().GetStatus().GetIdle().GetDone() != nil
 				})
-				awaitRoster(t, f.d, roster, "the roster paints done", func(r *frontendv1.WorkspaceRoster) bool {
+				awaitRoster(t, f.d, roster, "the roster paints done", func(r *frontendv1.RosterPush) bool {
 					return rosterRow(r, f.ws.GetId()).GetDone() != nil
 				})
 			default:
@@ -153,7 +153,7 @@ func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) 
 	awaitFooter(t, f, footer, "the footer draws vendor_fault · api_retrying", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetVendorFault().GetApiRetrying() != nil
 	})
-	awaitRoster(t, f.d, roster, "the roster paints api_retrying", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the roster paints api_retrying", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()).GetApiRetrying() != nil
 	})
 
@@ -167,7 +167,7 @@ func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) 
 	awaitFooter(t, f, footer, "the footer is working again", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetWorking() != nil
 	})
-	awaitRoster(t, f.d, roster, "the roster is thinking again", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the roster is thinking again", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()).GetThinking() != nil
 	})
 }
@@ -193,7 +193,7 @@ func TestRosterAndFooterAgreeOnAnOpenQuestion(t *testing.T) {
 	awaitFooter(t, f, footer, "the strip to name the question gate", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetQuestion() != nil
 	})
-	awaitRoster(t, f.d, roster, "the row to name the question gate", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the row to name the question gate", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()).GetQuestion() != nil
 	})
 }

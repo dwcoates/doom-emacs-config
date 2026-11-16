@@ -136,14 +136,14 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 				ws2 = harness.Register(t, f.d, repo2.Dir)
 			},
 			isFirst: func(msg proto.Message) bool {
-				return ws2 != nil && rosterRow(msg.(*frontendv1.WorkspaceRoster), ws2.GetId()) != nil
+				return ws2 != nil && rosterRow(msg.(*frontendv1.RosterPush), ws2.GetId()) != nil
 			},
 			drive2: func(t *testing.T, f *fixture) {
 				repo3 := harness.NewRepo(t)
 				ws3 = harness.Register(t, f.d, repo3.Dir)
 			},
 			isSecond: func(msg proto.Message) bool {
-				return ws3 != nil && rosterRow(msg.(*frontendv1.WorkspaceRoster), ws3.GetId()) != nil
+				return ws3 != nil && rosterRow(msg.(*frontendv1.RosterPush), ws3.GetId()) != nil
 			},
 			// The roster spans every case's workspaces; the case owns its own
 			// rows, which are the views it compares.
@@ -152,7 +152,7 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 					if ws == nil {
 						continue
 					}
-					ra, rb := rosterRow(a.(*frontendv1.WorkspaceRoster), ws.GetId()), rosterRow(b.(*frontendv1.WorkspaceRoster), ws.GetId())
+					ra, rb := rosterRow(a.(*frontendv1.RosterPush), ws.GetId()), rosterRow(b.(*frontendv1.RosterPush), ws.GetId())
 					if !proto.Equal(ra, rb) {
 						t.Logf("the row of %s differs: %v against %v", ws.GetId(), ra, rb)
 						return false

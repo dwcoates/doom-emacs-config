@@ -495,16 +495,17 @@ func awaitTopbar(t *testing.T, f *fixture, s *harness.Stream[*frontendv1.TopbarV
 }
 
 // awaitRoster reads roster pushes until one satisfies the predicate.
-func awaitRoster(t *testing.T, d *harness.Daemon, s *harness.Stream[*frontendv1.WorkspaceRoster], what string, pred func(*frontendv1.WorkspaceRoster) bool) *frontendv1.WorkspaceRoster {
+func awaitRoster(t *testing.T, d *harness.Daemon, s *harness.Stream[*frontendv1.RosterPush], what string, pred func(*frontendv1.RosterPush) bool) *frontendv1.RosterPush {
 	t.Helper()
 	ctx, cancel := d.WaitCtx()
 	defer cancel()
 	return harness.AwaitView(t, ctx, s, what, pred)
 }
 
-// rosterRow finds a workspace's row anywhere in the roster, repository
-// sections, task sections, recently merged and nested children alike.
-func rosterRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
+// rosterRow finds a workspace's row anywhere in the roster's streams: the
+// repository sections, the hidden section, the closed rows and nested
+// children alike. A merged workspace is in no stream (mergedRowOf).
+func rosterRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
 	for _, r := range rosterwalk.AllRows(roster) {
 		if r.GetWorkspace().GetWorkspace().GetId() == id {
 			return r
@@ -514,8 +515,8 @@ func rosterRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.Roster
 }
 
 // rosterOpenRow finds a workspace's open row under the repository grouping.
-func rosterOpenRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterOpenRow {
-	for _, open := range rosterwalk.OpenRows(roster) {
+func rosterOpenRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterOpenRow {
+	for _, open := range rosterwalk.OpenRows(roster.GetWorkspaces()) {
 		if open.GetRow().GetWorkspace().GetWorkspace().GetId() == id {
 			return open
 		}
@@ -523,14 +524,65 @@ func rosterOpenRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.Ro
 	return nil
 }
 
+// mergedRows pages every merged workspace's row, most recently merged first,
+// across every repository (agentrepl.v1.ListMergedWorkspaces), with the
+// merged-set token every page carried; the test fails when two pages carry
+// different tokens.
+func mergedRows(t *testing.T, d *harness.Daemon) ([]*frontendv1.RosterRow, uint64) {
+	t.Helper()
+	var out []*frontendv1.RosterRow
+	var token uint64
+	for page := uint32(0); ; page++ {
+		resp, err := d.Client().ListMergedWorkspaces(d.Ctx(), connect.NewRequest(&agentreplv1.ListMergedWorkspacesRequest{
+			Order: &agentreplv1.ListMergedWorkspacesOrder{Order: &agentreplv1.ListMergedWorkspacesOrder_MostRecentlyMerged{
+				MostRecentlyMerged: &agentreplv1.ListMergedWorkspacesOrderMerged{}}},
+			Page: page,
+		}))
+		if err != nil {
+			t.Fatalf("ListMergedWorkspaces page %d: %v", page, err)
+		}
+		success := resp.Msg.GetSuccess()
+		if success == nil {
+			t.Fatalf("ListMergedWorkspaces page %d answered %v", page, resp.Msg)
+		}
+		if page > 0 && success.GetRevision().GetRevision() != token {
+			t.Fatalf("ListMergedWorkspaces page %d carried token %d, page 0 %d", page, success.GetRevision().GetRevision(), token)
+		}
+		token = success.GetRevision().GetRevision()
+		if more := success.GetMore(); more != nil {
+			for _, row := range more.GetRows().GetRows() {
+				out = append(out, row.GetRow())
+			}
+			continue
+		}
+		for _, row := range success.GetLast().GetRows().GetRows() {
+			out = append(out, row.GetRow())
+		}
+		return out, token
+	}
+}
+
+// mergedRowOf finds a merged workspace's row on its page, nil when no page
+// carries it.
+func mergedRowOf(t *testing.T, d *harness.Daemon, id string) *frontendv1.RosterRow {
+	t.Helper()
+	rows, _ := mergedRows(t, d)
+	for _, row := range rows {
+		if row.GetWorkspace().GetWorkspace().GetId() == id {
+			return row
+		}
+	}
+	return nil
+}
+
 // rosterRepoRow finds a workspace's row only under the repository grouping.
-func rosterRepoRow(roster *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRow {
+func rosterRepoRow(roster *frontendv1.RosterPush, id string) *frontendv1.RosterRow {
 	return rosterOpenRow(roster, id).GetRow()
 }
 
 // rosterNests reports whether the repository grouping draws the child's row
 // among the parent's children.
-func rosterNests(roster *frontendv1.WorkspaceRoster, parentID, childID string) bool {
+func rosterNests(roster *frontendv1.RosterPush, parentID, childID string) bool {
 	for _, c := range rosterOpenRow(roster, parentID).GetChildren() {
 		if c.GetRow().GetWorkspace().GetWorkspace().GetId() == childID {
 			return true
@@ -600,9 +652,9 @@ func markViewed(t *testing.T, d *harness.Daemon, ws *workspacev1.WorkspaceRef) {
 }
 
 // repoRowIDs lists the workspace ids under the repository grouping, in order.
-func repoRowIDs(r *frontendv1.WorkspaceRoster) []string {
+func repoRowIDs(r *frontendv1.RosterPush) []string {
 	var out []string
-	for _, s := range r.GetRepository().GetSections() {
+	for _, s := range r.GetWorkspaces().GetRepository().GetSections() {
 		for _, open := range rosterwalk.UnsectionedRows(s) {
 			out = append(out, open.GetRow().GetWorkspace().GetWorkspace().GetId())
 		}

@@ -116,7 +116,7 @@ func TestRegisterRepositoryPutsTheMainWorktreeRowOnTheRoster(t *testing.T) {
 
 	// Assert
 	got := awaitRoster(t, d, roster, "a roster carrying the newly registered repository's workspace row",
-		func(r *frontendv1.WorkspaceRoster) bool {
+		func(r *frontendv1.RosterPush) bool {
 			return len(rosterwalk.UnsectionedRows(repoSectionByID(r, id))) == 1
 		})
 	section := repoSectionByID(got, id)
@@ -220,8 +220,8 @@ func TestRegisterRepositoryRefusesABlankPathAsAValidationFailure(t *testing.T) {
 }
 
 // repoSectionByID answers the repository grouping's section for one repository.
-func repoSectionByID(r *frontendv1.WorkspaceRoster, id string) *frontendv1.RosterRepoSection {
-	for _, section := range r.GetRepository().GetSections() {
+func repoSectionByID(r *frontendv1.RosterPush, id string) *frontendv1.RosterRepoSection {
+	for _, section := range r.GetWorkspaces().GetRepository().GetSections() {
 		if section.GetKey().GetRepository().GetId() == id {
 			return section
 		}

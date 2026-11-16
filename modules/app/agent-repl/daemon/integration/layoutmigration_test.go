@@ -34,7 +34,7 @@ func TestBootServesAWorkspaceRegisteredUnderTheOlderLayout(t *testing.T) {
 
 	// Assert: the workspace registered under layout 3 is served.
 	roster := d2.WatchRoster()
-	awaitRoster(t, d2, roster, "the roster after a migrated boot", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d2, roster, "the roster after a migrated boot", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, id) != nil
 	})
 }

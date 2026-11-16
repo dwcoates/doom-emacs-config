@@ -73,7 +73,7 @@ func TestRegisterWorkspaceAfterARestartIsIdempotent(t *testing.T) {
 
 	// Assert: no second roster row for it.
 	roster := d2.WatchRoster()
-	got := awaitRoster(t, d2, roster, "the roster after a post-restart re-registration", func(r *frontendv1.WorkspaceRoster) bool {
+	got := awaitRoster(t, d2, roster, "the roster after a post-restart re-registration", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, firstID) != nil
 	})
 	count := 0
@@ -116,8 +116,8 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	// is the re-selection's alone.
 	f.selectWorkspace()
 	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the latest roster", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
+	awaitRoster(t, f.d, roster, "the latest roster", func(r *frontendv1.RosterPush) bool {
+		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == f.ws.GetId()
 	})
 
 	// Act
@@ -146,9 +146,9 @@ func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 	fb := opened(harness.NewRepo(t))
 	roster := d.WatchRoster()
 	fa.selectWorkspace()
-	awaitRoster(t, d, roster, "both ready with A current", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "both ready with A current", func(r *frontendv1.RosterPush) bool {
 		rowA, rowB := rosterRow(r, fa.ws.GetId()), rosterRow(r, fb.ws.GetId())
-		return r.GetCurrent().GetWorkspace().GetId() == fa.ws.GetId() &&
+		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == fa.ws.GetId() &&
 			rowA != nil && rowA.GetReady() != nil && rowB != nil && rowB.GetReady() != nil
 	})
 
@@ -159,8 +159,8 @@ func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 	ctx, cancel := d.WaitCtx()
 	defer cancel()
 	got := harness.AwaitNext(t, ctx, roster, "the switch's push")
-	if got.GetCurrent().GetWorkspace().GetId() != fb.ws.GetId() {
-		t.Fatalf("the switch's push names current %v, want B %s", got.GetCurrent(), fb.ws.GetId())
+	if got.GetWorkspaces().GetCurrent().GetWorkspace().GetId() != fb.ws.GetId() {
+		t.Fatalf("the switch's push names current %v, want B %s", got.GetWorkspaces().GetCurrent(), fb.ws.GetId())
 	}
 	harness.ExpectNoPush(t, roster, "a switch is exactly one roster push")
 }
@@ -270,7 +270,7 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 	fa.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-attn-a", "act-attn-a")},
 	}))
-	awaitRoster(t, d, roster, "workspace A's attention marker set", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "workspace A's attention marker set", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, a.GetId())
 		return row != nil && row.GetAttention() != nil
 	})
@@ -281,8 +281,8 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 	}
 
 	// Assert: B is now current, and A's marker is UNTOUCHED.
-	got := awaitRoster(t, d, roster, "B stamped current", func(r *frontendv1.WorkspaceRoster) bool {
-		return r.GetCurrent().GetWorkspace().GetId() == b.GetId()
+	got := awaitRoster(t, d, roster, "B stamped current", func(r *frontendv1.RosterPush) bool {
+		return r.GetWorkspaces().GetCurrent().GetWorkspace().GetId() == b.GetId()
 	})
 	rowA := rosterRow(got, a.GetId())
 	if rowA == nil {
@@ -310,7 +310,7 @@ func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
 	}
 	roster := f.d.WatchRoster()
-	awaitRoster(t, f.d, roster, "the closed row", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the closed row", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetClosed().GetClosed()
 	})
@@ -322,7 +322,7 @@ func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 	if again.GetId() != f.ws.GetId() {
 		t.Fatalf("re-registering %s minted %q, want the same workspace %q", f.repo.Dir, again.GetId(), f.ws.GetId())
 	}
-	awaitRoster(t, f.d, roster, "the re-registered row drawn open", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the re-registered row drawn open", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && !row.GetClosed().GetClosed()
 	})

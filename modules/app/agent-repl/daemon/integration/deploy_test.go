@@ -289,7 +289,7 @@ func TestADeployHandoverDrawsAMidWorkHoldoutsRowFromTheIncumbent(t *testing.T) {
 	roster := d.WatchRosterOn(successor)
 
 	// Assert: the successor's row is the incumbent's thinking, not its own.
-	harness.AwaitView(t, d.Ctx(), roster, "the holdout's row thinking on the successor", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, d.Ctx(), roster, "the holdout's row thinking on the successor", func(r *frontendv1.RosterPush) bool {
 		_, thinking := rosterRow(r, f.ws.GetId()).GetStatus().(*frontendv1.RosterRow_Thinking)
 		return thinking
 	})
