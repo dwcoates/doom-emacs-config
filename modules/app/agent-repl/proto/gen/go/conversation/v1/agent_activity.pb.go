@@ -61,6 +61,12 @@ const (
 	// the success arm had no place to carry that act, so a row stamped 1 and
 	// not 2 lacks it as expected old data.
 	AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH AgentActivityContract = 2
+	// A monitor's failure restates the call it was armed with
+	// (AgentMonitorFailure.call) from EVERY producer. Below revision 3 the
+	// transcript plane wrote the failure bare and upserted it over the stream
+	// plane's restating one, so a row stamped 2 and not 3 lacks it as expected
+	// old data.
+	AgentActivityContract_AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL AgentActivityContract = 3
 )
 
 // Enum value maps for AgentActivityContract.
@@ -69,11 +75,13 @@ var (
 		0: "AGENT_ACTIVITY_CONTRACT_UNSPECIFIED",
 		1: "AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE",
 		2: "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+		3: "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
 	}
 	AgentActivityContract_value = map[string]int32{
 		"AGENT_ACTIVITY_CONTRACT_UNSPECIFIED":                             0,
 		"AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE":                     1,
 		"AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH": 2,
+		"AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL":       3,
 	}
 )
 
@@ -22340,11 +22348,12 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\acontent\x18\x03 \x01(\tH\x01R\acontent\x88\x01\x01B\a\n" +
 	"\x05_pathB\n" +
 	"\n" +
-	"\b_content*\xb6\x01\n" +
+	"\b_content*\xf5\x01\n" +
 	"\x15AgentActivityContract\x12'\n" +
 	"#AGENT_ACTIVITY_CONTRACT_UNSPECIFIED\x10\x00\x12/\n" +
 	"+AGENT_ACTIVITY_CONTRACT_SETTLES_STAND_ALONE\x10\x01\x12C\n" +
-	"?AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH\x10\x02*X\n" +
+	"?AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH\x10\x02\x12=\n" +
+	"9AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL\x10\x03*X\n" +
 	"\x10AgentBashTailCap\x12#\n" +
 	"\x1fAGENT_BASH_TAIL_CAP_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x19AGENT_BASH_TAIL_CAP_BYTES\x10\x80\x80\x01*\xa4\t\n" +

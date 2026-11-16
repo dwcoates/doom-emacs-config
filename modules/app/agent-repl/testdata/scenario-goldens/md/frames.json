@@ -178,7 +178,7 @@
             "thinking": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -224,7 +224,7 @@
               },
               "outputTokens": "36"
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH",
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL",
             "model": {
               "name": "fake-opus-4-8"
             }
@@ -258,7 +258,7 @@
             "response": {
               "start": {}
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -291,7 +291,7 @@
                 "newMarkdown": "# Markdown showcase\n\nRendered by the webapp's **markdown engine** — *streamed* over the wire like any other turn.\n\n## What works\n\n- **Bold**, *italic*, and `inline code`\n- [Links](https://example.com) with safe schemes only\n- Ordered lists too:\n\n1. first\n2. second\n\n> Blockquotes for the philosophical bits.\n\n```go\nfunc main() { fmt.Println(\"fenced code, escaped & highlighted-ish\") }\n```\n\n---\n\n## A numbered tree\n\n1 🌳 A bare Unicode tree, the shape the metaprompt answers in.\n"
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -324,7 +324,7 @@
                 "newMarkdown": "├── 1.1 This branch is deliberately longer than the bubble's live width, so the webapp wraps it before it is drawn, and every continuation line must still carry the rails of the branches around it.\n│   └── 1.1.1 A child beneath the wrapped branch, so the rail through the wrap is load-bearing.\n└── 1.2 The last branch, whose continuation carries no rail because nothing follows it, once it too runs past the bubble's width and wraps onto a second line.\n\nThat is the whole demo."
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {
@@ -366,7 +366,7 @@
                 }
               }
             },
-            "contract": "AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH"
+            "contract": "AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL"
           }
         },
         "agentId": {

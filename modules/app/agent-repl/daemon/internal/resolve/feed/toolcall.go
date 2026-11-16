@@ -258,6 +258,14 @@ func artifactPublishedStandsAlone(act *conversationv1.AgentActivity) bool {
 	return act.GetContract() >= conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH
 }
 
+// monitorFailureStandsAlone reports whether act's producer restates the call
+// on a monitor's failure: contract revision 3 and later. Below it the
+// transcript plane wrote the failure bare over the stream plane's restating
+// one.
+func monitorFailureStandsAlone(act *conversationv1.AgentActivity) bool {
+	return act.GetContract() >= conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL
+}
+
 // unrestatedUnder is unrestated graded by bound: whether the producer's
 // stamped revision obliges it to restate `field` (ERROR) or predates that
 // obligation (INFO, expected old data).
@@ -283,8 +291,15 @@ func (r *resolver) unrestatedUnder(s *wsState, act *conversationv1.AgentActivity
 // unrestatedErr answers the error a bare settle with no held start draws, by
 // its producer's contract: a defect or expected old data.
 func unrestatedErr(act *conversationv1.AgentActivity, kind string) error {
+	return unrestatedErrUnder(act, kind, standsAlone(act))
+}
+
+// unrestatedErrUnder is unrestatedErr graded by bound: whether the producer's
+// stamped revision obliges it to restate the call (a defect) or predates that
+// obligation (expected old data).
+func unrestatedErrUnder(act *conversationv1.AgentActivity, kind string, bound bool) error {
 	base := errSettlePredatesContract
-	if standsAlone(act) {
+	if bound {
 		base = errSettleNotRestated
 	}
 	return fmt.Errorf("%w (unit %s, kind %s)", base, act.GetActivityId().GetValue(), kind)
@@ -304,13 +319,19 @@ func unrestatedErr(act *conversationv1.AgentActivity, kind string) error {
 // from what the start said; when it did not the frame draws no row at all,
 // answered as errSettleNotRestated or errSettlePredatesContract.
 func (r *resolver) restatedOrHeld(s *wsState, act *conversationv1.AgentActivity, u *unitState, kind, restated, held string) (string, error) {
+	return r.restatedOrHeldUnder(s, act, u, kind, restated, held, standsAlone(act))
+}
+
+// restatedOrHeldUnder is restatedOrHeld graded by bound, for an arm whose
+// obligation to restate came at a later revision than SETTLES_STAND_ALONE.
+func (r *resolver) restatedOrHeldUnder(s *wsState, act *conversationv1.AgentActivity, u *unitState, kind, restated, held string, bound bool) (string, error) {
 	if restated != "" {
 		return restated, nil
 	}
 	if !u.startHeld {
-		return "", unrestatedErr(act, kind)
+		return "", unrestatedErrUnder(act, kind, bound)
 	}
-	r.unrestated(s, act, kind, "input", "the start this process held")
+	r.unrestatedUnder(s, act, kind, "input", "the start this process held", bound)
 	return held, nil
 }
 

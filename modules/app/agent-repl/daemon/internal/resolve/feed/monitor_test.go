@@ -320,6 +320,78 @@ func TestAFailedMonitorsCardIsSettledFailed(t *testing.T) {
 	}
 }
 
+// monitorFailedBare is a monitor's failure that restates no call, stamped
+// CONTRACT.
+func monitorFailedBare(unit string, contract conversationv1.AgentActivityContract) *conversationv1.AgentActivity {
+	act := monitorFrame(unit, &conversationv1.AgentMonitor{Result: &conversationv1.AgentMonitor_Failure{
+		Failure: &conversationv1.AgentMonitorFailure{Failure: &conversationv1.AgentToolFailure{}},
+	}})
+	act.Contract = contract
+	return act
+}
+
+func TestAFailedMonitorThatRestatesNothingAndHeldNoStartIsGradedByRevisionThree(t *testing.T) {
+	tests := []struct {
+		name      string
+		contract  conversationv1.AgentActivityContract
+		wantLevel string
+		wantOp    string
+	}{
+		{name: "a revision-3 producer has broken its contract", contract: conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL, wantLevel: "error", wantOp: "daemon.feed.activity_undrawable"},
+		{name: "a revision-2 row is expected old data", contract: conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH, wantLevel: "info", wantOp: "daemon.feed.settle_predates_contract"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act: the failure replayed alone.
+			h.send(monitorFailedBare("toolu_monitor", tt.contract))
+
+			// Assert: no row, recorded at the revision's level.
+			if rows := h.rows(rootFeed()); len(rows) != 0 {
+				t.Fatalf("rows = %d, want none for a settle that restated nothing", len(rows))
+			}
+			if !h.hasRecord(tt.wantLevel, tt.wantOp) {
+				t.Fatalf("records = %+v, want %s %s", h.records(), tt.wantLevel, tt.wantOp)
+			}
+			if tt.wantLevel == "info" && len(h.anyErrors()) != 0 {
+				t.Fatalf("records = %+v, want no ERROR for expected old data", h.records())
+			}
+		})
+	}
+}
+
+func TestAFailedMonitorThatRestatesNothingIsDrawnFromTheHeldStartGradedByRevisionThree(t *testing.T) {
+	tests := []struct {
+		name      string
+		contract  conversationv1.AgentActivityContract
+		wantLevel string
+		wantOp    string
+	}{
+		{name: "a revision-3 producer has broken its contract", contract: conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL, wantLevel: "error", wantOp: "daemon.feed.settle_not_restated"},
+		{name: "a revision-2 row is expected old data", contract: conversationv1.AgentActivityContract_AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH, wantLevel: "info", wantOp: "daemon.feed.settle_predates_contract"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.send(monitorArmed("toolu_monitor", watchedCommand("tail -f build.log")))
+
+			// Act.
+			h.send(monitorFailedBare("toolu_monitor", tt.contract))
+
+			// Assert: drawn from the held start, recorded at the revision's level.
+			if got := h.monitorCard().GetInput().GetText(); got != "tail -f build.log" {
+				t.Fatalf("input = %q, want the held start's command", got)
+			}
+			if !h.hasRecord(tt.wantLevel, tt.wantOp) {
+				t.Fatalf("records = %+v, want %s %s", h.records(), tt.wantLevel, tt.wantOp)
+			}
+		})
+	}
+}
+
 func TestAMonitorThatLeftTheLiveSetHasItsRunningCardSettled(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

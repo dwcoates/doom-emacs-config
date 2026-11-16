@@ -237,6 +237,12 @@ enum AgentActivityContract {
   // the success arm had no place to carry that act, so a row stamped 1 and
   // not 2 lacks it as expected old data.
   AGENT_ACTIVITY_CONTRACT_ARTIFACT_PUBLISHED_RESTATES_ITS_PUBLISH = 2;
+  // A monitor's failure restates the call it was armed with
+  // (AgentMonitorFailure.call) from EVERY producer. Below revision 3 the
+  // transcript plane wrote the failure bare and upserted it over the stream
+  // plane's restating one, so a row stamped 2 and not 3 lacks it as expected
+  // old data.
+  AGENT_ACTIVITY_CONTRACT_MONITOR_FAILURE_RESTATES_ITS_CALL = 3;
 }
 
 // What a unit of work is attributable to beyond its agent.

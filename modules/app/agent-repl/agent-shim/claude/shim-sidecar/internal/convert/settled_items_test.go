@@ -226,6 +226,37 @@ func TestEverySettleInstantRestatesTheCallsStart(t *testing.T) {
 	}
 }
 
+func TestAFailedMonitorRestatesItsCall(t *testing.T) {
+	tests := []struct {
+		name  string
+		input map[string]any
+	}{
+		{name: "a watched command", input: map[string]any{"description": "wait for DONE", "command": "tail -f out.log"}},
+		{name: "a persistent watch", input: map[string]any{"description": "watch", "command": "c", "persistent": true}},
+		{name: "a call that named nothing it watches", input: map[string]any{"query": "select:Monitor"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a call announced at 1000 that the vendor refused.
+			c := newTestConverter(t)
+			call := openCall{input: tt.input, startedAt: 1000, activityID: "toolu_m"}
+			block := map[string]any{"content": "InputValidationError"}
+
+			// Act
+			got := c.settledItem(kindMonitor, call, nil, block, true, 4000, Attribution{})
+
+			// Assert
+			restated := got.GetMonitor().GetFailure().GetCall()
+			if restated == nil {
+				t.Fatal("the failed monitor restated no call")
+			}
+			if want := monitorStart(tt.input, 1000); !proto.Equal(restated, want) {
+				t.Fatalf("restated call = %v, want the start's own reading %v", restated, want)
+			}
+		})
+	}
+}
+
 func TestAFailedArtifactCallRestatesItsAct(t *testing.T) {
 	tests := []struct {
 		name     string
