@@ -408,6 +408,30 @@ func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationF
 	return f.checks.BeginRemediationFinish(ctx, rf)
 }
 
+func (f *fakeDB) DeployProblems(ctx context.Context, repo wsm.RepoKey) ([]wsm.DeployProblem, error) {
+	return f.checks.DeployProblems(ctx, repo)
+}
+
+func (f *fakeDB) OwnDeployProblems(ctx context.Context, repo wsm.RepoKey, keys []wsm.ProblemKey, owner ids.WorkspaceID, findings string, at time.Time) error {
+	return f.checks.OwnDeployProblems(ctx, repo, keys, owner, findings, at)
+}
+
+func (f *fakeDB) FixDeployProblemsOf(ctx context.Context, owner ids.WorkspaceID, at time.Time) (int, error) {
+	return f.checks.FixDeployProblemsOf(ctx, owner, at)
+}
+
+func (f *fakeDB) CheckedThrough(ctx context.Context, repo wsm.RepoKey) (time.Time, bool, error) {
+	return f.checks.CheckedThrough(ctx, repo)
+}
+
+func (f *fakeDB) RecordMediationWindow(ctx context.Context, repo wsm.RepoKey, owed time.Time, w wsm.CheckWindow) (bool, error) {
+	return f.checks.RecordMediationWindow(ctx, repo, owed, w)
+}
+
+func (f *fakeDB) MediationWindowOf(ctx context.Context, repo wsm.RepoKey) (wsm.CheckWindow, bool, error) {
+	return f.checks.MediationWindowOf(ctx, repo)
+}
+
 func (f *fakeDB) PassRemediationGate(ctx context.Context, ws ids.WorkspaceID, head string, at time.Time) (bool, error) {
 	return f.checks.PassRemediationGate(ctx, ws, head, at)
 }

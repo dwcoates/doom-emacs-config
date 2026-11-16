@@ -231,8 +231,8 @@ func TestARemediationPastItsFixingBoundIsEscalatedForTheIntake(t *testing.T) {
 	if owedCheck(t, h) != nil || !h.bannerRaised(desktopnotify.KindDeployMediated) {
 		t.Fatalf("check %+v, banner %v; want the chain escalated and the queue let through", owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated))
 	}
-	if !slices.Equal(h.checks.closed, []ids.WorkspaceID{"ws-intake"}) || !slices.Contains(h.meter.all(), "remediation_gates:"+RemediationGateGivenUp+":4") {
-		t.Fatalf("closed %v, recorded %v; want the intake closed and the rounds given up", h.checks.closed, h.meter.all())
+	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !slices.Contains(h.meter.all(), "remediation_gates:"+RemediationGateGivenUp+":4") {
+		t.Fatalf("stopped %v, recorded %v; want the intake stopped and the rounds given up", h.checks.stopped, h.meter.all())
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
 		Message: "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue advances"}); !ok {

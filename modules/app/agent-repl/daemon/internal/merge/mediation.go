@@ -2,8 +2,10 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -53,6 +55,9 @@ const (
 	// ArmRemediationBoundReached refuses a dispatch once the chain deployed
 	// as many remediations in a row as its repository allows.
 	ArmRemediationBoundReached = "remediation_bound_reached"
+	// ArmProblemsUnowned refuses an approval while the check's window holds a
+	// group no one owns: NEW, SEEN BEFORE, or RECURRED after its fix.
+	ArmProblemsUnowned = "problems_unowned"
 )
 
 // MediationDecision is what an intake decided of a deploy.
@@ -469,7 +474,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		return
 	}
 	fields["intake"] = string(ws)
-	brief, err := o.intakeBrief(ctx, q, m)
+	brief, window, err := o.intakeBrief(ctx, q, m)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the intake's brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
 		return
@@ -479,7 +484,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		// branch: a shadowed err dropped a failed await, and the round then
 		// settled the check as decided nothing, letting the queue through.
 		var turn ids.TurnID
-		turn, err = o.tellIntake(ctx, q, ws, m, brief, fields)
+		turn, err = o.tellIntake(ctx, q, ws, m, brief, window, fields)
 		if err != nil || turn == "" {
 			return
 		}
@@ -538,7 +543,7 @@ func (o *orchestrator) intakeOf(ctx context.Context, q checkedQueue, m wsm.Media
 // tellIntake tells the chain's intake WS of M in BRIEF, answering the brief's
 // turn: empty when the check was replaced or released meanwhile. The intake's
 // context is never compacted: every deploy of its chain stays in it.
-func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, brief string, fields dlog.Context) (ids.TurnID, error) {
+func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, brief string, window wsm.CheckWindow, fields dlog.Context) (ids.TurnID, error) {
 	turn := wsm.NewTurnID()
 	told := o.deps.Now()
 	marked, err := o.deps.DB.MarkMediationPrompted(ctx, q.key, m.OwedAt, told, turn)
@@ -548,6 +553,19 @@ func (o *orchestrator) tellIntake(ctx context.Context, q checkedQueue, ws ids.Wo
 	}
 	if !marked {
 		o.deps.Log.Global().Info(opMediation, "the check was replaced or released before its intake was told; this round ends", fields)
+		return "", nil
+	}
+	// THE WINDOW IS RECORDED WITH THE TELLING: the next check reads from its
+	// end, and the decision is judged against its groups. A crash between the
+	// two writes leaves the next window starting earlier, reading some records
+	// twice, never fewer.
+	recorded, err := o.deps.DB.RecordMediationWindow(ctx, q.key, m.OwedAt, window)
+	if err != nil {
+		o.mediationFailed(ctx, fields, "could not record the window the intake is told; the queue stays held", err)
+		return "", err
+	}
+	if !recorded {
+		o.deps.Log.Global().Info(opMediation, "the check was replaced or released before its window was recorded; this round ends", fields)
 		return "", nil
 	}
 	o.deps.Meter.ObserveMediationSpan(MediationSpanRollout, MediationTold, told.Sub(m.OwedAt))
@@ -591,6 +609,12 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with a fix dispatched; the queue stays held for the remediation", withField(fields, "remediation", string(m.Remediation)))
 		return
 	}
+	// THE WINDOW IS READ BEFORE THE RELEASE, which clears it.
+	window, err := o.toldWindow(ctx, q.key, fields)
+	if err != nil {
+		o.mediationFailed(ctx, fields, "could not read the window of a check its turn ended on; the queue stays held", err)
+		return
+	}
 	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, owed)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "could not settle a check its turn ended on; the queue stays held", err)
@@ -602,8 +626,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 	}
 	o.endChain(ctx, q.key, *m, MediationUndecided)
 	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing about the deploy; the queue is let through and the user is told", fields)
-	// The failure is recorded by the escalation itself.
-	_, _ = o.escalate(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy; the queue moved on", nil, fields)
+	o.escalateOwning(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy; the queue moved on", nil, window, fields)
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
 }
@@ -650,6 +673,20 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if d.Kind == MediationDispatch {
 		return o.dispatch(ctx, q, m, ws, d, fields)
 	}
+	window, err := o.toldWindow(ctx, q.key, fields)
+	if err != nil {
+		return err
+	}
+	// AN APPROVAL LEAVES NO PROBLEM WITHOUT AN OWNER (owner ruling,
+	// 2026-11-16): a warning or error nobody owns, old or new, is dispatched
+	// or escalated, never approved past, or it recurs with no one to end it.
+	if unowned := unownedGroups(window); d.Kind == MediationApprove && len(unowned) > 0 {
+		refusal := &RefusalError{Arm: ArmProblemsUnowned, Workspace: ws,
+			Reason: fmt.Sprintf("the window holds %d groups no one owns; dispatch or escalate them", len(unowned)),
+			Fields: map[string]any{"groups": unowned}}
+		logRefusal(o.deps.Log.Global(), opMediation, "refused an approval while the check's window holds groups no one owns", withField(fields, "unowned", unowned), refusal)
+		return refusal
+	}
 	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not release the check the decision named", withField(fields, "error", err.Error()))
@@ -666,8 +703,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	}
 	o.deps.Log.Global().Info(opMediation, "the intake decided the deploy; the queue advances", withField(fields, "released", released))
 	if d.Kind == MediationEscalate {
-		// The failure is recorded by the escalation itself.
-		_, _ = o.escalate(ctx, q, m, d.Summary, d.Problems, fields)
+		o.escalateOwning(ctx, q, m, d.Summary, d.Problems, window, fields)
 	}
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
@@ -759,4 +795,113 @@ func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not republish the queue whose check changed", dlog.Context{"repo": string(repo), "error": err.Error()})
 	}
+}
+
+// toldWindow is the window the intake of REPO's owed check was told, empty
+// for one a previous build told, which recorded none.
+func (o *orchestrator) toldWindow(ctx context.Context, repo wsm.RepoKey, fields dlog.Context) (wsm.CheckWindow, error) {
+	window, found, err := o.deps.DB.MediationWindowOf(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read the window the intake was told", withField(fields, "error", err.Error()))
+		return wsm.CheckWindow{}, err
+	}
+	if !found {
+		o.deps.Log.Global().Info(opMediation, "the check was told by a previous build, which recorded no window; its decision is judged against none", fields)
+	}
+	return window, nil
+}
+
+// unownedGroups names every group of WINDOW no one owns, as
+// "OPERATION: MESSAGE (CLASS)", in its order.
+func unownedGroups(window wsm.CheckWindow) []string {
+	var out []string
+	for _, g := range window.Groups {
+		if g.Class != wsm.WindowOwned {
+			out = append(out, fmt.Sprintf("%s: %s (%s)", g.Operation, g.Message, g.Class))
+		}
+	}
+	return out
+}
+
+// escalatedKeys is every group of WINDOW an escalation takes over: each no
+// one owns.
+func escalatedKeys(window wsm.CheckWindow) []wsm.ProblemKey {
+	var out []wsm.ProblemKey
+	for _, g := range window.Groups {
+		if g.Class != wsm.WindowOwned {
+			out = append(out, wsm.ProblemKey{Operation: g.Operation, Message: g.Message})
+		}
+	}
+	return out
+}
+
+// problemKeys is the group each of PROBLEMS quotes a record of: a record's
+// operation and message, read from its JSON line. Evidence that is no log
+// record (a test reuse line) names no group.
+func problemKeys(problems []DeployProblem) []wsm.ProblemKey {
+	seen := map[wsm.ProblemKey]bool{}
+	var out []wsm.ProblemKey
+	for _, p := range problems {
+		for _, line := range p.Evidence {
+			var rec struct {
+				Operation string `json:"operation"`
+				Message   string `json:"message"`
+			}
+			if json.Unmarshal([]byte(strings.TrimSpace(line)), &rec) != nil || rec.Operation == "" {
+				continue
+			}
+			k := wsm.ProblemKey{Operation: rec.Operation, Message: rec.Message}
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	return out
+}
+
+// ownProblems makes OWNER the owner of every group PROBLEMS quote and every
+// group in ALSO, in REPO, with the problems' statements as its findings. A
+// write that fails is recorded at ERROR: the decision stands, and the groups
+// come back unowned to the next check.
+func (o *orchestrator) ownProblems(ctx context.Context, repo wsm.RepoKey, owner ids.WorkspaceID, problems []DeployProblem, also []wsm.ProblemKey, fields dlog.Context) {
+	keys := problemKeys(problems)
+	seen := map[wsm.ProblemKey]bool{}
+	for _, k := range keys {
+		seen[k] = true
+	}
+	for _, k := range also {
+		if !seen[k] {
+			seen[k] = true
+			keys = append(keys, k)
+		}
+	}
+	if len(keys) == 0 {
+		return
+	}
+	statements := make([]string, 0, len(problems))
+	for _, p := range problems {
+		statements = append(statements, p.Statement)
+	}
+	findings := strings.Join(statements, " / ")
+	if findings == "" {
+		findings = "taken over unowned by the escalation"
+	}
+	if err := o.deps.DB.OwnDeployProblems(ctx, repo, keys, owner, findings, o.deps.Now()); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the decided problems could not be recorded as owned; the next check finds them unowned", withField(withField(fields, "owner", string(owner)), "error", err.Error()))
+		return
+	}
+	o.deps.Log.Global().Info(opMediation, "recorded the decided problems as owned", withField(withField(fields, "owner", string(owner)), "problems", len(keys)))
+}
+
+// escalateOwning puts check M before the user in a new escalation workspace
+// (escalate), which then owns every group PROBLEMS quote and every group of
+// WINDOW no one owned. An escalation that cannot be made records its own
+// failure, and its groups stay unowned for the next check.
+func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) {
+	made, err := o.escalate(ctx, q, m, summary, problems, window, fields)
+	if err != nil {
+		return
+	}
+	o.ownProblems(ctx, q.key, made, problems, escalatedKeys(window), fields)
 }

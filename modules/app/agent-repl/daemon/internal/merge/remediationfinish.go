@@ -366,6 +366,11 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Info(opRemediationFinish, "the chain the remediation worked for ended already; nothing is escalated", fields)
 		return nil
 	}
+	// THE WINDOW IS READ BEFORE THE RELEASE, which clears it.
+	window, err := o.toldWindow(ctx, repo, fields)
+	if err != nil {
+		return err
+	}
 	released, err := o.deps.DB.ReleaseMediation(ctx, repo, m.OwedAt)
 	if err != nil {
 		return err
@@ -382,8 +387,7 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
 		return nil
 	}
-	// The failure is recorded by the escalation itself.
-	_, _ = o.escalate(ctx, q, *m, summary, nil, fields)
+	o.escalateOwning(ctx, q, *m, summary, nil, window, fields)
 	o.republishMediation(ctx, repo)
 	o.kick(repo)
 	return nil
@@ -504,6 +508,11 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 			continue
 		}
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy began; it owes the chain's next check", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
+		// ITS PROBLEMS ARE FIXED, NOT CLOSED: a later window that logs one
+		// again finds it RECURRED, with this owner's findings beside it.
+		if _, err := o.deps.DB.FixDeployProblemsOf(ctx, f.Workspace, at); err != nil {
+			errs = append(errs, err)
+		}
 		// AN ESCALATION'S FINISH IS DONE AT ITS DEPLOY: no chain's end
 		// forgets it (wsm.EndRemediationFinishesOf), so its deploy does.
 		if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, f.Workspace); err != nil {
