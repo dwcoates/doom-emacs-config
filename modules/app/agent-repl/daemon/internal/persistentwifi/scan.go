@@ -67,9 +67,26 @@ func (s wifiScan) sees(name string) bool {
 }
 
 // errScanUnauthorized is a scan whose helper is not allowed Location
-// Services, so it names no network: only the owner can allow it, in System
-// Settings, Privacy & Security, Location Services.
-var errScanUnauthorized = errors.New("agent-repl's Wi-Fi helper is not allowed Location Services, so no network can be named; allow it in System Settings > Privacy & Security > Location Services")
+// Services, so it names no network: only the owner can allow it.
+var errScanUnauthorized = errors.New("agent-repl's Wi-Fi helper is not allowed Location Services, so no network can be named")
+
+// unauthorizedRemedy is what the owner does to allow the helper Location
+// Services from STANDING. The remedy turns on the standing (2026-11-16): a
+// helper macOS never asked about is not listed in System Settings, so only
+// the helper's own prompt can allow it, while one the owner denied is
+// allowed only in System Settings.
+func unauthorizedRemedy(standing string) string {
+	if standing == standingNotDetermined {
+		return "macOS never asked about it, so it is not yet listed in System Settings; allow it in the Location Services prompt agent-repl asks macOS to show, or run `bin/requirements.sh install` to ask again"
+	}
+	return "allow it in System Settings > Privacy & Security > Location Services"
+}
+
+// unauthorizedScan is errScanUnauthorized for a scan whose helper's standing
+// is STANDING, naming the standing and its remedy.
+func unauthorizedScan(standing string) error {
+	return fmt.Errorf("%w; %s (its standing: %s)", errScanUnauthorized, unauthorizedRemedy(standing), standing)
+}
 
 // helperWait says whether a helper launch waits for the helper to exit.
 type helperWait bool

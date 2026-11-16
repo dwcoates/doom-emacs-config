@@ -19,9 +19,12 @@ func TestScanWifi(t *testing.T) {
 		{name: "an authorized scan names what it saw, joined and in sight",
 			answer:    writing(`{"authorization":"authorized","current":"Home","visible":[{"ssid":"Home","rssi":-40},{"ssid":"Cafe","rssi":-70}]}`),
 			wantNames: []string{"Home", "Cafe"}},
-		{name: "a helper not allowed Location Services names nothing",
+		{name: "a helper denied Location Services names nothing and points at System Settings",
 			answer:  writing(`{"authorization":"denied","visible":[]}`),
-			wantErr: "is not allowed Location Services"},
+			wantErr: "allow it in System Settings > Privacy & Security > Location Services (its standing: denied)"},
+		{name: "a helper macOS never asked about names nothing and points at the prompt",
+			answer:  writing(`{"authorization":"not_determined","visible":[]}`),
+			wantErr: "run `bin/requirements.sh install` to ask again (its standing: not_determined)"},
 		{name: "a scan the helper could not make says why",
 			answer:  writing(`{"authorization":"authorized","error":"the scan failed: busy","visible":[]}`),
 			wantErr: "the Wi-Fi helper's the scan failed: busy"},
@@ -37,8 +40,8 @@ func TestScanWifi(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newHarness(t)
+			// Arrange: a not_determined standing also launches the ask.
+			h := newHarness(t).launchesAuthorize()
 			h.r.onPrefix(argScan, tc.answer)
 
 			// Act
@@ -60,6 +63,34 @@ func TestScanWifi(t *testing.T) {
 			}
 			if strings.Join(names, ",") != strings.Join(tc.wantNames, ",") || scan.Current != "Home" {
 				t.Fatalf("scan = %+v, want %v in sight and Home joined", scan, tc.wantNames)
+			}
+		})
+	}
+}
+
+func TestUnauthorizedScan(t *testing.T) {
+	const systemSettings = "allow it in System Settings > Privacy & Security > Location Services"
+	cases := []struct {
+		standing   string
+		wantRemedy string
+	}{
+		{standing: "not_determined", wantRemedy: "macOS never asked about it, so it is not yet listed in System Settings; allow it in the Location Services prompt agent-repl asks macOS to show, or run `bin/requirements.sh install` to ask again"},
+		{standing: "denied", wantRemedy: systemSettings},
+		{standing: "restricted", wantRemedy: systemSettings},
+		{standing: "unknown", wantRemedy: systemSettings},
+	}
+	for _, tc := range cases {
+		t.Run(tc.standing, func(t *testing.T) {
+			// Act
+			err := unauthorizedScan(tc.standing)
+
+			// Assert
+			if !errors.Is(err, errScanUnauthorized) {
+				t.Fatalf("unauthorizedScan(%q) = %v, want errScanUnauthorized", tc.standing, err)
+			}
+			want := errScanUnauthorized.Error() + "; " + tc.wantRemedy + " (its standing: " + tc.standing + ")"
+			if err.Error() != want {
+				t.Fatalf("unauthorizedScan(%q) = %q, want %q", tc.standing, err.Error(), want)
 			}
 		})
 	}
