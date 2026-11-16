@@ -54,6 +54,14 @@ const workspaceRefFreshness = time.Second
 // full request timeout on every retry rung.
 const readinessTimeout = 250 * time.Millisecond
 
+// locateTimeout bounds the one LocateWorkspace call a directory the roster's
+// streams do not carry is asked of (locateWorkspace). MEASURED 2026-11-16 off
+// the owner's live daemon log (~/.claude-emacs/logs/agent-repl-*-daemon-*.log,
+// `daemon.server.locate_workspace` "completed the rpc handler" records): 8
+// calls against the ~1,150-workspace registry, p50 57ms, p90 100ms, max
+// 156ms. 400ms is ~2.6x that max.
+const locateTimeout = 400 * time.Millisecond
+
 // cachedWorkspaceRef is one directory's daemon-minted ref together with the
 // instant the roster that named it was delivered. The instant is the whole
 // point: a ref carries no expiry of its own, and the roster it came from can
@@ -92,6 +100,9 @@ type Client struct {
 	// daemon-minted id to another. It is the ordinary re-registration, so it is
 	// an INFO the owner can join the two ids on, never a warning.
 	refReplaced func(dir, oldID, newID string)
+	// locateFailed is told every LocateWorkspace call that failed, so the
+	// canonical logger records it before the record falls back unattributed.
+	locateFailed func(dir, address string, err error)
 	// seenServing is the set of addresses this Client has ever seen ACCEPTING —
 	// a successful Ready probe or a successful Forward — keyed by the bare
 	// "host:port" the address names. daemon.addr publishes an address before
@@ -392,7 +403,16 @@ func (c *Client) resolveWorkspace(
 			c.cacheWorkspace(address, wanted, ref)
 			return copyWorkspaceRef(ref), nil
 		}
-		return nil, fmt.Errorf("workspace %q is absent from the delivered roster at %s: %w", wanted, address, logging.ErrForwardWorkspaceUnresolvable)
+		// A MERGED WORKSPACE IS IN NO STREAM, but the registry still holds it,
+		// and its shim's last records are still its own. The registry is
+		// asked once (LocateWorkspace answers merged workspaces); a directory
+		// it does not hold either is the unresolvable one.
+		ref, err = c.locateWorkspace(ctx, client, address, wanted)
+		if err != nil {
+			return nil, err
+		}
+		c.cacheWorkspace(address, wanted, ref)
+		return copyWorkspaceRef(ref), nil
 	}
 	if err := stream.Err(); err != nil {
 		return nil, fmt.Errorf("WatchWorkspaceRoster at %s ended before delivering a roster for workspace %q: %w", address, wanted, err)
@@ -426,6 +446,68 @@ func normalizeWorkspaceDir(dir string) (string, error) {
 		rest = filepath.Join(filepath.Base(head), rest)
 		head = parent
 	}
+}
+
+// locateWorkspace asks the daemon's registry for the workspace at WANTED, a
+// directory the first push's streams do not carry (a merged workspace is in
+// none). It is asked ONCE, never retried, under locateTimeout. A failed call
+// -- the transport, or an answer with no success arm, or more than one
+// workspace at one directory -- is told to the locate-failed observer, the
+// canonical logger's, and then answered as unresolvable, so the record falls
+// back unattributed; a registry that holds no workspace there is unresolvable
+// with nothing to record.
+func (c *Client) locateWorkspace(
+	ctx context.Context,
+	client agentreplv1connect.AgentReplClient,
+	address string,
+	wanted string,
+) (*workspacev1.WorkspaceRef, error) {
+	locateCtx, cancel := context.WithTimeout(ctx, locateTimeout)
+	defer cancel()
+	response, err := client.LocateWorkspace(locateCtx, connect.NewRequest(&agentreplv1.LocateWorkspaceRequest{
+		By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: wanted}},
+	}))
+	var located []*workspacev1.WorkspaceRef
+	switch {
+	case err != nil:
+		err = fmt.Errorf("LocateWorkspace at %s: %w", address, err)
+	case response.Msg.GetSuccess() == nil:
+		err = fmt.Errorf("LocateWorkspace at %s answered no success arm", address)
+	default:
+		located = response.Msg.GetSuccess().GetWorkspaces()
+		if len(located) > 1 {
+			err = fmt.Errorf("LocateWorkspace at %s answered %d workspaces at %q, want at most one", address, len(located), wanted)
+		}
+	}
+	if err != nil {
+		c.notifyLocateFailed(wanted, address, err)
+		return nil, fmt.Errorf("workspace %q is absent from the delivered roster at %s, and the registry could not be asked: %w: %w",
+			wanted, address, err, logging.ErrForwardWorkspaceUnresolvable)
+	}
+	if len(located) == 0 || located[0].GetId() == "" {
+		return nil, fmt.Errorf("workspace %q is in neither the delivered roster nor the registry at %s: %w", wanted, address, logging.ErrForwardWorkspaceUnresolvable)
+	}
+	return located[0], nil
+}
+
+// notifyLocateFailed tells the locate-failed observer of ERR, when one is
+// installed.
+func (c *Client) notifyLocateFailed(dir, address string, err error) {
+	c.mu.Lock()
+	observe := c.locateFailed
+	c.mu.Unlock()
+	if observe != nil {
+		observe(dir, address, err)
+	}
+}
+
+// SetLocateFailedObserver installs the sink told every failed LocateWorkspace
+// call (locateWorkspace). It is installed after construction because the
+// logger that records it is built FROM this Client.
+func (c *Client) SetLocateFailedObserver(observe func(dir, address string, err error)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.locateFailed = observe
 }
 
 // workspaceRefInRoster answers the ref of the row at WANTEDDIR in PUSH, a

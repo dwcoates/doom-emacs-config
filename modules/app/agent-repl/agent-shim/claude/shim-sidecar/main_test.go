@@ -878,3 +878,35 @@ func TestOpenLoggerWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
 		t.Fatalf("warnings = %q, want the warning alone", warnings)
 	}
 }
+
+func TestLocateFailedRecordsAGlobalErrorNamingTheDirAndTheCause(t *testing.T) {
+	// Arrange.
+	base := t.TempDir()
+	logPath := filepath.Join(base, "sidecar.log")
+	logf, closeLog, err := openLoggerTo(&bytes.Buffer{}, filepath.Join(base, "store.sock"), base, logPath)
+	if err != nil {
+		t.Fatalf("openLoggerTo: %v", err)
+	}
+
+	// Act.
+	locateFailedObserver(logf)("/work/merged", "127.0.0.1:7777", errors.New("LocateWorkspace at 127.0.0.1:7777: deadline_exceeded"))
+	closeLog()
+
+	// Assert: an error record with its context, never file-scoped.
+	record := requireOnceIn(t, readDurable(t, sharedlogging.WarningsPath(logPath)), "workspace-locate-failed", "error")
+	for _, want := range []string{"/work/merged", "127.0.0.1:7777", "deadline_exceeded"} {
+		if !strings.Contains(record.Message, want) {
+			t.Fatalf("the locate failure record does not name %q: %q", want, record.Message)
+		}
+	}
+	raw, err := os.ReadFile(sharedlogging.WarningsPath(logPath))
+	if err != nil {
+		t.Fatalf("read the warnings file: %v", err)
+	}
+	if strings.Contains(string(raw), `"workspace_dir"`) {
+		t.Fatalf("the locate failure record is file-scoped and would be forwarded: %s", raw)
+	}
+	if !strings.Contains(string(raw), `"path":"/work/merged"`) || !strings.Contains(string(raw), `"rpc":"LocateWorkspace"`) {
+		t.Fatalf("the locate failure record carries no path or rpc key: %s", raw)
+	}
+}

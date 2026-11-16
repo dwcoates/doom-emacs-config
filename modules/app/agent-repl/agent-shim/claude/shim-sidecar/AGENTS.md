@@ -8,8 +8,21 @@ position riding the same transaction.
 
 It is a COPIER. It has no view of process liveness, no session semantics, and
 owns no database. Its daemon calls are the read-only `WatchWorkspaceRoster`
-lookup needed to obtain a daemon-minted ref and `ClientLog` for file-scoped
+lookup needed to obtain a daemon-minted ref, the read-only `LocateWorkspace`
+lookup for a directory that lookup misses, and `ClientLog` for file-scoped
 diagnostics; the daemon persists those records into workspace `sidecar.log`.
+
+A MERGED WORKSPACE IS ROUTED THROUGH THE REGISTRY (2026-11-16, the roster's
+split into snapshot streams). A merged workspace is in no roster stream, so a
+directory the first push's streams do not carry is asked of
+`LocateWorkspace{At: dir}` ONCE, never retried, under `locateTimeout` (400ms,
+about 2.6x the 156ms max of the daemon's measured handler time), and its record
+goes to the workspace the registry answers. A locate that fails (transport, no
+success arm, more than one workspace at the directory) is recorded at error as
+`workspace-locate-failed` (global, `path` and `rpc` keys) through the canonical
+logger, and only then does the record fall back as `forward_undelivered`; a
+registry that holds no workspace there falls back with nothing recorded
+(`internal/daemonclient/client.go` `locateWorkspace`).
 The only thing it concludes on its own is that it STOPPED SEEING a detached run.
 
 Dual-plane relationship with the shim: `StoreEntry.plane` names the producer.

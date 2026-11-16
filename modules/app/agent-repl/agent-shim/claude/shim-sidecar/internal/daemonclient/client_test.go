@@ -300,6 +300,12 @@ func startFakeDaemon(
 			func(ctx context.Context, _ *connect.Request[agentreplv1.WatchWorkspaceRosterRequest], stream *connect.ServerStream[agentreplv1.WatchWorkspaceRosterResponse]) error {
 				return roster(ctx, stream)
 			}))
+	mux.Handle(agentreplv1connect.AgentReplLocateWorkspaceProcedure,
+		connect.NewUnaryHandler(agentreplv1connect.AgentReplLocateWorkspaceProcedure,
+			func(context.Context, *connect.Request[agentreplv1.LocateWorkspaceRequest]) (*connect.Response[agentreplv1.LocateWorkspaceResponse], error) {
+				return connect.NewResponse(&agentreplv1.LocateWorkspaceResponse{
+					Result: &agentreplv1.LocateWorkspaceResponse_Success{Success: &agentreplv1.LocateWorkspaceSuccess{}}}), nil
+			}))
 	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure,
 			func(_ context.Context, _ *connect.Request[agentreplv1.ClientLogRequest]) (*connect.Response[agentreplv1.ClientLogResponse], error) {
@@ -862,6 +868,18 @@ type rosterDaemon struct {
 	unknown        map[string]struct{}
 	rosterRequests int
 	requests       []*agentreplv1.ClientLogRequest
+	// located is what LocateWorkspace answers for each directory (none for a
+	// directory it does not name); locateErr, when set, fails every call
+	// instead. locates counts the calls.
+	located   map[string]*workspacev1.WorkspaceRef
+	locateErr error
+	locates   int
+}
+
+func (d *rosterDaemon) locateCalls() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.locates
 }
 
 func (d *rosterDaemon) setRoster(refs ...*workspacev1.WorkspaceRef) {
@@ -909,6 +927,22 @@ func startRosterDaemon(t *testing.T, stateDir string) *rosterDaemon {
 				refs := append([]*workspacev1.WorkspaceRef(nil), daemon.refs...)
 				daemon.mu.Unlock()
 				return stream.Send(rosterResponseFor(refs))
+			}))
+	mux.Handle(agentreplv1connect.AgentReplLocateWorkspaceProcedure,
+		connect.NewUnaryHandler(agentreplv1connect.AgentReplLocateWorkspaceProcedure,
+			func(_ context.Context, req *connect.Request[agentreplv1.LocateWorkspaceRequest]) (*connect.Response[agentreplv1.LocateWorkspaceResponse], error) {
+				daemon.mu.Lock()
+				defer daemon.mu.Unlock()
+				daemon.locates++
+				if daemon.locateErr != nil {
+					return nil, daemon.locateErr
+				}
+				success := &agentreplv1.LocateWorkspaceSuccess{}
+				if ref, ok := daemon.located[req.Msg.GetAt().GetDir()]; ok {
+					success.Workspaces = []*workspacev1.WorkspaceRef{ref}
+				}
+				return connect.NewResponse(&agentreplv1.LocateWorkspaceResponse{
+					Result: &agentreplv1.LocateWorkspaceResponse_Success{Success: success}}), nil
 			}))
 	mux.Handle(agentreplv1connect.AgentReplClientLogProcedure,
 		connect.NewUnaryHandler(agentreplv1connect.AgentReplClientLogProcedure,
@@ -1245,6 +1279,79 @@ func TestWorkspaceRefInRosterReadsEveryStreamOfTheFirstPush(t *testing.T) {
 			}
 			if err != nil || got.GetId() != tt.wantID {
 				t.Fatalf("workspaceRefInRoster = %v, %v; want %q", got, err, tt.wantID)
+			}
+		})
+	}
+}
+
+// locateFailure is one call of the locate-failed observer.
+type locateFailure struct {
+	dir, address string
+	err          error
+}
+
+func TestForwardAsksTheRegistryForADirTheStreamsDoNotCarry(t *testing.T) {
+	merged := &workspacev1.WorkspaceRef{Id: "merged-id"}
+	tests := []struct {
+		name string
+		// inStreams draws the record's dir on the roster's streams.
+		inStreams bool
+		// located is what the registry answers for the dir, nil for none.
+		located   *workspacev1.WorkspaceRef
+		locateErr error
+		// wantID is the ref ClientLog is sent, empty when it is never sent.
+		wantID      string
+		wantLocates int
+		wantFailure bool
+	}{
+		{name: "a dir on the streams is forwarded with no locate", inStreams: true, wantID: "open-id", wantLocates: 0},
+		{name: "a merged workspace's dir is forwarded to the workspace the registry locates", located: merged, wantID: "merged-id", wantLocates: 1},
+		{name: "a dir the registry holds no workspace at falls back unattributed", wantLocates: 1},
+		{name: "a failed locate is recorded and falls back unattributed", locateErr: connect.NewError(connect.CodeInternal, errors.New("the registry is unreadable")), wantLocates: 1, wantFailure: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			stateDir := t.TempDir()
+			daemon := startRosterDaemon(t, stateDir)
+			dir := tempWorkspaceDir(t)
+			if tt.inStreams {
+				daemon.setRoster(&workspacev1.WorkspaceRef{Id: "open-id", Dir: dir})
+			}
+			daemon.mu.Lock()
+			daemon.locateErr = tt.locateErr
+			if tt.located != nil {
+				ref := proto.Clone(tt.located).(*workspacev1.WorkspaceRef)
+				ref.Dir = dir
+				daemon.located = map[string]*workspacev1.WorkspaceRef{dir: ref}
+			}
+			daemon.mu.Unlock()
+			client := New(stateDir)
+			var failures []locateFailure
+			client.SetLocateFailedObserver(func(dir, address string, err error) {
+				failures = append(failures, locateFailure{dir: dir, address: address, err: err})
+			})
+
+			// Act.
+			_, err := client.Forward(forwardFor(dir))
+
+			// Assert.
+			if got := daemon.locateCalls(); got != tt.wantLocates {
+				t.Fatalf("LocateWorkspace calls = %d, want %d", got, tt.wantLocates)
+			}
+			if tt.wantID != "" {
+				if err != nil || daemon.lastRequest(t).GetWorkspace().GetId() != tt.wantID {
+					t.Fatalf("Forward = %v, want the record sent to %s", err, tt.wantID)
+				}
+			} else if !errors.Is(err, logging.ErrForwardWorkspaceUnresolvable) {
+				t.Fatalf("Forward = %v, want ErrForwardWorkspaceUnresolvable", err)
+			}
+			if tt.wantFailure {
+				if len(failures) != 1 || failures[0].dir != dir || failures[0].address == "" || !strings.Contains(failures[0].err.Error(), "the registry is unreadable") {
+					t.Fatalf("locate failures = %+v, want one naming %s, the daemon and the cause", failures, dir)
+				}
+			} else if len(failures) != 0 {
+				t.Fatalf("locate failures = %+v, want none", failures)
 			}
 		})
 	}

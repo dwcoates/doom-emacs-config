@@ -478,6 +478,7 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	logf.NoteLevelSelection(selection)
 	forwarder.SetRefReplacedObserver(refReplacedObserver(logf))
+	forwarder.SetLocateFailedObserver(locateFailedObserver(logf))
 	stopExpiringLog := sharedlogging.StartExpiring(file.Log, reportLogExpiry(logf, logPath))
 	stopExpiringWarnings := sharedlogging.StartExpiring(file.Warnings, reportLogExpiry(logf, sharedlogging.WarningsPath(logPath)))
 	return logf, func() {
@@ -528,6 +529,21 @@ func refReplacedObserver(logf *logging.Bound) func(dir, oldID, newID string) {
 		logf.With(logging.Context{Operation: "workspace-ref-replaced"}).Log(
 			"the daemon roster now registers %s as workspace %s; the cached ref %s it replaced is no longer attributable",
 			dir, newID, oldID)
+	}
+}
+
+// locateFailedObserver records a failed LocateWorkspace call: a directory the
+// roster's streams do not carry (a merged workspace is in none) whose registry
+// lookup failed, so its record falls back unattributed. It is an ERROR: a
+// record that was attributable was not.
+//
+// THE RECORD IS GLOBAL ON PURPOSE, as refReplacedObserver's is: it runs inside
+// the forwarder, so the directory rides `path` and the message, never
+// `workspace_dir`, which would queue it for forwarding again.
+func locateFailedObserver(logf *logging.Bound) func(dir, address string, err error) {
+	return func(dir, address string, err error) {
+		logf.With(logging.Context{Operation: "workspace-locate-failed", Level: "error", RPC: "LocateWorkspace", Path: dir}).Log(
+			"the daemon at %s could not locate the workspace at %s, so its record is forwarded unattributed: %v", address, dir, err)
 	}
 }
 
