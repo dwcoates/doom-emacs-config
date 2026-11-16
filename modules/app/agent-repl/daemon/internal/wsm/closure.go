@@ -56,11 +56,11 @@ func (c CloseCause) valid() bool {
 	return false
 }
 
-// isGesture reports whether a close is someone's ASK (the user's or an
+// IsGesture reports whether a close is someone's ASK (the user's or an
 // agent's) rather than the daemon recording what already happened (a merge
 // landed, a directory vanished). Only an ask is refused by the family rules
 // (family.go).
-func (c CloseCause) isGesture() bool {
+func (c CloseCause) IsGesture() bool {
 	return c == CloseByUser || c == CloseByAgent
 }
 

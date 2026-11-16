@@ -85,7 +85,7 @@ func (s *server) focusClaim(gained bool) *agentreplv1.ReportEditorFocusSuccess {
 		}}
 	}
 	return &agentreplv1.ReportEditorFocusSuccess{Claim: &agentreplv1.ReportEditorFocusSuccess_Banner{
-		Banner: &agentreplv1.ReportEditorFocusBannerClaimed{Workspace: wsm.FamilyRef(claim.Target).Ref()},
+		Banner: &agentreplv1.ReportEditorFocusBannerClaimed{Workspace: wsm.FamilyRef{ID: claim.Target.ID, Dir: claim.Target.Dir}.Ref()},
 	}}
 }
 
