@@ -39,9 +39,9 @@ type fakeDB struct {
 	keepaliveErr error
 	// queued are the workspaces with an entry standing in a merge queue;
 	// queuesErr fails the queues' read.
-	queued    []ids.WorkspaceID
+	queued []ids.WorkspaceID
 	// queuedAt is when every queued entry joined its queue.
-	queuedAt time.Time
+	queuedAt  time.Time
 	queuesErr error
 	// sessions are the session records by workspace; sessionErr fails the read.
 	sessions   map[ids.WorkspaceID]wsm.Session

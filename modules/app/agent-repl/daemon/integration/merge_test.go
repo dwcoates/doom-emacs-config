@@ -1287,10 +1287,11 @@ func TestAMergeOverATurnWithDetachedWorkEndsOnlyTheTurnAndWaitsForTheWork(t *tes
 // the repository's queue until the daemon restarted.
 // ---------------------------------------------------------------------------
 
-// TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue pins the owner's
-// 2026-10-13 ruling: a queued merge whose session went cold is ejected from
-// the queue, not kept waiting on a session that cannot take its prompts.
-func TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue(t *testing.T) {
+// TestAQueuedMergeWhoseSessionParksAtItsColdGateKeepsItsPlaceInTheQueue pins
+// the cold gate's keeping of a queued merge: a merge whose session went cold
+// stays in the queue at its place, skipped until the gate is passed, rather
+// than leaving it.
+func TestAQueuedMergeWhoseSessionParksAtItsColdGateKeepsItsPlaceInTheQueue(t *testing.T) {
 	t.Parallel()
 	// Arrange: behind waits in line; the daemon restarts, and behind's
 	// resume is scripted cold.
@@ -1322,12 +1323,13 @@ func TestAQueuedMergeWhoseSessionParksAtItsColdGateLeavesTheQueue(t *testing.T) 
 	d2.DefaultConfigDir = d.DefaultConfigDir
 	roster := d2.WatchRoster()
 
-	// Assert: the merge left the queue, and the leaving is recorded at INFO.
-	awaitRoster(t, d2, roster, "the cold workspace off the queue", func(r *frontendv1.WorkspaceRoster) bool {
-		row := rosterRow(r, behind.ws.GetId())
-		return row != nil && row.GetMergeQueued() == nil
-	})
-	d2.AwaitRunLogRecordFromAnyProcess("the cold gate's ejection", func(r harness.LogRecord) bool {
+	// Assert: the merge kept its place in the queue, and the keeping is
+	// recorded at INFO.
+	d2.AwaitWorkspaceLogRecordInState("the cold gate keeping the merge's place", func(r harness.LogRecord) bool {
 		return r.Level == "info" && r.Operation == "daemon.merge.cold_gate" && r.Context["workspace"] == behind.ws.GetId()
+	})
+	awaitRoster(t, d2, roster, "the cold workspace still in the queue", func(r *frontendv1.WorkspaceRoster) bool {
+		row := rosterRow(r, behind.ws.GetId())
+		return row != nil && row.GetMergeQueued() != nil
 	})
 }

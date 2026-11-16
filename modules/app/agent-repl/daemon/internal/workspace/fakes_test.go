@@ -2340,10 +2340,10 @@ type fakeMerge struct {
 	interrupted []ids.WorkspaceID
 	// queued reports the workspace's sync merge is queued, so OnInterrupt
 	// raises the merge-queue question.
-	queued     bool
-	closed     []ids.WorkspaceID
+	queued bool
+	closed []ids.WorkspaceID
 	// hidden are the workspaces OnHidden was told of, in order.
-	hidden []ids.WorkspaceID
+	hidden     []ids.WorkspaceID
 	enqueued   []ids.WorkspaceID
 	enqueueErr error
 	// steps records the restart's suspension and take-back, in order, and
