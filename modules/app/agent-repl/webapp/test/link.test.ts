@@ -1266,7 +1266,7 @@ describe("installRunControlRouting", () => {
   it("sends the clicked block's command as a terminal_command target", async () => {
     // Arrange
     const { ctx, editor } = harness();
-    const { root, off } = blocks(ctx, codeBlockHtml("echo first", "bash") + codeBlockHtml("make -C proto all", "sh"));
+    const { root, off } = blocks(ctx, codeBlockHtml("echo first", "bash", { runControl: true }) + codeBlockHtml("make -C proto all", "sh", { runControl: true }));
     // Act
     const event = click(root.querySelectorAll<HTMLElement>(`.${CODE_RUN_CLASS}`)[1]!);
     await settle();
@@ -1278,7 +1278,7 @@ describe("installRunControlRouting", () => {
   it("leaves a modified click alone", async () => {
     // Arrange
     const { ctx, editor } = harness();
-    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash", { runControl: true }));
     // Act
     root.querySelector<HTMLElement>(`.${CODE_RUN_CLASS}`)!.dispatchEvent(
       new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true }),
@@ -1292,7 +1292,7 @@ describe("installRunControlRouting", () => {
   it("leaves a click on the block's code alone", async () => {
     // Arrange
     const { ctx, editor } = harness();
-    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash", { runControl: true }));
     // Act
     click(root.querySelector<HTMLElement>("code")!);
     await settle();
@@ -1304,7 +1304,7 @@ describe("installRunControlRouting", () => {
   it("draws a refused run beside the block", async () => {
     // Arrange
     const { ctx } = harness("error", "invalidUrl", "unknownWorkspace");
-    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash", { runControl: true }));
     const control = root.querySelector<HTMLElement>(`.${CODE_RUN_CLASS}`)!;
     // Act
     click(control);
@@ -1317,7 +1317,7 @@ describe("installRunControlRouting", () => {
   it("stops routing once uninstalled", async () => {
     // Arrange
     const { ctx, editor } = harness();
-    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash"));
+    const { root, off } = blocks(ctx, codeBlockHtml("ls", "bash", { runControl: true }));
     off();
     // Act
     click(root.querySelector<HTMLElement>(`.${CODE_RUN_CLASS}`)!);

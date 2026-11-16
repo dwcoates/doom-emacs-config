@@ -6679,6 +6679,21 @@ describe("the bubbles' resting copy icon (owner request, 2026-10-29)", () => {
   });
 });
 
+describe("a code block's run control (owner request, 2026-11-10)", () => {
+  const declarations = (): string =>
+    rulesOf(stylesheet).find((r) => r.selectors.includes(".md pre.md-code > .md-code-run"))?.declarations ?? "";
+
+  it("draws its icon in the canonical orange", () => {
+    // Act / Assert
+    expect(declarations()).toMatch(/(^|;)\s*color:\s*var\(--canonical-orange\)/);
+  });
+
+  it("rests at full strength, so the orange it shows is the canonical one", () => {
+    // Act / Assert
+    expect(/--copy-control-rest:\s*([0-9.]+)/.exec(declarations())?.[1]).toBe("1");
+  });
+});
+
 describe("the workspace name's status tint (owner request, 2026-10-29)", () => {
   const ruleFor = (selector: string): string =>
     rulesOf(stylesheet).find((r) => r.selectors.includes(selector) && /--name-|animation:|color:/.test(r.declarations))

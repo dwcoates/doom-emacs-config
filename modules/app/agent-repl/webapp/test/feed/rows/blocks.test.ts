@@ -32,6 +32,7 @@ import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../s
 import { WorkspaceMentionTargetsSchema } from "../../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
 import { applyMentionTargets, resetMentionTargets } from "../../../src/feed/workspace-mentions.js";
 import { plainProse } from "../../prose.js";
+import { CODE_RUN_CLASS } from "../../../src/run-control.js";
 import { servedProse } from "../../prose.js";
 
 /** Paint BLOCK through the one bubble body, as a prompt bubble does. */
@@ -41,6 +42,13 @@ function painted(block: HTMLElement): HTMLElement {
 }
 
 describe("drawFeedTextBlock", () => {
+  it("draws a prompt's shell block with no run control", () => {
+    // Act
+    const el = painted(drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("```bash\nls -la\n```") })));
+    // Assert
+    expect([el.querySelector("pre.md-code") !== null, el.querySelector(`.${CODE_RUN_CLASS}`)]).toEqual([true, null]);
+  });
+
   it("is a markdown slot, so the bubble's body pipeline paints it", () => {
     const el = drawFeedTextBlock(create(FeedTextBlockSchema, { prose: plainProse("**bold**") }));
     expect(el.hasAttribute(MARKDOWN_SLOT_ATTRIBUTE)).toBe(true);

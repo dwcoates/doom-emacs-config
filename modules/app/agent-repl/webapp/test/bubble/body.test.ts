@@ -3,6 +3,9 @@
  * body — the one bubble body: the custom element that knows when it joins the
  * document, the cap measurement a metaprompt tree wraps to, and its refusals.
  */
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { columnMeasure } from "../../src/metaprompt-tree.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -11,6 +14,8 @@ import {
   MARKDOWN_SLOT_ATTRIBUTE,
   addSlotMark,
   isMarkdownSlot,
+  offerShellRuns,
+  requireMarkdownSlot,
   TREE_WIDTH_UNMEASURABLE,
   createBubbleBody,
   firstLineBudgetPx,
@@ -42,8 +47,9 @@ import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { fireResize } from "../resize-observer.js";
 import { plainProse, promptProse, servedProse, treeProse } from "../prose.js";
 import { create } from "@bufbuild/protobuf";
-import { ParsedProseSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
+import { ParsedProseSchema, ProseTreeSchema, type ParsedProse } from "../../../proto/gen/ts/frontend/v1/prose_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { CODE_RUN_CLASS } from "../../src/run-control.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -1259,5 +1265,151 @@ describe("a slot keeping room free at the end of its first line", () => {
     // Assert
     const record = await forwardedRecord(capture, BODY_INVARIANT);
     expect(record).toMatchObject({ level: { case: "error" }, context: { slot: "not-a-slot" } });
+  });
+});
+
+/** A shell fence, as the prose a slot paints. */
+const SHELL_FENCE = "```bash\nls -la\n```";
+
+/** Served prose of one tree whose one node carries a shell block beneath it. */
+function shellTreeProse(): ParsedProse {
+  const tree = create(ProseTreeSchema, {
+    nodes: [
+      {
+        id: { index: 0 },
+        place: { case: "root", value: { marker: { text: "🔧" } } },
+        label: { text: "1" },
+        text: { markdown: "Run it" },
+        code: [{ language: "bash", body: "ls -la" }],
+      },
+    ],
+  });
+  return create(ParsedProseSchema, { blocks: [{ block: { case: "tree", value: tree } }] });
+}
+
+describe("proseHtml's code blocks", () => {
+  it("draws a plain block's shell fence with a run control when asked for one", () => {
+    // Act
+    const html = proseHtml(plainProse(SHELL_FENCE), () => columnMeasure(80), { runControl: true });
+    // Assert
+    expect(html).toContain(CODE_RUN_CLASS);
+  });
+
+  it("draws a tree's shell block with a run control when asked for one", () => {
+    // Act
+    const html = proseHtml(shellTreeProse(), () => columnMeasure(80), { runControl: true });
+    // Assert
+    expect(html).toContain(CODE_RUN_CLASS);
+  });
+
+  it("draws no run control on a plain block's shell fence unless asked for one", () => {
+    // Act
+    const html = proseHtml(plainProse(SHELL_FENCE), () => columnMeasure(80));
+    // Assert
+    expect(html).not.toContain(CODE_RUN_CLASS);
+  });
+
+  it("draws no run control on a tree's shell block unless asked for one", () => {
+    // Act
+    const html = proseHtml(shellTreeProse(), () => columnMeasure(80));
+    // Assert
+    expect(html).not.toContain(CODE_RUN_CLASS);
+  });
+});
+
+describe("offerShellRuns", () => {
+  it("paints a run control on the slot's shell block", () => {
+    // Arrange
+    const slot = markdownSlot("prose", plainProse(SHELL_FENCE));
+    offerShellRuns(slot);
+    // Act
+    paintBody(createBubbleBody(), [slot]);
+    // Assert
+    expect(slot.querySelector(`pre.md-code > .${CODE_RUN_CLASS}`)).not.toBeNull();
+  });
+
+  it("paints no run control on a slot never offered shell runs", () => {
+    // Arrange
+    const slot = markdownSlot("prose", plainProse(SHELL_FENCE));
+    // Act
+    paintBody(createBubbleBody(), [slot]);
+    // Assert
+    expect(slot.querySelector(`.${CODE_RUN_CLASS}`)).toBeNull();
+  });
+
+  it("keeps the run control across a repaint by a slot offered shell runs", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", plainProse(SHELL_FENCE));
+    offerShellRuns(slot);
+    paintBody(body, [slot]);
+    const next = markdownSlot("prose", plainProse(`${SHELL_FENCE}\n\nafter`));
+    offerShellRuns(next);
+    // Act
+    paintBody(body, [next]);
+    // Assert
+    expect([slot.querySelector(`.${CODE_RUN_CLASS}`) !== null, slot.textContent?.includes("after")]).toEqual([true, true]);
+  });
+
+  it("drops the run control when the repainting slot is not offered shell runs", () => {
+    // Arrange
+    const body = createBubbleBody();
+    const slot = markdownSlot("prose", plainProse(SHELL_FENCE));
+    offerShellRuns(slot);
+    paintBody(body, [slot]);
+    // Act
+    paintBody(body, [markdownSlot("prose", plainProse(SHELL_FENCE))]);
+    // Assert
+    expect(slot.querySelector(`.${CODE_RUN_CLASS}`)).toBeNull();
+  });
+
+  it("refuses an element that is not a markdown slot, recording it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = document.createElement("div");
+    el.className = "not-a-slot";
+    // Act
+    expect(() => offerShellRuns(el)).toThrow(/bubble body invariant/);
+    // Assert
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect([record.level.case, record.context?.slot, record.context?.reason]).toEqual([
+      "error",
+      "not-a-slot",
+      "shell runs were offered in an element that is not a markdown slot",
+    ]);
+  });
+});
+
+describe("requireMarkdownSlot", () => {
+  it("accepts a markdown slot", () => {
+    // Arrange
+    const slot = markdownSlot("prose", plainProse("x"));
+    // Act / Assert
+    expect(() => requireMarkdownSlot(slot, "a test touched")).not.toThrow();
+  });
+
+  it("refuses any other element, recording what was done to it through the canonical logger", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const el = document.createElement("div");
+    el.className = "not-a-slot";
+    // Act
+    expect(() => requireMarkdownSlot(el, "a test touched")).toThrow(/bubble body invariant/);
+    // Assert
+    const record = await forwardedRecord(capture, BODY_INVARIANT);
+    expect([record.level.case, record.context?.slot, record.context?.reason]).toEqual([
+      "error",
+      "not-a-slot",
+      "a test touched an element that is not a markdown slot",
+    ]);
+  });
+
+  it("is the one guard every slot-only setting goes through", () => {
+    // Arrange
+    const source = readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "../../src/bubble/body.ts"), "utf8");
+    // Act
+    const handRolled = source.match(/if \(!isMarkdownSlot\(/g) ?? [];
+    // Assert: only requireMarkdownSlot itself tests a slot this way.
+    expect(handRolled).toHaveLength(1);
   });
 });

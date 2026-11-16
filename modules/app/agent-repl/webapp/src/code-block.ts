@@ -13,6 +13,10 @@
  * A SHELL BLOCK ALSO CARRIES A RUN CONTROL (owner request, 2026-10-30): the
  * one run control (run-control.ts), floated right after the copy control so
  * it sits left of it, which runs the block's code in the editor's terminal.
+ * ONLY A RESPONSE'S SHELL BLOCK CARRIES ONE (owner request, 2026-11-10): the
+ * drawer asks for it (`CodeBlockOptions.runControl`), and only a response
+ * bubble's prose slot does (bubble/body.ts `offerShellRuns`), so a prompt's
+ * shell block, and every other drawn block, carries none.
  */
 import { copyControlHtml, type CopiedText } from "./copy-control.js";
 import { escapeHtml, highlightCode } from "./highlight.js";
@@ -24,15 +28,22 @@ export const CODE_COPY_CLASS = "md-code-copy";
 /** The copy control every code block carries. */
 const COPY_CONTROL_HTML = copyControlHtml("code", CODE_COPY_CLASS, "Copy code");
 
+/** What a code block carries beside its copy control. */
+export interface CodeBlockOptions {
+  /** Whether a shell block carries a run control: false unless asked for. */
+  readonly runControl?: boolean;
+}
+
 /**
  * BODY as the one code block: escaped, highlighted when LANG is a known
  * language (hljs escapes its own output), inside `pre.md-code`, with the copy
- * control, and a shell block's run control, ahead of the code.
+ * control, and a shell block's run control when OPTIONS ask for one, ahead of
+ * the code.
  */
-export function codeBlockHtml(body: string, lang: string): string {
+export function codeBlockHtml(body: string, lang: string, options: CodeBlockOptions = {}): string {
   const html = highlightCode(body, lang);
   const langClass = lang === "" ? "" : ` lang-${escapeHtml(lang)}`;
-  const run = isShellLang(lang) ? RUN_CONTROL_HTML : "";
+  const run = options.runControl === true && isShellLang(lang) ? RUN_CONTROL_HTML : "";
   return `<pre class="md-code">${COPY_CONTROL_HTML}${run}<code class="hljs${langClass}">${html}</code></pre>`;
 }
 

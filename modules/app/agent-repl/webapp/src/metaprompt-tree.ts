@@ -60,7 +60,7 @@
  * not a positive whole number is refused loudly, never replaced by a guess.
  */
 
-import { codeBlockHtml } from "./code-block.js";
+import { codeBlockHtml, type CodeBlockOptions } from "./code-block.js";
 import { escapeHtml } from "./highlight.js";
 import { log } from "./log.js";
 import type { ProseTree, ProseTreeCode } from "../../proto/gen/ts/frontend/v1/prose_pb";
@@ -1084,7 +1084,7 @@ export function renderTreeHtml(
     const opens = first;
     first = false;
     if (row.kind === "code") {
-      parts.push(renderFenceBlock(row.code));
+      parts.push(renderFenceBlock(row.code, options.code));
       continue;
     }
     if (row.kind === "raw") {
@@ -1132,10 +1132,10 @@ export function renderTreeHtml(
  * escaped (or syntax-highlighted for a known language, which also escapes),
  * never run through the markdown/inline pass, so tokens like `__name__` and
  * `->` stay literal. It is the one code block (code-block.ts) a markdown fence
- * renders as.
+ * renders as, drawn as OPTIONS say.
  */
-function renderFenceBlock(code: ProseTreeCode): string {
-  return codeBlockHtml(code.body, code.language ?? "");
+function renderFenceBlock(code: ProseTreeCode, options: CodeBlockOptions | undefined): string {
+  return codeBlockHtml(code.body, code.language ?? "", options);
 }
 
 /** How a caller decorates one node's drawn lines (`TreeRenderOptions.decorate`). */
@@ -1154,6 +1154,8 @@ export interface TreeRenderOptions {
   readonly decorate?: (node: number) => TreeLineDecor | undefined;
   /** Whether a blank line stands between two roots; true unless told. */
   readonly rootGap?: boolean;
+  /** How a node's code blocks are drawn (code-block.ts). */
+  readonly code?: CodeBlockOptions;
 }
 
 /** The node a run of drawn lines belongs to: its label and decoration. */

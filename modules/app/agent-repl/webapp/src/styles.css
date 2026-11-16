@@ -1582,7 +1582,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    resuming the queue, and its merge glyphs in the amber a paused merge
    bubble is framed in. The "Merge Queue" header keeps its purple. */
 #ws-sidebar .merged-group[data-paused] > .merged-group-head,
-#ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--canonical-orange); }
+#ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--canonical-orange); --copy-control-rest: 1; }
 #ws-sidebar .merged-group[data-paused] .sb-mq-glyph { color: var(--merge-paused); }
 /* A HEAD NOTHING OF WHOSE WORK RUNS draws its live stage as a still grey dot
    rather than the breathing purple one (owner request, 2026-10-27;
@@ -3195,8 +3195,9 @@ html[data-page-unshown] {
    first lines wrap around it rather than running under it. */
 .md pre.md-code > .md-code-copy { float: right; margin: -0.3em -0.5em 0.2em 0.6em; }
 /* A SHELL BLOCK'S RUN CONTROL (src/run-control.ts) floats right after the
-   copy control, so it sits just left of it, sharing its look. */
-.md pre.md-code > .md-code-run { float: right; margin: -0.3em 0 0.2em 0.2em; }
+   copy control, so it sits just left of it, sharing its look but drawn in the
+   canonical orange (owner request, 2026-11-10). */
+.md pre.md-code > .md-code-run { float: right; margin: -0.3em 0 0.2em 0.2em; color: var(--canonical-orange); --copy-control-rest: 1; }
 /* A BUBBLE'S COPY CONTROL (src/bubble/copy-room.ts) copies its whole text: a
    prompt's, on every prompt bubble, folded or opened, selected or not (owner
    request, 2026-10-24), and the turn's final response's (owner request,

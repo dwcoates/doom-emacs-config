@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { CODE_RUN_CLASS } from "../../../src/run-control.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport } from "@connectrpc/connect";
@@ -268,6 +269,18 @@ describe("the composer's box in a response", () => {
     // Assert
     expect([...el.querySelectorAll(`.${COMPOSER_ENTRY_CLASS}`)].map((l) => l.getAttribute("data-node"))).toEqual(["1.1"]);
     createComposerEntryHighlight(document).apply(create(FeedComposerEntrySchema, { at: { case: "none", value: {} } }));
+  });
+});
+
+describe("a response's shell block", () => {
+  it("carries the run control", () => {
+    // Act
+    const el = drawFeedResponse(
+      response({ result: { case: "success", value: { prose: { prose: plainProse("```bash\nls -la\n```") } } } }),
+      rowContext(),
+    );
+    // Assert
+    expect(el.querySelector(`.bubble-body pre.md-code > .${CODE_RUN_CLASS}`)).not.toBeNull();
   });
 });
 
