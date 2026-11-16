@@ -2,6 +2,7 @@ package topbar
 
 import (
 	"fmt"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -339,9 +340,21 @@ func titleLinks(links []Link) *frontendv1.TopbarTitleLinks {
 		return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Single{
 			Single: &frontendv1.TopbarTitleLink{Label: links[0].Label, Url: links[0].URL}}}
 	}
-	items := make([]*frontendv1.TopbarTitleLinkMenuItem, len(links))
-	for i, link := range links {
-		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL}
+	// Owned links first, each group keeping the order given.
+	ordered := slices.Clone(links)
+	slices.SortStableFunc(ordered, func(a, b Link) int {
+		switch {
+		case a.Owned == b.Owned:
+			return 0
+		case a.Owned:
+			return -1
+		default:
+			return 1
+		}
+	})
+	items := make([]*frontendv1.TopbarTitleLinkMenuItem, len(ordered))
+	for i, link := range ordered {
+		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL)}
 	}
 	return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{
 		Menu: &frontendv1.TopbarTitleLinkMenu{Items: items}}}
@@ -1244,4 +1257,30 @@ func (r *resolver) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
 		modes = append(modes, option.GetMode())
 	}
 	return modes, true
+}
+
+// linkIcon names the service icon a menu row draws for a url, from the url's
+// host: GitHub, Slack, Notion and GNS hosts have one, every other host none.
+func linkIcon(rawURL string) frontendv1.TopbarTitleLinkIcon {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED
+	}
+	host := strings.ToLower(u.Hostname())
+	switch {
+	case hostIs(host, "github.com"):
+		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GITHUB
+	case hostIs(host, "slack.com"):
+		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_SLACK
+	case hostIs(host, "notion.so"), hostIs(host, "notion.site"):
+		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION
+	case strings.Contains(host, "gns"):
+		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS
+	}
+	return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED
+}
+
+// hostIs reports whether host is domain or one of its subdomains.
+func hostIs(host, domain string) bool {
+	return host == domain || strings.HasSuffix(host, "."+domain)
 }

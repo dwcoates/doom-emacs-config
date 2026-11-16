@@ -3,6 +3,7 @@ package topbar
 import (
 	"agent-repld/internal/wsm"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1369,6 +1370,64 @@ func TestTheShownLinksRideTheTitle(t *testing.T) {
 			}
 			if !proto.Equal(got.GetLinks(), tt.wantLinks) {
 				t.Errorf("title links = %v, want %v", got.GetLinks(), tt.wantLinks)
+			}
+		})
+	}
+}
+
+func TestOwnedLinksLeadTheMenuAndReadAsOwned(t *testing.T) {
+	// Arrange
+	reference1 := Link{Label: "The thread", URL: "https://example.slack.com/archives/C1/p1"}
+	owned1 := Link{Label: "The pull request", URL: "https://github.com/o/r/pull/1", Owned: true}
+	reference2 := Link{Label: "The ticket", URL: "https://example.com/t"}
+	owned2 := Link{Label: "The doc", URL: "https://www.notion.so/doc", Owned: true}
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetSummary(testWS, "Title")
+
+	// Act
+	h.r.SetLinks(testWS, []Link{reference1, owned1, reference2, owned2})
+
+	// Assert
+	items := h.view(t).GetTitle().GetLinks().GetMenu().GetItems()
+	var gotURLs []string
+	for _, item := range items {
+		gotURLs = append(gotURLs, item.GetUrl())
+	}
+	wantURLs := []string{owned1.URL, owned2.URL, reference1.URL, reference2.URL}
+	if strings.Join(gotURLs, " ") != strings.Join(wantURLs, " ") {
+		t.Fatalf("menu urls = %v, want owned first in the given order: %v", gotURLs, wantURLs)
+	}
+	for i, wantOwned := range []bool{true, true, false, false} {
+		if items[i].GetOwned() != wantOwned {
+			t.Errorf("item %d owned = %v, want %v", i, items[i].GetOwned(), wantOwned)
+		}
+	}
+}
+
+func TestLinkIconNamesTheServiceOfTheHost(t *testing.T) {
+	tests := []struct {
+		name string
+		url  string
+		want frontendv1.TopbarTitleLinkIcon
+	}{
+		{"github", "https://github.com/o/r/pull/3", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GITHUB},
+		{"slack subdomain", "https://team.slack.com/archives/C1/p2", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_SLACK},
+		{"notion", "https://www.notion.so/page", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION},
+		{"notion site", "https://team.notion.site/page", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION},
+		{"gns", "https://gns.example.com/k/1", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS},
+		{"lookalike host has none", "https://notgithub.com/x", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED},
+		{"unknown host has none", "https://example.com/x", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED},
+		{"unparseable url has none", "http://[::1", frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := linkIcon(tt.url)
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("linkIcon(%q) = %v, want %v", tt.url, got, tt.want)
 			}
 		})
 	}

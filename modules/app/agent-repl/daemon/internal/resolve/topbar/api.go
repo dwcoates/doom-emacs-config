@@ -392,4 +392,6 @@ type Link struct {
 	Label string
 	// URL is the absolute http or https url a pick opens.
 	URL string
+	// Owned is whether the workspace's work made what the link points at.
+	Owned bool
 }

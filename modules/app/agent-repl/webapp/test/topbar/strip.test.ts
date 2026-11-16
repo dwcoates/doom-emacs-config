@@ -7,6 +7,7 @@ import {
   TopbarSessionLineSchema,
   TopbarTitleSchema,
   TopbarWorkspaceNameSchema,
+  TopbarTitleLinkIcon,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   OpenExternalResponseSchema,
@@ -23,7 +24,11 @@ import {
   drawTopbarSessionLine,
   drawTopbarTitle,
   drawTopbarWorkspaceName,
+  OWNED_LINK_CLASS,
 } from "../../src/topbar/strip.js";
+import { drawLinkIcon } from "../../src/topbar/link-icon.js";
+import styles from "../../src/styles.css?raw";
+import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
 import { appContext, openPanel, topbarContext } from "./fixtures.js";
 
@@ -515,6 +520,54 @@ describe("drawTopbarTitle with several shown links", () => {
     const future = create(TopbarTitleSchema, { text: "t", links: {} });
     // Act / Assert
     expect(() => drawTopbarTitle(future, topbarContext().tc)).toThrow(/TopbarTitleLinks.opens/);
+  });
+});
+
+describe("a summary menu row's owned tint and service icon", () => {
+  const rowsOf = (items: { label: string; url: string; owned?: boolean; icon?: TopbarTitleLinkIcon }[]) => {
+    const { host, tc } = topbarContext();
+    const heading = drawTopbarHeading(
+      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
+      workspaceName("w"),
+      tc,
+    );
+    host.append(heading);
+    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
+    click(heading.querySelector<HTMLElement>(".topbar-title")!);
+    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+  };
+
+  it("marks owned rows and leaves reference rows unmarked", () => {
+    const rows = rowsOf([
+      { label: "Mine", url: "https://a.example/1", owned: true },
+      { label: "Theirs", url: "https://a.example/2" },
+    ]);
+    expect(rows.map((row) => row.classList.contains(OWNED_LINK_CLASS))).toEqual([true, false]);
+  });
+
+  it.each([
+    [TopbarTitleLinkIcon.GITHUB, "GITHUB"],
+    [TopbarTitleLinkIcon.SLACK, "SLACK"],
+    [TopbarTitleLinkIcon.GNS, "GNS"],
+    [TopbarTitleLinkIcon.NOTION, "NOTION"],
+  ])("draws the icon of service %s left of the label", (icon, name) => {
+    const [row] = rowsOf([{ label: "L", url: "https://a.example/1", icon }]);
+    const anchor = row!.querySelector("a")!;
+    expect([anchor.firstElementChild!.getAttribute("data-link-icon"), anchor.textContent]).toEqual([name, "L"]);
+  });
+
+  it("draws no icon for a host with no service", () => {
+    const [row] = rowsOf([{ label: "L", url: "https://a.example/1" }]);
+    expect(row!.querySelector("svg")).toBeNull();
+  });
+
+  it("refuses an icon arm this build cannot draw", () => {
+    expect(() => drawLinkIcon(99 as TopbarTitleLinkIcon)).toThrow(/TopbarTitleLinkIcon/);
+  });
+
+  it("tints an owned row on a ground between the menu's and the topbar's", () => {
+    const rule = withoutBlockComments(styles).match(/\.topbar-title-link-option\.is-owned\s*\{([^}]*)\}/);
+    expect(rule?.[1]).toMatch(/background:\s*color-mix\(in srgb, var\(--bg\) 50%, var\(--sidebar-ground\)\)/);
   });
 });
 
