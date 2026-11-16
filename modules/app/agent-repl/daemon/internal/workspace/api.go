@@ -157,6 +157,10 @@ type CreateSpec struct {
 	// CreateIntake sets it, beside a name and an initial prompt, on a peer
 	// with a fresh context.
 	Intake bool
+	// IntakeCard is the feed card an intake workspace is made for, recorded
+	// in the insert's own transaction (wsm.RegisterFacts.IntakeCard). Only
+	// AskAboutCard sets it, beside Intake.
+	IntakeCard *wsm.IntakeCard
 	// Hidden makes the workspace BORN HIDDEN: its row is inserted hidden, in
 	// the insert's own transaction (agentrepl.v1.CreateWorkspaceRequest.hidden).
 	// Intake implies it.
@@ -774,10 +778,11 @@ type Verbs interface {
 	// fresh context, handed one brief, and retired by the daemon when a turn
 	// of it ends (intake.go).
 	CreateIntake(ctx context.Context, spec IntakeSpec) (wsm.Workspace, error)
-	// AskQuestionIntake sends QUESTION, a feed card's `?` question, from ASKER
-	// to an intake workspace created for it in the repository agent-repl's own
-	// checkout is in, and answers that workspace (intake.go).
-	AskQuestionIntake(ctx context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error)
+	// AskAboutCard hands QUESTION, a `?` question about CARD from its asker,
+	// to the workspace already addressing the card's questions, through SEND,
+	// or to an intake workspace created for it in the repository agent-repl's
+	// own checkout is in, and answers the recipient (intake.go).
+	AskAboutCard(ctx context.Context, card wsm.IntakeCard, question string, send CardQuestionSend) (CardQuestionAnswer, error)
 	// Notify raises one host notification: it raises the workspace's desktop
 	// banner (the daemon's own, decided on Emacs's focus) and sets the roster's
 	// attention marker, which SelectWorkspace and AsksSettled clear. It is the

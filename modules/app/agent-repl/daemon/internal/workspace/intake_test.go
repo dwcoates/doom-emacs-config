@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -159,6 +160,9 @@ func TestAnIntakeCreateSpecThatContradictsItselfIsRefused(t *testing.T) {
 		{name: "a one-shot", arrange: func(spec *CreateSpec) { spec.OneShot = true }},
 		{name: "a child", arrange: func(spec *CreateSpec) { spec.Parent = &parent }},
 		{name: "a fork", arrange: func(spec *CreateSpec) { spec.ForkFrom = &parent }},
+		{name: "an intake card on no intake", arrange: func(spec *CreateSpec) {
+			spec.Intake, spec.IntakeCard = false, &wsm.IntakeCard{Asker: "w1", Row: "row-1"}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -343,17 +347,44 @@ func questionFixture(t *testing.T) (*fixture, string) {
 	return f, home
 }
 
-func TestAskQuestionIntakeCreatesAnOpusIntakeWorkspaceInTheHomeRepository(t *testing.T) {
+// questionCard is the card every arranged question is asked about.
+var questionCard = wsm.IntakeCard{Asker: "w1", Row: "row-1"}
+
+// cardSend records every workspace a card's question is sent to, answering
+// REFUSED and ERR.
+type cardSend struct {
+	to      []wsm.Workspace
+	refused *agentreplv1.SubmitPromptError
+	err     error
+}
+
+func (c *cardSend) send(_ context.Context, to wsm.Workspace) (*agentreplv1.SubmitPromptError, error) {
+	c.to = append(c.to, to)
+	return c.refused, c.err
+}
+
+// addressee registers an open workspace named NAME in the fixture's registry.
+func addressee(t *testing.T, f *fixture, id ids.WorkspaceID, name string) wsm.Workspace {
+	t.Helper()
+	ws := f.workspace(id, t.TempDir())
+	ws.Name = name
+	f.db.with(ws)
+	return ws
+}
+
+func TestAskAboutCardCreatesAnOpusIntakeWorkspaceInTheHomeRepositoryForAnUnaddressedCard(t *testing.T) {
 	// Arrange
 	f, home := questionFixture(t)
+	sent := &cardSend{}
 
 	// Act
-	created, err := f.verbs.AskQuestionIntake(context.Background(), "w1", "why did the merge stall")
+	answer, err := f.verbs.AskAboutCard(context.Background(), questionCard, "why did the merge stall", sent.send)
 
 	// Assert
 	if err != nil {
-		t.Fatalf("AskQuestionIntake: %v", err)
+		t.Fatalf("AskAboutCard: %v", err)
 	}
+	created := answer.Recipient
 	if len(f.git.created) != 1 || f.git.created[0].RepoDir != home {
 		t.Fatalf("created worktrees = %+v, want one in the home repository %q", f.git.created, home)
 	}
@@ -366,36 +397,196 @@ func TestAskQuestionIntakeCreatesAnOpusIntakeWorkspaceInTheHomeRepository(t *tes
 	if got := f.db.putSessions[0].Model; got != DefaultLaunchModel {
 		t.Errorf("session model = %q, want %q", got, DefaultLaunchModel)
 	}
-	sent := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
-	if !strings.Contains(sent, "the asker (doom) asked: why did the merge stall") {
-		t.Errorf("initial prompt = %q, want the asker's name and the question", sent)
+	text := f.queue.submissions[0].Said.GetContent().GetBlocks()[0].GetText().GetText()
+	if !strings.Contains(text, "the asker (doom) asked: why did the merge stall") {
+		t.Errorf("initial prompt = %q, want the asker's name and the question", text)
+	}
+	if len(sent.to) != 0 || answer.Refused != nil {
+		t.Errorf("sent to %+v, refused %v; want the question in the intake's brief alone", sent.to, answer.Refused)
 	}
 }
 
-func TestAskQuestionIntakeFails(t *testing.T) {
+func TestAskAboutCardRecordsTheCardWithItsIntakeWorkspace(t *testing.T) {
+	// Arrange
+	f, _ := questionFixture(t)
+
+	// Act
+	answer, err := f.verbs.AskAboutCard(context.Background(), questionCard, "why", (&cardSend{}).send)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AskAboutCard: %v", err)
+	}
+	if got, ok := f.db.intakeCards[answer.Recipient.ID]; !ok || got != questionCard {
+		t.Fatalf("intake card = %+v, %v; want %+v registered with the intake", got, ok, questionCard)
+	}
+}
+
+func TestAskAboutCardSendsToTheWorkspaceAlreadyAddressingTheCard(t *testing.T) {
+	tests := []struct {
+		name       string
+		addressees func(work, intake ids.WorkspaceID) wsm.CardAddressees
+		want       string
+	}{
+		{name: "the workspace the intake created", addressees: func(work, _ ids.WorkspaceID) wsm.CardAddressees {
+			return wsm.CardAddressees{Work: &work}
+		}, want: "card-work"},
+		{name: "the intake still taking the first question in", addressees: func(_, intake ids.WorkspaceID) wsm.CardAddressees {
+			return wsm.CardAddressees{OpenIntake: &intake}
+		}, want: "question-intake-1"},
+		{name: "the created workspace over the intake still open", addressees: func(work, intake ids.WorkspaceID) wsm.CardAddressees {
+			return wsm.CardAddressees{Work: &work, OpenIntake: &intake}
+		}, want: "card-work"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f, _ := questionFixture(t)
+			work := addressee(t, f, "w-work", "card-work")
+			intake := addressee(t, f, "w-intake", "question-intake-1")
+			f.db.cardAddressees = tt.addressees(work.ID, intake.ID)
+			sent := &cardSend{}
+
+			// Act
+			answer, err := f.verbs.AskAboutCard(context.Background(), questionCard, "and the footer?", sent.send)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("AskAboutCard: %v", err)
+			}
+			if len(sent.to) != 1 || sent.to[0].Name != tt.want || answer.Recipient.Name != tt.want {
+				t.Fatalf("sent to %+v, answered %q; want the question sent to %q", sent.to, answer.Recipient.Name, tt.want)
+			}
+			if len(f.git.created) != 0 {
+				t.Fatalf("created %+v, want no intake workspace", f.git.created)
+			}
+			if len(operationRecords(f, dlog.LevelInfo, opIntake)) != 1 {
+				t.Fatalf("want one INFO %s record, got %+v", opIntake, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestAskAboutCardAnswersTheAddresseesRefusal(t *testing.T) {
+	// Arrange
+	f, _ := questionFixture(t)
+	work := addressee(t, f, "w-work", "card-work")
+	f.db.cardAddressees = wsm.CardAddressees{Work: &work.ID}
+	refusal := &agentreplv1.SubmitPromptError{Reason: &agentreplv1.SubmitPromptError_NoSession{NoSession: &agentreplv1.SubmitPromptNoSession{}}}
+	sent := &cardSend{refused: refusal}
+
+	// Act
+	answer, err := f.verbs.AskAboutCard(context.Background(), questionCard, "why", sent.send)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AskAboutCard: %v", err)
+	}
+	if answer.Refused != refusal || answer.Recipient.ID != work.ID {
+		t.Fatalf("answered %+v, want the addressee's refusal", answer)
+	}
+	if len(f.git.created) != 0 {
+		t.Fatalf("created %+v, want no intake workspace in the refusal's place", f.git.created)
+	}
+}
+
+func TestAQuestionHandedToAnOpenIntakeHoldsOffItsRetirement(t *testing.T) {
+	// Arrange
+	f, _ := questionFixture(t)
+	intake := addressee(t, f, "w-intake", "question-intake-1")
+	f.db.cardAddressees = wsm.CardAddressees{OpenIntake: &intake.ID}
+	v := f.mutable(t)
+	heldDuringSend := false
+	send := func(context.Context, wsm.Workspace) (*agentreplv1.SubmitPromptError, error) {
+		heldDuringSend = !v.intakeHandoffs.TryLock()
+		if !heldDuringSend {
+			v.intakeHandoffs.Unlock()
+		}
+		return nil, nil
+	}
+
+	// Act
+	_, err := f.verbs.AskAboutCard(context.Background(), questionCard, "why", send)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AskAboutCard: %v", err)
+	}
+	if !heldDuringSend {
+		t.Fatal("the question was sent without the handoff lock retirement takes")
+	}
+}
+
+func TestARetirementJudgesQuietnessUnderTheHandoffLock(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := intakeWorkspace(t, f)
+	v := f.mutable(t)
+	heldDuringCheck := false
+	v.deps.Freeness = func(ids.WorkspaceID) (Running, bool) {
+		heldDuringCheck = !v.intakeHandoffs.TryLock()
+		if !heldDuringCheck {
+			v.intakeHandoffs.Unlock()
+		}
+		return Running{}, false
+	}
+
+	// Act
+	err := f.verbs.CarryOutSelfClose(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("CarryOutSelfClose: %v", err)
+	}
+	if !heldDuringCheck {
+		t.Fatal("the intake's quietness was judged without the handoff lock a card's question takes")
+	}
+	if v.intakeHandoffs.TryLock() {
+		v.intakeHandoffs.Unlock()
+	} else {
+		t.Fatal("the retirement kept the handoff lock after it returned")
+	}
+}
+
+func TestAskAboutCardFails(t *testing.T) {
 	tests := []struct {
 		name      string
 		asker     ids.WorkspaceID
-		arrange   func(f *fixture)
+		arrange   func(t *testing.T, f *fixture, sent *cardSend)
 		operation string
 	}{
-		{name: "an unknown asker", asker: "w-nobody", arrange: func(*fixture) {}, operation: "daemon.refusal.typed"},
-		{name: "git cannot name the home repository", asker: "w1", arrange: func(f *fixture) {
+		{name: "an unknown asker", asker: "w-nobody", arrange: func(*testing.T, *fixture, *cardSend) {}, operation: "daemon.refusal.typed"},
+		{name: "git cannot name the home repository", asker: "w1", arrange: func(_ *testing.T, f *fixture, _ *cardSend) {
 			f.git.commonDirErr = errors.New("fatal: not a git repository")
+		}, operation: opIntake},
+		{name: "the card's addressees cannot be read", asker: "w1", arrange: func(_ *testing.T, f *fixture, _ *cardSend) {
+			f.db.cardAddresseesErr = errors.New("disk I/O error")
+		}, operation: opIntake},
+		{name: "the addressee's record cannot be read", asker: "w1", arrange: func(_ *testing.T, f *fixture, _ *cardSend) {
+			gone := ids.WorkspaceID("w-gone")
+			f.db.cardAddressees = wsm.CardAddressees{Work: &gone}
+		}, operation: opIntake},
+		{name: "the send to the addressee fails", asker: "w1", arrange: func(t *testing.T, f *fixture, sent *cardSend) {
+			work := addressee(t, f, "w-work", "card-work")
+			f.db.cardAddressees = wsm.CardAddressees{Work: &work.ID}
+			sent.err = errors.New("the daemon is shutting down")
 		}, operation: opIntake},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f, _ := questionFixture(t)
-			tt.arrange(f)
+			sent := &cardSend{}
+			tt.arrange(t, f, sent)
+			card := questionCard
+			card.Asker = tt.asker
 
 			// Act
-			_, err := f.verbs.AskQuestionIntake(context.Background(), tt.asker, "why")
+			_, err := f.verbs.AskAboutCard(context.Background(), card, "why", sent.send)
 
 			// Assert
 			if err == nil {
-				t.Fatal("AskQuestionIntake succeeded")
+				t.Fatal("AskAboutCard succeeded")
 			}
 			if len(f.git.created) != 0 {
 				t.Fatalf("created %+v, want no intake workspace", f.git.created)

@@ -29,7 +29,7 @@ type foldedLedger struct {
 	from, into LeaseID
 }
 
-// foldExtraMergeLedgers is layout 157's rewrite.
+// foldExtraMergeLedgers is layout 158's rewrite.
 func foldExtraMergeLedgers(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT l.lease_id, q.ledger_id FROM merge_queue AS q
@@ -62,7 +62,7 @@ func foldExtraMergeLedgers(ctx context.Context, tx *sql.Tx, log dlog.Logger) err
 		}
 		gone[f.from] = true
 	}
-	// AT MOST ONE ROUND OF A LEDGER STAYS LIVE: the latest (layout 154's rule).
+	// AT MOST ONE ROUND OF A LEDGER STAYS LIVE: the latest (layout 155's rule).
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE merge_tab_intervals SET outcome = 'restarted', held_since = NULL,
 		  ended_at = (SELECT MIN(later.started_at) FROM merge_tab_intervals AS later

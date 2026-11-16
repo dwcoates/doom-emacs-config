@@ -546,6 +546,10 @@ Every card in the feed has a question-mark icon: responses, tool cards, merge bu
   - The intake workspace is removed once it has done that. It sits in the hidden section until then.
   - Nothing is added to this workspace's feed, and no turn runs here.
   - The question mark is released, and the draft it set aside stays in history.
+- **A later question about the same card goes to the workspace already working on it.** No new intake workspace is created for it.
+  - When an earlier question's intake workspace created a workspace that is still open, the question is sent there, as a message from this workspace.
+  - When that intake workspace is still working out the earlier question, the question is sent to it.
+  - Once neither is open, the next question gets a new intake workspace.
 - **Limits:**
   - A question outranks a highlight and a selected response: the prompt is the question either way.
   - A card that a rollback has removed can no longer be asked about. The prompt is refused and the question ends.

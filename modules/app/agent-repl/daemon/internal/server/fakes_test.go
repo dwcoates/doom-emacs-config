@@ -391,12 +391,14 @@ type fakeVerbs struct {
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec
-	// intakeQuestions records every AskQuestionIntake question, in order;
+	// intakeQuestions records every AskAboutCard question, in order;
 	// questionIntake is the intake workspace it answers, questionIntakeErr
-	// its failure.
+	// its failure, and cardAddressee the workspace already addressing the
+	// card, which it sends the question to instead when set.
 	intakeQuestions   []fakeIntakeQuestion
 	questionIntake    wsm.Workspace
 	questionIntakeErr error
+	cardAddressee     *wsm.Workspace
 	// intakeSpecs records every CreateIntake spec, in order.
 	intakeSpecs []workspace.IntakeSpec
 	// createJoined, when set, makes EnterCreate answer a ticket that joined
@@ -1052,6 +1054,8 @@ type fakePrompts struct {
 	lastOrigin conversationv1.PromptOrigin
 	// lastSentBy is the sender the last submission was handed with.
 	lastSentBy *ids.WorkspaceID
+	// lastWorkspace is the workspace the last submission was handed to.
+	lastWorkspace ids.WorkspaceID
 	// submits counts the submissions.
 	submits int
 	// threadSubmissions records every SubmitThreadQuestion.
@@ -1072,7 +1076,8 @@ func (f *fakePrompts) SubmitThreadQuestion(_ context.Context, ws ids.WorkspaceID
 	return f.outcome, f.err
 }
 
-func (f *fakePrompts) Submit(_ context.Context, _ ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+func (f *fakePrompts) Submit(_ context.Context, ws ids.WorkspaceID, said *conversationv1.UserSaid, _ string, origin conversationv1.PromptOrigin, sentBy *ids.WorkspaceID, delivery wsm.Delivery, _ *feedid.Ref) (prompthandler.Outcome, error) {
+	f.lastWorkspace = ws
 	f.lastSaid = said
 	f.lastSentBy = sentBy
 	f.lastDelivery = delivery
@@ -3187,18 +3192,29 @@ func (f *fakeMemory) Workspace(ids.WorkspaceID) *frontendv1.SidebarWorkspaceMemo
 	return f.workspace
 }
 
-// fakeIntakeQuestion is one AskQuestionIntake call.
+// fakeIntakeQuestion is one AskAboutCard call.
 type fakeIntakeQuestion struct {
 	asker    ids.WorkspaceID
+	row      string
 	question string
 }
 
-func (f *fakeVerbs) AskQuestionIntake(_ context.Context, asker ids.WorkspaceID, question string) (wsm.Workspace, error) {
-	f.intakeQuestions = append(f.intakeQuestions, fakeIntakeQuestion{asker: asker, question: question})
-	if f.questionIntakeErr != nil {
-		return wsm.Workspace{}, f.questionIntakeErr
+// AskAboutCard records the call, then sends the question to cardAddressee
+// when one is set, as the verb does for a card already addressed, and answers
+// questionIntake otherwise.
+func (f *fakeVerbs) AskAboutCard(ctx context.Context, card wsm.IntakeCard, question string, send workspace.CardQuestionSend) (workspace.CardQuestionAnswer, error) {
+	f.intakeQuestions = append(f.intakeQuestions, fakeIntakeQuestion{asker: card.Asker, row: card.Row, question: question})
+	if f.cardAddressee != nil {
+		refused, err := send(ctx, *f.cardAddressee)
+		if err != nil {
+			return workspace.CardQuestionAnswer{}, err
+		}
+		return workspace.CardQuestionAnswer{Recipient: *f.cardAddressee, Refused: refused}, nil
 	}
-	return f.questionIntake, nil
+	if f.questionIntakeErr != nil {
+		return workspace.CardQuestionAnswer{}, f.questionIntakeErr
+	}
+	return workspace.CardQuestionAnswer{Recipient: f.questionIntake}, nil
 }
 
 func (f *fakeVerbs) CreateIntake(_ context.Context, spec workspace.IntakeSpec) (wsm.Workspace, error) {

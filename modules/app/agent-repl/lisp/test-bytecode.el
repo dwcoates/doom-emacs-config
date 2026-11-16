@@ -14,7 +14,6 @@
 (defvar agent-repl-test-bc--errors nil "Every error record, newest first.")
 (defvar agent-repl-test-bc--timers nil "Every timer key registered, newest first.")
 (defvar agent-repl-test-bc--cancelled nil "Every timer key cancelled, newest first.")
-(defvar agent-repl-test-bc--clock 0.0 "What the stubbed wall clock answers.")
 (defvar agent-repl-test-bc--input-pending nil "What the stubbed `input-pending-p' answers.")
 
 (defmacro agent-repl-test-bc--with-root (var &rest body)
@@ -38,23 +37,22 @@
          (agent-repl-test-bc--errors nil)
          (agent-repl-test-bc--timers nil)
          (agent-repl-test-bc--cancelled nil)
-         (agent-repl-test-bc--clock 100.0)
          (agent-repl-test-bc--input-pending nil)
          (agent-repl-bytecode--queue nil)
          (agent-repl-bytecode--run nil))
-     (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test-bc--clock))
-               ((symbol-function 'input-pending-p)
-                (lambda (&rest _) agent-repl-test-bc--input-pending))
-               ((symbol-function 'agent-repl--info)
-                (agent-repl-test--record-into agent-repl-test-bc--infos))
-               ((symbol-function 'agent-repl--error)
-                (agent-repl-test--record-into agent-repl-test-bc--errors))
-               ((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create)))
-               ((symbol-function 'agent-repl--register-timer)
-                (lambda (key timer) (push key agent-repl-test-bc--timers) timer))
-               ((symbol-function 'agent-repl--cancel-timer-key)
-                (lambda (key) (push key agent-repl-test-bc--cancelled) t)))
-       ,@body)))
+     (agent-repl-test--with-clock 100.0
+       (cl-letf (((symbol-function 'input-pending-p)
+                  (lambda (&rest _) agent-repl-test-bc--input-pending))
+                 ((symbol-function 'agent-repl--info)
+                  (agent-repl-test--record-into agent-repl-test-bc--infos))
+                 ((symbol-function 'agent-repl--error)
+                  (agent-repl-test--record-into agent-repl-test-bc--errors))
+                 ((symbol-function 'run-with-timer) (lambda (&rest _) (timer-create)))
+                 ((symbol-function 'agent-repl--register-timer)
+                  (lambda (key timer) (push key agent-repl-test-bc--timers) timer))
+                 ((symbol-function 'agent-repl--cancel-timer-key)
+                  (lambda (key) (push key agent-repl-test-bc--cancelled) t)))
+         ,@body))))
 
 (defconst agent-repl-test-bc--source
   (concat "(defun agent-repl-test-bc-one (x) (let ((y (1+ x))) (* y 2)))\n"
@@ -226,8 +224,8 @@
       (let ((alpha (agent-repl-test-bc--load-module root "alpha" agent-repl-test-bc--source)))
         (agent-repl-bytecode-schedule root '("alpha"))
         (advice-add 'agent-repl-bytecode--compile :after
-                    (lambda (&rest _) (setq agent-repl-test-bc--clock
-                                            (+ agent-repl-test-bc--clock 1.0)))
+                    (lambda (&rest _) (setq agent-repl-test--clock
+                                            (+ agent-repl-test--clock 1.0)))
                     '((name . agent-repl-test-bc-tick)))
         (unwind-protect
             ;; Act

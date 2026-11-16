@@ -14,7 +14,6 @@
 
 (defvar agent-repl-test-stall--reported nil "Every stall reported, newest first, as (KIND SECONDS).")
 (defvar agent-repl-test-stall--records nil "Every info record, newest first.")
-(defvar agent-repl-test-stall--clock 0.0 "What the stubbed wall clock answers.")
 (defvar agent-repl-test-stall--pending nil "What the stubbed input check answers.")
 
 (defmacro agent-repl-test-stall--with (&rest body)
@@ -24,20 +23,19 @@
          (agent-repl-stall--input nil)
          (agent-repl-test-stall--pending nil)
          (agent-repl-test-stall--reported nil)
-         (agent-repl-test-stall--records nil)
-         (agent-repl-test-stall--clock 100.0))
-     (cl-letf (((symbol-function 'agent-repl--now) (lambda () agent-repl-test-stall--clock))
-               ((symbol-function 'agent-repl-stall--input-pending-p)
-                (lambda () agent-repl-test-stall--pending))
-               ((symbol-function 'agent-repl-latency-report-editor)
-                (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
-               ((symbol-function 'agent-repl--info)
-                (agent-repl-test--record-into agent-repl-test-stall--records)))
-       ,@body)))
+         (agent-repl-test-stall--records nil))
+     (agent-repl-test--with-clock 100.0
+       (cl-letf (((symbol-function 'agent-repl-stall--input-pending-p)
+                  (lambda () agent-repl-test-stall--pending))
+                 ((symbol-function 'agent-repl-latency-report-editor)
+                  (lambda (kind seconds) (push (list kind seconds) agent-repl-test-stall--reported)))
+                 ((symbol-function 'agent-repl--info)
+                  (agent-repl-test--record-into agent-repl-test-stall--records)))
+         ,@body))))
 
 (defun agent-repl-test-stall--run-after (seconds)
   "Advance the clock by SECONDS and run the sampler."
-  (setq agent-repl-test-stall--clock (+ agent-repl-test-stall--clock seconds))
+  (setq agent-repl-test--clock (+ agent-repl-test--clock seconds))
   (agent-repl-stall-sample))
 
 (ert-deftest agent-repl-test-stall-the-first-run-measures-nothing ()
