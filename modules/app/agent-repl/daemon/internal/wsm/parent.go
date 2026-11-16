@@ -444,10 +444,17 @@ func writeTarget(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *Worksp
 
 // writeParent is writeTarget's parent half: the recorded parent, with the
 // subsection that follows it.
+//
+// A WORKSPACE THAT GOES TOP-LEVEL STAYS WHERE ITS FAMILY SAT ONLY IN ITS OWN
+// REPOSITORY. A child of another repository's parent nests in that family, so
+// the subsection its old root sits in is the other repository's
+// (rootSubsectionColumn), which it cannot store
+// (workspaces_subsection_same_repo). It goes to its own repository's
+// workspaces in no subsection instead (ownRepoRootSubsectionColumn).
 func writeParent(ctx context.Context, tx *sql.Tx, id WorkspaceID, parent *WorkspaceID) error {
 	owner := nullWorkspace(parent)
 	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET parent_id = ?,
-		subsection_id = CASE WHEN ? IS NULL THEN `+rootSubsectionColumn+` ELSE NULL END
+		subsection_id = CASE WHEN ? IS NULL THEN `+ownRepoRootSubsectionColumn+` ELSE NULL END
 		WHERE id = ?`, owner, owner, id)
 	if err != nil {
 		return err
