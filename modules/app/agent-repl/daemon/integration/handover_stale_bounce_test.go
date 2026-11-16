@@ -89,9 +89,14 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 	// stale, so the INCUMBENT bounces it and the successor adopts a shim that
 	// already runs the newer build (test run 2026-10-13: the incumbent bounced
 	// at the report, and the successor's stale-build bounce never came).
-	cold.AwaitLogRecord(cold.RunLogPath(), "the incumbent's judgement of its shim's build", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.rollout.staleness" && r.Message == "the shim runs the installed build" &&
-			r.Context["workspace"] == f.ws.GetId()
+	// THE REPORT'S OWN JUDGEMENT, named by judged_for: the boot sweep's
+	// judgement reads alike, and the report's runs off the reporting
+	// goroutine, so it can land after the sweep's (merge gate 2026-11-16: the
+	// sweep's record satisfied this wait, the report's judgement ran after
+	// the install below, and the incumbent bounced its own shim).
+	cold.AwaitLogRecord(cold.RunLogPath(), "the incumbent's judgement of its shim's build report", func(r harness.LogRecord) bool {
+		return r.PID == cold.PID() && r.Operation == "daemon.rollout.staleness" && r.Message == "the shim runs the installed build" &&
+			r.Context["workspace"] == f.ws.GetId() && r.Context["judged_for"] == "shim_report"
 	})
 
 	// AND ITS BOOT SWEEP HAS JUDGED IT TOO. The fresh boot judges every shim
