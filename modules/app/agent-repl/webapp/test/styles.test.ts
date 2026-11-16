@@ -5253,12 +5253,12 @@ describe("the rail's marks", () => {
 
   // THE BREATH RUNS ON THE COMPOSITOR (2026-11-16): a breathing name's own
   // text animates nothing, so the fade loop it outranks stops too.
-  it("animates nothing on a breathing name's own text, which rests in its rest ink", () => {
+  it("animates nothing on a breathing name's own text, which keeps its state's own color", () => {
     // Arrange / Act
     const rule = ownDeclarationsOf("#ws-sidebar .row .name.breathes") ?? "";
 
     // Assert
-    expect([/animation:\s*none/.test(rule), /(?:^|;)\s*color:\s*var\(--name-rest\)/.test(rule)]).toEqual([true, true]);
+    expect([/animation:\s*none/.test(rule), /(?:^|;)\s*color:/.test(rule)]).toEqual([true, false]);
   });
 
   it("hides an animated name's own text and strike line while its copies draw them", () => {

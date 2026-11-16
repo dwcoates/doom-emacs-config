@@ -6997,11 +6997,10 @@ bubble-body.bubble-body { display: block; }
    ink box and the breath the peak copy's opacity. */
 #ws-sidebar { --ws-mark-cycle: 2s; --ws-revive-cycle: 2.4s; }
 /* A breathing name rests in its rest ink, and no other animation colors it:
-   the breath outranks a fade, as the color loop it replaced did. */
-#ws-sidebar .row .name.breathes {
-  animation: none;
-  color: var(--name-rest);
-}
+   the breath outranks a fade, as the color loop it replaced did. Every name
+   state above declares its color as its --name-rest, so the rest ink is the
+   name's own color once the fade stops. */
+#ws-sidebar .row .name.breathes { animation: none; }
 /* A COLORED NAME BREATHES BOTH WAYS (owner request, 2026-10-29): evenly darker
    and brighter about its tone, with a shallower swing than the grey names'
    brightening alone. */
