@@ -26,13 +26,15 @@ func dispatched(h *harness, d Decision) error {
 
 // withRemediation records "ws-remedy" as the chain's last remediation: a fix
 // dispatched to it for the check owed at deployStarted, whose deploy began a
-// minute later.
+// minute later and is told to the check's fresh intake ("ws-intake" again,
+// as the harness names every intake).
 func withRemediation(t *testing.T, h *harness) {
 	t.Helper()
 	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
+	withIntake(t, h, deployStarted.Add(time.Minute))
 }
 
 func TestAFreshDispatchMakesAVisibleRemediationAndBriefsItTheProblems(t *testing.T) {
@@ -108,6 +110,51 @@ func TestARestoredDispatchReopensTheLastRemediation(t *testing.T) {
 	}
 }
 
+func TestARestoredRemediationIsShownAgain(t *testing.T) {
+	tests := []struct {
+		name      string
+		resumeErr error
+		wantErr   bool
+	}{
+		{name: "a restored remediation is shown"},
+		{name: "one that cannot be shown holds the queue for the intake", resumeErr: errors.New("database is locked"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			withRemediation(t, h)
+			h.checks.resumeErr = tt.resumeErr
+
+			// Act
+			err := dispatched(h, Decision{Restore: true})
+
+			// Assert
+			if !slices.Equal(h.checks.resumed, []ids.WorkspaceID{"ws-remedy"}) {
+				t.Fatalf("resumed %v, want the restored remediation shown", h.checks.resumed)
+			}
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("dispatch = %v, want an error %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				return
+			}
+			if m := owedCheck(t, h); m == nil || m.Dispatched {
+				t.Fatalf("check %+v, want it still owed with nothing dispatched", m)
+			}
+			if len(h.queue.submissions) != 0 {
+				t.Fatalf("submitted %v, want the hidden remediation unbriefed", h.queue.submissions)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+				Message: "the restored remediation workspace could not be shown; the queue stays held for the intake"}); !ok {
+				t.Fatalf("records = %v, want the failed show at ERROR", h.logs.Records())
+			}
+		})
+	}
+}
+
 func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -126,6 +173,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 					}
 					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
 				}
+				withIntake(t, h, deployStarted.Add(time.Duration(theBound)*time.Minute))
 			}},
 	}
 	for _, tt := range tests {

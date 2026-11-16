@@ -1121,50 +1121,68 @@ message RosterRepoMergeQueue {
 //   │ doom   [RosterMergeQueueMediation label]   (37)    │
 //   └────────────────────────────────────────────────────┘
 //
-// The label's words are the standing's: `hot reloading`, `assessing reload`
-// or `fixing reload`. A click on it selects the workspace at work, when one
-// is. Tag 1 (`subject`) is RETIRED: no workspace is drawn as a queue row for
-// the check.
+// The label's words are the standing's, fixed text the same for every
+// repository (owner ruling, 2026-11-16): `HOT-LOADING ZETTEL`, `ASSESSING
+// ZETTEL HEALTH`, `FIXING ZETTEL ISSUES`, `TESTING ZETTEL FIXES` or
+// `ZETTEL NEEDS YOU`. A click
+// on it selects the workspace at work, when one is. Tag 1 (`subject`) is
+// RETIRED: no workspace is drawn as a queue row for the check. Tag 5
+// (`finishing`) is RETIRED: a finish's gate and landing are `testing`, its
+// deploy `waiting`, and a gate that sends the workspace back is `fixing`.
 message RosterMergeQueueMediation {
-  reserved 1;
-  reserved "subject";
+  reserved 1, 5;
+  reserved "subject", "finishing";
   // REQUIRED. Where the check stands; the arm IS the label's state.
   oneof standing {
-    // The deploy is still rolling out (`hot reloading`).
+    // A deploy is rolling out (`HOT-LOADING ZETTEL`): a landing's, or a
+    // landed fix's.
     RosterMergeQueueMediationWaiting waiting = 2;
-    // The chain's intake is checking the deploy (`assessing reload`).
+    // The chain's intake is checking the deploy (`ASSESSING ZETTEL HEALTH`).
     RosterMergeQueueMediationChecking checking = 3;
-    // A remediation workspace is fixing what the intake found
-    // (`fixing reload`).
+    // A remediation workspace is fixing what the intake found, or what its
+    // own finish's gate failed on (`FIXING ZETTEL ISSUES`).
     RosterMergeQueueMediationFixing fixing = 4;
-    // A remediation or escalation workspace finished, and its fix is being
-    // gated, landed and deployed (`finishing reload`). The workspace itself
-    // is hidden meanwhile: this label is where it is shown.
-    RosterMergeQueueMediationFinishing finishing = 5;
+    // A remediation's or an escalation's finished fix runs its full gate
+    // and then lands (`TESTING ZETTEL FIXES`). The workspace itself stands
+    // by hidden meanwhile: this label is where it is shown.
+    RosterMergeQueueMediationTesting testing = 6;
+    // The check was escalated, and the queue waits on the user until the
+    // escalation's fix deploys and is approved or the user closes the
+    // escalation workspace (`ZETTEL NEEDS YOU`; owner ruling, 2026-11-16).
+    RosterMergeQueueMediationEscalated escalated = 7;
   }
 }
-// Hot reloading.
+// HOT-LOADING ZETTEL.
 message RosterMergeQueueMediationWaiting {
   // What a click on the label selects: the chain's intake, which checks the
-  // deploy once it has rolled out. UNSET for a chain's first deploy, whose
-  // intake does not exist yet; the label is then not clickable.
+  // deploy once it has rolled out. UNSET for a chain's first deploy, and for
+  // an escalation's fix deploying after its chain ended, which have no
+  // intake; the label is then not clickable.
   optional RosterMergeQueueMediationTarget target = 1;
 }
-// Assessing reload.
+// ASSESSING ZETTEL HEALTH.
 message RosterMergeQueueMediationChecking {
   // REQUIRED. What a click on the label selects: the chain's intake, a
   // hidden workspace the selection shows.
   RosterMergeQueueMediationTarget target = 1;
 }
-// Fixing reload.
+// FIXING ZETTEL ISSUES.
 message RosterMergeQueueMediationFixing {
   // REQUIRED. What a click on the label selects: the remediation workspace.
   RosterMergeQueueMediationTarget target = 1;
 }
-// Finishing reload.
-message RosterMergeQueueMediationFinishing {
-  // REQUIRED. What a click on the label selects: the finishing workspace.
+// TESTING ZETTEL FIXES.
+message RosterMergeQueueMediationTesting {
+  // REQUIRED. What a click on the label selects: the workspace whose fix is
+  // being tested, standing by hidden.
   RosterMergeQueueMediationTarget target = 1;
+}
+// ZETTEL NEEDS YOU.
+message RosterMergeQueueMediationEscalated {
+  // What a click on the label selects: the escalation workspace where the
+  // user settles the check. UNSET only while that workspace is still being
+  // made; the label is then not clickable.
+  optional RosterMergeQueueMediationTarget target = 1;
 }
 // The workspace a click on the label selects, handed back unchanged in the
 // selection (agentrepl.v1.SelectWorkspaceRequest).

@@ -308,6 +308,7 @@ var migrations = []migration{
 	{To: 157, Name: "merge_round_hold", Kind: MigrationAdditive, DDL: mergeRoundHoldDDL},
 	{To: 158, Name: "folded_merge_ledgers", Kind: MigrationAdditive, Rewrite: foldExtraMergeLedgers},
 	{To: 159, Name: "mediation_resumed", Kind: MigrationAdditive, DDL: mediationResumedDDL},
+	{To: 160, Name: "mediation_escalation", Kind: MigrationAdditive, DDL: mediationEscalationDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

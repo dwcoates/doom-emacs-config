@@ -153,6 +153,10 @@ message MergeQueueStatusAdvanceMediating {
     // A remediation workspace is fixing what the intake dispatched; no new
     // speculative work starts in the queue until its fix lands.
     MergeQueueStatusAdvanceMediatingFixing fixing = 5;
+    // The check was escalated, and the queue waits on the user until the
+    // escalation's fix deploys and is approved or the user closes the
+    // escalation (owner ruling, 2026-11-16); no intake decides it.
+    MergeQueueStatusAdvanceMediatingEscalated escalated = 7;
   }
   // How many remediations the chain has deployed in a row so far, 0 for a
   // chain's first deploy.
@@ -169,6 +173,12 @@ message MergeQueueStatusAdvanceMediatingRollingOut {
 message MergeQueueStatusAdvanceMediatingAssessing {
   // REQUIRED. The chain's intake, a hidden workspace.
   workspace.v1.WorkspaceRef intake = 1;
+}
+// Escalated.
+message MergeQueueStatusAdvanceMediatingEscalated {
+  // The escalation workspace the user settles the check in. UNSET only
+  // while it is still being made.
+  optional workspace.v1.WorkspaceRef escalation = 1;
 }
 // Fixing.
 message MergeQueueStatusAdvanceMediatingFixing {

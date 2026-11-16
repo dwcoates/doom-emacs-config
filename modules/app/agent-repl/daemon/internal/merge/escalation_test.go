@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -73,9 +74,9 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 			// Act
 			tt.act(t, h)
 
-			// Assert
-			if owedCheck(t, h) != nil {
-				t.Fatal("the escalated check still holds the queue")
+			// Assert: the check stays owed, holding the queue for the user.
+			if got := heldEscalation(t, h); got != "ws-escalate" {
+				t.Fatalf("the check waits on escalation %q, want the escalation workspace", got)
 			}
 			if len(h.checks.made) == 0 || !strings.HasPrefix(h.checks.made[len(h.checks.made)-1], "deploy-escalation-") {
 				t.Fatalf("made %v, want an escalation workspace made last", h.checks.made)
@@ -123,10 +124,11 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 			// Act
 			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours"})
 
-			// Assert: the queue moves on regardless, and the lost escalation
-			// is the record's to tell.
-			if err != nil || owedCheck(t, h) != nil {
-				t.Fatalf("DecideMediation = %v, want the check released", err)
+			// Assert: the queue stays held for the user, escalated with no
+			// workspace for the next pass to make, and the lost escalation is
+			// the record's to tell.
+			if err != nil || heldEscalation(t, h) != "" {
+				t.Fatalf("DecideMediation = %v, want the check held, escalated with no workspace", err)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
 				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
@@ -175,6 +177,18 @@ func TestAnEscalationThatCannotBeRecordedIsNotBriefed(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the escalation workspace could not be recorded as landing directly; it is not briefed and the user is not told"}); !ok {
 		t.Fatalf("records = %+v, want the failed record at ERROR", h.logs.Records())
 	}
+}
+
+// heldEscalation answers the escalation workspace the owed check waits on,
+// empty while it is still being made, failing unless the check is owed and
+// escalated: an escalation holds the queue for the user.
+func heldEscalation(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	m := owedCheck(t, h)
+	if m == nil || !m.Escalated() {
+		t.Fatalf("check %+v, want it owed and escalated, holding the queue", m)
+	}
+	return m.Escalation
 }
 
 // oldEscalation is the escalation workspace a check's problems were put
@@ -264,9 +278,13 @@ func TestAProblemAnOpenEscalationOwnsGoesBackToIt(t *testing.T) {
 			// Act
 			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: tt.problems})
 
-			// Assert
-			if err != nil || owedCheck(t, h) != nil {
-				t.Fatalf("DecideMediation = %v, want the check released", err)
+			// Assert: the check waits on the escalation that took it.
+			holder := oldEscalation
+			if tt.wantNew {
+				holder = "ws-escalate"
+			}
+			if got := heldEscalation(t, h); err != nil || got != holder {
+				t.Fatalf("DecideMediation = %v, check waits on %q; want it held by %q", err, got, holder)
 			}
 			updates := updatesTo(h, oldEscalation)
 			if tt.wantUpdate == "" && len(updates) != 0 {
@@ -362,9 +380,9 @@ func TestAnEscalationsUpdateThatCannotBeSentIsRecorded(t *testing.T) {
 			// Act
 			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
 
-			// Assert
-			if err != nil || owedCheck(t, h) != nil {
-				t.Fatalf("DecideMediation = %v, want the check released", err)
+			// Assert: the check waits on the escalation it went back to.
+			if got := heldEscalation(t, h); err != nil || got != oldEscalation {
+				t.Fatalf("DecideMediation = %v, check waits on %q; want it held by the open escalation", err, got)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
 				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
@@ -392,9 +410,9 @@ func TestOwnersThatCannotBeReadEscalateNothing(t *testing.T) {
 	// Act
 	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
 
-	// Assert
-	if err != nil || owedCheck(t, h) != nil {
-		t.Fatalf("DecideMediation = %v, want the check released", err)
+	// Assert: the check stays held, escalated with no workspace.
+	if err != nil || heldEscalation(t, h) != "" {
+		t.Fatalf("DecideMediation = %v, want the check held, escalated with no workspace", err)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 		Message: "could not read which open escalations own the deploy's problems; none is told, and nothing is escalated anew"}); !ok {
@@ -508,5 +526,134 @@ func TestADecisionWhileTheDaemonStopsLeavesTheCheckOwed(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: mediationNotRun}); !ok {
 		t.Fatalf("records = %v, want the refused decision recorded", h.logs.Records())
+	}
+}
+
+// escalatedBy escalates the owed check through its intake and answers the
+// escalation that holds it.
+func escalatedBy(t *testing.T, h *harness) ids.WorkspaceID {
+	t.Helper()
+	withIntake(t, h, deployStarted)
+	if err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours", Problems: aProblem}); err != nil {
+		t.Fatalf("DecideMediation: %v", err)
+	}
+	return heldEscalation(t, h)
+}
+
+func TestClosingTheEscalationIsWhatReleasesItsHold(t *testing.T) {
+	tests := []struct {
+		name         string
+		closed       ids.WorkspaceID
+		wantReleased bool
+	}{
+		{name: "the user closes the escalation the check waits on", closed: "ws-escalate", wantReleased: true},
+		{name: "another workspace closing leaves the hold", closed: theWorkspace},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			escalatedBy(t, h)
+
+			// Act
+			h.o.OnWorkspaceClosed(context.Background(), tt.closed)
+
+			// Assert
+			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
+				t.Fatalf("released %v, want %v", released, tt.wantReleased)
+			}
+			_, recorded := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+				Message: "the user closed the escalation; its check is released and the queue advances"})
+			if recorded != tt.wantReleased {
+				t.Fatalf("records = %v, want the release recorded %v", h.logs.Records(), tt.wantReleased)
+			}
+		})
+	}
+}
+
+func TestAnEscalationsOwnFixDeployingHandsItsCheckToAFreshIntake(t *testing.T) {
+	// Arrange: the check is escalated, and the escalation's finish lands.
+	h := checked(t)
+	owe(t, h)
+	esc := escalatedBy(t, h)
+	ctx := context.Background()
+	landed := deployStarted.Add(30 * time.Second)
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: esc, Repo: mediationKey(h), StartedAt: landed}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.AdvanceRemediationFinish(ctx, esc, wsm.RemediationGating, wsm.RemediationLanding, landed); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.RecordRemediationLanded(ctx, esc, tipAfter, nil, landed); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: the escalation's fix deploys, and an unrelated deploy before it.
+	oweAt(t, h, deployStarted.Add(time.Minute))
+
+	// Assert
+	m := owedCheck(t, h)
+	if m == nil || m.Escalated() || m.Intake != "" {
+		t.Fatalf("check %+v, want the fix's deploy owed afresh, unescalated, for a fresh intake", m)
+	}
+}
+
+func TestAnUnrelatedDeployLeavesTheEscalationsHold(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	esc := escalatedBy(t, h)
+
+	// Act
+	oweAt(t, h, deployStarted.Add(time.Minute))
+	h.o.Mediate(context.Background())
+
+	// Assert: still held by the same escalation, and no intake told of it.
+	if got := heldEscalation(t, h); got != esc || len(intakeTellings(h)) != 0 {
+		t.Fatalf("check waits on %q, intake told %d times; want the hold kept and no intake told", got, len(intakeTellings(h)))
+	}
+}
+
+func TestAnEscalationThatCouldNotBeMadeIsMadeByTheNextPass(t *testing.T) {
+	// Arrange: the first escalation workspace could not be made.
+	h := checked(t)
+	owe(t, h)
+	h.checks.escalationErr = errors.New("disk full")
+	if escalatedBy(t, h) != "" {
+		t.Fatal("the check names an escalation that was never made")
+	}
+	h.checks.mu.Lock()
+	h.checks.escalationErr = nil
+	h.checks.mu.Unlock()
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if got := heldEscalation(t, h); got != "ws-escalate" {
+		t.Fatalf("check waits on %q, want the escalation made by the pass", got)
+	}
+	if subs := escalationBriefs(h); len(subs) != 1 || !strings.Contains(submittedText(subs[0]), "the reaper errors on every pass") {
+		t.Fatalf("briefed %v, want the escalation briefed once with the kept findings", subs)
+	}
+}
+
+func TestAnIntakeThatCannotBeClosedAfterItsDecisionIsRecorded(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	h.checks.stopErr = errors.New("kill refused")
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours"})
+
+	// Assert: the decision stands, and the failed close is the record's.
+	if err != nil || heldEscalation(t, h) != "ws-escalate" {
+		t.Fatalf("DecideMediation = %v, want the escalation held", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake decided but could not be closed"}); !ok {
+		t.Fatalf("records = %v, want the failed close at ERROR", h.logs.Records())
 	}
 }

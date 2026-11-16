@@ -530,31 +530,37 @@ export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
 
 /**
  * The deploy check the queue waits on, as a purple label beside the
- * repository's name in its group header (owner rulings, 2026-11-14): `hot
- * reloading` while the landing's build rolls out, `assessing reload` while
- * the chain's intake checks it, `fixing reload` while a remediation
- * workspace fixes what the intake found, `finishing reload` while a
- * remediation's or an escalation's fix is gated, landed and deployed, its
- * workspace standing by hidden (owner requirement, 2026-11-16). A click on it selects the workspace
- * at work (`frontend.v1.RosterMergeQueueMediationTarget`), showing the hidden
- * intake for the visit as a click on any hidden workspace's link does; a
- * chain's first rollout names none, and its label selects nothing.
+ * repository's name in its group header (owner rulings, 2026-11-14 and
+ * 2026-11-16), its words fixed text the same for every repository, written
+ * lowercase for the header to draw uppercase: `hot-loading zettel` while a
+ * build rolls out, `assessing zettel health` while the chain's intake checks
+ * it, `fixing zettel issues` while a remediation workspace fixes what the
+ * intake or its own gate found, `testing zettel fixes` while a
+ * remediation's or an escalation's finished fix runs its gate and lands, its
+ * workspace standing by hidden, `zettel needs you` while an escalated check
+ * waits on the user. A click on it selects the workspace at work
+ * (`frontend.v1.RosterMergeQueueMediationTarget`), showing a hidden one for
+ * the visit as a click on any hidden workspace's link does; a rollout with no
+ * intake names none, and its label selects nothing.
  */
 export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: SidebarContext, path: string): HTMLElement {
   const standing = requireCase(u.standing, `${path}.standing`);
   switch (standing.case) {
     case "waiting":
-      return mediationLabel(sc, "hot reloading", "the last landing is rolling out; it is assessed once it has, and the queue waits for it",
+      return mediationLabel(sc, "hot-loading zettel", "Zettel is hot-loading the last landing; its health is assessed once it has, and the queue waits for it",
         standing.value.target, `${path}.standing.waiting.target`);
     case "checking":
-      return mediationLabel(sc, "assessing reload", "the last landing's reload is being assessed; the queue waits for it",
+      return mediationLabel(sc, "assessing zettel health", "Zettel's health after the last landing is being assessed; the queue waits for it",
         requireMessage(standing.value.target, `${path}.standing.checking.target`), `${path}.standing.checking.target`);
     case "fixing":
-      return mediationLabel(sc, "fixing reload", "a remediation is fixing what the last landing's reload broke; the queue waits for its fix",
+      return mediationLabel(sc, "fixing zettel issues", "a remediation is fixing the issues the last landing caused in Zettel; the queue waits for its fix",
         requireMessage(standing.value.target, `${path}.standing.fixing.target`), `${path}.standing.fixing.target`);
-    case "finishing":
-      return mediationLabel(sc, "finishing reload", "a fix finished; it is being gated, landed and deployed, and the queue waits for it",
-        requireMessage(standing.value.target, `${path}.standing.finishing.target`), `${path}.standing.finishing.target`);
+    case "testing":
+      return mediationLabel(sc, "testing zettel fixes", "a remediation's fix is running its full gate, then lands; the queue waits for it",
+        requireMessage(standing.value.target, `${path}.standing.testing.target`), `${path}.standing.testing.target`);
+    case "escalated":
+      return mediationLabel(sc, "zettel needs you", "a deploy check was escalated to you; the queue waits until its fix lands or you close its escalation",
+        standing.value.target, `${path}.standing.escalated.target`);
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);

@@ -307,7 +307,13 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 // SessionHealth counterpart of TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials:
 // a live shim whose stream was severed (never exited) is the link_severed
 // arm, distinct from shim_died.
-func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
+// TestALinkSeveredUnderALiveShimIsReportedUntilItServesAgain covers a
+// severing's whole life: the footer draws the link severed, the session's
+// link_severed fault opens, and once the watches re-open and serve under the
+// same live shim the fault closes on its link_restored edge, leaving the
+// session healthy (2026-11-16: rows stood severed while their workspaces
+// worked).
+func TestALinkSeveredUnderALiveShimIsReportedUntilItServesAgain(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newOpened(t, harness.Opts{})
@@ -319,21 +325,17 @@ func TestSessionHealthAfterTheLinkIsSeveredReportsLinkSevered(t *testing.T) {
 
 	// Act: sever the session stream without killing the shim process.
 	f.shim.DropStream(harness.StreamSession)
+
+	// Assert: drawn severed, then the severing closed on its own edge.
 	awaitFooter(t, f, footer, "disconnected.severed once the link dies", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetAgentReplFault().GetSevered() != nil
 	})
-
-	// Assert
+	f.d.AwaitLogRecord(f.d.RunLogPath(), "the severing closed once the link served again", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.health.close_on_edge" && r.Context["kind"] == "link_severed" && r.Context["edge"] == "link_restored"
+	})
 	resp, err := f.d.Client().SessionHealth(f.d.Ctx(), connect.NewRequest(&agentreplv1.SessionHealthRequest{Workspace: f.ws}))
-	if err != nil {
-		t.Fatalf("SessionHealth = error %v, want a success carrying the fault", err)
-	}
-	unhealthy := resp.Msg.GetSuccess().GetUnhealthy()
-	if unhealthy == nil || len(unhealthy.GetFaults()) == 0 {
-		t.Fatalf("SessionHealth with a severed link = %v, want success{unhealthy{faults}}", resp.Msg)
-	}
-	if got := unhealthy.GetFaults()[0].GetLinkSevered(); got == nil {
-		t.Fatalf("the reported fault = %v, want the link_severed arm", unhealthy.GetFaults()[0])
+	if err != nil || resp.Msg.GetSuccess().GetHealthy() == nil {
+		t.Fatalf("SessionHealth = (%v, %v), want healthy once the link serves again", resp, err)
 	}
 }
 

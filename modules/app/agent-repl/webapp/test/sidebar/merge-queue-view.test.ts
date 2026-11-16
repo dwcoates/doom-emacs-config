@@ -703,25 +703,40 @@ describe("drawQueueMediationLabel", () => {
   }
 
   it.each([
-    ["hot reloading", { case: "waiting" as const, value: {} }],
-    ["assessing reload", { case: "checking" as const, value: { target: target("intake") } }],
-    ["fixing reload", { case: "fixing" as const, value: { target: target("remedy") } }],
-    ["finishing reload", { case: "finishing" as const, value: { target: target("remedy") } }],
-  ])("reads %s for its standing", (want, standing) => {
+    ["hot-loading zettel", { case: "waiting" as const, value: {} },
+      "Zettel is hot-loading the last landing; its health is assessed once it has, and the queue waits for it"],
+    ["assessing zettel health", { case: "checking" as const, value: { target: target("intake") } },
+      "Zettel's health after the last landing is being assessed; the queue waits for it"],
+    ["fixing zettel issues", { case: "fixing" as const, value: { target: target("remedy") } },
+      "a remediation is fixing the issues the last landing caused in Zettel; the queue waits for its fix"],
+    ["testing zettel fixes", { case: "testing" as const, value: { target: target("remedy") } },
+      "a remediation's fix is running its full gate, then lands; the queue waits for it"],
+    ["zettel needs you", { case: "escalated" as const, value: { target: target("escalation") } },
+      "a deploy check was escalated to you; the queue waits until its fix lands or you close its escalation"],
+  ])("reads %s, titled to match, for its standing", (want, standing, title) => {
     const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), daemon().sc, "m");
-    expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual([want, true]);
+    expect([label.textContent, label.title, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual([want, title, true]);
   });
 
   it.each([
     ["a rollout's label selects the chain's intake", { case: "waiting" as const, value: { target: target("intake") } }, "intake"],
     ["an assessment's label selects the intake", { case: "checking" as const, value: { target: target("intake") } }, "intake"],
     ["a fix's label selects the remediation", { case: "fixing" as const, value: { target: target("remedy") } }, "remedy"],
-    ["a finish's label selects the workspace standing by", { case: "finishing" as const, value: { target: target("remedy") } }, "remedy"],
+    ["a fix under test's label selects the workspace standing by", { case: "testing" as const, value: { target: target("remedy") } }, "remedy"],
+    ["an escalated check's label selects its escalation", { case: "escalated" as const, value: { target: target("escalation") } }, "escalation"],
   ])("%s on a click", async (_name, standing, want) => {
     const { asked, sc } = selecting();
     drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), sc, "m").click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", want]]);
+  });
+
+  it("selects nothing on a click while an escalation is still being made", async () => {
+    const { asked, sc } = selecting();
+    const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing: { case: "escalated", value: {} } }), sc, "m");
+    label.click();
+    await settled();
+    expect([asked.length, label.hasAttribute("data-select")]).toEqual([0, false]);
   });
 
   it("selects nothing on a click while a chain's first deploy rolls out", async () => {
@@ -736,7 +751,7 @@ describe("drawQueueMediationLabel", () => {
     ["no standing", create(RosterMergeQueueMediationSchema, {})],
     ["an assessment with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "checking", value: {} } })],
     ["a fix with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "fixing", value: {} } })],
-    ["a finish with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "finishing", value: {} } })],
+    ["a fix under test with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "testing", value: {} } })],
   ])("refuses %s as a malformed view", (_name, malformed) => {
     expect(() => drawQueueMediationLabel(malformed, daemon().sc, "m")).toThrow(MalformedView);
   });
@@ -751,7 +766,7 @@ describe("drawQueueMediationLabel", () => {
     const section = mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1"), mediation: mediation(true) } })]);
     const head = drawRosterMergeQueueSection(section, daemon().sc, "p").querySelector(".merged-group-head");
     const label = head?.querySelector(`.${MERGE_QUEUE_MEDIATION_CLASS}`);
-    expect([label?.textContent, label?.previousElementSibling?.classList.contains("sb-open-count")]).toEqual(["assessing reload", true]);
+    expect([label?.textContent, label?.previousElementSibling?.classList.contains("sb-open-count")]).toEqual(["assessing zettel health", true]);
   });
 
   it("draws a queue holding only the mediation with no head, only the glyph's line", () => {

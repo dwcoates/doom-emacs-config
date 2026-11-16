@@ -143,6 +143,10 @@ type watcher struct {
 	// just established. A link that comes back with every stream still
 	// standing has nothing to re-open.
 	degraded bool
+	// severingRaised reports that this watcher raised a severing at the
+	// lifecycle (OnLinkFault, LinkFaultSevered) that no agent watch opening
+	// since has ended (linkRestoredLocked).
+	severingRaised bool
 	// fleetConnections is the client's Connections() when the current fleet
 	// was opened. A severing that finds the count already past it knows the
 	// link broke AND came back before this watcher heard its own stream end,
@@ -1437,6 +1441,7 @@ func (w *watcher) raiseLinkFaultLocked(state LinkState) {
 	switch state {
 	case shimclient.LinkRedialing:
 		w.log.Warn("daemon.sessionwatcher.link_fault", "the shim link was severed", nil)
+		w.severingRaised = true
 		w.sinks.Lifecycle.OnLinkFault(w.ws, LinkFault{
 			Kind:   LinkFaultSevered,
 			Detail: "a standing stream ended while the shim was still running",
@@ -1556,6 +1561,19 @@ func (w *watcher) pacedTookLocked() {
 	}
 	w.log.Info("daemon.sessionwatcher.paced_reopen_took", "a paced re-open took: the shim serves its watches again", dlog.Context{"attempts": w.paced})
 	w.paced = 0
+}
+
+// linkRestoredLocked ends the severing this watcher raised once an agent
+// watch opened again: its open read the store through the shim, so the link
+// serves again, and the lifecycle closes the `link_severed` fault the
+// severing opened (health.EdgeLinkRestored). Caller holds mu.
+func (w *watcher) linkRestoredLocked() {
+	if !w.severingRaised {
+		return
+	}
+	w.severingRaised = false
+	w.log.Info("daemon.sessionwatcher.link_restored", "an agent watch opened again after the link was severed; the severing is over", nil)
+	w.sinks.Lifecycle.OnLinkRestored(w.ws)
 }
 
 // reopenPace is how long a fleet severed under a live shim waits before each
@@ -1930,6 +1948,7 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 	a.refusals = 0
 	a.stream = installed
 	w.pacedTookLocked()
+	w.linkRestoredLocked()
 	w.log.Debug("daemon.sessionwatcher.watch_agent", "agent watch opened", dlog.Context{
 		"agent_id": a.id.GetValue(), "opening": openingName(req),
 	})

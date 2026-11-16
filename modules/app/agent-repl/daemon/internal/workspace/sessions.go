@@ -1541,8 +1541,8 @@ func (f *Fleet) timedStart(
 	// first healthy diagnostics, so reaching here IS the repair of every
 	// standing fault whose lifetime ends at a healthy attach: a lost link, a
 	// start that failed, an undetermined bounce. A mid-stream redial is NOT
-	// this moment: the link coming back on a stream the daemon never
-	// re-attached leaves the evidence standing.
+	// this moment: a severing ends there only once an agent watch opens again
+	// under the live shim (health.EdgeLinkRestored, the session watcher's).
 	f.closeOnEdge(ctx, log, ws, health.EdgeHealthyAttach)
 	// AGENT-REPL'S OWN SERVICES SERVE THE WORKSPACE from here, whatever the
 	// vendor goes on to do: this is the moment the editor's tab may open.

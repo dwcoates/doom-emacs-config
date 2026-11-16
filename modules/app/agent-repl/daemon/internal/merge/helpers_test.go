@@ -368,6 +368,14 @@ func (f *fakeDB) MarkMediationResumed(ctx context.Context, repo wsm.RepoKey, owe
 	return f.checks.MarkMediationResumed(ctx, repo, owed, turn)
 }
 
+func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time, brief string) (bool, error) {
+	return f.checks.EscalateMediation(ctx, repo, owed, brief)
+}
+
+func (f *fakeDB) RecordMediationEscalation(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
+	return f.checks.RecordMediationEscalation(ctx, repo, owed, ws)
+}
+
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }
@@ -4602,6 +4610,8 @@ type fakeDeployChecks struct {
 	// work; standByErr fails a stand-by.
 	stoodBy, resumed []ids.WorkspaceID
 	standByErr       error
+	// resumeErr fails every Resume.
+	resumeErr error
 	// onStopNow runs inside each stop, as ending the stopped session does.
 	onStopNow func()
 	// createCtxErrs records each check workspace's creation context error.
@@ -4682,7 +4692,7 @@ func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumed = append(f.resumed, ws)
-	return nil
+	return f.resumeErr
 }
 
 func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {

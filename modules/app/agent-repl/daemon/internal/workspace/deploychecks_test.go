@@ -73,6 +73,64 @@ func TestADeployCheckWorkspaceIsMadeUnpromptedWithNoSession(t *testing.T) {
 	}
 }
 
+func TestOnlyAnEscalationIsMadeInRemoteControl(t *testing.T) {
+	tests := []struct {
+		name   string
+		create func(v *verbs, repoDir string) (wsm.Workspace, error)
+		wantOn bool
+	}{
+		{name: "the intake", create: func(v *verbs, repoDir string) (wsm.Workspace, error) {
+			return v.CreateDeployIntake(context.Background(), repoDir, "deploy-intake-20261114-120000")
+		}},
+		{name: "the remediation", create: func(v *verbs, repoDir string) (wsm.Workspace, error) {
+			return v.CreateDeployRemediation(context.Background(), repoDir, "deploy-remediation-20261114-120000")
+		}},
+		{name: "the escalation", wantOn: true, create: func(v *verbs, repoDir string) (wsm.Workspace, error) {
+			return v.CreateDeployEscalation(context.Background(), repoDir, "deploy-escalation-20261114-120000")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
+
+			// Act
+			made, err := tt.create(f.verbs.(*verbs), mainWorktree(t, f))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			f.db.remoteMu.Lock()
+			standing := f.db.remote[made.ID]
+			f.db.remoteMu.Unlock()
+			if standing.On != tt.wantOn {
+				t.Fatalf("remote control %+v, want on %v", standing, tt.wantOn)
+			}
+		})
+	}
+}
+
+func TestAnEscalationWhoseRemoteControlCannotBeRecordedIsNotMade(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
+	f.db.remoteSetErr = errors.New("database is locked")
+
+	// Act
+	_, err := f.verbs.(*verbs).CreateDeployEscalation(context.Background(), mainWorktree(t, f), "deploy-escalation-20261114-120000")
+
+	// Assert
+	if err == nil {
+		t.Fatal("CreateDeployEscalation = nil, want the escalation refused")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks,
+		Message: "the escalation workspace was made but its remote control could not be turned on"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
 func TestADeployCheckWorkspaceIsSetToItsRolesEffort(t *testing.T) {
 	tests := []struct {
 		name string

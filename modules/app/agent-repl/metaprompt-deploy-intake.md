@@ -1,14 +1,14 @@
 ## Landing as a deploy intake
 
-### This workspace is the intake of a chain of deploys
+### This workspace is the intake of one deploy
 
-- This session is the deploy intake of one chain of its repository's deploys: a hidden workspace agent-repl makes to check each deploy before the merge queue lands past it.
-  - A chain begins at a deploy no other check was owed beside, and ends when the queue moves on; this workspace is closed then.
+- This session is a deploy intake: a hidden workspace agent-repl makes to check one deploy before the merge queue lands past it.
+  - It decides that deploy once, with one command, and agent-repl closes it the moment the decision is recorded.
+  - The next deploy of the chain, such as a remediation's, is told to a fresh intake; the brief states the chain so far.
   - The repository's lifecycle config turns the checks on (`deploy_checks` in `.agent-repl/lifecycle.yaml`).
   - The design is `modules/app/agent-repl/docs/investigations/2026-11-14-deploy-intake-plan.md`.
-- agent-repl tells this conversation of every deploy of the chain in turn, so every earlier attempt stays in this context.
-  - Each deploy is decided in the turn its brief starts.
-  - A turn that ends deciding nothing lets the queue through and tells the user, so always decide.
+- The deploy is decided in the turn its brief starts.
+  - A turn that ends deciding nothing is resumed once; a second escalates the deploy to the user, so always decide.
 
 ### State problems, never research or fix them
 
@@ -27,7 +27,7 @@
 
 - Every group is OWNED, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`.
   - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
-  - An approval stops this session at once, so the command is the turn's last act.
+  - Every decision closes this session at once, so the command is the turn's last act.
 - Something is wrong that the user should settle (a choice about how something looks or behaves, a NEW test reuse fact, or no problem an agent could fix from the evidence): escalate, with the findings on standard input as a dispatch's are:
 
 ```bash
@@ -37,7 +37,7 @@ JSON
 ```
 
   - This workspace never talks to the user: agent-repl makes a visible escalation workspace from the summary and findings, and notifies the user, whose click opens it.
-  - The queue moves on, and the chain ends.
+  - The queue lands nothing until the escalation's fix deploys and is approved, or the user closes the escalation.
   - The escalation workspace is told every SEEN BEFORE, RECURRED and OWNED group beside the findings, and owns every group it is told that nobody owned.
 - Problems an agent can fix, of any standing but OWNED: dispatch them, with their evidence, to a remediation workspace.
   - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem nobody has ended.

@@ -1540,13 +1540,14 @@ mediation the queue waits on, nil while it waits on none
 A plist `(:standing STANDING :target TARGET)': where the deploy check the
 queue waits on stands, `:waiting' (the deploy still rolls out),
 `:checking' (the chain's intake assesses it), `:fixing' (a remediation
-workspace fixes it) or `:finishing' (a remediation's or an escalation's fix
-is gated, landed and deployed while its workspace stands by hidden), and
-TARGET, the workspace ref a click on its label
-selects.  TARGET is nil only while a chain's first deploy rolls out, whose
-intake does not exist yet; the standing is never unset."
+workspace fixes it, or what its own gate failed on) or `:testing' (a
+remediation's or an escalation's fix runs its gate and lands while its
+workspace stands by hidden) or `:escalated' (the check waits on the user's
+escalation), and TARGET, the workspace ref a click on its label selects.
+TARGET is nil only while a deploy with no intake rolls out, or while an
+escalation is still being made; the standing is never unset."
   (let ((object (agent-repl-wire--object "RosterMergeQueueMediation" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking fixing finishing))
+    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking fixing testing escalated))
     (let ((standing (agent-repl-wire--decode-oneof
                      "RosterMergeQueueMediation" 'standing object
                      `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
@@ -1555,8 +1556,10 @@ intake does not exist yet; the standing is never unset."
                                                          "RosterMergeQueueMediationChecking" v t)))
                        (fixing :fixing ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
                                                      "RosterMergeQueueMediationFixing" v t)))
-                       (finishing :finishing ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
-                                                           "RosterMergeQueueMediationFinishing" v t)))))))
+                       (testing :testing ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
+                                                       "RosterMergeQueueMediationTesting" v t)))
+                       (escalated :escalated ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
+                                                           "RosterMergeQueueMediationEscalated" v nil)))))))
       (agent-repl-wire--decoded
        "RosterMergeQueueMediation"
        (list :standing (plist-get standing :arm)

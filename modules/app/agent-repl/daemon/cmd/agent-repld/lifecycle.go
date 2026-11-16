@@ -292,14 +292,24 @@ func (s *lifecycleSink) OnWatchOpenRefused(ws ids.WorkspaceID, refusal sessionwa
 // OnWatchOpened closes the workspace's standing watch-open refusal: the watch
 // the shim had refused opened after all.
 func (s *lifecycleSink) OnWatchOpened(ws ids.WorkspaceID) {
+	s.closeOnEdge(ws, health.EdgeWatchOpened, "a watch opened before the health reporter existed; its refusal fault was not closed")
+}
+
+// OnLinkRestored closes the workspace's standing link severing: an agent
+// watch opened again under the same live shim, so the link serves again.
+func (s *lifecycleSink) OnLinkRestored(ws ids.WorkspaceID) {
+	s.closeOnEdge(ws, health.EdgeLinkRestored, "a link was restored before the health reporter existed; its severing fault was not closed")
+}
+
+// closeOnEdge closes every standing fault of WS that EDGE ends. With no
+// health reporter yet, UNBOUND is recorded at ERROR and nothing closes.
+func (s *lifecycleSink) closeOnEdge(ws ids.WorkspaceID, edge health.Edge, unbound string) {
 	reporter, ok := s.health.reporter()
 	if !ok {
-		s.log.Error("daemon.cmd.lifecycle", "a watch opened before the health reporter existed; its refusal fault was not closed", dlog.Context{
-			"workspace": string(ws),
-		})
+		s.log.Error("daemon.cmd.lifecycle", unbound, dlog.Context{"workspace": string(ws), "edge": string(edge)})
 		return
 	}
-	health.CloseOnEdge(context.Background(), health.ReporterFaults(reporter), s.log, health.EdgeWatchOpened,
+	health.CloseOnEdge(context.Background(), health.ReporterFaults(reporter), s.log, edge,
 		health.EdgeScope{Workspace: &ws}, time.Now())
 }
 

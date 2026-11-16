@@ -141,6 +141,12 @@ func mediatingOf(m merge.OwedMediation) *agentreplv1.MergeQueueStatusAdvanceMedi
 		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Assessing{Assessing: &agentreplv1.MergeQueueStatusAdvanceMediatingAssessing{Intake: ref(m.Intake)}}
 	case merge.CheckFixing:
 		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Fixing{Fixing: &agentreplv1.MergeQueueStatusAdvanceMediatingFixing{Remediation: ref(m.Remediation), Intake: ref(m.Intake)}}
+	case merge.CheckEscalated:
+		escalated := &agentreplv1.MergeQueueStatusAdvanceMediatingEscalated{}
+		if m.Escalation != "" {
+			escalated.Escalation = ref(m.Escalation)
+		}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Escalated{Escalated: escalated}
 	default:
 		panic(fmt.Sprintf("server: a deploy check stands at no stage (%+v)", m))
 	}
