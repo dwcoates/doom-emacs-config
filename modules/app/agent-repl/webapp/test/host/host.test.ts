@@ -764,6 +764,30 @@ describe("retireAll", () => {
     ]);
   });
 
+  it("reads a removed page's last message with a null source at info, by its origin", () => {
+    // Arrange: WebKit detached the removed page's window before dispatching.
+    pages(host, "a");
+    host.retireAll();
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data: { channel: HOST_CHANNEL, kind: "drawn", what: "page" },
+        source: null,
+        origin: "http://ws-a.localhost:1",
+      }),
+    );
+
+    // Act
+    const answer = parsed(host.ids());
+
+    // Assert
+    expect(answer.notes).toEqual([
+      {
+        level: "info",
+        text: expect.stringContaining("already removed") as unknown,
+      },
+    ]);
+  });
+
   it("ends the webhost's own page, aborting its requests", () => {
     // Arrange
     pages(host, "a");
