@@ -2,8 +2,8 @@
 
 The services the platform's service manager keeps running: the shim-ecosystem
 services `com.agentrepl.shim-store` and `com.agentrepl.shim-claude-sidecar`,
-the knowledge-graph service `com.agentrepl.zettel`, and the metrics store
-`com.agentrepl.victoriametrics`. launchd runs them on macOS and the user's own
+the knowledge-graph service `com.agentrepl.zettel`, the test service
+`com.agentrepl.tests`, and the metrics store `com.agentrepl.victoriametrics`. launchd runs them on macOS and the user's own
 systemd manager (`systemctl --user`) on Linux; on both they start at login and
 are restarted when they die.
 
@@ -11,7 +11,7 @@ are restarted when they die.
 
 Each service is ONE `service` entry in its system's `requirements.json`
 (`agent-shim/shim-store/`, `agent-shim/claude/shim-sidecar/`, `zettel/`,
-`metrics/`): its label, its program (built here, or an installed command), its
+`testservice/`, `metrics/`): its label, its program (built here, or an installed command), its
 arguments, environment and log files. `bin/requirements.sh` (`rendered_service`)
 renders that entry into a launchd plist under `~/Library/LaunchAgents/` or a
 systemd unit under `~/.config/systemd/user/`, and `install` loads it. No plist
@@ -85,6 +85,17 @@ passed; every other flag keeps its default.
   test-only socket override, deliberately not set. The daemon keeps it loaded
   and on the installed build at every boot and deploy
   (`daemon/internal/deploy/services.go`); nothing else depends on its socket.
+- `com.agentrepl.tests` — `--socket` (`~/.cache/agent-repl/sock/tests.sock`),
+  `--runs` (`~/.cache/agent-repl/tests/runs`, the run registry) and `--log`
+  (`~/.cache/agent-repl/log/tests.log`). Every merge queue gate runs on it,
+  never in the daemon: the gate records its run's id in the merge's progress,
+  and a merge resumed on the next daemon watches that run again from its first
+  line, so a daemon deploy never cuts a gate. `AGENT_REPL_TESTS_SOCKET` is its
+  test-only socket override, deliberately not set, which the daemon's
+  `--tests-socket` beats; `--listen-fd` serves an already-listening socket a
+  test harness binds and hands over (`daemon/integration/harness/testservice.go`),
+  so a client's connect queues until the service accepts. The daemon keeps it
+  loaded and current exactly as it keeps zettel.
 
 `AGENT_REPL_STATE_DIR` is the sidecar's `--state-dir` default, and the same
 variable the daemon resolves and exports into every shim it spawns; the two
