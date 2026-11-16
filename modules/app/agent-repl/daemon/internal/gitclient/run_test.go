@@ -1003,3 +1003,43 @@ func TestAGitWhoseOutputCannotBeCapturedIsAFailureAndNeverRuns(t *testing.T) {
 		t.Fatalf("git ran %d times, want never: %v", len(calls), subjects(calls))
 	}
 }
+
+func TestARemoteTheNetworkCannotReachIsRecordedAtInfo(t *testing.T) {
+	tests := []struct {
+		name      string
+		stderr    string
+		wantLevel string
+	}{
+		{name: "an ssh host that does not resolve", stderr: "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
+		{name: "an https host that does not resolve", stderr: "fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com\n", wantLevel: "info"},
+		{name: "a remote that refused", stderr: "ERROR: Repository not found.\nfatal: Could not read from remote repository.\n", wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			git, logs := newTestClient(t)
+			newFakeGit(t, fails(128, tt.stderr))
+
+			// Act
+			_, err := git.ResolveRef(context.Background(), "/repo", "HEAD")
+
+			// Assert
+			var failure *Error
+			if !errors.As(err, &failure) {
+				t.Fatalf("error = %v, want the *gitclient.Error still returned", err)
+			}
+			got := ""
+			for _, r := range logs.records() {
+				if r.Level == "info" && r.Message == "git could not reach the remote; the network is down or the host does not resolve" {
+					got = "info"
+				}
+				if r.Level == "error" && r.Message == "git exited nonzero" {
+					got = "error"
+				}
+			}
+			if got != tt.wantLevel {
+				t.Fatalf("recorded at %q, want %q: %v", got, tt.wantLevel, logs.records())
+			}
+		})
+	}
+}
