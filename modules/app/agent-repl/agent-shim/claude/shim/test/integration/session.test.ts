@@ -28,6 +28,7 @@ import {
   resumeSession,
   startTurnRequest,
   stopAgent,
+  summarizeCompact,
   UNCATALOGED_MODEL,
   watchAgentRequest,
   workId,
@@ -67,6 +68,7 @@ import {
   entryUpdateArm,
   bashFrame,
   entryFrame,
+  conversationCompacted,
 } from "../integration-support/expect.js";
 import {
   awaitFile,
@@ -523,9 +525,10 @@ describe("the cold gate", () => {
   });
 
   test("remediation.compact resumes and the first page carries a compacted context_cut", async () => {
-    // THE COMPACTION EXPERIMENT: the shim writes the summarized transcript, the
-    // CLI resumes it, and the conversation serves. The cut is a page line, so
-    // the compaction is visible in the feed rather than only in the record.
+    // THE COMPACTION EXPERIMENT: SummarizeConversation writes the summarized
+    // transcript before the start, as the daemon asks it, then the CLI resumes
+    // it and the conversation serves. The cut is a page line, so the
+    // compaction is visible in the feed rather than only in the record.
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
@@ -533,11 +536,12 @@ describe("the cold gate", () => {
     await first.exited;
 
     const second = await spawnShim({ reuse: first.dirs, env: RESUMED_TWO_HOURS_LATER });
+    const remediation = remediationCompact(DEFAULT_MODEL, conversationv1.SessionCompactScope.ALL);
+    conversationCompacted(
+      await second.clients.h1.summarizeConversation(summarizeCompact(started.vendorSessionId, remediation)),
+    );
     const response = await second.clients.h1.startSession(
-      resumeSession(
-        started.vendorSessionId,
-        remediationCompact(DEFAULT_MODEL, conversationv1.SessionCompactScope.ALL),
-      ),
+      resumeSession(started.vendorSessionId, remediation),
     );
     sessionStarted(response);
     const watch = openStream((options) =>

@@ -137,6 +137,11 @@ type Client interface {
 	// StartSession starts or resumes the session. Session facts travel only
 	// here.
 	StartSession(ctx context.Context, req *shimv1.StartSessionRequest) (*shimv1.StartSessionResponse, error)
+	// SummarizeConversation summarizes a conversation of the workspace before
+	// StartSession: compacts the one the start resumes, or summarizes another
+	// for the daemon to carry into it. Its own call, so the start's bound
+	// never covers a summarizer.
+	SummarizeConversation(ctx context.Context, req *shimv1.SummarizeConversationRequest) (*shimv1.SummarizeConversationResponse, error)
 	// WatchSession opens the session frame stream. Its first diagnostics push
 	// is the readiness signal, healthy or not. The FRAME is handed on whole:
 	// a frame is either a SessionUpdate or the landing-7 re-announcement of

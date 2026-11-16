@@ -574,6 +574,33 @@ func (s *server) startSession(ctx context.Context, req *connect.Request[shimv1.S
 	return connect.NewResponse(resp), nil
 }
 
+// FakeCarriedSummary is the summary text the fake answers every
+// SummarizeConversation `carry` with, unless a scripted answer replaces it.
+const FakeCarriedSummary = "the fake shim's summary of the carried conversation"
+
+// SummarizeConversation answers the summary the daemon asks for before a
+// start: a `compact` as compacted, a `carry` as FakeCarriedSummary, or the
+// scripted answer.
+func (s *server) SummarizeConversation(ctx context.Context, req *connect.Request[shimv1.SummarizeConversationRequest]) (*connect.Response[shimv1.SummarizeConversationResponse], error) {
+	if err := s.enter(ctx, RPCSummarizeConversation, req.Msg); err != nil {
+		return nil, err
+	}
+	if resp, done, err := scripted[shimv1.SummarizeConversationResponse, *shimv1.SummarizeConversationResponse](s, RPCSummarizeConversation); done {
+		return resp, err
+	}
+	success := &shimv1.SummarizeConversationSuccess{
+		Use: &shimv1.SummarizeConversationSuccess_Compacted{Compacted: &shimv1.SummarizeConversationCompacted{}},
+	}
+	if req.Msg.GetCarry() != nil {
+		success.Use = &shimv1.SummarizeConversationSuccess_Carried{
+			Carried: &shimv1.SummarizeConversationCarried{Text: FakeCarriedSummary},
+		}
+	}
+	return connect.NewResponse(&shimv1.SummarizeConversationResponse{
+		Result: &shimv1.SummarizeConversationResponse_Success{Success: success},
+	}), nil
+}
+
 // startedSession answers the SessionStarted this fake last announced, nil
 // before any session has started, stating the turn in flight RIGHT NOW rather
 // than the one StartSession answered with.

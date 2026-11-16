@@ -30,8 +30,9 @@ const opOwedStartWork = "daemon.workspace.owed_start_work"
 //
 // AN OWED COMPACTION IS THE RESUME'S REMEDIATION. It replaces any remediation
 // the source carried, since a compacted resume reads no cold context to pay
-// for or clear. An owed summary is the resume's carry_summary. Both are made
-// by the cold gate's one summarizer at its default choice (defaultSummarizer).
+// for or clear. An owed summary rides no request: summarizeBeforeStart asks
+// for it before the start. Both are made by the cold gate's one summarizer at
+// its default choice (defaultSummarizer).
 func (f *Fleet) carryOwedStartWork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, req *shimv1.StartSessionRequest) (*wsm.OwedStartWork, error) {
 	owed, found, err := f.deps.DB.OwedStartWork(ctx, ws)
 	if err != nil {
@@ -59,25 +60,22 @@ func (f *Fleet) carryOwedStartWork(ctx context.Context, log dlog.Logger, ws ids.
 		resume.ColdRemediation = &conversationv1.SessionColdRemediation{
 			Remediation: &conversationv1.SessionColdRemediation_Compact{Compact: defaultSummarizer()},
 		}
-	} else {
-		resume.CarrySummary = &shimv1.StartSessionCarrySummary{VendorSessionId: owed.SummaryOf, Summarizer: defaultSummarizer()}
 	}
 	log.Info(opOwedStartWork, "the start carries the work the workspace's binding owes", fields)
 	return &owed, nil
 }
 
 // settleOwedStartWork retires CARRIED, the owed work a start carried, once
-// SUCCESS answered it, recording the summary it carried for the workspace's
-// next prompt (wsm.SettleOwedStartWork). A summary answered for a start that
-// asked for none, or none for one that asked, is the shim breaking its
-// contract, refused loudly.
-func (f *Fleet) settleOwedStartWork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, carried *wsm.OwedStartWork, success *shimv1.StartSessionSuccess) error {
-	summary := success.GetCarriedSummary().GetText()
+// the start succeeded, recording SUMMARY, the carried summary
+// summarizeBeforeStart answered, for the workspace's next prompt
+// (wsm.SettleOwedStartWork). A summary for a start that owed none, or none for
+// one that owed one, is this daemon breaking its own sequence, refused loudly.
+func (f *Fleet) settleOwedStartWork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, carried *wsm.OwedStartWork, summary string) error {
 	asked := carried != nil && carried.SummaryOf != ""
 	if asked != (summary != "") {
-		err := fmt.Errorf("start session for %q: the shim answered a carried summary %v for a start that asked for one %v", ws, summary != "", asked)
-		log.Error(opOwedStartWork, "the start's carried summary disagrees with what it asked for; the session's start is refused",
-			dlog.WithCause(dlog.Context{"invariant_violation": "StartSessionSuccess.carried_summary is set exactly when the resume carried carry_summary", "asked": asked}, err))
+		err := fmt.Errorf("start session for %q: a carried summary %v for a start that owed one %v", ws, summary != "", asked)
+		log.Error(opOwedStartWork, "the start's carried summary disagrees with what it owed; the session's start is refused",
+			dlog.WithCause(dlog.Context{"invariant_violation": "a summary is carried exactly when the binding owes one", "asked": asked}, err))
 		return err
 	}
 	if carried == nil {
@@ -101,8 +99,8 @@ func defaultSummarizer() *conversationv1.SessionColdCompact {
 }
 
 // compactionFailure answers the shim's account when ERR is a start that
-// failed on the compaction or summary it was asked for
-// (shim.v1.StartSessionVendorStartFailed.compaction).
+// failed on the compaction or summary it was preceded by
+// (summarizeBeforeStart).
 func compactionFailure(err error) (string, bool) {
 	var label *startLabel
 	if errors.As(err, &label) && label.compaction {

@@ -254,6 +254,10 @@ type FleetDeps struct {
 	// DefaultStartSessionBound, which is where the sizing is stated; it is a
 	// field for the same reason AdoptBound is.
 	StartBound time.Duration
+	// SummarizeBound bounds ONE SummarizeConversation call. Zero means
+	// DefaultSummarizeBound, which is where the sizing is stated; it is a
+	// field for the same reason StartBound is.
+	SummarizeBound time.Duration
 	// Clock drives the wait for a PREDECESSOR'S STARTING SHIM to announce
 	// itself on its socket. Nil means startingshim.SystemClock; it is a field
 	// so a test of that wait drives time rather than sleeping through it.
@@ -384,6 +388,9 @@ type Fleet struct {
 	adoptBound time.Duration
 	// startBound bounds ONE StartSession; see DefaultStartSessionBound.
 	startBound time.Duration
+	// summarizeBound bounds ONE SummarizeConversation; see
+	// DefaultSummarizeBound.
+	summarizeBound time.Duration
 	// networkBound bounds one shim's answer to a network change; see
 	// networkChangedBound.
 	networkBound time.Duration
@@ -636,6 +643,10 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	if startBound <= 0 {
 		startBound = DefaultStartSessionBound
 	}
+	summarizeBound := deps.SummarizeBound
+	if summarizeBound <= 0 {
+		summarizeBound = DefaultSummarizeBound
+	}
 	after := deps.RetryAfter
 	if after == nil {
 		after = time.After
@@ -646,20 +657,21 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 	}
 	detachedCtx, endDetached := context.WithCancel(context.Background())
 	return &Fleet{
-		networkBound: networkChangedBound,
-		after:        after,
-		vendorWindow: vendorWindow,
-		vendorRuns:   map[ids.WorkspaceID]*vendorRun{},
-		detachedCtx:  detachedCtx,
-		endDetached:  endDetached,
-		deps:         deps,
-		probe:        probe,
-		awaitLock:    awaitLock,
-		socketProbe:  socketProbe,
-		watch:        watch,
-		now:          now,
-		adoptBound:   adoptBound,
-		startBound:   startBound,
+		networkBound:   networkChangedBound,
+		after:          after,
+		vendorWindow:   vendorWindow,
+		vendorRuns:     map[ids.WorkspaceID]*vendorRun{},
+		detachedCtx:    detachedCtx,
+		endDetached:    endDetached,
+		deps:           deps,
+		probe:          probe,
+		awaitLock:      awaitLock,
+		socketProbe:    socketProbe,
+		watch:          watch,
+		now:            now,
+		adoptBound:     adoptBound,
+		startBound:     startBound,
+		summarizeBound: summarizeBound,
 
 		starting: startingshim.Waiter{
 			Alive:   deps.ShimAlive,
@@ -2691,9 +2703,32 @@ func (f *Fleet) agentStanding(ctx context.Context, log dlog.Logger, ws ids.Works
 // healthy start observed, which is deliberate: this bound exists to end a
 // start that has HUNG, never to hurry a slow one.
 //
+// IT NEVER COVERS A SUMMARIZER. A cold gate's compaction and a carried
+// summary are asked of SummarizeConversation before the start, under
+// DefaultSummarizeBound (summarizeBeforeStart), so this window is the vendor
+// opening's alone, whatever the size of the conversation.
+//
 // AGENT_REPL_START_SESSION_BOUND overrides it; a malformed or non-positive
 // value is REFUSED, never ignored.
 const DefaultStartSessionBound = 60 * time.Second
+
+// DefaultSummarizeBound bounds ONE SummarizeConversation call: the shim's
+// summarizer reading the whole conversation and writing its summary.
+//
+// MEASURED 2026-11-13 from the shim's own phase records (`bin/logs.sh --all
+// --since 2000h`, each shim.engine.session SUMMARIZING record paired with the
+// same vendor session's SUMMARIZED): 55 successful summarizations on Haiku
+// between 2026-10-27 and 2026-11-13 took 4.7s to 95.0s, loosely tied to size
+// (11k tokens 20.4s, 663k 56.8s, 872k 36.2s). The healthy worst case is 95.0s
+// (593,525 tokens, 2026-10-27), and a 596,848-token summary on 2026-11-13 ran
+// past the 60s start bound it used to share. 240s is about 2.5x that worst
+// case. A bound that fires fails the start loudly, naming the bound and
+// summarizeExpected, and is never retried.
+const DefaultSummarizeBound = 240 * time.Second
+
+// summarizeExpected is the measured healthy worst case DefaultSummarizeBound
+// is sized from, stated on the record of a bound that fired.
+const summarizeExpected = 95 * time.Second
 
 // startSessionRequest is the StartSession that brings SRC up: the source as
 // recorded (a fresh start's model and permission mode, or a resume's model,
@@ -2769,6 +2804,12 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		return nil, err
 	}
 	carried, err := f.carryOwedStartWork(ctx, log, ws, req)
+	if err != nil {
+		return nil, err
+	}
+	// THE SUMMARIES COME FIRST, EACH UNDER ITS OWN BOUND, so the start below
+	// is bounded by the vendor opening alone.
+	summary, err := f.summarizeBeforeStart(ctx, log, ws, client, req, carried)
 	if err != nil {
 		return nil, err
 	}
@@ -2889,61 +2930,12 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 			// "no transcript exists" is remediated differently from every
 			// other StartSession refusal.
 			// NOT RETRYABLE: the transcript will not reappear by asking again.
-			return nil, labeled(refuse(log, "OpenWorkspace", ArmUnknownSession,
-				fmt.Sprintf("the shim has no transcript for conversation %q: %s", src.VendorSessionID, failure.GetDetail()), false),
+			return nil, labeled(unknownSessionRefusal(log, src.VendorSessionID, failure.GetDetail()),
 				false, false, failure.GetDetail())
 		}
 		if vendor := failure.GetVendorStartFailed(); vendor != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetVendorStartFailed() != nil"})
-			// THE VENDOR FAILED TO START INSIDE A HEALTHY SHIM. The shim
-			// process is up and serving — only its StartSession answer is a
-			// refusal — so neither `spawn_failed` nor `shim_start_failed`,
-			// which both name the SHIM PROCESS, describes it. LANDING 9 gave
-			// it its own arm: OpenWorkspaceError.vendor_start_failed carries
-			// the shim's OWN account in `detail`, so the verdict is relayed
-			// typed rather than through the unlanded-arm convention.
-			refusal := refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
-				fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, failure.GetDetail()), false,
-				map[string]any{"detail": failure.GetDetail()})
-			// THE FAILURE WAS THE ASKED-FOR COMPACTION OR SUMMARY: the label
-			// says so, so a queue-bypass switch answers compaction_failed
-			// rather than switch_failed (compactionFailure).
-			compaction := vendor.GetCompaction() != nil
-			// THE SHIM LABELS WHETHER ASKING AGAIN CAN HELP, and the daemon
-			// never re-derives it from `detail`. A frame with neither arm is
-			// malformed: it is treated as a rejection, loudly.
-			switch retry := vendor.GetRetry().(type) {
-			case *shimv1.StartSessionVendorStartFailed_Retryable:
-				// WHOSE FAILURE IT WAS is the shim's to say too: an
-				// unreachable network is not the vendor's fault, and the
-				// daemon draws it as a network fault while it retries.
-				switch retry.Retryable.GetCause().(type) {
-				case *shimv1.StartSessionVendorStartRetryable_Network:
-					return nil, markCompaction(labeledNetwork(refusal, failure.GetDetail()), compaction)
-				case *shimv1.StartSessionVendorStartRetryable_Vendor:
-				default:
-					log.Error(opBringUp, "the shim's retryable vendor start names no cause; it is read as the vendor's", dlog.Context{
-						"detail":              failure.GetDetail(),
-						"invariant_violation": "StartSessionVendorStartRetryable.cause is always set",
-					})
-				}
-				return nil, markCompaction(labeled(refusal, true, true, failure.GetDetail()), compaction)
-			case *shimv1.StartSessionVendorStartFailed_Rejected:
-				// A CREDENTIAL THE VENDOR REJECTED is cured by signing in
-				// again: the ONE predicate a turn's account failure is read
-				// by decides it for a start too.
-				label := labeled(refusal, false, true, failure.GetDetail()).(*startLabel)
-				if refused := retry.Rejected.GetApiFailure(); ladder.ApiFailureCuredBySignIn(refused) {
-					label.signIn = refused.GetMessage()
-				}
-				return nil, markCompaction(label, compaction)
-			default:
-				log.Error(opBringUp, "the shim's vendor_start_failed states neither retryable nor rejected; treated as a rejection", dlog.Context{
-					"detail":              failure.GetDetail(),
-					"invariant_violation": "StartSessionVendorStartFailed.retry is always set",
-				})
-				return nil, markCompaction(labeled(refusal, false, true, failure.GetDetail()), compaction)
-			}
+			return nil, vendorStartLabel(log, ws, vendor, failure.GetDetail(), false)
 		}
 		if failure.GetAlreadyStarted() != nil {
 			log.Debug("daemon.workspace.flow_decision", "selected a workspace flow branch", dlog.Context{"function": "workspace", "condition": "failure.GetAlreadyStarted() != nil"})
@@ -2962,10 +2954,79 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 		return nil, refuse(log, "OpenWorkspace", ArmStartSessionUnspecified,
 			fmt.Sprintf("the shim refused to start workspace %q's session with no cause set: %s", ws, failure.GetDetail()), false)
 	}
-	if err := f.settleOwedStartWork(ctx, log, ws, carried, response.GetSuccess()); err != nil {
+	if err := f.settleOwedStartWork(ctx, log, ws, carried, summary); err != nil {
 		return nil, err
 	}
 	return response.GetSuccess().GetSession(), nil
+}
+
+// vendorStartLabel labels the shim's account of a vendor query that failed:
+// a start's own opening (shim.v1.StartSessionFailure.vendor_start_failed), or
+// the summarizer a start was preceded by
+// (shim.v1.SummarizeConversationFailure.summarizer_failed), which COMPACTION
+// marks so a queue-bypass switch answers compaction_failed rather than
+// switch_failed (compactionFailure).
+//
+// THE VENDOR FAILED INSIDE A HEALTHY SHIM. The shim process is up and serving
+// -- only its answer is a refusal -- so neither `spawn_failed` nor
+// `shim_start_failed`, which both name the SHIM PROCESS, describes it.
+// OpenWorkspaceError.vendor_start_failed carries the shim's OWN account in
+// `detail`, so the verdict is relayed typed. THE SHIM LABELS WHETHER ASKING
+// AGAIN CAN HELP, and the daemon never re-derives it from `detail`; a frame
+// with neither arm is malformed and is treated as a rejection, loudly.
+func vendorStartLabel(log dlog.Logger, ws ids.WorkspaceID, vendor *shimv1.StartSessionVendorStartFailed, detail string, compaction bool) error {
+	refusal := vendorStartRefusal(log, ws, detail)
+	switch retry := vendor.GetRetry().(type) {
+	case *shimv1.StartSessionVendorStartFailed_Retryable:
+		// WHOSE FAILURE IT WAS is the shim's to say too: an unreachable
+		// network is not the vendor's fault, and the daemon draws it as a
+		// network fault while it retries.
+		switch retry.Retryable.GetCause().(type) {
+		case *shimv1.StartSessionVendorStartRetryable_Network:
+			return markCompaction(labeledNetwork(refusal, detail), compaction)
+		case *shimv1.StartSessionVendorStartRetryable_Vendor:
+		default:
+			log.Error(opBringUp, "the shim's retryable vendor start names no cause; it is read as the vendor's", dlog.Context{
+				"detail":              detail,
+				"invariant_violation": "StartSessionVendorStartRetryable.cause is always set",
+			})
+		}
+		return markCompaction(labeled(refusal, true, true, detail), compaction)
+	case *shimv1.StartSessionVendorStartFailed_Rejected:
+		// A CREDENTIAL THE VENDOR REJECTED is cured by signing in again: the
+		// ONE predicate a turn's account failure is read by decides it for a
+		// start too.
+		label := labeled(refusal, false, true, detail).(*startLabel)
+		if refused := retry.Rejected.GetApiFailure(); ladder.ApiFailureCuredBySignIn(refused) {
+			label.signIn = refused.GetMessage()
+		}
+		return markCompaction(label, compaction)
+	default:
+		log.Error(opBringUp, "the shim's vendor_start_failed states neither retryable nor rejected; treated as a rejection", dlog.Context{
+			"detail":              detail,
+			"invariant_violation": "StartSessionVendorStartFailed.retry is always set",
+		})
+		return markCompaction(labeled(refusal, false, true, detail), compaction)
+	}
+}
+
+// vendorStartRefusal is the OpenWorkspace refusal of workspace WS's vendor
+// query that did not come up, carrying the shim's own account, DETAIL, typed:
+// the one spelling of it, whether the opening, its summarizer or the
+// summarizer's bound failed.
+func vendorStartRefusal(log dlog.Logger, ws ids.WorkspaceID, detail string) *Refusal {
+	return refuseWith(log, "OpenWorkspace", ArmVendorStartFailed,
+		fmt.Sprintf("the vendor failed to start for workspace %q: %s", ws, detail), false,
+		map[string]any{"detail": detail})
+}
+
+// unknownSessionRefusal is the OpenWorkspace refusal of a conversation,
+// VENDORSESSIONID, the shim has no transcript for, with the shim's account,
+// DETAIL: the one spelling of it, whether the start or a summary before it
+// found the transcript missing.
+func unknownSessionRefusal(log dlog.Logger, vendorSessionID, detail string) *Refusal {
+	return refuse(log, "OpenWorkspace", ArmUnknownSession,
+		fmt.Sprintf("the shim has no transcript for conversation %q: %s", vendorSessionID, detail), false)
 }
 
 // raiseColdGate publishes the gate's row and the footer's parked status, and

@@ -845,3 +845,101 @@ func TestValidateHoldParkedBridgeRequestAccepts(t *testing.T) {
 		t.Fatalf("validateHoldParkedBridgeRequest() = %v, want nil", err)
 	}
 }
+
+// validSummarizeConversationRequest is a compact of `vendor-1` on Haiku.
+func validSummarizeConversationRequest() *shimv1.SummarizeConversationRequest {
+	return &shimv1.SummarizeConversationRequest{
+		WorkspaceName: "w1",
+		Profile:       &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Chat{Chat: &shimv1.SessionProfileChat{}}},
+		Summarizer: &conversationv1.SessionColdCompact{
+			Model: validModel(),
+			Scope: conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
+		},
+		Use: &shimv1.SummarizeConversationRequest_Compact{Compact: &shimv1.SummarizeConversationCompact{VendorSessionId: "vendor-1"}},
+	}
+}
+
+func TestValidateSummarizeConversationRequestRefuses(t *testing.T) {
+	tests := []struct {
+		name  string
+		edit  func(*shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest
+		field string
+	}{
+		{"a nil request", func(*shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest { return nil }, "SummarizeConversationRequest"},
+		{"no workspace name", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.WorkspaceName = ""
+			return r
+		}, "SummarizeConversationRequest.workspace_name"},
+		{"no profile", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.Profile = nil
+			return r
+		}, "SummarizeConversationRequest.profile"},
+		{"no summarizer", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.Summarizer = nil
+			return r
+		}, "SummarizeConversationRequest.summarizer"},
+		{"a summarizer naming no model", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.Summarizer.Model = nil
+			return r
+		}, "SummarizeConversationRequest.summarizer.model"},
+		{"a summarizer whose scope is unspecified", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.Summarizer.Scope = conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_UNSPECIFIED
+			return r
+		}, "SummarizeConversationRequest.summarizer.scope"},
+		{"no use", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.Use = nil
+			return r
+		}, "SummarizeConversationRequest.use"},
+		{"a compact naming no conversation", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.GetCompact().VendorSessionId = ""
+			return r
+		}, "SummarizeConversationRequest.compact.vendor_session_id"},
+		{"a compact naming an empty rolled-back turn", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.GetCompact().RolledBackTurns = []*conversationv1.TurnId{{Value: ""}}
+			return r
+		}, "SummarizeConversationRequest.compact.rolled_back_turns[0]"},
+		{"a carry naming no conversation", func(r *shimv1.SummarizeConversationRequest) *shimv1.SummarizeConversationRequest {
+			r.Use = &shimv1.SummarizeConversationRequest_Carry{Carry: &shimv1.SummarizeConversationCarry{}}
+			return r
+		}, "SummarizeConversationRequest.carry.vendor_session_id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			req := tt.edit(validSummarizeConversationRequest())
+
+			// Act.
+			err := validateSummarizeConversationRequest(req)
+
+			// Assert.
+			assertInvalidField(t, err, tt.field)
+		})
+	}
+}
+
+func TestValidateSummarizeConversationRequestAccepts(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*shimv1.SummarizeConversationRequest)
+	}{
+		{"a compact", func(*shimv1.SummarizeConversationRequest) {}},
+		{"a carry", func(r *shimv1.SummarizeConversationRequest) {
+			r.Use = &shimv1.SummarizeConversationRequest_Carry{Carry: &shimv1.SummarizeConversationCarry{VendorSessionId: "queue-1"}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			req := validSummarizeConversationRequest()
+			tt.edit(req)
+
+			// Act.
+			err := validateSummarizeConversationRequest(req)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("validateSummarizeConversationRequest() = %v, want nil", err)
+			}
+		})
+	}
+}

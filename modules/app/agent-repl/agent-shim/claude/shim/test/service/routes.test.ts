@@ -34,6 +34,10 @@ function recordingEngine(): { engine: Engine; calls: Array<{ verb: string; reque
       record("startSession")(request);
       return create(shimv1.StartSessionResponseSchema, {});
     },
+    async summarizeConversation(request) {
+      record("summarizeConversation")(request);
+      return create(shimv1.SummarizeConversationResponseSchema, {});
+    },
     async *watchSession(request) {
       record("watchSession")(request);
       yield create(shimv1.WatchSessionResponseSchema, {});
@@ -159,6 +163,7 @@ async function drainToCompletion(stream: AsyncIterable<unknown>): Promise<void> 
 describe("shimRoutes unary delegation", () => {
   it.each([
     ["startSession", requests.startSessionRequest],
+    ["summarizeConversation", requests.summarizeConversationRequest],
     ["setSessionModel", requests.setSessionModelRequest],
     ["setSessionEffort", requests.setSessionEffortRequest],
     ["setSessionPermissionMode", requests.setSessionPermissionModeRequest],

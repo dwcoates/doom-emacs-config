@@ -1555,6 +1555,11 @@ func (c *client) StartSession(ctx context.Context, req *shimv1.StartSessionReque
 	return unary(ctx, c, "start_session", req, validateStartSessionRequest, c.rpc.StartSession)
 }
 
+// SummarizeConversation summarizes a conversation before the start.
+func (c *client) SummarizeConversation(ctx context.Context, req *shimv1.SummarizeConversationRequest) (*shimv1.SummarizeConversationResponse, error) {
+	return unary(ctx, c, "summarize_conversation", req, validateSummarizeConversationRequest, c.rpc.SummarizeConversation)
+}
+
 // WatchSession opens the session update stream.
 func (c *client) WatchSession(ctx context.Context) (Stream[*shimv1.WatchSessionResponse], error) {
 	return c.watchSession(ctx)

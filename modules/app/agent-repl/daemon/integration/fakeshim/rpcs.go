@@ -11,6 +11,7 @@ import (
 // never scripted.
 const (
 	RPCStartSession             = "StartSession"
+	RPCSummarizeConversation    = "SummarizeConversation"
 	RPCWatchSession             = "WatchSession"
 	RPCSetSessionModel          = "SetSessionModel"
 	RPCSetSessionPermissionMode = "SetSessionPermissionMode"
@@ -44,6 +45,8 @@ func newResponse(rpc string) proto.Message {
 	switch rpc {
 	case RPCStartSession:
 		return &shimv1.StartSessionResponse{}
+	case RPCSummarizeConversation:
+		return &shimv1.SummarizeConversationResponse{}
 	case RPCSetSessionModel:
 		return &shimv1.SetSessionModelResponse{}
 	case RPCSetSessionPermissionMode:

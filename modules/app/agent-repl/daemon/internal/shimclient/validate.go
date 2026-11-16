@@ -35,6 +35,44 @@ func validateStartSessionRequest(req *shimv1.StartSessionRequest) error {
 	}
 }
 
+// validateSummarizeConversationRequest is SummarizeConversationRequest's base
+// function: the workspace's name and profile every query states, a whole
+// summarizer, and exactly one use naming its conversation.
+func validateSummarizeConversationRequest(req *shimv1.SummarizeConversationRequest) error {
+	const m = "SummarizeConversationRequest"
+	if req == nil {
+		return invalid(m, m, "request is nil")
+	}
+	if req.GetWorkspaceName() == "" {
+		return invalid(m, m+".workspace_name", "the summarizer's system prompt names its workspace, and the name is empty")
+	}
+	if req.GetProfile() == nil {
+		return invalid(m, m+".profile", "is unset")
+	}
+	if err := validateSessionColdCompact(m+".summarizer", req.GetSummarizer()); err != nil {
+		return err
+	}
+	switch use := req.GetUse().(type) {
+	case *shimv1.SummarizeConversationRequest_Compact:
+		if use.Compact.GetVendorSessionId() == "" {
+			return invalid(m, m+".compact.vendor_session_id", "is empty")
+		}
+		for i, turn := range use.Compact.GetRolledBackTurns() {
+			if turn.GetValue() == "" {
+				return invalid(m, fmt.Sprintf("%s.compact.rolled_back_turns[%d]", m, i), "is empty")
+			}
+		}
+		return nil
+	case *shimv1.SummarizeConversationRequest_Carry:
+		if use.Carry.GetVendorSessionId() == "" {
+			return invalid(m, m+".carry.vendor_session_id", "is empty")
+		}
+		return nil
+	default:
+		return invalid(m, m+".use", "oneof is unset")
+	}
+}
+
 // validateStartSessionFresh is StartSessionFresh's base function.
 func validateStartSessionFresh(field string, fresh *shimv1.StartSessionFresh) error {
 	const m = "StartSessionFresh"
