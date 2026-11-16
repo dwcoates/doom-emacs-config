@@ -708,17 +708,24 @@ func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testi
 	}
 }
 
-func TestEnsureLoadedRefusesAnUnloadedServiceWithNoPlist(t *testing.T) {
+// An unloaded service with no plist has its definition written before it is
+// started (ensureLoaded); one whose definition cannot be written is refused,
+// and nothing is started.
+func TestEnsureLoadedRefusesAnUnloadedServiceWhosePlistCannotBeWritten(t *testing.T) {
 	// Arrange.
 	h := newRestarter(t)
 	h.services.loaded[StoreLabel] = false
+	h.defineErr = errors.New("define-service exited 1")
 
 	// Act.
 	err := h.r.EnsureLoaded(context.Background())
 
 	// Assert.
-	if err == nil || !strings.Contains(err.Error(), "install.sh") {
-		t.Fatalf("EnsureLoaded = %v, want a refusal naming the reinstall", err)
+	if err == nil || !strings.Contains(err.Error(), "write the definition of "+StoreLabel) {
+		t.Fatalf("EnsureLoaded = %v, want a refusal naming the definition write", err)
+	}
+	if slices.Contains(h.services.Calls(), "start "+StoreLabel) {
+		t.Fatalf("calls = %v, want nothing started", h.services.Calls())
 	}
 }
 

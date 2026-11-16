@@ -384,10 +384,10 @@ type fakeDB struct {
 	orphanReport wsm.OrphanReport
 	// orphanCtxErrs is the context's error each CloseOrphans ran under.
 	orphanCtxErrs []error
-	createdTasks []string
-	taskChanges  map[ids.TaskID]wsm.TaskChange
-	assignments  map[ids.WorkspaceID]*ids.TaskID
-	taskErr      error
+	createdTasks  []string
+	taskChanges   map[ids.TaskID]wsm.TaskChange
+	assignments   map[ids.WorkspaceID]*ids.TaskID
+	taskErr       error
 
 	// dbFaults is the fault table the fleet opens and closes lost-link rows
 	// in; dbClosed records the ids CloseFault was called with.
