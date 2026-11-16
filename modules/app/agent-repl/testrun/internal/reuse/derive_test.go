@@ -76,7 +76,7 @@ func TestDeriveGoCutsAModuleIntoPackagesVetsAndInfra(t *testing.T) {
 	u.Atomic = append(u.Atomic, spec("lock:vet[perf]"), spec("lock:build[integration]"), spec("lock:x:compiled"), spec("lock:coverage"))
 
 	// Act
-	su, err := Derive(f.d, lockSuite, u, true)
+	su, err := Derive(f.d, lockSuite, u, false)
 
 	// Assert
 	if err != nil {
@@ -141,6 +141,37 @@ func TestDeriveGoPlacesThePackagesATestBinaryLinksAndTheProgramsItStarts(t *test
 		if !set.Contains(fixtureModule + p) {
 			t.Errorf("the package's set does not place %s", p)
 		}
+	}
+}
+
+func TestDeriveGoKeysASubtestSelectionOnItsPackagesTestBinary(t *testing.T) {
+	// Arrange: a selection narrowed to one subtest groups it under its path.
+	f := newFixture(t)
+	write(t, f.d.Repo, fixtureModule+"/lock/dep/dep.go", "package dep")
+	lockDir := filepath.Join(f.d.Module, "lock")
+	f.d.GoList = func(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
+		if dir != lockDir || !tests {
+			return fakeGoList(dir, tags, tests, patterns...)
+		}
+		mod := &GoModule{GoMod: filepath.Join(lockDir, "go.mod")}
+		return []GoPackage{
+			{ImportPath: "lock", Dir: lockDir, Module: mod},
+			{ImportPath: "lock/dep", Dir: filepath.Join(lockDir, "dep"), Module: mod},
+			{ImportPath: "lock.test", Dir: lockDir, Module: mod, Deps: []string{"lock", "lock/dep"}},
+		}, nil
+	}
+	u := lockUnits()
+	u.Splits[0].Group = "lock:./TestLock/a_case"
+
+	// Act
+	su, err := Derive(f.d, lockSuite, u, false)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Derive = %v, want the subtest keyed on its package's test binary", err)
+	}
+	if set := unitsByName(su)["./TestLock/a_case"].Set; set == nil || !set.Contains(fixtureModule+"/lock/dep/dep.go") {
+		t.Fatalf("the subtest's set does not place the package's test binary's links")
 	}
 }
 

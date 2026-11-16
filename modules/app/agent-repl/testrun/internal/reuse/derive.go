@@ -260,12 +260,18 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 	pkgs := map[string]pkg{}
 	vets := map[string]string{}
 	for _, sp := range u.Splits {
-		name, rel, tags, err := goGroupUnit(s.Name, sp.Group)
+		name, _, _, err := goGroupUnit(s.Name, sp.Group)
 		if err != nil {
 			return nil, nil, err
 		}
+		if sp.Package == "" {
+			panic(fmt.Sprintf("reuse: %s's Go split %s names no package", s.Name, sp.Group))
+		}
+		// THE SPLIT NAMES ITS OWN PACKAGE: a selection narrowed to a subtest
+		// path groups it as "<package group>/<test path>", which no parse of
+		// the group can tell from a package path.
 		b.own(name, sp.Group)
-		pkgs[name] = pkg{rel, tags}
+		pkgs[name] = pkg{sp.Package, sp.Tags}
 	}
 	for _, a := range u.Atomic {
 		id := a.ID

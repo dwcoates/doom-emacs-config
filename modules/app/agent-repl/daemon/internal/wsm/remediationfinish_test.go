@@ -53,7 +53,7 @@ func TestARemediationFinishIsRefusedWhileItRuns(t *testing.T) {
 	for _, step := range []RemediationStep{RemediationGating, RemediationLanding, RemediationDeploying} {
 		t.Run(string(step), func(t *testing.T) {
 			// Arrange
-			s, _ := testStore(t)
+			s, log := testStore(t)
 			repo := RepoKey(t.TempDir())
 			beginFinish(t, s, repo, instant, nil)
 			if step != RemediationGating {
@@ -68,6 +68,9 @@ func TestARemediationFinishIsRefusedWhileItRuns(t *testing.T) {
 			// Assert
 			if !errors.Is(err, ErrRemediationFinishing) {
 				t.Fatalf("BeginRemediationFinish = %v, want ErrRemediationFinishing", err)
+			}
+			if loggedOperation(log, "daemon.wsm.begin_remediation_finish", "error") || !loggedOperation(log, "daemon.wsm.begin_remediation_finish", "debug") {
+				t.Fatalf("records = %v, want the refusal at DEBUG: it is the store answering what was asked", log.Records())
 			}
 		})
 	}

@@ -124,7 +124,7 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 	}
 	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: repo, StartedAt: o.deps.Now(), Version: version})
 	if errors.Is(err, wsm.ErrRemediationFinishing) {
-		o.deps.Log.Global().Warn(opRemediationFinish, "refused a remediation finish while its finish runs", fields)
+		o.deps.Log.Global().Info(opRemediationFinish, "refused a remediation finish while its finish runs", fields)
 		return refuse(ArmAlreadyMerging, ws, "this remediation's finish is already running")
 	}
 	if err != nil {

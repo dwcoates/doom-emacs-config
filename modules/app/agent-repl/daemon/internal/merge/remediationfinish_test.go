@@ -277,6 +277,11 @@ func TestARemediationFinishIsRefusedWhereItCannotRun(t *testing.T) {
 			if len(h.runner.argv) != 0 {
 				t.Fatalf("gate runs %v, want none", h.runner.argv)
 			}
+			if tt.wantArm == ArmAlreadyMerging {
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish, Message: "refused a remediation finish while its finish runs"}); !ok {
+					t.Fatalf("records = %v, want the refusal at INFO: the caller is answered", h.logs.Records())
+				}
+			}
 		})
 	}
 }
