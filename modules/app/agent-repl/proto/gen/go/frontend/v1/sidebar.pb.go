@@ -4666,10 +4666,13 @@ func (x *RosterRepoMergeQueue) GetMediation() *RosterMergeQueueMediation {
 //	│ doom   [RosterMergeQueueMediation label]   (37)    │
 //	└────────────────────────────────────────────────────┘
 //
-// The label's words are the standing's: `hot reloading`, `assessing reload`
-// or `fixing reload`. A click on it selects the workspace at work, when one
-// is. Tag 1 (`subject`) is RETIRED: no workspace is drawn as a queue row for
-// the check.
+// The label's words are the standing's, fixed text the same for every
+// repository (owner ruling, 2026-11-16): `HOT-LOADING ZETTEL`, `ASSESSING
+// ZETTEL HEALTH`, `FIXING ZETTEL ISSUES` or `TESTING ZETTEL FIXES`. A click
+// on it selects the workspace at work, when one is. Tag 1 (`subject`) is
+// RETIRED: no workspace is drawn as a queue row for the check. Tag 5
+// (`finishing`) is RETIRED: a finish's gate and landing are `testing`, its
+// deploy `waiting`, and a gate that sends the workspace back is `fixing`.
 type RosterMergeQueueMediation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. Where the check stands; the arm IS the label's state.
@@ -4679,7 +4682,7 @@ type RosterMergeQueueMediation struct {
 	//	*RosterMergeQueueMediation_Waiting
 	//	*RosterMergeQueueMediation_Checking
 	//	*RosterMergeQueueMediation_Fixing
-	//	*RosterMergeQueueMediation_Finishing
+	//	*RosterMergeQueueMediation_Testing
 	Standing      isRosterMergeQueueMediation_Standing `protobuf_oneof:"standing"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4749,10 +4752,10 @@ func (x *RosterMergeQueueMediation) GetFixing() *RosterMergeQueueMediationFixing
 	return nil
 }
 
-func (x *RosterMergeQueueMediation) GetFinishing() *RosterMergeQueueMediationFinishing {
+func (x *RosterMergeQueueMediation) GetTesting() *RosterMergeQueueMediationTesting {
 	if x != nil {
-		if x, ok := x.Standing.(*RosterMergeQueueMediation_Finishing); ok {
-			return x.Finishing
+		if x, ok := x.Standing.(*RosterMergeQueueMediation_Testing); ok {
+			return x.Testing
 		}
 	}
 	return nil
@@ -4763,26 +4766,27 @@ type isRosterMergeQueueMediation_Standing interface {
 }
 
 type RosterMergeQueueMediation_Waiting struct {
-	// The deploy is still rolling out (`hot reloading`).
+	// A deploy is rolling out (`HOT-LOADING ZETTEL`): a landing's, or a
+	// landed fix's.
 	Waiting *RosterMergeQueueMediationWaiting `protobuf:"bytes,2,opt,name=waiting,proto3,oneof"`
 }
 
 type RosterMergeQueueMediation_Checking struct {
-	// The chain's intake is checking the deploy (`assessing reload`).
+	// The chain's intake is checking the deploy (`ASSESSING ZETTEL HEALTH`).
 	Checking *RosterMergeQueueMediationChecking `protobuf:"bytes,3,opt,name=checking,proto3,oneof"`
 }
 
 type RosterMergeQueueMediation_Fixing struct {
-	// A remediation workspace is fixing what the intake found
-	// (`fixing reload`).
+	// A remediation workspace is fixing what the intake found, or what its
+	// own finish's gate failed on (`FIXING ZETTEL ISSUES`).
 	Fixing *RosterMergeQueueMediationFixing `protobuf:"bytes,4,opt,name=fixing,proto3,oneof"`
 }
 
-type RosterMergeQueueMediation_Finishing struct {
-	// A remediation or escalation workspace finished, and its fix is being
-	// gated, landed and deployed (`finishing reload`). The workspace itself
-	// is hidden meanwhile: this label is where it is shown.
-	Finishing *RosterMergeQueueMediationFinishing `protobuf:"bytes,5,opt,name=finishing,proto3,oneof"`
+type RosterMergeQueueMediation_Testing struct {
+	// A remediation's or an escalation's finished fix runs its full gate
+	// and then lands (`TESTING ZETTEL FIXES`). The workspace itself stands
+	// by hidden meanwhile: this label is where it is shown.
+	Testing *RosterMergeQueueMediationTesting `protobuf:"bytes,6,opt,name=testing,proto3,oneof"`
 }
 
 func (*RosterMergeQueueMediation_Waiting) isRosterMergeQueueMediation_Standing() {}
@@ -4791,14 +4795,15 @@ func (*RosterMergeQueueMediation_Checking) isRosterMergeQueueMediation_Standing(
 
 func (*RosterMergeQueueMediation_Fixing) isRosterMergeQueueMediation_Standing() {}
 
-func (*RosterMergeQueueMediation_Finishing) isRosterMergeQueueMediation_Standing() {}
+func (*RosterMergeQueueMediation_Testing) isRosterMergeQueueMediation_Standing() {}
 
-// Hot reloading.
+// HOT-LOADING ZETTEL.
 type RosterMergeQueueMediationWaiting struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// What a click on the label selects: the chain's intake, which checks the
-	// deploy once it has rolled out. UNSET for a chain's first deploy, whose
-	// intake does not exist yet; the label is then not clickable.
+	// deploy once it has rolled out. UNSET for a chain's first deploy, and for
+	// an escalation's fix deploying after its chain ended, which have no
+	// intake; the label is then not clickable.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3,oneof" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4841,7 +4846,7 @@ func (x *RosterMergeQueueMediationWaiting) GetTarget() *RosterMergeQueueMediatio
 	return nil
 }
 
-// Assessing reload.
+// ASSESSING ZETTEL HEALTH.
 type RosterMergeQueueMediationChecking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. What a click on the label selects: the chain's intake, a
@@ -4888,7 +4893,7 @@ func (x *RosterMergeQueueMediationChecking) GetTarget() *RosterMergeQueueMediati
 	return nil
 }
 
-// Fixing reload.
+// FIXING ZETTEL ISSUES.
 type RosterMergeQueueMediationFixing struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. What a click on the label selects: the remediation workspace.
@@ -4934,29 +4939,30 @@ func (x *RosterMergeQueueMediationFixing) GetTarget() *RosterMergeQueueMediation
 	return nil
 }
 
-// Finishing reload.
-type RosterMergeQueueMediationFinishing struct {
+// TESTING ZETTEL FIXES.
+type RosterMergeQueueMediationTesting struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. What a click on the label selects: the finishing workspace.
+	// REQUIRED. What a click on the label selects: the workspace whose fix is
+	// being tested, standing by hidden.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RosterMergeQueueMediationFinishing) Reset() {
-	*x = RosterMergeQueueMediationFinishing{}
+func (x *RosterMergeQueueMediationTesting) Reset() {
+	*x = RosterMergeQueueMediationTesting{}
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[77]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RosterMergeQueueMediationFinishing) String() string {
+func (x *RosterMergeQueueMediationTesting) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RosterMergeQueueMediationFinishing) ProtoMessage() {}
+func (*RosterMergeQueueMediationTesting) ProtoMessage() {}
 
-func (x *RosterMergeQueueMediationFinishing) ProtoReflect() protoreflect.Message {
+func (x *RosterMergeQueueMediationTesting) ProtoReflect() protoreflect.Message {
 	mi := &file_frontend_v1_sidebar_proto_msgTypes[77]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -4968,12 +4974,12 @@ func (x *RosterMergeQueueMediationFinishing) ProtoReflect() protoreflect.Message
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RosterMergeQueueMediationFinishing.ProtoReflect.Descriptor instead.
-func (*RosterMergeQueueMediationFinishing) Descriptor() ([]byte, []int) {
+// Deprecated: Use RosterMergeQueueMediationTesting.ProtoReflect.Descriptor instead.
+func (*RosterMergeQueueMediationTesting) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{77}
 }
 
-func (x *RosterMergeQueueMediationFinishing) GetTarget() *RosterMergeQueueMediationTarget {
+func (x *RosterMergeQueueMediationTesting) GetTarget() *RosterMergeQueueMediationTarget {
 	if x != nil {
 		return x.Target
 	}
@@ -12879,22 +12885,22 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\r_fixing_testsB\f\n" +
 	"\n" +
 	"_mediationJ\x04\b\x01\x10\x02J\x04\b\x05\x10\x06J\x04\b\b\x10\tJ\x04\b\n" +
-	"\x10\vR\x04rowsR\vremediatingR\x1cawaiting_resolving_conflicts\"\xe8\x02\n" +
+	"\x10\vR\x04rowsR\vremediatingR\x1cawaiting_resolving_conflicts\"\xf3\x02\n" +
 	"\x19RosterMergeQueueMediation\x12I\n" +
 	"\awaiting\x18\x02 \x01(\v2-.frontend.v1.RosterMergeQueueMediationWaitingH\x00R\awaiting\x12L\n" +
 	"\bchecking\x18\x03 \x01(\v2..frontend.v1.RosterMergeQueueMediationCheckingH\x00R\bchecking\x12F\n" +
-	"\x06fixing\x18\x04 \x01(\v2,.frontend.v1.RosterMergeQueueMediationFixingH\x00R\x06fixing\x12O\n" +
-	"\tfinishing\x18\x05 \x01(\v2/.frontend.v1.RosterMergeQueueMediationFinishingH\x00R\tfinishingB\n" +
+	"\x06fixing\x18\x04 \x01(\v2,.frontend.v1.RosterMergeQueueMediationFixingH\x00R\x06fixing\x12I\n" +
+	"\atesting\x18\x06 \x01(\v2-.frontend.v1.RosterMergeQueueMediationTestingH\x00R\atestingB\n" +
 	"\n" +
-	"\bstandingJ\x04\b\x01\x10\x02R\asubject\"x\n" +
+	"\bstandingJ\x04\b\x01\x10\x02J\x04\b\x05\x10\x06R\asubjectR\tfinishing\"x\n" +
 	" RosterMergeQueueMediationWaiting\x12I\n" +
 	"\x06target\x18\x01 \x01(\v2,.frontend.v1.RosterMergeQueueMediationTargetH\x00R\x06target\x88\x01\x01B\t\n" +
 	"\a_target\"i\n" +
 	"!RosterMergeQueueMediationChecking\x12D\n" +
 	"\x06target\x18\x01 \x01(\v2,.frontend.v1.RosterMergeQueueMediationTargetR\x06target\"g\n" +
 	"\x1fRosterMergeQueueMediationFixing\x12D\n" +
-	"\x06target\x18\x01 \x01(\v2,.frontend.v1.RosterMergeQueueMediationTargetR\x06target\"j\n" +
-	"\"RosterMergeQueueMediationFinishing\x12D\n" +
+	"\x06target\x18\x01 \x01(\v2,.frontend.v1.RosterMergeQueueMediationTargetR\x06target\"h\n" +
+	" RosterMergeQueueMediationTesting\x12D\n" +
 	"\x06target\x18\x01 \x01(\v2,.frontend.v1.RosterMergeQueueMediationTargetR\x06target\"[\n" +
 	"\x1fRosterMergeQueueMediationTarget\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xac\x02\n" +
@@ -13385,7 +13391,7 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterMergeQueueMediationWaiting)(nil),    // 74: frontend.v1.RosterMergeQueueMediationWaiting
 	(*RosterMergeQueueMediationChecking)(nil),   // 75: frontend.v1.RosterMergeQueueMediationChecking
 	(*RosterMergeQueueMediationFixing)(nil),     // 76: frontend.v1.RosterMergeQueueMediationFixing
-	(*RosterMergeQueueMediationFinishing)(nil),  // 77: frontend.v1.RosterMergeQueueMediationFinishing
+	(*RosterMergeQueueMediationTesting)(nil),    // 77: frontend.v1.RosterMergeQueueMediationTesting
 	(*RosterMergeQueueMediationTarget)(nil),     // 78: frontend.v1.RosterMergeQueueMediationTarget
 	(*RosterMergeQueueOffQueue)(nil),            // 79: frontend.v1.RosterMergeQueueOffQueue
 	(*RosterMergeQueueOffQueueCause)(nil),       // 80: frontend.v1.RosterMergeQueueOffQueueCause
@@ -13617,11 +13623,11 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	74,  // 98: frontend.v1.RosterMergeQueueMediation.waiting:type_name -> frontend.v1.RosterMergeQueueMediationWaiting
 	75,  // 99: frontend.v1.RosterMergeQueueMediation.checking:type_name -> frontend.v1.RosterMergeQueueMediationChecking
 	76,  // 100: frontend.v1.RosterMergeQueueMediation.fixing:type_name -> frontend.v1.RosterMergeQueueMediationFixing
-	77,  // 101: frontend.v1.RosterMergeQueueMediation.finishing:type_name -> frontend.v1.RosterMergeQueueMediationFinishing
+	77,  // 101: frontend.v1.RosterMergeQueueMediation.testing:type_name -> frontend.v1.RosterMergeQueueMediationTesting
 	78,  // 102: frontend.v1.RosterMergeQueueMediationWaiting.target:type_name -> frontend.v1.RosterMergeQueueMediationTarget
 	78,  // 103: frontend.v1.RosterMergeQueueMediationChecking.target:type_name -> frontend.v1.RosterMergeQueueMediationTarget
 	78,  // 104: frontend.v1.RosterMergeQueueMediationFixing.target:type_name -> frontend.v1.RosterMergeQueueMediationTarget
-	78,  // 105: frontend.v1.RosterMergeQueueMediationFinishing.target:type_name -> frontend.v1.RosterMergeQueueMediationTarget
+	78,  // 105: frontend.v1.RosterMergeQueueMediationTesting.target:type_name -> frontend.v1.RosterMergeQueueMediationTarget
 	201, // 106: frontend.v1.RosterMergeQueueMediationTarget.workspace:type_name -> workspace.v1.WorkspaceRef
 	93,  // 107: frontend.v1.RosterMergeQueueOffQueue.subject:type_name -> frontend.v1.RosterMergeQueueSubject
 	80,  // 108: frontend.v1.RosterMergeQueueOffQueue.cause:type_name -> frontend.v1.RosterMergeQueueOffQueueCause
@@ -13839,7 +13845,7 @@ func file_frontend_v1_sidebar_proto_init() {
 		(*RosterMergeQueueMediation_Waiting)(nil),
 		(*RosterMergeQueueMediation_Checking)(nil),
 		(*RosterMergeQueueMediation_Fixing)(nil),
-		(*RosterMergeQueueMediation_Finishing)(nil),
+		(*RosterMergeQueueMediation_Testing)(nil),
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[74].OneofWrappers = []any{}
 	file_frontend_v1_sidebar_proto_msgTypes[88].OneofWrappers = []any{}

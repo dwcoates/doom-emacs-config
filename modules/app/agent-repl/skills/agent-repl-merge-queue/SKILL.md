@@ -245,10 +245,12 @@ Either kind:
 - A repository whose `.agent-repl/lifecycle.yaml` sets `deploy_checks` holds
   its queue's head after every deploy until the deploy is checked.
   - Deploys in a row form a chain, which one hidden intake workspace checks.
-  - The sidebar labels the repository in purple: "hot reloading" while the
-    build rolls out, "assessing reload" while the intake checks it, "fixing
-    reload" while a remediation workspace fixes it. A click selects the
-    workspace at work.
+  - The sidebar labels the repository in purple: "HOT-LOADING ZETTEL" while
+    a build rolls out (a landing's or a landed fix's), "ASSESSING ZETTEL
+    HEALTH" while the intake checks it, "FIXING ZETTEL ISSUES" while a
+    remediation workspace fixes it or what its gate failed on, "TESTING
+    ZETTEL FIXES" while a finished fix runs its gate and lands. A click
+    selects the workspace at work.
   - `merge-queue status` answers its advance as `mediating`, with its stage
     (`rolling_out`, `assessing` or `fixing`, naming the intake and the
     remediation) and `remediations_in_a_row`; `paused` wins while the queue

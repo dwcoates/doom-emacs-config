@@ -207,7 +207,7 @@ func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, standBy b
 // queue. THE WORKSPACE STANDS BY THE MOMENT ITS FINISH IS ACCEPTED (owner
 // requirement, 2026-11-16): its session ends before its turn can write a
 // reply, and it leaves the working rows for its repository's
-// `finishing reload` label. CTX IS THE MEDIATION'S LIFETIME, NEVER THE
+// `TESTING ZETTEL FIXES` label. CTX IS THE MEDIATION'S LIFETIME, NEVER THE
 // FINISH REQUEST'S: the session the stand-by ends is the one that sent the
 // request, so ending it cancels the request's context mid-stand-by. A
 // stand-by that fails is recorded and the finish goes on: the fix still
@@ -307,6 +307,7 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 		return finishMoved(err, moved, f, wsm.RemediationLanding)
 	}
 	f.Step, f.GatedHead = wsm.RemediationLanding, gated
+	o.republishMediation(ctx, f.Repo)
 	return o.remediationLand(ctx, f, withField(fields, "step", string(f.Step)))
 }
 
@@ -496,6 +497,7 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateLanded, f.GateRounds)
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation landed directly on the main branch; it deploys", withField(withField(fields, "head", after), "paths", len(paths)))
 	f.Step, f.StepAt = wsm.RemediationDeploying, o.deps.Now()
+	o.republishMediation(ctx, f.Repo)
 	return o.remediationDeploy(ctx, f, withField(fields, "step", string(f.Step)))
 }
 
@@ -527,6 +529,14 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 		return err
 	}
 	var errs []error
+	moved := false
+	// EVERY STEP A FINISH MOVES IS REDRAWN: its deploy leaves the label to
+	// the check it owes.
+	defer func() {
+		if moved {
+			o.republishMediation(ctx, repo)
+		}
+	}()
 	for _, f := range finishes {
 		if !sameQueue(f.Repo, repo) || f.Step != wsm.RemediationDeploying || f.StepAt.After(at) {
 			continue
@@ -535,6 +545,7 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 			errs = append(errs, err)
 			continue
 		}
+		moved = true
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy began; it owes the chain's next check", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
 		// ITS PROBLEMS ARE FIXED, NOT CLOSED: a later window that logs one
 		// again finds it RECURRED, with this owner's findings beside it.
