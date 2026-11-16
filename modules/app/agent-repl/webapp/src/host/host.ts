@@ -460,13 +460,20 @@ export function createHost(env: HostEnv): Host {
    * page -- and it then arrives from a window no frame names any more. Such a
    * message is the page's last word, read as that at info; a message from a
    * window that never was a page here is still the warning it was.
+   *
+   * WebKit can dispatch such a message after it detached the window, with a
+   * null source no window set can match (2026-11-16: a removed page's
+   * `drawn` arrived source=null during a deploy), so the origins of removed
+   * pages are kept too: a live page's message always carries its window.
    */
   const removedWindows = new WeakSet<MessageEventSource>();
+  const removedOrigins = new Set<string>();
 
-  /** Take FRAME's iframe out of the document, remembering its window. */
+  /** Take FRAME's iframe out of the document, remembering its window and origin. */
   const removeFrame = (frame: Frame): void => {
     const removed = frame.iframe.contentWindow;
     if (removed !== null) removedWindows.add(removed);
+    removedOrigins.add(new URL(frame.url).origin);
     frame.iframe.remove();
   };
 
@@ -615,7 +622,9 @@ export function createHost(env: HostEnv): Host {
     if (!onHostChannel(event.data)) return;
     const frame = frameOf(event.source);
     if (frame === null) {
-      if (event.source !== null && removedWindows.has(event.source)) {
+      const removedPage =
+        event.source === null ? removedOrigins.has(event.origin) : removedWindows.has(event.source);
+      if (removedPage) {
         note("info", `a page this host already removed sent its last host message; it was dropped: ${JSON.stringify(event.data)}`);
         return;
       }
