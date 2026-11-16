@@ -107,6 +107,13 @@ type Mirror struct {
 	// undecodable are the rows of the last roster whose status this build
 	// cannot read, so each is logged when it becomes so, not on every push.
 	undecodable map[ids.WorkspaceID]bool
+	// workspaces and closed are the latest snapshot of each stream the
+	// incumbent's pushes carry rows on. A push carries only the streams it
+	// changed (frontend.v1.RosterPush), so a stream it leaves out keeps the
+	// snapshot held here. A merged workspace is in no stream, and the
+	// incumbent serves none, so none is mirrored.
+	workspaces *frontendv1.WorkspaceRoster
+	closed     *frontendv1.RosterClosedRows
 	// ended is set once, at the mirror's end; nothing is mirrored after it.
 	ended bool
 	// cancel ends Run's subscription; nil until Run starts.
@@ -161,8 +168,8 @@ func (m *Mirror) Run(ctx context.Context) {
 	m.deps.Log.Info(Op, "subscribed to the incumbent's roster; rows not yet adopted draw its status", fields)
 	for stream.Receive() {
 		switch push := stream.Msg().GetPush().(type) {
-		case *agentreplv1.WatchWorkspaceRosterResponse_Roster:
-			m.take(push.Roster, fields)
+		case *agentreplv1.WatchWorkspaceRosterResponse_Streams:
+			m.take(push.Streams, fields)
 		case *agentreplv1.WatchWorkspaceRosterResponse_Ending:
 			m.deps.Log.Info(Op, "the incumbent ended its roster stream; every row is this daemon's own", fields)
 			m.withdraw()
@@ -243,15 +250,18 @@ func (m *Mirror) withdraw() {
 	m.ended = true
 	m.arms = nil
 	m.undecodable = nil
+	m.workspaces, m.closed = nil, nil
 	m.mu.Unlock()
 	m.publish()
 }
 
-// take installs the incumbent's ROSTER. A row whose status this build cannot
-// read (an unset oneof, as an arm a newer or older schema names and this one
-// does not decodes, or an arm no claim places) is logged at ERROR when it
-// becomes so and is left out, so it keeps this daemon's own state.
-func (m *Mirror) take(roster *frontendv1.WorkspaceRoster, fields dlog.Context) {
+// take installs the incumbent's PUSH: each stream it carries replaces the
+// snapshot held of it, and the arms are read off the open, hidden and closed
+// rows of the snapshots held. A row whose status this build cannot read (an
+// unset oneof, as an arm a newer or older schema names and this one does not
+// decodes, or an arm no claim places) is logged at ERROR when it becomes so
+// and is left out, so it keeps this daemon's own state.
+func (m *Mirror) take(push *frontendv1.RosterPush, fields dlog.Context) {
 	arms := map[ids.WorkspaceID]string{}
 	undecodable := map[ids.WorkspaceID]bool{}
 	var fresh []dlog.Context
@@ -260,7 +270,13 @@ func (m *Mirror) take(roster *frontendv1.WorkspaceRoster, fields dlog.Context) {
 		m.mu.Unlock()
 		return
 	}
-	for _, row := range rosterwalk.AllRows(roster) {
+	if push.Workspaces != nil {
+		m.workspaces = push.Workspaces
+	}
+	if push.Closed != nil {
+		m.closed = push.Closed
+	}
+	for _, row := range rosterwalk.AllRows(&frontendv1.RosterPush{Workspaces: m.workspaces, Closed: m.closed}) {
 		ws := ids.WorkspaceID(row.GetWorkspace().GetWorkspace().GetId())
 		arm, problem := statusOf(row)
 		if problem != "" {

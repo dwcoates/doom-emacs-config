@@ -21,9 +21,9 @@ func rosterRow(id string, thinking bool) *frontendv1.RosterRow {
 	return row
 }
 
-// rosterOf is a roster drawing OPEN in the open section, HIDDEN in the hidden
-// section and MERGED in the recently merged band.
-func rosterOf(open, hidden, merged []*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
+// pushOf is a push whose workspaces stream draws OPEN in the open section
+// and HIDDEN in the hidden section.
+func pushOf(open, hidden []*frontendv1.RosterRow) *frontendv1.RosterPush {
 	var openRows []*frontendv1.RosterRepoEntry
 	for _, row := range open {
 		openRows = append(openRows, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Row{Row: &frontendv1.RosterOpenRow{Row: row}}})
@@ -32,28 +32,19 @@ func rosterOf(open, hidden, merged []*frontendv1.RosterRow) *frontendv1.Workspac
 	for _, row := range hidden {
 		hiddenRows = append(hiddenRows, &frontendv1.RosterHiddenRow{Row: row})
 	}
-	var mergedRows []*frontendv1.RosterMergedRow
-	for _, row := range merged {
-		mergedRows = append(mergedRows, &frontendv1.RosterMergedRow{Row: row})
-	}
-	return &frontendv1.WorkspaceRoster{
+	return &frontendv1.RosterPush{Workspaces: &frontendv1.WorkspaceRoster{
 		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{{Entries: openRows}}},
 		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: hiddenRows}},
-		RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{
-			{MergedRows: &frontendv1.RosterMergedRows{Rows: mergedRows}}}},
-	}
+	}}
 }
 
 func TestPlacementsAnswersEachDrawnWorkspacesSectionAndStatus(t *testing.T) {
-	// Arrange
-	roster := rosterOf(
-		[]*frontendv1.RosterRow{rosterRow("a", true)},
-		[]*frontendv1.RosterRow{rosterRow("b", true)},
-		[]*frontendv1.RosterRow{rosterRow("c", true)},
-	)
+	// Arrange: a and b on the workspaces stream, c a merged workspace's page
+	// row.
+	push := pushOf([]*frontendv1.RosterRow{rosterRow("a", true)}, []*frontendv1.RosterRow{rosterRow("b", true)})
 
 	// Act
-	got, err := Placements(roster)
+	got, err := Placements(push, []*frontendv1.RosterRow{rosterRow("c", true)})
 
 	// Assert
 	if err != nil {
@@ -72,24 +63,37 @@ func TestPlacementsAnswersEachDrawnWorkspacesSectionAndStatus(t *testing.T) {
 func TestPlacementsFailsOnABrokenRoster(t *testing.T) {
 	tests := []struct {
 		name   string
-		roster *frontendv1.WorkspaceRoster
+		push   *frontendv1.RosterPush
+		merged []*frontendv1.RosterRow
 		want   string
 	}{
 		{
-			name:   "a row with no status arm",
-			roster: rosterOf([]*frontendv1.RosterRow{rosterRow("a", false)}, nil, nil),
-			want:   "open row of workspace a sets no status arm",
+			name: "an open row with no status arm",
+			push: pushOf([]*frontendv1.RosterRow{rosterRow("a", false)}, nil),
+			want: "open row of workspace a sets no status arm",
 		},
 		{
-			name:   "a workspace drawn twice",
-			roster: rosterOf([]*frontendv1.RosterRow{rosterRow("a", true)}, []*frontendv1.RosterRow{rosterRow("a", true)}, nil),
-			want:   "draws workspace a twice, in its open and hidden sections",
+			name:   "a merged row with no status arm",
+			push:   pushOf(nil, nil),
+			merged: []*frontendv1.RosterRow{rosterRow("m", false)},
+			want:   "merged row of workspace m sets no status arm",
+		},
+		{
+			name: "a workspace drawn twice",
+			push: pushOf([]*frontendv1.RosterRow{rosterRow("a", true)}, []*frontendv1.RosterRow{rosterRow("a", true)}),
+			want: "draws workspace a twice, in its open and hidden sections",
+		},
+		{
+			name:   "a workspace both open and merged",
+			push:   pushOf([]*frontendv1.RosterRow{rosterRow("a", true)}, nil),
+			merged: []*frontendv1.RosterRow{rosterRow("a", true)},
+			want:   "draws workspace a twice, in its open and merged sections",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, err := Placements(tt.roster)
+			got, err := Placements(tt.push, tt.merged)
 
 			// Assert
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
