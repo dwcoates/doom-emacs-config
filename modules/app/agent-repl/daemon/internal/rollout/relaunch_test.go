@@ -979,6 +979,48 @@ func TestShimReportedIgnoresARepeatOfTheSameBuild(t *testing.T) {
 	}
 }
 
+func TestAStalenessJudgementNamesWhatAskedForIt(t *testing.T) {
+	tests := []struct {
+		name  string
+		judge func(h *harness, ws ids.WorkspaceID)
+		want  staleTrigger
+	}{
+		{name: "a shim's report", want: judgedForShimReport, judge: func(h *harness, ws ids.WorkspaceID) {
+			h.c.ShimReported(ws, "installed-build")
+			h.c.staleChecks.Wait()
+		}},
+		{name: "a caller's request", want: judgedForRequest, judge: func(h *harness, ws ids.WorkspaceID) {
+			h.c.mu.Lock()
+			h.c.reported[ws] = "installed-build"
+			h.c.unlock()
+			if _, err := h.c.CheckStaleness(context.Background(), ws, false); err != nil {
+				t.Fatalf("CheckStaleness: %v", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+
+			// Act
+			tt.judge(h, ws)
+
+			// Assert
+			var got []any
+			for _, r := range records(h.log, opStaleness) {
+				if r.Message == "the shim runs the installed build" {
+					got = append(got, r.Context["judged_for"])
+				}
+			}
+			if len(got) != 1 || got[0] != string(tt.want) {
+				t.Fatalf("judgements judged for %v, want one judged for %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestShimReportedSaysLoudlyThatAShimReportedNoBuild(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

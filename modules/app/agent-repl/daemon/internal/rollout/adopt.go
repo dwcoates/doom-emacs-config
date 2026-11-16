@@ -1003,7 +1003,7 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 	// THE ADOPTED SHIM IS JUDGED NOW THAT IT IS OURS. Its build report arrived
 	// when the adoption dialed it, which was before this daemon owned the
 	// workspace and so before it could bounce it.
-	if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws)); err != nil {
+	if _, err := c.checkStale(ctx, ws, c.takeoverForce(ws), judgedForAdoption); err != nil {
 		c.log.Error(opStaleness, "the adopted shim could not be judged against the installed build", dlog.WithCause(fields, err))
 	}
 
@@ -1643,7 +1643,7 @@ func (c *controller) judgeLiveShims(fields dlog.Context) (map[ids.WorkspaceID][]
 			continue
 		}
 		checked++
-		check, err := c.checkStale(lifetime, ws.ID, c.takeoverForce(ws.ID))
+		check, err := c.checkStale(lifetime, ws.ID, c.takeoverForce(ws.ID), judgedForSweep)
 		if err != nil {
 			c.log.Error(opStaleness, "an adopted shim could not be judged against the installed build",
 				dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws.ID)}), err))
