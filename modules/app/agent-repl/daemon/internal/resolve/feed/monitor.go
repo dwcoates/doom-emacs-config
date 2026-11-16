@@ -44,7 +44,7 @@ func (r *resolver) drawMonitor(s *wsState, at placement, act *conversationv1.Age
 		}
 	case *conversationv1.AgentMonitor_Ended:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Ended"})
-		if err := r.restateMonitor(s, act, u, state.Ended.GetCall()); err != nil {
+		if err := r.restateMonitor(s, act, u, state.Ended.GetCall(), standsAlone(act)); err != nil {
 			return nil, err
 		}
 		// The watch left the live set: an ordinary ending, with no output of its
@@ -53,7 +53,9 @@ func (r *resolver) drawMonitor(s *wsState, at placement, act *conversationv1.Age
 		row = r.toolRow(s, at, unitID, monitorName, returnedOutcome(u, true, nil, 0))
 	case *conversationv1.AgentMonitor_Failure:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawMonitor", "branch": "case *conversationv1.AgentMonitor_Failure"})
-		if err := r.restateMonitor(s, act, u, state.Failure.GetCall()); err != nil {
+		// A FAILURE'S RESTATEMENT BINDS FROM REVISION 3: below it the transcript
+		// plane wrote the failure bare (monitorFailureStandsAlone).
+		if err := r.restateMonitor(s, act, u, state.Failure.GetCall(), monitorFailureStandsAlone(act)); err != nil {
 			return nil, err
 		}
 		failure := state.Failure.GetFailure()
@@ -90,14 +92,15 @@ func monitorInput(start *conversationv1.AgentMonitorStart) (string, inputForm) {
 
 // restateMonitor takes the call a settled monitor frame RESTATES, the settle
 // standing alone as every other call's does. A settle that restated no call is
-// graded by its producer's contract (restatedOrHeld): drawn from the held start
-// and recorded, or, with no start held, no row at all.
-func (r *resolver) restateMonitor(s *wsState, act *conversationv1.AgentActivity, u *unitState, call *conversationv1.AgentMonitorStart) error {
+// graded by bound, whether its producer's revision obliges the arm to restate
+// (restatedOrHeldUnder): drawn from the held start and recorded, or, with no
+// start held, no row at all.
+func (r *resolver) restateMonitor(s *wsState, act *conversationv1.AgentActivity, u *unitState, call *conversationv1.AgentMonitorStart, bound bool) error {
 	if call != nil {
 		armMonitor(u, call)
 		return nil
 	}
-	input, err := r.restatedOrHeld(s, act, u, "monitor", "", u.input)
+	input, err := r.restatedOrHeldUnder(s, act, u, "monitor", "", u.input, bound)
 	if err != nil {
 		return err
 	}
