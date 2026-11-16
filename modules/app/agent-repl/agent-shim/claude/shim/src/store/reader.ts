@@ -39,9 +39,17 @@ import {
 } from "./persistence.js";
 import {
   isRetryableRead,
+  READ_RETRY_POLICY,
   readWithRetry,
   type ReadRetryOptions,
 } from "./retry.js";
+
+/** A backoff taken without holding the process open for it. */
+const sleepUnref = (ms: number): Promise<void> =>
+  new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
 
 const LOGGER = bindLog({
   component: "shim-store-reader",
@@ -1613,14 +1621,39 @@ export function createReader(options: ReaderOptions): Reader {
       const run = create(conversationv1.AgentActivityIdSchema, {
         value: runValue,
       });
-      const abort = new AbortController();
       LOGGER.debug(
         { run: runValue, work: work.value, await_first_row: awaitFirstRow },
         "following a shell run's stored rows",
       );
       let opened = false;
+      const policy = options.retry ?? READ_RETRY_POLICY;
+      const sleep = options.sleep ?? sleepUnref;
       return {
         async *[Symbol.asyncIterator]() {
+          // AN OPEN THE STORE'S RESTART CUT IS REPLAYED, on the read half's
+          // schedule. Before the first row nothing was yielded, so replaying
+          // the open repeats nothing (2026-11-16: a WatchBash open met the
+          // store's 43ms restart window and was refused as not_found).
+          for (let attempt = 1; ; attempt += 1) {
+            try {
+              yield* followBashRun();
+              return;
+            } catch (error) {
+              if (opened || !isRetryableRead(error) || attempt >= policy.maxAttempts) throw error;
+              const backoff = policy.backoffMs[Math.min(attempt - 1, policy.backoffMs.length - 1)] ?? 0;
+              LOGGER.info(
+                { run: runValue, attempt, backoff_ms: backoff, detail: String(error) },
+                "the store could not be reached to follow a shell run; replaying the open on the read retry schedule",
+              );
+              await sleep(backoff);
+            }
+          }
+        },
+      };
+
+      // ONE CALL PER ATTEMPT, each with its own cancellation.
+      async function* followBashRun(): AsyncGenerator<conversationv1.AgentBash> {
+          const abort = new AbortController();
           try {
             // A RUN THIS SHIM HOLDS LIVE IS WAITED ON; ANY OTHER IS REFUSED.
             // A live run's rows can all be the sidecar's, written once it reads
@@ -1667,8 +1700,7 @@ export function createReader(options: ReaderOptions): Reader {
             // body that has not finished.
             if (opened || !abort.signal.aborted) abort.abort();
           }
-        },
-      };
+      }
     },
 
     noteBashFrame(runValue, frame) {

@@ -1074,6 +1074,15 @@ export function notFound(detail: string): ConnectError {
 }
 
 /**
+ * A stream the STORE could not serve: its socket stayed down through the read
+ * half's whole retry schedule. Not a refusal (the handle may exist), so never
+ * `not_found`: the caller re-opens once the store is back.
+ */
+export function storeUnavailable(detail: string): ConnectError {
+  return new ConnectError(detail, Code.Unavailable);
+}
+
+/**
  * WORKFLOW IS KICKED (ruled 2026-08-29). The three workflow verbs stay in the
  * contract and answer this until the wave that implements them.
  *
