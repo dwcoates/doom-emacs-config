@@ -39,7 +39,7 @@ type Usage struct {
 type markedKernel struct {
 	listPids func() ([]int, error)
 	record   func(pid int) (procRecord, error)
-	args func(pid int) (argv, env []string, err error)
+	args     func(pid int) (argv, env []string, err error)
 	// rusage is the process's own and reaped children's CPU seconds.
 	rusage func(pid int) (own, children float64, err error)
 }
