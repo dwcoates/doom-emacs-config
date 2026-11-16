@@ -1113,7 +1113,8 @@ decision is recorded at INFO, as the roster's follow records its own."
                             (- gcs-done gcs)
                             (round (* 1000 (- gc-elapsed gc-seconds))))))))))
 
-(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent)
+(defun agent-repl-host--send-subject-verb (ws op rpc on-success on-not-sent
+                                               &optional timeout)
   "Send workspace WS\='s ref through the workspace-subject verb RPC.
 OP is the verb\='s record slug (`elisp.host.<op>\=', `<op>-skipped\=',
 `<op>-refused\=', `<op>-unknown-arm\=', `<op>-failed\=').  ON-SUCCESS is
@@ -1121,6 +1122,8 @@ called with no argument once the daemon answers success, and ON-NOT-SENT
 with no argument on every other outcome: no ref or no connection yet (WS
 is not sent), a refusal (recorded by `agent-repl-host--on-refused\='), an
 arm the verb does not know, or a transport failure (both at ERROR).
+TIMEOUT, when given, bounds the call in place of
+`agent-repl-connect-unary-timeout-seconds\='.
 Answers t when the call was made, nil when it was not."
   (let ((ref (agent-repl-host-ref ws))
         (conn (agent-repl-host-conn-or-primary ws)))
@@ -1147,7 +1150,8 @@ Answers t when the call was made, nil when it was not."
        :on-failure
        (lambda (detail)
          (agent-repl--error ws (format "elisp.host.%s-failed ws=%%s detail=%%S" op) ws detail)
-         (funcall on-not-sent)))
+         (funcall on-not-sent))
+       :timeout timeout)
       t))))
 
 (defun agent-repl-host-report-page-unloading (ws on-reported on-not-reported)
@@ -1165,6 +1169,20 @@ The outcomes are recorded by `agent-repl-host--send-subject-verb\='."
      (agent-repl--log ws "elisp.host.page-unloading-reported ws=%s" ws)
      (funcall on-reported))
    on-not-reported))
+
+(defconst agent-repl-host-page-residency-timeout-seconds 30
+  "How long a ReportPageResidency call may wait for the daemon\='s answer.
+Every link-up forgets each workspace\='s last report, so a handover sends
+one report per workspace while the successor is still adopting the rest
+\=(`agent-repl-page-unload-start\=').  Measured over the 14:52 deploy of
+2026-11-16 (120 workspaces): each report reached its handler up to 2.7s
+after its workspace\='s adopt, the handler took up to 5s
+\=(agentrepl_rpc_seconds), and Emacs itself stalled 4.1s before reading
+the answers, so a round trip ran to some 12s.  The generic
+`agent-repl-connect-unary-timeout-seconds\=' (10s) sat below that, and
+ten workspaces recorded their report at ERROR though the daemon had taken
+every one.  30s is two and a half times the worst, the same bound the
+adopt they follow waits (`agent-repl-host-adopt-timeout-seconds\=').")
 
 (defun agent-repl-host-report-page-residency (ws residency on-reported)
   "Tell the daemon what Emacs holds of workspace WS\='s page: RESIDENCY.
@@ -1186,7 +1204,8 @@ calling anything when WS has no ref or no connection yet."
      (agent-repl-host--put ws :last-known-page
                            (plist-get residency :arm))
      (funcall on-reported))
-   #'ignore))
+   #'ignore
+   agent-repl-host-page-residency-timeout-seconds))
 
 (defun agent-repl-host-mark-viewed (ws)
   "Tell the daemon the user has now SEEN workspace WS.

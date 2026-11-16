@@ -751,6 +751,53 @@ A hand-rolled copy of either would not be recorded here."
       (should-not (agent-repl-host-last-known-page "ws-1"))
       (should (agent-repl-test-host--logged-p :error "elisp.host.page-residency-refused")))))
 
+(ert-deftest agent-repl-test-host-page-residency-waits-out-its-own-bound ()
+  "The residency report waits `agent-repl-host-page-residency-timeout-seconds'."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((timeout :unset))
+      (cl-letf (((symbol-function 'agent-repl-rpc-report-page-residency)
+                 (lambda (_conn _request &rest keys) (setq timeout (plist-get keys :timeout)))))
+        ;; Act
+        (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) #'ignore)
+        ;; Assert
+        (should (equal timeout agent-repl-host-page-residency-timeout-seconds))))))
+
+(ert-deftest agent-repl-test-host-page-residency-bound-exceeds-the-unary-default ()
+  "The residency report's bound sits above the generic unary timeout."
+  ;; Assert
+  (should (> agent-repl-host-page-residency-timeout-seconds
+             agent-repl-connect-unary-timeout-seconds)))
+
+(ert-deftest agent-repl-test-host-subject-verb-without-a-bound-keeps-the-default ()
+  "A subject verb given no TIMEOUT passes nil, so the unary default applies."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((timeout :unset))
+      (cl-letf (((symbol-function 'agent-repl-rpc-mark-workspace-viewed)
+                 (lambda (_conn _request &rest keys) (setq timeout (plist-get keys :timeout)))))
+        ;; Act
+        (agent-repl-host-mark-viewed "ws-1")
+        ;; Assert
+        (should (null timeout))))))
+
+(ert-deftest agent-repl-test-host-page-residency-timeout-is-recorded-at-error ()
+  "A residency report that times out is recorded at ERROR and not reported."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--residency-answer
+          (list :failure (list :kind :timeout :message "ReportPageResidency timed out after 30s")))
+    (let (reported)
+      ;; Act
+      (agent-repl-host-report-page-residency "ws-1" '(:arm :not-loaded :value nil) (lambda () (setq reported t)))
+      ;; Assert
+      (should-not reported)
+      (should-not (agent-repl-host-last-known-page "ws-1"))
+      (should (agent-repl-test-host--logged-p :error "elisp.host.page-residency-failed")))))
+
 ;;;; ---- Report page unloading ----
 
 (defun agent-repl-test-host--report-unloading (ws)
