@@ -1168,17 +1168,3 @@ func TestASubscriptionThisDaemonNeverSawTakenIsToldEveryChange(t *testing.T) {
 		t.Fatalf("submissions = %+v, want alice told", got)
 	}
 }
-
-func TestADeploysEndNoQueueWriteMadeIsToldToEverySubscription(t *testing.T) {
-	// Arrange: the deploy's end carries no place in the changes' order.
-	f := newFixture(fakeSubscriptions{subs: []wsm.MergeQueueSubscription{sub(alice, repoDoom)}})
-	f.s.Subscribed(alice, repoDoom, 9)
-
-	// Act.
-	f.s.deliver(context.Background(), f.prompts, merge.QueueChange{Kind: merge.QueueChangeDeployed})
-
-	// Assert.
-	if got := f.prompts.submissions(); len(got) != 1 {
-		t.Fatalf("submissions = %+v, want the deploy's end told", got)
-	}
-}

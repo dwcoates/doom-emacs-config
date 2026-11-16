@@ -1733,7 +1733,7 @@ func TestPayOwedNamesALandingThatOwesNoReport(t *testing.T) {
 	f.svc.PayOwed(context.Background(), true, nil)
 
 	// Assert
-	want := merge.DeployEnd{Carried: []string{"one-shot-fix"}}
+	want := merge.DeployEnd{Landed: []ids.WorkspaceID{"ws-one-shot"}}
 	if len(f.deploys.ends) != 1 || !reflect.DeepEqual(f.deploys.ends[0], want) {
 		t.Fatalf("told %+v, want %+v", f.deploys.ends, want)
 	}
@@ -1755,7 +1755,7 @@ func TestPayOwedNamesALandingOnlyOnce(t *testing.T) {
 	f.svc.PayOwed(context.Background(), true, nil)
 
 	// Assert
-	if len(f.deploys.ends) != 2 || f.deploys.ends[1].Carried != nil {
+	if len(f.deploys.ends) != 2 || f.deploys.ends[1].Landed != nil {
 		t.Fatalf("told %+v, want the second deploy carrying nothing", f.deploys.ends)
 	}
 }
@@ -1790,7 +1790,7 @@ func TestPayOwedThatCannotTakeTheLandingsRecordsItAndStillPaysTheReports(t *test
 	if len(f.prompts.sent) != 1 {
 		t.Fatalf("sent = %+v, want the owed report paid", f.prompts.sent)
 	}
-	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Carried != nil {
+	if len(f.deploys.ends) != 1 || f.deploys.ends[0].Landed != nil {
 		t.Fatalf("told %+v, want the deploy told with no landing named", f.deploys.ends)
 	}
 	if r, ok := f.recordWith(dlog.LevelError, "could not take the landings the deploy carries; its notice names none of them"); !ok || r.Context["cause"] != "unreadable" {

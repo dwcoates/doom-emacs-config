@@ -205,7 +205,9 @@ func (s *Service) Edges() Edges { return Edges{s: s} }
 type Edges struct{ s *Service }
 
 // Closed implements wsedges.Observer.
-func (e Edges) Closed(before wsm.Workspace, _ wsm.CloseHow) { e.s.loop.Report(closeEvent{ws: before.ID}) }
+func (e Edges) Closed(before wsm.Workspace, _ wsm.CloseHow) {
+	e.s.loop.Report(closeEvent{ws: before.ID})
+}
 
 // TurnStarted implements wsedges.Observer.
 func (Edges) TurnStarted(ids.WorkspaceID) {}
