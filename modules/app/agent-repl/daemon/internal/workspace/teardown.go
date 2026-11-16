@@ -83,6 +83,28 @@ func (v *verbs) markClosedFirst(ctx context.Context, log dlog.Logger, op string,
 // kill is Kill's body, shared with Nuke, which kills before it destroys, and
 // with the retirements. BY is who the close it records is by.
 func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, by wsm.CloseCause) error {
+	report, err := v.endSession(ctx, log, ws)
+	if err != nil {
+		return err
+	}
+
+	// A killed workspace's roster row carries closed = true: Emacs derives its
+	// tab set from that flag, and a killed workspace has no editor state left.
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: by}); err != nil {
+		log.Error(opKill, "could not record the close", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("kill %q: record closed: %w", ws, err)
+	}
+
+	log.Info(opKill, "killed the workspace's session", dlog.Context{"orphans_closed": len(report.Turns)})
+	v.republishRegistry(ctx, log, opKill)
+	return nil
+}
+
+// endSession ends WS's session at once, its turn cut: the shim's session is
+// killed, the process stopped, the cut turns closed and the session's
+// terminal recorded. It closes nothing: Kill closes the workspace after it,
+// and a deploy check workspace standing by keeps its workspace open.
+func (v *verbs) endSession(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) (wsm.OrphanReport, error) {
 	if shim, live := v.deps.Shim(ws); live {
 		// THE LATCH IS ARMED BEFORE THE ASK, and therefore before the
 		// unconditional process stop the ask's failure leads to: the stop is a
@@ -111,14 +133,14 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, b
 
 	if err := v.deps.Sessions.Stop(shimlife.WithStandDown(ctx, shimlife.StandDownKill), ws, true); err != nil {
 		log.Error(opKill, "could not stop the shim process", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("kill %q: stop the shim: %w", ws, err)
+		return wsm.OrphanReport{}, fmt.Errorf("kill %q: stop the shim: %w", ws, err)
 	}
 
 	at := v.now()
 	report, err := v.deps.Queue.CloseOrphans(ctx, ws, at, wsm.LeaveCut)
 	if err != nil {
 		log.Error(opKill, "could not close the orphaned turns", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("kill %q: close orphans: %w", ws, err)
+		return wsm.OrphanReport{}, fmt.Errorf("kill %q: close orphans: %w", ws, err)
 	}
 	if err := v.deps.DB.SetSessionTerminal(ctx, ws, wsm.SessionTerminal{
 		Kind:   "killed",
@@ -135,20 +157,10 @@ func (v *verbs) kill(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, b
 			log.Debug(opKill, "no session to record a terminal for", dlog.Context{"cause": err.Error()})
 		} else {
 			log.Error(opKill, "could not record the session terminal", dlog.Context{"cause": err.Error()})
-			return fmt.Errorf("kill %q: record the terminal: %w", ws, err)
+			return wsm.OrphanReport{}, fmt.Errorf("kill %q: record the terminal: %w", ws, err)
 		}
 	}
-
-	// A killed workspace's roster row carries closed = true: Emacs derives its
-	// tab set from that flag, and a killed workspace has no editor state left.
-	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: by}); err != nil {
-		log.Error(opKill, "could not record the close", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("kill %q: record closed: %w", ws, err)
-	}
-
-	log.Info(opKill, "killed the workspace's session", dlog.Context{"orphans_closed": len(report.Turns)})
-	v.republishRegistry(ctx, log, opKill)
-	return nil
+	return report, nil
 }
 
 // Nuke destroys data: it kills the session when one is live, deletes the
