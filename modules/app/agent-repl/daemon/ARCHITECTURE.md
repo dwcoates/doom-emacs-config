@@ -401,9 +401,17 @@ the sink interfaces above plus daemon-fact setters:
   two places within one repository; MoveWorkspace puts one onto a sibling's tab, the
   tabs between shifting over), the tab bar as its own list in that order,
   attention marker (set on
-  notification, cleared on SelectWorkspace), recently merged, `current`,
-  status arm from session/merge/link facts; `SetMerge(ws, MergeFacts)`,
-  `SetSelected(ws)`, `SetRegistry(...)` on any WSM change.
+  notification, cleared on SelectWorkspace), `current`, status arm from
+  session/merge/link facts; `SetMerge(ws, MergeFacts)`, `SetSelected(ws)`,
+  `SetRegistry(...)` on any WSM change. ONE RENDER resolves the roster's
+  FOUR SNAPSHOT STREAMS under one lock (`frontend.v1.RosterPush`: workspaces,
+  merge queue, the Recently Merged summary, closed rows) and publishes them
+  whole as one value; a stream equal to the last keeps the last push's
+  message, and the stream server sends each subscription only the streams
+  whose message it has not sent. A merged workspace is in no stream: its
+  row facts are still derived every render, and its row is resolved on
+  demand, as a read, by `MergedPage` (`ListMergedWorkspaces`), ten per page,
+  under the merged set's token.
 - holds: `SetHeldPrompts(ws, []HeldPrompt)`, `SetEditing(ws, turn)`;
   heading composed here.
 
@@ -1103,10 +1111,10 @@ asks for the workspaces it wants open with the `OpenTabs` server stream.
   open began is not waited on. A hidden workspace is answered at once and its
   debt is untouched until it is shown and opened.
 - **`ready` and `failed` carry the roster row** (`sidebar.Resolver.Row`): the
-  row and its roster's `revision` taken together from the last resolved
-  roster, after the open lowered the workspace's `opening`. The roster raises
-  `WorkspaceRoster.revision` for every roster it resolves (an identical render
-  keeps it and is not republished).
+  row and its push's `revision` taken together from the last resolved
+  push, after the open lowered the workspace's `opening`. The roster raises
+  `RosterPush.revision` for every push whose streams differ (an identical
+  render keeps it and is not republished).
 - **A client that goes away** ends the stream; the bring-ups carry on (they
   run on the fleet's detached lifetime).
 - **Page facts live with the page stream**: `attachPage`/`detachPage` tell the
