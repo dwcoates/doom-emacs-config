@@ -176,8 +176,11 @@ func TestAPauseChangeThatWouldChangeNothingIsRefusedAndWritesNothing(t *testing.
 			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
 				t.Fatalf("error = %v, want the %s refusal", err, tt.wantArm)
 			}
-			if rec, ok := h.recordFor("warn", tt.wantOp); !ok || rec.Context["arm"] != tt.wantArm {
-				t.Fatalf("WARN %s record = %v (%v), want one naming the arm", tt.wantOp, rec.Context, ok)
+			if rec, ok := h.recordFor("info", tt.wantOp); !ok || rec.Context["arm"] != tt.wantArm {
+				t.Fatalf("INFO %s record = %v (%v), want one naming the arm", tt.wantOp, rec.Context, ok)
+			}
+			if rec, ok := h.recordFor("warn", tt.wantOp); ok {
+				t.Fatalf("WARN %s record = %v, want none: the refusal is the asker's answer, not a fault", tt.wantOp, rec.Context)
 			}
 		})
 	}
@@ -206,8 +209,11 @@ func TestAnUnscopedPauseChangeWithNoQueueAnywhereIsRefused(t *testing.T) {
 			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
 				t.Fatalf("error = %v, want the %s refusal", err, tt.wantArm)
 			}
-			if rec, ok := h.recordFor("warn", tt.wantOp); !ok || rec.Context["arm"] != tt.wantArm {
-				t.Fatalf("WARN %s record = %v (%v), want one naming the arm", tt.wantOp, rec.Context, ok)
+			if rec, ok := h.recordFor("info", tt.wantOp); !ok || rec.Context["arm"] != tt.wantArm {
+				t.Fatalf("INFO %s record = %v (%v), want one naming the arm", tt.wantOp, rec.Context, ok)
+			}
+			if rec, ok := h.recordFor("warn", tt.wantOp); ok {
+				t.Fatalf("WARN %s record = %v, want none: the refusal is the asker's answer, not a fault", tt.wantOp, rec.Context)
 			}
 		})
 	}

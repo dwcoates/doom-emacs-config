@@ -161,7 +161,7 @@ func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.Re
 		if paused {
 			arm, reason = ArmAlreadyPaused, "the merge queue is already paused"
 		}
-		o.deps.Log.Global().Warn(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
+		o.deps.Log.Global().Info(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
 		return &RefusalError{Arm: arm, Reason: reason}
 	}
 	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped})
@@ -392,7 +392,7 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 		if paused {
 			arm, reason = ArmAlreadyPaused, "no repository has a merge queue to pause"
 		}
-		o.deps.Log.Global().Warn(op, "refused a pause change with no queue to change", dlog.Context{"arm": arm})
+		o.deps.Log.Global().Info(op, "refused a pause change with no queue to change", dlog.Context{"arm": arm})
 		return nil, &RefusalError{Arm: arm, Reason: reason}
 	}
 	return keys, nil
