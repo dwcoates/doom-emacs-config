@@ -6,6 +6,7 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
 // TestStreamDrainKeepsAPumpFromWedging pins the property a PARTICIPANT HOLD
@@ -154,6 +155,34 @@ func TestBootWifiStanding(t *testing.T) {
 			// Assert
 			if got != tc.want {
 				t.Fatalf("BootWifiStanding(%v) = %t, want %t", tc.push, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTopbarBootWifiStanding(t *testing.T) {
+	tests := []struct {
+		name string
+		view *frontendv1.TopbarView
+		want bool
+	}{
+		{name: "a strip with no standing is not it", view: &frontendv1.TopbarView{}, want: false},
+		{name: "a strip with the lid unheard is not it", view: &frontendv1.TopbarView{PersistentWifi: &frontendv1.TopbarPersistentWifi{}}, want: false},
+		{name: "a strip with the lid heard closed is not it", view: &frontendv1.TopbarView{PersistentWifi: &frontendv1.TopbarPersistentWifi{
+			Lid: &frontendv1.TopbarPersistentWifi_LidClosed{LidClosed: &frontendv1.TopbarPersistentWifiLidClosed{}},
+		}}, want: false},
+		{name: "a strip with the lid heard open is it", view: &frontendv1.TopbarView{PersistentWifi: &frontendv1.TopbarPersistentWifi{
+			Lid: &frontendv1.TopbarPersistentWifi_LidOpen{LidOpen: &frontendv1.TopbarPersistentWifiLidOpen{}},
+		}}, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := TopbarBootWifiStanding(tc.view)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("TopbarBootWifiStanding(%v) = %t, want %t", tc.view, got, tc.want)
 			}
 		})
 	}

@@ -145,6 +145,13 @@ func BootWifiStanding(r *agentreplv1.WatchDaemonResponse) bool {
 	return r.GetPersistentWifi().GetLidOpen() != nil
 }
 
+// TopbarBootWifiStanding reports whether a topbar push carries the boot's
+// settled persistent-wifi standing (BootWifiStanding): the strip republishes
+// once the lid is heard, so a test asserting no further push awaits it first.
+func TopbarBootWifiStanding(v *frontendv1.TopbarView) bool {
+	return v.GetPersistentWifi().GetLidOpen() != nil
+}
+
 // AwaitBootWifiStanding waits on S for the settled boot standing
 // (BootWifiStanding), and answers it.
 func AwaitBootWifiStanding(t testing.TB, ctx context.Context, s *Stream[*agentreplv1.WatchDaemonResponse]) *agentreplv1.PersistentWifiState {

@@ -451,10 +451,11 @@ func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
 	}
 	f.shim.PushSessionUpdate(usage)
 	// THE STRIP SETTLES ON THE BOOT'S WI-FI STANDING TOO, which republishes
-	// it once the lid is heard (harness.BootWifiStanding): awaited here, it
-	// can never land after the identical push and read as that push's.
+	// it once the lid is heard (harness.TopbarBootWifiStanding): awaited
+	// here, it can never land after the identical push and read as that
+	// push's.
 	awaitTopbar(t, f, topbar, "the context chip after the first context_usage push, with the lid heard", func(v *frontendv1.TopbarView) bool {
-		return v.GetContext().GetText() == "10k" && v.GetPersistentWifi().GetLidOpen() != nil
+		return v.GetContext().GetText() == "10k" && harness.TopbarBootWifiStanding(v)
 	})
 
 	// Act: push the IDENTICAL context_usage fact again.
