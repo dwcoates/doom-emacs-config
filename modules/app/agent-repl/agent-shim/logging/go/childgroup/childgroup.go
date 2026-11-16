@@ -4,7 +4,7 @@
 package childgroup
 
 import (
-	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"syscall"
@@ -56,27 +56,64 @@ func ScrubRepositorySelectors(env []string) []string {
 	return out
 }
 
-// KillGroup SIGKILLs the process group PID leads. A group already gone is
-// the state the kill was asked to reach, answered as os.ErrProcessDone.
-func KillGroup(pid int) error { return KillGroupWith(syscall.Kill, pid) }
+// KillGroup SIGKILLs every member of the process group PID leads until no
+// live member is left. It answers nil once it killed the group, and
+// os.ErrProcessDone when the group held no live member to begin with.
+func KillGroup(pid int) error { return killUntilEmpty(pid, syscall.Kill, killableMembers) }
 
-// KillGroupWith is KillGroup over an injected kill, so the answers a kernel
-// gives for a finished group can be driven in a test.
-//
-// TWO ANSWERS MEAN THE GROUP HAS FINISHED. ESRCH is a group with no members
-// at all. EPERM is what darwin answers for a group whose members have all
-// exited and wait to be reaped: the child finished just as its caller
-// cancelled it. The group is the caller's own child's, created with Setpgid
-// and running as this user, so EPERM cannot mean a live member this process
-// may not signal. Returning either as an error made exec report "canceling
-// Cmd: operation not permitted" for a run that had in fact ended (2026-10-06,
-// a daemon exiting during its boot's service check).
-func KillGroupWith(kill func(int, syscall.Signal) error, pid int) error {
-	if err := kill(-pid, syscall.SIGKILL); err != nil {
-		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
-			return os.ErrProcessDone
-		}
-		return err
+// maxKillPasses bounds killUntilEmpty's passes. Each pass kills every live
+// member the group holds, and a killed member forks no more, so only a fork
+// already in flight when a pass lands can add one; a group still holding
+// members after this many passes is forking faster than it is killed.
+const maxKillPasses = 64
+
+// killableMembers answers the members of process group PGID that a kill can
+// still reach: neither exited nor exiting (Exiting), so a member SIGKILLed
+// by an earlier pass is never counted again while its exit completes.
+func killableMembers(pgid int) ([]Member, error) {
+	live, err := LiveMembers(pgid)
+	if err != nil {
+		return nil, err
 	}
-	return nil
+	var out []Member
+	for _, m := range live {
+		exiting, err := Exiting(m.Pid)
+		if err != nil {
+			return nil, err
+		}
+		if !exiting {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// killUntilEmpty is KillGroup over its kill and its reading of the group's
+// killable members, so a test can stand in for the kernel.
+//
+// ONE KILL IS NOT ENOUGH. A member caught mid-fork by the kill can finish the
+// fork after the group was signalled, and the child joins the group
+// unsignalled; and on darwin a group whose leader is an unreaped zombie
+// answers the group kill with EPERM without signalling the live child beside
+// it (SignalMembers). A shell's background subshell did both, outliving its
+// stopped run and holding the run's output pipe open forever (2026-11-16).
+// So the group's live members are read after every pass, and the group is
+// killed again until none is left.
+func killUntilEmpty(pgid int, kill func(int, syscall.Signal) error, members func(int) ([]Member, error)) error {
+	for pass := 0; pass < maxKillPasses; pass++ {
+		live, err := members(pgid)
+		if err != nil {
+			return fmt.Errorf("childgroup: read the members of process group %d: %w", pgid, err)
+		}
+		if len(live) == 0 {
+			if pass == 0 {
+				return os.ErrProcessDone
+			}
+			return nil
+		}
+		if err := SignalMembers(pgid, syscall.SIGKILL, kill, func(int) ([]Member, error) { return live, nil }); err != nil {
+			return err
+		}
+	}
+	return fmt.Errorf("childgroup: process group %d still had live members after %d kills", pgid, maxKillPasses)
 }

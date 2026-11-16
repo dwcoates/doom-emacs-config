@@ -3,6 +3,7 @@ package childgroup
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"slices"
 	"syscall"
 	"testing"
@@ -40,37 +41,93 @@ func selectorEntries() []string {
 	return out
 }
 
-func TestKillGroupReadsAFinishedGroupAsDone(t *testing.T) {
+func TestKillGroupKillsUntilNoLiveMemberIsLeft(t *testing.T) {
+	leader := Member{Pid: 4242, Comm: "sh", State: "sleeping"}
+	forked := Member{Pid: 4243, Comm: "sh", State: "being created"}
 	tests := []struct {
 		name   string
-		answer error
+		rounds [][]Member
+		group  []error
 		want   error
+		kills  []int
 	}{
-		{name: "a group killed", answer: nil, want: nil},
-		{name: "a group with no members", answer: syscall.ESRCH, want: os.ErrProcessDone},
-		{name: "a group whose members wait to be reaped", answer: syscall.EPERM, want: os.ErrProcessDone},
-		{name: "any other answer", answer: syscall.EINVAL, want: syscall.EINVAL},
+		{name: "a group killed in one pass", rounds: [][]Member{{leader}, nil}, group: []error{nil}, want: nil, kills: []int{-4242}},
+		{name: "a member forked during the kill is killed on the next pass",
+			rounds: [][]Member{{leader}, {forked}, nil}, group: []error{nil, nil}, want: nil, kills: []int{-4242, -4242}},
+		{name: "a live member beside a zombie leader is killed by its pid",
+			rounds: [][]Member{{forked}, nil}, group: []error{syscall.EPERM}, want: nil, kills: []int{-4242, 4243}},
+		{name: "a group with no live member at all", rounds: [][]Member{nil}, want: os.ErrProcessDone},
+		{name: "a kill the kernel refuses is the kill failing", rounds: [][]Member{{leader}}, group: []error{syscall.EINVAL}, want: syscall.EINVAL, kills: []int{-4242}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			var signalled int
-			var sent syscall.Signal
-			kill := func(pid int, sig syscall.Signal) error {
-				signalled, sent = pid, sig
-				return tt.answer
+			var kills []int
+			groupKills := 0
+			kill := func(target int, sig syscall.Signal) error {
+				if sig != syscall.SIGKILL {
+					t.Fatalf("signal %v, want SIGKILL", sig)
+				}
+				kills = append(kills, target)
+				if target < 0 {
+					answer := tt.group[groupKills]
+					groupKills++
+					return answer
+				}
+				return nil
+			}
+			reads := 0
+			members := func(int) ([]Member, error) {
+				m := tt.rounds[reads]
+				reads++
+				return m, nil
 			}
 
 			// Act
-			got := KillGroupWith(kill, 4242)
+			got := killUntilEmpty(4242, kill, members)
 
 			// Assert
 			if !errors.Is(got, tt.want) && got != tt.want {
-				t.Fatalf("KillGroupWith = %v, want %v", got, tt.want)
+				t.Fatalf("killUntilEmpty = %v, want %v", got, tt.want)
 			}
-			if signalled != -4242 || sent != syscall.SIGKILL {
-				t.Fatalf("kill(%d, %v), want kill(-4242, SIGKILL): the group, not the leader alone", signalled, sent)
+			if !slices.Equal(kills, tt.kills) {
+				t.Fatalf("kills = %v, want %v", kills, tt.kills)
 			}
 		})
+	}
+}
+
+func TestKillGroupGivesUpOnAGroupThatNeverEmpties(t *testing.T) {
+	// Arrange
+	member := []Member{{Pid: 4242, Comm: "sh", State: "running"}}
+	var kills int
+	kill := func(int, syscall.Signal) error { kills++; return nil }
+
+	// Act
+	err := killUntilEmpty(4242, kill, func(int) ([]Member, error) { return member, nil })
+
+	// Assert
+	if err == nil || kills != maxKillPasses {
+		t.Fatalf("killUntilEmpty = %v after %d kills, want an error after %d", err, kills, maxKillPasses)
+	}
+}
+
+func TestKillGroupKillsARealGroupWithAChildForkedInIt(t *testing.T) {
+	// Arrange: a shell and its background subshell, both blocked.
+	cmd := exec.Command("sh", "-c", "sleep 600 & sleep 600")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	pgid := cmd.Process.Pid
+
+	// Act
+	err := KillGroup(pgid)
+	_ = cmd.Wait()
+
+	// Assert
+	live, readErr := killableMembers(pgid)
+	if err != nil || readErr != nil || len(live) != 0 {
+		t.Fatalf("KillGroup = %v; members left %v (%v), want none", err, live, readErr)
 	}
 }
