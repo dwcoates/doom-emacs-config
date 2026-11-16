@@ -214,7 +214,7 @@ type SetWorkspaceOneShotSuccess struct {
 	// its work is done. UNSET when unmarked.
 	CompletionDirective *string `protobuf:"bytes,1,opt,name=completion_directive,json=completionDirective,proto3,oneof" json:"completion_directive,omitempty"`
 	// The revision of the roster the daemon resolved after the change
-	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it draws
+	// (frontend.v1.RosterPush.revision): every roster at or above it draws
 	// the workspace's row with its one-shot mark as asked
 	// (frontend.v1.RosterRowOneShot). 0 when the daemon has resolved no roster
 	// yet.

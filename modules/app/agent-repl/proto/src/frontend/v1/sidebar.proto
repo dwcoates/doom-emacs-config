@@ -10,7 +10,8 @@
 //
 // GLOBAL, NOT PER-WORKSPACE. This is the one component whose stream carries
 // no workspace: every webview (one per workspace) watches the same roster,
-// and the daemon's stream order is the only order — there is no publisher
+// split into four snapshot streams that ride one push (RosterPush), and the
+// daemon's stream order is the only order — there is no publisher
 // epoch to reconcile, because there is no outside publisher.
 //
 // VIEW ONLY. The sidebar's clicks (open, close, create, merge,
@@ -34,10 +35,10 @@
 //   │     repo-name                         │    RosterMergeQueueRepoGroup → header
 //   │       ⟳ head-row  rebasing 3/7        │      RosterMergeQueueHead
 //   │       • waiting-row                   │      RosterMergeQueueWaiting
-//   │ ▾ Recently Merged                     │  RosterMergedSection
-//   │     repo-name (3 today, last 4m ago)  │    RosterMergedRepoGroup → header
-//   │       merged-row                4m    │      RosterMergedRows → RosterRow
-//   └───────────────────────────────────────┘
+//   │ ▾ Recently Merged                     │  RosterMergedSection (its stream)
+//   │     repo-name (3 today, last 4m ago)  │    RosterMergedRepoGroup → header + summary
+//   │       merged-row                4m    │      a page of RosterMergedRows, fetched
+//   └───────────────────────────────────────┘        (agentrepl.v1.ListMergedWorkspaces)
 //
 // A repo section, the Merge Queue section and the Recently Merged section
 // share one header shape (label + fold).
@@ -55,10 +56,72 @@ import "zettel/v1/zettel.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
-// One complete, self-contained picture of the sidebar.
+// THE SIDEBAR'S STREAMS. The roster is pushed as four independent snapshot
+// streams, each a COMPLETE SNAPSHOT of its own facts that replaces the
+// client's copy whole, never a delta:
 //
-// Always whole, never a delta — the model is small, so a full replace makes a
-// partially-applied roster unrepresentable.
+//   workspaces       WorkspaceRoster          open, hidden, threads, selection
+//   merge_queue      RosterMergeQueueSection  every repository's active queue
+//   recently_merged  RosterMergedSection      the merged band's summary only
+//   closed           RosterClosedRows         the closed, never-merged rows
+//
+// A change to one stream's facts resends that stream alone, so a queue move
+// redraws the queue and a row's status redraws the workspaces, and neither
+// resends the other. MERGED WORKSPACES ARE IN NO STREAM: the roster carries
+// only their summary, and their rows are paged on demand
+// (agentrepl.v1.ListMergedWorkspaces).
+
+// ONE PUSH OF THE SIDEBAR's streams: every stream whose snapshot changed in
+// one resolve, each WHOLE, under the one revision that resolve took.
+//
+// THE CROSS-STREAM INVARIANT IS STRUCTURAL. Every stream is resolved by one
+// render under one lock, so a fact that moves a workspace between streams
+// (a workspace that merges leaves `workspaces` and raises
+// `recently_merged`'s counts; a merge that joins a queue enters
+// `merge_queue` beside its open row) changes every stream it touches in the
+// SAME push. A client applies every snapshot a push carries before it draws
+// any, so it never draws one stream's side of a transition without the
+// other's.
+//
+// THE FIRST PUSH OF EVERY SUBSCRIPTION CARRIES EVERY STREAM, so a client that
+// connects, or reconnects, holds every stream's whole snapshot before it
+// draws; every later push carries only the streams that changed since the
+// last push this subscription was sent, and an absent stream is UNCHANGED,
+// never empty. A client that drew from a push whose streams it did not all
+// hold yet has broken this contract and refuses the push.
+message RosterPush {
+  // THE ROSTER'S REVISION: the daemon raises it for every push whose
+  // streams differ from the last, so of two pushes (or a push and a verb's
+  // answer that names a revision, OpenTabsOpenedReady.roster_revision) the
+  // higher revision is the newer state. A client holding the streams of the
+  // push at revision R holds the daemon's whole roster as of R: every stream
+  // a push leaves out was unchanged since the last one sent. It orders what
+  // arrives over separate streams; nothing else is read off it.
+  uint64 revision = 1;
+  // The WORKSPACES stream's whole snapshot: the open and hidden workspaces,
+  // the chat threads, the selection and the rail's chrome. UNSET when it is
+  // unchanged since the last push this subscription was sent.
+  optional WorkspaceRoster workspaces = 2;
+  // The MERGE QUEUE stream's whole snapshot: every repository's active
+  // queue. Queue position lives here and in no row, so a queue that moves
+  // resends this stream alone. UNSET when unchanged.
+  optional RosterMergeQueueSection merge_queue = 3;
+  // The RECENTLY MERGED stream's whole snapshot: the band's header, fold and
+  // per-repository summary, never a merged row. UNSET when unchanged.
+  optional RosterMergedSection recently_merged = 4;
+  // The CLOSED stream's whole snapshot: every workspace that is closed and
+  // never merged. No sidebar section draws them; the editor offers them
+  // again and routes their records. UNSET when unchanged.
+  optional RosterClosedRows closed = 5;
+}
+
+// The WORKSPACES STREAM's snapshot: the open and hidden workspaces, the chat
+// threads, the selection and the rail's chrome, complete and self-contained.
+//
+// Always whole, never a delta, so a partially-applied roster is
+// unrepresentable. It is one of the roster's four streams (RosterPush): the
+// merge queue, the recently merged summary and the closed rows are streams
+// of their own, and a merged workspace is in none.
 //
 // `viewed` (field 12) is RETIRED and reserved: a band that hoisted every
 // workspace whose result was read out of the groupings. It split the
@@ -73,13 +136,21 @@ message WorkspaceRoster {
   // repository, and nothing else (owner ruling, 2026-10-15).
   reserved 2, 5, 6, 7, 8;
   reserved "task", "maturity", "shown_repository", "shown_task", "shown_maturity";
-  // THE LISTS ARE THE STATES. Every workspace the roster carries is in
-  // exactly one of `repository` (OPEN), `hidden` (HIDDEN), `recently_merged`
-  // (MERGED) and `closed` (CLOSED), and each list's row type (RosterOpenRow,
-  // RosterHiddenRow, RosterMergedRow, RosterClosedRow) is that state, so no
-  // row also carries a state that could disagree with its list. OPEN BEATS
-  // MERGED: a merged workspace that was reopened is open, and listed with the
-  // open ones.
+  // `recently_merged` (3), `merge_queue` (19) and `closed` (14) are RETIRED
+  // from this message (owner ruling, 2026-11-16): each is its own stream
+  // (RosterPush), so a change to one never resends the others, and a merged
+  // workspace's row is in no stream at all. `revision` (11) is RETIRED with
+  // them: the revision orders the PUSH, every stream together
+  // (RosterPush.revision).
+  reserved 3, 11, 14, 19;
+  reserved "recently_merged", "merge_queue", "closed", "revision";
+  // THE LISTS ARE THE STATES. Every OPEN workspace is in exactly one of
+  // `repository` (OPEN) and `hidden` (HIDDEN), and each list's row type
+  // (RosterOpenRow, RosterHiddenRow) is that state, so no row also carries a
+  // state that could disagree with its list. A CLOSED workspace is in the
+  // closed stream (RosterPush.closed) and a MERGED one in no stream. OPEN
+  // BEATS MERGED: a merged workspace that was reopened is open, and listed
+  // with the open ones.
   //
   // The OPEN workspaces, one section per repository: the rail's one grouping
   // AND THE EMACS TAB BAR. The tab bar is this tree's depth-first walk --
@@ -89,25 +160,10 @@ message WorkspaceRoster {
   // exactly when it has a tab, its repository's fold aside, and tab N is
   // always the row drawn immediately before tab N+1.
   RosterRepositoryView repository = 1;
-  // THE RECENTLY MERGED SECTION, drawn under the Merge Queue section: the
-  // workspaces whose merge has settled and that are CLOSED, since that they
-  // are done is the interesting fact, one group per repository. Its merged
-  // rows are never open.
-  RosterMergedSection recently_merged = 3;
-  // THE MERGE QUEUE SECTION, drawn directly under the Open section: every
-  // repository's active merge queue, one group per repository (owner
-  // request, 2026-11-01: split out of the Deploys section, which drew each
-  // repository's queue above its recent merges). Always set.
-  RosterMergeQueueSection merge_queue = 19;
   // Workspaces the user has hidden (agentrepl.v1.SetWorkspaceHidden). A
   // hidden workspace may keep its session until it is gated, but it has NO
   // TAB: the Emacs tab bar never draws, numbers or steps to it. Always set.
   RosterHiddenSection hidden = 9;
-  // Workspaces that are CLOSED and not in `recently_merged`: they have no tab
-  // and no sidebar section draws them. Carried so the editor can offer them
-  // again (its workspace switcher, reopening) and route their records.
-  // Always set.
-  RosterClosedRows closed = 14;
   // THE OPEN-WORKSPACES SECTION's heading and fold: the box the repository
   // sections are drawn in, under one "Open" header, above the hidden
   // section. Its count is RosterRepositoryView.open_count. Always set.
@@ -118,12 +174,6 @@ message WorkspaceRoster {
   // bar is the Open section's walk.
   reserved 10;
   reserved "tab_bar";
-  // THE ROSTER'S REVISION: the daemon raises it for every roster it
-  // resolves, so of two rosters (or a roster and an OpenTabs answer's row,
-  // OpenTabsOpenedReady.roster_revision) the higher revision is the newer
-  // state. It orders what arrives over separate streams; nothing else is
-  // read off it.
-  uint64 revision = 11;
   // The selected workspace — the last SelectWorkspace the daemon received.
   // UNSET when there is none.
   optional RosterCurrentWorkspace current = 4;
@@ -607,14 +657,16 @@ message RosterHiddenRow {
   repeated RosterHiddenRow children = 2;
 }
 
-// The rows of one repository's recently-merged group, newest merge first.
+// ONE PAGE of merged rows, as agentrepl.v1.ListMergedWorkspaces answers it:
+// at most ten, in the order the request asked for. It rides on no stream.
 message RosterMergedRows {
   // Each merged row. FLAT: a settled merge has no family left to draw.
   repeated RosterMergedRow rows = 1;
 }
 
-// The closed workspaces the roster carries outside recently_merged, in the
-// registry's order.
+// THE CLOSED STREAM's snapshot (RosterPush.closed): every workspace that is
+// closed and has never merged, in the registry's order. A merged workspace
+// is never here: it is in no stream.
 message RosterClosedRows {
   // Each closed row. FLAT: a closed workspace is drawn in no family.
   repeated RosterClosedRow rows = 1;
@@ -1652,8 +1704,13 @@ message RosterMergeQueueStageFailed {
   int64 ended_at_ms = 2;
 }
 
-// ONE MERGE WAITING behind the head.
+// ONE MERGE WAITING behind the head: IDENTITY AND ORDER ONLY. Who it is
+// (its subject) and how long it has waited, which no move changes; its
+// order is its place in RosterRepoMergeQueue.waiting. Nothing about it is
+// resolved per member as UI state, so a queue that moves reorders this list
+// and changes nothing inside any entry.
 message RosterMergeQueueWaiting {
+  // The merge's name, the workspace it is credited to, and the merge itself.
   RosterMergeQueueSubject subject = 1;
   // Tag 2 (`queued_at_ms`, when it was put in line) is RETIRED: its row's
   // clock is `clock`, which leaves out any active stretch the merge had.
@@ -1895,17 +1952,30 @@ message RosterRepoKey {
 message RosterMergedSection {
   // The section's label, "Recently Merged" (owner request, 2026-11-01; it
   // was "Deploys", which drew the queues too), drawn in the purple of a
-  // merge in progress. The section is drawn directly under the Merge Queue
-  // section, above the Hidden section. It carries NO COUNT (its `count` is
-  // unset): each group's header carries its own merge summary.
+  // merge in progress, and its COUNT: every merged workspace of every group,
+  // drawn beside the label while the section is folded or holds a group
+  // whose merges are not all loaded, since its rows are paged on demand
+  // (agentrepl.v1.ListMergedWorkspaces) and the count is then the only
+  // account of the merges not drawn. The section is drawn directly under the
+  // Merge Queue section, above the Hidden section.
   RosterSectionHeader header = 1;
   reserved 2;
   reserved "rows";
   // One group per repository that has at least one merged workspace, in the
   // repository sections' order (by repository name, then id). A repository
   // with none has no group. A group is drawn whichever way its repository
-  // section is folded.
+  // section is folded. A group carries its SUMMARY, never its rows.
   repeated RosterMergedRepoGroup groups = 5;
+  // WHICH SET OF MERGED WORKSPACES this summary was resolved from. Every
+  // page of merged rows (agentrepl.v1.ListMergedWorkspacesSuccess.revision)
+  // states the same token, and a client draws a loaded page beside this
+  // summary ONLY when the two are equal: a merge landing, or a merged
+  // workspace reopened, changes the set and this token in the same push that
+  // takes the workspace out of (or into) the workspaces stream, so a client
+  // that draws only agreeing pages can never draw a workspace both open and
+  // merged, nor in neither. A change of it is also how an open page learns
+  // to fetch its loaded pages again. Always set.
+  RosterMergedRevision merged_revision = 12;
   // Tags 6 (`queues`, every queue listed above the merged groups) and 7
   // (`merged_label`, the "Recently Deployed" heading over the merged groups)
   // are RETIRED (owner request, 2026-10-31); the queues are the Merge Queue
@@ -1926,7 +1996,9 @@ message RosterMergedSection {
   // fold is no page's own: opening it in one workspace's page opens it in
   // every page (owner ruling, 2026-10-06). Never folded or unfolded by
   // anyone, it is EXPANDED, so a just-merged workspace is in sight until the
-  // user folds the band away. Never unset on the wire.
+  // user folds the band away. A FOLDED BAND LOADS NOTHING: a client fetches
+  // no page of merged rows while it is folded, and lets go of every page it
+  // held the moment it folds. Never unset on the wire.
   oneof fold {
     // The merged rows are shown.
     RosterMergedSectionExpanded expanded = 3;
@@ -1947,6 +2019,16 @@ message RosterMergedSection {
 
 // An expanded Recently Merged band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionExpanded {}
+
+// THE IDENTITY OF ONE SET OF MERGED WORKSPACES: the roster revision
+// (RosterPush.revision) of the push in which the set of merged workspaces
+// last changed. It names a set, never an instant: two summaries, or a
+// summary and a page, resolved from the same set carry the same token, and a
+// merge landing or a merged workspace reopened raises it. Only equality is
+// read off it.
+message RosterMergedRevision {
+  uint64 revision = 1;
+}
 
 // A collapsed Recently Merged band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionCollapsed {}
@@ -1976,8 +2058,8 @@ message RosterMergedRepoGroup {
   // carries.
   RosterRepoKey key = 1;
   // The group's header box: the repository's label. The page draws the
-  // group's "(K today, last D ago)" beside it from the merged rows' instants,
-  // because the summary ticks with the clock.
+  // group's "(K today, last D ago)" beside it from the group's summary
+  // (`summary`), because the summary ticks with the clock.
   RosterMergedRepoGroupHeader header = 2;
   // `rows` (field 3) is RETIRED and reserved, as RosterRepoSection's is.
   reserved 3;
@@ -1986,15 +2068,58 @@ message RosterMergedRepoGroup {
   // RETIRED: a group no longer follows its repository section's fold.
   reserved 4, 5;
   reserved "shown", "repository_collapsed";
-  // The repository's merged workspaces, most recently
-  // merged first. FLAT: a settled merge has no family left to draw. Never
-  // empty: a repository with no merge has no group.
-  RosterMergedRows merged_rows = 6;
+  // `merged_rows` (field 6) is RETIRED (owner ruling, 2026-11-16): a merged
+  // workspace is finished and is in no stream. The group's rows are paged on
+  // demand, ten at a time (agentrepl.v1.ListMergedWorkspaces), and the group
+  // carries only their summary.
+  reserved 6;
+  reserved "merged_rows";
+  // What the group's header says about ALL its merges, loaded or not: how
+  // many there are, the latest's instant, and the last day's merges. Always
+  // set.
+  RosterMergedRepoGroupSummary summary = 9;
   // Tags 7 and 8 (the `activity` oneof: `queued`, `idle`) are RETIRED (owner
   // request, 2026-11-01): a repository's queue is drawn in its
   // RosterMergeQueueRepoGroup, in the Merge Queue section.
   reserved 7, 8;
   reserved "queued", "idle";
+}
+
+// WHAT A RECENTLY MERGED GROUP'S HEADER AND THE SECTION'S HEADER SAY ABOUT
+// THE GROUP'S MERGES, every one of them, whichever pages of its rows a
+// client has loaded: "(K today, last D ago)" beside the label, its hover's
+// commits merged today, and whether the group has merges beyond those drawn.
+message RosterMergedRepoGroupSummary {
+  // How many merged workspaces the group holds. Never zero: a repository
+  // with no merge has no group.
+  RosterMergedRepoGroupCount count = 1;
+  // The group's most recent merge: the "last D ago". Always set.
+  RosterMergedRepoGroupLatest latest = 2;
+  // Every merge of the group that landed within the 24 hours before this
+  // summary was resolved, most recent first. A client counts the ones of
+  // its own LOCAL DATE as "today" and recounts on every tick, so the count
+  // drops at midnight with no push: today's merges are always within the
+  // last 24 hours of any later instant. Empty when none landed in that day.
+  repeated RosterMergedRepoGroupRecentMerge recent = 3;
+}
+// How many merged workspaces a group holds.
+message RosterMergedRepoGroupCount {
+  uint32 merges = 1;
+}
+// A group's most recent merge.
+message RosterMergedRepoGroupLatest {
+  // When it landed, epoch MILLISECONDS on the daemon's clock. Never zero.
+  int64 merged_at_ms = 1;
+}
+// One merge of the last day, as the group's header counts and its hover sums
+// it.
+message RosterMergedRepoGroupRecentMerge {
+  // When it landed, epoch MILLISECONDS on the daemon's clock. Never zero.
+  int64 merged_at_ms = 1;
+  // How many commits it brought into its target, as its row's detail states
+  // it (RosterRowDetailCommits). UNSET when the daemon has no count for it;
+  // the hover then names it uncounted rather than summing it as zero.
+  optional uint32 commits = 2;
 }
 
 // A group's header: the repository's label, which a click folds or opens.
@@ -2007,6 +2132,14 @@ message RosterMergedRepoGroupHeader {
 // section's queues): header and one group per repository whose queue is
 // active. It has no key of its own -- the roster carries exactly one, so its
 // fold identity is fixed.
+//
+// IT IS THE MERGE QUEUE STREAM's snapshot (RosterPush.merge_queue), split in
+// two: the ACTIVE members (the head running its tests or rebasing, the merge
+// fixing its tests, the merges resolving conflicts) carry their full detail,
+// and the WAITING members (RosterMergeQueueWaiting) carry only who they are
+// and, by their place in the list, their order. QUEUE POSITION LIVES HERE AND
+// IN NO ROW: a merge that moves in line changes this one snapshot, never the
+// row of any workspace queued in it.
 //
 //   ▾ Merge Queue                            RosterMergeQueueSection
 //     repo-a                                   RosterMergeQueueRepoGroup → header

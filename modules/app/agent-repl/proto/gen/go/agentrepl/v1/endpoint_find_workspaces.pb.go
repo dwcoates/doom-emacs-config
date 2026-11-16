@@ -872,7 +872,7 @@ type FoundWorkspace struct {
 	// Where the sidebar roster draws the workspace and the live status it draws
 	// it with, as the roster last resolved stands. UNSET when the roster draws
 	// no row of it in its open, hidden or recently merged section: a closed
-	// workspace, or one landed longer ago than the recently merged band keeps.
+	// workspace that never merged.
 	Roster *FoundWorkspaceRoster `protobuf:"bytes,11,opt,name=roster,proto3,oneof" json:"roster,omitempty"`
 	// TRUE for the record of the workspace the request names as its caller
 	// (FindWorkspacesRequest.caller), false for every other record and for every
@@ -1056,9 +1056,11 @@ func (x *FoundWorkspaceMerge) GetRequester() *v1.WorkspaceRef {
 }
 
 // A found workspace as the sidebar roster draws it right now: which section
-// carries its row, and that row's status. Both are read off the one roster
-// the daemon publishes (frontend.v1.WorkspaceRoster), so the answer agrees
-// with what the user sees in the sidebar at the moment of the call.
+// carries its row, and that row's status. An open or hidden workspace's are
+// read off the workspaces stream the daemon publishes (frontend.v1
+// WorkspaceRoster), and a merged one's off the row the recently merged band's
+// pages resolve for it (ListMergedWorkspaces), so the answer agrees with what
+// the user sees in the sidebar at the moment of the call.
 type FoundWorkspaceRoster struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The roster section the workspace's row is drawn in.
@@ -1208,8 +1210,10 @@ type FoundWorkspaceRosterSection_Hidden struct {
 }
 
 type FoundWorkspaceRosterSection_Merged struct {
-	// The recently merged band (frontend.v1.WorkspaceRoster.recently_merged):
-	// landed and closed, recently enough that the band still draws it.
+	// The recently merged band (frontend.v1.RosterPush.recently_merged):
+	// landed and closed. The band draws every such workspace, paged on
+	// demand (ListMergedWorkspaces), so the registry answers it: no stream
+	// carries a merged row.
 	Merged *FoundWorkspaceRosterSectionMerged `protobuf:"bytes,3,opt,name=merged,proto3,oneof"`
 }
 

@@ -1348,7 +1348,7 @@ func (*ArrangeSidebarResponse_Error) isArrangeSidebarResponse_Result() {}
 type ArrangeSidebarSuccess struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// THE REVISION OF A ROSTER THAT CARRIES THE CHANGE
-	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it
+	// (frontend.v1.RosterPush.revision): every roster at or above it
 	// shows the new arrangement. The answer and the push travel on separate
 	// streams, so a page that drew the change at once holds its own drawing
 	// until a push at or above this revision arrives, rather than drawing an

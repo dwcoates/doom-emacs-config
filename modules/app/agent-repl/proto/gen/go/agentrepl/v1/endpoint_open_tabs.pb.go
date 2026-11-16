@@ -1337,7 +1337,7 @@ type OpenTabsOpenedReady struct {
 	//	*OpenTabsOpenedReady_Row
 	//	*OpenTabsOpenedReady_Thread
 	Listing isOpenTabsOpenedReady_Listing `protobuf_oneof:"listing"`
-	// The revision of the roster `row` was taken from (WorkspaceRoster.revision):
+	// The revision of the roster `row` was taken from (frontend.v1.RosterPush.revision):
 	// a consumer that already holds that revision or a later one already holds
 	// this row or a newer one, and keeps what it has.
 	RosterRevision uint64 `protobuf:"varint,2,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
