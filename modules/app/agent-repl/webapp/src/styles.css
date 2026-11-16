@@ -1580,6 +1580,10 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    rule (::after) is ordered before the status, which a short rule of its
    own follows. */
 #ws-sidebar .merged-group-head::after { order: 1; }
+/* ONLY THE TEXTS OF A HEADER WITH A DEPLOY CHECK STATUS ARE CLICKABLE (owner
+   request, 2026-11-16): its rules and gaps draw no pointer. */
+#ws-sidebar .merged-group-head.sb-mq-status-head { cursor: default; }
+#ws-sidebar .merged-group-head.sb-mq-status-head > :is(.sb-label, .sb-count, .sb-mq-mediation[data-select]) { cursor: pointer; }
 #ws-sidebar .merged-group-head > .sb-mq-mediation { order: 2; flex: 0 0 auto; margin-left: 0; }
 #ws-sidebar .merged-group-head > .sb-mq-release { order: 2; flex: 0 0 auto; margin-left: 0.5em; color: var(--blocked); text-decoration: underline; cursor: pointer; }
 #ws-sidebar .merged-group-head > .sb-mq-status-tail { order: 3; flex: 0 0 0.65rem; height: 1px; background: var(--border); }
