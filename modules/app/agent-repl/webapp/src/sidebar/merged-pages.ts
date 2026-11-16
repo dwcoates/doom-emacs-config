@@ -55,6 +55,19 @@ import { drawRosterRowWhenMerged } from "./row.js";
 /** How many merged rows one page holds: the daemon's fixed page size. */
 export const MERGED_PAGE_SIZE = 10;
 
+/**
+ * HOW LONG ONE PAGE FETCH MAY TAKE before it is a failure: the
+ * ListMergedWorkspaces round trip. Measured 2026-11-16: over Connect against
+ * the owner's registry shape (660 merged workspaces in 8 repositories, 500
+ * others), one repository's page by merge order took at most 2.9ms over 200
+ * calls (`BenchmarkListMergedWorkspaces`, niced and pinned to two cores); the
+ * nearest read the live daemon serves under the owner's real load,
+ * LocateWorkspace, took at most 156ms over 8 handler records. The bound is
+ * about 2.6x that loaded worst case. A fetch that outlives it fails as any
+ * transport failure does (`fetch-failed`, naming the bound).
+ */
+export const MERGED_PAGE_TIMEOUT_MS = 400;
+
 /** The class of one loaded page past a group's first, inside the group's body. */
 export const MERGED_PAGE_CLASS = "merged-page";
 
@@ -212,11 +225,14 @@ export function createMergedPages(deps: MergedPagesDeps): MergedPages {
       deps.ctx,
       "ListMergedWorkspaces",
       (client) =>
-        client.listMergedWorkspaces({
-          repository,
-          order: { order: { case: "mostRecentlyMerged", value: {} } },
-          page,
-        }),
+        client.listMergedWorkspaces(
+          {
+            repository,
+            order: { order: { case: "mostRecentlyMerged", value: {} } },
+            page,
+          },
+          { timeoutMs: MERGED_PAGE_TIMEOUT_MS },
+        ),
       ListMergedWorkspacesResponseSchema,
     ).then(
       (response) => landed(group, page, ticket, response),
@@ -283,6 +299,7 @@ export function createMergedPages(deps: MergedPagesDeps): MergedPages {
         asked_for: String(requireInFlight(group, page).askedFor),
         summary_token: token === null ? null : String(token),
         held: hold !== null,
+        bound_ms: MERGED_PAGE_TIMEOUT_MS,
       },
     });
     latched = token;

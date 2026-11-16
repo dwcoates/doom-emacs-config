@@ -32,6 +32,7 @@ import {
   MERGED_MORE_CLASS,
   MERGED_PAGE_CLASS,
   MERGED_PAGE_SIZE,
+  MERGED_PAGE_TIMEOUT_MS,
   createMergedPages,
   drawMergedMoreSpinner,
   inView,
@@ -55,6 +56,7 @@ interface Ask {
   repository: string;
   page: number;
   order: string | undefined;
+  timeoutMs: number | undefined;
   answer(response: ListMergedWorkspacesResponse): void;
   fail(err: Error): void;
 }
@@ -79,13 +81,14 @@ function harness(folded: Set<string> = new Set()) {
   // at the call itself, so a test reads what was asked with no wait.
   const client: AgentReplClient = {
     ...appContext().client,
-    listMergedWorkspaces: (request: MessageInitShape<typeof ListMergedWorkspacesRequestSchema>) =>
+    listMergedWorkspaces: (request: MessageInitShape<typeof ListMergedWorkspacesRequestSchema>, options?: { timeoutMs?: number }) =>
       new Promise<ListMergedWorkspacesResponse>((resolve, reject) => {
         const order = request.order?.order;
         asks.push({
           repository: request.repository?.id ?? "",
           page: request.page ?? 0,
           order: order?.case,
+          timeoutMs: options?.timeoutMs,
           answer: resolve,
           fail: reject,
         });
@@ -257,6 +260,15 @@ describe("loading as the band folds and opens", () => {
     const h = harness();
     h.pages.agree(openBand([groupOf("r1", 3)]), "s");
     expect([h.asks[0].repository, h.asks[0].order]).toEqual(["r1", "mostRecentlyMerged"]);
+  });
+
+  it("asks for every page under the measured bound", () => {
+    // Arrange
+    const h = harness();
+    // Act
+    h.pages.agree(openBand([groupOf("r1", 3)]), "s");
+    // Assert
+    expect(h.asks[0].timeoutMs).toBe(MERGED_PAGE_TIMEOUT_MS);
   });
 
   it("asks for a group's page 0 once, however often the band is drawn", () => {
@@ -642,7 +654,22 @@ describe("a page that cannot be loaded", () => {
         asked_for: "2",
         summary_token: "2",
         held: true,
+        bound_ms: MERGED_PAGE_TIMEOUT_MS,
       },
+    ]);
+  });
+
+  it("logs a fetch that outlived its bound as a failure naming the bound", async () => {
+    // Arrange
+    const { h } = await held();
+    const capture = captureLogRecords("error");
+    // Act
+    await failWith(h, new ConnectError("the operation timed out", Code.DeadlineExceeded));
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.merged-pages.fetch-failed");
+    expect([record.context?.cause, record.context?.bound_ms]).toEqual([
+      "ConnectError: [deadline_exceeded] the operation timed out",
+      MERGED_PAGE_TIMEOUT_MS,
     ]);
   });
 
