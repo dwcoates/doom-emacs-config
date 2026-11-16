@@ -60,7 +60,7 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id), ` +
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
-	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn
+	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, surfaced`
 
 // mergeTurnStartedColumn derives MergeTurnStartedAt: the newest start of the
 // workspace's turns that began at or before its own merge-queue entry was
@@ -117,7 +117,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		nukeOwed      sql.NullInt64
 		landsInto     sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -1077,14 +1077,12 @@ func (s *store) SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceI
 // walk step, is the new current workspace's walk_landed_at; every other row's
 // is cleared, so at most one workspace ever carries one.
 //
-// SELECTING A WORKSPACE EXPANDS THE FOLDS HOLDING IT (owner request,
-// 2026-10-25): its repository's section and the subsection it sits in
-// (expandFoldsHolding), in the same transaction as the selection. A switch
-// from anywhere -- `SPC p p`, a notification, an agent's select -- to a
-// workspace in a collapsed section therefore opens that section, and no
-// reader can ever see the current workspace inside a collapsed one: with the
-// collapse that would hold it refused (holds_current), the current workspace
-// sitting in a collapsed section is a state the store cannot reach.
+// SELECTING A WORKSPACE NEVER OPENS A FOLD (owner ruling, 2026-11-15,
+// replacing the 2026-10-25 opening). A switch from anywhere -- `SPC p p`, a
+// walk's step, a notification, an agent's select -- to a workspace a fold
+// hides leaves the fold folded: the roster draws the current workspace, and
+// only it, inside the fold (Workspace.DrawnInsideFold), until the user
+// switches out of it.
 func (s *store) setCurrent(ctx context.Context, op string, id WorkspaceID, stamp, walked *time.Time) error {
 	fields := selectionFields(id, stamp, walked)
 	var change currentChange
@@ -1114,11 +1112,10 @@ func selectionFields(id WorkspaceID, stamp, walked *time.Time) dlog.Context {
 
 // currentChange is what setCurrentTx changed beyond the current flag: the
 // workspace that stopped being current, the walk landing it committed, and
-// the folds it expanded.
+// the walk landing it committed.
 type currentChange struct {
 	previous  sql.NullString
 	committed sql.NullString
-	expanded  expandedFolds
 }
 
 // setCurrentTx is the selection's one write, inside TX: setCurrent's and
@@ -1155,8 +1152,7 @@ func setCurrentTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, stamp, walked
 	if err := requireOneRow(res, fmt.Sprintf("wsm: workspace %s", id)); err != nil {
 		return change, err
 	}
-	change.expanded, err = expandFoldsHolding(ctx, tx, id)
-	return change, err
+	return change, nil
 }
 
 // logCurrentChange records what a selection write changed beyond the
@@ -1165,11 +1161,6 @@ func (s *store) logCurrentChange(op string, fields dlog.Context, change currentC
 	if change.committed.Valid {
 		s.log.Info(op, "the selection left a recency walk's landing; the landing's selection instant is the walk's", dlog.Merge(fields, dlog.Context{
 			"landing": change.committed.String,
-		}))
-	}
-	if change.expanded.repository || change.expanded.subsection || change.expanded.children {
-		s.log.Info(op, "the selection expanded the collapsed folds holding the workspace", dlog.Merge(fields, dlog.Context{
-			"expanded_repository": change.expanded.repository, "expanded_subsection": change.expanded.subsection, "expanded_children": change.expanded.children,
 		}))
 	}
 }
@@ -1270,9 +1261,7 @@ func (s *store) Select(ctx context.Context, id WorkspaceID, write SelectionWrite
 	return out, nil
 }
 
-// readSelection reads, inside TX, the rows a selection of ID changed: an
-// expanded children fold (expandChildrenFoldsHolding) is on ID's ancestors'
-// rows, so they are read back too.
+// readSelection reads, inside TX, the rows a selection of ID changed.
 func readSelection(ctx context.Context, tx *sql.Tx, id WorkspaceID, change currentChange) (Selection, error) {
 	touched := []WorkspaceID{id}
 	others := []WorkspaceID{}
@@ -1280,13 +1269,6 @@ func readSelection(ctx context.Context, tx *sql.Tx, id WorkspaceID, change curre
 		if other.Valid {
 			others = append(others, WorkspaceID(other.String))
 		}
-	}
-	if change.expanded.children {
-		ancestors, err := ancestorsOf(ctx, tx, id)
-		if err != nil {
-			return Selection{}, err
-		}
-		others = append(others, ancestors...)
 	}
 	for _, other := range others {
 		if !slices.Contains(touched, other) {
@@ -1318,67 +1300,6 @@ func readSelection(ctx context.Context, tx *sql.Tx, id WorkspaceID, change curre
 		out.Subsection = &read
 	}
 	return out, nil
-}
-
-// expandedFolds says which folds holding a just-selected workspace its
-// selection expanded.
-type expandedFolds struct {
-	repository, subsection, children bool
-}
-
-// expandFoldsHolding expands, within TX, workspace ID's repository section
-// and the subsection it sits in (rootSubsectionColumn, so a child expands its
-// family's), answering which of them were collapsed.
-func expandFoldsHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (expandedFolds, error) {
-	var out expandedFolds
-	res, err := tx.ExecContext(ctx, `UPDATE repositories SET folded = 0 WHERE folded = 1 AND id = (SELECT repo_id FROM workspaces WHERE id = ?)`, id)
-	if err != nil {
-		return out, fmt.Errorf("wsm: expand the repository of %s: %w", id, err)
-	}
-	if out.repository, err = touchedRow(res); err != nil {
-		return out, fmt.Errorf("wsm: expand the repository of %s: %w", id, err)
-	}
-	if out.subsection, err = expandSubsectionHolding(ctx, tx, id); err != nil {
-		return out, err
-	}
-	if out.children, err = expandChildrenFoldsHolding(ctx, tx, id); err != nil {
-		return out, err
-	}
-	return out, nil
-}
-
-// expandSubsectionHolding expands, within TX, the subsection workspace ID's
-// family sits in (rootSubsectionColumn), answering whether it was collapsed.
-// A selection (expandFoldsHolding) and a workspace's work
-// (ExpandSubsectionHolding) both go through it, and it expands through the
-// one expansion of a subsection (expandSubsection).
-func expandSubsectionHolding(ctx context.Context, tx *sql.Tx, id WorkspaceID) (bool, error) {
-	// The outer SELECT always answers one row, NULL for an unknown
-	// workspace as for one in no subsection: neither has a fold to expand.
-	var sub sql.NullString
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT `+rootSubsectionColumn+` FROM workspaces WHERE id = ?)`, id).Scan(&sub); err != nil {
-		return false, fmt.Errorf("wsm: expand the subsection of %s: %w", id, err)
-	}
-	if !sub.Valid {
-		return false, nil
-	}
-	return expandSubsection(ctx, tx, SubsectionID(sub.String))
-}
-
-// ExpandSubsectionHolding expands the subsection workspace ID's family sits
-// in, answering whether it was collapsed. A workspace that starts working
-// never stays hidden inside a collapsed subsection (owner request,
-// 2026-10-29), so its turn's start comes here. The repository's own fold is
-// the user's alone and is left as it is.
-func (s *store) ExpandSubsectionHolding(ctx context.Context, id WorkspaceID) (bool, error) {
-	var expanded bool
-	err := s.write(ctx, "daemon.wsm.expand_subsection_holding", dlog.Context{"workspace": string(id)},
-		func(ctx context.Context, tx *sql.Tx) error {
-			var err error
-			expanded, err = expandSubsectionHolding(ctx, tx, id)
-			return err
-		})
-	return expanded, err
 }
 
 // Current reports the currently selected workspace, nil when none is.

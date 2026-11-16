@@ -439,11 +439,15 @@ export const UpdateSidebarViewUnknownWorkspaceSchema: GenMessage<UpdateSidebarVi
 
 /**
  * A collapse asked of the repository, subsection or workspace's children the
- * current workspace sits in. Collapsing it would stand down the session the user is looking at and
- * hide its tab, so nothing is recorded and the fold stands expanded. The
- * check and the selection are serialized in the daemon, so a switch racing
- * the ask is either wholly before it or wholly after it. The roster already
- * says so (frontend.v1.RosterRepoSectionExpanded.collapse and
+ * current workspace sits in, when no other open workspace is drawn outside it
+ * to land the user on. A collapse with somewhere to land is NOT refused: the
+ * daemon selects the workspace the user was on before, among the open
+ * sections, as the fold is recorded. Without one, collapsing would stand down
+ * the session the user is looking at and hide its tab, so nothing is recorded
+ * and the fold stands expanded. The check, the landing and the fold are
+ * serialized in the daemon, so a switch racing the ask is either wholly before
+ * it or wholly after it. The roster already says so
+ * (frontend.v1.RosterRepoSectionExpanded.collapse and
  * frontend.v1.RosterSubsectionExpanded.collapse), so a page reaches this arm
  * only when its roster is a push behind a switch. DELIBERATELY EMPTY: the arm
  * is the cause, and the request names the section.

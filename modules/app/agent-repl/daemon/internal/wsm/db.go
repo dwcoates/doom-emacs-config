@@ -76,15 +76,18 @@ type DB interface {
 	// SetSubsectionFolded records whether a subsection is collapsed; an
 	// unknown subsection is UnknownSubsectionError (subsectionfolds.go).
 	SetSubsectionFolded(ctx context.Context, id SubsectionID, folded bool) error
-	// ExpandSubsectionHolding expands the subsection a workspace's family sits
-	// in, answering whether it was collapsed (workspaces.go).
-	ExpandSubsectionHolding(ctx context.Context, id WorkspaceID) (bool, error)
 	// SetChildrenFolded records whether a workspace's children are folded; an
 	// unknown workspace is ErrNotFound (childrenfolds.go).
 	SetChildrenFolded(ctx context.Context, id WorkspaceID, folded bool) error
-	// ExpandChildrenFoldsHolding expands the collapsed folds of a workspace's
-	// ancestors' children, answering whether any was collapsed.
-	ExpandChildrenFoldsHolding(ctx context.Context, id WorkspaceID) (bool, error)
+	// SurfaceHeldWork marks a workspace that starts a turn under a fold as
+	// drawn inside it, answering whether a fold hid it (surfacing.go).
+	SurfaceHeldWork(ctx context.Context, id WorkspaceID) (bool, error)
+	// EndSurfacing takes a workspace's mark off at its turn's end, answering
+	// whether it carried one.
+	EndSurfacing(ctx context.Context, id WorkspaceID) (bool, error)
+	// ClearSurfaced takes the mark off every named workspace: a fold the
+	// user made hides them all.
+	ClearSurfaced(ctx context.Context, workspaces []WorkspaceID) error
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error
@@ -118,8 +121,7 @@ type DB interface {
 	// walk through the selection history, which must not reorder the history
 	// it walks. The instant is kept as the walk's landing (walk_landed_at),
 	// which the next SetCurrent commits as the workspace's last-selected
-	// instant when it moves off it. It expands the folds holding the
-	// workspace as SetCurrent does.
+	// instant when it moves off it. It opens no fold, as SetCurrent opens none.
 	SetCurrentKeepingLastSelected(ctx context.Context, id WorkspaceID, at time.Time) error
 	// Select records the user's selection of a workspace at an instant as
 	// WRITE says, clears its attention marker, and answers the rows the

@@ -62,12 +62,15 @@ function flashCurrentRow(section: HTMLElement): void {
  * section at once and asked of the daemon, whose push carries it to every
  * page (`view-change.ts`).
  *
- * A SECTION HOLDING THE CURRENT WORKSPACE NEVER COLLAPSES (owner request,
- * 2026-10-20): collapsing it would stand down the session the user is in, so
- * the gesture asks nothing while the box carries `HOLDS_CURRENT_ATTRIBUTE`.
- * The daemon refuses such a collapse too, for a page a push behind a switch.
- * The other way round, selecting a workspace in a collapsed section expands
- * it daemon-side, so its push repaints the fold (wsm's setCurrent).
+ * A SECTION HOLDING THE CURRENT WORKSPACE COLLAPSES, AND THE DAEMON MOVES THE
+ * SELECTION (owner request, 2026-11-09, superseding 2026-10-20): the
+ * workspace selected before, among the open sections, becomes current as the
+ * fold lands. Only a section whose collapse leaves nowhere to land carries
+ * `HOLDS_CURRENT_ATTRIBUTE` (the daemon's `holds_current` arm), and its
+ * gesture asks nothing and flashes the selected row, as the daemon refuses
+ * such a collapse too. Selecting a workspace in a collapsed section opens
+ * nothing: the roster draws that workspace alone inside the fold while it is
+ * the selection (`frontend.v1.RosterOpenRow.surfaced`).
  */
 export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTarget): FoldGesture {
   return (section, control) => {

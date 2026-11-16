@@ -3,14 +3,17 @@ package workspace
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
@@ -199,6 +202,7 @@ func current(f *fixture, ws ids.WorkspaceID) {
 	record := f.db.workspaces[ws]
 	record.Current = true
 	f.db.workspaces[ws] = record
+	f.db.current = &ws
 }
 
 func TestCollapsingARepositoryHoldingTheCurrentWorkspaceIsRefused(t *testing.T) {
@@ -365,12 +369,14 @@ var errUnknownTarget = errors.New("no such target")
 
 func TestEveryFoldThatHidesTabsGoesThroughFoldTabs(t *testing.T) {
 	// Act.
-	shared := sourcescan.Count(t, "v.foldTabs(ctx, log, foldTabsSpec{")
+	specs := sourcescan.Count(t, "foldTabsSpec{")
+	calls := sourcescan.Count(t, "v.foldTabs(ctx, log, ")
 	byHand := sourcescan.Count(t, "v.deps.StandDowns.StandDownFolded(ws.ID)")
 
 	// Assert.
-	if shared != 3 || byHand != 1 {
-		t.Fatalf("foldTabs calls = %d, stand-down loops = %d; want every tab-hiding fold through foldTabs", shared, byHand)
+	if specs != 3 || calls != 3 || byHand != 1 {
+		t.Fatalf("fold specs = %d, foldTabs calls = %d, stand-down loops = %d; want the repository's, the subsection's and the children's spec, each fold through foldTabs",
+			specs, calls, byHand)
 	}
 }
 
@@ -650,5 +656,160 @@ func TestFoldChildrenRefusesAnUnknownWorkspace(t *testing.T) {
 	asRefusal(t, err, ArmUnknownWorkspace)
 	if len(f.sidebar.registries) != 0 {
 		t.Fatalf("roster republications = %d, want none for a refused fold", len(f.sidebar.registries))
+	}
+}
+
+// landingFixture is a fixture whose current workspace "inside" sits in the
+// subsection "sub-1", beside "before" (selected at 10:00) and "never"
+// outside it, in registry order before, inside, never.
+func landingFixture(t *testing.T) (*fixture, ids.SubsectionID) {
+	t.Helper()
+	f := newFixture(t)
+	sub := ids.SubsectionID("sub-1")
+	for i, id := range []ids.WorkspaceID{"before", "inside", "never"} {
+		ws := f.workspace(id, filepath.Join(t.TempDir(), string(id)))
+		ws.Place = int64(i + 1)
+		if id == "inside" {
+			ws.Subsection = &sub
+			f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: sub, Repo: ws.Repo, Name: "later", Place: 1})
+		}
+		f.db.with(ws)
+	}
+	selected := time.Date(2026, 11, 9, 10, 0, 0, 0, time.UTC)
+	before := f.db.workspaces["before"]
+	before.LastSelectedAt = &selected
+	f.db.workspaces["before"] = before
+	current(f, "inside")
+	return f, sub
+}
+
+func TestCollapsingASubsectionHoldingTheCurrentWorkspaceLandsOnTheWorkspaceSelectedBefore(t *testing.T) {
+	// Arrange
+	f, sub := landingFixture(t)
+
+	// Act
+	err := f.verbs.FoldSubsection(context.Background(), sub, true, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldSubsection: %v", err)
+	}
+	if f.db.current == nil || *f.db.current != "before" {
+		t.Fatalf("current = %v, want before, the open workspace selected most recently", f.db.current)
+	}
+	if !f.db.subsections[0].Folded || !slices.Equal(f.standDowns, []ids.WorkspaceID{"inside"}) {
+		t.Fatalf("folded = %v, stand-downs = %v; want the collapse recorded and the section's workspace stood down", f.db.subsections[0].Folded, f.standDowns)
+	}
+}
+
+func TestACollapseThatLandsTheSelectionRecordsTheLandingAtInfo(t *testing.T) {
+	// Arrange
+	f, sub := landingFixture(t)
+
+	// Act
+	_ = f.verbs.FoldSubsection(context.Background(), sub, true, testRequester)
+
+	// Assert
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opFoldSubsection,
+		Message: "the collapse moved the selection off the folded subsection to the workspace selected before"})
+	if !ok || record.Context["from"] != "inside" || record.Context["by"] != string(sidebar.LandedByRecency) {
+		t.Fatalf("no info record names the landing off the folded subsection; records = %+v", f.log.logger.Records())
+	}
+}
+
+func TestACollapseWhoseLandingIsNotServedHereIsRefusedAndWritesNothing(t *testing.T) {
+	// Arrange
+	f, sub := landingFixture(t)
+	f.db.current = nil
+	current(f, "inside")
+	f.db.current = nil
+
+	// Act
+	err := f.verbs.FoldSubsection(context.Background(), sub, true, testRequester)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a collapse whose selection moved under the lock was answered as success")
+	}
+	if f.db.subsections[0].Folded {
+		t.Fatal("the collapse was recorded over a selection it could not move")
+	}
+}
+
+func TestSelectingIntoAFoldLeavesItCollapsedAndStandsNothingDown(t *testing.T) {
+	tests := []struct {
+		name  string
+		build func(*fixture)
+		folds func(*fixture) bool
+	}{
+		{
+			name: "a subsection",
+			build: func(f *fixture) {
+				sub := ids.SubsectionID("sub-1")
+				f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: sub, Name: "later", Place: 1, Folded: true})
+				ws := f.db.workspaces["target"]
+				ws.Subsection = &sub
+				f.db.with(ws)
+			},
+			folds: func(f *fixture) bool { return f.db.subsections[0].Folded },
+		},
+		{
+			name: "a repository",
+			build: func(f *fixture) {
+				inRepo(f, "target", "repo-1", false)
+				for i := range f.db.repositories {
+					if f.db.repositories[i].ID == "repo-1" {
+						f.db.repositories[i].Folded = true
+					}
+				}
+			},
+			folds: func(f *fixture) bool {
+				for _, repo := range f.db.repositories {
+					if repo.ID == "repo-1" {
+						return repo.Folded
+					}
+				}
+				return false
+			},
+		},
+		{
+			name: "a parent's children",
+			build: func(f *fixture) {
+				parent := f.workspace("parent", t.TempDir())
+				parent.ChildrenFolded = true
+				f.db.with(parent)
+				ws := f.db.workspaces["target"]
+				ws.Parent = &parent.ID
+				f.db.with(ws)
+			},
+			folds: func(f *fixture) bool { return f.db.workspaces["parent"].ChildrenFolded },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("outside", t.TempDir())
+			f.workspace("target", t.TempDir())
+			tt.build(f)
+			current(f, "outside")
+
+			// Act
+			err := f.verbs.Select(context.Background(), "target", Switch{History: RecordSelection})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Select: %v", err)
+			}
+			if !tt.folds(f) {
+				t.Error("the selection opened the fold")
+			}
+			if len(f.standDowns) != 0 {
+				t.Errorf("stand-downs = %v, want none", f.standDowns)
+			}
+			if f.db.current == nil || *f.db.current != "target" {
+				t.Errorf("current = %v, want target", f.db.current)
+			}
+		})
 	}
 }

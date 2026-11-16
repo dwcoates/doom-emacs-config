@@ -87,51 +87,7 @@ func TestSetChildrenFoldedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 }
 
-func TestExpandChildrenFoldsHolding(t *testing.T) {
-	tests := []struct {
-		name         string
-		pick         func(childrenFoldWorld) Workspace
-		want         bool
-		wantRootOpen bool
-		wantKidOpen  bool
-	}{
-		{name: "a child expands its parent's fold", pick: func(w childrenFoldWorld) Workspace { return w.child }, want: true, wantRootOpen: true},
-		{name: "a grandchild expands every ancestor's fold", pick: func(w childrenFoldWorld) Workspace { return w.grandchild }, want: true, wantRootOpen: true, wantKidOpen: true},
-		{name: "a workspace never expands its own children", pick: func(w childrenFoldWorld) Workspace { return w.root }},
-		{name: "an unrelated workspace expands nothing", pick: func(w childrenFoldWorld) Workspace { return w.sibling }},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			w := newChildrenFoldWorld(t, s)
-			for _, id := range []WorkspaceID{w.root.ID, w.child.ID} {
-				if err := s.SetChildrenFolded(context.Background(), id, true); err != nil {
-					t.Fatalf("SetChildrenFolded: %v", err)
-				}
-			}
-
-			// Act
-			got, err := s.ExpandChildrenFoldsHolding(context.Background(), tt.pick(w).ID)
-
-			// Assert
-			if err != nil {
-				t.Fatalf("ExpandChildrenFoldsHolding: %v", err)
-			}
-			if got != tt.want {
-				t.Errorf("expanded = %v, want %v", got, tt.want)
-			}
-			if open := !childrenFoldedOf(t, s, w.root.ID); open != tt.wantRootOpen {
-				t.Errorf("root's children expanded = %v, want %v", open, tt.wantRootOpen)
-			}
-			if open := !childrenFoldedOf(t, s, w.child.ID); open != tt.wantKidOpen {
-				t.Errorf("child's children expanded = %v, want %v", open, tt.wantKidOpen)
-			}
-		})
-	}
-}
-
-func TestSelectingADescendantExpandsTheChildrenFoldsHoldingIt(t *testing.T) {
+func TestSelectingADescendantLeavesTheChildrenFoldsHoldingItCollapsed(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)
 	w := newChildrenFoldWorld(t, s)
@@ -146,13 +102,12 @@ func TestSelectingADescendantExpandsTheChildrenFoldsHoldingIt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SetCurrent: %v", err)
 	}
-	if childrenFoldedOf(t, s, w.root.ID) {
-		t.Fatal("the selection left the collapsed fold holding the current workspace")
+	if !childrenFoldedOf(t, s, w.root.ID) {
+		t.Fatal("the selection opened the fold holding the current workspace")
 	}
-	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.set_current",
-		Message: "the selection expanded the collapsed folds holding the workspace"})
-	if !ok || rec.Context["expanded_children"] != true {
-		t.Fatalf("the expansion was not recorded at info naming the children fold: %v", log.Records())
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.wsm.set_current",
+		Message: "the selection expanded the collapsed folds holding the workspace"}); ok {
+		t.Fatalf("a selection recorded an expansion it no longer makes: %v", log.Records())
 	}
 }
 

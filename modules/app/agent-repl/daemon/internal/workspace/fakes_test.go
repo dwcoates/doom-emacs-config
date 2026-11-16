@@ -94,6 +94,9 @@ type fakeDB struct {
 	// contextSummaries are the summaries each workspace's next prompt owes.
 	contextSummaries map[ids.WorkspaceID]string
 
+	// clearedSurfaced are the workspaces ClearSurfaced was asked to clear, in order.
+	clearedSurfaced []ids.WorkspaceID
+
 	// storedSummaries are the summaries WorkspaceSummaryOf answers;
 	// summaryErr fails that read.
 	storedSummaries map[ids.WorkspaceID]string
@@ -4501,22 +4504,6 @@ func (d *fakeDB) SetSubsectionFolded(_ context.Context, id ids.SubsectionID, fol
 	return &wsm.UnknownSubsectionError{ID: id}
 }
 
-// ExpandSubsectionHolding expands the subsection the fake's workspace sits in,
-// answering whether it was collapsed, as WSM does.
-func (d *fakeDB) ExpandSubsectionHolding(_ context.Context, id ids.WorkspaceID) (bool, error) {
-	ws := d.workspaces[id]
-	if ws.Subsection == nil {
-		return false, nil
-	}
-	for i := range d.subsections {
-		if d.subsections[i].ID == *ws.Subsection && d.subsections[i].Folded {
-			d.subsections[i].Folded = false
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
 // SetChildrenFolded records the fold on the fake's workspace, as WSM does; an
 // unknown workspace is WSM's ErrNotFound.
 func (d *fakeDB) SetChildrenFolded(_ context.Context, id ids.WorkspaceID, folded bool) error {
@@ -4529,19 +4516,54 @@ func (d *fakeDB) SetChildrenFolded(_ context.Context, id ids.WorkspaceID, folded
 	return nil
 }
 
-// ExpandChildrenFoldsHolding expands the collapsed children folds of the
-// fake workspace's ancestors, answering whether any was, as WSM does.
-func (d *fakeDB) ExpandChildrenFoldsHolding(_ context.Context, id ids.WorkspaceID) (bool, error) {
-	expanded := false
-	for parent := d.workspaces[id].Parent; parent != nil; parent = d.workspaces[*parent].Parent {
-		ancestor := d.workspaces[*parent]
-		if ancestor.ChildrenFolded {
-			ancestor.ChildrenFolded = false
-			d.workspaces[*parent] = ancestor
-			expanded = true
+// SurfaceHeldWork marks the fake workspace surfaced when a fold hides it (its
+// repository's, its subsection's, or an ancestor's children fold), answering
+// whether it did, as WSM does.
+func (d *fakeDB) SurfaceHeldWork(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	ws, ok := d.workspaces[id]
+	if !ok || ws.Surfaced {
+		return false, nil
+	}
+	hidden := false
+	for _, repo := range d.repositories {
+		hidden = hidden || (repo.ID == ws.Repo && repo.Folded)
+	}
+	for _, sub := range d.subsections {
+		hidden = hidden || (ws.Subsection != nil && sub.ID == *ws.Subsection && sub.Folded)
+	}
+	for parent := ws.Parent; parent != nil; parent = d.workspaces[*parent].Parent {
+		hidden = hidden || d.workspaces[*parent].ChildrenFolded
+	}
+	if !hidden {
+		return false, nil
+	}
+	ws.Surfaced = true
+	d.workspaces[id] = ws
+	return true, nil
+}
+
+// EndSurfacing takes the fake workspace's mark off, answering whether it had
+// one, as WSM does.
+func (d *fakeDB) EndSurfacing(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	ws, ok := d.workspaces[id]
+	if !ok || !ws.Surfaced {
+		return false, nil
+	}
+	ws.Surfaced = false
+	d.workspaces[id] = ws
+	return true, nil
+}
+
+// ClearSurfaced takes the mark off every named fake workspace, as WSM does.
+func (d *fakeDB) ClearSurfaced(_ context.Context, workspaces []ids.WorkspaceID) error {
+	d.clearedSurfaced = append(d.clearedSurfaced, workspaces...)
+	for _, id := range workspaces {
+		if ws, ok := d.workspaces[id]; ok {
+			ws.Surfaced = false
+			d.workspaces[id] = ws
 		}
 	}
-	return expanded, nil
+	return nil
 }
 
 // fakeNetwork is the network state a failed naming call is classified by. It
