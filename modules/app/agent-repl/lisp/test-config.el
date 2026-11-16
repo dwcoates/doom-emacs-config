@@ -451,6 +451,14 @@ Binds `infos' and `warns', the formatted boot records, newest first."
     ;; Assert
     (should (memq #'agent-repl-schedule-log-retention-sweep emacs-startup-hook))))
 
+(ert-deftest agent-repl-config-test-lifecycle-registers-the-heap-census ()
+  "An interactive load registers the heap census on the startup hook."
+  (agent-repl-config-test--with-lifecycle
+    ;; Act
+    (agent-repl--register-lifecycle-hooks nil)
+    ;; Assert
+    (should (memq #'agent-repl-heap-census-schedule emacs-startup-hook))))
+
 (ert-deftest agent-repl-config-test-lifecycle-auto-start-off-registers-no-ensure ()
   "With auto-start off the daemon ensure is not registered."
   (agent-repl-config-test--with-lifecycle
