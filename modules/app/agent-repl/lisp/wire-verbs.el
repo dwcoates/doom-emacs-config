@@ -4051,6 +4051,18 @@ chain has no remediation workspace to restore."
     (list :remediations-before-escalation
           (agent-repl-wire--decode-uint32 message 'remediationsBeforeEscalation json))))
 
+(defun agent-repl-wire-decode-update-merge-queue-problems-unowned (json)
+  "Decode UpdateMergeQueueProblemsUnowned from JSON into `(:groups GROUPS)':
+each log group the check's window holds that no one owns, refusing the
+approval."
+  (let ((message "UpdateMergeQueueProblemsUnowned"))
+    (agent-repl-wire-verbs--check-keys message json '(groups))
+    (list :groups (agent-repl-wire--decode-repeated-string message 'groups json))))
+
+(defun agent-repl-wire-decode-update-merge-queue-error-problems-unowned (json)
+  "Decode UpdateMergeQueueError's `problems_unowned' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-problems-unowned json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-unknown-workspace (json)
   "Decode UpdateMergeQueueError's `unknown_workspace' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-unknown-workspace json))
@@ -4104,7 +4116,7 @@ chain has no remediation workspace to restore."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed noRemediationToRestore remediationBoundReached))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed noRemediationToRestore remediationBoundReached problemsUnowned))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4119,7 +4131,8 @@ arm this codec does not know is refused as an unknown field."
          (list 'notMediator :not-mediator #'agent-repl-wire-decode-update-merge-queue-error-not-mediator)
          (list 'noMediationOwed :no-mediation-owed #'agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed)
          (list 'noRemediationToRestore :no-remediation-to-restore #'agent-repl-wire-decode-update-merge-queue-error-no-remediation-to-restore)
-         (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached))))))
+         (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached)
+         (list 'problemsUnowned :problems-unowned #'agent-repl-wire-decode-update-merge-queue-error-problems-unowned))))))
 
 (defun agent-repl-wire-decode-update-merge-queue-response-success (json)
   "Decode UpdateMergeQueueResponse's `success' arm from JSON."

@@ -63,6 +63,11 @@ type deployerParams struct {
 	Reports deploy.OwedReports
 	Clients deploy.Clients
 	Runner  deploy.Runner
+	// WifiTools is the daemon's one persistent Wi-Fi tool set
+	// (persistentwifi.ConfigFromEnv), so the deploy stops the helper's asks
+	// with the tools every other Wi-Fi step uses: a harness's fakes under
+	// test, never the host's own pkill.
+	WifiTools persistentwifi.Tools
 	// Store is the store's socket, which a store restart awaits.
 	Store string
 	// Workspace answers every workspace with a live session.
@@ -207,7 +212,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Clients:  p.Clients,
 		Services: restarter,
 		StopWifiAsks: func(ctx context.Context) (bool, error) {
-			tools := persistentwifi.DefaultTools()
+			tools := p.WifiTools
 			tools.WifiApp = where.wifiApp
 			return persistentwifi.StopAsks(ctx, p.Runner, tools)
 		},

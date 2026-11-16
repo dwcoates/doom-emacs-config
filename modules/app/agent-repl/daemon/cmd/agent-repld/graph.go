@@ -1333,6 +1333,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The metrics surface's version series and the rail's header state it.
 	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
+		WifiTools:  wifiConfig.Tools,
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
 		ShimMain:   paths.ShimMain,

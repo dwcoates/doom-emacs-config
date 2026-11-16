@@ -3683,8 +3683,15 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "noRemediationToRestore" "remediationBoundReached")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "noRemediationToRestore" "remediationBoundReached" "problemsUnowned")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-problems-unowned-arm ()
+  "UpdateMergeQueueError's `problems_unowned' arm decodes the unowned groups."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"problemsUnowned\":{\"groups\":[\"op: msg (WARN)\"]}}"))
+                   '(:cause (:arm :problems-unowned :value (:groups ("op: msg (WARN)"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-session-health-error-unknown-workspace-arm ()
   "SessionHealthError's `unknown_workspace' arm decodes with everything it
