@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -2377,5 +2379,127 @@ func TestADrainEndingUnderAMergeLeaseWithNoBriefOfItsOwnDeliversNothing(t *testi
 	}
 	if !logged(h.log.Records(), "debug", opBounce, "a holding lease still stands; its release delivers what the drain held that it does not exempt") {
 		t.Fatalf("records = %+v, want the standing lease recorded", h.log.Records())
+	}
+}
+
+// A BOUNCE AND A STAND-DOWN NEVER BOTH ACT ON ONE FREE WORKSPACE (2026-11-16
+// 13:42:27, merge-view-one-source): a stale-build bounce taken at a turn's end
+// under the idle sweep's hibernation lease could not take its restart hold,
+// and failed. Under that lease the bounce now stays registered.
+func TestATurnEndUnderAStandDownsLeaseLeavesTheBounceRegistered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	h.lease(wsm.HolderHibernate, wsm.PolicyHold)
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if g.runs.Load() != 0 || h.q.isDraining(theWorkspace) {
+		t.Fatalf("runs = %d, draining = %v, want the bounce never taken under the stand-down's lease", g.runs.Load(), h.q.isDraining(theWorkspace))
+	}
+	if stage := registeredReplacement(h); stage == nil || stage.started {
+		t.Fatalf("replacement = %+v, want it registered, unstarted", stage)
+	}
+	if !logged(h.log.Records(), "info", opBounce, "a stand-down's lease holds the workspace; the bounce stays registered, the workspace is not drained, and the lease's release takes it") {
+		t.Fatalf("records = %+v, want the held bounce recorded at INFO", h.log.Records())
+	}
+}
+
+func TestABounceHeldBehindAStandDownsLeaseIsTakenWhenTheLeaseIsReleased(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	h.lease(wsm.HolderHibernate, wsm.PolicyHold)
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+
+	// Act
+	h.clearLease()
+	h.q.OnLeaseChanged(theWorkspace)
+
+	// Assert
+	g.awaitStart(t)
+	g.finish(h, nil)
+	if err := g.awaitDone(t); err != nil {
+		t.Fatalf("done = %v, want the bounce's clean finish", err)
+	}
+}
+
+func TestABounceWhoseLeaseCannotBeReadForAStandDownStaysRegisteredAndIsRecordedAtError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	h.db.mu.Lock()
+	h.db.leaseErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+
+	// Act
+	h.watcher.idle()
+	h.q.OnFree(theWorkspace)
+
+	// Assert
+	if g.runs.Load() != 0 || h.q.isDraining(theWorkspace) {
+		t.Fatalf("runs = %d, draining = %v, want nothing taken on an unread lease", g.runs.Load(), h.q.isDraining(theWorkspace))
+	}
+	r, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{
+		Level: "error", Operation: opBounce,
+		Message: "could not read the occupancy lease before taking a bounce; it stays registered for the next edge",
+	})
+	if !ok || r.Context["cause"] != "the store is gone" || r.Context["reason"] != "build_stale" {
+		t.Fatalf("records = %+v, want the unread lease at ERROR with its cause and reason", h.log.Records())
+	}
+}
+
+func TestBouncingAnswersWhetherABounceDrainsTheWorkspace(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	g := newGate()
+	before := h.q.Bouncing(theWorkspace)
+	if _, err := h.q.RequestBounce(context.Background(), theWorkspace, g.relaunching("build_stale")); err != nil {
+		t.Fatalf("RequestBounce: %v", err)
+	}
+	g.awaitStart(t)
+
+	// Act
+	during := h.q.Bouncing(theWorkspace)
+	g.finish(h, nil)
+	if err := g.awaitDone(t); err != nil {
+		t.Fatalf("done = %v", err)
+	}
+
+	// Assert
+	if before || !during {
+		t.Fatalf("Bouncing = (before %v, during %v), want (false, true)", before, during)
+	}
+}
+
+// EVERY BOUNCE DECISION ASKS THE ONE LEASE HOLD: no site in bounce.go asks the
+// merge's hold alone, so none can take a bounce a stand-down's lease holds.
+func TestEveryBounceDecisionAsksTheOneLeaseHold(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("bounce.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	direct := strings.Count(string(src), "q.heldBehindMergeLocked(")
+	shared := strings.Count(string(src), "q.heldBehindLeaseLocked(")
+
+	// Assert
+	if direct != 1 || shared != 3 {
+		t.Fatalf("heldBehindMergeLocked calls = %d, heldBehindLeaseLocked calls = %d, want only the shared hold to ask the merge's (1) and three decisions to ask the shared hold", direct, shared)
 	}
 }

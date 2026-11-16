@@ -547,11 +547,13 @@ type harness struct {
 	reviving  *fakeReviving
 	// delivering answers Deps.Delivering: nil answers false.
 	delivering func(ws ids.WorkspaceID) bool
-	stand      *fakeStand
-	spawns     *fakeSpawns
-	merges     *fakeMerges
-	log        *dlog.TestSurfaces
-	exits      chan struct{}
+	// bouncing answers Deps.Bouncing: nil answers false.
+	bouncing func(ws ids.WorkspaceID) bool
+	stand    *fakeStand
+	spawns   *fakeSpawns
+	merges   *fakeMerges
+	log      *dlog.TestSurfaces
+	exits    chan struct{}
 }
 
 // newHarness builds a controller over a real (in-memory) WSM store —
@@ -594,6 +596,12 @@ func newHarness(t *testing.T, adjust ...func(*Deps)) *harness {
 				return false
 			}
 			return h.delivering(ws)
+		},
+		Bouncing: func(ws ids.WorkspaceID) bool {
+			if h.bouncing == nil {
+				return false
+			}
+			return h.bouncing(ws)
 		},
 		Announcer: h.announcer,
 		Exit:      func(context.Context) error { h.exits <- struct{}{}; return nil },

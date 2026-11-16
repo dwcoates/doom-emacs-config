@@ -285,6 +285,14 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		log.Info(why.op, "a prompt is being delivered to the shim; deferring the park", fields)
 		return parkDeferred
 	}
+	// A BOUNCE DRAINING THE WORKSPACE OWNS IT. The bounce was decided on the
+	// same free workspace before this lease was taken, and its relaunch
+	// takes a restart hold this lease would refuse (2026-11-16 13:42:27,
+	// merge-view-one-source: the bounce failed under the park's lease).
+	if c.deps.Bouncing(ws) {
+		log.Info(why.op, "a bounce is replacing the workspace's shim; deferring the park", fields)
+		return parkDeferred
+	}
 
 	directive, cancelDirective := context.WithTimeout(ctx, c.deps.StandBound)
 	answer, err := c.deps.Stand.Hibernate(directive, ws)
