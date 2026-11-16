@@ -179,6 +179,11 @@ func (s *server) SubmitPrompt(
 			return nil, fail(subject.Log, rpc, err)
 		}
 	}
+	// A FORWARDED SLACK THREAD rides the prompt with the daemon's directive to
+	// tell the thread which workspace took it (slackforward.go).
+	if forward := req.Msg.GetSlackForward(); forward != nil {
+		said = withSlackForward(said, forward.GetThreadUrl(), subject.Record.Name)
+	}
 	outcome, err := s.deps.Prompts.Submit(ctx, subject.Record.ID, said,
 		req.Msg.GetIdempotencyKey(), req.Msg.GetOrigin(), sentBy, delivery, target)
 	if err != nil {
@@ -188,6 +193,11 @@ func (s *server) SubmitPrompt(
 		return nil, fail(subject.Log, rpc, err)
 	}
 	cerr := s.encodeSubmitOutcome(subject.Log, resp, outcome)
+	if forward := req.Msg.GetSlackForward(); forward != nil && cerr == nil && resp.GetError() == nil {
+		if err := s.storeForwardedThread(ctx, subject.Log, subject.Record.ID, forward.GetThreadUrl()); err != nil {
+			return nil, fail(subject.Log, rpc, err)
+		}
+	}
 	// A SEND THE PERSON MADE IS TIMED TO ITS ECHO by the page (webecho.go),
 	// once its row is drawn.
 	if echo, ok := promptEchoOf(req.Msg, outcome); ok && cerr == nil && resp.GetError() == nil {

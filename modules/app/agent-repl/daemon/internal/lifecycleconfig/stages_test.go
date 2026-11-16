@@ -369,3 +369,35 @@ func TestEveryWorkspaceScriptHookEnvironmentIsHookEnvs(t *testing.T) {
 		t.Fatalf("a script hook's environment built by hand in %v, want HookEnv", byHand)
 	}
 }
+
+func TestSlackForwardPromptNamesTheThreadAndTheRecipient(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{name: "the thread", want: "https://w.slack.com/archives/C1/p1"},
+		{name: "the recipient by name", want: "`footer-fix`"},
+		{name: "the posting skill", want: "send-to-slack"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := SlackForwardPrompt("https://w.slack.com/archives/C1/p1", "footer-fix")
+
+			// Assert
+			if !strings.Contains(got, tc.want) {
+				t.Fatalf("SlackForwardPrompt = %q, want it to contain %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSlackForwardPromptHasNoPlaceholder(t *testing.T) {
+	// Act: the directive is composed whole, so no hook expansion is owed.
+	got := SlackForwardPrompt("https://w.slack.com/archives/C1/p1", "footer-fix")
+
+	// Assert
+	if strings.Contains(got, "{{") {
+		t.Fatalf("SlackForwardPrompt = %q, want no placeholder left", got)
+	}
+}

@@ -225,6 +225,17 @@ func validateSubmitPromptRequest(req *agentreplv1.SubmitPromptRequest) *connect.
 	if _, err := prompthandler.DeliveryOf(req.Delivery); err != nil {
 		return invalid("delivery", err.Error())
 	}
+	if req.SlackForward != nil {
+		if req.SentBy == nil {
+			return invalid("slack_forward", "only an agent-sent prompt forwards a Slack thread")
+		}
+		if req.Feed != nil {
+			return invalid("slack_forward", "a prompt to a subagent's feed forwards no Slack thread")
+		}
+		if _, err := slacklink.ParseThread(req.GetSlackForward().GetThreadUrl()); err != nil {
+			return invalid("slack_forward.thread_url", err.Error())
+		}
+	}
 	if req.SubmittedAtUnixMs != nil && req.GetSubmittedAtUnixMs() <= 0 {
 		return invalid("submitted_at_unix_ms", "a submit instant must be positive Unix milliseconds")
 	}
