@@ -218,3 +218,22 @@ func TestHelperLaunch(t *testing.T) {
 		})
 	}
 }
+
+func TestAStandingForgottenAfterAnAllowedScanIsAskedForAgain(t *testing.T) {
+	// Arrange: asked, then allowed, then forgotten by a re-signed helper.
+	h := newHarness(t).sight(
+		wifiScan{Authorization: "not_determined"},
+		wifiScan{Authorization: "authorized"},
+		wifiScan{Authorization: "not_determined"},
+	).launchesAuthorize()
+
+	// Act
+	for range 3 {
+		_, _ = h.c.scanWifi(context.Background())
+	}
+
+	// Assert
+	if got := h.authorizeCalls(); len(got) != 2 {
+		t.Fatalf("authorize launches = %v, want one per standing never asked for", got)
+	}
+}

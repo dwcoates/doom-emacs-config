@@ -127,6 +127,12 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 		}
 		return scan, fmt.Errorf("%w (its standing: %s)", errScanUnauthorized, scan.Authorization)
 	}
+	// AN ALLOWED STANDING ENDS THE ASK: a deploy that installs a rebuilt
+	// helper re-signs it, macOS may forget the answer, and the next
+	// not_determined is asked for again.
+	c.mu.Lock()
+	c.authorizeAsked = false
+	c.mu.Unlock()
 	c.log.Debug(opFailover, "scanned the visible Wi-Fi networks", dlog.Context{
 		"visible": len(scan.Visible), "joined_named": scan.Current != "", "took_ms": took.Milliseconds()})
 	return scan, nil
@@ -136,7 +142,7 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 // asked: macOS shows its Location Services prompt only to an app that asks.
 const standingNotDetermined = "not_determined"
 
-// askAuthorization asks macOS, once per daemon, to show the owner the helper's
+// askAuthorization asks macOS, once per standing never asked for, to show the owner the helper's
 // Location Services prompt, through the helper's authorize verb
 // (wifi-helper/main.swift).
 //
@@ -146,9 +152,9 @@ const standingNotDetermined = "not_determined"
 // again: on 2026-11-16 every failover scan reported not_determined and no
 // prompt was ever shown. The verb waits for the owner's answer, unbounded, so
 // it is launched without -W and left running; the launch itself is bounded by
-// scanBound, which a scan's whole launch and scan fit inside. Asked once per
-// daemon, because a waiting prompt is not asked for twice. It runs OFF the
-// lock.
+// scanBound, which a scan's whole launch and scan fit inside. Asked once
+// until a scan hears the helper allowed, because a waiting prompt is not
+// asked for twice. It runs OFF the lock.
 func (c *Controller) askAuthorization(ctx context.Context) {
 	c.mu.Lock()
 	if c.authorizeAsked {
