@@ -15,6 +15,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { BAND_SIZED_ATTRIBUTE, type FittedSection } from "../../src/sidebar/band-fit.js";
 import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, OPEN_FOLD_KEY } from "../../src/sidebar/context.js";
+import { recorded } from "../events.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   RESIZE_HANDLE_CLASS,
@@ -57,11 +58,12 @@ interface Drawn {
  * answering ANSWER and recording every request.
  */
 function rail({ folded = {}, sized = {} }: Drawn = {}, answer: () => UpdateSidebarViewResponse = () => OK) {
-  const asked: UpdateSidebarViewRequest[] = [];
+  const requests = recorded<UpdateSidebarViewRequest>();
+  const asked = requests.calls;
   const sc = sidebarContext(
     appContext({
       updateSidebarView: (request) => {
-        asked.push(request);
+        requests.record(request);
         return answer();
       },
     }),
@@ -84,7 +86,7 @@ function rail({ folded = {}, sized = {} }: Drawn = {}, answer: () => UpdateSideb
   drawSectionHeight(merged, MERGED_FOLD_KEY, sized.merged ?? null, sc);
   drawSectionHeight(hidden, HIDDEN_FOLD_KEY, sized.hidden ?? null, sc);
   document.body.replaceChildren(pane);
-  return { asked, sc, pane, open, queue, merged, hidden };
+  return { asked, requests, sc, pane, open, queue, merged, hidden };
 }
 
 /** The grip over SECTION's rule, its pointer capture stubbed (jsdom has none). */
@@ -97,9 +99,10 @@ function grip(section: HTMLElement): HTMLElement {
 
 /** Install the drag over R with FITS as the last fit's measurements, counting refits. */
 function install(r: ReturnType<typeof rail>, fits: Map<HTMLElement, FittedSection>) {
-  const refit = vi.fn();
+  const refits = recorded<void>();
+  const refit = vi.fn(() => refits.record());
   const remove = installSectionResize(r.pane, r.sc, refit, (section) => fits.get(section) ?? null);
-  return { refit, remove };
+  return { refit, refits, remove };
 }
 
 /** Press the grip over SECTION at Y=100, move it to TO, and release it unless HOLD. */
@@ -263,7 +266,7 @@ describe("installSectionResize", () => {
     // Act
     drag(r.queue, 60);
     // Assert
-    await vi.waitFor(() => expect(r.asked).toHaveLength(1));
+    await r.requests.reached(1);
     const change = r.asked[0].change;
     expect(change.case === "sizeSections" && change.value.sizes.map((s) => [s.section.case, s.height.case, s.height.value])).toEqual([
       ["mergeQueue", "lines", expect.objectContaining({ lines: 4 })],
@@ -283,7 +286,7 @@ describe("installSectionResize", () => {
     // Act
     drag(r.hidden, 120);
     // Assert
-    await vi.waitFor(() => expect(r.asked).toHaveLength(1));
+    await r.requests.reached(1);
     const change = r.asked[0].change;
     expect(change.case === "sizeSections" && change.value.sizes.map((s) => [s.section.case, s.height.case === "lines" ? s.height.value.lines : null])).toEqual([
       ["recentlyMerged", 4],
@@ -332,11 +335,11 @@ describe("installSectionResize", () => {
   it("puts the wire's height back and re-fits when the daemon refuses", async () => {
     // Arrange
     const r = rail({}, () => REFUSED);
-    const { refit } = install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    const { refits } = install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
     // Act
     drag(r.queue, 60);
     // Assert
-    await vi.waitFor(() => expect(refit.mock.calls.length).toBe(2));
+    await refits.reached(2);
     expect(r.queue.hasAttribute(BAND_SIZED_ATTRIBUTE)).toBe(false);
   });
 
@@ -357,7 +360,7 @@ describe("installSectionResize", () => {
     // Act
     grip(r.hidden).dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     // Assert
-    await vi.waitFor(() => expect(r.asked).toHaveLength(1));
+    await r.requests.reached(1);
     const change = r.asked[0].change;
     expect([
       change.case === "sizeSections" && change.value.sizes.map((s) => [s.section.case, s.height.case]),

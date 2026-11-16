@@ -1791,7 +1791,7 @@ exactly one.  It holds one `RosterMergedRepoGroup' per repository with
 a recent merge."
   (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
     (agent-repl-wire--check-keys "RosterMergedSection" object
-                                 '(header groups expanded collapsed))
+                                 '(header groups expanded collapsed fitted sized))
     (agent-repl-wire--decoded
      "RosterMergedSection"
      (list :header (agent-repl-wire--decode-message
@@ -1837,7 +1837,7 @@ the roster carries exactly one.  It holds one `RosterMergeQueueRepoGroup'
 per repository whose queue is active."
   (let ((object (agent-repl-wire--object "RosterMergeQueueSection" value)))
     (agent-repl-wire--check-keys "RosterMergeQueueSection" object
-                                 '(header groups expanded collapsed))
+                                 '(header groups expanded collapsed fitted sized))
     (agent-repl-wire--decoded
      "RosterMergeQueueSection"
      (list :header (agent-repl-wire--decode-message
@@ -1880,7 +1880,7 @@ It has no key of its own — the roster carries exactly one — so a `key' on
 the wire is an unknown field."
   (let ((object (agent-repl-wire--object "RosterHiddenSection" value)))
     (agent-repl-wire--check-keys "RosterHiddenSection" object
-                                 '(header hiddenRows expanded collapsed))
+                                 '(header hiddenRows expanded collapsed fitted sized))
     (agent-repl-wire--decoded
      "RosterHiddenSection"
      (list :header (agent-repl-wire--decode-message
