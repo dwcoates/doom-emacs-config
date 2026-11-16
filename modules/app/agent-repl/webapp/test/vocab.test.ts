@@ -15,7 +15,7 @@ import paintClasses from "../../proto/vocab/paint-classes.json";
 import { MalformedView } from "../src/rpc/malformed.js";
 import { ForwardingLogger, setLogger } from "../src/log.js";
 import stylesheet from "../src/styles.css?raw";
-import { rulesOf } from "./stylesheet.js";
+import { mediaBlocksOf, rulesOf } from "./stylesheet.js";
 import {
   COLOR_THEMES,
   COLOR_TOKENS,
@@ -51,6 +51,13 @@ import {
   topbarConnectivityColor,
   topbarTone,
 } from "../src/vocab.js";
+
+/** THEME's part of the generated token sheet CSS: the light tokens ahead of the dark-theme block, the dark ones inside it. */
+function themeBlock(css: string, theme: (typeof COLOR_THEMES)[number]): string {
+  const [dark] = mediaBlocksOf("prefers-color-scheme: dark", css);
+  if (dark === undefined) throw new Error("the token sheet has no dark-theme block");
+  return theme === "light" ? css.slice(0, dark.start) : dark.body;
+}
 
 /** The proto (snake_case) arm names of the named oneof on a generated schema. */
 function oneofArmNames(schema: { oneofs: readonly { name: string; fields: readonly { name: string }[] }[] }, oneof: string): string[] {
@@ -530,8 +537,7 @@ describe("color_values, each color's one value per theme", () => {
   it.each(COLOR_THEMES)("defines the %s theme's compaction orange from the file", (theme) => {
     // Arrange
     const css = colorValuesStylesheet();
-    const darkAt = css.indexOf("@media (prefers-color-scheme: dark)");
-    const block = theme === "light" ? css.slice(0, darkAt) : css.slice(darkAt);
+    const block = themeBlock(css, theme);
 
     // Act
     const declared = block.includes(`--compact-rule: ${colorValue(theme, "orange")};`);
@@ -562,8 +568,7 @@ describe("color_values, each color's one value per theme", () => {
   it.each(CASES)("defines the %s theme's %s token from the file", (theme, color) => {
     // Arrange
     const css = colorValuesStylesheet();
-    const darkAt = css.indexOf("@media (prefers-color-scheme: dark)");
-    const block = theme === "light" ? css.slice(0, darkAt) : css.slice(darkAt);
+    const block = themeBlock(css, theme);
 
     // Act
     const declared = block.includes(`${COLOR_TOKENS[color]}: ${colorValue(theme, color)};`);

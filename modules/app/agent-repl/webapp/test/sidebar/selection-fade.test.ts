@@ -10,7 +10,7 @@ import {
 } from "../../src/sidebar/selection-fade.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import stylesheet from "../../src/styles.css?raw";
-import { keyframesOf, rulesOf } from "../stylesheet.js";
+import { keyframesOf, mediaBlocksOf, rulesOf } from "../stylesheet.js";
 
 /** A drawn copy of workspace ID's row, under ROOT. */
 function drawnRow(root: HTMLElement, id: string): HTMLElement {
@@ -293,13 +293,10 @@ describe("the selection fade's styling", () => {
 
   it.each(["selection-number-rise"])("stops the %s under reduced motion", (className) => {
     // Arrange
-    const reduced = stylesheet
-      .split("@media (prefers-reduced-motion: reduce)")
-      .slice(1)
-      .some((block: string) => {
-        const rule = block.match(/([^{}]*)\{\s*animation: none;/g) ?? [];
-        return rule.some((r) => r.includes(`#ws-sidebar .ws.${className} > .row .sb-num`));
-      });
+    const reduced = mediaBlocksOf("prefers-reduced-motion: reduce").some(({ body }) => {
+      const rule = body.match(/([^{}]*)\{\s*animation: none;/g) ?? [];
+      return rule.some((r) => r.includes(`#ws-sidebar .ws.${className} > .row .sb-num`));
+    });
 
     // Assert
     expect(reduced).toBe(true);

@@ -10,7 +10,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { cascadedValue, cascadedValueIn, inDocument, inRail, isOwnRule, keyframesOf, rulesOf, selectorOf } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, inRail, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, selectorOf } from "./stylesheet.js";
 import STYLES_TEST from "./styles.test.ts?raw";
 import STYLESHEET from "./stylesheet.ts?raw";
 import { filesUnder } from "./files-under.js";
@@ -92,6 +92,52 @@ describe("selectorOf", () => {
     expect(() => selectorOf(/(\.no-such-class-anywhere)\s*\{/, "phantom rule")).toThrow(
       "the stylesheet has no phantom rule",
     );
+  });
+});
+
+describe("mediaBlocksOf", () => {
+  it.each([
+    {
+      name: "reads a block's body between its own braces, nested rules whole",
+      css: "@media (q) { .a { x: 1; } .b { y: 2; } } .c { z: 3; }",
+      want: [" .a { x: 1; } .b { y: 2; } "],
+    },
+    {
+      name: "reads every block of the query in source order",
+      css: "@media (q) { .a { x: 1; } } .m { } @media (q) { .b { y: 2; } }",
+      want: [" .a { x: 1; } ", " .b { y: 2; } "],
+    },
+    { name: "skips a block of another query", css: "@media (other) { .a { x: 1; } }", want: [] },
+  ])("$name", ({ css, want }) => {
+    // Arrange / Act
+    const bodies = mediaBlocksOf("q", css).map((block) => block.body);
+
+    // Assert
+    expect(bodies).toEqual(want);
+  });
+
+  it("spans a block from its @media to just past its closing brace", () => {
+    // Arrange
+    const css = ".x { } @media (q) { .a { x: 1; } } .y { }";
+
+    // Act
+    const [block] = mediaBlocksOf("q", css);
+
+    // Assert
+    expect(css.slice(block?.start, block?.end)).toBe("@media (q) { .a { x: 1; } }");
+  });
+
+  it("fails loudly on a block that never closes", () => {
+    // Arrange / Act / Assert
+    expect(() => mediaBlocksOf("q", "@media (q) { .a { x: 1; }")).toThrow(/@media \(q\) block never closes/);
+  });
+
+  it("reads the real stylesheet by default", () => {
+    // Arrange / Act
+    const blocks = mediaBlocksOf("prefers-color-scheme: dark");
+
+    // Assert
+    expect(blocks[0]?.body).toContain(":root");
   });
 });
 

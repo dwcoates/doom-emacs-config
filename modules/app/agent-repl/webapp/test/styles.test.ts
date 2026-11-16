@@ -46,7 +46,7 @@ import { BUBBLE_EXPANDED_ONLY_CLASS } from "../src/bubble/expanded-only.js";
 import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../src/bubble/collapsed-thumbnail.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
 import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
@@ -173,19 +173,9 @@ function rootToken(name: string): string | undefined {
  * more than one suite below pins a dark-theme token.
  */
 function darkThemeBlock(): string {
-  const start = stylesheet.indexOf("@media (prefers-color-scheme: dark)");
-  if (start === -1) throw new Error("no dark-theme media query found");
-  const openBrace = stylesheet.indexOf("{", start);
-  let depth = 0;
-  let i = openBrace;
-  for (; i < stylesheet.length; i++) {
-    if (stylesheet[i] === "{") depth++;
-    else if (stylesheet[i] === "}") {
-      depth--;
-      if (depth === 0) break;
-    }
-  }
-  return stylesheet.slice(openBrace + 1, i);
+  const [dark] = mediaBlocksOf("prefers-color-scheme: dark");
+  if (dark === undefined) throw new Error("no dark-theme media query found");
+  return dark.body;
 }
 
 /**
@@ -939,21 +929,9 @@ describe("the footer status wave's stylesheet contract", () => {
    * lookup the override's declarations, which is exactly backwards.
    */
   function reducedMotionSplit(): { block: string; rest: string } {
-    const at = stylesheet.indexOf("@media (prefers-reduced-motion: reduce)");
-    if (at === -1) throw new Error("no reduced-motion block in the stylesheet");
-    const open = stylesheet.indexOf("{", at);
-    let depth = 0;
-    for (let cursor = open; cursor < stylesheet.length; cursor += 1) {
-      if (stylesheet[cursor] === "{") depth += 1;
-      if (stylesheet[cursor] === "}") depth -= 1;
-      if (depth === 0) {
-        return {
-          block: stylesheet.slice(open + 1, cursor),
-          rest: stylesheet.slice(0, at) + stylesheet.slice(cursor + 1),
-        };
-      }
-    }
-    throw new Error("the reduced-motion block is never closed");
+    const [reduced] = mediaBlocksOf("prefers-reduced-motion: reduce");
+    if (reduced === undefined) throw new Error("no reduced-motion block in the stylesheet");
+    return { block: reduced.body, rest: stylesheet.slice(0, reduced.start) + stylesheet.slice(reduced.end) };
   }
 
   /** The reduced-motion override's body. */
@@ -2008,23 +1986,9 @@ describe("the reviving shimmer's stylesheet contract", () => {
   const band = "#ws-sidebar .row .name.reviving > .name-ink";
   const copies = ["#ws-sidebar .row .name.reviving > .name-ink::before", "#ws-sidebar .row .name.reviving > .name-ink::after"];
 
-  /** The bodies of every `@media (QUERY)` block, matched brace by brace. */
+  /** The bodies of every `@media (QUERY)` block. */
   function mediaBodies(query: string): string[] {
-    const bodies: string[] = [];
-    const head = `@media (${query})`;
-    for (let at = stylesheet.indexOf(head); at !== -1; at = stylesheet.indexOf(head, at + head.length)) {
-      const open = stylesheet.indexOf("{", at);
-      let depth = 0;
-      let cursor = open;
-      for (; cursor < stylesheet.length; cursor += 1) {
-        if (stylesheet[cursor] === "{") depth += 1;
-        if (stylesheet[cursor] === "}") depth -= 1;
-        if (depth === 0) break;
-      }
-      if (depth !== 0) throw new Error(`a ${head} block is never closed`);
-      bodies.push(stylesheet.slice(open + 1, cursor));
-    }
-    return bodies;
+    return mediaBlocksOf(query).map((block) => block.body);
   }
 
   /** The declarations of the first rule whose selector list holds SELECTOR in CSS. */
