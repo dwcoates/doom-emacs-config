@@ -4584,6 +4584,10 @@ type fakeDeployChecks struct {
 	// work; standByErr fails a stand-by.
 	stoodBy, resumed []ids.WorkspaceID
 	standByErr       error
+	// onStandBy runs inside each stand-by, as ending the finishing session
+	// does; standByCtxErrs records the stand-by context's error after it.
+	onStandBy      func()
+	standByCtxErrs []error
 	// efforts records each effort set, "ROLE:WS", and
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
@@ -4640,10 +4644,14 @@ func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
 	return f.reopenErr
 }
 
-func (f *fakeDeployChecks) StandBy(_ context.Context, ws ids.WorkspaceID) error {
+func (f *fakeDeployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
+	if f.onStandBy != nil {
+		f.onStandBy()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stoodBy = append(f.stoodBy, ws)
+	f.standByCtxErrs = append(f.standByCtxErrs, ctx.Err())
 	return f.standByErr
 }
 

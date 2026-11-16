@@ -603,6 +603,25 @@ func TestAFinishedWorkspaceThatCannotStandByIsRecordedAndStillLands(t *testing.T
 	}
 }
 
+func TestAStandByThatEndsTheFinishingSessionRunsOnALiveContext(t *testing.T) {
+	// Arrange
+	h := finishing(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.checks.onStandBy = cancel
+
+	// Act
+	err := h.o.FinishRemediation(ctx, "ws-remedy", aRemediationPatch)
+
+	// Assert
+	if err != nil || !slices.Equal(h.checks.standByCtxErrs, []error{nil}) {
+		t.Fatalf("FinishRemediation = %v, stand-by context errors %v; want one stand-by on a live context", err, h.checks.standByCtxErrs)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "could not republish the queue whose check changed"}); ok {
+		t.Fatalf("records = %v, want the queue republished", h.logs.Records())
+	}
+}
+
 func TestTheDeployCheckLabelDrawsAFinishUnderWay(t *testing.T) {
 	tests := []struct {
 		name      string
