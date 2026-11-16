@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -871,23 +872,20 @@ func receiveHostSelection(
 	return receivePush(t, stream, "a selection", (*agentreplv1.WatchHostWorkspaceResponse).GetSelection)
 }
 
-// TestHostSelectionCarriesTheSelectedText pins what Emacs is handed for each
-// selected arm: its kind and the bubble's text, which the composer searches.
-func TestHostSelectionCarriesTheSelectedText(t *testing.T) {
+// TestHostSelectionCarriesTheSelectedKind pins what Emacs is handed for each
+// selected row: the arm of its kind, and nothing else.
+func TestHostSelectionCarriesTheSelectedKind(t *testing.T) {
 	tests := []struct {
 		name string
 		row  string
-		text func(*agentreplv1.HostWorkspaceSelection) string
+		want *agentreplv1.HostWorkspaceSelection
 	}{
-		{name: "a final response", row: "final-1", text: func(s *agentreplv1.HostWorkspaceSelection) string {
-			return s.GetResponse().GetMarkdown().GetText()
-		}},
-		{name: "a rollback prompt", row: "prompt-1", text: func(s *agentreplv1.HostWorkspaceSelection) string {
-			return s.GetPrompt().GetMarkdown().GetText()
-		}},
-		{name: "another bubble", row: "interim-1", text: func(s *agentreplv1.HostWorkspaceSelection) string {
-			return s.GetBubble().GetMarkdown().GetText()
-		}},
+		{name: "a final response", row: "final-1", want: &agentreplv1.HostWorkspaceSelection{
+			Selection: &agentreplv1.HostWorkspaceSelection_Response{Response: &agentreplv1.HostWorkspaceSelectionResponse{}}}},
+		{name: "a rollback prompt", row: "prompt-1", want: &agentreplv1.HostWorkspaceSelection{
+			Selection: &agentreplv1.HostWorkspaceSelection_Prompt{Prompt: &agentreplv1.HostWorkspaceSelectionPrompt{}}}},
+		{name: "another bubble", row: "interim-1", want: &agentreplv1.HostWorkspaceSelection{
+			Selection: &agentreplv1.HostWorkspaceSelection_Bubble{Bubble: &agentreplv1.HostWorkspaceSelectionBubble{}}}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -896,7 +894,6 @@ func TestHostSelectionCarriesTheSelectedText(t *testing.T) {
 			h.Feed.finals = feedIDs("final-1")
 			h.Feed.prompts = feedIDs("prompt-1")
 			h.Feed.markdown = map[string]string{"final-1": "the answer", "prompt-1": "the question", "interim-1": "meanwhile"}
-			want := h.Feed.markdown[tc.row]
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			stream := dialHostStream(t, h, ctx)
@@ -906,8 +903,8 @@ func TestHostSelectionCarriesTheSelectedText(t *testing.T) {
 			sel := receiveHostSelection(t, stream)
 
 			// Assert.
-			if got := tc.text(sel); got != want {
-				t.Fatalf("selection = %v, want text %q", sel, want)
+			if !proto.Equal(sel, tc.want) {
+				t.Fatalf("selection = %v, want %v", sel, tc.want)
 			}
 		})
 	}

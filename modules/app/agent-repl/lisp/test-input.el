@@ -4432,41 +4432,19 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     ;; Assert
     (should-not agent-repl-test-input--refusals)))
 
-;;;; ---- The selection mode and the response view ----
+;;;; ---- The selection mode ----
 
 (defvar agent-repl-test-input--host-kind nil
   "The selection kind the stubbed host watch reports.")
 
-(defvar agent-repl-test-input--host-text nil
-  "The selected bubble's text the stubbed host watch reports.")
-
-(defvar agent-repl-test-input--searches nil
-  "Which Evil searches a view test ran, newest first.")
-
-(defmacro agent-repl-test-input--with-host-selection (kind text &rest body)
-  "Run BODY in a composer whose host watch reports KIND selected with TEXT.
-`markdown-mode' is stubbed to set the major mode, since `emacs -Q' has no
-markdown package; the Evil searches record which one ran; the popup is
-recorded; the response view is killed afterwards."
-  (declare (indent 2))
+(defmacro agent-repl-test-input--with-host-selection (kind &rest body)
+  "Run BODY in a composer whose host watch reports KIND selected."
+  (declare (indent 1))
   `(agent-repl-test-input--with
-     (let ((agent-repl-test-input--host-kind ,kind)
-           (agent-repl-test-input--host-text ,text)
-           (agent-repl-test-input--searches nil))
-       (unwind-protect
-           (cl-letf (((symbol-function 'agent-repl-host-selection)
-                      (lambda (_ws) agent-repl-test-input--host-kind))
-                     ((symbol-function 'agent-repl-host-selection-markdown)
-                      (lambda (_ws) agent-repl-test-input--host-text))
-                     ((symbol-function 'markdown-mode)
-                      (lambda () (setq major-mode 'markdown-mode)))
-                     ((symbol-function 'evil-ex-search-forward)
-                      (lambda () (interactive) (push :forward agent-repl-test-input--searches)))
-                     ((symbol-function 'evil-ex-search-backward)
-                      (lambda () (interactive) (push :backward agent-repl-test-input--searches))))
-             (agent-repl-test--recording-popups ,@body))
-         (when-let ((view (get-buffer (agent-repl--response-view-name "ws-one"))))
-           (kill-buffer view))))))
+     (let ((agent-repl-test-input--host-kind ,kind))
+       (cl-letf (((symbol-function 'agent-repl-host-selection)
+                  (lambda (_ws) agent-repl-test-input--host-kind)))
+         ,@body))))
 
 (defun agent-repl-test-input--mode-on-p ()
   "Whether the composer's selection mode stands."
@@ -4474,7 +4452,7 @@ recorded; the response view is killed afterwards."
 
 (ert-deftest agent-repl-test-input-selection-changed-turns-the-mode-on ()
   "A selected bubble turns the composer's selection mode on."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
+  (agent-repl-test-input--with-host-selection :bubble
     ;; Act
     (agent-repl--input-selection-changed "ws-one")
     ;; Assert
@@ -4482,10 +4460,10 @@ recorded; the response view is killed afterwards."
 
 (ert-deftest agent-repl-test-input-selection-changed-turns-the-mode-off ()
   "Nothing selected turns the composer's selection mode off."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
+  (agent-repl-test-input--with-host-selection :bubble
     ;; Arrange
     (agent-repl--input-selection-changed "ws-one")
-    (setq agent-repl-test-input--host-kind :none agent-repl-test-input--host-text nil)
+    (setq agent-repl-test-input--host-kind :none)
     ;; Act
     (agent-repl--input-selection-changed "ws-one")
     ;; Assert
@@ -4493,7 +4471,7 @@ recorded; the response view is killed afterwards."
 
 (ert-deftest agent-repl-test-input-selection-changed-without-a-composer-is-logged ()
   "A workspace with no composer has nothing to follow, and says so."
-  (agent-repl-test-input--with-host-selection :response "the answer"
+  (agent-repl-test-input--with-host-selection :response
     ;; Arrange
     (let (logged)
       (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
@@ -4504,73 +4482,6 @@ recorded; the response view is killed afterwards."
       ;; Assert
       (should (cl-some (lambda (m) (string-match-p "selection-changed.*composer=nil" m)) logged)))))
 
-(ert-deftest agent-repl-test-input-search-forward-shows-the-view-in-the-popup ()
-  "`/' shows the selected bubble's view through the shared popup."
-  (agent-repl-test-input--with-host-selection :response "# The answer"
-    ;; Act
-    (agent-repl-response-search-forward)
-    ;; Assert
-    (should (equal (mapcar #'buffer-name agent-repl-test--popups-shown)
-                   (list (agent-repl--response-view-name "ws-one"))))))
-
-(ert-deftest agent-repl-test-input-search-fills-the-view-with-the-markdown ()
-  "The view holds the selected bubble's markdown source verbatim."
-  (agent-repl-test-input--with-host-selection :prompt "what is\n\nthe capital?"
-    ;; Act
-    (agent-repl-response-search-forward)
-    ;; Assert
-    (should (equal (with-current-buffer (agent-repl--response-view-name "ws-one") (buffer-string))
-                   "what is\n\nthe capital?"))))
-
-(ert-deftest agent-repl-test-input-search-view-is-read-only-markdown ()
-  "The view is read-only and in `markdown-mode'."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
-    ;; Act
-    (agent-repl-response-search-forward)
-    ;; Assert
-    (with-current-buffer (agent-repl--response-view-name "ws-one")
-      (should (equal (list buffer-read-only major-mode) '(t markdown-mode))))))
-
-(ert-deftest agent-repl-test-input-search-forward-runs-evil-search-forward ()
-  "`/' runs Evil's forward search in the view."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
-    ;; Act
-    (agent-repl-response-search-forward)
-    ;; Assert
-    (should (equal agent-repl-test-input--searches '(:forward)))))
-
-(ert-deftest agent-repl-test-input-search-backward-runs-evil-search-backward ()
-  "`?' runs Evil's backward search in the view."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
-    ;; Act
-    (agent-repl-response-search-backward)
-    ;; Assert
-    (should (equal agent-repl-test-input--searches '(:backward)))))
-
-(ert-deftest agent-repl-test-input-a-new-selection-refills-an-open-view ()
-  "A selection change refills an open view, so it never shows a stale bubble."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
-    ;; Arrange
-    (agent-repl-response-search-forward)
-    (setq agent-repl-test-input--host-kind :prompt agent-repl-test-input--host-text "a prompt")
-    ;; Act
-    (agent-repl--input-selection-changed "ws-one")
-    ;; Assert
-    (should (equal (with-current-buffer (agent-repl--response-view-name "ws-one") (buffer-string))
-                   "a prompt"))))
-
-(ert-deftest agent-repl-test-input-search-without-text-signals-and-logs ()
-  "A search with no selected text is a broken invariant: it signals and logs."
-  (agent-repl-test-input--with-host-selection :none nil
-    ;; Arrange
-    (let (errors)
-      (cl-letf (((symbol-function 'agent-repl--error)
-                 (agent-repl-test--record-into errors)))
-        ;; Act
-        (should-error (agent-repl-response-search-forward))
-        ;; Assert
-        (should (cl-some (lambda (m) (string-match-p "response-view-no-text" m)) errors))))))
-
 (defun agent-repl-test-input--evil-bindings ()
   "Run the selection mode's key binder; return every `evil-define-key*' call."
   (let (bound)
@@ -4580,35 +4491,24 @@ recorded; the response view is killed afterwards."
       (agent-repl--input-selection-bind-keys))
     (nreverse bound)))
 
-(ert-deftest agent-repl-test-input-selection-mode-binds-slash-and-question-mark ()
-  "`/' and `?' are bound in normal state on the selection mode's map."
+(ert-deftest agent-repl-test-input-selection-mode-binds-only-return-in-evil ()
+  "`RET' is the selection mode's one Evil binding, in normal and insert state.
+`/', `?' and `C-s' keep the composer's own meaning while a row is selected."
   ;; Act
   (let ((bound (agent-repl-test-input--evil-bindings)))
     ;; Assert
-    (should (member (list 'normal agent-repl-input-selection-mode-map
-                          (list "/" #'agent-repl-response-search-forward
-                                "?" #'agent-repl-response-search-backward))
-                    bound))))
-
-(ert-deftest agent-repl-test-input-selection-mode-binds-return-and-c-s-in-evil ()
-  "`RET' and `C-s' are bound in normal and insert state on the selection mode's map."
-  ;; Act
-  (let ((bound (agent-repl-test-input--evil-bindings)))
-    ;; Assert
-    (should (member (list '(normal insert) agent-repl-input-selection-mode-map
-                          (list (kbd "RET") #'agent-repl-input-selection-return
-                                (kbd "C-s") #'agent-repl-response-search-buffer))
-                    bound))))
+    (should (equal bound
+                   (list (list '(normal insert) agent-repl-input-selection-mode-map
+                               (list (kbd "RET") #'agent-repl-input-selection-return)))))))
 
 (ert-deftest agent-repl-test-input-selection-mode-binds-return-in-emacs-state ()
   "`RET' acts on the selection in the plain map, which emacs state reads."
   (should (eq (lookup-key agent-repl-input-selection-mode-map (kbd "RET"))
               #'agent-repl-input-selection-return)))
 
-(ert-deftest agent-repl-test-input-selection-mode-binds-c-s-in-emacs-state ()
-  "`C-s' searches the selection in the plain map, which emacs state reads."
-  (should (eq (lookup-key agent-repl-input-selection-mode-map (kbd "C-s"))
-              #'agent-repl-response-search-buffer)))
+(ert-deftest agent-repl-test-input-selection-mode-leaves-c-s-to-the-composer ()
+  "The plain map binds no `C-s', so the composer's own search runs."
+  (should-not (lookup-key agent-repl-input-selection-mode-map (kbd "C-s"))))
 
 (defmacro agent-repl-test-input--with-return-stubs (&rest body)
   "Run BODY with the rollback and send commands recording which one ran.
@@ -4626,7 +4526,7 @@ The record is bound as `ran'."
   (dolist (case '((:prompt :rollback-keep-files)
                   (:response :send)
                   (:bubble :send)))
-    (agent-repl-test-input--with-host-selection (car case) "text"
+    (agent-repl-test-input--with-host-selection (car case)
       (agent-repl-test-input--with-return-stubs
         ;; Act
         (agent-repl-input-selection-return)
@@ -4635,7 +4535,7 @@ The record is bound as `ran'."
 
 (ert-deftest agent-repl-test-input-selection-return-is-recorded-at-info ()
   "`RET' over a selection records which kind it acted on."
-  (agent-repl-test-input--with-host-selection :prompt "a prompt"
+  (agent-repl-test-input--with-host-selection :prompt
     (agent-repl-test-input--with-return-stubs
       (agent-repl-test-input--capturing-rungs
         ;; Act
@@ -4644,47 +4544,9 @@ The record is bound as `ran'."
         (should (cl-some (lambda (m) (string-match-p "elisp.input.selection-return.*:prompt" m))
                          agent-repl-test-input--info))))))
 
-(ert-deftest agent-repl-test-input-search-buffer-shows-the-view-in-the-popup ()
-  "`C-s' shows the selected bubble's view through the shared popup."
-  (agent-repl-test-input--with-host-selection :response "# The answer"
-    (cl-letf (((symbol-function 'key-binding)
-               (lambda (_key &rest _) (lambda () (interactive) nil))))
-      ;; Act
-      (agent-repl-response-search-buffer))
-    ;; Assert
-    (should (equal (mapcar #'buffer-name agent-repl-test--popups-shown)
-                   (list (agent-repl--response-view-name "ws-one"))))))
-
-(ert-deftest agent-repl-test-input-search-buffer-runs-c-s-in-the-view ()
-  "`C-s' runs, in the view buffer, the command `C-s' is bound to there."
-  (agent-repl-test-input--with-host-selection :prompt "a prompt"
-    ;; Arrange
-    (let (ran-in)
-      (cl-letf (((symbol-function 'key-binding)
-                 (lambda (_key &rest _)
-                   (lambda () (interactive) (push (buffer-name) ran-in)))))
-        ;; Act
-        (agent-repl-response-search-buffer))
-      ;; Assert
-      (should (equal ran-in (list (agent-repl--response-view-name "ws-one")))))))
-
-(ert-deftest agent-repl-test-input-search-buffer-with-c-s-unbound-signals-and-logs ()
-  "An unbound `C-s' in the view is a broken invariant: it signals and logs."
-  (agent-repl-test-input--with-host-selection :response "the answer"
-    ;; Arrange
-    (let (errors)
-      (cl-letf (((symbol-function 'key-binding) (lambda (_key &rest _) nil))
-                ((symbol-function 'agent-repl--error)
-                 (agent-repl-test--record-into errors)))
-        ;; Act
-        (should-error (agent-repl-response-search-buffer))
-        ;; Assert
-        (should (cl-some (lambda (m) (string-match-p "response-view-search-key-unbound" m))
-                         errors))))))
-
 (ert-deftest agent-repl-test-input-a-bubble-selection-is-active ()
   "A selected `:bubble' counts as a selection for escape and the mode."
-  (agent-repl-test-input--with-host-selection :bubble "meanwhile"
+  (agent-repl-test-input--with-host-selection :bubble
     (should (agent-repl--input-selection-active-p "ws-one"))))
 
 
@@ -5861,7 +5723,7 @@ was called for, :said the echo-area messages, :text the composer after."
 
 (ert-deftest agent-repl-test-input-selection-return-resends-the-composer-to-a-selected-prompt ()
   "`RET' on a selected prompt with words in the composer rolls back and resends them."
-  (agent-repl-test-input--with-host-selection :prompt "a prompt"
+  (agent-repl-test-input--with-host-selection :prompt
     ;; Arrange
     (agent-repl-test-input--type "the new words")
     (let (rolled)

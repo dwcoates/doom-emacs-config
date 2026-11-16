@@ -761,42 +761,35 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-watch-host-workspace-response
                   "{\"selection\":{\"none\":{}}}")
-                 '(:arm :selection :value (:kind :none :markdown nil)))))
+                 '(:arm :selection :value (:kind :none)))))
 
 (ert-deftest agent-repl-test-wire-host-selection-response-decodes-to-its-kind ()
   "A selected final response decodes to the `:response' kind."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"response\":{\"markdown\":{\"text\":\"the answer\"}}}")
-                 '(:kind :response :markdown "the answer"))))
+                  "{\"response\":{}}")
+                 '(:kind :response))))
 
 (ert-deftest agent-repl-test-wire-host-selection-prompt-decodes-to-its-kind ()
   "A selected prompt decodes to the `:prompt' kind."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"prompt\":{\"markdown\":{\"text\":\"the question\"}}}")
-                 '(:kind :prompt :markdown "the question"))))
+                  "{\"prompt\":{}}")
+                 '(:kind :prompt))))
 
-(ert-deftest agent-repl-test-wire-host-selection-bubble-decodes-to-its-kind-and-text ()
-  "Any other selected bubble decodes to the `:bubble' kind with its text."
+(ert-deftest agent-repl-test-wire-host-selection-bubble-decodes-to-its-kind ()
+  "Any other selected bubble decodes to the `:bubble' kind."
   (should (equal (agent-repl-test-wire-host--decode
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"bubble\":{\"markdown\":{\"text\":\"meanwhile\"}}}")
-                 '(:kind :bubble :markdown "meanwhile"))))
+                  "{\"bubble\":{}}")
+                 '(:kind :bubble))))
 
-(ert-deftest agent-repl-test-wire-host-selection-empty-text-decodes-to-the-empty-string ()
-  "A selected prompt with no text (an image alone) decodes to \"\"."
-  (should (equal (agent-repl-test-wire-host--decode
-                  #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"bubble\":{\"markdown\":{}}}")
-                 '(:kind :bubble :markdown ""))))
-
-(ert-deftest agent-repl-test-wire-host-selection-requires-the-text ()
-  "A selected arm with no text element is a contract breach."
+(ert-deftest agent-repl-test-wire-host-selection-refuses-the-retired-text ()
+  "The retired `markdown' text riding an arm is refused, not ignored."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"response\":{}}")
-                 '("HostWorkspaceSelectionResponse" markdown "required message field is absent"))))
+                  "{\"response\":{\"markdown\":{\"text\":\"the answer\"}}}")
+                 '("HostWorkspaceSelectionResponse" markdown "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-unset-is-a-breach ()
   "A selection push naming no kind is a contract breach."
@@ -805,10 +798,10 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                  '("HostWorkspaceSelection" selection "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-refuses-a-row ()
-  "The kind arms carry only the text: a row riding one is refused, not ignored."
+  "The kind arms are empty: a row riding one is refused, not ignored."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-host-workspace-selection
-                  "{\"response\":{\"markdown\":{},\"row\":{\"value\":\"r1\"}}}")
+                  "{\"response\":{\"row\":{\"value\":\"r1\"}}}")
                  '("HostWorkspaceSelectionResponse" row "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-selection-arms-pinned ()

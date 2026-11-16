@@ -2359,19 +2359,9 @@ answers `:unknown' and records the breach rather than opening."
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :prompt :markdown "q")))
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :prompt)))
     ;; Assert
     (should (eq (agent-repl-host-selection "ws-1") :prompt))))
-
-(ert-deftest agent-repl-test-host-selection-push-records-the-text ()
-  "A `selection' push records the selected bubble's text for the search."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :bubble :markdown "meanwhile")))
-    ;; Assert
-    (should (equal (agent-repl-host-selection-markdown "ws-1") "meanwhile"))))
 
 (ert-deftest agent-repl-test-host-selection-push-tells-the-composer ()
   "Every `selection' push reaches the composer, which follows it."
@@ -2382,7 +2372,7 @@ answers `:unknown' and records the breach rather than opening."
       (cl-letf (((symbol-function 'agent-repl--input-selection-changed)
                  (lambda (ws) (push ws told))))
         ;; Act
-        (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :none :markdown nil))))
+        (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :none))))
       ;; Assert
       (should (equal told '("ws-1"))))))
 
@@ -2391,9 +2381,9 @@ answers `:unknown' and records the breach rather than opening."
   (agent-repl-test-host--with-harness
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :response :markdown "a")))
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :response)))
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :none :markdown nil)))
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :none)))
     ;; Assert
     (should (eq (agent-repl-host-selection "ws-1") :none))))
 
@@ -2411,9 +2401,9 @@ answers `:unknown' and records the breach rather than opening."
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :response :markdown "abc")))
+    (agent-repl-test-host--push "ws-1" (list :arm :selection :value '(:kind :response)))
     ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.selection ws=ws-1 kind=:response text-len=3"))))
+    (should (agent-repl-test-host--logged-p :info "elisp.host.selection ws=ws-1 kind=:response"))))
 
 ;;;; ---- The notification click ----
 

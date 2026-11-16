@@ -1633,20 +1633,16 @@ otherwise invisible in the logs."
 
 (defun agent-repl-host--apply-selection (ws selection)
   "Record SELECTION as what WS's feed has selected, and hand it to the composer.
-SELECTION is the decoded `HostWorkspaceSelection' plist `(:kind :markdown)':
-KIND is `:none', `:response', `:prompt' or `:bubble', and MARKDOWN the
-selected bubble's text (nil for `:none').  It is the host watch's
-`selection' push: state, not an event, so a late subscriber is sent the
-selection in force first.  The daemon holds the selection itself; Emacs
-keeps the kind, for the composer's escape-twice clear, and the text, for
-the composer's search.  The composer turns its selection mode on or off
-from it (`agent-repl--input-selection-changed')."
-  (let ((kind (plist-get selection :kind))
-        (markdown (plist-get selection :markdown)))
+SELECTION is the decoded `HostWorkspaceSelection' plist `(:kind KIND)':
+KIND is `:none', `:response', `:prompt' or `:bubble'.  It is the host
+watch's `selection' push: state, not an event, so a late subscriber is sent
+the selection in force first.  The daemon holds the selection itself; Emacs
+keeps the kind, for the composer's escape-twice clear and its `RET'.  The
+composer turns its selection mode on or off from it
+\(`agent-repl--input-selection-changed')."
+  (let ((kind (plist-get selection :kind)))
     (agent-repl-host--put ws :selection kind)
-    (agent-repl-host--put ws :selection-markdown markdown)
-    (agent-repl--info ws "elisp.host.selection ws=%s kind=%S text-len=%s"
-                      ws kind (and markdown (length markdown)))
+    (agent-repl--info ws "elisp.host.selection ws=%s kind=%S" ws kind)
     (agent-repl--input-selection-changed ws)))
 
 (defun agent-repl-host-selection (ws)
@@ -1655,11 +1651,6 @@ One of `:none', `:response', `:prompt' and `:bubble', as the host watch
 last pushed it.  Nil means no selection push has arrived yet, which is
 nothing selected."
   (plist-get (agent-repl-host--entry ws) :selection))
-
-(defun agent-repl-host-selection-markdown (ws)
-  "Return the text of the bubble WS's feed has selected, or nil.
-Nil exactly while nothing is selected (or no push has arrived yet)."
-  (plist-get (agent-repl-host--entry ws) :selection-markdown))
 
 ;;;; ---- The composer mentions ----
 
