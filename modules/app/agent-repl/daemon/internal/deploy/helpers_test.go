@@ -101,7 +101,7 @@ func logged(log *dlog.TestSurfaces, level, operation, substr string) bool {
 
 // artifacts are the bytes one fake build stages, per artifact.
 type artifacts struct {
-	shim, webappEntry, daemon, store, sidecar, zettel, lock string
+	shim, webappEntry, daemon, store, sidecar, zettel, tests, lock string
 	// wifi is the Wi-Fi helper app's source hash; empty stages and installs
 	// no helper.
 	wifi string
@@ -128,6 +128,7 @@ func (a artifacts) stageInto(t *testing.T, staging string) {
 	writeFile(t, filepath.Join(filepath.Dir(s.CacheBin(buildreport.ServiceStore)), ".shim-store.source-tree"), "tree-"+a.store)
 	writeFile(t, s.CacheBin(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, s.CacheBin(buildreport.ServiceZettel), a.zettel)
+	writeFile(t, s.CacheBin(buildreport.ServiceTests), a.tests)
 	writeFile(t, s.CacheBin("shim-lock"), a.lock)
 	if a.wifi != "" {
 		writeWifiApp(t, s.WifiApp(), a.wifi)
@@ -143,6 +144,7 @@ func (a artifacts) installInto(t *testing.T, live Live) {
 	writeFile(t, live.CacheBinPath(buildreport.ServiceStore), a.store)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceSidecar), a.sidecar)
 	writeFile(t, live.CacheBinPath(buildreport.ServiceZettel), a.zettel)
+	writeFile(t, live.CacheBinPath(buildreport.ServiceTests), a.tests)
 	writeFile(t, live.CacheBinPath("shim-lock"), a.lock)
 	if live.WifiApp != "" && a.wifi != "" {
 		writeWifiApp(t, live.WifiApp, a.wifi)
@@ -406,7 +408,8 @@ type fakeServices struct {
 	calls      []string
 	storeErr   error
 	sidecarErr error
-	zettelErr  error
+	// standaloneErr fails a standalone service's restart, by component.
+	standaloneErr map[Component]error
 	// recovers makes a failing restart fail ONCE: every later restart of
 	// that service succeeds.
 	recovers bool
@@ -434,13 +437,13 @@ func (s *fakeServices) RestartSidecar(context.Context) error {
 	return err
 }
 
-func (s *fakeServices) RestartZettel(context.Context) error {
+func (s *fakeServices) RestartStandalone(_ context.Context, sv Standalone) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.calls = append(s.calls, "zettel")
-	err := s.zettelErr
+	s.calls = append(s.calls, string(sv.Component))
+	err := s.standaloneErr[sv.Component]
 	if s.recovers {
-		s.zettelErr = nil
+		delete(s.standaloneErr, sv.Component)
 	}
 	return err
 }
@@ -655,8 +658,8 @@ const runningLayout = 11
 // theFresh is the build every harness stages; theOld is what is installed and
 // running before it.
 var (
-	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", lock: "lock-2", wifi: "wifi-2"}
-	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", lock: "lock-1", wifi: "wifi-1"}
+	theFresh = artifacts{shim: "shim-2", webappEntry: "Web2", daemon: "daemon-2", store: "store-2", sidecar: "sidecar-2", zettel: "zettel-2", tests: "tests-2", lock: "lock-2", wifi: "wifi-2"}
+	theOld   = artifacts{shim: "shim-1", webappEntry: "Web1", daemon: "daemon-1", store: "store-1", sidecar: "sidecar-1", zettel: "zettel-1", tests: "tests-1", lock: "lock-1", wifi: "wifi-1"}
 )
 
 // withWifiHelper is a harness on the platform with a Wi-Fi helper: its live
@@ -703,6 +706,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 	h.report(t, buildreport.ServiceStore, 101, hashOf(t, theFresh.store))
 	h.report(t, buildreport.ServiceSidecar, 102, hashOf(t, theFresh.sidecar))
 	h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theFresh.zettel))
+	h.report(t, buildreport.ServiceTests, 104, hashOf(t, theFresh.tests))
 	d, err := New(Deps{
 		Live:        live,
 		StagingRoot: filepath.Join(t.TempDir(), "staging"),

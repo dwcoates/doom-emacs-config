@@ -98,13 +98,13 @@ func (s DeploySources) realServices() bool { return s.Store != "" }
 
 // placeholderServices are the cache-bin services this build stages as
 // placeholder bytes, whose reports the harness states itself
-// (Daemon.StateServiceBuilds): zettel always, and the store and the sidecar
-// when the world runs no real ones.
+// (Daemon.StateServiceBuilds): zettel and the test service always, and the
+// store and the sidecar when the world runs no real ones.
 func (s DeploySources) placeholderServices() []string {
 	if s.realServices() {
-		return []string{buildreport.ServiceZettel}
+		return []string{buildreport.ServiceZettel, buildreport.ServiceTests}
 	}
-	return []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel}
+	return []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests}
 }
 
 // DeployBuilder is the deploy's fake build: a Recorder, so a test can count
@@ -167,10 +167,11 @@ func NewFakeDeployBuilder(t testing.TB, dir string, src DeploySources) *DeployBu
   ` + service(buildreport.ServiceStore, src.Store) + `
   ` + service(buildreport.ServiceSidecar, src.Sidecar) + `
   ` + service(buildreport.ServiceZettel, "") + `
+  ` + service(buildreport.ServiceTests, "") + `
   printf 'harness shim-lock\n' > "$out/cache-bin/shim-lock"
   mkdir -p "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources"
   printf 'harness\n' > "$out/wifi-helper/` + persistentwifi.WifiAppName + `/Contents/Resources/source-sha256"
-  for n in shim-store shim-claude-sidecar zettel shim-lock; do
+  for n in shim-store shim-claude-sidecar zettel agent-repl-tests shim-lock; do
     for f in built-sha source-tree; do printf 'harness\n' > "$out/cache-bin/.$n.$f"; done
   done
   exit 0
