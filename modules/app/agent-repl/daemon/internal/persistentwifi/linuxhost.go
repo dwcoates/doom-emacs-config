@@ -15,6 +15,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/childproc"
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
 )
 
@@ -322,6 +323,12 @@ func (h *linuxHost) Scan(ctx context.Context) (wifiScan, error) {
 		}
 	}
 	return scan, nil
+}
+
+// AskScanPermission: Linux names networks to any user, so a scan never waits
+// on a permission and there is nothing to ask for.
+func (h *linuxHost) AskScanPermission(context.Context) (dlog.Context, error) {
+	return dlog.Context{}, nil
 }
 
 // ReadEnergy: `powerprofilesctl get`.

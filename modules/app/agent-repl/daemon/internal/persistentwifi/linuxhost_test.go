@@ -373,10 +373,11 @@ func TestLinuxHostConstants(t *testing.T) {
 
 	// Act
 	low, can, bright := h.LowPowerEnergy(), h.CanDisconnect(), h.SetBrightness(context.Background(), 0.5)
+	_, askErr := h.AskScanPermission(context.Background())
 
 	// Assert
-	if low != "power-saver" || can != nil || !errors.Is(bright, errNoBrightness) {
-		t.Fatalf("low %q, can disconnect %v, brightness %v", low, can, bright)
+	if low != "power-saver" || can != nil || !errors.Is(bright, errNoBrightness) || askErr != nil {
+		t.Fatalf("low %q, can disconnect %v, brightness %v, ask %v", low, can, bright, askErr)
 	}
 }
 
