@@ -3214,7 +3214,24 @@ message FeedContextCutTokens {
 // The fork point: everything above this divider was inherited from the
 // workspace this one was forked from, everything below is this workspace's
 // own. The divider is drawn grey, never the red or orange of a context cut.
-message FeedContextForked {}
+message FeedContextForked {
+  // The workspace the inherited context came from: the parent for the nearest
+  // generation, the grandparent for the next, and so on. The label names it
+  // (`FeedContextForkedSource.name` appears verbatim in the label's text), the
+  // client draws that name in the canonical purple, and a click on it calls
+  // agentrepl.v1.SelectWorkspace with `workspace`. UNSET when the daemon
+  // cannot name the workspace (the read is recorded at ERROR): the label then
+  // carries no name and nothing is clickable.
+  optional FeedContextForkedSource source = 1;
+}
+
+// The workspace a fork point's inherited context came from.
+message FeedContextForkedSource {
+  // The workspace, echoed verbatim on the click.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Its workspace name, the one the sidebar draws.
+  string name = 2;
+}
 
 // The history was discarded outright, with nothing left in its place — the
 // divider has nothing to expand.

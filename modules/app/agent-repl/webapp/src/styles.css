@@ -6362,6 +6362,13 @@ bubble-body.bubble-body { display: block; }
   font-size: 0.75rem;
 }
 .sep-tokens { color: var(--muted); }
+/* The workspace a fork point's inherited context came from: the canonical
+   purple (--blocked), clickable. */
+.sep-fork-source {
+  color: var(--blocked);
+  cursor: pointer;
+}
+.sep-fork-source:hover { text-decoration: underline; }
 .sep-compacted,
 .sep-worktree {
   width: var(--agent-bubble-cap);

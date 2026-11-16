@@ -18,6 +18,10 @@
  * bar (owner ruling, 2026-10-02), in its collapsed bubble form.
  */
 import { log } from "../../log.js";
+import { armButtonRole } from "../../control.js";
+import { guardMalformed } from "../../rpc/guard.js";
+import { MalformedView } from "../../rpc/malformed.js";
+import { jumpToWorkspace, type JumpSite } from "../merge/jump.js";
 import { drawOutcomeMarker } from "../marker.js";
 import { markdownSlot } from "../../bubble/body.js";
 import { drawBubble } from "../../bubble/draw.js";
@@ -31,6 +35,7 @@ import type {
   FeedContextCutCompactionFailed,
   FeedContextCutTokens,
   FeedContextForked,
+  FeedContextForkedSource,
   FeedSessionSeparation,
   FeedSessionSeparationLabel,
   FeedWorktreeEntered,
@@ -130,6 +135,7 @@ export function drawFeedSessionSeparation(
   const label = drawFeedSessionSeparationLabel(
     requireMessage(msg.label, `${PATH}.label`),
     msg.tokens,
+    kind.case === "forked" ? { source: kind.value.source, rc } : undefined,
   );
   el.append(label);
 
@@ -157,12 +163,49 @@ export function drawFeedSessionSeparation(
 export function drawFeedSessionSeparationLabel(
   labelMsg: FeedSessionSeparationLabel,
   tokens: FeedContextCutTokens | undefined,
+  fork?: { readonly source: FeedContextForkedSource | undefined; readonly rc: RowContext },
 ): HTMLElement {
   const el = document.createElement("div");
   el.className = "sep-label";
-  el.textContent = labelMsg.text;
+  if (fork?.source === undefined) el.textContent = labelMsg.text;
+  else el.append(...drawForkLabel(labelMsg.text, fork.source, fork.rc, el));
   if (tokens !== undefined) el.append(drawFeedContextCutTokens(tokens));
   return el;
+}
+
+/** Where the fork-point name's jump is recorded and its refusal drawn. */
+const FORK_SOURCE_JUMP: JumpSite = {
+  describe: "a fork-point divider",
+  operation: "feed.fork-source-jump",
+  refusalClass: "fork-source-refusal",
+};
+
+/**
+ * The fork-point label, split around the workspace's name, which is drawn in
+ * the canonical purple and selects that workspace on a click (an ordinary
+ * `SelectWorkspace`, the sidebar row's own call). The daemon states the name
+ * verbatim inside the label's text, so a label that does not hold it is a
+ * contract violation.
+ */
+function drawForkLabel(
+  text: string,
+  source: FeedContextForkedSource,
+  rc: RowContext,
+  host: HTMLElement,
+): (string | HTMLElement)[] {
+  const at = text.indexOf(source.name);
+  if (source.name === "" || at < 0) {
+    throw new MalformedView(`${PATH}.forked.source.name`, "the label's text does not hold the source workspace's name");
+  }
+  const workspace = requireMessage(source.workspace, `${PATH}.forked.source.workspace`);
+  const link = document.createElement("span");
+  armButtonRole(link);
+  link.className = "sep-fork-source";
+  link.textContent = source.name;
+  link.addEventListener("click", () => {
+    void guardMalformed(rc.ctx, "feed.fork-source-jump", jumpToWorkspace(host, rc.ctx, workspace, FORK_SOURCE_JUMP));
+  });
+  return [text.slice(0, at), link, text.slice(at + source.name.length)];
 }
 
 /**
