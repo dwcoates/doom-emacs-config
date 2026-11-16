@@ -127,6 +127,29 @@ func LiveOthers(addrPath, self string) ([]string, error) {
 	return live, nil
 }
 
+// Alive answers whether daemon INSTANCE runs on the state root of ADDRPATH:
+// another process holds its life lock. An instance with no lock file is not
+// running. A lock that cannot be probed is an error, never read as free.
+func Alive(addrPath, instance string) (bool, error) {
+	path := LifePath(addrPath, instance)
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("stat the life lock %q: %w", path, err)
+	}
+	rec, _, err := recordlock.TryExclusive(path)
+	switch {
+	case errors.Is(err, recordlock.ErrWouldBlock):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("probe the life lock %q: %w", path, err)
+	}
+	if err := rec.Release(); err != nil {
+		return false, fmt.Errorf("release the probed life lock %q: %w", path, err)
+	}
+	return false, nil
+}
+
 // AwaitGone returns once each of INSTANCES, daemons beside ADDRPATH, has
 // ended: it waits in the kernel for each one's life lock, never polling, and
 // removes each freed lock's file. A lock that cannot be waited for is an

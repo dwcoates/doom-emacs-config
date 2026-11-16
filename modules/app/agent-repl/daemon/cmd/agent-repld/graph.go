@@ -933,9 +933,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishHost:   relay.PublishHostWorkspace,
 		// THE WEBHOST DRAWS THE SHOWN WORKSPACE'S GATE from the roster, so the
 		// gate is on screen while the workspace's page is still loading.
-		GateDock:   sidebarResolver.SetColdGate,
-		DB:         p.DB,
-		Instance:   p.Instance,
+		GateDock: sidebarResolver.SetColdGate,
+		DB:       p.DB,
+		Instance: p.Instance,
+		InstanceRunning: func(instance ids.InstanceID) (bool, error) {
+			return daemonaddr.Alive(p.Layout.DaemonAddr(), string(instance))
+		},
 		Accounts:   accounts,
 		Supervisor: supervisor,
 		Sinks: sessionwatcher.Sinks{

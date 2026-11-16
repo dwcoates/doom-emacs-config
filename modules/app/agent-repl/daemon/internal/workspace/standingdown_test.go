@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 )
 
@@ -194,5 +195,66 @@ func TestStartRefusesWhenTheServingStandingCannotBeRead(t *testing.T) {
 	}
 	if !logged {
 		t.Fatal("no ERROR record of the unreadable standing")
+	}
+}
+
+// An older daemon still serving a workspace keeps it: a boot that found the
+// boot claim free (the newest daemon died) must never adopt its live shim.
+func TestStartBringsUpNoShimForAWorkspaceAnElderStillServes(t *testing.T) {
+	tests := []struct {
+		name       string
+		running    bool
+		probeErr   error
+		wantRefuse bool
+		wantError  bool
+	}{
+		{name: "an elder still running keeps its workspace", running: true, wantRefuse: true},
+		{name: "a row naming a daemon that ended is taken over", running: false},
+		{name: "an elder that cannot be probed brings up nothing", probeErr: errors.New("the life locks' directory is unreadable"), wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the workspace's serving row names another instance.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if err := f.fleet.deps.DB.ClaimServing(context.Background(), ws.ID, "elder"); err != nil {
+				t.Fatalf("ClaimServing: %v", err)
+			}
+			f.fleet.deps.InstanceRunning = func(instance ids.InstanceID) (bool, error) {
+				if instance != "elder" {
+					t.Errorf("probed %q, want the row's instance", instance)
+				}
+				return tt.running, tt.probeErr
+			}
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			switch {
+			case tt.wantRefuse:
+				asRefusal(t, err, ArmNotYetAdopted)
+				if f.probes != 0 || f.supervisor.spawnAttempts != 0 {
+					t.Fatalf("probes = %d, spawn attempts = %d, want 0 and 0: the elder's shim is not this daemon's", f.probes, f.supervisor.spawnAttempts)
+				}
+				var found bool
+				for _, r := range f.log.logger.Records() {
+					if r.Message == "no shim is brought up: an older daemon still serves the workspace, and it moves it here once it is free" {
+						found = r.Level == "info" && r.Context["elder"] == "elder"
+					}
+				}
+				if !found {
+					t.Fatal("no INFO record naming the elder")
+				}
+			case tt.wantError:
+				if err == nil || f.probes != 0 || f.supervisor.spawnAttempts != 0 {
+					t.Fatalf("Start = %v, probes %d, spawns %d; want an error and nothing brought up", err, f.probes, f.supervisor.spawnAttempts)
+				}
+			default:
+				if f.probes == 0 {
+					t.Fatalf("Start = %v, probes 0; want the bring-up to go on past a row naming an ended daemon", err)
+				}
+			}
+		})
 	}
 }

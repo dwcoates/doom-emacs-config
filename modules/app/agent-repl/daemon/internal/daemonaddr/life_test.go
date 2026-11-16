@@ -130,3 +130,52 @@ func TestAwaitGoneWaitsForADaemonStillRunning(t *testing.T) {
 		t.Fatalf("Release: %v", err)
 	}
 }
+
+func TestAliveAnswersWhetherTheInstanceRuns(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, path string)
+		want    bool
+	}{
+		{name: "a daemon holding its life lock runs", want: true, arrange: func(t *testing.T, path string) {
+			life, err := HoldLife(path, "elder")
+			if err != nil {
+				t.Fatalf("HoldLife: %v", err)
+			}
+			t.Cleanup(func() { life.Release() })
+		}},
+		{name: "a daemon that released its lock does not", arrange: func(t *testing.T, path string) {
+			life, err := HoldLife(path, "elder")
+			if err != nil {
+				t.Fatalf("HoldLife: %v", err)
+			}
+			if err := life.Release(); err != nil {
+				t.Fatalf("Release: %v", err)
+			}
+		}},
+		{name: "a lock file nobody holds is a daemon that died", arrange: func(t *testing.T, path string) {
+			if err := os.MkdirAll(filepath.Dir(LifePath(path, "elder")), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(LifePath(path, "elder"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "an instance that never held a lock does not", arrange: func(*testing.T, string) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(t.TempDir(), "daemon.addr")
+			tt.arrange(t, path)
+
+			// Act
+			alive, err := Alive(path, "elder")
+
+			// Assert
+			if err != nil || alive != tt.want {
+				t.Fatalf("Alive = (%v, %v), want %v", alive, err, tt.want)
+			}
+		})
+	}
+}
