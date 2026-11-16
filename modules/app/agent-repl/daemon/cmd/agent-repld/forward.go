@@ -336,7 +336,7 @@ func (f *verbsForwarder) closeWhenOwnedPullRequestsMerged(ctx context.Context, w
 	if err != nil {
 		return err
 	}
-	return verbs.CloseWhenOwnedPullRequestsMerged(ctx, ws)
+	return verbs.TellOwnedPullRequestsMerged(ctx, ws)
 }
 
 // letQueueThroughAfterBypassTurn is the turn-end edge's queue resume

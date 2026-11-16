@@ -491,11 +491,11 @@ type Verbs interface {
 	// CarryOutSelfClose carries out the close a workspace asked of itself,
 	// when one is marked (SelfCloses calls it at each turn's end).
 	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
-	// CloseWhenOwnedPullRequestsMerged closes WS once every pull request it
-	// owns has merged (wsm.OwnedPullRequestsMerged): at once when it is
-	// quiet, at its running turn's end otherwise. The pull request watcher
-	// calls it on each owned pull request's merge.
-	CloseWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error
+	// TellOwnedPullRequestsMerged tells WS, once, that every pull request it
+	// owns has merged (wsm.OwnedPullRequestsMerged), and that closing it is
+	// its own to do; nothing closes it for its merged pull requests. The pull
+	// request watcher calls it on each owned pull request's merge.
+	TellOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error
 	// SurfaceForWork marks a workspace whose turn starts under a fold as drawn
 	// inside it (WorkSurfacings calls it).
 	SurfaceForWork(ctx context.Context, ws ids.WorkspaceID) error

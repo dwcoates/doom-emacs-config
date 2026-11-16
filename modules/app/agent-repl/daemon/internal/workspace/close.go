@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -235,16 +236,20 @@ func (v *verbs) turnRunning(ws ids.WorkspaceID) bool {
 	return live && running.Turn != nil
 }
 
-// CloseWhenOwnedPullRequestsMerged closes WS once every pull request it owns
-// has merged (owner ruling, 2026-11-10: a workspace is closed when all its
-// canonical owned pull requests have merged, and only then). A workspace
-// that owns none, owns one not yet merged, is already closed, is its
-// repository's main workspace or is a merge workspace is left as it is. A
-// turn still running (a deploy hook waiting on the merge) closes it when it
-// ends, through the self-close mark; anything else blocking the close (held
-// prompts, live detached work, open children) leaves it open, recorded.
-func (v *verbs) CloseWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error {
-	record, log, err := v.owned(ctx, "CloseWorkspace", ws)
+// BriefOwnedPullRequestsMerged is the notice a workspace gets when the last
+// pull request it owns merges.
+const BriefOwnedPullRequestsMerged = "workspace-pull-requests-merged"
+
+// TellOwnedPullRequestsMerged tells WS, once, that every pull request it owns
+// has merged, and that closing it is its own to do once its work is done
+// (owner ruling, 2026-11-16: a workspace is never closed for its merged pull
+// requests; it closed torch-human-performance mid-work, its session still
+// running turns). A workspace that owns none, owns one not yet merged, is
+// already closed, is its repository's main workspace or is a merge workspace
+// is told nothing. The notice is the merge's: the poller calls this once,
+// at the subscription's end, when the pull request that ended it merged.
+func (v *verbs) TellOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "TellOwnedPullRequestsMerged", ws)
 	if err != nil {
 		return err
 	}
@@ -253,39 +258,38 @@ func (v *verbs) CloseWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.Wor
 	}
 	main, err := isMainWorkspace(ctx, v.deps.DB, record)
 	if err != nil {
-		log.Error(opClose, "could not read whether the workspace is its repository's main workspace; it is not closed for its merged pull requests", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("close %q for its merged pull requests: %w", ws, err)
+		log.Error(opClose, "could not read whether the workspace is its repository's main workspace; it is not told its pull requests merged", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("tell %q its pull requests merged: %w", ws, err)
 	}
 	if main {
 		return nil
 	}
 	links, err := v.deps.DB.WorkspaceLinks(ctx, ws)
 	if err != nil {
-		log.Error(opClose, "could not read the workspace's links; it is not closed for its merged pull requests", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("close %q for its merged pull requests: read the links: %w", ws, err)
+		log.Error(opClose, "could not read the workspace's links; it is not told its pull requests merged", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("tell %q its pull requests merged: read the links: %w", ws, err)
 	}
 	if _, merged := wsm.OwnedPullRequestsMerged(links); !merged {
-		log.Info(opClose, "an owned pull request merged, and others the workspace owns have not; it stays open", nil)
+		log.Info(opClose, "an owned pull request merged, and others the workspace owns have not; it is told nothing more", nil)
 		return nil
 	}
-	if v.turnRunning(ws) {
-		if err := v.deps.DB.MarkCloseWhenTurnEnds(ctx, ws, v.now()); err != nil {
-			log.Error(opClose, "could not mark the workspace to close when its turn ends; its owned pull requests have all merged", dlog.Context{"cause": err.Error()})
-			return fmt.Errorf("close %q for its merged pull requests: mark: %w", ws, err)
+	var urls []string
+	for _, link := range links {
+		if link.Owned && link.PullRequest != nil {
+			urls = append(urls, link.URL)
 		}
-		log.Info(opClose, "every pull request the workspace owns has merged; it closes when its running turn ends", nil)
-		if v.turnRunning(ws) {
-			return nil
-		}
-		return v.takeSelfClose(ctx, log, ws)
 	}
-	err = v.Close(ctx, ws, wsm.CloseByMerge)
-	if isCloseRefusal(err) {
-		log.Info(opClose, "every pull request the workspace owns has merged, but something else blocks its close; it stays open", dlog.Context{"cause": err.Error()})
-		return nil
+	notice, err := v.composeBrief(ctx, log, opClose, BriefOwnedPullRequestsMerged, map[string]string{
+		"pull_requests": strings.Join(urls, ", "),
+	})
+	if err != nil {
+		return err
 	}
-	if err == nil {
-		log.Info(opClose, "every pull request the workspace owns has merged; the workspace is closed", nil)
+	turn, _, err := v.queueDeferredBrief(ctx, log, opClose, ws, notice, conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		"the workspace's", "the notice that its pull requests merged")
+	if err != nil {
+		return err
 	}
-	return err
+	log.Info(opClose, "every pull request the workspace owns has merged; it is told so, and closing it is its own", dlog.Context{"turn": string(turn)})
+	return nil
 }

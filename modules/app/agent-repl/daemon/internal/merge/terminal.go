@@ -320,8 +320,8 @@ func (r *run) stampClosed(ctx context.Context, log dlog.Logger, op string, lande
 		// A WORKSPACE IS CLOSED ONLY ONCE ITS OWNED PULL REQUESTS HAVE MERGED
 		// (owner ruling, 2026-11-10). A deploy that hands its work to a pull
 		// request ends before GitHub merges it, so the workspace stays open,
-		// and the pull request watcher closes it when the last one merges
-		// (CloseWhenOwnedPullRequestsMerged).
+		// and the pull request watcher tells it when the last one merges,
+		// closing it being its own (TellOwnedPullRequestsMerged).
 		if open, err := r.awaitsOwnedPullRequests(ctx, closes); err != nil {
 			log.Error(op, "could not read whether the merged workspace's owned pull requests have merged; it is left open", dlog.Context{"workspace": string(closes), "error": err.Error()})
 			continue

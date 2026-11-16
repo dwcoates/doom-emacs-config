@@ -80,7 +80,7 @@ type Deps struct {
 	// in a GitHub merge queue (deployments.go).
 	Deployments DeploymentSink
 	// OwnedMerged is told each workspace one of whose owned pull requests
-	// merged (workspace.Verbs.CloseWhenOwnedPullRequestsMerged).
+	// merged (workspace.Verbs.TellOwnedPullRequestsMerged), which tells it once its last one has.
 	OwnedMerged func(ctx context.Context, ws ids.WorkspaceID) error
 	// Log is the global logger: a pull request is no workspace's.
 	Log dlog.Logger
@@ -354,13 +354,14 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 	case end != nil:
 		w.deps.Log.Info(opPoll, "the pull request ended; its subscription ended after telling it", fields)
 		// A MERGE MAY BE THE LAST OF ITS WORKSPACE'S OWNED PULL REQUESTS, which
-		// closes the workspace (owner ruling, 2026-11-10). Whatever the
+		// tells the workspace so; closing it is its own (owner ruling,
+		// 2026-11-16). Whatever the
 		// subscription's origin: an owned pull request its workspace follows
 		// again with narrowed events is followed as `requested`, and the
 		// verb judges ownership from the workspace's links.
 		if end.Merged {
 			if err := w.deps.OwnedMerged(ctx, sub.Subscriber); err != nil {
-				w.deps.Log.Error(opPoll, "could not judge closing the workspace one of whose owned pull requests merged", dlog.WithCause(fields, err))
+				w.deps.Log.Error(opPoll, "could not tell the workspace one of whose owned pull requests merged", dlog.WithCause(fields, err))
 			}
 		}
 	case len(owed) > 0:
