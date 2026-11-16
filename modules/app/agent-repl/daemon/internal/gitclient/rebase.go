@@ -134,6 +134,12 @@ func (c *client) AbortRebase(ctx context.Context, dir string) error {
 	return err
 }
 
+// RestoreBranchHead implements Git.
+func (c *client) RestoreBranchHead(ctx context.Context, dir, head string) error {
+	_, err := c.run(ctx, "daemon.gitclient.restore_branch_head", dir, "reset", "--keep", head)
+	return err
+}
+
 // rebaseCommand runs one rebase command and reads where the rebase stands.
 // Exit 0 is a replayed commit: the rebase is Done when no rebase is in
 // progress any more, and stopped at a break otherwise. A nonzero exit is a

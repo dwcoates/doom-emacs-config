@@ -151,18 +151,56 @@ func (f *Fleet) movedLocked() {
 	f.sessionsMoved.Notify()
 }
 
-// AwaitTurnEnd blocks until one submitted turn ends and reports how. A
-// workspace with no live session has no turn to wait on, which is a refusal
-// rather than an immediate success: the caller asked about a turn it believes
-// is running.
+// AwaitTurnEnd blocks until one submitted turn ends and reports how.
+//
+// A TURN HELD FOR A SESSION THAT IS NOT UP YET IS WAITED THROUGH. The prompt
+// queue holds a submitted turn durably until a session runs it, bringing the
+// session up in the background (and, should that fail, at whatever brings
+// one up next), so its end is awaited on the session's watcher once there is
+// one. Refusing at once failed a merge's commit prompt in the 37ms between
+// its submission and the session's spawn (2026-11-16 00:35:46,
+// resizable-sidebar-sections). A workspace with no live session and no hold
+// standing for the turn has no turn to wait on, which stays a refusal: the
+// caller asked about a turn it believes is running.
 func (f *Fleet) AwaitTurnEnd(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (wsm.TurnClose, error) {
-	f.mu.RLock()
-	session, ok := f.sessions[ws]
-	f.mu.RUnlock()
-	if !ok || session.watcher == nil {
-		return 0, fmt.Errorf("workspace: %q has no live session to await turn %q on", ws, turn)
+	waiting := false
+	for {
+		f.mu.RLock()
+		var watcher sessionwatcher.Watcher
+		if session, ok := f.sessions[ws]; ok {
+			watcher = session.watcher
+		}
+		moved := f.sessionsMoved.Changed()
+		f.mu.RUnlock()
+		if watcher != nil {
+			return watcher.AwaitTurnEnd(ctx, turn)
+		}
+		held, err := f.turnHeld(ctx, ws, turn)
+		if err != nil {
+			return 0, err
+		}
+		if !held {
+			return 0, fmt.Errorf("workspace: %q has no live session to await turn %q on", ws, turn)
+		}
+		if !waiting {
+			waiting = true
+			f.logFor(ctx, ws).Info("daemon.workspace.await_turn_end", "the turn is held until the workspace's session comes up; its end is awaited from then", dlog.Context{"turn": string(turn)})
+		}
+		if err := waitMoved(ctx, moved); err != nil {
+			return 0, err
+		}
 	}
-	return session.watcher.AwaitTurnEnd(ctx, turn)
+}
+
+// turnHeld reports whether TURN stands held for WS: submitted, and not yet
+// delivered or dropped (wsm.HeldPrompt.Tombstone).
+func (f *Fleet) turnHeld(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error) {
+	hold, found, err := f.deps.DB.HeldPromptByTurn(ctx, turn)
+	if err != nil {
+		f.logFor(ctx, ws).Error("daemon.workspace.await_turn_end", "could not read whether the turn awaited stands held; the wait is refused", dlog.Context{"turn": string(turn), "error": err.Error()})
+		return false, fmt.Errorf("workspace: read whether turn %q of %q stands held: %w", turn, ws, err)
+	}
+	return found && hold.Workspace == ws && hold.Tombstone == nil, nil
 }
 
 // Occupy takes the shim client's in-memory occupancy guard, which is what the

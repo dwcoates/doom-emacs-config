@@ -626,3 +626,32 @@ func TestAStartRefusalWhoseWorktreeCannotBeReadSurfacesTheRead(t *testing.T) {
 		t.Fatalf("StartRebase error = %v, want the status read's own failure", err)
 	}
 }
+
+func TestRestoreBranchHeadPutsTheBranchBackKeepingWhatIsUncommitted(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	fake := newFakeGit(t, ok("", "reset"))
+
+	// Act.
+	if err := git.RestoreBranchHead(context.Background(), "/wt", "abc123"); err != nil {
+		t.Fatalf("RestoreBranchHead: %v", err)
+	}
+
+	// Assert.
+	fake.assertSubject(0, "reset", "--keep", "abc123")
+}
+
+func TestRestoreBranchHeadFailurePropagatesTheGitEvidence(t *testing.T) {
+	// Arrange.
+	git, _ := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: Could not reset index file to revision 'abc123'.\n", "reset"))
+
+	// Act.
+	err := git.RestoreBranchHead(context.Background(), "/wt", "abc123")
+
+	// Assert.
+	var failure *Error
+	if !errors.As(err, &failure) || !strings.Contains(failure.Stderr, "Could not reset") {
+		t.Fatalf("RestoreBranchHead error = %v, want git's own evidence", err)
+	}
+}

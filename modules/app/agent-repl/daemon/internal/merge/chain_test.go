@@ -324,6 +324,10 @@ func (g *chainGit) StartRebase(ctx context.Context, dir, onto string, commits []
 	return g.replayLocked(dir), nil
 }
 
+func (g *chainGit) RestoreBranchHead(context.Context, string, string) error {
+	return errors.New("chain git: no chain test restores a branch head")
+}
+
 func (g *chainGit) AbortRebase(_ context.Context, dir string) error {
 	g.cmu.Lock()
 	defer g.cmu.Unlock()

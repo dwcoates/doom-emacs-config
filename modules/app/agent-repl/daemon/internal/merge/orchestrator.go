@@ -210,6 +210,10 @@ type orchestrator struct {
 	// them until their take-back (AdoptWorkspace) clears the mark. This
 	// daemon admits nothing of them meanwhile (transfer.go).
 	takenAway map[ids.WorkspaceID]suspension
+	// passedOverOf is, per queue, the merges its last admission passed over
+	// and why (notePassedOver), so each is recorded once per reason. Guarded
+	// by mu.
+	passedOverOf map[wsm.RepoKey]map[ids.WorkspaceID]passReason
 	// abandonsAtTakeBack are the abandonments that reached a merge after a
 	// suspension took it: the suspension stands, and the take-back that
 	// clears takenAway drops the merge instead of resuming it. Recorded and
@@ -373,6 +377,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		resumes:            map[ids.WorkspaceID]progressDoc{},
 		remediating:        map[ids.WorkspaceID]*remediation{},
 		takenAway:          map[ids.WorkspaceID]suspension{},
+		passedOverOf:       map[wsm.RepoKey]map[ids.WorkspaceID]passReason{},
 		moveLocks:          map[ids.WorkspaceID]*sync.Mutex{},
 		abandonsAtTakeBack: map[ids.WorkspaceID]AbandonCause{},
 		offers:             map[ids.WorkspaceID]bool{},

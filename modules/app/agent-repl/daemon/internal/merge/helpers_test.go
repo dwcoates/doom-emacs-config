@@ -1597,6 +1597,14 @@ type fakeGit struct {
 	// standingErr fails RebaseInProgress; abortErr fails AbortRebase.
 	standingErr error
 	abortErr    error
+	// dropsEveryCommit scripts a rebase that finishes with the branch on the
+	// tip, every commit dropped; rebaseFinished marks that it finished.
+	dropsEveryCommit bool
+	rebaseFinished   bool
+	// restoredHeads is every head RestoreBranchHead put a branch back at;
+	// restoreErr fails it.
+	restoredHeads []string
+	restoreErr    error
 
 	defaultBranch string
 	commonDirs    map[string]string
@@ -1877,6 +1885,11 @@ func (g *fakeGit) IsAncestor(_ context.Context, _, ancestor, descendant string) 
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	if ancestor == "feature" {
+		// A REBASE SCRIPTED TO DROP EVERY COMMIT leaves the branch on the
+		// tip once it finishes (keptCommits).
+		if g.dropsEveryCommit && g.rebaseFinished {
+			return true, nil
+		}
 		return g.contained, nil
 	}
 	return g.ancestry[ancestor+">"+descendant], nil
@@ -2092,6 +2105,14 @@ func dirtyStartRefusal() error {
 	return fmt.Errorf("%w: git rebase exited 1: error: cannot rebase: You have unstaged changes", gitclient.ErrDirtyWorktree)
 }
 
+func (g *fakeGit) RestoreBranchHead(_ context.Context, _, head string) error {
+	g.record("restore_branch_head")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.restoredHeads = append(g.restoredHeads, head)
+	return g.restoreErr
+}
+
 func (g *fakeGit) AbortRebase(context.Context, string) error {
 	g.record("abort_rebase")
 	g.mu.Lock()
@@ -2131,7 +2152,11 @@ func (g *fakeGit) replayLocked() (gitclient.RebaseStep, error) {
 		return gitclient.RebaseStep{Resolved: files}, nil
 	}
 	g.rebaseReplayed = k
-	return gitclient.RebaseStep{Done: g.rebaseReplayed >= g.rebaseTotal}, nil
+	done := g.rebaseReplayed >= g.rebaseTotal
+	if done {
+		g.rebaseFinished = true
+	}
+	return gitclient.RebaseStep{Done: done}, nil
 }
 
 func (g *fakeGit) RebaseInProgress(context.Context, string) (bool, error) {

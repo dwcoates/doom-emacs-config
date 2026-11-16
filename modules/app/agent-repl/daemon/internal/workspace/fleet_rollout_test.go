@@ -1949,3 +1949,80 @@ func TestAStartAskedDuringAHoldWaitsForTheRelease(t *testing.T) {
 		t.Fatal("the start left the gate held")
 	}
 }
+
+func TestAwaitTurnEndWaitsForTheSessionOfAHeldTurn(t *testing.T) {
+	// Arrange: the turn is held, and the workspace has no session yet.
+	f := newFleetFixture(t)
+	f.db.holds = map[ids.TurnID]wsm.HeldPrompt{"t-1": {Workspace: "ws-1", Turn: "t-1"}}
+	w := &fakeWatcher{turnEnded: make(chan wsm.TurnClose, 1)}
+	answered := make(chan error, 1)
+	var got wsm.TurnClose
+	go func() {
+		var err error
+		got, err = f.fleet.AwaitTurnEnd(context.Background(), "ws-1", "t-1")
+		answered <- err
+	}()
+
+	// Act: the session comes up and the turn ends on it.
+	w.turnEnded <- wsm.CloseCompleted
+	f.fleet.remember("ws-1", &live{client: f.client, watcher: w})
+
+	// Assert
+	select {
+	case err := <-answered:
+		if err != nil || got != wsm.CloseCompleted {
+			t.Fatalf("AwaitTurnEnd = (%v, %v), want the turn's end on the session that came up", got, err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("AwaitTurnEnd never answered once the session came up")
+	}
+}
+
+func TestAwaitTurnEndOfAHeldTurnWaitsRatherThanRefusing(t *testing.T) {
+	// Arrange: the turn is held, no session is up, and the caller has gone.
+	f := newFleetFixture(t)
+	f.db.holds = map[ids.TurnID]wsm.HeldPrompt{"t-1": {Workspace: "ws-1", Turn: "t-1"}}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := f.fleet.AwaitTurnEnd(ctx, "ws-1", "t-1")
+
+	// Assert: it waited for the session, recorded, until its context ended.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("AwaitTurnEnd = %v, want the wait cut by its context, not a refusal", err)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.workspace.await_turn_end",
+		Message: "the turn is held until the workspace's session comes up; its end is awaited from then"}); !ok {
+		t.Fatalf("records = %+v, want the wait for the session recorded", f.log.logger.Records())
+	}
+}
+
+func TestAwaitTurnEndRefusesATurnNoSessionWillRun(t *testing.T) {
+	retired := wsm.Tombstone{Kind: "delivered"}
+	tests := []struct {
+		name    string
+		holds   map[ids.TurnID]wsm.HeldPrompt
+		holdErr error
+	}{
+		{name: "a turn never held"},
+		{name: "a hold already retired", holds: map[ids.TurnID]wsm.HeldPrompt{"t-1": {Workspace: "ws-1", Turn: "t-1", Tombstone: &retired}}},
+		{name: "another workspace's hold", holds: map[ids.TurnID]wsm.HeldPrompt{"t-1": {Workspace: "ws-2", Turn: "t-1"}}},
+		{name: "a hold that cannot be read", holdErr: errors.New("disk gone")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			f.db.holds, f.db.holdErr = tt.holds, tt.holdErr
+
+			// Act
+			_, err := f.fleet.AwaitTurnEnd(context.Background(), "ws-1", "t-1")
+
+			// Assert
+			if err == nil {
+				t.Fatal("AwaitTurnEnd = nil, want a refusal: no session will run the turn")
+			}
+		})
+	}
+}
