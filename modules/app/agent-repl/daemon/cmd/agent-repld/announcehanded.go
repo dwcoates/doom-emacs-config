@@ -17,11 +17,13 @@ import (
 
 // acceptHandedBound bounds an older daemon's announcement of a move to the
 // newest daemon: a loopback unary answered from one state-database read and
-// an in-memory insert. A loopback DaemonHealth round trip measured 6-7ms
-// over 20 calls on an idle host (2026-11-16); the bound leaves a loaded
-// host's state-database read its room. One that fires fails the move, which
-// is offered again.
-const acceptHandedBound = time.Second
+// an in-memory insert. Measured 2026-11-16 13:31 on the live daemon under a
+// load average of 10 with three test runs going: a loopback DaemonHealth
+// round trip had a worst of 18ms over 60 calls, and GetWorkspaceStatus, which
+// reads the workspace's row as this call does, a worst of 9ms over 60. The
+// bound is a little under three times the worse of the two. One that fires
+// fails the move, which stays served where it is and is offered again.
+const acceptHandedBound = 50 * time.Millisecond
 
 // announceHanded tells the daemon at ADDRESS that OUTGOING is about to move
 // WS there (rollout.Deps.AnnounceHanded). Its not_newest refusal is

@@ -53,12 +53,15 @@ to it directly (`AcceptHandedWorkspace`), arming its adopt rendezvous for that o
 workspace, and then transfers it there exactly as it would to its own
 successor.
 
-## Open questions
+## Closed questions
 
-- A FRESH boot (no handover) that finds the boot claim free while a yielded
-  older daemon still serves its holdouts would recover that daemon's live
-  shims as orphans. It arises only when the newest daemon died while an older
-  one still served something. The fresh boot should defer its orphan recovery
-  to the same life-lock wait the takeover uses (`daemonaddr.LiveOthers`).
-- `acceptHandedBound` (1s) comes from an idle-host measure of a loopback
-  unary (6-7ms); it should be measured again under a loaded deploy.
+- A FRESH boot that finds the boot claim free while a yielded older daemon
+  still serves its holdouts never takes them: every session bring-up reads
+  the workspace's serving row, and a row naming another instance whose life
+  lock is held (`daemonaddr.Alive`) is left to that daemon
+  (`workspace.Fleet.servedByElder`), refused as `not_yet_adopted` and
+  recorded at INFO.
+- `acceptHandedBound` is 50ms: measured 2026-11-16 13:31 under a load average
+  of 10 with three test runs going, a loopback unary's worst was 18ms over 60
+  calls, and a call that reads the workspace's row as this one does peaked
+  at 9ms.
