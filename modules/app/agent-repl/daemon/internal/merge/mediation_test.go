@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -128,27 +129,28 @@ func decideInTurn(t *testing.T, h *harness, d Decision) {
 	}
 }
 
-// intakeSubmissions is every prompt the harness submitted to the intake.
-func intakeSubmissions(h *harness) []promptqueue.Submission {
+// submissionsTo is every prompt the harness submitted to WS whose text
+// opens with PREFIX, the brief's name, in order; an empty PREFIX takes
+// every one.
+func submissionsTo(h *harness, ws ids.WorkspaceID, prefix string) []promptqueue.Submission {
 	var out []promptqueue.Submission
 	for _, sub := range h.queue.submissions {
-		if sub.WS == "ws-intake" {
+		if sub.WS == ws && strings.HasPrefix(submittedText(sub), prefix) {
 			out = append(out, sub)
 		}
 	}
 	return out
 }
 
+// intakeSubmissions is every prompt the harness submitted to the intake.
+func intakeSubmissions(h *harness) []promptqueue.Submission {
+	return submissionsTo(h, "ws-intake", "")
+}
+
 // intakeTellings is every brief telling the intake of a deploy, the
 // resuming briefs of its undecided turns left out.
 func intakeTellings(h *harness) []promptqueue.Submission {
-	var out []promptqueue.Submission
-	for _, sub := range intakeSubmissions(h) {
-		if strings.HasPrefix(submittedText(sub), BriefDeployIntake+" ") {
-			out = append(out, sub)
-		}
-	}
-	return out
+	return submissionsTo(h, "ws-intake", BriefDeployIntake+" ")
 }
 
 // checkWorkspacesMade is every intake and remediation workspace made, the
@@ -927,13 +929,7 @@ func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
 
 // resumingBriefs is every resuming brief the harness submitted to the intake.
 func resumingBriefs(h *harness) []promptqueue.Submission {
-	var out []promptqueue.Submission
-	for _, sub := range intakeSubmissions(h) {
-		if strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
-			out = append(out, sub)
-		}
-	}
-	return out
+	return submissionsTo(h, "ws-intake", BriefDeployIntakeResumed)
 }
 
 func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) {
@@ -1063,3 +1059,57 @@ func TestAResumedIntakesTurnIsReattachedWithItsResumingBrief(t *testing.T) {
 	}
 }
 
+func TestSubmissionsToTakesOnlyTheNamedWorkspacesPromptsOfTheNamedBrief(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     ids.WorkspaceID
+		prefix string
+		want   []ids.TurnID
+	}{
+		{name: "every prompt to the workspace", ws: "ws-a", want: []ids.TurnID{"t1", "t3"}},
+		{name: "only the named brief's", ws: "ws-a", prefix: "brief-b", want: []ids.TurnID{"t3"}},
+		{name: "a workspace sent nothing", ws: "ws-c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			for _, sub := range []promptqueue.Submission{
+				{WS: "ws-a", Turn: "t1", Said: saidText("brief-a one")},
+				{WS: "ws-b", Turn: "t2", Said: saidText("brief-b two")},
+				{WS: "ws-a", Turn: "t3", Said: saidText("brief-b three")},
+			} {
+				if _, err := h.queue.Submit(context.Background(), sub); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got := submissionsTo(h, tt.ws, tt.prefix)
+
+			// Assert
+			var turns []ids.TurnID
+			for _, sub := range got {
+				turns = append(turns, sub.Turn)
+			}
+			if !slices.Equal(turns, tt.want) {
+				t.Fatalf("submissionsTo = %v, want %v", turns, tt.want)
+			}
+		})
+	}
+}
+
+// TestEverySubmissionFilterGoesThroughSubmissionsTo keeps the deploy-check
+// tests' filters of the harness's prompts on the one helper: a hand-rolled
+// loop over the submissions by workspace fails here.
+func TestEverySubmissionFilterGoesThroughSubmissionsTo(t *testing.T) {
+	for _, file := range []string{"mediation_test.go", "escalation_test.go"} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(src), "range h.queue.submissions {\n\t\tif sub.WS =="); n != 0 && !(file == "mediation_test.go" && n == 1) {
+			t.Fatalf("%s filters the submissions by workspace by hand %d times; use submissionsTo", file, n)
+		}
+	}
+}

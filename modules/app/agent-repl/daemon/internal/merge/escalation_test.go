@@ -29,13 +29,7 @@ func (h *harness) bannerRaisedFor(kind string, ws ids.WorkspaceID) bool {
 // escalationBriefs is every brief the harness submitted to the escalation
 // workspace.
 func escalationBriefs(h *harness) []promptqueue.Submission {
-	var out []promptqueue.Submission
-	for _, sub := range h.queue.submissions {
-		if sub.WS == "ws-escalate" {
-			out = append(out, sub)
-		}
-	}
-	return out
+	return submissionsTo(h, "ws-escalate", "")
 }
 
 func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) {
@@ -209,10 +203,8 @@ func withEscalationOwning(t *testing.T, h *harness, closed bool, keys ...wsm.Pro
 // updatesTo is every update the harness submitted to escalation WS.
 func updatesTo(h *harness, ws ids.WorkspaceID) []string {
 	var out []string
-	for _, sub := range h.queue.submissions {
-		if sub.WS == ws && strings.HasPrefix(submittedText(sub), BriefDeployEscalationUpdate) {
-			out = append(out, submittedText(sub))
-		}
+	for _, sub := range submissionsTo(h, ws, BriefDeployEscalationUpdate) {
+		out = append(out, submittedText(sub))
 	}
 	return out
 }
