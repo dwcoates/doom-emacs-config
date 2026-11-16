@@ -366,10 +366,7 @@ func (o *orchestrator) recoverAdmitted(ctx context.Context, repo wsm.RepoKey, en
 	// asked with, so the ordinary admission path runs it again under a lease
 	// of its own. A remove and re-request once sent the head to the back
 	// (2026-10-24: deploy-stage-concurrency went from the head to 19th).
-	ledger := o.mintLedger(ws)
-	if !held && entry.Ledger != "" {
-		ledger = o.ledgerOfEntry(entry)
-	}
+	ledger := o.ledgerOfEntry(entry)
 	return o.deps.DB.ReturnAdmittedMerge(ctx, repo, ws, ledger)
 }
 

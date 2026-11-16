@@ -68,3 +68,16 @@ func TestTheMergesViewIsDrawnThroughOnePath(t *testing.T) {
 		})
 	}
 }
+
+// ONE LEDGER PER MERGE: a ledger is minted only as a merge takes its place in
+// line (the request) or for a row an earlier build queued without one
+// (ledgerOfEntry); every other step reads its queue entry's.
+func TestALedgerIsMintedOnlyWhereAMergeTakesItsPlace(t *testing.T) {
+	// Act
+	got := callersOf(t, "o.mintLedger(")
+
+	// Assert
+	if strings.Join(got, ",") != "recover.go:ledgerOfEntry,request.go:queueRequestAt" {
+		t.Fatalf("functions minting a ledger = %v", got)
+	}
+}

@@ -80,7 +80,7 @@ func (o *orchestrator) startPick(ctx context.Context, ws ids.WorkspaceID, repo w
 		log.Error(op, "a pick was asked of a workspace that is no merge workspace", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return err
 	}
-	p := &pick{ws: ws, requester: requester, repo: repo, ledger: o.mintLedger(ws), turn: wsm.NewTurnID(), instruction: entry.Source.Pick, aheadLanded: aheadLandedOf(entry)}
+	p := &pick{ws: ws, requester: requester, repo: repo, ledger: o.ledgerOfEntry(entry), turn: wsm.NewTurnID(), instruction: entry.Source.Pick, aheadLanded: aheadLandedOf(entry)}
 	started := o.deps.Now()
 	p.startedMS = started.UnixMilli()
 	if err := o.deps.DB.StartMergePick(ctx, repo, ws, p.ledger, p.turn, started); err != nil {

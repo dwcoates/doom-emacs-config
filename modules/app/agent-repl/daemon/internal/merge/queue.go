@@ -1263,7 +1263,13 @@ func (o *orchestrator) leaseOf(ws ids.WorkspaceID) (ids.LeaseID, bool) {
 }
 
 // mintLedger mints a workspace's merge ledger identity, or answers the one it
-// already has: a merge put back in line keeps its bubble.
+// already has: a merge put back in line keeps its bubble. ONE LEDGER PER
+// MERGE: it is minted only as the merge takes its place in line (the
+// request) or for a row an earlier build queued without one
+// (ledgerOfEntry); every later step reads the one its queue entry carries
+// (ledgerOfEntry), never this daemon's memory, which a restart or a handover
+// empties (2026-11-15: a waiting merge's background rebase minted a second
+// ledger, and its bubble was drawn twice).
 func (o *orchestrator) mintLedger(ws ids.WorkspaceID) ids.LeaseID {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -1608,7 +1614,7 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 	// the queue (LeaseChanged). Admitting first once left a head admitted with
 	// no run when a restart held its workspace, which read as a merge another
 	// daemon drives, and the queue stood still behind it (2026-10-24 19:33).
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, front.Workspace, o.mintLedger(front.Workspace), wsm.HolderMerge, wsm.PolicyHold)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, front.Workspace, o.ledgerOfEntry(front), wsm.HolderMerge, wsm.PolicyHold)
 	if other, held := heldByAnother(err); held {
 		o.releaseRepoLockIfIdle(ctx, repo)
 		o.mu.Lock()

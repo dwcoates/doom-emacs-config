@@ -961,3 +961,27 @@ func TestAHoldThatCannotBeWrittenIsAnError(t *testing.T) {
 		t.Fatalf("records = %+v, want the failed hold at ERROR", h.logs.Records())
 	}
 }
+
+func TestAnAdmissionTakesItsLeaseUnderItsEntrysLedger(t *testing.T) {
+	// Arrange: a waiting merge whose entry names its ledger, this daemon
+	// remembering none of it (a restart, a handover).
+	h := newHarness(t)
+	enqueue(t, h)
+	ledger := queuedLedger(t, h)
+	h.o.mu.Lock()
+	delete(h.o.ledgerOf, theWorkspace)
+	h.o.mu.Unlock()
+	h.gatePasses("daemon")
+	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
+
+	// Act
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge ended on: %v", err)
+	}
+
+	// Assert: one ledger, the entry's.
+	ledgers, err := h.db.MergeLedger(context.Background(), theWorkspace)
+	if err != nil || len(ledgers) != 1 || ledgers[0].Lease != ledger {
+		t.Fatalf("ledgers = %+v (%v), want only the entry's %s", ledgers, err, ledger)
+	}
+}

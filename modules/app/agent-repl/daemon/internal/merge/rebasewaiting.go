@@ -141,7 +141,7 @@ func (o *orchestrator) rebaseWaitingMember(ctx context.Context, repo wsm.RepoKey
 		return
 	}
 	defer close(r.finished)
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.mintLedger(ws), wsm.HolderMerge, wsm.PolicyHold)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.ledgerOfEntry(entry), wsm.HolderMerge, wsm.PolicyHold)
 	// A WORKSPACE ANOTHER HOLDER HOLDS IS BUSY, as one with work in flight is
 	// above: freeness reads the session, not the lease, so a shim restart's
 	// lease passes it (2026-10-25: a skills bounce held a waiting merge's
@@ -379,7 +379,7 @@ func (o *orchestrator) resolveWaiting(ctx context.Context, repo wsm.RepoKey, ws 
 		return
 	}
 	defer close(r.finished)
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.mintLedger(ws), wsm.HolderMerge, wsm.PolicyHold)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.ledgerOfEntry(entry), wsm.HolderMerge, wsm.PolicyHold)
 	if other, held := heldByAnother(err); held {
 		fields["holder"], fields["lease"] = other.Holder.String(), string(other.Lease)
 		o.unregisterBackground(r)

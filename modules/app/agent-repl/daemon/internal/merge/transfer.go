@@ -658,7 +658,12 @@ func (o *orchestrator) requeueAdmitted(ctx context.Context, op string, repo wsm.
 		o.deps.Log.Global().Error(op, why.unleased, withField(fields, "error", err.Error()))
 		return err
 	}
-	ledger := o.mintLedger(ws)
+	entry, err := o.entryOf(ctx, repo, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
+		return err
+	}
+	ledger := o.ledgerOfEntry(entry)
 	if err := o.deps.DB.RequeuePausedMerge(ctx, repo, ws, lease.ID, ledger); err != nil {
 		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
 		return err
