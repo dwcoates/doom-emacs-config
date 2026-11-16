@@ -156,19 +156,32 @@ type Resolver interface {
 	// already agrees with the selection WSM stores before pushing a roster
 	// that would change nothing.
 	Selected() (ids.WorkspaceID, bool)
-	// Row answers one workspace's row exactly as the roster last resolved
-	// carries it, with that roster's revision: both taken from the SAME
-	// roster under the lock that resolved it, so the row is never older or
-	// newer than the revision it is stated with. False when no roster was
-	// resolved yet or the last one carries no row of the workspace.
+	// Row answers one workspace's row exactly as the last push carries it,
+	// with that push's revision: both taken from the SAME push under the lock
+	// that resolved it, so the row is never older or newer than the revision
+	// it is stated with. A MERGED workspace, which no stream carries, is
+	// answered the row a page of merged rows resolves for it (MergedPage).
+	// False when no push was resolved yet or the workspace is in none of its
+	// streams and not merged.
 	Row(ws ids.WorkspaceID) (*frontendv1.RosterRow, uint64, bool)
-	// Thread reports whether the last roster lists WS as a chat thread, with
+	// Thread reports whether the last push lists WS as a chat thread, with
 	// its revision.
 	Thread(ws ids.WorkspaceID) (uint64, bool)
-	// Revision answers the revision of the roster last resolved (frontend.v1
-	// WorkspaceRoster.revision), zero before any: every roster at that
-	// revision or later carries every change made before the call.
+	// Revision answers the revision of the push last resolved (frontend.v1
+	// RosterPush.revision), zero before any: every push at that revision or
+	// later carries every change made before the call.
 	Revision() uint64
+	// MergedPage answers one page of merged workspaces' rows
+	// (agentrepl.v1.ListMergedWorkspaces), resolved on demand under the lock
+	// from the merged set the last push was resolved from, with that set's
+	// token. The rows are READS: resolving them feeds no durable sink and no
+	// departure. ErrMergedNotReady before any registry was published, and an
+	// *UnknownRepositoryError for a repository the registry does not hold.
+	MergedPage(q MergedPageQuery) (MergedPage, error)
+	// MergedRows answers every merged workspace's row as a page resolves it,
+	// in registry order, with the last push, both under one lock, so no
+	// workspace is in both. False before any push.
+	MergedRows() ([]*frontendv1.RosterRow, *frontendv1.RosterPush, bool)
 	// SetViewed records that the user has READ the last turn's result — the
 	// editor's report that the user has now SEEN this workspace. It takes
 	// only on a turn-end row (done, interrupted or turn_failed), or on an
@@ -276,8 +289,11 @@ type Resolver interface {
 	// (frontend.v1.WorkspaceRoster.version); nil withdraws it. The deployed
 	// version's loop is the one caller.
 	deployedversion.Sink
-	// Topic is the one editor-global roster publication.
-	Topic() *publish.Topic[*frontendv1.WorkspaceRoster]
+	// Topic is the one editor-global roster publication: each value a
+	// whole RosterPush, EVERY STREAM SET, and a stream unchanged since the
+	// value before carrying that value's own message, so a subscriber tells
+	// what changed by pointer.
+	Topic() *publish.Topic[*frontendv1.RosterPush]
 }
 
 // MergeQueue is one repository's merge queue as the roster draws it. It is

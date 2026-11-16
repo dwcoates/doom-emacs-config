@@ -194,7 +194,7 @@ func TestRecentlyMergedIsFlat(t *testing.T) {
 	r.SetRegistry(registry(parent, child))
 
 	// Assert: a settled merge has no family left to draw.
-	rows := rosterwalk.MergedRows(latest(t, r))
+	rows := mergedRows(t, r)
 	if len(rows) != 2 {
 		t.Fatalf("the merged section drew %d rows, want both flat", len(rows))
 	}

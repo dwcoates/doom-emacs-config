@@ -54,7 +54,7 @@ func TestAClosedWorkspacesMergeOffItsQueueIsNotDrawn(t *testing.T) {
 	r.SetRegistry(queueView(closedWorkspace(workspace("w1", "one"))))
 
 	// Assert.
-	if group := queueGroup(latest(t, r), repo); group != nil {
+	if group := queueGroup(latestPush(t, r), repo); group != nil {
 		t.Fatalf("queue group = %v, want none for a closed workspace's merge", group)
 	}
 }

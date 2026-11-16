@@ -12,13 +12,13 @@ import (
 func TestTheRosterRevisionRisesWithEveryResolvedRoster(t *testing.T) {
 	// Arrange.
 	r := arrange(t)
-	before := latest(t, r).GetRevision()
+	before := latestPush(t, r).GetRevision()
 
 	// Act.
 	r.SetOpening(theWS, true)
 
 	// Assert.
-	if got := latest(t, r).GetRevision(); got != before+1 {
+	if got := latestPush(t, r).GetRevision(); got != before+1 {
 		t.Fatalf("revision = %d after one more resolve, want %d", got, before+1)
 	}
 }
@@ -28,7 +28,7 @@ func TestTheFirstResolvedRosterCarriesARevision(t *testing.T) {
 	r := arrange(t)
 
 	// Assert.
-	if got := latest(t, r).GetRevision(); got == 0 {
+	if got := latestPush(t, r).GetRevision(); got == 0 {
 		t.Fatal("revision = 0, want the first resolved roster's revision raised")
 	}
 }
@@ -37,7 +37,7 @@ func TestRowAnswersTheLastResolvedRowWithItsRostersRevision(t *testing.T) {
 	// Arrange.
 	r := arrange(t)
 	r.SetOpening(theWS, true)
-	roster := latest(t, r)
+	roster := latestPush(t, r)
 
 	// Act.
 	row, revision, ok := r.Row(theWS)
@@ -62,7 +62,7 @@ func TestRevisionAnswersTheLastResolvedRostersRevision(t *testing.T) {
 	r.SetOpening(theWS, true)
 
 	// Assert.
-	if got, want := r.Revision(), latest(t, r).GetRevision(); got != want || got == 0 {
+	if got, want := r.Revision(), latestPush(t, r).GetRevision(); got != want || got == 0 {
 		t.Fatalf("Revision = %d, want the published roster's %d", got, want)
 	}
 }
@@ -90,8 +90,8 @@ func TestRowFollowsALaterResolve(t *testing.T) {
 	if got := statusName(row); got != "ready" {
 		t.Fatalf("status = %q, want the row as of the lowered opening", got)
 	}
-	if revision != latest(t, r).GetRevision() {
-		t.Fatalf("revision = %d, want the latest roster's %d", revision, latest(t, r).GetRevision())
+	if revision != latestPush(t, r).GetRevision() {
+		t.Fatalf("revision = %d, want the latest roster's %d", revision, latestPush(t, r).GetRevision())
 	}
 }
 
@@ -169,7 +169,7 @@ func TestRowAnswersACloneNotThePublishedRow(t *testing.T) {
 func TestAnIdenticalRenderKeepsTheRevision(t *testing.T) {
 	// Arrange.
 	r := arrange(t, workspace(string(theWS), "one"))
-	before := latest(t, r).GetRevision()
+	before := latestPush(t, r).GetRevision()
 
 	// Act.
 	r.SetRegistry(registry(workspace(string(theWS), "one")))
@@ -177,5 +177,40 @@ func TestAnIdenticalRenderKeepsTheRevision(t *testing.T) {
 	// Assert.
 	if _, got, _ := r.Row(theWS); got != before {
 		t.Fatalf("revision = %d after an identical render, want %d kept", got, before)
+	}
+}
+
+func TestRowOfAMergedWorkspaceIsResolvedOnDemand(t *testing.T) {
+	// Arrange: a merged workspace beside an open one.
+	merged := workspace("m", "merged")
+	merged.MergedAt = at(0)
+	merged.Closed = true
+	r := arrange(t, merged, workspace(string(theWS), "one"))
+
+	// Act.
+	row, revision, ok := r.Row("m")
+
+	// Assert: the page's row, stated with the last push's revision.
+	if !ok {
+		t.Fatal("Row found no row for a merged workspace")
+	}
+	if revision != latestPush(t, r).GetRevision() {
+		t.Fatalf("revision = %d, want the last push's %d", revision, latestPush(t, r).GetRevision())
+	}
+	if !proto.Equal(row, rowFor(mergedRows(t, r), "m")) {
+		t.Fatalf("row = %v, want the page's row", row)
+	}
+}
+
+func TestRowOfAnUnknownWorkspaceAnswersNothing(t *testing.T) {
+	// Arrange.
+	r := arrange(t, workspace(string(theWS), "one"))
+
+	// Act.
+	_, _, ok := r.Row("nobody")
+
+	// Assert.
+	if ok {
+		t.Fatal("Row answered a row for a workspace the registry does not hold")
 	}
 }

@@ -2,12 +2,15 @@ package sidebar_test
 
 import (
 	"errors"
+	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/dlog"
@@ -143,13 +146,17 @@ func TestRosterPublishesTheWholeRosterOnEveryPush(t *testing.T) {
 	// Act.
 	r.SetRegistry(registry(workspace("w1", "one")))
 
-	// Assert: always whole, never a delta.
-	roster := latest(t, r)
+	// Assert: always whole, never a delta: every stream is set.
+	push := latestPush(t, r)
 	switch {
-	case roster.GetRepository() == nil:
+	case push.GetWorkspaces().GetRepository() == nil:
 		t.Fatal("the push carried no repository grouping")
-	case roster.GetRecentlyMerged() == nil:
-		t.Fatal("the push carried no recently-merged section")
+	case push.GetRecentlyMerged() == nil:
+		t.Fatal("the push carried no recently-merged stream")
+	case push.GetMergeQueue() == nil:
+		t.Fatal("the push carried no merge queue stream")
+	case push.GetClosed() == nil:
+		t.Fatal("the push carried no closed stream")
 	}
 }
 
@@ -164,7 +171,7 @@ func TestRosterRepublishesWhenAFactChanges(t *testing.T) {
 	r.SetSummary(theWS, "a new prompt")
 
 	// Assert.
-	got := rowFor(repoRows(t, <-ch), "w1").GetDetail().GetSummary().GetText()
+	got := rowFor(repoRows(t, (<-ch).GetWorkspaces()), "w1").GetDetail().GetSummary().GetText()
 	if got != "a new prompt" {
 		t.Fatalf("republished summary = %q, want the change", got)
 	}
@@ -183,7 +190,7 @@ func TestRosterDoesNotRepublishAnIdenticalRender(t *testing.T) {
 	r.SetSummary(theWS, "a change")
 
 	// Assert: the duplicate never reached the wire.
-	got := rowFor(repoRows(t, <-ch), "w1").GetDetail().GetSummary().GetText()
+	got := rowFor(repoRows(t, (<-ch).GetWorkspaces()), "w1").GetDetail().GetSummary().GetText()
 	if got != "a change" {
 		t.Fatalf("next delivery carried %q, want the change — a duplicate reached the wire", got)
 	}
@@ -199,7 +206,7 @@ func TestOneStreamServesEveryWebview(t *testing.T) {
 	r.SetRegistry(registry(workspace("w1", "one")))
 
 	// Assert.
-	if len(repoRows(t, <-first)) != 1 || len(repoRows(t, <-second)) != 1 {
+	if len(repoRows(t, (<-first).GetWorkspaces())) != 1 || len(repoRows(t, (<-second).GetWorkspaces())) != 1 {
 		t.Fatal("the two subscribers did not receive the same roster")
 	}
 }
@@ -220,10 +227,10 @@ func TestAReopeningSubscriberReplaysTheCurrentSelection(t *testing.T) {
 	roster := <-subscribe(t, r)
 
 	// Assert: the first delivery already states w2 as the current row.
-	if !rowFor(repoRows(t, roster), "w2").GetCurrent().GetCurrent() {
+	if !rowFor(repoRows(t, roster.GetWorkspaces()), "w2").GetCurrent().GetCurrent() {
 		t.Fatal("the reopened subscriber's first roster did not mark w2 current")
 	}
-	if rowFor(repoRows(t, roster), "w1").GetCurrent().GetCurrent() {
+	if rowFor(repoRows(t, roster.GetWorkspaces()), "w1").GetCurrent().GetCurrent() {
 		t.Fatal("the reopened subscriber's first roster marked the stale row current")
 	}
 }
@@ -246,7 +253,7 @@ func TestAReopeningSubscriberReplaysABootRestoredSelection(t *testing.T) {
 	roster := <-subscribe(t, r)
 
 	// Assert.
-	if !rowFor(repoRows(t, roster), "w2").GetCurrent().GetCurrent() {
+	if !rowFor(repoRows(t, roster.GetWorkspaces()), "w2").GetCurrent().GetCurrent() {
 		t.Fatal("the reopened subscriber did not replay the boot-restored selection")
 	}
 }
@@ -266,7 +273,7 @@ func TestALiveSelectionReachesAnAlreadyOpenSubscriber(t *testing.T) {
 	r.SetSelected(ids.WorkspaceID("w2"))
 
 	// Assert.
-	if !rowFor(repoRows(t, <-ch), "w2").GetCurrent().GetCurrent() {
+	if !rowFor(repoRows(t, (<-ch).GetWorkspaces()), "w2").GetCurrent().GetCurrent() {
 		t.Fatal("a live selection did not reach the already-open subscriber")
 	}
 }
@@ -436,10 +443,10 @@ func TestARegistryWithTheSelectionIsOnePush(t *testing.T) {
 
 	// Assert.
 	first := <-ch
-	if !rowFor(repoRows(t, first), "w2").GetCurrent().GetCurrent() {
+	if !rowFor(repoRows(t, first.GetWorkspaces()), "w2").GetCurrent().GetCurrent() {
 		t.Fatal("the select's one push did not mark w2 current")
 	}
-	if rowFor(repoRows(t, <-ch), "w3") == nil {
+	if rowFor(repoRows(t, (<-ch).GetWorkspaces()), "w3") == nil {
 		t.Fatal("a second roster arrived between the select's push and the sentinel")
 	}
 }
@@ -892,28 +899,28 @@ func TestSetIncumbentArms(t *testing.T) {
 	tests := []struct {
 		name string
 		// act installs the mirror and answers the roster published after it.
-		act        func(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster
+		act        func(t *testing.T, r sidebar.Resolver) *frontendv1.RosterPush
 		wantStatus string
 		// wantNewRevision says whether the act published a roster.
 		wantNewRevision bool
 	}{
 		{
 			name: "the caller's later writes to the map reach no render",
-			act: func(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster {
+			act: func(t *testing.T, r sidebar.Resolver) *frontendv1.RosterPush {
 				arms := map[ids.WorkspaceID]string{theWS: "thinking"}
 				r.SetIncumbentArms(arms)
 				arms[theWS] = "done"
 				r.FooterStatusChanged(theWS)
-				return latest(t, r)
+				return latestPush(t, r)
 			},
 			wantStatus:      "thinking",
 			wantNewRevision: true,
 		},
 		{
 			name: "an unchanged mirror publishes nothing",
-			act: func(t *testing.T, r sidebar.Resolver) *frontendv1.WorkspaceRoster {
+			act: func(t *testing.T, r sidebar.Resolver) *frontendv1.RosterPush {
 				r.SetIncumbentArms(nil)
-				return latest(t, r)
+				return latestPush(t, r)
 			},
 			wantStatus:      "ready",
 			wantNewRevision: false,
@@ -923,7 +930,7 @@ func TestSetIncumbentArms(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			r, _, _ := mirroredResolver(t)
-			before := latest(t, r).GetRevision()
+			before := latestPush(t, r).GetRevision()
 
 			// Act
 			roster := tc.act(t, r)
@@ -1042,5 +1049,178 @@ func TestARegisteredWorkspaceWhoseSinkCannotResolveLogsCentrallyAsOrdinary(t *te
 	}
 	if !routed {
 		t.Fatalf("records = %+v, want the arm change on the central sink naming the workspace", r.surfaces.Records())
+	}
+}
+
+// ---- the four snapshot streams on one push ----
+
+func TestEachStreamCarriesItsOwnSnapshot(t *testing.T) {
+	// Arrange: one workspace of each standing, and a queue holding the open
+	// one.
+	r, _ := newResolver(t)
+	closed := workspace("c", "closed")
+	closed.Closed = true
+	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"o"}, Line: inLine("o")})
+
+	// Act.
+	r.SetRegistry(queueView(workspace("o", "open"), hiddenWorkspace("h", "hidden"), closed, mergedAt("m", time.Hour)))
+
+	// Assert.
+	push := latestPush(t, r)
+	tests := []struct {
+		name string
+		got  []string
+		want []string
+	}{
+		{name: "workspaces holds the open and hidden rows", got: rowNames(rosterwalk.AllRows(&frontendv1.RosterPush{Workspaces: push.GetWorkspaces()})), want: []string{"open", "hidden"}},
+		{name: "closed holds the closed row", got: rowNames(rosterwalk.ClosedRows(push.GetClosed())), want: []string{"closed"}},
+		{name: "the merge queue holds the queued workspace", got: queueSubjectIDs(queueGroup(push, repo)), want: []string{"o"}},
+		{name: "recently merged holds the merge's summary", got: []string{fmt.Sprint(push.GetRecentlyMerged().GetHeader().GetCount().GetWorkspaces())}, want: []string{"1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !equal(tt.got, tt.want) {
+				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+// streamPointers names the message each stream of PUSH is.
+func streamPointers(push *frontendv1.RosterPush) [4]proto.Message {
+	return [4]proto.Message{push.GetWorkspaces(), push.GetMergeQueue(), push.GetRecentlyMerged(), push.GetClosed()}
+}
+
+func TestAnUnchangedStreamKeepsTheLastPushsMessage(t *testing.T) {
+	const (
+		workspaces = iota
+		mergeQueue
+		recentlyMerged
+		closedRows
+	)
+	closed := workspace("c", "closed")
+	closed.Closed = true
+	tests := []struct {
+		name string
+		act  func(r sidebar.Resolver)
+		// changed are the streams the act changes.
+		changed []int
+	}{
+		{name: "an open row's change resends the workspaces stream alone", act: func(r sidebar.Resolver) { r.SetSummary("o", "a prompt") }, changed: []int{workspaces}},
+		{name: "a closed row's change resends the closed stream alone", act: func(r sidebar.Resolver) { r.SetSummary("c", "a prompt") }, changed: []int{closedRows}},
+		{name: "a queue's change resends the merge queue alone", act: func(r sidebar.Resolver) {
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"o"}, Line: inLine("o")})
+		}, changed: []int{mergeQueue}},
+		{name: "a merge landing resends the workspaces and the summary", act: func(r sidebar.Resolver) {
+			r.SetRegistry(queueView(mergedAt("o", 0), closed, mergedAt("m", time.Hour)))
+		}, changed: []int{workspaces, recentlyMerged}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			r.SetRegistry(queueView(workspace("o", "open"), closed, mergedAt("m", time.Hour)))
+			before := latestPush(t, r)
+
+			// Act.
+			tt.act(r)
+
+			// Assert: exactly the changed streams are new messages, and the
+			// push took the next revision.
+			after := latestPush(t, r)
+			if after.GetRevision() != before.GetRevision()+1 {
+				t.Fatalf("revision = %d, want %d", after.GetRevision(), before.GetRevision()+1)
+			}
+			was, now := streamPointers(before), streamPointers(after)
+			for i := range was {
+				if moved := was[i] != now[i]; moved != slices.Contains(tt.changed, i) {
+					t.Fatalf("stream %d moved = %v, want %v", i, moved, slices.Contains(tt.changed, i))
+				}
+			}
+		})
+	}
+}
+
+func TestAnIdenticalRenderPublishesTheLastPushItself(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	reg := registry(workspace("o", "open"), mergedAt("m", time.Hour))
+	r.SetRegistry(reg)
+	before := latestPush(t, r)
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	if after := latestPush(t, r); after != before {
+		t.Fatalf("push = %p revision %d, want the last push %p kept at %d", after, after.GetRevision(), before, before.GetRevision())
+	}
+}
+
+func TestAMergeQueueReStampThatChangesNothingPublishesNothing(t *testing.T) {
+	// Arrange: a waiting member's merge facts and its queue, published.
+	r, _ := newResolver(t)
+	ch := subscribe(t, r)
+	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+	<-ch
+	queue := sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: inLine("w1", "w2")}
+	r.SetMergeQueue(theRepo, queue)
+	r.SetMerge("w2", mergeStates["queued"])
+	<-ch
+	<-ch
+	before := r.Revision()
+
+	// Act: the orchestrator re-stamps the same facts and the same queue, then
+	// a sentinel change.
+	r.SetMerge("w2", mergeStates["queued"])
+	r.SetMergeQueue(theRepo, queue)
+	r.SetSummary("w1", "a sentinel")
+
+	// Assert: the next push is the sentinel's, one revision on.
+	next := <-ch
+	if next.GetRevision() != before+1 || rowFor(innerRows(rosterwalk.OpenRows(next.GetWorkspaces())), "w1").GetDetail().GetSummary().GetText() != "a sentinel" {
+		t.Fatalf("next push = revision %d, want the sentinel's at %d: a re-stamp that changes nothing was published", next.GetRevision(), before+1)
+	}
+}
+
+func TestATransitionMovesEveryStreamItTouchesInOnePush(t *testing.T) {
+	reopened := mergedAt("w", time.Hour)
+	reopened.Closed = false
+	tests := []struct {
+		name          string
+		before, after sidebar.Registry
+		wantOpen      bool
+		wantCount     uint32
+	}{
+		{name: "a merge landing leaves workspaces and joins the summary", before: registry(workspace("w", "w")), after: registry(mergedAt("w", 0)), wantOpen: false, wantCount: 1},
+		{name: "a merged workspace reopened leaves the summary and joins workspaces", before: registry(mergedAt("w", time.Hour)), after: registry(reopened), wantOpen: true, wantCount: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ch := subscribe(t, r)
+			r.SetRegistry(tt.before)
+			first := <-ch
+
+			// Act.
+			r.SetRegistry(tt.after)
+
+			// Assert: the one next push carries both sides of the move.
+			push := <-ch
+			if push.GetRevision() != first.GetRevision()+1 {
+				t.Fatalf("revision = %d, want %d", push.GetRevision(), first.GetRevision()+1)
+			}
+			if open := rowFor(repoRows(t, push.GetWorkspaces()), "w") != nil; open != tt.wantOpen {
+				t.Fatalf("open = %v, want %v", open, tt.wantOpen)
+			}
+			merged := push.GetRecentlyMerged()
+			if got := merged.GetHeader().GetCount().GetWorkspaces(); got != tt.wantCount {
+				t.Fatalf("merged count = %d, want %d", got, tt.wantCount)
+			}
+			if got := merged.GetMergedRevision().GetRevision(); got != push.GetRevision() {
+				t.Fatalf("merged token = %d, want this push's revision %d", got, push.GetRevision())
+			}
+		})
 	}
 }

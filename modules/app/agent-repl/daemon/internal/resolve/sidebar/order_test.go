@@ -238,7 +238,7 @@ func TestRecentlyMergedOrdersByMergeTimeNewestFirst(t *testing.T) {
 	r.SetRegistry(registry(older, newer))
 
 	// Assert: merge time, newest first (owner request, 2026-10-13).
-	got := rowNames(rosterwalk.MergedRows(latest(t, r)))
+	got := rowNames(mergedRows(t, r))
 	if !equal(got, []string{"newer", "older"}) {
 		t.Fatalf("merged order = %v, want the latest merge first [newer older]", got)
 	}
@@ -461,7 +461,7 @@ func TestAReopenedMergedWorkspaceIsOpenWithATab(t *testing.T) {
 	if got := tabIDsOf(latest(t, r)); !equal(got, []string{"w-m:drawn"}) {
 		t.Fatalf("tab bar = %v, want the reopened workspace's tab", got)
 	}
-	if len(rosterwalk.MergedRows(latest(t, r))) != 0 {
+	if len(mergedRows(t, r)) != 0 {
 		t.Fatal("a reopened merged workspace is still under Recently Merged")
 	}
 }

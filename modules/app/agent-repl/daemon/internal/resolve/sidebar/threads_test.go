@@ -164,8 +164,8 @@ func TestThreadAnswersALaidOutThreadWithItsRostersRevision(t *testing.T) {
 	revision, ok := r.Thread(ids.WorkspaceID("t-1"))
 
 	// Assert
-	if !ok || revision != latest(t, r).GetRevision() {
-		t.Fatalf("Thread = %d, %v, want the roster's revision %d", revision, ok, latest(t, r).GetRevision())
+	if !ok || revision != latestPush(t, r).GetRevision() {
+		t.Fatalf("Thread = %d, %v, want the roster's revision %d", revision, ok, latestPush(t, r).GetRevision())
 	}
 }
 
