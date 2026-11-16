@@ -267,6 +267,9 @@ func TestEachDeployOfTheChainIsToldToAFreshIntake(t *testing.T) {
 	if intakeBriefs != 2 || intakes != 2 || len(made) != 3 {
 		t.Fatalf("intake told %d times, made %v; want a fresh intake told of each deploy, and one remediation made", intakeBriefs, h.checks.made)
 	}
+	if !slices.Contains(made, intakeName(deployStarted)) || !slices.Contains(made, intakeName(deployStarted.Add(time.Minute))) {
+		t.Fatalf("made %v, want each intake named for its own deploy, so no two share a name", made)
+	}
 	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake", "ws-intake"}) {
 		t.Fatalf("stopped %v, want each intake closed by its decision", h.checks.stopped)
 	}
@@ -1393,6 +1396,28 @@ func TestAnUnchangedDeploysReleaseCutByTheDaemonsExitIsNoFailure(t *testing.T) {
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error"}); ok {
 				t.Fatalf("records = %v, want no error", h.logs.Records())
+			}
+		})
+	}
+}
+
+func TestAnIntakeIsNamedForItsOwnDeployToTheMillisecond(t *testing.T) {
+	tests := []struct {
+		name string
+		owed time.Time
+		want string
+	}{
+		{name: "a deploy on the second", owed: time.Date(2026, 11, 16, 22, 26, 58, 0, time.UTC), want: "deploy-intake-20261116-222658-000"},
+		{name: "a deploy within the second", owed: time.Date(2026, 11, 16, 22, 26, 58, 80_000_000, time.UTC), want: "deploy-intake-20261116-222658-080"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := intakeName(tt.owed)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("intakeName = %q, want %q", got, tt.want)
 			}
 		})
 	}

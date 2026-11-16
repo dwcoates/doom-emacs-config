@@ -621,15 +621,21 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed tim
 	o.mediationFailed(ctx, fields, message, err)
 }
 
-// intakeOf answers the intake of the chain check M belongs to, making it,
-// hidden and unprompted, for a chain's first deploy and recording it on M
+// intakeOf answers the intake of check M, making it, hidden and unprompted,
+// for a check that has none (each decided check's newer deploy gets a fresh
+// one, wsm.OweMediation) and recording it on M
 // before anything prompts it: its first prompt then brings its session up
 // as the intake. Empty when M was replaced or released meanwhile.
 func (o *orchestrator) intakeOf(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Intake != "" {
 		return m.Intake, nil
 	}
-	name := "deploy-intake-" + m.ChainStartedAt.UTC().Format("20060102-150405")
+	// EACH CHECK'S INTAKE IS NAMED FOR ITS OWN DEPLOY, never its chain's
+	// start: an intake decides once, so a chain makes one per deploy, and
+	// the closed intake of an earlier deploy still holds its name
+	// (2026-11-16 22:27: a chain's second intake was refused name_held, and
+	// the queue stayed held for 90 minutes).
+	name := intakeName(m.OwedAt)
 	made, err := o.deps.DeployChecks.CreateDeployIntake(ctx, q.repository.Dir, name)
 	if err != nil {
 		return "", fmt.Errorf("merge: make the chain's intake %s: %w", name, err)
@@ -795,6 +801,12 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 		return
 	}
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
+}
+
+// intakeName is the name of the intake of the check owed at OWED, to the
+// millisecond, so no two checks share one.
+func intakeName(owed time.Time) string {
+	return "deploy-intake-" + strings.ReplaceAll(owed.UTC().Format("20060102-150405.000"), ".", "-")
 }
 
 // mediationVersion is how the brief names M's build.
