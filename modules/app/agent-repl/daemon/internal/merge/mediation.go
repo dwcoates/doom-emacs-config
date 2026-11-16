@@ -1024,6 +1024,7 @@ func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm
 	}
 	panic(fmt.Sprintf("merge: the finish of %s under way stands at %q", f.Workspace, f.Step))
 }
+
 // republishMediation tells the roster and the queue's subscribers a change
 // of REPO's check; a republication that fails is recorded.
 func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey) {

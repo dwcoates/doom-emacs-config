@@ -204,7 +204,7 @@ describe("this repository's committed metaprompt", () => {
     // Act
     const text = readLandingSection("deploy_intake", home);
     // Assert — owner rulings 2026-11-14.
-    expect(text).toContain("This session is the deploy intake of one chain of its repository's deploys");
+    expect(text).toContain("This session is a deploy intake: a hidden workspace agent-repl makes to check one deploy");
     expect(text).toContain("It never researches a cause and never prescribes a fix.");
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
     expect(text).toContain("agent-repld merge-queue mediation dispatch -fresh");

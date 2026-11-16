@@ -2424,6 +2424,10 @@ func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
 	h.session = h.client.nextSessionOpen(t)
 	open := h.client.nextAgentOpenFor(t, "")
 	h.main, h.mainReq = open.stream, open.req
+	// THE SEVERING ENDS WITH THE RE-OPENED WATCH (linkRestoredLocked): its
+	// telling is awaited here, so it never lands among what a test routes
+	// next.
+	h.rec.until(t, "lifecycle.OnLinkRestored")
 	return open.req
 }
 
