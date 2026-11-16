@@ -111,6 +111,11 @@ type suspension struct {
 	resumes string
 	// gateRerun says what becomes of a test gate the suspension cut.
 	gateRerun string
+	// keepsGateRun is a suspension the merge resumes from at the step it
+	// recorded: the gate's run goes on on the test service, and the resumed
+	// merge watches it again (gateservice.go). A suspension that sends the
+	// merge round again instead stops the run.
+	keepsGateRun bool
 	// stepBoundary asks a run that began its steps to finish the step in
 	// flight and let go at the next boundary, rather than at once.
 	stepBoundary bool
@@ -129,17 +134,17 @@ var (
 		moved:     "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded",
 		by:        "its workspace's transfer",
 		resumes:   "the successor resumes it at the step it recorded",
-		gateRerun: "it runs again from its start when the successor resumes the merge"}
+		gateRerun: "its run goes on on the test service, and the successor watches it again when it resumes the merge", keepsGateRun: true}
 	suspendPause = suspension{op: "daemon.merge.pause", cause: errPaused,
 		moved:     "a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed",
 		by:        "its queue's pause",
 		resumes:   "it stays suspended at the step it recorded until the queue is resumed",
-		gateRerun: "it runs again from its start once the queue is resumed"}
+		gateRerun: "its run goes on on the test service, and the merge watches it again once the queue is resumed", keepsGateRun: true}
 	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
 		moved:     "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished",
 		by:        "its workspace's restart",
 		resumes:   "it resumes at the step it recorded once the restart finished",
-		gateRerun: "it runs again from its start once the restart finished"}
+		gateRerun: "its run goes on on the test service, and the merge watches it again once the restart finished", keepsGateRun: true}
 	// suspendHandover is a deploy's handover holding every queue
 	// (standingMoved): like a pause, this daemon takes the merge straight
 	// back, so a handover that does not finish leaves it here to go on, and
@@ -148,13 +153,13 @@ var (
 		moved:     "a merge is suspended for the handover; the daemon that serves its workspace next resumes it at the step it recorded",
 		by:        "the handover",
 		resumes:   "the daemon that serves its workspace next resumes it at the step it recorded",
-		gateRerun: "it runs again from its start when the merge is resumed after the handover"}
+		gateRerun: "its run goes on on the test service, and the merge watches it again when it is resumed after the handover", keepsGateRun: true}
 	// suspendExit is the daemon's exit (Drain). Its records are the drain's
 	// own, so it is never handed to suspendFor and says nothing on moving.
 	suspendExit = suspension{op: "daemon.merge.drain", cause: errDaemonExiting, handedOn: true,
 		by:        "the daemon's exit",
 		resumes:   "the next boot resumes it at the step it recorded",
-		gateRerun: "it runs again from its start when the next boot resumes the merge"}
+		gateRerun: "its run goes on on the test service, and the next boot's merge watches it again", keepsGateRun: true}
 )
 
 // suspendLocked marks R suspending for WHY. It is the ONE way a run starts

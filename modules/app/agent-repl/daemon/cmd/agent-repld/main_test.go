@@ -684,25 +684,31 @@ func TestAnswerMigrationKind(t *testing.T) {
 	}
 }
 
-// TestTheZettelSocketPrecedence pins the zettel socket's precedence, which is
-// the store's: flag, then environment, then the zettel service's own default.
-func TestTheZettelSocketPrecedence(t *testing.T) {
+// TestTheServiceSocketPrecedence pins the zettel and test service sockets'
+// precedence, which is the store's: flag, then environment, then the
+// service's own default.
+func TestTheServiceSocketPrecedence(t *testing.T) {
 	// Arrange.
 	home := func() (string, error) { return "/home/tester", nil }
 	tests := []struct {
 		name      string
+		service   string
+		fallback  string
 		flagValue string
 		envValue  string
 		want      string
 	}{
-		{name: "the flag beats the environment", flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
-		{name: "the environment beats the default", envValue: "/run/env.sock", want: "/run/env.sock"},
-		{name: "the default is the zettel service's own", want: "/home/tester/.cache/agent-repl/sock/zettel.sock"},
+		{name: "zettel's flag beats the environment", service: "zettel", fallback: defaultZettelSocket, flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
+		{name: "zettel's environment beats the default", service: "zettel", fallback: defaultZettelSocket, envValue: "/run/env.sock", want: "/run/env.sock"},
+		{name: "zettel's default is the zettel service's own", service: "zettel", fallback: defaultZettelSocket, want: "/home/tester/.cache/agent-repl/sock/zettel.sock"},
+		{name: "the test service's flag beats the environment", service: "tests", fallback: defaultTestsSocket, flagValue: "/run/flag.sock", envValue: "/run/env.sock", want: "/run/flag.sock"},
+		{name: "the test service's environment beats the default", service: "tests", fallback: defaultTestsSocket, envValue: "/run/env.sock", want: "/run/env.sock"},
+		{name: "the test service's default is its own", service: "tests", fallback: defaultTestsSocket, want: "/home/tester/.cache/agent-repl/sock/tests.sock"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			// Act.
-			got, err := resolveSocket("zettel", test.flagValue, test.envValue, defaultZettelSocket, home)
+			got, err := resolveSocket(test.service, test.flagValue, test.envValue, test.fallback, home)
 
 			// Assert.
 			if err != nil || got != test.want {

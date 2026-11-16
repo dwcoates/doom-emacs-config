@@ -1354,8 +1354,9 @@ Owner rulings, 2026-09-30 (`internal/merge`; the contract is
   gate (no git starts after it), waits for the command in flight within
   `MergeGitStopBound` (10s; INFO with the measured wait, ERROR naming a
   command that outlives it), then cuts the run's waits: an agent turn (it
-  lives on in the shim) and a test gate run (INFO: it runs again from its
-  start on resume). A suspended run publishes, records and releases nothing
+  lives on in the shim) and a test gate's watch (its run goes on on the test
+  service, and the resumed merge watches it again from its first line:
+  `gateservice.go`, `testservice/AGENTS.md`). A suspended run publishes, records and releases nothing
   durable (INFO `daemon.merge.suspend`); `daemonaddr.ClaimWaitBound` outlasts
   both drain bounds so a replacement still replaces.
 - **A MERGE MOVES WITH ITS WORKSPACE ACROSS A HANDOVER** (`transfer.go`). A

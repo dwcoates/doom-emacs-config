@@ -156,20 +156,21 @@ func TestAMergeWhoseWorkspaceIsServedElsewhereIsPassedOverAndKeepsItsPlace(t *te
 
 func TestAHandoverSuspendsTheRunningMergeAndItsEndTakesItOnAtItsStep(t *testing.T) {
 	// Arrange: the head holds in its gate.
-	c, done := headInGate(t)
+	c, done, release := headHeldInGate(t)
 
-	// Act: a handover holds the queue, then gives it back.
+	// Act: a handover holds the queue, the gate's run finishes on the test
+	// service meanwhile, then the handover gives the queue back.
 	c.h.standing.set(false)
 	serves, _ := c.h.o.followStandingOnce(context.Background(), true)
 	<-done
-	cut := c.runner.ran(c.dirs[theWorkspace])
+	close(release)
 	c.h.standing.set(true)
 	serves, _ = c.h.o.followStandingOnce(context.Background(), serves)
 	c.promote(t)
 
-	// Assert
-	if cut != 1 || !serves {
-		t.Fatalf("gate ran %d before the hold ended, serves %v; want one cut run and the queue taken on", cut, serves)
+	// Assert: the run the handover left going is the one the resume read.
+	if ran := c.runner.ran(c.dirs[theWorkspace]); ran != 1 || !serves {
+		t.Fatalf("gate ran %d, serves %v; want one run and the queue taken on", ran, serves)
 	}
 	if got := c.git.landedOwn(); len(got) != 1 {
 		t.Fatalf("landings after the handover ended %v, want the merge landed once", got)

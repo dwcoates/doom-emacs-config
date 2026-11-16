@@ -92,6 +92,7 @@ import (
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
 	"agent-repld/internal/subagentmaker"
+	"agent-repld/internal/testsclient"
 	"agent-repld/internal/turnlatch"
 	"agent-repld/internal/userenv"
 	"agent-repld/internal/viewquiet"
@@ -1457,6 +1458,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestCommand:     merge.TestCommandFor,
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
+		Tests:           testsclient.New(p.Opts.testsSocket),
 		HookRunner:      scripts,
 		Builtins:        lifecycleconfig.Builtins{CheckoutRoot: paths.Checkout},
 		SelfAddress:     p.Claim.Address(),
@@ -1984,7 +1986,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StartSession:           fleet.Start,
 			EnsureServices:         services.step(bootServiceStep(p.Opts.joining != "", restarter.EnsureLoaded, sidecar.storeCurrent(restarter.EnsureStoreCurrent))),
 			EnsureSidecar:          sidecar.run,
-			EnsureZettel:           bootServiceStep(p.Opts.joining != "", restarter.EnsureZettelLoaded, restarter.EnsureZettelCurrent),
+			EnsureStandalones:      bootServiceStep(p.Opts.joining != "", restarter.EnsureStandalonesLoaded, restarter.EnsureStandalonesCurrent),
 			Unserved:               fleet.MarkUnserved,
 			BringingUp:             bringingUp,
 			AdoptBound:             adoptBound,

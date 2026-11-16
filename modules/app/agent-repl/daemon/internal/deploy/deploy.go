@@ -64,6 +64,7 @@ const (
 	ComponentStore   Component = "store"
 	ComponentSidecar Component = "sidecar"
 	ComponentZettel  Component = "zettel"
+	ComponentTests   Component = "tests"
 	ComponentElisp   Component = "elisp"
 	ComponentDaemon  Component = "daemon"
 	ComponentShim    Component = "shim"
@@ -87,6 +88,8 @@ func (c Component) Arm() agentreplv1.DeployComponent {
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP
 	case ComponentZettel:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_ZETTEL
+	case ComponentTests:
+		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_TESTS
 	default:
 		return agentreplv1.DeployComponent_DEPLOY_COMPONENT_UNSPECIFIED
 	}
@@ -204,7 +207,7 @@ type Clients interface {
 type Services interface {
 	RestartStore(ctx context.Context) error
 	RestartSidecar(ctx context.Context) error
-	RestartZettel(ctx context.Context) error
+	RestartStandalone(ctx context.Context, s Standalone) error
 }
 
 // Clock is the deploy's view of time.
@@ -721,18 +724,24 @@ func (d *Deployer) end(committed bool) {
 
 // builds are the fresh builds of one deploy.
 type builds struct {
-	shim, webapp, daemon, store, sidecar, zettel, lock, elisp string
+	shim, webapp, daemon, store, sidecar, lock, elisp string
+	// standalone is each standalone service's fresh build, by component.
+	standalone map[Component]string
 	// wifi is the Wi-Fi helper's source hash (wifiSourceHash); empty where
 	// the platform has no helper (Live.WifiApp).
 	wifi string
 }
 
 func (b builds) fields() dlog.Context {
-	return dlog.Context{
+	out := dlog.Context{
 		"shim": b.shim, "webapp": b.webapp, "daemon": b.daemon,
-		"store": b.store, "sidecar": b.sidecar, "zettel": b.zettel, "lock": b.lock, "elisp": b.elisp,
+		"store": b.store, "sidecar": b.sidecar, "lock": b.lock, "elisp": b.elisp,
 		"wifi": b.wifi,
 	}
+	for _, s := range Standalones {
+		out[string(s.Component)] = b.standalone[s.Component]
+	}
+	return out
 }
 
 // hashStaged names every staged artifact by content hash, and the checkout's
@@ -756,7 +765,12 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 	step("daemon", &b.daemon, func() (string, error) { return buildid.File(s.DaemonBin()) })
 	step("store", &b.store, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceStore)) })
 	step("sidecar", &b.sidecar, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceSidecar)) })
-	step("zettel", &b.zettel, func() (string, error) { return buildid.File(s.CacheBin(buildreport.ServiceZettel)) })
+	b.standalone = map[Component]string{}
+	for _, sv := range Standalones {
+		var hash string
+		step(string(sv.Component), &hash, func() (string, error) { return buildid.File(s.CacheBin(sv.Service)) })
+		b.standalone[sv.Component] = hash
+	}
 	step("lock", &b.lock, func() (string, error) { return buildid.File(s.CacheBin(sessionlock.HolderBinary)) })
 	step("elisp", &b.elisp, func() (string, error) { return buildid.Elisp(d.deps.Live.ModuleRoot) })
 	if d.deps.Live.WifiApp != "" {
@@ -806,7 +820,6 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 	daemonStamps := stampsBeside(filepath.Dir(s.DaemonBin()), filepath.Dir(live.DaemonBin()), "")
 	storeInstall, storeWrites, storeRestamp := cacheBin(buildreport.ServiceStore)
 	sidecarInstall, sidecarWrites, sidecarRestamp := cacheBin(buildreport.ServiceSidecar)
-	zettelInstall, zettelWrites, zettelRestamp := cacheBin(buildreport.ServiceZettel)
 	lockInstall, lockWrites, lockRestamp := cacheBin(sessionlock.HolderBinary)
 	artifacts := []artifact{
 		{component: ComponentShim, name: "shim", fresh: fresh.shim, installed: d.deps.Bundle.Build, install: func() error {
@@ -830,12 +843,15 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 		{component: ComponentSidecar, name: buildreport.ServiceSidecar, fresh: fresh.sidecar, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(buildreport.ServiceSidecar))
 		}, install: sidecarInstall, writes: sidecarWrites, restamp: sidecarRestamp},
-		{component: ComponentZettel, name: buildreport.ServiceZettel, fresh: fresh.zettel, installed: func() (string, error) {
-			return buildid.File(live.CacheBinPath(buildreport.ServiceZettel))
-		}, install: zettelInstall, writes: zettelWrites, restamp: zettelRestamp},
 		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
 		}, install: lockInstall, writes: lockWrites, restamp: lockRestamp},
+	}
+	for _, sv := range Standalones {
+		install, writes, restamp := cacheBin(sv.Service)
+		artifacts = append(artifacts, artifact{component: sv.Component, name: sv.Service, fresh: fresh.standalone[sv.Component], installed: func() (string, error) {
+			return buildid.File(live.CacheBinPath(sv.Service))
+		}, install: install, writes: writes, restamp: restamp})
 	}
 	if live.WifiApp != "" {
 		// THE HELPER RIDES WITH THE DAEMON, its one user, as shim-lock rides
@@ -907,18 +923,21 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 	return nil
 }
 
-// services restarts the store and the sidecar, and the zettel service, when
-// the processes launchd runs report a build that is not the fresh one. They
-// hold no turn state, so nothing is waited on. Zettel is independent of the
-// other two: no shim writes into it, and its restart moves neither.
+// services restarts the store and the sidecar, and each standalone service,
+// when the processes launchd runs report a build that is not the fresh one.
+// They hold no turn state, so nothing is waited on. A standalone service is
+// independent of the other two: no shim writes into it, and its restart moves
+// neither.
 func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) ([]Outcome, error) {
 	storeStale := d.serviceStale(ComponentStore, buildreport.ServiceStore, fresh.store)
 	sidecarStale := d.serviceStale(ComponentSidecar, buildreport.ServiceSidecar, fresh.sidecar)
-	zettelStale := d.serviceStale(ComponentZettel, buildreport.ServiceZettel, fresh.zettel)
 	store := Outcome{Component: ComponentStore, Build: fresh.store, Kind: UpToDate}
 	sidecar := Outcome{Component: ComponentSidecar, Build: fresh.sidecar, Kind: UpToDate}
-	zettel := Outcome{Component: ComponentZettel, Build: fresh.zettel, Kind: UpToDate}
-	outcomes := func() []Outcome { return []Outcome{store, sidecar, zettel} }
+	standalone := make([]Outcome, len(Standalones))
+	for i, sv := range Standalones {
+		standalone[i] = Outcome{Component: sv.Component, Build: fresh.standalone[sv.Component], Kind: UpToDate}
+	}
+	outcomes := func() []Outcome { return append([]Outcome{store, sidecar}, standalone...) }
 	switch {
 	case storeStale:
 		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
@@ -945,16 +964,20 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		sidecar.Kind = Restarted
 		d.log.Info(opDecide, "restarted the sidecar onto the fresh build", dlog.Context{"sidecar_build": fresh.sidecar})
 	}
-	if zettelStale {
-		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
-			Components: []deployprogress.Component{deployprogress.Zettel}})
-		prev.zettel = true
-		if err := d.deps.Services.RestartZettel(ctx); err != nil {
-			d.log.Error(opDecide, "the zettel restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentZettel)}, err))
-			return outcomes(), &ServiceRestartFailed{Component: ComponentZettel, Detail: err.Error()}
+	for i, sv := range Standalones {
+		build := fresh.standalone[sv.Component]
+		if !d.serviceStale(sv.Component, sv.Service, build) {
+			continue
 		}
-		zettel.Kind = Restarted
-		d.log.Info(opDecide, "restarted zettel onto the fresh build", dlog.Context{"zettel_build": fresh.zettel})
+		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
+			Components: []deployprogress.Component{sv.Progress}})
+		prev.restartedStandalone(sv.Component)
+		if err := d.deps.Services.RestartStandalone(ctx, sv); err != nil {
+			d.log.Error(opDecide, "the "+sv.Short+" restart failed", dlog.WithCause(dlog.Context{"component": string(sv.Component)}, err))
+			return outcomes(), &ServiceRestartFailed{Component: sv.Component, Detail: err.Error()}
+		}
+		standalone[i].Kind = Restarted
+		d.log.Info(opDecide, "restarted "+sv.Display+" onto the fresh build", dlog.Context{string(sv.Component) + "_build": build})
 	}
 	return outcomes(), nil
 }

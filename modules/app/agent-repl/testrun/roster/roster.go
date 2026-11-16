@@ -220,6 +220,7 @@ var Programs = []Program{
 	{Name: "shim-claude-sidecar", Owner: "sidecar", Module: "agent-shim/claude/shim-sidecar", Package: "."},
 	{Name: "shim-lock", Owner: "lock", Module: "agent-shim/shim-lock", Package: "."},
 	{Name: "zettel", Owner: "zettel", Module: "zettel", Package: "."},
+	{Name: "agent-repl-tests", Owner: "testservice", Module: "testservice", Package: "."},
 }
 
 // CoverageSystems are the suites whose code is a system the coverage
@@ -327,7 +328,7 @@ var Suites = []Suite{
 	{Name: "daemon", Kind: GoModule, Path: "daemon",
 		IntegrationTags: "integration", IntegrationPackages: "./integration",
 		TestParallel: map[string]Parallel{"integration": {Tests: 8, Slots: 2}},
-		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git"}},
+		Programs:     map[string][]string{"integration": {"agent-repld", "fakeshim", "git", "agent-repl-tests"}},
 		// EACH PACKAGE IS REUSED ON ITS OWN, keyed on the build graph `go list
 		// -deps -test` names for it; what its tests read beyond that graph is
 		// declared per package, and every other read in the checkout is
@@ -360,6 +361,9 @@ var Suites = []Suite{
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
 	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
+	// THE TEST SERVICE, which owns every merge gate's run so a daemon deploy
+	// never cuts one. Its tests start real child processes of its own.
+	{Name: "testservice", Kind: GoModule, Path: "testservice", Reuse: &Reuse{Inputs: []string{"testservice/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
 	// THE ERT SUITE'S FAKE DAEMON IS TESTED AS ITS OWN MODULE: the ert suite
@@ -441,7 +445,7 @@ var Suites = []Suite{
 		// harness.MainAt, which takes the daemon and its fakes from the
 		// run's programs rather than building them; the rest are the
 		// programs a world spawns.
-		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
+		Programs: map[string][]string{"stack": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel", "agent-repl-tests"}},
 		Reuse: &Reuse{Units: map[string][]string{
 			// The webapp layer's boot budget is held to its driver's.
 			".": {"webapp/test/webapp-layer/drive.ts"},
@@ -460,7 +464,7 @@ var Suites = []Suite{
 				"daemon/integration/", "agent-shim/claude/shim/test/"},
 		}}},
 	{Name: "e2e", Kind: E2E, Path: "e2e", TestParallel: map[string]Parallel{".": {Tests: 8, Slots: 2}}, VetTags: []string{"perf", "realtest"},
-		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel"}},
+		Programs:    map[string][]string{".": {"agent-repld", "fakeshim", "git", "shim-store", "shim-claude-sidecar", "shim-lock", "zettel", "agent-repl-tests"}},
 		NeverReused: "its worlds build and run every system of the module from its source, every untracked build output in it included, so no input set short of the checkout covers it"},
 }
 

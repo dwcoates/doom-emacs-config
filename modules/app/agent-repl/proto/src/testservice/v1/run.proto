@@ -1,0 +1,50 @@
+// run.proto — the test service's shared datatypes.
+
+syntax = "proto3";
+
+package testservice.v1;
+
+option go_package = "agentrepl/proto/testservice/v1;testservicev1";
+
+// One run, as the service names it. Minted by StartRun; opaque to callers.
+message RunId {
+  string value = 1;
+}
+
+// One line the run wrote, its standard output and error combined in order.
+message RunLine {
+  // The line's place in the run's output, from one.
+  uint64 number = 1;
+  // The line, without its newline.
+  string text = 2;
+}
+
+// How the run ended.
+message RunEnd {
+  oneof how {
+    // The command exited, or was killed by a signal.
+    RunExited exited = 1;
+    // The service stopped while the run was running: the run's process group
+    // was killed with it, and nothing it would have written is known.
+    RunLost lost = 2;
+  }
+  // The processor time the command and every descendant it waited for
+  // spent, user and system together; zero for a lost run.
+  int64 cpu_ms = 3;
+  // How long the run took, start to end.
+  int64 wall_ms = 4;
+}
+
+// The command's exit.
+message RunExited {
+  // The exit code; -1 when a signal ended it.
+  int32 exit_code = 1;
+  // A StopRun ended it.
+  bool stopped = 2;
+}
+
+// The run outlived the service that ran it.
+message RunLost {
+  // Why, in one line.
+  string detail = 1;
+}

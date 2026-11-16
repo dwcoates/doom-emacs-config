@@ -51,7 +51,7 @@ type fakeServiceManager struct {
 func newFakeServiceManager(dir string) *fakeServiceManager {
 	return &fakeServiceManager{
 		dir:    dir,
-		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true, ZettelLabel: true},
+		loaded: map[string]bool{StoreLabel: true, SidecarLabel: true, ZettelLabel: true, TestsLabel: true},
 		pid:    map[string]int{StoreLabel: 10, SidecarLabel: 20},
 	}
 }
@@ -1030,7 +1030,7 @@ func TestEnsureStoreCurrentsSecondHalfLeavesASidecarTheFirstHalfBootstrapped(t *
 	}
 }
 
-func TestRestartZettelKickstartsItAlone(t *testing.T) {
+func TestRestartStandaloneKickstartsItAlone(t *testing.T) {
 	cases := []struct {
 		name       string
 		restartErr error
@@ -1038,92 +1038,126 @@ func TestRestartZettelKickstartsItAlone(t *testing.T) {
 		{name: "kickstarted"},
 		{name: "a failed kickstart is surfaced", restartErr: errors.New("kickstart refused")},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newRestarter(t)
-			h.services.restartErr = tc.restartErr
+	for _, sv := range Standalones {
+		for _, tc := range cases {
+			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
+				// Arrange
+				h := newRestarter(t)
+				h.services.restartErr = tc.restartErr
 
-			// Act
-			err := h.r.RestartZettel(context.Background())
+				// Act
+				err := h.r.RestartStandalone(context.Background(), sv)
 
-			// Assert
-			if tc.restartErr != nil {
-				if err == nil || !loggedTo(h.log, "error", "the zettel restart failed") {
-					t.Fatalf("RestartZettel = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
+				// Assert
+				if tc.restartErr != nil {
+					if err == nil || !loggedTo(h.log, "error", "the "+sv.Short+" restart failed") {
+						t.Fatalf("RestartStandalone = %v, records %+v; want the failure returned and at ERROR", err, h.log.Records())
+					}
+					return
 				}
-				return
-			}
-			if calls := h.services.Calls(); err != nil || len(calls) != 1 || calls[0] != "restart "+ZettelLabel {
-				t.Fatalf("RestartZettel = %v, calls = %v, want one zettel kickstart", err, calls)
-			}
-		})
+				if calls := h.services.Calls(); err != nil || len(calls) != 1 || calls[0] != "restart "+sv.Label {
+					t.Fatalf("RestartStandalone = %v, calls = %v, want one %s kickstart", err, calls, sv.Label)
+				}
+			})
+		}
 	}
 }
 
-func TestEnsureCurrentKeepsZettelLoadedAndCurrent(t *testing.T) {
-	cases := []struct {
-		name    string
-		arrange func(t *testing.T, h *restarterHarness)
-		want    []string
-	}{
-		{name: "a stale zettel is restarted alone", arrange: func(t *testing.T, h *restarterHarness) {
-			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "old zettel", "new zettel")
-		}, want: []string{"restart " + ZettelLabel}},
-		{name: "a current zettel is left alone", arrange: func(t *testing.T, h *restarterHarness) {
-			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "new zettel", "new zettel")
-		}},
-		{name: "an unloaded zettel is bootstrapped", arrange: func(t *testing.T, h *restarterHarness) {
-			writeFile(t, filepath.Join(h.services.dir, ZettelLabel+".plist"), "<plist/>")
-			h.services.loaded[ZettelLabel] = false
-		}, want: []string{"start " + ZettelLabel}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newRestarter(t)
-			h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
-			h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
-			tc.arrange(t, h)
-
-			// Act
-			err := h.r.EnsureCurrent(context.Background())
-
-			// Assert
-			if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(tc.want) {
-				t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), tc.want)
-			}
-		})
+// standalonesCurrent makes every standalone service run the installed build,
+// but SKIP's.
+func standalonesCurrent(t *testing.T, h *restarterHarness, skip Standalone) {
+	t.Helper()
+	for i, sv := range Standalones {
+		if sv.Component != skip.Component {
+			h.running(t, sv.Label, sv.Service, 30+i, "new "+sv.Short, "new "+sv.Short)
+		}
 	}
 }
 
-func TestEnsureZettelLoadedNeverRestartsARunningZettel(t *testing.T) {
+func TestEnsureCurrentKeepsEveryStandaloneLoadedAndCurrent(t *testing.T) {
 	cases := []struct {
 		name    string
-		arrange func(t *testing.T, h *restarterHarness)
-		want    []string
+		arrange func(t *testing.T, h *restarterHarness, sv Standalone)
+		want    func(sv Standalone) []string
 	}{
-		{name: "a stale running zettel is left running", arrange: func(t *testing.T, h *restarterHarness) {
-			h.running(t, ZettelLabel, buildreport.ServiceZettel, 30, "old zettel", "new zettel")
-		}},
-		{name: "an unloaded zettel is bootstrapped", arrange: func(t *testing.T, h *restarterHarness) {
-			writeFile(t, filepath.Join(h.services.dir, ZettelLabel+".plist"), "<plist/>")
-			h.services.loaded[ZettelLabel] = false
-		}, want: []string{"start " + ZettelLabel}},
+		{name: "a stale one is restarted alone", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
+			h.running(t, sv.Label, sv.Service, 40, "old "+sv.Short, "new "+sv.Short)
+		}, want: func(sv Standalone) []string { return []string{"restart " + sv.Label} }},
+		{name: "a current one is left alone", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
+			h.running(t, sv.Label, sv.Service, 40, "new "+sv.Short, "new "+sv.Short)
+		}, want: func(Standalone) []string { return nil }},
+		{name: "an unloaded one is bootstrapped", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
+			writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
+			h.services.loaded[sv.Label] = false
+		}, want: func(sv Standalone) []string { return []string{"start " + sv.Label} }},
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange
-			h := newRestarter(t)
-			tc.arrange(t, h)
+	for _, sv := range Standalones {
+		for _, tc := range cases {
+			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
+				// Arrange
+				h := newRestarter(t)
+				h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+				h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
+				standalonesCurrent(t, h, sv)
+				tc.arrange(t, h, sv)
 
-			// Act
-			err := h.r.EnsureZettelLoaded(context.Background())
+				// Act
+				err := h.r.EnsureCurrent(context.Background())
 
-			// Assert
-			if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(tc.want) {
-				t.Fatalf("EnsureZettelLoaded = %v, acts %v; want %v", err, h.acts(), tc.want)
-			}
-		})
+				// Assert
+				if want := tc.want(sv); err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+					t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
+				}
+			})
+		}
+	}
+}
+
+func TestEnsureStandaloneLoadedNeverRestartsARunningOne(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(t *testing.T, h *restarterHarness, sv Standalone)
+		want    func(sv Standalone) []string
+	}{
+		{name: "a stale running one is left running", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
+			h.running(t, sv.Label, sv.Service, 30, "old "+sv.Short, "new "+sv.Short)
+		}, want: func(Standalone) []string { return nil }},
+		{name: "an unloaded one is bootstrapped", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
+			writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
+			h.services.loaded[sv.Label] = false
+		}, want: func(sv Standalone) []string { return []string{"start " + sv.Label} }},
+	}
+	for _, sv := range Standalones {
+		for _, tc := range cases {
+			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
+				// Arrange
+				h := newRestarter(t)
+				tc.arrange(t, h, sv)
+
+				// Act
+				err := h.r.EnsureStandaloneLoaded(context.Background(), sv)
+
+				// Assert
+				if want := tc.want(sv); err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+					t.Fatalf("EnsureStandaloneLoaded = %v, acts %v; want %v", err, h.acts(), want)
+				}
+			})
+		}
+	}
+}
+
+func TestEnsureStandalonesTriesEveryOneWhateverAnotherAnswers(t *testing.T) {
+	// Arrange: the first standalone's definition is missing, the second's loads.
+	h := newRestarter(t)
+	h.services.loaded[Standalones[0].Label] = false
+	writeFile(t, filepath.Join(h.services.dir, Standalones[1].Label+".plist"), "<plist/>")
+	h.services.loaded[Standalones[1].Label] = false
+
+	// Act
+	err := h.r.EnsureStandalonesLoaded(context.Background())
+
+	// Assert
+	if err == nil || fmt.Sprint(h.acts()) != fmt.Sprint([]string{"start " + Standalones[1].Label}) {
+		t.Fatalf("EnsureStandalonesLoaded = %v, acts %v; want the first's failure and the second started", err, h.acts())
 	}
 }

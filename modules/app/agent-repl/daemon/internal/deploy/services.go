@@ -12,18 +12,49 @@ import (
 	"agentrepl/logging/buildreport"
 
 	"agent-repld/internal/buildid"
+	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/restarttiming"
 )
 
-// The labels of the three services a deploy restarts: each is the launchd
-// label, and the systemd unit's name before its `.service`.
+// The labels of the services a deploy restarts: each is the launchd label,
+// and the systemd unit's name before its `.service`.
 const (
 	StoreLabel   = "com.agentrepl.shim-store"
 	SidecarLabel = "com.agentrepl.shim-claude-sidecar"
 	ZettelLabel  = "com.agentrepl.zettel"
+	TestsLabel   = "com.agentrepl.tests"
 )
+
+// Standalone is a service no other service's restart moves, and that moves
+// none: zettel and the test service. Every one is built, installed, judged,
+// restarted, rolled back and kept current at boot by the same code, from its
+// entry in Standalones.
+type Standalone struct {
+	// Component names it in a deploy's outcomes.
+	Component Component
+	// Label is its service manager label.
+	Label string
+	// Service is its binary's and its build report's name.
+	Service string
+	// Progress names it on the update line.
+	Progress deployprogress.Component
+	// Short and Display name it in records: "the <Short> restart failed",
+	// "restarted <Display>".
+	Short, Display string
+}
+
+// The standalone services.
+var (
+	Zettel = Standalone{Component: ComponentZettel, Label: ZettelLabel, Service: buildreport.ServiceZettel,
+		Progress: deployprogress.Zettel, Short: "zettel", Display: "zettel"}
+	Tests = Standalone{Component: ComponentTests, Label: TestsLabel, Service: buildreport.ServiceTests,
+		Progress: deployprogress.Tests, Short: "test service", Display: "the test service"}
+)
+
+// Standalones is every standalone service, in the order a deploy reports them.
+var Standalones = []Standalone{Zettel, Tests}
 
 const opServices = "daemon.deploy.services"
 
@@ -199,50 +230,72 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 	return storeBootstrapped, sidecarBootstrapped, nil
 }
 
-// RestartZettel restarts the zettel service alone. Nothing else depends on
-// its socket but the daemon's chat calls, which fail loudly while it is out.
-func (r *Restarter) RestartZettel(ctx context.Context) error {
-	fields := dlog.Context{"zettel": ZettelLabel}
-	if err := r.Services.Restart(ctx, ZettelLabel); err != nil {
-		r.failed("the zettel restart failed", fields, err)
-		return fmt.Errorf("deploy: restart %s: %w", ZettelLabel, err)
+// RestartStandalone restarts standalone service S alone. Nothing else
+// depends on its socket but the daemon's own calls, which fail loudly while
+// it is out.
+func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
+	fields := dlog.Context{s.Short: s.Label}
+	if err := r.Services.Restart(ctx, s.Label); err != nil {
+		r.failed("the "+s.Short+" restart failed", fields, err)
+		return fmt.Errorf("deploy: restart %s: %w", s.Label, err)
 	}
-	r.Log.Info(opServices, "restarted zettel", fields)
+	r.Log.Info(opServices, "restarted "+s.Display, fields)
 	return nil
 }
 
-// EnsureZettelCurrent is the boot's zettel step: the service manager holds the zettel
-// service, and it runs the installed build (restarted alone when it does not).
-// It is independent of the store and the sidecar -- no shim writes into it --
-// so the boot runs it beside the bring-ups, never before a shim starts.
-func (r *Restarter) EnsureZettelCurrent(ctx context.Context) error {
-	bootstrapped, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
+// EnsureStandaloneCurrent is the boot's step for standalone service S: the
+// service manager holds it, and it runs the installed build (restarted alone
+// when it does not). It is independent of the store and the sidecar -- no
+// shim writes into it -- so the boot runs it beside the bring-ups, never
+// before a shim starts.
+func (r *Restarter) EnsureStandaloneCurrent(ctx context.Context, s Standalone) error {
+	bootstrapped, err := r.ensureLoaded(ctx, s.Label, dlog.Context{s.Short: s.Label})
 	if err != nil {
 		return err
 	}
-	return r.zettelCurrent(ctx, bootstrapped)
-}
-
-// EnsureZettelLoaded makes sure the service manager holds the zettel service, and touches
-// nothing that runs: a joining successor's zettel step, which must not
-// restart a service the incumbent is still serving through.
-func (r *Restarter) EnsureZettelLoaded(ctx context.Context) error {
-	_, err := r.ensureLoaded(ctx, ZettelLabel, dlog.Context{"zettel": ZettelLabel})
-	return err
-}
-
-// zettelCurrent restarts a running zettel that is not the installed build.
-func (r *Restarter) zettelCurrent(ctx context.Context, bootstrapped bool) error {
-	stale, err := r.runningStale(ctx, bootstrapped, ComponentZettel, ZettelLabel, buildreport.ServiceZettel)
+	stale, err := r.runningStale(ctx, bootstrapped, s.Component, s.Label, s.Service)
 	if err != nil {
 		return err
 	}
 	if stale {
-		r.Log.Info(opServices, "the running zettel is not the installed build; restarting it", nil)
-		return r.RestartZettel(ctx)
+		r.Log.Info(opServices, "the running "+s.Short+" is not the installed build; restarting it", nil)
+		return r.RestartStandalone(ctx, s)
 	}
-	r.Log.Debug(opServices, "zettel runs the installed build", nil)
+	r.Log.Debug(opServices, s.Short+" runs the installed build", nil)
 	return nil
+}
+
+// EnsureStandaloneLoaded makes sure the service manager holds standalone
+// service S, and touches nothing that runs: a joining successor's step,
+// which must not restart a service the incumbent is still serving through.
+func (r *Restarter) EnsureStandaloneLoaded(ctx context.Context, s Standalone) error {
+	_, err := r.ensureLoaded(ctx, s.Label, dlog.Context{s.Short: s.Label})
+	return err
+}
+
+// EnsureStandalonesCurrent is EnsureStandaloneCurrent for every standalone
+// service, each tried whatever the others answered; the first failure is the
+// answer.
+func (r *Restarter) EnsureStandalonesCurrent(ctx context.Context) error {
+	return eachStandalone(func(s Standalone) error { return r.EnsureStandaloneCurrent(ctx, s) })
+}
+
+// EnsureStandalonesLoaded is EnsureStandaloneLoaded for every standalone
+// service, each tried whatever the others answered.
+func (r *Restarter) EnsureStandalonesLoaded(ctx context.Context) error {
+	return eachStandalone(func(s Standalone) error { return r.EnsureStandaloneLoaded(ctx, s) })
+}
+
+// eachStandalone runs STEP for every standalone service and joins what
+// failed.
+func eachStandalone(step func(Standalone) error) error {
+	var errs []error
+	for _, s := range Standalones {
+		if err := step(s); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // EnsureCurrent is the BOOT's service step: the service manager holds both services
@@ -277,7 +330,7 @@ func (r *Restarter) EnsureCurrent(ctx context.Context) error {
 	if err := sidecar(ctx); err != nil {
 		return err
 	}
-	return r.EnsureZettelCurrent(ctx)
+	return r.EnsureStandalonesCurrent(ctx)
 }
 
 // EnsureStoreCurrent is EnsureCurrent's FIRST HALF, the one shims must wait

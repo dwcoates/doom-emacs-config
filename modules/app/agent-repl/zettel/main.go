@@ -21,8 +21,8 @@ import (
 	"syscall"
 	"time"
 
-	sharedlogging "agentrepl/logging"
 	"agentrepl/logging/buildreport"
+	"agentrepl/logging/recordlog"
 	"agentrepl/zettel/internal/graph"
 	"agentrepl/zettel/internal/server"
 	"agentrepl/zettel/internal/zlog"
@@ -110,43 +110,17 @@ func run(socketPath, dbPath, logPath string) (err error) {
 }
 
 func openLog(path string) (*zlog.Logger, func(), error) {
-	selection, err := sharedlogging.SelectLevel(os.Getenv("AGENT_REPL_LOG_LEVEL"), os.Getenv(sharedlogging.UntilEnvironment), time.Now())
+	log, closeFile, err := recordlog.Open(zlog.Runtime, path, os.Stderr, os.Getenv, time.Now)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return nil, nil, err
-	}
-	file, err := sharedlogging.OpenRotating(path, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
-	if err != nil {
-		return nil, nil, err
-	}
-	log := zlog.New(file, os.Stderr, sharedlogging.NewWindow(selection, time.Now), time.Now)
-	if message, ok := selection.Note(); ok {
-		log.Info("zettel.logging.level-window", message, zlog.Context(selection.Context()))
-	}
-	return log, func() { _ = file.Close() }, nil
+	return log, func() { _ = closeFile() }, nil
 }
 
 // reportBuild writes zettel's build report so the daemon's deploy can tell
-// whether it runs the fresh build. A failure is logged and serving goes on: a
-// missing report only makes the deploy restart zettel.
+// whether it runs the fresh build (buildreport.Announce).
 func reportBuild(log *zlog.Logger) {
-	r, err := buildreport.Self()
-	if err != nil {
-		log.Error("zettel.buildreport", "zettel could not determine its own build", zlog.Context{"cause": err.Error()})
-		return
-	}
-	dir, err := buildreport.ResolveDir(os.Getenv)
-	if err != nil {
-		log.Error("zettel.buildreport", "zettel could not resolve its build report directory", zlog.Context{"cause": err.Error()})
-		return
-	}
-	if err := buildreport.Write(dir, buildreport.ServiceZettel, r); err != nil {
-		log.Error("zettel.buildreport", "zettel failed to write its build report", zlog.Context{"cause": err.Error(), "dir": dir})
-		return
-	}
-	log.Info("zettel.buildreport", "zettel reported its build", zlog.Context{"build": r.Build, "path": buildreport.Path(dir, buildreport.ServiceZettel)})
+	buildreport.Announce(buildreport.ServiceZettel, "zettel.buildreport", log, os.Getenv)
 }
 
 func cacheDir(home string) string {

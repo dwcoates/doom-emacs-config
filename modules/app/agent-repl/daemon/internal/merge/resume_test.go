@@ -714,7 +714,6 @@ func TestAMergeSuspendedMidGateResumesAfterARestartAndLands(t *testing.T) {
 	h.emacsRepo()
 	h.landsCleanly(mergeSHA)
 	inGate, release := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() { close(release) })
 	h.runner.before = func() {
 		close(inGate)
 		<-release
@@ -729,6 +728,9 @@ func TestAMergeSuspendedMidGateResumesAfterARestartAndLands(t *testing.T) {
 	h.runner.before = nil
 	h.runner.mu.Unlock()
 	h.gatePasses("daemon")
+	// The gate's run goes on on the test service across the restart, and
+	// passes there.
+	close(release)
 	// The tree as the dead run's finished rebase left it: the branch on the
 	// target's tip.
 	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
@@ -744,6 +746,9 @@ func TestAMergeSuspendedMidGateResumesAfterARestartAndLands(t *testing.T) {
 	heads := h.feed.headIDs()
 	if heads[len(heads)-1] != headIDOf(lease.ID) {
 		t.Fatalf("the last head is %s, want the suspended run's bubble", heads[len(heads)-1])
+	}
+	if started := h.tests.started(); len(started) != 1 {
+		t.Fatalf("started %d runs, want the one the restart left going", len(started))
 	}
 }
 

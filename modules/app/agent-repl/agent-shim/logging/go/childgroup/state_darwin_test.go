@@ -1,4 +1,4 @@
-package procgroup
+package childgroup
 
 import "testing"
 

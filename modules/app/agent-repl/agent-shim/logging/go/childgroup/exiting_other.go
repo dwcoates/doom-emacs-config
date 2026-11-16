@@ -1,6 +1,6 @@
 //go:build !linux && !darwin
 
-package procgroup
+package childgroup
 
 import (
 	"fmt"

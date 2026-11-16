@@ -1,0 +1,64 @@
+// endpoint_start_run.proto — StartRun: start one command in a directory.
+
+syntax = "proto3";
+
+package testservice.v1;
+
+import "testservice/v1/run.proto";
+
+option go_package = "agentrepl/proto/testservice/v1;testservicev1";
+
+// Starts ARGV in DIR, in a process group of its own, its environment the
+// service's own scrubbed of every repository-selecting git variable, plus
+// ENV.
+message StartRunRequest {
+  // The working directory. REQUIRED, and it must exist.
+  string dir = 1;
+  // The command and its arguments. REQUIRED, at least the command.
+  repeated string argv = 2;
+  // Added to the environment, each "KEY=value"; a key here overrides the
+  // inherited one.
+  repeated string env = 3;
+  // Who the run is for, in one line, for the service's records (a
+  // workspace's name and its round). REQUIRED.
+  string label = 4;
+}
+
+// The outcome of StartRun.
+message StartRunResponse {
+  oneof result {
+    StartRunSuccess success = 1;
+    StartRunFailure failure = 2;
+  }
+}
+
+// The run started.
+message StartRunSuccess {
+  RunId run = 1;
+}
+
+// The run could not be started.
+message StartRunFailure {
+  // A one-line account of the failure, for the caller's record.
+  string detail = 1;
+  oneof kind {
+    // A required field was missing or empty.
+    StartRunInvalidRequest invalid_request = 2;
+    // The command could not be spawned (no such program, no such directory).
+    StartRunUnstartable unstartable = 3;
+    // The run's output could not be recorded.
+    StartRunStorageFailure storage_failure = 4;
+  }
+}
+
+// A required field was missing or empty.
+message StartRunInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// The command could not be spawned.
+message StartRunUnstartable {}
+
+// The run's output could not be recorded.
+message StartRunStorageFailure {}

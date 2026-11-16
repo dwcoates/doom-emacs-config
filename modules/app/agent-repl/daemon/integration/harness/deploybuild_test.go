@@ -100,7 +100,7 @@ func readOrFail(t *testing.T, path string) string {
 // build, so a world can restate them under a handover successor once the
 // incumbent StageDeployBuild named has exited.
 func TestStateServiceBuildsNamesThePidItIsGiven(t *testing.T) {
-	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel} {
+	for _, service := range []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests} {
 		t.Run(service, func(t *testing.T) {
 			// Arrange
 			d := &Daemon{t: t, LockDir: t.TempDir(), Deploy: &DeployBuilder{}}
@@ -130,8 +130,8 @@ func TestPlaceholderServicesAreTheOnesNoWorldRunsForReal(t *testing.T) {
 		sources DeploySources
 		want    []string
 	}{
-		{name: "no real services", sources: DeploySources{}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel}},
-		{name: "a real store and sidecar", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar"}, want: []string{buildreport.ServiceZettel}},
+		{name: "no real services", sources: DeploySources{}, want: []string{buildreport.ServiceStore, buildreport.ServiceSidecar, buildreport.ServiceZettel, buildreport.ServiceTests}},
+		{name: "a real store and sidecar", sources: DeploySources{Store: "/bin/store", Sidecar: "/bin/sidecar"}, want: []string{buildreport.ServiceZettel, buildreport.ServiceTests}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

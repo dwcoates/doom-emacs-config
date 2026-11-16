@@ -1,6 +1,6 @@
 //go:build darwin
 
-package procgroup
+package childgroup
 
 import (
 	"os/exec"

@@ -529,10 +529,10 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps, *harness)) *h
 			h.ensures.Add(1)
 			return h.ensureErr
 		},
-		EnsureSidecar: func(context.Context) error { return nil },
-		EnsureZettel:  func(context.Context) error { return nil },
-		Now:           func() time.Time { return instant },
-		Log:           log,
+		EnsureSidecar:     func(context.Context) error { return nil },
+		EnsureStandalones: func(context.Context) error { return nil },
+		Now:               func() time.Time { return instant },
+		Log:               log,
 	}
 	for _, a := range adjust {
 		a(&h.deps, h)

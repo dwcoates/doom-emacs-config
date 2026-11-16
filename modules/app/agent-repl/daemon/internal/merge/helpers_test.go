@@ -3093,7 +3093,10 @@ type harness struct {
 	footer  *fakeFooter
 	sidebar *fakeSidebar
 	runner  *fakeRunner
-	logs    *dlog.TestSurfaces
+	// tests is the test service every gate runs on, its runs played by
+	// runner (fakeTestService).
+	tests *fakeTestService
+	logs  *dlog.TestSurfaces
 	// registryPublishes counts PublishRegistry calls, and publishErr, when
 	// set, fails every one.
 	registryPublishes int
@@ -3520,6 +3523,7 @@ func newHarness(t *testing.T) *harness {
 		freeness: &fakeFreeness{},
 		meter:    &fakeMeter{},
 	}
+	h.tests = newFakeTestService(t, h.runner)
 	h.detached = &fakeDetached{h: h}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
 	h.events = &fakeQueueEvents{}
@@ -3590,6 +3594,7 @@ func (h *harness) deps() Deps {
 			return []string{"bash", h.script}
 		},
 		TestRunner: h.runner,
+		Tests:      h.tests,
 		Painter:    fakePainter{},
 		PublishRegistry: func(context.Context) error {
 			h.mu.Lock()

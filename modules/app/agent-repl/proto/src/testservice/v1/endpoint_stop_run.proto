@@ -1,0 +1,48 @@
+// endpoint_stop_run.proto — StopRun: end a run no longer wanted.
+
+syntax = "proto3";
+
+package testservice.v1;
+
+import "testservice/v1/run.proto";
+
+option go_package = "agentrepl/proto/testservice/v1;testservicev1";
+
+// Kills RUN's whole process group. A run already ended is left as it ended:
+// stopping it is success, and its end says how it really ended.
+message StopRunRequest {
+  // The run to stop. REQUIRED.
+  RunId run = 1;
+}
+
+// The outcome of StopRun.
+message StopRunResponse {
+  oneof result {
+    StopRunSuccess success = 1;
+    StopRunFailure failure = 2;
+  }
+}
+
+// The run is stopped, or had already ended.
+message StopRunSuccess {}
+
+// The run could not be stopped.
+message StopRunFailure {
+  // A one-line account of the failure, for the caller's record.
+  string detail = 1;
+  oneof kind {
+    // A required field was missing or empty.
+    StopRunInvalidRequest invalid_request = 2;
+    // The service holds no run of that id.
+    StopRunUnknownRun unknown_run = 3;
+  }
+}
+
+// A required field was missing or empty.
+message StopRunInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// The service holds no run of that id.
+message StopRunUnknownRun {}
