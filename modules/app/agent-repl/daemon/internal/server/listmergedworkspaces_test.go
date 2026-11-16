@@ -3,17 +3,26 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"slices"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // mergedRow is a merged page's row of workspace ID.
@@ -192,5 +201,154 @@ func TestListMergedWorkspacesRefusesAMalformedRequest(t *testing.T) {
 				t.Fatalf("err = %v, pages asked %d; want invalid_argument and none", err, len(h.Sidebar.pages))
 			}
 		})
+	}
+}
+
+// ---- the endpoint's latency, measured over the real Connect transport ----
+
+// infoLogger is a Logger at the daemon's default threshold, info: it drops
+// every debug record, as a production daemon does, and keeps the rest in
+// BASE.
+type infoLogger struct{ base dlog.Logger }
+
+func (l infoLogger) Debug(string, string, dlog.Context) {}
+func (l infoLogger) Info(o, m string, c dlog.Context)   { l.base.Info(o, m, c) }
+func (l infoLogger) Warn(o, m string, c dlog.Context)   { l.base.Warn(o, m, c) }
+func (l infoLogger) Error(o, m string, c dlog.Context)  { l.base.Error(o, m, c) }
+func (l infoLogger) With(c dlog.Context) dlog.Logger    { return infoLogger{base: l.base.With(c)} }
+func (l infoLogger) Enabled(level string) bool          { return level != dlog.LevelDebug }
+
+// infoSurfaces are test surfaces whose loggers are infoLoggers.
+type infoSurfaces struct{ *dlog.TestSurfaces }
+
+func (s infoSurfaces) Global() dlog.Logger { return infoLogger{base: s.TestSurfaces.Global()} }
+func (s infoSurfaces) WorkspaceOrCentral(dir string) dlog.Logger {
+	return infoLogger{base: s.TestSurfaces.WorkspaceOrCentral(dir)}
+}
+
+// liveShapeRegistry is the owner's live registry shape (2026-11-16): about
+// 660 merged workspaces across 8 repositories and 500 open, hidden or closed
+// ones, every one at its own place, merged ones a minute apart, each with a
+// commit count.
+func liveShapeRegistry() sidebar.Registry {
+	epoch := time.UnixMilli(1_700_000_000_000)
+	var reg sidebar.Registry
+	for i := range 8 {
+		reg.Repositories = append(reg.Repositories, wsm.Repository{
+			ID: wsm.RepoID(fmt.Sprintf("repo-%d", i)), Dir: fmt.Sprintf("/repos/%d", i),
+			Name: fmt.Sprintf("repo-%d", i), DefaultBranch: "main", Place: int64(i + 1)})
+	}
+	place := int64(0)
+	add := func(ws wsm.Workspace) {
+		place++
+		ws.Place = place
+		reg.Workspaces = append(reg.Workspaces, ws)
+	}
+	base := func(kind string, i int) wsm.Workspace {
+		repo := reg.Repositories[i%len(reg.Repositories)]
+		id := fmt.Sprintf("%s-%04d", kind, i)
+		commits := uint32(i%7 + 1)
+		return wsm.Workspace{ID: wsm.WorkspaceID(id), Repo: repo.ID, Dir: repo.Dir + "/" + id, Name: id,
+			Branch: "branch/" + id, ParentBranch: "main", CreatedAt: epoch.Add(time.Duration(i) * time.Second), CommitCount: &commits}
+	}
+	for i := range 660 {
+		ws := base("merged", i)
+		at := epoch.Add(-time.Duration(i) * time.Minute)
+		ws.Closed, ws.MergedAt = true, &at
+		add(ws)
+	}
+	for i := range 500 {
+		ws := base("other", i)
+		switch {
+		case i%5 == 0:
+			hidden := epoch
+			ws.Hidden, ws.HiddenAt = true, &hidden
+		case i%5 == 1 || i%5 == 2:
+			ws.Closed = true
+		}
+		add(ws)
+	}
+	reg.View = wsm.DefaultSidebarView
+	return reg
+}
+
+// mergedPageServer serves ListMergedWorkspaces from a real sidebar resolver
+// holding the live-shaped registry, over httptest with h2c, and answers a
+// real Connect client dialed to it.
+func mergedPageServer(b *testing.B) agentreplv1connect.AgentReplClient {
+	b.Helper()
+	colors, err := vocab.LoadRenderColors("../../../proto/vocab")
+	if err != nil {
+		b.Fatalf("load render colors: %v", err)
+	}
+	surfaces := infoSurfaces{dlog.NewTestSurfaces()}
+	foot, err := footer.New(colors, surfaces)
+	if err != nil {
+		b.Fatalf("footer.New: %v", err)
+	}
+	roster, err := sidebar.New(colors, surfaces, foot)
+	if err != nil {
+		b.Fatalf("sidebar.New: %v", err)
+	}
+	reg := liveShapeRegistry()
+	dir := b.TempDir()
+	for _, ws := range reg.Workspaces {
+		if err := foot.SetWorkspaceDir(ws.ID, dir); err != nil {
+			b.Fatalf("SetWorkspaceDir: %v", err)
+		}
+	}
+	roster.SetRegistry(reg)
+	s := &server{deps: Deps{Sidebar: roster}, log: surfaces.Global()}
+	path, handler := agentreplv1connect.NewAgentReplHandler(mergedOnly{s: s})
+	mux := http.NewServeMux()
+	mux.Handle(path, handler)
+	srv := httptest.NewServer(H2C(mux, surfaces.Global()))
+	b.Cleanup(srv.Close)
+	return agentreplv1connect.NewAgentReplClient(h2cClient(), srv.URL)
+}
+
+// mergedOnly is the AgentRepl service answering ListMergedWorkspaces alone,
+// through the real handler.
+type mergedOnly struct {
+	agentreplv1connect.UnimplementedAgentReplHandler
+	s *server
+}
+
+func (m mergedOnly) ListMergedWorkspaces(ctx context.Context, req *connect.Request[agentreplv1.ListMergedWorkspacesRequest]) (*connect.Response[agentreplv1.ListMergedWorkspacesResponse], error) {
+	return m.s.ListMergedWorkspaces(ctx, req)
+}
+
+// BenchmarkListMergedWorkspaces measures one page's round trip over the
+// real Connect transport against the live registry shape, per scope, order
+// and page, reporting each call's p50, p90 and max. Run with -benchtime=200x
+// for the owner's 200-call figure.
+func BenchmarkListMergedWorkspaces(b *testing.B) {
+	client := mergedPageServer(b)
+	orders := map[string]*agentreplv1.ListMergedWorkspacesOrder{
+		"merged":  byMerge(),
+		"created": {Order: &agentreplv1.ListMergedWorkspacesOrder_MostRecentlyCreated{MostRecentlyCreated: &agentreplv1.ListMergedWorkspacesOrderCreated{}}},
+	}
+	scopes := map[string]*workspacev1.RepositoryRef{"every-repository": nil, "one-repository": {Id: "repo-3"}}
+	for _, scope := range []string{"every-repository", "one-repository"} {
+		for _, order := range []string{"merged", "created"} {
+			for _, page := range []uint32{0, 5, 1000} {
+				b.Run(fmt.Sprintf("%s/%s/page-%d", scope, order, page), func(b *testing.B) {
+					req := &agentreplv1.ListMergedWorkspacesRequest{Repository: scopes[scope], Order: orders[order], Page: page}
+					took := make([]time.Duration, 0, b.N)
+					for b.Loop() {
+						start := time.Now()
+						resp, err := client.ListMergedWorkspaces(context.Background(), connect.NewRequest(req))
+						took = append(took, time.Since(start))
+						if err != nil || resp.Msg.GetSuccess() == nil {
+							b.Fatalf("ListMergedWorkspaces = %v, %v", resp, err)
+						}
+					}
+					slices.Sort(took)
+					b.ReportMetric(float64(took[len(took)/2].Microseconds()), "p50-µs")
+					b.ReportMetric(float64(took[len(took)*9/10].Microseconds()), "p90-µs")
+					b.ReportMetric(float64(took[len(took)-1].Microseconds()), "max-µs")
+				})
+			}
+		}
 	}
 }
