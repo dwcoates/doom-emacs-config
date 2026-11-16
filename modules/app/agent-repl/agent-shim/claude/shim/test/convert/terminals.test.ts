@@ -21,6 +21,7 @@ import {
   convertResult,
   openingApiFailure,
   redactVendorMessage,
+  turnEnding,
   VENDOR_MESSAGE_MAX,
 } from "../../src/convert/terminals.js";
 import type { VendorApiError } from "../../src/convert/terminals.js";
@@ -607,4 +608,27 @@ describe("openingApiFailure", () => {
     // Assert.
     expect(failure.message).toBe(text);
   });
+});
+
+describe("turnEnding", () => {
+  const cases: Array<{ name: string; result: Record<string, unknown>; want: string }> = [
+    { name: "a completed terminal_reason is completed", result: { terminal_reason: "completed", subtype: "success" }, want: "completed" },
+    { name: "an unstated reason on a clean success is completed", result: { subtype: "success", is_error: false }, want: "completed" },
+    { name: "a stop mid-stream is a user stop", result: { terminal_reason: "aborted_streaming", is_error: true }, want: "user_stop" },
+    { name: "a stop mid-tools is a user stop", result: { terminal_reason: "aborted_tools", is_error: true }, want: "user_stop" },
+    { name: "an API error is a failure", result: { terminal_reason: "api_error", is_error: true }, want: "failed" },
+    { name: "a success flagged as an error is a failure", result: { subtype: "success", is_error: true }, want: "failed" },
+  ];
+  for (const tc of cases) {
+    it(tc.name, () => {
+      // Arrange.
+      const message = { type: "result", uuid: "u", session_id: "s", ...tc.result } as unknown as Extract<SdkMessage, { type: "result" }>;
+
+      // Act.
+      const ending = turnEnding(message);
+
+      // Assert.
+      expect(ending).toBe(tc.want);
+    });
+  }
 });

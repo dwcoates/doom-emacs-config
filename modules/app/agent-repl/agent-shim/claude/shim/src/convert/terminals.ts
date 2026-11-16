@@ -26,6 +26,7 @@ import { classifyAgentFailure, networkCodeIn } from "../engine/network-resume.js
 import { terminalEntry } from "./entries.js";
 import type { FoldContext } from "./fold-context.js";
 import type { FoldOutput } from "./fold.js";
+import type { TurnEnding } from "./stream-events.js";
 
 const LOGGER = bindLog({ component: "shim-convert-terminals", operation: "shim.convert.terminals" });
 
@@ -400,6 +401,21 @@ function accumulatedErrors(raw: RawResult): string[] {
  * tool call still open when it lands was cut by it, and nothing else in the
  * fold can recognize the two reasons that mean "the user stopped this".
  */
+/** Whether the vendor's result says the turn completed: the two success shapes. */
+function turnCompleted(raw: RawResult): boolean {
+  const reason = raw.terminal_reason;
+  return reason === "completed" || (reason === undefined && raw.subtype === "success" && raw.is_error !== true);
+}
+
+/**
+ * How the turn `message` ends, as the stream's unsettled units are judged:
+ * completed, stopped by the user, or failed (every other ending).
+ */
+export function turnEnding(message: Extract<SdkMessage, { type: "result" }>): TurnEnding {
+  if (turnCompleted(message as unknown as RawResult)) return "completed";
+  return isUserStop(message) ? "user_stop" : "failed";
+}
+
 export function isUserStop(message: Extract<SdkMessage, { type: "result" }>): boolean {
   const reason = (message as unknown as RawResult).terminal_reason;
   return reason === "aborted_streaming" || reason === "aborted_tools";
@@ -465,7 +481,7 @@ export function convertResult(
   };
 
   // ---- The two success shapes -------------------------------------------
-  if (reason === "completed" || (reason === undefined && raw.subtype === "success" && raw.is_error !== true)) {
+  if (turnCompleted(raw)) {
     LOGGER.info({ turn: context.turnId?.value }, "the turn completed");
     const result: conversationv1.AgentFrame["result"] = {
       case: "success",

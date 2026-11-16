@@ -116,6 +116,7 @@ import {
   convertStreamEvent,
   convertModelRefusal,
   convertThinkingTokens,
+  settleCutUnits,
   StreamBlocks,
 } from "./stream-events.js";
 import {
@@ -123,6 +124,7 @@ import {
   absorbedTurnTerminal,
   convertResult,
   isUserStop,
+  turnEnding,
   type VendorApiError,
 } from "./terminals.js";
 import { convertToolProgressMessage, convertUserRecord } from "./tool-results.js";
@@ -423,8 +425,12 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // this turn's vendor never stated.
       const vendorApiError = state.vendorApiError ?? {};
       state.vendorApiError = undefined;
-      // THE MAIN STREAM ENDS WITH ITS TURN, `message_stop` or not.
-      state.streams.endTurn();
+      // THE MAIN STREAM ENDS WITH ITS TURN, `message_stop` or not, and what
+      // it left unsettled is judged by how the turn ended: a stop or a failure
+      // cut it, and it settles as cut before the terminal.
+      const ending = turnEnding(message);
+      const cutUnits = state.streams.endTurn(ending);
+      const settled = ending === "completed" ? [] : settleCutUnits(message, context, cutUnits, ending);
       // A CUT NEVER OUTLIVES ITS TURN. One still held here is a summary the
       // vendor never stated, and holding it into the next turn is what left a
       // compaction undrawn for minutes. It lands before the terminal, which
@@ -444,7 +450,7 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
         { vendorUuid: message.uuid },
         isUserStop(message),
       );
-      const before = [...released, ...cut];
+      const before = [...released, ...settled, ...cut];
       return before.length === 0 ? output : { ...output, entries: [...before, ...output.entries] };
     }
 

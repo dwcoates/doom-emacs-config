@@ -977,7 +977,7 @@ describe("a stream's block state", () => {
     streams.beginResponse(null, MAIN_ID);
 
     // Act.
-    streams.endTurn();
+    streams.endTurn("completed");
 
     // Assert.
     expect(streams.openStreams).toBe(0);
@@ -989,7 +989,7 @@ describe("a stream's block state", () => {
     streams.beginResponse(SPAWN, SUB_ID);
 
     // Act.
-    streams.endTurn();
+    streams.endTurn("completed");
 
     // Assert.
     expect(streams.openResponse(SPAWN)?.messageId).toBe(SUB_ID);
@@ -1023,7 +1023,11 @@ describe("a stream's block state", () => {
     // Arrange.
     const streams = new StreamBlocks();
     const state = streams.beginResponse(null, MAIN_ID);
-    state.unsettled.set(1, create(conversationv1.AgentActivityIdSchema, { value: `${MAIN_ID}:1` }));
+    state.unsettled.set(1, {
+      activityId: create(conversationv1.AgentActivityIdSchema, { value: `${MAIN_ID}:1` }),
+      kind: "response",
+      prose: "",
+    });
 
     // Act.
     streams.settledBelow(null, 1);
@@ -1087,11 +1091,13 @@ describe("a streamed unit its stream started and never settled", () => {
   });
 
   it("names the main stream as `main`", () => {
-    // Arrange, Act.
+    // Arrange, Act: the main stream's message_stop holds the unit for the
+    // turn's end, which a completed turn reports.
     const reports = unsettledReports([
       eventOn(null, start(MAIN_ID), "u-m-start"),
       eventOn(null, blockStart(0, "thinking"), "u-m-b0"),
       eventOn(null, STOP, "u-m-stop"),
+      { type: "result", subtype: "success", is_error: false, result: "done", uuid: "u-r", session_id: "session-1" } as unknown as SdkMessage,
     ]);
 
     // Assert.

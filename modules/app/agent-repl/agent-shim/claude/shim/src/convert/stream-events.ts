@@ -38,6 +38,16 @@
  * id and the unit id, at whichever of those ends comes first — or at the
  * assistant line that moves past it. Nothing patches the row up.
  *
+ * EXCEPT A UNIT ITS TURN CUT. A user stop or a vendor request that fails
+ * mid-arrival ends the main stream's response with `message_stop` and no
+ * assistant line for the open block (2026-11-16: an interrupt at 18:30:14.275,
+ * the `message_stop` 3ms later, the result naming the user stop 2ms after
+ * that). Whether that is a violation is the TURN's to say, so what the main
+ * stream leaves unsettled at its `message_stop` is held to the turn's end
+ * ({@link StreamBlocks.endTurn}): a turn that completed reports it as above,
+ * and a turn that was stopped or failed settles it as cut
+ * ({@link settleCutUnits}), carrying the prose that arrived.
+ *
  * # Usage rides ONE unit
  *
  * A response's cost is a fact about the RESPONSE, and a response yields several
@@ -107,8 +117,30 @@ export interface BlockState {
    * or reasoning) that no assistant line has settled yet, by block index.
    * Whatever is still here when the stream moves past it is a stuck bubble.
    */
-  readonly unsettled: Map<number, conversationv1.AgentActivityId>;
+  readonly unsettled: Map<number, UnsettledUnit>;
 }
+
+/** A unit a stream started and no assistant line has settled yet. */
+export interface UnsettledUnit {
+  readonly activityId: conversationv1.AgentActivityId;
+  /** Prose or reasoning: which terminal settles it if its turn cuts it. */
+  readonly kind: "response" | "thinking";
+  /** The prose that arrived, so a cut response still shows what was said. */
+  prose: string;
+}
+
+/** A unit the main stream started that its turn cut, with where it sat. */
+export interface CutUnit {
+  readonly messageId: string;
+  readonly index: number;
+  readonly unit: UnsettledUnit;
+}
+
+/**
+ * How the turn ended, as the converters judge the units it left unsettled:
+ * completed (a unit left is a violation), stopped by the user, or failed.
+ */
+export type TurnEnding = "completed" | "user_stop" | "failed";
 
 /** The key of the MAIN stream; a spawning call's id is never empty. */
 const MAIN_STREAM = "";
@@ -137,21 +169,26 @@ function reportUnsettled(
   at: UnsettledAt,
   stillOpen: (index: number) => boolean = () => false,
 ): void {
-  for (const [index, activityId] of state.unsettled) {
+  for (const [index, unit] of state.unsettled) {
     if (stillOpen(index)) continue;
     state.unsettled.delete(index);
-    LOGGER.error(
-      {
-        stream: streamLabel(key),
-        message_id: state.messageId,
-        activity_id: activityId.value,
-        block_index: index,
-        detected_at: at,
-        detail: `the stream reached ${at} with unit ${activityId.value} started and never settled`,
-      },
-      "invariant violated: a streamed unit was started and never settled; its row stays unsettled",
-    );
+    reportOneUnsettled(key, state.messageId, index, unit, at);
   }
+}
+
+/** Log one started-and-never-settled unit as the invariant violation it is. */
+function reportOneUnsettled(key: string, messageId: string, index: number, unit: UnsettledUnit, at: UnsettledAt): void {
+  LOGGER.error(
+    {
+      stream: streamLabel(key),
+      message_id: messageId,
+      activity_id: unit.activityId.value,
+      block_index: index,
+      detected_at: at,
+      detail: `the stream reached ${at} with unit ${unit.activityId.value} started and never settled`,
+    },
+    "invariant violated: a streamed unit was started and never settled; its row stays unsettled",
+  );
 }
 
 /**
@@ -167,6 +204,12 @@ function reportUnsettled(
  */
 export class StreamBlocks {
   readonly #open = new Map<string, BlockState>();
+  /**
+   * What the MAIN stream left unsettled at a `message_stop`, held for the
+   * turn's end to judge (endTurn): a stop or a failure cuts the response
+   * with a `message_stop` and no assistant line.
+   */
+  #heldForTurn: CutUnit[] = [];
 
   /** How many streams have a response open. */
   get openStreams(): number {
@@ -218,18 +261,57 @@ export class StreamBlocks {
     if (state !== undefined) reportUnsettled(key, state, "assistant", (open) => open >= index);
   }
 
-  /** Close the stream's response at its `message_stop`, reporting what never settled. */
+  /**
+   * Close the stream's response at its `message_stop`. A subagent's stream
+   * reports what never settled; the MAIN stream holds it for the turn's end,
+   * which knows whether the turn cut it (endTurn).
+   */
   endResponse(parentToolUseId: unknown): void {
-    this.#drop(streamKeyOf(parentToolUseId), "message_stop");
+    const key = streamKeyOf(parentToolUseId);
+    const state = this.#open.get(key);
+    if (key !== MAIN_STREAM || state === undefined) {
+      this.#drop(key, "message_stop");
+      return;
+    }
+    for (const [index, unit] of state.unsettled) {
+      this.#heldForTurn.push({ messageId: state.messageId, index, unit });
+      LOGGER.logVerbose(
+        { message_id: state.messageId, activity_id: unit.activityId.value, block_index: index },
+        "the main stream stopped with a unit unsettled; the turn's end judges it",
+      );
+    }
+    this.#open.delete(key);
   }
 
   /**
-   * Drop the MAIN stream's response because the turn ended, reporting what
-   * never settled. A stop or a failure can end the turn with no `message_stop`;
-   * a subagent's stream is not the turn's and outlives it when backgrounded.
+   * Drop the MAIN stream's response because the turn ended, and judge every
+   * unit it started and never settled, the ones held at a `message_stop`
+   * included. A turn that COMPLETED reports each as a violation and answers
+   * none; a turn that was stopped or failed cut them, and answers them for
+   * settling as cut (settleCutUnits). A stop or a failure can end the turn
+   * with no `message_stop`; a subagent's stream is not the turn's and outlives
+   * it when backgrounded.
    */
-  endTurn(): void {
+  endTurn(ending: TurnEnding): readonly CutUnit[] {
+    const units: Array<CutUnit & { readonly at: UnsettledAt }> = this.#heldForTurn.map((u) => ({ ...u, at: "message_stop" }));
+    this.#heldForTurn = [];
+    const state = this.#open.get(MAIN_STREAM);
+    if (state !== undefined) {
+      for (const [index, unit] of state.unsettled) units.push({ messageId: state.messageId, index, unit, at: "turn_end" });
+      state.unsettled.clear();
+    }
     this.#drop(MAIN_STREAM, "turn_end");
+    if (ending === "completed") {
+      for (const u of units) reportOneUnsettled(MAIN_STREAM, u.messageId, u.index, u.unit, u.at);
+      return [];
+    }
+    for (const u of units) {
+      LOGGER.info(
+        { message_id: u.messageId, activity_id: u.unit.activityId.value, block_index: u.index, ending, detected_at: u.at },
+        "the turn cut a unit its stream started; it settles as cut",
+      );
+    }
+    return units.map(({ messageId, index, unit }) => ({ messageId, index, unit }));
   }
 
   /**
@@ -409,7 +491,7 @@ export function convertStreamEvent(
       const activityId = blockActivityId(messageId, index);
       const kind = event.content_block?.type;
       if (kind === "text") {
-        state.unsettled.set(index, activityId);
+        state.unsettled.set(index, { activityId, kind: "response", prose: "" });
         LOGGER.logVerbose({ message_id: messageId, index }, "a prose block opened");
         return [
           activityEntry(
@@ -429,7 +511,7 @@ export function convertStreamEvent(
       }
       if (kind === "thinking" || kind === "redacted_thinking") {
         state.openThinking = activityId;
-        state.unsettled.set(index, activityId);
+        state.unsettled.set(index, { activityId, kind: "thinking", prose: "" });
         LOGGER.logVerbose({ message_id: messageId, index, kind }, "a reasoning block opened");
         return [
           activityEntry(
@@ -467,6 +549,9 @@ export function convertStreamEvent(
       const activityId = blockActivityId(state.messageId, index);
       const delta = event.delta;
       if (delta?.type === "text_delta" && typeof delta.text === "string") {
+        // Kept for a cut: a turn that stops mid-block settles it with this.
+        const unsettled = state.unsettled.get(index);
+        if (unsettled !== undefined) unsettled.prose += delta.text;
         return [
           activityEntry(
             context,
@@ -1014,4 +1099,66 @@ export function convertThinkingTokens(
       }),
     ),
   ];
+}
+
+// ---------------------------------------------------------------------------
+// Units a turn cut
+// ---------------------------------------------------------------------------
+
+/**
+ * The terminals of the units turn-ending `message` cut (StreamBlocks.endTurn):
+ * a response settles as a failure carrying the prose that arrived, ABORTED
+ * for a user stop and REQUEST_FAILED for a turn that failed; a reasoning block
+ * settles as a failure. Each lands on the unit its stream started, so the
+ * bubble stops building.
+ */
+export function settleCutUnits(
+  message: Extract<SdkMessage, { type: "result" }>,
+  context: FoldContext,
+  cut: readonly CutUnit[],
+  ending: Exclude<TurnEnding, "completed">,
+): readonly PersistEntry[] {
+  return cut.map(({ index, unit }) => {
+    const origin: FrameOrigin = {
+      agentId: context.mainAgentId,
+      vendorUuid: message.uuid,
+      blockIndex: index,
+      discriminator: `activity.${unit.kind}.failure.cut`,
+    };
+    if (unit.kind === "thinking") {
+      return activityEntry(
+        context,
+        origin,
+        agentActivity(unit.activityId, {
+          case: "thinking",
+          value: create(conversationv1.AgentThinkingSchema, {
+            result: { case: "failure", value: create(conversationv1.AgentThinkingFailureSchema, {}) },
+          }),
+        }),
+      );
+    }
+    const reason = create(conversationv1.AgentResponseFailureReasonSchema, {
+      reason:
+        ending === "user_stop"
+          ? { case: "aborted", value: create(conversationv1.AgentResponseAbortedSchema, {}) }
+          : { case: "requestFailed", value: create(conversationv1.AgentResponseRequestFailedSchema, {}) },
+    });
+    return activityEntry(
+      context,
+      origin,
+      agentActivity(unit.activityId, {
+        case: "response",
+        value: create(conversationv1.AgentResponseSchema, {
+          result: {
+            case: "failure",
+            value: create(conversationv1.AgentResponseFailureSchema, {
+              prose: prose(unit.prose),
+              reason,
+              settledAt: recordSettledAt(message, context),
+            }),
+          },
+        }),
+      }),
+    );
+  });
 }
