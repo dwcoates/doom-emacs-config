@@ -16,7 +16,6 @@ import type { ArrangeHold } from "./arrange.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowHover } from "./row-hover.js";
 import type { RowMenus } from "./row-menu.js";
-import type { RowReveal } from "./reveal.js";
 import type { SelectionFade } from "./selection-fade.js";
 import type { FoldFade } from "./fold-fade.js";
 import type { DrawnView, SidebarView } from "./view.js";
@@ -60,8 +59,6 @@ export interface RailContext {
   rowMenus: RowMenus;
   /** Where a drawn row's attention marker is registered (`attention.ts`). */
   attention: AttentionMarks;
-  /** Draws a row the first time it comes into view (`reveal.ts`). */
-  reveal: RowReveal;
   /** The highlighted row's number fade, across redraws (`selection-fade.ts`). */
   selectionFade: SelectionFade;
   /** The fade of a row a fold stops drawing, across redraws (`fold-fade.ts`). */

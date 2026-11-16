@@ -93,7 +93,7 @@ import { applyNameTint, nameTint } from "./name-tint.js";
 import { markColdGatedName } from "./cold-gate-name.js";
 import { drawNameInk } from "./name-ink.js";
 import { drawNamePrefix } from "../name-prefix.js";
-import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
+import { guardMalformed } from "../rpc/guard.js";
 import type { Rect } from "../topbar/clamp.js";
 import { placeBeside, viewportOf } from "../placement.js";
 import {
@@ -474,53 +474,19 @@ export function drawRosterRow(
   return ws;
 }
 
-/** The attribute a row's stand-in carries until the row is drawn in its place. */
-export const STAND_IN_ATTRIBUTE = "data-stand-in";
-
-/**
- * A row's STAND-IN: the row's box, its line and its name, and its visible
- * children's stand-ins, and nothing else (`reveal.ts`). It is as tall as the
- * row wherever the row's line height is pinned (the Recently Merged band's
- * is), and it is what the band's fit counts and the search narrows, so
- * neither can tell it from the row. Only the parts it reads are validated;
- * the rest of the row is validated when it is drawn.
- */
-export function drawRosterRowStandIn(family: RowFamily, familyPath: string): HTMLElement {
-  const path = `${familyPath}.row`;
-  const u = requireMessage(family.row, path);
-  const workspace = drawRosterRowWorkspace(requireMessage(u.workspace, `${path}.workspace`), `${path}.workspace`);
-  const ws = document.createElement("div");
-  ws.className = "ws";
-  ws.setAttribute("data-roster-row", workspace.id);
-  ws.setAttribute(STAND_IN_ATTRIBUTE, "");
-  const line = document.createElement("div");
-  line.className = "row";
-  const nameMessage = requireMessage(u.name, `${path}.name`);
-  const prefix = drawNamePrefix(nameMessage.prefix, `${path}.name.prefix`);
-  if (prefix !== undefined) line.appendChild(prefix);
-  const label = document.createElement("span");
-  label.className = "name";
-  label.textContent = drawRosterRowName(nameMessage, `${path}.name`);
-  line.appendChild(label);
-  ws.appendChild(line);
-  appendRowKids(ws, family, familyPath, drawRosterRowStandIn, null);
-  return ws;
-}
-
 /**
  * Append KIN, the family of the list row at FAMILY_PATH, to its box WS, each
  * row drawn by DRAW, in the one `.kids` box the search and the stylesheet look
  * for a nested row in: the own-repository children first, then each
  * repository block (`drawRosterOpenRowRepositoryBlock`), each divider's name
- * selecting through SELECT_MAIN (null: a stand-in, whose names select
- * nothing). A row with no kin draws no box.
+ * selecting through SELECT_MAIN. A row with no kin draws no box.
  */
 export function appendRowKids(
   ws: HTMLElement,
   kin: RowKin,
   familyPath: string,
   draw: (child: RowFamily, childPath: string) => HTMLElement,
-  selectMain: SelectMainWorkspace | null,
+  selectMain: SelectMainWorkspace,
 ): void {
   const children = kin.children ?? [];
   const blocks = kin.repositoryBlocks ?? [];
@@ -576,7 +542,7 @@ export function drawRosterOpenRowRepositoryBlock(
   u: RosterOpenRowRepositoryBlock,
   path: string,
   draw: (child: RowFamily, childPath: string) => HTMLElement,
-  selectMain: SelectMainWorkspace | null,
+  selectMain: SelectMainWorkspace,
 ): HTMLElement {
   const repository = requireMessage(u.repository, `${path}.repository`);
   if (repository.id === "") throw new Error(`${path}.repository.id: a repository block names its repository`);
@@ -600,12 +566,12 @@ export const DIVIDER_MAIN_WORKSPACE_ATTRIBUTE = "data-main-workspace";
  * THE NAME SELECTS THE REPOSITORY'S MAIN WORKSPACE (owner request,
  * 2026-11-09) when the daemon names one (`main_workspace`): a click sends the
  * same SelectInEditor a row click sends, through SELECT_MAIN. With none named,
- * or no SELECT_MAIN, the name is plain text.
+ * the name is plain text.
  */
 export function drawRosterOpenRowRepositoryDivider(
   u: RosterOpenRowRepositoryDivider,
   path: string,
-  selectMain: SelectMainWorkspace | null,
+  selectMain: SelectMainWorkspace,
 ): HTMLElement {
   if (u.name === "") throw new Error(`${path}.name: a repository divider names its repository`);
   const divider = document.createElement("div");
@@ -614,7 +580,7 @@ export function drawRosterOpenRowRepositoryDivider(
   label.className = "sb-label";
   label.textContent = u.name;
   const main = u.mainWorkspace;
-  if (main !== undefined && selectMain !== null) {
+  if (main !== undefined) {
     if (main.id === "") throw new Error(`${path}.main_workspace.id: a divider's main workspace names a workspace`);
     label.setAttribute(DIVIDER_MAIN_WORKSPACE_ATTRIBUTE, main.id);
     label.setAttribute("data-select", "");
@@ -626,35 +592,6 @@ export function drawRosterOpenRowRepositoryDivider(
   }
   divider.appendChild(label);
   return divider;
-}
-
-/**
- * Draw U's stand-in into REGION, and the row in its place the first time the
- * stand-in comes into view (`reveal.ts`), FINISH run on the drawn row. The wait
- * is the section's: its scope stops it when the section's drawing goes.
- */
-export function drawRosterRowWhenShown(
-  region: HTMLElement,
-  family: RowFamily,
-  sc: SidebarContext,
-  path: string,
-  place: RowPlace,
-  finish: (row: HTMLElement) => void,
-): void {
-  const standIn = drawRosterRowStandIn(family, path);
-  finish(standIn);
-  region.appendChild(standIn);
-  sc.onDispose(
-    sc.reveal.whenShown(standIn, () => {
-      // The push that carried the row was drawn frames ago, so a row found
-      // malformed now is filed here (`guardMalformedNow`).
-      guardMalformedNow(sc.ctx, "sidebar.row.reveal", () => {
-        const row = drawRosterFamily(family, sc, path, place);
-        finish(row);
-        standIn.replaceWith(row);
-      });
-    }),
-  );
 }
 
 /** The workspace the row IS — the echo token every gesture travels back with. */

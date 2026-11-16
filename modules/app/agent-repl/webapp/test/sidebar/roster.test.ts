@@ -22,7 +22,6 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import { MERGED_MORE_CLASS, MERGED_PAGE_CLASS, MERGED_PAGE_SIZE, type MergedPages } from "../../src/sidebar/merged-pages.js";
 import { DEPLOYS_SECTION_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
 import { RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -1082,7 +1081,7 @@ describe("the Recently Merged section's header", () => {
         return { pages: pagesOfTen(rows), more: loaded < count, rows: rows.length };
       },
     };
-    const drawn = drawWorkspaceRoster(roster({ merged: mergedBand([group], collapsed) }), sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, pages));
+    const drawn = drawWorkspaceRoster(roster({ merged: mergedBand([group], collapsed) }), sidebarContext(undefined, undefined, undefined, undefined, undefined, pages));
     document.body.replaceChildren(drawn);
     return drawn;
   };
@@ -1533,7 +1532,7 @@ describe("recently merged repository groups", () => {
     const pages: MergedPages = { ...allMergesLoaded(), loaded: () => ({ pages: pagesOfTen(mergedRowsOf(group)), more, rows: n }) };
     return drawWorkspaceRoster(
       roster({ merged: mergedBand([group], false) }),
-      sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, pages),
+      sidebarContext(undefined, undefined, undefined, undefined, undefined, pages),
     );
   };
 
@@ -1557,7 +1556,7 @@ describe("recently merged repository groups", () => {
   it("draws no row for a group nothing is loaded for, under its header", () => {
     const drawn = drawWorkspaceRoster(
       roster({ merged: twoGroups() }),
-      sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, noMergesLoaded()),
+      sidebarContext(undefined, undefined, undefined, undefined, undefined, noMergesLoaded()),
     );
     expect(groupsIn(drawn).map((g) => [g.querySelector(".merged-group-head") !== null, g.querySelectorAll(".ws").length])).toEqual([
       [true, 0],
@@ -1565,11 +1564,12 @@ describe("recently merged repository groups", () => {
     ]);
   });
 
-  it("draws every loaded merged row whole, with no stand-in", () => {
+  it("draws every loaded merged row whole, its when-column and menu included", () => {
     const drawn = loadedBand(MERGED_PAGE_SIZE * 3);
-    expect([drawn.querySelectorAll(".merged-section .ws").length, drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`)]).toEqual([
+    const rows = [...drawn.querySelectorAll(".merged-section .ws")];
+    expect([rows.length, rows.every((ws) => ws.querySelector(":scope > .row > .when") !== null && ws.querySelector(":scope > .sb-menu") !== null)]).toEqual([
       MERGED_PAGE_SIZE * 3,
-      null,
+      true,
     ]);
   });
 });
@@ -2609,7 +2609,7 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     // Arrange
     let version = 0;
     const pages: MergedPages = { ...allMergesLoaded(), version: () => version };
-    const drawer = createRosterDrawer(sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, pages));
+    const drawer = createRosterDrawer(sidebarContext(undefined, undefined, undefined, undefined, undefined, pages));
     const streams = everyStream();
     const before = drawer.draw(streams).querySelector(".merged-section");
     // Act

@@ -79,7 +79,6 @@ import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { createRowHover } from "../../src/sidebar/row-hover.js";
 import { createRowMenus } from "../../src/sidebar/row-menu.js";
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
-import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
 import { createFoldFade } from "../../src/sidebar/fold-fade.js";
 import { rosterApps, type TestThread } from "../roster-apps.js";
@@ -189,32 +188,6 @@ export function appContext(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, ti
   });
 }
 
-/** A reveal that draws every row the moment it is waited on, as if every row were in view. */
-export const drawsAtOnce: RowReveal = {
-  whenShown: (_target, draw) => {
-    draw();
-    return () => undefined;
-  },
-};
-
-/** A reveal the test runs by hand: `show(target)` draws a waiting row as if it came into view. */
-export function manualReveal(): RowReveal & { waiting(): Element[]; show(target: Element): void } {
-  const waiting = new Map<Element, () => void>();
-  return {
-    whenShown: (target, draw) => {
-      waiting.set(target, draw);
-      return () => void waiting.delete(target);
-    },
-    waiting: () => [...waiting.keys()],
-    show: (target) => {
-      const draw = waiting.get(target);
-      if (draw === undefined) throw new Error("manualReveal: nothing waits on that element");
-      waiting.delete(target);
-      draw();
-    },
-  };
-}
-
 /**
  * A context over CTX, with a fresh view and no ask in flight, that serves both
  * as a rail's (`RailContext`, what the roster drawer takes) and as one drawn
@@ -227,7 +200,6 @@ export function sidebarContext(
   timers: Timers = fakeTimers(),
   view: SidebarView = createSidebarView(),
   openDetails: Set<string> = new Set(),
-  reveal: RowReveal = drawsAtOnce,
   deploysFold: DeploysFold = createDeploysFold(document, () => undefined),
   mergedPages: MergedPages = allMergesLoaded(),
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
@@ -248,7 +220,6 @@ export function sidebarContext(
     rowHover: createRowHover(dropdowns, openDetails),
     rowMenus: createRowMenus(dropdowns),
     attention: new AttentionRegistry(timers),
-    reveal,
     selectionFade: createSelectionFade(document),
     foldFade: createFoldFade(document),
     shownAhead: () => null,

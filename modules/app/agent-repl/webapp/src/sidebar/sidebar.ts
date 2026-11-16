@@ -53,7 +53,6 @@ import { createSidebarView } from "./view.js";
 import type { RailContext } from "./context.js";
 import { disposeWorkspaceRoster, drawWorkspaceRoster } from "./roster.js";
 import { nextFrame } from "../frame.js";
-import { createRowReveal } from "./reveal.js";
 import { guardMalformedNow } from "../rpc/guard.js";
 import { placeOpenRowDetails } from "./row.js";
 import { installBandFit } from "./band-fit.js";
@@ -255,16 +254,6 @@ function mountSidebarIn(
 
   const openDetails = new Set<string>();
   const dropdowns = createDropdowns();
-  // A ROW DRAWN WHEN IT COMES INTO VIEW (reveal.ts) is drawn after the
-  // roster's own draw ran the search and placed the open panels, so both are
-  // run again over the rail.
-  const reveal = createRowReveal(() => {
-    applySearch(body, search.query());
-    chatSearch.changed(search.query(), chatShown);
-    chatSearch.apply(body);
-    placeOpenRowDetails(body);
-    rail.rowMenus.placeOpen();
-  });
   const body = document.createElement("div");
   body.className = RAIL_BODY_CLASS;
   // THE ARRANGEMENT'S OWN ELEMENTS OUTLIVE EVERY PUSH (arrange.ts): the layer
@@ -283,7 +272,6 @@ function mountSidebarIn(
     rowHover: createRowHover(dropdowns, openDetails, deps.popupMirror ?? null),
     rowMenus: createRowMenus(dropdowns, deps.popupMirror ?? null),
     attention,
-    reveal,
     selectionFade: createSelectionFade(body),
     foldFade: createFoldFade(body),
     shownAhead: () => shownAhead,
@@ -613,7 +601,6 @@ function mountSidebarIn(
       disposeWorkspaceRoster(rail);
       disposeThreadList(rail);
       chatSearch.dispose();
-      reveal.dispose();
       attention.dispose();
       host.replaceChildren();
       host.hidden = true;

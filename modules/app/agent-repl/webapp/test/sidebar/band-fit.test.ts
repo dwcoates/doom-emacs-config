@@ -107,7 +107,7 @@ function drawn({ open = 0, hidden = 0, merged = 0, today = 0, folded = {}, expan
             : [queueGroup({ id: "alpha", queue: { head: mergingHead("q-0"), waiting: Array.from({ length: queued - 1 }, (_, i) => waitingMerge(`q-${i + 1}`)) } })],
         ),
       }),
-      sidebarContext(undefined, undefined, undefined, undefined, undefined, folds),
+      sidebarContext(undefined, undefined, undefined, undefined, folds),
     ),
   );
   document.body.replaceChildren(scroller);
