@@ -62,6 +62,11 @@ var errFake = errors.New("workspace test: arranged failure")
 type fakeDB struct {
 	wsm.DB
 
+	// holds are the held prompts HeldPromptByTurn answers, by turn;
+	// holdErr fails the read.
+	holds   map[ids.TurnID]wsm.HeldPrompt
+	holdErr error
+
 	// roles are the deploy check roles workspaces hold; rolesErr fails
 	// their read.
 	roles    map[ids.WorkspaceID]*wsm.MediationRole
@@ -4860,4 +4865,13 @@ func (t stubTopbar) RequestSignIn(ws ids.WorkspaceID) {
 	if t.signIns != nil {
 		*t.signIns = append(*t.signIns, ws)
 	}
+}
+
+// HeldPromptByTurn answers the hold the fixture states for TURN.
+func (d *fakeDB) HeldPromptByTurn(_ context.Context, turn ids.TurnID) (wsm.HeldPrompt, bool, error) {
+	if d.holdErr != nil {
+		return wsm.HeldPrompt{}, false, d.holdErr
+	}
+	h, ok := d.holds[turn]
+	return h, ok, nil
 }
