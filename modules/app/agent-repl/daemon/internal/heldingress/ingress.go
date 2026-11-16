@@ -56,6 +56,7 @@ const (
 	kindColdGate     = "cold_gate"
 	kindNoSession    = "no_session"
 	kindMovedAway    = "moved_away"
+	kindNotServed    = "not_served"
 	kindFault        = "fault"
 )
 
@@ -336,6 +337,17 @@ func (i *ingress) ingest(ctx context.Context, path string, sw *sweep) {
 	wlog := i.deps.Log.WorkspaceOrCentral(record.Dir).With(dlog.Context{
 		"workspace": string(record.ID), "path": path, "idempotency_key": entry.IdempotencyKey,
 	})
+	// ONLY THE DAEMON THAT SERVES THE WORKSPACE SUBMITS ITS ENTRY: the
+	// submission goes past the server's not_yet_adopted refusal, and a
+	// successor takes the intake while a workspace busy on its outgoing
+	// daemon is still that daemon's.
+	if !i.deps.ServesWorkspace(record.ID) {
+		sw.waiting[dir] = true
+		i.deferEntry(wlog, wlog.Info, path, kindNotServed, "this daemon does not serve the entry's workspace yet; it waits for the workspace's adoption",
+			fmt.Errorf("heldingress: workspace %s is not served by this daemon", record.ID))
+		leavePending(sw, record.ID, entry, i.retries[path].wait)
+		return
+	}
 
 	// The submission RE-DRIVES the attempt the client gave up on, so an
 	// already-accepted key is the expected answer, not an anomaly.
@@ -397,7 +409,7 @@ func waitOf(kind string) holds.IngressWait {
 		return holds.IngressWait{Kind: holds.IngressMerge}
 	case kindColdGate:
 		return holds.IngressWait{Kind: holds.IngressColdGate}
-	case kindMovedAway:
+	case kindMovedAway, kindNotServed:
 		return holds.IngressWait{Kind: holds.IngressMovedAway}
 	case kindFault:
 		return holds.IngressWait{Kind: holds.IngressRefused, Detail: "the daemon could not queue this prompt and keeps trying"}

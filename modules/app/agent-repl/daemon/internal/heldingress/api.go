@@ -74,6 +74,12 @@ type Deps struct {
 	// rollout.Controller.ServesIntake. A sweep while it answers false takes
 	// nothing. See internal/intakegate.
 	Serves func() bool
+	// ServesWorkspace reports whether THIS daemon serves one workspace now:
+	// rollout.Controller.ServesWorkspace. Serves opens for the whole daemon
+	// once the outgoing daemon's transfer pass ends, while a workspace still
+	// busy on it is not adopted yet, so an entry of a workspace this answers
+	// false for waits until the adoption, which changes the fleet.
+	ServesWorkspace func(ids.WorkspaceID) bool
 	// IntakeChanged answers a channel that closes at the next change of
 	// Serves' answer: rollout.Controller.IntakeChanged. Run sweeps again on
 	// it, so a daemon that comes to serve takes what waited on disk at once.
@@ -136,6 +142,8 @@ func New(deps Deps) (Ingress, error) {
 		return nil, fmt.Errorf("heldingress: the host publisher is required")
 	case deps.Serves == nil:
 		return nil, fmt.Errorf("heldingress: the serving answer is required")
+	case deps.ServesWorkspace == nil:
+		return nil, fmt.Errorf("heldingress: the workspace serving answer is required")
 	case deps.IntakeChanged == nil:
 		return nil, fmt.Errorf("heldingress: the intake's change signal is required")
 	case deps.FleetChanges == nil:
