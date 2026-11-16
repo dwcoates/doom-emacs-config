@@ -110,6 +110,7 @@
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-retrying "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-rejected "agent-repl-wire-common" (json))
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-failed "agent-repl-wire-common" (json))
+(declare-function agent-repl-wire-decode-session-fault-keepalive-undelivered "agent-repl-wire-common" (json))
 
 ;; core.el's canonical logging ladder.
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))

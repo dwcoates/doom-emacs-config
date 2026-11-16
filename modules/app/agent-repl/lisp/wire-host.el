@@ -70,6 +70,7 @@
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-retrying "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-keepalive-undelivered "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-rejected "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-failed "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-classifier-failed "wire-common")

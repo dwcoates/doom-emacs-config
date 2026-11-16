@@ -2,11 +2,11 @@ package wsm
 
 import (
 	"context"
-	"os"
-	"path/filepath"
-	"strings"
+	"slices"
 	"testing"
 	"time"
+
+	"agent-repld/internal/sourcescan"
 )
 
 // readRun reads workspace WS's keep-alive run back.
@@ -123,29 +123,11 @@ func TestAKeepaliveOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 // TestTheKeepaliveRunHasOneWrite pins countKeepalive as the run's one write:
 // a hand-rolled count elsewhere would drift from its turn-clock rule.
 func TestTheKeepaliveRunHasOneWrite(t *testing.T) {
-	// Arrange
-	sources, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatalf("Glob: %v", err)
-	}
-
 	// Act
-	var writers []string
-	for _, name := range sources {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		text, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatalf("ReadFile: %v", err)
-		}
-		if strings.Contains(string(text), "keepalive_run_beats =") {
-			writers = append(writers, name)
-		}
-	}
+	writers := sourcescan.Sites(t, "keepalive_run_beats =")
 
 	// Assert
-	if len(writers) != 1 || writers[0] != "keepaliverun.go" {
+	if !slices.Equal(writers, []string{"keepaliverun.go"}) {
 		t.Fatalf("the run is written in %v, want keepaliverun.go alone", writers)
 	}
 }

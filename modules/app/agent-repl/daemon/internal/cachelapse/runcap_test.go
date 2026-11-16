@@ -73,7 +73,7 @@ func TestACappedRunStatesWhyItOwesNoKeepalive(t *testing.T) {
 	h.keeper.schedule(context.Background(), theWorkspace, "test")
 
 	// Assert
-	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "debug", Operation: opDrive, Message: "the workspace owes no keep-alive"})
+	record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opDrive, Message: "the workspace owes no keep-alive"})
 	why, _ := record.Context["why"].(string)
 	if !ok || !strings.Contains(why, "break-even") || record.Context["workspace"] != string(theWorkspace) {
 		t.Fatalf("records = %+v, want the cap's reason for the workspace", h.log.Records())
