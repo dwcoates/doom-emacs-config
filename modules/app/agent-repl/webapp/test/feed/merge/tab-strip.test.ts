@@ -100,7 +100,7 @@ describe("readMergeTab: the arms are read from the contract", () => {
   });
 
   it.each(FeedMergeTabSchema.oneofs.find((o) => o.name === "kind")?.fields.map((f) => [f.localName, f]) ?? [])(
-    "holds to the schema: the %s tab is live or settled, since nothing parks, a tab an asking agent works in can wait on the user, and a commit can be pending",
+    "holds to the schema: the %s tab is live, on hold or settled, since nothing parks, a tab an asking agent works in can wait on the user, and a commit can be pending",
     (kind, field) => {
       const message = field.fieldKind === "message" ? field.message : undefined;
       const waits = [
@@ -112,12 +112,14 @@ describe("readMergeTab: the arms are read from the contract", () => {
         "fixingTests",
         "testsRunFixing",
       ].includes(kind);
+      // EVERY KIND CAN BE ON HOLD: its merge is suspended at it, or its queue
+      // holds every merge in it (frontend.v1.FeedMergeTabHeld).
       const want =
         kind === "rebaseCommit"
-          ? ["live", "pending", "settled", "waitingOnUser"]
+          ? ["live", "onHold", "pending", "settled", "waitingOnUser"]
           : waits
-              ? ["live", "settled", "waitingOnUser"]
-              : ["live", "settled"];
+              ? ["live", "onHold", "settled", "waitingOnUser"]
+              : ["live", "onHold", "settled"];
       expect(message === undefined ? [] : [...oneofArms(message, "state")].sort()).toEqual(want);
     },
   );
@@ -261,8 +263,32 @@ describe("the badge's paint", () => {
     }
   });
 
+  it("draws a tab on hold with the live dot, grey and still", () => {
+    const { el, teardown } = painted({ kind: "tests", state: "onHold" });
+    try {
+      const glyph = el.querySelector<HTMLElement>(".merge-tab-glyph")!;
+      expect([glyph.className, glyph.textContent, cascadedValue(glyph, "color"), cascadedValue(glyph, "animation")]).toEqual([
+        "merge-tab-glyph is-held",
+        "●",
+        "var(--muted)",
+        "none",
+      ]);
+    } finally {
+      teardown();
+    }
+  });
+
+  it.each([
+    { name: "shows how long it ran before it was held", heldSinceMs: TAB_STARTED_AT_MS + 3_000n, want: "3s" },
+    { name: "shows no time when its queue's hold holds it", heldSinceMs: 0n, want: "" },
+  ])("a tab on hold $name", ({ heldSinceMs, want }) => {
+    const [tab] = childTabsOf([tabRow("t1", { kind: "tests", state: "onHold", heldSinceMs })], undefined);
+    expect(drawTabDuration(tab, TICKER).textContent).toBe(want);
+  });
+
   it.each([
     ["live", { kind: "tests", state: "live" }],
+    ["held", { kind: "tests", state: "onHold" }],
   ] as const)("draws a %s tab's dot at 70%% of the badge's size", (_name, spec) => {
     const { el, teardown } = painted(spec);
     try {

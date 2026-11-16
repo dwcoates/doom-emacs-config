@@ -168,3 +168,43 @@ func retiredMergeTab(row *frontendv1.FeedRow) bool {
 	tab := row.GetMergeTab()
 	return tab != nil && tab.GetKind() == nil
 }
+
+// recordedRank is AT for the first draw in this daemon of durable row ID on
+// feed F: the rank the store records it at, when it records it. A ROW'S ORDER
+// KEY IS FIXED FOR ITS WHOLE LIFE (wsm.PutDurableFeedRow), but this daemon's
+// memory of it is only what it restored as the workspace's feed state was
+// born, and another daemon may record the row after that (a handover: both
+// daemons write for the workspace until its transfer lands). Drawn at a key
+// of its own, the row's record was refused and a new daemon never drew it
+// again (2026-11-16, merge-queue-active-clock's merge head, 46 times). A read
+// that fails is an ERROR, and the row is drawn at a key of its own, whose
+// record the store refuses if it disagrees. The caller holds the lock.
+func (r *resolver) recordedRank(s *wsState, f *feedState, id string, at placement) placement {
+	if r.deps.DurableRows == nil || at.inherit != nil {
+		return at
+	}
+	fields := dlog.Context{"row": id}
+	plane, key, found, err := r.deps.DurableRows.DurableFeedRowRank(context.Background(), s.id, id)
+	if err != nil {
+		fields["cause"] = err.Error()
+		r.logger(s.id).Error(opDurable, "could not read where a durable row is recorded; it is drawn at a key of its own", fields)
+		return at
+	}
+	if !found {
+		return at
+	}
+	if err := reserveOrder(f, key); err != nil {
+		fields["cause"], fields["key"] = err.Error(), key
+		r.logger(s.id).Error(opDurable, "a durable row's recorded order key cannot be read; it is drawn at a key of its own", fields)
+		return at
+	}
+	r.logger(s.id).Info(opDurable, "a durable row this daemon never drew is drawn where the store records it", withKey(fields, key))
+	at.inherit = &rowRank{plane: rowPlane(plane), key: key}
+	return at
+}
+
+// withKey is FIELDS naming KEY.
+func withKey(fields dlog.Context, key string) dlog.Context {
+	fields["key"] = key
+	return fields
+}

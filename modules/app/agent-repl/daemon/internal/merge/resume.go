@@ -84,6 +84,8 @@ func (o *orchestrator) resumeInto(runCtx context.Context, r *run, doc progressDo
 		r.end(runCtx, err)
 		return err
 	}
+	// THE HOLD ENDS AS THE RESUME RUNS (holdRound).
+	o.holdRound(runCtx, r.repo, r.ws, lease.ID, false)
 	return r.resumeRun(runCtx)
 }
 

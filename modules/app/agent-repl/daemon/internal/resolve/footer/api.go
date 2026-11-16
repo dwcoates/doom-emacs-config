@@ -50,6 +50,11 @@ type MergeFacts struct {
 	// Step is the merging substatus: the step the merge is on. Set for
 	// "queued" (always StepEnqueued) and "merging"; empty otherwise.
 	Step MergeStep
+	// Held says the step stands still: the merge is suspended at it, or its
+	// queue holds every merge in it (frontend.v1.FooterStatusMerging.held).
+	// It is the merge's one view's hold, which the bubble and the roster draw
+	// too (merge.viewOf), and is never set by a step.
+	Held bool
 	// QueuePlace and QueueWaiting are "enqueued k/n": this merge's 1-based
 	// place among the merges WAITING in its repository's queue (the one being
 	// worked on is not counted) and how many are waiting, this one included.

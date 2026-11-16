@@ -286,7 +286,7 @@ func (o *orchestrator) admitBehind(ctx context.Context, r *run) (speculativeAdmi
 	// THE LEASE GOES FIRST, THE ADMISSION AFTER: an admitted entry always has
 	// a run holding a lease, so nothing ever reads one as a merge another
 	// daemon drives while this one lets it go.
-	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.mintLedger(ws), wsm.HolderMerge, wsm.PolicyHold)
+	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.ledgerOfEntry(entry), wsm.HolderMerge, wsm.PolicyHold)
 	if err != nil {
 		log.Error(op, "could not take the merge lease of the merge behind the head", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		o.unstart(ctx, r, err)

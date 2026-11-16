@@ -1652,6 +1652,9 @@ func (r *resolver) upsertDurable(s *wsState, at placement, row *frontendv1.FeedR
 	r.settleMergeFold(s, at.feed, row)
 	f, id := r.feed(s, at.feed), row.GetId().GetValue()
 	prior, seen := f.rank[id]
+	if !seen {
+		at = r.recordedRank(s, f, id, at)
+	}
 	r.upsert(s, at, row, true)
 	settledFrom := ""
 	if seen && isPinKey(prior.key) && f.rank[id].key != prior.key {

@@ -69,7 +69,6 @@ import { fireVerb } from "./verbs.js";
 export const MERGE_QUEUE_PAUSED_ATTRIBUTE = "data-paused";
 
 /** The attribute the head's card carries, valueless, while nothing of its merge's work runs. */
-export const MERGE_QUEUE_SUSPENDED_ATTRIBUTE = "data-suspended";
 
 /** The class of a queue group's body: its head's card and its waiting merges. */
 export const MERGE_QUEUE_CLASS = "sb-merge-queue";
@@ -382,9 +381,8 @@ function moveInLine(sc: SidebarContext, workspace: WorkspaceRef, place: UpdateMe
  * the pause while its queue is PAUSED, and not drawn for a pause whose
  * instant was not recorded; then its stages so far. IT DRAWS NO STATUS LINE
  * (owner request, 2026-11-09): the stage strip already names the step it
- * stands on, and a pause is drawn on the group's label. A head nothing of
- * whose work runs is marked suspended, and the stylesheet stills its live
- * stage.
+ * stands on, and a pause is drawn on the group's label. A held merge's
+ * stages come drawn held (`drawRosterMergeQueueStage`).
  */
 export function drawRosterMergeQueueHead(
   u: RosterMergeQueueHead,
@@ -420,7 +418,6 @@ export function drawRosterMergeQueueHead(
     case "waiting":
       break;
     case "merging":
-      card.toggleAttribute(MERGE_QUEUE_SUSPENDED_ATTRIBUTE, standing.value.suspended !== undefined);
       break;
     default: {
       const other: { case: string } = standing;
@@ -445,6 +442,11 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   glyph.setAttribute("aria-hidden", "true");
   switch (state.case) {
     case "live":
+      glyph.textContent = STATE_GLYPHS.live;
+      break;
+    case "held":
+      // A HELD STAGE IS GREY AND STILL: its merge is suspended at it, or its
+      // queue holds every merge in it (frontend.v1.RosterMergeQueueStageHeld).
       glyph.textContent = STATE_GLYPHS.live;
       break;
     case "succeeded":

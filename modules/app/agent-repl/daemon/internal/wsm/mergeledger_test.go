@@ -7,6 +7,8 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"agent-repld/internal/dlog"
 )
 
 func TestOpenMergeLedgerRecordsTheLease(t *testing.T) {
@@ -409,5 +411,136 @@ func TestTheSettledLiveRoundsStepLeavesOnlyEachQueuedMergesCurrentRoundLive(t *t
 			}
 		}
 		rows.Close()
+	}
+}
+
+// liveRound opens a ledger for a workspace with one live tests round and
+// answers the workspace and the ledger.
+func liveRound(t *testing.T, s *store) (WorkspaceID, LeaseID) {
+	t.Helper()
+	ws := testWorkspace(t, s)
+	lease := NewLeaseID()
+	if err := s.OpenMergeLedger(context.Background(), ws.ID, lease); err != nil {
+		t.Fatalf("OpenMergeLedger: %v", err)
+	}
+	if err := s.RecordTabInterval(context.Background(), lease, TabInterval{Round: 1, Kind: "tests", StartedAt: instant}); err != nil {
+		t.Fatalf("RecordTabInterval: %v", err)
+	}
+	return ws.ID, lease
+}
+
+// onlyRound reads WS's one round.
+func onlyRound(t *testing.T, s *store, ws WorkspaceID) TabInterval {
+	t.Helper()
+	got, err := s.MergeLedger(context.Background(), ws)
+	if err != nil || len(got) != 1 || len(got[0].Intervals) != 1 {
+		t.Fatalf("MergeLedger = (%+v, %v), want one ledger with one round", got, err)
+	}
+	return got[0].Intervals[0]
+}
+
+func TestHoldMergeRoundMarksAndClearsTheLiveRound(t *testing.T) {
+	held := instant.Add(time.Minute)
+	tests := []struct {
+		name     string
+		hold     []*time.Time
+		wantHeld *time.Time
+	}{
+		{name: "a hold marks the live round held since its instant", hold: []*time.Time{&held}, wantHeld: &held},
+		{name: "a release clears the hold", hold: []*time.Time{&held, nil}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws, lease := liveRound(t, s)
+
+			// Act
+			for _, at := range tt.hold {
+				if ok, err := s.HoldMergeRound(context.Background(), lease, at); err != nil || !ok {
+					t.Fatalf("HoldMergeRound = (%v, %v), want the live round marked", ok, err)
+				}
+			}
+
+			// Assert
+			got := onlyRound(t, s, ws)
+			if (got.HeldSince == nil) != (tt.wantHeld == nil) || (got.HeldSince != nil && !got.HeldSince.Equal(*tt.wantHeld)) {
+				t.Fatalf("held since %v, want %v", got.HeldSince, tt.wantHeld)
+			}
+		})
+	}
+}
+
+func TestSettlingAHeldRoundClearsItsHold(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws, lease := liveRound(t, s)
+	held := instant.Add(time.Minute)
+	if _, err := s.HoldMergeRound(context.Background(), lease, &held); err != nil {
+		t.Fatal(err)
+	}
+	ended := instant.Add(2 * time.Minute)
+
+	// Act
+	err := s.RecordTabInterval(context.Background(), lease, TabInterval{Round: 1, Kind: "tests", StartedAt: instant, EndedAt: &ended, Outcome: "passed"})
+
+	// Assert
+	if got := onlyRound(t, s, ws); err != nil || got.HeldSince != nil || got.EndedAt == nil {
+		t.Fatalf("RecordTabInterval = %v, round %+v; want it settled and no longer held", err, got)
+	}
+}
+
+func TestHoldMergeRoundOfALedgerWithNoLiveRoundMarksNothing(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws, lease := liveRound(t, s)
+	ended := instant.Add(time.Minute)
+	if err := s.RecordTabInterval(context.Background(), lease, TabInterval{Round: 1, Kind: "tests", StartedAt: instant, EndedAt: &ended, Outcome: "passed"}); err != nil {
+		t.Fatal(err)
+	}
+	held := instant.Add(2 * time.Minute)
+
+	// Act
+	ok, err := s.HoldMergeRound(context.Background(), lease, &held)
+
+	// Assert
+	if err != nil || ok || onlyRound(t, s, ws).HeldSince != nil {
+		t.Fatalf("HoldMergeRound = (%v, %v), want nothing marked", ok, err)
+	}
+}
+
+func TestHoldMergeRoundRefusesALedgerItDoesNotName(t *testing.T) {
+	// Arrange
+	s, logs := testStore(t)
+	held := instant
+
+	// Act
+	_, err := s.HoldMergeRound(context.Background(), "", &held)
+
+	// Assert
+	if err == nil {
+		t.Fatal("HoldMergeRound accepted a hold naming no ledger")
+	}
+	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.hold_merge_round"}); !ok {
+		t.Fatalf("records = %+v, want the refusal at ERROR", logs.Records())
+	}
+}
+
+func TestHeldMergeRoundsAnswersEveryHeldLiveRound(t *testing.T) {
+	// Arrange: one held ledger and one running.
+	s, _ := testStore(t)
+	_, heldLease := liveRound(t, s)
+	_, _ = liveRound(t, s)
+	held := instant.Add(time.Minute)
+	if _, err := s.HoldMergeRound(context.Background(), heldLease, &held); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got, err := s.HeldMergeRounds(context.Background())
+
+	// Assert
+	if err != nil || len(got) != 1 || !got[heldLease].Equal(held) {
+		t.Fatalf("HeldMergeRounds = (%v, %v), want only %s held since %v", got, err, heldLease, held)
 	}
 }

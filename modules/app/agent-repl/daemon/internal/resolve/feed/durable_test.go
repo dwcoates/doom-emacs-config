@@ -7,6 +7,7 @@ import (
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -70,6 +71,16 @@ func (f *fakeDurableRows) ClearDurableFeedRows(_ context.Context, id ids.Workspa
 	delete(f.rows, id)
 	f.cleared = append(f.cleared, id)
 	return nil
+}
+
+func (f *fakeDurableRows) DurableFeedRowRank(_ context.Context, id ids.WorkspaceID, rowID string) (int, string, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.readErr != nil {
+		return 0, "", false, f.readErr
+	}
+	row, ok := f.rows[id][rowID]
+	return row.Plane, row.OrderKey, ok, nil
 }
 
 // recorded answers one recorded row.
@@ -558,5 +569,56 @@ func TestANewDaemonDrawsAPinnedRowAgainStillPinned(t *testing.T) {
 	got := feedRows(second, rootFeed())[0].GetOrder()
 	if got.GetKey() != want.GetKey() || got.GetPinned() == nil {
 		t.Fatalf("order = %+v, want %+v still pinned", got, want)
+	}
+}
+
+// A ROW'S ORDER KEY IS FIXED FOR ITS WHOLE LIFE, across daemons: a row
+// another daemon recorded after this one was born is drawn here where the
+// store records it, never at a key of this daemon's own (2026-11-16: a merge
+// head drawn at a fresh key during a handover, its record refused 46 times).
+func TestARowAnotherDaemonRecordedSinceThisOneWasBornIsDrawnAtItsRecordedKey(t *testing.T) {
+	// Arrange: the successor is born, then the outgoing daemon draws the head.
+	store := newFakeDurableRows()
+	outgoing, _ := daemonOver(t, store)
+	// The successor's clock reads a minute later, so a key of its own would
+	// differ from the one the outgoing daemon recorded.
+	successor, log := daemonOverWith(t, store, func(d *Deps) {
+		d.Now = func() time.Time { return time.Now().Add(time.Minute) }
+	})
+	_ = feedRows(successor, rootFeed())
+	outgoing.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+	want := feedRows(outgoing, rootFeed())[0].GetOrder().GetKey()
+
+	// Act: the successor draws the same head.
+	successor.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("merging"))
+
+	// Assert
+	rows := feedRows(successor, rootFeed())
+	if len(rows) != 1 || rows[0].GetOrder().GetKey() != want || rows[0].GetOrder().GetPinned() == nil {
+		t.Fatalf("successor's rows = %+v, want the head pinned at %q", rows, want)
+	}
+	if rec, ok := store.recorded(testWorkspace, rows[0].GetId().GetValue()); !ok || rec.OrderKey != want {
+		t.Fatalf("record = %+v, want it kept at %q", rec, want)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opDurable, Message: "a durable row this daemon never drew is drawn where the store records it"}); !ok {
+		t.Fatalf("records = %+v, want the adopted key recorded", log.Records())
+	}
+}
+
+func TestARowWhoseRecordCannotBeReadIsAnError(t *testing.T) {
+	// Arrange
+	store := newFakeDurableRows()
+	r, log := daemonOver(t, store)
+	_ = feedRows(r, rootFeed())
+	store.mu.Lock()
+	store.readErr = errors.New("disk gone")
+	store.mu.Unlock()
+
+	// Act
+	r.UpsertDurablePinned(testWorkspace, rootFeed(), mergeHeadRow("queued"))
+
+	// Assert
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opDurable, Message: "could not read where a durable row is recorded; it is drawn at a key of its own"}); !ok {
+		t.Fatalf("records = %+v, want the failed read at ERROR", log.Records())
 	}
 }

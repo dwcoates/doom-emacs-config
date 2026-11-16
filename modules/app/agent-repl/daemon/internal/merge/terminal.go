@@ -189,6 +189,10 @@ func (r *run) failedTerminal(ctx context.Context, summary string, area footer.Me
 // (tellThenRaise). Every terminal goes through it, so no resolution goes unannounced and none is
 // announced twice.
 func (o *orchestrator) ended(ctx context.Context, ws ids.WorkspaceID, out DetachedOutcome) {
+	// THE BUBBLE'S HOLD IS NO LONGER REDRAWN: its merge is out of the queue.
+	if lease, ok := o.leaseOf(ws); ok {
+		o.bubbleTabs.forget(lease)
+	}
 	o.log(ctx, ws).Debug("daemon.merge.ended", "a merge left the queue for good; handing it back and raising its resolved banner", dlog.Context{
 		"workspace": string(ws), "outcome": out.Kind.String()})
 	o.tellThenRaise(ws, out, func() { o.handBack(ctx, ws, out) })

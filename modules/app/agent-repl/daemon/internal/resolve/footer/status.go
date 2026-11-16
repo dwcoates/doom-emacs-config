@@ -541,7 +541,10 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 				"remediation":         "set MergeFacts.Step with every queued or merging state",
 			})
 	}
-	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging", "step": string(m.Step)})
+	if m.Held {
+		arm.Held = &frontendv1.FooterMergingHeld{}
+	}
+	log.Debug("daemon.footer.status_decision", "selected a footer status branch", dlog.Context{"function": "status", "branch": "merging", "step": string(m.Step), "held": m.Held})
 	return &frontendv1.FooterStatus{Status: &frontendv1.FooterStatus_Merging{Merging: arm}}
 }
 

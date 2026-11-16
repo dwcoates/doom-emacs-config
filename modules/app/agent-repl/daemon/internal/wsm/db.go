@@ -523,6 +523,12 @@ type DB interface {
 	// OpenMergeLedger opens a workspace's ledger for one merge lease.
 	OpenMergeLedger(ctx context.Context, id WorkspaceID, lease LeaseID) error
 	// RecordTabInterval appends one round's tab interval to a lease's ledger.
+	// HoldMergeRound marks the live round of a merge's ledger held since a
+	// time, or clears its hold, in one write (mergeledger.go).
+	HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time) (bool, error)
+	// HeldMergeRounds answers every ledger whose live round is held, and
+	// since when (mergeledger.go).
+	HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, error)
 	RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
@@ -1033,6 +1039,9 @@ type DB interface {
 	PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 	// DurableFeedRows loads every durable feed row of one workspace.
 	DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableFeedRow, error)
+	// DurableFeedRowRank answers where one durable row is recorded
+	// (durablefeedrows.go).
+	DurableFeedRowRank(ctx context.Context, id WorkspaceID, rowID string) (int, string, bool, error)
 	// ClearDurableFeedRows drops every durable feed row of one workspace.
 	ClearDurableFeedRows(ctx context.Context, id WorkspaceID) error
 

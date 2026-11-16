@@ -6265,15 +6265,7 @@ func (x *RosterMergeQueueHeadWaiting) GetQueuedAtMs() int64 {
 
 // The head is being worked on.
 type RosterMergeQueueHeadMerging struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// PRESENT while NOTHING of the merge's work runs: its queue is paused and
-	// no turn of the step it stands on is running. A pause suspends a merge's
-	// own steps but leaves a step's agent turn running until it ends or a hard
-	// stop interrupts it (agentrepl.v1.UpdateMergeQueuePause.hard), so a
-	// paused merge whose turn still runs is not suspended. The sidebar draws a
-	// suspended merge's live stage as a still grey dot rather than the
-	// breathing purple one (owner request, 2026-10-27).
-	Suspended     *RosterMergeQueueHeadSuspended `protobuf:"bytes,2,opt,name=suspended,proto3,oneof" json:"suspended,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -6308,50 +6300,6 @@ func (*RosterMergeQueueHeadMerging) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{99}
 }
 
-func (x *RosterMergeQueueHeadMerging) GetSuspended() *RosterMergeQueueHeadSuspended {
-	if x != nil {
-		return x.Suspended
-	}
-	return nil
-}
-
-// Nothing of the head's work runs. DELIBERATELY EMPTY: presence is the fact.
-type RosterMergeQueueHeadSuspended struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *RosterMergeQueueHeadSuspended) Reset() {
-	*x = RosterMergeQueueHeadSuspended{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[100]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *RosterMergeQueueHeadSuspended) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*RosterMergeQueueHeadSuspended) ProtoMessage() {}
-
-func (x *RosterMergeQueueHeadSuspended) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[100]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use RosterMergeQueueHeadSuspended.ProtoReflect.Descriptor instead.
-func (*RosterMergeQueueHeadSuspended) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{100}
-}
-
 // ONE STAGE of the head's merge.
 type RosterMergeQueueStage struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -6369,6 +6317,7 @@ type RosterMergeQueueStage struct {
 	//	*RosterMergeQueueStage_Live
 	//	*RosterMergeQueueStage_Succeeded
 	//	*RosterMergeQueueStage_Failed
+	//	*RosterMergeQueueStage_Held
 	State         isRosterMergeQueueStage_State `protobuf_oneof:"state"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -6376,7 +6325,7 @@ type RosterMergeQueueStage struct {
 
 func (x *RosterMergeQueueStage) Reset() {
 	*x = RosterMergeQueueStage{}
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[101]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[100]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -6388,7 +6337,7 @@ func (x *RosterMergeQueueStage) String() string {
 func (*RosterMergeQueueStage) ProtoMessage() {}
 
 func (x *RosterMergeQueueStage) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_sidebar_proto_msgTypes[101]
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[100]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -6401,7 +6350,7 @@ func (x *RosterMergeQueueStage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RosterMergeQueueStage.ProtoReflect.Descriptor instead.
 func (*RosterMergeQueueStage) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{101}
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{100}
 }
 
 func (x *RosterMergeQueueStage) GetLabel() string {
@@ -6452,6 +6401,15 @@ func (x *RosterMergeQueueStage) GetFailed() *RosterMergeQueueStageFailed {
 	return nil
 }
 
+func (x *RosterMergeQueueStage) GetHeld() *RosterMergeQueueStageHeld {
+	if x != nil {
+		if x, ok := x.State.(*RosterMergeQueueStage_Held); ok {
+			return x.Held
+		}
+	}
+	return nil
+}
+
 type isRosterMergeQueueStage_State interface {
 	isRosterMergeQueueStage_State()
 }
@@ -6468,11 +6426,76 @@ type RosterMergeQueueStage_Failed struct {
 	Failed *RosterMergeQueueStageFailed `protobuf:"bytes,5,opt,name=failed,proto3,oneof"`
 }
 
+type RosterMergeQueueStage_Held struct {
+	// The stage would run but stands still: its merge is suspended at it, or
+	// its queue holds every merge in it (a pause, a handover, a deploy
+	// check). Drawn grey, never ticking as live.
+	Held *RosterMergeQueueStageHeld `protobuf:"bytes,6,opt,name=held,proto3,oneof"`
+}
+
 func (*RosterMergeQueueStage_Live) isRosterMergeQueueStage_State() {}
 
 func (*RosterMergeQueueStage_Succeeded) isRosterMergeQueueStage_State() {}
 
 func (*RosterMergeQueueStage_Failed) isRosterMergeQueueStage_State() {}
+
+func (*RosterMergeQueueStage_Held) isRosterMergeQueueStage_State() {}
+
+// The stage is held.
+type RosterMergeQueueStageHeld struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// When the stage began, epoch ms.
+	StartedAtMs int64 `protobuf:"varint,1,opt,name=started_at_ms,json=startedAtMs,proto3" json:"started_at_ms,omitempty"`
+	// When its merge was suspended at it, epoch ms; 0 when the queue's hold
+	// holds it, which names no instant of its own.
+	HeldSinceMs   int64 `protobuf:"varint,2,opt,name=held_since_ms,json=heldSinceMs,proto3" json:"held_since_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RosterMergeQueueStageHeld) Reset() {
+	*x = RosterMergeQueueStageHeld{}
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[101]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RosterMergeQueueStageHeld) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RosterMergeQueueStageHeld) ProtoMessage() {}
+
+func (x *RosterMergeQueueStageHeld) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_sidebar_proto_msgTypes[101]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RosterMergeQueueStageHeld.ProtoReflect.Descriptor instead.
+func (*RosterMergeQueueStageHeld) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{101}
+}
+
+func (x *RosterMergeQueueStageHeld) GetStartedAtMs() int64 {
+	if x != nil {
+		return x.StartedAtMs
+	}
+	return 0
+}
+
+func (x *RosterMergeQueueStageHeld) GetHeldSinceMs() int64 {
+	if x != nil {
+		return x.HeldSinceMs
+	}
+	return 0
+}
 
 // The stage is running.
 type RosterMergeQueueStageLive struct {
@@ -12917,19 +12940,19 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\bstandingJ\x04\b\x05\x10\x06R\x06failed\"?\n" +
 	"\x1bRosterMergeQueueHeadWaiting\x12 \n" +
 	"\fqueued_at_ms\x18\x01 \x01(\x03R\n" +
-	"queuedAtMs\"\x86\x01\n" +
-	"\x1bRosterMergeQueueHeadMerging\x12M\n" +
-	"\tsuspended\x18\x02 \x01(\v2*.frontend.v1.RosterMergeQueueHeadSuspendedH\x00R\tsuspended\x88\x01\x01B\f\n" +
-	"\n" +
-	"_suspendedJ\x04\b\x01\x10\x02R\x04step\"\x1f\n" +
-	"\x1dRosterMergeQueueHeadSuspended\"\x9b\x02\n" +
+	"queuedAtMs\":\n" +
+	"\x1bRosterMergeQueueHeadMergingJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\x04stepR\tsuspended\"\xd9\x02\n" +
 	"\x15RosterMergeQueueStage\x12\x14\n" +
 	"\x05label\x18\x01 \x01(\tR\x05label\x12\x14\n" +
 	"\x05round\x18\x02 \x01(\rR\x05round\x12<\n" +
 	"\x04live\x18\x03 \x01(\v2&.frontend.v1.RosterMergeQueueStageLiveH\x00R\x04live\x12K\n" +
 	"\tsucceeded\x18\x04 \x01(\v2+.frontend.v1.RosterMergeQueueStageSucceededH\x00R\tsucceeded\x12B\n" +
-	"\x06failed\x18\x05 \x01(\v2(.frontend.v1.RosterMergeQueueStageFailedH\x00R\x06failedB\a\n" +
-	"\x05state\"?\n" +
+	"\x06failed\x18\x05 \x01(\v2(.frontend.v1.RosterMergeQueueStageFailedH\x00R\x06failed\x12<\n" +
+	"\x04held\x18\x06 \x01(\v2&.frontend.v1.RosterMergeQueueStageHeldH\x00R\x04heldB\a\n" +
+	"\x05state\"c\n" +
+	"\x19RosterMergeQueueStageHeld\x12\"\n" +
+	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\x12\"\n" +
+	"\rheld_since_ms\x18\x02 \x01(\x03R\vheldSinceMs\"?\n" +
 	"\x19RosterMergeQueueStageLive\x12\"\n" +
 	"\rstarted_at_ms\x18\x01 \x01(\x03R\vstartedAtMs\"d\n" +
 	"\x1eRosterMergeQueueStageSucceeded\x12\"\n" +
@@ -13359,8 +13382,8 @@ var file_frontend_v1_sidebar_proto_goTypes = []any{
 	(*RosterMergeQueueHead)(nil),                // 97: frontend.v1.RosterMergeQueueHead
 	(*RosterMergeQueueHeadWaiting)(nil),         // 98: frontend.v1.RosterMergeQueueHeadWaiting
 	(*RosterMergeQueueHeadMerging)(nil),         // 99: frontend.v1.RosterMergeQueueHeadMerging
-	(*RosterMergeQueueHeadSuspended)(nil),       // 100: frontend.v1.RosterMergeQueueHeadSuspended
-	(*RosterMergeQueueStage)(nil),               // 101: frontend.v1.RosterMergeQueueStage
+	(*RosterMergeQueueStage)(nil),               // 100: frontend.v1.RosterMergeQueueStage
+	(*RosterMergeQueueStageHeld)(nil),           // 101: frontend.v1.RosterMergeQueueStageHeld
 	(*RosterMergeQueueStageLive)(nil),           // 102: frontend.v1.RosterMergeQueueStageLive
 	(*RosterMergeQueueStageSucceeded)(nil),      // 103: frontend.v1.RosterMergeQueueStageSucceeded
 	(*RosterMergeQueueStageFailed)(nil),         // 104: frontend.v1.RosterMergeQueueStageFailed
@@ -13596,13 +13619,13 @@ var file_frontend_v1_sidebar_proto_depIdxs = []int32{
 	95,  // 126: frontend.v1.RosterMergeQueueMode.sync:type_name -> frontend.v1.RosterMergeQueueModeSync
 	96,  // 127: frontend.v1.RosterMergeQueueMode.async:type_name -> frontend.v1.RosterMergeQueueModeAsync
 	93,  // 128: frontend.v1.RosterMergeQueueHead.subject:type_name -> frontend.v1.RosterMergeQueueSubject
-	101, // 129: frontend.v1.RosterMergeQueueHead.stages:type_name -> frontend.v1.RosterMergeQueueStage
+	100, // 129: frontend.v1.RosterMergeQueueHead.stages:type_name -> frontend.v1.RosterMergeQueueStage
 	98,  // 130: frontend.v1.RosterMergeQueueHead.waiting:type_name -> frontend.v1.RosterMergeQueueHeadWaiting
 	99,  // 131: frontend.v1.RosterMergeQueueHead.merging:type_name -> frontend.v1.RosterMergeQueueHeadMerging
-	100, // 132: frontend.v1.RosterMergeQueueHeadMerging.suspended:type_name -> frontend.v1.RosterMergeQueueHeadSuspended
-	102, // 133: frontend.v1.RosterMergeQueueStage.live:type_name -> frontend.v1.RosterMergeQueueStageLive
-	103, // 134: frontend.v1.RosterMergeQueueStage.succeeded:type_name -> frontend.v1.RosterMergeQueueStageSucceeded
-	104, // 135: frontend.v1.RosterMergeQueueStage.failed:type_name -> frontend.v1.RosterMergeQueueStageFailed
+	102, // 132: frontend.v1.RosterMergeQueueStage.live:type_name -> frontend.v1.RosterMergeQueueStageLive
+	103, // 133: frontend.v1.RosterMergeQueueStage.succeeded:type_name -> frontend.v1.RosterMergeQueueStageSucceeded
+	104, // 134: frontend.v1.RosterMergeQueueStage.failed:type_name -> frontend.v1.RosterMergeQueueStageFailed
+	101, // 135: frontend.v1.RosterMergeQueueStage.held:type_name -> frontend.v1.RosterMergeQueueStageHeld
 	93,  // 136: frontend.v1.RosterMergeQueueWaiting.subject:type_name -> frontend.v1.RosterMergeQueueSubject
 	33,  // 137: frontend.v1.RosterRepoEntry.row:type_name -> frontend.v1.RosterOpenRow
 	107, // 138: frontend.v1.RosterRepoEntry.subsection:type_name -> frontend.v1.RosterSubsection
@@ -13808,11 +13831,11 @@ func file_frontend_v1_sidebar_proto_init() {
 		(*RosterMergeQueueHead_Waiting)(nil),
 		(*RosterMergeQueueHead_Merging)(nil),
 	}
-	file_frontend_v1_sidebar_proto_msgTypes[99].OneofWrappers = []any{}
-	file_frontend_v1_sidebar_proto_msgTypes[101].OneofWrappers = []any{
+	file_frontend_v1_sidebar_proto_msgTypes[100].OneofWrappers = []any{
 		(*RosterMergeQueueStage_Live)(nil),
 		(*RosterMergeQueueStage_Succeeded)(nil),
 		(*RosterMergeQueueStage_Failed)(nil),
+		(*RosterMergeQueueStage_Held)(nil),
 	}
 	file_frontend_v1_sidebar_proto_msgTypes[106].OneofWrappers = []any{
 		(*RosterRepoEntry_Row)(nil),

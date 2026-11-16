@@ -80,7 +80,7 @@ func (o *orchestrator) startPick(ctx context.Context, ws ids.WorkspaceID, repo w
 		log.Error(op, "a pick was asked of a workspace that is no merge workspace", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		return err
 	}
-	p := &pick{ws: ws, requester: requester, repo: repo, ledger: o.mintLedger(ws), turn: wsm.NewTurnID(), instruction: entry.Source.Pick, aheadLanded: aheadLandedOf(entry)}
+	p := &pick{ws: ws, requester: requester, repo: repo, ledger: o.ledgerOfEntry(entry), turn: wsm.NewTurnID(), instruction: entry.Source.Pick, aheadLanded: aheadLandedOf(entry)}
 	started := o.deps.Now()
 	p.startedMS = started.UnixMilli()
 	if err := o.deps.DB.StartMergePick(ctx, repo, ws, p.ledger, p.turn, started); err != nil {
@@ -135,6 +135,7 @@ func (o *orchestrator) resumePick(ctx context.Context, repo wsm.RepoKey, entry w
 // drawPickLive draws the head and the live pick tab, and stands the mirror the
 // pick turn is drawn at in the requester's bubble.
 func (o *orchestrator) drawPickLive(p *pick) {
+	o.recordPickRound(p, nil, "")
 	o.publishHead(p.ws, p.ledger, p.label, p.startedMS, headMerging, headPick)
 	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: o.deps.Asks.Waiting(p.ws)}))
 	o.deps.Feed.SetOutputMirror(p.ws, &wsm.MirrorAddress{
@@ -311,6 +312,12 @@ func (o *orchestrator) settlePick(p *pick, failure string) {
 	delete(o.picks, p.ws)
 	o.mu.Unlock()
 	endedMS := o.nowMS()
+	ended := time.UnixMilli(endedMS)
+	outcome := "succeeded"
+	if failure != "" {
+		outcome = "failed"
+	}
+	o.recordPickRound(p, &ended, outcome)
 	o.publishRoundTab(p.ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, settled: true, endedMS: endedMS, failure: failure}))
 	result := OutcomeOK
 	if failure != "" {
@@ -365,4 +372,25 @@ func (o *orchestrator) redrawPick(ws ids.WorkspaceID, waiting bool) bool {
 	}
 	o.publishRoundTab(ws, p.ledger, TabPick, 1, pickTab(tabState{startedMS: p.startedMS, waiting: waiting}))
 	return true
+}
+
+// recordPickRound records the pick as its ledger's first round, live until
+// ENDED and then settled with OUTCOME: THE PICK IS A ROUND OF THE MERGE'S ONE
+// VIEW (viewOf), so the roster's stages and the bubble's hold read it from
+// the ledger as they read every other step. A round that cannot be recorded
+// is an ERROR: the pick goes on, and only its stage is missing.
+func (o *orchestrator) recordPickRound(p *pick, ended *time.Time, outcome string) {
+	ctx := context.Background()
+	fields := dlog.Context{"workspace": string(p.ws), "ledger": string(p.ledger), "settled": ended != nil}
+	if err := o.deps.DB.OpenMergeLedger(ctx, p.ws, p.ledger); err != nil {
+		o.log(ctx, p.ws).Error("daemon.merge.pick", "could not open the pick's ledger; its round is not recorded", withField(fields, "error", err.Error()))
+		return
+	}
+	if err := o.deps.DB.RecordTabInterval(ctx, p.ledger, wsm.TabInterval{
+		Round: 1, Kind: TabPick, StartedAt: time.UnixMilli(p.startedMS), EndedAt: ended, Outcome: outcome,
+	}); err != nil {
+		o.log(ctx, p.ws).Error("daemon.merge.pick", "could not record the pick's round; its stage is missing from the merge's view", withField(fields, "error", err.Error()))
+		return
+	}
+	o.publishRosterQueue(ctx, p.repo)
 }

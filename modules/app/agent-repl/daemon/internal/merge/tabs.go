@@ -514,8 +514,17 @@ func (o *orchestrator) publishRoundTab(ws ids.WorkspaceID, lease ids.LeaseID, ki
 	o.publishTab(ws, lease, roundTabKey(kind, round), tab)
 }
 
-// publishTab publishes one labelled tab row, under KEY, in the bubble's feed.
+// publishTab publishes one labelled tab row, under KEY, in the bubble's feed,
+// drawn under the bubble's hold (renderTab) and kept for the republish that
+// redraws it when the hold moves (republishBubbles).
 func (o *orchestrator) publishTab(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *frontendv1.FeedMergeTab) {
+	hold := o.bubbleTabs.keep(ws, lease, key, tab)
+	o.upsertTab(ws, lease, key, renderTab(tab, hold))
+}
+
+// upsertTab writes one drawn tab row, under KEY, in the bubble's feed: the
+// one writer of a tab row, which only publishTab and the republish call.
+func (o *orchestrator) upsertTab(ws ids.WorkspaceID, lease ids.LeaseID, key tabKey, tab *frontendv1.FeedMergeTab) {
 	at := o.bubbleOf(ws)
 	o.deps.Feed.UpsertDurable(at.ws, mergeFeed(lease), tabRow(at.ws, lease, key, tab))
 }

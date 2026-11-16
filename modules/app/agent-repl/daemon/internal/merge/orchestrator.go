@@ -86,6 +86,9 @@ type orchestrator struct {
 	lockDir string
 	// rosterQueue serializes the roster's queues (publishRosterQueue).
 	rosterQueue rosterQueuePublisher
+	// bubbleTabs is every bubble's tabs as their steps last published them,
+	// redrawn whenever the bubble's hold moves (bubbleview.go).
+	bubbleTabs bubbles
 	// offQueueLanded is which merges off their queues have work on master
 	// already, judged off every lock (offqueuelanded.go).
 	offQueueLanded offQueueLanded
@@ -506,6 +509,11 @@ func (o *orchestrator) Facts(ws ids.WorkspaceID) (MergeFacts, bool) {
 // step can never be reported against no queue.
 func (o *orchestrator) publish(repo wsm.RepoKey, ws ids.WorkspaceID, facts MergeFacts) {
 	checkQueuedAt(o.log(context.Background(), ws), ws, facts)
+	// THE STEP'S HOLD IS THE BUBBLE'S (bubbleview.go), never the step's own.
+	facts.Held = false
+	if lease, ok := o.leaseOf(ws); ok && (facts.State == StateMerging || facts.State == StateQueued) {
+		facts.Held = o.bubbleTabs.holdOfLease(lease).held
+	}
 	o.mu.Lock()
 	_, hadFacts := o.facts[ws]
 	o.facts[ws] = facts

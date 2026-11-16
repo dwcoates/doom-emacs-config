@@ -92,6 +92,26 @@ func (s *store) PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 	})
 }
 
+// DurableFeedRowRank answers the plane and order key durable row ROWID of
+// workspace ID is recorded at, found false when it is not recorded.
+func (s *store) DurableFeedRowRank(ctx context.Context, id WorkspaceID, rowID string) (int, string, bool, error) {
+	const op = "daemon.wsm.durable_feed_row_rank"
+	var (
+		plane int
+		key   string
+		found bool
+	)
+	err := s.read(ctx, op, dlog.Context{"workspace": string(id), "row": rowID}, func(ctx context.Context) error {
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT plane, order_key FROM durable_feed_rows WHERE workspace_id = ? AND row_id = ?`, id, rowID).Scan(&plane, &key)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		found = err == nil
+		return err
+	})
+	return plane, key, found, err
+}
+
 // DurableFeedRows loads every durable feed row of one workspace, in order-key
 // order.
 func (s *store) DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableFeedRow, error) {

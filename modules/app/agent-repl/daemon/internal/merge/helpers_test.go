@@ -53,6 +53,9 @@ type fakeDB struct {
 	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	linksErr error
 
+	// holdErr fails every round hold (HoldMergeRound).
+	holdErr error
+
 	// progressHistory is every progress record written, in order.
 	progressHistory []wsm.MergeProgress
 
@@ -811,6 +814,46 @@ func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease ws
 	return nil
 }
 
+func (f *fakeDB) HeldMergeRounds(context.Context) (map[wsm.LeaseID]time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[wsm.LeaseID]time.Time{}
+	for _, entries := range f.ledger {
+		for _, entry := range entries {
+			for _, round := range entry.Intervals {
+				if round.EndedAt == nil && round.HeldSince != nil {
+					out[entry.Lease] = *round.HeldSince
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) HoldMergeRound(_ context.Context, lease wsm.LeaseID, at *time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.holdErr != nil {
+		return false, f.holdErr
+	}
+	// As the store does: the live round of the ledger is marked, a settled
+	// one never.
+	for id, entries := range f.ledger {
+		for i := range entries {
+			if entries[i].Lease != lease {
+				continue
+			}
+			for j, round := range entries[i].Intervals {
+				if round.EndedAt == nil {
+					f.ledger[id][i].Intervals[j].HeldSince = at
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
 	// As the store does: a write on a cancelled context begins no transaction.
 	if err := ctx.Err(); err != nil {
@@ -837,12 +880,17 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 						if at.Before(held.StartedAt) {
 							at = held.StartedAt
 						}
-						entries[i].Intervals[j].EndedAt, entries[i].Intervals[j].Outcome = &at, wsm.TabOutcomeRestarted
+						entries[i].Intervals[j].EndedAt, entries[i].Intervals[j].Outcome, entries[i].Intervals[j].HeldSince = &at, wsm.TabOutcomeRestarted, nil
 					}
 				}
 			}
 			for j, held := range entries[i].Intervals {
 				if held.Round == interval.Round && held.Kind == interval.Kind {
+					// As the store does: a live round's hold outlives its
+					// re-record, and settling it clears the hold.
+					if interval.EndedAt == nil {
+						interval.HeldSince = held.HeldSince
+					}
 					entries[i].Intervals[j] = interval
 					f.ledger[id] = entries
 					return nil

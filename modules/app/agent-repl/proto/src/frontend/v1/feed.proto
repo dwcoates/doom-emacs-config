@@ -3801,6 +3801,15 @@ message FeedMergeTabSettled {
     FeedMergeTabFailed failed = 3;
   }
 }
+// The tab's work would run but stands still: its merge is suspended at it,
+// or its queue holds every merge in it (a pause, a handover, a deploy check).
+message FeedMergeTabHeld {
+  // When the tab's work began, epoch ms.
+  int64 started_at_ms = 1;
+  // When the merge was suspended at it, epoch ms; 0 when the queue's hold
+  // holds it, which names no instant of its own.
+  int64 held_since_ms = 2;
+}
 message FeedMergeTabSucceeded {}
 // An agentic tab's work is running and held on the user: its agent has a
 // permission ask or a question batch open. Drawn with the ❓ emoji in place of
@@ -3825,6 +3834,9 @@ message FeedMergeTabQueue {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 4;
   }
   FeedMergeQueue queue = 3;
 }
@@ -3847,6 +3859,9 @@ message FeedMergeTabResolving {
     // has a permission ask or a question batch open, which also reveals that
     // workspace.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 4;
   }
 }
 
@@ -3868,6 +3883,9 @@ message FeedMergeTabRebasing {
     // A commit's conflict resolution is held on the user: its session has a
     // permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 5;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 7;
   }
   // Arm 6 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -3957,6 +3975,9 @@ message FeedMergeTabRebaseCommit {
     // The commit is on the tip (succeeded), or its replay or its conflict
     // resolution failed and the merge with it (failed).
     FeedMergeTabSettled settled = 4;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 9;
   }
   // Arm 8 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -4000,6 +4021,9 @@ message FeedMergeTabResolvingConflicts {
     // The resolution is held on the user: its session has a permission ask
     // or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 5;
   }
   // Arm 4 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -4024,6 +4048,9 @@ message FeedMergeTabConflictResolution {
     // short, settles failed with the line the merge tries again with, until
     // the next attempt draws it live again.
     FeedMergeTabSettled settled = 3;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 6;
   }
   // Arm 5 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -4055,6 +4082,9 @@ message FeedMergeTabTests {
     // The fixing after a failed run is held on the user: its session has a
     // permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 5;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 7;
   }
   // Arm 6 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -4079,6 +4109,9 @@ message FeedMergeTabTestsRun {
     FeedMergeTabLive live = 1;
     // The run ended: every suite passed (succeeded), or one failed (failed).
     FeedMergeTabSettled settled = 2;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 5;
   }
   // Tag 4 (`waiting_for_turn`, a run in line behind another merge's tests)
   // is RETIRED (2026-11-11): only the head runs the gate.
@@ -4197,6 +4230,9 @@ message FeedMergeTabFixingTests {
     // The attempt is held on the user: its session has a permission ask or a
     // question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 5;
   }
   // Arm 4 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -4220,6 +4256,9 @@ message FeedMergeTabTestsRunFixing {
     FeedMergeTabSettled settled = 2;
     // The session has a permission ask or a question batch open.
     FeedMergeTabWaitingOnUser waiting_on_user = 3;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 6;
   }
   // Arm 5 (`held`, a tab a repair left open while its merge waits in line)
   // is RETIRED (2026-11-12): a merge back from a repair waits like any other.
@@ -4343,6 +4382,9 @@ message FeedMergeTabCommitting {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 4;
   }
   // The merge commit's subject line.
   FeedMergeCommitSubject subject = 3;
@@ -4361,6 +4403,9 @@ message FeedMergeTabUpdatingMain {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 4;
   }
   // The step it is on.
   FeedMergeUpdatingMainStep step = 3;
@@ -4392,6 +4437,9 @@ message FeedMergeTabHookPrompt {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 3;
   }
 }
 
@@ -4403,6 +4451,9 @@ message FeedMergeTabHookScript {
   oneof state {
     FeedMergeTabLive live = 1;
     FeedMergeTabSettled settled = 2;
+    // Held: the merge is suspended at this tab, or its queue holds every
+    // merge in it; drawn grey and still (the merge's view, merge.viewOf).
+    FeedMergeTabHeld on_hold = 7;
   }
   // The script that runs.
   FeedMergeHookScriptPath path = 3;
