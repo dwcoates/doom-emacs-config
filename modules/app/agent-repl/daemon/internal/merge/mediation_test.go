@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1185,5 +1186,63 @@ func TestAnUnchangedDeploysCheckThatCannotBeReadStaysOwed(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 		Message: "could not read the check an unchanged deploy owes; it stays owed"}); !ok {
 		t.Fatalf("records = %v, want the failed read at ERROR", h.logs.Records())
+	}
+}
+
+func TestReleaseCheckEndsTheChainOfOnlyACheckItReleased(t *testing.T) {
+	tests := []struct {
+		name         string
+		owed         time.Time
+		wantReleased bool
+	}{
+		{name: "the check owed", owed: deployStarted, wantReleased: true},
+		{name: "a check a newer deploy replaced", owed: deployStarted.Add(-time.Minute)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			m := *owedCheck(t, h)
+			m.OwedAt = tt.owed
+
+			// Act
+			released, err := h.o.releaseCheck(context.Background(), mediationKey(h), m, MediationApproved)
+
+			// Assert
+			if err != nil || released != tt.wantReleased {
+				t.Fatalf("releaseCheck = (%v, %v), want %v", released, err, tt.wantReleased)
+			}
+			if stopped := slices.Contains(h.checks.stopped, "ws-intake"); stopped != tt.wantReleased {
+				t.Fatalf("stopped %v, want the chain's intake stopped %v", h.checks.stopped, tt.wantReleased)
+			}
+			if stillOwed := owedCheck(t, h) != nil; stillOwed == tt.wantReleased {
+				t.Fatalf("still owed %v, want %v", stillOwed, !tt.wantReleased)
+			}
+		})
+	}
+}
+
+// TestEveryCheckReleaseGoesThroughReleaseCheck keeps one path from a
+// released check to its chain's end: a site releasing a check by hand, which
+// could leave its chain running, fails here.
+func TestEveryCheckReleaseGoesThroughReleaseCheck(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n := strings.Count(string(src), "DB.ReleaseMediation(")
+		if want := map[bool]int{true: 1, false: 0}[file == "mediation.go"]; n != want {
+			t.Fatalf("%s releases a check %d times, want %d: release through releaseCheck", file, n, want)
+		}
 	}
 }

@@ -317,7 +317,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 			o.deps.Log.Global().Info(opMediation, "the deploy changed nothing, but its check carries an earlier chain; the chain's intake checks it", withField(fields, "chain_started", m.ChainStartedAt.UTC().Format(time.RFC3339Nano)))
 			continue
 		}
-		released, err := o.deps.DB.ReleaseMediation(ctx, q.key, at)
+		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnchanged)
 		if err != nil {
 			o.deps.Log.Global().Error(opMediation, "could not release the check of a deploy that changed nothing; it stays owed", withField(fields, "error", err.Error()))
 			errs = append(errs, err)
@@ -326,7 +326,6 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 		if !released {
 			continue
 		}
-		o.endChain(ctx, q.key, *m, MediationUnchanged)
 		o.deps.Log.Global().Info(opMediation, "the deploy changed nothing; its check is released unchecked and the queue advances", fields)
 		o.republishMediation(ctx, q.key)
 		o.kick(q.key)
@@ -434,7 +433,7 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 		if m == nil {
 			continue
 		}
-		released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
+		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnmediated)
 		if err != nil {
 			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not release a check no intake decides; the queue stays held", err) {
 				return
@@ -442,13 +441,25 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 			continue
 		}
 		if released {
-			o.endChain(ctx, q.key, *m, MediationUnmediated)
 			o.deps.Log.Global().Info(opMediation, "released a check owed by a repository whose lifecycle config checks no deploys now; its queue advances", dlog.Context{
 				"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
 			o.republishMediation(ctx, q.key)
 			o.kick(q.key)
 		}
 	}
+}
+
+// releaseCheck releases check M of queue REPO, still the one owed, and ends
+// its chain as OUTCOME when the release took: a released check is always its
+// chain's last. It answers whether it released it; one a newer deploy
+// replaced, or a decision released already, is not.
+func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, outcome string) (bool, error) {
+	released, err := o.deps.DB.ReleaseMediation(ctx, repo, m.OwedAt)
+	if err != nil || !released {
+		return false, err
+	}
+	o.endChain(ctx, repo, m, outcome)
+	return true, nil
 }
 
 // endChain records how check M of queue REPO, the last of its chain, ended
@@ -679,7 +690,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.mediationFailed(ctx, fields, "could not read the window of a check its turn ended on; the queue stays held", err)
 		return
 	}
-	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, owed)
+	released, err := o.releaseCheck(ctx, q.key, *m, MediationUndecided)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "could not settle a check its turn ended on; the queue stays held", err)
 		return
@@ -688,7 +699,6 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its check decided or replaced by a newer deploy", fields)
 		return
 	}
-	o.endChain(ctx, q.key, *m, MediationUndecided)
 	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, the queue is let through and the user is told", fields)
 	o.escalateOwning(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue moved on", nil, window, fields)
 	o.republishMediation(ctx, q.key)
@@ -804,19 +814,16 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		logRefusal(o.deps.Log.Global(), opMediation, "refused an approval while the check's window holds groups no one owns", withField(fields, "unowned", unowned), refusal)
 		return refusal
 	}
-	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not release the check the decision named", withField(fields, "error", err.Error()))
-		return err
+	outcome := MediationApproved
+	if d.Kind == MediationEscalate {
+		outcome = MediationEscalated
 	}
 	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
 	// counted that check's end, and the newer one is still owed.
-	if released {
-		outcome := MediationApproved
-		if d.Kind == MediationEscalate {
-			outcome = MediationEscalated
-		}
-		o.endChain(ctx, q.key, m, outcome)
+	released, err := o.releaseCheck(ctx, q.key, m, outcome)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not release the check the decision named", withField(fields, "error", err.Error()))
+		return err
 	}
 	o.deps.Log.Global().Info(opMediation, "the intake decided the deploy; the queue advances", withField(fields, "released", released))
 	switch {
