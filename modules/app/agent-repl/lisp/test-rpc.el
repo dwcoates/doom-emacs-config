@@ -483,6 +483,27 @@ missing here or there is a broken seam.")
     (should (agent-repl-test-rpc--logs-matching 'error "elisp\\.rpc\\.response-invalid"))
     (should (agent-repl-test-rpc--logs-matching 'error "bogus"))))
 
+;;;; ---- Tests: an undecodable response's body ----
+
+(ert-deftest agent-repl-test-rpc-an-undecodable-response-records-a-bounded-body ()
+  "An undecodable roster-sized response is recorded with only its body's head."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((body (list (cons 'roster (make-string 100000 ?x)))))
+      (cl-letf (((symbol-function 'agent-repl-connect-unary)
+                 (lambda (_conn _method _json &rest keys)
+                   (funcall (plist-get keys :on-response) body)))
+                ((symbol-function 'agent-repl-wire-encode-daemon-health-request) (lambda (_r) nil))
+                ((symbol-function 'agent-repl-wire-decode-daemon-health-response)
+                 (lambda (_a) (signal 'agent-repl-wire-error (list "R" 'bogus 'unknown-field)))))
+        ;; Act
+        (agent-repl-rpc-daemon-health nil nil :on-failure #'ignore))
+      ;; Assert
+      (let ((entries (agent-repl-test-rpc--logs-matching 'error "elisp\\.rpc\\.response-invalid")))
+        (should (= 1 (length entries)))
+        (should (string-match-p "more characters not logged" (cdr (car entries))))
+        (should (< (length (cdr (car entries))) (+ agent-repl-rpc--logged-body-chars 1000)))))))
+
 ;;;; ---- Tests: the sync variants ----
 
 (ert-deftest agent-repl-test-rpc-sync-returns-the-decoded-response ()

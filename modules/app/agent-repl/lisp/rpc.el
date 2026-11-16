@@ -238,8 +238,8 @@ ON-FAILURE."
                             method (plist-get decoded :arm))
            (when on-response (funcall on-response decoded)))
        (error
-        (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%S"
-                           method err alist)
+        (agent-repl--error log-scope "elisp.rpc.response-invalid method=%S error=%S body=%s"
+                           method err (agent-repl-rpc--logged-body alist))
         (when on-failure
           (funcall on-failure
                    (list :kind :malformed :code nil :status 200
