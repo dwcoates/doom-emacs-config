@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -15,6 +16,7 @@ import (
 
 	"agentrepl/logging/childgroup"
 
+	"agent-repld/integration/grantedclock"
 	"agent-repld/internal/testsclient"
 )
 
@@ -90,12 +92,16 @@ func ensureTestService(t testing.TB, stateDir, lockDir string) string {
 	t.Cleanup(func() {
 		testServices.Delete(stateDir)
 		_ = cmd.Process.Signal(syscall.SIGTERM)
+		// THE BOUND IS ON THE GRANTED CLOCK: the service is this binary's
+		// child, so a host too busy to schedule it never reads as a hang.
+		wait, cancel := grantedclock.WithBound(context.Background(), testServiceStopBound)
+		defer cancel()
 		select {
 		case <-exited:
-		case <-time.After(testServiceStopBound):
+		case <-wait.Done():
 			_ = cmd.Process.Kill()
 			<-exited
-			t.Errorf("harness: the test service did not exit within %s of SIGTERM (its drain is 5s); killed", testServiceStopBound)
+			t.Errorf("harness: the test service did not exit within %s granted of SIGTERM (its drain is 5s); killed: %v", testServiceStopBound, grantedclock.Explain(wait))
 		}
 		for _, err := range killRunsLeftGoing(runs, childgroup.KillGroup) {
 			t.Errorf("harness: %v", err)

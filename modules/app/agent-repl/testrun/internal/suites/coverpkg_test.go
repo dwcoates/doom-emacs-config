@@ -24,6 +24,7 @@ func systemTree(t *testing.T) Layout {
 		"agent-shim/logging/go":          "module agentrepl/logging\n",
 		"proto/helpers/go":               "module agentrepl/protohelpers\n",
 		"zettel":                         "module agentrepl/zettel\n",
+		"testservice":                    "module agentrepl/testservice\n",
 	}
 	for dir, body := range mods {
 		if err := os.MkdirAll(filepath.Join(root, dir), 0o755); err != nil {

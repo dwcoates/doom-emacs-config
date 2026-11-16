@@ -32,7 +32,15 @@ func ServeUnix(t *testing.T, path string, handler http.Handler) string {
 	mux := http.NewServeMux()
 	mux.Handle(path, handler)
 	srv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Close() })
+	served := make(chan struct{})
+	// inflight: joined: the cleanup closes the server and waits for it.
+	go func() {
+		defer close(served)
+		_ = srv.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		_ = srv.Close()
+		<-served
+	})
 	return sock
 }

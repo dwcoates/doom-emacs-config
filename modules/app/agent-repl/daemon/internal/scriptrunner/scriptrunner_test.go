@@ -434,7 +434,6 @@ func TestRunWaitsForTheWholeOutputOfAScriptWhoseChildOutlivesIt(t *testing.T) {
 	}
 }
 
-
 func TestRunLinesMeasuredCountsTheProcessorTimeOfTheScriptsChildren(t *testing.T) {
 	// Arrange: the script itself only waits; its child does the work.
 	dir := t.TempDir()

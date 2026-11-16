@@ -259,7 +259,7 @@ func TestParseArgsMeasuresARosterSuitesEveryPackage(t *testing.T) {
 		if s.Package == "./internal/workspace" && s.Tags == "" && len(s.Programs) == 0 {
 			sawUnit = true
 		}
-		if s.Package == "./integration" && s.Tags == "integration" && reflect.DeepEqual(s.Programs, []string{"agent-repld", "fakeshim", "git"}) {
+		if s.Package == "./integration" && s.Tags == "integration" && reflect.DeepEqual(s.Programs, []string{"agent-repld", "fakeshim", "git", "agent-repl-tests"}) {
 			sawIntegration = true
 		}
 	}
