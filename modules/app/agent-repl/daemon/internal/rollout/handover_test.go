@@ -329,6 +329,42 @@ func TestHandoverExitsAfterTheLastTransfer(t *testing.T) {
 	}
 }
 
+func TestHandoverDrainsItsMergesBeforeItsExit(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert
+	taken := h.order.Taken()
+	drain, exit := indexOf(taken, "drain_merges"), indexOf(taken, "exit")
+	if drain < 0 || exit < 0 || drain > exit {
+		t.Fatalf("steps = %v, want the merges drained before the orderly exit", taken)
+	}
+}
+
+func TestAHandoverThatDoesNotExitDrainsNoMerge(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.registry.err = errFake
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+
+	// Assert
+	if indexOf(h.order.Taken(), "drain_merges") >= 0 {
+		t.Fatalf("steps = %v, want no merge drained by a daemon that keeps serving", h.order.Taken())
+	}
+}
+
 func TestHandoverIgnoresAWorkspaceAnotherDaemonServes(t *testing.T) {
 	// Arrange: another daemon serves `theirs`, and THIS daemon holds no
 	// session for it. (One this daemon holds a live session for is its own

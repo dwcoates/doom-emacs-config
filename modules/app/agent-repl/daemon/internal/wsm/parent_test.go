@@ -609,3 +609,133 @@ func TestRestoreParentRemovesTheCreationJobARestatedLandingRecorded(t *testing.T
 		t.Fatalf("Workspace = parent %q, %v; want the prior top-level standing", ids.Optional(ws.Parent), err)
 	}
 }
+
+// crossRepoFamily is a parent in subsection "theirs" of its own repository,
+// with a child of ANOTHER repository nested under it, that repository having
+// its own subsection "ours".
+type crossRepoFamily struct {
+	parent, child Workspace
+	theirs, ours  Subsection
+}
+
+// newCrossRepoFamily arranges a crossRepoFamily, each workspace with a
+// creation job targeting its own repository's main checkout.
+func newCrossRepoFamily(t *testing.T, s *store) crossRepoFamily {
+	t.Helper()
+	f := newParentFamily(t, s, "parent")
+	g := newParentFamily(t, s, "child")
+	out := crossRepoFamily{parent: f.byName["parent"], child: g.byName["child"]}
+	out.theirs = mustSubsection(t, s, out.parent.Repo, "theirs")
+	out.ours = mustSubsection(t, s, out.child.Repo, "ours")
+	mustPlace(t, s, out.parent.ID, &out.theirs.ID, AtEnd{})
+	if _, err := s.SetParent(context.Background(), out.child.ID, ToParent(&out.parent.ID)); err != nil {
+		t.Fatalf("SetParent(child under parent): %v", err)
+	}
+	return out
+}
+
+func TestSetParentToNoneKeepsTheFamilysSubsectionOnlyInTheOwnRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		// arrange answers the workspace to make top-level and the subsection
+		// it should then sit in, nil for none.
+		arrange func(t *testing.T, s *store) (WorkspaceID, *SubsectionID)
+	}{
+		{
+			name: "a child of another repository's parent goes to its own repository's unsectioned workspaces",
+			arrange: func(t *testing.T, s *store) (WorkspaceID, *SubsectionID) {
+				f := newCrossRepoFamily(t, s)
+				return f.child.ID, nil
+			},
+		},
+		{
+			name: "a grandchild whose root shares its repository keeps the root's subsection through a foreign parent",
+			arrange: func(t *testing.T, s *store) (WorkspaceID, *SubsectionID) {
+				f := newCrossRepoFamily(t, s)
+				grandchild := registerInRepo(t, s, arrangeRepoOf(t, s, f.parent), "grandchild", true)
+				if _, err := s.SetParent(context.Background(), grandchild.ID, ToParent(&f.child.ID)); err != nil {
+					t.Fatalf("SetParent(grandchild under child): %v", err)
+				}
+				return grandchild.ID, &f.theirs.ID
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws, want := tt.arrange(t, s)
+
+			// Act
+			_, err := s.SetParent(context.Background(), ws, ToParent(nil))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("SetParent(nil): %v", err)
+			}
+			got, err := s.Workspace(context.Background(), ws)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if got.Parent != nil {
+				t.Fatalf("parent = %q, want none", *got.Parent)
+			}
+			if !sameSubsection(got.Subsection, want) {
+				t.Fatalf("subsection = %v, want %v", ids.Optional(got.Subsection), ids.Optional(want))
+			}
+		})
+	}
+}
+
+func TestATopLevelFormerCrossRepositoryChildIsPlacedInItsOwnRepositorysSubsection(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	f := newCrossRepoFamily(t, s)
+	if _, err := s.SetParent(context.Background(), f.child.ID, ToParent(nil)); err != nil {
+		t.Fatalf("SetParent(nil): %v", err)
+	}
+
+	// Act
+	err := s.PlaceWorkspacesByAgent(context.Background(), []WorkspaceID{f.child.ID}, &f.ours.ID, AtEnd{})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("PlaceWorkspacesByAgent: %v", err)
+	}
+	if got := subsectionOf(t, s, f.child.ID); !sameSubsection(got, &f.ours.ID) {
+		t.Fatalf("subsection = %v, want %q", ids.Optional(got), f.ours.ID)
+	}
+	if got := subsectionOf(t, s, f.parent.ID); !sameSubsection(got, &f.theirs.ID) {
+		t.Fatalf("the former parent moved to %v, want it kept in %q", ids.Optional(got), f.theirs.ID)
+	}
+}
+
+func TestACrossRepositoryChildIsRefusedItsOwnRepositorysSubsectionWritingNothing(t *testing.T) {
+	// Arrange -- A FAMILY MOVES WHOLE: placing the child places its root, of
+	// the other repository, which cannot enter this repository's subsection.
+	s, log := testStore(t)
+	f := newCrossRepoFamily(t, s)
+
+	// Act
+	err := s.PlaceWorkspacesByAgent(context.Background(), []WorkspaceID{f.child.ID}, &f.ours.ID, AtEnd{})
+
+	// Assert
+	if !errors.Is(err, ErrOtherRepository) {
+		t.Fatalf("PlaceWorkspacesByAgent = %v, want ErrOtherRepository", err)
+	}
+	if got := subsectionOf(t, s, f.parent.ID); !sameSubsection(got, &f.theirs.ID) {
+		t.Fatalf("the parent moved to %v on a refusal, want it kept in %q", ids.Optional(got), f.theirs.ID)
+	}
+	child, err := s.Workspace(context.Background(), f.child.ID)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if ids.Optional(child.Parent) != string(f.parent.ID) {
+		t.Fatalf("child's parent = %q on a refusal, want %q", ids.Optional(child.Parent), f.parent.ID)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" || r.Level == "warn" {
+			t.Fatalf("a refused placement logged %s %q; it is an answer", r.Level, r.Message)
+		}
+	}
+}

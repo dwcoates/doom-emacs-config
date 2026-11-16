@@ -140,6 +140,9 @@ var sessionFaultCells = map[string]FaultCell{
 	// a session that is serving perfectly. The three cases are told apart by
 	// the fault's own `why` evidence, which the arm carries.
 	KindFinalAnswerUnresolved: {FaultStatusNone, ""},
+	// NON-ESCALATING: the session serves; what failed is the keeper that
+	// keeps its cache warm between turns.
+	KindKeepaliveUndelivered: {FaultStatusNone, ""},
 }
 
 // daemonFaultCells is the partition for a DAEMON-scoped fault, which stands on
@@ -159,6 +162,9 @@ var daemonFaultCells = map[string]FaultCell{
 	// install restarted nothing, so `agent_repl_fault` would say the daemon cannot
 	// serve a session it is serving.
 	KindDeployFailed: {FaultStatusNone, ""},
+	// NON-ESCALATING for the same reason: every session serves, and only its
+	// cache is left to lapse between turns.
+	KindKeepaliveDriveStopped: {FaultStatusNone, ""},
 }
 
 // FaultFooterCell answers where one recorded fault lands on the strip, and

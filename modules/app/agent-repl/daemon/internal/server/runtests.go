@@ -443,6 +443,23 @@ func (s *server) testWorktreeOf(ctx context.Context, rpc, op string, ref *worksp
 	if err != nil {
 		return testWorktree{}, failResolution(s.log, rpc, err)
 	}
+	if refused != nil && refused.Arm == workspace.ArmNotYetAdopted {
+		// A RUN THE INCUMBENT SENT ON HERE MID-ADOPTION WAITS FOR IT. The
+		// incumbent answers transferring_away the moment it hands the
+		// workspace over, and the caller re-sends the run here before this
+		// daemon has finished adopting it (2026-11-16 13:32:20: refused 32ms
+		// before the adoption landed, and the run was lost).
+		s.log.Info(op, "a test run arrived for a workspace this daemon is still adopting; it waits for the adoption", dlog.Context{
+			"workspace_id": ref.GetId()})
+		if _, werr := s.deps.Rollout.AwaitAdopted(ctx, ids.WorkspaceID(ref.GetId())); werr != nil {
+			s.log.Info(op, "a test run's wait for its workspace's adoption ended without it", dlog.Context{
+				"workspace_id": ref.GetId(), "cause": werr.Error()})
+			return testWorktree{}, werr
+		}
+		if subject, refused, err = s.resolveRef(ctx, rpc, ref); err != nil {
+			return testWorktree{}, failResolution(s.log, rpc, err)
+		}
+	}
 	if refused != nil && refused.Arm == workspace.ArmTransferringAway {
 		address, _ := refused.Fields["address"].(string)
 		s.log.Info(op, "refused a test run for a workspace this daemon handed to its successor; the caller sends it there", dlog.Context{

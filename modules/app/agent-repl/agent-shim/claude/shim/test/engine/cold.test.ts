@@ -16,8 +16,12 @@ import {
   CACHE_TTL_1H_MS,
   CACHE_TTL_5M_MS,
   COLD_GATE_FLOOR_TOKENS,
+  CACHE_READ_PRICE,
+  CACHE_WRITE_PRICE,
   cacheRequestOf,
+  coverageContext,
   judgeCold,
+  leftContextCached,
   readTranscriptFacts,
   sessionCacheLapse,
   sessionCold,
@@ -288,6 +292,7 @@ describe("reading the transcript's facts", () => {
 // "warm" for the floor's reason rather than the one it is testing.
 const FACTS: TranscriptFacts = {
   contextTokens: 180_000,
+  cachedTokens: 180_000,
   sawUsage: true,
   lastRequestAtMs: 1_000_000,
   cacheTtlMs: CACHE_TTL_5M_MS,
@@ -299,31 +304,37 @@ describe("what one assistant record states about its request", () => {
   it("states the 1-hour tier for a request that wrote the 1h bucket", () => {
     const record = { message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 3, ephemeral_5m_input_tokens: 0 } } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0 });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_1H_MS, contextTokens: 0, cachedTokens: 0 });
   });
 
   it("states the 5-minute tier for a request that wrote the 5m bucket", () => {
     const record = { message: { model: "m", usage: { cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 3 } } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS, contextTokens: 0 });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS, contextTokens: 0, cachedTokens: 0 });
   });
 
   it("states the 5-minute tier for cache writes with no per-tier split", () => {
     const record = { message: { model: "m", usage: { cache_creation_input_tokens: 3 } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS, contextTokens: 3 });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: CACHE_TTL_5M_MS, contextTokens: 3, cachedTokens: 3 });
   });
 
   it("states no tier for a request that wrote nothing", () => {
     const record = { message: { model: "m", usage: { cache_read_input_tokens: 3 } } };
 
-    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: undefined, contextTokens: 3 });
+    expect(cacheRequestOf(record)).toEqual({ writtenTtlMs: undefined, contextTokens: 3, cachedTokens: 3 });
   });
 
   it("states the context the request sent as its read, written and uncached input", () => {
     const record = { message: { model: "m", usage: { input_tokens: 2, cache_creation_input_tokens: 30, cache_read_input_tokens: 400 } } };
 
     expect(cacheRequestOf(record)?.contextTokens).toBe(432);
+  });
+
+  it("states what the request left cached as its read and written input, never its uncached input", () => {
+    const record = { message: { model: "m", usage: { input_tokens: 2, cache_creation_input_tokens: 30, cache_read_input_tokens: 400 } } };
+
+    expect(cacheRequestOf(record)?.cachedTokens).toBe(430);
   });
 
   it("is no request when the record states no usage", () => {
@@ -571,6 +582,17 @@ describe("reading a compaction as the latest request", () => {
     expect(facts?.contextTokens).toBe(16048);
   });
 
+  it("states the context the compaction left as cached, as before the coverage rule", () => {
+    // Arrange
+    const file = transcript([assistant(), boundary()]);
+
+    // Act
+    const facts = readTranscriptFacts(file);
+
+    // Assert
+    expect(facts?.cachedTokens).toBe(16048);
+  });
+
   it("takes the compaction's instant as the last request", () => {
     // Arrange
     const file = transcript([assistant(), boundary()]);
@@ -604,5 +626,77 @@ describe("reading a compaction as the latest request", () => {
     // Assert
     expect(facts?.contextTokens).toBe(1102);
     expect(facts?.lastRequestAtMs).toBe(Date.parse("2026-08-29T12:00:00.000Z"));
+  });
+});
+
+// THE INCIDENT'S OWN FIGURES (torch-human-cancel-hang, 2026-11-11 14:58 UTC):
+// a vendor-error retry sent 916,455 tokens uncached over a 35,089-token cached
+// prefix and wrote nothing.
+const RETRY_CONTEXT = 916_455 + 35_089;
+
+describe("whether a request left its context cached", () => {
+  it("states the vendor's read and one-hour write prices", () => {
+    expect([CACHE_READ_PRICE, CACHE_WRITE_PRICE]).toEqual([0.1, 2]);
+  });
+
+  const cases: ReadonlyArray<{ readonly name: string; readonly contextTokens: number; readonly cachedTokens: number; readonly expected: boolean }> = [
+    { name: "the incident's retry, its context uncached past the prefix, left it UNCACHED", contextTokens: RETRY_CONTEXT, cachedTokens: 35_089, expected: false },
+    { name: "an ordinary request, a few tokens past its last breakpoint, left it cached", contextTokens: 945_000, cachedTokens: 944_998, expected: true },
+    { name: "an uncached part whose write costs exactly the re-read left it cached", contextTokens: 100_000, cachedTokens: 95_000, expected: true },
+    { name: "an uncached part one token past the re-read's cost left it UNCACHED", contextTokens: 100_000, cachedTokens: 94_999, expected: false },
+    { name: "a request that sent nothing has nothing to keep, and counts as cached", contextTokens: 0, cachedTokens: 0, expected: true },
+  ];
+
+  for (const testCase of cases) {
+    it(testCase.name, () => {
+      expect(leftContextCached({ contextTokens: testCase.contextTokens, cachedTokens: testCase.cachedTokens })).toBe(testCase.expected);
+    });
+  }
+
+  it("states a coverage's context, cached and uncached tokens for the log", () => {
+    expect(coverageContext({ contextTokens: 10, cachedTokens: 7 })).toEqual({ context_tokens: 10, cached_tokens: 7, uncached_tokens: 3 });
+  });
+
+  it("reads the last request's cached tokens off the transcript", () => {
+    const file = transcript([
+      assistant(),
+      assistant({ message: { model: "m", usage: { input_tokens: 916_455, cache_read_input_tokens: 35_089, cache_creation_input_tokens: 0 } } }),
+    ]);
+
+    expect(readTranscriptFacts(file)?.cachedTokens).toBe(35_089);
+  });
+});
+
+describe("judging a cache whose last request left its context uncached", () => {
+  const UNCACHED: TranscriptFacts = { ...FACTS, cacheTtlMs: CACHE_TTL_1H_MS, contextTokens: RETRY_CONTEXT, cachedTokens: 35_089 };
+  const INSIDE_TIER = FACTS.lastRequestAtMs + 52 * 60 * 1000;
+
+  it("judges it LAPSED inside its tier, so the gate asks before the full-price read", () => {
+    expect(judgeCold(UNCACHED, INSIDE_TIER, "claude-opus-5")).toBe("lapsed");
+  });
+
+  it("records the coverage that judged it at INFO", () => {
+    // Arrange
+    const before = logSinkMark();
+
+    // Act
+    judgeCold(UNCACHED, INSIDE_TIER, "claude-opus-5");
+
+    // Assert
+    const record = logRecordsSince(before).find((r) => r.message.includes("left its context uncached"));
+    expect([record?.level, record?.context.context_tokens, record?.context.cached_tokens, record?.context.uncached_tokens]).toEqual([
+      "info",
+      RETRY_CONTEXT,
+      35_089,
+      916_455,
+    ]);
+  });
+
+  it("judges a cached context inside its tier warm, as before", () => {
+    expect(judgeCold({ ...UNCACHED, cachedTokens: RETRY_CONTEXT }, INSIDE_TIER, "claude-opus-5")).toBeUndefined();
+  });
+
+  it("lets an uncached context under the floor continue without the gate", () => {
+    expect(judgeCold({ ...UNCACHED, contextTokens: 100_000, cachedTokens: 0 }, INSIDE_TIER, "claude-opus-5")).toBeUndefined();
   });
 });

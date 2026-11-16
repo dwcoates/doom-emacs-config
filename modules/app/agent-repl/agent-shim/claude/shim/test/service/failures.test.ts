@@ -824,6 +824,7 @@ describe("transcriptsRead", () => {
     bound: false,
     facts: {
       contextTokens: 4_242,
+      cachedTokens: 4_242,
       sawUsage: true,
       lastRequestAtMs: 1_699_999_000_000,
       cacheTtlMs: 300_000,

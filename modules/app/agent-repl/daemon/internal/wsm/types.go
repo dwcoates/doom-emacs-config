@@ -95,6 +95,10 @@ type Workspace struct {
 	// stopped part way is owed (owednuke.go); nil otherwise. The boot finishes
 	// it, and nothing restores the worktree of a workspace that owes one.
 	NukeOwedAt *time.Time
+	// KeepaliveRunBeats is how many keep-alives the daemon has sent the
+	// workspace, for either of its conversations, since its last turn closed
+	// (keepaliverun.go): 0 once a turn closes. Derived on read.
+	KeepaliveRunBeats int
 	// CacheColdTurnAt is the turn clock (LastTurnEndedAt) at which the
 	// workspace's prompt cache was last known cold (cachecold.go): its cold
 	// gate was raised or answered, or its shim judged the cache lapsed. Nil

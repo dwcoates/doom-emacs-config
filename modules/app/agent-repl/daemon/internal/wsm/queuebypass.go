@@ -209,9 +209,17 @@ func (s *store) SwapParkedConversation(ctx context.Context, id WorkspaceID, step
 }
 
 // SetParkedKeepalive records AT as when workspace ID's parked conversation's
-// keep-alive was answered: its clock moves, and its cache is warm.
+// keep-alive was answered: its clock moves, and its cache is warm. It is
+// counted into the workspace's keep-alive run in the same transaction
+// (keepaliverun.go): a parked keep-alive is rent spent on the workspace like
+// the running conversation's.
 func (s *store) SetParkedKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error {
-	return s.setParkedClock(ctx, "daemon.wsm.set_parked_keepalive", id, `clock_at = ?, cold = 0`, nanos(at))
+	return s.write(ctx, "daemon.wsm.set_parked_keepalive", dlog.Context{"workspace": string(id)}, func(ctx context.Context, tx *sql.Tx) error {
+		if err := updateParkedClock(ctx, tx, id, `clock_at = ?, cold = 0`, nanos(at)); err != nil {
+			return err
+		}
+		return countKeepalive(ctx, tx, id)
+	})
 }
 
 // MarkParkedCold records that workspace ID's parked conversation's cache has
@@ -225,17 +233,23 @@ func (s *store) MarkParkedCold(ctx context.Context, id WorkspaceID) error {
 func (s *store) setParkedClock(ctx context.Context, op string, id WorkspaceID, set string, args ...any) error {
 	fields := dlog.Context{"workspace": string(id)}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE workspace_parked_conversations SET `+set+` WHERE workspace_id = ?`, append(args, id)...)
-		if err != nil {
-			return err
-		}
-		if n, err := res.RowsAffected(); err != nil {
-			return err
-		} else if n != 1 {
-			return fmt.Errorf("wsm: workspace %s parks no conversation", id)
-		}
-		return nil
+		return updateParkedClock(ctx, tx, id, set, args...)
 	})
+}
+
+// updateParkedClock is setParkedClock's statement, inside a transaction the
+// caller already holds.
+func updateParkedClock(ctx context.Context, tx *sql.Tx, id WorkspaceID, set string, args ...any) error {
+	res, err := tx.ExecContext(ctx, `UPDATE workspace_parked_conversations SET `+set+` WHERE workspace_id = ?`, append(args, id)...)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return fmt.Errorf("wsm: workspace %s parks no conversation", id)
+	}
+	return nil
 }
 
 // readQueueBypass reads workspace ID's standing on Q.

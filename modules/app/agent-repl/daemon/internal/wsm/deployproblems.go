@@ -23,7 +23,7 @@ import (
 // recur" by the next check's short window, and the chain closed on it
 // (2026-11-16 02:44: the durable log sink warning).
 
-// deployProblemsDDL is the layout-153 addition: the deploy problems, each
+// deployProblemsDDL is the layout-154 addition: the deploy problems, each
 // owned check's window, and where each repository's checks have read up to.
 // IT IS ADDITIVE: a new table and two new columns the previous build never
 // names.

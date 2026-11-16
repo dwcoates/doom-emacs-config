@@ -235,7 +235,9 @@ message FooterStrip {
 //   | (whatever  | (whatever | shim_reported, classifier_failed,            |
 //   |  stands)   |  stands)  | bounce_unknown, conversation_abandoned,      |
 //   |            |           | final_answer_unresolved,                     |
-//   |            |           | deploy_failed (daemon)                       |
+//   |            |           | keepalive_undelivered,                       |
+//   |            |           | deploy_failed (daemon),                      |
+//   |            |           | keepalive_drive_stopped (daemon)             |
 //
 // WHY THOSE FOUR DO NOT ESCALATE, since the ruling's worked example put them
 // under `disconnected · degraded`: the shim answered in every one of them. A

@@ -70,6 +70,7 @@
 (declare-function agent-repl-wire-decode-session-fault-adoption-window-expired "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-final-answer-unresolved "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-retrying "wire-common")
+(declare-function agent-repl-wire-decode-session-fault-keepalive-undelivered "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-rejected "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-vendor-start-failed "wire-common")
 (declare-function agent-repl-wire-decode-session-fault-classifier-failed "wire-common")
@@ -207,6 +208,11 @@ Rotates on restart within one session; fault windows scope to it."
 `SessionFaultVendorStartFailed'."
   (agent-repl-wire-decode-session-fault-vendor-start-failed value))
 
+(defun agent-repl-wire-decode-host-fault-keepalive-undelivered (value)
+  "Decode HostFault's `keepalive_undelivered' kind arm from VALUE as a
+`SessionFaultKeepaliveUndelivered'."
+  (agent-repl-wire-decode-session-fault-keepalive-undelivered value))
+
 (defun agent-repl-wire-decode-host-fault-kind (value)
   "Decode HostFault's `kind' oneof from the object VALUE.
 THE ARM IS THE FAULT CLASS: `detail' supplements it and never replaces
@@ -231,7 +237,8 @@ fault the consumer would have to parse."
        (finalAnswerUnresolved :final-answer-unresolved agent-repl-wire-decode-host-fault-final-answer-unresolved)
        (vendorStartRetrying :vendor-start-retrying agent-repl-wire-decode-host-fault-vendor-start-retrying)
        (vendorStartRejected :vendor-start-rejected agent-repl-wire-decode-host-fault-vendor-start-rejected)
-       (vendorStartFailed :vendor-start-failed agent-repl-wire-decode-host-fault-vendor-start-failed)))))
+       (vendorStartFailed :vendor-start-failed agent-repl-wire-decode-host-fault-vendor-start-failed)
+       (keepaliveUndelivered :keepalive-undelivered agent-repl-wire-decode-host-fault-keepalive-undelivered)))))
 
 (defun agent-repl-wire-decode-host-fault (value)
   "Decode VALUE as `HostFault', a plist `(:detail :opened-at-ms :kind)'.
@@ -240,7 +247,7 @@ verbatim with SessionHealth's `SessionFault' — the stream reporting a
 fault never changes its class."
   (let ((object (agent-repl-wire--object "HostFault" value)))
     (agent-repl-wire--check-keys
-     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed))
+     "HostFault" object '(detail openedAtMs shimStartFailed shimDied linkSevered resumeFailed bounceDied bounceUnknown classifierFailed shimReported conversationAbandoned sessionAbsent watchOpenRefused daemonStateUnreadable adoptionWindowExpired finalAnswerUnresolved vendorStartRetrying vendorStartRejected vendorStartFailed keepaliveUndelivered))
     (agent-repl-wire--decoded
      "HostFault"
      (list :detail (agent-repl-wire--decode-string "HostFault" 'detail object)
@@ -711,12 +718,11 @@ without their slash, WORKSPACES as the roster names them."
 ;;;; ---- The selection push ----
 
 (defun agent-repl-wire-decode-host-workspace-selection (value)
-  "Decode VALUE as `HostWorkspaceSelection', a plist `(:kind :markdown)'.
+  "Decode VALUE as `HostWorkspaceSelection', a plist `(:kind KIND)'.
 KIND is `:none', `:response', `:prompt' or `:bubble': which kind of row the
-feed has selected, never the row, because Emacs never names it back.
-MARKDOWN is the selected bubble's text, which the composer's `/' and `?'
-search, and nil exactly when KIND is `:none'.  An unset or doubled oneof is
-a contract breach."
+feed has selected, never the row, because Emacs never names it back.  Every
+arm is empty, so a field riding one is refused.  An unset or doubled oneof
+is a contract breach."
   (let ((object (agent-repl-wire--object "HostWorkspaceSelection" value)))
     (agent-repl-wire--check-keys "HostWorkspaceSelection" object '(none response prompt bubble))
     (let ((selection
@@ -728,40 +734,23 @@ a contract breach."
                (response :response agent-repl-wire-decode-host-workspace-selection-response)
                (prompt :prompt agent-repl-wire-decode-host-workspace-selection-prompt)
                (bubble :bubble agent-repl-wire-decode-host-workspace-selection-bubble))))))
-      (list :kind (plist-get selection :arm)
-            :markdown (plist-get selection :value)))))
+      (list :kind (plist-get selection :arm)))))
 
 (defun agent-repl-wire-decode-host-workspace-selection-none (value)
   "Decode VALUE as the empty message `HostWorkspaceSelectionNone'."
   (agent-repl-wire--decode-empty "HostWorkspaceSelectionNone" value))
 
-(defun agent-repl-wire--decode-host-workspace-selection-text (message-name value)
-  "Decode VALUE as the selected-arm MESSAGE-NAME, answering its text.
-Every selected arm carries the bubble's text in a REQUIRED `markdown'
-element; the text itself may be empty (a prompt that is an image alone)."
-  (let ((object (agent-repl-wire--object message-name value)))
-    (agent-repl-wire--check-keys message-name object '(markdown))
-    (agent-repl-wire--decode-message
-     message-name 'markdown object
-     #'agent-repl-wire-decode-host-workspace-selection-markdown)))
-
-(defun agent-repl-wire-decode-host-workspace-selection-markdown (value)
-  "Decode VALUE as `HostWorkspaceSelectionMarkdown', answering its text."
-  (let ((object (agent-repl-wire--object "HostWorkspaceSelectionMarkdown" value)))
-    (agent-repl-wire--check-keys "HostWorkspaceSelectionMarkdown" object '(text))
-    (agent-repl-wire--decode-string "HostWorkspaceSelectionMarkdown" 'text object)))
-
 (defun agent-repl-wire-decode-host-workspace-selection-response (value)
-  "Decode VALUE as `HostWorkspaceSelectionResponse', answering its text."
-  (agent-repl-wire--decode-host-workspace-selection-text "HostWorkspaceSelectionResponse" value))
+  "Decode VALUE as the empty message `HostWorkspaceSelectionResponse'."
+  (agent-repl-wire--decode-empty "HostWorkspaceSelectionResponse" value))
 
 (defun agent-repl-wire-decode-host-workspace-selection-prompt (value)
-  "Decode VALUE as `HostWorkspaceSelectionPrompt', answering its text."
-  (agent-repl-wire--decode-host-workspace-selection-text "HostWorkspaceSelectionPrompt" value))
+  "Decode VALUE as the empty message `HostWorkspaceSelectionPrompt'."
+  (agent-repl-wire--decode-empty "HostWorkspaceSelectionPrompt" value))
 
 (defun agent-repl-wire-decode-host-workspace-selection-bubble (value)
-  "Decode VALUE as `HostWorkspaceSelectionBubble', answering its text."
-  (agent-repl-wire--decode-host-workspace-selection-text "HostWorkspaceSelectionBubble" value))
+  "Decode VALUE as the empty message `HostWorkspaceSelectionBubble'."
+  (agent-repl-wire--decode-empty "HostWorkspaceSelectionBubble" value))
 
 ;;;; ---- The remaining WatchHostWorkspace push arms ----
 
@@ -998,7 +987,7 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   (agent-repl-wire-decode-host-workspace-mentions value))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
-  "Decode the `selection' push arm VALUE as its `(:kind :markdown)' plist."
+  "Decode the `selection' push arm VALUE as its `(:kind KIND)' plist."
   (agent-repl-wire-decode-host-workspace-selection value))
 
 (defun agent-repl-wire-decode-watch-host-workspace-response-transferred (value)

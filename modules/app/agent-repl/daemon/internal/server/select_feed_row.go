@@ -637,7 +637,7 @@ func (k selectionKind) contextKind() workspace.ContextSelectionKind {
 
 // selectionState is one workspace's selection as every client receives it:
 // the selection the webapp draws and, while a row is selected, that row's
-// text, which Emacs searches. A value is never mutated after it is published.
+// text, which a one-shot's context brief quotes. A value is never mutated after it is published.
 type selectionState struct {
 	selection *frontendv1.FeedSelection
 	markdown  string
@@ -693,25 +693,23 @@ func (s *server) setSelection(ws ids.WorkspaceID, state *selectionState) {
 	s.composerChanges.Emit(ws)
 }
 
-// hostSelectionOf is the selection as Emacs needs it: the kind of row, and the
-// selected row's text for the composer's search.
+// hostSelectionOf is the selection as Emacs needs it: the kind of row alone.
 func hostSelectionOf(state *selectionState) *agentreplv1.HostWorkspaceSelection {
 	_, kind, held := selectedRow(state.selection)
 	if !held {
 		return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_None{
 			None: &agentreplv1.HostWorkspaceSelectionNone{}}}
 	}
-	text := &agentreplv1.HostWorkspaceSelectionMarkdown{Text: state.markdown}
 	switch kind {
 	case selectionPrompt:
 		return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_Prompt{
-			Prompt: &agentreplv1.HostWorkspaceSelectionPrompt{Markdown: text}}}
+			Prompt: &agentreplv1.HostWorkspaceSelectionPrompt{}}}
 	case selectionBubble:
 		return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_Bubble{
-			Bubble: &agentreplv1.HostWorkspaceSelectionBubble{Markdown: text}}}
+			Bubble: &agentreplv1.HostWorkspaceSelectionBubble{}}}
 	}
 	return &agentreplv1.HostWorkspaceSelection{Selection: &agentreplv1.HostWorkspaceSelection_Response{
-		Response: &agentreplv1.HostWorkspaceSelectionResponse{Markdown: text}}}
+		Response: &agentreplv1.HostWorkspaceSelectionResponse{}}}
 }
 
 // selectionTopic answers a workspace's selection topic, minting it on first

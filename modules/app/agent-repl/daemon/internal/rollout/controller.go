@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"agent-repld/internal/changesignal"
 	"sync"
 	"time"
 
@@ -57,6 +58,12 @@ type controller struct {
 	// the last unlock, each with the channel its next change closes.
 	intake answerLatch
 	queue  answerLatch
+	// standings is told at every unlock, since any critical section may
+	// change a workspace's standing: what AwaitAdopted waits on.
+	standings changesignal.Signal
+	// onAdoptionWait is the test seam, nil in production: called each time
+	// AwaitAdopted begins waiting on a standing change.
+	onAdoptionWait func()
 	// rendezvous is the per-workspace adopt ledger, armed either by this
 	// daemon's own announcement (the outgoing side, so ExpectedParticipants can
 	// answer) or by the intent manifest read at Join (the incoming side).

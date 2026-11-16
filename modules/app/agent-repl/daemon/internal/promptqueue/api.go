@@ -863,6 +863,12 @@ type StandDownGuard interface {
 	// the lease under the same delivery lock, so a submission is either held
 	// against the lease or seen here, never sent to a hibernated shim.
 	Delivering(ws ids.WorkspaceID) bool
+	// Bouncing reports whether a bounce is draining the workspace. A
+	// stand-down asks it AFTER taking its hibernation lease, and a bounce's
+	// decision reads the lease under the same delivery lock, so a park and a
+	// bounce never both act on one free workspace: the one that came second
+	// stands aside for the first.
+	Bouncing(ws ids.WorkspaceID) bool
 }
 
 // HeldRollback is the stop key's take-back of a held prompt: the one part of

@@ -168,6 +168,15 @@ which every runtime stops by itself.
 - **Status / next step**: proposed: log a row's decisions only when its result changes; awaiting the owner.
 - **Flagged by**: found by profiling, 2026-10-12.
 
+### Sidebar animation smoothness under load
+- **Interaction**: watching the rail while workspaces work: a working workspace's name breathes, and a reviving one's shimmers; under load both stutter or freeze.
+- **Budget**: every frame (16ms); an animation must never wait on the page's main thread.
+- **Measured**: 2026-11-16, owner-observed "very unsmooth under load". A roster draw (webapp `sidebar.roster-draw`) takes median 41ms and p90 98ms, and runs up to 140 times a minute during a deploy; garbage collection and style passes add more. Each draw froze the breath and the shimmer, because they animated `color` and `mask-position`, which WebKit computes on the main thread every frame. Not yet measured live: whether the compositor keeps `opacity`/`transform` moving in the Emacs xwidget while the main thread blocks. The probe (a busy loop run through the sidebar page) needs screen capture, which macOS denies both the agent's shell and Emacs.
+- **Code paths**: `webapp/src/styles.css` (`ws-pulse`, `ws-pulse-rest`, `ws-revive-shimmer`, `ws-revive-counter`), `webapp/src/sidebar/name-ink.ts` (the name's animated copies), `webapp/src/sidebar/row.ts`, `webapp/src/sidebar/wall-phase.ts` (the wall-clock seek).
+- **Contributors**: measured: main-thread properties (`color`, `mask-position`) on looping animations; roster draws, garbage collection and style passes on the sidebar page's main thread.
+- **Status / next step**: fixed on branch `sidebar-compositor-animations`: the breath crossfades two copies of the name by `opacity` (`plus-lighter`, so the mix is the old color loop's), and the shimmer's mask rides the name's ink box by `transform` with the text counter-moved. In headless WebKit, frames seeked to the same phases match the old ones within 2/255 for grey and tinted names, and within 24/255 on glyph edges mid-breath for viewed and cold-gated names. Next: grant screen capture and run the busy-loop probe in the xwidget to confirm the compositor keeps both moving.
+- **Flagged by**: the owner, 2026-11-16 ("the sidebar's animations become very unsmooth under load").
+
 ### Log volume at info
 - **Interaction**: none directly; CPU and disk on every record, on battery.
 - **Budget**: background.

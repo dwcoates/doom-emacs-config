@@ -138,7 +138,7 @@ func (s *store) HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, err
 	return out, err
 }
 
-// mergeRoundHoldDDL is the layout-154 addition: when the live round of a
+// mergeRoundHoldDDL is the layout-155 addition: when the live round of a
 // merge's ledger was suspended, NULL while it runs (HoldMergeRound).
 const mergeRoundHoldDDL = `
 ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
@@ -148,7 +148,7 @@ ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
 // settled (RecordTabInterval).
 const TabOutcomeRestarted = "restarted"
 
-// settledLiveRoundsDDL is the layout-152 addition: every round left live in
+// settledLiveRoundsDDL is the layout-153 addition: every round left live in
 // a ledger before RecordTabInterval kept one live round per ledger is settled
 // `restarted` at the next round's start, and every live round of a ledger no
 // queued merge draws any more is settled at its own start, so the store holds

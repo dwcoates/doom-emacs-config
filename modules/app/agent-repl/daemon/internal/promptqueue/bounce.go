@@ -433,7 +433,7 @@ func (q *queue) RequestBounce(ctx context.Context, ws ids.WorkspaceID, req bounc
 		})
 		return decision, nil
 	}
-	if q.heldBehindMergeLocked(ctx, d, existing, log) {
+	if q.heldBehindLeaseLocked(ctx, d, existing, log) {
 		return decision, nil
 	}
 	decision.Now = true
@@ -706,13 +706,54 @@ func (q *queue) checkRegistryLocked(d *delivery, edge freenessEdge, log dlog.Log
 		})
 		return false
 	}
-	if q.heldBehindMergeLocked(context.Background(), d, pending, log) {
+	if q.heldBehindLeaseLocked(context.Background(), d, pending, log) {
 		return false
 	}
 	log.Info(opBounce, "the workspace's work ended; taking its registered bounce now", dlog.Context{
 		"reason": pending.reason(),
 	})
 	return q.startBounceLocked(d, log)
+}
+
+// heldBehindLeaseLocked reports whether PENDING may not be taken now because
+// a lease holds the workspace that its run would collide with: a merge's
+// (heldBehindMergeLocked) or a stand-down's (heldBehindHibernationLocked).
+// EVERY bounce decision asks it, so no site takes a bounce one of them holds.
+// The caller holds the delivery lock (d).
+func (q *queue) heldBehindLeaseLocked(ctx context.Context, d *delivery, pending *pendingBounce, log dlog.Logger) bool {
+	return q.heldBehindMergeLocked(ctx, d, pending, log) || q.heldBehindHibernationLocked(ctx, d, pending, log)
+}
+
+// heldBehindHibernationLocked reports whether PENDING may not be taken now
+// because a stand-down's hibernation lease holds the workspace: the idle
+// sweep took the free workspace first. Such a bounce stays registered, the
+// workspace is never drained for it, and the lease's release takes it
+// (OnLeaseChanged's lease edge) on the session the stand-down left. Taken
+// under the lease, its relaunch could not take its restart hold and failed
+// (2026-11-16 13:42:27, merge-view-one-source). The park reads Bouncing under
+// the same delivery lock, so the two never both act.
+//
+// A lease that cannot be read takes nothing: the bounce stays registered, the
+// failure is recorded at ERROR, and the next edge judges it again. The caller
+// holds the delivery lock (d).
+func (q *queue) heldBehindHibernationLocked(ctx context.Context, d *delivery, pending *pendingBounce, log dlog.Logger) bool {
+	q.mu.Lock()
+	reason := pending.reason()
+	q.mu.Unlock()
+	lease, held, err := q.deps.DB.Lease(ctx, d.ws)
+	if err != nil {
+		log.Error(opBounce, "could not read the occupancy lease before taking a bounce; it stays registered for the next edge", dlog.Context{
+			"reason": reason, "cause": err.Error(),
+		})
+		return true
+	}
+	if !held || lease.Holder != wsm.HolderHibernate {
+		return false
+	}
+	log.Info(opBounce, "a stand-down's lease holds the workspace; the bounce stays registered, the workspace is not drained, and the lease's release takes it", dlog.Context{
+		"reason": reason, "lease": string(lease.ID),
+	})
+	return true
 }
 
 // heldBehindMergeLocked reports whether PENDING may not be taken now because
@@ -795,7 +836,7 @@ func (q *queue) decideBounceLocked(d *delivery, log dlog.Logger) bool {
 		log.Info(opBounce, "a dispatch-quiet move deferred behind a shim call: moving the workspace now; the work in flight runs on through the move", dlog.Context{
 			"turn_in_flight": turn, "detached_work": detached, "overtook_replacement": overtook,
 		})
-	case free && q.heldBehindMergeLocked(context.Background(), d, pending, log):
+	case free && q.heldBehindLeaseLocked(context.Background(), d, pending, log):
 		return false
 	case free:
 		log.Info(opBounce, "a bounce deferred behind a shim call: the workspace is free; bouncing it now", dlog.Context{"reason": pending.reason()})

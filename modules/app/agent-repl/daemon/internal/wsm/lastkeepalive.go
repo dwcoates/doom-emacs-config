@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"database/sql"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -22,10 +23,15 @@ ALTER TABLE workspaces ADD COLUMN last_keepalive_at INTEGER;
 `
 
 // SetLastKeepalive records AT as when the workspace's keep-alive was last
-// sent.
+// sent, and counts it into the workspace's keep-alive run (keepaliverun.go)
+// in the same transaction.
 func (s *store) SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error {
-	return s.setWorkspaceColumns(ctx, "daemon.wsm.set_last_keepalive", id, dlog.Context{"at": at},
-		workspaceColumn{name: "last_keepalive_at", value: nanos(at)})
+	return s.write(ctx, "daemon.wsm.set_last_keepalive", dlog.Context{"workspace": string(id), "at": at}, func(ctx context.Context, tx *sql.Tx) error {
+		if err := updateWorkspaceColumns(ctx, tx, id, workspaceColumn{name: "last_keepalive_at", value: nanos(at)}); err != nil {
+			return err
+		}
+		return countKeepalive(ctx, tx, id)
+	})
 }
 
 // CacheClock is when the prompt cache of the conversation the workspace runs

@@ -1,5 +1,12 @@
 # One selection for every landed bubble, on the SelectFeedRow model
 
+> **Retired 2026-11-10:** the response view and its `/`, `?` and `C-s`
+> search of a selected bubble are removed, because they took the composer's
+> own search keys while a row was selected. `agentrepl.v1.HostWorkspaceSelection`'s
+> arms are empty again, their `markdown` field `reserved`, and
+> `agentrepl.v1.HostWorkspaceSelectionMarkdown` is gone. The selection itself,
+> and `RET` on it, stand as designed below.
+
 This rebuilds the feature first designed in
 `docs/protobuf-design/response-search.md` (branch `response-search`). Read that
 record for the owner's rulings and the reasoning behind them. While that

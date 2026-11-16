@@ -36,9 +36,7 @@ func (k *Keeper) parkedDue(ctx context.Context, log dlog.Logger, ws ids.Workspac
 	}
 	standing, err := k.deps.DB.QueueBypass(ctx, ws)
 	if err != nil {
-		if !leaving(ctx, log, opDrive, "reading the workspace's parked conversation to time its keep-alive", err) {
-			log.Error(opDrive, "could not read the workspace's parked conversation; its keep-alive is not armed", dlog.Context{"cause": err.Error()})
-		}
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace's parked conversation to time its keep-alive", "could not read the workspace's parked conversation; its keep-alive is not armed", nil, err)
 		return time.Time{}, false
 	}
 	if standing.ParkedVendorSessionID == "" || standing.ParkedCold || standing.ParkedClockAt == nil {
@@ -97,14 +95,12 @@ func (k *Keeper) parkedAnswered(ctx context.Context, ws ids.WorkspaceID, answer 
 		log.Info(opDrive, "the shim holds no session for the parked keep-alive; it is asked again shortly", dlog.Context{"retry_in": BeatRetry.String()})
 		k.parkedRetry[ws] = now.Add(BeatRetry)
 	case errors.As(err, &failed):
-		log.Error(opDrive, "the parked conversation's keep-alive failed; it is asked again shortly",
-			dlog.Context{"cause": failed.Detail, "retry_in": BeatRetry.String()})
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "submitting the parked keep-alive", "the parked conversation's keep-alive failed; it is asked again shortly",
+			dlog.Context{"retry_in": BeatRetry.String()}, errors.New(failed.Detail))
 		k.parkedRetry[ws] = now.Add(BeatRetry)
 	case err != nil:
-		if !leaving(ctx, log, opDrive, "asking the shim for the parked keep-alive", err) {
-			log.Error(opDrive, "could not ask the shim for the parked keep-alive; it is asked again shortly",
-				dlog.Context{"cause": err.Error(), "retry_in": BeatRetry.String(), "bound": AnswerBound.String()})
-		}
+		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "asking the shim for the parked keep-alive", "could not ask the shim for the parked keep-alive; it is asked again shortly",
+			dlog.Context{"retry_in": BeatRetry.String(), "bound": AnswerBound.String()}, err)
 		k.parkedRetry[ws] = now.Add(BeatRetry)
 	case answer.GetSent() != nil:
 		delete(k.parkedRetry, ws)
@@ -113,6 +109,7 @@ func (k *Keeper) parkedAnswered(ctx context.Context, ws ids.WorkspaceID, answer 
 			k.parkedRetry[ws] = now.Add(BeatRetry)
 		} else {
 			log.Info(opDrive, "the parked conversation's keep-alive was answered; its cache is warm", nil)
+			k.delivered(ctx, log, ws)
 		}
 	case answer.GetSkipped().GetCacheLapsed() != nil:
 		delete(k.parkedRetry, ws)

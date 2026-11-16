@@ -626,13 +626,16 @@ message HostFault {
     SessionFaultVendorStartRejected vendor_start_rejected = 18;
     // The vendor kept failing to start for the whole retry window.
     SessionFaultVendorStartFailed vendor_start_failed = 19;
+    // A keep-alive that was due could not be armed or sent, or was not sent
+    // before the cache lapsed.
+    SessionFaultKeepaliveUndelivered keepalive_undelivered = 20;
   }
 }
 
 
 // What the workspace's feed has selected, as Emacs needs it: which kind of
-// row, and the selected bubble's text, never the row, because Emacs never names
-// it back. The text is what the composer's `/` and `?` search.
+// row, never the row, because Emacs never names it back. The kind is what the
+// composer's escape-twice clear and its `RET` on a selection act on.
 message HostWorkspaceSelection {
   // Exactly one is set on every push.
   oneof selection {
@@ -651,19 +654,25 @@ message HostWorkspaceSelection {
 message HostWorkspaceSelectionNone {}
 // A final response is selected.
 message HostWorkspaceSelectionResponse {
-  // The response's text.
-  HostWorkspaceSelectionMarkdown markdown = 1;
+  // The response's text, retired with the composer's search of a selected
+  // bubble.
+  reserved 1;
+  reserved "markdown";
 }
 // A prompt a rollback can reach is selected.
 message HostWorkspaceSelectionPrompt {
-  // The prompt's text.
-  HostWorkspaceSelectionMarkdown markdown = 1;
+  // The prompt's text, retired with the composer's search of a selected
+  // bubble.
+  reserved 1;
+  reserved "markdown";
 }
 // Any other bubble is selected: an interim or thinking response, an agent
 // prompt, or a user prompt a rollback cannot reach.
 message HostWorkspaceSelectionBubble {
-  // The bubble's text.
-  HostWorkspaceSelectionMarkdown markdown = 1;
+  // The bubble's text, retired with the composer's search of a selected
+  // bubble.
+  reserved 1;
+  reserved "markdown";
 }
 // The commands and workspaces a workspace's own final responses mentioned,
 // each the most recently mentioned first. A mention's instant is the instant
@@ -680,10 +689,4 @@ message HostWorkspaceMentions {
   // workspace open when the response was read.
   repeated string workspaces = 2;
 }
-// A selected bubble's text as markdown source, verbatim: a response's prose,
-// or a prompt's text blocks joined by blank lines. Empty for a prompt that
-// carries no text (an image alone).
-message HostWorkspaceSelectionMarkdown {
-  // The markdown.
-  string text = 1;
-}
+

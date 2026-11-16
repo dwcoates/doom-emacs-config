@@ -270,6 +270,32 @@ describe("the breathing name", () => {
   it("never breathes the mark of a breathing row", () => {
     expect(dotOf(drawArm("thinking")).classList.contains("breathes")).toBe(false);
   });
+
+  // THE LOOPS RUN ON THE COMPOSITOR (2026-11-16): the breath crossfades
+  // copies of the name in its ink box (name-ink.ts).
+  it("draws a breathing name's ink box with the name's text, hidden from the accessibility tree", () => {
+    // Arrange / Act
+    const ink = nameOf(drawArm("thinking")).querySelector(":scope > .name-ink");
+
+    // Assert
+    expect([ink?.getAttribute("data-name"), ink?.getAttribute("aria-hidden")]).toEqual(["ws-1", "true"]);
+  });
+
+  it("keeps a breathing name's text the name alone", () => {
+    // Arrange / Act
+    const name = nameOf(drawArm("thinking"));
+
+    // Assert
+    expect(name.textContent).toBe("ws-1");
+  });
+
+  it("draws no ink box on a still name", () => {
+    // Arrange / Act
+    const name = nameOf(drawArm("waiting"));
+
+    // Assert
+    expect(name.querySelector(".name-ink")).toBeNull();
+  });
 });
 
 
@@ -1009,7 +1035,7 @@ describe("a repository block", () => {
   /** Parent ws-1 with a beta block of ws-3, its divider naming MAIN as the repository's main workspace. */
   function blockWithMain(main: string | undefined): RosterOpenRow {
     const family = withRepositoryBlocks(openRow(row({ id: "ws-1" })), [{ repo: "repo-beta", name: "beta", rows: [row({ id: "ws-3" })] }]);
-    if (main !== undefined) family.repositoryBlocks[0]!.divider!.mainWorkspace = create(WorkspaceRefSchema, { id: main, dir: `/w/${main}` });
+    if (main !== undefined) family.repositoryBlocks[0].divider!.mainWorkspace = create(WorkspaceRefSchema, { id: main, dir: `/w/${main}` });
     return family;
   }
 
@@ -2578,6 +2604,15 @@ describe("the reviving shimmer", () => {
     // Assert.
     const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
     expect(name.classList.contains("reviving")).toBe(true);
+  });
+
+  it("draws a reviving name's ink box, which carries the band", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", reviving: true }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector(":scope > .row > .name") as HTMLElement;
+    expect(name.querySelectorAll(":scope > .name-ink")).toHaveLength(1);
   });
 
   it("leaves the NAME still once the marker is gone", () => {

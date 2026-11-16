@@ -114,7 +114,7 @@ func (h *darwinHost) Scan(ctx context.Context) (wifiScan, error) {
 		return scan, fmt.Errorf("the Wi-Fi helper's %s", scan.Error)
 	}
 	if !scan.authorized() {
-		return scan, fmt.Errorf("%w (its standing: %s)", errScanUnauthorized, scan.Authorization)
+		return scan, unauthorizedScan(scan.Authorization)
 	}
 	return scan, nil
 }

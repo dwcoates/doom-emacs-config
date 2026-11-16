@@ -107,6 +107,14 @@ const rootSubsectionColumn = `(WITH RECURSIVE up(id, parent_id, subsection_id) A
   SELECT anc.id, anc.parent_id, anc.subsection_id FROM workspaces AS anc JOIN up ON anc.id = up.parent_id
 ) SELECT subsection_id FROM up WHERE parent_id IS NULL)`
 
+// ownRepoRootSubsectionColumn is rootSubsectionColumn kept only when the
+// subsection is of the row's own repository, none otherwise: the subsection a
+// workspace may store as its own when it becomes a root (writeParent). A
+// family whose root is of another repository sits in that repository's
+// subsection, which is never the workspace's to keep.
+const ownRepoRootSubsectionColumn = `(SELECT inherited.id FROM subsections AS inherited
+  WHERE inherited.id = ` + rootSubsectionColumn + ` AND inherited.repo_id = workspaces.repo_id)`
+
 // ErrUnknownSubsection is a subsection id no subsection carries. It wraps
 // ErrNotFound, so a caller asking only "was it there" still reads it.
 var ErrUnknownSubsection = fmt.Errorf("wsm: unknown subsection: %w", ErrNotFound)

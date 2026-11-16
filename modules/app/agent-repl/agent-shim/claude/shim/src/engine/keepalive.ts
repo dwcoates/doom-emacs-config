@@ -114,6 +114,7 @@
  */
 import { bindLog } from "../log.js";
 import type { SdkMessage } from "../sdk/types.js";
+import { coverageContext, leftContextCached, type CacheCoverage, type CacheRequest, type TranscriptFacts } from "./cold.js";
 import type { SendVerdict } from "./sends.js";
 
 const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
@@ -836,13 +837,43 @@ export const REAL_SCHEDULER: KeepaliveScheduler = {
  * `ttlMs` is the tier the cache was bought at (engine/cold.ts,
  * `cacheRequestOf`), or absence when no request has stated one -- a fresh
  * conversation that has made none yet.
+ *
+ * Its coverage is what that request left cached ({@link CacheCoverage}): a
+ * request that left its context uncached keeps nothing warm, so the cache is
+ * lapsed from that request on, whatever its tier ({@link anchorLapsesAtMs}).
  */
-export interface CacheAnchor {
+export interface CacheAnchor extends CacheCoverage {
   /** When that request happened, on the cadence's clock, in epoch milliseconds. */
   readonly atMs: number;
   readonly ttlMs: number | undefined;
-  /** The context that request sent: what a cold read after the lapse re-reads. */
-  readonly contextTokens: number;
+}
+
+/**
+ * The anchor a transcript's last request states: when it happened, the tier
+ * the cache was bought at, and what it left cached. THE ONE READING of a
+ * transcript as an anchor, for a resumed session's cadence and a parked
+ * conversation's beat alike. The caller answers a transcript that states no
+ * request instant itself.
+ */
+export function transcriptCacheAnchor(facts: TranscriptFacts): CacheAnchor {
+  return {
+    atMs: facts.lastRequestAtMs,
+    ttlMs: facts.cacheTtlMs,
+    contextTokens: facts.contextTokens,
+    cachedTokens: facts.cachedTokens,
+  };
+}
+
+/**
+ * When the anchored cache lapses: a tier after the anchor, or THE ANCHOR
+ * ITSELF when nothing is known cached, because no request stated a tier or the
+ * anchoring request left its context uncached ({@link leftContextCached}).
+ * The one reading of an anchor's lapse, for the asked beat, the held
+ * projection and the scheduled beat alike.
+ */
+export function anchorLapsesAtMs(anchor: CacheAnchor): number {
+  if (anchor.ttlMs === undefined || !leftContextCached(anchor)) return anchor.atMs;
+  return anchor.atMs + anchor.ttlMs;
 }
 
 /**
@@ -931,7 +962,7 @@ export class KeepaliveCadence {
    * request. A second start re-anchors; it never doubles the cadence.
    */
   start(anchor: CacheAnchor | undefined, reason: string): void {
-    this.anchor = anchor ?? { atMs: this.nowMs(), ttlMs: undefined, contextTokens: 0 };
+    this.anchor = anchor ?? { atMs: this.nowMs(), ttlMs: undefined, contextTokens: 0, cachedTokens: 0 };
     this.unansweredBeatAtMs = undefined;
     this.arm(anchor === undefined ? `${reason}; no request stated, anchored at the start` : reason);
   }
@@ -939,10 +970,23 @@ export class KeepaliveCadence {
   /**
    * An API request just answered: the cache was read or written now. A request
    * that wrote nothing states no tier and keeps the one the cache was bought at.
+   * What it left cached is the anchor's coverage, so a request that left its
+   * context uncached anchors a lapsed cache.
    */
-  noteRequest(writtenTtlMs: number | undefined, contextTokens: number): void {
+  noteRequest(request: CacheRequest): void {
     if (this.anchor === undefined) return;
-    this.anchor = { atMs: this.nowMs(), ttlMs: writtenTtlMs ?? this.anchor.ttlMs, contextTokens };
+    this.anchor = {
+      atMs: this.nowMs(),
+      ttlMs: request.writtenTtlMs ?? this.anchor.ttlMs,
+      contextTokens: request.contextTokens,
+      cachedTokens: request.cachedTokens,
+    };
+    if (!leftContextCached(request)) {
+      LOGGER.info(
+        { ...anchorContext(this.anchor) },
+        "an API request left the conversation's context uncached; the cache is lapsed from it, and no keep-alive may go out until a request caches it again",
+      );
+    }
     this.unansweredBeatAtMs = undefined;
     this.arm("an API request answered");
   }
@@ -1016,7 +1060,9 @@ export class KeepaliveCadence {
    * exists because a beat every interval cannot keep a short-tier cache warm;
    * one beat into a cache still warm keeps it warm whatever its tier. Only a
    * cache already lapsed is refused, because a keep-alive into it is the
-   * full-price cold read the cold gate owns.
+   * full-price cold read the cold gate owns. A cache whose last request left
+   * the context uncached is one ({@link anchorLapsesAtMs}): the keep-alive
+   * would rewrite the whole context to keep it.
    */
   askedBeat(): AskedBeatRefusal | undefined {
     const anchor = this.anchor;
@@ -1026,8 +1072,15 @@ export class KeepaliveCadence {
     if (this.paused) return { kind: "turnInFlight" };
     const work = this.detachedWork();
     if (work.length > 0) return { kind: "detachedWorkLive", liveItems: work.length };
+    if (!leftContextCached(anchor)) {
+      LOGGER.info(
+        { ...anchorContext(anchor) },
+        "the asked keep-alive is refused as lapsed: the conversation's last request left its context uncached, so a keep-alive would rewrite it all",
+      );
+      return { kind: "cacheLapsed", lapsedAtMs: anchor.atMs };
+    }
     if (anchor.ttlMs !== undefined) {
-      const lapsedAtMs = anchor.atMs + anchor.ttlMs;
+      const lapsedAtMs = anchorLapsesAtMs(anchor);
       if (this.nowMs() >= lapsedAtMs) return { kind: "cacheLapsed", lapsedAtMs };
     }
     return undefined;
@@ -1088,9 +1141,9 @@ export class KeepaliveCadence {
     this.projectLapse(anchor);
   }
 
-  /** States when the anchored cache lapses: a TTL after the anchor, or the anchor itself when no tier is stated. */
+  /** States when the anchored cache lapses ({@link anchorLapsesAtMs}). */
   private projectLapse(anchor: CacheAnchor): void {
-    const lapsesAtMs = anchor.ttlMs === undefined ? anchor.atMs : anchor.atMs + anchor.ttlMs;
+    const lapsesAtMs = anchorLapsesAtMs(anchor);
     LOGGER.debug(
       { ...anchorContext(anchor), lapses_at: new Date(lapsesAtMs).toISOString(), context_tokens: anchor.contextTokens },
       "projected the held cache's lapse",
@@ -1118,10 +1171,11 @@ export class KeepaliveCadence {
 
   /** Whether a beat can still keep the anchored cache warm; INFO when it cannot. */
   private keepable(anchor: CacheAnchor, reason: string): boolean {
-    if (anchor.ttlMs === undefined) return true;
-    const expiresAtMs = anchor.atMs + anchor.ttlMs;
-    const why =
-      anchor.ttlMs <= this.intervalMs
+    if (anchor.ttlMs === undefined && leftContextCached(anchor)) return true;
+    const expiresAtMs = anchorLapsesAtMs(anchor);
+    const why = !leftContextCached(anchor)
+      ? "the conversation's last request left its context uncached, so a beat would rewrite it all"
+      : anchor.ttlMs !== undefined && anchor.ttlMs <= this.intervalMs
         ? "the cache tier is no longer than the keep-alive interval, so no beat can keep it warm"
         : this.nowMs() >= expiresAtMs
           ? "the cache has already lapsed; the cold gate owns the next request"
@@ -1220,5 +1274,7 @@ function anchorContext(anchor: CacheAnchor | undefined): Record<string, unknown>
   return {
     anchor_at: new Date(anchor.atMs).toISOString(),
     ...(anchor.ttlMs === undefined ? { cache_ttl: "unstated" } : { cache_ttl_ms: anchor.ttlMs }),
+    ...coverageContext(anchor),
+    context_cached: leftContextCached(anchor),
   };
 }

@@ -1,6 +1,10 @@
 package rollout
 
 import (
+	"context"
+	"fmt"
+	"time"
+
 	"agent-repld/internal/changesignal"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
@@ -66,6 +70,47 @@ func (s Standing) String() string {
 func (c *controller) Standing(ws ids.WorkspaceID) Standing {
 	c.mu.Lock()
 	defer c.unlock()
+	return c.standingLocked(ws)
+}
+
+// DefaultAdoptionWaitBound is how long AwaitAdopted waits for a workspace a joining
+// daemon has not adopted yet. Measured 2026-11-16 (the 13:32 rollout, 121
+// workspaces): a workspace's adoption landed 3.3s after its transfer was
+// announced at the median and 8.05s at the worst, so the bound is about 2.5
+// times that worst.
+const DefaultAdoptionWaitBound = 20 * time.Second
+
+// AwaitAdopted implements Controller.
+func (c *controller) AwaitAdopted(ctx context.Context, ws ids.WorkspaceID) (Standing, error) {
+	limit := c.deps.AdoptionWaitBound
+	bound := time.NewTimer(limit)
+	defer bound.Stop()
+	for {
+		c.mu.Lock()
+		standing := c.standingLocked(ws)
+		changed := c.standings.Changed()
+		c.unlock()
+		if standing != StandingNotYetAdopted {
+			return standing, nil
+		}
+		if c.onAdoptionWait != nil {
+			c.onAdoptionWait()
+		}
+		select {
+		case <-changed:
+		case <-ctx.Done():
+			return standing, ctx.Err()
+		case <-bound.C:
+			err := fmt.Errorf("rollout: workspace %q was not adopted within %s (its adoption is expected within about 8s)", ws, limit)
+			c.log.Error(opAdopt, "a workspace a caller waited on was not adopted before the bound", dlog.Context{
+				"workspace": string(ws), "bound": limit.String(), "expected": "8.05s", "error": err.Error()})
+			return standing, err
+		}
+	}
+}
+
+// standingLocked is Standing under the held lock.
+func (c *controller) standingLocked(ws ids.WorkspaceID) Standing {
 	if c.transferred[ws] != "" {
 		return StandingTransferringAway
 	}
@@ -283,6 +328,7 @@ func (l *answerLatch) set(answer bool) {
 // them.
 func (c *controller) unlock() {
 	c.intake.set(c.servesIntakeLocked())
+	c.standings.Notify()
 	c.queue.set(c.servesQueueLocked())
 	c.mu.Unlock()
 }

@@ -819,6 +819,20 @@ failing a send."
                   "{\"failedAttempts\":90,\"lastCause\":\"overloaded\",\"failingSinceMs\":\"2000\"}")
                  '(:failed-attempts 90 :last-cause "overloaded" :failing-since-ms 2000))))
 
+(ert-deftest agent-repl-test-wire-common-session-fault-keepalive-undelivered-decodes ()
+  "The undelivered keep-alive carries its cause and when it was due."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-keepalive-undelivered
+                  "{\"cause\":\"submit failed\",\"dueAtMs\":\"2000\"}")
+                 '(:cause "submit failed" :due-at-ms 2000))))
+
+(ert-deftest agent-repl-test-wire-common-session-fault-keepalive-undelivered-untimed-decodes-to-zero ()
+  "An undelivered keep-alive the keeper could not time states no due instant."
+  (should (equal (agent-repl-test-wire-common--decode
+                  #'agent-repl-wire-decode-session-fault-keepalive-undelivered
+                  "{\"cause\":\"could not read the workspace\"}")
+                 '(:cause "could not read the workspace" :due-at-ms 0))))
+
 (ert-deftest agent-repl-test-wire-common-session-fault-shim-reported-decodes ()
   "A relayed shim-side fault names the component and the shim's own kind."
   (should (equal (agent-repl-test-wire-common--decode

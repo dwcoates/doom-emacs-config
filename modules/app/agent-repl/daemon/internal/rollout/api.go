@@ -204,6 +204,12 @@ type Controller interface {
 	// non-owned standings are the two the rollout itself creates: a workspace
 	// transferred away, and one a joining daemon has not adopted yet.
 	Standing(ws ids.WorkspaceID) Standing
+	// AwaitAdopted waits, within Deps.AdoptionWaitBound, until WS's standing is
+	// no longer not_yet_adopted, and answers the standing it reached. A
+	// request the incumbent sent on to this daemon mid-adoption waits for
+	// the adoption rather than being refused. A bound that fires is an
+	// ERROR, answered with the standing still not_yet_adopted.
+	AwaitAdopted(ctx context.Context, ws ids.WorkspaceID) (Standing, error)
 	// SuccessorAddress answers the address a transferred workspace moved to,
 	// empty when no handover is in flight.
 	SuccessorAddress() string
@@ -466,6 +472,9 @@ type Deps struct {
 	// teardown worst case; it is a field so a hung shim is exercised without
 	// waiting the real bound out.
 	StandDownCallBound time.Duration
+	// AdoptionWaitBound bounds AwaitAdopted (DefaultAdoptionWaitBound when
+	// zero).
+	AdoptionWaitBound time.Duration
 	// ReadyBound bounds the wait for a spawned successor to prove it is
 	// serving (Successor.Ready). Zero means DefaultReadyBound.
 	ReadyBound time.Duration
@@ -510,6 +519,12 @@ type MergeMover interface {
 	// at its place in line: the workspace waits on this daemon for its work
 	// to end, and its merge must not hold the queue the successor serves.
 	ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error
+	// Drain suspends every merge this daemon still runs and waits, within
+	// its own bound, for each to let go. The handover asks it before its
+	// exit: a merge of a workspace no transfer moved (one with no session)
+	// is still running here, and the successor takes over -- and reviews
+	// every queue -- the moment this daemon's shutdown begins.
+	Drain(ctx context.Context)
 }
 
 // QueuedCreateRecovery takes up the creates a previous daemon held for the
@@ -879,6 +894,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.StandDownCallBound <= 0 {
 		deps.StandDownCallBound = drain.DefaultStandBound
+	}
+	if deps.AdoptionWaitBound <= 0 {
+		deps.AdoptionWaitBound = DefaultAdoptionWaitBound
 	}
 	if deps.ReadyBound <= 0 {
 		deps.ReadyBound = DefaultReadyBound

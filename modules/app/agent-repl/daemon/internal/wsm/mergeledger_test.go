@@ -380,7 +380,7 @@ func TestTheSettledLiveRoundsStepLeavesOnlyEachQueuedMergesCurrentRoundLive(t *t
 
 	// Act
 	if _, err := s.db().Exec(settledLiveRoundsDDL); err != nil {
-		t.Fatalf("the layout-152 step: %v", err)
+		t.Fatalf("the layout-153 step: %v", err)
 	}
 
 	// Assert

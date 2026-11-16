@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"google.golang.org/protobuf/proto"
@@ -22,6 +23,7 @@ func TestDaemonFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "prompts dir missing", fault: wsm.Fault{Kind: KindPromptsDirMissing}},
 		{name: "wsm read only", fault: wsm.Fault{Kind: KindWsmReadOnly}},
 		{name: "deploy failed", fault: wsm.Fault{Kind: KindDeployFailed, Evidence: DeployFailure{Step: DeployStepBuild}.Evidence()}},
+		{name: "keep-alive drive stopped", fault: wsm.Fault{Kind: KindKeepaliveDriveStopped}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -184,6 +186,7 @@ func TestSessionFaultFillsEveryTypedArm(t *testing.T) {
 		{name: "vendor start retrying", kind: KindVendorStartRetrying},
 		{name: "vendor start rejected", kind: KindVendorStartRejected},
 		{name: "vendor start failed", kind: KindVendorStartFailed},
+		{name: "keepalive undelivered", kind: KindKeepaliveUndelivered},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -750,5 +753,43 @@ func TestFaultLineDetailIsTheVendorStartLine(t *testing.T) {
 	// Assert
 	if want := "Claude SDK failed to start · restart: SPC o C-c"; got != want {
 		t.Fatalf("FaultLineDetail = %q, want %q", got, want)
+	}
+}
+
+func TestDaemonFaultCarriesTheStoppedKeepersCause(t *testing.T) {
+	// Arrange
+	fault := wsm.Fault{Kind: KindKeepaliveDriveStopped, Evidence: map[string]string{EvidenceCause: "list the workspaces: disk I/O error"}}
+
+	// Act
+	got := daemonFault(fault)
+
+	// Assert
+	if cause := got.GetKeepaliveDriveStopped().GetCause(); cause != "list the workspaces: disk I/O error" {
+		t.Fatalf("keepalive_drive_stopped cause = %q, want the recorded cause", cause)
+	}
+}
+
+func TestSessionFaultCarriesTheUndeliveredKeepalivesCauseAndDue(t *testing.T) {
+	// Arrange
+	due := time.UnixMilli(1_700_000_000_000)
+	fault := wsm.Fault{Kind: KindKeepaliveUndelivered, Evidence: KeepaliveUndeliveredEvidence("the keep-alive's submission failed", due)}
+
+	// Act
+	got, _ := sessionFault(fault)
+
+	// Assert
+	arm := got.GetKeepaliveUndelivered()
+	if arm.GetCause() != "the keep-alive's submission failed" || arm.GetDueAtMs() != due.UnixMilli() {
+		t.Fatalf("keepalive_undelivered = %+v, want the recorded evidence", arm)
+	}
+}
+
+func TestAnUndeliveredKeepaliveTheKeeperCouldNotTimeIsDueAtZero(t *testing.T) {
+	// Arrange, Act
+	got := KeepaliveUndeliveredEvidence("could not read the workspace", time.Time{})
+
+	// Assert
+	if got[EvidenceDueAtMs] != "0" || got[EvidenceCause] != "could not read the workspace" {
+		t.Fatalf("evidence = %v, want due 0 and the cause", got)
 	}
 }

@@ -1,6 +1,7 @@
 package rollout
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -609,6 +610,81 @@ func TestArmingTheManifestKeepsAJoiningQueueHeldWithoutAFlip(t *testing.T) {
 			h.c.mu.Unlock()
 			if !seen {
 				t.Fatal("arming the manifest's sessions did not mark the manifest seen")
+			}
+		})
+	}
+}
+
+// TestAwaitAdopted covers the wait a request sent on mid-adoption takes: it
+// answers the standing the workspace reaches, and fails loudly at its bound.
+func TestAwaitAdopted(t *testing.T) {
+	cases := []struct {
+		name  string
+		bound time.Duration
+		// act runs once the wait has begun; nil leaves it waiting.
+		act          func(h *harness, ws ids.WorkspaceID, cancel context.CancelFunc)
+		joining      bool
+		wantStanding Standing
+		wantErr      bool
+		wantRecord   bool
+	}{
+		{name: "an owned workspace answers at once", wantStanding: StandingOwned},
+		{name: "a workspace adopted during the wait answers owned", joining: true, wantStanding: StandingOwned,
+			act: func(h *harness, ws ids.WorkspaceID, _ context.CancelFunc) {
+				h.c.mu.Lock()
+				h.c.owned = map[ids.WorkspaceID]bool{ws: true}
+				h.c.unlock()
+			}},
+		{name: "a caller that leaves ends the wait", joining: true, wantStanding: StandingNotYetAdopted, wantErr: true,
+			act: func(_ *harness, _ ids.WorkspaceID, cancel context.CancelFunc) { cancel() }},
+		{name: "a bound that fires is an ERROR", joining: true, bound: time.Millisecond, wantStanding: StandingNotYetAdopted, wantErr: true, wantRecord: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, func(d *Deps) {
+				if tc.bound > 0 {
+					d.AdoptionWaitBound = tc.bound
+				}
+			})
+			ws := ids.WorkspaceID("ws-manifested")
+			if tc.joining {
+				h.c.mu.Lock()
+				h.c.joining = map[ids.WorkspaceID]bool{ws: true}
+				h.c.mu.Unlock()
+			}
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			waiting := make(chan struct{}, 1)
+			h.c.onAdoptionWait = func() {
+				select {
+				case waiting <- struct{}{}:
+				default:
+				}
+			}
+			type answer struct {
+				standing Standing
+				err      error
+			}
+			answered := make(chan answer, 1)
+
+			// Act
+			go func() {
+				standing, err := h.c.AwaitAdopted(ctx, ws)
+				answered <- answer{standing, err}
+			}()
+			if tc.act != nil {
+				<-waiting
+				tc.act(h, ws, cancel)
+			}
+			got := <-answered
+
+			// Assert
+			if got.standing != tc.wantStanding || (got.err != nil) != tc.wantErr {
+				t.Fatalf("AwaitAdopted = (%v, %v), want (%v, error %v)", got.standing, got.err, tc.wantStanding, tc.wantErr)
+			}
+			if recorded := loggedError(h.log, opAdopt, "was not adopted before the bound"); recorded != tc.wantRecord {
+				t.Fatalf("ERROR recorded = %v, want %v", recorded, tc.wantRecord)
 			}
 		})
 	}
