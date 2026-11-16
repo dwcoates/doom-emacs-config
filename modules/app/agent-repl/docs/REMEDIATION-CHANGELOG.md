@@ -1501,3 +1501,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-16 merge-queue-stall-triage (landed in queue bypass mode): a deploy remediation works at low effort and an escalation at medium
 - 2026-11-16 deploy-remediation-20261116-114547 (landed in queue bypass mode): A workspace bring-up cancelled by its caller (a daemon handing the workspace to its successor) is recorded at INFO with no fault, instead of two ERRORs and a WARN
 - 2026-11-16 merge-queue-stall-triage (landed in queue bypass mode): a queue group's deploy check status stands against the sidebar's right margin; escape in the stop key's rollback picker cancels instead of erroring in a process sentinel
+- 2026-11-16 merge-queue-stall-triage (landed in queue bypass mode): the merge queue keeps a cut head's place, restores and fails a rebase that would empty a branch, awaits a held turn's session, logs passed-over merges at INFO, and draws a merge back from repair as waiting
