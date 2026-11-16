@@ -252,6 +252,11 @@ user in the same response what it reorganized and why.
   name, and this workspace's feed shows it sent, with WS's name then a right
   arrow, and whether it was held or refused. A prompt that begins with a slash command is refused: an agent never
   clears another workspace's conversation.
+- `workspace prompt -slack-forward URL WS TEXT` hands WS a Slack message with
+  the prompt (the Slack emoji-ack intake forwarding a reaction). The daemon
+  stores the thread among WS's links as a reference, "Forwarded Slack
+  thread", and adds a directive asking WS to post one brief reply there naming
+  itself. That reply is the only post the forwarded thread gets.
 - A refused `workspace prompt` exits 6, prints the daemon's answer on
   stdout, and prints one plain sentence on stderr saying why WS cannot take
   the prompt. Read that sentence to tell the user what became of the send.
@@ -291,9 +296,11 @@ user in the same response what it reorganized and why.
   whether it awaits another workspace, and a cold gate it is parked at.
 - `workspace list` prints `workspace find`'s record, one compact JSON object a
   line, for every workspace the sidebar draws (open, hidden and recently merged)
-  in every repository, most recently active first. It takes no narrowing flags
-  on purpose: narrow, filter and sort its lines yourself with `jq`, `head`,
-  `sort`, `grep` and other shell utilities. Each line is one
+  in every repository, most recently active first. Its one narrowing flag is
+  `-login here|WS`: only the workspaces whose repository is routed to the same
+  login (Claude config dir) as WS's repository, plus the direct children of
+  those workspaces in any repository. Narrow, filter and sort everything else
+  yourself with `jq`, `head`, `sort`, `grep` and other shell utilities. Each line is one
   `agentrepl.v1.FoundWorkspace` in protojson field names, and a field that is
   unset or false is absent:
   - `name`, `branch`: strings.

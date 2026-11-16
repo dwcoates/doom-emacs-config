@@ -31,33 +31,29 @@ workspace (`emoji-ack-intake-routing`), as the owner directed.
   grandchild is a child of a non-routed child, which is out of scope for now.
   The owner will tighten it later.
 
-### `agentrepl.v1.SubmitPromptDelivery.SUBMIT_PROMPT_DELIVERY_AFTER_TOOL_CALL` (`-skip-classification`)
+### No skip-classification delivery
 
-- WHAT: a third delivery. While a turn runs, the prompt earns the classifier's
-  `after_tool_call` verdict without asking the classifier, and joins the
-  running turn through the ordinary join path. Refused beside `feed`.
-- WHY: the owner wanted intake questions delivered after the target's current
-  tool call, never interrupting and never held for the turn's end.
-- It is a value of the existing delivery enum, not a new bool. Delivery is
-  already that enum, and a bool beside it would be a second, contradictory
-  way to say how a prompt is delivered.
-- CONSEQUENCE (accepted): a join the running turn cannot take (a context cut,
-  a turn past its last tool boundary) leaves the prompt held for the turn's
-  end, as every join that cannot go already does. Joining is the only way to
-  reach a running turn without interrupting it.
-- CONSEQUENCE: `held_prompts.delivery` now stores 2. The column is an integer
-  with no check, so no migration is needed. A build older than this one fails
-  loudly (`DecodeError`) on such a row, and never reads it as ordinary.
-- `GatherWorkspacesRequest.delivery` carries the same enum, so one gather
-  delivers every target the same way.
+- An earlier draft added `SUBMIT_PROMPT_DELIVERY_AFTER_TOOL_CALL` and
+  `agentrepl.v1.GatherWorkspacesRequest.delivery`, so the intake's questions
+  would join the target's running turn without the classifier.
+- Dropped before landing: master's agent join (`promptqueue/agentjoin.go`)
+  already joins every agent-sent prompt that way, and `workspace prompt` and
+  `workspace gather` only send agent prompts.
 
 ### `agentrepl.v1.SubmitPromptRequest.slack_forward` (`workspace prompt -slack-forward URL`)
 
 - WHAT: an optional `SubmitPromptSlackForward{thread_url}` on an agent-sent
-  prompt. The daemon records the thread on the recipient (a new wsm table,
-  once per thread) and stores it as a reference link, "Forwarded Slack
-  thread". It also appends its built-in directive asking the recipient to post
-  one brief reply in the thread naming itself.
+  prompt. Once the prompt is accepted, the daemon stores the thread among the
+  recipient's links as a reference, "Forwarded Slack thread". A thread the
+  recipient already holds keeps its own label. The daemon also appends its
+  built-in directive (`lifecycleconfig.SlackForwardPrompt`) asking the
+  recipient to post one brief reply in the thread naming itself.
+- CORRECTION: an earlier draft of this entry named a new wsm table recording
+  forwarded threads. It was dropped before landing, because nothing would have
+  read it: a forwarded thread gets no later post. The reference link is the
+  record. A later post to forwarded threads (the PR, `:merged:`) reads the
+  links, or adds the table then. Root cause: designing storage before naming
+  its reader.
 - WHY: the owner wanted the reacted thread told which workspace took the
   reaction, and a workspace able to hold Slack threads beyond the one it was
   created for.
