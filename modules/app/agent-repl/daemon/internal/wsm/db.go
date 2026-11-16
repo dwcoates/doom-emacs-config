@@ -1023,6 +1023,9 @@ type DB interface {
 	PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 	// DurableFeedRows loads every durable feed row of one workspace.
 	DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableFeedRow, error)
+	// DurableFeedRowRank answers where one durable row is recorded
+	// (durablefeedrows.go).
+	DurableFeedRowRank(ctx context.Context, id WorkspaceID, rowID string) (int, string, bool, error)
 	// ClearDurableFeedRows drops every durable feed row of one workspace.
 	ClearDurableFeedRows(ctx context.Context, id WorkspaceID) error
 
