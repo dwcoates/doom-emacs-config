@@ -2467,3 +2467,69 @@ type arrangementFailing struct{ wsm.DB }
 func (arrangementFailing) ReadArrangement(context.Context) (wsm.Arrangement, error) {
 	return wsm.Arrangement{}, errors.New("the arrangement read failed")
 }
+
+// yieldsInto wires the boot claim's yield to count on YIELDED, failing with
+// ERR when set.
+func yieldsInto(yielded chan<- struct{}, err error) func(d *Deps) {
+	return func(d *Deps) {
+		d.YieldBootClaim = func() error {
+			yielded <- struct{}{}
+			return err
+		}
+	}
+}
+
+func TestAHandoverYieldsTheBootClaimOnceItsTransferPassIsOver(t *testing.T) {
+	// Arrange: one workspace, whose adoption window the yield never waits on.
+	yielded := make(chan struct{}, 1)
+	h := newHarness(t, yieldsInto(yielded, nil))
+	h.workspace(t)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	<-yielded
+
+	// Assert: the yield comes before this daemon's exit, and is said.
+	select {
+	case <-h.exits:
+		t.Fatal("the daemon exited before it yielded; the yield must not wait for the handover's end")
+	default:
+	}
+	awaitRecord(t, h, opHandover, "the transfer pass is over: the successor takes over now, and this daemon serves what is still busy here until each workspace is free to move")
+}
+
+func TestAHandoverWhoseYieldFailsSaysSo(t *testing.T) {
+	// Arrange
+	yielded := make(chan struct{}, 1)
+	h := newHarness(t, yieldsInto(yielded, errors.New("the boot lock could not be released")))
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	<-yielded
+
+	// Assert
+	awaitRecord(t, h, opHandover, "the transfer pass is over but the boot claim could not be yielded; the successor takes over at this daemon's exit")
+}
+
+func TestARestartNeverYieldsTheBootClaim(t *testing.T) {
+	// Arrange
+	yielded := make(chan struct{}, 1)
+	h := newHarness(t, yieldsInto(yielded, nil))
+	h.workspace(t)
+
+	// Act
+	runRestart(t, h)
+
+	// Assert
+	select {
+	case <-yielded:
+		t.Fatal("a restart yielded the boot claim; its replacement takes it at the exit")
+	default:
+	}
+}

@@ -456,14 +456,43 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 			c.log.Info(opTransfer, "every unfolded workspace's transfer has run or waits on its work; transferring the folded ones",
 				dlog.Merge(fields, dlog.Context{"unfolded": len(unfolded), "folded": len(folded)}))
 		}
+		var pass sync.WaitGroup
 		for _, ws := range folded {
-			if c.requestTransfer(ctx, ws, plan, &windows, outcomes, func() {}) {
+			pass.Add(1)
+			if c.requestTransfer(ctx, ws, plan, &windows, outcomes, sync.OnceFunc(pass.Done)) {
 				requested++
 			}
+		}
+		pass.Wait()
+		if !plan.restart {
+			c.yieldToSuccessor(fields)
 		}
 		refused := len(plan.workspaces) - requested
 		c.followHandover(ctx, plan, outcomes, requested, refused, &windows)
 	})
+}
+
+// yieldToSuccessor gives the boot claim to the successor at the end of the
+// handover's TRANSFER PASS: every workspace has moved, or waits on work of its
+// own, which this daemon keeps serving and moves the moment it is free,
+// however long that takes (owner ruling, 2026-11-16). The successor takes
+// over at once (docs/investigations/2026-11-16-several-daemons-plan.md, phase
+// 2): it advertises, says the deploy is done, serves the queue and takes the
+// next deploy, never waiting on a busy workspace here. A yield that fails is
+// recorded and the successor takes over at this daemon's exit, as before.
+func (c *controller) yieldToSuccessor(fields dlog.Context) {
+	if c.deps.YieldBootClaim == nil {
+		return
+	}
+	c.mu.Lock()
+	holdouts := len(c.handover.holdouts)
+	c.unlock()
+	if err := c.deps.YieldBootClaim(); err != nil {
+		c.log.Error(opHandover, "the transfer pass is over but the boot claim could not be yielded; the successor takes over at this daemon's exit", dlog.WithCause(fields, err))
+		return
+	}
+	c.log.Info(opHandover, "the transfer pass is over: the successor takes over now, and this daemon serves what is still busy here until each workspace is free to move",
+		dlog.Merge(fields, dlog.Context{"holdouts": holdouts}))
 }
 
 // requestTransfer asks the bounce registry for WS's transfer and answers

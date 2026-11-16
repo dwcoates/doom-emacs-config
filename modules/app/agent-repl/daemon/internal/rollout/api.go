@@ -396,6 +396,19 @@ type Deps struct {
 	// so the takeover follows the incumbent's exit at once. Required whenever
 	// WriteDaemonAddr is set.
 	AwaitBootClaim AwaitBootClaimFunc
+	// YieldBootClaim gives the boot claim to the successor once this daemon's
+	// handover has finished its transfer pass, while this daemon keeps
+	// serving what is still busy here (daemonaddr.Claim.Yield). Nil in tests
+	// that observe no yield.
+	YieldBootClaim func() error
+	// LiveElders answers the daemons older than this one still running on
+	// its state root (daemonaddr.LiveOthers), and AwaitElders returns once
+	// each of them has ended (daemonaddr.AwaitGone). What only the last
+	// daemon may do waits on them: contract steps, recovering shims no daemon
+	// owns, the creates an outgoing daemon held for the network. Nil in tests
+	// with no elders.
+	LiveElders  func() ([]string, error)
+	AwaitElders func(ctx context.Context, elders []string) error
 	// ShimBuild answers the INSTALLED shim bundle's build: the content hash a
 	// fresh spawn would report. It is the staleness authority every reported
 	// build is judged against.

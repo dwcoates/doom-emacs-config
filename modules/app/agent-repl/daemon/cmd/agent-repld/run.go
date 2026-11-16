@@ -275,6 +275,25 @@ func run(ctx context.Context, opts options, h hooks) error {
 			return c, joiningVerdict, err
 		}
 	}
+	// THE LIFE LOCK IS TAKEN FIRST AND LET GO LAST, so for the whole of this
+	// process every newer daemon of the state root sees it running: what only
+	// the last daemon may do (a contract migration, recovering shims no
+	// daemon owns) waits in the kernel for it (daemonaddr.LiveOthers,
+	// docs/investigations/2026-11-16-several-daemons-plan.md).
+	instance := wsm.NewInstanceID()
+	life, err := daemonaddr.HoldLife(layout.DaemonAddr(), string(instance))
+	if err != nil {
+		log.Error("daemon.cmd.life", "this daemon's life lock could not be held", dlog.Context{
+			"state_dir": layout.Dir(), "instance": string(instance), "error": err.Error()})
+		return fmt.Errorf("agent-repld: hold the life lock: %w", err)
+	}
+	defer teardown.step("life_release", func() {
+		if err := life.Release(); err != nil {
+			log.Error("daemon.cmd.life", "this daemon's life lock could not be released; the kernel frees it with this process", dlog.Context{
+				"state_dir": layout.Dir(), "instance": string(instance), "error": err.Error()})
+		}
+	})
+
 	claimStart := time.Now()
 	claim, verdict, err := bindClaim(layout.DaemonAddr(), 0)
 	claimWaited := time.Since(claimStart)
@@ -493,7 +512,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		Claim:      claim,
 		Metrics:    metricsSurface,
 		Reconnects: reconnects,
-		Instance:   wsm.NewInstanceID(),
+		Instance:   instance,
 		Exit: func(reason standDownReason) {
 			ended.record(reason, nil)
 			stopServing()

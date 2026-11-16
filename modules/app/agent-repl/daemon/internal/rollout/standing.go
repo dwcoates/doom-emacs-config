@@ -120,17 +120,18 @@ func (c *controller) SuccessorAddress() string {
 
 // IncumbentAddress implements Controller.
 //
-// THE INCUMBENT SERVES WHAT THIS DAEMON HAS NOT ADOPTED for exactly as long as
-// this daemon is joining: joining mode ends when the incumbent's exit hands
-// over the boot claim (takeOverOnClaim), and from then no other daemon serves
-// anything, so the arm names none and a client waits for the adoption.
+// THE INCUMBENT SERVES WHAT THIS DAEMON HAS NOT ADOPTED for as long as this
+// daemon is joining, and after its takeover for as long as an older daemon
+// still runs its holdouts (eldersRunning). Once none does, no other daemon
+// serves anything, so the arm names none and a client waits for the
+// adoption.
 func (c *controller) IncumbentAddress() string {
 	c.mu.Lock()
 	defer c.unlock()
-	if !c.joiningMode {
-		return ""
+	if c.joiningMode || c.eldersRunning {
+		return c.deps.IncumbentAddress
 	}
-	return c.deps.IncumbentAddress
+	return ""
 }
 
 // recordTransfer marks a workspace as handed to the successor at the address
@@ -249,7 +250,11 @@ func (c *controller) ServesWorkspace(ws ids.WorkspaceID) bool {
 	if _, gone := c.transferred[ws]; gone {
 		return false
 	}
-	if c.joiningMode && c.joining[ws] && !c.owned[ws] {
+	// A WORKSPACE HANDED HERE AND NOT ADOPTED YET is still its outgoing
+	// daemon's, after this daemon's takeover too: an older daemon keeps its
+	// holdouts until each is free to move (adoptStragglers marks owned only
+	// what no daemon serves).
+	if c.joining[ws] && !c.owned[ws] {
 		return false
 	}
 	return true

@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/composermentions"
 	"agent-repld/internal/creategate"
+	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/desktopnotify"
@@ -1286,9 +1287,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
 		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
-		ShimBuild:       shimBundle.Build,
-		ColdGate:        fleet.RaiseColdGate,
-		Progress:        deployEdges,
+		YieldBootClaim:  p.Claim.Yield,
+		LiveElders: func() ([]string, error) {
+			return daemonaddr.LiveOthers(p.Layout.DaemonAddr(), string(p.Instance))
+		},
+		AwaitElders: func(ctx context.Context, elders []string) error {
+			return daemonaddr.AwaitGone(ctx, p.Layout.DaemonAddr(), elders)
+		},
+		ShimBuild: shimBundle.Build,
+		ColdGate:  fleet.RaiseColdGate,
+		Progress:  deployEdges,
 		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
 		// adopts.
 		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),
