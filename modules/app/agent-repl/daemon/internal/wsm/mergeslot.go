@@ -325,10 +325,12 @@ func SlotsOf(entries []MergeQueueEntry) ([]MergeSlot, error) {
 }
 
 // restampMergeSlots writes, for every entry of KEY's queue whose slot changed
-// in the transaction TX, its new slot and AT as the moment it took it. An
-// entry whose slot is unchanged keeps its moment, so a restart or a handover
-// that leaves the queue's shape alone changes no clock. Every write that can
-// change a queue's shape runs it last, in the same transaction (writeQueue).
+// in the transaction TX, its new slot and AT as the moment it took it, and
+// for every entry whose clock phase changed, its clock moved at AT
+// (nextMergeClock). An entry whose slot and phase are unchanged keeps its
+// moment and its clock, so a restart or a handover that leaves the queue's
+// shape alone changes no clock. Every write that can change a queue's shape
+// or an entry's state runs it last, in the same transaction (writeQueue).
 //
 // EVERY CHANGED ROW IS CLEARED BEFORE ANY IS SET: a head that stepped aside
 // and the merge behind it that heads now trade the head's slot in one write,
@@ -337,24 +339,33 @@ func SlotsOf(entries []MergeQueueEntry) ([]MergeSlot, error) {
 // Cleared first, the index meets only the stamps the derivation answers, so
 // a refusal from it is a true second holder.
 func restampMergeSlots(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Time) error {
-	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, state, aside, slot, cold_gated FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
+	rows, err := tx.QueryContext(ctx, `SELECT workspace_id, state, aside, slot, cold_gated, clock_phase, clock_since, clock_waited, clock_held FROM merge_queue WHERE repo_key = ? ORDER BY seq`, key)
 	if err != nil {
 		return err
 	}
-	var entries []slotRow
+	var (
+		entries []slotRow
+		clocks  []MergeClock
+	)
 	for rows.Next() {
 		var (
-			row   slotRow
-			state int64
-			aside int64
-			slot  int64
+			row    slotRow
+			state  int64
+			aside  int64
+			slot   int64
+			phase  int64
+			since  int64
+			waited int64
+			clock  MergeClock
 		)
-		if err := rows.Scan(&row.workspace, &state, &aside, &slot, &row.coldGated); err != nil {
+		if err := rows.Scan(&row.workspace, &state, &aside, &slot, &row.coldGated, &phase, &since, &waited, &clock.Held); err != nil {
 			rows.Close()
 			return err
 		}
 		row.state, row.aside, row.slot = MergeQueueState(state), MergeAside(aside), MergeSlot(slot)
+		clock.Phase, clock.Since, clock.Waited = MergeClockPhase(phase), fromNanos(since), time.Duration(waited)
 		entries = append(entries, row)
+		clocks = append(clocks, clock)
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -384,7 +395,29 @@ func restampMergeSlots(ctx context.Context, tx *sql.Tx, key RepoKey, at time.Tim
 			return fmt.Errorf("wsm: recording workspace %s in repo %q in the %s slot: %w", entries[i].workspace, key, slots[i], err)
 		}
 	}
+	for i, slot := range slots {
+		next, moved, err := StampClock(clocks[i], entries[i].state, slot, at)
+		if err != nil {
+			return fmt.Errorf("%w (workspace %s in repo %q)", err, entries[i].workspace, key)
+		}
+		if !moved {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE merge_queue SET clock_phase = ?, clock_since = ?, clock_waited = ?, clock_held = ? WHERE repo_key = ? AND workspace_id = ?`,
+			int(next.Phase), clockNanos(next.Since), int64(next.Waited), next.Held, key, entries[i].workspace); err != nil {
+			return fmt.Errorf("wsm: moving workspace %s in repo %q onto its %s clock: %w", entries[i].workspace, key, next.Phase, err)
+		}
+	}
 	return nil
+}
+
+// clockNanos stores a clock's start: 0 for the clock of a merge in no line,
+// which has none.
+func clockNanos(since time.Time) int64 {
+	if since.IsZero() {
+		return 0
+	}
+	return nanos(since)
 }
 
 // writeQueue is the one write path for anything that can change the shape

@@ -78,11 +78,11 @@ CONSEQUENCES:
 - `RosterMergeQueueHeadWaiting` is now empty: its one field was obviated by
   the head's clock. The arm stays, because it is the head's standing.
 - Non-obvious implementation consequences: the store keeps the clock
-  durably on each `merge_queue` row (layout 152), maintained in the same
+  durably on each `merge_queue` row (layout 180), maintained in the same
   transaction as the slot restamp (`wsm.restampMergeSlots`), which every
   queue-shape write runs; `wsm.ReturnAdmittedMerge` and
   `wsm.RequeuePausedMerge` hold the active stretch across the restart they
-  serve. Rows queued before layout 152 take a clock from what the file
+  serve. Rows queued before layout 180 take a clock from what the file
   knows: an active row's stretch from its slot moment, a waiting row's from
   when it was put in line, with no waiting before it.
 

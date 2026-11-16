@@ -1266,9 +1266,33 @@ func queueView(ws ...wsm.Workspace) sidebar.Registry {
 func inLine(ws ...ids.WorkspaceID) []sidebar.QueueEntry {
 	out := make([]sidebar.QueueEntry, 0, len(ws))
 	for i, w := range ws {
-		out = append(out, sidebar.QueueEntry{Workspace: w, Credited: w, Admitted: i == 0})
+		clock := waitingClock(1, 0)
+		if i == 0 {
+			clock = activeClock(1)
+		}
+		out = append(out, sidebar.QueueEntry{Workspace: w, Credited: w, Admitted: i == 0, Clock: clock})
 	}
 	return out
+}
+
+// activeClock is the clock of a merge active since SINCE, epoch ms.
+func activeClock(since int64) wsm.MergeClock {
+	return wsm.MergeClock{Phase: wsm.MergeClockActive, Since: time.UnixMilli(since)}
+}
+
+// waitingClock is the clock of a merge waiting since SINCE, epoch ms, having
+// waited WAITED before.
+func waitingClock(since int64, waited time.Duration) wsm.MergeClock {
+	return wsm.MergeClock{Phase: wsm.MergeClockWaiting, Since: time.UnixMilli(since), Waited: waited}
+}
+
+// repairClock is the clock a merge at REPAIR stands on: active at a repair,
+// waiting while it awaits one.
+func repairClock(repair sidebar.QueueRepair) wsm.MergeClock {
+	if repair == sidebar.RepairAwaitingFixingTests {
+		return waitingClock(1, 0)
+	}
+	return activeClock(1)
 }
 
 // queueSubjectIDs reads the workspace ids a queue group draws: its head's,
@@ -1520,22 +1544,22 @@ func TestEachMergeInTheQueueIsDrawnUnderItsOwnName(t *testing.T) {
 	}{
 		{
 			name:       "a sync merge is drawn under the landing workspace's name",
-			line:       []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Admitted: true}},
+			line:       []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Admitted: true, Clock: activeClock(1)}},
 			workspaces: []wsm.Workspace{workspace("w1", "one")},
 			want:       []drawn{{credited: "w1", name: "one", merge: "w1"}},
 		},
 		{
 			name:       "an async merge is drawn under its own name, credited to its requester",
-			line:       []sidebar.QueueEntry{{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true}},
+			line:       []sidebar.QueueEntry{{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true, Clock: activeClock(1)}},
 			workspaces: []wsm.Workspace{workspace("w1", "one"), mergeWorkspace("w-merge", "land-one", "w1")},
 			want:       []drawn{{credited: "w1", name: "land-one", async: true, requester: "one", merge: "w-merge"}},
 		},
 		{
 			name: "several async merges from one requester are drawn apart",
 			line: []sidebar.QueueEntry{
-				{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true},
-				{Workspace: "w-merge2", Credited: "w1", Async: true, AsyncName: "land-two"},
-				{Workspace: "w1", Credited: "w1", Async: true, AsyncName: "land-three"},
+				{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true, Clock: activeClock(1)},
+				{Workspace: "w-merge2", Credited: "w1", Async: true, AsyncName: "land-two", Clock: waitingClock(1, 0)},
+				{Workspace: "w1", Credited: "w1", Async: true, AsyncName: "land-three", Clock: waitingClock(1, 0)},
 			},
 			workspaces: []wsm.Workspace{workspace("w1", "one"), mergeWorkspace("w-merge", "land-one", "w1"), mergeWorkspace("w-merge2", "land-two", "w1")},
 			want: []drawn{
@@ -1577,8 +1601,8 @@ func TestAMergeWhoseOwnNameContradictsItsModeIsRecordedAndNotDrawn(t *testing.T)
 		name  string
 		entry sidebar.QueueEntry
 	}{
-		{name: "an async merge without its own name", entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1", Async: true}},
-		{name: "a sync merge carrying an async name", entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1", AsyncName: "land-one"}},
+		{name: "an async merge without its own name", entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1", Async: true, Clock: activeClock(1)}},
+		{name: "a sync merge carrying an async name", entry: sidebar.QueueEntry{Workspace: "w1", Credited: "w1", AsyncName: "land-one", Clock: activeClock(1)}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1637,7 +1661,6 @@ func TestEveryMergeInTheQueueCarriesTheBubbleItReveals(t *testing.T) {
 }
 
 func TestTheHeadStatesItsStanding(t *testing.T) {
-	queued := time.UnixMilli(7_000)
 	tests := []struct {
 		name     string
 		admitted bool
@@ -1659,14 +1682,14 @@ func TestTheHeadStatesItsStanding(t *testing.T) {
 
 			// Act.
 			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"},
-				Line: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Admitted: tt.admitted, QueuedAt: queued}}})
+				Line: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Admitted: tt.admitted, Clock: activeClock(1)}}})
 
 			// Assert.
 			head := firstQueue(t, r).GetHead()
 			switch tt.want {
 			case "waiting":
-				if head.GetWaiting().GetQueuedAtMs() != queued.UnixMilli() {
-					t.Fatalf("head = %v, want waiting since %d", head, queued.UnixMilli())
+				if waiting := head.GetWaiting(); waiting == nil || !proto.Equal(waiting, &frontendv1.RosterMergeQueueHeadWaiting{}) {
+					t.Fatalf("head = %v, want waiting", head)
 				}
 			case "merging":
 				if merging := head.GetMerging(); merging == nil || !proto.Equal(merging, &frontendv1.RosterMergeQueueHeadMerging{}) {
@@ -1694,21 +1717,22 @@ func TestTheHeadCarriesItsStages(t *testing.T) {
 	}
 }
 
-func TestAWaitingMergeCarriesWhenItWasPutInLine(t *testing.T) {
-	// Arrange.
+func TestAWaitingMergeCarriesItsWaitingClock(t *testing.T) {
+	// Arrange: w2 waits again after an active stretch, having waited 40
+	// minutes before it.
 	r, _ := newResolver(t)
-	queued := time.UnixMilli(9_000)
 	line := inLine("w1", "w2")
-	line[1].QueuedAt = queued
+	line[1].Clock = waitingClock(9_000, 40*time.Minute)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1", "w2"}, Line: line})
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
 
 	// Assert.
-	waiting := firstQueue(t, r).GetWaiting()[0]
-	if waiting.GetQueuedAtMs() != queued.UnixMilli() {
-		t.Fatalf("waiting = %v, want queued at %d", waiting, queued.UnixMilli())
+	got := firstQueue(t, r).GetWaiting()[0].GetClock()
+	want := &frontendv1.RosterMergeQueueWaitingClock{WaitingSinceMs: 9_000, WaitedBeforeMs: (40 * time.Minute).Milliseconds()}
+	if !proto.Equal(got, want) {
+		t.Fatalf("waiting clock = %v, want %v", got, want)
 	}
 }
 
@@ -1809,7 +1833,11 @@ func TestTwoQueuesOfOneRepositoryAreRecordedAndBothDrawn(t *testing.T) {
 	// Arrange.
 	r, logs := newResolver(t)
 	r.SetMergeQueue(wsm.RepoKey("/a/.git"), sidebar.MergeQueue{Line: inLine("w1")})
-	r.SetMergeQueue(wsm.RepoKey("/b/.git"), sidebar.MergeQueue{Line: inLine("w2")})
+	// The second queue's head waits to be admitted, so it is drawn as one of
+	// the merges waiting behind the first queue's head.
+	second := inLine("w2")
+	second[0].Admitted, second[0].Clock = false, waitingClock(1, 0)
+	r.SetMergeQueue(wsm.RepoKey("/b/.git"), sidebar.MergeQueue{Line: second})
 
 	// Act.
 	r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
@@ -1823,21 +1851,104 @@ func TestTwoQueuesOfOneRepositoryAreRecordedAndBothDrawn(t *testing.T) {
 	}
 }
 
-func TestTheMergeQueueHeadCarriesWhenItReachedTheHead(t *testing.T) {
-	// Arrange: a front that waited in line long before it reached the head.
-	r, _ := newResolver(t)
-	line := inLine("w1")
-	line[0].QueuedAt = time.UnixMilli(1_700_000_000_000)
-	line[0].SlotSince = time.UnixMilli(1_700_000_900_000)
-	r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: line})
+func TestTheMergeQueueHeadCarriesItsClockInTheStretchItIsIn(t *testing.T) {
+	cases := []struct {
+		name     string
+		admitted bool
+		clock    wsm.MergeClock
+		want     *frontendv1.RosterMergeQueueHeadClock
+	}{
+		{name: "an admitted head counts from when it became active", admitted: true, clock: activeClock(1_700_000_900_000),
+			want: &frontendv1.RosterMergeQueueHeadClock{Stretch: &frontendv1.RosterMergeQueueHeadClock_Active{
+				Active: &frontendv1.RosterMergeQueueActiveClock{ActiveSinceMs: 1_700_000_900_000}}}},
+		{name: "a head waiting to be admitted counts its whole wait", clock: waitingClock(1_700_000_900_000, 3*time.Minute),
+			want: &frontendv1.RosterMergeQueueHeadClock{Stretch: &frontendv1.RosterMergeQueueHeadClock_Waiting{
+				Waiting: &frontendv1.RosterMergeQueueWaitingClock{WaitingSinceMs: 1_700_000_900_000, WaitedBeforeMs: (3 * time.Minute).Milliseconds()}}}},
+		{name: "a head a restart returned to its place stays active", clock: activeClock(1_700_000_900_000),
+			want: &frontendv1.RosterMergeQueueHeadClock{Stretch: &frontendv1.RosterMergeQueueHeadClock_Active{
+				Active: &frontendv1.RosterMergeQueueActiveClock{ActiveSinceMs: 1_700_000_900_000}}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			line := inLine("w1")
+			line[0].Admitted, line[0].Clock = tc.admitted, tc.clock
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Workspaces: []ids.WorkspaceID{"w1"}, Line: line})
 
-	// Act.
-	r.SetRegistry(queueView(workspace("w1", "one")))
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "one")))
 
-	// Assert.
-	head := queuedGroups(latest(t, r))[0].GetQueue().GetHead()
-	if got := head.GetHeadSinceMs(); got != 1_700_000_900_000 {
-		t.Fatalf("head_since_ms = %d, want when it reached the head, 1700000900000", got)
+			// Assert.
+			if got := queuedGroups(latest(t, r))[0].GetQueue().GetHead().GetClock(); !proto.Equal(got, tc.want) {
+				t.Fatalf("head clock = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMergeWhoseClockItsLineCannotCarryIsRecordedAndNotDrawn(t *testing.T) {
+	cases := []struct {
+		name  string
+		queue func() sidebar.MergeQueue
+		drawn func(*frontendv1.RosterRepoMergeQueue) bool
+		phase string
+		want  string
+	}{
+		{name: "a head counting nothing",
+			queue: func() sidebar.MergeQueue {
+				line := inLine("w1", "w2")
+				line[0].Clock = wsm.MergeClock{}
+				return sidebar.MergeQueue{Line: line}
+			},
+			drawn: func(q *frontendv1.RosterRepoMergeQueue) bool { return q.Head != nil }, phase: "none", want: "active or waiting"},
+		{name: "a merge in line on an active clock",
+			queue: func() sidebar.MergeQueue {
+				line := inLine("w1", "w2")
+				line[1].Clock = activeClock(1)
+				return sidebar.MergeQueue{Line: line}
+			},
+			drawn: func(q *frontendv1.RosterRepoMergeQueue) bool { return len(q.Waiting) != 0 }, phase: "active", want: "waiting"},
+		{name: "a merge fixing tests on a waiting clock",
+			queue: func() sidebar.MergeQueue {
+				return sidebar.MergeQueue{Line: inLine("w1"), Remediating: []sidebar.QueueEntry{
+					{Workspace: "w2", Credited: "w2", Repair: sidebar.RepairFixingTests, Clock: waitingClock(1, 0)}}}
+			},
+			drawn: func(q *frontendv1.RosterRepoMergeQueue) bool { return q.FixingTests != nil }, phase: "waiting", want: "active"},
+		{name: "a merge resolving conflicts on a waiting clock",
+			queue: func() sidebar.MergeQueue {
+				return sidebar.MergeQueue{Line: inLine("w1"), Remediating: []sidebar.QueueEntry{
+					{Workspace: "w2", Credited: "w2", Repair: sidebar.RepairResolvingConflicts, Clock: waitingClock(1, 0)}}}
+			},
+			drawn: func(q *frontendv1.RosterRepoMergeQueue) bool { return len(q.ResolvingConflicts) != 0 }, phase: "waiting", want: "active"},
+		{name: "a merge awaiting the fixing-tests slot on an active clock",
+			queue: func() sidebar.MergeQueue {
+				return sidebar.MergeQueue{Line: inLine("w1"), Remediating: []sidebar.QueueEntry{
+					{Workspace: "w2", Credited: "w2", Repair: sidebar.RepairAwaitingFixingTests, Clock: activeClock(1)}}}
+			},
+			drawn: func(q *frontendv1.RosterRepoMergeQueue) bool { return len(q.AwaitingFixingTests) != 0 }, phase: "active", want: "waiting"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, logs := newResolver(t)
+			queue := tc.queue()
+			queue.Workspaces = []ids.WorkspaceID{"w1", "w2"}
+			r.SetMergeQueue(theRepo, queue)
+
+			// Act.
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "two")))
+
+			// Assert.
+			if tc.drawn(queuedGroups(latest(t, r))[0].GetQueue()) {
+				t.Fatalf("the merge on a clock its line cannot carry was drawn")
+			}
+			rec, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
+				Message: "a merge's clock is in a phase its line cannot carry, so it is not drawn"})
+			if !ok || rec.Context["clock_phase"] != tc.phase || rec.Context["want_phase"] != tc.want {
+				t.Fatalf("ERROR record = %+v (found %v), want clock_phase %q and want_phase %q", rec, ok, tc.phase, tc.want)
+			}
+		})
 	}
 }
 
@@ -1847,7 +1958,7 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w2", "w1"},
 		Line:        inLine("w2"),
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1_700_000_000_000), Repair: sidebar.RepairFixingTests}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Clock: activeClock(1_700_000_000_000), Repair: sidebar.RepairFixingTests}},
 	})
 
 	// Act.
@@ -1859,8 +1970,8 @@ func TestTheMergeQueueDrawsAMergeRemediatingOutOfLineAsItsSecondSpot(t *testing.
 		t.Fatalf("head = %q, want two, the merge now at the head", got)
 	}
 	aside := queue.GetFixingTests()
-	if aside.GetSubject().GetName() != "one" || aside.GetSinceMs() != 1_700_000_000_000 {
-		t.Fatalf("fixing tests = %v, want one, since 1700000000000", aside)
+	if aside.GetSubject().GetName() != "one" || aside.GetClock().GetActiveSinceMs() != 1_700_000_000_000 {
+		t.Fatalf("fixing tests = %v, want one, active since 1700000000000", aside)
 	}
 }
 
@@ -1894,7 +2005,7 @@ func TestAMergeOutOfLineIsDrawnAtTheRepairSlotItHoldsOrAwaits(t *testing.T) {
 			r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 				Workspaces:  []ids.WorkspaceID{"w2", "w1"},
 				Line:        inLine("w2"),
-				Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), Repair: tc.repair}},
+				Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Clock: repairClock(tc.repair), Repair: tc.repair}},
 			})
 
 			// Act
@@ -1914,8 +2025,8 @@ func TestASecondHolderOfARepairSlotIsRecordedAndNotDrawn(t *testing.T) {
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces: []ids.WorkspaceID{"w1", "w2"},
 		Remediating: []sidebar.QueueEntry{
-			{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), Repair: sidebar.RepairFixingTests},
-			{Workspace: "w2", Credited: "w2", SlotSince: time.UnixMilli(2), Repair: sidebar.RepairFixingTests},
+			{Workspace: "w1", Credited: "w1", Clock: activeClock(1), Repair: sidebar.RepairFixingTests},
+			{Workspace: "w2", Credited: "w2", Clock: activeClock(2), Repair: sidebar.RepairFixingTests},
 		},
 	})
 
@@ -1938,7 +2049,7 @@ func TestAMergeOutOfLineNamingNoRepairSlotIsRecordedAndNotDrawn(t *testing.T) {
 	r, log := newResolver(t)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w1"},
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1)}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Clock: activeClock(1)}},
 	})
 
 	// Act
@@ -1960,7 +2071,7 @@ func TestAQueueWhoseOnlyMergeRemediatesIsListedWithNoHead(t *testing.T) {
 	r, _ := newResolver(t)
 	r.SetMergeQueue(theRepo, sidebar.MergeQueue{
 		Workspaces:  []ids.WorkspaceID{"w1"},
-		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", SlotSince: time.UnixMilli(1), Repair: sidebar.RepairResolvingConflicts}},
+		Remediating: []sidebar.QueueEntry{{Workspace: "w1", Credited: "w1", Clock: activeClock(1), Repair: sidebar.RepairResolvingConflicts}},
 	})
 
 	// Act.

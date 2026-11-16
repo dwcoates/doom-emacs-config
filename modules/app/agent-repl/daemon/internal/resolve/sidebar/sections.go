@@ -223,20 +223,27 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 	}
 	front := q.line[0]
 	if sub, ok := subject(front); ok {
-		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages, HeadSinceMs: front.SlotSince.UnixMilli()}
+		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages}
 		if front.Admitted {
 			head.Standing = &frontendv1.RosterMergeQueueHead_Merging{Merging: &frontendv1.RosterMergeQueueHeadMerging{}}
 		} else {
-			head.Standing = &frontendv1.RosterMergeQueueHead_Waiting{Waiting: &frontendv1.RosterMergeQueueHeadWaiting{QueuedAtMs: front.QueuedAt.UnixMilli()}}
+			head.Standing = &frontendv1.RosterMergeQueueHead_Waiting{Waiting: &frontendv1.RosterMergeQueueHeadWaiting{}}
 		}
-		out.Head = head
+		if clock, ok := drawHeadClock(front, log); ok {
+			head.Clock = clock
+			out.Head = head
+		}
 	}
 	for _, entry := range q.line[1:] {
 		sub, ok := subject(entry)
 		if !ok {
 			continue
 		}
-		out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{Subject: sub, QueuedAtMs: entry.QueuedAt.UnixMilli()})
+		clock, ok := drawWaitingClock(entry, log)
+		if !ok {
+			continue
+		}
+		out.Waiting = append(out.Waiting, &frontendv1.RosterMergeQueueWaiting{Subject: sub, Clock: clock})
 	}
 	return out
 }
@@ -248,7 +255,6 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 // resolving conflicts is drawn, in order (owner ruling, 2026-11-14).
 func drawRepair(out *frontendv1.RosterRepoMergeQueue, entry QueueEntry, sub *frontendv1.RosterMergeQueueSubject, log dlog.Logger) {
 	const op = "daemon.sidebar.merge_queue"
-	since := entry.SlotSince.UnixMilli()
 	second := func(holder *frontendv1.RosterMergeQueueSubject) {
 		log.Error(op, "a second merge holds a repair slot of the queue, so it is not drawn", dlog.Context{
 			"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(), "holder": holder.GetName(),
@@ -260,16 +266,80 @@ func drawRepair(out *frontendv1.RosterRepoMergeQueue, entry QueueEntry, sub *fro
 			second(out.FixingTests.Subject)
 			return
 		}
-		out.FixingTests = &frontendv1.RosterMergeQueueFixingTests{Subject: sub, SinceMs: since}
+		clock, ok := drawActiveClock(entry, log)
+		if !ok {
+			return
+		}
+		out.FixingTests = &frontendv1.RosterMergeQueueFixingTests{Subject: sub, Clock: clock}
 	case RepairResolvingConflicts:
-		out.ResolvingConflicts = append(out.ResolvingConflicts, &frontendv1.RosterMergeQueueResolvingConflicts{Subject: sub, SinceMs: since})
+		clock, ok := drawActiveClock(entry, log)
+		if !ok {
+			return
+		}
+		out.ResolvingConflicts = append(out.ResolvingConflicts, &frontendv1.RosterMergeQueueResolvingConflicts{Subject: sub, Clock: clock})
 	case RepairAwaitingFixingTests:
-		out.AwaitingFixingTests = append(out.AwaitingFixingTests, &frontendv1.RosterMergeQueueAwaitingFixingTests{Subject: sub, SinceMs: since})
+		clock, ok := drawWaitingClock(entry, log)
+		if !ok {
+			return
+		}
+		out.AwaitingFixingTests = append(out.AwaitingFixingTests, &frontendv1.RosterMergeQueueAwaitingFixingTests{Subject: sub, Clock: clock})
 	default:
 		log.Error(op, "a merge out of line names no repair slot, so it is not drawn", dlog.Context{
 			"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(),
 			"invariant_violation": "a merge out of line holds or awaits a repair slot"})
 	}
+}
+
+// drawActiveClock draws ENTRY's clock as an active one: the clock of a line
+// whose merge is always at work (fixing tests, resolving conflicts). A clock
+// in any other phase there is a defect, recorded at ERROR, and the line is
+// not drawn.
+func drawActiveClock(entry QueueEntry, log dlog.Logger) (*frontendv1.RosterMergeQueueActiveClock, bool) {
+	if entry.Clock.Phase != wsm.MergeClockActive {
+		clockDefect(entry, wsm.MergeClockActive.String(), log)
+		return nil, false
+	}
+	return &frontendv1.RosterMergeQueueActiveClock{ActiveSinceMs: entry.Clock.Since.UnixMilli()}, true
+}
+
+// drawWaitingClock draws ENTRY's clock as a waiting one: the clock of a line
+// whose merge always waits (in line behind the head, awaiting the
+// fixing-tests slot). A clock in any other phase there is a defect, recorded
+// at ERROR, and the line is not drawn.
+func drawWaitingClock(entry QueueEntry, log dlog.Logger) (*frontendv1.RosterMergeQueueWaitingClock, bool) {
+	if entry.Clock.Phase != wsm.MergeClockWaiting {
+		clockDefect(entry, wsm.MergeClockWaiting.String(), log)
+		return nil, false
+	}
+	return &frontendv1.RosterMergeQueueWaitingClock{
+		WaitingSinceMs: entry.Clock.Since.UnixMilli(),
+		WaitedBeforeMs: entry.Clock.Waited.Milliseconds(),
+	}, true
+}
+
+// drawHeadClock draws the head ENTRY's clock in the stretch it is in. A head
+// whose clock counts nothing is a defect, recorded at ERROR, and the head is
+// not drawn.
+func drawHeadClock(entry QueueEntry, log dlog.Logger) (*frontendv1.RosterMergeQueueHeadClock, bool) {
+	switch entry.Clock.Phase {
+	case wsm.MergeClockActive:
+		active, _ := drawActiveClock(entry, log)
+		return &frontendv1.RosterMergeQueueHeadClock{Stretch: &frontendv1.RosterMergeQueueHeadClock_Active{Active: active}}, true
+	case wsm.MergeClockWaiting:
+		waiting, _ := drawWaitingClock(entry, log)
+		return &frontendv1.RosterMergeQueueHeadClock{Stretch: &frontendv1.RosterMergeQueueHeadClock_Waiting{Waiting: waiting}}, true
+	}
+	clockDefect(entry, "active or waiting", log)
+	return nil, false
+}
+
+// clockDefect records that ENTRY's line is not drawn because its clock is in
+// a phase its line cannot carry: WANT names the phases it can.
+func clockDefect(entry QueueEntry, want string, log dlog.Logger) {
+	log.Error("daemon.sidebar.merge_queue", "a merge's clock is in a phase its line cannot carry, so it is not drawn", dlog.Context{
+		"workspace_id": string(entry.Workspace), "credited": string(entry.Credited), "repair": entry.Repair.String(),
+		"clock_phase": entry.Clock.Phase.String(), "want_phase": want, "admitted": entry.Admitted,
+		"invariant_violation": "a merge queue line's clock is in the phase its standing gives it"})
 }
 
 // drawMergeQueuePause renders a queue's standing pause as the roster draws

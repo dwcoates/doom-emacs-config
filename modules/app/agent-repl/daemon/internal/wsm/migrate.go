@@ -335,6 +335,9 @@ var migrations = []migration{
 	{To: 177, Name: "settings_visit", Kind: MigrationAdditive, DDL: settingsVisitDDL},
 	{To: 178, Name: "retired_quiet_compaction", Kind: MigrationContract, DDL: retiredQuietCompactionDDL},
 	{To: 179, Name: "merge_queue_resolved_rebase", Kind: MigrationAdditive, DDL: mergeQueueResolvedRebaseDDL},
+	// merge_queue_clock: each entry's active or waiting clock (MergeClock).
+	// IT IS ADDITIVE: see mergeQueueClockDDL.
+	{To: 180, Name: "merge_queue_clock", Kind: MigrationAdditive, DDL: mergeQueueClockDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
