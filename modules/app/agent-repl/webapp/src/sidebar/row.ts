@@ -141,6 +141,12 @@ export interface RowFamily {
    * own-repository or in a block (frontend.v1.RosterOpenRow.children_fold).
    */
   childrenFold?: RosterOpenRowChildrenFold;
+  /**
+   * Whether the row is drawn although a fold covers it: its workspace started
+   * a turn under the fold and the turn is running
+   * (frontend.v1.RosterOpenRow.surfaced).
+   */
+  surfaced?: boolean;
 }
 
 /** A row's kin: its own children and its repository blocks, as `RowFamily` carries them. */
@@ -159,8 +165,18 @@ export function pathedFamilies(rows: readonly RowFamily[], path: string): Pathed
 
 /** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
-  return drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family, path, family.childrenFold);
+  const drawn = drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family, path, family.childrenFold);
+  if (family.surfaced === true) drawn.classList.add(SURFACED_ROW_CLASS);
+  return drawn;
 }
+
+/**
+ * The class of a row drawn inside a fold that covers it
+ * (frontend.v1.RosterOpenRow.surfaced): the stylesheet hides every other row
+ * of the fold, and a row of its family that stands between the fold and it
+ * keeps only its `.kids` box.
+ */
+export const SURFACED_ROW_CLASS = "surfaced";
 
 /**
  * Which kind of section a row is drawn in, which decides what it looks like

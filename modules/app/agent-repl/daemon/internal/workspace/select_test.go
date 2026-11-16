@@ -1173,89 +1173,6 @@ func TestShowingAWorkspaceStartsNothingAndStandsNothingDown(t *testing.T) {
 	}
 }
 
-func TestHideLandingTarget(t *testing.T) {
-	at := func(minute int) *time.Time {
-		v := time.Date(2026, 10, 20, 12, minute, 0, 0, time.UTC)
-		return &v
-	}
-	tab := func(id ids.WorkspaceID, withheld wsm.Withholding, selected *time.Time) sidebar.Tab {
-		return sidebar.Tab{Workspace: wsm.Workspace{ID: id, LastSelectedAt: selected}, Withheld: withheld}
-	}
-	drawn := func(id ids.WorkspaceID) sidebar.Tab { return tab(id, wsm.Drawn, nil) }
-	selected := func(id ids.WorkspaceID, minute int) sidebar.Tab { return tab(id, wsm.Drawn, at(minute)) }
-	tests := []struct {
-		name      string
-		tabs      []sidebar.Tab
-		want      ids.WorkspaceID
-		wantBy    hideLanding
-		wantFound bool
-	}{
-		{
-			name:      "the most recently selected tab wins over the first and the neighbours",
-			tabs:      []sidebar.Tab{selected("first", 1), selected("left", 2), selected("w1", 9), selected("right", 3), selected("recent", 5)},
-			want:      "recent",
-			wantBy:    landedByRecency,
-			wantFound: true,
-		},
-		{
-			name:      "a selected tab wins over never-selected neighbours",
-			tabs:      []sidebar.Tab{drawn("left"), drawn("w1"), drawn("right"), selected("far", 1)},
-			want:      "far",
-			wantBy:    landedByRecency,
-			wantFound: true,
-		},
-		{
-			name:      "a withheld tab is passed over however recently it was selected",
-			tabs:      []sidebar.Tab{tab("hidden", wsm.WithheldHidden, at(8)), tab("collapsed", wsm.WithheldCollapsed, at(7)), selected("older", 1), drawn("w1")},
-			want:      "older",
-			wantBy:    landedByRecency,
-			wantFound: true,
-		},
-		{
-			name:      "with no tab ever selected the tab immediately left wins",
-			tabs:      []sidebar.Tab{drawn("first"), drawn("left"), drawn("w1"), drawn("right")},
-			want:      "left",
-			wantBy:    landedByNeighbour,
-			wantFound: true,
-		},
-		{
-			name:      "with no tab ever selected withheld tabs to the left are passed over",
-			tabs:      []sidebar.Tab{drawn("far-left"), tab("hidden", wsm.WithheldHidden, nil), tab("collapsed", wsm.WithheldCollapsed, nil), drawn("w1")},
-			want:      "far-left",
-			wantBy:    landedByNeighbour,
-			wantFound: true,
-		},
-		{
-			name:      "with no tab ever selected the leftmost tab lands on its nearest drawn right neighbour",
-			tabs:      []sidebar.Tab{drawn("w1"), tab("hidden", wsm.WithheldHidden, nil), drawn("right"), drawn("further")},
-			want:      "right",
-			wantBy:    landedByNeighbour,
-			wantFound: true,
-		},
-		{
-			name:      "no other drawn tab finds none",
-			tabs:      []sidebar.Tab{tab("hidden", wsm.WithheldHidden, at(1)), drawn("w1"), tab("collapsed", wsm.WithheldCollapsed, at(2))},
-			wantFound: false,
-		},
-		{
-			name:      "a workspace with no tab finds none",
-			tabs:      []sidebar.Tab{selected("w2", 1), drawn("w3")},
-			wantFound: false,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got, by, found := hideLandingTarget(tt.tabs, "w1")
-
-			// Assert
-			if found != tt.wantFound || found && (got.ID != tt.want || by != tt.wantBy) {
-				t.Fatalf("landing = (%q, %q, %v), want (%q, %q, %v)", got.ID, by, found, tt.want, tt.wantBy, tt.wantFound)
-			}
-		})
-	}
-}
-
 // hideFixture is a fixture with w1, w2 and w3 in that registry order, and
 // CURRENT selected.
 func hideFixture(t *testing.T, current ids.WorkspaceID) *fixture {
@@ -1337,7 +1254,7 @@ func TestHidingTheCurrentWorkspaceLandsOnTheOneSelectedBeforeIt(t *testing.T) {
 	}
 	landed := false
 	for _, r := range f.log.logger.Records() {
-		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w4" && r.Context["hidden"] == "w3" && r.Context["by"] == string(landedByRecency) {
+		if r.Operation == opSetHidden && r.Level == dlog.LevelInfo && r.Context["workspace"] == "w4" && r.Context["hidden"] == "w3" && r.Context["by"] == string(sidebar.LandedByRecency) {
 			landed = true
 		}
 	}

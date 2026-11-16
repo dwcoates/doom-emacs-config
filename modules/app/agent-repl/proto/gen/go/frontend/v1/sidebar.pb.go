@@ -2096,8 +2096,17 @@ type RosterOpenRow struct {
 	// block holds at least one row. Their tabs follow `children`'s, block by
 	// block. Empty when every child is of the row's own repository.
 	RepositoryBlocks []*RosterOpenRowRepositoryBlock `protobuf:"bytes,6,rep,name=repository_blocks,json=repositoryBlocks,proto3" json:"repository_blocks,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// WHETHER A FOLD COVERS THE ROW AND THE ROW IS DRAWN ANYWAY. DAEMON-HELD:
+	// the workspace started a turn while a fold hid it (its repository's, its
+	// subsection's, or an ancestor's `children_fold`) and the turn is still
+	// running, or it is the workspace the user is on. The fold stays collapsed
+	// and hides every other row under it; this one is drawn, and its `tab` is
+	// numbered, not folded. It ends with the turn, when the user switches away
+	// from it, and when the user folds the section again. False on a row no
+	// fold covers and on a row the fold hides.
+	Surfaced      bool `protobuf:"varint,7,opt,name=surfaced,proto3" json:"surfaced,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RosterOpenRow) Reset() {
@@ -2163,6 +2172,13 @@ func (x *RosterOpenRow) GetRepositoryBlocks() []*RosterOpenRowRepositoryBlock {
 		return x.RepositoryBlocks
 	}
 	return nil
+}
+
+func (x *RosterOpenRow) GetSurfaced() bool {
+	if x != nil {
+		return x.Surfaced
+	}
+	return false
 }
 
 // A row's children's fold, as a subsection's is drawn
@@ -6951,12 +6967,15 @@ func (*RosterSubsection_Collapsed) isRosterSubsection_Fold() {}
 type RosterSubsectionExpanded struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHETHER A COLLAPSE MAY BE ASKED FOR. A collapse stands down the sessions
-	// of the workspaces the subsection holds and hides their tabs, so the
-	// subsection holding the CURRENT workspace never collapses: the daemon
-	// refuses the ask (agentrepl.v1.UpdateSidebarViewError.holds_current), and
-	// the sidebar's fold gesture asks nothing while this arm says so. The
-	// daemon resolves the arm on every push from its own selection, so it
-	// follows every switch. Never unset on a wire subsection.
+	// of the workspaces the subsection holds and hides their tabs, and a
+	// collapse of the subsection holding the CURRENT workspace moves the
+	// selection to the workspace selected before, among the open sections. Only
+	// when no other open workspace is drawn outside the subsection does it
+	// never collapse: the daemon refuses the ask
+	// (agentrepl.v1.UpdateSidebarViewError.holds_current), and the sidebar's
+	// fold gesture asks nothing while this arm says so. The daemon resolves the
+	// arm on every push from its own selection, so it follows every switch.
+	// Never unset on a wire subsection.
 	//
 	// Types that are valid to be assigned to Collapse:
 	//
@@ -7027,12 +7046,14 @@ type isRosterSubsectionExpanded_Collapse interface {
 }
 
 type RosterSubsectionExpanded_Collapsible struct {
-	// No current workspace sits in the subsection: the gesture collapses it.
+	// The gesture collapses the subsection: no current workspace sits in it,
+	// or one does and the collapse has another open workspace to land on.
 	Collapsible *RosterSubsectionCollapsible `protobuf:"bytes,1,opt,name=collapsible,proto3,oneof"`
 }
 
 type RosterSubsectionExpanded_HoldsCurrent struct {
-	// The current workspace sits in the subsection: the gesture does nothing.
+	// The current workspace sits in the subsection with nowhere else to
+	// land: the gesture does nothing.
 	HoldsCurrent *RosterSubsectionHoldsCurrent `protobuf:"bytes,2,opt,name=holds_current,json=holdsCurrent,proto3,oneof"`
 }
 
@@ -7078,8 +7099,8 @@ func (*RosterSubsectionCollapsible) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{109}
 }
 
-// An expanded subsection holding the current workspace, which the fold
-// gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
+// An expanded subsection holding the current workspace with nowhere else to
+// land, which the fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
 type RosterSubsectionHoldsCurrent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -7251,12 +7272,15 @@ func (x *RosterSubsectionKey) GetSubsectionId() string {
 type RosterRepoSectionExpanded struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// WHETHER A COLLAPSE MAY BE ASKED FOR. A collapse stands down the sessions
-	// of the repository's open workspaces and hides their tabs, so the
-	// repository holding the CURRENT workspace never collapses: the daemon
-	// refuses the ask (agentrepl.v1.UpdateSidebarViewError.holds_current), and
-	// the sidebar's fold gesture asks nothing while this arm says so. The
-	// daemon resolves the arm on every push from its own selection, so it
-	// follows every switch. Never unset on a wire section.
+	// of the repository's open workspaces and hides their tabs, and a collapse
+	// of the repository holding the CURRENT workspace moves the selection to
+	// the workspace selected before, among the open sections. Only when no
+	// other open workspace is drawn outside the repository does it never
+	// collapse: the daemon refuses the ask
+	// (agentrepl.v1.UpdateSidebarViewError.holds_current), and the sidebar's
+	// fold gesture asks nothing while this arm says so. The daemon resolves the
+	// arm on every push from its own selection, so it follows every switch.
+	// Never unset on a wire section.
 	//
 	// Types that are valid to be assigned to Collapse:
 	//
@@ -7327,13 +7351,14 @@ type isRosterRepoSectionExpanded_Collapse interface {
 }
 
 type RosterRepoSectionExpanded_Collapsible struct {
-	// No current workspace sits in the repository: the gesture collapses it.
+	// The gesture collapses the repository: no current workspace sits in it,
+	// or one does and the collapse has another open workspace to land on.
 	Collapsible *RosterRepoSectionCollapsible `protobuf:"bytes,1,opt,name=collapsible,proto3,oneof"`
 }
 
 type RosterRepoSectionExpanded_HoldsCurrent struct {
-	// The current workspace sits in the repository, in a subsection or not:
-	// the gesture does nothing.
+	// The current workspace sits in the repository, in a subsection or not,
+	// with nowhere else to land: the gesture does nothing.
 	HoldsCurrent *RosterRepoSectionHoldsCurrent `protobuf:"bytes,2,opt,name=holds_current,json=holdsCurrent,proto3,oneof"`
 }
 
@@ -7379,8 +7404,8 @@ func (*RosterRepoSectionCollapsible) Descriptor() ([]byte, []int) {
 	return file_frontend_v1_sidebar_proto_rawDescGZIP(), []int{115}
 }
 
-// An expanded repository section holding the current workspace, which the
-// fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
+// An expanded repository section holding the current workspace with nowhere
+// else to land, which the fold gesture leaves expanded. DELIBERATELY EMPTY: the arm is the fact.
 type RosterRepoSectionHoldsCurrent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -12729,13 +12754,14 @@ const file_frontend_v1_sidebar_proto_rawDesc = "" +
 	"\rRosterVersion\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\"@\n" +
 	"\x0eRosterOpenRows\x12.\n" +
-	"\x04rows\x18\x01 \x03(\v2\x1a.frontend.v1.RosterOpenRowR\x04rows\"\xf8\x02\n" +
+	"\x04rows\x18\x01 \x03(\v2\x1a.frontend.v1.RosterOpenRowR\x04rows\"\x94\x03\n" +
 	"\rRosterOpenRow\x12(\n" +
 	"\x03row\x18\x01 \x01(\v2\x16.frontend.v1.RosterRowR\x03row\x12/\n" +
 	"\x03tab\x18\x02 \x01(\v2\x1d.frontend.v1.RosterOpenRowTabR\x03tab\x126\n" +
 	"\bchildren\x18\x03 \x03(\v2\x1a.frontend.v1.RosterOpenRowR\bchildren\x12P\n" +
 	"\rchildren_fold\x18\x05 \x01(\v2&.frontend.v1.RosterOpenRowChildrenFoldH\x00R\fchildrenFold\x88\x01\x01\x12V\n" +
-	"\x11repository_blocks\x18\x06 \x03(\v2).frontend.v1.RosterOpenRowRepositoryBlockR\x10repositoryBlocksB\x10\n" +
+	"\x11repository_blocks\x18\x06 \x03(\v2).frontend.v1.RosterOpenRowRepositoryBlockR\x10repositoryBlocks\x12\x1a\n" +
+	"\bsurfaced\x18\a \x01(\bR\bsurfacedB\x10\n" +
 	"\x0e_children_foldJ\x04\b\x04\x10\x05R\x12repository_divider\"\xba\x01\n" +
 	"\x19RosterOpenRowChildrenFold\x12H\n" +
 	"\bexpanded\x18\x01 \x01(\v2*.frontend.v1.RosterOpenRowChildrenExpandedH\x00R\bexpanded\x12K\n" +

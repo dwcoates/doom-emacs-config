@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
 
@@ -33,16 +34,22 @@ func (r FoldRequester) context() dlog.Context {
 // and the Emacs tab bar hides that repository's workspaces, both off the one
 // pushed fold. COLLAPSING HIDES THE SECTION'S OPEN WORKSPACES and stands down
 // the sessions of those it does not spare (foldTabs); EXPANDING starts
-// nothing, the editor asks with OpenTabs. Selecting a workspace expands the
-// folds holding it without coming here (wsm's setCurrent).
+// nothing, the editor asks with OpenTabs. Selecting a workspace opens no fold:
+// the roster draws the current workspace inside the fold that hides it.
 func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool, requester FoldRequester) error {
 	log := v.deps.Log.Global().With(dlog.Merge(dlog.Context{"repo_id": string(repo), "folded": folded}, requester.context()))
-	return v.foldTabs(ctx, log, foldTabsSpec{
-		op:     opFoldRepository,
-		what:   "repository",
-		target: string(repo),
-		folded: folded,
-		write:  func() error { return v.deps.DB.SetRepositoryFolded(ctx, repo, folded) },
+	return v.foldTabs(ctx, log, v.repositoryFold(ctx, log, repo, folded))
+}
+
+// repositoryFold is the fold of REPO's section as a foldTabsSpec.
+func (v *verbs) repositoryFold(ctx context.Context, log dlog.Logger, repo ids.RepoID, folded bool) foldTabsSpec {
+	return foldTabsSpec{
+		op:       opFoldRepository,
+		what:     "repository",
+		target:   string(repo),
+		folded:   folded,
+		landsOff: true,
+		write:    func() error { return v.deps.DB.SetRepositoryFolded(ctx, repo, folded) },
 		unknown: func(err error) error {
 			if !errors.Is(err, wsm.ErrNotFound) {
 				return nil
@@ -50,7 +57,7 @@ func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool
 			return refuse(log, "FoldRepository", ArmUnknownRepository, fmt.Sprintf("no repository %q is registered", repo), true)
 		},
 		members: func([]wsm.Workspace) wsm.FoldMembers { return wsm.RepositoryMembers(repo) },
-	})
+	}
 }
 
 // opFoldSubsection is the operation FoldSubsection's records carry.
@@ -64,12 +71,18 @@ const opFoldSubsection = "daemon.workspace.fold_subsection"
 // An unknown subsection is refused unknown_subsection.
 func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded bool, requester FoldRequester) error {
 	log := v.deps.Log.Global().With(dlog.Merge(dlog.Context{"subsection": string(sub), "folded": folded}, requester.context()))
-	return v.foldTabs(ctx, log, foldTabsSpec{
-		op:     opFoldSubsection,
-		what:   "subsection",
-		target: string(sub),
-		folded: folded,
-		write:  func() error { return v.deps.DB.SetSubsectionFolded(ctx, sub, folded) },
+	return v.foldTabs(ctx, log, v.subsectionFold(ctx, log, sub, folded))
+}
+
+// subsectionFold is the fold of SUB as a foldTabsSpec (repositoryFold).
+func (v *verbs) subsectionFold(ctx context.Context, log dlog.Logger, sub ids.SubsectionID, folded bool) foldTabsSpec {
+	return foldTabsSpec{
+		op:       opFoldSubsection,
+		what:     "subsection",
+		target:   string(sub),
+		folded:   folded,
+		landsOff: true,
+		write:    func() error { return v.deps.DB.SetSubsectionFolded(ctx, sub, folded) },
 		unknown: func(err error) error {
 			var unknown *wsm.UnknownSubsectionError
 			if !errors.As(err, &unknown) {
@@ -79,7 +92,7 @@ func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded
 				map[string]any{"subsection": &agentreplv1.SubsectionRef{Id: string(sub)}})
 		},
 		members: func([]wsm.Workspace) wsm.FoldMembers { return wsm.SubsectionMembers(sub) },
-	})
+	}
 }
 
 // opFoldChildren is the operation FoldChildren's records carry.
@@ -127,6 +140,11 @@ type foldTabsSpec struct {
 	// workspace as it stands (a repository's and a subsection's membership
 	// reads none of them).
 	members func(all []wsm.Workspace) wsm.FoldMembers
+	// landsOff is set by the folds of a section (a repository's, a
+	// subsection's): a collapse holding the current workspace moves the
+	// selection off it (landOffFold). A fold without it (a workspace's
+	// children) refuses such a collapse holds_current, as the roster says.
+	landsOff bool
 }
 
 // foldTabs is THE ONE PATH OF A FOLD THAT HIDES TABS: the fold recorded, the
@@ -172,11 +190,14 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 // collapse to stand down and the members of the fold (both nil for an expand).
 //
 // A COLLAPSE NEVER STANDS DOWN THE CURRENT WORKSPACE. A collapse of a section
-// holding it is refused holds_current and nothing is written. The check and
-// the write run under the selection lock, which every select holds while it
-// moves the selection (selectCurrent), so a switch racing the collapse lands
-// wholly before the check or wholly after the write: no interleaving records
-// a collapse over the workspace the user has just switched to.
+// holding it first moves the selection to the workspace the user was on
+// before, among the tabs the collapse leaves drawn (landOffFold), and a
+// collapse with no such workspace is refused holds_current, nothing written.
+// The check, the landing and the write run under the selection lock, which
+// every select holds while it moves the selection (selectCurrent), so a
+// switch racing the collapse lands wholly before the check or wholly after
+// the write: no interleaving records a collapse over the workspace the user
+// has just switched to.
 func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSpec) ([]wsm.Workspace, wsm.FoldMembers, error) {
 	var workspaces []wsm.Workspace
 	var members wsm.FoldMembers
@@ -190,10 +211,16 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 		}
 		members = spec.members(listed)
 		for _, ws := range listed {
-			if ws.Current && members.HoldsCurrent(&ws) {
+			if !ws.Current || !members.HoldsCurrent(&ws) {
+				continue
+			}
+			if !spec.landsOff {
 				return nil, nil, refuse(log, "UpdateSidebarView", ArmHoldsCurrent,
 					fmt.Sprintf("the %s holds the current workspace %q; collapsing it would stand that workspace down", spec.what, ws.ID),
 					false)
+			}
+			if err := v.landOffFold(ctx, log, spec, members, ws.ID); err != nil {
+				return nil, nil, err
 			}
 		}
 		workspaces = listed
@@ -205,5 +232,55 @@ func (v *verbs) recordFold(ctx context.Context, log dlog.Logger, spec foldTabsSp
 		log.Error(spec.op, "could not record the "+spec.what+"'s fold", dlog.Context{"cause": err.Error()})
 		return nil, nil, fmt.Errorf("fold %s %q: %w", spec.what, spec.target, err)
 	}
+	// A FOLD THE USER MAKES HIDES EVERYTHING UNDER IT, a working workspace
+	// that surfaced under an earlier fold included (surfacing.go).
+	if spec.folded {
+		var surfaced []ids.WorkspaceID
+		for _, ws := range workspaces {
+			if ws.Surfaced && members(ws) {
+				surfaced = append(surfaced, ws.ID)
+			}
+		}
+		if len(surfaced) > 0 {
+			if err := v.deps.DB.ClearSurfaced(ctx, surfaced); err != nil {
+				log.Error(spec.op, "could not take the surfacing off the workspaces the "+spec.what+"'s fold hides", dlog.Context{"cause": err.Error(), "workspaces": len(surfaced)})
+				return nil, nil, fmt.Errorf("fold %s %q: clear the surfacing of its workspaces: %w", spec.what, spec.target, err)
+			}
+		}
+	}
 	return workspaces, members, nil
+}
+
+// landOffFold moves the selection off CURRENT, which the collapse SPEC is
+// about to fold away (its MEMBERS), to the workspace the user was on before
+// among the tabs the collapse leaves drawn (sidebar.LandingTarget, the
+// question the roster asks to decide whether a collapse may be asked). It runs
+// under the selection lock, which recordFold holds. With nowhere to land the
+// collapse is refused holds_current and the selection stands.
+func (v *verbs) landOffFold(ctx context.Context, log dlog.Logger, spec foldTabsSpec, members wsm.FoldMembers, current ids.WorkspaceID) error {
+	reg, err := v.readRegistry(ctx, log, spec.op)
+	if err != nil {
+		return fmt.Errorf("fold %s %q: the registry could not be read to land off %q: %w", spec.what, spec.target, current, err)
+	}
+	target, by, found := sidebar.LandingTarget(sidebar.Tabs(reg, log), current, members)
+	if !found {
+		return refuse(log, "UpdateSidebarView", ArmHoldsCurrent,
+			fmt.Sprintf("the %s holds the current workspace %q and no other open workspace is drawn to land on; collapsing it would stand that workspace down", spec.what, current),
+			false)
+	}
+	_, targetLog, err := v.owned(ctx, "SelectWorkspace", target.ID)
+	if err != nil {
+		return err
+	}
+	applied, err := v.selectLocked(ctx, targetLog, target.ID, &current, Switch{History: RecordSelection})
+	if err != nil {
+		return fmt.Errorf("fold %s %q: land off %q: %w", spec.what, spec.target, current, err)
+	}
+	if !applied {
+		log.Error(spec.op, "the selection moved under the selection lock while a collapse landed off it", dlog.Context{"workspace": string(current)})
+		return fmt.Errorf("fold %s %q: land off %q: the selection moved under the selection lock", spec.what, spec.target, current)
+	}
+	targetLog.Info(spec.op, "the collapse moved the selection off the folded "+spec.what+" to the workspace selected before",
+		dlog.Context{"from": string(current), "place": target.Place, "by": string(by)})
+	return nil
 }

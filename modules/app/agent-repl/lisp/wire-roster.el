@@ -1027,13 +1027,14 @@ repository's children of an open row, ROWS each an open row in drawn order."
 (defun agent-repl-wire-decode-roster-open-row (value)
   "Decode VALUE as `RosterOpenRow'.
 The plist is `(:row ROW :tab TAB :children ROWS :repository-blocks BLOCKS
-:children-fold FOLD)'.  CHILDREN are the row's open children of its own
-repository, each itself an open row, in drawn order; BLOCKS are its children
-of other repositories, one `RosterOpenRowRepositoryBlock' per repository,
-drawn after CHILDREN.  FOLD is set exactly when the row has a child of either
-kind, and folds them all."
+:children-fold FOLD :surfaced BOOL)'.  CHILDREN are the row's open children
+of its own repository, each itself an open row, in drawn order; BLOCKS are
+its children of other repositories, one `RosterOpenRowRepositoryBlock' per
+repository, drawn after CHILDREN.  FOLD is set exactly when the row has a
+child of either kind, and folds them all.  SURFACED is true for a row drawn
+inside a fold that covers it (a running turn, or the selection)."
   (let ((object (agent-repl-wire--object "RosterOpenRow" value)))
-    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryBlocks childrenFold))
+    (agent-repl-wire--check-keys "RosterOpenRow" object '(row tab children repositoryBlocks childrenFold surfaced))
     (agent-repl-wire--decoded
      "RosterOpenRow"
      (list :row (agent-repl-wire--decode-message
@@ -1047,7 +1048,8 @@ kind, and folds them all."
                                #'agent-repl-wire-decode-roster-open-row-repository-block)
            :children-fold (agent-repl-wire--decode-optional-message
                            "RosterOpenRow" 'childrenFold object
-                           #'agent-repl-wire-decode-roster-open-row-children-fold)))))
+                           #'agent-repl-wire-decode-roster-open-row-children-fold)
+           :surfaced (agent-repl-wire--decode-bool "RosterOpenRow" 'surfaced object)))))
 
 (defun agent-repl-wire-decode-roster-open-rows (value)
   "Decode VALUE as `RosterOpenRows', a plist `(:rows OPEN-ROWS)'."

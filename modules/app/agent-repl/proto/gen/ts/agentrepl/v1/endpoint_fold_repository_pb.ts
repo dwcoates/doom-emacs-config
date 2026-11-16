@@ -188,8 +188,9 @@ export const FoldRepositoryUnknownRepositorySchema: GenMessage<FoldRepositoryUnk
   messageDesc(file_agentrepl_v1_endpoint_fold_repository, 6);
 
 /**
- * A collapse asked of the repository the current workspace sits in, refused
- * as agentrepl.v1.UpdateSidebarViewError.holds_current refuses it: nothing is
+ * A collapse asked of the repository the current workspace sits in when no
+ * other open workspace is drawn outside it to land on, refused as
+ * agentrepl.v1.UpdateSidebarViewError.holds_current refuses it: nothing is
  * recorded and the section stands expanded. DELIBERATELY EMPTY: the arm is
  * the cause, and the request names the repository.
  *

@@ -127,6 +127,10 @@ type Workspace struct {
 	// rows hidden in the sidebar and their tabs folded off the tab bar
 	// (SetChildrenFolded).
 	ChildrenFolded bool
+	// Surfaced reports whether the workspace started a turn while a fold hid
+	// it and that turn is still running: the roster draws it inside the fold
+	// (SurfaceHeldWork).
+	Surfaced bool
 	// Current reports whether the workspace is the user's selection
 	// (SetCurrent): the one they are looking at. At most one workspace is.
 	Current bool

@@ -1047,7 +1047,8 @@ func TestAnExpandedSectionSaysWhetherItHoldsTheCurrentWorkspace(t *testing.T) {
 		{
 			name:    "the current workspace sits in a subsection",
 			arrange: func(reg *sidebar.Registry) { current := ids.WorkspaceID("w1"); reg.Current = &current },
-			want:    []string{"holds_current", "collapsible", "holds_current"},
+			// w2 stays selectable outside the subsection, so its collapse lands there.
+			want: []string{"holds_current", "collapsible", "collapsible"},
 		},
 		{
 			name: "a collapsed section states no collapse arm",
@@ -1089,8 +1090,8 @@ func TestASectionsCollapseArmFollowsASwitch(t *testing.T) {
 	r.SetSelected("w1")
 
 	// Assert
-	if got := collapseArms(latest(t, r).GetRepository().GetSections()[0]); !equal(got, []string{"holds_current", "collapsible", "holds_current"}) {
-		t.Fatalf("collapse arms = %v, want later to hold the switched-to workspace", got)
+	if got := collapseArms(latest(t, r).GetRepository().GetSections()[0]); !equal(got, []string{"holds_current", "collapsible", "collapsible"}) {
+		t.Fatalf("collapse arms = %v, want later to stay collapsible because w2 is a landing target", got)
 	}
 }
 

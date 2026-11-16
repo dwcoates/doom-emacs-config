@@ -73,6 +73,13 @@ func (v *verbs) Select(ctx context.Context, ws ids.WorkspaceID, sw Switch) error
 func (v *verbs) selectCurrent(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID, sw Switch) (bool, error) {
 	v.selection.Lock()
 	defer v.selection.Unlock()
+	return v.selectLocked(ctx, log, ws, from, sw)
+}
+
+// selectLocked is selectCurrent's body, for a caller that already holds the
+// selection lock (a collapse that lands the user off the section it folds,
+// recordFold).
+func (v *verbs) selectLocked(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, from *ids.WorkspaceID, sw Switch) (bool, error) {
 
 	if from != nil {
 		current, err := v.deps.DB.Current(ctx)

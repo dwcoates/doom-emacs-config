@@ -301,10 +301,11 @@ var migrations = []migration{
 	{To: 150, Name: "lifted_remote_control", Kind: MigrationAdditive, DDL: liftedRemoteControlDDL},
 	{To: 151, Name: "composer_mentions", Kind: MigrationAdditive, DDL: composerMentionsDDL},
 	{To: 152, Name: "keepalive_run", Kind: MigrationAdditive, DDL: keepaliveRunDDL},
-	{To: 153, Name: "settled_live_rounds", Kind: MigrationAdditive, DDL: settledLiveRoundsDDL},
-	{To: 154, Name: "deploy_problems", Kind: MigrationAdditive, DDL: deployProblemsDDL},
-	{To: 155, Name: "merge_round_hold", Kind: MigrationAdditive, DDL: mergeRoundHoldDDL},
-	{To: 156, Name: "folded_merge_ledgers", Kind: MigrationAdditive, Rewrite: foldExtraMergeLedgers},
+	{To: 153, Name: "surfaced_work", Kind: MigrationAdditive, DDL: surfacedWorkDDL},
+	{To: 154, Name: "settled_live_rounds", Kind: MigrationAdditive, DDL: settledLiveRoundsDDL},
+	{To: 155, Name: "deploy_problems", Kind: MigrationAdditive, DDL: deployProblemsDDL},
+	{To: 156, Name: "merge_round_hold", Kind: MigrationAdditive, DDL: mergeRoundHoldDDL},
+	{To: 157, Name: "folded_merge_ledgers", Kind: MigrationAdditive, Rewrite: foldExtraMergeLedgers},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

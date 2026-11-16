@@ -1028,7 +1028,16 @@ body {
 }
 #ws-sidebar:not(.sb-hover-suspended) .repo-head:hover { background: var(--card); }
 #ws-sidebar .repo-head .n { color: var(--muted); font-weight: 400; text-transform: none; }
-#ws-sidebar .repo.folded .rows { display: none; }
+/* A FOLD HIDES EVERY ROW UNDER IT BUT THE ONES THAT SURFACED (owner request,
+   2026-11-15; frontend.v1.RosterOpenRow.surfaced): a workspace whose turn
+   started under a repository's fold, a subsection's or a parent's draws, and
+   only it, until the turn ends. The fold stays folded. A fold with no
+   surfaced row draws none; with one, every other row is hidden, and a row
+   standing between the fold and a surfaced one keeps only its `.kids` box. */
+#ws-sidebar .repo.folded .rows:not(:has(.surfaced)) { display: none; }
+#ws-sidebar :is(.repo.folded .rows, .sb-subsection.folded > .rows, .ws.folded > .kids) .ws:not(.surfaced):not(:has(.surfaced)) { display: none; }
+#ws-sidebar :is(.repo.folded .rows, .sb-subsection.folded > .rows, .ws.folded > .kids) .ws:not(.surfaced):has(.surfaced) > :not(.kids) { display: none; }
+#ws-sidebar .repo.folded .rows .sb-subsection:not(:has(.surfaced)) { display: none; }
 /* NO SECTION HEADER'S COUNT WEARS A BADGE (owner request, 2026-10-19): each
    is plain text, a step smaller than its label (0.85em).
    - The folded count "(N)" (frontend.v1.RosterSectionHeader.count) sits
@@ -1220,7 +1229,7 @@ body {
 /* A COLLAPSED SUBSECTION (its header's click, src/sidebar/subsections.ts) shows its
    header alone: its rows are hidden, and its header greys as a collapsed
    repository's does. */
-#ws-sidebar .sb-subsection.folded > .rows { display: none; }
+#ws-sidebar .sb-subsection.folded > .rows:not(:has(.surfaced)) { display: none; }
 #ws-sidebar .sb-subsection.folded > .sb-subsection-head { color: var(--repo-head-collapsed); }
 /* SUBSECTIONS WITH NOTHING UNDER THEM STAND CLOSE TOGETHER (owner request,
    2026-11-13): a subsection that is folded or empty shows its header alone,
@@ -1787,7 +1796,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 /* A row whose children are folded draws none of them, its repository blocks
    included; the status mark of a row that has children is the control that
    folds them (children-fold.ts). */
-#ws-sidebar .ws.folded > .kids { display: none; }
+#ws-sidebar .ws.folded > .kids:not(:has(.surfaced)) { display: none; }
 #ws-sidebar .row > .st[data-children-fold] { cursor: pointer; }
 #ws-sidebar .kids > .ws,
 #ws-sidebar .kids > .sb-repo-block > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }

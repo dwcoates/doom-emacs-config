@@ -995,6 +995,26 @@ message."
                             :tab)
                  '(:tab (:arm :folded :value nil)))))
 
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-the-surfaced-mark ()
+  "A row drawn inside a fold that covers it says so; any other row does not."
+  (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
+    (should (equal (list (plist-get (agent-repl-test-wire-roster--decode
+                                     #'agent-repl-wire-decode-roster-open-row
+                                     (concat (substring open 0 -1) ",\"surfaced\":true}"))
+                                    :surfaced)
+                         (plist-get (agent-repl-test-wire-roster--decode
+                                     #'agent-repl-wire-decode-roster-open-row open)
+                                    :surfaced))
+                   '(t nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-non-boolean-surfaced-mark-is-a-breach ()
+  "The surfaced mark is a boolean; anything else is a breach."
+  (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
+    (should (equal (agent-repl-test-wire-roster--breach
+                    #'agent-repl-wire-decode-roster-open-row
+                    (concat (substring open 0 -1) ",\"surfaced\":\"yes\"}"))
+                   '("RosterOpenRow" surfaced "expected a boolean")))))
+
 (ert-deftest agent-repl-test-wire-roster-an-open-row-without-a-tab-is-a-breach ()
   "Every open row has a tab; an unset tab is a breach."
   (should (equal (agent-repl-test-wire-roster--breach

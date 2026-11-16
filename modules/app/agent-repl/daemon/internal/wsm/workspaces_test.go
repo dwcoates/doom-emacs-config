@@ -1783,36 +1783,32 @@ func repositoryFolded(t *testing.T, s *store, repo RepoID) bool {
 	return scalar[bool](t, s, `SELECT folded FROM repositories WHERE id = ?`, repo)
 }
 
-func TestSelectingAWorkspaceExpandsTheFoldsHoldingIt(t *testing.T) {
+func TestSelectingAWorkspaceLeavesTheFoldsHoldingItCollapsed(t *testing.T) {
 	tests := []struct {
-		name   string
-		pick   func(selectionFoldWorld) Workspace
-		act    func(*store, WorkspaceID) error
-		wantOp string
+		name string
+		pick func(selectionFoldWorld) Workspace
+		act  func(*store, WorkspaceID) error
 	}{
 		{
-			name: "a selection expands the root's repository and subsection",
+			name: "a selection leaves the root's repository and subsection collapsed",
 			pick: func(w selectionFoldWorld) Workspace { return w.root },
 			act: func(s *store, id WorkspaceID) error {
 				return s.SetCurrent(context.Background(), id, instant)
 			},
-			wantOp: "daemon.wsm.set_current",
 		},
 		{
-			name: "a selection expands a child's family subsection",
+			name: "a selection leaves a child's family subsection collapsed",
 			pick: func(w selectionFoldWorld) Workspace { return w.child },
 			act: func(s *store, id WorkspaceID) error {
 				return s.SetCurrent(context.Background(), id, instant)
 			},
-			wantOp: "daemon.wsm.set_current",
 		},
 		{
-			name: "a recency walk's step expands them too",
+			name: "a recency walk's step leaves them collapsed too",
 			pick: func(w selectionFoldWorld) Workspace { return w.root },
 			act: func(s *store, id WorkspaceID) error {
 				return s.SetCurrentKeepingLastSelected(context.Background(), id, instant)
 			},
-			wantOp: "daemon.wsm.set_current_keeping_last_selected",
 		},
 	}
 	for _, tt := range tests {
@@ -1829,22 +1825,14 @@ func TestSelectingAWorkspaceExpandsTheFoldsHoldingIt(t *testing.T) {
 			if err != nil {
 				t.Fatalf("select: %v", err)
 			}
-			if repositoryFolded(t, s, ws.Repo) {
-				t.Fatal("the selected workspace's repository is still collapsed")
+			if !repositoryFolded(t, s, ws.Repo) {
+				t.Fatal("the selection opened the selected workspace's repository")
 			}
-			if subsectionNow(t, s, w.sub.ID).Folded {
-				t.Fatal("the selected workspace's subsection is still collapsed")
+			if !subsectionNow(t, s, w.sub.ID).Folded {
+				t.Fatal("the selection opened the selected workspace's subsection")
 			}
-			if !repositoryFolded(t, s, w.other.Repo) {
-				t.Fatal("another repository's collapse was expanded")
-			}
-			rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: tt.wantOp,
-				Message: "the selection expanded the collapsed folds holding the workspace"})
-			if !ok {
-				t.Fatalf("the expansion was not recorded at info: %v", log.Records())
-			}
-			if rec.Context["workspace"] != string(ws.ID) || rec.Context["expanded_repository"] != true || rec.Context["expanded_subsection"] != true {
-				t.Fatalf("the expansion's record = %+v, want the workspace and both folds named", rec.Context)
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Message: "the selection expanded the collapsed folds holding the workspace"}); ok {
+				t.Fatalf("a selection recorded an expansion it no longer makes: %v", log.Records())
 			}
 		})
 	}
@@ -1867,50 +1855,6 @@ func TestSelectingAWorkspaceInExpandedFoldsRecordsNoExpansion(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Message: "the selection expanded the collapsed folds holding the workspace"}); ok {
 		t.Fatalf("a selection that expanded nothing recorded an expansion: %v", log.Records())
-	}
-}
-
-func TestSelectingAWorkspaceIsAtomicWithItsExpansion(t *testing.T) {
-	tests := []struct {
-		name    string
-		trigger string
-	}{
-		{"the repository's expansion fails", `CREATE TRIGGER fail_the_expansion BEFORE UPDATE OF folded ON repositories
-			BEGIN SELECT RAISE(ABORT, 'the expansion failed'); END`},
-		{"the subsection's expansion fails", `CREATE TRIGGER fail_the_expansion BEFORE UPDATE OF folded ON subsections
-			BEGIN SELECT RAISE(ABORT, 'the expansion failed'); END`},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, log := testStore(t)
-			w := newSelectionFoldWorld(t, s)
-			if err := s.SetCurrent(context.Background(), w.other.ID, instant); err != nil {
-				t.Fatalf("SetCurrent: %v", err)
-			}
-			corrupt(t, s, tt.trigger)
-
-			// Act
-			err := s.SetCurrent(context.Background(), w.root.ID, instant)
-
-			// Assert -- the failure rolls the selection back with the folds.
-			if err == nil {
-				t.Fatal("SetCurrent succeeded through a failed expansion")
-			}
-			got, err := s.Current(context.Background())
-			if err != nil {
-				t.Fatalf("Current: %v", err)
-			}
-			if got == nil || *got != w.other.ID {
-				t.Fatalf("current = %v after the failure, want %q", got, w.other.ID)
-			}
-			if !repositoryFolded(t, s, w.root.Repo) || !subsectionNow(t, s, w.sub.ID).Folded {
-				t.Fatal("a fold was expanded by a selection that failed")
-			}
-			if !loggedOperation(log, "daemon.wsm.set_current", "error") {
-				t.Fatalf("the failed selection was not logged at error: %v", log.Records())
-			}
-		})
 	}
 }
 
@@ -2282,7 +2226,7 @@ func TestSelectAnswersTheRowsItChangedAsTheStoreHoldsThem(t *testing.T) {
 	}
 }
 
-func TestSelectAnswersTheFoldsItExpanded(t *testing.T) {
+func TestSelectAnswersTheFoldsAsTheyStand(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	w := newSelectionFoldWorld(t, s)
@@ -2294,15 +2238,15 @@ func TestSelectAnswersTheFoldsItExpanded(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Select: %v", err)
 	}
-	if got.Repository.ID != w.child.Repo || got.Repository.Folded {
-		t.Fatalf("Repository = %+v, want the child's repository expanded", got.Repository)
+	if got.Repository.ID != w.child.Repo || !got.Repository.Folded {
+		t.Fatalf("Repository = %+v, want the child's repository still collapsed", got.Repository)
 	}
-	if got.Subsection == nil || got.Subsection.ID != w.sub.ID || got.Subsection.Folded {
-		t.Fatalf("Subsection = %+v, want the family's subsection %q expanded", got.Subsection, w.sub.ID)
+	if got.Subsection == nil || got.Subsection.ID != w.sub.ID || !got.Subsection.Folded {
+		t.Fatalf("Subsection = %+v, want the family's subsection %q still collapsed", got.Subsection, w.sub.ID)
 	}
 }
 
-func TestSelectAnswersTheParentWhoseChildrenFoldItExpanded(t *testing.T) {
+func TestSelectAnswersOnlyTheSelectedRowWhenAParentsChildrenFoldStands(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	w := newSelectionFoldWorld(t, s)
@@ -2320,12 +2264,12 @@ func TestSelectAnswersTheParentWhoseChildrenFoldItExpanded(t *testing.T) {
 	var rows []WorkspaceID
 	for _, row := range got.Workspaces {
 		rows = append(rows, row.ID)
-		if row.ID == w.root.ID && row.ChildrenFolded {
-			t.Fatal("the parent's row was answered with its children still folded")
-		}
 	}
-	if !slices.Equal(rows, []WorkspaceID{w.child.ID, w.root.ID}) {
-		t.Fatalf("answered rows = %v, want the child and the parent whose fold it expanded", rows)
+	if !slices.Equal(rows, []WorkspaceID{w.child.ID}) {
+		t.Fatalf("answered rows = %v, want only the child, the parent's fold being untouched", rows)
+	}
+	if !childrenFoldedOf(t, s, w.root.ID) {
+		t.Fatal("the selection opened the parent's children fold")
 	}
 	if want := selectionReadBack(t, s, got); !reflect.DeepEqual(got, want) {
 		t.Fatalf("Select answered\n%+v\nthe store holds\n%+v", got, want)
