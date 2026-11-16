@@ -497,7 +497,8 @@ type QueueMediation struct {
 	Repo  ids.RepoID
 	Stage MediationStage
 	// Intake is the chain's intake, empty while a chain's first deploy rolls
-	// out; Remediation the workspace fixing, set at MediationFixing.
+	// out; Remediation the workspace at work, set at MediationFixing and
+	// MediationTesting.
 	Intake      ids.WorkspaceID
 	Remediation ids.WorkspaceID
 }
@@ -506,14 +507,17 @@ type QueueMediation struct {
 type MediationStage int
 
 const (
-	// MediationWaiting: the deploy rolls out (`hot reloading`).
+	// MediationWaiting: a deploy rolls out, a landing's or a landed fix's
+	// (`HOT-LOADING ZETTEL`).
 	MediationWaiting MediationStage = iota + 1
-	// MediationChecking: the chain's intake checks it (`assessing reload`).
+	// MediationChecking: the chain's intake checks it (`ASSESSING ZETTEL
+	// HEALTH`).
 	MediationChecking
-	// MediationFixing: a remediation workspace fixes it (`fixing reload`).
+	// MediationFixing: a remediation workspace fixes it, or what its own
+	// finish's gate failed on (`FIXING ZETTEL ISSUES`).
 	MediationFixing
-	// MediationFinishing: a remediation's or an escalation's fix is gated,
-	// landed and deployed while its workspace stands by (`finishing reload`).
-	// Remediation names that workspace.
-	MediationFinishing
+	// MediationTesting: a remediation's or an escalation's finished fix runs
+	// its full gate and lands while its workspace stands by (`TESTING ZETTEL
+	// FIXES`). Remediation names that workspace.
+	MediationTesting
 )

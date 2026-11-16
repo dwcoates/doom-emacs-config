@@ -222,3 +222,11 @@ embeds another's new messages.
 - The sidebar label gains `fixing reload` and selects the workspace at work.
 - Every finish answers `queued` or `landing_directly`; a remediation's
   `placement` is not read.
+
+## Superseded wording (2026-11-16)
+
+The label words quoted above (`hot reloading`, `assessing reload`, `fixing
+reload`) and the later `finishing` arm are superseded by
+`docs/protobuf-design/2026-11-16-zettel-deploy-check-labels.md`: the labels
+read `HOT-LOADING ZETTEL`, `ASSESSING ZETTEL HEALTH`, `FIXING ZETTEL ISSUES`
+and `TESTING ZETTEL FIXES`.

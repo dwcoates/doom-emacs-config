@@ -107,8 +107,8 @@ type Decision struct {
 }
 
 // The spans of a deploy check a Meter records: how long its deploy rolled out
-// before its intake was told (the sidebar's "hot reloading"), how long the
-// intake then assessed it ("assessing reload"), and both together.
+// before its intake was told (the sidebar's "HOT-LOADING ZETTEL"), how long the
+// intake then assessed it ("ASSESSING ZETTEL HEALTH"), and both together.
 const (
 	MediationSpanRollout    = "rollout"
 	MediationSpanAssessment = "assessment"
@@ -773,19 +773,16 @@ func owedFrom(repo ids.RepoID, m wsm.Mediation) (*OwedMediation, error) {
 // rosterMediation is the deploy check REPO's queue waits on as the roster
 // draws it, beside the repository's name: nil while it owes none.
 func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*sidebar.QueueMediation, error) {
-	// A DIRECT FINISH UNDER WAY IS DRAWN FIRST, owed check or none: the
-	// workspace that finished stands by hidden, and the label is where it is
-	// shown (an escalation's finish runs after its chain ended).
-	finishing, err := o.finishingIn(ctx, repo)
+	// A DIRECT FINISH UNDER WAY IS DRAWN FIRST, owed check or none (an
+	// escalation's finish runs after its chain ended): its gate and landing
+	// test the fix, its deploy rolls out. A finish sent back to fix is drawn
+	// as its owed check draws it.
+	finish, err := o.finishUnderWay(ctx, repo)
 	if err != nil {
 		return nil, err
 	}
-	if finishing != "" {
-		q, ok, err := o.checkedQueueOf(ctx, repo)
-		if err != nil || !ok {
-			return nil, err
-		}
-		return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationFinishing, Remediation: finishing}, nil
+	if finish != nil {
+		return o.rosterFinish(ctx, repo, *finish)
 	}
 	owed, err := o.owedMediation(ctx, repo)
 	if err != nil || owed == nil {
@@ -803,6 +800,30 @@ func (o *orchestrator) rosterMediation(ctx context.Context, repo wsm.RepoKey) (*
 	return out, nil
 }
 
+// rosterFinish is finish F under way in REPO's queue as the roster draws it:
+// its gate and landing test the fix, with its workspace standing by hidden;
+// its deploy rolls out, selecting the chain's intake when a check is owed.
+func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm.RemediationFinish) (*sidebar.QueueMediation, error) {
+	q, ok, err := o.checkedQueueOf(ctx, repo)
+	if err != nil || !ok {
+		return nil, err
+	}
+	switch f.Step {
+	case wsm.RemediationGating, wsm.RemediationLanding:
+		return &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationTesting, Remediation: f.Workspace}, nil
+	case wsm.RemediationDeploying:
+		owed, err := o.owedMediation(ctx, repo)
+		if err != nil {
+			return nil, err
+		}
+		out := &sidebar.QueueMediation{Repo: q.repository.ID, Stage: sidebar.MediationWaiting}
+		if owed != nil {
+			out.Intake = owed.Intake
+		}
+		return out, nil
+	}
+	panic(fmt.Sprintf("merge: the finish of %s under way stands at %q", f.Workspace, f.Step))
+}
 // republishMediation tells the roster and the queue's subscribers a change
 // of REPO's check; a republication that fails is recorded.
 func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey) {
@@ -920,13 +941,12 @@ func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm
 	o.ownProblems(ctx, q.key, made, problems, escalatedKeys(window), fields)
 }
 
-// finishingIn answers the workspace whose direct finish is under way in
-// REPO's queue: gating, landing or deploying, its workspace standing by.
-// Empty when none is.
-func (o *orchestrator) finishingIn(ctx context.Context, repo wsm.RepoKey) (ids.WorkspaceID, error) {
+// finishUnderWay answers the direct finish under way in REPO's queue:
+// gating, landing or deploying, its workspace standing by. Nil when none is.
+func (o *orchestrator) finishUnderWay(ctx context.Context, repo wsm.RepoKey) (*wsm.RemediationFinish, error) {
 	finishes, err := o.deps.DB.RemediationFinishes(ctx)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	for _, f := range finishes {
 		if !sameQueue(f.Repo, repo) {
@@ -934,8 +954,8 @@ func (o *orchestrator) finishingIn(ctx context.Context, repo wsm.RepoKey) (ids.W
 		}
 		switch f.Step {
 		case wsm.RemediationGating, wsm.RemediationLanding, wsm.RemediationDeploying:
-			return f.Workspace, nil
+			return &f, nil
 		}
 	}
-	return "", nil
+	return nil, nil
 }
