@@ -138,7 +138,7 @@ func (s *store) HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, err
 	return out, err
 }
 
-// mergeRoundHoldDDL is the layout-153 addition: when the live round of a
+// mergeRoundHoldDDL is the layout-154 addition: when the live round of a
 // merge's ledger was suspended, NULL while it runs (HoldMergeRound).
 const mergeRoundHoldDDL = `
 ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
