@@ -507,7 +507,7 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "Spellcheck: %s did not answer for %S (%s); the spell process was reset"
      "tells the user the spell checker stopped answering and was reset")
     ("status.el" agent-repl-tabbar-apply-row-count
-     "agent-repl: tab-bar set to %d line%s on this frame"
+     "agent-repl: tab-bar set to %s on this frame"
      "confirms the interactive tab-bar layout command")
     ("terminal.el" agent-repl-terminal-finished
      "agent-repl: the command exited with status %s; SPC o t shows its output"
@@ -556,7 +556,9 @@ Each result is `(RELATIVE-FILE OWNER FORM)'."
      "tells the user their interrupt stopped the turn but could not roll its prompt back, and why")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: nothing to interrupt"
      "tells the user there was no running turn to interrupt")
-    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s agent%s also ended"
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: %s stopped"
+     "confirms the user's interrupt stopped the response updates and how many")
+    ("verbs.el" agent-repl-verb-interrupt "agent-repl: turn stopped, %s also ended"
      "confirms the interrupt stopped the turn and how many agents it also ended")
     ("verbs.el" agent-repl-verb-interrupt "agent-repl: the interrupt answer could not be read"
      "tells the user the interrupt outcome could not be read")
