@@ -1007,7 +1007,7 @@ install_program() {
       # shellcheck disable=SC2086 # the packages are one word each
       os_install "$pm" $pkgs
     elif [ -n "$goi" ]; then
-      go install "$goi"
+      install_go "$goi"
     elif [ -n "$(field "$e" .install.release.file)" ]; then
       install_release "$e"
     else
@@ -1030,10 +1030,19 @@ install_program() {
   elif [ -n "$cask" ]; then
     brew install --cask "$cask"
   elif [ -n "$goi" ]; then
-    go install "$goi"
+    install_go "$goi"
   else
     return 1
   fi
+}
+
+# install_go MODULE@VERSION: go-install a program into the user's bin dir, the
+# one find_program looks in beside PATH. Go's own default, ~/go/bin, is on no
+# PATH a fresh Linux machine sets, so a program installed there read missing
+# after its install (Lima VM, 2026-11-16).
+install_go() {
+  mkdir -p "$BIN_DIR"
+  GOBIN="$BIN_DIR" go install "$1"
 }
 
 # install_release ENTRY: install the program from the release its entry pins

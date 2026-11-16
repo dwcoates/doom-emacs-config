@@ -467,6 +467,18 @@ test_a_linux_entry_without_this_managers_package_says_to_add_it() {
   else fail "no package" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
+test_a_go_installed_program_is_found_in_the_user_bin_dir() {
+  new_case
+  manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"go_install": "example.com/tool@v1"}}]'
+  fake_linux_package_managers
+  # go installs into GOBIN, as the real one does, and nowhere when it is unset.
+  write_stub go '[ -n "${GOBIN:-}" ] || exit 0; printf "#!/bin/sh\n" >"$GOBIN/tool"; chmod +x "$GOBIN/tool"'
+  PLATFORM=linux run install
+  if [ "$RC" -eq 0 ] && [ -x "$CASE/home/.local/bin/tool" ]; then
+    pass "a go-installed program lands in the user's bin dir and reads installed"
+  else fail "go install bin dir" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
 test_a_linux_entry_go_installs_without_a_package() {
   new_case
   manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"go_install": "example.com/tool@v1"}}]'
