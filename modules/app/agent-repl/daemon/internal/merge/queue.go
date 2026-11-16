@@ -157,12 +157,7 @@ func (o *orchestrator) pauseRepos(ctx context.Context, op string, repos []wsm.Re
 		changed = append(changed, repo)
 	}
 	if len(changed) == 0 {
-		arm, reason := ArmNotPaused, "the merge queue is not paused"
-		if paused {
-			arm, reason = ArmAlreadyPaused, "the merge queue is already paused"
-		}
-		o.deps.Log.Global().Info(op, "refused a pause change that would not change anything", dlog.Context{"arm": arm})
-		return &RefusalError{Arm: arm, Reason: reason}
+		return o.refuseNoopPause(op, paused, "refused a pause change that would not change anything", "the merge queue is not paused", "the merge queue is already paused")
 	}
 	o.deps.Log.Global().Debug(op, "changed the merge queue's pause state", dlog.Context{"paused": paused, "repos": len(changed), "scoped": scoped})
 	if paused {
@@ -388,12 +383,7 @@ func (o *orchestrator) pauseScope(ctx context.Context, op string, scope *Reposit
 		keys = append(keys, repo)
 	}
 	if len(keys) == 0 {
-		arm, reason := ArmNotPaused, "no repository has a merge queue to resume"
-		if paused {
-			arm, reason = ArmAlreadyPaused, "no repository has a merge queue to pause"
-		}
-		o.deps.Log.Global().Info(op, "refused a pause change with no queue to change", dlog.Context{"arm": arm})
-		return nil, &RefusalError{Arm: arm, Reason: reason}
+		return nil, o.refuseNoopPause(op, paused, "refused a pause change with no queue to change", "no repository has a merge queue to resume", "no repository has a merge queue to pause")
 	}
 	return keys, nil
 }
@@ -2063,4 +2053,17 @@ func heldByAnother(err error) (*wsm.LeaseHeldError, bool) {
 		return other, true
 	}
 	return nil, false
+}
+
+// refuseNoopPause refuses a pause change that would change nothing: PAUSED
+// names the asked-for state, so a pause refuses as already_paused and a resume
+// as not_paused, with the matching reason. The refusal is the asker's typed
+// answer rather than a daemon fault, so it is recorded at INFO under OP.
+func (o *orchestrator) refuseNoopPause(op string, paused bool, message, notPausedReason, alreadyPausedReason string) *RefusalError {
+	arm, reason := ArmNotPaused, notPausedReason
+	if paused {
+		arm, reason = ArmAlreadyPaused, alreadyPausedReason
+	}
+	o.deps.Log.Global().Info(op, message, dlog.Context{"arm": arm})
+	return &RefusalError{Arm: arm, Reason: reason}
 }

@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -507,5 +508,58 @@ func TestAPauseRecordsWhetherItWasMadeToLand(t *testing.T) {
 				t.Fatalf("pause = %+v, want to_land %v, hard %v", got, tt.toLand, tt.hard)
 			}
 		})
+	}
+}
+
+func TestRefuseNoopPauseNamesTheArmAndReasonOfTheAskedForState(t *testing.T) {
+	tests := []struct {
+		name       string
+		paused     bool
+		wantArm    string
+		wantReason string
+	}{
+		{name: "pause", paused: true, wantArm: ArmAlreadyPaused, wantReason: "already"},
+		{name: "resume", paused: false, wantArm: ArmNotPaused, wantReason: "not"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			refused := h.o.refuseNoopPause("daemon.merge.test", tt.paused, "the message", "not", "already")
+
+			// Assert: the arm and reason follow the asked-for state, and one INFO
+			// record names the arm and no WARN record is written.
+			if refused.Arm != tt.wantArm || refused.Reason != tt.wantReason {
+				t.Fatalf("refusal = %+v, want arm %s reason %q", refused, tt.wantArm, tt.wantReason)
+			}
+			if rec, ok := h.recordFor("info", "daemon.merge.test"); !ok || rec.Context["arm"] != tt.wantArm || rec.Message != "the message" {
+				t.Fatalf("INFO record = %+v (%v), want the message naming the arm", rec, ok)
+			}
+			if _, ok := h.recordFor("warn", "daemon.merge.test"); ok {
+				t.Fatalf("a WARN record was written, want none")
+			}
+		})
+	}
+}
+
+func TestNoopPauseRefusalsAllGoThroughRefuseNoopPause(t *testing.T) {
+	// Arrange.
+	src, err := os.ReadFile("queue.go")
+	if err != nil {
+		t.Fatalf("read queue.go: %v", err)
+	}
+
+	// Act.
+	text := string(src)
+
+	// Assert: two call sites share the helper, and only the helper builds the
+	// already_paused arm by hand.
+	if n := strings.Count(text, "o.refuseNoopPause(op, paused,"); n != 2 {
+		t.Fatalf("refuseNoopPause call sites = %d, want 2", n)
+	}
+	if n := strings.Count(text, "ArmAlreadyPaused, "); n != 1 {
+		t.Fatalf("hand-built already_paused arms in queue.go = %d, want only the helper's", n)
 	}
 }
