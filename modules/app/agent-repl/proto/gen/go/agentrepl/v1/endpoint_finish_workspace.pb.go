@@ -80,9 +80,10 @@ type FinishWorkspaceRequest struct {
 	// before the landing, so deploys reordered in the queue still produce
 	// consecutive versions.
 	VersionIncrement *MergeWorkspaceVersionIncrement `protobuf:"bytes,3,opt,name=version_increment,json=versionIncrement,proto3,oneof" json:"version_increment,omitempty"`
-	// Where the deploy joins its queue. REQUIRED. A deploy remediation
-	// workspace's finish never joins the queue (FinishWorkspaceSuccess
-	// .landing_directly), so its placement is not read.
+	// Where the deploy joins its queue. REQUIRED for a finish through the
+	// queue, refused as invalid without it. A deploy remediation or
+	// escalation's finish never joins the queue (FinishWorkspaceSuccess
+	// .landing_directly), so it names none, and one it names is not read.
 	Placement     *MergeQueuePlacement `protobuf:"bytes,4,opt,name=placement,proto3" json:"placement,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

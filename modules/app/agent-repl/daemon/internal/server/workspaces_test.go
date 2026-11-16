@@ -3623,21 +3623,27 @@ func TestFinishWorkspaceAnswersHowTheWorkLands(t *testing.T) {
 	tests := []struct {
 		name            string
 		remediation     bool
+		noPlacement     bool
 		wantDirectly    bool
 		wantRemediation int
 		wantQueued      int
 	}{
 		{name: "an ordinary workspace's finish is queued", wantQueued: 1},
 		{name: "a deploy remediation's finish lands directly", remediation: true, wantDirectly: true, wantRemediation: 1},
+		{name: "a deploy remediation's finish naming no placement lands directly", remediation: true, noPlacement: true, wantDirectly: true, wantRemediation: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			h.Merge.remediations = map[ids.WorkspaceID]bool{testWorkspaceID: tt.remediation}
+			req := ownFinish()
+			if tt.noPlacement {
+				req.Placement = nil
+			}
 
 			// Act.
-			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(ownFinish()))
+			resp, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(req))
 
 			// Assert.
 			if err != nil || resp.Msg.GetSuccess() == nil {
