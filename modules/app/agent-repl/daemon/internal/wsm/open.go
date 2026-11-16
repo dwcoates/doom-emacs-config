@@ -741,6 +741,13 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 			s.log.Debug(op, "the workspace's merge stands off its queue; the request was refused", withError(fields, err))
 			return err
 		}
+		// A REMEDIATION WHOSE FINISH ALREADY RUNS is the store answering what
+		// was asked; the orchestrator turns it into the finish's
+		// already-merging arm and records it at its own level.
+		if errors.Is(err, ErrRemediationFinishing) {
+			s.log.Debug(op, "the remediation's finish is already running; the request was refused", withError(fields, err))
+			return err
+		}
 		// A THREAD NAME ALREADY TAKEN is the store answering what was asked;
 		// RegisterThread states it at info and the thread verb picks the next
 		// name.
