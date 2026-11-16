@@ -185,11 +185,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 	if sub, ok := subject(front); ok {
 		head := &frontendv1.RosterMergeQueueHead{Subject: sub, Stages: front.Stages, HeadSinceMs: front.SlotSince.UnixMilli()}
 		if front.Admitted {
-			merging := &frontendv1.RosterMergeQueueHeadMerging{}
-			if r.headSuspended(q, front.Workspace) {
-				merging.Suspended = &frontendv1.RosterMergeQueueHeadSuspended{}
-			}
-			head.Standing = &frontendv1.RosterMergeQueueHead_Merging{Merging: merging}
+			head.Standing = &frontendv1.RosterMergeQueueHead_Merging{Merging: &frontendv1.RosterMergeQueueHeadMerging{}}
 		} else {
 			head.Standing = &frontendv1.RosterMergeQueueHead_Waiting{Waiting: &frontendv1.RosterMergeQueueHeadWaiting{QueuedAtMs: front.QueuedAt.UnixMilli()}}
 		}
@@ -234,18 +230,6 @@ func drawRepair(out *frontendv1.RosterRepoMergeQueue, entry QueueEntry, sub *fro
 			"workspace_id": string(entry.Workspace), "repair": entry.Repair.String(),
 			"invariant_violation": "a merge out of line holds or awaits a repair slot"})
 	}
-}
-
-// headSuspended reports whether NOTHING of the head's merge in WS runs: Q is
-// paused, which suspends the merge's own steps, and no turn runs in WS, which
-// a pause leaves running until it ends or a hard stop interrupts it
-// (frontend.v1.RosterMergeQueueHeadMerging.suspended).
-func (r *resolver) headSuspended(q repoQueue, ws ids.WorkspaceID) bool {
-	if q.pause == nil {
-		return false
-	}
-	s, ok := r.state.workspaces[ws]
-	return !ok || s.turn == nil
 }
 
 // drawMergeQueuePause renders a queue's standing pause as the roster draws

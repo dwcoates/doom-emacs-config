@@ -1591,11 +1591,6 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group[data-paused] > .merged-group-head,
 #ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--canonical-orange); --copy-control-rest: 1; }
 #ws-sidebar .merged-group[data-paused] .sb-mq-glyph { color: var(--merge-paused); }
-/* A HEAD NOTHING OF WHOSE WORK RUNS draws its live stage as a still grey dot
-   rather than the breathing purple one (owner request, 2026-10-27;
-   frontend.v1.RosterMergeQueueHeadMerging.suspended). */
-#ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] { color: var(--muted); }
-#ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { color: var(--muted); animation: none; }
 /* A GROUP'S NAME STANDS OFF THE TEXT AROUND IT BY --inside-rule-gap
    (owner request, 2026-10-31), measured from text to text in WebKit as the
    rules between the sections are: the section header's baseline above the

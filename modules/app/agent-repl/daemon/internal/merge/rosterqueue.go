@@ -369,7 +369,7 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			// attempt's rounds, which drawn under it read as steps it is taking
 			// (2026-11-15: a waiting head drew "rebasing" settled hours before).
 			if headed && i == 0 && drawn.Admitted {
-				stages, err := o.ledgerStages(ctx, entry.Workspace, lease, queueHeld)
+				stages, err := o.ledgerStages(ctx, entry.Workspace, lease, o.heldByQueue(queueHeld, entry))
 				if err != nil {
 					return nil, err
 				}

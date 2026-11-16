@@ -183,3 +183,35 @@ func TestAQueueThatHoldsItsMergesPublishesTheirStepsHeld(t *testing.T) {
 		t.Fatalf("footer facts = %+v, want the testing step published held", facts)
 	}
 }
+
+func TestAQueuesHoldSparesAMergeWhoseTurnStillRuns(t *testing.T) {
+	tests := []struct {
+		name      string
+		queueHeld bool
+		state     wsm.MergeQueueState
+		turn      ids.TurnID
+		want      bool
+	}{
+		{name: "a held queue holds a merge running no turn", queueHeld: true, state: wsm.MergeAdmitted, want: true},
+		{name: "a held queue spares a merge whose step's turn still runs", queueHeld: true, state: wsm.MergeAdmitted, turn: "t-1"},
+		{name: "a held queue spares a merge out of line on its repair", queueHeld: true, state: wsm.MergeRemediating},
+		{name: "a running queue holds nothing", state: wsm.MergeAdmitted},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.mu.Lock()
+			h.inFlight = tt.turn
+			h.mu.Unlock()
+
+			// Act
+			got := h.o.heldByQueue(tt.queueHeld, wsm.MergeQueueEntry{Workspace: theWorkspace, State: tt.state})
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("heldByQueue = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

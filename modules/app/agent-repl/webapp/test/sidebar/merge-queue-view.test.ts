@@ -57,7 +57,6 @@ import {
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REASON_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
-  MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUE_WAITING_CLASS,
   MERGE_QUEUE_POSITION_CLASS,
   pausedText,
@@ -867,14 +866,6 @@ describe("drawRosterMergeQueueHead", () => {
   ])("draws no status line under $name: its card is its name line and its stages", ({ head, pause, want }) => {
     const { sc } = daemon();
     expect([...drawRosterMergeQueueHead(head(), pause, glyph(), sc, "head").children].map((el) => el.className)).toEqual(want);
-  });
-
-  it.each([
-    { name: "marks a suspended head", suspended: true, want: true },
-    { name: "marks no head whose work runs", suspended: false, want: false },
-  ])("$name", ({ suspended, want }) => {
-    const { sc } = daemon();
-    expect(drawRosterMergeQueueHead(mergingHead("w1", { suspended }), paused(), glyph(), sc, "head").hasAttribute(MERGE_QUEUE_SUSPENDED_ATTRIBUTE)).toBe(want);
   });
 
   it("stops a paused head's clock at the pause", () => {

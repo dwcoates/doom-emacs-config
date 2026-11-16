@@ -157,6 +157,21 @@ func renderTab(tab *frontendv1.FeedMergeTab, hold bubbleHold) *frontendv1.FeedMe
 	return out
 }
 
+// heldByQueue reports whether the hold of ENTRY's queue (QUEUEHELD) holds
+// ENTRY's merge. A queue's hold stops a merge's own steps but never a turn:
+// a merge out of line runs its repair turn whatever its queue does, and a
+// pause leaves the turn of the step a merge stands on running until it ends
+// (agentrepl.v1.UpdateMergeQueuePause.hard). A merge whose workspace runs a
+// turn is therefore not held by its queue; only its own suspension holds it.
+// It is the one answer the roster's stages and the bubble both draw by.
+func (o *orchestrator) heldByQueue(queueHeld bool, entry wsm.MergeQueueEntry) bool {
+	if !queueHeld || entry.State == wsm.MergeRemediating {
+		return false
+	}
+	_, turning := o.deps.TurnInFlight(entry.Workspace)
+	return !turning
+}
+
 // republishBubbles redraws the bubble of every merge in ENTRIES, REPO's
 // queue, whose hold moved: QUEUEHELD is the queue's hold, and the store's
 // held rounds each merge's own. publishRosterQueue runs it after every ledger
@@ -168,9 +183,7 @@ func (o *orchestrator) republishBubbles(ctx context.Context, entries []wsm.Merge
 		if !ok {
 			continue
 		}
-		// A MERGE OUT OF LINE RUNS ITS REPAIR TURN whatever its queue does: only
-		// its own suspension holds it.
-		hold := holdOf(lease, queueHeld && entry.State != wsm.MergeRemediating, heldRounds)
+		hold := holdOf(lease, o.heldByQueue(queueHeld, entry), heldRounds)
 		changed, tabs := o.bubbleTabs.moved(entry.Workspace, lease, hold)
 		if !changed {
 			continue

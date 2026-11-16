@@ -1381,18 +1381,13 @@ message RosterMergeQueueHeadMerging {
   // strip (RosterMergeQueueHead.stages) already naming the step it stands on.
   reserved 1;
   reserved "step";
-  // PRESENT while NOTHING of the merge's work runs: its queue is paused and
-  // no turn of the step it stands on is running. A pause suspends a merge's
-  // own steps but leaves a step's agent turn running until it ends or a hard
-  // stop interrupts it (agentrepl.v1.UpdateMergeQueuePause.hard), so a
-  // paused merge whose turn still runs is not suspended. The sidebar draws a
-  // suspended merge's live stage as a still grey dot rather than the
-  // breathing purple one (owner request, 2026-10-27).
-  optional RosterMergeQueueHeadSuspended suspended = 2;
+  // Tag 2 (`suspended`, present while a paused queue's head ran no turn) is
+  // RETIRED (2026-11-16): the head's stages carry its hold themselves
+  // (RosterMergeQueueStageHeld), drawn from the merge's one view, so the
+  // card no longer judges the pause a second way.
+  reserved 2;
+  reserved "suspended";
 }
-
-// Nothing of the head's work runs. DELIBERATELY EMPTY: presence is the fact.
-message RosterMergeQueueHeadSuspended {}
 
 // ONE STAGE of the head's merge.
 message RosterMergeQueueStage {

@@ -1185,41 +1185,6 @@ func TestAPausedQueueCarriesItsRecord(t *testing.T) {
 	}
 }
 
-func TestOnlyTheSuspendedHeadOfAPausedQueueSaysSo(t *testing.T) {
-	tests := []struct {
-		name          string
-		pause         *wsm.MergeQueuePause
-		turnRunning   bool
-		wantSuspended bool
-	}{
-		{name: "a paused queue whose head runs no turn", pause: pausedBy(), wantSuspended: true},
-		{name: "a paused queue whose head's turn still runs", pause: pausedBy(), turnRunning: true, wantSuspended: false},
-		{name: "a running queue", pause: nil, wantSuspended: false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-			r.SetRegistry(queueView(workspace("w1", "one")))
-			if tt.turnRunning {
-				r.SetTurn("w1", &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
-			}
-
-			// Act.
-			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Pause: tt.pause, Workspaces: []ids.WorkspaceID{"w1"}, Line: inLine("w1")})
-
-			// Assert.
-			merging := firstQueue(t, r).GetHead().GetMerging()
-			if merging == nil {
-				t.Fatal("head is not merging")
-			}
-			if got := merging.GetSuspended() != nil; got != tt.wantSuspended {
-				t.Fatalf("suspended = %v, want %v", got, tt.wantSuspended)
-			}
-		})
-	}
-}
-
 func TestTheMergeQueueSectionListsAQueueThatHoldsAMerge(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1540,7 +1505,7 @@ func TestTheHeadStatesItsStanding(t *testing.T) {
 				}
 			case "merging":
 				if merging := head.GetMerging(); merging == nil || !proto.Equal(merging, &frontendv1.RosterMergeQueueHeadMerging{}) {
-					t.Fatalf("head = %v, want merging with nothing suspended", head)
+					t.Fatalf("head = %v, want merging", head)
 				}
 			}
 		})
