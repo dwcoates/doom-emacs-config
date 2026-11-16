@@ -26,15 +26,20 @@
 (require 'cl-lib)
 (require 'minibuffer)
 
-(defun agent-repl-completion-match-table (category collection)
+(defun agent-repl-completion-match-table (category collection &optional sort)
   "Return a completion table over COLLECTION that names CATEGORY.
 A `metadata' ACTION answers CATEGORY, so the styles registered for it in
-`completion-category-defaults' are the table's.  Every other ACTION is
-COLLECTION's -- a list of strings, or a completion function -- through
-`complete-with-action'."
+`completion-category-defaults' are the table's, and, when SORT is given,
+SORT as both its `display-sort-function' and its `cycle-sort-function', so
+a completion UI offers the candidates in SORT's order rather than its own
+\(completion-order.el).  Every other ACTION is COLLECTION's -- a list of
+strings, or a completion function -- through `complete-with-action'."
   (lambda (string predicate action)
     (if (eq action 'metadata)
-        `(metadata (category . ,category))
+        `(metadata (category . ,category)
+                   ,@(when sort
+                       `((display-sort-function . ,sort)
+                         (cycle-sort-function . ,sort))))
       (complete-with-action action collection string predicate))))
 
 (defun agent-repl-completion-match-p (string table)

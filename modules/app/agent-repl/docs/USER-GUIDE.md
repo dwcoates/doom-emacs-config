@@ -652,6 +652,12 @@ The input window underlines misspelled words as you type.
 - A word that begins with `/` completes against slash commands instead.
   - A slash command matches anywhere in its name, so `/workspaces` offers `/agent-repl-workspaces`.
   - Failing that, it matches the typed letters in order, so `/arinst` offers `/agent-repl-install`.
+- Workspace names and slash commands are offered in the same order.
+  - First come the ones you have completed before in any input window, the most recent first.
+    - Emacs remembers these until it exits.
+  - Next come the ones this workspace mentioned in its final responses, the most recently mentioned first.
+    - The daemon reads each final response as it lands and keeps what it mentioned, so the order survives a restart.
+  - Last come the rest, in their usual order.
 
 ## A one-shot in agent-repl
 

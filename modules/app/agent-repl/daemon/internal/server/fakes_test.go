@@ -2229,9 +2229,12 @@ type harness struct {
 	ReconnectRecords *restarttimingtest.Recorder
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
-	Surfaces      *fakeSurfaces
-	Tests         *fakeTests
-	WebappDist    string
+	// Mentions is the composer mentions' record, one topic per workspace,
+	// which a test publishes to.
+	Mentions   *fakeMentions
+	Surfaces   *fakeSurfaces
+	Tests      *fakeTests
+	WebappDist string
 }
 
 // fakeBanners answers one scripted claim and one scripted notify decision, and
@@ -2363,6 +2366,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
 		SlashCommands:    commandcatalog.New(),
+		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
 		StallBeat:        &fakeStallBeat{},
 		Pages:            &fakeSupersededPages{},
 	}
@@ -2397,6 +2401,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Health:            h.Health,
 		SessionFacts:      h.Facts,
 		SlashCommands:     h.SlashCommands,
+		Mentions:          h.Mentions,
 		Login:             h.Login,
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
@@ -3202,4 +3207,23 @@ func (f *fakeDB) SetPageLoaded(_ context.Context, id ids.WorkspaceID, loaded boo
 	}
 	f.pages[id] = loaded
 	return nil
+}
+
+// fakeMentions is the composer mentions' record: one topic per workspace,
+// holding nothing until a test publishes to it, as a workspace that never
+// mentioned anything holds nothing.
+type fakeMentions struct {
+	mu     sync.Mutex
+	topics map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]
+}
+
+func (f *fakeMentions) Topic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.HostWorkspaceMentions] {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	topic, ok := f.topics[ws]
+	if !ok {
+		topic = &publish.Topic[*agentreplv1.HostWorkspaceMentions]{}
+		f.topics[ws] = topic
+	}
+	return topic
 }

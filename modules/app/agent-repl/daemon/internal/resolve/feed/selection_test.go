@@ -2,6 +2,7 @@ package feed
 
 import (
 	"agent-repld/internal/prose"
+	"slices"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -612,5 +613,58 @@ func TestTurnBoundariesForAnUnknownWorkspaceAreEmpty(t *testing.T) {
 	// Assert.
 	if len(got) != 0 {
 		t.Fatalf("TurnBoundaries() = %v, want none", got)
+	}
+}
+
+// TestConcludingATurnTellsItsAnswerSettled pins Deps.AnswerSettled: a
+// concluded answer is told with its settled markdown and settle instant, and
+// only off the resolver's lock (Deps.Go), so the receiver may take its own.
+func TestConcludingATurnTellsItsAnswerSettled(t *testing.T) {
+	tests := []struct {
+		name string
+		run  bool
+		want []settledAnswer
+	}{
+		{name: "nothing is told on the resolver's lock", run: false},
+		{name: "the answer is told off the lock", run: true, want: []settledAnswer{
+			{ws: testWorkspace, markdown: "run /merge-queue", settledAtMs: 1_700_000_000_000},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			h.concludeAnswer("turn-1", "unit-1", "run /merge-queue")
+			if tt.run {
+				h.runSpawned()
+			}
+
+			// Assert.
+			if !slices.Equal(h.settled, tt.want) {
+				t.Fatalf("told %+v, want %+v", h.settled, tt.want)
+			}
+		})
+	}
+}
+
+// TestAReplayedTerminalTellsTheSameSettleInstant pins that a terminal arriving
+// again (the file plane after the stream, a boot's replay) tells the answer's
+// own settle instant again, never the instant of the replay.
+func TestAReplayedTerminalTellsTheSameSettleInstant(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.concludeAnswer("turn-1", "unit-1", "the answer")
+	h.nowMs += 60_000
+
+	// Act.
+	id := ids.TurnID("turn-1")
+	h.resolver.OnAgentTerminal(testWorkspace, mainAgent(), &id, completedWith("unit-1"), nil, nil)
+	h.runSpawned()
+
+	// Assert.
+	if len(h.settled) != 2 || h.settled[0] != h.settled[1] {
+		t.Fatalf("told %+v, want the same answer and instant twice", h.settled)
 	}
 }

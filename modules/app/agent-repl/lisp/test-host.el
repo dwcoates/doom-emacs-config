@@ -2084,6 +2084,63 @@ answers `:unknown' and records the breach rather than opening."
                               (string-prefix-p "elisp.host.vendor-session" (cdr entry)))
                             agent-repl-test-host--logs))))
 
+;;;; ---- The composer mentions ----
+
+(ert-deftest agent-repl-test-host-mentions-are-nil-before-the-first-push ()
+  "A workspace whose host watch pushed no mentions has mentioned nothing."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should-not (agent-repl-host-mentions "ws-1" 'command))
+    (should-not (agent-repl-host-mentions "ws-1" 'workspace))))
+
+(ert-deftest agent-repl-test-host-mentions-push-is-read-back-by-kind ()
+  "The pushed record is answered by kind, newest first, as pushed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mentions :value '(:commands ("b" "a") :workspaces ("alpha"))))
+    ;; Assert
+    (should (equal (agent-repl-host-mentions "ws-1" 'command) '("b" "a")))
+    (should (equal (agent-repl-host-mentions "ws-1" 'workspace) '("alpha")))))
+
+(ert-deftest agent-repl-test-host-mentions-push-whole-replaces-the-record ()
+  "A later push replaces the record whole."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mentions :value '(:commands ("a") :workspaces ("alpha"))))
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mentions :value '(:commands ("b" "a") :workspaces nil)))
+    ;; Assert
+    (should (equal (agent-repl-host-mentions "ws-1" 'command) '("b" "a")))
+    (should-not (agent-repl-host-mentions "ws-1" 'workspace))))
+
+(ert-deftest agent-repl-test-host-mentions-push-is-logged ()
+  "The push is recorded with how many names of each kind it carried."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mentions :value '(:commands ("b" "a") :workspaces ("alpha"))))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :log "elisp.host.mentions ws=ws-1 commands=2 workspaces=1"))))
+
+(ert-deftest agent-repl-test-host-mentions-of-an-unknown-kind-is-an-error ()
+  "Asking for a kind no record holds is a defect, refused loudly."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should-error (agent-repl-host-mentions "ws-1" 'skill))))
+
 (ert-deftest agent-repl-test-host-a-push-after-the-workspace-is-forgotten-is-dropped ()
   "A frame that arrives after `agent-repl-host-forget' re-creates nothing."
   (agent-repl-test-host--with-harness

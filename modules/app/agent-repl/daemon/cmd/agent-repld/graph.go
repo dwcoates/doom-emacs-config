@@ -27,6 +27,7 @@ import (
 	"agent-repld/internal/clock"
 	"agent-repld/internal/coldbacklog"
 	"agent-repld/internal/commandcatalog"
+	"agent-repld/internal/composermentions"
 	"agent-repld/internal/creategate"
 	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/deployprogress"
@@ -632,6 +633,23 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// watchers and read by ListSlashCommands and the feed resolver.
 	slashCommands := commandcatalog.New()
 
+	// THE COMPOSER MENTIONS: the commands and workspaces each workspace's own
+	// final responses mentioned, which order the Emacs composer's completions.
+	// Fed by the feed resolver as it records every answer, kept durably, and
+	// served to Emacs on the host stream. A response's words are matched
+	// against the workspaces the roster holds open when it is read.
+	mentions, err := composermentions.New(ctx, composermentions.Deps{
+		Store: p.DB,
+		WorkspaceNames: func() []string {
+			roster, _ := sidebarResolver.Topic().Latest()
+			return composermentions.RosterNames(roster)
+		},
+		Log: log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the composer mentions: %w", err)
+	}
+
 	// EVERY HEADLESS CALL ABOUT A WORKSPACE runs under that workspace's
 	// account root: the chat's abbreviations, the topbar's titles and the
 	// turn banners' summaries.
@@ -741,6 +759,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ChessBoards: chessBoards,
 		// A USER PROMPT'S KNOWN COMMANDS are the standing catalog's.
 		Commands: slashCommands.Catalog,
+		// EVERY RECORDED ANSWER'S MENTIONS order the composer's completions.
+		AnswerSettled: mentions.Answered,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the feed resolver: %w", err)
@@ -1864,6 +1884,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			}),
 			SessionFacts:     hostSessionFacts{fleet: fleet},
 			SlashCommands:    slashCommands,
+			Mentions:         mentions,
 			DB:               p.DB,
 			Prompts:          handler,
 			Queue:            queue,

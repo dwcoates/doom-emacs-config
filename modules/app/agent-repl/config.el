@@ -359,6 +359,10 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; (command-completion.el and workspace-completion.el, below) answer by: a
 ;; completion offers itself only when its own table's styles match.
 (agent-repl--load-module "completion-match")
+;; WHY: completion-order.el is the one order both composer completions offer
+;; their candidates in: taken before, then mentioned by the composer's own
+;; workspace (host.el's record), then the rest.
+(agent-repl--load-module "completion-order")
 ;; WHY: composer-mark.el owns the composer's one purple face for a known word
 ;; and the shape every kind of mark takes; command-completion.el and
 ;; workspace-completion.el, below, both mark through it.

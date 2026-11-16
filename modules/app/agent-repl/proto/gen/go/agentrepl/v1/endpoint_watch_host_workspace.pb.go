@@ -99,6 +99,7 @@ type WatchHostWorkspaceResponse struct {
 	//	*WatchHostWorkspaceResponse_ResponseTextHighlighted
 	//	*WatchHostWorkspaceResponse_RunInTerminal
 	//	*WatchHostWorkspaceResponse_ResponseQuestion
+	//	*WatchHostWorkspaceResponse_Mentions
 	Push          isWatchHostWorkspaceResponse_Push `protobuf_oneof:"push"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -303,6 +304,15 @@ func (x *WatchHostWorkspaceResponse) GetResponseQuestion() *HostWorkspaceRespons
 	return nil
 }
 
+func (x *WatchHostWorkspaceResponse) GetMentions() *HostWorkspaceMentions {
+	if x != nil {
+		if x, ok := x.Push.(*WatchHostWorkspaceResponse_Mentions); ok {
+			return x.Mentions
+		}
+	}
+	return nil
+}
+
 type isWatchHostWorkspaceResponse_Push interface {
 	isWatchHostWorkspaceResponse_Push()
 }
@@ -480,6 +490,17 @@ type WatchHostWorkspaceResponse_ResponseQuestion struct {
 	ResponseQuestion *HostWorkspaceResponseQuestion `protobuf:"bytes,20,opt,name=response_question,json=responseQuestion,proto3,oneof"`
 }
 
+type WatchHostWorkspaceResponse_Mentions struct {
+	// THE NAMES THIS WORKSPACE'S FINAL RESPONSES MENTIONED, whole-replaced on
+	// every change: Emacs's standing record of them, which orders the
+	// composer's completions so a command or workspace the workspace itself
+	// talked about is offered before one it never did. State, not an event: a
+	// late subscriber is sent the record in force first, which is how Emacs is
+	// hydrated after either side restarts. The daemon keeps the record durably,
+	// so it outlives the newest page a boot replays.
+	Mentions *HostWorkspaceMentions `protobuf:"bytes,21,opt,name=mentions,proto3,oneof"`
+}
+
 func (*WatchHostWorkspaceResponse_Host) isWatchHostWorkspaceResponse_Push() {}
 
 func (*WatchHostWorkspaceResponse_Transferred) isWatchHostWorkspaceResponse_Push() {}
@@ -515,6 +536,8 @@ func (*WatchHostWorkspaceResponse_ResponseTextHighlighted) isWatchHostWorkspaceR
 func (*WatchHostWorkspaceResponse_RunInTerminal) isWatchHostWorkspaceResponse_Push() {}
 
 func (*WatchHostWorkspaceResponse_ResponseQuestion) isWatchHostWorkspaceResponse_Push() {}
+
+func (*WatchHostWorkspaceResponse_Mentions) isWatchHostWorkspaceResponse_Push() {}
 
 // The relayed click's target, verbatim from the request.
 type HostOpenInEditor struct {
@@ -3834,6 +3857,69 @@ func (x *HostWorkspaceSelectionBubble) GetMarkdown() *HostWorkspaceSelectionMark
 	return nil
 }
 
+// The commands and workspaces a workspace's own final responses mentioned,
+// each the most recently mentioned first. A mention's instant is the instant
+// the response that made it settled, so a replay of an older response never
+// makes its names newer. Every name is listed once.
+type HostWorkspaceMentions struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The slash commands, by name WITHOUT the leading slash: every slash word a
+	// final response wrote whose name could name a command, by the rule
+	// proto/vocab/slash-word.json pins. Not narrowed to the session's catalog,
+	// since a boot replays responses before any session has stated one; the
+	// composer orders only the names its own catalog holds.
+	Commands []string `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+	// The workspaces, by name: every name word of a final response that named a
+	// workspace open when the response was read.
+	Workspaces    []string `protobuf:"bytes,2,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *HostWorkspaceMentions) Reset() {
+	*x = HostWorkspaceMentions{}
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *HostWorkspaceMentions) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*HostWorkspaceMentions) ProtoMessage() {}
+
+func (x *HostWorkspaceMentions) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use HostWorkspaceMentions.ProtoReflect.Descriptor instead.
+func (*HostWorkspaceMentions) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *HostWorkspaceMentions) GetCommands() []string {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+func (x *HostWorkspaceMentions) GetWorkspaces() []string {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
+}
+
 // A selected bubble's text as markdown source, verbatim: a response's prose,
 // or a prompt's text blocks joined by blank lines. Empty for a prompt that
 // carries no text (an image alone).
@@ -3847,7 +3933,7 @@ type HostWorkspaceSelectionMarkdown struct {
 
 func (x *HostWorkspaceSelectionMarkdown) Reset() {
 	*x = HostWorkspaceSelectionMarkdown{}
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[54]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[55]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3859,7 +3945,7 @@ func (x *HostWorkspaceSelectionMarkdown) String() string {
 func (*HostWorkspaceSelectionMarkdown) ProtoMessage() {}
 
 func (x *HostWorkspaceSelectionMarkdown) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[54]
+	mi := &file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[55]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3872,7 +3958,7 @@ func (x *HostWorkspaceSelectionMarkdown) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HostWorkspaceSelectionMarkdown.ProtoReflect.Descriptor instead.
 func (*HostWorkspaceSelectionMarkdown) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{54}
+	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP(), []int{55}
 }
 
 func (x *HostWorkspaceSelectionMarkdown) GetText() string {
@@ -3888,7 +3974,7 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\n" +
 	"0agentrepl/v1/endpoint_watch_host_workspace.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a'agentrepl/v1/daemon_stream_ending.proto\x1a$agentrepl/v1/editor_evaluation.proto\x1a*agentrepl/v1/endpoint_open_in_editor.proto\x1a*agentrepl/v1/endpoint_session_health.proto\x1a\x1aconversation/v1/turn.proto\x1a\x1aconversation/v1/user.proto\x1a\x16frontend/v1/feed.proto\"U\n" +
 	"\x19WatchHostWorkspaceRequest\x128\n" +
-	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xb5\f\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\xf8\f\n" +
 	"\x1aWatchHostWorkspaceResponse\x121\n" +
 	"\x04host\x18\x01 \x01(\v2\x1b.agentrepl.v1.HostWorkspaceH\x00R\x04host\x12J\n" +
 	"\vtransferred\x18\x03 \x01(\v2&.agentrepl.v1.HostWorkspaceTransferredH\x00R\vtransferred\x12N\n" +
@@ -3908,7 +3994,8 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x13load_page_requested\x18\x11 \x01(\v2,.agentrepl.v1.HostWorkspaceLoadPageRequestedH\x00R\x11loadPageRequested\x12p\n" +
 	"\x19response_text_highlighted\x18\x12 \x01(\v22.agentrepl.v1.HostWorkspaceResponseTextHighlightedH\x00R\x17responseTextHighlighted\x12S\n" +
 	"\x0frun_in_terminal\x18\x13 \x01(\v2).agentrepl.v1.OpenInEditorTerminalCommandH\x00R\rrunInTerminal\x12Z\n" +
-	"\x11response_question\x18\x14 \x01(\v2+.agentrepl.v1.HostWorkspaceResponseQuestionH\x00R\x10responseQuestionB\x06\n" +
+	"\x11response_question\x18\x14 \x01(\v2+.agentrepl.v1.HostWorkspaceResponseQuestionH\x00R\x10responseQuestion\x12A\n" +
+	"\bmentions\x18\x15 \x01(\v2#.agentrepl.v1.HostWorkspaceMentionsH\x00R\bmentionsB\x06\n" +
 	"\x04pushJ\x04\b\x02\x10\x03J\x04\b\r\x10\x0eR\fnotificationR\x14prompt_entry_clicked\"H\n" +
 	"\x10HostOpenInEditor\x12\x12\n" +
 	"\x04path\x18\x01 \x01(\tR\x04path\x12\x17\n" +
@@ -4082,7 +4169,12 @@ const file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc = "" +
 	"\x1cHostWorkspaceSelectionPrompt\x12H\n" +
 	"\bmarkdown\x18\x01 \x01(\v2,.agentrepl.v1.HostWorkspaceSelectionMarkdownR\bmarkdown\"h\n" +
 	"\x1cHostWorkspaceSelectionBubble\x12H\n" +
-	"\bmarkdown\x18\x01 \x01(\v2,.agentrepl.v1.HostWorkspaceSelectionMarkdownR\bmarkdown\"4\n" +
+	"\bmarkdown\x18\x01 \x01(\v2,.agentrepl.v1.HostWorkspaceSelectionMarkdownR\bmarkdown\"S\n" +
+	"\x15HostWorkspaceMentions\x12\x1a\n" +
+	"\bcommands\x18\x01 \x03(\tR\bcommands\x12\x1e\n" +
+	"\n" +
+	"workspaces\x18\x02 \x03(\tR\n" +
+	"workspaces\"4\n" +
 	"\x1eHostWorkspaceSelectionMarkdown\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04textB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
@@ -4098,7 +4190,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescGZIP() []byte 
 	return file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 55)
+var file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 56)
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*WatchHostWorkspaceRequest)(nil),              // 0: agentrepl.v1.WatchHostWorkspaceRequest
 	(*WatchHostWorkspaceResponse)(nil),             // 1: agentrepl.v1.WatchHostWorkspaceResponse
@@ -4154,43 +4246,44 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_goTypes = []any{
 	(*HostWorkspaceSelectionResponse)(nil),         // 51: agentrepl.v1.HostWorkspaceSelectionResponse
 	(*HostWorkspaceSelectionPrompt)(nil),           // 52: agentrepl.v1.HostWorkspaceSelectionPrompt
 	(*HostWorkspaceSelectionBubble)(nil),           // 53: agentrepl.v1.HostWorkspaceSelectionBubble
-	(*HostWorkspaceSelectionMarkdown)(nil),         // 54: agentrepl.v1.HostWorkspaceSelectionMarkdown
-	(*v1.WorkspaceRef)(nil),                        // 55: workspace.v1.WorkspaceRef
-	(*DaemonStreamEnding)(nil),                     // 56: agentrepl.v1.DaemonStreamEnding
-	(*OpenInEditorCommitLog)(nil),                  // 57: agentrepl.v1.OpenInEditorCommitLog
-	(*OpenInEditorTerminalCommand)(nil),            // 58: agentrepl.v1.OpenInEditorTerminalCommand
-	(*EditorEvaluationToken)(nil),                  // 59: agentrepl.v1.EditorEvaluationToken
-	(*v11.UserSaid)(nil),                           // 60: conversation.v1.UserSaid
-	(*v12.FeedId)(nil),                             // 61: frontend.v1.FeedId
-	(*v11.TurnId)(nil),                             // 62: conversation.v1.TurnId
-	(*SessionFaultShimStartFailed)(nil),            // 63: agentrepl.v1.SessionFaultShimStartFailed
-	(*SessionFaultShimDied)(nil),                   // 64: agentrepl.v1.SessionFaultShimDied
-	(*SessionFaultLinkSevered)(nil),                // 65: agentrepl.v1.SessionFaultLinkSevered
-	(*SessionFaultResumeFailed)(nil),               // 66: agentrepl.v1.SessionFaultResumeFailed
-	(*SessionFaultBounceDied)(nil),                 // 67: agentrepl.v1.SessionFaultBounceDied
-	(*SessionFaultBounceUnknown)(nil),              // 68: agentrepl.v1.SessionFaultBounceUnknown
-	(*SessionFaultClassifierFailed)(nil),           // 69: agentrepl.v1.SessionFaultClassifierFailed
-	(*SessionFaultShimReported)(nil),               // 70: agentrepl.v1.SessionFaultShimReported
-	(*SessionFaultConversationAbandoned)(nil),      // 71: agentrepl.v1.SessionFaultConversationAbandoned
-	(*SessionFaultSessionAbsent)(nil),              // 72: agentrepl.v1.SessionFaultSessionAbsent
-	(*SessionFaultWatchOpenRefused)(nil),           // 73: agentrepl.v1.SessionFaultWatchOpenRefused
-	(*SessionFaultDaemonStateUnreadable)(nil),      // 74: agentrepl.v1.SessionFaultDaemonStateUnreadable
-	(*SessionFaultAdoptionWindowExpired)(nil),      // 75: agentrepl.v1.SessionFaultAdoptionWindowExpired
-	(*SessionFaultFinalAnswerUnresolved)(nil),      // 76: agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	(*SessionFaultVendorStartRetrying)(nil),        // 77: agentrepl.v1.SessionFaultVendorStartRetrying
-	(*SessionFaultVendorStartRejected)(nil),        // 78: agentrepl.v1.SessionFaultVendorStartRejected
-	(*SessionFaultVendorStartFailed)(nil),          // 79: agentrepl.v1.SessionFaultVendorStartFailed
+	(*HostWorkspaceMentions)(nil),                  // 54: agentrepl.v1.HostWorkspaceMentions
+	(*HostWorkspaceSelectionMarkdown)(nil),         // 55: agentrepl.v1.HostWorkspaceSelectionMarkdown
+	(*v1.WorkspaceRef)(nil),                        // 56: workspace.v1.WorkspaceRef
+	(*DaemonStreamEnding)(nil),                     // 57: agentrepl.v1.DaemonStreamEnding
+	(*OpenInEditorCommitLog)(nil),                  // 58: agentrepl.v1.OpenInEditorCommitLog
+	(*OpenInEditorTerminalCommand)(nil),            // 59: agentrepl.v1.OpenInEditorTerminalCommand
+	(*EditorEvaluationToken)(nil),                  // 60: agentrepl.v1.EditorEvaluationToken
+	(*v11.UserSaid)(nil),                           // 61: conversation.v1.UserSaid
+	(*v12.FeedId)(nil),                             // 62: frontend.v1.FeedId
+	(*v11.TurnId)(nil),                             // 63: conversation.v1.TurnId
+	(*SessionFaultShimStartFailed)(nil),            // 64: agentrepl.v1.SessionFaultShimStartFailed
+	(*SessionFaultShimDied)(nil),                   // 65: agentrepl.v1.SessionFaultShimDied
+	(*SessionFaultLinkSevered)(nil),                // 66: agentrepl.v1.SessionFaultLinkSevered
+	(*SessionFaultResumeFailed)(nil),               // 67: agentrepl.v1.SessionFaultResumeFailed
+	(*SessionFaultBounceDied)(nil),                 // 68: agentrepl.v1.SessionFaultBounceDied
+	(*SessionFaultBounceUnknown)(nil),              // 69: agentrepl.v1.SessionFaultBounceUnknown
+	(*SessionFaultClassifierFailed)(nil),           // 70: agentrepl.v1.SessionFaultClassifierFailed
+	(*SessionFaultShimReported)(nil),               // 71: agentrepl.v1.SessionFaultShimReported
+	(*SessionFaultConversationAbandoned)(nil),      // 72: agentrepl.v1.SessionFaultConversationAbandoned
+	(*SessionFaultSessionAbsent)(nil),              // 73: agentrepl.v1.SessionFaultSessionAbsent
+	(*SessionFaultWatchOpenRefused)(nil),           // 74: agentrepl.v1.SessionFaultWatchOpenRefused
+	(*SessionFaultDaemonStateUnreadable)(nil),      // 75: agentrepl.v1.SessionFaultDaemonStateUnreadable
+	(*SessionFaultAdoptionWindowExpired)(nil),      // 76: agentrepl.v1.SessionFaultAdoptionWindowExpired
+	(*SessionFaultFinalAnswerUnresolved)(nil),      // 77: agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	(*SessionFaultVendorStartRetrying)(nil),        // 78: agentrepl.v1.SessionFaultVendorStartRetrying
+	(*SessionFaultVendorStartRejected)(nil),        // 79: agentrepl.v1.SessionFaultVendorStartRejected
+	(*SessionFaultVendorStartFailed)(nil),          // 80: agentrepl.v1.SessionFaultVendorStartFailed
 }
 var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
-	55, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	56, // 0: agentrepl.v1.WatchHostWorkspaceRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	19, // 1: agentrepl.v1.WatchHostWorkspaceResponse.host:type_name -> agentrepl.v1.HostWorkspace
 	4,  // 2: agentrepl.v1.WatchHostWorkspaceResponse.transferred:type_name -> agentrepl.v1.HostWorkspaceTransferred
 	6,  // 3: agentrepl.v1.WatchHostWorkspaceResponse.reload_webapp:type_name -> agentrepl.v1.HostWorkspaceReloadWebapp
 	2,  // 4: agentrepl.v1.WatchHostWorkspaceResponse.open_in_editor:type_name -> agentrepl.v1.HostOpenInEditor
-	56, // 5: agentrepl.v1.WatchHostWorkspaceResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	57, // 5: agentrepl.v1.WatchHostWorkspaceResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
 	7,  // 6: agentrepl.v1.WatchHostWorkspaceResponse.notification_clicked:type_name -> agentrepl.v1.HostWorkspaceNotificationClicked
 	49, // 7: agentrepl.v1.WatchHostWorkspaceResponse.selection:type_name -> agentrepl.v1.HostWorkspaceSelection
-	57, // 8: agentrepl.v1.WatchHostWorkspaceResponse.open_commit_log:type_name -> agentrepl.v1.OpenInEditorCommitLog
+	58, // 8: agentrepl.v1.WatchHostWorkspaceResponse.open_commit_log:type_name -> agentrepl.v1.OpenInEditorCommitLog
 	3,  // 9: agentrepl.v1.WatchHostWorkspaceResponse.evaluate:type_name -> agentrepl.v1.HostEvaluate
 	8,  // 10: agentrepl.v1.WatchHostWorkspaceResponse.final_response_clicked:type_name -> agentrepl.v1.HostWorkspaceFinalResponseClicked
 	16, // 11: agentrepl.v1.WatchHostWorkspaceResponse.select_requested:type_name -> agentrepl.v1.HostWorkspaceSelectRequested
@@ -4199,76 +4292,77 @@ var file_agentrepl_v1_endpoint_watch_host_workspace_proto_depIdxs = []int32{
 	5,  // 14: agentrepl.v1.WatchHostWorkspaceResponse.transfer_withdrawn:type_name -> agentrepl.v1.HostWorkspaceTransferWithdrawn
 	17, // 15: agentrepl.v1.WatchHostWorkspaceResponse.load_page_requested:type_name -> agentrepl.v1.HostWorkspaceLoadPageRequested
 	10, // 16: agentrepl.v1.WatchHostWorkspaceResponse.response_text_highlighted:type_name -> agentrepl.v1.HostWorkspaceResponseTextHighlighted
-	58, // 17: agentrepl.v1.WatchHostWorkspaceResponse.run_in_terminal:type_name -> agentrepl.v1.OpenInEditorTerminalCommand
+	59, // 17: agentrepl.v1.WatchHostWorkspaceResponse.run_in_terminal:type_name -> agentrepl.v1.OpenInEditorTerminalCommand
 	11, // 18: agentrepl.v1.WatchHostWorkspaceResponse.response_question:type_name -> agentrepl.v1.HostWorkspaceResponseQuestion
-	59, // 19: agentrepl.v1.HostEvaluate.token:type_name -> agentrepl.v1.EditorEvaluationToken
-	12, // 20: agentrepl.v1.HostWorkspaceResponseQuestion.asked:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionAsked
-	13, // 21: agentrepl.v1.HostWorkspaceResponseQuestion.moved:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionMoved
-	14, // 22: agentrepl.v1.HostWorkspaceResponseQuestion.withdrawn:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionWithdrawn
-	15, // 23: agentrepl.v1.HostWorkspaceResponseQuestion.taken:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionTaken
-	31, // 24: agentrepl.v1.HostWorkspace.none:type_name -> agentrepl.v1.HostSessionNone
-	32, // 25: agentrepl.v1.HostWorkspace.existing:type_name -> agentrepl.v1.HostSessionExisting
-	38, // 26: agentrepl.v1.HostWorkspace.naming:type_name -> agentrepl.v1.HostWorkspaceNaming
-	30, // 27: agentrepl.v1.HostWorkspace.held_prompt_edit:type_name -> agentrepl.v1.HostHeldPromptEdit
-	28, // 28: agentrepl.v1.HostWorkspace.gate:type_name -> agentrepl.v1.HostGate
-	21, // 29: agentrepl.v1.HostWorkspace.ask:type_name -> agentrepl.v1.HostAsk
-	20, // 30: agentrepl.v1.HostWorkspace.composer_entries:type_name -> agentrepl.v1.HostComposerEntries
-	60, // 31: agentrepl.v1.HostWorkspace.initial_prompt:type_name -> conversation.v1.UserSaid
-	61, // 32: agentrepl.v1.HostAsk.row:type_name -> frontend.v1.FeedId
-	22, // 33: agentrepl.v1.HostAsk.question:type_name -> agentrepl.v1.HostAskQuestion
-	26, // 34: agentrepl.v1.HostAsk.permission:type_name -> agentrepl.v1.HostAskPermission
-	23, // 35: agentrepl.v1.HostAskQuestion.single_select:type_name -> agentrepl.v1.HostAskQuestionSingleSelect
-	24, // 36: agentrepl.v1.HostAskQuestion.multi_select:type_name -> agentrepl.v1.HostAskQuestionMultiSelect
-	25, // 37: agentrepl.v1.HostAskQuestionSingleSelect.options:type_name -> agentrepl.v1.HostAskQuestionOption
-	25, // 38: agentrepl.v1.HostAskQuestionMultiSelect.options:type_name -> agentrepl.v1.HostAskQuestionOption
-	27, // 39: agentrepl.v1.HostAskPermission.standing_offered:type_name -> agentrepl.v1.HostAskPermissionStandingOffered
-	29, // 40: agentrepl.v1.HostGate.cold_gate:type_name -> agentrepl.v1.HostGateColdGate
-	62, // 41: agentrepl.v1.HostHeldPromptEdit.turn:type_name -> conversation.v1.TurnId
-	60, // 42: agentrepl.v1.HostHeldPromptEdit.said:type_name -> conversation.v1.UserSaid
-	35, // 43: agentrepl.v1.HostSessionExisting.id:type_name -> agentrepl.v1.HostSessionId
-	33, // 44: agentrepl.v1.HostSessionExisting.live:type_name -> agentrepl.v1.HostSessionLive
-	34, // 45: agentrepl.v1.HostSessionExisting.terminal:type_name -> agentrepl.v1.HostSessionTerminal
-	36, // 46: agentrepl.v1.HostSessionLive.generation:type_name -> agentrepl.v1.HostGenerationId
-	37, // 47: agentrepl.v1.HostSessionLive.claude:type_name -> agentrepl.v1.HostVendorClaude
-	39, // 48: agentrepl.v1.HostSessionLive.backfill:type_name -> agentrepl.v1.HostBackfill
-	44, // 49: agentrepl.v1.HostSessionLive.open:type_name -> agentrepl.v1.HostComposerOpen
-	45, // 50: agentrepl.v1.HostSessionLive.merging:type_name -> agentrepl.v1.HostComposerMerging
-	46, // 51: agentrepl.v1.HostSessionLive.draining:type_name -> agentrepl.v1.HostComposerDraining
-	47, // 52: agentrepl.v1.HostSessionLive.restarting:type_name -> agentrepl.v1.HostComposerRestarting
-	48, // 53: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
-	40, // 54: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
-	41, // 55: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
-	42, // 56: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
-	43, // 57: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
-	63, // 58: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
-	64, // 59: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
-	65, // 60: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
-	66, // 61: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
-	67, // 62: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
-	68, // 63: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
-	69, // 64: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
-	70, // 65: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
-	71, // 66: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
-	72, // 67: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
-	73, // 68: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
-	74, // 69: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
-	75, // 70: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
-	76, // 71: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
-	77, // 72: agentrepl.v1.HostFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
-	78, // 73: agentrepl.v1.HostFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
-	79, // 74: agentrepl.v1.HostFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
-	50, // 75: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
-	51, // 76: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
-	52, // 77: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
-	53, // 78: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
-	54, // 79: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	54, // 80: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	54, // 81: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
-	82, // [82:82] is the sub-list for method output_type
-	82, // [82:82] is the sub-list for method input_type
-	82, // [82:82] is the sub-list for extension type_name
-	82, // [82:82] is the sub-list for extension extendee
-	0,  // [0:82] is the sub-list for field type_name
+	54, // 19: agentrepl.v1.WatchHostWorkspaceResponse.mentions:type_name -> agentrepl.v1.HostWorkspaceMentions
+	60, // 20: agentrepl.v1.HostEvaluate.token:type_name -> agentrepl.v1.EditorEvaluationToken
+	12, // 21: agentrepl.v1.HostWorkspaceResponseQuestion.asked:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionAsked
+	13, // 22: agentrepl.v1.HostWorkspaceResponseQuestion.moved:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionMoved
+	14, // 23: agentrepl.v1.HostWorkspaceResponseQuestion.withdrawn:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionWithdrawn
+	15, // 24: agentrepl.v1.HostWorkspaceResponseQuestion.taken:type_name -> agentrepl.v1.HostWorkspaceResponseQuestionTaken
+	31, // 25: agentrepl.v1.HostWorkspace.none:type_name -> agentrepl.v1.HostSessionNone
+	32, // 26: agentrepl.v1.HostWorkspace.existing:type_name -> agentrepl.v1.HostSessionExisting
+	38, // 27: agentrepl.v1.HostWorkspace.naming:type_name -> agentrepl.v1.HostWorkspaceNaming
+	30, // 28: agentrepl.v1.HostWorkspace.held_prompt_edit:type_name -> agentrepl.v1.HostHeldPromptEdit
+	28, // 29: agentrepl.v1.HostWorkspace.gate:type_name -> agentrepl.v1.HostGate
+	21, // 30: agentrepl.v1.HostWorkspace.ask:type_name -> agentrepl.v1.HostAsk
+	20, // 31: agentrepl.v1.HostWorkspace.composer_entries:type_name -> agentrepl.v1.HostComposerEntries
+	61, // 32: agentrepl.v1.HostWorkspace.initial_prompt:type_name -> conversation.v1.UserSaid
+	62, // 33: agentrepl.v1.HostAsk.row:type_name -> frontend.v1.FeedId
+	22, // 34: agentrepl.v1.HostAsk.question:type_name -> agentrepl.v1.HostAskQuestion
+	26, // 35: agentrepl.v1.HostAsk.permission:type_name -> agentrepl.v1.HostAskPermission
+	23, // 36: agentrepl.v1.HostAskQuestion.single_select:type_name -> agentrepl.v1.HostAskQuestionSingleSelect
+	24, // 37: agentrepl.v1.HostAskQuestion.multi_select:type_name -> agentrepl.v1.HostAskQuestionMultiSelect
+	25, // 38: agentrepl.v1.HostAskQuestionSingleSelect.options:type_name -> agentrepl.v1.HostAskQuestionOption
+	25, // 39: agentrepl.v1.HostAskQuestionMultiSelect.options:type_name -> agentrepl.v1.HostAskQuestionOption
+	27, // 40: agentrepl.v1.HostAskPermission.standing_offered:type_name -> agentrepl.v1.HostAskPermissionStandingOffered
+	29, // 41: agentrepl.v1.HostGate.cold_gate:type_name -> agentrepl.v1.HostGateColdGate
+	63, // 42: agentrepl.v1.HostHeldPromptEdit.turn:type_name -> conversation.v1.TurnId
+	61, // 43: agentrepl.v1.HostHeldPromptEdit.said:type_name -> conversation.v1.UserSaid
+	35, // 44: agentrepl.v1.HostSessionExisting.id:type_name -> agentrepl.v1.HostSessionId
+	33, // 45: agentrepl.v1.HostSessionExisting.live:type_name -> agentrepl.v1.HostSessionLive
+	34, // 46: agentrepl.v1.HostSessionExisting.terminal:type_name -> agentrepl.v1.HostSessionTerminal
+	36, // 47: agentrepl.v1.HostSessionLive.generation:type_name -> agentrepl.v1.HostGenerationId
+	37, // 48: agentrepl.v1.HostSessionLive.claude:type_name -> agentrepl.v1.HostVendorClaude
+	39, // 49: agentrepl.v1.HostSessionLive.backfill:type_name -> agentrepl.v1.HostBackfill
+	44, // 50: agentrepl.v1.HostSessionLive.open:type_name -> agentrepl.v1.HostComposerOpen
+	45, // 51: agentrepl.v1.HostSessionLive.merging:type_name -> agentrepl.v1.HostComposerMerging
+	46, // 52: agentrepl.v1.HostSessionLive.draining:type_name -> agentrepl.v1.HostComposerDraining
+	47, // 53: agentrepl.v1.HostSessionLive.restarting:type_name -> agentrepl.v1.HostComposerRestarting
+	48, // 54: agentrepl.v1.HostSessionLive.faults:type_name -> agentrepl.v1.HostFault
+	40, // 55: agentrepl.v1.HostBackfill.none:type_name -> agentrepl.v1.HostBackfillNone
+	41, // 56: agentrepl.v1.HostBackfill.pending:type_name -> agentrepl.v1.HostBackfillPending
+	42, // 57: agentrepl.v1.HostBackfill.done:type_name -> agentrepl.v1.HostBackfillDone
+	43, // 58: agentrepl.v1.HostBackfill.failed:type_name -> agentrepl.v1.HostBackfillFailed
+	64, // 59: agentrepl.v1.HostFault.shim_start_failed:type_name -> agentrepl.v1.SessionFaultShimStartFailed
+	65, // 60: agentrepl.v1.HostFault.shim_died:type_name -> agentrepl.v1.SessionFaultShimDied
+	66, // 61: agentrepl.v1.HostFault.link_severed:type_name -> agentrepl.v1.SessionFaultLinkSevered
+	67, // 62: agentrepl.v1.HostFault.resume_failed:type_name -> agentrepl.v1.SessionFaultResumeFailed
+	68, // 63: agentrepl.v1.HostFault.bounce_died:type_name -> agentrepl.v1.SessionFaultBounceDied
+	69, // 64: agentrepl.v1.HostFault.bounce_unknown:type_name -> agentrepl.v1.SessionFaultBounceUnknown
+	70, // 65: agentrepl.v1.HostFault.classifier_failed:type_name -> agentrepl.v1.SessionFaultClassifierFailed
+	71, // 66: agentrepl.v1.HostFault.shim_reported:type_name -> agentrepl.v1.SessionFaultShimReported
+	72, // 67: agentrepl.v1.HostFault.conversation_abandoned:type_name -> agentrepl.v1.SessionFaultConversationAbandoned
+	73, // 68: agentrepl.v1.HostFault.session_absent:type_name -> agentrepl.v1.SessionFaultSessionAbsent
+	74, // 69: agentrepl.v1.HostFault.watch_open_refused:type_name -> agentrepl.v1.SessionFaultWatchOpenRefused
+	75, // 70: agentrepl.v1.HostFault.daemon_state_unreadable:type_name -> agentrepl.v1.SessionFaultDaemonStateUnreadable
+	76, // 71: agentrepl.v1.HostFault.adoption_window_expired:type_name -> agentrepl.v1.SessionFaultAdoptionWindowExpired
+	77, // 72: agentrepl.v1.HostFault.final_answer_unresolved:type_name -> agentrepl.v1.SessionFaultFinalAnswerUnresolved
+	78, // 73: agentrepl.v1.HostFault.vendor_start_retrying:type_name -> agentrepl.v1.SessionFaultVendorStartRetrying
+	79, // 74: agentrepl.v1.HostFault.vendor_start_rejected:type_name -> agentrepl.v1.SessionFaultVendorStartRejected
+	80, // 75: agentrepl.v1.HostFault.vendor_start_failed:type_name -> agentrepl.v1.SessionFaultVendorStartFailed
+	50, // 76: agentrepl.v1.HostWorkspaceSelection.none:type_name -> agentrepl.v1.HostWorkspaceSelectionNone
+	51, // 77: agentrepl.v1.HostWorkspaceSelection.response:type_name -> agentrepl.v1.HostWorkspaceSelectionResponse
+	52, // 78: agentrepl.v1.HostWorkspaceSelection.prompt:type_name -> agentrepl.v1.HostWorkspaceSelectionPrompt
+	53, // 79: agentrepl.v1.HostWorkspaceSelection.bubble:type_name -> agentrepl.v1.HostWorkspaceSelectionBubble
+	55, // 80: agentrepl.v1.HostWorkspaceSelectionResponse.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	55, // 81: agentrepl.v1.HostWorkspaceSelectionPrompt.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	55, // 82: agentrepl.v1.HostWorkspaceSelectionBubble.markdown:type_name -> agentrepl.v1.HostWorkspaceSelectionMarkdown
+	83, // [83:83] is the sub-list for method output_type
+	83, // [83:83] is the sub-list for method input_type
+	83, // [83:83] is the sub-list for extension type_name
+	83, // [83:83] is the sub-list for extension extendee
+	0,  // [0:83] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() }
@@ -4299,6 +4393,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 		(*WatchHostWorkspaceResponse_ResponseTextHighlighted)(nil),
 		(*WatchHostWorkspaceResponse_RunInTerminal)(nil),
 		(*WatchHostWorkspaceResponse_ResponseQuestion)(nil),
+		(*WatchHostWorkspaceResponse_Mentions)(nil),
 	}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[2].OneofWrappers = []any{}
 	file_agentrepl_v1_endpoint_watch_host_workspace_proto_msgTypes[4].OneofWrappers = []any{}
@@ -4374,7 +4469,7 @@ func file_agentrepl_v1_endpoint_watch_host_workspace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_host_workspace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   55,
+			NumMessages:   56,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

@@ -36,7 +36,20 @@ func (r *resolver) recordFinalAnswer(s *wsState, id *frontendv1.FeedId, unit str
 	// the user saw as the final answer.
 	if fold, ok := s.foldOfAnswer(id, unit); ok {
 		s.answerMarkdown[value] = fold.markdown
+		r.tellAnswerSettled(s.id, fold)
 	}
+}
+
+// tellAnswerSettled hands FOLD's settled markdown and settle instant to
+// Deps.AnswerSettled, OFF the resolver's lock (Deps.Go), on every conclusion
+// alike: the receiver orders by the instant, so a replayed conclusion and two
+// answers told out of order record the same thing.
+func (r *resolver) tellAnswerSettled(ws ids.WorkspaceID, fold *proseState) {
+	if r.deps.AnswerSettled == nil {
+		return
+	}
+	markdown, at := fold.markdown, fold.settledAtMs
+	r.deps.Go(func() { r.deps.AnswerSettled(ws, markdown, at) })
 }
 
 // foldOfAnswer is the fold that OWNS the answering row, which is NOT always

@@ -58,12 +58,44 @@
   ;; Arrange
   (let ((categories nil))
     (cl-letf (((symbol-function 'agent-repl-completion-match-table)
-               (lambda (category _collection) (push category categories) 'table)))
+               (lambda (category _collection &optional _sort) (push category categories) 'table)))
       ;; Act
       (agent-repl--command-completion-table '("/a"))
       (agent-repl--workspace-completion-table '("a"))
       ;; Assert
       (should (equal categories '(agent-repl-workspace-name agent-repl-slash-command))))))
+
+(ert-deftest agent-repl-test-completion-match-both-composer-tables-carry-their-sort ()
+  "Both composer tables hand the helper the order they were given, unchanged."
+  ;; Arrange
+  (let ((sorts nil))
+    (cl-letf (((symbol-function 'agent-repl-completion-match-table)
+               (lambda (_category _collection &optional sort) (push sort sorts) 'table)))
+      ;; Act
+      (agent-repl--command-completion-table '("/a") 'command-sort)
+      (agent-repl--workspace-completion-table '("a") 'workspace-sort)
+      ;; Assert
+      (should (equal sorts '(workspace-sort command-sort))))))
+
+(ert-deftest agent-repl-test-completion-match-table-carries-its-sort ()
+  "A table made with a sort answers it as both its display and cycle sort."
+  ;; Arrange
+  (let* ((sort (lambda (candidates) (reverse candidates)))
+         (metadata (completion-metadata
+                    "" (agent-repl-completion-match-table
+                        agent-repl-test-completion-match--category '("a" "b") sort)
+                    nil)))
+    ;; Act / Assert
+    (should (eq (completion-metadata-get metadata 'display-sort-function) sort))
+    (should (eq (completion-metadata-get metadata 'cycle-sort-function) sort))))
+
+(ert-deftest agent-repl-test-completion-match-table-without-a-sort-states-none ()
+  "A table made with no sort leaves the completion UI's own order."
+  ;; Arrange
+  (let ((metadata (completion-metadata "" (agent-repl-test-completion-match--table '("a")) nil)))
+    ;; Act / Assert
+    (should-not (completion-metadata-get metadata 'display-sort-function))
+    (should-not (completion-metadata-get metadata 'cycle-sort-function))))
 
 (ert-deftest agent-repl-test-completion-match-p-follows-the-tables-styles ()
   "A substring the table's own style matches is a match."

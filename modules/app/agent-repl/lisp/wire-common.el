@@ -339,6 +339,16 @@ Returns nil when the field is absent — presence is the fact."
           ((listp raw) (mapcar decoder raw))
           (t (agent-repl-wire--fail message-name field "expected an array")))))
 
+(defun agent-repl-wire--decode-repeated-string (message-name field object)
+  "Decode OBJECT's repeated string FIELD of MESSAGE-NAME as a list.
+An absent field is the empty list; a non-string element is a breach."
+  (agent-repl-wire--decode-repeated
+   message-name field object
+   (lambda (element)
+     (if (stringp element)
+         element
+       (agent-repl-wire--fail message-name field "expected a string")))))
+
 (defun agent-repl-wire--decode-oneof (message-name oneof object arms &optional unset-legal)
   "Decode the ONEOF of MESSAGE-NAME from OBJECT.
 ARMS is a list of (WIRE-KEY ARM-KEYWORD DECODER).  Exactly one arm must be

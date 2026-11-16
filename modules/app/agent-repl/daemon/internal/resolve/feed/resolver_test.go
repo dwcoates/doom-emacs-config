@@ -174,6 +174,15 @@ type harness struct {
 	// spawned is the work the resolver started off its lock (Deps.Go), run
 	// only when the test chooses (runSpawned).
 	spawned []func()
+	// settled are the final responses Deps.AnswerSettled was told, in order.
+	settled []settledAnswer
+}
+
+// settledAnswer is one Deps.AnswerSettled call.
+type settledAnswer struct {
+	ws          ids.WorkspaceID
+	markdown    string
+	settledAtMs int64
 }
 
 // fakeWarnings records every warning the resolver raised on the topbar.
@@ -320,7 +329,10 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 		PeerDeliveries: h.peerSource,
 		VendorTasks:    h.taskSource,
 		Go:             func(f func()) { h.spawned = append(h.spawned, f) },
-		Answers:        h.chat,
+		AnswerSettled: func(ws ids.WorkspaceID, markdown string, settledAtMs int64) {
+			h.settled = append(h.settled, settledAnswer{ws: ws, markdown: markdown, settledAtMs: settledAtMs})
+		},
+		Answers: h.chat,
 		EntryPlaced: func(_ ids.WorkspaceID, unit string, row *frontendv1.FeedId) {
 			h.placed = append(h.placed, placedEntry{unit: unit, row: row.GetValue()})
 		},
