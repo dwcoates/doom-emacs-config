@@ -81,6 +81,7 @@
 (declare-function evil-normal-state "evil-states" (&optional arg))
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
+(declare-function agent-repl--user-message "agent-repl-core" (ws fmt args &key detail))
 (declare-function agent-repl--log-verbose "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-count-noun "agent-repl-core" (n one &optional many))
