@@ -177,7 +177,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"set":                    {usage: "set WS [-hidden|-shown] [-priority p05|p1|p2|p3|none] [-parent WS|-top-level] [-lands-into WS|main] [-one-shot|-not-one-shot] [-await WS|-not-awaiting] [-name NAME] [-remote-control on|off] [-queue-bypass on|off [-context full|compacted|existing|existing-plus-compacted]] [-as-user]", run: workspaceSet},
 		"summary":                {usage: "summary WS -text SUMMARY", run: workspaceSummary},
 		"link":                   {usage: "link WS (-url URL -label TEXT -owned [-announces URL]|-reference | -remove URL | -show URL [-show URL]... | -clear)", run: workspaceLink},
-		"finished":               {usage: "finished WS -placement back|front|behind=MERGE [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
+		"finished":               {usage: "finished WS [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-as-user]", run: workspaceFinished},
 		"open":                   {usage: "open WS", run: workspaceOpen},
 		"close":                  {usage: "close WS [-as-user]", run: workspaceClose},
 		"kill":                   {usage: "kill WS", run: workspaceKill},
@@ -838,7 +838,7 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 	subagent := fs.String("maker-subagent", "", "the subagent that made the branch")
 	contextFork := fs.String("context-fork", "", "the maker, whose conversation the merge workspace forks")
 	target := fs.String("target", "", "primary, or maker")
-	place := fs.String("placement", "", "back or front")
+	place := fs.String("placement", "", "back, front or behind=MERGE; a finish through the merge queue names one, a direct landing none")
 	instruction := fs.String("instruction", "", "how the merge workspace prepares the branch")
 	closeAfter := fs.String("close-after", "", "a workspace closed once the merge lands")
 	cleanup := fs.Bool("cleanup-worktree", false, "remove the branch's worktree once it lands")
@@ -853,9 +853,15 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 	if len(positionals) != 0 || *contextFork == "" || (*maker == "") == (*subagent == "") {
 		return c.usageFailed("exactly one of -maker and -maker-subagent, and -context-fork, are required")
 	}
-	where, err := placement(*place)
-	if err != nil {
-		return c.usageFailed("%v", err)
+	// A FINISH THROUGH THE QUEUE NAMES ITS PLACE, and the daemon refuses one
+	// that does not; a deploy remediation or escalation lands directly and
+	// names none (FinishWorkspaceRequest.placement).
+	var where *agentreplv1.MergeQueuePlacement
+	if *place != "" {
+		var err error
+		if where, err = placement(*place); err != nil {
+			return c.usageFailed("%v", err)
+		}
 	}
 	version, err := versionIncrement(*part, *line)
 	if err != nil {
@@ -1319,7 +1325,7 @@ func priorityOf(text string) (*agentreplv1.WorkspacePriority, error) {
 
 func workspaceFinished(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	place := fs.String("placement", "", "back or front")
+	place := fs.String("placement", "", "back, front or behind=MERGE; a finish through the merge queue names one, a direct landing none")
 	part := fs.String("version-part", "", "minor or patch, for a deploy onto a versioned repository's main branch")
 	line := fs.String("changelog-line", "", "the version tag's changelog line")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
@@ -1330,9 +1336,15 @@ func workspaceFinished(c *cliCall, args []string) int {
 	if len(rest) != 0 {
 		return c.usageFailed("nothing but the workspace is positional")
 	}
-	where, err := placement(*place)
-	if err != nil {
-		return c.usageFailed("%v", err)
+	// A FINISH THROUGH THE QUEUE NAMES ITS PLACE, and the daemon refuses one
+	// that does not; a deploy remediation or escalation lands directly and
+	// names none (FinishWorkspaceRequest.placement).
+	var where *agentreplv1.MergeQueuePlacement
+	if *place != "" {
+		var err error
+		if where, err = placement(*place); err != nil {
+			return c.usageFailed("%v", err)
+		}
 	}
 	version, err := versionIncrement(*part, *line)
 	if err != nil {

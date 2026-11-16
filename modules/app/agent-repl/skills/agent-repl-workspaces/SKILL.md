@@ -714,6 +714,8 @@ creating workspaces there with `-repository DIR`.
   when, and for the version increment a deploy onto a versioned main branch
   carries), or on a child whose owner you are, after reviewing its work
   against yours. WS closes once its deploy succeeds.
+  - A deploy remediation or escalation names no `-placement`: its finish
+    lands directly, never in the queue, and its brief gives the command.
 - `workspace open WS` reopens a closed workspace.
 - `workspace close WS` closes a workspace whose work is done or abandoned; its
   worktree stays. `close here` closes this workspace once the current turn

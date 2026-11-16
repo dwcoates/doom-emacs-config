@@ -773,9 +773,14 @@ func TestEachRequestValidatorNamesTheFieldItRefusesWithTargetsAndSources(t *test
 			req.Requester = nil
 			return validateFinishWorkspaceRequest(req)
 		}, field: "requester"},
-		{name: "finish with no placement", check: func() *connect.Error {
+		{name: "a queued finish with no placement", check: func() *connect.Error {
 			req := ownFinish()
 			req.Placement = nil
+			return validateQueuedFinishPlacement(req)
+		}, field: "placement"},
+		{name: "finish with a placement naming no arm", check: func() *connect.Error {
+			req := ownFinish()
+			req.Placement = &agentreplv1.MergeQueuePlacement{}
 			return validateFinishWorkspaceRequest(req)
 		}, field: "placement"},
 	}

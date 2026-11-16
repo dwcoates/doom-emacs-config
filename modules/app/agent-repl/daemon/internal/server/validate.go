@@ -1815,7 +1815,10 @@ func validateOpenInEditorRequest(req *agentreplv1.OpenInEditorRequest) *connect.
 }
 
 // validateFinishWorkspaceRequest is FinishWorkspaceRequest's base function: the
-// workspace's ref, its requester and its placement.
+// workspace's ref, its requester and, when it names one, its placement. Only
+// a finish through the queue needs a placement, and only the workspace's
+// recorded role says whether it lands directly, so the requirement is the
+// queue branch's (validateQueuedFinishPlacement).
 func validateFinishWorkspaceRequest(req *agentreplv1.FinishWorkspaceRequest) *connect.Error {
 	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
 		return err
@@ -1823,11 +1826,23 @@ func validateFinishWorkspaceRequest(req *agentreplv1.FinishWorkspaceRequest) *co
 	if err := validateWorkspaceRequester("requester", req.GetRequester()); err != nil {
 		return err
 	}
-	if err := validateMergeQueuePlacement("placement", req.GetPlacement()); err != nil {
-		return err
+	if p := req.GetPlacement(); p != nil {
+		if err := validateMergeQueuePlacement("placement", p); err != nil {
+			return err
+		}
 	}
 	if err := validateMergeWorkspaceVersionIncrement("version_increment", req.GetVersionIncrement()); err != nil {
 		return err
+	}
+	return nil
+}
+
+// validateQueuedFinishPlacement refuses a finish through the queue that names
+// no placement: where it joins the line is the asker's to say
+// (FinishWorkspaceRequest.placement). A direct landing never reads one.
+func validateQueuedFinishPlacement(req *agentreplv1.FinishWorkspaceRequest) *connect.Error {
+	if req.GetPlacement() == nil {
+		return invalid("placement", "a finish through the merge queue names its placement (back, front or behind)")
 	}
 	return nil
 }

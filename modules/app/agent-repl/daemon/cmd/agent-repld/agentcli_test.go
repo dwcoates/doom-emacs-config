@@ -853,12 +853,13 @@ func TestFinishedNamesItsPlacement(t *testing.T) {
 		code   int
 		front  bool
 		behind string
+		none   bool
 	}{
 		{name: "at the front", args: []string{"here", "-placement", "front"}, code: exitSuccess, front: true},
 		{name: "behind a named merge", args: []string{"here", "-placement", "behind=two"}, code: exitSuccess, behind: "two"},
 		{name: "behind no merge", args: []string{"here", "-placement", "behind="}, code: exitFailure},
 		{name: "with an unknown placement", args: []string{"here", "-placement", "middle"}, code: exitFailure},
-		{name: "with no placement", args: []string{"here"}, code: exitFailure},
+		{name: "with no placement, which a direct landing names and the daemon judges", args: []string{"here"}, code: exitSuccess, none: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -877,6 +878,9 @@ func TestFinishedNamesItsPlacement(t *testing.T) {
 			}
 			if tt.behind != "" && only[*agentreplv1.FinishWorkspaceRequest](t, f).GetPlacement().GetBehind().GetMerge() != tt.behind {
 				t.Errorf("the deploy was not placed behind %s", tt.behind)
+			}
+			if tt.none && only[*agentreplv1.FinishWorkspaceRequest](t, f).GetPlacement() != nil {
+				t.Error("a finish naming no placement sent one")
 			}
 		})
 	}

@@ -68,9 +68,10 @@ message FinishWorkspaceRequest {
   // before the landing, so deploys reordered in the queue still produce
   // consecutive versions.
   optional MergeWorkspaceVersionIncrement version_increment = 3;
-  // Where the deploy joins its queue. REQUIRED. A deploy remediation
-  // workspace's finish never joins the queue (FinishWorkspaceSuccess
-  // .landing_directly), so its placement is not read.
+  // Where the deploy joins its queue. REQUIRED for a finish through the
+  // queue, refused as invalid without it. A deploy remediation or
+  // escalation's finish never joins the queue (FinishWorkspaceSuccess
+  // .landing_directly), so it names none, and one it names is not read.
   MergeQueuePlacement placement = 4;
 }
 

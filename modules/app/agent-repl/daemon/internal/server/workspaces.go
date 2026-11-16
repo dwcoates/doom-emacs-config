@@ -983,8 +983,14 @@ func (s *server) FinishWorkspace(
 			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
 		}
 		success.Landing = &agentreplv1.FinishWorkspaceSuccess_LandingDirectly{LandingDirectly: &agentreplv1.FinishWorkspaceSuccessLandingDirectly{}}
-	} else if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg)); err != nil {
-		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
+	} else {
+		if err := validateQueuedFinishPlacement(req.Msg); err != nil {
+			subject.Log.Warn("daemon.server.finish_workspace", "refused a finish through the merge queue that names no placement; nothing was finished", dlog.Context{"rpc": rpc})
+			return nil, err
+		}
+		if _, err := s.deps.Merge.Enqueue(ctx, finishRequest(subject.Record.ID, req.Msg)); err != nil {
+			return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, finishRenames))
+		}
 	}
 	// The verb moved the session's standing or the composer's gate; the host
 	// view is recomposed from what the change left behind.

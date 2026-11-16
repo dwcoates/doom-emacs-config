@@ -100,9 +100,10 @@ export type FinishWorkspaceRequest = Message<"agentrepl.v1.FinishWorkspaceReques
   versionIncrement?: MergeWorkspaceVersionIncrement | undefined;
 
   /**
-   * Where the deploy joins its queue. REQUIRED. A deploy remediation
-   * workspace's finish never joins the queue (FinishWorkspaceSuccess
-   * .landing_directly), so its placement is not read.
+   * Where the deploy joins its queue. REQUIRED for a finish through the
+   * queue, refused as invalid without it. A deploy remediation or
+   * escalation's finish never joins the queue (FinishWorkspaceSuccess
+   * .landing_directly), so it names none, and one it names is not read.
    *
    * @generated from field: agentrepl.v1.MergeQueuePlacement placement = 4;
    */
