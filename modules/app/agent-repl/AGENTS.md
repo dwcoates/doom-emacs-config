@@ -3621,7 +3621,8 @@ the correct code sitting in `git log` makes it harder to diagnose.
 
 THE DEPLOY IS THE DAEMON'S, for every component alike — shim, webapp, daemon,
 store, sidecar and elisp, and on macOS the Wi-Fi helper app, which rides with
-the daemon and is replaced only when the source hash it carries changes (see
+the daemon and is replaced only when the source hash it carries changes, its
+replaced build's waiting Location Services asks stopped with it (see
 "A deploy never ends a turn unless it is FORCED" above). Nobody hand-builds into `~/.cache/agent-repl/bin`, hand-
 kickstarts a service or hand-loads elisp to deploy a change: those paths skip
 the staleness judgement and the recorded safe order, and they are how a
