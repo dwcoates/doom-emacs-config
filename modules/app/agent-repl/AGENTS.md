@@ -1982,6 +1982,9 @@ agent-repl runs on a Linux desktop through freedesktop standards, never one dist
   - persistent wifi (`daemon/internal/persistentwifi/linuxhost.go`): the logind inhibitor that keeps a closed lid awake, nmcli's joins, leaves and scans, the power-saver profile, DPMS display sleep, and the lid heard from the kernel's lid switch;
   - the application freezer's Linux naming (an application is its executable);
   - links opening in `google-chrome`'s routed profile.
+- **Trying a change on Linux** is `bin/linux-vm.sh`: `create` makes the Lima VM once, and `smoke [REV]` starts it, pushes the commit into the VM's `~/.config/doom` over Lima's ssh, runs the installer there, and stops the VM.
+  - The VM shares no host folder (owner ruling, 2026-11-15): a mount of the worktree held ~49,500 of the host's open files and filled its file table. `create` makes it with no mounts, and `smoke` refuses one that has any.
+  - The VM runs only while a smoke does, and a smoke stops it however it ends.
 - **The design is meant to be right, and the details may not be.** A Linux user whose machine answers differently (another tool's output, a polkit rule, a Wayland-only session) fixes the Linux implementation, and keeps the macOS one untouched.
 - **What Linux does without, by design**:
   - the orange unfocused title bar (`lisp/titlebar.el`): the window manager draws Linux's title bar, and the module logs that it is unavailable;
