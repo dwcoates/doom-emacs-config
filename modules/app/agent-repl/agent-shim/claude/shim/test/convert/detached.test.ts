@@ -2541,6 +2541,30 @@ describe("a resumed subagent's frames restate its spawn's commission", () => {
     expect(restatedPrompt(entries.at(-1))?.description).toBe("fix the shim");
   });
 
+  it("restates the spawn's start on a resumed run's terminal once the spawn's call is released", () => {
+    // Arrange: the spawn settles, its call leaves the registry, and the agent
+    // runs again under the same task, naming the spawn (2026-11-16).
+    const registry = createTaskKindRegistry();
+    const calls = createCallRegistry();
+    calls.remember(COMMISSIONED_SPAWN);
+    convert({ subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" }, {}, registry, calls);
+    convert({ subtype: "task_notification", task_id: "a5583", tool_use_id: "toolu_spawn", status: "completed" }, {}, registry, calls);
+    convert({ subtype: "task_started", task_id: "a5583", tool_use_id: "toolu_spawn", task_type: "local_agent" }, {}, registry, createCallRegistry());
+
+    // Act
+    const entries = convert(
+      { subtype: "task_notification", task_id: "a5583", tool_use_id: "toolu_spawn", status: "completed" },
+      {},
+      registry,
+      createCallRegistry(),
+    );
+
+    // Assert
+    const subagent = activityOf(entries.at(-1))?.item.value as conversationv1.AgentSubagent | undefined;
+    const success = subagent?.result.case === "success" ? subagent.result.value : undefined;
+    expect(success?.settledAt?.startedAt?.atMs).toBe(1n);
+  });
+
   it("restates an empty prompt, at ERROR, for a resume whose spawn this process never saw", () => {
     // Arrange: the agent named by the store, as after a shim restart.
     const registry = createTaskKindRegistry();
@@ -2649,6 +2673,39 @@ describe("TaskKindRegistry: the commission", () => {
     expect({ oldest: registry.commissionOf("t0"), lost: warned.map((record) => record.context.lost) }).toEqual({
       oldest: undefined,
       lost: ["the commission its agent was spawned with, so a resume of that agent cannot restate it"],
+    });
+  });
+});
+
+describe("TaskKindRegistry: the spawning call", () => {
+  it("keeps a task's spawning call past the task's settle, so a resume's terminal can restate its start", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    registry.rememberCall("a5583", { ...monitorCall("toolu_s"), startedAtMs: 1_000 });
+
+    // Act
+    registry.settlesAsSubagent("a5583");
+
+    // Assert
+    expect(registry.callOf("a5583")?.startedAtMs).toBe(1_000);
+  });
+
+  it("forgets the oldest spawning call at the bound, and says so", () => {
+    // Arrange
+    const registry = createTaskKindRegistry();
+    for (let i = 0; i < TASK_KIND_CAPACITY; i += 1) {
+      registry.rememberCall(`t${String(i)}`, monitorCall(`toolu_${String(i)}`));
+    }
+    const before = logSinkMark();
+
+    // Act
+    registry.rememberCall("one-more", monitorCall("toolu_more"));
+
+    // Assert
+    const warned = logRecordsSince(before).filter((record) => record.level === "warn");
+    expect({ oldest: registry.callOf("t0"), lost: warned.map((record) => record.context.lost) }).toEqual({
+      oldest: undefined,
+      lost: ["its spawning call, so a resume's terminal cannot restate the spawn's start"],
     });
   });
 });

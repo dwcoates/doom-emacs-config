@@ -871,7 +871,11 @@ export interface TaskKindRegistry {
    * where it survives the call registry forgetting it.
    */
   rememberCall(taskId: string, call: PendingCall): void;
-  /** The spawning call remembered for a task, or `undefined` if the fold never saw it open. */
+  /**
+   * The spawning call remembered for a task, or `undefined` if the fold never
+   * saw it open. KEPT PAST THE TASK'S SETTLE, as its agent and commission are:
+   * a resume of the agent settles the same spawn unit again.
+   */
   callOf(taskId: string): PendingCall | undefined;
   /**
    * Whether a settling task is an AGENT run, and so owns a subagent terminal.
@@ -930,7 +934,6 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       toolUseId?: string;
       foreground?: boolean;
       owner?: conversationv1.AgentId;
-      call?: PendingCall;
       storeAnswer?: string;
       kindAnswer?: string;
       concludedOnRecord?: boolean;
@@ -941,6 +944,14 @@ export function createTaskKindRegistry(): TaskKindRegistry {
   const agents = new Map<string, conversationv1.AgentId>();
   /** The commissions subagent tasks' agents were spawned with, by task id; kept past each task's settle. */
   const commissions = new Map<string, conversationv1.AgentSubagentPrompt>();
+  /**
+   * The spawning calls of tasks, by task id; kept past each task's settle. A
+   * resumed agent runs under the SAME task id and settles the SAME spawn unit
+   * again, long after its first settle forgot the task's facts, and that
+   * terminal must still restate the spawn's start (2026-11-16: a resumed run's
+   * terminal restated no start, and the daemon drew a clock with no start).
+   */
+  const spawnCalls = new Map<string, PendingCall>();
   /**
    * Make room for one more entry in either table, forgetting the oldest when
    * the cap is hit. ONE BOUND, ONE RECORD for both tables: what is lost differs
@@ -1058,11 +1069,10 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       return facts.get(taskId)?.owner;
     },
     rememberCall(taskId, call) {
-      reserve(facts, FACTS_LOST);
-      facts.set(taskId, { ...facts.get(taskId), call });
+      keep(spawnCalls, taskId, call, "its spawning call, so a resume's terminal cannot restate the spawn's start");
     },
     callOf(taskId) {
-      return facts.get(taskId)?.call;
+      return spawnCalls.get(taskId);
     },
     settlesAsSubagent(taskId) {
       const kind = facts.get(taskId)?.kind;
