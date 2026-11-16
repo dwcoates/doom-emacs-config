@@ -158,6 +158,12 @@ func (c QueueBypassContext) resumesExisting() bool {
 // holder's own still standing is resumed last; a pause by the user or another
 // workspace stands.
 //
+// A HOLDER IS IN REMOTE CONTROL. The store derives it: a take that finds the
+// mode off lifts it on the hold's own row, and a release drops the row and
+// the lift with it (wsm.RemoteControl.LiftedByQueueBypass). Right after each
+// write, the fleet states what the store now reads (restateRemoteControl), so
+// the topbar and the live shim follow before the conversation switches.
+//
 // THE SWITCH SWAPS TWO CONVERSATIONS. The one the workspace steps out of is
 // parked with its cache clock (wsm.SwapParkedConversation) and the parked one
 // is bound with its own, through the same stop, record, feed reset and start
@@ -229,11 +235,13 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 			log.Error(opQueueBypass, "could not record the workspace's hold on the queue bypass mode", dlog.Context{"cause": err.Error()})
 			return false, fmt.Errorf("queue bypass for %q: take the hold: %w", ws, err)
 		}
+		v.restateRemoteControl(swap, log, ws, queueBypassEntered)
 	} else {
 		if err := v.deps.DB.ReleaseQueueBypass(swap, ws); err != nil {
 			log.Error(opQueueBypass, "could not clear the workspace's hold on the queue bypass mode", dlog.Context{"cause": err.Error()})
 			return true, fmt.Errorf("queue bypass for %q: release the hold: %w", ws, err)
 		}
+		v.restateRemoteControl(swap, log, ws, queueBypassLeft)
 	}
 	if err := v.switchConversation(swap, log, rpc, ws, standing.ParkedVendorSessionID, want, bypassContext); err != nil {
 		v.restateQueueBypass(swap, log, standing.RepoID)
@@ -256,6 +264,23 @@ func (v *verbs) UpdateQueueBypassMode(ctx context.Context, ws ids.WorkspaceID, c
 	log.Info(opQueueBypass, "the workspace switched its queue bypass mode", dlog.Context{"on": want})
 	v.republishRegistry(swap, log, opQueueBypass)
 	return want, nil
+}
+
+// The queue bypass transitions a remote-control restate names.
+const (
+	queueBypassEntered = "entered"
+	queueBypassLeft    = "left"
+)
+
+// restateRemoteControl has the fleet put the remote-control mode a queue
+// bypass TRANSITION left in force. The fleet logs a failure, with the
+// transition and its cause, and states it on the warning strip; the
+// transition stands either way, because the mode the store derives is
+// already right and the next bring-up puts it in force.
+func (v *verbs) restateRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, transition string) {
+	if err := v.deps.Sessions.RestateRemoteControl(ctx, log, ws, transition); err != nil {
+		log.Info(opQueueBypass, "the queue bypass transition stands; the fleet surfaced its remote-control failure", dlog.Context{"transition": transition, "cause": err.Error()})
+	}
 }
 
 // switchConversation parks the conversation workspace WS runs and binds

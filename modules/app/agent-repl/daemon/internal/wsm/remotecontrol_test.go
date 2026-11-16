@@ -252,3 +252,41 @@ func TestTheMigratedWorkspaceRecordsNoMode(t *testing.T) {
 		t.Fatalf("RemoteControl = %+v, %v; want the default, nothing recorded", got, err)
 	}
 }
+
+func TestAnExplicitChangeOwnsTheModeOverALift(t *testing.T) {
+	tests := []struct {
+		name   string
+		change RemoteControlChange
+		wantOn bool
+	}{
+		{name: "an off while lifted turns remote control off", change: RemoteControlOff},
+		{name: "a toggle while lifted turns remote control off", change: RemoteControlToggle},
+		{name: "an on while lifted outlives the release", change: RemoteControlOn, wantOn: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testLinkedWorktree(t, s)
+			ctx := context.Background()
+			if err := s.TakeQueueBypass(ctx, ws.ID, instant); err != nil {
+				t.Fatalf("TakeQueueBypass: %v", err)
+			}
+
+			// Act
+			on, err := s.SetRemoteControlMode(ctx, ws.ID, tt.change)
+			if err != nil {
+				t.Fatalf("SetRemoteControlMode: %v", err)
+			}
+			if err := s.ReleaseQueueBypass(ctx, ws.ID); err != nil {
+				t.Fatalf("ReleaseQueueBypass: %v", err)
+			}
+
+			// Assert
+			got, err := s.RemoteControl(ctx, ws.ID)
+			if err != nil || on != tt.wantOn || got.On != tt.wantOn || got.LiftedByQueueBypass {
+				t.Fatalf("change answered %v; RemoteControl = %+v, %v; want %v with no lift", on, got, err, tt.wantOn)
+			}
+		})
+	}
+}
