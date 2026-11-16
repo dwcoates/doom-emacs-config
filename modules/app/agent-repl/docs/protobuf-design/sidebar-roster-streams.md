@@ -221,6 +221,8 @@ re-renders of the whole roster that the topic then pushed whole; with the
 queue its own stream and per-stream equality, a re-stamp that changes nothing
 pushes nothing, and a move pushes the queue stream alone.
 
+**Agreed with `merge-queue-active-clock` (2026-11-16, owner instruction to align).** That workspace owns every merge-queue clock field and lands first: `frontend.v1.RosterMergeQueueActiveClock`, `RosterMergeQueueWaitingClock` and `RosterMergeQueueHeadClock`, carried on the head, the waiting, fixing-tests, resolving-conflicts and awaiting members, retiring `queued_at_ms`, `since_ms` and `head_since_ms`. This branch adds no merge-queue field, rebases onto it, and embeds those messages unchanged in the merge queue stream. A waiting member's clock is fixed at its last transition, so it stays identity and order plus facts that a move never changes. The paragraph below is superseded by that agreement and kept for the record.
+
 **`queued_at_ms` is kept on waiting members.** It is the queue entry's
 durable instant, which no move changes, and the waiting line's clock ticks
 from it. Removing it would remove a drawn clock, a look-and-feel change the
