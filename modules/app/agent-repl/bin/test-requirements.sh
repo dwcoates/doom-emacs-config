@@ -1562,7 +1562,8 @@ test_a_rendered_service_expands_its_arguments_placeholders() {
 test_no_real_service_names_a_literal_claude_config_root() {
   local bad
   bad="$(find "$MODULE" -name requirements.json -not -path '*/node_modules/*' -print0 \
-    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | select(any(.args[]?; test("\\.claude"))) | .id')"
+    | xargs -0 jq -r '.requirements[]? | select(.kind == "service") | (.args // []) as $a
+        | select([range(0; ($a | length) - 1) | select($a[.] == "--config-roots") | $a[. + 1]] | any(. != "{claude-config-roots}")) | .id')"
   if [ -z "$bad" ]; then pass "no real service names a literal Claude config root"; else fail "services naming a literal config root:" "$bad"; fi
 }
 

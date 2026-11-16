@@ -922,7 +922,13 @@ rendered_service() {
   while IFS= read -r arg; do
     args+=("$(expand_placeholders "$arg")") || return 1
   done < <(printf '%s\n' "$entry" | jq -r '(.args // [])[]')
-  entry="$(printf '%s\n' "$entry" | jq -c '.args = $ARGS.positional' --args ${args[@]+"${args[@]}"})"
+  # The arguments go to jq as JSON, never as its own argv, where one opening
+  # with a dash would read as a jq option.
+  local json="[]"
+  if [ "${#args[@]}" -gt 0 ]; then
+    json="$(printf '%s\n' "${args[@]}" | jq -Rn '[inputs]')"
+  fi
+  entry="$(printf '%s\n' "$entry" | jq -c --argjson args "$json" '.args = $args')"
   printf '%s\n' "$entry" | jq -r --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
     --arg path "$(command_service_path)" --arg restart "$SERVICE_RESTART_SECONDS" --arg stop "$SERVICE_STOP_SECONDS" '
     def home: gsub("~/"; $home + "/");
