@@ -676,7 +676,7 @@ Response (👀 no changes made)
 
 ### Summary section
 
-- Every tree response ends with a summary section, rendered as its own root branch.
+- Every response's tree ends with a summary section, rendered as its own root branch.
   - The summary branch is ALWAYS the root branch immediately before the questions branch, after every other root branch including the memory branch.
   - When the response has no questions branch, the summary branch is the LAST root branch of the tree.
   - The summary branch is labelled `Summary` and prefixed with the pushpin icon 📌, per the emoji prefixing section below.
