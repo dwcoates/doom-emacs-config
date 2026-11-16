@@ -38,7 +38,7 @@ func NewMarked(name string) (*Marked, error) {
 	rusage := func(pid int) (float64, float64, error) {
 		buf := make([]byte, sizeofRusageV1)
 		if _, err := procInfo(callPidRusage, pid, rusageInfoV1, buf); err != nil {
-			return 0, 0, err
+			return 0, 0, fmt.Errorf("proc_pid_rusage: %w", err)
 		}
 		at := func(off int) uint64 { return nativeEndian.Uint64(buf[off:]) }
 		own := seconds(at(offUserTime)) + seconds(at(offSystemTime))
@@ -48,6 +48,6 @@ func NewMarked(name string) (*Marked, error) {
 	return &Marked{
 		Name: name,
 		UID:  os.Geteuid(),
-		k:    markedKernel{listPids: listPids, record: record, procArgs: procArgs, rusage: rusage},
+		k:    markedKernel{listPids: listPids, record: record, args: procargs2Args(procArgs), rusage: rusage},
 	}, nil
 }

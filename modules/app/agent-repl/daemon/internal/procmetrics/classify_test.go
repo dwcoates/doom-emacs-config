@@ -129,7 +129,7 @@ func TestClassify(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := classify(tt.ids, testSelf, testEmacs, testSock, argvOf(tt.argv))
+			got := classify(Darwin, tt.ids, testSelf, testEmacs, testSock, argvOf(tt.argv))
 
 			// Assert
 			if len(got.errs) != 0 {
@@ -158,7 +158,7 @@ func TestClassifyFoldsAWebKitDevelopmentBuildIntoItsRole(t *testing.T) {
 			ids := baseHost(Identity{PID: 20, PPID: 1, Name: tt.proc, Responsible: testEmacs})
 
 			// Act
-			got := classify(ids, testSelf, testEmacs, testSock, argvOf(nil))
+			got := classify(Darwin, ids, testSelf, testEmacs, testSock, argvOf(nil))
 
 			// Assert
 			if got.groups[20] != (Group{Process: tt.want}) || len(got.unknownWebKit) != 0 {
@@ -173,7 +173,7 @@ func TestClassifyLeavesAWebKitRoleNoGroupNamesOutAndSaysWhich(t *testing.T) {
 	ids := baseHost(Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.Model", Responsible: testEmacs})
 
 	// Act
-	got := classify(ids, testSelf, testEmacs, testSock, argvOf(nil))
+	got := classify(Darwin, ids, testSelf, testEmacs, testSock, argvOf(nil))
 
 	// Assert
 	if _, ok := got.groups[20]; ok {
@@ -190,7 +190,7 @@ func TestClassifyReportsAnArgvReadThatFailedForAnotherReason(t *testing.T) {
 	denied := errors.New("procmetrics: read the argv of pid 30: operation not permitted")
 
 	// Act
-	got := classify(ids, testSelf, testEmacs, testSock, func(int) ([]string, error) { return nil, denied })
+	got := classify(Darwin, ids, testSelf, testEmacs, testSock, func(int) ([]string, error) { return nil, denied })
 
 	// Assert
 	if len(got.errs) != 1 || !errors.Is(got.errs[0], denied) {
@@ -233,7 +233,7 @@ func TestClassifyWithNoEmacsStreamHasNoEmacsAndNoWebKit(t *testing.T) {
 	ids := baseHost(Identity{PID: 20, PPID: 1, Name: "com.apple.WebKit.WebContent", Responsible: testEmacs})
 
 	// Act
-	got := classify(ids, testSelf, 0, testSock, argvOf(nil))
+	got := classify(Darwin, ids, testSelf, 0, testSock, argvOf(nil))
 
 	// Assert
 	if want := map[int]Group{testSelf: {Process: ProcessDaemon}}; !reflect.DeepEqual(got.groups, want) {

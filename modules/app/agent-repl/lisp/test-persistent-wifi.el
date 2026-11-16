@@ -111,6 +111,11 @@ written inside BODY after the act."
   (dolist (case '(("0" . "automatic") ("1" . "low power") ("2" . "high power") ("7" . "powermode 7")))
     (should (equal (agent-repl-persistent-wifi--power-mode-text (car case)) (cdr case)))))
 
+(ert-deftest agent-repl-test-pwifi-power-mode-text-words-every-linux-profile ()
+  "Every Linux power profile has its words."
+  (dolist (case '(("power-saver" . "power saver") ("balanced" . "balanced") ("performance" . "performance")))
+    (should (equal (agent-repl-persistent-wifi--power-mode-text (car case)) (cdr case)))))
+
 (ert-deftest agent-repl-test-pwifi-energy-mode-text-refuses-an-unworded-arm ()
   "An energy mode arm with no wording is a bug, signalled."
   (should-error (agent-repl-persistent-wifi--energy-mode-text '(:arm :turbo :value nil))))

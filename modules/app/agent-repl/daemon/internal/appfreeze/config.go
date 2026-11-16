@@ -22,8 +22,9 @@ import (
 )
 
 // EnvApps names the applications to freeze, comma-separated by their bundle
-// names ("Slack,Google Chrome"). Unset is DefaultApps; `none` freezes
-// nothing. It is per-user configuration, set in the shell profile like the
+// names ("Slack,Google Chrome"), or on Linux their executables
+// ("slack,chrome"). Unset is DefaultApps on macOS and nothing on Linux; `none`
+// freezes nothing. It is per-user configuration, set in the shell profile like the
 // other persistent-wifi variables.
 const EnvApps = "AGENT_REPL_PERSISTENT_WIFI_FREEZE_APPS"
 
@@ -45,15 +46,23 @@ var neverFrozen = []string{
 	"Emacs", "Zettel",
 	"Terminal", "iTerm", "iTerm2", "Ghostty", "WezTerm", "Alacritty", "kitty", "Warp", "Hyper", "Tabby",
 	"Docker", "Docker Desktop", "OrbStack", "Rancher Desktop", "Podman Desktop",
+	// Linux names the same by their executables.
+	"emacs", "ghostty", "wezterm-gui", "alacritty", "gnome-terminal-server", "konsole", "xterm", "tilix", "foot",
+	"dockerd", "containerd", "podman",
 }
 
 // AppsFromEnv resolves the configured list. Every entry is trimmed; an empty
 // entry, a duplicate, and an entry naming a bundle that is never frozen
 // (neverFrozen) are REFUSED, so a configuration that would freeze the editor
-// or a terminal never starts.
-func AppsFromEnv(getenv func(string) string) ([]string, error) {
+// or a terminal never starts. The list is for the platform goos: Linux has no
+// default list, since which executables draw for a screen nobody sees is each
+// machine's own, so nothing is frozen until EnvApps names some.
+func AppsFromEnv(goos string, getenv func(string) string) ([]string, error) {
 	raw := getenv(EnvApps)
 	if raw == "" {
+		if goos == "linux" {
+			return nil, nil
+		}
 		return append([]string(nil), DefaultApps...), nil
 	}
 	if strings.TrimSpace(raw) == NoApps {
@@ -67,7 +76,7 @@ func AppsFromEnv(getenv func(string) string) ([]string, error) {
 		case name == "":
 			return nil, fmt.Errorf("appfreeze: %s=%q has an empty entry", EnvApps, raw)
 		case strings.ContainsAny(name, "/"):
-			return nil, fmt.Errorf("appfreeze: %s entry %q is a path; name the application's bundle (\"Google Chrome\")", EnvApps, name)
+			return nil, fmt.Errorf("appfreeze: %s entry %q is a path; name the application's bundle (\"Google Chrome\"), or on Linux its executable (\"chrome\")", EnvApps, name)
 		case seen[strings.ToLower(name)]:
 			return nil, fmt.Errorf("appfreeze: %s names %q twice", EnvApps, name)
 		case isNeverFrozen(name):

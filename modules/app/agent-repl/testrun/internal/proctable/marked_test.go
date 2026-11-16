@@ -36,13 +36,13 @@ func (f *fakeMarked) scanner() *Marked {
 			}
 			return r, nil
 		},
-		procArgs: func(pid int) ([]byte, error) {
+		args: procargs2Args(func(pid int) ([]byte, error) {
 			f.argsRead[pid]++
 			if err := f.argsErr[pid]; err != nil {
 				return nil, err
 			}
 			return f.args[pid], nil
-		},
+		}),
 		rusage: func(pid int) (float64, float64, error) {
 			if err := f.cpuErr[pid]; err != nil {
 				return 0, 0, err
@@ -178,11 +178,11 @@ func TestMarkedScanFailures(t *testing.T) {
 		f    *fakeMarked
 		want string
 	}{
-		{name: "the pid list fails", f: &fakeMarked{listErr: boom}, want: "list the processes (proc_info listpids): boom"},
-		{name: "a record fails", f: &fakeMarked{pids: []int{7}, recErr: map[int]error{7: boom}}, want: "read pid 7's record (proc_info bsdinfo): boom"},
-		{name: "an environment fails", f: &fakeMarked{pids: []int{7}, records: mine, argsErr: map[int]error{7: boom}}, want: "read pid 7's environment (sysctl kern.procargs2): boom"},
+		{name: "the pid list fails", f: &fakeMarked{listErr: boom}, want: "list the processes: boom"},
+		{name: "a record fails", f: &fakeMarked{pids: []int{7}, recErr: map[int]error{7: boom}}, want: "read pid 7's record: boom"},
+		{name: "an environment fails", f: &fakeMarked{pids: []int{7}, records: mine, argsErr: map[int]error{7: boom}}, want: "read pid 7's environment: sysctl kern.procargs2: boom"},
 		{name: "an environment is malformed", f: &fakeMarked{pids: []int{7}, records: mine, args: map[int][]byte{7: {1}}}, want: "read pid 7's environment: kern.procargs2: 1 bytes"},
-		{name: "a CPU read fails", f: &fakeMarked{pids: []int{7}, records: mine, args: marked, cpuErr: map[int]error{7: boom}}, want: "read pid 7's CPU (proc_pid_rusage): boom"},
+		{name: "a CPU read fails", f: &fakeMarked{pids: []int{7}, records: mine, args: marked, cpuErr: map[int]error{7: boom}}, want: "read pid 7's CPU: boom"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -8,35 +8,38 @@ import (
 	"time"
 )
 
-// procRecord is what the kernel's BSD record of a process says.
+// procRecord is what the kernel's record of a process says.
 type procRecord struct {
 	Ppid, Pgid int
 	// UID is the process's effective user; the short record leaves it 0.
-	UID    int
-	Status int8
-	Start  time.Time
-	Comm   string
+	UID int
+	// State is ps's letter for the process's state ('Z' a zombie).
+	State byte
+	Start time.Time
+	Comm  string
 }
 
 // kernel is the reads List makes, each answering the kernel's errno: ESRCH
-// for a process gone, EPERM for one this user may not read.
+// for a process gone, EPERM for one this user may not read. Each platform's
+// reads name their own kernel call in their errors (proctable_darwin.go,
+// proctable_linux.go).
 type kernel struct {
 	// listPids answers every pid on the host.
 	listPids func() ([]int, error)
-	// record is a process's full BSD record (proc_info PROC_PIDTBSDINFO).
+	// record is a process's full record.
 	record func(pid int) (procRecord, error)
-	// shortRecord is the record any user may read of any process
-	// (PROC_PIDT_SHORTBSDINFO): no start time.
+	// shortRecord is the record any user may read of any process: no start
+	// time.
 	shortRecord func(pid int) (procRecord, error)
-	// procArgs is the process's kern.procargs2 buffer.
-	procArgs func(pid int) ([]byte, error)
+	// args is the process's argv and environment.
+	args func(pid int) (argv, env []string, err error)
 }
 
 // list reads every process through k.
 func (k kernel) list() ([]Entry, error) {
 	pids, err := k.listPids()
 	if err != nil {
-		return nil, fmt.Errorf("list the processes (proc_info listpids): %w", err)
+		return nil, fmt.Errorf("list the processes: %w", err)
 	}
 	var entries []Entry
 	for _, pid := range pids {
@@ -62,37 +65,45 @@ func (k kernel) entry(pid int) (Entry, bool, error) {
 	if errors.Is(err, syscall.EPERM) {
 		rec, err = k.shortRecord(pid)
 		if err != nil && !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
-			return Entry{}, false, fmt.Errorf("read pid %d's short record (proc_info shortbsdinfo): %w", pid, err)
+			return Entry{}, false, fmt.Errorf("read pid %d's short record: %w", pid, err)
 		}
 		if errors.Is(err, syscall.EPERM) {
 			return Entry{Pid: pid, State: '?'}, true, nil
 		}
 	} else if err != nil && !errors.Is(err, syscall.ESRCH) {
-		return Entry{}, false, fmt.Errorf("read pid %d's record (proc_info bsdinfo): %w", pid, err)
+		return Entry{}, false, fmt.Errorf("read pid %d's record: %w", pid, err)
 	}
 	if errors.Is(err, syscall.ESRCH) {
 		return Entry{}, false, nil
 	}
-	e := Entry{Pid: pid, Ppid: rec.Ppid, Pgid: rec.Pgid, State: stateLetter(rec.Status), Start: rec.Start, Comm: rec.Comm}
+	e := Entry{Pid: pid, Ppid: rec.Ppid, Pgid: rec.Pgid, State: rec.State, Start: rec.Start, Comm: rec.Comm}
 	if e.State == 'Z' {
 		return e, true, nil
 	}
-	buf, err := k.procArgs(pid)
+	argv, env, err := k.args(pid)
 	switch {
 	case err == nil:
-		argv, env, perr := ParseProcArgs(buf)
-		if perr != nil {
-			return Entry{}, false, fmt.Errorf("read pid %d's command line: %w", pid, perr)
-		}
 		e.Argv, e.Env = argv, env
 	case errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.ESRCH), errors.Is(err, syscall.EIO):
 		// Exiting, mid-exec (EIO: its argument area cannot be read, measured
 		// 2026-10-23 on a process exiting under a test), or not readable:
 		// listed by its short name, as ps lists it.
 	default:
-		return Entry{}, false, fmt.Errorf("read pid %d's command line (sysctl kern.procargs2): %w", pid, err)
+		return Entry{}, false, fmt.Errorf("read pid %d's command line: %w", pid, err)
 	}
 	return e, true, nil
+}
+
+// procargs2Args reads argv and the environment from a kern.procargs2 read,
+// naming the call in its failure.
+func procargs2Args(read func(pid int) ([]byte, error)) func(pid int) ([]string, []string, error) {
+	return func(pid int) ([]string, []string, error) {
+		buf, err := read(pid)
+		if err != nil {
+			return nil, nil, fmt.Errorf("sysctl kern.procargs2: %w", err)
+		}
+		return ParseProcArgs(buf)
+	}
 }
 
 var errNoPath = errors.New("kern.procargs2: no executable path")

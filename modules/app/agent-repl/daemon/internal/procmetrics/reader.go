@@ -13,15 +13,22 @@
 // counted exactly like one this daemon spawned:
 //   - the daemon is this process;
 //   - Emacs is the process whose WatchDaemon stream stands (EmacsProcess);
-//   - the WebKit processes are the ones macOS holds Emacs responsible for;
-//   - the store and the sidecar are the processes named for their binaries;
+//   - the WebKit processes are the ones macOS holds Emacs responsible for,
+//     or on Linux WebKitGTK's processes descending from Emacs (Platform);
+//   - the store and the sidecar are the processes named for their binaries
+//     that the platform's service manager runs;
 //   - a shim is a node process whose argv listens on
 //     a shim socket, and the socket's name is its workspace;
 //   - a shim's descendants are its tools (the vendor CLI, shim-lock, every
 //     command the agent runs), the daemon's other descendants are its tools.
 package procmetrics
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+
+	"agentrepl/logging/hostcpu"
+)
 
 // ErrGone is a process that exited between the listing and the read: an
 // ordinary schedule, never an error worth recording.
@@ -30,9 +37,11 @@ var ErrGone = errors.New("procmetrics: the process is gone")
 // Identity is what classifying a process needs, read for every process on
 // the host.
 type Identity struct {
-	PID         int
-	PPID        int
-	Name        string
+	PID  int
+	PPID int
+	Name string
+	// Responsible is the process macOS holds responsible for this one; Linux
+	// has no such record and leaves it zero (Platform.WebKitRole).
 	Responsible int
 	// StartUnixMicros tells a reused pid from the process that held it.
 	StartUnixMicros int64
@@ -45,9 +54,11 @@ type Usage struct {
 	FootprintBytes uint64
 	DiskReadBytes  uint64
 	DiskWriteBytes uint64
-	EnergyJoules   float64
-	Threads        int
-	OpenFDs        int
+	// EnergyJoules is zero where the kernel attributes no energy
+	// (Platform.MeasuresEnergy).
+	EnergyJoules float64
+	Threads      int
+	OpenFDs      int
 }
 
 // Host is the host's own record.
@@ -58,15 +69,19 @@ type Host struct {
 	MemoryBytes      map[string]uint64
 	MemoryTotalBytes uint64
 	// MemoryPressure is the kernel's pressure level: 1 normal, 2 warning, 4
-	// critical.
+	// critical; zero where the kernel has no level
+	// (Platform.MeasuresMemoryPressure).
 	MemoryPressure int
 	// DiskFreeBytes and DiskTotalBytes are the volume holding the state root.
 	DiskFreeBytes  uint64
 	DiskTotalBytes uint64
 }
 
-// Reader reads the kernel. The real one is reader_darwin.go's; tests fake it.
+// Reader reads the kernel. The real ones are reader_darwin.go's and
+// reader_linux.go's; tests fake it.
 type Reader interface {
+	// Platform answers the rules of the kernel this reader reads.
+	Platform() Platform
 	// PIDs lists every process on the host.
 	PIDs() ([]int, error)
 	// Identity reads one process's identity; ErrGone when it already exited.
@@ -77,4 +92,15 @@ type Reader interface {
 	Args(pid int) ([]string, error)
 	// Host reads the host, its disk figures for the volume holding path.
 	Host(path string) (Host, error)
+}
+
+// hostCPUSeconds reads the host's CPU time in each mode through hostcpu, the
+// one reader testrun's CPU governor shares, so the two never disagree on the
+// host's load. Every platform's Host reads it here.
+func hostCPUSeconds() (map[string]float64, error) {
+	load, err := hostcpu.Read()
+	if err != nil {
+		return nil, fmt.Errorf("procmetrics: %w", err)
+	}
+	return map[string]float64{"user": load.User, "system": load.System, "idle": load.Idle, "nice": load.Nice}, nil
 }

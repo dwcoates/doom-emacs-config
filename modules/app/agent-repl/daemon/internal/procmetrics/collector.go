@@ -110,7 +110,7 @@ func New(deps Deps) (*Collector, error) {
 		cpu:             desc("agentrepl_process_cpu_seconds_total", "CPU seconds (user and system) a group of agent-repl processes used since the daemon started.", labels),
 		read:            desc("agentrepl_process_disk_read_bytes_total", "Bytes a group read from disk since the daemon started.", labels),
 		write:           desc("agentrepl_process_disk_written_bytes_total", "Bytes a group wrote to disk since the daemon started.", labels),
-		energy:          desc("agentrepl_process_energy_joules_total", "Energy macOS attributes to a group since the daemon started.", labels),
+		energy:          desc("agentrepl_process_energy_joules_total", "Energy the kernel attributes to a group since the daemon started (macOS only: Linux attributes none).", labels),
 		resident:        desc("agentrepl_process_resident_bytes", "Resident memory of a group's live processes.", labels),
 		footprint:       desc("agentrepl_process_footprint_bytes", "Physical footprint (compressed and swapped included) of a group's live processes.", labels),
 		threads:         desc("agentrepl_process_threads", "Threads in a group's live processes.", labels),
@@ -119,7 +119,7 @@ func New(deps Deps) (*Collector, error) {
 		hostCPU:         desc("agentrepl_host_cpu_seconds_total", "CPU seconds every processor spent in each mode since the daemon started.", []string{"mode"}),
 		hostMemory:      desc("agentrepl_host_memory_bytes", "Physical memory by state.", []string{"state"}),
 		hostMemoryTotal: desc("agentrepl_host_memory_total_bytes", "All physical memory.", nil),
-		hostPressure:    desc("agentrepl_host_memory_pressure", "The kernel's memory pressure level: 1 normal, 2 warning, 4 critical.", nil),
+		hostPressure:    desc("agentrepl_host_memory_pressure", "The kernel's memory pressure level: 1 normal, 2 warning, 4 critical (macOS only).", nil),
 		hostDiskFree:    desc("agentrepl_host_disk_free_bytes", "Free bytes on the volume holding the state root.", nil),
 		hostDiskTotal:   desc("agentrepl_host_disk_total_bytes", "Size of the volume holding the state root.", nil),
 		hostOnBattery:   desc("agentrepl_host_on_battery", "1 while the host runs on battery, 0 on AC.", nil),
@@ -207,13 +207,16 @@ func (c *Collector) collectProcesses(ch chan<- prometheus.Metric) {
 	sort.Slice(groups, func(i, j int) bool {
 		return groups[i].Process+"/"+groups[i].Workspace < groups[j].Process+"/"+groups[j].Workspace
 	})
+	measuresEnergy := c.deps.Reader.Platform().MeasuresEnergy
 	for _, g := range groups {
 		t, s := snapshot[g], sums[g]
 		lv := []string{g.Process, g.Workspace}
 		ch <- prometheus.MustNewConstMetric(c.cpu, prometheus.CounterValue, t.cpu, lv...)
 		ch <- prometheus.MustNewConstMetric(c.read, prometheus.CounterValue, t.read, lv...)
 		ch <- prometheus.MustNewConstMetric(c.write, prometheus.CounterValue, t.write, lv...)
-		ch <- prometheus.MustNewConstMetric(c.energy, prometheus.CounterValue, t.energy, lv...)
+		if measuresEnergy {
+			ch <- prometheus.MustNewConstMetric(c.energy, prometheus.CounterValue, t.energy, lv...)
+		}
 		ch <- prometheus.MustNewConstMetric(c.resident, prometheus.GaugeValue, float64(s.resident), lv...)
 		ch <- prometheus.MustNewConstMetric(c.footprint, prometheus.GaugeValue, float64(s.footprint), lv...)
 		ch <- prometheus.MustNewConstMetric(c.threads, prometheus.GaugeValue, float64(s.threads), lv...)
@@ -248,7 +251,7 @@ func (c *Collector) sample() (map[Group]gauges, map[Group]totals, bool) {
 	}
 	c.note("identity", identityErr)
 	emacs, _ := c.deps.Emacs.PID()
-	classified := classify(ids, c.deps.Self, emacs, c.deps.SockDir, c.deps.Reader.Args)
+	classified := classify(c.deps.Reader.Platform(), ids, c.deps.Self, emacs, c.deps.SockDir, c.deps.Reader.Args)
 	c.note("argv", errors.Join(classified.errs...))
 	c.noteUnknownWebKit(classified.unknownWebKit)
 
@@ -339,7 +342,9 @@ func (c *Collector) collectHost(ch chan<- prometheus.Metric) {
 		ch <- prometheus.MustNewConstMetric(c.hostMemory, prometheus.GaugeValue, float64(h.MemoryBytes[state]), state)
 	}
 	ch <- prometheus.MustNewConstMetric(c.hostMemoryTotal, prometheus.GaugeValue, float64(h.MemoryTotalBytes))
-	ch <- prometheus.MustNewConstMetric(c.hostPressure, prometheus.GaugeValue, float64(h.MemoryPressure))
+	if c.deps.Reader.Platform().MeasuresMemoryPressure {
+		ch <- prometheus.MustNewConstMetric(c.hostPressure, prometheus.GaugeValue, float64(h.MemoryPressure))
+	}
 	ch <- prometheus.MustNewConstMetric(c.hostDiskFree, prometheus.GaugeValue, float64(h.DiskFreeBytes))
 	ch <- prometheus.MustNewConstMetric(c.hostDiskTotal, prometheus.GaugeValue, float64(h.DiskTotalBytes))
 }

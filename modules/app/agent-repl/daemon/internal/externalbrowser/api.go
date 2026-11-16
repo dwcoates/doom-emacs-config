@@ -16,7 +16,7 @@ package externalbrowser
 import (
 	"context"
 	"errors"
-	"os"
+	"os/exec"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -37,17 +37,16 @@ const EnvBrowserCmd = "AGENT_REPL_BROWSER_CMD"
 // url to, and OpenExternal answers no_browser_configured instead of pretending
 // a launch and failing.
 func DefaultLauncherConfigured() bool {
-	return DefaultLauncherConfiguredAt(DefaultBinary)
+	return DefaultLauncherConfiguredAt(Host.Binary)
 }
 
 // DefaultLauncherConfiguredAt is DefaultLauncherConfigured against a named
-// path. The pinned default is an absolute macOS application path, so the
-// question "is this launcher present" has no seam at all otherwise; this is
-// that seam, and DefaultLauncherConfigured is exactly this function applied to
-// DefaultBinary.
-func DefaultLauncherConfiguredAt(path string) bool {
-	info, err := os.Stat(path)
-	return err == nil && !info.IsDir()
+// launcher: an absolute path, or a name looked up on PATH. The pinned default
+// has no seam of its own, so this is that seam, and DefaultLauncherConfigured
+// is exactly this function applied to Host.Binary.
+func DefaultLauncherConfiguredAt(launcher string) bool {
+	_, err := exec.LookPath(launcher)
+	return err == nil
 }
 
 // Opener opens links externally.
@@ -66,24 +65,28 @@ type Opener interface {
 // Config assembles an Opener.
 type Config struct {
 	// LauncherCmd is the command a url is handed to. Empty takes
-	// $AGENT_REPL_BROWSER_CMD, and an unset environment takes DefaultBinary
+	// $AGENT_REPL_BROWSER_CMD, and an unset environment takes Platform.Binary
 	// (with the routed-profile argv and the activation step). A command from
 	// either override is invoked as `<cmd> <url>` and nothing else.
 	LauncherCmd string
 	// LocalStatePath is Chrome's Local State document, read on the default
 	// path to route an account email to its on-disk profile directory. Empty
-	// takes DefaultLocalStatePath; a path that cannot be read fails the open
+	// takes the Platform's LocalState; a path that cannot be read fails the open
 	// of any link whose account has an email.
 	LocalStatePath string
 	// DefaultLauncherBin is the browser executable the DEFAULT path hands a
-	// url to. Empty takes DefaultBinary. It exists for the same reason
+	// url to. Empty takes Platform.Binary. It exists for the same reason
 	// LauncherCmd does — the launcher's spelling is injected rather than
 	// hardcoded — and it is the only way a test drives the default path,
 	// whose binary is an absolute macOS application path.
 	DefaultLauncherBin string
 	// ActivateBin is the command that raises the browser before the url is
-	// handed over on the DEFAULT path. Empty takes osascript.
+	// handed over on the DEFAULT path, with the Platform's ActivateArgv. Empty
+	// takes the Platform's ActivateBin, itself empty where no raise is made.
 	ActivateBin string
+	// Platform is the platform whose defaults every empty field takes; nil is
+	// Host.
+	Platform *Platform
 	// LaunchWindow is how long the launcher is given to hand the url off and
 	// exit before it is presumed to have BECOME the browser (a cold Chrome
 	// launch runs the browser in the invoked process, which never exits).
@@ -94,7 +97,7 @@ type Config struct {
 	// every Slack link to the browser.
 	SlackTeams SlackTeams
 	// SlackOpenBin is the program a Slack deep link is handed to. Empty takes
-	// SlackOpenBinary.
+	// the Platform's SlackOpen.
 	SlackOpenBin string
 	// Logger is required; every branch of a launch is recorded.
 	Logger dlog.Logger

@@ -15,6 +15,7 @@ require (
 	agentrepl/tldr v0.0.0 // indirect
 	agentrepl/tldrprompt v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/godbus/dbus/v5 v5.2.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-pointer v0.0.1 // indirect

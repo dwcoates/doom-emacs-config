@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -60,10 +61,10 @@ func modeName(m modeKnown) string {
 // the failed arm; the standing then says the display is awake, and the next
 // lid or mode change tries again. Caller holds mu.
 func (c *Controller) sleepDisplayLocked(ctx context.Context, trigger string) *agentreplv1.UpdatePersistentWifiModeDisplay {
-	if _, err := run(ctx, c.runner, c.cfg.Tools.Pmset, "displaysleepnow"); err != nil {
+	if err := c.host.SleepDisplay(ctx); err != nil {
 		c.displayCause = err.Error()
 		c.log.Error(opDisplay, "the display could not be put to sleep for the closed lid; it stays awake", dlog.Context{
-			"trigger": trigger, "tool": c.cfg.Tools.Pmset, "cause": err.Error()})
+			"trigger": trigger, "cause": err.Error()})
 		return displayFailed(err.Error())
 	}
 	c.displayAsleep, c.displayCause = true, ""
@@ -82,9 +83,9 @@ func (c *Controller) wakeDisplayLocked(ctx context.Context, trigger string) *age
 		c.displayCause = ""
 		return displayUnchanged()
 	}
-	if _, err := run(ctx, c.runner, c.cfg.Tools.Caffeinate, "-u", "-t", "1"); err != nil {
+	if err := c.host.WakeDisplay(ctx); err != nil {
 		c.log.Error(opDisplay, "the display could not be woken from the quiet state's sleep", dlog.Context{
-			"trigger": trigger, "tool": c.cfg.Tools.Caffeinate, "cause": err.Error()})
+			"trigger": trigger, "cause": err.Error()})
 		c.displayAsleep = false
 		return displayFailed(err.Error())
 	}
@@ -108,12 +109,12 @@ func (c *Controller) restoreLegacyDimLocked(ctx context.Context) {
 	if !ok {
 		return
 	}
-	fields := dlog.Context{"restore_level": level, "tool": c.cfg.Tools.Brightness}
-	if !c.exists(c.cfg.Tools.Brightness) {
+	fields := dlog.Context{"restore_level": level}
+	if err := c.host.SetBrightness(ctx, level); errors.Is(err, errNoBrightness) {
+		fields["cause"] = err.Error()
 		c.log.Error(opDisplay, "a lid dim an earlier build left in force cannot be undone: the brightness tool is not installed; set the brightness by hand", fields)
 		return
-	}
-	if _, err := run(ctx, c.runner, c.cfg.Tools.Brightness, formatLevel(level)); err != nil {
+	} else if err != nil {
 		fields["cause"] = err.Error()
 		c.log.Error(opDisplay, "a lid dim an earlier build left in force could not be undone; it is tried again at the next boot", fields)
 		return

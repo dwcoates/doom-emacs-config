@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package proctable
 
@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// List is darwin's alone; anywhere else it fails loudly.
+// List is darwin's and linux's alone; anywhere else it fails loudly.
 func List() ([]Entry, error) {
 	return nil, fmt.Errorf("reading the process table is not implemented on %s: %w", runtime.GOOS, syscall.ENOSYS)
 }

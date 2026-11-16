@@ -2,9 +2,15 @@ package appfreeze
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"agentrepl/logging/procstat"
 )
 
 // Process is one running process as the process table lists it.
@@ -79,6 +85,65 @@ func bundleOf(path, app string) bool {
 	return strings.Contains(path, "/"+app+".app/")
 }
 
+// executableOf is Linux's bundleOf, where an application is named by its
+// executable: path's own name is app, or app names a directory path lies
+// under (Chrome's helpers run from /opt/google/chrome/). A process of another
+// executable whose name merely starts the same is not app's.
+func executableOf(path, app string) bool {
+	return filepath.Base(path) == app || strings.Contains(path, "/"+app+"/")
+}
+
+// AppOf answers whether the executable at path is app's.
+type AppOf func(path, app string) bool
+
+// AppMatcherFor answers goos's AppOf: an application is a bundle on macOS and
+// an executable on Linux.
+func AppMatcherFor(goos string) AppOf {
+	if goos == "linux" {
+		return executableOf
+	}
+	return bundleOf
+}
+
+// ProcLister lists the process table from a /proc tree (procstat.Tree), as
+// Linux names a process's executable only there: `ps` prints its 15-byte
+// command name. Another user's process hides its executable, and such a
+// process is no application of this user's, so it is listed with no path; a
+// kernel thread has none either.
+func ProcLister(tree procstat.Tree) Lister {
+	return func(context.Context) ([]Process, error) {
+		pids, err := tree.PIDs()
+		if err != nil {
+			return nil, err
+		}
+		var procs []Process
+		for _, pid := range pids {
+			line, err := tree.Stat(pid)
+			if procstat.Gone(err) {
+				continue
+			}
+			if err != nil {
+				return nil, err
+			}
+			ppid, err := line.Uint(procstat.FieldPPID)
+			if err != nil {
+				return nil, fmt.Errorf("pid %d: %w", pid, err)
+			}
+			exe, err := os.Readlink(tree.Path(pid, "exe"))
+			switch {
+			case err == nil:
+				exe = strings.TrimSuffix(exe, " (deleted)")
+			case procstat.Gone(err) || errors.Is(err, fs.ErrPermission):
+				exe = ""
+			default:
+				return nil, fmt.Errorf("read the executable of pid %d: %w", pid, err)
+			}
+			procs = append(procs, Process{PID: pid, PPID: int(ppid), Path: exe})
+		}
+		return procs, nil
+	}
+}
+
 // Protection says which processes are never frozen: the daemon itself and
 // every ancestor of it below launchd (the editor that started it), every
 // process whose executable lies under one of PathPrefixes (agent-repl's own
@@ -93,7 +158,7 @@ type Protection struct {
 }
 
 // protected answers the pids Protection covers in table.
-func (p Protection) protected(table []Process) map[int]bool {
+func (p Protection) protected(table []Process, appOf AppOf) map[int]bool {
 	byPID := map[int]Process{}
 	children := map[int][]int{}
 	for _, proc := range table {
@@ -118,7 +183,7 @@ func (p Protection) protected(table []Process) map[int]bool {
 			}
 		}
 		for _, app := range neverFrozen {
-			if bundleOf(proc.Path, app) {
+			if appOf(proc.Path, app) {
 				roots[proc.PID] = true
 			}
 		}

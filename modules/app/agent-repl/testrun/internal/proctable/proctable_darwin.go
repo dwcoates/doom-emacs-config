@@ -45,7 +45,7 @@ type bsdShort struct {
 
 // List answers every process on the host.
 func List() ([]Entry, error) {
-	return kernel{listPids: listPids, record: record, shortRecord: shortRecord, procArgs: procArgs}.list()
+	return kernel{listPids: listPids, record: record, shortRecord: shortRecord, args: procargs2Args(procArgs)}.list()
 }
 
 func procInfo(call, pid, flavor int, buf []byte) (int, error) {
@@ -63,12 +63,12 @@ func procInfo(call, pid, flavor int, buf []byte) (int, error) {
 func listPids() ([]int, error) {
 	need, err := procInfo(callListPids, allPids, 0, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("proc_info listpids: %w", err)
 	}
 	raw := make([]byte, need+listPidsHeadroom*4)
 	n, err := procInfo(callListPids, allPids, 0, raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("proc_info listpids: %w", err)
 	}
 	pids := make([]int, 0, n/4)
 	for i := 0; i+4 <= n; i += 4 {
@@ -96,10 +96,10 @@ func pidInfo(pid, flavor, size int, out any) error {
 func record(pid int) (procRecord, error) {
 	var bi bsdInfo
 	if err := pidInfo(pid, flavorBSDInfo, sizeofBSDInfo, &bi); err != nil {
-		return procRecord{}, err
+		return procRecord{}, fmt.Errorf("proc_info bsdinfo: %w", err)
 	}
 	return procRecord{
-		Ppid: int(bi.Ppid), Pgid: int(bi.Pgid), UID: int(bi.UID), Status: int8(bi.Status),
+		Ppid: int(bi.Ppid), Pgid: int(bi.Pgid), UID: int(bi.UID), State: stateLetter(int8(bi.Status)),
 		Start: time.Unix(int64(bi.StartSec), int64(bi.StartUsec)*1000),
 		Comm:  unix.ByteSliceToString(bi.Comm[:]),
 	}, nil
@@ -108,9 +108,9 @@ func record(pid int) (procRecord, error) {
 func shortRecord(pid int) (procRecord, error) {
 	var si bsdShort
 	if err := pidInfo(pid, flavorBSDShort, sizeofBSDShort, &si); err != nil {
-		return procRecord{}, err
+		return procRecord{}, fmt.Errorf("proc_info shortbsdinfo: %w", err)
 	}
-	return procRecord{Ppid: int(si.Ppid), Pgid: int(si.Pgid), Status: int8(si.Status), Comm: unix.ByteSliceToString(si.Comm[:])}, nil
+	return procRecord{Ppid: int(si.Ppid), Pgid: int(si.Pgid), State: stateLetter(int8(si.Status)), Comm: unix.ByteSliceToString(si.Comm[:])}, nil
 }
 
 func procArgs(pid int) ([]byte, error) { return unix.SysctlRaw("kern.procargs2", pid) }

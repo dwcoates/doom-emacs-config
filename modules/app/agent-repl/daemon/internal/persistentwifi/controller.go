@@ -79,11 +79,10 @@ type Deps struct {
 // turns over under the same lock as the turn.
 type Controller struct {
 	cfg         Config
-	runner      Runner
+	host        Host
 	clock       clock.Clock
 	network     func() <-chan struct{}
 	power       kernelevent.Source
-	exists      func(string) bool
 	onChange    func(*agentreplv1.PersistentWifiState)
 	log         dlog.Logger
 	lidWatch    LidWatcher
@@ -118,12 +117,8 @@ type Controller struct {
 	// failover is the Wi-Fi failover's retry schedule since Wi-Fi was lost;
 	// the zero value while the failover stands down (failoverDueLocked).
 	failover failoverSchedule
-	// scanDir is where the Wi-Fi helper writes its answers (Deps.ScanDir).
-	scanDir string
 	// scanBound bounds each scan (scanBound, the constant; a test shortens it).
 	scanBound time.Duration
-	// scanSeq names each scan's answer file apart from the last's.
-	scanSeq int
 	// scanCause is why the last Wi-Fi scan named no networks; empty while
 	// scans name them (recordStandingCause).
 	scanCause string
@@ -176,20 +171,17 @@ func New(d Deps) (*Controller, error) {
 	case d.PowerChanges == nil:
 		return nil, fmt.Errorf("persistentwifi: the power settings' change signal is required")
 	}
-	exists := d.Exists
-	if exists == nil {
-		exists = regularFile
+	host, err := NewHost(d.Config, d.Runner, d.Exists, d.ScanDir)
+	if err != nil {
+		return nil, err
 	}
 	c := &Controller{
-		cfg: d.Config, runner: d.Runner, clock: d.Clock,
+		cfg: d.Config, host: host, clock: d.Clock,
 		network: d.NetworkChanged, power: d.PowerChanges,
-		exists: exists, onChange: d.OnChange, log: d.Log,
+		onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, sourceWatch: d.PowerSource, legacy: d.LegacyLidDims, freezer: d.Freezer,
 		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
-		scanDir: d.ScanDir, scanBound: scanBound,
-	}
-	if c.scanDir == "" {
-		c.scanDir = os.TempDir()
+		scanBound: scanBound,
 	}
 	d.Freezer.OnChange(c.frozenChanged)
 	return c, nil
@@ -248,7 +240,7 @@ func (c *Controller) Run(ctx context.Context) error {
 		case err := <-power:
 			if err != nil {
 				c.log.Error(opProbe, "the power settings could not be followed; a mode changed outside agent-repl is heard only on the next network change",
-					dlog.Context{"dir": PowerPrefsDir, "cause": err.Error()})
+					dlog.Context{"source": c.cfg.PowerChangesSource(), "cause": err.Error()})
 				power = nil
 				continue
 			}
@@ -263,7 +255,7 @@ func (c *Controller) Run(ctx context.Context) error {
 // publishes. Caller holds mu.
 func (c *Controller) readLocked(ctx context.Context) reading {
 	start := c.clock.Now()
-	rd := probe(ctx, c.runner, c.cfg.Tools)
+	rd := c.host.Read(ctx)
 	// THE READ IS TIMED: it runs three host tools in sequence, and the boot
 	// reads it before serving, so its cost is the boot's (an e2e boot under
 	// load spent 1.74s between its reconciliation and serving with nothing said).
@@ -373,7 +365,7 @@ func (c *Controller) Update(ctx context.Context, req *agentreplv1.UpdatePersiste
 			dlog.Context{"on": on, "hotspot": failed.GetNetworkName(), "cause": failed.GetDetail()})
 	}
 
-	if err := c.applyPower(ctx, on); err != nil {
+	if err := c.host.SetSleepDisabled(ctx, on); err != nil {
 		c.log.Error(opUpdate, "the power settings change was refused; the mode is as it was",
 			dlog.Context{"on": on, "hotspot_outcome": hotspotArm(hotspotOutcome), "cause": err.Error()})
 		c.readLocked(ctx)

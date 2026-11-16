@@ -1,4 +1,4 @@
-//go:build !darwin
+//go:build !darwin && !linux
 
 package reap
 
@@ -8,7 +8,7 @@ import (
 	"syscall"
 )
 
-// Getsid reads a process's session. Only darwin's getsid(2) is wired; the
+// Getsid reads a process's session. Only darwin's and linux's getsid(2) is wired; the
 // reap fails loudly anywhere else (see exit_other.go).
 func Getsid(int) (int, error) {
 	return 0, fmt.Errorf("reading a process's session is not implemented on %s: %w", runtime.GOOS, syscall.ENOSYS)

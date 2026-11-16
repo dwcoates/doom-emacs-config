@@ -13,27 +13,6 @@ import (
 	"agent-repld/internal/usersetup"
 )
 
-const (
-	// DefaultBinary is the browser executable a url is handed to when nothing
-	// overrides it.
-	//
-	// Chrome's own executable is invoked directly rather than through `open`:
-	// macOS `open -a Foo --args …` DROPS the arguments whenever Foo is already
-	// running, so `--profile-directory` would be honored on a cold launch and
-	// silently ignored on every link after it. Invoked directly, Chrome hands
-	// the url to the running browser over its singleton socket TOGETHER with
-	// the requested profile, which is the only invocation that lands the tab in
-	// a specific profile's window reliably.
-	DefaultBinary = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
-
-	// DefaultApp is the application name used to raise the browser BEFORE the
-	// url is handed over. See openDefault for why the activation goes first.
-	DefaultApp = "Google Chrome"
-
-	// activateBinary raises an application on macOS.
-	activateBinary = "osascript"
-)
-
 // DefaultLaunchWindow is how long a launcher is given to exit before it is
 // presumed to have become the browser itself.
 const DefaultLaunchWindow = 2 * time.Second
@@ -43,6 +22,7 @@ type opener struct {
 	launcherCmd    string
 	defaultBin     string
 	activateBin    string
+	activateArgv   []string
 	localStatePath string
 	slackTeams     SlackTeams
 	slackOpenBin   string
@@ -52,10 +32,15 @@ type opener struct {
 
 // newOpener resolves every default and builds the opener.
 func newOpener(cfg Config) *opener {
+	platform := Host
+	if cfg.Platform != nil {
+		platform = *cfg.Platform
+	}
 	o := &opener{
 		launcherCmd:    cfg.LauncherCmd,
 		defaultBin:     cfg.DefaultLauncherBin,
 		activateBin:    cfg.ActivateBin,
+		activateArgv:   platform.ActivateArgv,
 		localStatePath: cfg.LocalStatePath,
 		slackTeams:     cfg.SlackTeams,
 		slackOpenBin:   cfg.SlackOpenBin,
@@ -66,16 +51,16 @@ func newOpener(cfg Config) *opener {
 		o.launcherCmd = os.Getenv(EnvBrowserCmd)
 	}
 	if o.defaultBin == "" {
-		o.defaultBin = DefaultBinary
+		o.defaultBin = platform.Binary
 	}
 	if o.activateBin == "" {
-		o.activateBin = activateBinary
+		o.activateBin = platform.ActivateBin
 	}
 	if o.localStatePath == "" {
-		o.localStatePath = DefaultLocalStatePath()
+		o.localStatePath = platform.localStatePath()
 	}
 	if o.slackOpenBin == "" {
-		o.slackOpenBin = SlackOpenBinary
+		o.slackOpenBin = platform.SlackOpen
 	}
 	if o.launchWindow <= 0 {
 		o.launchWindow = DefaultLaunchWindow
@@ -124,7 +109,7 @@ func LaunchArgv(profile, url string) []string {
 	return []string{"--profile-directory=" + profile, url}
 }
 
-// ActivateArgv is the osascript argument list that raises the browser.
+// ActivateArgv is the osascript argument list that raises app on macOS.
 func ActivateArgv(app string) []string {
 	return []string{"-e", fmt.Sprintf("tell application %q to activate", app)}
 }
@@ -275,15 +260,8 @@ func (o *opener) openOverridden(ctx context.Context, url string) error {
 // A failed raise and a failed hand-off are distinct errors: a link the user
 // clicked that silently went nowhere is worse than a loud failure.
 func (o *opener) openDefault(ctx context.Context, url, profile string) error {
-	if err := o.run(ctx, o.activateBin, ActivateArgv(DefaultApp)); err != nil {
-		wrapped := fmt.Errorf("externalbrowser: raising %q before opening %s: %w", DefaultApp, url, err)
-		o.log.Error("daemon.externalbrowser.open", "could not raise the external browser", dlog.Context{
-			"url":    url,
-			"app":    DefaultApp,
-			"branch": "activate-failed",
-			"error":  wrapped.Error(),
-		})
-		return wrapped
+	if err := o.activate(ctx, url); err != nil {
+		return err
 	}
 	if err := o.run(ctx, o.defaultBin, LaunchArgv(profile, url)); err != nil {
 		wrapped := fmt.Errorf("externalbrowser: opening %s in profile %q: %w", url, profile, err)
@@ -300,6 +278,29 @@ func (o *opener) openDefault(ctx context.Context, url, profile string) error {
 		"profile": profile,
 		"branch":  "default",
 	})
+	return nil
+}
+
+// activate raises the browser, on a platform whose browser does not raise
+// itself (Platform.ActivateBin).
+func (o *opener) activate(ctx context.Context, url string) error {
+	if o.activateBin == "" {
+		o.log.Debug("daemon.externalbrowser.open", "the browser raises its own window; no raise is made", dlog.Context{
+			"url":    url,
+			"branch": "no-activate",
+		})
+		return nil
+	}
+	if err := o.run(ctx, o.activateBin, o.activateArgv); err != nil {
+		wrapped := fmt.Errorf("externalbrowser: raising the browser with %s before opening %s: %w", o.activateBin, url, err)
+		o.log.Error("daemon.externalbrowser.open", "could not raise the external browser", dlog.Context{
+			"url":      url,
+			"activate": append([]string{o.activateBin}, o.activateArgv...),
+			"branch":   "activate-failed",
+			"error":    wrapped.Error(),
+		})
+		return wrapped
+	}
 	return nil
 }
 

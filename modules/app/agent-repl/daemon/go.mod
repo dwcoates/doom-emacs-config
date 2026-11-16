@@ -9,6 +9,7 @@ require (
 	agentrepl/testrun v0.0.0
 	connectrpc.com/connect v1.17.0
 	github.com/creack/pty v1.1.24
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/google/uuid v1.6.0
 	github.com/prometheus/client_golang v1.23.2
 	github.com/tree-sitter/go-tree-sitter v0.25.0

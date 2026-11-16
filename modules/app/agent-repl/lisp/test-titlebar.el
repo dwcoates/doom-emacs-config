@@ -225,16 +225,51 @@ frame\='s paint is undone afterwards, so no case leaks into another."
   "The title bar\='s orange is the one the tab dot and the webapp draw."
   (should (equal agent-repl-titlebar-unfocused-color agent-repl--color-compaction-orange)))
 
+(defmacro agent-repl-test-titlebar--installing (system &rest body)
+  "Install the title bar on SYSTEM into empty hooks, then run BODY.
+`infos\=' collects every line the info rung receives, and the paint the
+install makes on macOS is stubbed out."
+  (declare (indent 1))
+  `(let ((agent-repl-focus-settled-hook nil)
+         (after-make-frame-functions nil)
+         (enable-theme-functions nil)
+         (infos nil))
+     (cl-letf (((symbol-function 'agent-repl-titlebar-sync) #'ignore)
+               ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+       (agent-repl--titlebar-install ,system)
+       ,@body)))
+
 (ert-deftest agent-repl-test-titlebar-rides-the-focus-settled-hook ()
-  "The title bar follows every settled focus change."
-  (should (memq #'agent-repl-titlebar-sync agent-repl-focus-settled-hook)))
+  "On macOS the title bar follows every settled focus change."
+  (agent-repl-test-titlebar--installing 'darwin
+    (should (memq #'agent-repl-titlebar-sync agent-repl-focus-settled-hook))))
 
 (ert-deftest agent-repl-test-titlebar-paints-every-new-frame ()
-  "A frame made while Emacs is unfocused is painted at once."
-  (should (memq #'agent-repl-titlebar-sync after-make-frame-functions)))
+  "On macOS a frame made while Emacs is unfocused is painted at once."
+  (agent-repl-test-titlebar--installing 'darwin
+    (should (memq #'agent-repl-titlebar-sync after-make-frame-functions))))
 
 (ert-deftest agent-repl-test-titlebar-repaints-on-every-theme-load ()
-  "A theme load repaints the title bars."
-  (should (memq #'agent-repl--titlebar-on-theme enable-theme-functions)))
+  "On macOS a theme load repaints the title bars."
+  (agent-repl-test-titlebar--installing 'darwin
+    (should (memq #'agent-repl--titlebar-on-theme enable-theme-functions))))
+
+(ert-deftest agent-repl-test-titlebar-installs-nothing-on-linux ()
+  "On Linux the title bar rides no hook at all."
+  (agent-repl-test-titlebar--installing 'gnu/linux
+    (should-not agent-repl-focus-settled-hook)
+    (should-not after-make-frame-functions)
+    (should-not enable-theme-functions)))
+
+(ert-deftest agent-repl-test-titlebar-says-it-is-unavailable-on-linux ()
+  "On Linux the log says the title bar is unavailable, and why."
+  (agent-repl-test-titlebar--installing 'gnu/linux
+    (should (equal (length infos) 1))
+    (should (string-match-p "elisp.titlebar.unavailable system-type=gnu/linux: .*macOS's alone" (car infos)))))
+
+(ert-deftest agent-repl-test-titlebar-says-nothing-on-macos ()
+  "On macOS no unavailability is logged."
+  (agent-repl-test-titlebar--installing 'darwin
+    (should-not infos)))
 
 ;;; test-titlebar.el ends here

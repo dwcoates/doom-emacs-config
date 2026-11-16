@@ -3,20 +3,23 @@ package procgroup
 import (
 	"errors"
 	"fmt"
-	"io/fs"
-	"os"
 	"strconv"
+
+	"agentrepl/logging/procstat"
 )
+
+// proc is the host's /proc.
+var proc = procstat.New("/proc")
 
 // readStat reads pid's /proc/<pid>/stat line, answering gone for a pid with
 // no process.
 func readStat(pid int) (stat string, gone bool, err error) {
-	raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
-	if errors.Is(err, fs.ErrNotExist) {
+	raw, err := proc.Read(pid, "stat")
+	if errors.Is(err, procstat.ErrGone) {
 		return "", true, nil
 	}
 	if err != nil {
-		return "", false, fmt.Errorf("read /proc/%d/stat: %w", pid, err)
+		return "", false, err
 	}
 	return string(raw), false, nil
 }
@@ -30,7 +33,7 @@ func ReadState(pid int) (State, error) {
 	if err != nil {
 		return State{}, err
 	}
-	line, err := ParseStat(raw)
+	line, err := procstat.ParseStat(raw)
 	if err != nil {
 		return State{}, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 	}
@@ -47,25 +50,21 @@ func ReadState(pid int) (State, error) {
 // LiveMembers answers the members of process group pgid that have not
 // exited: everything in the group but its zombies and dead entries.
 func LiveMembers(pgid int) ([]Member, error) {
-	entries, err := os.ReadDir("/proc")
+	pids, err := proc.PIDs()
 	if err != nil {
-		return nil, fmt.Errorf("list /proc: %w", err)
+		return nil, err
 	}
 	var live []Member
-	for _, e := range entries {
-		pid, err := strconv.Atoi(e.Name())
-		if err != nil {
-			continue
-		}
-		raw, err := os.ReadFile("/proc/" + e.Name() + "/stat")
-		if errors.Is(err, fs.ErrNotExist) {
+	for _, pid := range pids {
+		raw, err := proc.Read(pid, "stat")
+		if errors.Is(err, procstat.ErrGone) {
 			continue
 		}
 		if err != nil {
 			return nil, err
 		}
 		// The state, ppid and pgrp follow the parenthesized command name.
-		line, err := ParseStat(string(raw))
+		line, err := procstat.ParseStat(string(raw))
 		if err != nil {
 			return nil, fmt.Errorf("unparseable /proc/%d/stat: %w", pid, err)
 		}

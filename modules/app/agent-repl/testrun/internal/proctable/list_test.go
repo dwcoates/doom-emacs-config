@@ -116,7 +116,7 @@ func (f fakeKernel) kernel() kernel {
 			}
 			return f.shorts[pid], nil
 		},
-		procArgs: func(pid int) ([]byte, error) {
+		args: procargs2Args(func(pid int) ([]byte, error) {
 			if b, ok := f.args[pid]; ok {
 				return b, nil
 			}
@@ -124,7 +124,7 @@ func (f fakeKernel) kernel() kernel {
 				return nil, err
 			}
 			return nil, syscall.EINVAL
-		},
+		}),
 	}
 }
 
@@ -134,13 +134,13 @@ func TestListReadsEveryProcess(t *testing.T) {
 	k := fakeKernel{
 		pids: []int{0, 10, 11, 12, 13, 14, 15, 16},
 		records: map[int]procRecord{
-			10: {Ppid: 1, Pgid: 10, Status: 3, Start: start, Comm: "sh"},
-			11: {Ppid: 10, Pgid: 10, Status: 5, Start: start, Comm: "zomb"},
-			12: {Ppid: 10, Pgid: 10, Status: 2, Start: start, Comm: "exiting"},
-			16: {Ppid: 10, Pgid: 10, Status: 2, Start: start, Comm: "mid-exec"},
+			10: {Ppid: 1, Pgid: 10, State: 'S', Start: start, Comm: "sh"},
+			11: {Ppid: 10, Pgid: 10, State: 'Z', Start: start, Comm: "zomb"},
+			12: {Ppid: 10, Pgid: 10, State: 'R', Start: start, Comm: "exiting"},
+			16: {Ppid: 10, Pgid: 10, State: 'R', Start: start, Comm: "mid-exec"},
 		},
 		recErr:  map[int]error{14: syscall.EPERM, 15: syscall.EPERM},
-		shorts:  map[int]procRecord{14: {Ppid: 1, Pgid: 14, Status: 3, Comm: "rootd"}},
+		shorts:  map[int]procRecord{14: {Ppid: 1, Pgid: 14, State: 'S', Comm: "rootd"}},
 		shortEr: map[int]error{15: syscall.EPERM},
 		args:    map[int][]byte{10: procArgsBuf(1, "/bin/sh", "sh", "A=1"), 14: procArgsBuf(1, "/usr/libexec/rootd", "/usr/libexec/rootd")},
 		argsErr: map[int]error{12: syscall.EINVAL, 16: syscall.EIO},
@@ -173,11 +173,11 @@ func TestListFailures(t *testing.T) {
 		k    fakeKernel
 		want string
 	}{
-		{name: "the pid list fails", k: fakeKernel{listErr: boom}, want: "list the processes (proc_info listpids): boom"},
-		{name: "a record fails", k: fakeKernel{pids: []int{7}, recErr: map[int]error{7: boom}}, want: "read pid 7's record (proc_info bsdinfo): boom"},
-		{name: "a short record fails", k: fakeKernel{pids: []int{7}, recErr: map[int]error{7: syscall.EPERM}, shortEr: map[int]error{7: boom}}, want: "read pid 7's short record (proc_info shortbsdinfo): boom"},
-		{name: "a command line fails", k: fakeKernel{pids: []int{7}, records: map[int]procRecord{7: {Status: 3}}, argsErr: map[int]error{7: boom}}, want: "read pid 7's command line (sysctl kern.procargs2): boom"},
-		{name: "a command line is malformed", k: fakeKernel{pids: []int{7}, records: map[int]procRecord{7: {Status: 3}}, args: map[int][]byte{7: {1}}}, want: "read pid 7's command line: kern.procargs2: 1 bytes"},
+		{name: "the pid list fails", k: fakeKernel{listErr: boom}, want: "list the processes: boom"},
+		{name: "a record fails", k: fakeKernel{pids: []int{7}, recErr: map[int]error{7: boom}}, want: "read pid 7's record: boom"},
+		{name: "a short record fails", k: fakeKernel{pids: []int{7}, recErr: map[int]error{7: syscall.EPERM}, shortEr: map[int]error{7: boom}}, want: "read pid 7's short record: boom"},
+		{name: "a command line fails", k: fakeKernel{pids: []int{7}, records: map[int]procRecord{7: {State: 'S'}}, argsErr: map[int]error{7: boom}}, want: "read pid 7's command line: sysctl kern.procargs2: boom"},
+		{name: "a command line is malformed", k: fakeKernel{pids: []int{7}, records: map[int]procRecord{7: {State: 'S'}}, args: map[int][]byte{7: {1}}}, want: "read pid 7's command line: kern.procargs2: 1 bytes"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

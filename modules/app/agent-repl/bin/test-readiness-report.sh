@@ -96,6 +96,7 @@ make_repo() {
              "$root/webapp/dist" "$root/home/.cache/agent-repl/bin"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
+    cp "$THIS_DIR/lib-stat.sh" "$root/bin/lib-stat.sh"
 
     # Mirror the real repo, where every build output is ignored. Without this a
     # fixture commit would SWEEP THE STAMPS INTO THE HISTORY, and a later revert
@@ -534,6 +535,7 @@ t_no_git_checkout_exits_nonzero() {
     mkdir -p "$root/bin" "$root/home"
     cp "$SCRIPT_UNDER_TEST" "$root/bin/readiness-report.sh"
     cp "$LIB_UNDER_TEST" "$root/bin/lib-deploy-stamp.sh"
+    cp "$THIS_DIR/lib-stat.sh" "$root/bin/lib-stat.sh"
     make_stubs "$root/stubs"
     # A temp dir can sit under an unrelated checkout on some machines; point
     # git at a ceiling so the probe is decided by THIS tree.

@@ -146,11 +146,15 @@ Nil when the lid is not yet heard and no quiet state stands."
       (arm (error "agent-repl-persistent-wifi: hotspot arm %S has no wording" arm)))))
 
 (defun agent-repl-persistent-wifi--power-mode-text (power-mode)
-  "Return the words for POWER-MODE, `pmset''s powermode value verbatim."
+  "Return the words for POWER-MODE, the host's energy mode verbatim.
+macOS names it by `pmset''s powermode value, Linux by its power profile."
   (pcase power-mode
     ("0" "automatic")
     ("1" "low power")
     ("2" "high power")
+    ("power-saver" "power saver")
+    ("balanced" "balanced")
+    ("performance" "performance")
     (_ (format "powermode %s" power-mode))))
 
 (defun agent-repl-persistent-wifi--energy-mode-text (energy-mode)

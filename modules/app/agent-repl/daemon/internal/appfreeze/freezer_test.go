@@ -115,7 +115,8 @@ func newRig(t *testing.T, apps []string, signalErrs map[int]error, listErr error
 	store.events = &r.events
 	r.store = store
 	f, err := New(Deps{
-		Apps: apps,
+		AppOf: bundleOf,
+		Apps:  apps,
 		Processes: func(context.Context) ([]Process, error) {
 			if listErr != nil {
 				return nil, listErr
@@ -310,6 +311,7 @@ func TestNewRefusesIncompleteDeps(t *testing.T) {
 			Signal:    func(int, syscall.Signal) error { return nil },
 			Store:     &memStore{}, Log: dlog.NewTestLogger(),
 			Spawns: func() (SpawnFollower, error) { return newFakeSpawns(), nil },
+			AppOf:  bundleOf,
 		}
 	}
 	tests := []struct {
@@ -318,6 +320,7 @@ func TestNewRefusesIncompleteDeps(t *testing.T) {
 	}{
 		{name: "no lister", break_: func(d *Deps) { d.Processes = nil }},
 		{name: "no signaler", break_: func(d *Deps) { d.Signal = nil }},
+		{name: "no naming of an application", break_: func(d *Deps) { d.AppOf = nil }},
 		{name: "no store", break_: func(d *Deps) { d.Store = nil }},
 		{name: "no source of process starts", break_: func(d *Deps) { d.Spawns = nil }},
 		{name: "no logger", break_: func(d *Deps) { d.Log = nil }},
@@ -341,7 +344,7 @@ func TestNewRefusesIncompleteDeps(t *testing.T) {
 
 func TestProtectionCoversTheDaemonItsEditorAgentRepAndAgentSessions(t *testing.T) {
 	// Act
-	got := protection.protected(table)
+	got := protection.protected(table, bundleOf)
 
 	// Assert
 	for _, pid := range []int{90, 100, 500, 501, 502} {

@@ -37,7 +37,7 @@ func TestDecideRestore(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := decideRestore(tc.energy, tc.kept); got != tc.want {
+			if got := decideRestore(tc.energy, tc.kept, energyModeLowPower); got != tc.want {
 				t.Fatalf("decideRestore(%q, %q) = %v, want %v", tc.energy, tc.kept, got, tc.want)
 			}
 		})
@@ -458,7 +458,11 @@ func TestGuardRestoreEnergy(t *testing.T) {
 			log := dlog.NewTestLogger()
 
 			// Act
-			err := GuardRestoreEnergy(context.Background(), r, tools, store, log)
+			host, err := NewHost(Config{Platform: "darwin", Tools: tools}, r, nil, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = GuardRestoreEnergy(context.Background(), host, store, log)
 
 			// Assert
 			if (err != nil) != tc.wantErr {

@@ -457,8 +457,8 @@ func TestOpenDefaultSurfacesAFailedRaise(t *testing.T) {
 	if err == nil {
 		t.Fatal("Open() = nil error, want the failed raise surfaced")
 	}
-	if !strings.Contains(err.Error(), externalbrowser.DefaultApp) {
-		t.Fatalf("err = %v, want it to name the app it could not raise", err)
+	if !strings.Contains(err.Error(), activate) {
+		t.Fatalf("err = %v, want it to name the raise that failed", err)
 	}
 }
 

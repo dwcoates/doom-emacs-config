@@ -2696,7 +2696,7 @@ func buildBrowser(noBrowser bool, getenv func(string) string, defaultPresent boo
 	case getenv(externalbrowser.EnvBrowserCmd) == "" && !defaultPresent:
 		log.Warn(graphOperation, "no external browser is configured for this daemon", dlog.Context{
 			"reason":  "neither $" + externalbrowser.EnvBrowserCmd + " nor the pinned default launcher is present",
-			"default": externalbrowser.DefaultBinary,
+			"default": externalbrowser.Host.Binary,
 		})
 		return nil, nil
 	}

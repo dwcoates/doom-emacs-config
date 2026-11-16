@@ -34,7 +34,7 @@ func TestAppsFromEnv(t *testing.T) {
 			}
 
 			// Act
-			got, err := AppsFromEnv(getenv)
+			got, err := AppsFromEnv("darwin", getenv)
 
 			// Assert
 			if tt.wantErr {
@@ -59,5 +59,17 @@ func TestTheDefaultListLeavesDockerAlone(t *testing.T) {
 		if app == "Docker" {
 			t.Fatal("DefaultApps names Docker")
 		}
+	}
+}
+
+func TestAppsFromEnvOnLinuxFreezesNothingUnlessNamed(t *testing.T) {
+	// Act
+	unset, unsetErr := AppsFromEnv("linux", func(string) string { return "" })
+	named, namedErr := AppsFromEnv("linux", func(string) string { return "slack,chrome" })
+	_, editorErr := AppsFromEnv("linux", func(string) string { return "emacs" })
+
+	// Assert
+	if unsetErr != nil || unset != nil || namedErr != nil || !reflect.DeepEqual(named, []string{"slack", "chrome"}) || editorErr == nil {
+		t.Fatalf("unset %v (%v), named %v (%v), editor %v", unset, unsetErr, named, namedErr, editorErr)
 	}
 }

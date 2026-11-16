@@ -9,9 +9,10 @@
 // with the day, and whether the stalls follow it, could not be read from
 // the logs.
 //
-// The footprint is the kernel's phys_footprint: what it charges the
+// The footprint is macOS's phys_footprint: what the kernel charges the
 // process, compressed and swapped pages included, which resident size alone
-// misses by a factor of five here. It is read through the metrics
+// misses by a factor of five here (on Linux, its private anonymous memory,
+// resident or swapped). It is read through the metrics
 // collector's kernel reader (procmetrics), so the log record and the
 // agentrepl_process_footprint_bytes series read the same figure, and no tool
 // is spawned to read it.
@@ -31,9 +32,6 @@ import (
 
 // Every is how often the footprints are sampled.
 const Every = time.Minute
-
-// processName is the web content process's name.
-const processName = "com.apple.WebKit.WebContent"
 
 const op = "daemon.webfootprint"
 
@@ -118,6 +116,7 @@ func (s *Sampler) list() ([]Process, error) {
 		return nil, err
 	}
 	now := s.deps.Clock.Now()
+	name := s.deps.Reader.Platform().WebContentName
 	var procs []Process
 	for _, pid := range pids {
 		id, err := s.deps.Reader.Identity(pid)
@@ -127,7 +126,7 @@ func (s *Sampler) list() ([]Process, error) {
 		if err != nil {
 			return nil, err
 		}
-		if id.Name != processName {
+		if id.Name != name {
 			continue
 		}
 		started := time.UnixMicro(id.StartUnixMicros)

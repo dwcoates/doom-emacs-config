@@ -1,4 +1,4 @@
-//go:build darwin
+//go:build darwin || linux
 
 package reap
 
@@ -6,9 +6,10 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 // exitWait bounds a wait the test expects to end at once.
@@ -16,7 +17,7 @@ const exitWait = 10 * time.Second
 
 func TestOSTableListsThisProcessInItsSession(t *testing.T) {
 	// Arrange.
-	sid, err := syscall.Getsid(os.Getpid())
+	sid, err := unix.Getsid(os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}

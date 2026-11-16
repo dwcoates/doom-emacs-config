@@ -27,6 +27,7 @@ package persistentwifi
 
 import (
 	"fmt"
+	"runtime"
 
 	"agent-repld/internal/appfreeze"
 	"path/filepath"
@@ -137,7 +138,12 @@ func ToolsIn(dir string) Tools {
 // Config is the environment's say over the package: which tools, which
 // hotspot, and where the lid is heard from.
 type Config struct {
-	Tools   Tools
+	// Platform is the GOOS whose Host drives the tools (NewHost).
+	Platform string
+	// Tools are macOS's tools.
+	Tools Tools
+	// Linux are Linux's tools.
+	Linux   LinuxTools
 	Hotspot string
 	// FreezeApps are the applications the quiet state freezes
 	// (appfreeze.AppsFromEnv). A fake host freezes none unless the variable
@@ -170,7 +176,12 @@ func (c Config) PowerSource() PowerSourceWatcher {
 // to write; a fake lid or power source is likewise refused without fake
 // tools.
 func ConfigFromEnv(getenv func(string) string) (Config, error) {
-	cfg := Config{Tools: DefaultTools()}
+	return configFromEnv(runtime.GOOS, getenv)
+}
+
+// configFromEnv is ConfigFromEnv on the platform goos.
+func configFromEnv(goos string, getenv func(string) string) (Config, error) {
+	cfg := Config{Platform: goos}
 	dir, lid := getenv(EnvToolsDir), getenv(EnvLid)
 	if err := fakeFact(EnvLid, lid, dir, parseLidLine); err != nil {
 		return Config{}, err
@@ -180,12 +191,17 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 		return Config{}, err
 	}
 	cfg.FakeLid, cfg.FakePowerSource = lid, source
-	if dir != "" {
-		if !filepath.IsAbs(dir) {
-			return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
-		}
+	switch {
+	case dir != "" && !filepath.IsAbs(dir):
+		return Config{}, fmt.Errorf("persistentwifi: %s=%q is not an absolute path", EnvToolsDir, dir)
+	case goos == "linux" && dir != "":
+		cfg.Linux = LinuxToolsIn(dir)
+	case goos == "linux":
+		cfg.Linux = DefaultLinuxTools()
+	case dir != "":
 		cfg.Tools = ToolsIn(dir)
-	} else {
+	default:
+		cfg.Tools = DefaultTools()
 		// THE WI-FI HELPER IS INSTALLED UNDER HOME (WifiAppIn); a HOME that
 		// is not absolute would name it relative to the daemon's directory.
 		home := getenv("HOME")
@@ -198,7 +214,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	case lid != "" && getenv(appfreeze.EnvApps) == "":
 		cfg.FreezeApps = nil
 	default:
-		apps, err := appfreeze.AppsFromEnv(getenv)
+		apps, err := appfreeze.AppsFromEnv(goos, getenv)
 		if err != nil {
 			return Config{}, fmt.Errorf("persistentwifi: %w", err)
 		}

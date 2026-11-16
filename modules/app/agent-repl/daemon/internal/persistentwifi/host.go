@@ -28,14 +28,18 @@ const PowerPrefsDir = "/Library/Preferences"
 // PowerPrefsDir: the system's and each per-host one.
 const powerPrefsPattern = "com.apple.PowerManagement*.plist"
 
-// PowerChanges is the Source of the power settings changing: the preference
-// directory (an atomic rewrite is an entry change) and every power-management
-// file in it (a rewrite in place). A fake host (EnvLid set) has no real power
+// PowerChanges is the Source of the power settings changing: on macOS the
+// preference directory (an atomic rewrite is an entry change) and every
+// power-management file in it (a rewrite in place); on Linux logind's
+// inhibitors changing (logindPowerChanges). A fake host (EnvLid set) has no real power
 // settings to hear, so its source never fires: its mode changes only through
 // Update, which publishes at once.
 func (c Config) PowerChanges() kernelevent.Source {
-	if c.FakeLid != "" {
+	switch {
+	case c.FakeLid != "":
 		return quietSource
+	case c.Platform == "linux":
+		return logindPowerChanges
 	}
 	return func(ctx context.Context) (<-chan error, func()) {
 		return kernelevent.Follow(ctx, powerPrefsPaths(PowerPrefsDir)...)
@@ -56,4 +60,13 @@ func powerPrefsPaths(dir string) []string {
 // quietSource is a Source that never fires and never fails.
 func quietSource(context.Context) (<-chan error, func()) {
 	return make(chan error), func() {}
+}
+
+// PowerChangesSource names where PowerChanges hears the mode, for the record
+// of a source that failed.
+func (c Config) PowerChangesSource() string {
+	if c.Platform == "linux" {
+		return "logind's inhibitors (PropertiesChanged on the system bus)"
+	}
+	return PowerPrefsDir
 }

@@ -630,6 +630,34 @@ test_an_unset_variable_needs_the_user() {
 }
 
 # ---------------------------------------------------------------------------
+# group.
+# ---------------------------------------------------------------------------
+
+GROUP_ENTRY='{"id": "lid", "kind": "group", "why": "w", "profile": "run", "platforms": ["linux"], "name": "input"}'
+
+test_a_user_in_the_group_is_ok() {
+  new_case; manifest "[$GROUP_ENTRY]"
+  write_stub id 'echo "users input wheel"'
+  PLATFORM=linux run check
+  if [ "$RC" -eq 0 ] && has "ok          lid: " && has "is in the input group"; then pass "a user in the group is ok"; else fail "in group" "rc=$RC" "$OUT"; fi
+}
+
+test_a_user_outside_the_group_needs_an_administrator() {
+  new_case; manifest "[$GROUP_ENTRY]"
+  write_stub id 'echo "users inputs wheel"'
+  PLATFORM=linux run install
+  if [ "$RC" -eq 1 ] && has "needs-user  lid: " && has "is not in the input group" && has "sudo usermod -aG input" && ! has "installing"; then
+    pass "a user outside the group needs an administrator and is never installed"
+  else fail "outside group" "rc=$RC" "$OUT"; fi
+}
+
+test_a_group_entry_needs_its_name() {
+  new_case; manifest '[{"id": "lid", "kind": "group", "why": "w", "profile": "run", "platforms": ["linux"]}]'
+  PLATFORM=linux run check
+  if [ "$RC" -ne 0 ] && has 'lid: group needs "name"'; then pass "a group entry without its name is refused"; else fail "group validation" "rc=$RC" "$OUT"; fi
+}
+
+# ---------------------------------------------------------------------------
 # emacs.
 # ---------------------------------------------------------------------------
 

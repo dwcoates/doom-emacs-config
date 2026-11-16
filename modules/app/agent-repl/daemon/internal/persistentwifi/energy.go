@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -92,13 +93,13 @@ const (
 	restoreWrite
 )
 
-func decideRestore(energy, kept string) restoreAction {
+func decideRestore(energy, kept, low string) restoreAction {
 	switch {
 	case energy == "":
 		return restoreWait
 	case energy == kept:
 		return restoreAlready
-	case energy != energyModeLowPower:
+	case energy != low:
 		return restoreUserMoved
 	}
 	return restoreWrite
@@ -135,11 +136,11 @@ func (c *Controller) lowerEnergyLocked(ctx context.Context, energy, trigger, bec
 		return c.energyFailedLocked(ctx, trigger,
 			"the energy mode in use could not be recorded, so Low Power Mode was not set; it is tried again on the next beat", err)
 	}
-	if energy == energyModeLowPower {
+	if energy == c.host.LowPowerEnergy() {
 		c.energyCause = ""
 		return energyUnchanged()
 	}
-	if err := c.pmsetAll(ctx, "powermode", energyModeLowPower); err != nil {
+	if err := c.host.SetEnergy(ctx, c.host.LowPowerEnergy()); err != nil {
 		return c.energyFailedLocked(ctx, trigger,
 			"Low Power Mode could not be set for the lid-closed quiet state; it is tried again on the next beat", err)
 	}
@@ -202,7 +203,7 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, b
 		}
 		return energyUnchanged()
 	}
-	switch decideRestore(energy, kept) {
+	switch decideRestore(energy, kept, c.host.LowPowerEnergy()) {
 	case restoreWait:
 		c.log.Debug(opEnergy, "the energy mode in use is unread; the recorded mode is restored once it is read",
 			dlog.Context{"trigger": trigger, "recorded": kept})
@@ -214,7 +215,7 @@ func (c *Controller) restoreEnergyLocked(ctx context.Context, energy, trigger, b
 		c.forgetEnergyLocked(ctx, trigger, because, "the energy mode was changed after the lid-closed quiet state set Low Power Mode; that choice stands and the recorded mode is forgotten", energy, kept)
 		return energyUnchanged()
 	}
-	if err := c.pmsetAll(ctx, "powermode", kept); err != nil {
+	if err := c.host.SetEnergy(ctx, kept); err != nil {
 		return c.energyFailedLocked(ctx, trigger,
 			"the recorded energy mode could not be restored; the record is kept and the restore tried again on the next beat", err)
 	}
@@ -269,7 +270,7 @@ func energyUnchanged() *agentreplv1.UpdatePersistentWifiModeEnergyMode {
 // (decideRestore), and the record cleared. A failure keeps the record, so
 // the next daemon restores it by state. Every failure is recorded at ERROR
 // and answered.
-func GuardRestoreEnergy(ctx context.Context, r Runner, tools Tools, store EnergyStore, log dlog.Logger) error {
+func GuardRestoreEnergy(ctx context.Context, host Host, store EnergyStore, log dlog.Logger) error {
 	const trigger = "thaw_guard"
 	rec, ok, err := store.Load()
 	if err != nil {
@@ -279,22 +280,21 @@ func GuardRestoreEnergy(ctx context.Context, r Runner, tools Tools, store Energy
 	if !ok {
 		return nil
 	}
-	out, err := run(ctx, r, tools.Pmset, "-g")
+	energy, err := host.ReadEnergy(ctx)
 	if err != nil {
 		log.Error(opEnergy, "the thaw guard could not read the energy mode in use; the record is kept for the next daemon",
 			dlog.Context{"trigger": trigger, "recorded": rec.Mode, "cause": err.Error()})
 		return err
 	}
-	energy := parseEnergyMode(out)
-	action := decideRestore(energy, rec.Mode)
+	action := decideRestore(energy, rec.Mode, host.LowPowerEnergy())
 	switch action {
 	case restoreWait:
-		err := fmt.Errorf("%s -g printed no powermode line", tools.Pmset)
+		err := errors.New("the host named no energy mode in use")
 		log.Error(opEnergy, "the thaw guard read no energy mode in use; the record is kept for the next daemon",
 			dlog.Context{"trigger": trigger, "recorded": rec.Mode, "cause": err.Error()})
 		return err
 	case restoreWrite:
-		if err := pmsetWrite(ctx, r, tools, "powermode", rec.Mode); err != nil {
+		if err := host.SetEnergy(ctx, rec.Mode); err != nil {
 			log.Error(opEnergy, "the thaw guard could not restore the recorded energy mode; the record is kept for the next daemon",
 				dlog.Context{"trigger": trigger, "recorded": rec.Mode, "cause": err.Error()})
 			return err

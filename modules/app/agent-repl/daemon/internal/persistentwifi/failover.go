@@ -249,7 +249,7 @@ func (c *Controller) knownNetworks(attempt failoverAttempt, rd reading, wanted f
 	if !wanted(attempt, "saved_list") {
 		return nil, stepAbandoned
 	}
-	out, err := run(ctx, c.runner, c.cfg.Tools.Networksetup, "-listpreferredwirelessnetworks", rd.device)
+	networks, err := c.host.PreferredNetworks(ctx, rd.device)
 	if ctx.Err() != nil {
 		wanted(attempt, "saved_list")
 		return nil, stepAbandoned
@@ -267,7 +267,7 @@ func (c *Controller) knownNetworks(attempt failoverAttempt, rd reading, wanted f
 	c.knownCause = ""
 	c.mu.Unlock()
 	var known []string
-	for _, name := range preferredNetworks(out) {
+	for _, name := range networks {
 		if !sameNetwork(name, c.cfg.Hotspot) {
 			known = append(known, name)
 		}
@@ -303,15 +303,13 @@ func (c *Controller) joinNamed(attempt failoverAttempt, rd reading, name string,
 	bounded, cancel := context.WithTimeout(ctx, joinBound)
 	defer cancel()
 	start := c.clock.Now()
-	joinOut, err := run(bounded, c.runner, c.cfg.Tools.Networksetup, "-setairportnetwork", rd.device, name)
+	err := c.host.JoinNetwork(bounded, rd.device, name)
 	took := c.clock.Now().Sub(start)
 	if ctx.Err() != nil {
 		wanted(attempt, "known_join")
 		return false, stepAbandoned
 	}
-	// `-setairportnetwork` prints nothing on success and a sentence naming
-	// the network on failure, so only the outcome is kept.
-	ok := err == nil && strings.TrimSpace(joinOut) == ""
+	ok := err == nil
 	record := dlog.Context{"device": rd.device, "took_ms": took.Milliseconds(), "took_bound": bounded.Err() != nil, "joined": ok}
 	for k, v := range fields {
 		record[k] = v
@@ -411,7 +409,7 @@ func (c *Controller) recordLossLocked(ctx context.Context, rd reading) {
 	// read; only a machine with none has no radio to ask.
 	if rd.device == "" {
 		fields["radio_power"] = "no_wifi_interface"
-	} else if power, err := readRadioPower(ctx, c.runner, c.cfg.Tools, rd.device); err != nil {
+	} else if power, err := c.host.RadioPower(ctx, rd.device); err != nil {
 		fields["radio_power"] = "unreadable"
 		fields["radio_power_cause"] = err.Error()
 	} else {

@@ -1948,6 +1948,25 @@ Every commit, whether made by an agent, a merge, or a hook, is authored and comm
   - The merge queue checks every commit from the target's tip to the merge commit just before the fast-forward (`daemon/internal/merge/identity.go`), and a mismatch fails the merge with the target unmoved.
   - An outside contributor's commit is refused by the local merge (`pre_deploy.local_merge` in `.agent-repl/lifecycle.yaml`), which lands only this machine's work. A repository whose deploy has no local merge lands its commits through its own upstream, which recorded their identities, so its deploys are not checked.
 
+## Linux runs on freedesktop standards, and some of it is untested on real hardware (owner ruling, 2026-11-14)
+
+agent-repl runs on a Linux desktop through freedesktop standards, never one distribution: `systemd --user`, logind, NetworkManager, power-profiles-daemon, X11, `xdg-open`, `notify-send`.
+
+- **What has run on Linux**, in a Lima VM (Ubuntu, aarch64, no GPU, no radio, no lid):
+  - the installer, building zettel-emacs (X11 GTK3, xwidgets) and every other requirement;
+  - the store, sidecar, zettel and metrics store under `systemd --user`, the process metrics reading `/proc`;
+  - every Go module's tests, natively;
+  - a webview drawing a page and running JavaScript under Xvfb.
+- **What is proven only against fakes**, because no Linux laptop was at hand:
+  - persistent wifi (`daemon/internal/persistentwifi/linuxhost.go`): the logind inhibitor that keeps a closed lid awake, nmcli's joins, leaves and scans, the power-saver profile, DPMS display sleep, and the lid heard from the kernel's lid switch;
+  - the application freezer's Linux naming (an application is its executable);
+  - links opening in `google-chrome`'s routed profile.
+- **The design is meant to be right, and the details may not be.** A Linux user whose machine answers differently (another tool's output, a polkit rule, a Wayland-only session) fixes the Linux implementation, and keeps the macOS one untouched.
+- **What Linux does without, by design**:
+  - the orange unfocused title bar (`lisp/titlebar.el`): the window manager draws Linux's title bar, and the module logs that it is unavailable;
+  - a clipboard image offered only as TIFF, which only macOS converts (`lisp/clipboard-image.el`); X11 offers PNG beside it;
+  - the test runner's RAM disk: a Linux run's root is on `/tmp`, which most distributions mount as `tmpfs`.
+
 ## Requirements: the manifests are the one record of what a machine needs
 
 Everything agent-repl needs on a machine is an entry in a requirement
@@ -1968,7 +1987,7 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - A program some Linux distribution does not package names a pinned `release` instead (VictoriaMetrics, which Fedora lacks, and whose Debian package starts a system-wide copy on the same port): the publisher's archive for each machine (`linux-arm64`, `linux-amd64`), its sha256, and the `file` inside it. Install checks the archive against the pin and puts the program into the user's bin dir; an archive that differs is refused, and the fix is a new pin.
   - A program is looked for on PATH and then in the user's bin dir (`~/.local/bin`), where a release and the Linux Emacs build are installed. Whether that dir is on the user's PATH is the `command_link` entry's to report, once.
   - A Linux machine whose package manager an entry has no package for reports the entry `missing` with "add install.<manager>": the manifest is inadequate, and the fix is the missing package name.
-- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `notification_permission`, `app_build`, `location_permission`, `sudo_grant`, `skill_link`, `command_link`, `git_hook`, `service`, `download`), and checks and installs each kind one way.
+- **The runner names no requirement.** It knows only the kinds an entry may be (`program`, `emacs`, `env`, `group`, `notification_permission`, `app_build`, `location_permission`, `sudo_grant`, `skill_link`, `command_link`, `git_hook`, `service`, `download`), and checks and installs each kind one way.
   - A new dependency is a manifest entry, never a script edit.
   - A dependency no kind can express is a new kind, added to the runner with its tests in `bin/test-requirements.sh`. It is never shell embedded in a manifest.
 - **A `service` is one entry the runner renders for the platform's service manager**: a launchd plist on macOS, a systemd user unit on Linux (`services/AGENTS.md`). No plist or unit is checked in.
