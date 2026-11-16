@@ -9,8 +9,8 @@
  * view state: it is transient to the page that opened it.
  */
 import type { DeploysFold } from "./deploys-fold.js";
-import type { DeploysMore } from "./deploys-more.js";
 import type { DrawnStatusLog } from "../drawn-status.js";
+import type { MergedPages } from "./merged-pages.js";
 import type { DaemonContext } from "../rpc/context.js";
 import type { ArrangeHold } from "./arrange.js";
 import type { Dropdowns } from "./dropdowns.js";
@@ -76,8 +76,8 @@ export interface RailContext {
   arrange: ArrangeContext;
   /** Whether each Merge Queue and Recently Merged group is folded, this page's own (`deploys-fold.ts`). */
   deploysFold: DeploysFold;
-  /** How many older merges each Recently Merged group shows, this page's own (`deploys-more.ts`). */
-  deploysMore: DeploysMore;
+  /** The Recently Merged groups' pages of rows this page has loaded (`merged-pages.ts`). */
+  mergedPages: MergedPages;
 }
 
 /**

@@ -26,11 +26,11 @@ import {
   type ArrangeSidebarRequest,
   type ArrangeSidebarResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { createDrawingHold, type DrawingHold } from "../hold.js";
 import { log } from "../log.js";
 import { unreachableArm } from "../rpc/strict.js";
 import type { SidebarContext } from "./context.js";
+import type { RosterStreams } from "./roster-streams.js";
 import { fireVerb, type VerbCall, type VerbResponse } from "./verbs.js";
 
 /** One ArrangeSidebar change: the request's change arm. */
@@ -145,12 +145,14 @@ export async function sendHeld<Res extends VerbResponse>(
 }
 
 /** The page's hold on its own roster drawing while an arrangement is dragged or asked for (`hold.ts`). */
-export type ArrangeHold = DrawingHold<WorkspaceRoster>;
+export type ArrangeHold = DrawingHold<RosterStreams>;
 
 /**
  * The hold, drawing through DRAW, letting go at the roster revision an
- * arrangement answered (`ArrangeSidebarSuccess.roster_revision`).
+ * arrangement answered (`ArrangeSidebarSuccess.roster_revision`), which is
+ * compared against the PUSH's revision (`RosterPush.revision`): holding every
+ * stream of the push at R is holding the roster as of R.
  */
-export function createArrangeHold(draw: (roster: WorkspaceRoster) => void): ArrangeHold {
-  return createDrawingHold({ draw, revisionOf: (roster) => roster.revision, operation: "sidebar.arrange.hold-released" });
+export function createArrangeHold(draw: (streams: RosterStreams) => void): ArrangeHold {
+  return createDrawingHold({ draw, revisionOf: (streams) => streams.revision, operation: "sidebar.arrange.hold-released" });
 }

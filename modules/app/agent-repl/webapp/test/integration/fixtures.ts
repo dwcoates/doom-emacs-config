@@ -61,9 +61,13 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import {
   WorkspaceRosterSchema,
+  RosterPushSchema,
+  RosterMergedRowSchema,
   RosterRowSchema,
+  type RosterMergedRepoGroup,
+  type RosterMergedRow,
+  type RosterPush,
   type RosterRow,
-  type WorkspaceRoster,
   RosterRepoSectionSchema,
   type RosterRowWhenSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -2657,9 +2661,15 @@ export function roster(init?: {
   mergedCollapsed?: boolean;
   /** The hidden section's rows; none unless said, so the section is not drawn. */
   hidden?: RosterRow[];
-}): WorkspaceRoster {
+  /** The push's revision; 1 unless said. */
+  revision?: bigint;
+}): RosterPush {
   const rows = init?.rows ?? [rosterRow()];
-  const built = create(WorkspaceRosterSchema, {
+  const merged = (init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })]).map((row) =>
+    create(RosterMergedRowSchema, { row }),
+  );
+  const mergedAt = (m: RosterMergedRow): bigint => (m.row?.when?.shown.case === "merged" ? m.row.when.shown.value.atMs : 0n);
+  const workspaces = create(WorkspaceRosterSchema, {
     repository: {
       sections: init?.repositorySections?.map((section) => ({
         key: { repository: repositoryRef(section.repositoryId) },
@@ -2685,27 +2695,6 @@ export function roster(init?: {
       fold: { case: "expanded", value: {} },
       height: { case: "fitted", value: {} },
     },
-    mergeQueue: {
-      header: { label: { text: "Merge Queue" } },
-      groups: [],
-      fold: { case: "expanded", value: {} },
-      height: { case: "fitted", value: {} },
-    },
-    recentlyMerged: {
-      header: { label: { text: "Recently Merged" } },
-      groups: [
-        {
-          key: { repository: repositoryRef() },
-          header: { label: { text: "doom" } },
-          mergedRows: {
-            rows: (init?.merged ?? [rosterRow({ id: "ws-merged", status: "merged", when: "merged" })]).map((row) => ({ row })),
-          },
-        },
-      ],
-      fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
-      height: { case: "fitted", value: {} },
-    },
-    closed: {},
     ...rosterApps(),
     current:
       init?.currentUnset === true
@@ -2714,12 +2703,51 @@ export function roster(init?: {
   });
   // THE DAEMON NUMBERS EVERY OPEN ROW'S TAB, in the Open section's walk.
   numberTabs(
-    (built.repository?.sections ?? []).map(sectionTabRegions),
+    (workspaces.repository?.sections ?? []).map(sectionTabRegions),
   );
+  // THE FIRST PUSH OF A SUBSCRIPTION CARRIES EVERY STREAM, and the fake
+  // serves every push whole, so each one is a first push it could send.
+  const built = create(RosterPushSchema, {
+    revision: init?.revision ?? 1n,
+    workspaces,
+    mergeQueue: {
+      header: { label: { text: "Merge Queue" } },
+      groups: [],
+      fold: { case: "expanded", value: {} },
+      height: { case: "fitted", value: {} },
+    },
+    recentlyMerged: {
+      header: { label: { text: "Recently Merged" }, count: { workspaces: merged.length } },
+      groups: [
+        {
+          key: { repository: repositoryRef() },
+          header: { label: { text: "doom" } },
+          summary: {
+            count: { merges: merged.length },
+            latest: { mergedAtMs: merged.reduce((max, m) => (mergedAt(m) > max ? mergedAt(m) : max), 1n) },
+            recent: merged.map((m) => ({ mergedAtMs: mergedAt(m) === 0n ? 1n : mergedAt(m) })),
+          },
+        },
+      ],
+      mergedRevision: { revision: 1n },
+      fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
+      height: { case: "fitted", value: {} },
+    },
+    closed: {},
+  });
+  for (const group of built.recentlyMerged?.groups ?? []) MERGED_ROWS.set(group, merged);
   return built;
 }
 
-export const emptyRoster = (): WorkspaceRoster => roster();
+/** The merged rows each roster fixture's Recently Merged group pages: what the fake's ListMergedWorkspaces serves. */
+const MERGED_ROWS = new WeakMap<RosterMergedRepoGroup, RosterMergedRow[]>();
+
+/** The merged rows GROUP (a roster fixture's) pages, most recent first. */
+export function mergedRowsOf(group: RosterMergedRepoGroup): RosterMergedRow[] {
+  return MERGED_ROWS.get(group) ?? [];
+}
+
+export const emptyRoster = (): RosterPush => roster();
 
 // ---------------------------------------------------------------------------
 // Daemon hold tray

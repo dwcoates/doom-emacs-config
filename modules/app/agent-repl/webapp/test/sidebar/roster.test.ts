@@ -13,6 +13,9 @@ import {
   RosterSectionHeaderSchema,
   RosterOpenHeaderSchema,
   RosterRepoSectionSchema,
+  RosterClosedRowsSchema,
+  RosterCurrentWorkspaceSchema,
+  RosterMergedSectionSchema,
   WorkspaceRosterSchema,
   RosterColdGateSchema,
   type RosterOpenRow,
@@ -20,15 +23,12 @@ import {
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
-import { DEPLOYS_MORE_CLASS, DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE } from "../../src/sidebar/deploys-more.js";
+import { MERGED_MORE_CLASS, MERGED_PAGE_CLASS, MERGED_PAGE_SIZE, type MergedPages } from "../../src/sidebar/merged-pages.js";
 import { DEPLOYS_SECTION_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
 import { RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createSidebarView } from "../../src/sidebar/view.js";
-import type { FailureSink } from "../../src/failure/sink.js";
 import { repoFoldKey } from "../../src/sidebar/context.js";
 import {
-  MERGED_DRAWN_AT_ONCE,
-  MERGED_AT_ATTRIBUTE,
+  MERGED_PARTLY_LOADED_ATTRIBUTE,
   MERGED_GROUP_CLASS,
   MERGED_TODAY_COUNT_CLASS,
   createRosterDrawer,
@@ -49,6 +49,7 @@ import {
   todaysMerges,
   mergedTodayCountText,
   mergedGroupFacts,
+  mergedSectionFacts,
 } from "../../src/sidebar/roster.js";
 import { HOLDS_CURRENT_ATTRIBUTE } from "../../src/sidebar/section-fold.js";
 import { RESIZE_HANDLE_CLASS } from "../../src/sidebar/section-resize.js";
@@ -67,15 +68,18 @@ import {
   appContext,
   drawnEntries,
   fakeTicker,
+  allMergesLoaded,
   hiddenSection,
-  manualReveal,
   mergedBand,
   mergedGroup,
   mergedSection,
   mergeQueueBand,
+  mergedRowsOf,
   mergingHead,
+  noMergesLoaded,
   NOW,
   openSection,
+  pagesOfTen,
   queueGroup,
   fixingTestsMerge,
   repoSection,
@@ -86,7 +90,6 @@ import {
   startOfTomorrow,
   waitingMerge,
 } from "./harness.js";
-import { recordingFailures } from "../failure-sink.js";
 
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
@@ -592,7 +595,7 @@ describe("drawHeadedSection", () => {
   it.each([
     ["repository", ".repo-section", roster({ repos: [repoSection({ id: "repo-1" })] }), true],
     ["hidden", ".hidden-section", roster({ hidden: hiddenSection([HIDDEN_ROW]) }), true],
-    ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) }), false],
+    ["merged", ".merged-section", roster({ merged: mergedSection([MERGED_ROW]) }), true],
   ] as const)("draws the %s section in the one headed shape", (_kind, selector, made, counted) => {
     const drawn = drawWorkspaceRoster(made, sidebarContext());
     const section = drawn.querySelector(selector) as HTMLElement;
@@ -708,10 +711,7 @@ describe("hidden workspaces", () => {
   });
 
   it("refuses a roster with no hidden section as a malformed view", () => {
-    const bare = create(WorkspaceRosterSchema, {
-      repository: { sections: [] },
-      recentlyMerged: mergedSection(),
-    });
+    const bare = { ...roster(), workspaces: create(WorkspaceRosterSchema, { repository: { sections: [] } }) };
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 
@@ -752,25 +752,13 @@ describe("the create controls", () => {
 
 describe("a malformed roster", () => {
   it("refuses one with no repository view", () => {
-    const malformed = create(WorkspaceRosterSchema, {
-      recentlyMerged: mergedSection(),
-    });
-    expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
-  });
-
-  it("refuses one with no recently-merged section", () => {
-    const malformed = create(WorkspaceRosterSchema, {
-      repository: { sections: [] },
-    });
+    const malformed = { ...roster(), workspaces: create(WorkspaceRosterSchema, {}) };
     expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
   });
 
   it("refuses a current workspace with no identity", () => {
-    const malformed = create(WorkspaceRosterSchema, {
-      repository: { sections: [] },
-      recentlyMerged: mergedSection(),
-      current: {},
-    });
+    const malformed = roster();
+    malformed.workspaces.current = create(RosterCurrentWorkspaceSchema, {});
     expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
   });
 
@@ -829,12 +817,9 @@ describe("a malformed roster", () => {
   });
 });
 
-describe("a recently-merged section with no rows box", () => {
+describe("a recently-merged section with no fold", () => {
   it("is a malformed view, never an empty band", () => {
-    const malformed = create(WorkspaceRosterSchema, {
-      repository: { sections: [] },
-      recentlyMerged: { header: { label: { text: "Recently Merged" } } },
-    });
+    const malformed = { ...roster(), recentlyMerged: create(RosterMergedSectionSchema, { header: { label: { text: "Recently Merged" } } }) };
     expect(() => drawWorkspaceRoster(malformed, sidebarContext())).toThrow(MalformedView);
   });
 });
@@ -952,13 +937,16 @@ describe("a section's folded count", () => {
     expect([countOf(drawn, ".hidden-section").textContent, pane(drawn).querySelectorAll(".hidden-section .row").length]).toEqual(["(3)", 3]);
   });
 
-  it("draws the Recently Merged section's label with no folded count", () => {
+  it("draws the Recently Merged section's count of every merge beside its label", () => {
     const drawn = drawWorkspaceRoster(
-      roster({ merged: mergedSection([row({ id: "ws-9", status: { case: "merged", value: {} } })]) }),
+      roster({ merged: mergedBand([mergedGroup({ id: "repo-1", rows: [MERGED_ROW], count: 40 })]) }),
       sidebarContext(),
     );
     const head = pane(drawn).querySelector(".merged-section > .repo-head") as HTMLElement;
-    expect([head.querySelector(".sb-label")?.textContent, head.querySelector("[data-section-count]")]).toEqual(["Recently Merged", null]);
+    expect([head.querySelector(".sb-label")?.textContent, head.querySelector("[data-section-count]")?.textContent]).toEqual([
+      "Recently Merged",
+      "(40)",
+    ]);
   });
 
   it("draws the count a step smaller than the label", () => {
@@ -1029,9 +1017,12 @@ describe("the Recently Merged section's header", () => {
       collapsed,
     );
 
-  it("draws the today count as its only count", () => {
+  it("draws the daemon's count of every merge, then the today count", () => {
     const drawn = drawBand();
-    expect([...head(drawn).querySelectorAll(".sb-count")].map((c) => c.className)).toEqual([`sb-count ${MERGED_TODAY_COUNT_CLASS}`]);
+    expect([...head(drawn).querySelectorAll(".sb-count")].map((c) => [c.className, c.hasAttribute("data-section-count")])).toEqual([
+      ["sb-count", true],
+      [`sb-count ${MERGED_TODAY_COUNT_CLASS}`, false],
+    ]);
   });
 
   it("sums every group's merges of today, aged by the latest of them", () => {
@@ -1074,10 +1065,49 @@ describe("the Recently Merged section's header", () => {
     expect(rosterSource.match(/appendChild\(drawMergedTodayCount\(/g)?.length).toBe(2);
   });
 
-  it("refuses a header that carries a count as a malformed view", () => {
+  it("refuses a header whose count is unset as a malformed view", () => {
     const band = mergedSection([mergedAt("ws-1", NOW)], false);
-    band.header = create(RosterSectionHeaderSchema, { label: { text: "Recently Merged" }, count: { workspaces: 1 } });
+    band.header = create(RosterSectionHeaderSchema, { label: { text: "Recently Merged" } });
     expect(() => drawWorkspaceRoster(roster({ merged: band }), sidebarContext())).toThrow(MalformedView);
+  });
+
+  /** A band of one group holding COUNT merges, of which LOADED are on the page, folded when COLLAPSED. */
+  const partlyBand = (count: number, loaded: number, collapsed: boolean): HTMLElement => {
+    const merges = Array.from({ length: count }, (_, i) => mergedAt(`ws-${i}`, NOW - i * 60_000));
+    const group = mergedGroup({ id: "repo-1", rows: merges });
+    const pages: MergedPages = {
+      ...allMergesLoaded(),
+      loaded: () => {
+        const rows = mergedRowsOf(group).slice(0, loaded);
+        return { pages: pagesOfTen(rows), more: loaded < count, rows: rows.length };
+      },
+    };
+    const drawn = drawWorkspaceRoster(roster({ merged: mergedBand([group], collapsed) }), sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, pages));
+    document.body.replaceChildren(drawn);
+    return drawn;
+  };
+  const sectionCount = (drawn: HTMLElement): HTMLElement => head(drawn).querySelector("[data-section-count]") as HTMLElement;
+
+  it.each([
+    { name: "shows its count while it is folded", count: 12, loaded: 0, collapsed: true, want: "inline" },
+    { name: "shows its count while a group's merges are not all loaded", count: 12, loaded: 10, collapsed: false, want: "inline" },
+    { name: "hides its count while every merge is loaded and it is open", count: 12, loaded: 12, collapsed: false, want: "none" },
+  ])("$name", ({ count, loaded, collapsed, want }) => {
+    const drawn = partlyBand(count, loaded, collapsed);
+    expect(inRail(drawn, () => cascadedValue(sectionCount(drawn), "display"))).toBe(want);
+  });
+
+  it.each([
+    { name: "marks the section partly loaded while a group's merges are not all loaded", loaded: 10, want: true },
+    { name: "leaves the section unmarked once every merge is loaded", loaded: 12, want: false },
+  ])("$name", ({ loaded, want }) => {
+    const drawn = partlyBand(12, loaded, false);
+    expect(pane(drawn).querySelector(".merged-section")?.hasAttribute(MERGED_PARTLY_LOADED_ATTRIBUTE)).toBe(want);
+  });
+
+  it("counts today's merges from the summary, loaded or not", () => {
+    const drawn = partlyBand(12, 0, true);
+    expect(todayCount(drawn).textContent).toBe("(12 today, last 0s ago)");
   });
 
   it.each([
@@ -1093,13 +1123,13 @@ describe("the Recently Merged section's header", () => {
     expect(pane(drawn).querySelector(".merged-section")).toBeNull();
   });
 
-  it("refuses a merged row whose when-column is unset", () => {
+  it("refuses a loaded merged row whose when-column is unset", () => {
     const bad = mergedAt("ws-1", NOW);
     bad.when = undefined;
     expect(() => drawBand([bad])).toThrow(MalformedView);
   });
 
-  it("refuses a merged row whose when-column is on another arm than merged", () => {
+  it("refuses a loaded merged row whose when-column is on another arm than merged", () => {
     const bad = row({ id: "ws-1", closed: true, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
     expect(() => drawBand([bad])).toThrow(MalformedView);
   });
@@ -1245,43 +1275,65 @@ describe("todaysMerges", () => {
 });
 
 describe("mergedGroupFacts", () => {
-  const merged = (id: string, atMs: number, commits?: number) =>
-    row({
-      id,
-      closed: true,
-      status: { case: "merged", value: {} },
-      when: { case: "merged", value: { atMs: BigInt(atMs) } },
-      detail: commits === undefined ? {} : { commits: { count: commits } },
+  it("reads the summary's count, latest instant and last day's merges, in the summary's order", () => {
+    const group = mergedGroup({ id: "repo-1", count: 30, latestMs: NOW, recent: [{ atMs: NOW, commits: 3 }, { atMs: NOW - 60_000 }] });
+    expect(mergedGroupFacts(group, "p")).toEqual({
+      count: 30,
+      latestMs: NOW,
+      recent: [
+        { atMs: NOW, commits: 3 },
+        { atMs: NOW - 60_000, commits: undefined },
+      ],
     });
-
-  it("reads each merged row's instant and commits, in the rows' order", () => {
-    const group = mergedGroup({ id: "repo-1", rows: [merged("ws-1", NOW, 3), merged("ws-2", NOW - 60_000)] });
-    expect(mergedGroupFacts(group, "p")).toEqual([
-      { atMs: NOW, commits: 3 },
-      { atMs: NOW - 60_000, commits: undefined },
-    ]);
   });
 
-  it("refuses a row on another when arm than merged as a malformed view", () => {
-    const bad = row({ id: "ws-1", closed: true, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } });
-    expect(() => mergedGroupFacts(mergedGroup({ id: "repo-1", rows: [bad] }), "p")).toThrow(MalformedView);
+  it("reads the latest merge from the summary though no merge landed in the last day", () => {
+    const group = mergedGroup({ id: "repo-1", count: 2, latestMs: NOW - 3 * 86_400_000, recent: [] });
+    expect([mergedGroupFacts(group, "p").latestMs, mergedGroupFacts(group, "p").recent]).toEqual([NOW - 3 * 86_400_000, []]);
+  });
+
+  it.each([
+    { name: "refuses a group with no summary as a malformed view", field: "summary" as const },
+    { name: "refuses a summary with no count as a malformed view", field: "count" as const },
+    { name: "refuses a summary with no latest merge as a malformed view", field: "latest" as const },
+  ])("$name", ({ field }) => {
+    const group = mergedGroup({ id: "repo-1", rows: [MERGED_ROW] });
+    if (field === "summary") group.summary = undefined;
+    else group.summary![field] = undefined;
+    expect(() => mergedGroupFacts(group, "p")).toThrow(MalformedView);
+  });
+});
+
+describe("mergedSectionFacts", () => {
+  it("joins every group's last day of merges and takes the latest of their latest", () => {
+    const facts = mergedSectionFacts([
+      { count: 1, latestMs: 10, recent: [{ atMs: 10, commits: 1 }] },
+      { count: 1, latestMs: 30, recent: [{ atMs: 30, commits: undefined }] },
+    ]);
+    expect(facts).toEqual({ latestMs: 30, recent: [{ atMs: 10, commits: 1 }, { atMs: 30, commits: undefined }] });
+  });
+
+  it("has no latest merge when there is no group", () => {
+    expect(mergedSectionFacts([])).toEqual({ latestMs: null, recent: [] });
   });
 });
 
 describe("mergedTodayCountText", () => {
   it.each([
-    { name: "no age while the group holds no merge", ages: [] as number[], want: "(0 today)" },
+    { name: "no age while there is no merge", ages: [] as number[], want: "(0 today)" },
     { name: "the latest merge's age though none landed today", ages: [NOW - startOfToday() + 60_000], want: `(0 today, last ${formatAge(NOW - startOfToday() + 60_000)} ago)` },
+    { name: "the summary's latest merge's age though none landed in the last day", ages: [] as number[], latestAge: 2 * 86_400_000, want: "(0 today, last 2d ago)" },
     { name: "the latest merge's age in seconds", ages: [45_000], want: "(1 today, last 45s ago)" },
     { name: "minutes and seconds", ages: [5 * 60_000 + 30_000, 2 * 3_600_000], want: "(2 today, last 5m 30s ago)" },
     { name: "hours and minutes, the seconds dropped", ages: [3_600_000 + 5 * 60_000 + 59_000], want: "(1 today, last 1h 5m ago)" },
     { name: "a whole hour as one unit", ages: [2 * 3_600_000], want: "(1 today, last 2h ago)" },
     { name: "a stamp a moment ahead of the clock as 0s", ages: [-400], want: "(1 today, last 0s ago)" },
-  ])("words $name", ({ ages, want }) => {
+  ])("words $name", ({ ages, latestAge, want }: { ages: number[]; latestAge?: number; want: string }) => {
     // Arrange
-    const today = ages.map((age) => ({ atMs: NOW - age, commits: 1 }));
+    const recent = ages.map((age) => ({ atMs: NOW - age, commits: 1 }));
+    const latestMs = latestAge !== undefined ? NOW - latestAge : recent.length === 0 ? null : Math.max(...recent.map((m) => m.atMs));
     // Act / Assert
-    expect(mergedTodayCountText(today, NOW)).toBe(want);
+    expect(mergedTodayCountText({ recent, latestMs }, NOW)).toBe(want);
   });
 });
 
@@ -1474,29 +1526,51 @@ describe("recently merged repository groups", () => {
     expect(groupsIn(drawn).map((g) => g.hidden)).toEqual([false, false]);
   });
 
+  /** A band of one group of N merges, every one loaded, its pages answered MORE. */
+  const loadedBand = (n: number, more = false): HTMLElement => {
+    const merges = Array.from({ length: n }, (_, i) => merge(`ws-${i}`));
+    const group = mergedGroup({ id: "alpha", rows: merges });
+    const pages: MergedPages = { ...allMergesLoaded(), loaded: () => ({ pages: pagesOfTen(mergedRowsOf(group)), more, rows: n }) };
+    return drawWorkspaceRoster(
+      roster({ merged: mergedBand([group], false) }),
+      sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, pages),
+    );
+  };
+
   it.each([
-    { name: "draws a group's first ten merges and hides the rest in pages", rows: DEPLOYS_PAGE_SIZE + 1, want: [DEPLOYS_PAGE_SIZE, 1, true] },
-    { name: "draws a group of ten merges with no page", rows: DEPLOYS_PAGE_SIZE, want: [DEPLOYS_PAGE_SIZE, 0, null] },
+    { name: "draws a group's first page in its body and each later page in its own box", rows: MERGED_PAGE_SIZE + 1, want: [MERGED_PAGE_SIZE, [1]] },
+    { name: "draws a group of one page with no page box", rows: MERGED_PAGE_SIZE, want: [MERGED_PAGE_SIZE, []] },
   ])("$name", ({ rows, want }) => {
-    const merges = Array.from({ length: rows }, (_, i) => merge(`ws-${i}`));
-    const drawn = drawWorkspaceRoster(roster({ merged: mergedBand([mergedGroup({ id: "alpha", rows: merges })], false) }), sidebarContext());
-    const body = groupsIn(drawn)[0].querySelector(":scope > .rows")!;
-    const pages = [...body.querySelectorAll<HTMLElement>(`:scope > .${DEPLOYS_PAGE_CLASS}`)];
-    expect([
-      body.querySelectorAll(":scope > .ws").length,
-      pages.length,
-      pages.length === 0 ? null : pages.every((page) => page.hidden),
-    ]).toEqual(want);
+    const body = groupsIn(loadedBand(rows))[0].querySelector(":scope > .rows")!;
+    const pages = [...body.querySelectorAll<HTMLElement>(`:scope > .${MERGED_PAGE_CLASS}`)];
+    expect([body.querySelectorAll(":scope > .ws").length, pages.map((page) => page.children.length)]).toEqual(want);
   });
 
   it.each([
-    { name: "draws the arrow under a group with more than ten merges", rows: DEPLOYS_PAGE_SIZE + 1, want: true },
-    { name: "draws no arrow under a group of ten merges", rows: DEPLOYS_PAGE_SIZE, want: false },
-  ])("$name", ({ rows, want }) => {
-    const merges = Array.from({ length: rows }, (_, i) => merge(`ws-${i}`));
-    const drawn = drawWorkspaceRoster(roster({ merged: mergedBand([mergedGroup({ id: "alpha", rows: merges })], false) }), sidebarContext());
-    const arrow = groupsIn(drawn)[0].querySelector(`:scope > .rows > .${DEPLOYS_MORE_CLASS}:last-child`);
-    expect(arrow !== null).toBe(want);
+    { name: "draws the spinner at a group's end while more pages exist", more: true, want: true },
+    { name: "draws no spinner at a group's end once its last page is loaded", more: false, want: false },
+  ])("$name", ({ more, want }) => {
+    const spinner = groupsIn(loadedBand(MERGED_PAGE_SIZE, more))[0].querySelector(`:scope > .rows > .${MERGED_MORE_CLASS}:last-child`);
+    expect(spinner !== null).toBe(want);
+  });
+
+  it("draws no row for a group nothing is loaded for, under its header", () => {
+    const drawn = drawWorkspaceRoster(
+      roster({ merged: twoGroups() }),
+      sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, noMergesLoaded()),
+    );
+    expect(groupsIn(drawn).map((g) => [g.querySelector(".merged-group-head") !== null, g.querySelectorAll(".ws").length])).toEqual([
+      [true, 0],
+      [true, 0],
+    ]);
+  });
+
+  it("draws every loaded merged row whole, with no stand-in", () => {
+    const drawn = loadedBand(MERGED_PAGE_SIZE * 3);
+    expect([drawn.querySelectorAll(".merged-section .ws").length, drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`)]).toEqual([
+      MERGED_PAGE_SIZE * 3,
+      null,
+    ]);
   });
 });
 
@@ -1712,7 +1786,7 @@ describe("the repository label's divergence hover", () => {
       fold: { case: "expanded", value: { collapse: { case: "collapsible", value: {} } } },
     });
     const wire = roster({ repos: [] });
-    wire.repository = { $typeName: "frontend.v1.RosterRepositoryView", sections: [section] };
+    wire.workspaces.repository = { $typeName: "frontend.v1.RosterRepositoryView", sections: [section] };
     expect(() => drawWorkspaceRoster(wire, sidebarContext())).toThrow(MalformedView);
   });
 });
@@ -1843,19 +1917,19 @@ describe("the open workspaces section", () => {
 
   it("refuses a roster without it as a malformed view", () => {
     const bare = roster();
-    bare.open = undefined;
+    bare.workspaces.open = undefined;
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 
   it("refuses a repository view without its open count", () => {
     const bare = roster();
-    bare.repository!.openCount = undefined;
+    bare.workspaces.repository!.openCount = undefined;
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 
   it("refuses a section with no fold arm", () => {
     const bare = roster();
-    bare.open!.fold = { case: undefined };
+    bare.workspaces.open!.fold = { case: undefined };
     expect(() => drawWorkspaceRoster(bare, sidebarContext())).toThrow(MalformedView);
   });
 });
@@ -2145,8 +2219,8 @@ describe("the Merge Queue section's queues", () => {
     const drawer = createRosterDrawer(sidebarContext());
     const made = withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })]);
     drawer.draw(made);
-    const gated = clone(WorkspaceRosterSchema, made);
-    gated.coldGates = gates.map((id) => create(RosterColdGateSchema, { workspace: { id, dir: `/w/${id}` } }));
+    const gated = { ...made, workspaces: clone(WorkspaceRosterSchema, made.workspaces) };
+    gated.workspaces.coldGates = gates.map((id) => create(RosterColdGateSchema, { workspace: { id, dir: `/w/${id}` } }));
 
     // Act
     const drawn = drawer.draw(gated);
@@ -2160,11 +2234,11 @@ describe("the Merge Queue section's queues", () => {
     // Arrange
     const drawer = createRosterDrawer(sidebarContext());
     const made = withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]);
-    made.coldGates = [create(RosterColdGateSchema, { workspace: { id: "w1", dir: "/w/w1" } })];
+    made.workspaces.coldGates = [create(RosterColdGateSchema, { workspace: { id: "w1", dir: "/w/w1" } })];
     const section = drawer.draw(made).querySelector(".merge-queue-section");
 
-    // Act
-    const redrawn = drawer.draw(clone(WorkspaceRosterSchema, made)).querySelector(".merge-queue-section");
+    // Act: the workspaces stream replaced by an equal snapshot, the queue's unchanged.
+    const redrawn = drawer.draw({ ...made, workspaces: clone(WorkspaceRosterSchema, made.workspaces) }).querySelector(".merge-queue-section");
 
     // Assert
     expect(redrawn).toBe(section);
@@ -2484,6 +2558,79 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     expect(after).toBe(before);
   });
 
+  /** Every stream drawn once: a repository, a hidden row, a queue and a merged group. */
+  const everyStream = () =>
+    roster({
+      repos: [ticking("a")],
+      hidden: hiddenSection([row({ id: "ws-h" })]),
+      mergeQueue: mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]),
+      merged: mergedBand([mergedGroup({ id: "a", rows: [MERGED_ROW] })], false),
+    });
+  /** Each stream's section in DRAWN, by its class. */
+  const sectionsOf = (drawn: HTMLElement) =>
+    [".open-section", ".hidden-section", ".merge-queue-section", ".merged-section"].map((cls) => drawn.querySelector(cls));
+
+  it("keeps every section of a stream the push did not replace, and redraws the one it did", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const first = everyStream();
+    const [open, hidden, queue, merged] = sectionsOf(drawer.draw(first));
+    // Act: the push replaces the merge queue stream alone.
+    const next = { ...first, revision: 2n, mergeQueue: mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w9") } })]) };
+    const after = sectionsOf(drawer.draw(next));
+    // Assert
+    expect([after[0] === open, after[1] === hidden, after[2] === queue, after[3] === merged]).toEqual([true, true, false, true]);
+  });
+
+  it("keeps a stream's sections when a push replaces it with an equal snapshot", () => {
+    // Arrange: a reconnect's first push restates every stream as it was.
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = sectionsOf(drawer.draw(everyStream()));
+    // Act
+    const after = sectionsOf(drawer.draw(everyStream()));
+    // Assert
+    expect(after.map((section, i) => section === before[i])).toEqual([true, true, true, true]);
+  });
+
+  it("logs which streams the push replaced, at the push's revision", async () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const first = everyStream();
+    drawer.draw(first);
+    const capture = captureLogRecords("debug");
+    // Act
+    drawer.draw({ ...first, revision: 7n, closed: create(RosterClosedRowsSchema, {}) });
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.roster");
+    expect(record.context).toMatchObject({ revision: "7", changed_streams: ["closed"], redrawn_sections: 0 });
+  });
+
+  it("redraws the Recently Merged section when its loaded pages change, though its stream did not", () => {
+    // Arrange
+    let version = 0;
+    const pages: MergedPages = { ...allMergesLoaded(), version: () => version };
+    const drawer = createRosterDrawer(sidebarContext(undefined, undefined, undefined, undefined, undefined, undefined, pages));
+    const streams = everyStream();
+    const before = drawer.draw(streams).querySelector(".merged-section");
+    // Act
+    version = 1;
+    const after = drawer.draw(streams).querySelector(".merged-section");
+    // Assert
+    expect(after === before).toBe(false);
+  });
+
+  it("redraws a workspaces section a drag rearranged, though its stream is the snapshot drawn", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const streams = everyStream();
+    const before = drawer.draw(streams).querySelector(".repo-section") as HTMLElement;
+    before.setAttribute(REARRANGED_ATTRIBUTE, "");
+    // Act
+    const after = drawer.draw(streams).querySelector(".repo-section");
+    // Assert
+    expect(after === before).toBe(false);
+  });
+
   it("keeps a kept section's attention marker alive across the pass", () => {
     // Arrange
     const sc = sidebarContext();
@@ -2543,163 +2690,6 @@ describe("the roster drawer: a push redraws only what it changed", () => {
   });
 });
 
-describe("the recently-merged band: rows out of view are not drawn", () => {
-  /** N merged rows, ws-0 first. */
-  const merges = (n: number, from = 0): ReturnType<typeof row>[] =>
-    Array.from({ length: n }, (_, i) => row({ id: `ws-${from + i}` }));
-
-  /**
-   * ROWS spread over groups of a group's first ten, so every row is one the
-   * band draws at once or as it comes into view, never one in a page.
-   */
-  const spread = (rows: ReturnType<typeof row>[]): ReturnType<typeof mergedGroup>[] =>
-    Array.from({ length: Math.ceil(rows.length / DEPLOYS_PAGE_SIZE) }, (_, g) =>
-      mergedGroup({ id: `r${g}`, rows: rows.slice(g * DEPLOYS_PAGE_SIZE, (g + 1) * DEPLOYS_PAGE_SIZE) }),
-    );
-
-  /** Draw a band of GROUPS through a hand-run reveal. */
-  function drawBand(groups: ReturnType<typeof mergedGroup>[], failures?: FailureSink) {
-    const reveal = manualReveal();
-    const ctx = appContext();
-    const sc = sidebarContext(
-      failures === undefined ? ctx : { ...ctx, failures },
-      undefined,
-      createSidebarView(),
-      new Set(),
-      reveal,
-    );
-    const drawer = createRosterDrawer(sc);
-    const drawn = drawer.draw(roster({ merged: mergedBand(groups, false) }));
-    return { drawn, reveal, drawer };
-  }
-
-  const standIns = (drawn: HTMLElement): string[] =>
-    [...drawn.querySelectorAll(`[${STAND_IN_ATTRIBUTE}]`)].map((el) => el.getAttribute("data-roster-row") ?? "");
-
-  it("draws the band's first rows with the band", () => {
-    // Act
-    const { drawn } = drawBand(spread(merges(MERGED_DRAWN_AT_ONCE + 3)));
-
-    // Assert
-    expect(drawn.querySelector(`[data-roster-row='ws-${MERGED_DRAWN_AT_ONCE - 1}']`)?.hasAttribute(STAND_IN_ATTRIBUTE)).toBe(false);
-  });
-
-  it("draws a stand-in for every row after the first ones", () => {
-    // Act
-    const { drawn } = drawBand(spread(merges(MERGED_DRAWN_AT_ONCE + 3)));
-
-    // Assert
-    expect(standIns(drawn)).toEqual([0, 1, 2].map((i) => `ws-${MERGED_DRAWN_AT_ONCE + i}`));
-  });
-
-  it("counts the rows drawn at once across the band's groups", () => {
-    // Act
-    const { drawn } = drawBand([
-      mergedGroup({ id: "r1", rows: merges(DEPLOYS_PAGE_SIZE) }),
-      mergedGroup({ id: "r2", rows: merges(MERGED_DRAWN_AT_ONCE - DEPLOYS_PAGE_SIZE + 2, 100) }),
-    ]);
-
-    // Assert
-    expect(standIns(drawn)).toEqual(["ws-102", "ws-103"]);
-  });
-
-  it("draws every row past a group's first ten as a stand-in in a page of ten", () => {
-    // Act
-    const { drawn } = drawBand([mergedGroup({ id: "r", rows: merges(DEPLOYS_PAGE_SIZE * 2 + 1) })]);
-
-    // Assert
-    expect(
-      [...drawn.querySelectorAll(`.${DEPLOYS_PAGE_CLASS}`)].map((page) =>
-        [...page.children].map((el) => [el.getAttribute("data-roster-row"), el.hasAttribute(STAND_IN_ATTRIBUTE)]),
-      ),
-    ).toEqual([
-      Array.from({ length: DEPLOYS_PAGE_SIZE }, (_, i) => [`ws-${DEPLOYS_PAGE_SIZE + i}`, true]),
-      [[`ws-${DEPLOYS_PAGE_SIZE * 2}`, true]],
-    ]);
-  });
-
-  it("gives a stand-in the row's name on a line, as the fit and the search read it", () => {
-    // Act
-    const { drawn } = drawBand(spread(merges(MERGED_DRAWN_AT_ONCE + 1)));
-
-    // Assert
-    const standIn = drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
-    expect(standIn?.querySelector(":scope > .row > .name")?.textContent).toBe(`ws-${MERGED_DRAWN_AT_ONCE}`);
-  });
-
-  it("stamps a stand-in with the row's merged instant", () => {
-    // Act
-    const { drawn } = drawBand(spread(merges(MERGED_DRAWN_AT_ONCE + 1)));
-
-    // Assert
-    expect(drawn.querySelector(`[${STAND_IN_ATTRIBUTE}]`)?.getAttribute(MERGED_AT_ATTRIBUTE)).toBe(
-      String(1_000_000_000 - (MERGED_DRAWN_AT_ONCE % DEPLOYS_PAGE_SIZE) * 60_000),
-    );
-  });
-
-  it("draws the row in its stand-in's place once it comes into view", () => {
-    // Arrange
-    const { drawn, reveal } = drawBand(spread(merges(MERGED_DRAWN_AT_ONCE + 1)));
-    const [standIn] = reveal.waiting();
-
-    // Act
-    reveal.show(standIn);
-
-    // Assert
-    const shown = drawn.querySelector(`[data-roster-row='ws-${MERGED_DRAWN_AT_ONCE}']`);
-    expect([shown?.hasAttribute(STAND_IN_ATTRIBUTE), shown?.getAttribute(MERGED_AT_ATTRIBUTE), standIn.parentElement !== null]).toEqual([
-      false,
-      String(1_000_000_000 - (MERGED_DRAWN_AT_ONCE % DEPLOYS_PAGE_SIZE) * 60_000),
-      false,
-    ]);
-  });
-
-  it("stops waiting on a stand-in whose band is drawn anew", () => {
-    // Arrange
-    const { reveal, drawer } = drawBand(spread(merges(MERGED_DRAWN_AT_ONCE + 1)));
-
-    // Act
-    drawer.draw(roster({ merged: mergedBand(spread(merges(MERGED_DRAWN_AT_ONCE)), false) }));
-
-    // Assert
-    expect(reveal.waiting()).toEqual([]);
-  });
-
-  it("files a row it finds malformed when it comes into view, leaving the stand-in", () => {
-    // Arrange
-    const failures = recordingFailures();
-    const bad = row({ id: "ws-bad" });
-    bad.status = { case: undefined };
-    const { reveal } = drawBand(spread([...merges(MERGED_DRAWN_AT_ONCE), bad]), failures);
-    const [standIn] = reveal.waiting();
-
-    // Act
-    reveal.show(standIn);
-
-    // Assert
-    expect([failures.cases, standIn.parentElement !== null]).toEqual([["frameUndecodable"], true]);
-  });
-
-  it("logs a row it finds malformed when it comes into view", async () => {
-    // Arrange
-    const capture = captureLogRecords("debug");
-    const bad = row({ id: "ws-bad" });
-    bad.status = { case: undefined };
-    const { reveal } = drawBand(spread([...merges(MERGED_DRAWN_AT_ONCE), bad]));
-
-    // Act
-    reveal.show(reveal.waiting()[0]);
-
-    // Assert
-    const record = await forwardedRecord(capture, "sidebar.row.reveal-undecodable");
-    expect([record.level.case, record.context?.path]).toEqual([
-      "error",
-      `WorkspaceRoster.recently_merged.groups[${Math.floor(MERGED_DRAWN_AT_ONCE / DEPLOYS_PAGE_SIZE)}].merged_rows.rows[${MERGED_DRAWN_AT_ONCE % DEPLOYS_PAGE_SIZE}].row.status`,
-    ]);
-  });
-});
-
-
 describe("the recently merged rows' stylesheet", () => {
   /** A Recently Merged group drawing ROWS merges, beside a queue with one merge waiting. */
   const drawnGroup = (rows: number): HTMLElement => {
@@ -2757,15 +2747,6 @@ describe("the recently merged rows' stylesheet", () => {
     expect(inRail(drawn, () => cascadedValue(glyph, "width"))).toBe("var(--mq-glyph-w)");
   });
 
-  it.each([
-    { name: "draws a hidden page as nothing", selector: `.${DEPLOYS_PAGE_CLASS}` },
-    { name: "draws a hidden arrow as nothing", selector: `.${DEPLOYS_MORE_CLASS}` },
-  ])("$name", ({ selector }) => {
-    const drawn = drawnGroup(DEPLOYS_PAGE_SIZE + 1);
-    const el = drawn.querySelector<HTMLElement>(selector)!;
-    el.hidden = true;
-    expect(inRail(drawn, () => cascadedValue(el, "display"))).toBe("none");
-  });
 });
 
 describe("the open rows' recency gutters", () => {
@@ -2775,7 +2756,7 @@ describe("the open rows' recency gutters", () => {
 
   /** The roster U's open row for workspace "x", its one repository's first row. */
   const openX = (u: ReturnType<typeof roster>): RosterOpenRow => {
-    const first = u.repository?.sections[0]?.entries[0]?.entry;
+    const first = u.workspaces.repository?.sections[0]?.entries[0]?.entry;
     if (first?.case !== "row") throw new Error("the fixture has its open row");
     return first.value;
   };
@@ -2868,7 +2849,7 @@ describe("the open rows' tab numbers", () => {
   it("refuses an open row with no tab as a malformed view", () => {
     // Arrange
     const u = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })] });
-    const first = u.repository?.sections[0]?.entries[0]?.entry;
+    const first = u.workspaces.repository?.sections[0]?.entries[0]?.entry;
     const open = first?.case === "row" ? first.value : undefined;
     if (open === undefined) throw new Error("the fixture has its open row");
     open.tab = undefined;

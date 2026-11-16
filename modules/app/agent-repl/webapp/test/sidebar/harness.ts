@@ -6,12 +6,18 @@
  * suite builds its own idea of what a roster looks like.
  */
 import { createDeploysFold, type DeploysFold } from "../../src/sidebar/deploys-fold.js";
-import { createDeploysMore, type DeploysMore } from "../../src/sidebar/deploys-more.js";
+import type { MergedGroupPages, MergedPages } from "../../src/sidebar/merged-pages.js";
+import { MERGED_PAGE_SIZE } from "../../src/sidebar/merged-pages.js";
+import type { RosterStreamName, RosterStreams } from "../../src/sidebar/roster-streams.js";
 import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
 import { createRouterTransport, type ServiceImpl } from "@connectrpc/connect";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
 import { UpdateSidebarViewResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
+import {
+  ListMergedWorkspacesResponseSchema,
+  type ListMergedWorkspacesResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_list_merged_workspaces_pb";
 import {
   RosterRowSchema,
   RosterRowDetailSchema,
@@ -19,9 +25,12 @@ import {
   RosterHiddenSectionSchema,
   RosterOpenSectionSchema,
   RosterMergedRepoGroupSchema,
+  RosterMergedRowSchema,
   RosterMergedSectionSchema,
   RosterMergeQueueRepoGroupSchema,
   RosterMergeQueueSectionSchema,
+  RosterPushSchema,
+  RosterClosedRowsSchema,
   RosterRepoEntrySchema,
   RosterMergeQueueActiveClockSchema,
   RosterMergeQueueHeadClockSchema,
@@ -43,7 +52,9 @@ import {
   type RosterMergeQueueWaiting,
   type RosterOpenSection,
   type RosterMergedRepoGroup,
+  type RosterMergedRow,
   type RosterMergedSection,
+  type RosterPush,
   type RosterMergeQueueRepoGroup,
   type RosterMergeQueueSection,
   type RosterRepoSection,
@@ -218,7 +229,7 @@ export function sidebarContext(
   openDetails: Set<string> = new Set(),
   reveal: RowReveal = drawsAtOnce,
   deploysFold: DeploysFold = createDeploysFold(document, () => undefined),
-  deploysMore: DeploysMore = createDeploysMore(document, () => undefined),
+  mergedPages: MergedPages = allMergesLoaded(),
 ): SidebarContext & RailContext & { view: DrawnView & SidebarView; attention: AttentionRegistry; disposers: Array<() => void> } {
   const disposers: Array<() => void> = [];
   const dropdowns = createDropdowns();
@@ -247,7 +258,7 @@ export function sidebarContext(
       status: document.createElement("div"),
     },
     deploysFold,
-    deploysMore,
+    mergedPages,
     disposers,
     onDispose: (fn) => {
       disposers.push(fn);
@@ -255,14 +266,33 @@ export function sidebarContext(
   };
 }
 
-/** A response stream that yields ROSTERS and then never concludes. */
+/**
+ * The push carrying STREAMS' snapshots: every stream unless ONLY names which,
+ * at STREAMS' revision.
+ */
+export function pushOf(streams: RosterStreams, only?: readonly RosterStreamName[]): RosterPush {
+  const carries = (name: RosterStreamName): boolean => only === undefined || only.includes(name);
+  return create(RosterPushSchema, {
+    revision: streams.revision,
+    ...(carries("workspaces") ? { workspaces: streams.workspaces } : {}),
+    ...(carries("merge_queue") ? { mergeQueue: streams.mergeQueue } : {}),
+    ...(carries("recently_merged") ? { recentlyMerged: streams.recentlyMerged } : {}),
+    ...(carries("closed") ? { closed: streams.closed } : {}),
+  });
+}
+
+/**
+ * A response stream that yields PUSHES (a `RosterStreams` is the push
+ * carrying every stream of it) and then never concludes.
+ */
 export function rosterStream(
-  rosters: readonly WorkspaceRoster[],
+  pushes: ReadonlyArray<RosterStreams | RosterPush>,
 ): Partial<ServiceImpl<typeof AgentRepl>> {
   return {
     watchWorkspaceRoster: async function* () {
-      for (const roster of rosters) {
-        yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster } });
+      for (const push of pushes) {
+        const value = "$typeName" in push ? push : pushOf(push);
+        yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "streams", value } });
       }
       // A standing stream never ends on its own.
       await new Promise<never>(() => undefined);
@@ -439,16 +469,108 @@ export function bandHeight(sized: number | null): { case: "fitted"; value: objec
 }
 
 /**
- * The Recently Merged section carrying GROUPS and its fold stated. Its header
- * counts nothing, as the daemon draws it.
+ * The Recently Merged section carrying GROUPS' summaries, its fold and its
+ * height (`bandHeight`) stated, and its set of merged workspaces named TOKEN
+ * (1 unless said). Its header counts every group's merges, as the daemon
+ * draws it.
  */
-export function mergedBand(groups: RosterMergedRepoGroup[], collapsed: boolean = true, sized: number | null = null): RosterMergedSection {
+export function mergedBand(
+  groups: RosterMergedRepoGroup[],
+  collapsed: boolean = true,
+  sized: number | null = null,
+  token: bigint = 1n,
+): RosterMergedSection {
   return create(RosterMergedSectionSchema, {
-    header: { label: { text: "Recently Merged" } },
+    header: {
+      label: { text: "Recently Merged" },
+      count: { workspaces: groups.reduce((sum, group) => sum + (group.summary?.count?.merges ?? 0), 0) },
+    },
     groups,
+    mergedRevision: { revision: token },
     fold: collapsed ? { case: "collapsed", value: {} } : { case: "expanded", value: {} },
     height: bandHeight(sized),
   });
+}
+
+/** The merged rows each harness group was built from: what its pages hold. */
+const MERGED_ROWS = new WeakMap<RosterMergedRepoGroup, RosterMergedRow[]>();
+
+/** The merged rows GROUP (a `mergedGroup`) was built from, most recent first. */
+export function mergedRowsOf(group: RosterMergedRepoGroup): RosterMergedRow[] {
+  return MERGED_ROWS.get(group) ?? [];
+}
+
+/** ROWS as pages of ten, as ListMergedWorkspaces answers them. */
+export function pagesOfTen<T>(rows: readonly T[]): T[][] {
+  const pages: T[][] = [];
+  for (let i = 0; i < rows.length; i += MERGED_PAGE_SIZE) pages.push(rows.slice(i, i + MERGED_PAGE_SIZE));
+  return pages;
+}
+
+/**
+ * Merged pages where every merge of every harness group (`mergedGroup`) is
+ * loaded and every page agrees with its summary: what a drawer test draws
+ * through, so it reads the drawing and not the loading (merged-pages.ts has
+ * its own suite).
+ */
+export function allMergesLoaded(): MergedPages {
+  return {
+    agree: () => "draw",
+    loaded: (group): MergedGroupPages => {
+      const rows = mergedRowsOf(group);
+      return { pages: pagesOfTen(rows), more: false, rows: rows.length };
+    },
+    version: () => 0,
+    check: () => undefined,
+    foldsChanged: () => undefined,
+    dispose: () => undefined,
+  };
+}
+
+/**
+ * A daemon answering ListMergedWorkspaces from SECTIONS' harness groups
+ * (`mergedGroup`): each group's rows ten at a time, at the token of the last
+ * section listing it.
+ */
+export function listMergedFrom(sections: readonly RosterMergedSection[]): Partial<ServiceImpl<typeof AgentRepl>> {
+  return {
+    listMergedWorkspaces: (request) => {
+      let found: { group: RosterMergedRepoGroup; token: bigint } | null = null;
+      for (const section of sections) {
+        const group = section.groups.find((g) => g.key?.repository?.id === request.repository?.id);
+        if (group !== undefined) found = { group, token: section.mergedRevision?.revision ?? 0n };
+      }
+      if (found === null) {
+        return create(ListMergedWorkspacesResponseSchema, {
+          result: { case: "error", value: { cause: { case: "unknownRepository", value: { repository: request.repository } } } },
+        });
+      }
+      return mergedPageAnswer(mergedRowsOf(found.group), request.page, found.token);
+    },
+  };
+}
+
+/** The answer for page PAGE of ROWS, at TOKEN: `more` while rows follow it, else `last`. */
+export function mergedPageAnswer(rows: readonly RosterMergedRow[], page: number, token: bigint): ListMergedWorkspacesResponse {
+  const slice = rows.slice(page * MERGED_PAGE_SIZE, (page + 1) * MERGED_PAGE_SIZE);
+  const omitted = Math.max(0, rows.length - (page + 1) * MERGED_PAGE_SIZE);
+  return create(ListMergedWorkspacesResponseSchema, {
+    result: {
+      case: "success",
+      value: {
+        revision: { revision: token },
+        extent:
+          omitted > 0
+            ? { case: "more", value: { rows: { rows: slice }, omitted } }
+            : { case: "last", value: { rows: { rows: slice } } },
+      },
+    },
+  });
+}
+
+/** Merged pages where nothing is loaded: a folded band's, or one whose fetch failed. */
+export function noMergesLoaded(): MergedPages {
+  return { ...allMergesLoaded(), loaded: () => ({ pages: [], more: false, rows: 0 }) };
 }
 
 /**
@@ -479,15 +601,21 @@ export function queueGroup(init: {
 }
 
 /**
- * One repository's group inside the Recently Merged section. A row left on
- * `row`'s default when arm (no turn running) is stamped on the merged arm,
- * as the daemon stamps every merged row, a minute apart and most recent
- * first.
+ * One repository's group inside the Recently Merged section, its summary
+ * built from ROWS as the daemon builds it: their count (COUNT unless said),
+ * the first's instant as the latest, and every one of them as a merge of the
+ * last day (RECENT unless said), with its commits. A row left on `row`'s
+ * default when arm (no turn running) is stamped on the merged arm, as the
+ * daemon stamps every merged row, a minute apart and most recent first. The
+ * rows are what its pages hold (`mergedRowsOf`).
  */
 export function mergedGroup(init: {
   id: string;
   label?: string;
   rows?: RosterRow[];
+  count?: number;
+  latestMs?: number;
+  recent?: Array<{ atMs: number; commits?: number }>;
 }): RosterMergedRepoGroup {
   const rows = (init.rows ?? []).map((r, i) => {
     if (r.when === undefined || r.when.shown.case !== "noTurnRunning") return r;
@@ -495,11 +623,21 @@ export function mergedGroup(init: {
     stamped.when = create(RosterRowWhenSchema, { shown: { case: "merged", value: { atMs: BigInt(1_000_000_000 - i * 60_000) } } });
     return stamped;
   });
-  return create(RosterMergedRepoGroupSchema, {
+  const atMs = (r: RosterRow): number => (r.when?.shown.case === "merged" ? Number(r.when.shown.value.atMs) : 0);
+  const recent =
+    init.recent ??
+    rows.map((r) => ({ atMs: atMs(r), ...(r.detail?.commits === undefined ? {} : { commits: r.detail.commits.count }) }));
+  const group = create(RosterMergedRepoGroupSchema, {
     key: { repository: { id: init.id, dir: `/r/${init.id}` } },
     header: { label: { text: init.label ?? init.id } },
-    mergedRows: { rows: rows.map((row) => ({ row })) },
+    summary: {
+      count: { merges: init.count ?? rows.length },
+      latest: { mergedAtMs: BigInt(init.latestMs ?? (rows.length === 0 ? 1_000_000_000 : Math.max(...rows.map(atMs)))) },
+      recent: recent.map((merge) => ({ mergedAtMs: BigInt(merge.atMs), ...(merge.commits === undefined ? {} : { commits: merge.commits }) })),
+    },
   });
+  MERGED_ROWS.set(group, rows.map((row) => create(RosterMergedRowSchema, { row })));
+  return group;
 }
 
 /**
@@ -532,8 +670,12 @@ export function openSection(collapsed: boolean = false): RosterOpenSection {
   });
 }
 
-/** A whole roster, with every required box present. */
+/**
+ * A whole roster, every stream of it as of one push (REVISION, 1 unless
+ * said), with every required box present.
+ */
 export function roster(init: {
+  revision?: bigint;
   repos?: RosterRepoSection[];
   merged?: RosterMergedSection;
   mergeQueue?: RosterMergeQueueSection;
@@ -555,7 +697,7 @@ export function roster(init: {
   tabs?: Array<{ id: string; drawn?: "drawn" | "withheldCollapsed" }>;
   /** The Chat app is shown, with these threads (id and name). */
   chat?: TestThread[];
-} = {}): WorkspaceRoster {
+} = {}): RosterStreams {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
   const unfolded = repos.reduce((sum, section) => sum + (section.header?.count?.unfolded ?? 0), 0);
@@ -563,19 +705,23 @@ export function roster(init: {
     repos.map(sectionTabRegions),
     init.tabs?.filter((tab) => (tab.drawn ?? "drawn") === "drawn").map((tab) => tab.id),
   );
-  return create(WorkspaceRosterSchema, {
+  const workspaces: WorkspaceRoster = create(WorkspaceRosterSchema, {
     repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted, unfolded: init.openUnfolded ?? init.openCount ?? unfolded } },
     open: init.open ?? openSection(),
-    recentlyMerged: init.merged ?? mergedSection(),
-    mergeQueue: init.mergeQueue ?? mergeQueueBand(),
     hidden: init.hidden ?? hiddenSection(),
-    closed: {},
     ...rosterApps(init.chat),
     ...(init.current === undefined
       ? {}
       : { current: { workspace: { id: init.current, dir: `/w/${init.current}` } } }),
     ...(init.version === undefined ? {} : { version: { text: init.version } }),
   });
+  return {
+    revision: init.revision ?? 1n,
+    workspaces,
+    mergeQueue: init.mergeQueue ?? mergeQueueBand(),
+    recentlyMerged: init.merged ?? mergedSection(),
+    closed: create(RosterClosedRowsSchema, {}),
+  };
 }
 
 export { primaryPointer, settleOwedDragClick } from "../drag-pointer.js";

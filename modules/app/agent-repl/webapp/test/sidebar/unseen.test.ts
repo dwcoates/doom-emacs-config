@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterStreams } from "../../src/sidebar/roster-streams.js";
 import { createPresence } from "../../src/presence.js";
 import { createUnseenGate, type UnseenEnv } from "../../src/sidebar/unseen.js";
 import { createPageSeen } from "../../src/page-seen.js";
@@ -25,11 +25,11 @@ function env(initial: DocumentVisibilityState): UnseenEnv & { show(): void; hide
 
 /** A gate whose draws the test reads back, in order. */
 function gate(initial: DocumentVisibilityState): {
-  drawn: WorkspaceRoster[];
+  drawn: RosterStreams[];
   e: ReturnType<typeof env>;
   g: ReturnType<typeof createUnseenGate>;
 } {
-  const drawn: WorkspaceRoster[] = [];
+  const drawn: RosterStreams[] = [];
   const e = env(initial);
   const g = createUnseenGate(OWN, (r) => drawn.push(r), e);
   return { drawn, e, g };
@@ -188,7 +188,7 @@ describe("the unseen gate", () => {
   it("holds a push while its host does not show the page", () => {
     // Arrange
     const presence = createPresence(visibilityDoc("visible").doc, true);
-    const drawn: WorkspaceRoster[] = [];
+    const drawn: RosterStreams[] = [];
     const g = createUnseenGate(OWN, (r) => drawn.push(r), { seen: createPageSeen(OWN, presence), now: () => 0 });
 
     // Act
@@ -202,7 +202,7 @@ describe("the unseen gate", () => {
   it("draws the newest held push when its host shows the page", () => {
     // Arrange
     const presence = createPresence(visibilityDoc("visible").doc, true);
-    const drawn: WorkspaceRoster[] = [];
+    const drawn: RosterStreams[] = [];
     const g = createUnseenGate(OWN, (r) => drawn.push(r), { seen: createPageSeen(OWN, presence), now: () => 0 });
     const newest = roster({ current: OTHER });
     g.offer(roster({ current: OTHER }));

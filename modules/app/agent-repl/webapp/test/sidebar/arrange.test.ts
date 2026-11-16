@@ -8,7 +8,7 @@ import {
   ArrangeSidebarResponseSchema,
   type ArrangeSidebarRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_arrange_sidebar_pb";
-import { WorkspaceRosterSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterStreams } from "../../src/sidebar/roster-streams.js";
 import {
   arrangeSidebarRefusal,
   buildArrangeSidebarRequest,
@@ -18,12 +18,12 @@ import {
   successRevision,
 } from "../../src/sidebar/arrange.js";
 import { log } from "../../src/log.js";
-import { appContext, sidebarContext } from "./harness.js";
+import { appContext, roster, sidebarContext } from "./harness.js";
 import { codeOf } from "../source-text.js";
 
-/** A roster carrying nothing but REVISION. */
-function at(revision: number): WorkspaceRoster {
-  return create(WorkspaceRosterSchema, { revision: BigInt(revision) });
+/** Every roster stream as of the push at REVISION. */
+function at(revision: number): RosterStreams {
+  return roster({ revision: BigInt(revision) });
 }
 
 describe("the arrangement hold", () => {

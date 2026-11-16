@@ -4,9 +4,12 @@
  * `WatchWorkspaceRoster` carries no workspace. Every webview — one per
  * workspace — watches the same roster, and the daemon's stream order is the
  * only order, because there is no outside publisher to reconcile against. The
- * roster is ALWAYS WHOLE, never a delta, so a push throws the previous DOM
- * away rather than reconciling it: a workspace that left is simply absent from
- * the next push, and deletion is row omission, never an event.
+ * roster is FOUR SNAPSHOT STREAMS on one push (`roster-streams.ts`), each
+ * ALWAYS WHOLE when it is carried, never a delta: a workspace that left is
+ * simply absent from its stream's next snapshot, and deletion is row
+ * omission, never an event. Every snapshot a push carries is applied before
+ * anything is drawn, and a frame draws only the streams that changed since
+ * the last draw.
  *
  * THE RAIL SHIPS HIDDEN and reveals itself on its FIRST PUSH, so a session
  * that never receives a roster keeps the single-column layout instead of
@@ -30,7 +33,7 @@ import { createSelectionPaint, type RecordSidebarLatency } from "./selection-pai
 import { drawTimingEnv, timeRosterDraw, type DrawTimingEnv, type MarkPhase } from "./draw-timing.js";
 import type { AppContext, DaemonContext } from "../rpc/context.js";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
+import { requireMessage } from "../rpc/strict.js";
 import { watchStream } from "../rpc/streams.js";
 import { WINDOW_TIMERS, type Timers } from "../timers.js";
 import { AttentionRegistry } from "./attention.js";
@@ -38,7 +41,8 @@ import { createDropdowns } from "./dropdowns.js";
 import { createRowMenus } from "./row-menu.js";
 import { createRowHover } from "./row-hover.js";
 import { createDeploysFold, installDeploysFoldReset } from "./deploys-fold.js";
-import { createDeploysMore } from "./deploys-more.js";
+import { createMergedPages } from "./merged-pages.js";
+import { createRosterIntake, rosterPushOf, type RosterStreams } from "./roster-streams.js";
 import { openScope } from "./scope.js";
 import { installFocusFold } from "./section-fold.js";
 import { installSectionResize } from "./section-resize.js";
@@ -66,7 +70,7 @@ import { createFoldFade } from "./fold-fade.js";
 import { createRailScrollKeep } from "./scroll-keep.js";
 import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
 import { createQueueSelectionScroll } from "./queue-selection.js";
-import type { RosterVersion, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterVersion } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
 export interface Handle {
@@ -283,16 +287,22 @@ function mountSidebarIn(
     selectionFade: createSelectionFade(body),
     foldFade: createFoldFade(body),
     shownAhead: () => shownAhead,
-    arrange: { hold: createArrangeHold((roster) => drawRoster(roster)), layer: arrangeLayer, status: arrangeStatus },
+    arrange: { hold: createArrangeHold((streams) => drawRoster(streams)), layer: arrangeLayer, status: arrangeStatus },
     // A CHANGE IS FITTED AT ONCE: the rows shown or let go are the Deploys
-    // band's lines (band-fit.ts). A group folded or opened also hides or
-    // shows its older deploys, which starts or stops their linger.
+    // band's lines (band-fit.ts). A Recently Merged group folded lets its
+    // pages go, and opened loads its first again (merged-pages.ts).
     deploysFold: createDeploysFold(body, () => {
       bandFit.refit();
-      rail.deploysMore.check();
+      rail.mergedPages.foldsChanged();
     }),
-    // EACH GROUP'S OLDER DEPLOYS (deploys-more.ts), fitted the same way.
-    deploysMore: createDeploysMore(body, () => bandFit.refit()),
+    // THE RECENTLY MERGED BAND'S PAGES (merged-pages.ts): a page loaded or
+    // let go draws the rail again, through the same frame a push draws in.
+    mergedPages: createMergedPages({
+      ctx,
+      root: body,
+      folded: (repository) => rail.deploysFold.mergedFolded(repository),
+      changed: () => redraw(),
+    }),
   };
   // THE BAND FIT (band-fit.ts): the Open, Hidden Workspaces and Recently
   // Merged viewports, re-fitted after every draw, on every resize of the rail
@@ -309,7 +319,7 @@ function mountSidebarIn(
     "scroll",
     () => {
       selectionScroll.scrolled(body);
-      rail.deploysMore.check();
+      rail.mergedPages.check();
     },
     true,
   );
@@ -403,6 +413,8 @@ function mountSidebarIn(
     placement.case === "page"
       ? createUnseenGate(placement.ctx.workspace.id, (roster) => rail.arrange.hold.offer(roster), deps.unseen ?? unseenEnv(placement.ctx.seen))
       : null;
+  // THE CLIENT'S COPY OF THE FOUR STREAMS (roster-streams.ts), one run's.
+  const intake = createRosterIntake();
   const stream = watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
@@ -410,19 +422,18 @@ function mountSidebarIn(
     plannedEnding: (response) => response.push.case === "ending",
     // A run that ended forgets what `current` was: the next run's first push
     // is a baseline, so a reconnect restating it is never taken for a switch.
+    // It forgets its streams too: the next run's first push carries them all.
     onEnd: () => {
+      intake.reset();
       selectionEdge?.reset();
       rail.arrange.hold.reset();
     },
     onPush: (response) => {
-      const push = requireCase(response.push, "WatchWorkspaceRosterResponse.push");
-      if (push.case !== "roster") {
-        // A TOP-LEVEL push arm this build cannot draw is forward-compat skew,
-        // not a contract violation: skipped quietly by the stream pipeline.
-        // (`ending` never reaches here: the stream pipeline consumes it.)
-        return unreachablePushArm("WatchWorkspaceRosterResponse.push", push.case);
-      }
-      const roster = requireMessage(push.value, "WatchWorkspaceRosterResponse.roster");
+      // A TOP-LEVEL push arm this build cannot draw is forward-compat skew,
+      // skipped quietly by the stream pipeline (`rosterPushOf`); a first push
+      // missing a stream is refused whole, and nothing of it is kept.
+      const streams = intake.apply(rosterPushOf(response));
+      const roster = streams.workspaces;
       current =
         roster.current === undefined
           ? null
@@ -441,45 +452,67 @@ function mountSidebarIn(
       // A PUSH WAITS WHILE THE PAGE HOLDS ITS OWN DRAWING of an arrangement
       // it dragged or asked for (arrange.ts), so the moved item is never put
       // back for an instant.
-      if (unseen === null) rail.arrange.hold.offer(roster);
-      else unseen.offer(roster);
+      if (unseen === null) rail.arrange.hold.offer(streams);
+      else unseen.offer(streams);
       // EVERY push moves the selection edge, drawn or held, so the edge's
       // baseline is the roster the daemon last stated, not the last one drawn.
       selectionEdge?.observe(roster);
     },
   });
 
-  // AT MOST ONE DRAW PER FRAME, OF THE NEWEST ROSTER (2026-10-15). Pushes
+  // AT MOST ONE DRAW PER FRAME, OF THE NEWEST STREAMS (2026-10-15). Pushes
   // arrive in bursts (ten inside one second at a page's boot), and each used
   // to draw at once, so a burst paid for every roster in it while only the
-  // last was ever seen. A push now replaces the one waiting, and the frame
-  // draws whichever is newest.
+  // last was ever seen. A push now replaces the streams waiting, every
+  // snapshot of it already applied (roster-streams.ts), and the frame draws
+  // whichever is newest, redrawing only the streams it changed (roster.ts).
   const frame = deps.frame ?? nextFrame;
   // THE FIRST PAINT OF EACH SELECT'S SELECTION is recorded beside the page's
   // own (selection-paint.ts), with the switch's sidebar latency.
   const selectionPaint = createSelectionPaint({ wallNow: deps.wallNow ?? (() => Date.now()), frame }, deps.recordLatency);
-  let waiting: WorkspaceRoster | null = null;
+  /** The newest streams offered to the rail, drawn or still held for their merged pages. */
+  let latest: RosterStreams | null = null;
+  let scheduled = false;
   let disposed = false;
 
-  /** Draw ROSTER on the next frame, replacing any roster still waiting for it. */
-  function drawRoster(roster: WorkspaceRoster): void {
-    const scheduled = waiting !== null;
-    waiting = roster;
+  /** Draw STREAMS on the next frame, replacing any streams still waiting for it. */
+  function drawRoster(streams: RosterStreams): void {
+    latest = streams;
+    schedule();
+  }
+
+  /**
+   * The Recently Merged pages changed: draw the newest streams again with
+   * them. A drawing the arrangement holds is drawn when the hold lets go.
+   */
+  function redraw(): void {
+    if (rail.arrange.hold.holding()) return;
+    schedule();
+  }
+
+  function schedule(): void {
     if (scheduled) return;
+    scheduled = true;
     frame(() => {
-      const newest = waiting;
-      waiting = null;
+      scheduled = false;
+      const newest = latest;
       if (disposed || newest === null) return;
-      // The push's stream returned before this frame, so a roster the draw
-      // finds malformed is filed here, as the stream would have filed it.
-      guardMalformedNow(ctx, "sidebar.roster-draw", () =>
-        timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming),
-      );
+      // The push's stream returned before this frame, so streams the draw
+      // finds malformed are filed here, as the stream would have filed them.
+      guardMalformedNow(ctx, "sidebar.roster-draw", () => {
+        // A PUSH WHOSE MERGED PAGES DO NOT AGREE WITH ITS SUMMARY IS HELD,
+        // every stream of it, until they do (merged-pages.ts): the rail never
+        // draws a workspace both open and merged, nor in neither.
+        const chat = showsChat(requireMessage(newest.workspaces.appSwitcher, "WorkspaceRoster.app_switcher"));
+        if (rail.mergedPages.agree(chat ? null : newest.recentlyMerged, "RosterPush.recently_merged") === "hold") return;
+        timeRosterDraw(body, placement.case, (mark) => drawRosterNow(newest, mark), drawTiming);
+      });
     });
   }
 
-  /** Draw one roster into the rail, marking each phase's end. */
-  function drawRosterNow(roster: WorkspaceRoster, mark: MarkPhase): void {
+  /** Draw every stream of one push into the rail, marking each phase's end. */
+  function drawRosterNow(streams: RosterStreams, mark: MarkPhase): void {
+    const roster = streams.workspaces;
     // The blink pass brackets the draw: markers are re-attached to the phases
     // already running, and any marker the daemon cleared is forgotten.
     attention.beginPass();
@@ -494,7 +527,7 @@ function mountSidebarIn(
       drawn = drawThreadList(requireMessage(roster.threads, "WorkspaceRoster.threads"), rail);
     } else {
       disposeThreadList(rail);
-      drawn = drawWorkspaceRoster(roster, rail);
+      drawn = drawWorkspaceRoster(streams, rail);
     }
     attention.endPass();
     head.showVersion(roster.version);
@@ -527,9 +560,9 @@ function mountSidebarIn(
     // Followed once the bands are fitted, so it scrolls the viewport they drew.
     selectionScroll.follow(body);
     queueSelection.follow(body, shownAhead ?? current?.id ?? null);
-    // Looked at once the viewports stand where they will, so a group's older
-    // deploys are in view or not as the reader sees them.
-    rail.deploysMore.check();
+    // Looked at once the viewports stand where they will, so a group's end
+    // and its pages are in view or not as the reader sees them.
+    rail.mergedPages.check();
     // Seeked once the draw is in the document, where its animations run.
     wallPhase.seek();
     selectionPaint.drawn(roster.current);
@@ -574,7 +607,7 @@ function mountSidebarIn(
       removeFocusFold();
       removeSectionResize();
       focusFoldScope.dispose(host);
-      rail.deploysMore.dispose();
+      rail.mergedPages.dispose();
       versionNotices?.dispose();
       rail.rowHover.dispose();
       disposeWorkspaceRoster(rail);

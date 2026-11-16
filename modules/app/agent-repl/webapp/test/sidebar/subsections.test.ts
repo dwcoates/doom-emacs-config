@@ -1490,7 +1490,7 @@ describe("a subsection's fold", () => {
   it("refuses a subsection with no fold as a malformed view", () => {
     // Arrange
     const made = subsectionOf(false);
-    const entry = made.repository!.sections[0].entries.find((e) => e.entry.case === "subsection")!.entry;
+    const entry = made.workspaces.repository!.sections[0].entries.find((e) => e.entry.case === "subsection")!.entry;
     if (entry.case !== "subsection") throw new Error("the fixture has its subsection");
     entry.value.fold = { case: undefined };
 

@@ -12,6 +12,7 @@
  * assertable rather than a matter of watching it.
  */
 import type { FinishWorkspaceRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_finish_workspace_pb";
+import type { ListMergedWorkspacesRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_list_merged_workspaces_pb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -320,11 +321,19 @@ describe("row decoration", () => {
     expect(harness.$(".sb-pane .merged-group-head .sb-today-count")?.textContent).toMatch(/^\(\d+ today, last .+ ago\)$/);
   });
 
-  it("draws a merged row in the merged section", async () => {
+  it("draws a merged row in the unfolded merged section, its page fetched for its repository", async () => {
+    // Arrange / Act
+    await withRoster({ mergedCollapsed: false });
+    // Assert
+    const [asked] = harness.fake.calls<ListMergedWorkspacesRequest>("listMergedWorkspaces");
+    expect([harness.$('[data-roster-row="ws-merged"]') !== null, asked?.repository?.id, asked?.page]).toEqual([true, "repo-1", 0]);
+  });
+
+  it("fetches no merged row while the merged section is folded", async () => {
     // Arrange / Act
     await withRoster({});
     // Assert
-    expect(harness.$('[data-roster-row="ws-merged"]')).not.toBeNull();
+    expect([harness.$('[data-roster-row="ws-merged"]'), harness.fake.calls("listMergedWorkspaces").length]).toEqual([null, 0]);
   });
 
   it("draws a merged row inside its repository's group", async () => {
@@ -618,6 +627,7 @@ describe("roster ordering", () => {
         rosterRow({ id: "ws-alpha", name: "alpha", priority: "p1" }),
         rosterRow({ id: "ws-mid", name: "mid" }),
       ],
+      mergedCollapsed: false,
     });
     // Assert
     expect(
@@ -654,6 +664,7 @@ describe("roster ordering", () => {
         { repositoryId: "repo-z", label: "zulu", rows: [rosterRow({ id: "ws-z" })] },
         { repositoryId: "repo-a", label: "alpha", rows: [rosterRow({ id: "ws-a" })] },
       ],
+      mergedCollapsed: false,
     });
     // Assert
     expect(

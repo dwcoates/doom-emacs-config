@@ -15,7 +15,7 @@ function edge(): { arrivals: () => number; observe: (current?: string) => void; 
   });
   return {
     arrivals: () => count,
-    observe: (current) => e.observe(roster(current === undefined ? {} : { current })),
+    observe: (current) => e.observe(roster(current === undefined ? {} : { current }).workspaces),
     reset: () => e.reset(),
   };
 }

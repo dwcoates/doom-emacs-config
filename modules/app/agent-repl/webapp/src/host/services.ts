@@ -17,7 +17,7 @@ import type { WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_
 import { bootFailed } from "../failure/sink.js";
 import { log } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
-import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
+import { createRosterIntake, rosterPushOf } from "../sidebar/roster-streams.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { startWebhostDocument, type WebhostDocumentDeps, type WebhostRuntime } from "./document.js";
 import type { Host } from "./host.js";
@@ -46,7 +46,9 @@ export interface WebhostServicesDeps extends WebhostDocumentDeps {
 }
 
 /**
- * Tell ON_GATES the roster's shown cold gates on every roster pushed over CTX.
+ * Tell ON_GATES the roster's shown cold gates on every push over CTX that
+ * carries the workspaces stream (`roster-streams.ts`): a push leaving the
+ * stream out left its gates as they were.
  *
  * The gate is drawn from the roster (`WorkspaceRoster.cold_gates`), which the
  * sidebar's document watches too; each document watches its own, since the
@@ -57,15 +59,17 @@ export function watchColdGates(
   ctx: DaemonContext,
   onGates: (gates: WorkspaceRoster["coldGates"]) => void,
 ): StreamHandle {
+  const intake = createRosterIntake();
   return watchStream(ctx, {
     name: "WatchWorkspaceRoster",
     schema: WatchWorkspaceRosterResponseSchema,
     open: (_client, signal) => ctx.streams.watch("roster", {}, signal),
     plannedEnding: (response) => response.push.case === "ending",
+    onEnd: () => intake.reset(),
     onPush: (response) => {
-      const push = requireCase(response.push, "WatchWorkspaceRosterResponse.push");
-      if (push.case !== "roster") return unreachablePushArm("WatchWorkspaceRosterResponse.push", push.case);
-      onGates(requireMessage(push.value, "WatchWorkspaceRosterResponse.roster").coldGates);
+      const push = rosterPushOf(response);
+      const streams = intake.apply(push);
+      if (push.workspaces !== undefined) onGates(streams.workspaces.coldGates);
     },
   });
 }

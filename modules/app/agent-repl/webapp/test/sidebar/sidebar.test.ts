@@ -7,7 +7,7 @@ import { SELECTION_ANIMATIONS, SELECTION_NUMBER_RISE } from "../../src/sidebar/s
 import { create } from "@bufbuild/protobuf";
 import { WatchWorkspaceRosterResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
 import { AgentRepl } from "../../../proto/gen/ts/agentrepl/v1/service_pb";
-import { createRouterTransport } from "@connectrpc/connect";
+import { Code, ConnectError, createRouterTransport } from "@connectrpc/connect";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { type AppContext } from "../../src/rpc/context.js";
 import { testAppContext } from "../rpc/app-context.js";
@@ -22,13 +22,18 @@ import {
   type SidebarDeps,
   type WebhostSidebarDeps,
 } from "../../src/sidebar/sidebar.js";
-import { RosterVersionSchema, type WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { RosterVersionSchema, type RosterPush } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterStreams } from "../../src/sidebar/roster-streams.js";
+import type {
+  ListMergedWorkspacesRequest,
+  ListMergedWorkspacesResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_list_merged_workspaces_pb";
 import { createRailSearch } from "../../src/sidebar/search.js";
 import { createAppSwitcher } from "../../src/sidebar/threads.js";
 import { createDropdowns } from "../../src/sidebar/dropdowns.js";
 import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import { HOVER_SUSPENDED_CLASS } from "../../src/sidebar/transients.js";
-import { captureLogRecords, forwardedRecord, type LogCapture } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords, type LogCapture } from "../log-capture.js";
 import type { PhasedAnimation } from "../../src/sidebar/wall-phase.js";
 import type { UnseenEnv } from "../../src/sidebar/unseen.js";
 import { createPageSeen } from "../../src/page-seen.js";
@@ -42,11 +47,15 @@ import {
   appContext,
   fakeTicker,
   fakeTimers,
+  listMergedFrom,
   mergedBand,
   mergedGroup,
+  mergedPageAnswer,
+  mergedRowsOf,
   mergedSection,
   mergeQueueBand,
   mergingHead,
+  pushOf,
   primaryPointer,
   queueGroup,
   waitingMerge,
@@ -57,10 +66,6 @@ import {
   row,
 } from "./harness.js";
 import { frameQueue, type FrameQueue } from "../frame-queue.js";
-import { fireIntersection } from "../intersection-observer.js";
-import { MERGED_DRAWN_AT_ONCE } from "../../src/sidebar/roster.js";
-import { DEPLOYS_PAGE_SIZE } from "../../src/sidebar/deploys-more.js";
-import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { recordingFailures } from "../failure-sink.js";
 import { boxRect } from "../dom-rect.js";
@@ -114,6 +119,7 @@ function ctxFor(
     service(AgentRepl, {
       updateSidebarView: () => create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } }),
       ...rosterStream(rosters),
+      ...listMergedFrom(rosters.map((r) => r.recentlyMerged)),
       ...impl,
     });
   });
@@ -372,7 +378,7 @@ describe("mounting the rail: the view is the daemon's", () => {
 
 describe("mounting the rail: the search", () => {
   /** Open HOST's search and type QUERY into it. */
-  const pushes = (): WorkspaceRoster[] => [
+  const pushes = (): RosterStreams[] => [
     roster({
       repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1", name: "alpha" }), row({ id: "ws-2", name: "beta" })] })],
     }),
@@ -544,7 +550,7 @@ describe("mounting the rail: a switch to this workspace", () => {
         watchWorkspaceRoster: async function* () {
           run += 1;
           yield create(WatchWorkspaceRosterResponseSchema, {
-            push: { case: "roster", value: roster({ current: run === 1 ? "ws-other" : WORKSPACE.id }) },
+            push: { case: "streams", value: pushOf(roster({ current: run === 1 ? "ws-other" : WORKSPACE.id })) },
           });
           if (run === 1) return;
           await new Promise<never>(() => undefined);
@@ -698,7 +704,7 @@ describe("mounting the rail", () => {
       service(AgentRepl, {
         watchWorkspaceRoster: async function* () {
           requests += 1;
-          yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster() } });
+          yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "streams", value: pushOf(roster()) } });
           await new Promise<never>(() => undefined);
         },
       });
@@ -727,7 +733,7 @@ describe("the roster stream's planned ending", () => {
         watchWorkspaceRoster: async function* () {
           requests += 1;
           if (requests === 1) {
-            yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: roster() } });
+            yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "streams", value: pushOf(roster()) } });
             yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "ending", value: {} } });
             return;
           }
@@ -1072,8 +1078,8 @@ describe("mounting the rail: a page no one can see", () => {
 });
 
 /** A roster stream the test pushes into, one roster at a time. */
-function pushedRosters(): { impl: Partial<ServiceImpl<typeof AgentRepl>>; push(roster: WorkspaceRoster): void } {
-  const queue: WorkspaceRoster[] = [];
+function pushedRosters(): { impl: Partial<ServiceImpl<typeof AgentRepl>>; push(roster: RosterStreams | RosterPush): void } {
+  const queue: Array<RosterStreams | RosterPush> = [];
   let wake: (() => void) | null = null;
   return {
     impl: {
@@ -1086,7 +1092,7 @@ function pushedRosters(): { impl: Partial<ServiceImpl<typeof AgentRepl>>; push(r
             });
             continue;
           }
-          yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "roster", value: next } });
+          yield create(WatchWorkspaceRosterResponseSchema, { push: { case: "streams", value: "$typeName" in next ? next : pushOf(next) } });
         }
       },
     },
@@ -1104,7 +1110,7 @@ function highlighted(host: HTMLElement): string[] {
 }
 
 /** A roster of rows ws-1 and ws-2, CURRENT the one the daemon names current. */
-function twoRows(current: string): WorkspaceRoster {
+function twoRows(current: string): RosterStreams {
   return roster({
     current,
     repos: [
@@ -1153,9 +1159,10 @@ describe("the webhost's paint of a select's selection", () => {
     // Arrange
     const host = document.createElement("nav");
     const pushed = twoRows("ws-2");
-    if (pushed.current === undefined) throw new Error("the roster names no current workspace");
-    pushed.current.selectionId = "sel-1";
-    pushed.current.switchStartedAtMs = 1_700_000_000_000n;
+    const pushedCurrent = pushed.workspaces.current;
+    if (pushedCurrent === undefined) throw new Error("the roster names no current workspace");
+    pushedCurrent.selectionId = "sel-1";
+    pushedCurrent.switchStartedAtMs = 1_700_000_000_000n;
     const recorded: Array<[string, number]> = [];
 
     // Act
@@ -1261,12 +1268,13 @@ describe("the webhost's page on screen leads the roster", () => {
 
 describe("the selected workspace's merges in the Merge Queue", () => {
   /** Rows ws-1 and ws-2, CURRENT the one named current, and a queue whose head is ws-2's merge and whose line holds ws-1's. */
-  function queued(current: string): WorkspaceRoster {
-    const drawn = twoRows(current);
-    drawn.mergeQueue = mergeQueueBand([
-      queueGroup({ id: "repo-1", queue: { head: mergingHead("ws-2"), waiting: [waitingMerge("ws-1")] } }),
-    ]);
-    return drawn;
+  function queued(current: string): RosterStreams {
+    return {
+      ...twoRows(current),
+      mergeQueue: mergeQueueBand([
+        queueGroup({ id: "repo-1", queue: { head: mergingHead("ws-2"), waiting: [waitingMerge("ws-1")] } }),
+      ]),
+    };
   }
 
   /** The workspaces whose queue lines are highlighted. */
@@ -1555,7 +1563,7 @@ describe("mounting the rail: one draw per frame", () => {
 
 describe("mounting the rail: a roster its frame cannot draw", () => {
   /** Mount on PUSHES, its failures recorded. */
-  function mountRecording(pushes: WorkspaceRoster[]): { host: HTMLElement; reports: string[] } {
+  function mountRecording(pushes: RosterStreams[]): { host: HTMLElement; reports: string[] } {
     const host = document.createElement("nav");
     const failures = recordingFailures();
     mountSidebar(host, ctxFor(pushes, {}, failures), { storage: null, timers: fakeTimers() });
@@ -1563,9 +1571,9 @@ describe("mounting the rail: a roster its frame cannot draw", () => {
   }
 
   /** A roster whose repository section names no repository. */
-  const malformed = (): WorkspaceRoster => {
+  const malformed = (): RosterStreams => {
     const bad = roster({ repos: [repoSection({ id: "repo-1" })] });
-    const section = bad.repository?.sections[0];
+    const section = bad.workspaces.repository?.sections[0];
     if (section === undefined) throw new Error("the fixture drew no section");
     section.key = undefined;
     return bad;
@@ -1612,75 +1620,9 @@ describe("mounting the rail: a roster its frame cannot draw", () => {
   });
 });
 
-describe("mounting the rail: a merged row drawn when it comes into view", () => {
-  /**
-   * A rail whose open merged band holds one row past those drawn at once, the
-   * last named NAME. The rows are spread over groups of a group's first ten,
-   * so the one stand-in is that row's, never one in a group's hidden page.
-   */
-  async function mountLong(name: string): Promise<{ host: HTMLElement; standIn: Element }> {
-    const host = document.createElement("nav");
-    const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE }, (_, i) => row({ id: `ws-${i}`, name: "kept" }));
-    rows.push(row({ id: "ws-late", name }));
-    const groups = Array.from({ length: Math.ceil(rows.length / DEPLOYS_PAGE_SIZE) }, (_, g) =>
-      mergedGroup({ id: `repo-${g}`, rows: rows.slice(g * DEPLOYS_PAGE_SIZE, (g + 1) * DEPLOYS_PAGE_SIZE) }),
-    );
-    mountSidebar(host, ctxFor([roster({ merged: mergedBand(groups, false) })]), {
-      storage: null,
-      timers: fakeTimers(),
-    });
-    await settle();
-    const standIn = host.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
-    if (standIn === null) throw new Error("the band drew no stand-in");
-    return { host, standIn };
-  }
-
-  it("draws the row in its stand-in's place", async () => {
-    // Arrange
-    const { host, standIn } = await mountLong("late");
-
-    // Act
-    fireIntersection(standIn, true);
-
-    // Assert
-    expect(host.querySelector("[data-roster-row='ws-late']")?.hasAttribute(STAND_IN_ATTRIBUTE)).toBe(false);
-  });
-
-  it("narrows the drawn row to the search the rail already holds", async () => {
-    // Arrange
-    const { host, standIn } = await mountLong("late");
-    search(host, "kept");
-
-    // Act
-    fireIntersection(standIn, true);
-
-    // Assert
-    expect(host.querySelector("[data-roster-row='ws-late']")?.classList.contains("sb-search-miss")).toBe(true);
-  });
-
-  it("stops watching its stand-ins once the rail is disposed", async () => {
-    // Arrange
-    const host = document.createElement("nav");
-    const rows = Array.from({ length: MERGED_DRAWN_AT_ONCE + 1 }, (_, i) => row({ id: `ws-${i}` }));
-    const handle = mountSidebar(host, ctxFor([roster({ merged: mergedSection(rows, false) })]), {
-      storage: null,
-      timers: fakeTimers(),
-    });
-    await settle();
-    const standIn = host.querySelector(`[${STAND_IN_ATTRIBUTE}]`);
-
-    // Act
-    handle?.dispose();
-
-    // Assert
-    expect(() => fireIntersection(standIn as Element, true)).toThrow(/no IntersectionObserver/);
-  });
-});
-
-
 describe("the rail holds its drawing while a row is dragged", () => {
   /** A roster with rows ws-1 and ws-2, ws-2 named NAME. */
-  const named = (name: string): WorkspaceRoster =>
+  const named = (name: string): RosterStreams =>
     roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2", name })] })] });
   const nameOf = (host: HTMLElement): string | null | undefined =>
     host.querySelector("[data-roster-row='ws-2'] > .row .name")?.textContent;
@@ -1713,7 +1655,7 @@ describe("the rail holds its drawing while a row is dragged", () => {
 });
 
 /** A roster of rows ws-0..ws-5 in one repository, CURRENT the one the daemon names current. */
-function sixRows(current: string, openCount?: number): WorkspaceRoster {
+function sixRows(current: string, openCount?: number): RosterStreams {
   return roster({
     current,
     openCount,
@@ -1831,7 +1773,7 @@ describe("the rail scrolls the selected row into its section's view", () => {
 
     // Act: a changed heading draws the Open section anew.
     const relabeled = sixRows("ws-0");
-    relabeled.open!.label!.text = "Open now";
+    relabeled.workspaces.open!.label!.text = "Open now";
     stream.push(relabeled);
     await settle();
 
@@ -1873,7 +1815,7 @@ describe("the rail lets go of what the pointer raised when the user leaves it", 
   async function mountRail(): Promise<{
     host: HTMLElement;
     sidebar: ReturnType<typeof mountWebhostSidebar>;
-    push: (roster: WorkspaceRoster) => Promise<void>;
+    push: (roster: RosterStreams) => Promise<void>;
   }> {
     const host = document.createElement("nav");
     document.body.appendChild(host);
@@ -1881,7 +1823,7 @@ describe("the rail lets go of what the pointer raised when the user leaves it", 
     const stream = pushedRosters();
     const sidebar = mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
     mounted.push(sidebar);
-    const push = async (next: WorkspaceRoster): Promise<void> => {
+    const push = async (next: RosterStreams): Promise<void> => {
       stream.push(next);
       await settle();
     };
@@ -1941,5 +1883,204 @@ describe("the rail lets go of what the pointer raised when the user leaves it", 
     sidebar.dispose();
     window.dispatchEvent(new FocusEvent("blur"));
     expect(host.classList.contains(HOVER_SUSPENDED_CLASS)).toBe(false);
+  });
+});
+
+describe("mounting the rail: the roster's four streams", () => {
+  /** The rail mounted on a stream the test pushes into, over a daemon also answering IMPL. */
+  function mountStreams(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, failures: FailureSink = SINK) {
+    const host = document.createElement("nav");
+    document.body.append(host);
+    const stream = pushedRosters();
+    const sidebar = mountWebhostSidebar(host, ctxFor([], { ...stream.impl, ...impl }, failures), { storage: null, timers: fakeTimers() });
+    return {
+      host,
+      push: async (next: RosterStreams | RosterPush): Promise<void> => {
+        stream.push(next);
+        await settle();
+      },
+      dispose: () => {
+        sidebar.dispose();
+        host.remove();
+      },
+    };
+  }
+  /** Every stream drawn: a repository's row named NAME, a queue, a merged group. */
+  const every = (name: string, revision = 1n): RosterStreams =>
+    roster({
+      revision,
+      repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1", name })] })],
+      mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })]),
+    });
+  const nameOf = (host: HTMLElement): string | null | undefined => host.querySelector("[data-roster-row='ws-1'] > .row .name")?.textContent;
+
+  it("refuses a first push missing a stream, drawing nothing of it", async () => {
+    // Arrange
+    const failures = recordingFailures();
+    const rail = mountStreams({}, failures);
+    // Act
+    await rail.push(pushOf(every("first"), ["workspaces", "merge_queue", "closed"]));
+    // Assert
+    expect([rail.host.querySelector("[data-roster-row]"), failures.cases]).toEqual([null, ["frameUndecodable"]]);
+    rail.dispose();
+  });
+
+  it("logs a first push missing a stream at error, naming what it lacks", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const rail = mountStreams();
+    // Act
+    await rail.push(pushOf(every("first"), ["workspaces"]));
+    // Assert
+    const record = await forwardedRecord(capture, "rpc.stream-frame-undecodable");
+    expect([record.level.case, record.context?.path, record.context?.cause]).toEqual([
+      "error",
+      "WatchWorkspaceRosterResponse.streams",
+      "the first push of a subscription carries every stream; revision 1 lacks merge_queue, recently_merged, closed",
+    ]);
+    rail.dispose();
+  });
+
+  it("draws a later push's stream over the snapshots of the streams it leaves out", async () => {
+    // Arrange
+    const rail = mountStreams();
+    await rail.push(every("before"));
+    // Act: the workspaces stream alone, its row renamed.
+    await rail.push(pushOf(every("after", 2n), ["workspaces"]));
+    // Assert: the queue, which the push left out, is still drawn.
+    expect([nameOf(rail.host), rail.host.querySelector(".merge-queue-section .sb-mq-head") !== null]).toEqual(["after", true]);
+    rail.dispose();
+  });
+
+  it("keeps the sections of every stream a push leaves out, uncompared", async () => {
+    // Arrange
+    const rail = mountStreams();
+    await rail.push(every("before"));
+    const open = rail.host.querySelector(".open-section");
+    // Act: the merge queue stream alone.
+    await rail.push(pushOf(roster({ revision: 2n, mergeQueue: mergeQueueBand() }), ["merge_queue"]));
+    // Assert
+    expect([rail.host.querySelector(".open-section") === open, rail.host.querySelector(".merge-queue-section .sb-mq-head")]).toEqual([true, null]);
+    rail.dispose();
+  });
+
+  it("draws two pushes of different streams arriving in one frame once, with both applied", async () => {
+    // Arrange
+    const rail = mountStreams();
+    await rail.push(every("before"));
+    const capture = captureLogRecords("debug");
+    // Act: two pushes, one frame.
+    rail.push(pushOf(every("after", 2n), ["workspaces"])).catch(() => undefined);
+    await rail.push(pushOf(roster({ revision: 3n, mergeQueue: mergeQueueBand() }), ["merge_queue"]));
+    // Assert
+    const draws = (await forwardedRecords(capture)).filter((r) => r.operation === "sidebar.roster");
+    expect([draws.map((r) => r.context?.changed_streams), nameOf(rail.host), rail.host.querySelector(".merge-queue-section .sb-mq-head")]).toEqual([
+      [["workspaces", "merge_queue"]],
+      "after",
+      null,
+    ]);
+    rail.dispose();
+  });
+
+  /** A daemon whose ListMergedWorkspaces waits for the test's answer. */
+  function deferredPages() {
+    const asks: Array<{ page: number; answer: (r: ListMergedWorkspacesResponse) => void; fail: (e: Error) => void }> = [];
+    let woken: (() => void) | null = null;
+    return {
+      impl: {
+        listMergedWorkspaces: (request: ListMergedWorkspacesRequest) =>
+          new Promise<ListMergedWorkspacesResponse>((answer, fail) => {
+            asks.push({ page: request.page, answer, fail });
+            woken?.();
+            woken = null;
+          }),
+      },
+      /** The next ask the rail makes. */
+      async next() {
+        while (asks.length === 0) await new Promise<void>((resolve) => (woken = resolve));
+        return asks.shift()!;
+      },
+    };
+  }
+  const merged = (id: string) => row({ id, closed: true, status: { case: "merged", value: {} } });
+  /** The roster before ws-1 merges (token 1), and after (token 2): ws-1 leaves the open section for the band. */
+  const beforeMerge = (): RosterStreams =>
+    roster({
+      revision: 1n,
+      repos: [repoSection({ id: "repo-1", rows: [row({ id: "ws-1" })] })],
+      merged: mergedBand([mergedGroup({ id: "repo-1", rows: [merged("ws-old")] })], false, null, 1n),
+    });
+  const afterMerge = (): RosterStreams =>
+    roster({
+      revision: 2n,
+      repos: [repoSection({ id: "repo-1", rows: [] })],
+      merged: mergedBand([mergedGroup({ id: "repo-1", rows: [merged("ws-1"), merged("ws-old")] })], false, null, 2n),
+    });
+  /** Where ws-1 is drawn: in the open section, the merged band, both or neither. */
+  const whereIs = (host: HTMLElement): [boolean, boolean] => [
+    host.querySelector(".open-section [data-roster-row='ws-1']") !== null,
+    host.querySelector(".merged-section [data-roster-row='ws-1']") !== null,
+  ];
+
+  /** The rail drawing BEFORE_MERGE with its band's page loaded, then pushed AFTER_MERGE, its refetch asked. */
+  async function heldMerge(failures: FailureSink = SINK) {
+    const pages = deferredPages();
+    const rail = mountStreams(pages.impl, failures);
+    await rail.push(beforeMerge());
+    const first = await pages.next();
+    first.answer(mergedPageAnswer(mergedRowsOf(beforeMerge().recentlyMerged.groups[0]), 0, 1n));
+    await settle();
+    const after = afterMerge();
+    await rail.push(after);
+    const refetch = await pages.next();
+    return { rail, after, refetch };
+  }
+
+  it("holds a push that moves the merged set while pages are loaded, every stream of it", async () => {
+    // Arrange / Act
+    const { rail } = await heldMerge();
+    // Assert: ws-1 is still drawn open, and only there.
+    expect(whereIs(rail.host)).toEqual([true, false]);
+    rail.dispose();
+  });
+
+  it("draws the held push and its refetched pages together once they agree", async () => {
+    // Arrange
+    const { rail, after, refetch } = await heldMerge();
+    // Act
+    refetch.answer(mergedPageAnswer(mergedRowsOf(after.recentlyMerged.groups[0]), 0, 2n));
+    await settle();
+    // Assert: ws-1 has moved to the band, and only there.
+    expect([refetch.page, whereIs(rail.host)]).toEqual([0, [false, true]]);
+    rail.dispose();
+  });
+
+  it("draws the held push without the merged pages when their refetch fails, the band showing its count", async () => {
+    // Arrange
+    const { rail, refetch } = await heldMerge();
+    // Act
+    refetch.fail(new ConnectError("the daemon went away", Code.Unavailable));
+    await settle();
+    // Assert
+    const band = rail.host.querySelector(".merged-section");
+    expect([whereIs(rail.host), band?.querySelectorAll(".ws").length, band?.hasAttribute("data-partly-loaded")]).toEqual([
+      [false, false],
+      0,
+      true,
+    ]);
+    rail.dispose();
+  });
+
+  it("logs the failed refetch with its repository and the summary's token", async () => {
+    // Arrange
+    const { rail, refetch } = await heldMerge();
+    const capture = captureLogRecords("error");
+    // Act
+    refetch.fail(new ConnectError("the daemon went away", Code.Unavailable));
+    await settle();
+    // Assert
+    const record = await forwardedRecord(capture, "sidebar.merged-pages.fetch-failed");
+    expect(record.context).toMatchObject({ repository: "repo-1", page: 0, kind: "transport", summary_token: "2", held: true });
+    rail.dispose();
   });
 });
