@@ -711,6 +711,12 @@ type DB interface {
 	// false when that mediation is no longer owed, was dispatched, or was
 	// resumed already.
 	MarkMediationResumed(ctx context.Context, repo RepoKey, owed time.Time, turn TurnID) (bool, error)
+	// EscalateMediation records that the owed mediation is escalated with
+	// BRIEF, before its workspace is made; RecordMediationEscalation records
+	// that workspace. Each answers false when the mediation is no longer the
+	// one owed.
+	EscalateMediation(ctx context.Context, repo RepoKey, owed time.Time, brief string) (bool, error)
+	RecordMediationEscalation(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
 	// ReleaseMediation clears the mediation owed at OWED, if it still is.
 	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
 	// RecordMediationIntake records a chain's intake workspace on the

@@ -382,7 +382,7 @@ func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationF
 	if err != nil {
 		return err
 	}
-	summary := fmt.Sprintf("the deploy remediation %s could not pass its gate after %d fixing attempts; the queue moved on", name, MaxFixAttempts)
+	summary := fmt.Sprintf("the deploy remediation %s could not pass its gate after %d fixing attempts; the queue waits for you", name, MaxFixAttempts)
 	return o.escalateForIntake(ctx, f.Repo, f.Workspace, summary, withField(fields, "gave_up", true))
 }
 
@@ -398,16 +398,11 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Info(opRemediationFinish, "the chain the remediation worked for ended already; nothing is escalated", fields)
 		return nil
 	}
-	// THE WINDOW IS READ BEFORE THE RELEASE, which clears it.
 	window, err := o.toldWindow(ctx, repo, fields)
 	if err != nil {
 		return err
 	}
-	released, err := o.releaseCheck(ctx, repo, *m, MediationEscalated)
-	if err != nil {
-		return err
-	}
-	o.deps.Log.Global().Error(opRemediationFinish, "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue advances", withField(withField(fields, "summary", summary), "released", released))
+	o.deps.Log.Global().Error(opRemediationFinish, "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue is held for them", withField(fields, "summary", summary))
 	q, ok, err := o.checkedQueueOf(ctx, repo)
 	if err != nil {
 		return err
@@ -416,10 +411,39 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
 		return nil
 	}
-	o.escalateOwning(ctx, q, *m, summary, nil, window, fields)
-	o.republishMediation(ctx, repo)
-	o.kick(repo)
+	o.holdEscalated(ctx, q, *m, summary, nil, window, fields)
 	return nil
+}
+
+// escalationClosed releases the check escalation WS holds, when one does:
+// the user closing the escalation is their ruling that the queue moves on
+// (owner ruling, 2026-11-16).
+func (o *orchestrator) escalationClosed(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
+	queues, err := o.checkedQueues(ctx, opMediation)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not list the queues a closed escalation may hold; its hold stands", withField(fields, "error", err.Error()))
+		return
+	}
+	for _, q := range queues {
+		m, err := o.deps.DB.MediationOf(ctx, q.key)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not read whether a closed escalation holds a queue; its hold stands", withField(withField(fields, "repo", string(q.key)), "error", err.Error()))
+			continue
+		}
+		if m == nil || !m.Escalated() || m.Escalation != ws {
+			continue
+		}
+		released, err := o.releaseCheck(ctx, q.key, *m, MediationEscalated)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "the user closed the escalation, but its check could not be released; the queue stays held", withField(withField(fields, "repo", string(q.key)), "error", err.Error()))
+			continue
+		}
+		if released {
+			o.deps.Log.Global().Info(opMediation, "the user closed the escalation; its check is released and the queue advances", withField(fields, "repo", string(q.key)))
+			o.republishMediation(ctx, q.key)
+			o.kick(q.key)
+		}
+	}
 }
 
 // remediationLand lands F's branch directly on the main branch
@@ -617,6 +641,7 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 		} else if ended {
 			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy escalation's finish was ended", fields)
 		}
+		o.escalationClosed(ctx, ws, fields)
 		return
 	}
 	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
@@ -640,7 +665,7 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 		o.deps.Log.Global().Error(opRemediationFinish, "a remediation closed before landing, and its chain could not be escalated without its name; the queue stays held", withField(fields, "error", err.Error()))
 		return
 	}
-	summary := fmt.Sprintf("the deploy remediation %s was closed before its fix landed; the queue moved on", name)
+	summary := fmt.Sprintf("the deploy remediation %s was closed before its fix landed; the queue waits for you", name)
 	if err := o.escalateForIntake(ctx, role.Repo, ws, summary, fields); err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "a remediation closed before landing, and its chain could not be escalated; the queue stays held", withField(fields, "error", err.Error()))
 	}

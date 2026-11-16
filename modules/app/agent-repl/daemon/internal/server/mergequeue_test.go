@@ -349,6 +349,10 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Intake: "ws-intake"}},
 		{name: "a fixed deploy names its remediation and intake", want: "fixing ws-remedy ws-intake: in a row 2",
 			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Intake: "ws-intake", Remediation: "ws-remedy", InARow: 2}},
+		{name: "an escalated deploy names its escalation", want: "escalated ws-escalate: in a row 1",
+			mediation: &merge.OwedMediation{Stage: merge.CheckEscalated, Escalation: "ws-escalate", InARow: 1}},
+		{name: "an escalation still being made names none", want: "escalated: in a row 0",
+			mediation: &merge.OwedMediation{Stage: merge.CheckEscalated}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -375,6 +379,8 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 					got = "assessing " + stage.Assessing.GetIntake().GetId()
 				case *agentreplv1.MergeQueueStatusAdvanceMediating_Fixing:
 					got = "fixing " + stage.Fixing.GetRemediation().GetId() + " " + stage.Fixing.GetIntake().GetId()
+				case *agentreplv1.MergeQueueStatusAdvanceMediating_Escalated:
+					got = strings.TrimSpace("escalated " + stage.Escalated.GetEscalation().GetId())
 				}
 				got += fmt.Sprintf(": in a row %d", m.GetRemediationsInARow())
 			}

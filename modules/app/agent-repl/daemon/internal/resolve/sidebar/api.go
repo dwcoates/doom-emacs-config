@@ -498,9 +498,11 @@ type QueueMediation struct {
 	Stage MediationStage
 	// Intake is the chain's intake, empty while a chain's first deploy rolls
 	// out; Remediation the workspace at work, set at MediationFixing and
-	// MediationTesting.
+	// MediationTesting; Escalation the escalation workspace the check waits
+	// on, set at MediationEscalated once it is made.
 	Intake      ids.WorkspaceID
 	Remediation ids.WorkspaceID
+	Escalation  ids.WorkspaceID
 }
 
 // MediationStage is where a deploy check stands, as its label draws it.
@@ -520,4 +522,8 @@ const (
 	// its full gate and lands while its workspace stands by (`TESTING ZETTEL
 	// FIXES`). Remediation names that workspace.
 	MediationTesting
+	// MediationEscalated: the check was escalated, and the queue waits on the
+	// user until the escalation's fix deploys and is approved or the user
+	// closes the escalation (`ZETTEL NEEDS YOU`). Escalation names it.
+	MediationEscalated
 )

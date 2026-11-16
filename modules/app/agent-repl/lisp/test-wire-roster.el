@@ -2161,6 +2161,22 @@ a click on its label selects."
     (should (equal (list (plist-get decoded :standing) (plist-get (plist-get decoded :target) :id))
                    '(:testing "remedy")))))
 
+(ert-deftest agent-repl-test-wire-roster-an-escalated-deploy-mediation-selects-its-escalation ()
+  "An escalated check decodes `:escalated', selecting its escalation."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  "{\"escalated\":{\"target\":{\"workspace\":{\"id\":\"escalation\",\"dir\":\"/wt/escalation\"}}}}")))
+    (should (equal (list (plist-get decoded :standing) (plist-get (plist-get decoded :target) :id))
+                   '(:escalated "escalation")))))
+
+(ert-deftest agent-repl-test-wire-roster-an-escalation-being-made-decodes-no-target ()
+  "An escalated check whose escalation is still being made decodes no target."
+  (let ((decoded (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mediation
+                  "{\"escalated\":{}}")))
+    (should (equal (list (plist-get decoded :standing) (plist-get decoded :target))
+                   '(:escalated nil)))))
+
 (ert-deftest agent-repl-test-wire-roster-a-waiting-deploy-mediation-decodes-waiting ()
   "A check whose deploy still rolls out decodes `:waiting', with no target
 for a chain's first deploy."

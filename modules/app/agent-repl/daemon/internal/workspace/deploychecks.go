@@ -74,8 +74,20 @@ func (v *verbs) CreateDeployRemediation(ctx context.Context, repoDir, name strin
 // CreateDeployEscalation implements Verbs: makes a visible escalation
 // workspace, unprompted, where the user settles an escalated deploy (owner
 // ruling, 2026-11-15).
+//
+// IT IS MADE IN REMOTE CONTROL (owner ruling, 2026-11-16): the user settles
+// an escalation from wherever they are, so its mode is recorded on before
+// its first session starts, which puts the mode in force at bring-up.
 func (v *verbs) CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	return v.createDeployCheck(ctx, "escalation", deployCheckSpec(repoDir, name, remediationModel, false))
+	made, err := v.createDeployCheck(ctx, "escalation", deployCheckSpec(repoDir, name, remediationModel, false))
+	if err != nil {
+		return wsm.Workspace{}, err
+	}
+	if _, err := v.deps.DB.SetRemoteControlMode(ctx, made.ID, wsm.RemoteControlOn); err != nil {
+		v.deps.Log.Global().Error(opDeployChecks, "the escalation workspace was made but its remote control could not be turned on", dlog.WithCause(withWorkspace(dlog.Context{"repo": repoDir, "name": name}, made.ID), err))
+		return wsm.Workspace{}, fmt.Errorf("turn remote control on for the deploy escalation %q: %w", name, err)
+	}
+	return made, nil
 }
 
 // createDeployCheck makes SPEC, a ROLE workspace. A make that fails is

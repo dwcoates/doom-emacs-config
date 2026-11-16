@@ -1,5 +1,5 @@
 <!-- used by: daemon internal/merge/escalation.go (escalate); placeholders: {{repo_dir}}, {{deploy_started}}, {{summary}}, {{problems}}, {{old_problems}} -->
-The deploy of {{repo_dir}} that began at {{deploy_started}} was escalated to the user, and its merge queue moved on. The deploy check's summary:
+The deploy of {{repo_dir}} that began at {{deploy_started}} was escalated to the user, and its merge queue lands nothing until this workspace's fix deploys and its deploy check approves it, or the user closes this workspace. The deploy check's summary:
 
 {{summary}}
 

@@ -1888,6 +1888,10 @@ func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.
 			wantLabel: "fixing", wantTarget: "w3"},
 		{name: "a fix under test selects the workspace standing by", mediation: sidebar.QueueMediation{Stage: sidebar.MediationTesting, Remediation: "w3"},
 			wantLabel: "testing", wantTarget: "w3"},
+		{name: "an escalated check selects its escalation", mediation: sidebar.QueueMediation{Stage: sidebar.MediationEscalated, Escalation: "w3"},
+			wantLabel: "escalated", wantTarget: "w3"},
+		{name: "an escalation still being made selects nothing", mediation: sidebar.QueueMediation{Stage: sidebar.MediationEscalated},
+			wantLabel: "escalated"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1916,6 +1920,8 @@ func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.
 				label, target = "fixing", standing.Fixing.GetTarget().GetWorkspace().GetId()
 			case *frontendv1.RosterMergeQueueMediation_Testing:
 				label, target = "testing", standing.Testing.GetTarget().GetWorkspace().GetId()
+			case *frontendv1.RosterMergeQueueMediation_Escalated:
+				label, target = "escalated", standing.Escalated.GetTarget().GetWorkspace().GetId()
 			}
 			if label != tc.wantLabel || target != tc.wantTarget {
 				t.Fatalf("label = %s selecting %q, want %s selecting %q", label, target, tc.wantLabel, tc.wantTarget)

@@ -301,6 +301,9 @@ func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log
 			return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Testing{
 				Testing: &frontendv1.RosterMergeQueueMediationTesting{Target: t}}}
 		}
+	case MediationEscalated:
+		return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Escalated{
+			Escalated: &frontendv1.RosterMergeQueueMediationEscalated{Target: target(m.Escalation)}}}
 	default:
 		panic(fmt.Sprintf("sidebar: a deploy check stands at no stage (%+v)", m))
 	}

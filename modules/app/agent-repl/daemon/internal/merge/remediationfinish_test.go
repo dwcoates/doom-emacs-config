@@ -229,14 +229,14 @@ func TestARemediationPastItsFixingBoundIsEscalatedForTheIntake(t *testing.T) {
 	h.o.runRemediationFinish(ctx, *f)
 
 	// Assert
-	if owedCheck(t, h) != nil || !h.bannerRaised(desktopnotify.KindDeployMediated) {
-		t.Fatalf("check %+v, banner %v; want the chain escalated and the queue let through", owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated))
+	if heldEscalation(t, h) != "ws-escalate" || !h.bannerRaised(desktopnotify.KindDeployMediated) {
+		t.Fatalf("check %+v, banner %v; want the chain escalated and the queue held for the user", owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated))
 	}
-	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !slices.Contains(h.meter.all(), "remediation_gates:"+RemediationGateGivenUp+":4") {
-		t.Fatalf("stopped %v, recorded %v; want the intake stopped and the rounds given up", h.checks.stopped, h.meter.all())
+	if !slices.Contains(h.meter.all(), "remediation_gates:"+RemediationGateGivenUp+":4") {
+		t.Fatalf("recorded %v; want the rounds given up", h.meter.all())
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
-		Message: "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue advances"}); !ok {
+		Message: "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue is held for them"}); !ok {
 		t.Fatalf("records = %v, want the escalation at ERROR", h.logs.Records())
 	}
 }
@@ -386,8 +386,8 @@ func TestARemediationClosedBeforeItsFixDeploysHandsTheHoldBack(t *testing.T) {
 			h.o.OnWorkspaceClosed(ctx, "ws-remedy")
 
 			// Assert
-			if escalated := owedCheck(t, h) == nil; escalated != tt.wantEscalate {
-				t.Fatalf("escalated %v, want %v", escalated, tt.wantEscalate)
+			if m := owedCheck(t, h); (m != nil && m.Escalated()) != tt.wantEscalate {
+				t.Fatalf("check %+v, want escalated %v", m, tt.wantEscalate)
 			}
 			if h.bannerRaised(desktopnotify.KindDeployMediated) != tt.wantEscalate {
 				t.Fatalf("banner %v, want %v", h.bannerRaised(desktopnotify.KindDeployMediated), tt.wantEscalate)
@@ -702,16 +702,19 @@ func TestEveryStepOfAFinishRedrawsTheDeployCheckLabel(t *testing.T) {
 	testing_ := fmt.Sprintf("%d:ws-remedy", sidebar.MediationTesting)
 	fixing := fmt.Sprintf("%d:ws-remedy", sidebar.MediationFixing)
 	hotLoading := fmt.Sprintf("%d:ws-intake", sidebar.MediationWaiting)
+	// THE FIX'S DEPLOY OWES A CHECK FOR A FRESH INTAKE, not yet made: the
+	// intake that dispatched it decided once.
+	hotLoadingFresh := fmt.Sprintf("%d:", sidebar.MediationWaiting)
 	tests := []struct {
 		name    string
 		arrange func(h *harness)
 		want    []string
 	}{
 		{name: "a passing gate is tested, landed and hot-loaded",
-			want: []string{testing_, testing_, hotLoading, hotLoading, hotLoading}},
+			want: []string{testing_, testing_, hotLoading, hotLoadingFresh, hotLoadingFresh}},
 		{name: "a failing gate is fixed, then tested, landed and hot-loaded",
 			arrange: func(h *harness) { h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}} },
-			want:    []string{testing_, fixing, testing_, testing_, hotLoading, hotLoading, hotLoading}},
+			want:    []string{testing_, fixing, testing_, testing_, hotLoading, hotLoadingFresh, hotLoadingFresh}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

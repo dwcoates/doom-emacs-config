@@ -26,13 +26,15 @@ func dispatched(h *harness, d Decision) error {
 
 // withRemediation records "ws-remedy" as the chain's last remediation: a fix
 // dispatched to it for the check owed at deployStarted, whose deploy began a
-// minute later.
+// minute later and is told to the check's fresh intake ("ws-intake" again,
+// as the harness names every intake).
 func withRemediation(t *testing.T, h *harness) {
 	t.Helper()
 	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
+	withIntake(t, h, deployStarted.Add(time.Minute))
 }
 
 func TestAFreshDispatchMakesAVisibleRemediationAndBriefsItTheProblems(t *testing.T) {
@@ -171,6 +173,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 					}
 					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
 				}
+				withIntake(t, h, deployStarted.Add(time.Duration(theBound)*time.Minute))
 			}},
 	}
 	for _, tt := range tests {

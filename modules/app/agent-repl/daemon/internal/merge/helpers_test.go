@@ -368,6 +368,14 @@ func (f *fakeDB) MarkMediationResumed(ctx context.Context, repo wsm.RepoKey, owe
 	return f.checks.MarkMediationResumed(ctx, repo, owed, turn)
 }
 
+func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time, brief string) (bool, error) {
+	return f.checks.EscalateMediation(ctx, repo, owed, brief)
+}
+
+func (f *fakeDB) RecordMediationEscalation(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
+	return f.checks.RecordMediationEscalation(ctx, repo, owed, ws)
+}
+
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }

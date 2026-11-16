@@ -537,7 +537,8 @@ export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
  * it, `fixing zettel issues` while a remediation workspace fixes what the
  * intake or its own gate found, `testing zettel fixes` while a
  * remediation's or an escalation's finished fix runs its gate and lands, its
- * workspace standing by hidden. A click on it selects the workspace at work
+ * workspace standing by hidden, `zettel needs you` while an escalated check
+ * waits on the user. A click on it selects the workspace at work
  * (`frontend.v1.RosterMergeQueueMediationTarget`), showing a hidden one for
  * the visit as a click on any hidden workspace's link does; a rollout with no
  * intake names none, and its label selects nothing.
@@ -557,6 +558,9 @@ export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: Sideba
     case "testing":
       return mediationLabel(sc, "testing zettel fixes", "a remediation's fix is running its full gate, then lands; the queue waits for it",
         requireMessage(standing.value.target, `${path}.standing.testing.target`), `${path}.standing.testing.target`);
+    case "escalated":
+      return mediationLabel(sc, "zettel needs you", "a deploy check was escalated to you; the queue waits until its fix lands or you close its escalation",
+        standing.value.target, `${path}.standing.escalated.target`);
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);
