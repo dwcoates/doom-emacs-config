@@ -9,6 +9,7 @@ import (
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/recordlog"
 )
 
 func fixedClock() time.Time { return time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC) }
@@ -107,4 +108,20 @@ func TestEmptyOperationPanics(t *testing.T) {
 
 	// Act
 	log.Info("", "no operation", nil)
+}
+
+// ZETTEL'S RECORDS GO THROUGH THE SHARED WRITER: its Logger is
+// recordlog.Logger under the runtime "zettel", so a writer of its own cannot
+// drift from the shape every service shares.
+func TestZettelRecordsGoThroughTheSharedWriter(t *testing.T) {
+	// Arrange
+	var sink, terminal bytes.Buffer
+
+	// Act
+	var log *recordlog.Logger = New(&sink, &terminal, sharedlogging.FixedWindow(sharedlogging.LevelDebug), fixedClock)
+
+	// Assert
+	if log.Runtime() != Runtime {
+		t.Fatalf("runtime = %q, want %q", log.Runtime(), Runtime)
+	}
 }
