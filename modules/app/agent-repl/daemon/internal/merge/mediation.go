@@ -528,7 +528,7 @@ func (o *orchestrator) intakeOf(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	// THE ROLE IS RECORDED BEFORE THE EFFORT IS SET: setting it starts the
 	// sessionless intake's shim, whose landing reads the role.
-	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, true); err != nil {
+	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, DeployCheckIntake); err != nil {
 		return "", fmt.Errorf("merge: set the chain's intake %s's effort: %w", name, err)
 	}
 	o.deps.Log.Global().Info(opMediation, "made the chain's intake", withField(withField(fields, "intake", string(made.ID)), "name", name))

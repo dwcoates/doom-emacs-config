@@ -85,7 +85,7 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 			if len(h.checks.made) == 0 || !strings.HasPrefix(h.checks.made[len(h.checks.made)-1], "deploy-escalation-") {
 				t.Fatalf("made %v, want an escalation workspace made last", h.checks.made)
 			}
-			if !slices.Contains(h.checks.efforts, "remediation:ws-escalate:recorded=false") {
+			if !slices.Contains(h.checks.efforts, "escalation:ws-escalate:recorded=false") {
 				t.Fatalf("efforts %v, want the escalation at the remediation's effort", h.checks.efforts)
 			}
 			if subs := escalationBriefs(h); len(subs) != 1 {

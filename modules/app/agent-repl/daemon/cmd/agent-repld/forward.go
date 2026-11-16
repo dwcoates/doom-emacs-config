@@ -367,12 +367,12 @@ func (d deployChecks) CreateDeployEscalation(ctx context.Context, repoDir, name 
 	return verbs.CreateDeployEscalation(ctx, repoDir, name)
 }
 
-func (d deployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error {
+func (d deployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, role merge.DeployCheckRole) error {
 	verbs, err := d.f.bound("the merge queue set a deploy check workspace's effort")
 	if err != nil {
 		return err
 	}
-	return verbs.SetDeployCheckEffort(ctx, ws, intake)
+	return verbs.SetDeployCheckEffort(ctx, ws, role)
 }
 
 func (d deployChecks) Reopen(ctx context.Context, ws ids.WorkspaceID) error {

@@ -72,7 +72,7 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	// A FRESH REMEDIATION'S EFFORT IS SET ONCE ITS DISPATCH IS RECORDED: it
 	// starts the workspace's shim.
 	if !d.Restore {
-		if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, remedy, false); err != nil {
+		if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, remedy, DeployCheckRemediation); err != nil {
 			o.deps.Log.Global().Error(opMediation, "the remediation's effort could not be set; the dispatch stands with its workspace unprompted", withField(fields, "error", err.Error()))
 			return err
 		}

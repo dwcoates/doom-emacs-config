@@ -428,7 +428,7 @@ type Verbs interface {
 	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
 	// SetDeployCheckEffort sets a deploy check workspace to its role's
 	// effort, once its role is recorded (deploychecks.go).
-	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, intake bool) error
+	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, role merge.DeployCheckRole) error
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.

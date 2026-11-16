@@ -45,7 +45,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	if err := o.deps.DB.RecordDeployEscalation(ctx, made.ID, q.key, o.deps.Now()); err != nil {
 		return failed("the escalation workspace could not be recorded as landing directly; it is not briefed and the user is not told", err)
 	}
-	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, false); err != nil {
+	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, DeployCheckEscalation); err != nil {
 		return failed("the escalation workspace's effort could not be set; it is not briefed and the user is not told", err)
 	}
 	brief, err := o.deps.Briefs(BriefDeployEscalation, map[string]string{
