@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gitclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -262,6 +263,66 @@ func TestTheSweepCountsALandedBranchWhoseTargetItCouldNotProbe(t *testing.T) {
 	}
 	if got[0].Context["branch"] != "ramdisk-leak-investigation" || got[0].Context["into"] != "fix/parent" || got[0].Context["cause"] == nil {
 		t.Fatalf("the ERROR record's context is %v, want the branch, its target and the cause", got[0].Context)
+	}
+}
+
+// TestTheSweepCountsNoFailureForALandedBranchTheDaemonStopped covers the
+// daemon's exit cancelling the healing pass's git (2026-11-16: the handing-over
+// daemon exited mid-probe of `footer-drag-handle-removal`): the branch is
+// kept, the stop is recorded at INFO, and nothing is recorded at ERROR or
+// counted as a failure.
+func TestTheSweepCountsNoFailureForALandedBranchTheDaemonStopped(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(w *world, repoDir string, cancelled error)
+		// wantMessage is the INFO record of the stop.
+		wantMessage string
+	}{
+		{
+			name: "a cancelled probe of the landed branch",
+			arrange: func(w *world, repoDir string, cancelled error) {
+				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "master")
+				w.git.branchExistsErr = map[string]error{"ramdisk-leak-investigation": cancelled}
+			},
+			wantMessage: "stopped retiring the landed branch with the daemon: probe the branch; the branch is kept",
+		},
+		{
+			name: "a cancelled probe of the branch it landed into",
+			arrange: func(w *world, repoDir string, cancelled error) {
+				landedWorkspace(w, repoDir, "inv", "ramdisk-leak-investigation", "fix/parent")
+				w.git.refExistsErr = map[string]error{"fix/parent": cancelled}
+			},
+			wantMessage: "the step stopped with the daemon",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			w := newWorld(t)
+			repoDir := w.addRepo("doom")
+			tc.arrange(w, repoDir, &gitclient.Cancelled{Args: []string{"show-ref"}, Dir: repoDir, Cause: context.Canceled})
+
+			// Act
+			report := w.sweep()
+
+			// Assert
+			if w.git.saw("delete_branch ramdisk-leak-investigation " + landedHead) {
+				t.Fatal("a branch whose retirement was stopped was deleted")
+			}
+			if report.Failures != 0 {
+				t.Fatalf("Failures = %d, want 0", report.Failures)
+			}
+			if got := dlog.FilterRecords(w.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opLandedBranch}); len(got) != 0 {
+				t.Fatalf("want no ERROR %s record, got %+v", opLandedBranch, got)
+			}
+			record, ok := dlog.FindRecord(w.log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opLandedBranch, Message: tc.wantMessage})
+			if !ok {
+				t.Fatalf("no INFO %s record %q: %+v", opLandedBranch, tc.wantMessage, w.log.Records())
+			}
+			if record.Context["branch"] != "ramdisk-leak-investigation" || record.Context["cause"] == nil {
+				t.Fatalf("the INFO record's context is %v, want the branch and the cause", record.Context)
+			}
+		})
 	}
 }
 

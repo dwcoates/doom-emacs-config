@@ -65,11 +65,13 @@ type fakeGit struct {
 	// descendant; ancestorErr fails IsAncestor.
 	branches   map[string]bool
 	remoteRefs map[string]bool
-	// refExistsErr fails RefExists for the named ref.
-	refExistsErr map[string]error
-	branchHeads  map[string]string
-	notInside    map[string]bool
-	ancestorErr  error
+	// refExistsErr fails RefExists for the named ref; branchExistsErr fails
+	// BranchExists for the named branch.
+	refExistsErr    map[string]error
+	branchExistsErr map[string]error
+	branchHeads     map[string]string
+	notInside       map[string]bool
+	ancestorErr     error
 
 	// entered and release, when set, hold DefaultBranch until the test
 	// releases it: the rendezvous a concurrency test needs.
@@ -150,6 +152,9 @@ func (g *fakeGit) ResolveRef(_ context.Context, repoDir, ref string) (string, er
 }
 
 func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
+	if err := g.branchExistsErr[branch]; err != nil {
+		return false, err
+	}
 	return g.branches[branch], nil
 }
 

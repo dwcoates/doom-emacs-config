@@ -64,6 +64,7 @@ func (g *fakeGit) DeleteBranchAt(_ context.Context, _, branch, head string) erro
 
 func TestRetire(t *testing.T) {
 	boom := errors.New("boom")
+	cancelled := &gitclient.Cancelled{Args: []string{"show-ref"}, Dir: testRepo, Cause: context.Canceled}
 	cases := []struct {
 		name        string
 		git         fakeGit
@@ -181,6 +182,25 @@ func TestRetire(t *testing.T) {
 			wantMessage: "could not retire the landed branch: probe the branch; the branch is kept",
 		},
 		{
+			name:        "a probe the daemon cancelled is recorded at INFO and keeps the branch",
+			git:         fakeGit{existsErr: cancelled},
+			branch:      "footer-drag-handle-removal",
+			landing:     Landing{Into: "master"},
+			wantErr:     true,
+			wantLevel:   "info",
+			wantMessage: "stopped retiring the landed branch with the daemon: probe the branch; the branch is kept",
+		},
+		{
+			name:              "a compare-and-delete the daemon cancelled is recorded at INFO and keeps the branch",
+			wantAncestryAsked: true,
+			git:               fakeGit{exists: true, ancestor: true, deleteErr: cancelled},
+			branch:            "b",
+			landing:           Landing{Into: "master"},
+			wantErr:           true,
+			wantLevel:         "info",
+			wantMessage:       "stopped retiring the landed branch with the daemon: delete the branch at the judged head; the branch is kept",
+		},
+		{
 			name:        "a worktree list that fails is an error and keeps the branch",
 			git:         fakeGit{exists: true, listErr: boom},
 			branch:      "b",
@@ -268,6 +288,12 @@ func TestRetire(t *testing.T) {
 			if rec.Context["branch"] != tc.branch || rec.Context["workspace"] != "w1" || rec.Context["repo"] != testRepo || rec.Context["landed_head"] != tc.landing.Head {
 				t.Fatalf("record context = %v, want branch %q, workspace w1, repo %q, landed_head %q", rec.Context, tc.branch, testRepo, tc.landing.Head)
 			}
+			if errs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "error"}); tc.wantLevel != "error" && len(errs) != 0 {
+				t.Fatalf("want no ERROR record, got %+v", errs)
+			}
+			if tc.wantErr && rec.Context["cause"] == nil {
+				t.Fatalf("the record's context %v carries no cause", rec.Context)
+			}
 			if tc.wantJudgedBy != "" && rec.Context["judged_by"] != tc.wantJudgedBy {
 				t.Fatalf("judged_by = %v, want %q", rec.Context["judged_by"], tc.wantJudgedBy)
 			}
@@ -290,5 +316,53 @@ func TestRetireAsksWhetherTheTipIsInsideTheLandingRef(t *testing.T) {
 	// Assert
 	if git.ancestorAsked != [2]string{testHead, "parent-branch"} {
 		t.Fatalf("IsAncestor asked %v, want [%s parent-branch]", git.ancestorAsked, testHead)
+	}
+}
+
+// TestRetireUnderADoneContextIsStopped covers a git whose error is not itself
+// a cancellation but that ran under a context the daemon cancelled: the stop
+// is recorded at INFO, never at ERROR, and returned.
+func TestRetireUnderADoneContextIsStopped(t *testing.T) {
+	// Arrange
+	git := fakeGit{existsErr: errors.New("signal: killed")}
+	log := dlog.NewTestLogger()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := Retire(ctx, &git, log, testOp, testRepo, "b", Landing{Into: "master"}, nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a stopped retirement returned no error")
+	}
+	if errs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "error"}); len(errs) != 0 {
+		t.Fatalf("want no ERROR record, got %+v", errs)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: testOp,
+		Message: "stopped retiring the landed branch with the daemon: probe the branch; the branch is kept"}); !ok {
+		t.Fatalf("no INFO record of the stop; records: %+v", log.Records())
+	}
+}
+
+// TestRetireUnderADoneContextStillRefusesABadRequest covers the request check:
+// a malformed request is a caller's bug, recorded at ERROR whatever the
+// context.
+func TestRetireUnderADoneContextStillRefusesABadRequest(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := Retire(ctx, &fakeGit{}, log, testOp, testRepo, "b", Landing{}, nil)
+
+	// Assert
+	if err == nil {
+		t.Fatal("a request without a landing ref was accepted")
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: testOp,
+		Message: "could not retire the landed branch: check the request; the branch is kept"}); !ok {
+		t.Fatalf("no ERROR record of the refusal; records: %+v", log.Records())
 	}
 }
