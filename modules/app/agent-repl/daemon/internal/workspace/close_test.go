@@ -3,6 +3,7 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -425,5 +426,100 @@ func TestCloseWhoseMergeQueuesCannotBeReadClosesNothing(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no ERROR record of the failed judgment: %+v", f.log.logger.Records())
+	}
+}
+
+func TestCloseJudgesTheFamilyRuleOnlyForAnOpenWorkspacesGesture(t *testing.T) {
+	tests := []struct {
+		name      string
+		by        wsm.CloseCause
+		closed    bool
+		wantAsked bool
+	}{
+		{name: "the user's close", by: wsm.CloseByUser, wantAsked: true},
+		{name: "an agent's close", by: wsm.CloseByAgent, wantAsked: true},
+		{name: "a merge's close", by: wsm.CloseByMerge},
+		{name: "the daemon's close", by: wsm.CloseByDaemon},
+		{name: "a user's close of a closed workspace", by: wsm.CloseByUser, closed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			ws := f.db.workspaces["w1"]
+			ws.Closed = tt.closed
+			f.db.workspaces["w1"] = ws
+
+			// Act
+			err := f.verbs.Close(context.Background(), "w1", tt.by)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Close: %v", err)
+			}
+			if asked := slices.Contains(f.db.noOpenChildrenAsked, "w1"); asked != tt.wantAsked {
+				t.Errorf("asked the family rule = %v, want %v", asked, tt.wantAsked)
+			}
+		})
+	}
+}
+
+func TestCloseRefusesAParentWithOpenChildrenBeforeItsWrite(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.noOpenChildrenErr = errOpenChildren
+
+	// Act
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert
+	requireFamilyAnswer(t, f, err, errOpenChildren, opClose)
+	if len(f.db.closures["w1"]) != 0 {
+		t.Fatalf("closures = %+v, want none written", f.db.closures["w1"])
+	}
+}
+
+func TestCloseFailsWhenItsOpenChildrenCannotBeRead(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.noOpenChildrenErr = errors.New("db gone")
+
+	// Act
+	err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+	// Assert
+	if err == nil || isCloseRefusal(err) || len(f.db.closures["w1"]) != 0 {
+		t.Fatalf("Close = %v, closures %+v; want a hard failure with nothing written", err, f.db.closures["w1"])
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opClose,
+		Message: "could not read whether the workspace has open children"}); !ok {
+		t.Errorf("no error record: %+v", f.log.logger.Records())
+	}
+}
+
+func TestIsCloseRefusal(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "the blocked arm", err: &Refusal{Rpc: "CloseWorkspace", Arm: "blocked"}, want: true},
+		{name: "a family rule", err: errOpenChildren, want: true},
+		{name: "a failure", err: errors.New("db gone")},
+		{name: "no error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := isCloseRefusal(tt.err)
+
+			// Assert
+			if got != tt.want {
+				t.Errorf("isCloseRefusal(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
 	}
 }
