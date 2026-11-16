@@ -1,15 +1,33 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/shimclient"
 )
 
 // noSessionEnv is a command environment that names no session workspace.
 func noSessionEnv(string) string { return "" }
+
+// atCaller fills DEPS' caller seams for a command run in /wt/caller/src, the
+// own worktree of the one workspace "caller": the commands' tests that need
+// a caller and nothing else of it share this one shape.
+func atCaller(deps cliDeps) cliDeps {
+	deps.locate = locateOver(cliRow("ws-caller", "/wt/caller", "caller"))
+	deps.getwd = func() (string, error) { return "/wt/caller/src", nil }
+	deps.getenv = noSessionEnv
+	deps.isWorktreeRoot = worktreeRoots("/wt/caller")
+	deps.mintKey = func(prefix string) (string, error) { return prefix + "-1", nil }
+	return deps
+}
 
 // worktreeRoots answers that exactly ROOTS are git worktrees' roots.
 func worktreeRoots(roots ...string) func(string) (bool, error) {
@@ -91,5 +109,51 @@ func TestIsWorktreeRoot(t *testing.T) {
 				t.Fatalf("isWorktreeRoot = %v, %v; want %v, %v", got, err, tt.want, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestAtCallerIsTheCallersOwnWorktree(t *testing.T) {
+	// Arrange
+	deps := atCaller(cliDeps{})
+
+	// Act
+	cwd, err := deps.getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	root, rootErr := worktreeRoot(cwd, deps.isWorktreeRoot)
+	refs, locateErr := deps.locate(context.Background(), nil, &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: root}}})
+
+	// Assert
+	if rootErr != nil || locateErr != nil || root != "/wt/caller" || len(refs) != 1 || refs[0].GetId() != "ws-caller" ||
+		deps.getenv(shimclient.EnvWorkspaceDir) != "" {
+		t.Fatalf("root %q (%v), located %v (%v); want ws-caller's own worktree /wt/caller with no session", root, rootErr, refs, locateErr)
+	}
+}
+
+// TestEveryCallerOnlyFixtureSharesAtCaller fails a test file that hand-rolls
+// the caller seams atCaller owns, so the copies cannot drift apart.
+func TestEveryCallerOnlyFixtureSharesAtCaller(t *testing.T) {
+	// Arrange
+	files, err := filepath.Glob("*_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const shape = `locateOver(cliRow("ws-caller", "/wt/caller", "caller"))`
+
+	for _, file := range files {
+		if file == "caller_test.go" {
+			continue
+		}
+		// Act
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Assert
+		if strings.Contains(string(src), shape) {
+			t.Errorf("%s hand-rolls the caller seams; use atCaller", file)
+		}
 	}
 }
