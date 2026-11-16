@@ -3,6 +3,7 @@ package harness
 import (
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/wssummary"
+	"agentrepl/logging/childgroup"
 	"context"
 	"errors"
 	"fmt"
@@ -623,9 +624,6 @@ func InstallFakeGit(t testing.TB, dir string) {
 	}
 }
 
-// gitEnvKeys are the repository-selecting variables that must never be
-// inherited by a git child: a hook-leaked GIT_DIR is a real, previously
-// observed source of bogus work-tree errors.
 // inMemoryRoots names every state root this suite process started on
 // in-memory state, so a later daemon on the same root is refused rather than
 // booted onto an empty database.
@@ -653,11 +651,6 @@ func refuseInMemoryReuse(stateDir string) error {
 	return nil
 }
 
-var gitEnvKeys = []string{
-	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-}
-
 // omitFlags returns args without each named flag and the value following it.
 // A flag that is not present is not an error: a test names what must be
 // missing, not what the harness happened to add.
@@ -680,23 +673,10 @@ func omitFlags(args, omit []string) []string {
 	return kept
 }
 
-func cleanGitEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		key, _, _ := strings.Cut(kv, "=")
-		drop := false
-		for _, bad := range gitEnvKeys {
-			if key == bad {
-				drop = true
-				break
-			}
-		}
-		if !drop {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
+// cleanGitEnv returns env with every repository selector dropped
+// (childgroup.RepositorySelectors), so a fake git child resolves its own
+// repository.
+func cleanGitEnv(env []string) []string { return childgroup.ScrubRepositorySelectors(env) }
 
 // StartDaemon lays out a hermetic environment, starts the daemon, waits for
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.

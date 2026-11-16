@@ -13,6 +13,7 @@
 package gitclient
 
 import (
+	"agentrepl/logging/childgroup"
 	"context"
 	"errors"
 	"os"
@@ -34,23 +35,6 @@ func terminatingSignal(state *os.ProcessState) (syscall.Signal, bool) {
 		return 0, false
 	}
 	return status.Signal(), true
-}
-
-// strippedVars are the environment bindings that select a repository, an
-// index, or an object store independently of `-C dir`. Every one of them is
-// removed from the inherited environment before git is spawned. Everything
-// else the daemon inherited (PATH, HOME, the git identity, the config-file
-// overrides) survives untouched.
-var strippedVars = []string{
-	"GIT_DIR",
-	"GIT_WORK_TREE",
-	"GIT_INDEX_FILE",
-	"GIT_COMMON_DIR",
-	"GIT_PREFIX",
-	"GIT_OBJECT_DIRECTORY",
-	"GIT_ALTERNATE_OBJECT_DIRECTORIES",
-	"GIT_NAMESPACE",
-	"GIT_CEILING_DIRECTORIES",
 }
 
 // MergeQueueMarker is the binding the merge queue's fast-forward carries into
@@ -104,10 +88,8 @@ func isScrubbed(entry string) bool {
 	if !ok {
 		return false
 	}
-	for _, stripped := range strippedVars {
-		if name == stripped {
-			return true
-		}
+	if childgroup.SelectsRepository(entry) {
+		return true
 	}
 	for _, marker := range hookMarkerVars {
 		if name == marker {
