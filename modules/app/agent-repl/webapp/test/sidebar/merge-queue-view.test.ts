@@ -743,11 +743,11 @@ describe("drawQueueMediationLabel", () => {
     expect([...body.children].map((el) => el.getAttribute("data-workspace"))).toEqual(["w1"]);
   });
 
-  it("draws the label in the repository's group header, before its count", () => {
+  it("draws the label in the repository's group header, after its count (owner request, 2026-11-16)", () => {
     const section = mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1"), mediation: mediation(true) } })]);
     const head = drawRosterMergeQueueSection(section, daemon().sc, "p").querySelector(".merged-group-head");
     const label = head?.querySelector(`.${MERGE_QUEUE_MEDIATION_CLASS}`);
-    expect([label?.textContent, label?.nextElementSibling?.classList.contains("sb-open-count")]).toEqual(["assessing reload", true]);
+    expect([label?.textContent, label?.previousElementSibling?.classList.contains("sb-open-count")]).toEqual(["assessing reload", true]);
   });
 
   it("draws a queue holding only the mediation with no head, only the glyph's line", () => {

@@ -1456,8 +1456,9 @@ the reader cancelling the rollback: it is recorded and said, never raised."
   (condition-case nil
       (agent-repl--input-rollback-offer-arm ws offer)
     (quit
-     (agent-repl--info ws "elisp.input.rollback-dismissed ws=%s arm=%S" ws (plist-get offer :arm))
-     (message "agent-repl: rollback cancelled"))))
+     (agent-repl--user-message
+      ws "rollback cancelled" nil
+      :detail (format "elisp.input.rollback-dismissed ws=%s arm=%S" ws (plist-get offer :arm))))))
 
 (defun agent-repl--input-rollback-offer-arm (ws offer)
   "Act on OFFER's arm for WS (`agent-repl--input-rollback-offer')."
