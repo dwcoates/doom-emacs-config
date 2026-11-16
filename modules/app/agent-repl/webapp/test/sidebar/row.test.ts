@@ -1009,7 +1009,7 @@ describe("a repository block", () => {
   /** Parent ws-1 with a beta block of ws-3, its divider naming MAIN as the repository's main workspace. */
   function blockWithMain(main: string | undefined): RosterOpenRow {
     const family = withRepositoryBlocks(openRow(row({ id: "ws-1" })), [{ repo: "repo-beta", name: "beta", rows: [row({ id: "ws-3" })] }]);
-    if (main !== undefined) family.repositoryBlocks[0]!.divider!.mainWorkspace = create(WorkspaceRefSchema, { id: main, dir: `/w/${main}` });
+    if (main !== undefined) family.repositoryBlocks[0].divider!.mainWorkspace = create(WorkspaceRefSchema, { id: main, dir: `/w/${main}` });
     return family;
   }
 
