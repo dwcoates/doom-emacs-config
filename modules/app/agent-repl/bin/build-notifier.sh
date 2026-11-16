@@ -17,7 +17,8 @@
 # Usage: bin/build-notifier.sh [--out BUNDLE] [--no-install]
 #
 # Test seams: AGENT_REPL_APPLICATIONS_DIR (default ~/Applications),
-# AGENT_REPL_LAUNCHCTL (default launchctl), AGENT_REPL_LSREGISTER.
+# AGENT_REPL_LAUNCHCTL (default launchctl, through lib-service.sh),
+# AGENT_REPL_LSREGISTER.
 
 set -euo pipefail
 
@@ -33,7 +34,6 @@ while [ $# -gt 0 ]; do
     esac
 done
 APPS="${AGENT_REPL_APPLICATIONS_DIR:-$HOME/Applications}"
-LAUNCHCTL="${AGENT_REPL_LAUNCHCTL:-launchctl}"
 LSREGISTER="${AGENT_REPL_LSREGISTER:-/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister}"
 LABEL="com.agentrepl.notifier"
 
@@ -71,8 +71,11 @@ mv "$DEST.new" "$DEST"
 rm -rf "$DEST.old"
 "$LSREGISTER" -f "$DEST"
 echo "[build-notifier] installed $DEST"
-uid="$(id -u)"
-if "$LAUNCHCTL" print "gui/$uid/$LABEL" >/dev/null 2>&1; then
-    "$LAUNCHCTL" kickstart -k "gui/$uid/$LABEL"
+# The notifier is macOS's alone, so its service manager is launchd's.
+# shellcheck source=lib-service.sh
+. "$ROOT/bin/lib-service.sh"
+SERVICE_PLATFORM=darwin
+if service_held "$LABEL"; then
+    service_restart "$LABEL"
     echo "[build-notifier] restarted $LABEL onto the new build"
 fi
