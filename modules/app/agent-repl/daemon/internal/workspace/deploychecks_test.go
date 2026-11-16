@@ -2,12 +2,14 @@ package workspace
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/wsm"
 )
 
 func TestTheDeployCheckWorkspacesAreMadeOnTheirModelsWithNoPrompt(t *testing.T) {
@@ -148,5 +150,90 @@ func TestADeployCheckWorkspaceThatCannotBeMadeIsRecorded(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy check workspace could not be made"}); !ok {
 		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
+func TestADeployCheckWorkspaceStoppedAtOnceIsKilledAndClosedByItsAgent(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+
+	// Act
+	err := f.verbs.(*verbs).StopDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err != nil || len(f.shim.killedSession) != 1 || !f.shim.killedSession[0] {
+		t.Fatalf("StopDeployCheck = %v, kills %v; want one forced kill", err, f.shim.killedSession)
+	}
+	closures := f.db.closures[ws]
+	if len(closures) != 2 || closures[0].By != wsm.CloseByAgent || closures[0].How != wsm.HowKilled || closures[1].By != wsm.CloseByAgent {
+		t.Fatalf("close records = %+v, want the stop's and the teardown's, both its agent's", closures)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "stopped the deploy check workspace at once; its turn is cut, not ended"}); !ok {
+		t.Fatalf("records = %+v, want the stop recorded", f.log.logger.Records())
+	}
+}
+
+func TestADeployCheckWorkspaceThatCannotBeMarkedClosedIsNotKilled(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	f.db.setClosedErr = errors.New("disk gone")
+
+	// Act
+	err := f.verbs.(*verbs).StopDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err == nil || len(f.shim.killedSession) != 0 {
+		t.Fatalf("StopDeployCheck = %v, kills %v; want a refusal and no kill", err, f.shim.killedSession)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy check workspace could not be marked closed ahead of its stop"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
+func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+
+	// Act
+	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err != nil || len(f.shim.killedSession) != 1 || !f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
+		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, hidden and still open", err, f.shim.killedSession, f.db.workspaces[ws])
+	}
+}
+
+func TestADeployCheckWorkspaceThatCannotBeHiddenIsNotStoodBy(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	f.db.setHiddenErr = errors.New("disk gone")
+
+	// Act
+	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err == nil || len(f.shim.killedSession) != 0 {
+		t.Fatalf("StandByDeployCheck = %v, kills %v; want a refusal and its session left", err, f.shim.killedSession)
+	}
+}
+
+func TestAResumedDeployCheckWorkspaceIsShownAgain(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	if err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := f.verbs.(*verbs).ResumeDeployCheck(context.Background(), ws)
+
+	// Assert
+	if err != nil || f.db.workspaces[ws].Hidden {
+		t.Fatalf("ResumeDeployCheck = %v, record %+v; want it shown again", err, f.db.workspaces[ws])
 	}
 }

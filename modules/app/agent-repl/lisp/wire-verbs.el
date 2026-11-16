@@ -6369,6 +6369,78 @@ Every arm is an answer to a valid report, so every arm ends the batch."
    #'agent-repl-wire-decode-report-latencies-success
    #'agent-repl-wire-decode-report-latencies-error))
 
+;;;; ---- GetWorkspaceStatus -------------------------------------------
+;;
+;; Emacs asks only whether a workspace is still open: the log router asks
+;; it of a registered workspace whose directory is gone (stale-sink.el).
+;; Every field of the status is accepted; only its standing is decoded.
+;; See endpoint_get_workspace_status.proto and workspace_status.proto.
+
+(defun agent-repl-wire-encode-get-workspace-status-request (request)
+  "Encode GetWorkspaceStatusRequest from plist REQUEST, (:workspace REF)."
+  (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get request :workspace)))))
+
+(defun agent-repl-wire-decode-workspace-status-open (json)
+  "Decode WorkspaceStatusOpen from JSON into (); its activity is not read."
+  (agent-repl-wire-verbs--check-keys "WorkspaceStatusOpen" json '(activity))
+  nil)
+
+(defun agent-repl-wire-decode-workspace-status-closed (json)
+  "Decode the empty WorkspaceStatusClosed from JSON."
+  (agent-repl-wire-verbs--decode-empty "WorkspaceStatusClosed" json))
+
+(defun agent-repl-wire-decode-workspace-status-standing (json)
+  "Decode WorkspaceStatusStanding from JSON into (:arm :open|:closed :value V)."
+  (let ((message "WorkspaceStatusStanding"))
+    (agent-repl-wire-verbs--check-keys message json '(open closed))
+    (agent-repl-wire-verbs--decode-oneof
+     message "standing" json
+     (list (list 'open :open #'agent-repl-wire-decode-workspace-status-open)
+           (list 'closed :closed #'agent-repl-wire-decode-workspace-status-closed)))))
+
+(defun agent-repl-wire-decode-workspace-status (json)
+  "Decode WorkspaceStatus from JSON into (:standing STANDING).
+Every field is accepted; only the standing is decoded."
+  (let ((message "WorkspaceStatus"))
+    (agent-repl-wire-verbs--check-keys
+     message json
+     '(workspace name branch mergeTarget hidden standing oneShot awaiting repository
+       links relationship owner createdBy children summary))
+    (list :standing (agent-repl-wire-decode-workspace-status-standing
+                     (alist-get 'standing json)))))
+
+(defun agent-repl-wire-decode-get-workspace-status-success (json)
+  "Decode GetWorkspaceStatusSuccess from JSON into (:status STATUS)."
+  (let ((message "GetWorkspaceStatusSuccess"))
+    (agent-repl-wire-verbs--check-keys message json '(status))
+    (list :status (agent-repl-wire-decode-workspace-status (alist-get 'status json)))))
+
+(defun agent-repl-wire-decode-get-workspace-status-unknown-workspace (json)
+  "Decode the empty GetWorkspaceStatusUnknownWorkspace from JSON."
+  (agent-repl-wire-verbs--decode-empty "GetWorkspaceStatusUnknownWorkspace" json))
+
+(defun agent-repl-wire-decode-get-workspace-status-workspace-ref-mismatch (json)
+  "Decode GetWorkspaceStatusWorkspaceRefMismatch from JSON into (:registry-dir D)."
+  (let ((message "GetWorkspaceStatusWorkspaceRefMismatch"))
+    (agent-repl-wire-verbs--check-keys message json '(registryDir))
+    (list :registry-dir (agent-repl-wire-verbs--decode-string message 'registryDir json))))
+
+(defun agent-repl-wire-decode-get-workspace-status-error (json)
+  "Decode GetWorkspaceStatusError from JSON into (:arm ARM :value V)."
+  (let ((message "GetWorkspaceStatusError"))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch))
+    (agent-repl-wire-verbs--decode-oneof
+     message "cause" json
+     (list (list 'unknownWorkspace :unknown-workspace #'agent-repl-wire-decode-get-workspace-status-unknown-workspace)
+           (list 'workspaceRefMismatch :workspace-ref-mismatch #'agent-repl-wire-decode-get-workspace-status-workspace-ref-mismatch)))))
+
+(defun agent-repl-wire-decode-get-workspace-status-response (json)
+  "Decode GetWorkspaceStatusResponse from JSON into (:arm ARM :value V)."
+  (agent-repl-wire-verbs--decode-result
+   "GetWorkspaceStatusResponse" json
+   #'agent-repl-wire-decode-get-workspace-status-success
+   #'agent-repl-wire-decode-get-workspace-status-error))
+
 ;;;; ---- UpdateSidebarView --------------------------------------------
 ;;
 ;; The editor folds the sidebar's one-of-a-kind sections: Hidden at every

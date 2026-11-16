@@ -709,6 +709,22 @@ type DB interface {
 	// MediationRoleOf answers the owed mediation a workspace is the intake
 	// or the last remediation of, nil for neither (mediation.go).
 	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)
+	// DeployProblems answers every problem a repository's deploy checks
+	// keep (deployproblems.go).
+	DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProblem, error)
+	// OwnDeployProblems makes a workspace the owner of the problems named,
+	// open again from the instant given.
+	OwnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, owner WorkspaceID, findings string, at time.Time) error
+	// FixDeployProblemsOf marks every open problem an owner owns fixed.
+	FixDeployProblemsOf(ctx context.Context, owner WorkspaceID, at time.Time) (int, error)
+	// CheckedThrough answers where a repository's deploy checks have read
+	// its logs up to.
+	CheckedThrough(ctx context.Context, repo RepoKey) (time.Time, bool, error)
+	// RecordMediationWindow records the window the owed check's intake was
+	// told and the instant it was read to.
+	RecordMediationWindow(ctx context.Context, repo RepoKey, owed time.Time, w CheckWindow) (bool, error)
+	// MediationWindowOf answers the window the owed check's intake was told.
+	MediationWindowOf(ctx context.Context, repo RepoKey) (CheckWindow, bool, error)
 	// RecordDeployEscalation records WS as the deploy escalation workspace
 	// of REPO's queue, whose finish lands directly.
 	RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo RepoKey, at time.Time) error

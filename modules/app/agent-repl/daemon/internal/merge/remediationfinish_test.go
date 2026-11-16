@@ -16,6 +16,7 @@ import (
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/wsm"
 )
@@ -231,8 +232,8 @@ func TestARemediationPastItsFixingBoundIsEscalatedForTheIntake(t *testing.T) {
 	if owedCheck(t, h) != nil || !h.bannerRaised(desktopnotify.KindDeployMediated) {
 		t.Fatalf("check %+v, banner %v; want the chain escalated and the queue let through", owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated))
 	}
-	if !slices.Equal(h.checks.closed, []ids.WorkspaceID{"ws-intake"}) || !slices.Contains(h.meter.all(), "remediation_gates:"+RemediationGateGivenUp+":4") {
-		t.Fatalf("closed %v, recorded %v; want the intake closed and the rounds given up", h.checks.closed, h.meter.all())
+	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !slices.Contains(h.meter.all(), "remediation_gates:"+RemediationGateGivenUp+":4") {
+		t.Fatalf("stopped %v, recorded %v; want the intake stopped and the rounds given up", h.checks.stopped, h.meter.all())
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
 		Message: "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue advances"}); !ok {
@@ -551,5 +552,96 @@ func TestAClosedEscalationsFinishIsEnded(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish, Message: "a closed deploy escalation's finish was ended"}); !ok {
 		t.Fatalf("records = %+v, want the end recorded", h.logs.Records())
+	}
+}
+
+func TestAFinishedRemediationStandsByAndReturnsOnlyWithWork(t *testing.T) {
+	tests := []struct {
+		name        string
+		arrange     func(h *harness)
+		wantResumed []ids.WorkspaceID
+	}{
+		{name: "a finish that lands leaves it standing by until its deploy closes it"},
+		{name: "a gate that fails brings it back for its brief", wantResumed: []ids.WorkspaceID{"ws-remedy"},
+			arrange: func(h *harness) { h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}} }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			if tt.arrange != nil {
+				h.git.mu.Lock()
+				tt.arrange(h)
+				h.git.mu.Unlock()
+			}
+
+			// Act
+			err := h.o.FinishRemediation(context.Background(), "ws-remedy", aRemediationPatch)
+
+			// Assert
+			if err != nil || !slices.Equal(h.checks.stoodBy, []ids.WorkspaceID{"ws-remedy"}) || !slices.Equal(h.checks.resumed, tt.wantResumed) {
+				t.Fatalf("FinishRemediation = %v, stood by %v, resumed %v; want it standing by and resumed %v", err, h.checks.stoodBy, h.checks.resumed, tt.wantResumed)
+			}
+		})
+	}
+}
+
+func TestAFinishedWorkspaceThatCannotStandByIsRecordedAndStillLands(t *testing.T) {
+	// Arrange
+	h := finishing(t)
+	h.checks.standByErr = errors.New("the shim would not stop")
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-remedy", aRemediationPatch)
+
+	// Assert
+	if f := finishOf(t, h); err != nil || f == nil || f.Step != wsm.RemediationDeploying {
+		t.Fatalf("FinishRemediation = %v, finish %+v; want it landed regardless", err, f)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish, Message: "the finished workspace could not stand by; its session runs on and it stays among the working rows"}); !ok {
+		t.Fatalf("records = %v, want the failed stand-by at ERROR", h.logs.Records())
+	}
+}
+
+func TestTheDeployCheckLabelDrawsAFinishUnderWay(t *testing.T) {
+	tests := []struct {
+		name      string
+		step      wsm.RemediationStep
+		wantStage sidebar.MediationStage
+	}{
+		{name: "a gating finish is drawn finishing", step: wsm.RemediationGating, wantStage: sidebar.MediationFinishing},
+		{name: "a finish sent back to fix is not", step: wsm.RemediationFixing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			ctx := context.Background()
+			if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-remedy", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+				t.Fatal(err)
+			}
+			if tt.step != wsm.RemediationGating {
+				if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-remedy", wsm.RemediationGating, tt.step, deployStarted); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got, err := h.o.rosterMediation(ctx, mediationKey(h))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("rosterMediation: %v", err)
+			}
+			if tt.wantStage == sidebar.MediationFinishing {
+				if got == nil || got.Stage != sidebar.MediationFinishing || got.Remediation != "ws-remedy" {
+					t.Fatalf("rosterMediation = %+v, want finishing on ws-remedy", got)
+				}
+				return
+			}
+			if got != nil && got.Stage == sidebar.MediationFinishing {
+				t.Fatalf("rosterMediation = %+v, want no finishing label for a finish at %s", got, tt.step)
+			}
+		})
 	}
 }

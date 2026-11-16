@@ -818,6 +818,15 @@ type DeployCheckWorkspaces interface {
 	// CloseSelf closes a deploy check workspace, at its running turn's end
 	// when one runs, answering whether it waits for that end.
 	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// StopNow ends a deploy check workspace at once, its session killed
+	// mid-turn: a chain's end never lets its intake's turn run on.
+	StopNow(ctx context.Context, ws ids.WorkspaceID) error
+	// StandBy hides a remediation or escalation whose finish was accepted and
+	// ends its session at once, keeping it open until its fix deploys.
+	StandBy(ctx context.Context, ws ids.WorkspaceID) error
+	// Resume shows a standing-by workspace again, for the brief sending it
+	// back to work.
+	Resume(ctx context.Context, ws ids.WorkspaceID) error
 }
 
 // Meter records the merge queue's metrics. Each call is an atomic add and

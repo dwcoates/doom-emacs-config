@@ -6863,3 +6863,41 @@ and why."
                    '(:cause (:arm :lifecycle-config-invalid
                              :value (:path "/r/.agent-repl/lifecycle.yaml" :detail "pre_deploy is required")))))))
 
+
+(ert-deftest agent-repl-test-wire-verbs-get-workspace-status-request-shape ()
+  "The status ask names the workspace by the ref the daemon minted."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-encode-get-workspace-status-request
+                    (list :workspace (list :id "0123456789abcdef" :dir "/tmp/w")))
+                   '((workspace (id . "0123456789abcdef") (dir . "/tmp/w")))))))
+
+(ert-deftest agent-repl-test-wire-verbs-get-workspace-status-decodes-an-open-standing ()
+  "A status of an open workspace decodes to its open standing, every other field accepted."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((response (agent-repl-wire-decode-get-workspace-status-response
+                     '((success (status (workspace (id . "0123456789abcdef") (dir . "/tmp/w"))
+                                        (name . "w") (hidden . t)
+                                        (standing (open (activity (idle))))))))))
+      (should (eq (plist-get response :arm) :success))
+      (should (eq (plist-get (plist-get (plist-get (plist-get response :value) :status) :standing) :arm) :open)))))
+
+(ert-deftest agent-repl-test-wire-verbs-get-workspace-status-decodes-a-closed-standing ()
+  "A status of a closed workspace decodes to its closed standing."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((response (agent-repl-wire-decode-get-workspace-status-response
+                     '((success (status (standing (closed))))))))
+      (should (eq (plist-get (plist-get (plist-get (plist-get response :value) :status) :standing) :arm) :closed)))))
+
+(ert-deftest agent-repl-test-wire-verbs-get-workspace-status-decodes-an-unknown-workspace ()
+  "A workspace the daemon no longer knows decodes to its error arm."
+  (agent-repl-test-wire-verbs--with-common
+    (let ((response (agent-repl-wire-decode-get-workspace-status-response
+                     '((error (unknownWorkspace))))))
+      (should (eq (plist-get response :arm) :error))
+      (should (eq (plist-get (plist-get response :value) :arm) :unknown-workspace)))))
+
+(ert-deftest agent-repl-test-wire-verbs-get-workspace-status-refuses-an-unknown-field ()
+  "A status field the contract does not declare is refused, not ignored."
+  (agent-repl-test-wire-verbs--with-common
+    (should-error (agent-repl-wire-decode-get-workspace-status-response
+                   '((success (status (standing (closed)) (notAField . 1))))))))

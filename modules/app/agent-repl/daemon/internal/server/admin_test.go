@@ -1112,6 +1112,12 @@ func TestUpdateMergeQueueAnswersAMediationRefusal(t *testing.T) {
 			got: func(e *agentreplv1.UpdateMergeQueueError) bool {
 				return e.GetRemediationBoundReached().GetRemediationsBeforeEscalation() == 4
 			}},
+		{name: "groups no one owns", refusal: &merge.RefusalError{Arm: merge.ArmProblemsUnowned, Reason: "one",
+			Fields: map[string]any{"groups": []string{"op: msg (new)"}}},
+			got: func(e *agentreplv1.UpdateMergeQueueError) bool {
+				groups := e.GetProblemsUnowned().GetGroups()
+				return len(groups) == 1 && groups[0] == "op: msg (new)"
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

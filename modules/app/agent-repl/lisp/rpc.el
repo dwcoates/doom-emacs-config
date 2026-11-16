@@ -92,6 +92,8 @@
 (declare-function agent-repl-wire-encode-find-entry-neighbor-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-find-entry-neighbor-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-report-latencies-request "wire-verbs" (request))
+(declare-function agent-repl-wire-encode-get-workspace-status-request "wire-verbs" (request))
+(declare-function agent-repl-wire-decode-get-workspace-status-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-report-latencies-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-report-editor-focus-response "wire-host" (alist))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
@@ -382,6 +384,13 @@ and the next stream states its focus itself.")
   "Report the editor's startup milestones to the daemon's metrics.
 Every success arm acknowledges the batch; a refusal is a defect the same
 batch would only repeat.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-get-workspace-status
+  "GetWorkspaceStatus"
+  agent-repl-wire-encode-get-workspace-status-request
+  agent-repl-wire-decode-get-workspace-status-response
+  "Ask the daemon for a workspace's status, open or closed.
+Emacs reads only its standing: whether the workspace is still open.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-mark-workspace-viewed
   "MarkWorkspaceViewed"
