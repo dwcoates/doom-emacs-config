@@ -1353,27 +1353,92 @@ message RosterMergeQueueGithubPlace {
 // The merge holding the fixing-tests slot.
 message RosterMergeQueueFixingTests {
   RosterMergeQueueSubject subject = 1;
-  // WHEN THE MERGE TOOK THE SLOT, epoch ms: the queue entry's durable slot
-  // moment, written in the store write that granted it (its step aside, or
-  // the release of the merge that held the slot before), so a restart or a
-  // handover reads the same moment. Its clock ticks from here. Never zero.
-  int64 since_ms = 2;
+  // Tag 2 (`since_ms`, when the merge took the slot) is RETIRED: the line's
+  // clock is `clock`, which counts the merge's whole active stretch.
+  reserved 2;
+  reserved "since_ms";
+  // How long the merge has been active: fixing its tests is active work, so
+  // its clock is always an active one.
+  RosterMergeQueueActiveClock clock = 3;
 }
 
-// The merge holding the resolving-conflicts slot.
+// One merge resolving its rebase's conflicts out of line.
 message RosterMergeQueueResolvingConflicts {
   RosterMergeQueueSubject subject = 1;
-  // WHEN THE MERGE STEPPED ASIDE TO RESOLVE, epoch ms, as
-  // RosterMergeQueueFixingTests.since_ms is. Never zero.
-  int64 since_ms = 2;
+  // Tag 2 (`since_ms`, when the merge stepped aside to resolve) is RETIRED:
+  // the line's clock is `clock`.
+  reserved 2;
+  reserved "since_ms";
+  // How long the merge has been active: resolving conflicts is active work,
+  // so its clock is always an active one.
+  RosterMergeQueueActiveClock clock = 3;
 }
 
 // One merge out of line waiting for the fixing-tests slot.
 message RosterMergeQueueAwaitingFixingTests {
   RosterMergeQueueSubject subject = 1;
-  // When it stepped aside to wait for the slot, epoch ms: its durable slot
-  // moment. Its clock ticks from here. Never zero.
-  int64 since_ms = 2;
+  // Tag 2 (`since_ms`, when it stepped aside to wait) is RETIRED: the line's
+  // clock is `clock`.
+  reserved 2;
+  reserved "since_ms";
+  // How long the merge has waited: awaiting the slot is waiting, so its
+  // clock is always a waiting one, which carries the waiting it did before
+  // its last active stretch.
+  RosterMergeQueueWaitingClock clock = 3;
+}
+
+// ---- Merge clocks: how long a merge has been active, or has waited ----
+//
+// THE OWNER'S RULE (2026-11-16): a merge is ACTIVE while it rebases, runs its
+// tests, fixes its tests or resolves its conflicts -- the admitted head, the
+// merge fixing tests, and every merge resolving conflicts -- and WAITING
+// otherwise: in line behind the head, at the head before it is admitted, or
+// awaiting the fixing-tests slot. An active merge's clock counts from 0 at
+// the moment it became active. A waiting merge's clock counts its whole
+// waiting time: the waiting it did before its last active stretch, and the
+// waiting since, never the active stretch between them. So a merge that
+// waited 40 minutes, was active for 10, and waits again reads 40m and counts
+// on.
+//
+// The daemon owns every instant and duration here. Each is durable on the
+// merge's queue entry, written in the same store write that changed the
+// merge's standing, so a restart, a rollout or a handover reads the same
+// clock, and a merge a restart returns to its place before it took a step
+// stays active across the restart. The client only counts on from what it
+// is given.
+
+// The clock of a merge at active work.
+message RosterMergeQueueActiveClock {
+  // When the merge's current active stretch began, epoch ms. The clock reads
+  // now minus this. A move from one kind of active work to another (the head
+  // stepping aside to fix its tests) continues the stretch. Never zero.
+  int64 active_since_ms = 1;
+}
+
+// The clock of a waiting merge.
+message RosterMergeQueueWaitingClock {
+  // When the merge's current waiting stretch began, epoch ms: when it was put
+  // in line, or when its last active stretch ended. Never zero.
+  int64 waiting_since_ms = 1;
+  // The waiting the merge did before its current waiting stretch, in ms:
+  // every earlier waiting stretch, summed, with no active stretch counted.
+  // The clock reads this plus (now minus `waiting_since_ms`). Zero for a
+  // merge that has not been active since it was put in line.
+  int64 waited_before_ms = 2;
+}
+
+// The head's clock: the head is active once admitted and waits before.
+message RosterMergeQueueHeadClock {
+  // Whether the head is at active work or waiting; the set arm is the
+  // stretch it is in. It follows the merge's activity, not `standing`
+  // alone: a head a restart returned to its place before it took a step
+  // stands waiting to be admitted again, and stays active.
+  oneof stretch {
+    // The head is active: admitted, or held active across a restart.
+    RosterMergeQueueActiveClock active = 1;
+    // The head waits to be admitted.
+    RosterMergeQueueWaitingClock waiting = 2;
+  }
 }
 
 // The queue is paused: when, by whom, and whether the pause was a hard stop.
@@ -1509,20 +1574,22 @@ message RosterMergeQueueHead {
   // is RETIRED (2026-10-27): a queue whose line is empty is not listed.
   reserved 5;
   reserved "failed";
-  // WHEN THIS MERGE TOOK THE HEAD SLOT, epoch ms: the head's clock ticks
-  // from it, so a merge that waited hours in line reads zero as it takes the
-  // head slot (owner ruling, 2026-10-30). It is the queue entry's durable
-  // slot moment, written in the same store write that made the merge the
-  // front of its line, so a restart or a handover reads the same moment, and
-  // a merge that left the head (to repair out of line) and takes it again starts again from zero. Never zero.
-  int64 head_since_ms = 6;
+  // Tag 6 (`head_since_ms`, when the merge took the head slot) is RETIRED:
+  // the head's clock is `clock`, which reads from 0 as the head is admitted
+  // rather than as it reaches the front.
+  reserved 6;
+  reserved "head_since_ms";
+  // How long the head has been active, or has waited. Drawn on its name
+  // line, stopped at the pause while its queue is paused. Never unset.
+  RosterMergeQueueHeadClock clock = 7;
 }
 
 // The head waits at the front of the line.
 message RosterMergeQueueHeadWaiting {
-  // When the merge was put in line, epoch ms. The client ticks how long it
-  // has waited from it.
-  int64 queued_at_ms = 1;
+  // Tag 1 (`queued_at_ms`, when the merge was put in line) is RETIRED: how
+  // long the head has waited is its clock (RosterMergeQueueHead.clock).
+  reserved 1;
+  reserved "queued_at_ms";
 }
 
 // The head is being worked on.
@@ -1588,8 +1655,13 @@ message RosterMergeQueueStageFailed {
 // ONE MERGE WAITING behind the head.
 message RosterMergeQueueWaiting {
   RosterMergeQueueSubject subject = 1;
-  // When it was put in line, epoch ms. Its row's clock ticks from it.
-  int64 queued_at_ms = 2;
+  // Tag 2 (`queued_at_ms`, when it was put in line) is RETIRED: its row's
+  // clock is `clock`, which leaves out any active stretch the merge had.
+  reserved 2;
+  reserved "queued_at_ms";
+  // How long the merge has waited: a merge in line behind the head is
+  // waiting, so its clock is always a waiting one.
+  RosterMergeQueueWaitingClock clock = 6;
   // Tag 3 (`placed_at_front`, drawn as a "front" label), tag 4 (`racing`, a
   // merge worked on behind the head) and tag 5 (`placement`, front or
   // returned) are RETIRED (2026-11-11): the sidebar draws no "front" and no
