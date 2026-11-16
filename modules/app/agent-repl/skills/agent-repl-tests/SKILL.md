@@ -59,7 +59,7 @@ holder's own landing gate, which stands in for the queue's.
 Options:
 
 ```text
--coverage                instrument and report coverage; every selection must be a whole suite (-suite or -every-suite); the coverage-only suites (the istanbul honesty probes) run in a coverage run of -every-suite, or when named with -suite
+-coverage                instrument and report coverage; every selection must be a whole suite (-suite or -every-suite); -every-suite measures every system over every tier and fails on a tier it should have run, while a selection reports each system only as far as the selected suites reached it, every line provisional as a partial measurement; the coverage-only suites (the istanbul honesty probes) run in a coverage run of -every-suite, or when named with -suite
 -record                  append the run's timings to test_time.csv; -every-suite alone, on master, only when the user asks
 -runs N                  repeat the run N times, each its own run with its own log (every frame names its run); for a flaky test, repeat just that test
 -stop-at-first-failure   stop repeating at the first failing run

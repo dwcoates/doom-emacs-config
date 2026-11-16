@@ -12,16 +12,73 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"time"
 
 	"agentrepl/testrun/internal/goprofile"
 	"agentrepl/testrun/internal/redundancy"
+	"agentrepl/testrun/roster"
 )
+
+// Selection is which suites a coverage run selected: every suite, or the
+// named ones. A coverage system whose own suite the selection ran is held
+// to every tier that suite measures, and a missing one fails the merge; any
+// other system is reported only as far as the selected suites reached it,
+// as a partial measurement no removal may be held to.
+type Selection struct {
+	Every bool
+	// Suites are the selected suites, sorted and unique; empty when Every.
+	Suites []string
+}
+
+// SelectionOf is a run's selection from its suite narrowing, empty meaning
+// every suite: the named suites sorted, each once.
+func SelectionOf(selected []string) Selection {
+	if len(selected) == 0 {
+		return Selection{Every: true}
+	}
+	return Selection{Suites: slices.Compact(slices.Sorted(slices.Values(selected)))}
+}
+
+// Args are the selection as `testrun coverage-baseline`'s flags, the ones
+// ParseBaselineArgs reads.
+func (s Selection) Args() []string {
+	if s.Every {
+		return []string{"-every-suite"}
+	}
+	var out []string
+	for _, name := range s.Suites {
+		out = append(out, "-suite", name)
+	}
+	return out
+}
+
+// Ran answers whether the selection ran suite.
+func (s Selection) Ran(suite string) bool {
+	return s.Every || slices.Contains(s.Suites, suite)
+}
+
+// partial is why a selection's lines are provisional, or "" for every suite.
+func (s Selection) partial() string {
+	if s.Every {
+		return ""
+	}
+	return "a partial measurement: only the suites " + strings.Join(s.Suites, ", ") + " ran"
+}
+
+// goTiers is the Go systems' Tiers text for the selection.
+func (s Selection) goTiers() string {
+	if s.Every {
+		return "go: unit, integration and e2e, spawned systems included"
+	}
+	return "go: " + strings.Join(s.Suites, ", ") + " only, spawned systems included"
+}
 
 // BaselineInput is what one merge needs.
 type BaselineInput struct {
@@ -30,32 +87,42 @@ type BaselineInput struct {
 	// GoSystems maps each Go coverage system's module path to its suite.
 	GoSystems map[string]string
 	// Vitest maps a vitest coverage system's name to its istanbul reports,
-	// every tier's (istanbulStatements).
+	// every tier's (istanbulStatements): only the systems the run measured.
 	Vitest map[string]VitestReports
-	Commit string
-	Now    time.Time
+	// Selection is the suites the run selected.
+	Selection Selection
+	Commit    string
+	Now       time.Time
 }
 
-// Baseline merges the run's counters into each system's coverage.
+// Baseline merges the run's counters into each system's coverage. A Go
+// system whose suite the selection ran must have a counter; one it did not
+// run is reported when some selected suite's counters reach it.
 func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error) {
+	out := &redundancy.BaselineFile{Commit: in.Commit, Measured: in.Now.UTC().Format(time.RFC3339), Systems: map[string]redundancy.SystemBaseline{}}
 	dirs, err := goprofile.CounterDirs(in.CoverRoot)
 	if err != nil {
 		return nil, err
 	}
-	if len(dirs) == 0 {
+	expected := false
+	for _, suite := range in.GoSystems {
+		expected = expected || in.Selection.Ran(suite)
+	}
+	if len(dirs) == 0 && expected {
 		return nil, fmt.Errorf("cover: %s holds no coverage counters", in.CoverRoot)
 	}
-	profile := filepath.Join(in.CoverRoot, "baseline.coverprofile")
-	if _, err := goTool(in.CoverRoot, "tool", "covdata", "textfmt", "-i="+strings.Join(dirs, ","), "-o="+profile); err != nil {
-		return nil, fmt.Errorf("cover: merge the run's counters: %w", err)
-	}
-	text, err := os.ReadFile(profile)
-	if err != nil {
-		return nil, fmt.Errorf("cover: read the merged profile: %w", err)
-	}
-	out := &redundancy.BaselineFile{Commit: in.Commit, Measured: in.Now.UTC().Format(time.RFC3339)}
-	if out.Systems, err = goSystems(string(text), in.GoSystems); err != nil {
-		return nil, err
+	if len(dirs) > 0 {
+		profile := filepath.Join(in.CoverRoot, "baseline.coverprofile")
+		if _, err := goTool(in.CoverRoot, "tool", "covdata", "textfmt", "-i="+strings.Join(dirs, ","), "-o="+profile); err != nil {
+			return nil, fmt.Errorf("cover: merge the run's counters: %w", err)
+		}
+		text, err := os.ReadFile(profile)
+		if err != nil {
+			return nil, fmt.Errorf("cover: read the merged profile: %w", err)
+		}
+		if out.Systems, err = goSystems(string(text), in.GoSystems, in.Selection.goTiers()); err != nil {
+			return nil, err
+		}
 	}
 	for name, r := range in.Vitest {
 		c, err := istanbulStatements(r)
@@ -65,18 +132,32 @@ func Baseline(goTool Runner, in BaselineInput) (*redundancy.BaselineFile, error)
 		out.Systems[name] = c
 	}
 	for mod, suite := range in.GoSystems {
-		if _, ok := out.Systems[mod]; !ok {
+		if _, ok := out.Systems[mod]; !ok && in.Selection.Ran(suite) {
 			return nil, fmt.Errorf("cover: no counter of the run covers %s (suite %s)", mod, suite)
 		}
 	}
+	if len(out.Systems) == 0 {
+		return nil, fmt.Errorf("cover: the suites %s measured no coverage system", strings.Join(in.Selection.Suites, ", "))
+	}
+	if why := in.Selection.partial(); why != "" {
+		for name, b := range out.Systems {
+			b.Provisional, b.Reason = true, joinReasons(b.Reason, why)
+			out.Systems[name] = b
+		}
+	}
 	return out, nil
+}
+
+// joinReasons is a provisional line's reasons, the empty ones dropped.
+func joinReasons(reasons ...string) string {
+	return strings.Join(slices.DeleteFunc(reasons, func(r string) bool { return r == "" }), "; ")
 }
 
 // goSystems sums a merged profile's statements per system: the module path
 // that is the longest prefix of each block's file. A block of no system (the
 // e2e harness, a fake) is not counted; a block met twice counts once,
 // covered if either count is.
-func goSystems(profile string, systems map[string]string) (map[string]redundancy.SystemBaseline, error) {
+func goSystems(profile string, systems map[string]string, tiers string) (map[string]redundancy.SystemBaseline, error) {
 	all, covered, err := goprofile.ParseProfile(profile)
 	if err != nil {
 		return nil, fmt.Errorf("cover: the merged profile: %w", err)
@@ -105,7 +186,7 @@ func goSystems(profile string, systems map[string]string) (map[string]redundancy
 	}
 	out := map[string]redundancy.SystemBaseline{}
 	for mod, n := range total {
-		out[mod] = baselineOf(hit[mod], n, "go: unit, integration and e2e, spawned systems included")
+		out[mod] = baselineOf(hit[mod], n, tiers)
 	}
 	return out, nil
 }
@@ -119,7 +200,9 @@ func baselineOf(hit, total int, tiers string) redundancy.SystemBaseline {
 // VitestReports are one vitest system's istanbul reports.
 type VitestReports struct {
 	// Unit is the unit pass's merged report. Its files and statements are the
-	// system: its config's all:true pass over its coverage include.
+	// system: its config's all:true pass over its coverage include. Empty
+	// when the run did not run the system's suite: the system is then the
+	// files its tiers loaded, a partial measurement.
 	Unit string
 	// Tiers are every other tier's reports, by the tier's name ("integration",
 	// "e2e webapp layer"); their hits count only in Unit's statements.
@@ -153,28 +236,41 @@ func readIstanbul(path string) (istanbulReport, error) {
 // istanbulStatements merges a vitest system's reports into its statement
 // coverage: a statement of the unit report is covered when any tier's report
 // counts it. Every tier instruments the same file with the same istanbul, so
-// its statement map must be the unit report's: one that is not would count
-// hits against the wrong statements, and is refused.
+// its statement map must be the first report's that held the file: one that
+// is not would count hits against the wrong statements, and is refused. With
+// no unit report the system is every file the tiers loaded, each counted
+// once.
 func istanbulStatements(r VitestReports) (redundancy.SystemBaseline, error) {
-	unit, err := readIstanbul(r.Unit)
-	if err != nil {
-		return redundancy.SystemBaseline{}, err
-	}
+	known, from := istanbulReport{}, map[string]string{}
 	covered := map[string]map[string]bool{}
 	total := 0
-	for file, f := range unit {
-		covered[file] = map[string]bool{}
-		for id, n := range f.S {
-			total++
+	admit := func(path string, rep istanbulReport, file string) {
+		f := rep[file]
+		known[file], from[file], covered[file] = f, path, map[string]bool{}
+		total += len(f.S)
+	}
+	hits := func(file string, s map[string]int) {
+		for id, n := range s {
 			if n > 0 {
 				covered[file][id] = true
 			}
 		}
 	}
-	if total == 0 {
-		return redundancy.SystemBaseline{}, fmt.Errorf("%s holds no statements", r.Unit)
+	var tiers []string
+	if r.Unit != "" {
+		unit, err := readIstanbul(r.Unit)
+		if err != nil {
+			return redundancy.SystemBaseline{}, err
+		}
+		for file, f := range unit {
+			admit(r.Unit, unit, file)
+			hits(file, f.S)
+		}
+		if total == 0 {
+			return redundancy.SystemBaseline{}, fmt.Errorf("%s holds no statements", r.Unit)
+		}
+		tiers = append(tiers, "unit")
 	}
-	tiers := []string{"unit"}
 	names := make([]string, 0, len(r.Tiers))
 	for name := range r.Tiers {
 		names = append(names, name)
@@ -191,26 +287,31 @@ func istanbulStatements(r VitestReports) (redundancy.SystemBaseline, error) {
 				return redundancy.SystemBaseline{}, err
 			}
 			for file, f := range rep {
-				u, ok := unit[file]
-				if !ok {
+				k, ok := known[file]
+				switch {
+				case !ok && r.Unit != "":
 					continue // a file outside the unit config's coverage include
+				case !ok:
+					admit(path, rep, file)
+				case !reflect.DeepEqual(f.StatementMap, k.StatementMap):
+					return redundancy.SystemBaseline{}, fmt.Errorf("%s's statements of %s are not %s's: the tiers instrumented it differently", path, file, from[file])
 				}
-				if !reflect.DeepEqual(f.StatementMap, u.StatementMap) {
-					return redundancy.SystemBaseline{}, fmt.Errorf("%s's statements of %s are not %s's: the tiers instrumented it differently", path, file, r.Unit)
-				}
-				for id, n := range f.S {
-					if n > 0 {
-						covered[file][id] = true
-					}
-				}
+				hits(file, f.S)
 			}
 		}
+	}
+	if total == 0 {
+		return redundancy.SystemBaseline{}, fmt.Errorf("no tier's report holds a statement (tiers: %s)", strings.Join(tiers, ", "))
 	}
 	hit := 0
 	for _, ids := range covered {
 		hit += len(ids)
 	}
-	b := baselineOf(hit, total, "vitest: "+strings.Join(tiers, ", ")+", merged by statement")
+	text := "vitest: " + strings.Join(tiers, ", ") + ", merged by statement"
+	if r.Unit == "" {
+		text = "vitest: " + strings.Join(tiers, ", ") + " only, over the files it loaded, merged by statement"
+	}
+	b := baselineOf(hit, total, text)
 	if r.Missing != "" {
 		b.Provisional, b.Reason = true, r.Missing
 	}
@@ -224,10 +325,13 @@ type BaselineArgs struct {
 	Commit       string
 	// Out is where the merged baseline is written.
 	Out string
+	// Selection is the suites the run selected.
+	Selection Selection
 }
 
 // ParseBaselineArgs reads `testrun coverage-baseline -module M -work W
-// -commit C -out F`.
+// -commit C -out F` and the run's selection: -every-suite, or one -suite per
+// selected roster suite.
 func ParseBaselineArgs(argv []string) (BaselineArgs, error) {
 	fs := flag.NewFlagSet("testrun coverage-baseline", flag.ContinueOnError)
 	var a BaselineArgs
@@ -235,12 +339,26 @@ func ParseBaselineArgs(argv []string) (BaselineArgs, error) {
 	fs.StringVar(&a.Work, "work", "", "the run's scratch directory")
 	fs.StringVar(&a.Commit, "commit", "", "the commit the run measured")
 	fs.StringVar(&a.Out, "out", "", "where to write the baseline")
+	var every bool
+	var named []string
+	fs.BoolVar(&every, "every-suite", false, "the run selected every suite")
+	fs.Func("suite", "a suite the run selected (repeatable)", func(name string) error {
+		if _, ok := roster.Lookup(name); !ok {
+			return fmt.Errorf("%q is no roster suite", name)
+		}
+		named = append(named, name)
+		return nil
+	})
 	if err := fs.Parse(argv); err != nil {
 		return BaselineArgs{}, err
 	}
 	if a.Module == "" || a.Work == "" || a.Commit == "" || a.Out == "" || fs.NArg() != 0 {
-		return BaselineArgs{}, fmt.Errorf("cover: coverage-baseline takes exactly -module, -work, -commit and -out")
+		return BaselineArgs{}, fmt.Errorf("cover: coverage-baseline takes exactly -module, -work, -commit and -out, and the run's selection")
 	}
+	if every == (len(named) > 0) {
+		return BaselineArgs{}, fmt.Errorf("cover: coverage-baseline takes the run's selection as exactly one of -every-suite or one -suite per selected suite")
+	}
+	a.Selection = SelectionOf(named)
 	return a, nil
 }
 
@@ -269,34 +387,47 @@ var unmergedReach = map[string]string{
 }
 
 // vitestReports finds every tier's istanbul reports of one vitest system in
-// a finished coverage run's work directory.
-func vitestReports(work, coverRoot, name string) (VitestReports, error) {
-	r := VitestReports{Unit: VitestCoverage(work, name), Tiers: map[string][]string{}}
-	integ, err := filepath.Glob(filepath.Join(VitestIntegrationCoverage(work, name), "*", "coverage-final.json"))
-	if err != nil {
-		return VitestReports{}, fmt.Errorf("cover: find %s's integration reports: %w", name, err)
-	}
-	sort.Strings(integ)
-	r.Tiers["integration"] = integ
+// a finished coverage run's work directory, false when the run measured none
+// of the system. A system whose suite the selection ran is held to its unit
+// report; one it did not run is measured only by the e2e webapp layer, when
+// the run reached it.
+func vitestReports(work, coverRoot, name string, sel Selection) (VitestReports, bool, error) {
+	r := VitestReports{Tiers: map[string][]string{}}
 	var missing []string
-	if len(integ) == 0 {
-		missing = append(missing, "the run wrote no integration coverage")
+	if sel.Ran(name) {
+		r.Unit = VitestCoverage(work, name)
+		integ, err := filepath.Glob(filepath.Join(VitestIntegrationCoverage(work, name), "*", "coverage-final.json"))
+		if err != nil {
+			return VitestReports{}, false, fmt.Errorf("cover: find %s's integration reports: %w", name, err)
+		}
+		sort.Strings(integ)
+		r.Tiers["integration"] = integ
+		if len(integ) == 0 {
+			missing = append(missing, "the run wrote no integration coverage")
+		}
 	}
 	if name == "webapp" {
 		layer, err := webappLayerReports(coverRoot)
 		if err != nil {
-			return VitestReports{}, err
+			return VitestReports{}, false, err
 		}
 		r.Tiers["e2e webapp layer"] = layer
-		if len(layer) == 0 {
+		if len(layer) == 0 && sel.Ran(name) {
 			missing = append(missing, "the run measured no e2e webapp layer (run the e2e suite in the same coverage run)")
 		}
+	}
+	measured := r.Unit != ""
+	for _, paths := range r.Tiers {
+		measured = measured || len(paths) > 0
+	}
+	if !measured {
+		return VitestReports{}, false, nil
 	}
 	if why, ok := unmergedReach[name]; ok {
 		missing = append(missing, why)
 	}
-	r.Missing = strings.Join(missing, "; ")
-	return r, nil
+	r.Missing = joinReasons(missing...)
+	return r, true, nil
 }
 
 // webappLayerReports is every run-*.json under every WebappLayerDir/driver-*
@@ -322,15 +453,33 @@ func webappLayerReports(root string) ([]string, error) {
 	return out, nil
 }
 
+// SystemLines are a merged baseline's systems as the run's log reports them,
+// one line each in name order, a provisional line ending with its reason.
+func SystemLines(f *redundancy.BaselineFile) []string {
+	names := slices.Sorted(maps.Keys(f.Systems))
+	lines := make([]string, 0, len(names))
+	for _, name := range names {
+		s := f.Systems[name]
+		provisional := ""
+		if s.Provisional {
+			provisional = "; provisional: " + s.Reason
+		}
+		lines = append(lines, fmt.Sprintf("%s %.2f%% of %d statements (floor %.2f%%; %s%s)", name, s.Percent, s.Statements, s.Floor, s.Tiers, provisional))
+	}
+	return lines
+}
+
 // RunBaseline merges a finished coverage run into a baseline file at a.Out.
 func RunBaseline(goTool Runner, a BaselineArgs, goSystems map[string]string, vitest []string, now time.Time) (*redundancy.BaselineFile, error) {
-	in := BaselineInput{CoverRoot: filepath.Join(a.Work, "cover"), GoSystems: goSystems, Vitest: map[string]VitestReports{}, Commit: a.Commit, Now: now}
+	in := BaselineInput{CoverRoot: filepath.Join(a.Work, "cover"), GoSystems: goSystems, Vitest: map[string]VitestReports{}, Selection: a.Selection, Commit: a.Commit, Now: now}
 	for _, name := range vitest {
-		r, err := vitestReports(a.Work, in.CoverRoot, name)
+		r, ok, err := vitestReports(a.Work, in.CoverRoot, name, a.Selection)
 		if err != nil {
 			return nil, err
 		}
-		in.Vitest[name] = r
+		if ok {
+			in.Vitest[name] = r
+		}
 	}
 	f, err := Baseline(goTool, in)
 	if err != nil {

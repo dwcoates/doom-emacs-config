@@ -8,7 +8,7 @@
 //	testrun finish-record --module DIR --record-out PATH
 //	testrun cover-report -name N -module DIR -covdirs ROOT
 //	testrun roster
-//	testrun coverage-baseline -module DIR -work DIR -commit SHA -out FILE (a --coverage run's last unit)
+//	testrun coverage-baseline -module DIR -work DIR -commit SHA -out FILE -every-suite|-suite NAME... (a --coverage run's last unit)
 //	testrun redundancy go -module DIR -pkg PKG -tests FILES -out DIR [...]
 //	testrun redundancy vitest -package DIR -mutate GLOBS -out DIR [...]
 //	testrun redundancy report -in measurement.json [-universe U] [-overhead D]
@@ -27,7 +27,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -526,7 +525,9 @@ func coverCmd(log *run.Log, argv []string) int {
 }
 
 // coverageBaselineCmd merges a finished --coverage run into each coverage
-// system's all-tier statement coverage (internal/cover, baseline.go).
+// system's statement coverage: every tier in a whole-roster run, the selected
+// suites' tiers, labeled partial, in a run of a selection (internal/cover,
+// baseline.go).
 func coverageBaselineCmd(log *run.Log, argv []string) int {
 	a, err := cover.ParseBaselineArgs(argv)
 	if err != nil {
@@ -549,14 +550,8 @@ func coverageBaselineCmd(log *run.Log, argv []string) int {
 		log.Errorf("coverage-baseline of %s at %s: %v", a.Work, a.Commit, err)
 		return 1
 	}
-	names := make([]string, 0, len(f.Systems))
-	for name := range f.Systems {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	for _, name := range names {
-		s := f.Systems[name]
-		log.Infof("coverage-baseline: %s %.2f%% of %d statements (floor %.2f%%; %s)", name, s.Percent, s.Statements, s.Floor, s.Tiers)
+	for _, line := range cover.SystemLines(f) {
+		log.Infof("coverage-baseline: %s", line)
 	}
 	log.Infof("coverage-baseline: wrote %s; it becomes testrun/coverage-baseline.json only by the owner's decision", a.Out)
 	// THE SHIM'S E2E REACH is reported beside the baseline, never merged
