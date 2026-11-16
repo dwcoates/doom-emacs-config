@@ -40,6 +40,8 @@ const (
 	ServiceSidecar = "shim-claude-sidecar"
 	// ServiceZettel is zettel, the knowledge graph service.
 	ServiceZettel = "zettel"
+	// ServiceTests is the test service, which runs every merge gate.
+	ServiceTests = "agent-repl-tests"
 )
 
 // Report is one service's statement of what it runs.
