@@ -72,6 +72,10 @@ type resolver struct {
 	// publishes the current roster once.
 	quiet      *viewquiet.Gate
 	quietStale bool
+	// departures are the rows a render moved onto a departure arm
+	// (departureArm), collected for the span of one combined commit so a
+	// quiet commit can tell whether it must publish anyway. Caller holds mu.
+	departures []departure
 	// factsOnly is set for the span of a renderFacts: row derives its facts
 	// and builds no row.
 	factsOnly bool
@@ -93,6 +97,12 @@ type resolver struct {
 type resultChange struct {
 	ws     ids.WorkspaceID
 	result *wsm.TurnResult
+}
+
+// departure is one row a render moved onto a departure arm.
+type departure struct {
+	ws  ids.WorkspaceID
+	arm string
 }
 
 // statusChange is one workspace's published status arm moving, and when.
@@ -250,12 +260,33 @@ func (r *resolver) applyBatch(batch []*mutation) batchOutcome {
 	// is resolved and published once when the gate opens (resyncAfterQuiet).
 	// The gate is read under the lock the resync takes, so a change is either
 	// published now or left stale for the resync, never lost between them.
+	//
+	// A DEPARTURE IS PUBLISHED EVEN WHILE QUIET. A row moving onto a departure
+	// arm (departureArm) is a fact the editor acts on, not a picture of one:
+	// the merge that moved it removes the workspace's worktree, and an editor
+	// still holding the roster from before the lid closed reads the vanished
+	// directory as a registry row that outlived its worktree. On 2026-11-16 a
+	// merge ran from admission to teardown with the lid closed, Emacs's roster
+	// stood eight minutes old, and its log routing raised the
+	// stale-registration warning for the workspace that had just landed.
 	quiet := ready && r.quiet.Quiet()
+	r.departures = nil
 	if quiet {
 		r.renderFacts(last.log, last.operation)
-		r.quietStale = true
-		r.quiet.Skipped(QuietViewName)
+		if len(r.departures) == 0 {
+			r.quietStale = true
+			r.quiet.Skipped(QuietViewName)
+		} else {
+			for _, d := range r.departures {
+				r.logFor(d.ws).Info("daemon.sidebar.quiet_departure",
+					"the lid is closed and quiet, but a row moved onto a departure arm, so the roster was published",
+					dlog.Context{"arm": d.arm})
+			}
+			quiet = false
+			r.quietStale = false
+		}
 	}
+	r.departures = nil
 	var roster *frontendv1.WorkspaceRoster
 	if ready && !quiet {
 		roster = r.render(last.log, last.operation)
