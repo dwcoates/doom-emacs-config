@@ -1858,7 +1858,7 @@ own run log, never in the OS temporary root the system may sweep."
       ;; Assert
       (should (equal (alist-get 'level record) "error"))
       (should (equal (alist-get 'oversize_bytes (alist-get 'context record)) full))
-      (should (string-match-p "\\`elisp.test.big body=x+\\.\\.\\.\\[[0-9]+ more chars\\]\\'"
+      (should (string-match-p "\\`elisp.test.big body=x+ \\[[0-9]+ more characters not logged\\]\\'"
                               (alist-get 'message record))))))
 
 (ert-deftest agent-repl-test-log-record-cut-still-past-the-bound-signals ()
@@ -1876,7 +1876,30 @@ own run log, never in the OS temporary root the system may sweep."
         (kept (agent-repl--log-excerpt "short")))
     ;; Assert
     (should (equal kept "short"))
-    (should (string-suffix-p "...[10 more chars]" cut))))
+    (should (string-suffix-p " [10 more characters not logged]" cut))))
+
+(ert-deftest agent-repl-test-log-excerpt-cuts-to-a-given-length ()
+  "An excerpt cut to an explicit length keeps that many characters."
+  ;; Act
+  (let ((cut (agent-repl--log-excerpt "abcdefghij" 4)))
+    ;; Assert
+    (should (equal cut "abcd [6 more characters not logged]"))))
+
+(ert-deftest agent-repl-test-log-excerpt-is-every-excerpt-s-one-cut ()
+  "No agent-repl source but core.el writes the excerpt marker by hand."
+  ;; Arrange
+  (let ((dir (file-name-directory (symbol-file 'agent-repl--log-excerpt)))
+        (hand-rolled nil))
+    (dolist (file (directory-files dir t "\\`[a-z-]+\\.el\\'"))
+      (unless (or (string-prefix-p "test-" (file-name-nondirectory file))
+                  (equal (file-name-nondirectory file) "core.el"))
+        (with-temp-buffer
+          (insert-file-contents file)
+          ;; Act
+          (when (search-forward "more characters not logged]" nil t)
+            (push (file-name-nondirectory file) hand-rolled)))))
+    ;; Assert
+    (should (null hand-rolled))))
 
 (defun agent-repl-test--workspace-log-record (ws)
   "Return the LAST JSONL record written to WS's durable Emacs log sink."

@@ -274,13 +274,9 @@ outlived its 3 s bound.")
 (defun agent-repl-rpc--logged-body (alist)
   "Return ALIST printed for a dropped push's record, as a string.
 A body longer than `agent-repl-rpc--logged-body-chars' is cut there and
-ends by saying how many characters were left out."
-  (let* ((text (prin1-to-string alist))
-         (over (- (length text) agent-repl-rpc--logged-body-chars)))
-    (if (<= over 0)
-        text
-      (format "%s [%d more characters not logged]"
-              (substring text 0 agent-repl-rpc--logged-body-chars) over))))
+ends by saying how many characters were left out (`agent-repl--log-excerpt',
+every record's one cut)."
+  (agent-repl--log-excerpt (prin1-to-string alist) agent-repl-rpc--logged-body-chars))
 
 (defun agent-repl-rpc--stream (conn method encoder decoder request on-push on-close
                                     &optional on-open)

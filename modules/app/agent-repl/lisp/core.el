@@ -1915,13 +1915,15 @@ ERROR, and its full size recorded as `context.oversize_bytes'."
 (defconst agent-repl--log-oversize-excerpt-chars 2048
   "Characters of an oversized record's message and of each argument kept.")
 
-(defun agent-repl--log-excerpt (text)
-  "Answer TEXT cut to `agent-repl--log-oversize-excerpt-chars', marked when cut."
-  (if (<= (length text) agent-repl--log-oversize-excerpt-chars)
-      text
-    (format "%s...[%d more chars]"
-            (substring text 0 agent-repl--log-oversize-excerpt-chars)
-            (- (length text) agent-repl--log-oversize-excerpt-chars))))
+(defun agent-repl--log-excerpt (text &optional chars)
+  "Answer TEXT cut to CHARS characters, marked with how many were left out.
+CHARS defaults to `agent-repl--log-oversize-excerpt-chars'.  Every place a
+record carries an excerpt of something too long to record whole cuts it here,
+so one marker says the same thing wherever it is read."
+  (let ((chars (or chars agent-repl--log-oversize-excerpt-chars)))
+    (if (<= (length text) chars)
+        text
+      (format "%s [%d more characters not logged]" (substring text 0 chars) (- (length text) chars)))))
 
 (defun agent-repl--log-record-bounded (record)
   "Serialize RECORD, cutting it when it passes `agent-repl-log-record-max-bytes'.
