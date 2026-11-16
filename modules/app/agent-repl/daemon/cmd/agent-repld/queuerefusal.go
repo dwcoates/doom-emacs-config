@@ -103,6 +103,11 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 		return fmt.Sprintf("%s is no repository's deploy mediator, so it makes no mediation decision", ws), nil
 	case *agentreplv1.UpdateMergeQueueError_NoMediationOwed:
 		return "the mediator's repository owes no mediation now", nil
+	case *agentreplv1.UpdateMergeQueueError_NoRemediationToRestore:
+		return "the chain has no remediation workspace to restore yet; dispatch a fresh one instead", nil
+	case *agentreplv1.UpdateMergeQueueError_RemediationBoundReached:
+		return fmt.Sprintf("the chain has deployed %d remediations in a row, its repository's bound, so only an escalation is accepted now",
+			r.RemediationBoundReached.GetRemediationsBeforeEscalation()), nil
 	}
 	return "", undescribed("updating the merge queue", e)
 }

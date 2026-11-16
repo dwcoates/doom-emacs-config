@@ -64,7 +64,12 @@ var queueRefusals = func() []describedRefusal {
 				refusalCase{name: "no_such_queued_merge", err: armed(update, "no_such_queued_merge", nil), want: "no merge of ws is queued"},
 				refusalCase{name: "unknown_repository", err: armed(update, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"},
 				refusalCase{name: "not_mediator", err: armed(update, "not_mediator", nil), want: "ws is no repository's deploy mediator, so it makes no mediation decision"},
-				refusalCase{name: "no_mediation_owed", err: armed(update, "no_mediation_owed", nil), want: "the mediator's repository owes no mediation now"}),
+				refusalCase{name: "no_mediation_owed", err: armed(update, "no_mediation_owed", nil), want: "the mediator's repository owes no mediation now"},
+				refusalCase{name: "no_remediation_to_restore", err: armed(update, "no_remediation_to_restore", nil),
+					want: "the chain has no remediation workspace to restore yet; dispatch a fresh one instead"},
+				refusalCase{name: "remediation_bound_reached",
+					err:  armed(update, "remediation_bound_reached", &agentreplv1.UpdateMergeQueueRemediationBoundReached{RemediationsBeforeEscalation: 3}),
+					want: "the chain has deployed 3 remediations in a row, its repository's bound, so only an escalation is accepted now"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeUpdateQueueRefusal("ws", e.(*agentreplv1.UpdateMergeQueueError))
 			}},
