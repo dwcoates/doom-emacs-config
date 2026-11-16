@@ -76,6 +76,8 @@ type FindingGroup struct {
 	Class    wsm.WindowClass
 	Owner    string
 	Findings string
+	// Fixes is how many fixes of the group's problem deployed.
+	Fixes int
 }
 
 // Key is the group's problem key.
@@ -111,7 +113,7 @@ func classifyFindings(groups []FindingGroup, problems []wsm.DeployProblem, name 
 			if err != nil {
 				return nil, err
 			}
-			g.Owner, g.Findings = owner, p.Findings
+			g.Owner, g.Findings, g.Fixes = owner, p.Findings, p.Fixes
 		}
 		out[i] = g
 	}
@@ -122,7 +124,7 @@ func classifyFindings(groups []FindingGroup, problems []wsm.DeployProblem, name 
 func windowGroups(groups []FindingGroup) []wsm.WindowGroup {
 	out := make([]wsm.WindowGroup, 0, len(groups))
 	for _, g := range groups {
-		out = append(out, wsm.WindowGroup{Operation: g.Operation, Message: g.Message, Class: g.Class})
+		out = append(out, wsm.WindowGroup{Operation: g.Operation, Message: g.Message, Class: g.Class, Fixes: g.Fixes})
 	}
 	return out
 }
@@ -204,6 +206,9 @@ func RenderFindings(groups []FindingGroup) string {
 			standing = fmt.Sprintf("OWNED by %s, still at work on it", g.Owner)
 		case wsm.WindowRecurred:
 			standing = fmt.Sprintf("RECURRED after %s's fix deployed", g.Owner)
+			if pastItsFixes(g.Class, g.Fixes) {
+				standing = fmt.Sprintf("RECURRED after %s's fix deployed, after %d fixes in all: only an escalation is accepted", g.Owner, g.Fixes)
+			}
 		default:
 			panic(fmt.Sprintf("merge: a finding group with no class: %+v", g))
 		}

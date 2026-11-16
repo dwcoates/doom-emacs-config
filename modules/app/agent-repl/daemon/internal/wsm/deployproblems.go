@@ -63,7 +63,17 @@ type DeployProblem struct {
 	FixedAt *time.Time
 	// Findings is every statement its owners were given, oldest first.
 	Findings string
+	// Fixes is how many of its owners' fixes deployed: a problem that comes
+	// back after more than two is the user's (owner ruling, 2026-11-16).
+	Fixes int
 }
+
+// deployProblemFixesDDL is the layout-161 addition: how many fixes of each
+// problem deployed (DeployProblem.Fixes). IT IS ADDITIVE: the build before
+// it neither reads nor writes the column.
+const deployProblemFixesDDL = `
+ALTER TABLE deploy_problems ADD COLUMN fixes INTEGER NOT NULL DEFAULT 0;
+`
 
 // WindowClass is how a check's window found one group against the problems
 // the repository keeps.
@@ -97,6 +107,9 @@ type WindowGroup struct {
 	Operation string      `json:"operation"`
 	Message   string      `json:"message"`
 	Class     WindowClass `json:"class"`
+	// Fixes is how many fixes of the group's problem deployed, for an owned
+	// or recurred group.
+	Fixes int `json:"fixes,omitempty"`
 }
 
 // DeployProblems answers every problem REPO's deploy checks keep.
@@ -109,7 +122,7 @@ func (s *store) DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProbl
 	}
 	var out []DeployProblem
 	err = s.read(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context) error {
-		rows, err := s.q(ctx).QueryContext(ctx, `SELECT operation, message, owner, opened_at, fixed_at, findings FROM deploy_problems WHERE repo_key = ? ORDER BY opened_at, operation, message`, string(key))
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT operation, message, owner, opened_at, fixed_at, findings, fixes FROM deploy_problems WHERE repo_key = ? ORDER BY opened_at, operation, message`, string(key))
 		if err != nil {
 			return err
 		}
@@ -119,7 +132,7 @@ func (s *store) DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProbl
 			var owner string
 			var opened int64
 			var fixed sql.NullInt64
-			if err := rows.Scan(&p.Key.Operation, &p.Key.Message, &owner, &opened, &fixed, &p.Findings); err != nil {
+			if err := rows.Scan(&p.Key.Operation, &p.Key.Message, &owner, &opened, &fixed, &p.Findings, &p.Fixes); err != nil {
 				return err
 			}
 			p.Owner, p.OpenedAt, p.FixedAt = WorkspaceID(owner), fromNanos(opened), optTime(fixed)
@@ -180,7 +193,7 @@ func (s *store) FixDeployProblemsOf(ctx context.Context, owner WorkspaceID, at t
 	}
 	n := 0
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE deploy_problems SET fixed_at = ? WHERE owner = ? AND fixed_at IS NULL`, nanos(at), string(owner))
+		res, err := tx.ExecContext(ctx, `UPDATE deploy_problems SET fixed_at = ?, fixes = fixes + 1 WHERE owner = ? AND fixed_at IS NULL`, nanos(at), string(owner))
 		if err != nil {
 			return err
 		}

@@ -18,6 +18,7 @@ func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
 		wantOwner    WorkspaceID
 		wantFixed    bool
 		wantFindings []string
+		wantFixes    int
 	}{
 		{name: "a dispatched problem is owned and open",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
@@ -31,7 +32,7 @@ func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
 					t.Fatalf("FixDeployProblemsOf = (%d, %v), want one fixed", n, err)
 				}
 			},
-			wantOwner: "remedy-1", wantFixed: true, wantFindings: []string{"the sink warning"}},
+			wantOwner: "remedy-1", wantFixed: true, wantFindings: []string{"the sink warning"}, wantFixes: 1},
 		{name: "a recurrence's new owner reopens it with the earlier findings kept",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				own(t, s, repo, "remedy-1", "the sink warning", instant)
@@ -40,7 +41,17 @@ func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
 				}
 				own(t, s, repo, "remedy-2", "it recurred on a direct landing", instant.Add(2*time.Hour))
 			},
-			wantOwner: "remedy-2", wantFindings: []string{"the sink warning", "it recurred on a direct landing"}},
+			wantOwner: "remedy-2", wantFindings: []string{"the sink warning", "it recurred on a direct landing"}, wantFixes: 1},
+		{name: "every deployed fix is counted, across owners",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				for i, owner := range []WorkspaceID{"remedy-1", "remedy-2", "remedy-3"} {
+					own(t, s, repo, owner, "again", instant.Add(time.Duration(i)*time.Hour))
+					if _, err := s.FixDeployProblemsOf(context.Background(), owner, instant.Add(time.Duration(i)*time.Hour+time.Minute)); err != nil {
+						t.Fatal(err)
+					}
+				}
+			},
+			wantOwner: "remedy-3", wantFixed: true, wantFindings: []string{"again", "again", "again"}, wantFixes: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -62,6 +73,9 @@ func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
 			}
 			if got := strings.Split(p.Findings, "\n"); strings.Join(got, "|") != strings.Join(tt.wantFindings, "|") {
 				t.Fatalf("findings = %q, want %q", got, tt.wantFindings)
+			}
+			if p.Fixes != tt.wantFixes {
+				t.Fatalf("fixes = %d, want %d", p.Fixes, tt.wantFixes)
 			}
 		})
 	}

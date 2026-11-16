@@ -258,6 +258,10 @@ message UpdateMergeQueueError {
     // owns: a NEW one, an old one nobody owns, or one that came back after
     // its fix deployed. Dispatch or escalate them instead.
     UpdateMergeQueueProblemsUnowned problems_unowned = 19;
+    // An approval or a dispatch while the check's window holds a problem that
+    // came back after more than two of its fixes deployed: only an
+    // escalation is accepted (owner ruling, 2026-11-16).
+    UpdateMergeQueueProblemsRecurring problems_recurring = 20;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -293,6 +297,12 @@ message UpdateMergeQueueNoRemediationToRestore {}
 message UpdateMergeQueueProblemsUnowned {
   // Each unowned group, as "OPERATION: MESSAGE (CLASS)", in the window's
   // order.
+  repeated string groups = 1;
+}
+// The recurring-problems refusal.
+message UpdateMergeQueueProblemsRecurring {
+  // Each group that came back after more than two of its fixes deployed, as
+  // "OPERATION: MESSAGE (FIXES fixes)", in the window's order.
   repeated string groups = 1;
 }
 // The bound refusal.

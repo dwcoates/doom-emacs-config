@@ -3683,8 +3683,15 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "noRemediationToRestore" "remediationBoundReached" "problemsUnowned")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "noRemediationToRestore" "remediationBoundReached" "problemsUnowned" "problemsRecurring")
                        #'string<))))
+
+(ert-deftest agent-repl-test-wire-verbs-update-merge-queue-error-decodes-problems-recurring ()
+  "UpdateMergeQueueError's `problems_recurring' arm decodes the recurring groups."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"problemsRecurring\":{\"groups\":[\"op: msg (3 fixes)\"]}}"))
+                   '(:cause (:arm :problems-recurring :value (:groups ("op: msg (3 fixes)"))))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-problems-unowned-arm ()
   "UpdateMergeQueueError's `problems_unowned' arm decodes the unowned groups."

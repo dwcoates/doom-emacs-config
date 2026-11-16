@@ -54,3 +54,5 @@ JSON
 
 - The brief states the chain's remediations in a row against its bound.
   - At the bound, escalate: a dispatch is refused there.
+- A RECURRED group whose problem came back after more than two of its fixes deployed is the user's: escalate the deploy.
+  - The brief marks it, and agent-repl refuses an approval or a dispatch while the window holds one (`problems_recurring`).

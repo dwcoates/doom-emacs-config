@@ -93,6 +93,8 @@ func TestAWindowGroupStandsAgainstTheProblemsKept(t *testing.T) {
 			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-remedy"}}, want: wsm.WindowOwned},
 		{name: "a group a fixed problem names recurred", group: FindingGroup{Operation: "a", Message: "m", Before: 1},
 			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-remedy", FixedAt: &fixed}}, want: wsm.WindowRecurred},
+		{name: "a recurred group carries its problem's fixes", group: FindingGroup{Operation: "a", Message: "m", Before: 1},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-remedy", FixedAt: &fixed, Fixes: 3}}, want: wsm.WindowRecurred},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,6 +107,9 @@ func TestAWindowGroupStandsAgainstTheProblemsKept(t *testing.T) {
 			}
 			if tt.problems != nil && got[0].Owner != "name-of-ws-remedy" {
 				t.Fatalf("owner = %q, want the problem's owner by name", got[0].Owner)
+			}
+			if tt.problems != nil && got[0].Fixes != tt.problems[0].Fixes {
+				t.Fatalf("fixes = %d, want the problem's %d", got[0].Fixes, tt.problems[0].Fixes)
 			}
 		})
 	}
@@ -275,5 +280,74 @@ func TestDecidedProblemsThatCannotBeRecordedAsOwnedAreAnError(t *testing.T) {
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the decided problems could not be recorded as owned; the next check finds them unowned"}); !ok {
 		t.Fatalf("records = %v, want the failed ownership at ERROR", h.logs.Records())
+	}
+}
+
+func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
+	recurred := func(fixes int) wsm.WindowGroup {
+		return wsm.WindowGroup{Operation: sinkKey.Operation, Message: sinkKey.Message, Class: wsm.WindowRecurred, Fixes: fixes}
+	}
+	tests := []struct {
+		name     string
+		group    wsm.WindowGroup
+		decision MediationDecision
+		wantArm  string
+	}{
+		{name: "a dispatch of a group past two fixes is refused", group: recurred(3), decision: MediationDispatch, wantArm: ArmProblemsRecurring},
+		{name: "an approval of a group past two fixes is refused", group: recurred(3), decision: MediationApprove, wantArm: ArmProblemsRecurring},
+		{name: "an escalation of a group past two fixes is accepted", group: recurred(3), decision: MediationEscalate},
+		{name: "a dispatch of a group after two fixes is accepted", group: recurred(2), decision: MediationDispatch},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			toldWith(t, h, tt.group)
+
+			// Act
+			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: tt.decision, Summary: "s", Problems: []DeployProblem{{Statement: "s", Evidence: []string{sinkRecord.Raw}}}})
+
+			// Assert
+			var refused *RefusalError
+			if tt.wantArm == "" {
+				if errors.As(err, &refused) {
+					t.Fatalf("DecideMediation = %v, want it accepted", err)
+				}
+				return
+			}
+			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
+				t.Fatalf("DecideMediation = %v, want the %s refusal", err, tt.wantArm)
+			}
+			if groups, _ := refused.Fields["groups"].([]string); len(groups) != 1 || !strings.Contains(groups[0], "(3 fixes)") {
+				t.Fatalf("refusal fields %v, want the group named with its fixes", refused.Fields)
+			}
+			if m := owedCheck(t, h); m == nil || m.Dispatched || m.Escalated() {
+				t.Fatalf("check %+v, want it owed and undecided", m)
+			}
+		})
+	}
+}
+
+func TestTheBriefMarksAProblemPastItsFixes(t *testing.T) {
+	tests := []struct {
+		name  string
+		fixes int
+		want  bool
+	}{
+		{name: "after three fixes it is marked", fixes: 3, want: true},
+		{name: "after two it is not", fixes: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := RenderFindings([]FindingGroup{{Operation: "a", Message: "m", Level: "error", Count: 1, Class: wsm.WindowRecurred, Owner: "remedy", Fixes: tt.fixes}})
+
+			// Assert
+			if marked := strings.Contains(got, "only an escalation is accepted"); marked != tt.want {
+				t.Fatalf("brief %q, want marked %v", got, tt.want)
+			}
+		})
 	}
 }
