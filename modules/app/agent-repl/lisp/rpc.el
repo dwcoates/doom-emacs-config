@@ -108,6 +108,8 @@
 (declare-function agent-repl-wire-decode-open-tabs-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-watch-workspace-roster-request "wire-roster" (request))
 (declare-function agent-repl-wire-decode-watch-workspace-roster-response "wire-roster" (alist))
+(declare-function agent-repl-wire-encode-list-merged-workspaces-request "wire-roster" (request))
+(declare-function agent-repl-wire-decode-list-merged-workspaces-response "wire-roster" (alist))
 (declare-function agent-repl-wire-encode-create-workspace-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-create-workspace-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-encode-validate-workspace-name-request "wire-verbs" (request))
@@ -598,6 +600,14 @@ each hidden workspace's outcome; only an unreadable registry is an error.")
   "Move a workspace into the sidebar's hidden section, or back out of it.
 A hidden workspace keeps its session and its tab; the roster push that
 follows takes its tab off the bar's drawing, numbering and navigation.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-list-merged-workspaces
+  "ListMergedWorkspaces"
+  agent-repl-wire-encode-list-merged-workspaces-request
+  agent-repl-wire-decode-list-merged-workspaces-response
+  "Fetch one page of merged workspaces\=' rows, ten to a page.
+A merged workspace is in no roster stream, so its row is paged here; the
+answer names the merged set it was resolved from.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-update-sidebar-view
   "UpdateSidebarView"
