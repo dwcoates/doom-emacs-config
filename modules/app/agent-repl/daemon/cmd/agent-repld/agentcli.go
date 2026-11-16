@@ -407,14 +407,14 @@ func (c *cliCall) callingRef(nestedIsNone bool) (*workspacev1.WorkspaceRef, stri
 		return nil, cwd, c.failed("%v", err)
 	}
 	if worktree != "" {
-		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: worktree}}}, worktree)
+		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: worktree}}}, "are at "+worktree)
 		if !ok || ref != nil {
 			return ref, cwd, ok
 		}
 	}
 	if sessionDir := c.deps.getenv(shimclient.EnvWorkspaceDir); sessionDir != "" {
 		sessionDir = canonicalDir(sessionDir)
-		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: sessionDir}}}, sessionDir)
+		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: sessionDir}}}, "are at "+sessionDir)
 		switch {
 		case !ok:
 			return nil, cwd, false
@@ -428,7 +428,7 @@ func (c *cliCall) callingRef(nestedIsNone bool) (*workspacev1.WorkspaceRef, stri
 		return nil, cwd, true
 	}
 	enclosing, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{
-		Containing: &agentreplv1.LocateWorkspaceContaining{Dir: worktree}}}, worktree)
+		Containing: &agentreplv1.LocateWorkspaceContaining{Dir: worktree}}}, "contain "+worktree)
 	switch {
 	case !ok:
 		return nil, cwd, false
@@ -438,10 +438,10 @@ func (c *cliCall) callingRef(nestedIsNone bool) (*workspacev1.WorkspaceRef, stri
 	return nil, cwd, c.failed("%v", &nestedWorktreeError{worktree: worktree, enclosing: enclosing})
 }
 
-// locateOne answers the one workspace REQ locates for DIR, nil when none is,
-// and refuses more than one: a directory is at most one workspace's, and
-// lies in at most one.
-func (c *cliCall) locateOne(req *agentreplv1.LocateWorkspaceRequest, dir string) (*workspacev1.WorkspaceRef, bool) {
+// locateOne answers the one workspace REQ locates, nil when none is, and
+// refuses more than one, saying how many workspaces MATCHED ("are at DIR"):
+// every resolution of one workspace refuses an ambiguous answer the same way.
+func (c *cliCall) locateOne(req *agentreplv1.LocateWorkspaceRequest, matched string) (*workspacev1.WorkspaceRef, bool) {
 	refs, ok := c.locate(req)
 	if !ok {
 		return nil, false
@@ -452,7 +452,7 @@ func (c *cliCall) locateOne(req *agentreplv1.LocateWorkspaceRequest, dir string)
 	case 1:
 		return refs[0], true
 	}
-	return nil, c.failed("the daemon located %d workspaces for %s, where a directory is at most one's", len(refs), dir)
+	return nil, c.failed("%d workspaces %s", len(refs), matched)
 }
 
 // named answers the workspace NAME names: `here`, a directory, or a name,
@@ -464,29 +464,18 @@ func (c *cliCall) named(name string) (*workspacev1.WorkspaceRef, bool) {
 	}
 	if strings.Contains(name, "/") {
 		dir := canonicalDir(name)
-		refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}})
-		if !ok {
-			return nil, false
-		}
-		switch len(refs) {
-		case 0:
+		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}}, "are at "+dir)
+		if ok && ref == nil {
 			return nil, c.failed("the daemon holds no workspace at %s", dir)
-		case 1:
-			return refs[0], true
 		}
-		return nil, c.failed("%d workspaces are at %s", len(refs), dir)
+		return ref, ok
 	}
-	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: name}}})
-	if !ok {
-		return nil, false
-	}
-	switch len(refs) {
-	case 0:
+	ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: name}}},
+		fmt.Sprintf("are named %q; name one by its directory", name))
+	if ok && ref == nil {
 		return nil, c.failed("the daemon holds no workspace named %q", name)
-	case 1:
-		return refs[0], true
 	}
-	return nil, c.failed("%d workspaces are named %q; name one by its directory", len(refs), name)
+	return ref, ok
 }
 
 // locate asks the daemon which workspaces REQ names, failing the call when

@@ -3907,3 +3907,37 @@ func TestGiveUpRefusesWhatItCannotSend(t *testing.T) {
 		})
 	}
 }
+
+func TestLocateOne(t *testing.T) {
+	tests := []struct {
+		name       string
+		rows       []*frontendv1.RosterRow
+		wantID     string
+		wantOK     bool
+		wantStderr string
+	}{
+		{name: "none located answers nil", wantOK: true},
+		{name: "one located answers it", rows: []*frontendv1.RosterRow{cliRow("ws-a", "/w/a", "a")}, wantID: "ws-a", wantOK: true},
+		{name: "more than one is refused saying how many matched", rows: []*frontendv1.RosterRow{cliRow("ws-a", "/w/a", "twin"), cliRow("ws-b", "/w/b", "twin")},
+			wantStderr: `2 workspaces are named "twin"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			var errOut bytes.Buffer
+			c := &cliCall{ctx: context.Background(), deps: cliDeps{locate: locateOver(tt.rows...)}, errOut: &errOut, name: "workspace test"}
+			req := &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: "twin"}}}
+			if tt.wantID != "" {
+				req = &agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: "/w/a"}}}
+			}
+
+			// Act
+			ref, ok := c.locateOne(req, `are named "twin"`)
+
+			// Assert
+			if ref.GetId() != tt.wantID || ok != tt.wantOK || !strings.Contains(errOut.String(), tt.wantStderr) || (tt.wantStderr == "") != (errOut.Len() == 0) {
+				t.Fatalf("locateOne = %v, %v, stderr %q; want %q, %v, %q", ref, ok, errOut.String(), tt.wantID, tt.wantOK, tt.wantStderr)
+			}
+		})
+	}
+}
