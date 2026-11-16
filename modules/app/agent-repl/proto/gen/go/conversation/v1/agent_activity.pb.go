@@ -19994,7 +19994,14 @@ type AgentUnmodeledStart struct {
 	// its own instead.
 	Arguments *structpb.Struct `protobuf:"bytes,2,opt,name=arguments,proto3" json:"arguments,omitempty"`
 	// When the call was issued.
-	StartedAt     *AgentActivityStartedAt `protobuf:"bytes,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	StartedAt *AgentActivityStartedAt `protobuf:"bytes,3,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	// The session offers no tool by this name: the agent called a tool that
+	// does not exist (a misspelled or miscased name, such as `bash` for
+	// `Bash`), and the vendor refuses the call. Not a tool this schema has yet
+	// to catch up with, so nothing about it asks for modelling. FALSE when the
+	// session offers the tool, and when the producer had not yet learned the
+	// session's tools.
+	NotOffered    bool `protobuf:"varint,5,opt,name=not_offered,json=notOffered,proto3" json:"not_offered,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -20048,6 +20055,13 @@ func (x *AgentUnmodeledStart) GetStartedAt() *AgentActivityStartedAt {
 		return x.StartedAt
 	}
 	return nil
+}
+
+func (x *AgentUnmodeledStart) GetNotOffered() bool {
+	if x != nil {
+		return x.NotOffered
+	}
+	return false
 }
 
 // The tool returned.
@@ -22317,12 +22331,14 @@ const file_conversation_v1_agent_activity_proto_rawDesc = "" +
 	"\bprogress\x18\x04 \x01(\v2&.conversation.v1.AgentToolCallProgressH\x00R\bprogress\x12B\n" +
 	"\asuccess\x18\x02 \x01(\v2&.conversation.v1.AgentUnmodeledSuccessH\x00R\asuccess\x12B\n" +
 	"\afailure\x18\x03 \x01(\v2&.conversation.v1.AgentUnmodeledFailureH\x00R\afailureB\b\n" +
-	"\x06result\"\xc3\x01\n" +
+	"\x06result\"\xe4\x01\n" +
 	"\x13AgentUnmodeledStart\x12\x1b\n" +
 	"\ttool_name\x18\x01 \x01(\tR\btoolName\x125\n" +
 	"\targuments\x18\x02 \x01(\v2\x17.google.protobuf.StructR\targuments\x12F\n" +
 	"\n" +
-	"started_at\x18\x03 \x01(\v2'.conversation.v1.AgentActivityStartedAtR\tstartedAtJ\x04\b\x04\x10\x05R\n" +
+	"started_at\x18\x03 \x01(\v2'.conversation.v1.AgentActivityStartedAtR\tstartedAt\x12\x1f\n" +
+	"\vnot_offered\x18\x05 \x01(\bR\n" +
+	"notOfferedJ\x04\b\x04\x10\x05R\n" +
 	"mcp_server\"\xe0\x01\n" +
 	"\x15AgentUnmodeledSuccess\x12\x1b\n" +
 	"\ttool_name\x18\x01 \x01(\tR\btoolName\x12<\n" +
