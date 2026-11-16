@@ -360,6 +360,9 @@ var Suites = []Suite{
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
 	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
+	// THE TEST SERVICE, which owns every merge gate's run so a daemon deploy
+	// never cuts one. Its tests start real child processes of its own.
+	{Name: "testservice", Kind: GoModule, Path: "testservice", Reuse: &Reuse{Inputs: []string{"testservice/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
 	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
 	// THE ERT SUITE'S FAKE DAEMON IS TESTED AS ITS OWN MODULE: the ert suite
