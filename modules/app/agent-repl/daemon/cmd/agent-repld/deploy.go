@@ -204,8 +204,13 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Workspaces: func(context.Context) ([]ids.WorkspaceID, error) {
 			return p.Workspace(), nil
 		},
-		Clients:   p.Clients,
-		Services:  restarter,
+		Clients:  p.Clients,
+		Services: restarter,
+		StopWifiAsks: func(ctx context.Context) (bool, error) {
+			tools := persistentwifi.DefaultTools()
+			tools.WifiApp = where.wifiApp
+			return persistentwifi.StopAsks(ctx, p.Runner, tools)
+		},
 		ReportDir: where.reportDir,
 		Lifetime:  ctx,
 		Progress:  p.Progress,

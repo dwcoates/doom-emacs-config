@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds agent-repl's Wi-Fi helper app (main.swift, standing.swift) into OUT (default
+# Builds agent-repl's Wi-Fi helper app (main.swift, standing.swift, seats.swift) into OUT (default
 # ~/.cache/agent-repl/AgentReplWifi.app), signed ad hoc so macOS can hold its
 # Location Services permission against a stable identity.
 #
@@ -13,7 +13,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # source_hash DIR: the one hash of the helper's sources, the installer's
 # (bin/requirements.sh, check_app_build) and the build's alike.
 source_hash() {
-  cat "$1/main.swift" "$1/standing.swift" "$1/Info.plist" | shasum -a 256 | cut -d' ' -f1
+  cat "$1/main.swift" "$1/standing.swift" "$1/seats.swift" "$1/Info.plist" | shasum -a 256 | cut -d' ' -f1
 }
 if [ "${1:-}" = --source-hash ]; then
   source_hash "$here"
@@ -24,7 +24,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/AgentReplWifi.app/Contents/MacOS"
 cp "$here/Info.plist" "$work/AgentReplWifi.app/Contents/Info.plist"
-swiftc -O -swift-version 5 -o "$work/AgentReplWifi.app/Contents/MacOS/agent-repl-wifi" "$here/main.swift" "$here/standing.swift" \
+swiftc -O -swift-version 5 -o "$work/AgentReplWifi.app/Contents/MacOS/agent-repl-wifi" "$here/main.swift" "$here/standing.swift" "$here/seats.swift" \
   -framework CoreWLAN -framework CoreLocation
 mkdir -p "$work/AgentReplWifi.app/Contents/Resources"
 source_hash "$here" >"$work/AgentReplWifi.app/Contents/Resources/source-sha256"

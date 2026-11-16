@@ -16,7 +16,11 @@
 //                          write the answer once the owner gave it
 //
 // Every answer names the permission's standing, so the daemon can say why a
-// scan carries no names.
+// scan carries no names: one of authorizationName's (standing.swift), or
+// awaiting_owner, a scan launched while an ask waits on the owner's answer.
+//
+// AN INSTANCE IS A LOCATION SERVICES CLIENT ONLY FROM ITS SEAT (seats.swift):
+// locationd serves one instance of the bundle at a time.
 
 import CoreLocation
 import CoreWLAN
@@ -107,17 +111,72 @@ final class Listener: NSObject, CLLocationManagerDelegate {
 // time on this host, lid open); the bound is 2.5 times that.
 let standingBound: TimeInterval = 0.04
 
+// seatBound bounds a scan's wait for the client seat: one scan ahead of it,
+// its standing heard and its CoreWLAN scan run. Measured 3.6s at worst over
+// five scans (2026-11-16, the helper's scan verb run directly on this host,
+// lid open, the first one cold); the bound is 2.5 times that. An ask waits
+// unbounded: what it waits on is the owner's answer to an ask ahead of it.
+let seatBound: TimeInterval = 9
+
+// Once decides who ends a bounded wait: the waiter, or its bound.
+final class Once {
+    private let lock = NSLock()
+    private var claimed = false
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
+        return true
+    }
+}
+
+// fail answers ERROR for VERB in OUT, naming no standing, and exits with CODE.
+func fail(verb: String, out: String, _ error: String, code: Int32) -> Never {
+    write(Answer(verb: verb, authorization: "unknown", interface: nil, current: nil, visible: [], error: error), to: out)
+    exit(code)
+}
+
 let args = CommandLine.arguments
 guard args.count == 4, args[2] == "--out", ["scan", "authorize"].contains(args[1]) else {
     FileHandle.standardError.write("usage: agent-repl-wifi scan|authorize --out FILE\n".data(using: .utf8)!)
     exit(2)
 }
-let listener = Listener(verb: args[1], out: args[3])
+let verb = args[1]
+let out = args[3]
+// THE HELPER RUNS AS ITS APP (`open`), so it always has its bundle's identity,
+// which is what locationd serves one client of.
+guard let bundle = Bundle.main.bundleIdentifier else {
+    fail(verb: verb, out: out, "the helper ran outside its app bundle, so it has no bundle to take a seat for", code: 2)
+}
+do {
+    let seats = try openSeats(dir: NSTemporaryDirectory(), bundle: bundle)
+    if verb == "authorize" {
+        try takeAskSeat(seats)
+    } else {
+        let once = Once()
+        DispatchQueue.global().asyncAfter(deadline: .now() + seatBound) {
+            if once.claim() {
+                fail(verb: verb, out: out, "another scan held Location Services for over \(seatBound)s", code: 4)
+            }
+        }
+        let seat = try takeScanSeat(seats)
+        guard once.claim() else {
+            // The bound answered and is exiting the process.
+            while true { pause() }
+        }
+        if seat == .askWaits {
+            write(Answer(verb: verb, authorization: "awaiting_owner", interface: nil, current: nil, visible: [], error: nil), to: out)
+            exit(0)
+        }
+    }
+} catch {
+    fail(verb: verb, out: out, "its Location Services seat could not be taken: \(error)", code: 3)
+}
+let listener = Listener(verb: verb, out: out)
 DispatchQueue.main.asyncAfter(deadline: .now() + standingBound) {
     if !listener.heard {
-        write(Answer(verb: listener.verb, authorization: "unknown", interface: nil, current: nil, visible: [],
-                     error: "Location Services did not tell the standing within \(standingBound)s"), to: listener.out)
-        exit(4)
+        fail(verb: verb, out: out, "Location Services did not tell the standing within \(standingBound)s", code: 4)
     }
 }
 // CoreLocation calls the listener on this run loop.

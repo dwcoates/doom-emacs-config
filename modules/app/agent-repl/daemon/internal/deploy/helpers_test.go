@@ -481,6 +481,21 @@ type harness struct {
 	reports        *fakeReports
 	// deployed counts the Deployed hook's calls.
 	deployed int
+	// wifiAsks answers StopWifiAsks.
+	wifiAsks *fakeWifiAsks
+}
+
+// fakeWifiAsks answers the deploy's StopWifiAsks with stopped and err, and
+// counts its calls.
+type fakeWifiAsks struct {
+	calls   int
+	stopped bool
+	err     error
+}
+
+func (f *fakeWifiAsks) stop(context.Context) (bool, error) {
+	f.calls++
+	return f.stopped, f.err
 }
 
 // fakeReports records every cover and payment of the owed landing reports, in
@@ -676,6 +691,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		progress:      &fakeProgress{},
 		faults:        newFakeFaults(),
 		restarts:      &restarttimingtest.Recorder{},
+		wifiAsks:      &fakeWifiAsks{},
 	}
 	h.reports = &fakeReports{builder: h.builder}
 	// Both services run the FRESH build unless a test says otherwise.
@@ -693,9 +709,10 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		Workspaces: func(context.Context) ([]ids.WorkspaceID, error) {
 			return []ids.WorkspaceID{"ws-a", "ws-b"}, nil
 		},
-		Clients:   h.clients,
-		Services:  h.services,
-		ReportDir: h.reportDir,
+		Clients:      h.clients,
+		Services:     h.services,
+		StopWifiAsks: h.wifiAsks.stop,
+		ReportDir:    h.reportDir,
 		Alive: func(pid int) bool {
 			return h.alive[pid]
 		},

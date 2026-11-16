@@ -71,6 +71,9 @@ type Tools struct {
 	Brightness string
 	// Ps lists the process table for the application freezer.
 	Ps string
+	// Pkill stops the Wi-Fi helper's asks a rebuilt helper replaced
+	// (StopAsks).
+	Pkill string
 	// Open launches the Wi-Fi helper app (WifiApp) as its own app, so macOS
 	// attributes its Location Services permission to the helper and not to
 	// the daemon.
@@ -93,6 +96,7 @@ func DefaultTools() Tools {
 		Caffeinate:   "/usr/bin/caffeinate",
 		Brightness:   "/opt/homebrew/bin/mac-brightness",
 		Ps:           "/bin/ps",
+		Pkill:        "/usr/bin/pkill",
 		Open:         "/usr/bin/open",
 	}
 }
@@ -107,6 +111,10 @@ func WifiAppIn(home string) string {
 // (deploy.Live.WifiApp) and launched by the failover.
 const WifiAppName = "AgentReplWifi.app"
 
+// wifiAppExecutable is the helper's executable inside its bundle
+// (wifi-helper/Info.plist's CFBundleExecutable).
+const wifiAppExecutable = "Contents/MacOS/agent-repl-wifi"
+
 // ToolsIn is every tool resolved from one directory by its base name.
 func ToolsIn(dir string) Tools {
 	d := DefaultTools()
@@ -120,6 +128,7 @@ func ToolsIn(dir string) Tools {
 		Caffeinate:   in(d.Caffeinate),
 		Brightness:   in(d.Brightness),
 		Ps:           in(d.Ps),
+		Pkill:        in(d.Pkill),
 		Open:         in(d.Open),
 		WifiApp:      filepath.Join(dir, WifiAppName),
 	}

@@ -385,6 +385,29 @@ connection is closed is never answered."
   (let ((primary agent-repl-link--primary))
     (and primary (agent-repl-connect-connection-alive-p primary) primary)))
 
+(defun agent-repl-link-newest ()
+  "Return the connection a DAEMON-WIDE call goes to, or nil while none may take it.
+A daemon-wide call (a report to the daemon\='s metrics, Emacs\='s focus)
+belongs to no workspace, so it goes to the daemon that serves NEXT: the
+accepted successor during a handover, else the live primary.  It is nil
+while a successor is announced but not accepted yet, and while the live
+primary has said it is leaving (`agent-repl-link-departing-p'): each of
+those daemons is about to stop listening, so the caller waits for the
+link\='s next edge (`agent-repl-link-handover-functions',
+`agent-repl-link-promote-functions' or `agent-repl-link-up-functions')
+instead of dialing it.
+
+Regression, 2026-11-16 02:53:13: a latency report went to the daemon a
+handover was leaving, which had exited 0.8s before, while its accepted
+successor stood: `elisp.connect.dial-failed' at ERROR.  Emacs read the
+old daemon\='s end 2.7s after it exited, so no order of reads can keep a
+call aimed at the leaving daemon safe; aiming it at the successor does."
+  (cond
+   (agent-repl-link--successor)
+   ((agent-repl-link-successor-pending-p) nil)
+   (t (let ((live (agent-repl-link-live)))
+        (and live (not (agent-repl-link-departing-p live)) live)))))
+
 (defun agent-repl-link-serving-conn (address)
   "Return a connection to the daemon at ADDRESS, which serves a workspace now.
 ADDRESS is the one a `not_yet_adopted' refusal names: the handover\='s

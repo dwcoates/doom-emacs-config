@@ -68,7 +68,7 @@ one of `debug', `info', `warn' and `error'."
 ;;;; ---- Tests: reporting the focus ----
 
 (defmacro agent-repl-test-notifications--with-reporter (focused conn &rest body)
-  "Run BODY with the focus reporter's state fresh, Emacs FOCUSED, and CONN live.
+  "Run BODY with the focus reporter's state fresh, Emacs FOCUSED, and CONN newest.
 Every `ReportEditorFocus' call is recorded into `calls' as (CONN . REQUEST)
 with its callbacks in `answers', so a test answers each one itself."
   (declare (indent 2))
@@ -77,7 +77,7 @@ with its callbacks in `answers', so a test answers each one itself."
          (focused-now ,focused)
          (calls nil)
          (answers nil))
-     (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () ,conn))
+     (cl-letf (((symbol-function 'agent-repl-link-newest) (lambda () ,conn))
                ((symbol-function 'agent-repl--emacs-focused-p) (lambda (&optional _ws) focused-now))
                ((symbol-function 'agent-repl-rpc-report-editor-focus)
                 (lambda (c request &rest keys)
@@ -207,8 +207,9 @@ with its callbacks in `answers', so a test answers each one itself."
     (should (equal calls '((conn . (:focus (:arm :focused))))))))
 
 (ert-deftest agent-repl-test-focus-reporter-rides-the-link-hooks ()
-  "The reporter is on the link-up and promotion hooks, and on focus changes."
+  "The reporter is on the link-up, acceptance and promotion hooks, and on focus changes."
   (should (memq #'agent-repl--focus-report-on-link agent-repl-link-up-functions))
+  (should (memq #'agent-repl--focus-report-on-link agent-repl-link-handover-functions))
   (should (memq #'agent-repl--focus-report-on-link agent-repl-link-promote-functions))
   (should (advice-function-member-p #'agent-repl--focus-changed after-focus-change-function))
   (should (memq #'agent-repl--focus-report agent-repl-focus-settled-hook)))

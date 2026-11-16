@@ -323,7 +323,16 @@ quiet state, not the switch.
   (`app_build`, rebuilt only when its sources change, so macOS keeps the
   permission) and asks for the permission once (`location_permission`).
 - Consequences:
-  - A scan is bounded at 10s (measured 3.9s). Each join is recorded at INFO
+  - locationd serves one instance of the helper's bundle at a time, so an
+    instance becomes its client only from the client seat, an flock
+    (`wifi-helper/seats.swift`): an ask holds every seat while it waits on
+    the owner, and a scan launched meanwhile answers `awaiting_owner` at
+    once; a scan waits out at most one scan ahead of it, bounded at 9s. On
+    2026-11-16 an ask left waiting held the bundle and every scan timed out
+    unheard. A deploy that installs a rebuilt helper stops the replaced
+    build's waiting asks (`persistentwifi.StopAsks`), and the next scan asks
+    again from the installed helper.
+  - A scan is bounded at 20s (one measured 3.9s, two back to back 7.8s). Each join is recorded at INFO
     with its duration, bounded at 30s until those records measure it
     (`org/todo.md`).
   - Without the permission a scan names nothing: it is recorded once at

@@ -56,7 +56,7 @@ func TestConfigFromEnv(t *testing.T) {
 				Sudo: "/fake/bin/sudo", Pmset: "/fake/bin/pmset", Ipconfig: "/fake/bin/ipconfig",
 				Networksetup: "/fake/bin/networksetup", WifiUtil: "/fake/bin/wifi-util",
 				Caffeinate: "/fake/bin/caffeinate", Brightness: "/fake/bin/mac-brightness", Ps: "/fake/bin/ps",
-				Open: "/fake/bin/open", WifiApp: "/fake/bin/AgentReplWifi.app",
+				Pkill: "/fake/bin/pkill", Open: "/fake/bin/open", WifiApp: "/fake/bin/AgentReplWifi.app",
 			}, FakeLid: "/fake/lid", FakePowerSource: "ac"},
 		},
 		{

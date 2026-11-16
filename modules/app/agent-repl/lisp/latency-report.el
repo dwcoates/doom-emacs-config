@@ -13,7 +13,7 @@
 ;; A MEASUREMENT IS KEPT UNTIL A REPORT OF IT IS ACKNOWLEDGED.  It stays in
 ;; its queue while a report carrying it is out, and leaves only on the
 ;; daemon's answer, so a report that did not arrive (a daemon handover, no
-;; link) loses nothing: the next link-up sends it again.  Every answer ends
+;; link) loses nothing: the next link edge sends it again.  Every answer ends
 ;; the batch: a success recorded it, and a refusal is a defect the same batch
 ;; would only repeat, so it is recorded at ERROR and dropped.
 ;;
@@ -36,7 +36,7 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-link-newest "daemon-link" ())
 (declare-function agent-repl-rpc-report-latencies "rpc" (conn request &rest keys))
 
 (defconst agent-repl-latency-report--central
@@ -105,12 +105,15 @@ Each is a plist (:kind KEYWORD :seconds NUMBER) for
   (agent-repl-latency-report-flush))
 
 (defun agent-repl-latency-report-flush (&rest _connections)
-  "Send every queued measurement, when nothing is in flight and a link stands.
-Also the link-up handler, so a link that comes back sends what waited."
+  "Send every queued measurement, when nothing is in flight and a daemon takes it.
+The report is daemon-wide, so it goes to the daemon that serves next
+\(`agent-repl-link-newest'): never to one a handover is leaving.  Also the
+handler of every link edge that answers a new daemon (up, a successor's
+acceptance, a promotion), so what waited is sent there."
   (let ((conn (and (not agent-repl-latency-report--in-flight)
                    (or agent-repl-latency-report--startup
                        agent-repl-latency-report--editor)
-                   (agent-repl-link-live))))
+                   (agent-repl-link-newest))))
     (when conn
       (let ((startup agent-repl-latency-report--startup)
             (editor agent-repl-latency-report--editor))
@@ -161,6 +164,8 @@ Both stay queued for the next link-up or measurement."
                     (length startup) (length editor) detail))
 
 (add-hook 'agent-repl-link-up-functions #'agent-repl-latency-report-flush)
+(add-hook 'agent-repl-link-handover-functions #'agent-repl-latency-report-flush)
+(add-hook 'agent-repl-link-promote-functions #'agent-repl-latency-report-flush)
 
 (provide 'latency-report)
 
