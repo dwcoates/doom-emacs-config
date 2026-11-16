@@ -259,6 +259,14 @@ func (c *Converter) callItem(kind toolKind, name string, input map[string]any, t
 				StartedAt: startedAt(ts),
 			}},
 		}})
+	case kindReadNotifications:
+		// The call takes no input, so its announcement carries only when it
+		// was issued.
+		return item(&conversationv1.AgentActivity_ReadNotifications{ReadNotifications: &conversationv1.AgentReadNotifications{
+			Result: &conversationv1.AgentReadNotifications_Start{Start: &conversationv1.AgentReadNotificationsStart{
+				StartedAt: startedAt(ts),
+			}},
+		}})
 	default:
 		return nil
 	}
@@ -542,6 +550,8 @@ func item(arm any) *conversationv1.AgentActivity {
 	case *conversationv1.AgentActivity_Cron:
 		activity.Item = a
 	case *conversationv1.AgentActivity_PushNotification:
+		activity.Item = a
+	case *conversationv1.AgentActivity_ReadNotifications:
 		activity.Item = a
 	case *conversationv1.AgentActivity_Subagent:
 		activity.Item = a

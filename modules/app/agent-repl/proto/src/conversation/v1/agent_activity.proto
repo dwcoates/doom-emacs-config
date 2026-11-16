@@ -216,6 +216,11 @@ message AgentActivity {
     // which the daemon draws as the CEE CLI webapp's interactive widget. The
     // call names the session and nothing else.
     AgentChessBoard chess_board = 36;
+    // The agent reading its session's queued notifications: the background
+    // and task notifications the vendor holds for the agent until it asks.
+    // Drawn as the ordinary tool card, with what the read returned as its
+    // output.
+    AgentReadNotifications read_notifications = 38;
   }
 }
 
@@ -731,6 +736,51 @@ message AgentCronJob {
 message AgentCronFailure {
   // What the call said when it failed, and when it settled.
   optional AgentToolFailure error = 1;
+}
+
+// ---- Reading queued notifications: the agent asking what is waiting for it ----
+
+// One ReadNotifications tool call. The vendor queues notifications for the
+// agent (a background task finishing, a task notification) and this call
+// drains that queue into the conversation. The call takes no input, so no arm
+// restates one: a settled frame alone draws the card from the tool's name and
+// what it returned.
+message AgentReadNotifications {
+  // Where the call stands: the tool-call lifecycle every call shares. The set
+  // arm IS the state.
+  oneof result {
+    // The call was issued.
+    AgentReadNotificationsStart start = 1;
+    // The call returned what was queued.
+    AgentReadNotificationsSuccess success = 2;
+    // The call could not be performed.
+    AgentReadNotificationsFailure failure = 3;
+  }
+}
+
+// A read this stream has begun carrying. It carries no request, because the
+// vendor's call takes none.
+message AgentReadNotificationsStart {
+  // When the call was issued.
+  AgentActivityStartedAt started_at = 1;
+}
+
+// The read returned.
+message AgentReadNotificationsSuccess {
+  // What the read returned, verbatim: the queued notifications as the vendor
+  // words them, or its own sentence saying none were queued. Carried as the
+  // vendor's text and never parsed, because the vendor states the queue only
+  // in prose; an empty queue is a successful answer, not a failure. UNSET
+  // when the vendor returned no text at all.
+  optional string returned_text = 1;
+  // When the call settled. UNSET when the producer observed no instant.
+  optional AgentActivitySettledAt settled_at = 2;
+}
+
+// The call could not be performed.
+message AgentReadNotificationsFailure {
+  // What the call said when it failed, and when it settled.
+  AgentToolFailure error = 1;
 }
 
 // ---- The push notification: the agent reaching an absent user ----

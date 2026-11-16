@@ -2588,7 +2588,7 @@ describe("a prompt joining the running turn", () => {
     expect([charged, (await startDuring(h, "turn-3")).result.case]).toEqual(["turn-2", "success"]);
   });
 
-  it("opens the waiting prompt as its own turn when the running turn is killed", async () => {
+  it("keeps the waiting prompt waiting while the killed turn's stop result is owed", async () => {
     // Arrange
     const h = harness();
     await started(h);
@@ -2601,7 +2601,31 @@ describe("a prompt joining the running turn", () => {
     );
 
     // Assert
-    expect(promptRows(h).at(-1)).toEqual(["turn-2", undefined]);
+    expect(promptRows(h)).toEqual([["turn-1", undefined]]);
+  });
+
+  it("opens the waiting prompt as its own turn after the killed turn's stop result is written", async () => {
+    // Arrange: a stop leaves the slot before the vendor's stop result arrives
+    // (merge-queue-stall-triage, 2026-11-16: the join ran and ended first).
+    const h = harness();
+    await started(h);
+    await realPrompt(h, "turn-1");
+    await join(h, "turn-2");
+    await h.engine.killTurn(
+      create(shimv1.KillTurnRequestSchema, { turn: create(conversationv1.TurnIdSchema, { value: "turn-1" }) }),
+    );
+
+    // Act
+    await h.engine.onSdkMessage(resultMessage("turn-1-stop-result"));
+
+    // Assert
+    expect({ stopCharged: h.fold.contexts.at(-1)?.turnId?.value, prompts: promptRows(h) }).toEqual({
+      stopCharged: "turn-1",
+      prompts: [
+        ["turn-1", undefined],
+        ["turn-2", undefined],
+      ],
+    });
   });
 
   it("ends the waiting prompt's turn too when the query dies, after the running turn's terminal", async () => {

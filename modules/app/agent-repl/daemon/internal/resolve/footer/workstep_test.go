@@ -70,6 +70,7 @@ func TestTheWorkingStepNamesTheRunningCall(t *testing.T) {
 		want string
 	}{
 		{"a read", "read", "reading"},
+		{"a notifications read", "read_notifications", "reading"},
 		{"a write", "write", "writing"},
 		{"an edit", "edit", "writing"},
 		{"a grep", "grep", "searching"},

@@ -120,6 +120,9 @@ func (r *resolver) drawActivity(s *wsState, agent *conversationv1.AgentId, act *
 	case *conversationv1.AgentActivity_WebSearch:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_WebSearch"})
 		row, err = r.drawWebSearch(s, at, act, item.WebSearch)
+	case *conversationv1.AgentActivity_ReadNotifications:
+		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_ReadNotifications"})
+		row, err = r.drawReadNotifications(s, at, act, item.ReadNotifications)
 	case *conversationv1.AgentActivity_SkillUse:
 		r.logger(s.id).Debug("daemon.feed.row_decision", "selected a feed row decision", dlog.Context{"function": "drawActivity", "branch": "case *conversationv1.AgentActivity_SkillUse"})
 		row, err = r.drawSkill(s, at, act, item.SkillUse)

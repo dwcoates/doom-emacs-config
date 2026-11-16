@@ -1529,3 +1529,40 @@ func TestWritePatchKeepsTheStatedPatchWhenThereIsNoContentToDiff(t *testing.T) {
 		t.Fatalf("hunks = %d, want the vendor's own patch kept rather than dropped", len(got))
 	}
 }
+
+func TestReadNotificationsSuccessCarriesTheReturnedTextVerbatim(t *testing.T) {
+	tests := []struct {
+		name    string
+		content any
+		want    *string
+	}{
+		{name: "a plain string is carried as it came", content: "No queued notifications.", want: proto.String("No queued notifications.")},
+		{
+			name: "text blocks are joined in order",
+			content: []any{
+				map[string]any{"type": "text", "text": "Task build finished."},
+				map[string]any{"type": "text", "text": "Task lint failed."},
+			},
+			want: proto.String("Task build finished.\nTask lint failed."),
+		},
+		{name: "an empty text leaves it unset", content: "", want: nil},
+		{name: "no content at all leaves it unset", content: nil, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			block := map[string]any{"content": tt.content}
+
+			// Act.
+			got := readNotificationsSuccess(openCall{startedAt: 1000}, block, 4000)
+
+			// Assert.
+			if (tt.want == nil) != (got.ReturnedText == nil) || (tt.want != nil && *tt.want != got.GetReturnedText()) {
+				t.Fatalf("returned text = %v, want %v", got.ReturnedText, tt.want)
+			}
+			if got.GetSettledAt().GetAtMs() != 4000 {
+				t.Fatalf("settled at = %d, want 4000", got.GetSettledAt().GetAtMs())
+			}
+		})
+	}
+}

@@ -1455,6 +1455,14 @@ func TestActivityToolName(t *testing.T) {
 			want: "mcp__agent-repl__show_chess_board",
 		},
 		{
+			name: "a notifications read is named by its vendor tool",
+			act: &conversationv1.AgentActivity{
+				ActivityId: &conversationv1.AgentActivityId{Value: "act-1"},
+				Item:       &conversationv1.AgentActivity_ReadNotifications{ReadNotifications: &conversationv1.AgentReadNotifications{}},
+			},
+			want: "ReadNotifications",
+		},
+		{
 			name: "prose is not a tool call and has no name",
 			act:  responseActivity("act-1"),
 			want: "",

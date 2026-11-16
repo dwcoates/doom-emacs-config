@@ -25,6 +25,7 @@ import { monitorConverter } from "./monitor.js";
 import { planModeConverter } from "./plan-mode.js";
 import { pushNotificationConverter } from "./push-notification.js";
 import { readConverter } from "./read.js";
+import { readNotificationsConverter } from "./read-notifications.js";
 import { reportFindingsConverter } from "./report-findings.js";
 import { showChessBoardConverter } from "./show-chess-board.js";
 import { scheduleWakeupConverter } from "./schedule-wakeup.js";
@@ -82,6 +83,8 @@ export const TOOL_CONVERTERS: ReadonlyMap<string, ToolConverter> = new Map<strin
   ["CronList", cronConverter],
   // Outbound attention.
   ["PushNotification", pushNotificationConverter],
+  // The agent's own notification queue.
+  ["ReadNotifications", readNotificationsConverter],
   // agent-repl's OWN MCP tools, which it draws itself; an exact name wins over
   // the MCP prefix below.
   [SHOW_CHESS_BOARD_TOOL_NAME, showChessBoardConverter],
