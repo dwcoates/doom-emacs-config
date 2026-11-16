@@ -201,7 +201,7 @@ func TestAScanThatNamesNoNetworkIsAnErrorOnceAndTheHotspotIsStillTried(t *testin
 		wantCause string
 	}{
 		{name: "the helper is not allowed Location Services", scan: wifiScan{Authorization: "not_determined"},
-			wantCause: errScanUnauthorized.Error() + " (its standing: not_determined)"},
+			wantCause: unauthorizedScan("not_determined").Error()},
 		{name: "the helper's scan failed", scan: wifiScan{Authorization: "authorized", Error: "the scan failed: busy"},
 			wantCause: "the Wi-Fi helper's the scan failed: busy"},
 	}
