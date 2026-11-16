@@ -142,6 +142,12 @@ type Restarter struct {
 	// (restarttiming.ServiceRestart). REQUIRED; runtimemetrics.Surface is
 	// the production one.
 	Restarts restarttiming.Recorder
+	// Define writes label's definition from its requirements entry, where
+	// Services.Definition finds it: a service added since this machine's
+	// install has none, and a deploy that ships it must bring it up.
+	// REQUIRED; ScriptDefiner is the production one
+	// (bin/requirements.sh define-service).
+	Define func(ctx context.Context, label string) error
 }
 
 // timed runs restart and records how long it took as service's restart.
@@ -432,10 +438,23 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 	if loaded {
 		return false, nil
 	}
-	if _, err := os.Stat(definition); err != nil {
-		r.Log.Error(opServices, "a service is not loaded and its definition is missing", dlog.WithCause(fields, err))
-		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot bring it back: %w "+
-			"(re-run .claude/install.sh)", label, definition, err)
+	if _, err := os.Stat(definition); errors.Is(err, os.ErrNotExist) {
+		// A SERVICE ADDED SINCE THIS MACHINE'S INSTALL (2026-11-16: the test
+		// service shipped, and no deploy could start it, so no merge gate
+		// ran): its definition is written from its requirements entry, by
+		// the same renderer install uses, before it is started.
+		r.Log.Info(opServices, "a service is not loaded and has no definition; writing it from its requirements entry", fields)
+		if err := r.Define(ctx, label); err != nil {
+			r.failed("a service's definition could not be written from its requirements entry", fields, err)
+			return false, fmt.Errorf("deploy: write the definition of %s: %w", label, err)
+		}
+		if _, err := os.Stat(definition); err != nil {
+			r.Log.Error(opServices, "a service's definition is still missing after it was written", dlog.WithCause(fields, err))
+			return false, fmt.Errorf("deploy: %s was written but %s is still unreadable: %w", label, definition, err)
+		}
+	} else if err != nil {
+		r.Log.Error(opServices, "a service is not loaded and its definition cannot be read", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot be read: %w", label, definition, err)
 	}
 	r.Log.Info(opServices, "a service was not loaded; starting it", fields)
 	if err := r.Services.Start(ctx, label); err != nil {

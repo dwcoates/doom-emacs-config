@@ -1267,6 +1267,44 @@ EOF
   else fail "rendered plist lacks:$bad" "$(cat "$plist")"; fi
 }
 
+# define-service writes the definition install renders, from the same entry,
+# and neither builds nor loads: the daemon's deploy starts the service itself.
+test_define_service_writes_the_rendered_plist_without_building_or_loading() {
+  service_case
+  run define-service com.example.svc
+  local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist"
+  if [ "$RC" -eq 0 ] && [ -f "$plist" ] && grep -qF "<string>$CASE/home/.cache/agent-repl/bin/svc</string>" "$plist" \
+     && [ -d "$CASE/home/.cache/agent-repl/sock" ] && ! ran "build" && ! ran "launchctl" && has "define-service: wrote $plist"; then
+    pass "define-service writes the rendered plist and touches no build or service manager"
+  else fail "define-service" "rc=$RC" "$OUT" "$(cat "$CASE/transcript" 2>/dev/null)"; fi
+}
+
+test_define_service_writes_the_rendered_systemd_unit() {
+  service_case
+  PLATFORM=linux run define-service com.example.svc
+  local unit="$CASE/home/.config/systemd/user/com.example.svc.service"
+  if [ "$RC" -eq 0 ] && [ -f "$unit" ] && ! ran "systemctl"; then
+    pass "define-service writes the rendered systemd unit and loads nothing"
+  else fail "define-service on linux" "rc=$RC" "$OUT"; fi
+}
+
+test_define_service_refuses_an_unknown_label() {
+  service_case
+  run define-service com.example.nothing
+  if [ "$RC" -eq 1 ] && has "define-service: no service entry on darwin is labelled com.example.nothing" \
+     && [ ! -e "$CASE/home/Library/LaunchAgents/com.example.nothing.plist" ]; then
+    pass "define-service refuses a label no service entry carries and writes nothing"
+  else fail "define-service unknown label" "rc=$RC" "$OUT"; fi
+}
+
+test_define_service_needs_a_label() {
+  service_case
+  run define-service
+  if [ "$RC" -eq 2 ] && has "define-service needs a service label"; then
+    pass "define-service without a label is a usage error"
+  else fail "define-service without a label" "rc=$RC" "$OUT"; fi
+}
+
 test_install_builds_renders_and_starts_a_systemd_service() {
   service_case
   PLATFORM=linux run install
