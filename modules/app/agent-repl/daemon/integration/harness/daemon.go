@@ -3,6 +3,7 @@ package harness
 import (
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/wssummary"
+	"agentrepl/logging/childgroup"
 	"context"
 	"errors"
 	"fmt"
@@ -516,6 +517,9 @@ type Daemon struct {
 	MultiRepoRoot string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
+	// TestsSocket is the socket of the real test service its merge gates run
+	// on, shared by every daemon over its state root (TestsSocketFor).
+	TestsSocket string
 	// Git is the fake git world every scripted `git` answers from.
 	Git *GitWorld
 
@@ -623,9 +627,6 @@ func InstallFakeGit(t testing.TB, dir string) {
 	}
 }
 
-// gitEnvKeys are the repository-selecting variables that must never be
-// inherited by a git child: a hook-leaked GIT_DIR is a real, previously
-// observed source of bogus work-tree errors.
 // inMemoryRoots names every state root this suite process started on
 // in-memory state, so a later daemon on the same root is refused rather than
 // booted onto an empty database.
@@ -653,11 +654,6 @@ func refuseInMemoryReuse(stateDir string) error {
 	return nil
 }
 
-var gitEnvKeys = []string{
-	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-}
-
 // omitFlags returns args without each named flag and the value following it.
 // A flag that is not present is not an error: a test names what must be
 // missing, not what the harness happened to add.
@@ -680,23 +676,10 @@ func omitFlags(args, omit []string) []string {
 	return kept
 }
 
-func cleanGitEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		key, _, _ := strings.Cut(kv, "=")
-		drop := false
-		for _, bad := range gitEnvKeys {
-			if key == bad {
-				drop = true
-				break
-			}
-		}
-		if !drop {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
+// cleanGitEnv returns env with every repository selector dropped
+// (childgroup.RepositorySelectors), so a fake git child resolves its own
+// repository.
+func cleanGitEnv(env []string) []string { return childgroup.ScrubRepositorySelectors(env) }
 
 // StartDaemon lays out a hermetic environment, starts the daemon, waits for
 // daemon.addr, and dials it. Every process it starts is killed on cleanup.
@@ -803,6 +786,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 			t.Fatalf("harness: mkdir %s: %v", dir, err)
 		}
 	}
+	d.TestsSocket = ensureTestService(t, d.StateDir, d.LockDir)
 	mainJS := filepath.Join(root, "main.js")
 	writeFile(t, mainJS, "// placeholder shim module\n")
 	if opts.ShimMain != "" {
@@ -812,6 +796,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	d.Deploy = NewFakeDeployBuilder(t, fakeBin, DeploySources{
 		ShimMain: mainJS, WebappDist: d.WebappDir,
 		Store: opts.ServiceBinaries.Store, Sidecar: opts.ServiceBinaries.Sidecar,
+		Tests: TestServiceBinary(t),
 	})
 	fakeClaude := NewFakeClaude(t, fakeBin)
 	// The scripted `git` goes first on the daemon's PATH, so every git fact the
@@ -863,6 +848,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"--shim-main", mainJS,
 		"--webapp-dist", d.WebappDir,
 		"--store-socket", d.StoreSocket,
+		"--tests-socket", d.TestsSocket,
 		"--prompts-dir", d.PromptsDir,
 		"--default-config-dir", d.DefaultConfigDir,
 		"--multi-repo-config-dir", d.MultiRepoConfigDir,

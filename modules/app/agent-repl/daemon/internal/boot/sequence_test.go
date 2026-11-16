@@ -2821,10 +2821,10 @@ func TestTheWithheldWorkspacesAreStatedAtInfo(t *testing.T) {
 	t.Fatalf("records = %+v, want an info record naming the workspaces left as they are", h.log.Records())
 }
 
-// TestTheZettelStepRunsBesideTheBringUp pins that zettel's service step runs
+// TestTheStandalonesStepRunsBesideTheBringUp pins that the standalone services' step runs
 // on the bring-up, is joined before it returns, and that its outcome is
 // recorded: a failure at ERROR naming zettel, the exit's cut at INFO.
-func TestTheZettelStepRunsBesideTheBringUp(t *testing.T) {
+func TestTheStandalonesStepRunsBesideTheBringUp(t *testing.T) {
 	cases := []struct {
 		name      string
 		err       func(ctx context.Context) error
@@ -2833,9 +2833,9 @@ func TestTheZettelStepRunsBesideTheBringUp(t *testing.T) {
 		message   string
 	}{
 		{name: "a failed zettel step is an error", err: func(context.Context) error { return errBoom },
-			level: "error", message: "the zettel service could not be made current; chat threads cannot record or read their graph until it is"},
+			level: "error", message: "a standalone service could not be made current; until it is, chat threads cannot record their graph (zettel) or merge gates cannot run (the test service)"},
 		{name: "a zettel step the exit cut is info", err: func(ctx context.Context) error { return ctx.Err() }, cancelled: true,
-			level: "info", message: "the daemon's exit cut zettel's service step short; the next boot's service step completes it"},
+			level: "info", message: "the daemon's exit cut the standalone services' step short; the next boot's service step completes it"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2843,7 +2843,7 @@ func TestTheZettelStepRunsBesideTheBringUp(t *testing.T) {
 			var ran atomic.Bool
 			h := newHarness(t, func(deps *Deps, _ *harness) {
 				deps.EnsureServices = func(context.Context) error { return nil }
-				deps.EnsureZettel = func(ctx context.Context) error {
+				deps.EnsureStandalones = func(ctx context.Context) error {
 					ran.Store(true)
 					return tc.err(ctx)
 				}

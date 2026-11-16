@@ -71,7 +71,7 @@ func TestAFailureAfterTheInstallBeganLeavesThePreviousBuild(t *testing.T) {
 		}, []string{"sidecar", "sidecar"}},
 		{"a zettel restart that fails", func(t *testing.T, h *harness) {
 			h.report(t, buildreport.ServiceZettel, 103, hashOf(t, theOld.zettel))
-			h.services.zettelErr = errors.New("kickstart refused")
+			h.services.standaloneErr = map[Component]error{ComponentZettel: errors.New("kickstart refused")}
 			h.services.recovers = true
 		}, []string{"zettel", "zettel"}},
 		{"a refused handover after the store restarted", func(t *testing.T, h *harness) {

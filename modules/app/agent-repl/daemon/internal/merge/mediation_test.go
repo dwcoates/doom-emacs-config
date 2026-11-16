@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -18,6 +19,7 @@ import (
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -35,6 +37,8 @@ func checked(t *testing.T) *harness {
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
 	h.briefs[BriefDeployIntake] = []string{"deploy_started", "window_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
+	h.briefs[BriefDeployEscalationUpdate] = []string{"repo_dir", "deploy_started", "summary", "problems", "recurred", "persisting"}
+	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}
 	h.briefs[BriefDeployRemediation] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
@@ -126,15 +130,28 @@ func decideInTurn(t *testing.T, h *harness, d Decision) {
 	}
 }
 
-// intakeSubmissions is every prompt the harness submitted to the intake.
-func intakeSubmissions(h *harness) []promptqueue.Submission {
+// submissionsTo is every prompt the harness submitted to WS whose text
+// opens with PREFIX, the brief's name, in order; an empty PREFIX takes
+// every one.
+func submissionsTo(h *harness, ws ids.WorkspaceID, prefix string) []promptqueue.Submission {
 	var out []promptqueue.Submission
 	for _, sub := range h.queue.submissions {
-		if sub.WS == "ws-intake" {
+		if sub.WS == ws && strings.HasPrefix(submittedText(sub), prefix) {
 			out = append(out, sub)
 		}
 	}
 	return out
+}
+
+// intakeSubmissions is every prompt the harness submitted to the intake.
+func intakeSubmissions(h *harness) []promptqueue.Submission {
+	return submissionsTo(h, "ws-intake", "")
+}
+
+// intakeTellings is every brief telling the intake of a deploy, the
+// resuming briefs of its undecided turns left out.
+func intakeTellings(h *harness) []promptqueue.Submission {
+	return submissionsTo(h, "ws-intake", BriefDeployIntake+" ")
 }
 
 // checkWorkspacesMade is every intake and remediation workspace made, the
@@ -191,16 +208,13 @@ func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
 	if made := checkWorkspacesMade(h); len(made) != 1 || !strings.HasPrefix(made[0], "deploy-intake-") {
 		t.Fatalf("made %v, want one intake for the chain", h.checks.made)
 	}
-	var origins []conversationv1.PromptOrigin
 	for _, sub := range intakeSubmissions(h) {
-		if sub.WS != "ws-intake" {
-			t.Fatalf("submitted to %s, want the intake", sub.WS)
+		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
+			t.Fatalf("submitted %v to the intake, want no compaction", sub.Origin)
 		}
-		origins = append(origins, sub.Origin)
 	}
-	brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
-	if !slices.Equal(origins, []conversationv1.PromptOrigin{brief}) {
-		t.Fatalf("submitted %v, want one brief and no compaction", origins)
+	if told := intakeTellings(h); len(told) != 1 {
+		t.Fatalf("told the intake %d times, want one brief", len(told))
 	}
 }
 
@@ -241,12 +255,7 @@ func TestEachDeployOfTheChainIsToldToTheSameIntake(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	var intakeBriefs int
-	for _, sub := range h.queue.submissions {
-		if sub.WS == "ws-intake" {
-			intakeBriefs++
-		}
-	}
+	intakeBriefs := len(intakeTellings(h))
 	if made := checkWorkspacesMade(h); intakeBriefs != 2 || slices.Index(made, "deploy-intake-"+deployStarted.Format("20060102-150405")) < 0 || len(made) != 2 {
 		t.Fatalf("intake told %d times, made %v; want one intake told of both deploys, and one remediation made", intakeBriefs, h.checks.made)
 	}
@@ -305,7 +314,7 @@ func TestATurnThatDecidesNothingLetsTheQueueThroughTellsTheUserAndEndsTheChain(t
 		t.Fatal("the user was not told the intake decided nothing")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the intake's turn ended deciding nothing about the deploy; the queue is let through and the user is told"}); !ok {
+		Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, the queue is let through and the user is told"}); !ok {
 		t.Fatalf("records = %v, want the undecided check at ERROR", h.logs.Records())
 	}
 	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
@@ -411,8 +420,8 @@ func TestACheckAlreadyToldIsReattachedToItsTurn(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if len(intakeSubmissions(h)) != tt.wantSubmitted || len(checkWorkspacesMade(h)) != 0 || h.awaitedTurns[len(h.awaitedTurns)-1] != "turn-told" {
-				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(intakeSubmissions(h)), h.checks.made, h.awaitedTurns, tt.wantSubmitted)
+			if len(intakeTellings(h)) != tt.wantSubmitted || len(checkWorkspacesMade(h)) != 0 || !slices.Contains(h.awaitedTurns, "turn-told") {
+				t.Fatalf("submitted %d, made %v, awaited %v; want %d submitted and turn-told awaited", len(intakeTellings(h)), h.checks.made, h.awaitedTurns, tt.wantSubmitted)
 			}
 		})
 	}
@@ -860,7 +869,7 @@ func TestARoundForAReplacedCheckNeverBlocksTheNewerChecksRound(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: the newer check's round ran, and told the intake.
-	if subs := intakeSubmissions(h); len(subs) != 1 {
+	if subs := intakeTellings(h); len(subs) != 1 {
 		t.Fatalf("submitted %+v, want the newer check told to the intake", h.queue.submissions)
 	}
 }
@@ -916,5 +925,431 @@ func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 		Message: "the chain's intake could not be found or made; the queue stays held for it"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
+	}
+}
+
+// resumingBriefs is every resuming brief the harness submitted to the intake.
+func resumingBriefs(h *harness) []promptqueue.Submission {
+	return submissionsTo(h, "ws-intake", BriefDeployIntakeResumed)
+}
+
+func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) {
+	tests := []struct {
+		name         string
+		decide       bool
+		wantReleased bool
+		wantEscalate bool
+		wantFault    bool
+	}{
+		{name: "the resumed turn decides", decide: true, wantReleased: true},
+		{name: "the resumed turn ends undecided again", wantReleased: true, wantEscalate: true, wantFault: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			if tt.decide {
+				h.queue.onSubmit = func(sub promptqueue.Submission) {
+					if sub.WS == "ws-intake" && strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
+						if err := h.o.DecideMediation(context.Background(), sub.WS, Decision{Kind: MediationApprove, Summary: "nothing new"}); err != nil {
+							t.Errorf("DecideMediation: %v", err)
+						}
+					}
+				}
+			}
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if subs := resumingBriefs(h); len(subs) != 1 {
+				t.Fatalf("resumed the intake %d times, want once", len(subs))
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "warn", Operation: opMediation,
+				Message: "the intake's turn ended deciding nothing about the deploy; it is resumed once to decide it, the queue still held"}); !ok {
+				t.Fatalf("records = %v, want the resume at WARN", h.logs.Records())
+			}
+			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
+				t.Fatalf("released %v, want %v", released, tt.wantReleased)
+			}
+			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") })
+			if escalated != tt.wantEscalate {
+				t.Fatalf("made %v, want an escalation %v", h.checks.made, tt.wantEscalate)
+			}
+			_, fault := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+				Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, the queue is let through and the user is told"})
+			if fault != tt.wantFault {
+				t.Fatalf("records = %v, want the intake's fault at ERROR %v", h.logs.Records(), tt.wantFault)
+			}
+		})
+	}
+}
+
+func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness)
+		message string
+	}{
+		{name: "a resume that cannot be recorded", message: "could not record that the undecided intake is resumed; the queue stays held",
+			arrange: func(h *harness) {
+				h.db.mu.Lock()
+				h.db.resumeMarkErr = errors.New("database is locked")
+				h.db.mu.Unlock()
+			}},
+		{name: "a resuming brief that cannot be composed", message: "the undecided intake's resuming brief could not be composed; the queue stays held",
+			arrange: func(h *harness) { delete(h.briefs, BriefDeployIntakeResumed) }},
+		{name: "a resuming brief that cannot be submitted", message: "the undecided intake's resuming brief could not be submitted; the queue stays held",
+			arrange: func(h *harness) {
+				h.queue.onSubmit = func(sub promptqueue.Submission) {
+					if !strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
+						return
+					}
+					h.queue.mu.Lock()
+					h.queue.err = errors.New("queue closed")
+					h.queue.mu.Unlock()
+				}
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			tt.arrange(h)
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if owedCheck(t, h) == nil {
+				t.Fatal("the check was released, want the queue held")
+			}
+			if slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") }) {
+				t.Fatalf("made %v, want no escalation", h.checks.made)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
+				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestAResumedIntakesTurnIsReattachedWithItsResumingBrief(t *testing.T) {
+	// Arrange: the intake was told, then resumed, and the daemon restarted
+	// before the resuming turn reached its session.
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	told(t, h, deployStarted, "turn-told")
+	if ok, err := h.db.MarkMediationResumed(context.Background(), mediationKey(h), deployStarted, "turn-resumed"); err != nil || !ok {
+		t.Fatalf("MarkMediationResumed = (%v, %v)", ok, err)
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	subs := intakeSubmissions(h)
+	if len(subs) == 0 || subs[0].Turn != "turn-resumed" || !strings.HasPrefix(submittedText(subs[0]), BriefDeployIntakeResumed) {
+		t.Fatalf("submitted %+v, want the resuming brief resubmitted in its recorded turn", subs)
+	}
+	if len(resumingBriefs(h)) != 1 {
+		t.Fatalf("resumed the intake %d times, want the recorded resume only", len(resumingBriefs(h)))
+	}
+}
+
+func TestSubmissionsToTakesOnlyTheNamedWorkspacesPromptsOfTheNamedBrief(t *testing.T) {
+	tests := []struct {
+		name   string
+		ws     ids.WorkspaceID
+		prefix string
+		want   []ids.TurnID
+	}{
+		{name: "every prompt to the workspace", ws: "ws-a", want: []ids.TurnID{"t1", "t3"}},
+		{name: "only the named brief's", ws: "ws-a", prefix: "brief-b", want: []ids.TurnID{"t3"}},
+		{name: "a workspace sent nothing", ws: "ws-c"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			for _, sub := range []promptqueue.Submission{
+				{WS: "ws-a", Turn: "t1", Said: saidText("brief-a one")},
+				{WS: "ws-b", Turn: "t2", Said: saidText("brief-b two")},
+				{WS: "ws-a", Turn: "t3", Said: saidText("brief-b three")},
+			} {
+				if _, err := h.queue.Submit(context.Background(), sub); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			// Act
+			got := submissionsTo(h, tt.ws, tt.prefix)
+
+			// Assert
+			var turns []ids.TurnID
+			for _, sub := range got {
+				turns = append(turns, sub.Turn)
+			}
+			if !slices.Equal(turns, tt.want) {
+				t.Fatalf("submissionsTo = %v, want %v", turns, tt.want)
+			}
+		})
+	}
+}
+
+// TestEverySubmissionFilterGoesThroughSubmissionsTo keeps the deploy-check
+// tests' filters of the harness's prompts on the one helper: a hand-rolled
+// loop over the submissions by workspace fails here.
+func TestEverySubmissionFilterGoesThroughSubmissionsTo(t *testing.T) {
+	for _, file := range []string{"mediation_test.go", "escalation_test.go"} {
+		src, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n := strings.Count(string(src), "range h.queue.submissions {\n\t\tif sub.WS =="); n != 0 && !(file == "mediation_test.go" && n == 1) {
+			t.Fatalf("%s filters the submissions by workspace by hand %d times; use submissionsTo", file, n)
+		}
+	}
+}
+
+func TestADeployThatChangedNothingIsReleasedUnchecked(t *testing.T) {
+	later := deployStarted.Add(time.Minute)
+	tests := []struct {
+		name         string
+		arrange      func(t *testing.T, h *harness)
+		release      time.Time
+		wantReleased bool
+		wantMessage  string
+	}{
+		{name: "a check that began its own chain", release: deployStarted, wantReleased: true,
+			wantMessage: "the deploy changed nothing; its check is released unchecked and the queue advances"},
+		{name: "a check carrying an earlier check's chain", release: later,
+			arrange: func(t *testing.T, h *harness) {
+				withIntake(t, h, deployStarted)
+				oweAt(t, h, later)
+			},
+			wantMessage: "the deploy changed nothing, but its check carries an earlier chain; the chain's intake checks it"},
+		{name: "another deploy's check", release: later},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			if tt.arrange != nil {
+				tt.arrange(t, h)
+			}
+
+			// Act
+			err := h.o.ReleaseUnchangedDeploy(context.Background(), tt.release)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ReleaseUnchangedDeploy: %v", err)
+			}
+			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
+				t.Fatalf("released %v, want %v", released, tt.wantReleased)
+			}
+			if tt.wantMessage != "" {
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: tt.wantMessage}); !ok {
+					t.Fatalf("records = %v, want %q", h.logs.Records(), tt.wantMessage)
+				}
+			}
+			if len(h.queue.submissions) != 0 || len(h.checks.made) != 0 {
+				t.Fatalf("submitted %v, made %v; want no intake told or made", h.queue.submissions, h.checks.made)
+			}
+		})
+	}
+}
+
+func TestAnUnchangedDeploysCheckThatCannotBeReadStaysOwed(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.db.mu.Lock()
+	h.db.mediationErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.ReleaseUnchangedDeploy(context.Background(), deployStarted)
+
+	// Assert
+	h.db.mu.Lock()
+	h.db.mediationErr = nil
+	h.db.mu.Unlock()
+	if err == nil || owedCheck(t, h) == nil {
+		t.Fatalf("ReleaseUnchangedDeploy = %v, want the failure answered and the check still owed", err)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not read the check an unchanged deploy owes; it stays owed"}); !ok {
+		t.Fatalf("records = %v, want the failed read at ERROR", h.logs.Records())
+	}
+}
+
+func TestReleaseCheckEndsTheChainOfOnlyACheckItReleased(t *testing.T) {
+	tests := []struct {
+		name         string
+		owed         time.Time
+		wantReleased bool
+	}{
+		{name: "the check owed", owed: deployStarted, wantReleased: true},
+		{name: "a check a newer deploy replaced", owed: deployStarted.Add(-time.Minute)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			m := *owedCheck(t, h)
+			m.OwedAt = tt.owed
+
+			// Act
+			released, err := h.o.releaseCheck(context.Background(), mediationKey(h), m, MediationApproved)
+
+			// Assert
+			if err != nil || released != tt.wantReleased {
+				t.Fatalf("releaseCheck = (%v, %v), want %v", released, err, tt.wantReleased)
+			}
+			if stopped := slices.Contains(h.checks.stopped, "ws-intake"); stopped != tt.wantReleased {
+				t.Fatalf("stopped %v, want the chain's intake stopped %v", h.checks.stopped, tt.wantReleased)
+			}
+			if stillOwed := owedCheck(t, h) != nil; stillOwed == tt.wantReleased {
+				t.Fatalf("still owed %v, want %v", stillOwed, !tt.wantReleased)
+			}
+		})
+	}
+}
+
+// TestEveryCheckReleaseGoesThroughReleaseCheck keeps one path from a
+// released check to its chain's end: a site releasing a check by hand, which
+// could leave its chain running, fails here.
+func TestEveryCheckReleaseGoesThroughReleaseCheck(t *testing.T) {
+	if sites := sourcescan.Sites(t, "DB.ReleaseMediation("); !slices.Equal(sites, []string{"mediation.go"}) {
+		t.Fatalf("checks are released in %v, want only releaseCheck in mediation.go", sites)
+	}
+}
+
+func TestAnAwaitCutByTheIntakesOwnDecisionIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name      string
+		decide    bool
+		wantLevel string
+		message   string
+	}{
+		{name: "a decision released the check, then stopped the intake", decide: true, wantLevel: "info",
+			message: "the intake's turn ended with its session, which its own decision stopped; the check is decided"},
+		{name: "the session ended with the check still owed", wantLevel: "error",
+			message: "the intake's turn could not be awaited; the queue stays held until the next round"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the await fails as a stopped session's does, after
+			// the intake decided or not.
+			h := checked(t)
+			owe(t, h)
+			if tt.decide {
+				decideInTurn(t, h, Decision{Kind: MediationApprove, Summary: "nothing new"})
+			}
+			h.mu.Lock()
+			h.awaitErr = errors.New("workspace has no live session to await the turn on")
+			h.mu.Unlock()
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: opMediation, Message: tt.message}); !ok {
+				t.Fatalf("records = %v, want %q at %s", h.logs.Records(), tt.message, tt.wantLevel)
+			}
+			if released := owedCheck(t, h) == nil; released != tt.decide {
+				t.Fatalf("released %v, want %v", released, tt.decide)
+			}
+		})
+	}
+}
+
+func TestOwesIsTheCheckOfTheDeployThatBeganThen(t *testing.T) {
+	tests := []struct {
+		name string
+		m    *wsm.Mediation
+		want bool
+	}{
+		{name: "the deploy's check", m: &wsm.Mediation{OwedAt: deployStarted}, want: true},
+		{name: "a newer deploy's check", m: &wsm.Mediation{OwedAt: deployStarted.Add(time.Minute)}},
+		{name: "no check owed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := owes(tt.m, deployStarted)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("owes = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryStillOwedTestGoesThroughOwes keeps one reading of "this check is
+// still the one owed": a hand-rolled comparison of a check's instant fails
+// here.
+func TestEveryStillOwedTestGoesThroughOwes(t *testing.T) {
+	if sites := sourcescan.Sites(t, ".OwedAt.Equal("); !slices.Equal(sites, []string{"mediation.go"}) {
+		t.Fatalf("an owed check's instant is compared in %v, want only owes in mediation.go", sites)
+	}
+}
+
+func TestAnUnchangedDeploysReleaseCutByTheDaemonsExitIsNoFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(h *harness) context.Context
+		message string
+	}{
+		{name: "a release cut mid-read", message: "the mediation was cut by the daemon's exit; the next boot's pass runs it again",
+			arrange: func(h *harness) context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				h.db.mu.Lock()
+				h.db.mediationErr = context.Canceled
+				h.db.mu.Unlock()
+				return ctx
+			}},
+		{name: "a release after the mediation stopped", message: mediationNotRun,
+			arrange: func(h *harness) context.Context {
+				if idle := h.o.stopMediation(); idle != nil {
+					<-idle
+				}
+				return context.Background()
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			ctx := tt.arrange(h)
+
+			// Act
+			_ = h.o.ReleaseUnchangedDeploy(ctx, deployStarted)
+
+			// Assert
+			h.db.mu.Lock()
+			h.db.mediationErr = nil
+			h.db.mu.Unlock()
+			if owedCheck(t, h) == nil {
+				t.Fatal("the cut release let the check go")
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: tt.message}); !ok {
+				t.Fatalf("records = %v, want %q at INFO", h.logs.Records(), tt.message)
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error"}); ok {
+				t.Fatalf("records = %v, want no error", h.logs.Records())
+			}
+		})
 	}
 }

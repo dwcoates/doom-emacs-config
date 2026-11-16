@@ -29,22 +29,30 @@ func TestAPausedQueueAdmitsNothing(t *testing.T) {
 }
 
 func TestAPauseSuspendsTheRunningMergeAndTheQueuesResumeTakesItOnAtItsStep(t *testing.T) {
-	// Arrange, Act: pause while the head holds in its gate (the running gate
-	// is cut), then resume the queue.
-	c := pausedUnderGate(t)
-	cut := c.runner.ran(c.dirs[theWorkspace])
+	// Arrange, Act: pause while the head holds in its gate (the gate's watch
+	// is cut, its run goes on on the test service), let the run finish, then
+	// resume the queue.
+	c, done, release := headHeldInGate(t)
+	if err := c.h.o.Pause(context.Background(), nil, userPauser); err != nil {
+		t.Fatalf("Pause: %v", err)
+	}
+	<-done
 	queued, err := c.h.db.MergeQueue(context.Background(), c.h.repoKey())
 	if err != nil {
 		t.Fatal(err)
 	}
+	close(release)
 	if err := c.h.o.Unpause(context.Background(), nil); err != nil {
 		t.Fatalf("Unpause: %v", err)
 	}
 	c.promote(t)
 
-	// Assert.
-	if cut != 1 || len(queued) != 1 || queued[0].State != wsm.MergeAdmitted {
-		t.Fatalf("after the pause: gate ran %d, queue %v; want one cut run and the merge still admitted in line", cut, queued)
+	// Assert: the one run the pause left going is the one the resume read.
+	if ran := c.runner.ran(c.dirs[theWorkspace]); ran != 1 || len(queued) != 1 || queued[0].State != wsm.MergeAdmitted {
+		t.Fatalf("gate ran %d, queue after the pause %v; want one run and the merge still admitted in line", ran, queued)
+	}
+	if stops := c.h.tests.stopped(); len(stops) != 0 {
+		t.Fatalf("stopped %v, want the run the pause left going never stopped", stops)
 	}
 	if got := c.git.landedOwn(); len(got) != 1 {
 		t.Fatalf("landings after the resume %v, want the merge landed once", got)
@@ -75,7 +83,7 @@ func TestAGateThePauseCutNamesThePause(t *testing.T) {
 	if got["by"] != "its queue's pause" {
 		t.Fatalf("cut by = %v, want the queue's pause", got["by"])
 	}
-	if gateRecords(c.h, "it runs again from its start once the queue is resumed") != 1 {
+	if gateRecords(c.h, "its run goes on on the test service, and the merge watches it again once the queue is resumed") != 1 {
 		t.Fatal("the cut does not say the gate runs again once the queue is resumed")
 	}
 }

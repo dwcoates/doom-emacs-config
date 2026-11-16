@@ -49,6 +49,9 @@ import (
 // only what the orchestrator actually calls: anything else would panic loudly
 // rather than quietly answering a zero value.
 type fakeDB struct {
+	// resumeMarkErr fails recording that an undecided intake is resumed.
+	resumeMarkErr error
+
 	// links are each workspace's stored links, and linksErr fails their read.
 	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	linksErr error
@@ -353,6 +356,16 @@ func (f *fakeDB) OweMediation(ctx context.Context, repo wsm.RepoKey, at time.Tim
 
 func (f *fakeDB) MarkMediationPrompted(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, turn ids.TurnID) (bool, error) {
 	return f.checks.MarkMediationPrompted(ctx, repo, owed, at, turn)
+}
+
+func (f *fakeDB) MarkMediationResumed(ctx context.Context, repo wsm.RepoKey, owed time.Time, turn ids.TurnID) (bool, error) {
+	f.mu.Lock()
+	err := f.resumeMarkErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return f.checks.MarkMediationResumed(ctx, repo, owed, turn)
 }
 
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
@@ -3093,7 +3106,10 @@ type harness struct {
 	footer  *fakeFooter
 	sidebar *fakeSidebar
 	runner  *fakeRunner
-	logs    *dlog.TestSurfaces
+	// tests is the test service every gate runs on, its runs played by
+	// runner (fakeTestService).
+	tests *fakeTestService
+	logs  *dlog.TestSurfaces
 	// registryPublishes counts PublishRegistry calls, and publishErr, when
 	// set, fails every one.
 	registryPublishes int
@@ -3520,6 +3536,7 @@ func newHarness(t *testing.T) *harness {
 		freeness: &fakeFreeness{},
 		meter:    &fakeMeter{},
 	}
+	h.tests = newFakeTestService(t, h.runner)
 	h.detached = &fakeDetached{h: h}
 	h.hooks = &fakeHookRunner{h: h, exits: map[string]int{}, timeouts: map[string]bool{}, lines: map[string][]string{}, outputs: map[string]string{}}
 	h.events = &fakeQueueEvents{}
@@ -3590,6 +3607,7 @@ func (h *harness) deps() Deps {
 			return []string{"bash", h.script}
 		},
 		TestRunner: h.runner,
+		Tests:      h.tests,
 		Painter:    fakePainter{},
 		PublishRegistry: func(context.Context) error {
 			h.mu.Lock()
@@ -4584,6 +4602,10 @@ type fakeDeployChecks struct {
 	// work; standByErr fails a stand-by.
 	stoodBy, resumed []ids.WorkspaceID
 	standByErr       error
+	// onStopNow runs inside each stop, as ending the stopped session does.
+	onStopNow func()
+	// createCtxErrs records each check workspace's creation context error.
+	createCtxErrs []error
 	// onStandBy runs inside each stand-by, as ending the finishing session
 	// does; standByCtxErrs records the stand-by context's error after it.
 	onStandBy      func()
@@ -4627,9 +4649,10 @@ func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name st
 	return f.make("ws-remedy", name)
 }
 
-func (f *fakeDeployChecks) CreateDeployEscalation(_ context.Context, _, name string) (wsm.Workspace, error) {
+func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name string) (wsm.Workspace, error) {
 	f.mu.Lock()
 	err := f.escalationErr
+	f.createCtxErrs = append(f.createCtxErrs, ctx.Err())
 	f.mu.Unlock()
 	if err != nil {
 		return wsm.Workspace{}, err
@@ -4663,6 +4686,9 @@ func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
 }
 
 func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {
+	if f.onStopNow != nil {
+		f.onStopNow()
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.stopped = append(f.stopped, ws)

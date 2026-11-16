@@ -13,6 +13,7 @@
 package scriptrunner
 
 import (
+	"agentrepl/logging/childgroup"
 	"bytes"
 	"context"
 	"errors"
@@ -26,63 +27,6 @@ import (
 	"agent-repld/internal/childproc"
 	"agent-repld/internal/dlog"
 )
-
-// gitEnvKeys are the repository-selecting variables that must never be
-// inherited by a spawned script: a hook-leaked GIT_DIR is a real, previously
-// observed source of bogus work-tree errors, and a script running as part of
-// the deploy chain or the merge test gate must resolve its own repository
-// rather than one a caller's environment happened to leak in. This mirrors
-// integration/harness/daemon.go's gitEnvKeys, which scrubs a fake git child's
-// environment for the identical reason.
-var gitEnvKeys = []string{
-	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR",
-	"GIT_PREFIX", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-}
-
-// cleanEnv returns env with every repository-selecting git variable dropped.
-func cleanEnv(env []string) []string {
-	out := make([]string, 0, len(env))
-	for _, kv := range env {
-		key, _, _ := strings.Cut(kv, "=")
-		drop := false
-		for _, bad := range gitEnvKeys {
-			if key == bad {
-				drop = true
-				break
-			}
-		}
-		if !drop {
-			out = append(out, kv)
-		}
-	}
-	return out
-}
-
-// killGroup SIGKILLs the process group the script leads. A group already gone
-// is the state the kill was asked to reach.
-func killGroup(pid int) error { return killGroupWith(syscall.Kill, pid) }
-
-// killGroupWith is killGroup over an injected kill, so the answers a kernel
-// gives for a finished group can be driven in a test.
-//
-// TWO ANSWERS MEAN THE GROUP HAS FINISHED. ESRCH is a group with no members at
-// all. EPERM is what darwin answers for a group whose members have all exited
-// and wait to be reaped: the script finished just as its caller cancelled it.
-// The group is this daemon's own child's, created with Setpgid and running as
-// this user, so EPERM cannot mean a live member this process may not signal.
-// Returning either as an error made exec report "canceling Cmd: operation not
-// permitted" for a run that had in fact ended, logged at ERROR as a script that
-// could not be run (2026-10-06, a daemon exiting during its boot's service
-// check).
-func killGroupWith(kill func(int, syscall.Signal) error, pid int) error {
-	if err := kill(-pid, syscall.SIGKILL); err != nil {
-		if errors.Is(err, syscall.ESRCH) || errors.Is(err, syscall.EPERM) {
-			return os.ErrProcessDone
-		}
-		return err
-	}
-	return nil
-}
 
 // Runner runs a script in a directory. It is stateless beyond its logger, so
 // one instance serves every caller in the daemon.
@@ -202,8 +146,8 @@ func (r *Runner) RunLinesWith(ctx context.Context, dir string, argv []string, op
 	// it also runs after an ordinary exit, and under load it cut the output of
 	// scripts that had finished and answered.)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error { return killGroup(cmd.Process.Pid) }
-	cmd.Env = append(cleanEnv(os.Environ()), opts.Env...)
+	cmd.Cancel = func() error { return childgroup.KillGroup(cmd.Process.Pid) }
+	cmd.Env = append(childgroup.ScrubRepositorySelectors(os.Environ()), opts.Env...)
 	cmd.ExtraFiles = opts.ExtraFiles
 	// stdout and stderr are combined, in order, into one buffer: a caller
 	// painting a test gate's output or a deploy step's log wants what a

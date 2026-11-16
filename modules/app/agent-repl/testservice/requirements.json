@@ -1,0 +1,30 @@
+{
+  "system": "testservice",
+  "requirements": [
+    {
+      "id": "service-tests",
+      "kind": "service",
+      "why": "the test service that runs every merge gate, kept running by the platform's service manager so a daemon deploy never cuts a gate",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "label": "com.agentrepl.tests",
+      "args": [
+        "--socket",
+        "~/.cache/agent-repl/sock/tests.sock",
+        "--runs",
+        "~/.cache/agent-repl/tests/runs",
+        "--log",
+        "~/.cache/agent-repl/log/tests.log"
+      ],
+      "log": {
+        "stdout": "tests.out.log",
+        "stderr": "tests.err.log"
+      },
+      "build_target": "tests",
+      "binary": "agent-repl-tests"
+    }
+  ]
+}

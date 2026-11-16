@@ -270,7 +270,7 @@ func TestDecidedProblemsThatCannotBeRecordedAsOwnedAreAnError(t *testing.T) {
 
 	// Act: a problem quoting a record whose group names no operation is
 	// refused by the store.
-	h.o.ownProblems(context.Background(), mediationKey(h), "ws-remedy", []DeployProblem{{Statement: "s"}}, []wsm.ProblemKey{{Message: "no operation"}}, dlog.Context{})
+	h.o.ownProblems(context.Background(), mediationKey(h), "ws-remedy", []DeployProblem{{Statement: "s"}}, []wsm.ProblemKey{{Message: "no operation"}}, "unstated", dlog.Context{})
 
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the decided problems could not be recorded as owned; the next check finds them unowned"}); !ok {

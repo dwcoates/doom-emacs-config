@@ -545,6 +545,7 @@ func newChain(t *testing.T) *chain {
 	c := &chain{h: h, git: newChainGit(h.git), runner: newChainRunner(),
 		idle: make(chan ids.WorkspaceID, 1024), kicks: make(chan wsm.RepoKey, 1),
 		dirs: map[ids.WorkspaceID]string{theWorkspace: h.sourceD}, branches: map[ids.WorkspaceID]string{theWorkspace: "feature"}}
+	h.tests.runner = c.runner
 	c.wire(h.o)
 	c.git.branch("feature", "a1")
 	return c
@@ -554,6 +555,7 @@ func newChain(t *testing.T) *chain {
 func (c *chain) wire(o *orchestrator) {
 	o.deps.Git = c.git
 	o.deps.TestRunner = c.runner
+	o.deps.Tests = c.h.tests
 	o.onChainIdle = func(ws ids.WorkspaceID) { c.idle <- ws }
 	o.onKick = func(repo wsm.RepoKey) {
 		select {
@@ -840,12 +842,21 @@ func standChain(t *testing.T, h *harness, chain []ids.WorkspaceID, left ids.Work
 // there, answering the chain and the pump's result once the gate is entered.
 func headInGate(t *testing.T) (*chain, <-chan error) {
 	t.Helper()
+	c, done, _ := headHeldInGate(t)
+	return c, done
+}
+
+// headHeldInGate is headInGate answering also the channel whose close lets
+// the held run go on: the run outlives a suspension of its merge on the test
+// service, so a test that resumes the merge releases it.
+func headHeldInGate(t *testing.T) (*chain, <-chan error, chan struct{}) {
+	t.Helper()
 	c := newChain(t)
-	inGate, _ := c.runner.hold(c.dirs[theWorkspace])
+	inGate, release := c.runner.hold(c.dirs[theWorkspace])
 	enqueue(t, c.h)
 	done := admitAsync(c.h, context.Background())
 	<-inGate
-	return c, done
+	return c, done, release
 }
 
 func TestUngovernedTestArgvRunsTheCommandUngovernedAtNicenessOne(t *testing.T) {

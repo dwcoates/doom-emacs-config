@@ -92,11 +92,12 @@ func TestAHeadHandedOverAfterTheMergeBehindItResumesAsTheHeadAndAMergeTakenBackI
 		t.Fatalf("SubmitPrompt(beta) after the evict = %v; want the prompt accepted", prompt.Msg)
 	}
 
-	// Act (the head): A is taken back, resumes as the head, and lands.
+	// Act (the head): A is taken back, resumes as the head watching the gate
+	// run its transfer left going on the test service, and lands once that
+	// run passes.
 	if o := adoptBothParticipants(d, successor, a.ws); o.hostErr != nil || o.webErr != nil {
 		t.Fatalf("adopting alpha: host %v, web %v", o.hostErr, o.webErr)
 	}
-	gate.awaitStart(d, a.ws.GetDir())
 	gate.release(0)
 
 	// Assert (the head): A landed.

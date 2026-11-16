@@ -3,9 +3,6 @@ package zettelclient
 import (
 	"context"
 	"errors"
-	"net"
-	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,9 +11,8 @@ import (
 	"agentrepl/proto/zettel/v1/zettelv1connect"
 
 	"connectrpc.com/connect"
-	"golang.org/x/net/http2"
-	"golang.org/x/net/http2/h2c"
 
+	"agent-repld/internal/h2cclient/h2ctest"
 	"agent-repld/internal/wsm"
 )
 
@@ -82,23 +78,8 @@ func (f *fakeZettel) DeleteThread(context.Context, *connect.Request[zettelv1.Del
 // the client's own dialing is what the test drives.
 func serve(t *testing.T, f *fakeZettel) Client {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "zc")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
-	sock := filepath.Join(dir, "z.sock")
-	ln, err := net.Listen("unix", sock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
 	path, handler := zettelv1connect.NewZettelHandler(f)
-	mux.Handle(path, handler)
-	srv := &http.Server{Handler: h2c.NewHandler(mux, &http2.Server{})}
-	go func() { _ = srv.Serve(ln) }()
-	t.Cleanup(func() { _ = srv.Close() })
-	return New(sock)
+	return New(h2ctest.ServeUnix(t, path, handler))
 }
 
 func question() wsm.ThreadQuestion {

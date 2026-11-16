@@ -135,6 +135,8 @@ const (
 	MediationUndecided = "undecided"
 	// MediationUnmediated: the repository checks its deploys no more.
 	MediationUnmediated = "unmediated"
+	// MediationUnchanged: the deploy changed nothing, so it was not checked.
+	MediationUnchanged = "unchanged"
 )
 
 // The outcomes a remediation's span ends in (Meter.ObserveRemediation): from
@@ -285,6 +287,68 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 	return errors.Join(errs...)
 }
 
+// ReleaseUnchangedDeploy implements Orchestrator: the deploy that began AT
+// changed nothing, every component up to date, so the check it owes is
+// released unchecked and its queue advances (2026-11-14: a deploy that
+// installed nothing held the queue for an intake's check). The logs it left
+// are not skipped: the next check's window starts where the last one read.
+// A check that carries an earlier check's chain (a fix dispatched or an
+// intake at work) stays owed for that chain's intake. A failure is recorded
+// at ERROR and answered: the check stays owed and its intake checks it.
+func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error {
+	// THE RELEASE RUNS INSIDE THE MEDIATION'S LIFETIME, as a pass does: the
+	// daemon's exit cuts it and waits for it before the state client
+	// closes, and a cut is recorded as one, never as a failure.
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, dlog.Context{"deploy_started": at.UTC().Format(time.RFC3339Nano)})
+		return nil
+	}
+	defer leave()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(life, cancel)()
+	queues, err := o.checkedQueues(ctx, opMediation)
+	if err != nil {
+		o.mediationFailed(ctx, nil, "could not list the repositories an unchanged deploy owes checks in; its checks stay owed", err)
+		return err
+	}
+	var errs []error
+	for _, q := range queues {
+		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano)}
+		m, err := o.deps.DB.MediationOf(ctx, q.key)
+		if err != nil {
+			errs = append(errs, err)
+			if o.mediationFailed(ctx, fields, "could not read the check an unchanged deploy owes; it stays owed", err) {
+				break
+			}
+			continue
+		}
+		if !owes(m, at) {
+			continue
+		}
+		if !m.ChainStartedAt.Equal(m.OwedAt) {
+			o.deps.Log.Global().Info(opMediation, "the deploy changed nothing, but its check carries an earlier chain; the chain's intake checks it", withField(fields, "chain_started", m.ChainStartedAt.UTC().Format(time.RFC3339Nano)))
+			continue
+		}
+		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnchanged)
+		if err != nil {
+			errs = append(errs, err)
+			if o.mediationFailed(ctx, fields, "could not release the check of a deploy that changed nothing; it stays owed", err) {
+				break
+			}
+			continue
+		}
+		if !released {
+			continue
+		}
+		o.deps.Log.Global().Info(opMediation, "the deploy changed nothing; its check is released unchecked and the queue advances", fields)
+		o.republishMediation(ctx, q.key)
+		o.kick(q.key)
+	}
+	return errors.Join(errs...)
+}
+
 // Mediate implements Orchestrator: runs a round for every check owed and not
 // yet awaited here, and takes up every remediation finish a restart cut
 // (remediationfinish.go). A daemon that may not advance its queues runs
@@ -385,7 +449,7 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 		if m == nil {
 			continue
 		}
-		released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
+		released, err := o.releaseCheck(ctx, q.key, *m, MediationUnmediated)
 		if err != nil {
 			if o.mediationFailed(ctx, dlog.Context{"repo": string(q.key)}, "could not release a check no intake decides; the queue stays held", err) {
 				return
@@ -393,13 +457,32 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 			continue
 		}
 		if released {
-			o.endChain(ctx, q.key, *m, MediationUnmediated)
 			o.deps.Log.Global().Info(opMediation, "released a check owed by a repository whose lifecycle config checks no deploys now; its queue advances", dlog.Context{
 				"repo": string(q.key), "deploy_started": m.OwedAt.UTC().Format(time.RFC3339Nano)})
 			o.republishMediation(ctx, q.key)
 			o.kick(q.key)
 		}
 	}
+}
+
+// owes reports whether M, a repository's owed check or nil for none, is the
+// check of the deploy that began at OWED: none owed, or a newer deploy's, is
+// not.
+func owes(m *wsm.Mediation, owed time.Time) bool {
+	return m != nil && m.OwedAt.Equal(owed)
+}
+
+// releaseCheck releases check M of queue REPO, still the one owed, and ends
+// its chain as OUTCOME when the release took: a released check is always its
+// chain's last. It answers whether it released it; one a newer deploy
+// replaced, or a decision released already, is not.
+func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, outcome string) (bool, error) {
+	released, err := o.deps.DB.ReleaseMediation(ctx, repo, m.OwedAt)
+	if err != nil || !released {
+		return false, err
+	}
+	o.endChain(ctx, repo, m, outcome)
+	return true, nil
 }
 
 // endChain records how check M of queue REPO, the last of its chain, ended
@@ -494,14 +577,35 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		// between the two (a refused submission, the daemon's exit) left a
 		// turn that never reached the session: reattaching submits it then,
 		// and awaits one that did.
-		o.deps.Log.Global().Info(opMediation, "the intake was told of this deploy before; its turn is reattached", withField(fields, "turn", string(m.Turn)))
-		_, err = o.reattachTurn(ctx, ws, fields, m.Turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
+		// A RESUMED INTAKE'S TURN IS ITS RESUMING BRIEF'S.
+		told := brief
+		if m.Resumed {
+			if told, err = o.resumeBrief(m); err != nil {
+				o.deps.Log.Global().Error(opMediation, "the undecided intake's resuming brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
+				return
+			}
+		}
+		o.deps.Log.Global().Info(opMediation, "the intake was told of this deploy before; its turn is reattached", withField(withField(fields, "turn", string(m.Turn)), "resumed", m.Resumed))
+		_, err = o.reattachTurn(ctx, ws, fields, m.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
 	}
 	if err != nil {
-		o.mediationFailed(ctx, fields, "the intake's turn could not be awaited; the queue stays held until the next round", err)
+		o.awaitFailed(ctx, q, m.OwedAt, fields, "the intake's turn could not be awaited; the queue stays held until the next round", err)
 		return
 	}
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
+}
+
+// awaitFailed settles a failed await of the intake's turn on the check owed
+// at OWED. THE DECISION RELEASES ITS CHECK BEFORE IT STOPS THE INTAKE
+// (releaseCheck, then endChain), so an await cut by that stop finds the
+// check no longer owed: that is the decision's end, recorded at INFO. Any
+// other failure holds the queue and is the round's failure, MESSAGE.
+func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed time.Time, fields dlog.Context, message string, err error) {
+	if now, readErr := o.deps.DB.MediationOf(ctx, q.key); readErr == nil && !owes(now, owed) {
+		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its session, which its own decision stopped; the check is decided", withField(fields, "cause", err.Error()))
+		return
+	}
+	o.mediationFailed(ctx, fields, message, err)
 }
 
 // intakeOf answers the intake of the chain check M belongs to, making it,
@@ -601,12 +705,19 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.deps.Log.Global().Error(opMediation, "could not read the check its turn ended on; the queue stays held", withField(fields, "error", err.Error()))
 		return
 	}
-	if m == nil || !m.OwedAt.Equal(owed) {
+	if !owes(m, owed) {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its check decided or replaced by a newer deploy", fields)
 		return
 	}
 	if m.Dispatched {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with a fix dispatched; the queue stays held for the remediation", withField(fields, "remediation", string(m.Remediation)))
+		return
+	}
+	// AN INTAKE CANNOT END ITS TURN UNDECIDED (owner ruling, 2026-11-16):
+	// its first undecided end resumes it once to decide the deploy, the
+	// queue still held; only a second is let through, as the intake's fault.
+	if !m.Resumed {
+		o.resumeIntake(ctx, q, ws, *m, fields)
 		return
 	}
 	// THE WINDOW IS READ BEFORE THE RELEASE, which clears it.
@@ -615,7 +726,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.mediationFailed(ctx, fields, "could not read the window of a check its turn ended on; the queue stays held", err)
 		return
 	}
-	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, owed)
+	released, err := o.releaseCheck(ctx, q.key, *m, MediationUndecided)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "could not settle a check its turn ended on; the queue stays held", err)
 		return
@@ -624,11 +735,59 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its check decided or replaced by a newer deploy", fields)
 		return
 	}
-	o.endChain(ctx, q.key, *m, MediationUndecided)
-	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing about the deploy; the queue is let through and the user is told", fields)
-	o.escalateOwning(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy; the queue moved on", nil, window, fields)
+	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, the queue is let through and the user is told", fields)
+	o.escalateOwning(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue moved on", nil, window, fields)
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
+}
+
+// errMediationStopped answers a decision made while this daemon stops: the
+// check stays owed, and the daemon that serves the queues next tells the
+// intake again.
+var errMediationStopped = errors.New("merge: this daemon is stopping; the check stays owed for the daemon that serves the queues next")
+
+// BriefDeployIntakeResumed resumes an intake whose turn ended undecided.
+const BriefDeployIntakeResumed = "deploy-intake-resumed"
+
+// resumeBrief is the prompt resuming check M's undecided intake.
+func (o *orchestrator) resumeBrief(m wsm.Mediation) (string, error) {
+	return o.deps.Briefs(BriefDeployIntakeResumed, map[string]string{
+		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
+		"version":        mediationVersion(m),
+	})
+}
+
+// resumeIntake resumes intake WS, whose turn on check M of queue Q ended
+// deciding nothing, in a turn recorded on M before it is submitted, then
+// settles what that turn decided (intakeTurnEnded). A step that fails holds
+// the queue and is recorded: the next round reattaches the recorded turn.
+func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, fields dlog.Context) {
+	brief, err := o.resumeBrief(m)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the undecided intake's resuming brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
+		return
+	}
+	turn := wsm.NewTurnID()
+	fields = withField(fields, "turn", string(turn))
+	marked, err := o.deps.DB.MarkMediationResumed(ctx, q.key, m.OwedAt, turn)
+	if err != nil {
+		o.mediationFailed(ctx, fields, "could not record that the undecided intake is resumed; the queue stays held", err)
+		return
+	}
+	if !marked {
+		o.deps.Log.Global().Info(opMediation, "the check was decided, dispatched or replaced before its undecided intake was resumed; this round ends", fields)
+		return
+	}
+	if _, err := o.submitCheckPrompt(ctx, ws, turn, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
+		o.mediationFailed(ctx, fields, "the undecided intake's resuming brief could not be submitted; the queue stays held", err)
+		return
+	}
+	o.deps.Log.Global().Warn(opMediation, "the intake's turn ended deciding nothing about the deploy; it is resumed once to decide it, the queue still held", fields)
+	if _, err := o.deps.AwaitTurnEnd(ctx, ws, turn); err != nil {
+		o.awaitFailed(ctx, q, m.OwedAt, fields, "the resumed intake's turn could not be awaited; the queue stays held until the next round", err)
+		return
+	}
+	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
 }
 
 // mediationVersion is how the brief names M's build.
@@ -646,6 +805,18 @@ func mediationVersion(m wsm.Mediation) string {
 // remediation workspace and keeps the queue held (dispatch.go).
 func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error {
 	fields := dlog.Context{"workspace": string(ws), "decision": d.Kind.String(), "summary": d.Summary}
+	// A DECISION RUNS ON THE MEDIATION'S LIFETIME, NEVER ITS REQUEST'S: the
+	// request comes from the intake's own session, and an approval or an
+	// escalation ends the chain, which stops that session and cancels the
+	// request mid-decision (2026-11-16 17:55: an escalation's workspace was
+	// made on the cancelled request, failed, and the user was never told).
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, fields)
+		return errMediationStopped
+	}
+	defer leave()
+	ctx = life
 	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read the role of the workspace a decision came from", withField(fields, "error", err.Error()))
@@ -671,7 +842,16 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		return refuse(ArmNoMediationOwed, ws, "a fix is dispatched for this deploy already; its deploy owes the next check")
 	}
 	if d.Kind == MediationDispatch {
-		return o.dispatch(ctx, q, m, ws, d, fields)
+		if err := o.dispatch(ctx, q, m, ws, d, fields); err != nil {
+			return err
+		}
+		// THE DISPATCH IS RECORDED BEFORE ANY ESCALATION IS TOLD: a window
+		// that cannot be read for the confirmations leaves the dispatch
+		// standing, and the record of the failure is toldWindow's.
+		if window, err := o.toldWindow(ctx, q.key, fields); err == nil {
+			o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
+		}
+		return nil
 	}
 	window, err := o.toldWindow(ctx, q.key, fields)
 	if err != nil {
@@ -687,23 +867,23 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		logRefusal(o.deps.Log.Global(), opMediation, "refused an approval while the check's window holds groups no one owns", withField(fields, "unowned", unowned), refusal)
 		return refusal
 	}
-	released, err := o.deps.DB.ReleaseMediation(ctx, q.key, m.OwedAt)
+	outcome := MediationApproved
+	if d.Kind == MediationEscalate {
+		outcome = MediationEscalated
+	}
+	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
+	// counted that check's end, and the newer one is still owed.
+	released, err := o.releaseCheck(ctx, q.key, m, outcome)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not release the check the decision named", withField(fields, "error", err.Error()))
 		return err
 	}
-	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
-	// counted that check's end, and the newer one is still owed.
-	if released {
-		outcome := MediationApproved
-		if d.Kind == MediationEscalate {
-			outcome = MediationEscalated
-		}
-		o.endChain(ctx, q.key, m, outcome)
-	}
 	o.deps.Log.Global().Info(opMediation, "the intake decided the deploy; the queue advances", withField(fields, "released", released))
-	if d.Kind == MediationEscalate {
+	switch {
+	case d.Kind == MediationEscalate:
 		o.escalateOwning(ctx, q, m, d.Summary, d.Problems, window, fields)
+	case released:
+		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
 	}
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
@@ -875,10 +1055,11 @@ func problemKeys(problems []DeployProblem) []wsm.ProblemKey {
 }
 
 // ownProblems makes OWNER the owner of every group PROBLEMS quote and every
-// group in ALSO, in REPO, with the problems' statements as its findings. A
-// write that fails is recorded at ERROR: the decision stands, and the groups
-// come back unowned to the next check.
-func (o *orchestrator) ownProblems(ctx context.Context, repo wsm.RepoKey, owner ids.WorkspaceID, problems []DeployProblem, also []wsm.ProblemKey, fields dlog.Context) {
+// group in ALSO, in REPO, with the problems' statements as its findings, or
+// UNSTATED when the problems state none. A write that fails is recorded at
+// ERROR: the decision stands, and the groups come back unowned to the next
+// check.
+func (o *orchestrator) ownProblems(ctx context.Context, repo wsm.RepoKey, owner ids.WorkspaceID, problems []DeployProblem, also []wsm.ProblemKey, unstated string, fields dlog.Context) {
 	keys := problemKeys(problems)
 	seen := map[wsm.ProblemKey]bool{}
 	for _, k := range keys {
@@ -899,7 +1080,7 @@ func (o *orchestrator) ownProblems(ctx context.Context, repo wsm.RepoKey, owner 
 	}
 	findings := strings.Join(statements, " / ")
 	if findings == "" {
-		findings = "taken over unowned by the escalation"
+		findings = unstated
 	}
 	if err := o.deps.DB.OwnDeployProblems(ctx, repo, keys, owner, findings, o.deps.Now()); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the decided problems could not be recorded as owned; the next check finds them unowned", withField(withField(fields, "owner", string(owner)), "error", err.Error()))
@@ -908,16 +1089,25 @@ func (o *orchestrator) ownProblems(ctx context.Context, repo wsm.RepoKey, owner 
 	o.deps.Log.Global().Info(opMediation, "recorded the decided problems as owned", withField(withField(fields, "owner", string(owner)), "problems", len(keys)))
 }
 
-// escalateOwning puts check M before the user in a new escalation workspace
-// (escalate), which then owns every group PROBLEMS quote and every group of
-// WINDOW no one owned. An escalation that cannot be made records its own
+// escalateOwning puts check M before the user: each problem PROBLEMS or
+// WINDOW hold that an open escalation owns goes back to that escalation
+// (tellEscalations), and the rest to a new escalation workspace (escalate),
+// which then owns them. An escalation that cannot be made records its own
 // failure, and its groups stay unowned for the next check.
 func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) {
-	made, err := o.escalate(ctx, q, m, summary, problems, window, fields)
+	routes, ok := o.tellEscalations(ctx, q, m, summary, window, problems, true, fields)
+	if !ok {
+		return
+	}
+	if len(routes.order) > 0 && len(routes.fresh) == 0 && len(routes.freshKeys) == 0 {
+		o.deps.Log.Global().Info(opMediation, "every escalated problem went to the open escalation that owns it; no new escalation is made", withField(fields, "escalations", len(routes.order)))
+		return
+	}
+	made, err := o.escalate(ctx, q, m, summary, routes.fresh, window, fields)
 	if err != nil {
 		return
 	}
-	o.ownProblems(ctx, q.key, made, problems, escalatedKeys(window), fields)
+	o.ownProblems(ctx, q.key, made, routes.fresh, routes.freshKeys, "taken over unowned by the escalation", fields)
 }
 
 // finishingIn answers the workspace whose direct finish is under way in

@@ -421,3 +421,52 @@ func TestSingletonServicesBindThroughTheSharedHelper(t *testing.T) {
 		t.Fatal("scanned no source files")
 	}
 }
+
+// TestChildgroupIsTheOnlyRepositorySelectorList pins the call sites: every Go
+// file that keeps a child from inheriting a repository selector scrubs
+// through agentrepl/logging/childgroup, and no other file restates the list.
+// Three copies once drifted apart (2026-11-16: the git client stripped nine
+// variables, the script runner and the test harness seven).
+func TestChildgroupIsTheOnlyRepositorySelectorList(t *testing.T) {
+	// Arrange: the agent-repl root, two directories up.
+	root := moduleRootDir(t)
+	owner := filepath.Join(root, "agent-shim", "logging", "go", "childgroup")
+	generated := filepath.Join(root, "proto", "gen")
+	scans, err := filepath.Abs(".")
+	if err != nil {
+		t.Fatalf("resolve this package: %v", err)
+	}
+	var offenders []string
+
+	// Act.
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			if path == owner || path == generated || path == scans || d.Name() == "node_modules" || d.Name() == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(body), `"GIT_ALTERNATE_OBJECT_DIRECTORIES"`) {
+			offenders = append(offenders, path)
+		}
+		return nil
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("walk agent-repl: %v", err)
+	}
+	if len(offenders) > 0 {
+		t.Fatalf("these files restate the repository selector list; scrub through childgroup instead: %v", offenders)
+	}
+}

@@ -975,10 +975,11 @@ func TestTheDrainLetsATerminalFinishItsDurableStamps(t *testing.T) {
 	}
 }
 
-// TestTheDrainCutsAMergesTestGateAndSaysItRunsAgain covers the one long
-// phase the exit does not wait out: the test gate is cut, and the record says
-// the resumed merge runs it again from its start.
-func TestTheDrainCutsAMergesTestGateAndSaysItRunsAgain(t *testing.T) {
+// TestTheDrainLeavesAMergesTestGateRunningAndSaysItIsWatchedAgain covers the
+// one long phase the exit does not wait out: the gate's watch is cut, its run
+// goes on on the test service, and the record says the resumed merge watches
+// it again.
+func TestTheDrainLeavesAMergesTestGateRunningAndSaysItIsWatchedAgain(t *testing.T) {
 	// Arrange: a merge held inside its test gate, which is a long phase.
 	h := newHarness(t)
 	h.emacsRepo()
@@ -1001,8 +1002,8 @@ func TestTheDrainCutsAMergesTestGateAndSaysItRunsAgain(t *testing.T) {
 
 	// Assert: one INFO naming the cut gate, and no error record at all.
 	record, found := recordWith(h, "info", "daemon.merge.drain")
-	if !found || !strings.Contains(record.Message, "runs it again from its start") {
-		t.Fatalf("the drain's record is %+v (found %v), want the test gate's cut", record, found)
+	if !found || !strings.Contains(record.Message, "the resumed merge watches it again") {
+		t.Fatalf("the drain's record is %+v (found %v), want the test gate's run left going", record, found)
 	}
 	if record.Context["tab"] != TabTests || record.Context["workspace"] != string(theWorkspace) {
 		t.Fatalf("the drain's record names %v / %v, want %q / %q", record.Context["tab"], record.Context["workspace"], TabTests, theWorkspace)

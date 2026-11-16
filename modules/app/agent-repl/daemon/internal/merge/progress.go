@@ -109,9 +109,16 @@ type progressDoc struct {
 	// reached the session is composed again whole.
 	FailingArchive string `json:"failing_archive,omitempty"`
 	FailingTail    string `json:"failing_tail,omitempty"`
-	Head           string `json:"head,omitempty"`
-	TreeAttempts   int    `json:"tree_attempts"`
-	MergeCommit    string `json:"merge_commit,omitempty"`
+	// TestRun is the test service's run of the live tests round's gate, set
+	// the moment the run starts: a resumed merge watches that run again
+	// rather than start another, so a daemon deploy never cuts a gate. Empty
+	// before the run starts, and from the first record after its gate read
+	// its end; a host fault drops it at once (hostFault).
+	TestRun string `json:"test_run,omitempty"`
+
+	Head         string `json:"head,omitempty"`
+	TreeAttempts int    `json:"tree_attempts"`
+	MergeCommit  string `json:"merge_commit,omitempty"`
 	// Before is the main worktree's tip before updating main moved it.
 	Before string `json:"before,omitempty"`
 	// Outcome is what the method concluded, recorded once the target moved:

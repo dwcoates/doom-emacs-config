@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -145,7 +146,6 @@ func TestTheAdoptingDaemonResumesASuspendedMergeInTheSameBubble(t *testing.T) {
 	// Arrange: a merge suspended for its transfer, and the successor.
 	h := newHarness(t)
 	release, done := heldInGateForTransfer(t, h)
-	t.Cleanup(func() { close(release) })
 	if err := h.o.SuspendForTransfer(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("SuspendForTransfer: %v", err)
 	}
@@ -155,6 +155,9 @@ func TestTheAdoptingDaemonResumesASuspendedMergeInTheSameBubble(t *testing.T) {
 	h.runner.before = nil
 	h.runner.mu.Unlock()
 	h.gatePasses("daemon")
+	// The gate's run goes on on the test service across the transfer, and
+	// passes there.
+	close(release)
 	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
 	h.restart(t)
 
@@ -181,7 +184,6 @@ func TestATakenBackTransferResumesItsMergeHere(t *testing.T) {
 	// Arrange: a merge suspended for a transfer that did not land.
 	h := newHarness(t)
 	release, done := heldInGateForTransfer(t, h)
-	t.Cleanup(func() { close(release) })
 	if err := h.o.SuspendForTransfer(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("SuspendForTransfer: %v", err)
 	}
@@ -190,6 +192,9 @@ func TestATakenBackTransferResumesItsMergeHere(t *testing.T) {
 	h.runner.before = nil
 	h.runner.mu.Unlock()
 	h.gatePasses("daemon")
+	// The gate's run goes on on the test service across the transfer, and
+	// passes there.
+	close(release)
 	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
 
 	// Act.
@@ -203,6 +208,9 @@ func TestATakenBackTransferResumesItsMergeHere(t *testing.T) {
 	// Assert.
 	if facts := h.footer.last(); facts.State != StateMerged {
 		t.Fatalf("the merge stands at %q (%s), want it landed here", facts.State, facts.Detail)
+	}
+	if started := h.tests.started(); len(started) != 1 {
+		t.Fatalf("started %d runs, want the one the transfer left going", len(started))
 	}
 }
 
@@ -907,14 +915,15 @@ func TestAMergeIsHeldFromItsTakeBackUntilItsResumeRuns(t *testing.T) {
 	// Arrange: a merge suspended in its gate for a transfer that did not land.
 	h := newHarness(t)
 	release, done := heldInGateForTransfer(t, h)
-	t.Cleanup(func() { close(release) })
+	var releaseOnce sync.Once
+	releaseRun := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseRun)
 	if err := h.o.SuspendForTransfer(context.Background(), theWorkspace); err != nil {
 		t.Fatalf("SuspendForTransfer: %v", err)
 	}
 	<-done
-	h.runner.mu.Lock()
-	h.runner.before = nil
-	h.runner.mu.Unlock()
+	// The transfer left the gate's run going on the test service, so the
+	// resume watches that run: it passes once released.
 	h.gatePasses("daemon")
 	h.git.ancestry["0000000000000000000000000000000000000000>feature"] = true
 
@@ -928,7 +937,8 @@ func TestAMergeIsHeldFromItsTakeBackUntilItsResumeRuns(t *testing.T) {
 		t.Fatalf("live round = %+v, want it held once taken back", round)
 	}
 
-	// Act: the resume.
+	// Act: the resume, watching the run the transfer left going.
+	releaseRun()
 	if err := h.admit(context.Background()); err != nil {
 		t.Fatalf("the resumed merge ended on: %v", err)
 	}

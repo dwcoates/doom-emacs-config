@@ -64,7 +64,21 @@ type Mediation struct {
 	// before its first: each remediation is measured from it to the check
 	// that ends it.
 	LastDispatchedAt *time.Time
+	// Resumed reports that the intake's turn on this mediation ended once
+	// deciding nothing, and the intake was resumed in Turn to decide it
+	// (owner ruling, 2026-11-16): a second such end is the intake's fault.
+	Resumed bool
 }
+
+// mediationResumedDDL is the layout-159 addition: the owed instant of the
+// mediation whose intake was resumed once (Mediation.Resumed). IT NAMES THE
+// MEDIATION IT WAS SET FOR, never a bare flag, so a mark left by a write
+// that does not clear it (the build before this one owing a newer deploy)
+// can never be read as a later mediation's. IT IS ADDITIVE: the build before
+// it neither reads nor writes the column.
+const mediationResumedDDL = `
+ALTER TABLE merge_queue_repos ADD COLUMN mediation_resumed_owed_at INTEGER;
+`
 
 // mediationRolesDDL is the layout-138 addition: each owed mediation carries
 // its chain's intake and last remediation workspaces, and whether a fix was
@@ -195,18 +209,18 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 }
 
 // mediationQuery reads one repository's mediation columns, keyed by repo.
-const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at FROM merge_queue_repos WHERE repo_key = ?`
+const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at FROM merge_queue_repos WHERE repo_key = ?`
 
 // scanMediation decodes ROW of mediationQuery, REPO's: nil when the
 // repository has no row or owes no mediation. It is the one mediation
 // decoding path. An owed mediation with no chain is a DecodeError: every
 // write that owes one records its chain.
 func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
-	var owed, prompted, chainStart, dispatchedAt sql.NullInt64
+	var owed, prompted, chainStart, dispatchedAt, resumedOwed sql.NullInt64
 	var version, turn, intake, remediation string
 	var redeploys int
 	var dispatched bool
-	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &intake, &remediation, &dispatched, &dispatchedAt)
+	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &intake, &remediation, &dispatched, &dispatchedAt, &resumedOwed)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -217,7 +231,7 @@ func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 		return nil, &DecodeError{Table: "merge_queue_repos", Row: repo, Field: "mediation_chain_started_at", Err: errors.New("an owed mediation records no chain")}
 	}
 	m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn), ChainStartedAt: fromNanos(chainStart.Int64), ChainRedeploys: redeploys,
-		Intake: WorkspaceID(intake), Remediation: WorkspaceID(remediation), Dispatched: dispatched}
+		Intake: WorkspaceID(intake), Remediation: WorkspaceID(remediation), Dispatched: dispatched, Resumed: resumedOwed.Valid && resumedOwed.Int64 == owed.Int64}
 	if prompted.Valid {
 		at := fromNanos(prompted.Int64)
 		m.PromptedAt = &at
@@ -254,12 +268,28 @@ func (s *store) MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, a
 		`UPDATE merge_queue_repos SET mediation_prompted_at = ?, mediation_turn = ? WHERE repo_key = ? AND mediation_owed_at = ?`, nanos(at), string(turn))
 }
 
+// MarkMediationResumed records that REPO's intake, whose turn on the
+// mediation owed at OWED ended deciding nothing, is resumed in TURN to decide
+// it. It answers false when that mediation is no longer the one owed, was
+// dispatched meanwhile, or was resumed already: the intake is resumed once.
+func (s *store) MarkMediationResumed(ctx context.Context, repo RepoKey, owed time.Time, turn TurnID) (bool, error) {
+	if turn == "" {
+		err := errors.New("wsm: a resumed intake names the turn it is resumed in")
+		s.log.Error("daemon.wsm.mark_mediation_resumed", "refused to resume an intake in no turn", withError(dlog.Context{"repo": string(repo)}, err))
+		return false, err
+	}
+	return s.mediationWrite(ctx, "daemon.wsm.mark_mediation_resumed", repo, owed,
+		`UPDATE merge_queue_repos SET mediation_turn = ?, mediation_resumed_owed_at = mediation_owed_at
+		 WHERE repo_key = ? AND mediation_owed_at = ? AND mediation_dispatched = 0
+		   AND (mediation_resumed_owed_at IS NULL OR mediation_resumed_owed_at <> mediation_owed_at)`, string(turn))
+}
+
 // ReleaseMediation clears the mediation REPO owes when it is still the one
 // owed at OWED, answering whether it did: a decision on an older deploy
 // releases nothing a newer deploy owes.
 func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error) {
 	return s.mediationWrite(ctx, "daemon.wsm.release_mediation", repo, owed,
-		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '', mediation_dispatched = 0, mediation_dispatched_at = NULL WHERE repo_key = ? AND mediation_owed_at = ?`)
+		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_resumed_owed_at = NULL, mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '', mediation_dispatched = 0, mediation_dispatched_at = NULL WHERE repo_key = ? AND mediation_owed_at = ?`)
 }
 
 // mediationWrite runs QUERY against the mediation of REPO owed at OWED, its

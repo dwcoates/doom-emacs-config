@@ -991,9 +991,9 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 	sidecar := make(chan error, 1)
 	// inflight: joined: the function that starts it waits for it.
 	go func() { sidecar <- s.deps.EnsureSidecar(ctx) }()
-	zettel := make(chan error, 1)
+	standalones := make(chan error, 1)
 	// inflight: joined: the function that starts it waits for it.
-	go func() { zettel <- s.deps.EnsureZettel(ctx) }()
+	go func() { standalones <- s.deps.EnsureStandalones(ctx) }()
 	brought := bringup.Run(ctx, bringup.Deps{
 		DB:           s.deps.DB,
 		StartSession: bringup.StartFunc(s.deps.StartSession),
@@ -1015,13 +1015,13 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 			})
 		}
 	}
-	if err := <-zettel; err != nil {
+	if err := <-standalones; err != nil {
 		if ctx.Err() != nil {
-			log.Info("daemon.boot.bring_up", "the daemon's exit cut zettel's service step short; the next boot's service step completes it", dlog.Context{
+			log.Info("daemon.boot.bring_up", "the daemon's exit cut the standalone services' step short; the next boot's service step completes it", dlog.Context{
 				"error": err.Error(),
 			})
 		} else {
-			log.Error("daemon.boot.bring_up", "the zettel service could not be made current; chat threads cannot record or read their graph until it is", dlog.Context{
+			log.Error("daemon.boot.bring_up", "a standalone service could not be made current; until it is, chat threads cannot record their graph (zettel) or merge gates cannot run (the test service)", dlog.Context{
 				"error": err.Error(),
 			})
 		}

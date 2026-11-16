@@ -863,7 +863,7 @@ func (o *orchestrator) Drain(ctx context.Context) {
 		step := r.progressStep()
 		fields := dlog.Context{"workspace": string(r.ws), "lease": string(r.lease.ID), "step": step, "tab": r.activeTab()}
 		if r.activeTab() == TabTests {
-			log.Info(op, "the merge's test gate is cut by the daemon's exit; the resumed merge runs it again from its start", fields)
+			log.Info(op, "the daemon's exit suspends the merge in its test gate; its run goes on on the test service, and the resumed merge watches it again", fields)
 		} else {
 			log.Info(op, "a merge is suspended at a stopping point by the daemon's exit; the next boot resumes it at the step it recorded", fields)
 		}

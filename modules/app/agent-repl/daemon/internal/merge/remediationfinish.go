@@ -402,12 +402,9 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 	if err != nil {
 		return err
 	}
-	released, err := o.deps.DB.ReleaseMediation(ctx, repo, m.OwedAt)
+	released, err := o.releaseCheck(ctx, repo, *m, MediationEscalated)
 	if err != nil {
 		return err
-	}
-	if released {
-		o.endChain(ctx, repo, *m, MediationEscalated)
 	}
 	o.deps.Log.Global().Error(opRemediationFinish, "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue advances", withField(withField(fields, "summary", summary), "released", released))
 	q, ok, err := o.checkedQueueOf(ctx, repo)

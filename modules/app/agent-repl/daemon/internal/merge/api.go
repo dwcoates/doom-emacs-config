@@ -41,6 +41,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/scriptrunner"
+	"agent-repld/internal/testsclient"
 	"agent-repld/internal/wsm"
 )
 
@@ -267,6 +268,10 @@ type Orchestrator interface {
 	// OweMediations records that the deploy that started AT owes a check in
 	// every repository that checks its deploys (mediation.go).
 	OweMediations(ctx context.Context, at time.Time) error
+	// ReleaseUnchangedDeploy releases, unchecked, the check the deploy that
+	// began AT owes in every repository that checks its deploys, when that
+	// deploy changed nothing and the check began its own chain.
+	ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error
 	// Mediate runs an intake round for every check owed, and takes up every
 	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.
@@ -681,10 +686,14 @@ type Deps struct {
 	// TestMetricsRoot is the metrics root every gate's test runner pushes its
 	// tests' times under (gateArgv); empty when the daemon records no metrics.
 	TestMetricsRoot string
-	// TestRunner runs the test gate. Injected so the gate is exercised against
-	// a scripted script rather than the repository's real suite: GIT IS NEVER
-	// CALLED DURING TESTING and neither is the real roster.
+	// TestRunner runs a remediation's full-suite gate. Injected so the gate is
+	// exercised against a scripted script rather than the repository's real
+	// suite: GIT IS NEVER CALLED DURING TESTING and neither is the real roster.
 	TestRunner ScriptRunner
+	// Tests is the test service every queue gate runs on, so a daemon deploy
+	// never cuts one (testsclient): the gate starts its run there, records the
+	// run's id in its progress, and a resumed merge watches the same run.
+	Tests GateService
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter
@@ -925,6 +934,14 @@ type ScriptRunner interface {
 	// each line to onLine as it is written, so the gate follows its suites
 	// live and the governor learns a gate's processor cost.
 	RunLinesMeasured(ctx context.Context, dir string, argv []string, onLine func(string)) (scriptrunner.Run, error)
+}
+
+// GateService is the slice of the test service a queue gate drives
+// (testsclient.Client).
+type GateService interface {
+	Start(ctx context.Context, spec testsclient.Spec) (string, error)
+	Watch(ctx context.Context, run string, from uint64, onLine func(number uint64, text string)) (testsclient.End, error)
+	Stop(ctx context.Context, run string) error
 }
 
 // HookScriptRunner runs one script hook: argv in dir with the options' added
