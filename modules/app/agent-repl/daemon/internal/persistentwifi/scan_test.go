@@ -192,3 +192,29 @@ func TestAnAuthorizeLaunchThatFailsIsAnError(t *testing.T) {
 		t.Fatalf("asked records = %+v, want none for a launch that failed", asked)
 	}
 }
+
+func TestHelperLaunch(t *testing.T) {
+	cases := []struct {
+		name string
+		wait helperWait
+		verb string
+		want string
+	}{
+		{name: "a scan waits for its answer", wait: helperWaits, verb: "scan", want: argScan + "/f"},
+		{name: "an authorize is launched and left", wait: helperLeftRunning, verb: "authorize", want: argAuthorize + "/f"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			tools := Tools{Open: "/t/open", WifiApp: "/t/AgentReplWifi.app"}
+
+			// Act
+			got := strings.Join(helperLaunch(tools, tc.wait, tc.verb, "/f"), " ")
+
+			// Assert: the very argv every controller launch is scripted against.
+			if got != tc.want {
+				t.Fatalf("helperLaunch = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

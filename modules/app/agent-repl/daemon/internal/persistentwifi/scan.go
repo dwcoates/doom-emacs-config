@@ -67,6 +67,27 @@ func (s wifiScan) sees(name string) bool {
 // Settings, Privacy & Security, Location Services.
 var errScanUnauthorized = errors.New("agent-repl's Wi-Fi helper is not allowed Location Services, so no network can be named; allow it in System Settings > Privacy & Security > Location Services")
 
+// helperWait says whether a helper launch waits for the helper to exit.
+type helperWait bool
+
+const (
+	// helperWaits is a verb whose answer the launch waits for (`open -W`).
+	helperWaits helperWait = true
+	// helperLeftRunning is a verb that waits on the owner, launched and left.
+	helperLeftRunning helperWait = false
+)
+
+// helperLaunch is the one argv that runs the Wi-Fi helper's VERB, answering in
+// OUT: a fresh instance (-n) in the background (-g), launched by `open` so
+// macOS attributes the permission to the helper's own bundle.
+func helperLaunch(tools Tools, wait helperWait, verb, out string) []string {
+	argv := []string{tools.Open}
+	if wait {
+		argv = append(argv, "-W")
+	}
+	return append(argv, "-n", "-g", "-a", tools.WifiApp, "--args", verb, "--out", out)
+}
+
 // scanWifi runs one scan, bounded by scanBound. A scan that could not run,
 // did not answer in time, failed, or names no network for want of the
 // permission is an error naming why. It runs OFF the lock.
@@ -79,7 +100,7 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
 	defer cancel()
 	start := c.clock.Now()
-	_, err := run(bounded, c.runner, c.cfg.Tools.Open, "-W", "-n", "-g", "-a", c.cfg.Tools.WifiApp, "--args", "scan", "--out", out)
+	_, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperWaits, "scan", out)...)
 	took := c.clock.Now().Sub(start)
 	switch {
 	case ctx.Err() != nil:
@@ -140,7 +161,7 @@ func (c *Controller) askAuthorization(ctx context.Context) {
 	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
 	defer cancel()
 	fields := dlog.Context{"app": c.cfg.Tools.WifiApp, "answer": out}
-	if _, err := run(bounded, c.runner, c.cfg.Tools.Open, "-n", "-g", "-a", c.cfg.Tools.WifiApp, "--args", "authorize", "--out", out); err != nil {
+	if _, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperLeftRunning, "authorize", out)...); err != nil {
 		c.log.Error(opFailover, "could not ask macOS for the Wi-Fi helper's Location Services permission", dlog.WithCause(fields, err))
 		return
 	}
