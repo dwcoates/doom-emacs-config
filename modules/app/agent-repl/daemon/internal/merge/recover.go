@@ -219,7 +219,10 @@ func (o *orchestrator) recoverWaiting(ctx context.Context, repo wsm.RepoKey, ent
 // no resume adopts the lease, and the pump's every admission of it at the
 // head is refused by it, stalling the whole queue. Every taker of a waiting
 // entry (the boot, a handover's take-back, a review) comes through here, so
-// a merge lease no live run of this daemon holds is always a dead process's.
+// a merge lease no live run of this daemon holds is always a dead process's,
+// or an outgoing daemon's that already let go: a handover drains its merges
+// before its exit begins (rollout's handover), and the takeover that reviews
+// the queues follows that exit.
 // A lease of any other holder is not the merge's to judge and is left to its
 // own owner.
 func (o *orchestrator) releaseWaitingRebaseLease(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) error {

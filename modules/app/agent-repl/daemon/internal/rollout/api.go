@@ -484,6 +484,12 @@ type MergeMover interface {
 	// at its place in line: the workspace waits on this daemon for its work
 	// to end, and its merge must not hold the queue the successor serves.
 	ReturnPausedMerges(ctx context.Context, ws ids.WorkspaceID) error
+	// Drain suspends every merge this daemon still runs and waits, within
+	// its own bound, for each to let go. The handover asks it before its
+	// exit: a merge of a workspace no transfer moved (one with no session)
+	// is still running here, and the successor takes over -- and reviews
+	// every queue -- the moment this daemon's shutdown begins.
+	Drain(ctx context.Context)
 }
 
 // QueuedCreateRecovery takes up the creates a previous daemon held for the

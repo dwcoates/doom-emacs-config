@@ -633,6 +633,16 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 	// no process either way.
 	c.standDownTheUntransferred(ctx, plan.untransferable)
 
+	// THE MERGES STILL RUNNING HERE LET GO BEFORE THE EXIT BEGINS. A
+	// workspace no transfer moved keeps its merge here (a waiting member's
+	// background rebase among them), and the successor takes over the moment
+	// this daemon's shutdown begins: its queue review then read a lease this
+	// daemon's live rebase still held as a dead process's and released it
+	// under the rebase (2026-11-16, linux-runtime-port: "lease ... not
+	// found" at the rebase's own release). Drained here, every lease such a
+	// merge holds is given back, or left to its recorded resume, before the
+	// successor can read it. The teardown's own drain then finds nothing.
+	c.deps.Merges.Drain(context.WithoutCancel(ctx))
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
 	if err := c.deps.Exit(ctx); err != nil {
 		c.log.Error(opHandover, "the orderly exit could not be started", dlog.WithCause(fields, err))

@@ -1741,6 +1741,13 @@ func (f *fakeMerges) ReturnPausedMerges(_ context.Context, ws ids.WorkspaceID) e
 	return f.returnErr
 }
 
+func (f *fakeMerges) Drain(context.Context) {
+	f.order.record("drain_merges")
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, "drain")
+}
+
 func (f *fakeMerges) ReviewQueues(context.Context) error {
 	f.order.record("review_queues")
 	f.mu.Lock()
