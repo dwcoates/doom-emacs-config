@@ -85,7 +85,7 @@ func TestAScanThatOutlivesItsBoundIsCutAndSaysSo(t *testing.T) {
 	_, err := h.c.scanWifi(context.Background())
 
 	// Assert
-	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not answer within 1ms (measured 3.9s)") {
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not answer within 1ms (measured 7.8s)") {
 		t.Fatalf("scanWifi error = %v, want the bound and its measurement named", err)
 	}
 }
@@ -144,6 +144,7 @@ func TestAScanOfAStandingNeverAskedForAsksOnce(t *testing.T) {
 		{name: "a standing never asked for is asked for", standing: "not_determined", scans: 1, wantAsked: 1},
 		{name: "a second scan asks no more", standing: "not_determined", scans: 2, wantAsked: 1},
 		{name: "a denied standing is the owner's answer and is not asked again", standing: "denied", scans: 1, wantAsked: 0},
+		{name: "a standing whose ask waits on the owner is not asked again", standing: "awaiting_owner", scans: 1, wantAsked: 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -235,5 +236,57 @@ func TestAStandingForgottenAfterAnAllowedScanIsAskedForAgain(t *testing.T) {
 	// Assert
 	if got := h.authorizeCalls(); len(got) != 2 {
 		t.Fatalf("authorize launches = %v, want one per standing never asked for", got)
+	}
+}
+
+func TestStopAsks(t *testing.T) {
+	// argv is the one pkill StopAsks runs against the helper at /t.
+	const argv = `/t/pkill -f ^/t/AgentReplWifi\.app/Contents/MacOS/agent-repl-wifi authorize( |$)`
+	cases := []struct {
+		name        string
+		answer      answer
+		wantStopped bool
+		wantErr     string
+	}{
+		{name: "an ask that was waiting is stopped", answer: answer{code: 0}, wantStopped: true},
+		{name: "no ask waiting stops nothing", answer: answer{code: 1}},
+		{name: "a pkill that failed says how", answer: answer{out: "pkill: bad pattern\n", code: 2}, wantErr: "pkill exited 2: pkill: bad pattern"},
+		{name: "a pkill that could not run says why", answer: answer{err: errors.New("no such file")}, wantErr: "pkill could not be run: no such file"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r := newFakeRunner(t).on(argv, tc.answer)
+
+			// Act
+			stopped, err := StopAsks(context.Background(), r, Tools{Pkill: "/t/pkill", WifiApp: "/t/AgentReplWifi.app"})
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("StopAsks error = %v, want one saying %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || stopped != tc.wantStopped {
+				t.Fatalf("StopAsks = %v, %v, want %v", stopped, err, tc.wantStopped)
+			}
+			if got := r.ran(); len(got) != 1 || got[0] != argv {
+				t.Fatalf("ran %q, want the one pkill %q", got, argv)
+			}
+		})
+	}
+}
+
+func TestAStopAsksThatOutlivesItsBoundSaysSo(t *testing.T) {
+	// Arrange
+	r := newFakeRunner(t).hangPrefix("/t/pkill")
+
+	// Act
+	_, err := StopAsks(context.Background(), r, Tools{Pkill: "/t/pkill", WifiApp: "/t/AgentReplWifi.app"})
+
+	// Assert
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not end within 40ms (measured 17ms)") {
+		t.Fatalf("StopAsks error = %v, want the bound and its measurement named", err)
 	}
 }

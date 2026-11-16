@@ -240,6 +240,10 @@ type Deps struct {
 	Workspaces func(ctx context.Context) ([]ids.WorkspaceID, error)
 	Clients    Clients
 	Services   Services
+	// StopWifiAsks stops the Wi-Fi helper's asks still running from the
+	// build an install just replaced, and reports whether one was
+	// (persistentwifi.StopAsks). REQUIRED when Live names a helper.
+	StopWifiAsks func(ctx context.Context) (bool, error)
 	// ReportDir is where the services write their build reports.
 	ReportDir string
 	// Alive reports whether a process is running; nil is the kernel's answer.
@@ -335,6 +339,8 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: this daemon's own build is required")
 	case deps.StagingRoot == "" || deps.ReportDir == "":
 		return nil, errors.New("deploy: the staging root and the report directory are required")
+	case deps.Live.WifiApp != "" && deps.StopWifiAsks == nil:
+		return nil, errors.New("deploy: the Wi-Fi helper's ask stopper is required where a helper is installed")
 	}
 	if deps.Clock == nil {
 		deps.Clock = rollout.SystemClock{}
@@ -473,7 +479,7 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
 	installing := d.deps.Clock.Now()
-	err = d.install(Staged{Dir: staging}, fresh, nonce, prev)
+	err = d.install(ctx, Staged{Dir: staging}, fresh, nonce, prev)
 	d.timePhase(restarttiming.DeployInstall, installing, err)
 	if err != nil {
 		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", dlog.WithCause(fields, err))
@@ -762,7 +768,7 @@ func (d *Deployer) hashStaged(s Staged) (builds, error) {
 // install puts every staged artifact whose content differs from the installed
 // one into place, KEEPING what stood at every path it writes in prev first, so
 // a later failure can roll it back. Nothing has been restarted when it runs.
-func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous) error {
+func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce string, prev *previous) error {
 	live := d.deps.Live
 	in := installer{nonce: nonce, log: d.log}
 	type artifact struct {
@@ -833,10 +839,23 @@ func (d *Deployer) install(s Staged, fresh builds, nonce string, prev *previous)
 	}
 	if live.WifiApp != "" {
 		// THE HELPER RIDES WITH THE DAEMON, its one user, as shim-lock rides
-		// with the shim: no process runs it standing, so nothing restarts.
+		// with the shim: no process runs it standing, so nothing restarts,
+		// save an ask of the replaced build still waiting on the owner, which
+		// is stopped: it holds the bundle's one Location Services client.
 		artifacts = append(artifacts, artifact{component: ComponentDaemon, name: "wifi-helper", fresh: fresh.wifi,
 			installed: func() (string, error) { return wifiSourceHash(live.WifiApp) }, install: func() error {
-				return in.dir(s.WifiApp(), live.WifiApp)
+				if err := in.dir(s.WifiApp(), live.WifiApp); err != nil {
+					return err
+				}
+				stopped, err := d.deps.StopWifiAsks(ctx)
+				if err != nil {
+					return fmt.Errorf("stop the replaced Wi-Fi helper's waiting asks: %w", err)
+				}
+				if stopped {
+					d.log.Info(opInstall, "stopped the replaced Wi-Fi helper's ask waiting on the owner; the next scan asks again from the installed helper",
+						dlog.Context{"app": live.WifiApp})
+				}
+				return nil
 			}, writes: []string{live.WifiApp}, tree: true})
 	}
 	for _, a := range artifacts {

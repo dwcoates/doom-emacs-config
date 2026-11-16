@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strings"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -20,19 +22,23 @@ import (
 // the helper's own, and answering in a file, since `open` hands back no
 // output.
 
-// scanBound bounds one scan: the helper's launch and its CoreWLAN scan.
-// Measured 3.9s (2026-11-14, `open -W` of the helper on this host, lid open);
-// the bound is 2.5 times that.
-const scanBound = 10 * time.Second
+// scanBound bounds one scan: the helper's launch, its wait for the client
+// seat (wifi-helper/seats.swift) behind at most one scan ahead of it, and its
+// own CoreWLAN scan. One scan measured 3.9s (2026-11-14, `open -W` of the
+// helper on this host, lid open), so two back to back are 7.8s; the bound is
+// 2.5 times that. The helper bounds its own seat wait inside it (seatBound,
+// 9s), so a helper always answers before this bound cuts it.
+const scanBound = 20 * time.Second
 
 // scanMeasured is the scan's measured healthy time scanBound is sized from.
-const scanMeasured = "3.9s"
+const scanMeasured = "7.8s"
 
 // wifiScan is the helper's answer (wifi-helper/main.swift's Answer).
 type wifiScan struct {
 	// Authorization is the helper's Location Services standing:
 	// "authorized", or why it names no networks ("not_determined",
-	// "denied", "restricted").
+	// "denied", "restricted", or "awaiting_owner": an ask holds the helper's
+	// one Location Services seat, waiting on the owner's answer).
 	Authorization string `json:"authorization"`
 	// Current is the joined network's name; empty while none is joined or
 	// names are not readable.
@@ -77,6 +83,12 @@ const (
 	helperLeftRunning helperWait = false
 )
 
+// The helper's verbs (wifi-helper/main.swift).
+const (
+	verbScan      = "scan"
+	verbAuthorize = "authorize"
+)
+
 // helperLaunch is the one argv that runs the Wi-Fi helper's VERB, answering in
 // OUT: a fresh instance (-n) in the background (-g), launched by `open` so
 // macOS attributes the permission to the helper's own bundle.
@@ -100,7 +112,7 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
 	defer cancel()
 	start := c.clock.Now()
-	_, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperWaits, "scan", out)...)
+	_, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperWaits, verbScan, out)...)
 	took := c.clock.Now().Sub(start)
 	switch {
 	case ctx.Err() != nil:
@@ -167,11 +179,45 @@ func (c *Controller) askAuthorization(ctx context.Context) {
 	bounded, cancel := context.WithTimeout(ctx, c.scanBound)
 	defer cancel()
 	fields := dlog.Context{"app": c.cfg.Tools.WifiApp, "answer": out}
-	if _, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperLeftRunning, "authorize", out)...); err != nil {
+	if _, err := run(bounded, c.runner, helperLaunch(c.cfg.Tools, helperLeftRunning, verbAuthorize, out)...); err != nil {
 		c.log.Error(opFailover, "could not ask macOS for the Wi-Fi helper's Location Services permission", dlog.WithCause(fields, err))
 		return
 	}
 	c.log.Info(opFailover, "asked macOS for the Wi-Fi helper's Location Services permission; its prompt waits for the owner", fields)
+}
+
+// stopAsksBound bounds StopAsks' pkill. Measured 17ms at worst over 30 runs
+// (2026-11-16, pkill of a pattern matching nothing on this host); the bound is
+// 2.5 times that.
+const stopAsksBound = 40 * time.Millisecond
+
+// StopAsks stops every authorize ask of the helper app installed in TOOLS
+// (TOOLS.WifiApp) that is still running, and reports whether one was. The
+// deploy calls it once it installed a rebuilt helper: an ask waits on the
+// owner unbounded and holds the bundle's one Location Services client, so an
+// ask of the build the install replaced (whose answer would go to the old
+// signature) kept every scan of the installed build from hearing its
+// standing (2026-11-16 02:53). The next scan asks again, from the installed
+// helper. A scan is never stopped: it ends on its own within scanBound.
+func StopAsks(ctx context.Context, r Runner, tools Tools) (bool, error) {
+	bounded, cancel := context.WithTimeout(ctx, stopAsksBound)
+	defer cancel()
+	exe := filepath.Join(tools.WifiApp, wifiAppExecutable)
+	pattern := "^" + regexp.QuoteMeta(exe) + " " + verbAuthorize + "( |$)"
+	out, code, err := r.Run(bounded, runDir, []string{tools.Pkill, "-f", pattern})
+	switch {
+	case bounded.Err() != nil:
+		return false, fmt.Errorf("pkill of the Wi-Fi helper's asks did not end within %s (measured 17ms): %w", stopAsksBound, bounded.Err())
+	case err != nil:
+		return false, fmt.Errorf("pkill could not be run: %w", err)
+	case code == 0:
+		return true, nil
+	case code == 1:
+		// pkill answers 1 when nothing matched: no ask was waiting.
+		return false, nil
+	default:
+		return false, fmt.Errorf("pkill exited %d: %s", code, strings.TrimSpace(out))
+	}
 }
 
 // recordScanCauseLocked records a scan's failure once per distinct cause

@@ -1774,6 +1774,98 @@ func TestADeployInstallsAWifiHelperBuiltFromOtherSources(t *testing.T) {
 	}
 }
 
+func TestADeployThatInstallsAWifiHelperStopsTheReplacedBuildsAsks(t *testing.T) {
+	cases := []struct {
+		name       string
+		stopped    bool
+		wantRecord bool
+	}{
+		{name: "an ask that was waiting is stopped and recorded", stopped: true, wantRecord: true},
+		{name: "no ask waiting records nothing", stopped: false, wantRecord: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, withWifiHelper(t))
+			h.wifiAsks.stopped = tc.stopped
+
+			// Act
+			if _, err := h.d.Deploy(context.Background(), false); err != nil {
+				t.Fatalf("Deploy: %v", err)
+			}
+
+			// Assert
+			if h.wifiAsks.calls != 1 {
+				t.Fatalf("StopWifiAsks calls = %d, want one after the helper's install", h.wifiAsks.calls)
+			}
+			var stopped []map[string]any
+			for _, r := range records(h.log, opInstall) {
+				if r.Level == "info" && strings.HasPrefix(r.Message, "stopped the replaced Wi-Fi helper's ask waiting on the owner") {
+					stopped = append(stopped, r.Context)
+				}
+			}
+			if (len(stopped) == 1) != tc.wantRecord || (tc.wantRecord && stopped[0]["app"] != h.live.WifiApp) {
+				t.Fatalf("stopped records = %+v, want one naming the helper: %v", stopped, tc.wantRecord)
+			}
+		})
+	}
+}
+
+func TestADeployThatLeavesTheWifiHelperStopsNoAsk(t *testing.T) {
+	// Arrange: the live helper is already the fresh build.
+	h := newHarness(t, withWifiHelper(t))
+	writeWifiApp(t, h.live.WifiApp, theFresh.wifi)
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert: an ask of the standing build is the one the owner may answer.
+	if h.wifiAsks.calls != 0 {
+		t.Fatalf("StopWifiAsks calls = %d, want none for a helper left standing", h.wifiAsks.calls)
+	}
+}
+
+func TestAWifiAskThatCannotBeStoppedFailsTheInstallAndPutsTheHelperBack(t *testing.T) {
+	// Arrange
+	h := newHarness(t, withWifiHelper(t))
+	h.wifiAsks.err = errors.New("pkill exited 2: bad pattern")
+
+	// Act
+	_, err := h.d.Deploy(context.Background(), false)
+
+	// Assert
+	var failed *InstallFailed
+	if !errors.As(err, &failed) || failed.Component != ComponentDaemon || !strings.Contains(failed.Detail, "stop the replaced Wi-Fi helper's waiting asks: pkill exited 2") {
+		t.Fatalf("Deploy = %v, want the helper's install failure naming the stop", err)
+	}
+	if got := h.wifiHash(t); got != theOld.wifi {
+		t.Fatalf("live helper sources = %q, want the previous %q restored", got, theOld.wifi)
+	}
+	if !logged(h.log, "error", opInstall, "could not install the fresh build") {
+		t.Fatalf("records = %+v, want the failure at ERROR", h.log.Records())
+	}
+	if len(h.services.Calls()) != 0 || len(h.rollout.handovers) != 0 {
+		t.Fatalf("services %v, handovers %v: want nothing restarted after a failed install", h.services.Calls(), h.rollout.handovers)
+	}
+}
+
+func TestNewRefusesAWifiHelperWithNoAskStopper(t *testing.T) {
+	// Arrange
+	h := newHarness(t, withWifiHelper(t))
+	deps := h.d.deps
+	deps.StopWifiAsks = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "ask stopper is required") {
+		t.Fatalf("New = %v, want the missing ask stopper refused", err)
+	}
+}
+
 func TestADeployLeavesAWifiHelperBuiltFromTheSameSources(t *testing.T) {
 	// Arrange: the live helper is built from the fresh sources but signed
 	// apart, as a rebuild would sign it.
