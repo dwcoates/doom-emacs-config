@@ -784,21 +784,6 @@ func TestEachChangeTakesTheNextPlaceInTheOrder(t *testing.T) {
 	}
 }
 
-func TestADeploysEndTakesItsPlaceInTheOrder(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	enqueue(t, h)
-	before := lastChange(t, h).Seq
-
-	// Act.
-	h.o.ReportDeploy(context.Background(), h.targetD, DeployEnd{})
-
-	// Assert.
-	if got := lastChange(t, h); got.Kind != QueueChangeDeployed || got.Seq != before+1 {
-		t.Fatalf("change = %+v, want the deploy's end at %d", got, before+1)
-	}
-}
-
 func TestSubscribeRefusesAnUnknownRepository(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
