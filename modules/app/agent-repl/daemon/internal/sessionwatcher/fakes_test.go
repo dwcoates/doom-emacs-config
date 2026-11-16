@@ -2420,14 +2420,21 @@ func (h *harness) relink(t *testing.T) *shimv1.WatchAgentRequest {
 	t.Helper()
 	h.session.fail(errors.New("connection reset"))
 	h.rec.until(t, "sidebar.OnLink")
+	// THE SEVERING IS RAISED BEFORE THE LINK IS PUBLISHED (setLinkLocked),
+	// so the sidebar's link edge read above settles whether one was.
+	h.w.mu.Lock()
+	severed := h.w.severingRaised
+	h.w.mu.Unlock()
 	h.client.linkBack()
 	h.session = h.client.nextSessionOpen(t)
 	open := h.client.nextAgentOpenFor(t, "")
 	h.main, h.mainReq = open.stream, open.req
-	// THE SEVERING ENDS WITH THE RE-OPENED WATCH (linkRestoredLocked): its
-	// telling is awaited here, so it never lands among what a test routes
-	// next.
-	h.rec.until(t, "lifecycle.OnLinkRestored")
+	// A RAISED SEVERING ENDS WITH THE RE-OPENED WATCH (linkRestoredLocked):
+	// its telling is awaited here, so it never lands among what a test
+	// routes next.
+	if severed {
+		h.rec.until(t, "lifecycle.OnLinkRestored")
+	}
 	return open.req
 }
 
