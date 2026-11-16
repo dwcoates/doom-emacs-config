@@ -241,6 +241,19 @@ func (r *Restarter) ensureBothLoaded(ctx context.Context) (storeBootstrapped, si
 // it is out.
 func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
 	fields := dlog.Context{s.Short: s.Label}
+	// A SERVICE THE MANAGER DOES NOT HOLD CANNOT BE KICKSTARTED (2026-11-16:
+	// the test service's first deploy failed with launchctl exit 113 and
+	// rolled the whole deploy back). It is loaded from its definition, written
+	// when missing (ensureLoaded), and a service just started from the
+	// installed build needs no restart.
+	bootstrapped, err := r.ensureLoaded(ctx, s.Label, fields)
+	if err != nil {
+		return err
+	}
+	if bootstrapped {
+		r.Log.Info(opServices, s.Display+" was not loaded; it was started from the installed build, so it is not restarted", fields)
+		return nil
+	}
 	if err := r.Services.Restart(ctx, s.Label); err != nil {
 		r.failed("the "+s.Short+" restart failed", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", s.Label, err)

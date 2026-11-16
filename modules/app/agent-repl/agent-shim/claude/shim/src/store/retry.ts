@@ -17,17 +17,34 @@
  * the identical answer. Retrying those would turn a correct refusal into a
  * multi-second stall.
  *
- * THE SCHEDULE IS THE WRITER'S. One policy for the record plane, so a store
- * outage looks the same whichever half of it met the store first.
+ * THE STEPS ARE THE WRITER'S, THE LENGTH IS THE READ HALF'S OWN
+ * ({@link READ_RETRY_POLICY}): a read cannot be held the way a write is.
  */
 import { bindLog } from "../log.js";
 import {
-  DEFAULT_RETRY_POLICY,
   PersistenceError,
   type PersistenceRetryPolicy,
 } from "./persistence.js";
 
 const LOGGER = bindLog({ component: "shim-store-retry", operation: "shim.store.retry" });
+
+/**
+ * The read half's schedule: the writer's backoff steps, then 3s steps, giving
+ * up only after about 25s of backoff.
+ *
+ * SIZED TO THE STORE'S RESTART, NOT THE WRITER'S. A write that outlives its
+ * schedule is HELD and retried; a read that outlives its schedule fails its
+ * caller. launchd relaunches a service no sooner than its ThrottleInterval
+ * (10s, bin/requirements.sh SERVICE_RESTART_SECONDS) after its last start, so
+ * two store restarts close together leave the socket down for up to 10s:
+ * measured 8.0s on 2026-11-16 (19:39:58.62 to 19:40:06.65, a rollback 2s
+ * after the deploy's own restart), when the writer's 4s schedule gave up every
+ * open read. 25s is 2.5 times that 10s bound.
+ */
+export const READ_RETRY_POLICY: Pick<PersistenceRetryPolicy, "backoffMs" | "maxAttempts"> = {
+  backoffMs: [50, 200, 800, 3000],
+  maxAttempts: 12,
+};
 
 /** The backoff, taken without holding the process open for it. */
 const defaultSleep = (ms: number): Promise<void> =>
@@ -51,7 +68,7 @@ export function isRetryableRead(error: unknown): boolean {
 /** What a retried read needs beyond the read itself. */
 export interface ReadRetryOptions {
   /**
-   * The schedule. Defaults to {@link DEFAULT_RETRY_POLICY}. A read GIVES UP at
+   * The schedule. Defaults to {@link READ_RETRY_POLICY}. A read GIVES UP at
    * `maxAttempts`, so the write half's held-batch cadence is no part of it.
    */
   readonly retry?: Pick<PersistenceRetryPolicy, "backoffMs" | "maxAttempts">;
@@ -72,7 +89,7 @@ export async function readWithRetry<T>(
   read: () => Promise<T>,
   options: ReadRetryOptions = {},
 ): Promise<T> {
-  const policy = options.retry ?? DEFAULT_RETRY_POLICY;
+  const policy = options.retry ?? READ_RETRY_POLICY;
   const sleep = options.sleep ?? defaultSleep;
   for (let attempt = 1; ; attempt += 1) {
     try {

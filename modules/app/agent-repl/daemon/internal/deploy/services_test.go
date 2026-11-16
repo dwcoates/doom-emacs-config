@@ -1080,8 +1080,8 @@ func TestRestartStandaloneKickstartsItAlone(t *testing.T) {
 					}
 					return
 				}
-				if calls := h.services.Calls(); err != nil || len(calls) != 1 || calls[0] != "restart "+sv.Label {
-					t.Fatalf("RestartStandalone = %v, calls = %v, want one %s kickstart", err, calls, sv.Label)
+				if acts := h.acts(); err != nil || len(acts) != 1 || acts[0] != "restart "+sv.Label {
+					t.Fatalf("RestartStandalone = %v, acts = %v, want one %s kickstart", err, acts, sv.Label)
 				}
 			})
 		}
@@ -1229,5 +1229,37 @@ func TestEnsureLoadedWritesAMissingDefinitionBeforeStartingTheService(t *testing
 				t.Fatalf("records = %+v, want %s %q", h.log.Records(), tc.level, tc.wantLog)
 			}
 		})
+	}
+}
+
+func TestRestartStandaloneLoadsAServiceTheManagerDoesNotHold(t *testing.T) {
+	cases := []struct {
+		name      string
+		defineErr error
+		wantActs  func(Standalone) []string
+		wantErr   bool
+	}{
+		{name: "an unloaded one with no definition is defined and started, never kickstarted",
+			wantActs: func(sv Standalone) []string { return []string{"define " + sv.Label, "start " + sv.Label} }},
+		{name: "one whose definition cannot be written is neither started nor kickstarted", defineErr: errors.New("define-service exited 1"),
+			wantActs: func(sv Standalone) []string { return []string{"define " + sv.Label} }, wantErr: true},
+	}
+	for _, sv := range Standalones {
+		for _, tc := range cases {
+			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
+				// Arrange
+				h := newRestarter(t)
+				h.services.loaded[sv.Label] = false
+				h.defineErr = tc.defineErr
+
+				// Act
+				err := h.r.RestartStandalone(context.Background(), sv)
+
+				// Assert
+				if (err != nil) != tc.wantErr || fmt.Sprint(h.acts()) != fmt.Sprint(tc.wantActs(sv)) {
+					t.Fatalf("RestartStandalone = %v, acts %v; want error %v and acts %v", err, h.acts(), tc.wantErr, tc.wantActs(sv))
+				}
+			})
+		}
 	}
 }
