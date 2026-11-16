@@ -720,31 +720,6 @@ func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	return f, selfRepo, source
 }
 
-// promptAwaitMergeLease blocks until the workspace's merge holds its lease and
-// has come to REST holding it, which is what a submission is refused against.
-//
-// WHY NOT THE MERGING ARM ALONE. `FooterStatus.merging` stands from the moment
-// the merge is put in line, before the queue pump has admitted anything and
-// before any lease exists, so every assertion past it would race a merge that
-// was still running.
-//
-// WHY CONFLICT RESOLUTION IS THE REST STATE. The fixture scripts a rebase
-// conflict, so the run opens a conflict section and then WAITS for the
-// resolution's turn to conclude -- and only the fake shim can conclude it.
-// The lease is held and no further git runs and no further record are owed
-// while it waits.
-func promptAwaitMergeLease(t *testing.T, f *fixture) {
-	t.Helper()
-	footer := f.d.WatchFooter(f.ws)
-	awaitFooter(t, f, footer, "the merge at rest in conflict resolution, lease held", func(v *frontendv1.FooterView) bool {
-		return v.GetStrip().GetStatus().GetMerging().GetConflictResolution() != nil
-	})
-	// The declared records are the evidence of the conflict the fixture
-	// scripts. They are declared HERE because reaching conflict resolution is
-	// what makes them certain rather than a matter of timing.
-
-}
-
 func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 	t.Parallel()
 	// Arrange: a prompt is held (turn in flight) BEFORE the merge begins.
@@ -763,22 +738,17 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 		t.Fatalf("FinishWorkspace = error %v, want the deploy enqueued", err)
 	}
 
-	// Assert: the held entry is unaffected. The read is a FRESH subscription
-	// taken once the merge holds its lease, not a wait for a further push on
-	// the standing one: the merge's start need not push the tray at all — the
-	// entry not moving is the whole point — and a late subscriber is replayed
-	// the current view, which is exactly the question being asked.
-	promptAwaitMergeLease(t, f)
-	got := harness.AwaitNext(t, f.d.Ctx(), f.d.WatchHolds(f.ws), "the tray a late subscriber is replayed")
-	entry := promptHeldEntry(got, turn2)
-	if entry == nil {
-		t.Fatalf("a prompt held before the merge began was dropped once the merge started: %v", got)
-	}
-	// The merge's lease stamps it: it waits for the merge, as a prompt
-	// submitted during the merge does.
-	if entry.GetMerge() == nil {
-		t.Fatalf("the pre-merge held entry = %v, want it held by the merge", entry)
-	}
+	// Assert: the held entry is unaffected, and the merge's lease stamps it:
+	// it waits for the merge, as a prompt submitted during the merge does.
+	// The stamp is the wait's REST: it stands for as long as the merge holds
+	// its lease, where the footer's conflict resolution stands only until the
+	// merge's own repair turn starts, the footer then drawing the turn (owner
+	// request, 2026-11-15), which a watch taken late under load missed
+	// (2026-11-16 gate, 5s granted of 29s wall).
+	awaitView(t, f, f.d.WatchHolds(f.ws), "the pre-merge held entry, stamped by the merge's lease", func(tray *frontendv1.FeedHeld) bool {
+		entry := promptHeldEntry(tray, turn2)
+		return entry != nil && entry.GetMerge() != nil
+	})
 }
 
 // ---------------------------------------------------------------------------
