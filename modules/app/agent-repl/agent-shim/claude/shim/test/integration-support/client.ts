@@ -382,6 +382,26 @@ export function remediationCompact(
   });
 }
 
+/**
+ * SummarizeConversation's `compact` of VENDOR_SESSION_ID under REMEDIATION's
+ * summarizer, as the daemon asks it before a start whose remediation is
+ * `compact`.
+ */
+export function summarizeCompact(
+  vendorSessionId: string,
+  remediation: conversationv1.SessionColdRemediation,
+): shimv1.SummarizeConversationRequest {
+  if (remediation.remediation.case !== "compact") {
+    throw new Error(`summarizeCompact needs a compact remediation, got ${remediation.remediation.case ?? "unset"}`);
+  }
+  return create(shimv1.SummarizeConversationRequestSchema, {
+    workspaceName: "parser-fix",
+    profile: { kind: { case: "agent", value: { standing: { kind: { case: "linkedWorkspace", value: {} } }, landing: { landing: { case: "throughQueue", value: {} } } } } },
+    summarizer: remediation.remediation.value,
+    use: { case: "compact", value: create(shimv1.SummarizeConversationCompactSchema, { vendorSessionId }) },
+  });
+}
+
 /** `conversation.v1.UserSaid` carrying one text block. */
 export function said(text: string): conversationv1.UserSaid {
   return create(conversationv1.UserSaidSchema, {

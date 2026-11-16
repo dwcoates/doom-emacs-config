@@ -337,6 +337,22 @@ export function sessionUpdate(frame: shimv1.WatchSessionResponse): conversationv
   return frame.frame.value;
 }
 
+/** SummarizeConversation's `compacted` success, or the wrong arm thrown. */
+export function conversationCompacted(
+  response: shimv1.SummarizeConversationResponse,
+): shimv1.SummarizeConversationCompacted {
+  if (response.result.case !== "success" || response.result.value.use.case !== "compacted") {
+    throw wrongArm(
+      "SummarizeConversation",
+      response.result.case === "failure"
+        ? `failure.${response.result.value.cause.case ?? "unset"}`
+        : `${response.result.case ?? "unset"}.${response.result.value?.use.case ?? "unset"}`,
+      response.result.case === "failure" ? response.result.value.detail : undefined,
+    );
+  }
+  return response.result.value.use.value;
+}
+
 /** The `SessionStarted` re-announcement a WatchSession frame carries. */
 export function sessionStartedFrame(
   frame: shimv1.WatchSessionResponse,
