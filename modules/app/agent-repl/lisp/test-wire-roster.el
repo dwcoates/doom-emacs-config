@@ -2270,6 +2270,14 @@ its place and since it joined."
                    (:arm :succeeded :value (:started-at-ms 1 :ended-at-ms 2))
                    (:arm :failed :value (:started-at-ms 1 :ended-at-ms 2))))))
 
+(ert-deftest agent-repl-test-wire-roster-a-held-merge-queue-stage-decodes ()
+  "A held stage decodes with its start and when it was held."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merge-queue-stage
+                             "{\"label\":\"tests\",\"round\":1,\"held\":{\"startedAtMs\":\"1\",\"heldSinceMs\":\"3\"}}")
+                            :state)
+                 '(:arm :held :value (:started-at-ms 1 :held-since-ms 3)))))
+
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-head-without-standing-is-a-breach ()
   "Where the head stands is never unset on the wire."
   (should (equal (agent-repl-test-wire-roster--breach

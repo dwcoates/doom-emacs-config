@@ -187,7 +187,16 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	for _, entry := range entries {
 		queue.Workspaces = append(queue.Workspaces, entry.Workspace)
 	}
-	line, err := o.rosterLine(ctx, inLine(entries), true)
+	// THE QUEUE'S HOLD IS AN INPUT OF THE VIEW (viewOf): read once, it draws
+	// the repository's status and every stage of the head alike.
+	queueHeld, err := o.queueHeld(ctx, repo)
+	if err != nil {
+		recordFailed(o.deps.Log.Global(), op, "could not read whether the merge queue is held, so the roster is not told the queue",
+			"the hold's read ended when its context was cancelled; the roster is not told the queue",
+			dlog.Context{"repo": string(repo), "entries": len(entries)}, err)
+		return
+	}
+	line, err := o.rosterLine(ctx, inLine(entries), true, queueHeld)
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges in line as the roster draws them, so the roster is not told the queue",
 			"the line's read ended when its context was cancelled; the roster is not told the queue",
@@ -195,7 +204,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 		return
 	}
 	queue.Line = line
-	remediating, err := o.rosterLine(ctx, outOfLine(entries), false)
+	remediating, err := o.rosterLine(ctx, outOfLine(entries), false, queueHeld)
 	if err != nil {
 		recordFailed(o.deps.Log.Global(), op, "could not resolve the merges remediating out of line as the roster draws them, so the roster is not told the queue",
 			"the remediating merges' read ended when its context was cancelled; the roster is not told the queue",
@@ -325,7 +334,7 @@ func (o *orchestrator) creditOf(ctx context.Context, entry wsm.MergeQueueEntry) 
 // are read from its ledger. Every merge carries the moment it took its slot, durable on its
 // queue entry (wsm.MergeQueueEntry.SlotSince). The merges remediating out of
 // line are drawn unheaded.
-func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed bool) ([]sidebar.QueueEntry, error) {
+func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntry, headed, queueHeld bool) ([]sidebar.QueueEntry, error) {
 	out := make([]sidebar.QueueEntry, 0, len(line))
 	for i, entry := range line {
 		c, err := o.creditOf(ctx, entry)
@@ -348,7 +357,7 @@ func (o *orchestrator) rosterLine(ctx context.Context, line []wsm.MergeQueueEntr
 			// attempt's rounds, which drawn under it read as steps it is taking
 			// (2026-11-15: a waiting head drew "rebasing" settled hours before).
 			if headed && i == 0 && drawn.Admitted {
-				stages, err := o.ledgerStages(ctx, entry.Workspace, lease)
+				stages, err := o.ledgerStages(ctx, entry.Workspace, lease, queueHeld)
 				if err != nil {
 					return nil, err
 				}
@@ -383,15 +392,16 @@ func (o *orchestrator) bubbleHeadID(ws ids.WorkspaceID, lease ids.LeaseID) *fron
 }
 
 // ledgerStages answers the stages of the merge running in WS under LEASE, read
-// from its ledger (stagesOf). A ledger not opened yet has no stages.
-func (o *orchestrator) ledgerStages(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID) ([]*frontendv1.RosterMergeQueueStage, error) {
+// from its ledger and drawn held when QUEUEHELD (stagesOf). A ledger not
+// opened yet has no stages.
+func (o *orchestrator) ledgerStages(ctx context.Context, ws ids.WorkspaceID, lease ids.LeaseID, queueHeld bool) ([]*frontendv1.RosterMergeQueueStage, error) {
 	ledgers, err := o.deps.DB.MergeLedger(ctx, ws)
 	if err != nil {
 		return nil, fmt.Errorf("merge: read the ledger of %s: %w", ws, err)
 	}
 	for _, ledger := range ledgers {
 		if ledger.Lease == lease {
-			return stagesOf(ledger.Intervals)
+			return stagesOf(ledger.Intervals, queueHeld)
 		}
 	}
 	return nil, nil

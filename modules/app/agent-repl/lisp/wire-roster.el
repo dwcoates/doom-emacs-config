@@ -1372,7 +1372,7 @@ as its queue holds it (an async merge's merge workspace)."
 
 (defconst agent-repl-wire--roster-merge-queue-instants
   '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms)
-    (sinceMs . :since-ms))
+    (sinceMs . :since-ms) (heldSinceMs . :held-since-ms))
   "Each epoch-ms field a merge queue's span messages carry, and its keyword.")
 
 (defun agent-repl-wire--decode-roster-merge-queue-span (message-name value fields)
@@ -1391,9 +1391,9 @@ Returns a plist keyed by each field's keyword
 (defun agent-repl-wire-decode-roster-merge-queue-stage (value)
   "Decode VALUE as `RosterMergeQueueStage'.
 A plist `(:label LABEL :round ROUND :state (:arm ARM :value SPAN))', ARM
-`:live', `:succeeded' or `:failed'."
+`:live', `:held', `:succeeded' or `:failed'."
   (let ((object (agent-repl-wire--object "RosterMergeQueueStage" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueStage" object '(label round live succeeded failed))
+    (agent-repl-wire--check-keys "RosterMergeQueueStage" object '(label round live succeeded failed held))
     (agent-repl-wire--decoded
      "RosterMergeQueueStage"
      (list :label (agent-repl-wire--decode-string "RosterMergeQueueStage" 'label object)
@@ -1405,7 +1405,9 @@ A plist `(:label LABEL :round ROUND :state (:arm ARM :value SPAN))', ARM
                      (succeeded :succeeded ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
                                                          "RosterMergeQueueStageSucceeded" v '(startedAtMs endedAtMs))))
                      (failed :failed ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
-                                                   "RosterMergeQueueStageFailed" v '(startedAtMs endedAtMs))))))))))
+                                                   "RosterMergeQueueStageFailed" v '(startedAtMs endedAtMs))))
+                     (held :held ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
+                                               "RosterMergeQueueStageHeld" v '(startedAtMs heldSinceMs))))))))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-head-merging (value)
   "Decode VALUE as `RosterMergeQueueHeadMerging'.

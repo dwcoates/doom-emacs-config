@@ -447,6 +447,11 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
     case "live":
       glyph.textContent = STATE_GLYPHS.live;
       break;
+    case "held":
+      // A HELD STAGE IS GREY AND STILL: its merge is suspended at it, or its
+      // queue holds every merge in it (frontend.v1.RosterMergeQueueStageHeld).
+      glyph.textContent = STATE_GLYPHS.live;
+      break;
     case "succeeded":
       glyph.textContent = STATE_GLYPHS.succeeded;
       el.title = formatElapsed(msOf(state.value.endedAtMs, `${path}.state.ended_at_ms`) - msOf(state.value.startedAtMs, `${path}.state.started_at_ms`));

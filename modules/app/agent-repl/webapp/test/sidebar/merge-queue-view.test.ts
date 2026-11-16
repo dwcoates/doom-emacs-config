@@ -492,14 +492,16 @@ describe("drawQueueControlLine", () => {
 });
 
 /** A stage of LABEL at ROUND in STATE, begun at START and ended at END. */
-function stage(label: string, state: "live" | "succeeded" | "failed", round = 1, start = 1_000n, end = 4_000n) {
+function stage(label: string, state: "live" | "held" | "succeeded" | "failed", round = 1, start = 1_000n, end = 4_000n) {
   return create(RosterMergeQueueStageSchema, {
     label,
     round,
     state:
       state === "live"
         ? { case: "live", value: { startedAtMs: start } }
-        : { case: state, value: { startedAtMs: start, endedAtMs: end } },
+        : state === "held"
+          ? { case: "held", value: { startedAtMs: start, heldSinceMs: end } }
+          : { case: state, value: { startedAtMs: start, endedAtMs: end } },
   });
 }
 
@@ -958,6 +960,7 @@ describe("drawRosterMergeQueueHead's refusals", () => {
 describe("drawRosterMergeQueueStage", () => {
   it.each([
     { name: "a live stage", state: "live" as const, glyph: STATE_GLYPHS.live },
+    { name: "a held stage", state: "held" as const, glyph: STATE_GLYPHS.live },
     { name: "a succeeded stage", state: "succeeded" as const, glyph: STATE_GLYPHS.succeeded },
     { name: "a failed stage", state: "failed" as const, glyph: STATE_GLYPHS.failed },
   ])("wears the bubble's glyph for $name", ({ state, glyph }) => {

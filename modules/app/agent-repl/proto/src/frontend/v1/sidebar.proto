@@ -1408,7 +1408,19 @@ message RosterMergeQueueStage {
     RosterMergeQueueStageLive live = 3;
     RosterMergeQueueStageSucceeded succeeded = 4;
     RosterMergeQueueStageFailed failed = 5;
+    // The stage would run but stands still: its merge is suspended at it, or
+    // its queue holds every merge in it (a pause, a handover, a deploy
+    // check). Drawn grey, never ticking as live.
+    RosterMergeQueueStageHeld held = 6;
   }
+}
+// The stage is held.
+message RosterMergeQueueStageHeld {
+  // When the stage began, epoch ms.
+  int64 started_at_ms = 1;
+  // When its merge was suspended at it, epoch ms; 0 when the queue's hold
+  // holds it, which names no instant of its own.
+  int64 held_since_ms = 2;
 }
 // The stage is running.
 message RosterMergeQueueStageLive {

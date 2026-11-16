@@ -8959,6 +8959,12 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    the check, the cross and the question mark keep the badge's size. */
 .merge-tab-glyph.is-live,
 #ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { font-size: 0.7em; }
+/* A HELD TAB'S DOT IS GREY AND STILL (owner ruling, 2026-11-16): its merge
+   is suspended at it, or its queue holds every merge in it, so nothing
+   breathes; it keeps the live dot's size, since it is the step that runs
+   next. */
+.merge-tab-glyph.is-held,
+#ws-sidebar .sb-mq-stage[data-state="held"] .sb-mq-stage-glyph { color: var(--muted); animation: none; font-size: 0.7em; }
 /* A replayed commit's badge (tab-strip.ts): its short hash at the duration's
    size, in a darker grey than the duration, beside a subject in the badge's
    own color. */
