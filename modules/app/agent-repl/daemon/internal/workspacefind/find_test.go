@@ -272,3 +272,61 @@ func TestFindOnRosterKeepsOnlyDrawnWorkspacesAndAnswersHowEachIsDrawn(t *testing
 		})
 	}
 }
+
+// loginFixture is a work repository (doom, routed to the login) and another
+// (other): a work workspace, its child in the other repository, an
+// unrelated workspace of the other repository, and a grandchild under the
+// child.
+func loginFixture() []wsm.Workspace {
+	work := record("work", "intake-routing", doom, 0)
+	child := record("child", "skill-script", other, 1)
+	child.Parent = &work.ID
+	unrelated := record("unrelated", "store-prune", other, 2)
+	grandchild := record("grandchild", "deep-fix", other, 3)
+	grandchild.Parent = &child.ID
+	return []wsm.Workspace{work, child, unrelated, grandchild}
+}
+
+func TestFindNarrowsToALogin(t *testing.T) {
+	tests := []struct {
+		name  string
+		repos map[wsm.RepoID]bool
+		want  []string
+	}{
+		{name: "no login narrows nothing", repos: nil, want: []string{"grandchild", "unrelated", "child", "work"}},
+		{name: "a login keeps its repository's workspaces and their children", repos: map[wsm.RepoID]bool{doom.ID: true}, want: []string{"child", "work"}},
+		{name: "a login routed no repository keeps nothing", repos: map[wsm.RepoID]bool{}, want: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			workspaces := loginFixture()
+
+			// Act
+			got, err := Find(workspaces, []wsm.Repository{doom, other}, nil, nil, Query{LoginRepos: tc.repos})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("Find: %v", err)
+			}
+			if !reflect.DeepEqual(ids(got), tc.want) {
+				t.Fatalf("found %v, want %v", ids(got), tc.want)
+			}
+		})
+	}
+}
+
+func TestFindByLoginPanicsOnAParentTheListingDoesNotHold(t *testing.T) {
+	// Arrange: a child whose parent is missing from the listing.
+	orphan := record("orphan", "lost", other, 0)
+	missing := wsm.WorkspaceID("gone")
+	orphan.Parent = &missing
+	defer func() {
+		if recover() == nil {
+			t.Fatalf("Find did not panic on a parent the listing does not hold")
+		}
+	}()
+
+	// Act
+	_, _ = Find([]wsm.Workspace{orphan}, []wsm.Repository{doom, other}, nil, nil, Query{LoginRepos: map[wsm.RepoID]bool{doom.ID: true}})
+}

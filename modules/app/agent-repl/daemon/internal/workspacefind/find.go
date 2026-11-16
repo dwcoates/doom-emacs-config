@@ -48,6 +48,10 @@ type Query struct {
 	CreatedBy *wsm.WorkspaceID
 	// OnRoster keeps only the workspaces the roster draws (Found.Roster set).
 	OnRoster bool
+	// LoginRepos keeps only the workspaces of these repositories (the ones
+	// routed to one login) plus the direct children of those workspaces, in
+	// any repository. nil narrows nothing; an empty set keeps nothing.
+	LoginRepos map[wsm.RepoID]bool
 }
 
 // Found is one workspace a find answered.
@@ -111,6 +115,10 @@ func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries m
 	for _, repo := range repositories {
 		repos[repo.ID] = repo
 	}
+	byID := make(map[wsm.WorkspaceID]wsm.Workspace, len(workspaces))
+	for _, ws := range workspaces {
+		byID[ws.ID] = ws
+	}
 	var matched []Found
 	for _, ws := range workspaces {
 		if !IsAgentWorkspace(ws) {
@@ -127,7 +135,7 @@ func Find(workspaces []wsm.Workspace, repositories []wsm.Repository, summaries m
 		if d, ok := drawn[ws.ID]; ok {
 			found.Roster = &d
 		}
-		if matches(found, q) {
+		if matches(found, q) && ofLogin(ws, byID, q.LoginRepos) {
 			matched = append(matched, found)
 		}
 	}
@@ -174,6 +182,25 @@ func matches(f Found, q Query) bool {
 		return false
 	}
 	return true
+}
+
+// ofLogin reports whether WS belongs to the login whose repositories are
+// REPOS: it is in one of them, or its parent (in BYID, the same listing) is.
+// A nil REPOS narrows nothing. A parent the listing does not hold is an
+// invariant violation (the registry's foreign key sets it NULL when the row
+// is forgotten) and panics.
+func ofLogin(ws wsm.Workspace, byID map[wsm.WorkspaceID]wsm.Workspace, repos map[wsm.RepoID]bool) bool {
+	if repos == nil || repos[ws.Repo] {
+		return true
+	}
+	if ws.Parent == nil {
+		return false
+	}
+	parent, ok := byID[*ws.Parent]
+	if !ok {
+		panic(fmt.Sprintf("workspacefind: workspace %s names parent %s, which the registry listing does not hold", ws.ID, *ws.Parent))
+	}
+	return repos[parent.Repo]
 }
 
 // inStanding reports whether WS is in STANDING.
