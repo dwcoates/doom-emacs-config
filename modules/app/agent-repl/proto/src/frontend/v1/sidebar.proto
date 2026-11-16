@@ -1128,6 +1128,10 @@ message RosterMergeQueueMediation {
     // A remediation workspace is fixing what the intake found
     // (`fixing reload`).
     RosterMergeQueueMediationFixing fixing = 4;
+    // A remediation or escalation workspace finished, and its fix is being
+    // gated, landed and deployed (`finishing reload`). The workspace itself
+    // is hidden meanwhile: this label is where it is shown.
+    RosterMergeQueueMediationFinishing finishing = 5;
   }
 }
 // Hot reloading.
@@ -1146,6 +1150,11 @@ message RosterMergeQueueMediationChecking {
 // Fixing reload.
 message RosterMergeQueueMediationFixing {
   // REQUIRED. What a click on the label selects: the remediation workspace.
+  RosterMergeQueueMediationTarget target = 1;
+}
+// Finishing reload.
+message RosterMergeQueueMediationFinishing {
+  // REQUIRED. What a click on the label selects: the finishing workspace.
   RosterMergeQueueMediationTarget target = 1;
 }
 // The workspace a click on the label selects, handed back unchanged in the
