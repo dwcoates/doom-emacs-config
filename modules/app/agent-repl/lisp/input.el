@@ -1451,7 +1451,16 @@ that asked for it."
 (defun agent-repl--input-rollback-offer (ws offer)
   "Act on the stop key's rollback OFFER for WS, `(:arm ARM :value V)'.
 ARM `:immediate' rolls the latest prompt back with V's token, at once;
-`:choose' opens the picker."
+`:choose' opens the picker.  A quit in the picker or its confirmation is
+the reader cancelling the rollback: it is recorded and said, never raised."
+  (condition-case nil
+      (agent-repl--input-rollback-offer-arm ws offer)
+    (quit
+     (agent-repl--info ws "elisp.input.rollback-dismissed ws=%s arm=%S" ws (plist-get offer :arm))
+     (message "agent-repl: rollback cancelled"))))
+
+(defun agent-repl--input-rollback-offer-arm (ws offer)
+  "Act on OFFER's arm for WS (`agent-repl--input-rollback-offer')."
   (pcase (plist-get offer :arm)
     (:immediate
      (when-let* ((endpoints (agent-repl--input-rollback-endpoints ws (list :offer :immediate))))

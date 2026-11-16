@@ -107,6 +107,7 @@
 (declare-function agent-repl-link-on-successor-accepted "agent-repl-daemon-link" (fn))
 (declare-function agent-repl--read-input-buffer "agent-repl-input" (ws))
 (declare-function agent-repl--input-rollback-offer "agent-repl-input" (ws offer))
+(declare-function agent-repl--defer-to-main-thread "agent-repl-core" (thunk))
 (declare-function agent-repl--input-string-parts "agent-repl-input" (text))
 (declare-function agent-repl--input-said "agent-repl-input" (parts))
 (declare-function agent-repl--input-parts-text "agent-repl-input" (parts))
@@ -884,8 +885,13 @@ surfaced loudly by the shared dispatcher."
           (let ((offer (plist-get (plist-get value :value) :rollback)))
             (agent-repl--info ws "elisp.verbs.interrupt-nothing-running ws=%s offer=%S"
                               ws (plist-get offer :arm))
+            ;; THE OFFER'S PICKER AND CONFIRMATION ARE READ IN THE COMMAND
+            ;; LOOP, never in this response callback: a minibuffer read
+            ;; inside a process sentinel turns the reader's escape into
+            ;; "error in process sentinel: quit".
             (if offer
-                (agent-repl--input-rollback-offer ws offer)
+                (agent-repl--defer-to-main-thread
+                 (lambda () (agent-repl--input-rollback-offer ws offer)))
               (message "agent-repl: nothing to interrupt"))))
          (:merge-queue-offered
           ;; THE STOP WAS ABOUT THE QUEUED MERGE: the daemon raised the
