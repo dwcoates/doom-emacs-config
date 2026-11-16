@@ -1,0 +1,58 @@
+// endpoint_watch_run.proto — WatchRun: a run's lines, then its end.
+
+syntax = "proto3";
+
+package testservice.v1;
+
+import "testservice/v1/run.proto";
+
+option go_package = "agentrepl/proto/testservice/v1;testservicev1";
+
+// Watches RUN from line FROM_LINE on. The stream sends every recorded line
+// from FROM_LINE in order, then each new one as the run writes it, and ends
+// with the run's end. A caller that watched before resumes from the line
+// after its last; one that never did, from line one.
+message WatchRunRequest {
+  // The run to watch. REQUIRED.
+  RunId run = 1;
+  // The first line wanted, from one; zero is one.
+  uint64 from_line = 2;
+}
+
+// One event of a watched run.
+message WatchRunResponse {
+  oneof event {
+    // A line the run wrote.
+    RunLine line = 1;
+    // The run's end, the stream's last event.
+    RunEnd ended = 2;
+    // The run cannot be watched; the stream's only event.
+    WatchRunFailure failure = 3;
+  }
+}
+
+// The run cannot be watched.
+message WatchRunFailure {
+  // A one-line account of the failure, for the caller's record.
+  string detail = 1;
+  oneof kind {
+    // A required field was missing or empty.
+    WatchRunInvalidRequest invalid_request = 2;
+    // The service holds no run of that id: never started here, or pruned.
+    WatchRunUnknownRun unknown_run = 3;
+    // The run's recorded output could not be read.
+    WatchRunStorageFailure storage_failure = 4;
+  }
+}
+
+// A required field was missing or empty.
+message WatchRunInvalidRequest {
+  // The field at fault, by its proto name.
+  string field = 1;
+}
+
+// The service holds no run of that id.
+message WatchRunUnknownRun {}
+
+// The run's recorded output could not be read.
+message WatchRunStorageFailure {}

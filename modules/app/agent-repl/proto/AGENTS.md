@@ -22,6 +22,7 @@ decision there stands unless the new record reopens it by name.
 | `store.v1` | `store/v1/` | the producer-side internal half: which plane observed a record, the store's write identity, anything a producer could not convert | shim, sidecar, store ONLY |
 | `state.v1` | `state/v1/` | daemon-internal only, including the schema the daemon marshals into its own SQLite store | daemon |
 | `zettel.v1` | `zettel/v1/` | the zettel service's API: the knowledge graph's threads, nodes, exchanges and sightings (`service Zettel`). The daemon is its only caller; `frontend.v1` imports its identities (`NodeId`, `NodeQuote`) as join keys the webapp echoes back | daemon, zettel service; identities: frontend.v1, agentrepl.v1, webapp |
+| `testservice.v1` | `testservice/v1/` | the test service's API: test gate runs started, watched by line and stopped (`service Tests`). The daemon is its only caller, so a daemon deploy never cuts a gate the service runs | daemon, test service |
 
 **What decides membership is who produces a message and where it is routed** —
 never what it is about. Subject is a judgment call, which is how a message whose
