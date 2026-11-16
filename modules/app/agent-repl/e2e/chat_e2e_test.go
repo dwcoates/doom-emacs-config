@@ -49,8 +49,8 @@ func graphOf(t *testing.T, w *stack.World, thread *workspacev1.WorkspaceRef) []*
 }
 
 // threadRow is THREAD's row in ROSTER's thread section, or nil.
-func threadRow(r *frontendv1.WorkspaceRoster, thread *workspacev1.WorkspaceRef) *frontendv1.RosterThreadRow {
-	for _, row := range r.GetThreads().GetRows() {
+func threadRow(r *frontendv1.RosterPush, thread *workspacev1.WorkspaceRef) *frontendv1.RosterThreadRow {
+	for _, row := range r.GetWorkspaces().GetThreads().GetRows() {
 		if row.GetThread().GetId() == thread.GetId() {
 			return row
 		}
@@ -102,10 +102,10 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	if nodes := graphOf(t, w, thread); len(nodes) != 1 || nodes[0].GetQuestion().GetText() != "Why is the sky blue?" {
 		t.Fatalf("graph = %v, want the first question as its root", nodes)
 	}
-	harness.AwaitView(t, ctx, roster, "the thread listed open and current, under its first question", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the thread listed open and current, under its first question", func(r *frontendv1.RosterPush) bool {
 		row := threadRow(r, thread)
 		return row != nil && row.GetStanding().GetOpen() != nil && row.GetCurrent() != nil &&
-			r.GetAppSwitcher().GetShown().GetChat() != nil && row.GetName().GetText() == "Why is the sky blue?"
+			r.GetWorkspaces().GetAppSwitcher().GetShown().GetChat() != nil && row.GetName().GetText() == "Why is the sky blue?"
 	})
 
 	// ---- A question typed in the composer is asked of the shown path ----
@@ -141,7 +141,7 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	}
 
 	// ---- The long question is abbreviated, in zettel and in the outline ----
-	harness.AwaitView(t, ctx, roster, "the follow-up's outline row drawn abbreviated", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the follow-up's outline row drawn abbreviated", func(r *frontendv1.RosterPush) bool {
 		for _, row := range threadRow(r, thread).GetOutline().GetRows() {
 			if row.GetNode().GetId() == followUp.GetId() {
 				return row.GetLabel().GetText() == harness.FakeClaudeMintedAbbreviation && row.GetLabel().GetQuestion() == longFollowUp
@@ -190,14 +190,14 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	if resp, err := w.Client().CloseWorkspace(ctx, connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Workspace: thread, Requester: harness.User()})); err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("CloseWorkspace = %v, %v", resp, err)
 	}
-	harness.AwaitView(t, ctx, roster, "the thread archived", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the thread archived", func(r *frontendv1.RosterPush) bool {
 		row := threadRow(r, thread)
 		return row != nil && row.GetStanding().GetArchived() != nil
 	})
 	if resp, err := w.Client().OpenWorkspace(ctx, connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: thread})); err != nil || resp.Msg.GetSuccess() == nil {
 		t.Fatalf("OpenWorkspace = %v, %v", resp, err)
 	}
-	harness.AwaitView(t, ctx, roster, "the thread restored", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the thread restored", func(r *frontendv1.RosterPush) bool {
 		row := threadRow(r, thread)
 		return row != nil && row.GetStanding().GetOpen() != nil
 	})
@@ -220,7 +220,7 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	if got := searched(t, w, "sunset"); len(got) != 0 {
 		t.Fatalf("SearchChats(sunset) after delete = %v, want none", got)
 	}
-	harness.AwaitView(t, ctx, roster, "the thread gone from the list", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the thread gone from the list", func(r *frontendv1.RosterPush) bool {
 		return threadRow(r, thread) == nil
 	})
 
@@ -232,7 +232,7 @@ func testAChatThreadLivesItsWholeLife(t *testing.T) {
 	if err != nil || long.Msg.GetSuccess() == nil {
 		t.Fatalf("CreateThread = %v, %v", long, err)
 	}
-	harness.AwaitView(t, ctx, roster, "the long-question thread named by its abbreviation", func(r *frontendv1.WorkspaceRoster) bool {
+	harness.AwaitView(t, ctx, roster, "the long-question thread named by its abbreviation", func(r *frontendv1.RosterPush) bool {
 		row := threadRow(r, long.Msg.GetSuccess().GetThread())
 		return row != nil && row.GetName().GetText() == harness.FakeClaudeMintedAbbreviation
 	})

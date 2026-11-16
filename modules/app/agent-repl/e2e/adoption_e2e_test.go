@@ -216,8 +216,8 @@ func adSelfRepoWorld(t *testing.T) (*harness.Repo, *stack.World) {
 // by the COMMON DIR, `<worktree>/.git` for an ordinary checkout, so either
 // spelling is checked (mirrors daemon/integration/merge_test.go's
 // mergeFindRepoKey).
-func adFindRepoKey(r *frontendv1.WorkspaceRoster, dir string) *workspacev1.RepositoryRef {
-	for _, s := range r.GetRepository().GetSections() {
+func adFindRepoKey(r *frontendv1.RosterPush, dir string) *workspacev1.RepositoryRef {
+	for _, s := range r.GetWorkspaces().GetRepository().GetSections() {
 		switch s.GetKey().GetRepository().GetDir() {
 		case dir, filepath.Join(dir, ".git"):
 			return s.GetKey().GetRepository()
@@ -233,7 +233,7 @@ func adRepositoryRef(t *testing.T, w *stack.World, repo *harness.Repo) *workspac
 	harness.Register(t, w.Daemon, repo.Dir)
 	roster := w.WatchRoster()
 	defer roster.Close()
-	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section", func(r *frontendv1.WorkspaceRoster) bool {
+	got := harness.AwaitView(t, w.Ctx(), roster, "the repository's roster section", func(r *frontendv1.RosterPush) bool {
 		return adFindRepoKey(r, repo.Dir) != nil
 	})
 	ref := adFindRepoKey(got, repo.Dir)
