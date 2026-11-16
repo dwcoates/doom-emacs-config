@@ -1463,6 +1463,13 @@ func (h *harness) Drained() []ids.WorkspaceID {
 	return append([]ids.WorkspaceID(nil), h.drained...)
 }
 
+// DrainedHolds answers the hold each drain was handed, in drain order.
+func (h *harness) DrainedHolds() []*ids.LeaseID {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]*ids.LeaseID(nil), h.drainedHolds...)
+}
+
 // listFailingDB is the state client with its workspace listing refusable, so
 // the handover's `served` step fails AFTER the successor is up.
 type listFailingDB struct {

@@ -3,6 +3,7 @@ package handover
 import (
 	"agent-repld/internal/tempdirs/tempdirstest"
 	"context"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -165,9 +166,95 @@ func TestQuiesceOverAnotherHoldersLeaseAnswersNoLease(t *testing.T) {
 	}
 }
 
-// TestDrainIntakeReleasesTheHandoverHold covers the incoming half: releasing
-// the hold is what drains the held intake.
-func TestDrainIntakeReleasesTheHandoverHold(t *testing.T) {
+// TestDrainIntakeReleasesTheCarriedHold covers the incoming half: releasing
+// the hold the incumbent's quiesce took, named by the carry, is what drains
+// the held intake.
+func TestDrainIntakeReleasesTheCarriedHold(t *testing.T) {
+	// Arrange
+	intake, queue, db, ws, log := newIntakeLogged(t)
+	hold, err := intake.Quiesce(context.Background(), ws)
+	if err != nil || hold == "" {
+		t.Fatalf("Quiesce = (%q, %v), want the hold it took", hold, err)
+	}
+	before := len(queue.calls())
+
+	// Act
+	err = intake.DrainIntake(context.Background(), ws, &hold)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("DrainIntake: %v", err)
+	}
+	if _, held, err := db.Lease(context.Background(), ws); err != nil || held {
+		t.Fatalf("lease held = %v (err %v) after the drain, want it released", held, err)
+	}
+	if got := queue.calls()[before:]; len(got) != 1 || got[0] != ws {
+		t.Fatalf("queue re-evaluations after the drain = %v, want one for %s", got, ws)
+	}
+	got, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opDrain})
+	if !ok || got.Context["lease"] != string(hold) {
+		t.Fatalf("drain record = %+v (found %v), want one INFO naming the released hold", got, ok)
+	}
+}
+
+// TestDrainIntakeLeavesARelaunchsHoldWhenTheHandoverTookNone is the
+// 2026-11-16 regression: the incumbent's quiesce took no hold, a relaunch on
+// the successor took its restart-pending hold during the adoption, and the
+// drain released that hold as the handover's -- the relaunch's own release
+// then failed `wsm: not found`.
+func TestDrainIntakeLeavesARelaunchsHoldWhenTheHandoverTookNone(t *testing.T) {
+	// Arrange
+	intake, queue, db, ws := newIntake(t)
+	relaunch, err := db.AcquireLease(context.Background(), ws, wsm.HolderRestart, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	none := ids.LeaseID("")
+
+	// Act
+	err = intake.DrainIntake(context.Background(), ws, &none)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("DrainIntake: %v", err)
+	}
+	lease, held, err := db.Lease(context.Background(), ws)
+	if err != nil || !held || lease.ID != relaunch.ID {
+		t.Fatalf("lease = %+v, held %v (err %v), want the relaunch's hold %s untouched", lease, held, err, relaunch.ID)
+	}
+	if got := queue.calls(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("queue re-evaluations = %v, want one for %s", got, ws)
+	}
+}
+
+// TestDrainIntakeOfAHoldAlreadyGoneFails covers a carried hold whose lease no
+// longer stands: nothing else releases it, so the drain fails loudly, records
+// the hold at ERROR, and tells the queue nothing changed.
+func TestDrainIntakeOfAHoldAlreadyGoneFails(t *testing.T) {
+	// Arrange
+	intake, queue, _, ws, log := newIntakeLogged(t)
+	gone := ids.LeaseID("0000000000000000")
+
+	// Act
+	err := intake.DrainIntake(context.Background(), ws, &gone)
+
+	// Assert
+	if !errors.Is(err, wsm.ErrNotFound) {
+		t.Fatalf("DrainIntake = %v, want the release's not-found refusal", err)
+	}
+	got, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrain})
+	if !ok || got.Context["lease"] != string(gone) || got.Context["workspace"] != string(ws) {
+		t.Fatalf("drain record = %+v (found %v), want one ERROR naming the hold and workspace", got, ok)
+	}
+	if got := queue.calls(); len(got) != 0 {
+		t.Fatalf("queue re-evaluations = %v, want none: no lease changed", got)
+	}
+}
+
+// TestDrainIntakeByHolderReleasesTheHandoverHold covers a carry from an
+// incumbent that predates the hold field: its quiesce hold is found by its
+// holder.
+func TestDrainIntakeByHolderReleasesTheHandoverHold(t *testing.T) {
 	// Arrange
 	intake, _, db, ws := newIntake(t)
 	if _, err := intake.Quiesce(context.Background(), ws); err != nil {
@@ -175,7 +262,7 @@ func TestDrainIntakeReleasesTheHandoverHold(t *testing.T) {
 	}
 
 	// Act
-	if err := intake.DrainIntake(context.Background(), ws); err != nil {
+	if err := intake.DrainIntake(context.Background(), ws, nil); err != nil {
 		t.Fatalf("DrainIntake: %v", err)
 	}
 
@@ -185,10 +272,10 @@ func TestDrainIntakeReleasesTheHandoverHold(t *testing.T) {
 	}
 }
 
-// TestDrainIntakeLeavesAnotherHoldersLeaseAlone covers the lease this half
-// does not own: a merge that was running when the handover began still owns
-// the workspace on the successor.
-func TestDrainIntakeLeavesAnotherHoldersLeaseAlone(t *testing.T) {
+// TestDrainIntakeByHolderLeavesAnotherHoldersLeaseAlone covers the lease this
+// half does not own: a merge that was running when the handover began still
+// owns the workspace on the successor.
+func TestDrainIntakeByHolderLeavesAnotherHoldersLeaseAlone(t *testing.T) {
 	// Arrange
 	intake, _, db, ws := newIntake(t)
 	if _, err := db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyRefuse); err != nil {
@@ -196,7 +283,7 @@ func TestDrainIntakeLeavesAnotherHoldersLeaseAlone(t *testing.T) {
 	}
 
 	// Act
-	if err := intake.DrainIntake(context.Background(), ws); err != nil {
+	if err := intake.DrainIntake(context.Background(), ws, nil); err != nil {
 		t.Fatalf("DrainIntake: %v", err)
 	}
 
@@ -207,9 +294,9 @@ func TestDrainIntakeLeavesAnotherHoldersLeaseAlone(t *testing.T) {
 	}
 }
 
-// TestDrainIntakeRecordsAnotherHoldersLeaseAtInfo pins the level: a merge
-// running across a deploy is the ordinary case, never a warning.
-func TestDrainIntakeRecordsAnotherHoldersLeaseAtInfo(t *testing.T) {
+// TestDrainIntakeByHolderRecordsAnotherHoldersLeaseAtInfo pins the level: a
+// merge running across a deploy is the ordinary case, never a warning.
+func TestDrainIntakeByHolderRecordsAnotherHoldersLeaseAtInfo(t *testing.T) {
 	// Arrange
 	intake, _, db, ws, log := newIntakeLogged(t)
 	if _, err := db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyRefuse); err != nil {
@@ -217,7 +304,7 @@ func TestDrainIntakeRecordsAnotherHoldersLeaseAtInfo(t *testing.T) {
 	}
 
 	// Act
-	if err := intake.DrainIntake(context.Background(), ws); err != nil {
+	if err := intake.DrainIntake(context.Background(), ws, nil); err != nil {
 		t.Fatalf("DrainIntake: %v", err)
 	}
 
@@ -231,14 +318,14 @@ func TestDrainIntakeRecordsAnotherHoldersLeaseAtInfo(t *testing.T) {
 	}
 }
 
-// TestDrainIntakeOnAnUnheldWorkspaceSucceeds covers the adoption of a
+// TestDrainIntakeByHolderOnAnUnheldWorkspaceSucceeds covers the adoption of a
 // workspace nothing was holding.
-func TestDrainIntakeOnAnUnheldWorkspaceSucceeds(t *testing.T) {
+func TestDrainIntakeByHolderOnAnUnheldWorkspaceSucceeds(t *testing.T) {
 	// Arrange
 	intake, _, _, ws := newIntake(t)
 
 	// Act
-	err := intake.DrainIntake(context.Background(), ws)
+	err := intake.DrainIntake(context.Background(), ws, nil)
 
 	// Assert
 	if err != nil {

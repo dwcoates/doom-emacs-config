@@ -874,7 +874,18 @@ func (c *controller) adopt(ctx context.Context, ws ids.WorkspaceID, source strin
 			carryErr = fmt.Errorf("rollout: adopt %q: install the carried queue memory: %w", ws, err)
 		}
 	}
-	if err := c.deps.DrainIntake(ctx, ws); err != nil {
+	// THE DRAIN RELEASES THE HOLD THE INCUMBENT CARRIED, by its identity: a
+	// relaunch this daemon began meanwhile holds a lease of the same holder,
+	// which is that relaunch's to release. With no carry the incumbent sealed
+	// no move, so its quiesce took no hold this adoption drains.
+	var hold *ids.LeaseID
+	if carried {
+		hold = carry.Hold
+	} else {
+		none := ids.LeaseID("")
+		hold = &none
+	}
+	if err := c.deps.DrainIntake(ctx, ws, hold); err != nil {
 		c.log.Error(opAdopt, "could not drain the held intake", dlog.WithCause(fields, err))
 		return errors.Join(dialErr, carryErr, c.consumeCarry(ws, carried),
 			fmt.Errorf("rollout: adopt %q: drain the held intake: %w", ws, err))

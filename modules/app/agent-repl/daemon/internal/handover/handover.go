@@ -97,11 +97,41 @@ func (i *Intake) Quiesce(ctx context.Context, ws ids.WorkspaceID) (wsm.LeaseID, 
 // workspace. Releasing the hold is what drains it: the queue re-evaluates
 // every standing hold against the lease that is no longer there.
 //
-// A workspace with NO lease is success: nothing was held, so nothing has to be
-// let go, and refusing here would fail an adoption over a workspace that was
-// already open.
-func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID) error {
+// IT RELEASES EXACTLY THE HOLD THE INCUMBENT'S QUIESCE TOOK, named by the
+// lease the incumbent carried (hold), and never a lease it merely finds: a
+// handover's hold and a shim relaunch's are both QuiesceHolder leases, so a
+// lease found on the workspace by its holder may be this daemon's own
+// relaunch's. Before this the drain released whatever restart lease stood,
+// and a skills_changed relaunch this daemon began during the adoption lost
+// its restart-pending hold under it (2026-11-16 01:08:24, linux-wifi-port:
+// the relaunch's own release then failed `wsm: not found`).
+//
+// An EMPTY hold is success: the incumbent's quiesce found the intake already
+// held by another lease and took none, so nothing here is the handover's to
+// let go, and any lease standing is its own holder's.
+//
+// A NIL hold is a carry from an incumbent that predates the field, which
+// names no hold: its quiesce hold is found by its holder as before
+// (drainByHolder), because leaving it standing would refuse every prompt.
+func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID, hold *ids.LeaseID) error {
 	fields := dlog.Context{"workspace": string(ws)}
+	if hold == nil {
+		return i.drainByHolder(ctx, ws, fields)
+	}
+	if *hold == "" {
+		i.log.Debug(opDrain, "the handover took no hold of its own; any lease on the workspace is its holder's", fields)
+		i.queue.OnLeaseChanged(ws)
+		return nil
+	}
+	fields["lease"] = string(*hold)
+	return i.release(ctx, ws, *hold, fields)
+}
+
+// drainByHolder is the drain for a carry that names no hold: the workspace's
+// QuiesceHolder lease is taken for the handover's. A workspace with NO lease
+// is success: nothing was held, so nothing has to be let go, and refusing here
+// would fail an adoption over a workspace that was already open.
+func (i *Intake) drainByHolder(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
 	lease, held, err := i.db.Lease(ctx, ws)
 	if err != nil {
 		i.log.Error(opDrain, "could not read the workspace's lease", dlog.WithCause(fields, err))
@@ -126,9 +156,15 @@ func (i *Intake) DrainIntake(ctx context.Context, ws ids.WorkspaceID) error {
 		i.queue.OnLeaseChanged(ws)
 		return nil
 	}
-	if err := i.db.ReleaseLease(ctx, lease.ID); err != nil {
+	return i.release(ctx, ws, lease.ID, fields)
+}
+
+// release drops the handover hold and tells the queue, whose re-evaluation
+// against the lease no longer there is what drains the held intake.
+func (i *Intake) release(ctx context.Context, ws ids.WorkspaceID, hold ids.LeaseID, fields dlog.Context) error {
+	if err := i.db.ReleaseLease(ctx, hold); err != nil {
 		i.log.Error(opDrain, "could not release the handover hold", dlog.WithCause(fields, err))
-		return fmt.Errorf("handover: drain %q: release the hold: %w", ws, err)
+		return fmt.Errorf("handover: drain %q: release the hold %s: %w", ws, hold, err)
 	}
 	i.queue.OnLeaseChanged(ws)
 	i.log.Info(opDrain, "released the handover hold; the held intake drains", fields)

@@ -1221,6 +1221,7 @@ type harness struct {
 	// quiesceErr fails every quiesce.
 	quiesceErr   error
 	drained      []ids.WorkspaceID
+	drainedHolds []*ids.LeaseID
 	leaseChanged []ids.WorkspaceID
 	published    []ids.WorkspaceID
 	// unreported records every StateUnreported statement, in order.
@@ -1406,10 +1407,11 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 			}
 			return lease.ID, nil
 		},
-		DrainIntake: func(_ context.Context, ws ids.WorkspaceID) error {
+		DrainIntake: func(_ context.Context, ws ids.WorkspaceID, hold *ids.LeaseID) error {
 			order.record("drain_intake")
 			h.mu.Lock()
 			h.drained = append(h.drained, ws)
+			h.drainedHolds = append(h.drainedHolds, hold)
 			h.mu.Unlock()
 			return nil
 		},
