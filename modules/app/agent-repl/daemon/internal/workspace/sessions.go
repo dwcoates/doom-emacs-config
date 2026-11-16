@@ -2323,6 +2323,18 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			return nil, pathNone, fmt.Errorf("%w: %w", shimclient.ErrStandingDown,
 				refuse(log, "OpenWorkspace", ArmSpawnFailed, shimclient.ErrStandingDown.Error(), false))
 		}
+		if err != nil && errors.Is(err, context.Canceled) && ctx.Err() != nil {
+			// THE CALLER WITHDREW THE BRING-UP: its context was cancelled (a
+			// daemon handing the workspace to its successor cancels the open
+			// it was serving), and the supervisor has already stopped the
+			// spawned shim. Nothing about this workspace failed, so no fault
+			// is filed, and a fault's write would only fail on the same
+			// cancelled context.
+			log.Info(opBringUp, "no shim is brought up: the bring-up was cancelled by its caller", dlog.Context{
+				"workspace": string(ws), "socket": udsPath, "cause": err.Error(),
+			})
+			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
+		}
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
 			// A BRING-UP DEATH IS A WORKSPACE FAULT, not only a failed rpc.

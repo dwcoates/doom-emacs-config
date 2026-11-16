@@ -639,12 +639,17 @@ func TestAnAbandonedBringUpIsRecordedOnTheWorkspacesLogNotTheRunLog(t *testing.T
 	waitForExit(t, record.PID)
 
 	// Assert.
-	query := dlog.RecordQuery{Level: "warn", Operation: "daemon.shimclient.spawn"}
+	query := dlog.RecordQuery{Level: "info", Operation: "daemon.shimclient.spawn", Message: "the bring-up was cancelled; stopping the spawned shim"}
 	if _, ok := dlog.FindRecord(surfaces.log.Records(), query); !ok {
-		t.Fatalf("workspace records = %+v, want the abandoned bring-up's WARN", surfaces.log.Records())
+		t.Fatalf("workspace records = %+v, want the abandoned bring-up's record", surfaces.log.Records())
 	}
 	if rec, ok := dlog.FindRecord(surfaces.global.Records(), query); ok {
-		t.Fatalf("the run log carried the workspace-bound WARN: %+v", rec)
+		t.Fatalf("the run log carried the workspace-bound record: %+v", rec)
+	}
+	for _, r := range surfaces.log.Records() {
+		if r.Level == "warn" || r.Level == "error" {
+			t.Fatalf("a cancelled bring-up was recorded as a failure: %+v", r)
+		}
 	}
 }
 
