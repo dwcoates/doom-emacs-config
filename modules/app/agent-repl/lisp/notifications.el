@@ -43,11 +43,12 @@
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-link-newest "daemon-link" ())
 (declare-function agent-repl-rpc-report-editor-focus "rpc" (conn request &rest keys))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (defvar agent-repl--global-log-scope)
 (defvar agent-repl-link-up-functions)
+(defvar agent-repl-link-handover-functions)
 (defvar agent-repl-link-promote-functions)
 
 ;;;; ---- Emacs's focus ----
@@ -99,12 +100,15 @@ command loop; the report is taken once that settles, so the daemon is
 told where focus came to rest rather than every step on the way.")
 
 (defun agent-repl--focus-report ()
-  "Tell the live daemon whether Emacs is focused now.
-With no link standing there is nothing to tell: the next WatchDaemon
-Emacs opens states its focus itself.  While a report is in flight, the
+  "Tell the daemon that serves next whether Emacs is focused now.
+Focus is daemon-wide, so it goes to `agent-repl-link-newest', never to a
+daemon a handover is leaving.  With none to take it there is nothing to
+tell: the link edge that answers the next daemon reports again
+\(`agent-repl--focus-report-on-link'), and a WatchDaemon states the focus
+Emacs held when it was built.  While a report is in flight, the
 new one is OWED and sent when that one is answered
 \(`agent-repl--focus-serial')."
-  (let ((conn (agent-repl-link-live)))
+  (let ((conn (agent-repl-link-newest)))
     (if (null conn)
         (agent-repl--log agent-repl--focus-log-scope
                          "elisp.notifications.focus-report skipped reason=no-link")
@@ -178,6 +182,7 @@ stream stood) is told here, once the stream stands."
 (add-function :after after-focus-change-function #'agent-repl--focus-changed)
 (add-hook 'agent-repl-focus-settled-hook #'agent-repl--focus-report)
 (add-hook 'agent-repl-link-up-functions #'agent-repl--focus-report-on-link)
+(add-hook 'agent-repl-link-handover-functions #'agent-repl--focus-report-on-link)
 (add-hook 'agent-repl-link-promote-functions #'agent-repl--focus-report-on-link)
 
 ;;;; ---- Coming forward ----

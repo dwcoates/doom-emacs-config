@@ -15,7 +15,7 @@
 (defvar agent-repl-test-latency-report--sent nil "Every report sent, newest first, as its request plist.")
 (defvar agent-repl-test-latency-report--answer nil "How the stubbed rpc answers: (:response R), (:failure D) or nil for never.")
 (defvar agent-repl-test-latency-report--records nil "Every record, newest first, as (LEVEL TEXT).")
-(defvar agent-repl-test-latency-report--link nil "What the stubbed `agent-repl-link-live' answers.")
+(defvar agent-repl-test-latency-report--link nil "What the stubbed `agent-repl-link-newest' answers.")
 (defvar agent-repl-test-latency-report--timers nil "Every timer armed, as (SECS FUNCTION).")
 
 (defconst agent-repl-test-latency-report--recorded
@@ -35,7 +35,7 @@
          (agent-repl-test-latency-report--timers nil)
          (agent-repl-test-latency-report--answer agent-repl-test-latency-report--recorded)
          (agent-repl-test-latency-report--link 'conn))
-     (cl-letf (((symbol-function 'agent-repl-link-live) (lambda () agent-repl-test-latency-report--link))
+     (cl-letf (((symbol-function 'agent-repl-link-newest) (lambda () agent-repl-test-latency-report--link))
                ((symbol-function 'run-at-time)
                 (lambda (secs _repeat fn &rest _args)
                   (push (list secs fn) agent-repl-test-latency-report--timers)
@@ -207,6 +207,15 @@
 (ert-deftest agent-repl-test-latency-report-the-link-up-hook-flushes ()
   "A link that comes up sends what waited."
   (should (memq #'agent-repl-latency-report-flush agent-repl-link-up-functions)))
+
+(ert-deftest agent-repl-test-latency-report-a-successors-acceptance-flushes ()
+  "A successor accepted mid-handover is sent what waited while it was pending."
+  (should (memq #'agent-repl-latency-report-flush agent-repl-link-handover-functions)))
+
+(ert-deftest agent-repl-test-latency-report-a-promotion-flushes ()
+  "A promoted successor is sent what waited."
+  (should (memq #'agent-repl-latency-report-flush agent-repl-link-promote-functions)))
+
 
 (provide 'test-latency-report)
 

@@ -315,6 +315,69 @@ gate is the point, so it is exercised here rather than bypassed."
       ;; Act / Assert
       (should (null (agent-repl-link-live))))))
 
+(ert-deftest agent-repl-test-link-newest-answers-the-live-primary ()
+  "With no handover standing, a daemon-wide call goes to the live primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act / Assert
+      (should (eq (agent-repl-link-newest) conn)))))
+
+(ert-deftest agent-repl-test-link-newest-is-nil-with-no-link ()
+  "No link standing is no daemon to take a daemon-wide call."
+  (agent-repl-test-link--with-harness
+    ;; Act / Assert
+    (should (null (agent-repl-link-newest)))))
+
+(ert-deftest agent-repl-test-link-newest-answers-the-accepted-successor ()
+  "Mid-handover a daemon-wide call goes to the accepted successor, not the leaving primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      ;; Act
+      (let ((got (agent-repl-link-newest)))
+        ;; Assert
+        (should (eq got successor))
+        (should (eq (agent-repl-link-live) conn))))))
+
+(ert-deftest agent-repl-test-link-newest-is-nil-while-the-successor-is-pending ()
+  "A successor announced but not accepted yet takes nothing, and the leaving primary neither."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (agent-repl-test-link--connect "127.0.0.1:9001")
+    (agent-repl-link-successor-at "127.0.0.1:9100")
+    ;; Act
+    (let ((got (agent-repl-link-newest)))
+      ;; Assert
+      (should (agent-repl-link-successor-pending-p))
+      (should (null got)))))
+
+(ert-deftest agent-repl-test-link-newest-is-nil-on-a-departing-primary ()
+  "A primary whose link carried its planned ending takes no daemon-wide call."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push conn '(:arm :ending :value nil))
+      ;; Act
+      (let ((got (agent-repl-link-newest)))
+        ;; Assert
+        (should (eq (agent-repl-link-live) conn))
+        (should (null got))))))
+
+(ert-deftest agent-repl-test-link-newest-answers-the-promoted-successor ()
+  "Once the handover completes the promoted successor is the newest daemon."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let* ((conn (agent-repl-test-link--connect "127.0.0.1:9001"))
+           (successor (agent-repl-test-link--announce-successor conn "127.0.0.1:9100")))
+      (agent-repl-test-link--close conn '(:ended))
+      ;; Act
+      (let ((got (agent-repl-link-newest)))
+        ;; Assert
+        (should (eq (agent-repl-link-live) successor))
+        (should (eq got successor))))))
+
 (ert-deftest agent-repl-test-link-connect-is-idempotent-while-up ()
   "A second connect while the link stands opens no second stream."
   (agent-repl-test-link--with-harness
@@ -515,6 +578,19 @@ gate is the point, so it is exercised here rather than bypassed."
                       (memq 'agent-repl-link-departing-p (flatten-tree roster)))))
       ;; Assert
       (should (and host roster (car asks) (cadr asks))))))
+
+(ert-deftest agent-repl-test-link-every-daemon-wide-call-asks-newest ()
+  "The latency and focus reports ask the one newest question, never the live daemon."
+  ;; Arrange
+  (let ((latency (agent-repl-test-link--defun-form "latency-report.el" 'agent-repl-latency-report-flush))
+        (focus (agent-repl-test-link--defun-form "notifications.el" 'agent-repl--focus-report)))
+    ;; Act
+    (let ((asked (mapcar #'flatten-tree (list latency focus))))
+      ;; Assert
+      (should (and latency focus))
+      (dolist (tree asked)
+        (should (memq 'agent-repl-link-newest tree))
+        (should-not (memq 'agent-repl-link-live tree))))))
 
 (ert-deftest agent-repl-test-link-planned-end-tells-the-down-hook-it-was-planned ()
   "A down hook run for an announced ending reads `agent-repl-link-down-planned' set."
