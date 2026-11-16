@@ -896,6 +896,17 @@ export function drawRepositoryGroup(
   return group;
 }
 
+/** The class of the short rule after a queue group's deploy check status. */
+export const QUEUE_STATUS_TAIL_RULE_CLASS = "sb-mq-status-tail";
+
+/** The short rule a queue group's header draws after its deploy check status. */
+function drawQueueStatusTailRule(): HTMLElement {
+  const rule = document.createElement("span");
+  rule.className = QUEUE_STATUS_TAIL_RULE_CLASS;
+  rule.setAttribute("aria-hidden", "true");
+  return rule;
+}
+
 /** A Merge Queue heading's "(N)": the merges queued, drawn as the Open section's count is. */
 export function drawQueueCount(count: number): HTMLElement {
   const span = document.createElement("span");
@@ -920,8 +931,14 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
   const name = requireMessage(header.label, `${path}.header.label`).text;
   const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, { key, name }, sc, queuePath), sc);
   group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
-  if (queue.mediation !== undefined) head.appendChild(drawQueueMediationLabel(queue.mediation, sc, `${queuePath}.mediation`));
   head.appendChild(drawQueueCount(queueCount(queue)));
+  // THE DEPLOY CHECK'S STATUS STANDS AGAINST THE RIGHT MARGIN (owner request,
+  // 2026-11-16): `-- <repo> (count) ------ <status> --`, after the long rule
+  // and before a short one of its own.
+  if (queue.mediation !== undefined) {
+    head.appendChild(drawQueueMediationLabel(queue.mediation, sc, `${queuePath}.mediation`));
+    head.appendChild(drawQueueStatusTailRule());
+  }
   drawQueuedGroupHead(group, head, queue, key, sc, queuePath);
   tickPaint(sc, (nowMs) => {
     head.title = queueHoverText(queue, nowMs, queuePath);

@@ -1550,6 +1550,13 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group-head::after { flex: 1 1 0; min-width: 0.65rem; }
 #ws-sidebar .merged-group-head > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 #ws-sidebar .merged-group-head { cursor: pointer; }
+/* A QUEUE GROUP'S DEPLOY CHECK STATUS STANDS AGAINST THE RIGHT MARGIN (owner
+   request, 2026-11-16): `-- <repo> (count) ------ <status> --`. The long
+   rule (::after) is ordered before the status, which a short rule of its
+   own follows. */
+#ws-sidebar .merged-group-head::after { order: 1; }
+#ws-sidebar .merged-group-head > .sb-mq-mediation { order: 2; flex: 0 0 auto; margin-left: 0; }
+#ws-sidebar .merged-group-head > .sb-mq-status-tail { order: 3; flex: 0 0 0.65rem; height: 1px; background: var(--border); }
 /* A FOLDED GROUP shows its header alone: its queue and its merged rows are
    drawn as nothing until it opens. */
 #ws-sidebar .merged-group.folded > .rows { display: none; }
