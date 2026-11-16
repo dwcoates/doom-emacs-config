@@ -115,6 +115,28 @@ func (v *verbs) SetDeployCheckEffort(ctx context.Context, ws wsm.WorkspaceID, ro
 	return nil
 }
 
+// StopDeployCheck implements Verbs: ends deploy check workspace WS at once,
+// its session killed mid-turn, never at its turn's end (owner ruling,
+// 2026-11-16). An intake's decision is durable before the chain ends it, so
+// what the turn would have said after it is nothing anyone reads: a turn
+// left to end wrote a reply an approved, hidden intake should never have.
+func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
+	_, log, err := v.owned(ctx, "StopDeployCheck", ws)
+	if err != nil {
+		return err
+	}
+	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByAgent, How: wsm.HowKilled}); err != nil {
+		log.Error(opDeployChecks, "the deploy check workspace could not be marked closed ahead of its stop", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("stop the deploy check %s: record closed: %w", ws, err)
+	}
+	v.republishRegistry(ctx, log, opDeployChecks)
+	if err := v.kill(ctx, log, ws, wsm.CloseByAgent); err != nil {
+		return fmt.Errorf("stop the deploy check %s: %w", ws, err)
+	}
+	log.Info(opDeployChecks, "stopped the deploy check workspace at once; its turn is cut, not ended", nil)
+	return nil
+}
+
 // withWorkspace is FIELDS naming workspace WS.
 func withWorkspace(fields dlog.Context, ws wsm.WorkspaceID) dlog.Context {
 	fields["workspace"] = string(ws)

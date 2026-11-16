@@ -680,12 +680,12 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	}
 }
 
-func TestAnIntakeThatCannotBeClosedAtTheChainsEndIsRecorded(t *testing.T) {
+func TestAnIntakeThatCannotBeStoppedAtTheChainsEndIsRecorded(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	h.checks.closeErr = errors.New("still busy")
+	h.checks.stopErr = errors.New("still busy")
 
 	// Act
 	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
@@ -694,8 +694,23 @@ func TestAnIntakeThatCannotBeClosedAtTheChainsEndIsRecorded(t *testing.T) {
 	if err != nil || owedCheck(t, h) != nil {
 		t.Fatalf("DecideMediation = %v, want the approval to release the queue regardless", err)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the chain ended but its intake could not be closed"}); !ok {
-		t.Fatalf("records = %v, want the failed close at ERROR", h.logs.Records())
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the chain ended but its intake could not be stopped"}); !ok {
+		t.Fatalf("records = %v, want the failed stop at ERROR", h.logs.Records())
+	}
+}
+
+func TestAnApprovalStopsItsIntakeAtOnce(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
+
+	// Assert
+	if err != nil || !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || len(h.checks.closed) != 0 {
+		t.Fatalf("DecideMediation = %v, stopped %v, closed %v; want the intake stopped at once and never closed at its turn's end", err, h.checks.stopped, h.checks.closed)
 	}
 }
 

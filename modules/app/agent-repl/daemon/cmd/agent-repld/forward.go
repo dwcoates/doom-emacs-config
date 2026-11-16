@@ -391,6 +391,14 @@ func (d deployChecks) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, 
 	return verbs.CloseSelf(ctx, ws)
 }
 
+func (d deployChecks) StopNow(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue stopped a deploy check workspace")
+	if err != nil {
+		return err
+	}
+	return verbs.StopDeployCheck(ctx, ws)
+}
+
 // unfoldSubsectionForWork is the turn-start edge's unfold
 // (workspace.SubsectionUnfolds), read out of the verbs, which are built after
 // the edges.

@@ -398,9 +398,10 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 }
 
 // endChain records how check M of queue REPO, the last of its chain, ended
-// as OUTCOME, forgets what the chain's remediations landed, and closes the
-// chain's intake: the next deploy begins another chain with a fresh intake.
-// The intake deciding inside its own turn is closed when that turn ends.
+// as OUTCOME, forgets what the chain's remediations landed, and stops the
+// chain's intake at once: the next deploy begins another chain with a fresh
+// intake. The intake deciding inside its own turn is cut mid-turn, so it
+// writes nothing past its decision (owner ruling, 2026-11-16).
 func (o *orchestrator) endChain(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, outcome string) {
 	o.observeMediationEnd(m, outcome, o.deps.Now())
 	fields := dlog.Context{"repo": string(repo), "intake": string(m.Intake), "outcome": outcome, "chain_started": m.ChainStartedAt.UTC().Format(time.RFC3339Nano)}
@@ -410,12 +411,11 @@ func (o *orchestrator) endChain(ctx context.Context, repo wsm.RepoKey, m wsm.Med
 	if m.Intake == "" {
 		return
 	}
-	later, err := o.deps.DeployChecks.CloseSelf(ctx, m.Intake)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the chain ended but its intake could not be closed", withField(fields, "error", err.Error()))
+	if err := o.deps.DeployChecks.StopNow(ctx, m.Intake); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the chain ended but its intake could not be stopped", withField(fields, "error", err.Error()))
 		return
 	}
-	o.deps.Log.Global().Info(opMediation, "the chain ended; its intake is closed", withField(fields, "at_turn_end", later))
+	o.deps.Log.Global().Info(opMediation, "the chain ended; its intake is stopped", fields)
 }
 
 // checkClaim is one check's round: the queue and the deploy it checks. A
