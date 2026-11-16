@@ -520,3 +520,48 @@ func TestRepublishRosterAnswersAndLogsAFailedRead(t *testing.T) {
 		t.Fatalf("roster republications = %d, want none", len(f.sidebar.registries))
 	}
 }
+
+func TestInstallUnlessOvertaken(t *testing.T) {
+	tests := []struct {
+		name          string
+		epoch         uint64
+		wantInstalled bool
+	}{
+		{name: "a read no select overtook is installed", epoch: 0, wantInstalled: true},
+		{name: "a read a select overtook is not", epoch: 7, wantInstalled: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			installed := false
+
+			// Act
+			got, _ := f.mutable(t).installUnlessOvertaken(tt.epoch, sidebar.Registry{}, func(sidebar.Registry) { installed = true })
+
+			// Assert
+			if got != tt.wantInstalled || installed != tt.wantInstalled {
+				t.Fatalf("installUnlessOvertaken = %v (install ran %v), want %v", got, installed, tt.wantInstalled)
+			}
+		})
+	}
+}
+
+func TestAnInstallThatPanicsLeavesTheSelectionLockFree(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	raised := func() (r any) {
+		defer func() { r = recover() }()
+		f.mutable(t).installUnlessOvertaken(0, sidebar.Registry{}, func(sidebar.Registry) { panic("a roster invariant") })
+		return nil
+	}()
+
+	// Act: a lock the panic held would block this forever.
+	free := f.mutable(t).selection.TryLock()
+
+	// Assert
+	if raised != "a roster invariant" || !free {
+		t.Fatalf("raised %v, lock free %v; want the panic raised and the lock free", raised, free)
+	}
+	f.mutable(t).selection.Unlock()
+}

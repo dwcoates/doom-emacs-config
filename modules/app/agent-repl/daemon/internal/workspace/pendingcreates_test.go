@@ -1054,7 +1054,6 @@ func TestHeldDeployHooksShareTheProtoHexEncoding(t *testing.T) {
 	}
 }
 
-
 // The seams a create's panic is injected at: inside its worktree step, before
 // anything is registered, and in the roster's republish inside Register,
 // after its row is written (the 2026-11 sidebar invariant panic).
