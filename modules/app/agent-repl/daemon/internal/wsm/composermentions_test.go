@@ -25,8 +25,8 @@ func TestComposerMentions(t *testing.T) {
 	}{
 		{name: "a workspace with none recorded has none"},
 		{
-			name: "a mention is read back whole",
-			puts: [][]ComposerMention{{{Kind: ComposerMentionCommand, Name: "merge-queue", MentionedAtMs: 10}}},
+			name:  "a mention is read back whole",
+			puts:  [][]ComposerMention{{{Kind: ComposerMentionCommand, Name: "merge-queue", MentionedAtMs: 10}}},
 			wantA: []ComposerMention{{Kind: ComposerMentionCommand, Name: "merge-queue", MentionedAtMs: 10}},
 		},
 		{
