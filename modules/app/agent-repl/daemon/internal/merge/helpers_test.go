@@ -804,6 +804,19 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 			if entries[i].Lease != lease {
 				continue
 			}
+			// As the store does: a live round settles every other round
+			// left live as cut, at its own start (wsm.RecordTabInterval).
+			if interval.EndedAt == nil {
+				for j, held := range entries[i].Intervals {
+					if held.EndedAt == nil && (held.Round != interval.Round || held.Kind != interval.Kind) {
+						at := interval.StartedAt
+						if at.Before(held.StartedAt) {
+							at = held.StartedAt
+						}
+						entries[i].Intervals[j].EndedAt, entries[i].Intervals[j].Outcome = &at, wsm.TabOutcomeRestarted
+					}
+				}
+			}
 			for j, held := range entries[i].Intervals {
 				if held.Round == interval.Round && held.Kind == interval.Kind {
 					entries[i].Intervals[j] = interval

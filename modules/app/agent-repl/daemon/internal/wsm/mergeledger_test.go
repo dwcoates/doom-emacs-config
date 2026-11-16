@@ -3,6 +3,8 @@ package wsm
 import (
 	"context"
 	"errors"
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 )
@@ -297,5 +299,115 @@ func TestMergeLedgerWorkspace(t *testing.T) {
 				t.Fatalf("MergeLedgerWorkspace = (%q, %v), want %q", got, err, ws.ID)
 			}
 		})
+	}
+}
+
+func TestALedgerHoldsAtMostOneLiveRound(t *testing.T) {
+	settledAt := instant.Add(time.Second)
+	tests := []struct {
+		name        string
+		then        TabInterval
+		wantLive    []string
+		wantCutKind string
+	}{
+		{name: "a new live round settles the one left live", then: TabInterval{Round: 2, Kind: "rebasing", StartedAt: instant.Add(time.Minute)},
+			wantLive: []string{"rebasing/2"}, wantCutKind: "rebasing/1"},
+		{name: "rewriting the live round itself keeps it live", then: TabInterval{Round: 1, Kind: "rebasing", StartedAt: instant},
+			wantLive: []string{"rebasing/1"}},
+		{name: "a settled round written beside it leaves the live one live", then: TabInterval{Round: 1, Kind: "queue", StartedAt: instant, EndedAt: &settledAt, Outcome: "succeeded"},
+			wantLive: []string{"rebasing/1"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: one live rebasing round.
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			lease := NewLeaseID()
+			ctx := context.Background()
+			if err := s.OpenMergeLedger(ctx, ws.ID, lease); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.RecordTabInterval(ctx, lease, TabInterval{Round: 1, Kind: "rebasing", StartedAt: instant}); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			if err := s.RecordTabInterval(ctx, lease, tt.then); err != nil {
+				t.Fatalf("RecordTabInterval: %v", err)
+			}
+
+			// Assert
+			got, err := s.MergeLedger(ctx, ws.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var live []string
+			for _, iv := range got[0].Intervals {
+				key := fmt.Sprintf("%s/%d", iv.Kind, iv.Round)
+				if iv.EndedAt == nil {
+					live = append(live, key)
+				}
+				if key == tt.wantCutKind && (iv.Outcome != TabOutcomeRestarted || iv.EndedAt == nil || !iv.EndedAt.Equal(tt.then.StartedAt)) {
+					t.Fatalf("cut round = %+v, want it settled restarted at the new round's start", iv)
+				}
+			}
+			if !slices.Equal(live, tt.wantLive) {
+				t.Fatalf("live rounds = %v, want %v", live, tt.wantLive)
+			}
+		})
+	}
+}
+
+func TestTheSettledLiveRoundsStepLeavesOnlyEachQueuedMergesCurrentRoundLive(t *testing.T) {
+	// Arrange: a queued merge's ledger with two rounds left live and its
+	// current one, and an old ledger of the same workspace with a live round.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	repo := RepoKey(t.TempDir())
+	current, old := LeaseID("ledger-current"), LeaseID("ledger-old")
+	queued(t, s, repo, ws.ID, instant)
+	for _, stmt := range []string{
+		`UPDATE merge_queue SET ledger_id = 'ledger-current'`,
+		`INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES ('ledger-current', '` + string(ws.ID) + `', 1), ('ledger-old', '` + string(ws.ID) + `', 1)`,
+		`INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, outcome) VALUES ('ledger-current', 1, 'rebasing', 100, ''), ('ledger-current', 2, 'rebasing', 200, ''), ('ledger-current', 1, 'tests', 300, ''), ('ledger-old', 1, 'rebasing', 50, '')`,
+	} {
+		if _, err := s.db().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+
+	// Act
+	if _, err := s.db().Exec(settledLiveRoundsDDL); err != nil {
+		t.Fatalf("the layout-152 step: %v", err)
+	}
+
+	// Assert
+	want := map[string]struct {
+		ended   int64
+		outcome string
+	}{
+		"ledger-current/rebasing/1": {200, "restarted"},
+		"ledger-current/rebasing/2": {300, "restarted"},
+		"ledger-current/tests/1":    {0, ""},
+		"ledger-old/rebasing/1":     {50, "restarted"},
+	}
+	for _, lease := range []LeaseID{current, old} {
+		rows, err := s.db().Query(`SELECT round, kind, COALESCE(ended_at, 0), outcome FROM merge_tab_intervals WHERE lease_id = ?`, lease)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var round int
+			var kind, outcome string
+			var ended int64
+			if err := rows.Scan(&round, &kind, &ended, &outcome); err != nil {
+				t.Fatal(err)
+			}
+			key := fmt.Sprintf("%s/%s/%d", lease, kind, round)
+			if w := want[key]; w.ended != ended || w.outcome != outcome {
+				t.Errorf("%s = ended %d %q, want %d %q", key, ended, outcome, w.ended, w.outcome)
+			}
+		}
+		rows.Close()
 	}
 }

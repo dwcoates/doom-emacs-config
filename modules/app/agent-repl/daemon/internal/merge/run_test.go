@@ -428,7 +428,10 @@ func TestOpenTabStampsTheRoundWithItsLedgerStart(t *testing.T) {
 // round of its kind the ledger already holds, so no earlier interval is
 // overwritten (2026-11-09).
 func TestARunOnALedgerEarlierRunsWroteNumbersItsRoundsPastTheirs(t *testing.T) {
+	// THE EARLIER RUNS' ROUNDS ARE SETTLED, as every ledger's are but its
+	// current one (wsm.RecordTabInterval keeps one live round per ledger).
 	started := time.UnixMilli(1_000)
+	ended := time.UnixMilli(1_500)
 	tests := []struct {
 		name      string
 		held      []wsm.TabInterval
@@ -438,14 +441,16 @@ func TestARunOnALedgerEarlierRunsWroteNumbersItsRoundsPastTheirs(t *testing.T) {
 	}{
 		{name: "a fresh ledger opens round one", kind: TabRebasing, wantRound: 1},
 		{
-			name:      "a rebasing round after a waiting rebase's two rounds is the third",
-			held:      []wsm.TabInterval{{Round: 1, Kind: TabRebasing, StartedAt: started}, {Round: 1, Kind: TabConflicts, StartedAt: started}, {Round: 2, Kind: TabRebasing, StartedAt: started}},
+			name: "a rebasing round after a waiting rebase's two rounds is the third",
+			held: []wsm.TabInterval{{Round: 1, Kind: TabRebasing, StartedAt: started, EndedAt: &ended, Outcome: "failed"},
+				{Round: 1, Kind: TabConflicts, StartedAt: started, EndedAt: &ended, Outcome: "succeeded"},
+				{Round: 2, Kind: TabRebasing, StartedAt: started, EndedAt: &ended, Outcome: "succeeded"}},
 			kind:      TabRebasing,
 			wantRound: 3,
 		},
 		{
 			name:      "a kind the ledger does not hold opens round one",
-			held:      []wsm.TabInterval{{Round: 2, Kind: TabRebasing, StartedAt: started}},
+			held:      []wsm.TabInterval{{Round: 2, Kind: TabRebasing, StartedAt: started, EndedAt: &ended, Outcome: "succeeded"}},
 			kind:      TabQueue,
 			wantRound: 1,
 		},
