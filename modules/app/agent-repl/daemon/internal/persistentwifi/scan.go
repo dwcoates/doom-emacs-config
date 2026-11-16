@@ -186,10 +186,18 @@ func (c *Controller) askAuthorization(ctx context.Context) {
 	c.log.Info(opFailover, "asked macOS for the Wi-Fi helper's Location Services permission; its prompt waits for the owner", fields)
 }
 
-// stopAsksBound bounds StopAsks' pkill. Measured 17ms at worst over 30 runs
-// (2026-11-16, pkill of a pattern matching nothing on this host); the bound is
-// 2.5 times that.
-const stopAsksBound = 40 * time.Millisecond
+// Expected time and bound of StopAsks' pkill, spawned the way the daemon
+// spawns it. Measured 2026-11-16 on the owner's laptop: 1500 pkills of a
+// pattern matching nothing, run through scriptrunner from a Go process
+// holding the daemon's 520MB heap while a 13-unit test run (an e2e among
+// them) shared the host at load average 4 to 6: median 15ms, p99 19ms, worst
+// 56ms. The bound is 2.5 times the worst. An earlier 40ms bound, measured on
+// a shell's pkill with no test load (worst 17ms over 30 runs), fired under
+// the merge queue's test gate (2026-11-16).
+const (
+	stopAsksExpected = 56 * time.Millisecond
+	stopAsksBound    = 140 * time.Millisecond
+)
 
 // StopAsks stops every authorize ask of the helper app installed in TOOLS
 // (TOOLS.WifiApp) that is still running, and reports whether one was. The
@@ -207,7 +215,7 @@ func StopAsks(ctx context.Context, r Runner, tools Tools) (bool, error) {
 	out, code, err := r.Run(bounded, runDir, []string{tools.Pkill, "-f", pattern})
 	switch {
 	case bounded.Err() != nil:
-		return false, fmt.Errorf("pkill of the Wi-Fi helper's asks did not end within %s (measured 17ms): %w", stopAsksBound, bounded.Err())
+		return false, fmt.Errorf("pkill of the Wi-Fi helper's asks did not end within %s (expected %s): %w", stopAsksBound, stopAsksExpected, bounded.Err())
 	case err != nil:
 		return false, fmt.Errorf("pkill could not be run: %w", err)
 	case code == 0:
