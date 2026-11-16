@@ -54,6 +54,26 @@ message FindWorkspacesRequest {
   // user, or a shell outside every worktree), and no record answers calling.
   // A ref naming no registered workspace is the unknown_caller answer.
   optional workspace.v1.WorkspaceRef caller = 8;
+  // Only the workspaces of one login, and their children: every workspace
+  // whose repository's main checkout is routed to that login's Claude config
+  // dir (the account routing `$MULTI_REPO_ROOT` decides), plus every child
+  // (WorkspaceRelationship.child) of such a workspace, in ANY repository,
+  // since a child of a work task need not live in a work repository. What
+  // the Slack emoji-ack intake reads to see only the workspaces a reaction
+  // may be routed to. UNSET = every login.
+  optional FindWorkspacesLogin login = 9;
+}
+
+// The login a find narrows to (FindWorkspacesRequest.login). THE ARM IS HOW
+// THE LOGIN IS NAMED.
+message FindWorkspacesLogin {
+  // REQUIRED: a login with no arm is malformed (Connect InvalidArgument).
+  oneof login {
+    // The login this workspace's repository is routed to (`workspace list
+    // -login here` names the calling workspace). A ref naming no registered
+    // workspace is the unknown_login_workspace answer.
+    workspace.v1.WorkspaceRef of_workspace = 1;
+  }
 }
 
 // Narrows a find to the workspaces the sidebar roster draws. No fields: its
@@ -247,6 +267,9 @@ message FindWorkspacesError {
     FindWorkspacesUnknownCreator unknown_creator = 2;
     // `caller` names a workspace the daemon's registry does not hold.
     FindWorkspacesUnknownCaller unknown_caller = 3;
+    // `login.of_workspace` names a workspace the daemon's registry does not
+    // hold.
+    FindWorkspacesUnknownLoginWorkspace unknown_login_workspace = 4;
   }
 }
 // Empty: the echoed ref is the only identity involved.
@@ -255,3 +278,5 @@ message FindWorkspacesUnknownRepository {}
 message FindWorkspacesUnknownCreator {}
 // Empty: the echoed ref is the only identity involved.
 message FindWorkspacesUnknownCaller {}
+// Empty: the echoed ref is the only identity involved.
+message FindWorkspacesUnknownLoginWorkspace {}
