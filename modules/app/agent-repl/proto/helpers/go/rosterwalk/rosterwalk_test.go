@@ -224,27 +224,61 @@ func TestOpenRowsWalksTheSectionsInOrder(t *testing.T) {
 	}
 }
 
-func TestAllRowsListsOpenThenHiddenThenMergedThenClosed(t *testing.T) {
-	// Arrange.
-	roster := &frontendv1.WorkspaceRoster{
-		Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o", open("o1"))))}},
-		Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: []*frontendv1.RosterHiddenRow{hidden("h", hidden("h1"))}}},
-		RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{
-			{MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: row("m")}}}},
-			{MergedRows: &frontendv1.RosterMergedRows{Rows: []*frontendv1.RosterMergedRow{{Row: row("n")}}}},
-		}},
-		Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("c")}}},
+func TestAllRows(t *testing.T) {
+	tests := []struct {
+		name string
+		push *frontendv1.RosterPush
+		want []string
+	}{
+		{
+			name: "open then hidden then closed, each family under its parent",
+			push: &frontendv1.RosterPush{
+				Workspaces: &frontendv1.WorkspaceRoster{
+					Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o", open("o1"))))}},
+					Hidden:     &frontendv1.RosterHiddenSection{HiddenRows: &frontendv1.RosterHiddenRows{Rows: []*frontendv1.RosterHiddenRow{hidden("h", hidden("h1"))}}},
+				},
+				Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("c")}}},
+			},
+			want: []string{"o", "o1", "h", "h1", "c"},
+		},
+		{
+			name: "a push with no closed stream lists the workspaces stream alone",
+			push: &frontendv1.RosterPush{Workspaces: &frontendv1.WorkspaceRoster{
+				Repository: &frontendv1.RosterRepositoryView{Sections: []*frontendv1.RosterRepoSection{section(entry(open("o")))}},
+			}},
+			want: []string{"o"},
+		},
+		{
+			name: "a push with no workspaces stream lists the closed stream alone",
+			push: &frontendv1.RosterPush{Closed: &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("c")}}}},
+			want: []string{"c"},
+		},
+		{
+			name: "the merged summary contributes no row",
+			push: &frontendv1.RosterPush{RecentlyMerged: &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{{}}}},
+			want: nil,
+		},
+		{name: "an empty push lists none", push: &frontendv1.RosterPush{}, want: nil},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := ids(AllRows(tt.push))
 
-	// Act / Assert.
-	if got, want := ids(AllRows(roster)), []string{"o", "o1", "h", "h1", "m", "n", "c"}; !slices.Equal(got, want) {
-		t.Fatalf("AllRows = %v, want %v", got, want)
+			// Assert.
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("AllRows = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
-func TestAllRowsOfAnEmptyRosterIsEmpty(t *testing.T) {
+func TestClosedRowsListsTheClosedStreamInOrder(t *testing.T) {
+	// Arrange.
+	closed := &frontendv1.RosterClosedRows{Rows: []*frontendv1.RosterClosedRow{{Row: row("a")}, {Row: row("b")}}}
+
 	// Act / Assert.
-	if got := AllRows(&frontendv1.WorkspaceRoster{}); len(got) != 0 {
-		t.Fatalf("AllRows = %v, want none", ids(got))
+	if got, want := ids(ClosedRows(closed)), []string{"a", "b"}; !slices.Equal(got, want) {
+		t.Fatalf("ClosedRows = %v, want %v", got, want)
 	}
 }
