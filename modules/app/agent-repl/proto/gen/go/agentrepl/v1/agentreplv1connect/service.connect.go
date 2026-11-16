@@ -335,6 +335,9 @@ const (
 	// AgentReplAdoptHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// AdoptHostWorkspace RPC.
 	AgentReplAdoptHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AdoptHostWorkspace"
+	// AgentReplAcceptHandedWorkspaceProcedure is the fully-qualified name of the AgentRepl's
+	// AcceptHandedWorkspace RPC.
+	AgentReplAcceptHandedWorkspaceProcedure = "/agentrepl.v1.AgentRepl/AcceptHandedWorkspace"
 	// AgentReplListSlashCommandsProcedure is the fully-qualified name of the AgentRepl's
 	// ListSlashCommands RPC.
 	AgentReplListSlashCommandsProcedure = "/agentrepl.v1.AgentRepl/ListSlashCommands"
@@ -562,6 +565,7 @@ var (
 	agentReplWatchDaemonMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplOpenTabsMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("OpenTabs")
 	agentReplAdoptHostWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
+	agentReplAcceptHandedWorkspaceMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AcceptHandedWorkspace")
 	agentReplListSlashCommandsMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
 	agentReplWatchWebWorkspaceMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
 	agentReplOpenLoginMethodDescriptor                         = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
@@ -953,6 +957,9 @@ type AgentReplClient interface {
 	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
 	// endpoint_adopt_host_workspace.proto.
 	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
+	// An older daemon's announcement to the newest that it is about to move a
+	// workspace there. See endpoint_accept_handed_workspace.proto.
+	AcceptHandedWorkspace(context.Context, *connect.Request[v1.AcceptHandedWorkspaceRequest]) (*connect.Response[v1.AcceptHandedWorkspaceResponse], error)
 	// Every slash command the workspace's agent runtime answers, for the
 	// composer's completion. See endpoint_list_slash_commands.proto.
 	ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error)
@@ -1768,6 +1775,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplAdoptHostWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		acceptHandedWorkspace: connect.NewClient[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse](
+			httpClient,
+			baseURL+AgentReplAcceptHandedWorkspaceProcedure,
+			connect.WithSchema(agentReplAcceptHandedWorkspaceMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		listSlashCommands: connect.NewClient[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse](
 			httpClient,
 			baseURL+AgentReplListSlashCommandsProcedure,
@@ -2136,6 +2149,7 @@ type agentReplClient struct {
 	watchDaemon                       *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	openTabs                          *connect.Client[v1.OpenTabsRequest, v1.OpenTabsResponse]
 	adoptHostWorkspace                *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
+	acceptHandedWorkspace             *connect.Client[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse]
 	listSlashCommands                 *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
 	watchWebWorkspace                 *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
 	openLogin                         *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
@@ -2724,6 +2738,11 @@ func (c *agentReplClient) AdoptHostWorkspace(ctx context.Context, req *connect.R
 	return c.adoptHostWorkspace.CallUnary(ctx, req)
 }
 
+// AcceptHandedWorkspace calls agentrepl.v1.AgentRepl.AcceptHandedWorkspace.
+func (c *agentReplClient) AcceptHandedWorkspace(ctx context.Context, req *connect.Request[v1.AcceptHandedWorkspaceRequest]) (*connect.Response[v1.AcceptHandedWorkspaceResponse], error) {
+	return c.acceptHandedWorkspace.CallUnary(ctx, req)
+}
+
 // ListSlashCommands calls agentrepl.v1.AgentRepl.ListSlashCommands.
 func (c *agentReplClient) ListSlashCommands(ctx context.Context, req *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error) {
 	return c.listSlashCommands.CallUnary(ctx, req)
@@ -3277,6 +3296,9 @@ type AgentReplHandler interface {
 	// Emacs's half of the handover rendezvous, called on the NEW daemon. See
 	// endpoint_adopt_host_workspace.proto.
 	AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error)
+	// An older daemon's announcement to the newest that it is about to move a
+	// workspace there. See endpoint_accept_handed_workspace.proto.
+	AcceptHandedWorkspace(context.Context, *connect.Request[v1.AcceptHandedWorkspaceRequest]) (*connect.Response[v1.AcceptHandedWorkspaceResponse], error)
 	// Every slash command the workspace's agent runtime answers, for the
 	// composer's completion. See endpoint_list_slash_commands.proto.
 	ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error)
@@ -4088,6 +4110,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplAdoptHostWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplAcceptHandedWorkspaceHandler := connect.NewUnaryHandler(
+		AgentReplAcceptHandedWorkspaceProcedure,
+		svc.AcceptHandedWorkspace,
+		connect.WithSchema(agentReplAcceptHandedWorkspaceMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplListSlashCommandsHandler := connect.NewUnaryHandler(
 		AgentReplListSlashCommandsProcedure,
 		svc.ListSlashCommands,
@@ -4562,6 +4590,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplOpenTabsHandler.ServeHTTP(w, r)
 		case AgentReplAdoptHostWorkspaceProcedure:
 			agentReplAdoptHostWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplAcceptHandedWorkspaceProcedure:
+			agentReplAcceptHandedWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplListSlashCommandsProcedure:
 			agentReplListSlashCommandsHandler.ServeHTTP(w, r)
 		case AgentReplWatchWebWorkspaceProcedure:
@@ -5087,6 +5117,10 @@ func (UnimplementedAgentReplHandler) OpenTabs(context.Context, *connect.Request[
 
 func (UnimplementedAgentReplHandler) AdoptHostWorkspace(context.Context, *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AdoptHostWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) AcceptHandedWorkspace(context.Context, *connect.Request[v1.AcceptHandedWorkspaceRequest]) (*connect.Response[v1.AcceptHandedWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.AcceptHandedWorkspace is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error) {

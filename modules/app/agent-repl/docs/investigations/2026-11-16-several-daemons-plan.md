@@ -49,6 +49,16 @@ An incumbent's transfer names its successor, fixed when the handover began.
 When a newer daemon has taken over since (`daemon.addr` names another daemon),
 a holdout freed later goes to the NEWEST daemon, read at each move. The newest
 was never told of it in a manifest, so the outgoing daemon announces the move
-to it directly (`AcceptTransfer`), arming its adopt rendezvous for that one
+to it directly (`AcceptHandedWorkspace`), arming its adopt rendezvous for that one
 workspace, and then transfers it there exactly as it would to its own
 successor.
+
+## Open questions
+
+- A FRESH boot (no handover) that finds the boot claim free while a yielded
+  older daemon still serves its holdouts would recover that daemon's live
+  shims as orphans. It arises only when the newest daemon died while an older
+  one still served something. The fresh boot should defer its orphan recovery
+  to the same life-lock wait the takeover uses (`daemonaddr.LiveOthers`).
+- `acceptHandedBound` (1s) comes from an idle-host measure of a loopback
+  unary (6-7ms); it should be measured again under a loaded deploy.

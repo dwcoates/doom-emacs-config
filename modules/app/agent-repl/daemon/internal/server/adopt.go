@@ -2,6 +2,8 @@ package server
 
 import (
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/rollout"
 	"agent-repld/internal/wsm"
 	"context"
 	"net/http"
@@ -55,6 +57,34 @@ func (s *server) AdoptHostWorkspace(
 	resp.Result = &agentreplv1.AdoptHostWorkspaceResponse_Success{
 		Success: &agentreplv1.AdoptHostWorkspaceSuccess{},
 	}
+	return connect.NewResponse(resp), nil
+}
+
+// AcceptHandedWorkspace is an older daemon's announcement that it is about
+// to move a workspace here (several-daemons plan, phase 3).
+func (s *server) AcceptHandedWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.AcceptHandedWorkspaceRequest],
+) (*connect.Response[agentreplv1.AcceptHandedWorkspaceResponse], error) {
+	const rpc = "AcceptHandedWorkspace"
+	if err := validateAcceptHandedWorkspaceRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.AcceptHandedWorkspaceResponse{}
+	subject, cerr, done := s.subjectForAdoption(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	expected := rollout.Participants{Host: req.Msg.GetExpectedHost(), Web: req.Msg.GetExpectedWeb()}
+	if err := s.deps.Rollout.AcceptHanded(ctx, subject.Record.ID, ids.InstanceID(req.Msg.GetOutgoingDaemon()), expected); err != nil {
+		refused, ok := s.asRefusal(err)
+		if !ok {
+			return nil, fail(subject.Log, rpc, err)
+		}
+		refused.Info = true
+		return answer(resp, s.refuse(subject.Log, rpc, resp, refused))
+	}
+	resp.Result = &agentreplv1.AcceptHandedWorkspaceResponse_Success{Success: &agentreplv1.AcceptHandedWorkspaceSuccess{}}
 	return connect.NewResponse(resp), nil
 }
 

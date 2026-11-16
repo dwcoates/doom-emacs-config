@@ -1288,6 +1288,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
 		YieldBootClaim:  p.Claim.Yield,
+		NewestDaemon: func() (string, error) {
+			ad, err := daemonaddr.ReadAdvertisement(p.Layout.DaemonAddr())
+			return ad.Address, err
+		},
+		AnnounceHanded: announceHanded,
 		LiveElders: func() ([]string, error) {
 			return daemonaddr.LiveOthers(p.Layout.DaemonAddr(), string(p.Instance))
 		},

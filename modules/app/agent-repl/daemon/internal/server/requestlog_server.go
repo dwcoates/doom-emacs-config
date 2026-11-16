@@ -693,6 +693,13 @@ func (s *requestLoggingServer) WatchDaemon(
 	return serveStream(s, ctx, "WatchDaemon", req, stream, s.server.WatchDaemon)
 }
 
+func (s *requestLoggingServer) AcceptHandedWorkspace(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.AcceptHandedWorkspaceRequest],
+) (*connect.Response[agentreplv1.AcceptHandedWorkspaceResponse], error) {
+	return serveUnary(s, ctx, "AcceptHandedWorkspace", req, s.server.AcceptHandedWorkspace)
+}
+
 func (s *requestLoggingServer) AdoptHostWorkspace(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.AdoptHostWorkspaceRequest],

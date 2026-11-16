@@ -677,7 +677,12 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 // is re-adopted, so a transfer that failed leaves the workspace served HERE --
 // never held by a lease nobody will release.
 func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *handoverPlan, windows *sync.WaitGroup) error {
-	successor := plan.successor
+	successor, err := c.transferTarget(ctx, ws, plan)
+	if err != nil {
+		// NOTHING WAS TOUCHED: the workspace is served here as it was, and
+		// offered again.
+		return errors.Join(fmt.Errorf("rollout: transfer %q: %w", ws.ID, err), errServedWhole)
+	}
 	fields := dlog.Context{"workspace": string(ws.ID), "successor": successor}
 	// THE WORKSPACE'S OWN LOG SAYS WHY TWO DAEMONS WRITE FOR IT. For the
 	// length of a transfer this daemon and its successor both record about
@@ -1658,4 +1663,67 @@ func (c *controller) livePID(ws ids.WorkspaceID) (int, bool) {
 		return 0, false
 	}
 	return client.PID(), true
+}
+
+// transferTarget answers the daemon WS moves to (docs/investigations/
+// 2026-11-16-several-daemons-plan.md, phase 3): this handover's successor,
+// or, once a newer daemon has taken over since, the NEWEST, read from
+// daemon.addr at this move, so a holdout freed long after its handover
+// never goes through every generation in turn. The newest was told of WS in
+// no manifest, so it is told here (AcceptHandedWorkspace) before anything of
+// WS is touched. A move it cannot be told of is an error, and WS stays
+// served here and is offered again.
+func (c *controller) transferTarget(ctx context.Context, ws wsm.Workspace, plan *handoverPlan) (string, error) {
+	if plan.restart || c.deps.NewestDaemon == nil {
+		return plan.successor, nil
+	}
+	fields := dlog.Merge(plan.fields, dlog.Context{"workspace": string(ws.ID), "successor": plan.successor})
+	newest, err := c.deps.NewestDaemon()
+	if err != nil {
+		c.log.Error(opTransfer, "could not read which daemon is the newest; the workspace stays served here and is offered again", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("read the newest daemon: %w", err)
+	}
+	// THE ADVERTISEMENT NAMES THIS DAEMON until it yields, and the successor
+	// once it has taken over: either way the move is the handover's own.
+	if newest == "" || newest == plan.successor || newest == c.deps.SelfAddress {
+		return plan.successor, nil
+	}
+	fields["newest"] = newest
+	expected := plan.snapshot[ws.ID]
+	if err := c.deps.AnnounceHanded(ctx, newest, ws, c.deps.Instance, expected); err != nil {
+		c.log.Error(opTransfer, "the newest daemon could not be told of the move; the workspace stays served here and is offered again", dlog.WithCause(fields, err))
+		return "", fmt.Errorf("announce the move to the newest daemon %s: %w", newest, err)
+	}
+	c.log.Info(opTransfer, "a newer daemon took over since this handover began, so the freed workspace moves straight to the newest", fields)
+	return newest, nil
+}
+
+// AcceptHanded implements Controller (docs/investigations/
+// 2026-11-16-several-daemons-plan.md, phase 3). It arms the rendezvous for
+// WS as a manifest session would, so the adoption that follows the older
+// daemon's transfer is the one every handover runs. A workspace already
+// armed is left as it is. While this daemon hands over itself it is no
+// longer the newest, and the workspace goes to the daemon that is.
+func (c *controller) AcceptHanded(ctx context.Context, ws ids.WorkspaceID, outgoing ids.InstanceID, expected Participants) error {
+	fields := dlog.Context{"workspace": string(ws), "outgoing_daemon": string(outgoing),
+		"expected_host": expected.Host, "expected_web": expected.Web}
+	c.mu.Lock()
+	handingOver := c.handover != nil
+	c.unlock()
+	if handingOver {
+		c.log.Info(opJoin, "an older daemon would move a workspace here while this daemon hands over itself; it is pointed to the newest", fields)
+		return ErrNotNewest
+	}
+	record, err := c.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		c.log.Error(opJoin, "could not read the workspace an older daemon would move here", dlog.WithCause(fields, err))
+		return fmt.Errorf("rollout: accept the handed workspace %q: %w", ws, err)
+	}
+	added := c.armSessions(outgoing, c.deps.Clock.Now(), []ManifestSession{{
+		Workspace: ws, Dir: record.Dir, Intent: IntentPreserve,
+		ExpectedHost: expected.Host, ExpectedWeb: expected.Web,
+	}})
+	c.log.Info(opJoin, "an older daemon announced it is moving a workspace here; its rendezvous is armed",
+		dlog.Merge(fields, dlog.Context{"newly_armed": added == 1}))
+	return nil
 }
