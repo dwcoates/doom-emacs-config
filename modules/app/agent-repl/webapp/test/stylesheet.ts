@@ -136,6 +136,41 @@ export function keyframesOf(name: string, css: string = stylesheet): string {
   return css.slice(bodyStart, end);
 }
 
+/** One `@media` block of a stylesheet, as `mediaBlocksOf` finds it. */
+export interface MediaBlock {
+  /** Where the block's `@media` starts. */
+  start: number;
+  /** Just past the block's closing brace. */
+  end: number;
+  /** Everything between the block's braces. */
+  body: string;
+}
+
+/**
+ * Every `@media (QUERY)` block in CSS (the real stylesheet by default), in
+ * source order, each matched brace by brace from its opening `{`: `rulesOf`'s
+ * flat scan cannot tell a rule inside a media block from one outside it, and
+ * the same selector often stands on both sides. Fails loudly on a block that
+ * never closes.
+ */
+export function mediaBlocksOf(query: string, css: string = stylesheet): MediaBlock[] {
+  const head = `@media (${query})`;
+  const blocks: MediaBlock[] = [];
+  for (let start = css.indexOf(head); start !== -1; start = css.indexOf(head, start + head.length)) {
+    const open = css.indexOf("{", start);
+    let depth = 0;
+    let cursor = open;
+    for (; cursor !== -1 && cursor < css.length; cursor += 1) {
+      if (css[cursor] === "{") depth += 1;
+      if (css[cursor] === "}") depth -= 1;
+      if (depth === 0) break;
+    }
+    if (open === -1 || depth !== 0) throw new Error(`the stylesheet's ${head} block never closes`);
+    blocks.push({ start, end: cursor + 1, body: css.slice(open + 1, cursor) });
+  }
+  return blocks;
+}
+
 /**
  * The selector PATTERN's first group captures from the real stylesheet,
  * comments stripped, or a loud failure naming WHAT the test looked for.

@@ -44,12 +44,14 @@ describe("codeOf", () => {
 
 describe("the call sites", () => {
 
-  it("strip comments and scan stylesheet rules only through the shared readers", () => {
+  it("strip comments, scan stylesheet rules and find media blocks only through the shared readers", () => {
     // Arrange: the hand-rolled shapes the shared readers replaced.
     const shapes = [
       String.raw`/\/\*[\s\S]*?\*\//g`,
       String.raw`/^\s*\/\/.*$/gm`,
       String.raw`/([^{}]+)\{([^{}]*)\}/g`,
+      'indexOf("@media',
+      'split("@media',
     ];
     const owners = new Set([
       path.join(here, "source-text.ts"),

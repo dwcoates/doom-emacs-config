@@ -1701,9 +1701,20 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    2026-09-19): one soft band of reduced ink (40%) ripples across the text and
    rests off it at either end of the pass. The band is a MASK's alpha, so the
    name keeps whatever colour it already has, a PARTIAL (viewed) name's muted
-   tone included. The mask is 250% of the box and pans only between 0% and
-   100%, which keeps it covering the text at every frame: a position outside
-   that range would mask glyphs out entirely.
+   tone included. The mask is 250% of the name's box and travels from 150% of
+   the box left of the name to the name's own left edge, which keeps it
+   covering the text at every frame: a mask that left the text would mask
+   glyphs out entirely.
+
+   THE BAND MOVES ON THE COMPOSITOR (2026-11-16): the mask once panned by
+   `mask-position`, which WebKit computes on the page's main thread every
+   frame, so every main-thread block froze it. Now the mask is on the name's
+   ink box (src/sidebar/name-ink.ts), as wide as the mask, and a `transform`
+   carries the box across: `ws-revive-shimmer` moves it 60% of its own width,
+   1.5 times the name's, and `ws-revive-counter` moves the copies inside it
+   back by the same 1.5 names (150% of a copy's own width) on the same timing,
+   so the text stands still while the band passes. The resting copy takes the
+   name's colour, any fade included.
 
    NO GRADIENT MIXES `currentColor`. WebKitGTK ended every page of the webhost
    the moment a gradient drew `color-mix(in srgb, currentColor 40%,
@@ -1713,22 +1724,41 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 
    The rail's wall-clock seek (src/sidebar/wall-phase.ts) reads the 2.4s
    period from here, so a roster push that rebuilds the row continues the pass
-   rather than restarting it. Reduced motion drops the shimmer entirely (see the
-   `prefers-reduced-motion` block). */
-#ws-sidebar .row .name.reviving {
-  -webkit-mask-image: linear-gradient(90deg,
-    #000 0%, #000 42%, rgb(0 0 0 / 40%) 50%, #000 58%, #000 100%);
-  mask-image: linear-gradient(90deg,
-    #000 0%, #000 42%, rgb(0 0 0 / 40%) 50%, #000 58%, #000 100%);
-  -webkit-mask-size: 250% 100%;
-  mask-size: 250% 100%;
-  -webkit-mask-repeat: no-repeat;
-  mask-repeat: no-repeat;
-  animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite;
+   rather than restarting it. Reduced motion drops the shimmer entirely: every
+   rule of it is drawn only under `prefers-reduced-motion: no-preference`, so
+   the name is drawn in plain ink. */
+@media (prefers-reduced-motion: no-preference) {
+  #ws-sidebar .row .name.reviving > .name-ink {
+    width: 250%;
+    -webkit-mask-image: linear-gradient(90deg,
+      #000 0%, #000 42%, rgb(0 0 0 / 40%) 50%, #000 58%, #000 100%);
+    mask-image: linear-gradient(90deg,
+      #000 0%, #000 42%, rgb(0 0 0 / 40%) 50%, #000 58%, #000 100%);
+    -webkit-mask-size: 100% 100%;
+    mask-size: 100% 100%;
+    -webkit-mask-repeat: no-repeat;
+    mask-repeat: no-repeat;
+    animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite;
+  }
+  #ws-sidebar .row .name.reviving > .name-ink::before,
+  #ws-sidebar .row .name.reviving > .name-ink::after { width: 40%; }
+  #ws-sidebar .row .name.reviving > .name-ink::before {
+    animation: ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite;
+  }
+  #ws-sidebar .row .name.breathes.reviving > .name-ink::before {
+    animation: ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite, ws-pulse-rest var(--ws-mark-cycle) ease-in-out infinite;
+  }
+  #ws-sidebar .row .name.breathes.reviving > .name-ink::after {
+    animation: ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
+  }
 }
 @keyframes ws-revive-shimmer {
-  from { -webkit-mask-position: 100% 0; mask-position: 100% 0; }
-  to { -webkit-mask-position: 0% 0; mask-position: 0% 0; }
+  from { transform: translateX(-60%); }
+  to { transform: translateX(0); }
+}
+@keyframes ws-revive-counter {
+  from { transform: translateX(150%); }
+  to { transform: translateX(0); }
 }
 #ws-sidebar .row .when,
 #ws-sidebar .sb-mq-clock {
@@ -1984,16 +2014,26 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 
 /* THE BREATH ONLY BRIGHTENS (owner request, 2026-10-29): a breathing name
    swings between the name's resting ink (--name-rest) and --name-peak, the
-   full text color or, for a name held at its status tone, a brighter tone,
-   and never dims below the resting ink. It still never changes
-   size (owner ruling, 2026-10-14). */
-@keyframes ws-pulse-tone {
-  0%, 100% { color: var(--name-dark); }
-  50% { color: var(--name-bright); }
-}
+   full text color or, for a name held at its status tone, between a darker
+   and a brighter tone (--name-dark, --name-bright), and never dims below the
+   resting ink. It still never changes size (owner ruling, 2026-10-14).
+
+   THE BREATH IS A CROSSFADE ON THE COMPOSITOR (2026-11-16): a copy in the
+   rest ink (the ink box's `::before`, src/sidebar/name-ink.ts) fades out as a
+   copy in the peak ink (its `::after`) fades in, by `opacity`, which WebKit
+   runs off the page's main thread. The peak copy is ADDED to the resting one
+   (`plus-lighter`, in the ink box's own group), and their opacities always
+   sum to one, so every pixel, a glyph's antialiased edge and a
+   semi-transparent rest ink (the cold gate's) included, is the premultiplied
+   mix the color loop it replaced drew. Painted over each other instead, the
+   two copies' edges would double and the name would read bolder. */
 @keyframes ws-pulse {
-  0%, 100% { color: var(--name-rest); }
-  50% { color: var(--name-peak); }
+  0%, 100% { opacity: 0; }
+  50% { opacity: 1; }
+}
+@keyframes ws-pulse-rest {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 #topbar {
@@ -4933,15 +4973,6 @@ html[data-page-unshown] {
     width: 100%;
     opacity: 0.5;
   }
-  /* The reviving shimmer STOPS, and its mask goes with it so the name is
-     drawn in plain ink rather than through a parked band. The fact it
-     restates is transient and the row's status resolves the moment the
-     session is up. */
-  #ws-sidebar .row .name.reviving {
-    animation: none;
-    -webkit-mask-image: none;
-    mask-image: none;
-  }
 }
 
 /* Items the renderer suppresses (textless thinking, AskUserQuestion's tool
@@ -6963,16 +6994,69 @@ bubble-body.bubble-body { display: block; }
    THE NAME BREATHES, THE MARK STANDS STILL (owner request, 2026-10-14): row.ts
    puts `breathes` on the row's name, and no status mark animates at all. A
    name that is also reviving runs both loops, since the shimmer moves the
-   background and the breath the opacity. */
+   ink box and the breath the peak copy's opacity. */
 #ws-sidebar { --ws-mark-cycle: 2s; --ws-revive-cycle: 2.4s; }
-#ws-sidebar .row .name.breathes { animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite; }
+/* A breathing name rests in its rest ink, and no other animation colors it:
+   the breath outranks a fade, as the color loop it replaced did. Every name
+   state above declares its color as its --name-rest, so the rest ink is the
+   name's own color once the fade stops. */
+#ws-sidebar .row .name.breathes { animation: none; }
 /* A COLORED NAME BREATHES BOTH WAYS (owner request, 2026-10-29): evenly darker
    and brighter about its tone, with a shallower swing than the grey names'
    brightening alone. */
-#ws-sidebar .row .name.tinted.breathes { animation: ws-pulse-tone var(--ws-mark-cycle) ease-in-out infinite; }
-#ws-sidebar .row .name.breathes.reviving {
-  animation: ws-revive-shimmer var(--ws-revive-cycle) ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
+#ws-sidebar .row .name.tinted.breathes { color: var(--name-dark); }
+/* THE INK BOX (src/sidebar/name-ink.ts): the name's animated copies, over the
+   name's own box and in its font, each cut off with the same ellipsis, never
+   catching the pointer. The name's own text, its ellipsis and its strike line
+   are hidden while the copies draw them; the name keeps its box, its colour
+   and its text for everything that reads it. The copies draw the strike line
+   themselves, since a decoration never reaches an absolutely positioned box. */
+#ws-sidebar .row .name.breathes,
+#ws-sidebar .row .name.reviving {
+  position: relative;
+  -webkit-text-fill-color: transparent;
+  text-decoration-color: transparent;
 }
+#ws-sidebar .row .name > .name-ink {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  pointer-events: none;
+  isolation: isolate;
+  text-decoration-line: inherit;
+  text-decoration-style: inherit;
+  text-decoration-thickness: inherit;
+}
+#ws-sidebar .row .name > .name-ink::before,
+#ws-sidebar .row .name > .name-ink::after {
+  content: attr(data-name);
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  -webkit-text-fill-color: currentColor;
+  text-decoration-line: inherit;
+  text-decoration-style: inherit;
+  text-decoration-thickness: inherit;
+  text-decoration-color: currentColor;
+}
+#ws-sidebar .row .name > .name-ink::after { display: none; }
+#ws-sidebar .row .name.breathes > .name-ink::before {
+  animation: ws-pulse-rest var(--ws-mark-cycle) ease-in-out infinite;
+}
+#ws-sidebar .row .name.breathes > .name-ink::after {
+  display: block;
+  color: var(--name-peak);
+  mix-blend-mode: plus-lighter;
+  animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
+}
+#ws-sidebar .row .name.tinted.breathes > .name-ink::after { color: var(--name-bright); }
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
    specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are
