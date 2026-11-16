@@ -526,6 +526,9 @@ type DB interface {
 	// HoldMergeRound marks the live round of a merge's ledger held since a
 	// time, or clears its hold, in one write (mergeledger.go).
 	HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time) (bool, error)
+	// HeldMergeRounds answers every ledger whose live round is held, and
+	// since when (mergeledger.go).
+	HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, error)
 	RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)

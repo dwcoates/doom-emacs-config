@@ -114,6 +114,30 @@ func (s *store) HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time
 	return held, err
 }
 
+// HeldMergeRounds answers every ledger whose live round is held, and since
+// when (HoldMergeRound): the one read the merge views take their holds from.
+func (s *store) HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, error) {
+	const op = "daemon.wsm.held_merge_rounds"
+	out := map[LeaseID]time.Time{}
+	err := s.read(ctx, op, nil, func(ctx context.Context) error {
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT lease_id, held_since FROM merge_tab_intervals WHERE held_since IS NOT NULL AND ended_at IS NULL`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var lease LeaseID
+			var at int64
+			if err := rows.Scan(&lease, &at); err != nil {
+				return err
+			}
+			out[lease] = fromNanos(at)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // mergeRoundHoldDDL is the layout-153 addition: when the live round of a
 // merge's ledger was suspended, NULL while it runs (HoldMergeRound).
 const mergeRoundHoldDDL = `

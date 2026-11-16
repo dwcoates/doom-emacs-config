@@ -525,3 +525,22 @@ func TestHoldMergeRoundRefusesALedgerItDoesNotName(t *testing.T) {
 		t.Fatalf("records = %+v, want the refusal at ERROR", logs.Records())
 	}
 }
+
+func TestHeldMergeRoundsAnswersEveryHeldLiveRound(t *testing.T) {
+	// Arrange: one held ledger and one running.
+	s, _ := testStore(t)
+	_, heldLease := liveRound(t, s)
+	_, _ = liveRound(t, s)
+	held := instant.Add(time.Minute)
+	if _, err := s.HoldMergeRound(context.Background(), heldLease, &held); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got, err := s.HeldMergeRounds(context.Background())
+
+	// Assert
+	if err != nil || len(got) != 1 || !got[heldLease].Equal(held) {
+		t.Fatalf("HeldMergeRounds = (%v, %v), want only %s held since %v", got, err, heldLease, held)
+	}
+}
