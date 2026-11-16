@@ -1887,6 +1887,7 @@ describe("the rail lets go of what the pointer raised when the user leaves it", 
 });
 
 describe("mounting the rail: the roster's four streams", () => {
+  afterEach(settleOwedDragClick);
   /** The rail mounted on a stream the test pushes into, over a daemon also answering IMPL. */
   function mountStreams(impl: Partial<ServiceImpl<typeof AgentRepl>> = {}, failures: FailureSink = SINK) {
     const host = document.createElement("nav");
@@ -2068,6 +2069,25 @@ describe("mounting the rail: the roster's four streams", () => {
       0,
       true,
     ]);
+    rail.dispose();
+  });
+
+  it("draws a page that lands while a drag holds the drawing only once the hold lets go", async () => {
+    // Arrange: the band's page 0 is asked, and a drag lifts ws-1 before it lands.
+    const pages = deferredPages();
+    const rail = mountStreams(pages.impl);
+    await rail.push(beforeMerge());
+    const first = await pages.next();
+    primaryPointer("pointerdown", rail.host.querySelector("[data-roster-row='ws-1'] > .row") as Element, 10);
+    primaryPointer("pointermove", window, 40);
+    first.answer(mergedPageAnswer(mergedRowsOf(beforeMerge().recentlyMerged.groups[0]), 0, 1n));
+    await settle();
+    const whileHeld = rail.host.querySelector(".merged-section [data-roster-row='ws-old']");
+    // Act
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    await settle();
+    // Assert
+    expect([whileHeld, rail.host.querySelector(".merged-section [data-roster-row='ws-old']") !== null]).toEqual([null, true]);
     rail.dispose();
   });
 
