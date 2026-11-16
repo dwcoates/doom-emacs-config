@@ -4,8 +4,12 @@
 
 ;; THE SIDEBAR'S STREAM, DECODED.  WatchWorkspaceRoster is THE ONE GLOBAL
 ;; STREAM: it carries no workspace, every client watches the same roster, and
-;; the daemon's stream order is the only order.  Its response wraps
-;; `frontend.v1.WorkspaceRoster' whole.
+;; the daemon's stream order is the only order.  Its response wraps one
+;; `frontend.v1.RosterPush': the roster's four snapshot streams (the
+;; workspaces, the merge queue, the Recently Merged summary and the closed
+;; rows), each WHOLE whenever it is carried and absent when unchanged.  A
+;; merged workspace is in no stream: its row is paged by
+;; `agentrepl.v1.ListMergedWorkspaces', whose codec is also here.
 ;;
 ;; THE MESSAGE TREE IS THE UI TREE, and the decode preserves it exactly:
 ;; every drawn box is one message and every message is one plist, nesting
@@ -30,6 +34,7 @@
 (declare-function agent-repl-wire--decode-empty "wire-common")
 (declare-function agent-repl-wire--decode-int64 "wire-common")
 (declare-function agent-repl-wire--decode-uint32 "wire-common")
+(declare-function agent-repl-wire--decode-optional-uint32 "wire-common")
 (declare-function agent-repl-wire--decode-uint64 "wire-common")
 (declare-function agent-repl-wire--decode-message "wire-common")
 (declare-function agent-repl-wire--decode-oneof "wire-common")
@@ -48,6 +53,8 @@
 (declare-function agent-repl-wire--present-p "wire-common")
 (declare-function agent-repl-wire--raw "wire-common")
 (declare-function agent-repl-wire-decode-repository-ref "wire-common")
+(declare-function agent-repl-wire-encode-repository-ref "wire-common")
+(declare-function agent-repl-wire--encode-oneof "wire-common")
 (declare-function agent-repl-wire-decode-workspace-ref "wire-common")
 
 ;; wire-common.el is loaded immediately before this file by config.el's
@@ -1901,9 +1908,16 @@ subsections, interleaved (`agent-repl-wire-decode-roster-repo-entry')."
                      #'agent-repl-wire-decode-roster-repo-entry)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-header (value)
-  "Decode `RosterMergedSection''s `header' field VALUE, a plist `(:label L)'.
-The Recently Merged and Merge Queue sections' headers carry NO count:
-each Recently Merged group's header carries its own merge summary."
+  "Decode `RosterMergedSection''s `header' field VALUE.
+A plist `(:label L :count C)': the Recently Merged section's header
+carries its COUNT, every merged workspace of every group, since its rows
+are paged on demand and the count is then the only account of the merges
+not drawn."
+  (agent-repl-wire-decode-roster-section-header value))
+
+(defun agent-repl-wire-decode-roster-merge-queue-section-header (value)
+  "Decode `RosterMergeQueueSection''s `header' field VALUE, `(:label L)'.
+The Merge Queue section's header carries NO count."
   (let ((object (agent-repl-wire--object "RosterSectionHeader" value)))
     (agent-repl-wire--check-keys "RosterSectionHeader" object '(label))
     (agent-repl-wire--decoded
@@ -1931,13 +1945,66 @@ A group's header is its repository's label and nothing to toggle."
                    "RosterMergedRepoGroupHeader" 'label object
                    #'agent-repl-wire-decode-roster-merged-repo-group-header-label)))))
 
+(defun agent-repl-wire-decode-roster-merged-repo-group-count (value)
+  "Decode VALUE as `RosterMergedRepoGroupCount', a plist `(:merges N)'."
+  (let ((object (agent-repl-wire--object "RosterMergedRepoGroupCount" value)))
+    (agent-repl-wire--check-keys "RosterMergedRepoGroupCount" object '(merges))
+    (agent-repl-wire--decoded
+     "RosterMergedRepoGroupCount"
+     (list :merges (agent-repl-wire--decode-uint32
+                    "RosterMergedRepoGroupCount" 'merges object)))))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-latest (value)
+  "Decode VALUE as `RosterMergedRepoGroupLatest', a plist `(:merged-at-ms MS)'."
+  (let ((object (agent-repl-wire--object "RosterMergedRepoGroupLatest" value)))
+    (agent-repl-wire--check-keys "RosterMergedRepoGroupLatest" object '(mergedAtMs))
+    (agent-repl-wire--decoded
+     "RosterMergedRepoGroupLatest"
+     (list :merged-at-ms (agent-repl-wire--decode-int64
+                          "RosterMergedRepoGroupLatest" 'mergedAtMs object)))))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-recent-merge (value)
+  "Decode VALUE as `RosterMergedRepoGroupRecentMerge'.
+A plist `(:merged-at-ms MS :commits N-or-nil)': COMMITS is nil when the
+daemon has no count for the merge, never zero for an uncounted one."
+  (let ((object (agent-repl-wire--object "RosterMergedRepoGroupRecentMerge" value)))
+    (agent-repl-wire--check-keys "RosterMergedRepoGroupRecentMerge" object
+                                 '(mergedAtMs commits))
+    (agent-repl-wire--decoded
+     "RosterMergedRepoGroupRecentMerge"
+     (list :merged-at-ms (agent-repl-wire--decode-int64
+                          "RosterMergedRepoGroupRecentMerge" 'mergedAtMs object)
+           :commits (agent-repl-wire--decode-optional-uint32
+                     "RosterMergedRepoGroupRecentMerge" 'commits object)))))
+
+(defun agent-repl-wire-decode-roster-merged-repo-group-summary (value)
+  "Decode VALUE as `RosterMergedRepoGroupSummary'.
+A plist `(:count C :latest L :recent MERGES)': what a group's header says
+about ALL its merges, whichever pages of its rows are loaded.  Emacs draws
+none of it; it is decoded because the codec refuses unknown fields."
+  (let ((object (agent-repl-wire--object "RosterMergedRepoGroupSummary" value)))
+    (agent-repl-wire--check-keys "RosterMergedRepoGroupSummary" object
+                                 '(count latest recent))
+    (agent-repl-wire--decoded
+     "RosterMergedRepoGroupSummary"
+     (list :count (agent-repl-wire--decode-message
+                   "RosterMergedRepoGroupSummary" 'count object
+                   #'agent-repl-wire-decode-roster-merged-repo-group-count)
+           :latest (agent-repl-wire--decode-message
+                    "RosterMergedRepoGroupSummary" 'latest object
+                    #'agent-repl-wire-decode-roster-merged-repo-group-latest)
+           :recent (agent-repl-wire--decode-repeated
+                    "RosterMergedRepoGroupSummary" 'recent object
+                    #'agent-repl-wire-decode-roster-merged-repo-group-recent-merge)))))
+
 (defun agent-repl-wire-decode-roster-merged-repo-group (value)
   "Decode VALUE as `RosterMergedRepoGroup'.
-A plist `(:key :header :merged-rows)'.  One repository in the Recently
-Merged section: its merged rows."
+A plist `(:key :header :summary)'.  One repository in the Recently Merged
+section: its SUMMARY, never its rows, which are paged on demand
+\(`agent-repl-wire-decode-list-merged-workspaces-response')."
   (let ((object (agent-repl-wire--object "RosterMergedRepoGroup" value)))
     (agent-repl-wire--check-keys "RosterMergedRepoGroup" object
-                                 '(key header mergedRows))
+                                 '(key header summary))
     (agent-repl-wire--decoded
      "RosterMergedRepoGroup"
      (list :key (agent-repl-wire--decode-message
@@ -1946,9 +2013,9 @@ Merged section: its merged rows."
            :header (agent-repl-wire--decode-message
                     "RosterMergedRepoGroup" 'header object
                     #'agent-repl-wire-decode-roster-merged-repo-group-header)
-           :merged-rows (agent-repl-wire--decode-message
-                         "RosterMergedRepoGroup" 'mergedRows object
-                         #'agent-repl-wire-decode-roster-merged-rows)))))
+           :summary (agent-repl-wire--decode-message
+                     "RosterMergedRepoGroup" 'summary object
+                     #'agent-repl-wire-decode-roster-merged-repo-group-summary)))))
 
 (defun agent-repl-wire-decode-roster-merged-section-expanded (value)
   "Decode VALUE as the empty message `RosterMergedSectionExpanded'."
@@ -1966,15 +2033,25 @@ THE ARM IS THE FOLD, the daemon's view state; it is never unset."
    '((expanded :expanded agent-repl-wire-decode-roster-merged-section-expanded)
      (collapsed :collapsed agent-repl-wire-decode-roster-merged-section-collapsed))))
 
+(defun agent-repl-wire-decode-roster-merged-revision (value)
+  "Decode VALUE as `RosterMergedRevision', a plist `(:revision N)'.
+The identity of one set of merged workspaces: only equality is read off it."
+  (let ((object (agent-repl-wire--object "RosterMergedRevision" value)))
+    (agent-repl-wire--check-keys "RosterMergedRevision" object '(revision))
+    (agent-repl-wire--decoded
+     "RosterMergedRevision"
+     (list :revision (agent-repl-wire--decode-uint64
+                      "RosterMergedRevision" 'revision object)))))
+
 (defun agent-repl-wire-decode-roster-merged-section (value)
-  "Decode VALUE as `RosterMergedSection'.
-A plist `(:header :groups :fold)'.
+  "Decode VALUE as `RosterMergedSection', the RECENTLY MERGED stream.
+A plist `(:header :groups :merged-revision :fold)'.
 The Recently Merged section has no key of its own — the roster carries
 exactly one.  It holds one `RosterMergedRepoGroup' per repository with
 a recent merge."
   (let ((object (agent-repl-wire--object "RosterMergedSection" value)))
     (agent-repl-wire--check-keys "RosterMergedSection" object
-                                 '(header groups expanded collapsed fitted sized))
+                                 '(header groups mergedRevision expanded collapsed fitted sized))
     (agent-repl-wire--decoded
      "RosterMergedSection"
      (list :header (agent-repl-wire--decode-message
@@ -1983,6 +2060,9 @@ a recent merge."
            :groups (agent-repl-wire--decode-repeated
                     "RosterMergedSection" 'groups object
                     #'agent-repl-wire-decode-roster-merged-repo-group)
+           :merged-revision (agent-repl-wire--decode-message
+                             "RosterMergedSection" 'mergedRevision object
+                             #'agent-repl-wire-decode-roster-merged-revision)
            :fold (agent-repl-wire-decode-roster-merged-section-fold object)))))
 
 ;;;; ---- The Merge Queue section ----
@@ -2025,7 +2105,7 @@ per repository whose queue is active."
      "RosterMergeQueueSection"
      (list :header (agent-repl-wire--decode-message
                     "RosterMergeQueueSection" 'header object
-                    #'agent-repl-wire-decode-roster-merged-section-header)
+                    #'agent-repl-wire-decode-roster-merge-queue-section-header)
            :groups (agent-repl-wire--decode-repeated
                     "RosterMergeQueueSection" 'groups object
                     #'agent-repl-wire-decode-roster-merge-queue-repo-group)
@@ -2167,14 +2247,6 @@ fields."
   "Decode `WorkspaceRoster''s `repository' field VALUE."
   (agent-repl-wire-decode-roster-repository-view value))
 
-(defun agent-repl-wire-decode-workspace-roster-recently-merged (value)
-  "Decode `WorkspaceRoster''s `recently_merged' field VALUE."
-  (agent-repl-wire-decode-roster-merged-section value))
-
-(defun agent-repl-wire-decode-workspace-roster-merge-queue (value)
-  "Decode `WorkspaceRoster''s `merge_queue' field VALUE."
-  (agent-repl-wire-decode-roster-merge-queue-section value))
-
 (defun agent-repl-wire-decode-workspace-roster-hidden (value)
   "Decode `WorkspaceRoster''s `hidden' field VALUE."
   (agent-repl-wire-decode-roster-hidden-section value))
@@ -2183,9 +2255,6 @@ fields."
   "Decode `WorkspaceRoster''s `open' field VALUE."
   (agent-repl-wire-decode-roster-open-section value))
 
-(defun agent-repl-wire-decode-workspace-roster-closed (value)
-  "Decode `WorkspaceRoster''s `closed' field VALUE."
-  (agent-repl-wire-decode-roster-closed-rows value))
 
 ;;;; ---- The sidebar's apps: the switcher and the thread section ----
 ;;
@@ -2487,17 +2556,17 @@ read further."
                  #'agent-repl-wire-decode-feed-id)))))
 
 (defun agent-repl-wire-decode-workspace-roster (value)
-  "Decode VALUE as `WorkspaceRoster'.
-Returns `(:repository V :open O :hidden H :recently-merged S
-:merge-queue Q :closed C
-:current C-or-nil :revision N :version V-or-nil :app-switcher A
-:threads T :cold-gates G)'.  THERE IS NO TAB BAR
-MESSAGE: the Open section's rows are the tab bar, each stating its own
-tab."
+  "Decode VALUE as `WorkspaceRoster', the WORKSPACES stream's snapshot.
+Returns `(:repository V :open O :hidden H :current C-or-nil
+:version V-or-nil :app-switcher A :threads T :cold-gates G)'.  THERE IS
+NO TAB BAR MESSAGE: the Open section's rows are the tab bar, each stating
+its own tab.  The retired `recently_merged', `merge_queue', `closed' and
+`revision' are streams (or the push's revision) of their own
+\(`agent-repl-wire-decode-roster-push'), so each is an unknown field here."
   (let ((object (agent-repl-wire--object "WorkspaceRoster" value)))
     (agent-repl-wire--check-keys
      "WorkspaceRoster" object
-     '(repository open hidden recentlyMerged mergeQueue closed current revision version appSwitcher threads coldGates))
+     '(repository open hidden current version appSwitcher threads coldGates))
     (agent-repl-wire--decoded
      "WorkspaceRoster"
      (list :repository (agent-repl-wire--decode-message
@@ -2509,19 +2578,9 @@ tab."
            :hidden (agent-repl-wire--decode-message
                     "WorkspaceRoster" 'hidden object
                     #'agent-repl-wire-decode-workspace-roster-hidden)
-           :recently-merged (agent-repl-wire--decode-message
-                             "WorkspaceRoster" 'recentlyMerged object
-                             #'agent-repl-wire-decode-workspace-roster-recently-merged)
-           :merge-queue (agent-repl-wire--decode-message
-                         "WorkspaceRoster" 'mergeQueue object
-                         #'agent-repl-wire-decode-workspace-roster-merge-queue)
-           :closed (agent-repl-wire--decode-message
-                    "WorkspaceRoster" 'closed object
-                    #'agent-repl-wire-decode-workspace-roster-closed)
            :current (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'current object
                      #'agent-repl-wire-decode-workspace-roster-current)
-           :revision (agent-repl-wire--decode-uint64 "WorkspaceRoster" 'revision object)
            :version (agent-repl-wire--decode-optional-message
                      "WorkspaceRoster" 'version object
                      #'agent-repl-wire-decode-workspace-roster-version)
@@ -2535,6 +2594,35 @@ tab."
                         "WorkspaceRoster" 'coldGates object
                         #'agent-repl-wire-decode-roster-cold-gate)))))
 
+;;;; ---- The push: the roster's four streams ----
+
+(defun agent-repl-wire-decode-roster-push (value)
+  "Decode VALUE as `RosterPush', the roster's four snapshot streams.
+Returns `(:revision N :workspaces W :merge-queue Q :recently-merged M
+:closed C)'.  Each stream is WHOLE when carried and NIL WHEN ABSENT,
+meaning UNCHANGED since the last push the subscription was sent, never
+empty: whether a push is complete is the consumer's to judge
+\(`agent-repl-roster-on-push'), because only it knows whether this is
+its subscription's first push."
+  (let ((object (agent-repl-wire--object "RosterPush" value)))
+    (agent-repl-wire--check-keys
+     "RosterPush" object '(revision workspaces mergeQueue recentlyMerged closed))
+    (agent-repl-wire--decoded
+     "RosterPush"
+     (list :revision (agent-repl-wire--decode-uint64 "RosterPush" 'revision object)
+           :workspaces (agent-repl-wire--decode-optional-message
+                        "RosterPush" 'workspaces object
+                        #'agent-repl-wire-decode-workspace-roster)
+           :merge-queue (agent-repl-wire--decode-optional-message
+                         "RosterPush" 'mergeQueue object
+                         #'agent-repl-wire-decode-roster-merge-queue-section)
+           :recently-merged (agent-repl-wire--decode-optional-message
+                             "RosterPush" 'recentlyMerged object
+                             #'agent-repl-wire-decode-roster-merged-section)
+           :closed (agent-repl-wire--decode-optional-message
+                    "RosterPush" 'closed object
+                    #'agent-repl-wire-decode-roster-closed-rows)))))
+
 ;;;; ---- The rpc ----
 
 (defun agent-repl-wire-encode-watch-workspace-roster-request (value)
@@ -2543,9 +2631,9 @@ tab."
    "WatchWorkspaceRosterRequest"
    (agent-repl-wire--encode-empty "WatchWorkspaceRosterRequest" value)))
 
-(defun agent-repl-wire-decode-watch-workspace-roster-response-roster (value)
-  "Decode `WatchWorkspaceRosterResponse''s `roster' field VALUE."
-  (agent-repl-wire-decode-workspace-roster value))
+(defun agent-repl-wire-decode-watch-workspace-roster-response-streams (value)
+  "Decode `WatchWorkspaceRosterResponse''s `streams' push arm VALUE."
+  (agent-repl-wire-decode-roster-push value))
 
 (defun agent-repl-wire-decode-watch-workspace-roster-response-ending (value)
   "Decode `WatchWorkspaceRosterResponse''s `ending' push arm VALUE."
@@ -2553,19 +2641,143 @@ tab."
 
 (defun agent-repl-wire-decode-watch-workspace-roster-response (value)
   "Decode VALUE as `WatchWorkspaceRosterResponse', `(:arm ARM :value V)'.
-THE ARM IS WHAT THE FRAME CARRIES: `:roster' is the roster, always whole
-and never a delta -- a partially-applied roster is unrepresentable by
-construction -- and `:ending' (value nil) is the planned end of the
-stream, its last frame before a clean end.  An unset oneof is a breach,
+THE ARM IS WHAT THE FRAME CARRIES: `:streams' is a push of the roster's
+streams (`agent-repl-wire-decode-roster-push'), and `:ending' (value nil)
+is the planned end of the stream, its last frame before a clean end.  The
+retired `roster' arm is an unknown field.  An unset oneof is a breach,
 never an empty sidebar."
   (let ((object (agent-repl-wire--object "WatchWorkspaceRosterResponse" value)))
-    (agent-repl-wire--check-keys "WatchWorkspaceRosterResponse" object '(roster ending))
+    (agent-repl-wire--check-keys "WatchWorkspaceRosterResponse" object '(streams ending))
     (agent-repl-wire--decoded
      "WatchWorkspaceRosterResponse"
      (agent-repl-wire--decode-oneof
       "WatchWorkspaceRosterResponse" 'push object
-      '((roster :roster agent-repl-wire-decode-watch-workspace-roster-response-roster)
+      '((streams :streams agent-repl-wire-decode-watch-workspace-roster-response-streams)
         (ending :ending agent-repl-wire-decode-watch-workspace-roster-response-ending))))))
+
+;;;; ---- ListMergedWorkspaces: the merged rows, ten to a page ----
+;;
+;; A MERGED WORKSPACE IS IN NO STREAM, so whoever reads one (the switcher,
+;; the name lookups, the log retention) pages it here
+;; (endpoint_list_merged_workspaces.proto).  The request is encoded whole or
+;; refused before anything is sent.
+
+(defun agent-repl-wire-encode-list-merged-workspaces-order (value)
+  "Encode VALUE, `(:arm ARM)', as `ListMergedWorkspacesOrder'.
+ARM is `:most-recently-merged' or `:most-recently-created', each an empty
+message: the arm is the order.  An unset
+or unknown order is refused: the daemon answers one as malformed."
+  (agent-repl-wire--encoded
+   "ListMergedWorkspacesOrder"
+   (agent-repl-wire--encode-oneof
+    "ListMergedWorkspacesOrder" 'order value
+    (list (list :most-recently-merged 'mostRecentlyMerged
+                (lambda (v) (agent-repl-wire--encode-empty "ListMergedWorkspacesOrderMerged" v)))
+          (list :most-recently-created 'mostRecentlyCreated
+                (lambda (v) (agent-repl-wire--encode-empty "ListMergedWorkspacesOrderCreated" v)))))))
+
+(defun agent-repl-wire-encode-list-merged-workspaces-request (value)
+  "Encode VALUE as `ListMergedWorkspacesRequest'.
+VALUE is `(:repository REF-or-nil :order ORDER :page N)': a nil REF asks
+for every repository's merged workspaces in one order, ORDER is
+`agent-repl-wire-encode-list-merged-workspaces-order''s, and N is the
+0-based page, a non-negative integer.  Page 0 is the proto3 default and
+rides the wire omitted, as protojson spells it."
+  (let ((page (plist-get value :page))
+        (repository (plist-get value :repository)))
+    (unless (natnump page)
+      (agent-repl-wire--fail "ListMergedWorkspacesRequest" 'page
+                             "expected a non-negative integer"))
+    (agent-repl-wire--encoded
+     "ListMergedWorkspacesRequest"
+     (append
+      (when repository
+        (list (cons 'repository (agent-repl-wire-encode-repository-ref repository))))
+      (list (cons 'order (agent-repl-wire-encode-list-merged-workspaces-order
+                          (plist-get value :order))))
+      (unless (zerop page)
+        (list (cons 'page page)))))))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-last (value)
+  "Decode VALUE as `ListMergedWorkspacesSuccessLast', `(:rows ROWS)'.
+The last page: ROWS, a `RosterMergedRows', may be empty."
+  (let ((object (agent-repl-wire--object "ListMergedWorkspacesSuccessLast" value)))
+    (agent-repl-wire--check-keys "ListMergedWorkspacesSuccessLast" object '(rows))
+    (agent-repl-wire--decoded
+     "ListMergedWorkspacesSuccessLast"
+     (list :rows (agent-repl-wire--decode-message
+                  "ListMergedWorkspacesSuccessLast" 'rows object
+                  #'agent-repl-wire-decode-roster-merged-rows)))))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-more (value)
+  "Decode VALUE as `ListMergedWorkspacesSuccessMore', `(:rows ROWS :omitted N)'.
+A full page with N merged workspaces after it."
+  (let ((object (agent-repl-wire--object "ListMergedWorkspacesSuccessMore" value)))
+    (agent-repl-wire--check-keys "ListMergedWorkspacesSuccessMore" object '(rows omitted))
+    (agent-repl-wire--decoded
+     "ListMergedWorkspacesSuccessMore"
+     (list :rows (agent-repl-wire--decode-message
+                  "ListMergedWorkspacesSuccessMore" 'rows object
+                  #'agent-repl-wire-decode-roster-merged-rows)
+           :omitted (agent-repl-wire--decode-uint32
+                     "ListMergedWorkspacesSuccessMore" 'omitted object)))))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-success (value)
+  "Decode VALUE as `ListMergedWorkspacesSuccess'.
+A plist `(:revision R :extent (:arm :last-or-:more :value V))'.  R is the
+`RosterMergedRevision' of the set the page was resolved from; the ARM IS
+THE COMPLETENESS, so no caller compares a count against the page size."
+  (let ((object (agent-repl-wire--object "ListMergedWorkspacesSuccess" value)))
+    (agent-repl-wire--check-keys "ListMergedWorkspacesSuccess" object '(revision last more))
+    (agent-repl-wire--decoded
+     "ListMergedWorkspacesSuccess"
+     (list :revision (agent-repl-wire--decode-message
+                      "ListMergedWorkspacesSuccess" 'revision object
+                      #'agent-repl-wire-decode-roster-merged-revision)
+           :extent (agent-repl-wire--decode-oneof
+                    "ListMergedWorkspacesSuccess" 'extent object
+                    '((last :last agent-repl-wire-decode-list-merged-workspaces-last)
+                      (more :more agent-repl-wire-decode-list-merged-workspaces-more)))))))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-unknown-repository (value)
+  "Decode VALUE as `ListMergedWorkspacesUnknownRepository', `(:repository REF)'."
+  (let ((object (agent-repl-wire--object "ListMergedWorkspacesUnknownRepository" value)))
+    (agent-repl-wire--check-keys "ListMergedWorkspacesUnknownRepository" object '(repository))
+    (agent-repl-wire--decoded
+     "ListMergedWorkspacesUnknownRepository"
+     (list :repository (agent-repl-wire--decode-message
+                        "ListMergedWorkspacesUnknownRepository" 'repository object
+                        #'agent-repl-wire-decode-repository-ref)))))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-not-ready (value)
+  "Decode VALUE as the empty `ListMergedWorkspacesNotReady': the arm is the fact."
+  (agent-repl-wire--decode-empty "ListMergedWorkspacesNotReady" value))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-error (value)
+  "Decode VALUE as `ListMergedWorkspacesError', `(:cause (:arm ARM :value V))'.
+ARM is `:unknown-repository' or `:not-ready'."
+  (let ((object (agent-repl-wire--object "ListMergedWorkspacesError" value)))
+    (agent-repl-wire--check-keys "ListMergedWorkspacesError" object
+                                 '(unknownRepository notReady))
+    (agent-repl-wire--decoded
+     "ListMergedWorkspacesError"
+     (list :cause (agent-repl-wire--decode-oneof
+                   "ListMergedWorkspacesError" 'cause object
+                   '((unknownRepository :unknown-repository
+                                        agent-repl-wire-decode-list-merged-workspaces-unknown-repository)
+                     (notReady :not-ready agent-repl-wire-decode-list-merged-workspaces-not-ready)))))))
+
+(defun agent-repl-wire-decode-list-merged-workspaces-response (value)
+  "Decode VALUE as `ListMergedWorkspacesResponse', `(:arm ARM :value V)'.
+ARM is `:success' or `:error'; an unset result is a breach."
+  (let ((object (agent-repl-wire--object "ListMergedWorkspacesResponse" value)))
+    (agent-repl-wire--check-keys "ListMergedWorkspacesResponse" object '(success error))
+    (agent-repl-wire--decoded
+     "ListMergedWorkspacesResponse"
+     (agent-repl-wire--decode-oneof
+      "ListMergedWorkspacesResponse" 'result object
+      '((success :success agent-repl-wire-decode-list-merged-workspaces-success)
+        (error :error agent-repl-wire-decode-list-merged-workspaces-error))))))
 
 (provide 'wire-roster)
 
