@@ -107,8 +107,7 @@ func (s *store) HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
-		held = n > 0
+		held, err = touchedRow(res)
 		return err
 	})
 	return held, err

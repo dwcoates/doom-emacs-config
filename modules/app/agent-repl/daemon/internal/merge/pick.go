@@ -382,7 +382,7 @@ func (o *orchestrator) redrawPick(ws ids.WorkspaceID, waiting bool) bool {
 func (o *orchestrator) recordPickRound(p *pick, ended *time.Time, outcome string) {
 	ctx := context.Background()
 	fields := dlog.Context{"workspace": string(p.ws), "ledger": string(p.ledger), "settled": ended != nil}
-	if err := o.deps.DB.OpenMergeLedger(ctx, p.ws, p.ledger); err != nil {
+	if err := o.openMergeLedger(ctx, p.ws, p.ledger); err != nil {
 		o.log(ctx, p.ws).Error("daemon.merge.pick", "could not open the pick's ledger; its round is not recorded", withField(fields, "error", err.Error()))
 		return
 	}

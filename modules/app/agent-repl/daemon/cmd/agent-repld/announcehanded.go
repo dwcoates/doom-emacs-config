@@ -8,7 +8,6 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/rollout"
@@ -33,7 +32,7 @@ func announceHanded(ctx context.Context, address string, ws wsm.Workspace, outgo
 	defer cancel()
 	client := newDaemonClient(address)
 	resp, err := client.AcceptHandedWorkspace(ctx, connect.NewRequest(&agentreplv1.AcceptHandedWorkspaceRequest{
-		Workspace:      &workspacev1.WorkspaceRef{Id: string(ws.ID), Dir: ws.Dir},
+		Workspace:      ws.Ref(),
 		OutgoingDaemon: string(outgoing),
 		ExpectedHost:   expected.Host,
 		ExpectedWeb:    expected.Web,

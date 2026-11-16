@@ -2269,7 +2269,7 @@ func TestBecomeIncumbentHasOneOwner(t *testing.T) {
 
 func TestConcurrentBootClaimWaitersTakeOverOnce(t *testing.T) {
 	// Arrange: a joined successor, and two callers released together, as the
-	// two boot-claim waiters are when the incumbent exits.
+	// two boot-claim waiters are when the incumbent yields.
 	h := newHarness(t)
 	joinedWithOneOfTwo(t, h)
 	start := make(chan struct{})
@@ -2294,7 +2294,7 @@ func TestConcurrentBootClaimWaitersTakeOverOnce(t *testing.T) {
 	}
 	ran := 0
 	for _, r := range records(h.log, opAdopt) {
-		if r.Message == "the outgoing daemon is gone; this daemon now serves every workspace it was not handed" {
+		if r.Message == "the outgoing daemon yielded; this daemon now serves every workspace it was not handed and no older daemon still serves" {
 			ran++
 		}
 	}

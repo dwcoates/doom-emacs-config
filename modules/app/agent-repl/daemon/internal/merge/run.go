@@ -347,6 +347,13 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 	return round
 }
 
+// openMergeLedger opens LEDGER, WS's merge ledger: the ONE door to
+// DB.OpenMergeLedger, which a run's openLedger and an async merge's pick (the
+// ledger's first round, before any run) both go through.
+func (o *orchestrator) openMergeLedger(ctx context.Context, ws ids.WorkspaceID, ledger ids.LeaseID) error {
+	return o.deps.DB.OpenMergeLedger(ctx, ws, ledger)
+}
+
 // openLedger opens the run's merge ledger and continues its tab rounds from
 // the rounds the ledger already holds. ONE LEDGER OUTLIVES MANY RUNS: a
 // waiting merge's background rebases (rebasewaiting.go) and its run at the
@@ -358,7 +365,7 @@ func (r *run) openTab(ctx context.Context, kind string) tabRound {
 // round of its kind the ledger holds, and no interval is ever rewritten by
 // another run's.
 func (r *run) openLedger(ctx context.Context) error {
-	if err := r.o.deps.DB.OpenMergeLedger(ctx, r.ws, r.lease.ID); err != nil {
+	if err := r.o.openMergeLedger(ctx, r.ws, r.lease.ID); err != nil {
 		return fmt.Errorf("could not open the merge ledger: %w", err)
 	}
 	ledgers, err := r.o.deps.DB.MergeLedger(ctx, r.ws)
