@@ -157,6 +157,14 @@ cannot cover them. Instead:
   merged in every drawn frame. While the section is folded no page is loaded,
   so no hold happens: the workspace leaves the open section and the count
   rises in one push.
+- THE HOLD'S END IS STRUCTURAL, so it carries no timer of its own. A page
+  token newer than the summary's can only come from a set the resolver
+  changed under its lock, and the push carrying that set was enqueued on the
+  topic under the same lock before any page could be resolved from it; the
+  push therefore reaches every live subscription. A subscription that dies
+  first resets the page's copy of every stream. The refetch itself is bounded
+  by the webapp's request client. `sidebar.merged-pages.hold-released`
+  records `held_ms`, the measurement a later bound would be sized from.
 - A failed refetch is logged through the page's canonical logger and the
   held push is then drawn with the merged pages unloaded, the section showing
   its count (the "partly loaded" state the contract names). That is the
