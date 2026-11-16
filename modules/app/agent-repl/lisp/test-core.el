@@ -7269,6 +7269,141 @@ restores them afterwards."
               (should (equal (file-symlink-p canonical) foreign))))
         (delete-directory workspace t)))))
 
+;;; The merged workspaces' links: their directories are on the merged pages
+
+(defun agent-repl-test--merged-page (dirs &optional more)
+  "Return a decoded ListMergedWorkspaces success whose rows live in DIRS.
+MORE non-nil makes it a page with more after it."
+  (let ((rows (list :rows (mapcar (lambda (dir)
+                                    (list :row (list :workspace
+                                                     (list :workspace (list :id dir :dir dir)))))
+                                  dirs))))
+    (list :arm :success
+          :value (list :revision '(:revision 3)
+                       :extent (if more
+                                   (list :arm :more :value (list :rows rows :omitted 1))
+                                 (list :arm :last :value (list :rows rows)))))))
+
+(defmacro agent-repl-test--with-merged-pages (answers &rest body)
+  "Run BODY with the async merged-page verb answering ANSWERS, page by call.
+Each is a response for `:on-response', or `(:failure D)' for `:on-failure'.
+`asked' counts the pages asked for."
+  (declare (indent 1))
+  `(let ((answers ,answers) (asked 0))
+     (cl-letf (((symbol-function 'agent-repl-rpc-list-merged-workspaces)
+                (cl-function
+                 (lambda (_conn _request &key on-response on-failure _timeout)
+                   (cl-incf asked)
+                   (let ((answer (pop answers)))
+                     (if (eq (car answer) :failure)
+                         (funcall on-failure (cadr answer))
+                       (funcall on-response answer)))))))
+       ,@body)))
+
+(defun agent-repl-test--merged-roster (token)
+  "A roster view whose Recently Merged summary names merged set TOKEN."
+  (list :recently-merged (list :merged-revision (list :revision token))))
+
+(ert-deftest agent-repl-test-merged-workspace-dirs-are-every-merged-pages-dirs ()
+  "Every merged page is read, and every row's directory handed over in order."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-merged-pages
+        (list (agent-repl-test--merged-page '("/m/1" "/m/2") t)
+              (agent-repl-test--merged-page '("/m/3")))
+      (let ((got nil) (agent-repl-roster-view nil))
+        ;; Act
+        (agent-repl--merged-workspace-dirs 'conn (lambda (dirs) (setq got dirs)) #'ignore)
+        ;; Assert
+        (should (equal got '("/m/1" "/m/2" "/m/3")))))))
+
+(ert-deftest agent-repl-test-a-dangling-merged-log-link-is-retired ()
+  "A merged workspace, in no stream, still has its dangling link retired."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let* ((workspace (make-temp-file "agent-repl-merged-ws-" t))
+           (gone (expand-file-name "agent-repl-emacs-gone.log" temporary-file-directory))
+           (agent-repl--dangling-log-links-checked (make-hash-table :test #'equal))
+           (agent-repl--merged-log-links-token nil)
+           (agent-repl-roster--stream-conn 'conn))
+      (unwind-protect
+          (agent-repl-test--with-roster-dirs nil
+            (agent-repl-test--with-merged-pages (list (agent-repl-test--merged-page (list workspace)))
+              (let ((canonical (agent-repl-test--plant-emacs-log-link workspace gone)))
+                ;; Act
+                (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+                ;; Assert
+                (should-not (file-symlink-p canonical)))))
+        (delete-directory workspace t)))))
+
+(ert-deftest agent-repl-test-merged-log-links-are-read-once-per-merged-set ()
+  "A push naming the merged set already read asks for no merged page."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--dangling-log-links-checked (make-hash-table :test #'equal))
+          (agent-repl--merged-log-links-token nil)
+          (agent-repl-roster--stream-conn 'conn))
+      (agent-repl-test--with-roster-dirs nil
+        (agent-repl-test--with-merged-pages (list (agent-repl-test--merged-page nil)
+                                                  (agent-repl-test--merged-page nil))
+          ;; Act
+          (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+          (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+          ;; Assert
+          (should (= asked 1)))))))
+
+(ert-deftest agent-repl-test-merged-log-links-are-read-again-when-the-set-changes ()
+  "A push naming another merged set reads its pages."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--dangling-log-links-checked (make-hash-table :test #'equal))
+          (agent-repl--merged-log-links-token nil)
+          (agent-repl-roster--stream-conn 'conn))
+      (agent-repl-test--with-roster-dirs nil
+        (agent-repl-test--with-merged-pages (list (agent-repl-test--merged-page nil)
+                                                  (agent-repl-test--merged-page nil))
+          ;; Act
+          (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+          (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 4))
+          ;; Assert
+          (should (= asked 2)))))))
+
+(ert-deftest agent-repl-test-a-failed-merged-read-is-surfaced-and-asked-again ()
+  "A merged page that fails is recorded at ERROR, and the next push asks again."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--dangling-log-links-checked (make-hash-table :test #'equal))
+          (agent-repl--merged-log-links-token nil)
+          (agent-repl-roster--stream-conn 'conn)
+          (errors nil)
+          (infos nil))
+      (agent-repl-test--with-roster-dirs nil
+        (agent-repl-test--with-merged-pages
+            (list '(:arm :error :value (:cause (:arm :not-ready :value nil)))
+                  (agent-repl-test--merged-page nil))
+          (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors))
+                    ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+            ;; Act
+            (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+            (let ((token-after-failure agent-repl--merged-log-links-token))
+              (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+              ;; Assert
+              (should (equal (list errors token-after-failure asked
+                                   (seq-filter (lambda (line) (string-prefix-p "elisp.core.merged-log-dirs-retry" line))
+                                               infos))
+                             '(("elisp.roster.merged-page-failed: page=0 cause=error-arm :not-ready")
+                               nil 2
+                               ("elisp.core.merged-log-dirs-retry-next-push: token=3 failure=(0 \"error-arm :not-ready\")")))))))))))
+
+(ert-deftest agent-repl-test-merged-log-links-ask-nothing-without-a-roster-connection ()
+  "With no connection under the roster nothing is asked, and the next push asks."
+  (agent-repl-test--with-clean-state
+    (let ((agent-repl--dangling-log-links-checked (make-hash-table :test #'equal))
+          (agent-repl--merged-log-links-token nil)
+          (agent-repl-roster--stream-conn nil))
+      (agent-repl-test--with-roster-dirs nil
+        (agent-repl-test--with-merged-pages nil
+          ;; Act
+          (agent-repl--retire-dangling-emacs-log-links (agent-repl-test--merged-roster 3))
+          ;; Assert
+          (should (equal (list asked agent-repl--merged-log-links-token) '(0 nil))))))))
+
 (ert-deftest agent-repl-test-core-every-registered-boundary-is-defined ()
   "Every external-boundary registry entry names a function some source defines.
 A stale entry guards nothing and hides that the wrapper it named is gone."

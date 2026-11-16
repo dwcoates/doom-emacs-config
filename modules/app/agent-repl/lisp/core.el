@@ -2273,23 +2273,21 @@ the daemon ages its own."
 
 (defvar agent-repl-roster-view)
 (defvar agent-repl-roster-update-functions)
+(defvar agent-repl-roster--stream-conn)
 (declare-function agent-repl-roster-walk "roster")
 (declare-function agent-repl-roster-row-ref "roster")
+(declare-function agent-repl-roster-merged-entries "roster" (conn on-entries on-failure))
 
 (defun agent-repl--roster-workspace-dirs ()
   "Return every workspace directory the last roster push names, CLOSED included.
 Nil before the first push.  A closed workspace has no tab and no entry in
 `agent-repl--workspaces', so the roster is the only thing in this runtime
 that still names its directory -- and with it the canonical link that names
-its log target."
+its log target.  A MERGED workspace is in no roster stream: its directory
+is on the merged pages (`agent-repl--merged-workspace-dirs')."
   (when (and (boundp 'agent-repl-roster-view) agent-repl-roster-view
              (fboundp 'agent-repl-roster-walk))
-    (let (dirs)
-      (dolist (entry (agent-repl-roster-walk agent-repl-roster-view))
-        (let ((dir (plist-get (agent-repl-roster-row-ref (plist-get entry :row)) :dir)))
-          (when (and (stringp dir) (not (string-empty-p dir)))
-            (push dir dirs))))
-      (nreverse dirs))))
+    (agent-repl--entry-dirs (agent-repl-roster-walk agent-repl-roster-view))))
 
 (defun agent-repl--log-sweep-directories ()
   "Return every directory Emacs log files live in, without duplicates.
@@ -2382,7 +2380,57 @@ never leaves two sweeps running."
 The check is once per directory per runtime: a link this module later
 re-points always names a target it just created.")
 
-(defun agent-repl--retire-dangling-emacs-log-links (_roster)
+(defun agent-repl--entry-dirs (entries)
+  "Return the non-empty workspace directories of walk ENTRIES, in order."
+  (let (dirs)
+    (dolist (entry entries)
+      (let ((dir (plist-get (agent-repl-roster-row-ref (plist-get entry :row)) :dir)))
+        (when (and (stringp dir) (not (string-empty-p dir)))
+          (push dir dirs))))
+    (nreverse dirs)))
+
+(defun agent-repl--merged-workspace-dirs (conn on-dirs on-failure)
+  "Hand ON-DIRS every MERGED workspace's directory, paged on CONN.
+Every merged page is read, asynchronously
+\(`agent-repl-roster-merged-entries'), so no merged workspace\='s directory
+is dropped and no push waits on the pages.  ON-FAILURE receives the
+failure, which the roster recorded at ERROR first."
+  (agent-repl-roster-merged-entries
+   conn
+   (lambda (entries) (funcall on-dirs (agent-repl--entry-dirs entries)))
+   on-failure))
+
+(defvar agent-repl--merged-log-links-token nil
+  "The merged set whose directories\=' links were last asked for, or nil.
+A `RosterMergedRevision' revision: the merged pages are read again only
+when the set changes, and a read that failed clears it so the next push
+asks again.")
+
+(defun agent-repl--retire-dangling-merged-log-links (roster)
+  "Retire the dangling links of the merged workspaces ROSTER\='s summary names.
+Read once per merged set (`agent-repl--merged-log-links-token'), on the
+connection the roster stream rides.  With no such connection nothing is
+asked and the token is left, so the next push asks."
+  (let ((token (plist-get (plist-get (plist-get roster :recently-merged) :merged-revision)
+                          :revision))
+        (conn (and (boundp 'agent-repl-roster--stream-conn) agent-repl-roster--stream-conn)))
+    (when (and token conn (not (equal token agent-repl--merged-log-links-token)))
+      (setq agent-repl--merged-log-links-token token)
+      (agent-repl--merged-workspace-dirs
+       conn
+       (lambda (dirs)
+         (agent-repl--log '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
+                          "elisp.core.merged-log-dirs: token=%s dirs=%d" token (length dirs))
+         (agent-repl--retire-dangling-emacs-log-links-in dirs))
+       (lambda (failure)
+         (when (equal agent-repl--merged-log-links-token token)
+           (setq agent-repl--merged-log-links-token nil))
+         ;; The failure itself was recorded at ERROR by the roster; this
+         ;; says only what the retention does about it.
+         (agent-repl--info '(:agent-repl-central "the roster names workspaces this runtime may hold no sink for")
+                           "elisp.core.merged-log-dirs-retry-next-push: token=%s failure=%S" token failure))))))
+
+(defun agent-repl--retire-dangling-emacs-log-links (roster)
   "Remove every roster workspace's canonical `emacs.log' link that names no file.
 A link whose target is gone names records that no longer exist anywhere, and
 every reader that resolves it -- an operator, the log reader, the realtest
@@ -2392,8 +2440,17 @@ foreign link is the workspace's, not ours.  The next record the workspace
 writes mints a fresh target and a fresh link, exactly as a first open does.
 
 Registered on `agent-repl-roster-update-functions', because the roster is the
-one place a CLOSED workspace's directory is still named."
-  (dolist (dir (agent-repl--roster-workspace-dirs))
+one place a CLOSED workspace's directory is still named.  A MERGED
+workspace\='s is named on the merged pages, read when ROSTER\='s merged set
+changes (`agent-repl--retire-dangling-merged-log-links')."
+  (agent-repl--retire-dangling-emacs-log-links-in (agent-repl--roster-workspace-dirs))
+  (agent-repl--retire-dangling-merged-log-links roster))
+
+(defun agent-repl--retire-dangling-emacs-log-links-in (dirs)
+  "Remove the canonical `emacs.log' link of each of DIRS that names no file.
+Each directory is checked once per runtime
+\(`agent-repl--dangling-log-links-checked')."
+  (dolist (dir dirs)
     (unless (gethash dir agent-repl--dangling-log-links-checked)
       (puthash dir t agent-repl--dangling-log-links-checked)
       (let* ((canonical (agent-repl--workspace-emacs-log-path dir))
