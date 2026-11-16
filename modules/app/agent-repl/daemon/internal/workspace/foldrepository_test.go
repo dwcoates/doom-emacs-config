@@ -614,7 +614,7 @@ func TestFoldChildrenExpandRecordsTheFoldAndStandsNothingDown(t *testing.T) {
 	}
 }
 
-func TestFoldChildrenCollapseOverTheCurrentDescendantIsRefused(t *testing.T) {
+func TestFoldChildrenCollapseOverTheCurrentDescendantSelectsTheParentAndFolds(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	childFamily(t, f)
@@ -624,9 +624,29 @@ func TestFoldChildrenCollapseOverTheCurrentDescendantIsRefused(t *testing.T) {
 	err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
 
 	// Assert
-	asRefusal(t, err, ArmHoldsCurrent)
-	if f.db.workspaces["p1"].ChildrenFolded || len(f.standDowns) != 0 {
-		t.Fatalf("folded = %v, stand-downs = %v; want nothing done for a refused collapse", f.db.workspaces["p1"].ChildrenFolded, f.standDowns)
+	if err != nil {
+		t.Fatalf("FoldChildren: %v", err)
+	}
+	if !f.db.workspaces["p1"].Current || f.db.workspaces["g1"].Current {
+		t.Fatalf("p1 current = %v, g1 current = %v; want the parent selected", f.db.workspaces["p1"].Current, f.db.workspaces["g1"].Current)
+	}
+	if !f.db.workspaces["p1"].ChildrenFolded {
+		t.Fatal("the children's fold was not recorded")
+	}
+}
+
+func TestFoldChildrenCollapseOverAnUnrelatedCurrentWorkspaceSelectsNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	childFamily(t, f)
+	current(f, "other")
+
+	// Act
+	err := f.verbs.FoldChildren(context.Background(), "p1", true, testRequester)
+
+	// Assert
+	if err != nil || !f.db.workspaces["other"].Current || f.db.workspaces["p1"].Current {
+		t.Fatalf("err = %v, other current = %v, p1 current = %v; want the selection untouched", err, f.db.workspaces["other"].Current, f.db.workspaces["p1"].Current)
 	}
 }
 

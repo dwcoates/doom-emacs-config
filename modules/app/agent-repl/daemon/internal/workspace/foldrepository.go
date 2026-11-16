@@ -102,10 +102,17 @@ const opFoldChildren = "daemon.workspace.fold_children"
 // effect a subsection's collapse has (FoldSubsection): the sidebar hides the
 // children's rows, the Emacs tab bar folds their tabs, and COLLAPSING HIDES
 // THE OPEN WORKSPACES BELOW ws, standing down those it does not spare. A
-// collapse of the children of an ancestor of the current workspace is refused
-// holds_current. An unknown workspace is refused unknown_workspace.
+// collapse of the children of an ancestor of the current workspace SELECTS
+// ws first (selectParentOverCurrentDescendant), so the collapse never stands
+// the current workspace down. An unknown workspace is refused
+// unknown_workspace.
 func (v *verbs) FoldChildren(ctx context.Context, ws ids.WorkspaceID, folded bool, requester FoldRequester) error {
 	log := v.deps.Log.Global().With(dlog.Merge(dlog.Context{"workspace": string(ws), "folded": folded}, requester.context()))
+	if folded {
+		if err := v.selectParentOverCurrentDescendant(ctx, log, ws); err != nil {
+			return err
+		}
+	}
 	return v.foldTabs(ctx, log, foldTabsSpec{
 		op:     opFoldChildren,
 		what:   "workspace's children",
@@ -120,6 +127,33 @@ func (v *verbs) FoldChildren(ctx context.Context, ws ids.WorkspaceID, folded boo
 		},
 		members: func(all []wsm.Workspace) wsm.FoldMembers { return wsm.DescendantMembers(all, ws) },
 	})
+}
+
+// selectParentOverCurrentDescendant is THE FOLD OF A PARENT'S CHILDREN OVER
+// THE CURRENT CHILD (owner request, 2026-11-16): folding the children of a
+// workspace whose descendant is current selects the workspace itself, rather
+// than blocking the fold, so the user lands on the row that stays visible.
+// The select is conditional on that descendant still being current, so a
+// switch the user made meanwhile stands. Should one still land inside the
+// family before the fold's own check, recordFold refuses the collapse
+// holds_current as before.
+func (v *verbs) selectParentOverCurrentDescendant(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID) error {
+	listed, err := v.deps.DB.ListWorkspaces(ctx)
+	if err != nil {
+		log.Error(opFoldChildren, "could not list the workspaces; the collapse was not recorded", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("fold workspace's children %q: list its workspaces: %w", ws, err)
+	}
+	members := wsm.DescendantMembers(listed, ws)
+	for _, w := range listed {
+		if !w.Current || !members.HoldsCurrent(&w) {
+			continue
+		}
+		log.Info(opFoldChildren, "the collapsed children hold the current workspace; the parent is selected instead of the collapse being refused",
+			dlog.Context{"current": string(w.ID)})
+		_, err := v.selectCurrent(ctx, log, ws, &w.ID, Switch{History: RecordSelection})
+		return err
+	}
+	return nil
 }
 
 // foldTabsSpec is one fold that hides workspaces' tabs (a repository's, a

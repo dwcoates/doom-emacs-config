@@ -1154,8 +1154,12 @@ func (d *fakeDB) Reopen(_ context.Context, id ids.WorkspaceID, serving ids.Insta
 
 func (d *fakeDB) SetCurrent(_ context.Context, id ids.WorkspaceID, at time.Time) error {
 	d.current, d.currentAt = &id, at
-	// As WSM does: the selection stamps the durable last-selected instant
-	// the roster row carries.
+	// As WSM does: exactly one row is current, and the selection stamps the
+	// durable last-selected instant the roster row carries.
+	for other, row := range d.workspaces {
+		row.Current = other == id
+		d.workspaces[other] = row
+	}
 	if ws, ok := d.workspaces[id]; ok {
 		stamped := at
 		ws.LastSelectedAt = &stamped
