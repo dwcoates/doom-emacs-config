@@ -310,7 +310,7 @@ func (o *orchestrator) ReleaseUnchangedDeploy(ctx context.Context, at time.Time)
 			errs = append(errs, err)
 			continue
 		}
-		if m == nil || !m.OwedAt.Equal(at) {
+		if !owes(m, at) {
 			continue
 		}
 		if !m.ChainStartedAt.Equal(m.OwedAt) {
@@ -449,6 +449,13 @@ func (o *orchestrator) releaseUnchecked(ctx context.Context, checked []checkedQu
 	}
 }
 
+// owes reports whether M, a repository's owed check or nil for none, is the
+// check of the deploy that began at OWED: none owed, or a newer deploy's, is
+// not.
+func owes(m *wsm.Mediation, owed time.Time) bool {
+	return m != nil && m.OwedAt.Equal(owed)
+}
+
 // releaseCheck releases check M of queue REPO, still the one owed, and ends
 // its chain as OUTCOME when the release took: a released check is always its
 // chain's last. It answers whether it released it; one a newer deploy
@@ -578,7 +585,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 // check no longer owed: that is the decision's end, recorded at INFO. Any
 // other failure holds the queue and is the round's failure, MESSAGE.
 func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed time.Time, fields dlog.Context, message string, err error) {
-	if now, readErr := o.deps.DB.MediationOf(ctx, q.key); readErr == nil && (now == nil || !now.OwedAt.Equal(owed)) {
+	if now, readErr := o.deps.DB.MediationOf(ctx, q.key); readErr == nil && !owes(now, owed) {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its session, which its own decision stopped; the check is decided", withField(fields, "cause", err.Error()))
 		return
 	}
@@ -682,7 +689,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		o.deps.Log.Global().Error(opMediation, "could not read the check its turn ended on; the queue stays held", withField(fields, "error", err.Error()))
 		return
 	}
-	if m == nil || !m.OwedAt.Equal(owed) {
+	if !owes(m, owed) {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its check decided or replaced by a newer deploy", fields)
 		return
 	}

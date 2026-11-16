@@ -1285,3 +1285,39 @@ func TestAnAwaitCutByTheIntakesOwnDecisionIsNoFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestOwesIsTheCheckOfTheDeployThatBeganThen(t *testing.T) {
+	tests := []struct {
+		name string
+		m    *wsm.Mediation
+		want bool
+	}{
+		{name: "the deploy's check", m: &wsm.Mediation{OwedAt: deployStarted}, want: true},
+		{name: "a newer deploy's check", m: &wsm.Mediation{OwedAt: deployStarted.Add(time.Minute)}},
+		{name: "no check owed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := owes(tt.m, deployStarted)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("owes = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEveryStillOwedTestGoesThroughOwes keeps one reading of "this check is
+// still the one owed": a hand-rolled comparison of a check's instant fails
+// here.
+func TestEveryStillOwedTestGoesThroughOwes(t *testing.T) {
+	src, err := os.ReadFile("mediation.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(src), ".OwedAt.Equal("); n != 1 {
+		t.Fatalf("mediation.go compares an owed check's instant %d times, want once, in owes", n)
+	}
+}
