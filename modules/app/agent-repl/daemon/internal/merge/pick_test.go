@@ -542,3 +542,56 @@ func TestThePickBriefSaysToRebaseOnlyWhenTheMergeAheadHasLanded(t *testing.T) {
 		})
 	}
 }
+
+// pickRoundOf answers the pick round of the merge workspace's ledger, nil
+// when none is recorded.
+func pickRoundOf(t *testing.T, h *harness) *wsm.TabInterval {
+	t.Helper()
+	ledgers, err := h.db.MergeLedger(context.Background(), theMergeWorkspace)
+	if err != nil {
+		t.Fatalf("MergeLedger: %v", err)
+	}
+	for _, ledger := range ledgers {
+		for _, round := range ledger.Intervals {
+			if round.Kind == TabPick {
+				return &round
+			}
+		}
+	}
+	return nil
+}
+
+func TestAPickIsTheFirstRoundOfItsMergesLedger(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+
+	// Act: the pick begins.
+	requestPick(t, h)
+
+	// Assert: a live round.
+	if round := pickRoundOf(t, h); round == nil || round.Round != 1 || round.EndedAt != nil {
+		t.Fatalf("pick round = %+v, want round 1 live", round)
+	}
+
+	// Act: the pick succeeds.
+	runThePick(t, h, context.Background(), false)
+
+	// Assert: settled succeeded.
+	if round := pickRoundOf(t, h); round == nil || round.EndedAt == nil || round.Outcome != "succeeded" {
+		t.Fatalf("pick round = %+v, want it settled succeeded", round)
+	}
+}
+
+func TestAPickRoundThatCannotBeRecordedIsAnError(t *testing.T) {
+	// Arrange
+	h := pickHarness(t)
+	h.db.tabErr = errors.New("disk gone")
+
+	// Act
+	requestPick(t, h)
+
+	// Assert
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.pick", Message: "could not record the pick's round; its stage is missing from the merge's view"}); !ok {
+		t.Fatalf("records = %+v, want the failed round at ERROR", h.logs.Records())
+	}
+}

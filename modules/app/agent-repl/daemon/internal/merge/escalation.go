@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -26,7 +27,7 @@ const BriefDeployEscalation = "deploy-escalation"
 // SUMMARY with PROBLEMS, answering the escalation workspace. Each failure is
 // recorded at ERROR and answered: the check is released already, so the
 // escalation is lost to the user and the record is its account.
-func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, fields dlog.Context) (ids.WorkspaceID, error) {
+func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) (ids.WorkspaceID, error) {
 	repoDir := q.repository.Dir
 	name := "deploy-escalation-" + o.deps.Now().UTC().Format("20060102-150405")
 	fields = withField(withField(fields, "escalation", name), "summary", summary)
@@ -53,6 +54,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
 		"summary":        summary,
 		"problems":       renderEscalationProblems(problems),
+		"old_problems":   renderOldProblems(window),
 	})
 	if err != nil {
 		return failed("the escalation workspace's brief could not be composed; it is not briefed and the user is not told", err)
@@ -63,6 +65,34 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	o.deps.Banners.Mediated(made.ID, summary)
 	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in a new escalation workspace", withField(fields, "problems", len(problems)))
 	return made.ID, nil
+}
+
+// renderOldProblems is every group of WINDOW that is not NEW, as the
+// escalation's brief lists them beside the findings (owner ruling,
+// 2026-11-16): an old warning or error still recurring is the user's to see
+// whenever a deploy is put before them, whoever owns it.
+func renderOldProblems(window wsm.CheckWindow) string {
+	var b strings.Builder
+	for _, g := range window.Groups {
+		var standing string
+		switch g.Class {
+		case wsm.WindowNew:
+			continue
+		case wsm.WindowSeenBefore:
+			standing = "seen before, owned by nobody; this workspace owns it now"
+		case wsm.WindowRecurred:
+			standing = "came back after its fix deployed; this workspace owns it now"
+		case wsm.WindowOwned:
+			standing = "owned by another workspace still at work on it"
+		default:
+			panic(fmt.Sprintf("merge: a window group with no class: %+v", g))
+		}
+		b.WriteString(fmt.Sprintf("- %s: %s (%s)\n", g.Operation, g.Message, standing))
+	}
+	if b.Len() == 0 {
+		return "No older warning or error is still recurring."
+	}
+	return "Older warnings and errors still recurring in the window:\n\n" + b.String()
 }
 
 // renderEscalationProblems is the findings as the escalation's brief quotes

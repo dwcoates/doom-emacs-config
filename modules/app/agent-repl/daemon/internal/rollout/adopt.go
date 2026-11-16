@@ -1271,11 +1271,8 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 		c.closeTookOverLocked()
 		c.unlock()
 	}()
-	c.log.Info(opAdopt, "the outgoing daemon is gone; this daemon now serves every workspace it was not handed",
+	c.log.Info(opAdopt, "the outgoing daemon yielded; this daemon now serves every workspace it was not handed and no older daemon still serves",
 		dlog.Merge(fields, dlog.Context{"state": "joining_mode", "before": true, "after": false}))
-	// THE HANDOVER IS OVER, AND THE MIRROR WITH IT: every row is this
-	// daemon's own from the takeover on.
-	c.stopRosterMirror("the incumbent exited; this daemon took over")
 	// THE HANDLE BECOMES A WRITING ONE AT THE TAKEOVER, whatever was handed
 	// over. It used to be promoted only inside a per-workspace adoption, so a
 	// successor handed NOTHING -- an incumbent whose handover listed no
@@ -1286,18 +1283,16 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// the proof the outgoing daemon has stopped writing (it released its boot
 	// claim by exiting), so this is the moment the one-writer invariant moves.
 	promoted := c.promoteAtTakeover(fields)
-	// THE CONTRACT STEPS THE JOIN LEFT run now: the outgoing daemon is gone,
-	// so no running build reads what they remove (wsm.MigrationContract). A
-	// step that fails leaves the file as it was, rolled back and recorded by
-	// the store; this daemon serves on the shapes it reads either way.
-	if promoted {
-		if err := c.deps.DB.ApplyContracts(c.lifetime(context.Background())); err != nil {
-			c.log.Error(opAdopt, "the contract steps the join left could not be applied; they are applied at the next boot", dlog.WithCause(fields, err))
-		}
-	}
-	c.adoptStragglers(fields)
-	if promoted {
-		c.recoverOrphans(fields)
+	// OLDER DAEMONS MAY STILL SERVE WHAT IS BUSY ON THEM (owner ruling,
+	// 2026-11-16): the outgoing daemon yields at the end of its transfer pass
+	// and keeps its holdouts until each is free. What only the last daemon
+	// may do waits for every one of them to end (afterElders).
+	elders := c.liveElders(fields)
+	if len(elders) == 0 {
+		c.lastDaemonsDuties(promoted, &c.stragglerAdoptions, fields)
+	} else {
+		c.log.Info(opAdopt, "older daemons still serve workspaces busy on them; this daemon takes over now, and does what only the last daemon may once they have ended",
+			dlog.Merge(fields, dlog.Context{"elders": elders}))
 	}
 	c.bounceStaleAdopted(fields)
 	// THE QUEUES ARE READ AGAIN NOW THAT ONE DAEMON WRITES THEM. While both
@@ -1313,8 +1308,8 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// THE CREATES THE OUTGOING DAEMON HELD FOR THE NETWORK ARE THIS DAEMON'S
 	// NOW: it is gone, so none of them can run there, and each resumes here on
 	// the network's restoration under its own key and pending ref.
-	if err := c.deps.QueuedCreates.RecoverQueuedCreates(c.lifetime(context.Background())); err != nil {
-		c.log.Error(opAdopt, "the creates the outgoing daemon held for the network could not be taken up; they wait until the next daemon takes them up", dlog.WithCause(fields, err))
+	if len(elders) == 0 {
+		c.recoverQueuedCreates(fields)
 	}
 	// THE LANDING REPORTS THE HANDOVER'S DEPLOY COVERED ARE PAID NOW, after
 	// every adopted shim was judged: a stale one is bounced, or registered to
@@ -1323,6 +1318,123 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// the build that carries the landing it reports.
 	c.deps.Reports.PayOwed(c.lifetime(context.Background()), true, nil)
 	c.settleTakeover(fields)
+	if len(elders) > 0 {
+		inflight.Standing(func() { c.afterElders(elders, promoted, fields) })
+	}
+}
+
+// liveElders answers the daemons older than this one still running, nil
+// when none does or none is wired. A probe that fails is recorded and read
+// as no elders: the life locks are the only record of them, and the takeover
+// then runs as it always has.
+func (c *controller) liveElders(fields dlog.Context) []string {
+	if c.deps.LiveElders == nil {
+		c.closeEldersGone()
+		return nil
+	}
+	elders, err := c.deps.LiveElders()
+	if err != nil {
+		c.log.Error(opAdopt, "could not read which older daemons still run; the takeover runs as if none did", dlog.WithCause(fields, err))
+		elders = nil
+	}
+	if len(elders) == 0 {
+		c.closeEldersGone()
+		return nil
+	}
+	c.mu.Lock()
+	c.eldersRunning = true
+	c.unlock()
+	return elders
+}
+
+// lastDaemonsDuties is what only the last daemon of a state root may do,
+// run at the takeover when no older daemon runs and otherwise once the last
+// of them has ended (afterElders): the roster mirror stops, the contract
+// steps the join left run, the workspaces no daemon serves are adopted (on
+// WG), and the shims nothing adopted are recovered.
+func (c *controller) lastDaemonsDuties(promoted bool, wg *sync.WaitGroup, fields dlog.Context) {
+	// THE HANDOVER IS OVER, AND THE MIRROR WITH IT: every row is this
+	// daemon's own from here on.
+	c.stopRosterMirror("no older daemon serves anything; this daemon took over")
+	// THE CONTRACT STEPS THE JOIN LEFT run now: no older daemon runs, so no
+	// running build reads what they remove (wsm.MigrationContract). A step
+	// that fails leaves the file as it was, rolled back and recorded by the
+	// store; this daemon serves on the shapes it reads either way.
+	if promoted {
+		if err := c.deps.DB.ApplyContracts(c.lifetime(context.Background())); err != nil {
+			c.log.Error(opAdopt, "the contract steps the join left could not be applied; they are applied at the next boot", dlog.WithCause(fields, err))
+		}
+	}
+	c.adoptStragglers(wg, fields)
+	if promoted {
+		c.recoverOrphans(fields)
+	}
+}
+
+// recoverQueuedCreates takes up the creates an outgoing daemon held for the
+// network: no older daemon runs, so none of them can run there, and each
+// resumes here on the network's restoration under its own key and pending
+// ref.
+func (c *controller) recoverQueuedCreates(fields dlog.Context) {
+	if err := c.deps.QueuedCreates.RecoverQueuedCreates(c.lifetime(context.Background())); err != nil {
+		c.log.Error(opAdopt, "the creates the outgoing daemon held for the network could not be taken up; they wait until the next daemon takes them up", dlog.WithCause(fields, err))
+	}
+}
+
+// afterElders waits for ELDERS, the older daemons still running at the
+// takeover, to end, then does what only the last daemon may. Each of them
+// moved here every workspace it held, so whatever is still unadopted when
+// the last one ends is a straggler no daemon serves. A wait that fails is
+// recorded, and nothing it guards runs: an older build may still be reading.
+func (c *controller) afterElders(elders []string, promoted bool, fields dlog.Context) {
+	lifetime := c.lifetime(context.Background())
+	if err := c.deps.AwaitElders(lifetime, elders); err != nil {
+		if lifetime.Err() != nil {
+			c.log.Debug(opAdopt, "the daemon's lifetime ended while older daemons still ran", fields)
+			return
+		}
+		c.log.Error(opAdopt, "could not wait for the older daemons to end; the contract steps, orphan recovery and held creates wait for the next daemon", dlog.WithCause(dlog.Merge(fields, dlog.Context{"elders": elders}), err))
+		return
+	}
+	c.log.Info(opAdopt, "every older daemon has ended; this daemon now does what only the last daemon may",
+		dlog.Merge(fields, dlog.Context{"elders": elders}))
+	var stragglers sync.WaitGroup
+	c.lastDaemonsDuties(promoted, &stragglers, fields)
+	c.recoverQueuedCreates(fields)
+	stragglers.Wait()
+	c.mu.Lock()
+	c.eldersRunning = false
+	c.unlock()
+	c.closeEldersGone()
+}
+
+// eldersGoneSignalLocked answers the channel that closes once no older
+// daemon runs. Callers hold c.mu.
+func (c *controller) eldersGoneSignalLocked() chan struct{} {
+	if c.eldersGone == nil {
+		c.eldersGone = make(chan struct{})
+	}
+	return c.eldersGone
+}
+
+// closeEldersGone closes the elders-gone signal unless it is already closed.
+func (c *controller) closeEldersGone() {
+	c.mu.Lock()
+	defer c.unlock()
+	signal := c.eldersGoneSignalLocked()
+	select {
+	case <-signal:
+	default:
+		close(signal)
+	}
+}
+
+// eldersGoneSignal is eldersGoneSignalLocked for a caller that does not hold
+// c.mu.
+func (c *controller) eldersGoneSignal() <-chan struct{} {
+	c.mu.Lock()
+	defer c.unlock()
+	return c.eldersGoneSignalLocked()
 }
 
 // enterJoiningLocked puts this daemon in joining mode, and with it opens the
@@ -1437,7 +1549,7 @@ func (c *controller) tookOverSignal() <-chan struct{} {
 // daemon left to serve it (TestAWorkspaceWhoseHandoverNeverFinishedIsOwnedAfterTheTakeover,
 // under the merge queue's full run, 2026-10-31). Its own adoption carries on;
 // no straggler adoption is started beside it.
-func (c *controller) adoptStragglers(fields dlog.Context) {
+func (c *controller) adoptStragglers(wg *sync.WaitGroup, fields dlog.Context) {
 	c.mu.Lock()
 	var stragglers []ids.WorkspaceID
 	midAdoption := 0
@@ -1470,9 +1582,9 @@ func (c *controller) adoptStragglers(fields dlog.Context) {
 	c.log.Info(opAdopt, "adopting the workspaces whose handover never finished",
 		dlog.Merge(fields, dlog.Context{"workspaces": len(stragglers)}))
 	for _, ws := range stragglers {
-		c.stragglerAdoptions.Add(1)
+		wg.Add(1)
 		inflight.Go(func() {
-			defer c.stragglerAdoptions.Done()
+			defer wg.Done()
 			if err := c.adopt(lifetime, ws, "straggler"); err != nil {
 				c.log.Error(opAdopt, "a workspace whose handover never finished could not have its session adopted; it is served without one",
 					dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws)}), err))

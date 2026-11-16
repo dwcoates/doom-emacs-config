@@ -958,6 +958,9 @@ message FooterStatusInterruptedSalient {
 // asked for it, and runs it. Nothing about a merge reaches this footer until
 // the turn that asked for it has ended, so the first step shown is already
 // "enqueued" or later.
+// The merge's step stands still (FooterStatusMerging.held).
+message FooterMergingHeld {}
+
 message FooterStatusMerging {
   // The merge's step, in the order a merge goes through them. A merge that
   // starts over because the target moved returns to "rebasing"; conflict
@@ -1018,6 +1021,11 @@ message FooterStatusMerging {
   // The activity cell. ALWAYS SET: the enduring tier guarantees the cell has
   // something to draw under every status.
   FooterStatusMergingActivity activity = 10;
+  // Present while the merge's step stands still: its merge is suspended at
+  // it, or its queue holds every merge in it (a pause, a handover, a deploy
+  // check). The step is drawn grey and still, never as running: the same
+  // hold the bubble's tabs and the roster's stages are drawn from.
+  FooterMergingHeld held = 29;
 }
 // The merge holds the workspace and waits for it to fall free before it
 // starts, drawn "waiting for: the turn, 2 subagents, 1 shell". Every count is

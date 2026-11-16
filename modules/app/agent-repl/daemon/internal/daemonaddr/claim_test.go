@@ -1326,3 +1326,81 @@ func TestAnAwaitedClaimWhoseServingLockCannotBeTakenIsAnsweredWithTheCause(t *te
 		t.Fatalf("ProbeBootClaim after the failed takeover = %v, want the claim free", err)
 	}
 }
+
+func TestAYieldedClaimHandsTheBootClaimToItsSuccessor(t *testing.T) {
+	// Arrange: an incumbent advertising, and its successor waiting.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	incumbent, err := Bind(path, 0)
+	if err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	defer incumbent.Close()
+	if err := incumbent.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	successor, err := BindJoining(path, 0)
+	if err != nil {
+		t.Fatalf("BindJoining: %v", err)
+	}
+	defer successor.Close()
+	waited := awaitResult(context.Background(), successor)
+
+	// Act
+	err = incumbent.Yield()
+
+	// Assert: the successor's wait takes the claim, and it advertises.
+	if err != nil {
+		t.Fatalf("Yield = %v", err)
+	}
+	if err := <-waited; err != nil {
+		t.Fatalf("the successor's AwaitBootClaim = %v, want the claim", err)
+	}
+	if err := successor.Publish(); err != nil {
+		t.Fatalf("the successor's Publish = %v", err)
+	}
+}
+
+func TestAYieldedClaimIsStillWhole(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(c Claim) error
+		want bool
+	}{
+		{name: "it verifies while its successor advertises", act: func(c Claim) error { return c.Verify() }, want: true},
+		{name: "it never waits for the boot claim again", act: func(c Claim) error { return c.AwaitBootClaim(context.Background()) }},
+		{name: "it never advertises again", act: func(c Claim) error { return c.Publish() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the incumbent yielded, and its successor advertises.
+			path := filepath.Join(t.TempDir(), "daemon.addr")
+			incumbent, err := Bind(path, 0)
+			if err != nil {
+				t.Fatalf("Bind: %v", err)
+			}
+			defer incumbent.Close()
+			if err := incumbent.Publish(); err != nil {
+				t.Fatalf("Publish: %v", err)
+			}
+			if err := incumbent.Yield(); err != nil {
+				t.Fatalf("Yield: %v", err)
+			}
+			successor, err := BindJoining(path, 0)
+			if err != nil {
+				t.Fatalf("BindJoining: %v", err)
+			}
+			defer successor.Close()
+			if err := successor.Publish(); err != nil {
+				t.Fatalf("the successor's Publish: %v", err)
+			}
+
+			// Act
+			err = tt.act(incumbent)
+
+			// Assert
+			if (err == nil) != tt.want {
+				t.Fatalf("got %v, want success %v", err, tt.want)
+			}
+		})
+	}
+}

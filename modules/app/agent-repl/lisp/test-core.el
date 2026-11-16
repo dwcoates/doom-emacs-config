@@ -4192,8 +4192,11 @@ it last; the `.claude/emacs' directory the link needs is missing."
                 (should-error (agent-repl--info "sink-broken-ws" "elisp.test.broken payload"))))
           (delete-directory project t))))))
 
-(ert-deftest agent-repl-test-deleted-worktree-records-the-central-fallback-at-warn ()
-  "A REGISTERED directory that is gone is a stale row, announced at WARN."
+(ert-deftest agent-repl-test-deleted-worktree-records-the-central-fallback-at-info ()
+  "A REGISTERED directory that is gone is announced at INFO, unconfirmed.
+Only the daemon saying the workspace is still open makes it a WARN, and
+`agent-repl-stale-sink-confirm' records that itself (owner ruling,
+2026-11-16)."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       ;; Arrange
@@ -4201,12 +4204,12 @@ it last; the `.claude/emacs' directory the link needs is missing."
             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal)))
         (agent-repl--ws-put "vanished-record-ws" :project-dir project)
         (delete-directory project t)
-        (cl-letf (((symbol-function 'display-warning) #'ignore))
+        (cl-letf (((symbol-function 'agent-repl-stale-sink-confirm) #'ignore))
           ;; Act
           (agent-repl--log "vanished-record-ws" "line after the worktree went away"))
         ;; Assert
         (let ((record (agent-repl-test--log-record-for path "log-central-fallback")))
-          (should (equal (alist-get 'level record) "warn")))))))
+          (should (equal (alist-get 'level record) "info")))))))
 
 (ert-deftest agent-repl-test-no-durable-home-records-the-central-fallback-at-info ()
   "A workspace with no durable home of its own is ordinary, announced at INFO."
@@ -4537,76 +4540,44 @@ its ERROR while an unavailable directory does not."
         (let ((record (agent-repl-test--log-record-for path "log-routing-error")))
           (should (equal (alist-get 'level record) "error")))))))
 
-(ert-deftest agent-repl-test-stale-registration-is-named-in-a-user-warning ()
-  "A registered directory that is GONE is visible and names the workspace."
+(ert-deftest agent-repl-test-stale-registration-asks-the-daemon-with-its-directory ()
+  "A registered directory that is GONE is asked of the daemon, never popped up here."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       ;; Arrange
-      (let ((project (make-temp-file "agent-repl-stale-named-" t))
+      (let ((project (make-temp-file "agent-repl-stale-asked-" t))
             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (warning nil))
-        (agent-repl--ws-put "stale-named-ws" :project-dir project)
+            (asked nil)
+            (warnings 0))
+        (agent-repl--ws-put "stale-asked-ws" :project-dir project)
         (delete-directory project t)
-        (cl-letf (((symbol-function 'display-warning)
-                   (lambda (_type text &rest _) (setq warning text))))
+        (cl-letf (((symbol-function 'agent-repl-stale-sink-confirm)
+                   (lambda (ws dir) (push (list ws dir) asked)))
+                  ((symbol-function 'display-warning)
+                   (lambda (&rest _) (cl-incf warnings))))
           ;; Act
-          (agent-repl--log "stale-named-ws" "probe"))
+          (agent-repl--log "stale-asked-ws" "probe"))
         ;; Assert
-        (should (string-match-p "stale-named-ws" warning))))))
+        (should (equal asked (list (list "stale-asked-ws" project))))
+        (should (= warnings 0))))))
 
-(ert-deftest agent-repl-test-stale-registration-warning-keeps-its-wording ()
-  "The one warning the user still sees is worded exactly as it always was."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((project (make-temp-file "agent-repl-stale-wording-" t))
-            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (warning nil))
-        (agent-repl--ws-put "stale-wording-ws" :project-dir project)
-        (delete-directory project t)
-        (cl-letf (((symbol-function 'display-warning)
-                   (lambda (_type text &rest _) (setq warning text))))
-          ;; Act
-          (agent-repl--log "stale-wording-ws" "probe"))
-        ;; Assert
-        (should (string-match-p "cannot host a durable log sink" warning))
-        (should (string-match-p "\\[MISSING\\]" warning))))))
-
-(ert-deftest agent-repl-test-stale-registration-warning-keeps-its-level ()
-  "The stale registry row keeps the `:warning' level it has always had."
-  (agent-repl-test--with-clean-state
-    (agent-repl-test--with-temp-logfile path
-      ;; Arrange
-      (let ((project (make-temp-file "agent-repl-stale-level-" t))
-            (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (level :unset))
-        (agent-repl--ws-put "stale-level-ws" :project-dir project)
-        (delete-directory project t)
-        (cl-letf (((symbol-function 'display-warning)
-                   (lambda (_type _text &optional warning-level &rest _)
-                     (setq level warning-level))))
-          ;; Act
-          (agent-repl--log "stale-level-ws" "probe"))
-        ;; Assert
-        (should (eq level :warning))))))
-
-(ert-deftest agent-repl-test-stale-registration-warns-only-once ()
-  "Repeated records about one stale row record every time but warn once."
+(ert-deftest agent-repl-test-stale-registration-asks-the-daemon-only-once ()
+  "Repeated records about one stale row are each recorded, and asked about once."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-temp-logfile path
       ;; Arrange
       (let ((project (make-temp-file "agent-repl-stale-once-" t))
             (agent-repl--unroutable-log-workspaces (make-hash-table :test #'equal))
-            (warnings 0))
+            (asks 0))
         (agent-repl--ws-put "stale-once-ws" :project-dir project)
         (delete-directory project t)
-        (cl-letf (((symbol-function 'display-warning)
-                   (lambda (&rest _) (cl-incf warnings))))
+        (cl-letf (((symbol-function 'agent-repl-stale-sink-confirm)
+                   (lambda (&rest _) (cl-incf asks))))
           ;; Act
           (dotimes (_ 5)
             (agent-repl--log "stale-once-ws" "repeated probe")))
         ;; Assert
-        (should (= warnings 1))))))
+        (should (= asks 1))))))
 
 (ert-deftest agent-repl-test-unregistered-workspace-raises-no-user-warning ()
   "A name that owns no registration at all must not interrupt the user."

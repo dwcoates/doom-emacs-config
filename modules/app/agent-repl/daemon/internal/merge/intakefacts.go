@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -69,6 +70,61 @@ type FindingGroup struct {
 	Before int
 	// Sample is the group's first record, verbatim.
 	Sample string
+	// Class is how the group stands against the problems the repository's
+	// deploy checks keep (classifyFindings); Owner names the problem's owner
+	// and Findings what its owners were told, for an owned or recurred one.
+	Class    wsm.WindowClass
+	Owner    string
+	Findings string
+}
+
+// Key is the group's problem key.
+func (g FindingGroup) Key() wsm.ProblemKey {
+	return wsm.ProblemKey{Operation: g.Operation, Message: g.Message}
+}
+
+// classifyFindings stands each of GROUPS against PROBLEMS, the problems the
+// repository's deploy checks keep, naming each problem's owner through NAME:
+// a group a problem names is OWNED while its owner is at work and RECURRED
+// once its fix deployed; any other is NEW or SEEN BEFORE by the span before.
+// An owner whose name cannot be read is NAME's error, answered.
+func classifyFindings(groups []FindingGroup, problems []wsm.DeployProblem, name func(ids.WorkspaceID) (string, error)) ([]FindingGroup, error) {
+	byKey := make(map[wsm.ProblemKey]wsm.DeployProblem, len(problems))
+	for _, p := range problems {
+		byKey[p.Key] = p
+	}
+	out := make([]FindingGroup, len(groups))
+	for i, g := range groups {
+		p, kept := byKey[g.Key()]
+		switch {
+		case kept && p.FixedAt != nil:
+			g.Class = wsm.WindowRecurred
+		case kept:
+			g.Class = wsm.WindowOwned
+		case g.New():
+			g.Class = wsm.WindowNew
+		default:
+			g.Class = wsm.WindowSeenBefore
+		}
+		if kept {
+			owner, err := name(p.Owner)
+			if err != nil {
+				return nil, err
+			}
+			g.Owner, g.Findings = owner, p.Findings
+		}
+		out[i] = g
+	}
+	return out, nil
+}
+
+// windowGroups is GROUPS as a check's window records them.
+func windowGroups(groups []FindingGroup) []wsm.WindowGroup {
+	out := make([]wsm.WindowGroup, 0, len(groups))
+	for _, g := range groups {
+		out = append(out, wsm.WindowGroup{Operation: g.Operation, Message: g.Message, Class: g.Class})
+	}
+	return out
 }
 
 // New reports whether the group was not seen in the span before the deploy.
@@ -126,57 +182,122 @@ func severity(level string) int {
 	return 0
 }
 
-// RenderFindings is the brief's facts: one block per group, its sample
-// quoted verbatim, or a line saying the window holds none.
+// RenderFindings is the brief's facts: one block per group, its standing,
+// its sample quoted verbatim and, for a problem the repository keeps, its
+// owner and its earlier findings, or a line saying the window holds none.
 func RenderFindings(groups []FindingGroup) string {
 	if len(groups) == 0 {
-		return "No system logged a warning or an error since the deploy began."
+		return "No system logged a warning or an error in the window."
 	}
 	var b strings.Builder
 	for i, g := range groups {
 		if i > 0 {
 			b.WriteString("\n")
 		}
-		standing := "NEW"
-		if !g.New() {
-			standing = fmt.Sprintf("SEEN BEFORE (%d in the span before)", g.Before)
+		var standing string
+		switch g.Class {
+		case wsm.WindowNew:
+			standing = "NEW"
+		case wsm.WindowSeenBefore:
+			standing = fmt.Sprintf("SEEN BEFORE, owned by nobody (%d in the span before)", g.Before)
+		case wsm.WindowOwned:
+			standing = fmt.Sprintf("OWNED by %s, still at work on it", g.Owner)
+		case wsm.WindowRecurred:
+			standing = fmt.Sprintf("RECURRED after %s's fix deployed", g.Owner)
+		default:
+			panic(fmt.Sprintf("merge: a finding group with no class: %+v", g))
 		}
 		b.WriteString(fmt.Sprintf("- %s: %d %s of %s: %s\n  %s\n", standing, g.Count, strings.ToUpper(g.Level), g.Operation, g.Message, g.Sample))
+		if g.Findings != "" {
+			b.WriteString("  Its owners were told: " + strings.ReplaceAll(g.Findings, "\n", " / ") + "\n")
+		}
 	}
 	return b.String()
 }
 
 // intakeBrief composes the intake's brief of check M on queue Q: the deploy,
-// the chain so far against its bound, and the window's findings sorted NEW
-// or SEEN BEFORE against the same span before the deploy.
-func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, error) {
+// the chain so far against its bound, and the window's findings, each stood
+// against the span before the window and the problems the repository's
+// deploy checks keep. It answers the window as the brief tells it.
+//
+// THE WINDOW STARTS WHERE THE REPOSITORY'S LAST CHECK READ TO, never at the
+// deploy's start (owner ruling, 2026-11-16): a landing logs between its
+// merge and its deploy, and a window from the deploy's start left those
+// records unread by every check (the durable log sink warning, whose
+// landing removed the worktree just before the deploy began). An intake told
+// before, whose turn is reattached, is told the window it was told then.
+func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, wsm.CheckWindow, error) {
 	now := o.deps.Now()
-	span := now.Sub(m.OwedAt)
-	window, err := o.deps.ReadLogs(ctx, q.repository.Dir, m.OwedAt, now)
+	since, err := o.windowStart(ctx, q.key, m)
 	if err != nil {
-		return "", fmt.Errorf("merge: read the deploy's window: %w", err)
+		return "", wsm.CheckWindow{}, err
 	}
-	before, err := o.deps.ReadLogs(ctx, q.repository.Dir, m.OwedAt.Add(-span), m.OwedAt)
+	span := now.Sub(since)
+	window, err := o.deps.ReadLogs(ctx, q.repository.Dir, since, now)
 	if err != nil {
-		return "", fmt.Errorf("merge: read the span before the deploy: %w", err)
+		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the deploy's window: %w", err)
+	}
+	before, err := o.deps.ReadLogs(ctx, q.repository.Dir, since.Add(-span), since)
+	if err != nil {
+		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the span before the window: %w", err)
+	}
+	problems, err := o.deps.DB.DeployProblems(ctx, q.key)
+	if err != nil {
+		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
+	}
+	groups, err := classifyFindings(SortFindings(window, before), problems, func(ws ids.WorkspaceID) (string, error) {
+		return o.workspaceName(ctx, opMediation, ws)
+	})
+	if err != nil {
+		return "", wsm.CheckWindow{}, err
 	}
 	chain, err := o.chainSoFar(ctx, q, m)
 	if err != nil {
-		return "", err
+		return "", wsm.CheckWindow{}, err
 	}
 	gate, gated, err := lastGateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
 	if err != nil {
-		return "", err
+		return "", wsm.CheckWindow{}, err
 	}
-	return o.deps.Briefs(BriefDeployIntake, map[string]string{
+	brief, err := o.deps.Briefs(BriefDeployIntake, map[string]string{
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
+		"window_started": since.UTC().Format(time.RFC3339),
 		"repo_dir":       q.repository.Dir,
 		"version":        mediationVersion(m),
 		"chain":          chain,
 		"bound":          fmt.Sprint(q.bound),
-		"facts":          RenderFindings(SortFindings(window, before)),
+		"facts":          RenderFindings(groups),
 		"reuse":          RenderReuse(gate, gated),
 	})
+	if err != nil {
+		return "", wsm.CheckWindow{}, err
+	}
+	return brief, wsm.CheckWindow{Start: since, Through: now, Groups: windowGroups(groups)}, nil
+}
+
+// windowStart is where check M's window starts: the start of the window its
+// intake was told, when it was told one; otherwise where REPO's last check
+// read to; the deploy's start for a repository never checked, or a check a
+// previous build told, which recorded no window.
+func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation) (time.Time, error) {
+	if m.Prompted() {
+		told, found, err := o.deps.DB.MediationWindowOf(ctx, repo)
+		if err != nil {
+			return time.Time{}, fmt.Errorf("merge: read the window the intake was told: %w", err)
+		}
+		if found {
+			return told.Start, nil
+		}
+		return m.OwedAt, nil
+	}
+	through, found, err := o.deps.DB.CheckedThrough(ctx, repo)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("merge: read where the last check read to: %w", err)
+	}
+	if found {
+		return through, nil
+	}
+	return m.OwedAt, nil
 }
 
 // chainSoFar is the brief's account of check M's chain: its first deploy, or

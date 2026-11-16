@@ -54,6 +54,14 @@ type Claim interface {
 	// answer owed leaves, so every daemon spawned in response to a shutdown
 	// finds it departed. It is idempotent.
 	Depart() error
+	// Yield releases the serving lock and the boot claim and keeps the
+	// listener: the daemon has finished its handover's transfer pass, so its
+	// successor takes over now while this daemon serves the workspaces still
+	// busy here until each is free to move (docs/investigations/
+	// 2026-11-16-several-daemons-plan.md, phase 2). The advertisement is the
+	// successor's from here on, so Verify no longer reads it, and the claim
+	// never waits for the boot claim again. It is idempotent.
+	Yield() error
 	// Close closes the listener and releases the boot claim, serving lock
 	// first. It does not withdraw the advertisement.
 	Close() error

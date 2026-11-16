@@ -1334,8 +1334,8 @@ export const MERGE_TAB_KINDS = [
 ] as const;
 export type MergeTabKind = (typeof MERGE_TAB_KINDS)[number];
 
-/** The state arms every tab kind carries: nothing parks, so live or settled. */
-export const MERGE_TAB_STATES = ["live", "settled"] as const;
+/** The state arms every tab kind carries: live, held (its merge or its queue holds it), or settled. */
+export const MERGE_TAB_STATES = ["live", "onHold", "settled"] as const;
 /**
  * The kinds that can also wait on the user: the pick, a conflict resolution
  * and a fixing attempt, whose agent asks, the resolving-conflicts and
@@ -1359,6 +1359,7 @@ export type MergeTabState = (typeof MERGE_TAB_STATES)[number] | "waitingOnUser" 
 /** When every fixture tab's work began, and each queue entry its stage. */
 const MERGE_TAB_STARTED_AT_MS = 1_000n;
 const liveState = () => ({ case: "live" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS } });
+const heldState = () => ({ case: "onHold" as const, value: { startedAtMs: MERGE_TAB_STARTED_AT_MS, heldSinceMs: 5_000n } });
 const settledState = () => ({
   case: "settled" as const,
   value: {
@@ -1372,6 +1373,7 @@ const settledState = () => ({
 const plainState = (state: MergeTabState) => {
   if (state === "waitingOnUser") throw new Error("only the MERGE_TAB_WAITING_KINDS wait on the user");
   if (state === "pending") throw new Error("only the MERGE_TAB_PENDING_KINDS are pending");
+  if (state === "onHold") return heldState();
   return state === "settled" ? settledState() : liveState();
 };
 

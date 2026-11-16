@@ -57,7 +57,6 @@ import {
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REASON_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
-  MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
   MERGE_QUEUE_WAITING_CLASS,
   MERGE_QUEUE_POSITION_CLASS,
   pausedText,
@@ -492,14 +491,16 @@ describe("drawQueueControlLine", () => {
 });
 
 /** A stage of LABEL at ROUND in STATE, begun at START and ended at END. */
-function stage(label: string, state: "live" | "succeeded" | "failed", round = 1, start = 1_000n, end = 4_000n) {
+function stage(label: string, state: "live" | "held" | "succeeded" | "failed", round = 1, start = 1_000n, end = 4_000n) {
   return create(RosterMergeQueueStageSchema, {
     label,
     round,
     state:
       state === "live"
         ? { case: "live", value: { startedAtMs: start } }
-        : { case: state, value: { startedAtMs: start, endedAtMs: end } },
+        : state === "held"
+          ? { case: "held", value: { startedAtMs: start, heldSinceMs: end } }
+          : { case: state, value: { startedAtMs: start, endedAtMs: end } },
   });
 }
 
@@ -705,6 +706,7 @@ describe("drawQueueMediationLabel", () => {
     ["hot reloading", { case: "waiting" as const, value: {} }],
     ["assessing reload", { case: "checking" as const, value: { target: target("intake") } }],
     ["fixing reload", { case: "fixing" as const, value: { target: target("remedy") } }],
+    ["finishing reload", { case: "finishing" as const, value: { target: target("remedy") } }],
   ])("reads %s for its standing", (want, standing) => {
     const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), daemon().sc, "m");
     expect([label.textContent, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual([want, true]);
@@ -714,6 +716,7 @@ describe("drawQueueMediationLabel", () => {
     ["a rollout's label selects the chain's intake", { case: "waiting" as const, value: { target: target("intake") } }, "intake"],
     ["an assessment's label selects the intake", { case: "checking" as const, value: { target: target("intake") } }, "intake"],
     ["a fix's label selects the remediation", { case: "fixing" as const, value: { target: target("remedy") } }, "remedy"],
+    ["a finish's label selects the workspace standing by", { case: "finishing" as const, value: { target: target("remedy") } }, "remedy"],
   ])("%s on a click", async (_name, standing, want) => {
     const { asked, sc } = selecting();
     drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), sc, "m").click();
@@ -733,6 +736,7 @@ describe("drawQueueMediationLabel", () => {
     ["no standing", create(RosterMergeQueueMediationSchema, {})],
     ["an assessment with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "checking", value: {} } })],
     ["a fix with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "fixing", value: {} } })],
+    ["a finish with no target", create(RosterMergeQueueMediationSchema, { standing: { case: "finishing", value: {} } })],
   ])("refuses %s as a malformed view", (_name, malformed) => {
     expect(() => drawQueueMediationLabel(malformed, daemon().sc, "m")).toThrow(MalformedView);
   });
@@ -867,14 +871,6 @@ describe("drawRosterMergeQueueHead", () => {
     expect([...drawRosterMergeQueueHead(head(), pause, glyph(), sc, "head").children].map((el) => el.className)).toEqual(want);
   });
 
-  it.each([
-    { name: "marks a suspended head", suspended: true, want: true },
-    { name: "marks no head whose work runs", suspended: false, want: false },
-  ])("$name", ({ suspended, want }) => {
-    const { sc } = daemon();
-    expect(drawRosterMergeQueueHead(mergingHead("w1", { suspended }), paused(), glyph(), sc, "head").hasAttribute(MERGE_QUEUE_SUSPENDED_ATTRIBUTE)).toBe(want);
-  });
-
   it("stops a paused head's clock at the pause", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
@@ -958,6 +954,7 @@ describe("drawRosterMergeQueueHead's refusals", () => {
 describe("drawRosterMergeQueueStage", () => {
   it.each([
     { name: "a live stage", state: "live" as const, glyph: STATE_GLYPHS.live },
+    { name: "a held stage", state: "held" as const, glyph: STATE_GLYPHS.live },
     { name: "a succeeded stage", state: "succeeded" as const, glyph: STATE_GLYPHS.succeeded },
     { name: "a failed stage", state: "failed" as const, glyph: STATE_GLYPHS.failed },
   ])("wears the bubble's glyph for $name", ({ state, glyph }) => {

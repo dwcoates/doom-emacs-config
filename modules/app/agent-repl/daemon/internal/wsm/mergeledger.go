@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/dlog"
 )
@@ -31,6 +32,14 @@ func (s *store) OpenMergeLedger(ctx context.Context, id WorkspaceID, lease Lease
 // RecordTabInterval appends one round's tab interval to a lease's ledger. The
 // same (round, kind) is UPDATED rather than duplicated, which is how a running
 // interval later records its end and outcome.
+//
+// A LEDGER HOLDS AT MOST ONE LIVE ROUND, the merge's current step (owner
+// ruling, 2026-11-16). A live round written while another stands live means
+// the merge moved on from that other step without settling it: a restart, a
+// handover, a pause or a step aside cut it. That round is settled `restarted`
+// at the new round's start IN THE SAME WRITE, so no reader ever sees two live
+// rounds (2026-11-16: linux-wifi-port's ledger held six rebasing rounds that
+// never ended beside a live tests round, and the roster drew both live).
 func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error {
 	const op = "daemon.wsm.record_tab_interval"
 	fields := dlog.Context{"lease": string(lease), "round": interval.Round, "kind": interval.Kind}
@@ -53,14 +62,106 @@ func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval T
 		if err != nil {
 			return err
 		}
+		if interval.EndedAt == nil {
+			res, err := tx.ExecContext(ctx,
+				`UPDATE merge_tab_intervals SET ended_at = MAX(started_at, ?), outcome = ?, held_since = NULL
+				 WHERE lease_id = ? AND ended_at IS NULL AND NOT (round = ? AND kind = ?)`,
+				nanos(interval.StartedAt), TabOutcomeRestarted, lease, interval.Round, interval.Kind)
+			if err != nil {
+				return err
+			}
+			if cut, err := res.RowsAffected(); err != nil {
+				return err
+			} else if cut > 0 {
+				s.log.Info(op, "a round opened while another stood live; the one left live is settled as cut in the same write", dlog.Merge(fields, dlog.Context{"cut": cut}))
+			}
+		}
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome) VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(lease_id, round, kind) DO UPDATE SET
-			   started_at = excluded.started_at, ended_at = excluded.ended_at, outcome = excluded.outcome`,
+			   started_at = excluded.started_at, ended_at = excluded.ended_at, outcome = excluded.outcome,
+			   held_since = CASE WHEN excluded.ended_at IS NULL THEN merge_tab_intervals.held_since END`,
 			lease, interval.Round, interval.Kind, nanos(interval.StartedAt), nullNanos(interval.EndedAt), interval.Outcome)
 		return err
 	})
 }
+
+// HoldMergeRound marks the live round of LEASE's ledger HELD since AT, or
+// clears its hold when AT is nil, and answers whether a live round was there
+// to mark. It is the ONE writer of a round's hold (merge's suspend and
+// resume): a held round is one whose merge is suspended at it, which every
+// view of the merge draws from this one column. A settled round is never
+// held: settling a round clears its hold in the same write
+// (RecordTabInterval).
+func (s *store) HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time) (bool, error) {
+	const op = "daemon.wsm.hold_merge_round"
+	fields := dlog.Context{"lease": string(lease), "held": at != nil}
+	if lease == "" {
+		err := errors.New("wsm: a merge round's hold names its ledger")
+		s.log.Error(op, "refused a merge round hold that names no ledger", withError(fields, err))
+		return false, err
+	}
+	held := false
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE merge_tab_intervals SET held_since = ? WHERE lease_id = ? AND ended_at IS NULL`, nullNanos(at), lease)
+		if err != nil {
+			return err
+		}
+		held, err = touchedRow(res)
+		return err
+	})
+	return held, err
+}
+
+// HeldMergeRounds answers every ledger whose live round is held, and since
+// when (HoldMergeRound): the one read the merge views take their holds from.
+func (s *store) HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, error) {
+	const op = "daemon.wsm.held_merge_rounds"
+	out := map[LeaseID]time.Time{}
+	err := s.read(ctx, op, nil, func(ctx context.Context) error {
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT lease_id, held_since FROM merge_tab_intervals WHERE held_since IS NOT NULL AND ended_at IS NULL`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var lease LeaseID
+			var at int64
+			if err := rows.Scan(&lease, &at); err != nil {
+				return err
+			}
+			out[lease] = fromNanos(at)
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
+// mergeRoundHoldDDL is the layout-157 addition: when the live round of a
+// merge's ledger was suspended, NULL while it runs (HoldMergeRound).
+const mergeRoundHoldDDL = `
+ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
+`
+
+// TabOutcomeRestarted is the outcome of a round a later step cut before it
+// settled (RecordTabInterval).
+const TabOutcomeRestarted = "restarted"
+
+// settledLiveRoundsDDL is the layout-155 addition: every round left live in
+// a ledger before RecordTabInterval kept one live round per ledger is settled
+// `restarted` at the next round's start, and every live round of a ledger no
+// queued merge draws any more is settled at its own start, so the store holds
+// at most one live round per ledger, the current one.
+const settledLiveRoundsDDL = `
+UPDATE merge_tab_intervals SET outcome = 'restarted',
+  ended_at = COALESCE((SELECT MIN(later.started_at) FROM merge_tab_intervals AS later
+                       WHERE later.lease_id = merge_tab_intervals.lease_id AND later.started_at > merge_tab_intervals.started_at),
+                      merge_tab_intervals.started_at)
+WHERE ended_at IS NULL
+  AND (EXISTS (SELECT 1 FROM merge_tab_intervals AS later
+               WHERE later.lease_id = merge_tab_intervals.lease_id AND later.started_at > merge_tab_intervals.started_at)
+       OR NOT EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.ledger_id = merge_tab_intervals.lease_id));
+`
 
 // MergeLedger loads a workspace's ledger entries, all-or-nothing: one entry per
 // merge lease, each carrying its rounds in order.
@@ -124,7 +225,7 @@ func (s *store) MergeLedgerWorkspace(ctx context.Context, lease LeaseID) (Worksp
 // tabIntervals loads one lease's rounds in order, all-or-nothing.
 func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval, error) {
 	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT round, kind, started_at, ended_at, outcome FROM merge_tab_intervals WHERE lease_id = ? ORDER BY round, started_at, kind`, lease)
+		`SELECT round, kind, started_at, ended_at, outcome, held_since FROM merge_tab_intervals WHERE lease_id = ? ORDER BY round, started_at, kind`, lease)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +236,9 @@ func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval,
 			interval TabInterval
 			started  int64
 			ended    sql.NullInt64
+			held     sql.NullInt64
 		)
-		if err := rows.Scan(&interval.Round, &interval.Kind, &started, &ended, &interval.Outcome); err != nil {
+		if err := rows.Scan(&interval.Round, &interval.Kind, &started, &ended, &interval.Outcome, &held); err != nil {
 			return nil, err
 		}
 		if interval.Round < 1 {
@@ -144,6 +246,10 @@ func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval,
 		}
 		interval.StartedAt = fromNanos(started)
 		interval.EndedAt = optTime(ended)
+		interval.HeldSince = optTime(held)
+		if interval.HeldSince != nil && interval.EndedAt != nil {
+			return nil, &DecodeError{Table: "merge_tab_intervals", Row: string(lease), Field: "held_since", Err: fmt.Errorf("round %d of %s is settled and held", interval.Round, interval.Kind)}
+		}
 		loaded = append(loaded, interval)
 	}
 	if err := rows.Err(); err != nil {

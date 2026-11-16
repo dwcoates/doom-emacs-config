@@ -391,6 +391,30 @@ func (d deployChecks) CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, 
 	return verbs.CloseSelf(ctx, ws)
 }
 
+func (d deployChecks) StopNow(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue stopped a deploy check workspace")
+	if err != nil {
+		return err
+	}
+	return verbs.StopDeployCheck(ctx, ws)
+}
+
+func (d deployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue stood a finished deploy check workspace by")
+	if err != nil {
+		return err
+	}
+	return verbs.StandByDeployCheck(ctx, ws)
+}
+
+func (d deployChecks) Resume(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue brought a deploy check workspace back to work")
+	if err != nil {
+		return err
+	}
+	return verbs.ResumeDeployCheck(ctx, ws)
+}
+
 // surfaceForWork is the turn-start edge's surfacing (workspace.WorkSurfacings),
 // read out of the verbs, which are built after the edges.
 func (f *verbsForwarder) surfaceForWork(ctx context.Context, ws ids.WorkspaceID) error {

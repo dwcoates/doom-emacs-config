@@ -74,11 +74,17 @@ func TestRenderFindingsQuotesEachGroupsSample(t *testing.T) {
 		groups []FindingGroup
 		want   []string
 	}{
-		{name: "no findings says so", want: []string{"No system logged a warning or an error since the deploy began."}},
+		{name: "no findings says so", want: []string{"No system logged a warning or an error in the window."}},
 		{name: "a new and a seen group", groups: []FindingGroup{
-			{Operation: "a", Message: "m", Level: "error", Count: 2, Sample: "{raw-a}"},
-			{Operation: "b", Message: "n", Level: "warn", Count: 1, Before: 3, Sample: "{raw-b}"},
-		}, want: []string{"- NEW: 2 ERROR of a: m\n  {raw-a}", "- SEEN BEFORE (3 in the span before): 1 WARN of b: n\n  {raw-b}"}},
+			{Operation: "a", Message: "m", Level: "error", Count: 2, Sample: "{raw-a}", Class: wsm.WindowNew},
+			{Operation: "b", Message: "n", Level: "warn", Count: 1, Before: 3, Sample: "{raw-b}", Class: wsm.WindowSeenBefore},
+		}, want: []string{"- NEW: 2 ERROR of a: m\n  {raw-a}", "- SEEN BEFORE, owned by nobody (3 in the span before): 1 WARN of b: n\n  {raw-b}"}},
+		{name: "an owned group names its owner and what it was told", groups: []FindingGroup{
+			{Operation: "c", Message: "o", Level: "warn", Count: 1, Before: 1, Sample: "{raw-c}", Class: wsm.WindowOwned, Owner: "deploy-remediation-1", Findings: "the sink warning"},
+		}, want: []string{"- OWNED by deploy-remediation-1, still at work on it: 1 WARN of c: o", "  Its owners were told: the sink warning"}},
+		{name: "a recurred group names whose fix it outlived", groups: []FindingGroup{
+			{Operation: "d", Message: "p", Level: "warn", Count: 4, Before: 2, Sample: "{raw-d}", Class: wsm.WindowRecurred, Owner: "deploy-remediation-1", Findings: "first\nsecond"},
+		}, want: []string{"- RECURRED after deploy-remediation-1's fix deployed: 4 WARN of d: p", "  Its owners were told: first / second"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -113,7 +119,7 @@ func TestTheIntakesBriefSortsTheWindowAgainstTheSpanBeforeTheDeploy(t *testing.T
 	}
 
 	// Act
-	_, err = h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+	_, _, err = h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
 	// Assert
 	if err != nil || len(spans) != 2 {
@@ -124,7 +130,7 @@ func TestTheIntakesBriefSortsTheWindowAgainstTheSpanBeforeTheDeploy(t *testing.T
 		t.Fatalf("read window %v and before %v, want equal spans either side of the deploy", window, before)
 	}
 	values := h.briefValues[len(h.briefValues)-1]
-	if !strings.Contains(values["facts"], "- NEW: 1 ERROR of daemon.merge: boom") || !strings.Contains(values["facts"], "- SEEN BEFORE (1 in the span before): 1 WARN of daemon.shim") {
+	if !strings.Contains(values["facts"], "- NEW: 1 ERROR of daemon.merge: boom") || !strings.Contains(values["facts"], "- SEEN BEFORE, owned by nobody (1 in the span before): 1 WARN of daemon.shim") {
 		t.Fatalf("facts = %q, want the merge error NEW and the shim warning SEEN BEFORE", values["facts"])
 	}
 	if values["bound"] != fmt.Sprint(theBound) || !strings.Contains(values["chain"], "first deploy") {

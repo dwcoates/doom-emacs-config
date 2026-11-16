@@ -549,6 +549,10 @@ exit 0
 printf '<dictionary> {\n  InterfaceType : WiFi\n  LinkStatusActive : TRUE\n  SSID : ` + FakeHostNetwork + `\n}\n'
 `,
 	"wifi-util": "#!/bin/sh\nexit 0\n",
+	// The deploy's stop of the Wi-Fi helper's waiting asks (persistentwifi
+	// StopAsks): pkill answers 1, nothing matched, so no test ever signals a
+	// process of the host's.
+	"pkill": "#!/bin/sh\nexit 1\n",
 	// The Wi-Fi helper's launch (persistentwifi's scan): it answers, in the
 	// file --out names, joined to FakeHostNetwork with it alone in sight.
 	"open": `#!/bin/sh

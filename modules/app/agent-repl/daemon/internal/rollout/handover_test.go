@@ -2503,3 +2503,195 @@ type arrangementFailing struct{ wsm.DB }
 func (arrangementFailing) ReadArrangement(context.Context) (wsm.Arrangement, error) {
 	return wsm.Arrangement{}, errors.New("the arrangement read failed")
 }
+
+// yieldsInto wires the boot claim's yield to count on YIELDED, failing with
+// ERR when set.
+func yieldsInto(yielded chan<- struct{}, err error) func(d *Deps) {
+	return func(d *Deps) {
+		d.YieldBootClaim = func() error {
+			yielded <- struct{}{}
+			return err
+		}
+	}
+}
+
+func TestAHandoverYieldsTheBootClaimOnceItsTransferPassIsOver(t *testing.T) {
+	// Arrange: one workspace, whose adoption window the yield never waits on.
+	yielded := make(chan struct{}, 1)
+	h := newHarness(t, yieldsInto(yielded, nil))
+	h.workspace(t)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	<-yielded
+
+	// Assert: the yield comes before this daemon's exit, and is said.
+	select {
+	case <-h.exits:
+		t.Fatal("the daemon exited before it yielded; the yield must not wait for the handover's end")
+	default:
+	}
+	awaitRecord(t, h, opHandover, "the transfer pass is over: the successor takes over now, and this daemon serves what is still busy here until each workspace is free to move")
+}
+
+func TestAHandoverWhoseYieldFailsSaysSo(t *testing.T) {
+	// Arrange
+	yielded := make(chan struct{}, 1)
+	h := newHarness(t, yieldsInto(yielded, errors.New("the boot lock could not be released")))
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	<-yielded
+
+	// Assert
+	awaitRecord(t, h, opHandover, "the transfer pass is over but the boot claim could not be yielded; the successor takes over at this daemon's exit")
+}
+
+func TestARestartNeverYieldsTheBootClaim(t *testing.T) {
+	// Arrange
+	yielded := make(chan struct{}, 1)
+	h := newHarness(t, yieldsInto(yielded, nil))
+	h.workspace(t)
+
+	// Act
+	runRestart(t, h)
+
+	// Assert
+	select {
+	case <-yielded:
+		t.Fatal("a restart yielded the boot claim; its replacement takes it at the exit")
+	default:
+	}
+}
+
+// announced records each move announced to a newer daemon.
+type announced struct {
+	mu    sync.Mutex
+	moves []string
+	err   error
+}
+
+// newestIs wires daemon.addr to name NEWEST, and the announcements into A.
+func newestIs(newest string, a *announced) func(d *Deps) {
+	return func(d *Deps) {
+		d.NewestDaemon = func() (string, error) { return newest, nil }
+		d.AnnounceHanded = func(ctx context.Context, address string, ws wsm.Workspace, outgoing ids.InstanceID, expected Participants) error {
+			a.mu.Lock()
+			defer a.mu.Unlock()
+			a.moves = append(a.moves, fmt.Sprintf("%s->%s by %s", ws.ID, address, outgoing))
+			return a.err
+		}
+	}
+}
+
+func TestAMoveGoesToTheNewestDaemon(t *testing.T) {
+	tests := []struct {
+		name         string
+		newest       string
+		wantAnnounce bool
+		wantTo       string
+	}{
+		{name: "a newer daemon took over since the handover began", newest: "127.0.0.1:9999", wantAnnounce: true, wantTo: "127.0.0.1:9999"},
+		{name: "the advertisement still names this daemon", newest: "127.0.0.1:7777"},
+		{name: "the advertisement names no daemon", newest: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			a := &announced{}
+			h := newHarness(t, newestIs(tt.newest, a))
+			ws, _ := h.workspace(t)
+
+			// Act
+			handOverUntilWindow(t, h)
+
+			// Assert: the move is told to the newest only when it is newer.
+			a.mu.Lock()
+			moves := slices.Clone(a.moves)
+			a.mu.Unlock()
+			if tt.wantAnnounce != (len(moves) == 1) {
+				t.Fatalf("announcements = %v, want one %v", moves, tt.wantAnnounce)
+			}
+			want := tt.wantTo
+			if want == "" {
+				want = h.spawner.address
+			}
+			var to string
+			for _, c := range h.pusher.Calls() {
+				if c.WS == ws && c.Kind == "transferred" {
+					to = c.Address
+				}
+			}
+			if to != want {
+				t.Fatalf("transferred to %q, want %q", to, want)
+			}
+		})
+	}
+}
+
+func TestAMoveTheNewestDaemonCannotBeToldOfStaysServedHere(t *testing.T) {
+	// Arrange
+	a := &announced{err: ErrNotNewest}
+	h := newHarness(t, newestIs("127.0.0.1:9999", a))
+	ws, _ := h.workspace(t)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+
+	// Assert: nothing of the workspace moved, and the failure is said.
+	awaitRecord(t, h, opTransfer, "the newest daemon could not be told of the move; the workspace stays served here and is offered again")
+	for _, c := range h.pusher.Calls() {
+		if c.WS == ws && c.Kind == "transferred" {
+			t.Fatalf("pushes = %+v, want no transfer announced", h.pusher.Calls())
+		}
+	}
+}
+
+func TestAcceptHandedArmsTheRendezvousForTheMove(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+
+	// Act
+	err := h.c.AcceptHanded(context.Background(), ws, "elder", Participants{Host: true})
+
+	// Assert: the workspace is the elder's until it is adopted here.
+	if err != nil {
+		t.Fatalf("AcceptHanded = %v", err)
+	}
+	h.c.mu.Lock()
+	e, armed := h.c.rendezvous[ws]
+	h.c.unlock()
+	if !armed || e.outgoing != "elder" || !e.expected.Host || e.expected.Web {
+		t.Fatalf("rendezvous = %+v (armed %v), want it armed from elder expecting the host", e, armed)
+	}
+	if h.c.ServesWorkspace(ws) || h.c.Standing(ws) != StandingNotYetAdopted {
+		t.Fatalf("serves %v, standing %v; want the workspace not yet adopted", h.c.ServesWorkspace(ws), h.c.Standing(ws))
+	}
+}
+
+func TestAcceptHandedRefusesWhileThisDaemonHandsOverItself(t *testing.T) {
+	// Arrange: this daemon hands over to a newer one.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.freeness.SetFree(ws, false)
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+
+	// Act
+	err := h.c.AcceptHanded(context.Background(), ws, "elder", Participants{})
+
+	// Assert
+	if !errors.Is(err, ErrNotNewest) {
+		t.Fatalf("AcceptHanded = %v, want ErrNotNewest", err)
+	}
+}

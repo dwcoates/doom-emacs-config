@@ -51,7 +51,6 @@ import { REARRANGED_ATTRIBUTE } from "../../src/drag.js";
 import {
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
-  MERGE_QUEUE_SUSPENDED_ATTRIBUTE,
 } from "../../src/sidebar/merge-queue-view.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { formatAge } from "../../src/duration.js";
@@ -1990,22 +1989,24 @@ describe("the Merge Queue section's queues", () => {
   });
 
   it.each([
-    { name: "a suspended head's live stage as a still grey dot", suspended: true, color: "var(--muted)", animation: "none" },
-    { name: "a running head's live stage breathing in the merge purple", suspended: false, color: "var(--blocked)", animation: "merge-breathe 1.8s ease-in-out infinite" },
-  ])("draws $name", ({ suspended, color, animation }) => {
+    { name: "a held head's stage as a still grey dot", held: true, color: "var(--muted)", animation: "none" },
+    { name: "a running head's live stage breathing in the merge purple", held: false, color: "var(--blocked)", animation: "merge-breathe 1.8s ease-in-out infinite" },
+  ])("draws $name", ({ held, color, animation }) => {
+    const state = held
+      ? ({ case: "held", value: { startedAtMs: 1n, heldSinceMs: 0n } } as const)
+      : ({ case: "live", value: { startedAtMs: 1n } } as const);
     const drawn = drawWorkspaceRoster(
       withQueues([
         queueGroup({
           id: "a",
           queue: {
-            head: mergingHead("w1", { suspended, stages: [{ label: "deploy", round: 1, state: { case: "live", value: { startedAtMs: 1n } } }] }),
+            head: mergingHead("w1", { stages: [{ label: "deploy", round: 1, state }] }),
             paused: {},
           },
         }),
       ]),
       sidebarContext(),
     );
-    expect(drawn.querySelector(".sb-mq-head")?.hasAttribute(MERGE_QUEUE_SUSPENDED_ATTRIBUTE)).toBe(suspended);
     expect(inRail(drawn, () => [cascadedValue(drawn.querySelector(".sb-mq-stage-glyph")!, "color"), cascadedValue(drawn.querySelector(".sb-mq-stage-glyph")!, "animation")])).toEqual([color, animation]);
   });
 

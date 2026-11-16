@@ -53,6 +53,9 @@ type fakeDB struct {
 	links    map[ids.WorkspaceID][]wsm.WorkspaceLink
 	linksErr error
 
+	// holdErr fails every round hold (HoldMergeRound).
+	holdErr error
+
 	// progressHistory is every progress record written, in order.
 	progressHistory []wsm.MergeProgress
 
@@ -406,6 +409,30 @@ func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationF
 		return wsm.RemediationFinish{}, err
 	}
 	return f.checks.BeginRemediationFinish(ctx, rf)
+}
+
+func (f *fakeDB) DeployProblems(ctx context.Context, repo wsm.RepoKey) ([]wsm.DeployProblem, error) {
+	return f.checks.DeployProblems(ctx, repo)
+}
+
+func (f *fakeDB) OwnDeployProblems(ctx context.Context, repo wsm.RepoKey, keys []wsm.ProblemKey, owner ids.WorkspaceID, findings string, at time.Time) error {
+	return f.checks.OwnDeployProblems(ctx, repo, keys, owner, findings, at)
+}
+
+func (f *fakeDB) FixDeployProblemsOf(ctx context.Context, owner ids.WorkspaceID, at time.Time) (int, error) {
+	return f.checks.FixDeployProblemsOf(ctx, owner, at)
+}
+
+func (f *fakeDB) CheckedThrough(ctx context.Context, repo wsm.RepoKey) (time.Time, bool, error) {
+	return f.checks.CheckedThrough(ctx, repo)
+}
+
+func (f *fakeDB) RecordMediationWindow(ctx context.Context, repo wsm.RepoKey, owed time.Time, w wsm.CheckWindow) (bool, error) {
+	return f.checks.RecordMediationWindow(ctx, repo, owed, w)
+}
+
+func (f *fakeDB) MediationWindowOf(ctx context.Context, repo wsm.RepoKey) (wsm.CheckWindow, bool, error) {
+	return f.checks.MediationWindowOf(ctx, repo)
 }
 
 func (f *fakeDB) PassRemediationGate(ctx context.Context, ws ids.WorkspaceID, head string, at time.Time) (bool, error) {
@@ -787,6 +814,46 @@ func (f *fakeDB) OpenMergeLedger(_ context.Context, id ids.WorkspaceID, lease ws
 	return nil
 }
 
+func (f *fakeDB) HeldMergeRounds(context.Context) (map[wsm.LeaseID]time.Time, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[wsm.LeaseID]time.Time{}
+	for _, entries := range f.ledger {
+		for _, entry := range entries {
+			for _, round := range entry.Intervals {
+				if round.EndedAt == nil && round.HeldSince != nil {
+					out[entry.Lease] = *round.HeldSince
+				}
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeDB) HoldMergeRound(_ context.Context, lease wsm.LeaseID, at *time.Time) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.holdErr != nil {
+		return false, f.holdErr
+	}
+	// As the store does: the live round of the ledger is marked, a settled
+	// one never.
+	for id, entries := range f.ledger {
+		for i := range entries {
+			if entries[i].Lease != lease {
+				continue
+			}
+			for j, round := range entries[i].Intervals {
+				if round.EndedAt == nil {
+					f.ledger[id][i].Intervals[j].HeldSince = at
+					return true, nil
+				}
+			}
+		}
+	}
+	return false, nil
+}
+
 func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, interval wsm.TabInterval) error {
 	// As the store does: a write on a cancelled context begins no transaction.
 	if err := ctx.Err(); err != nil {
@@ -804,8 +871,26 @@ func (f *fakeDB) RecordTabInterval(ctx context.Context, lease wsm.LeaseID, inter
 			if entries[i].Lease != lease {
 				continue
 			}
+			// As the store does: a live round settles every other round
+			// left live as cut, at its own start (wsm.RecordTabInterval).
+			if interval.EndedAt == nil {
+				for j, held := range entries[i].Intervals {
+					if held.EndedAt == nil && (held.Round != interval.Round || held.Kind != interval.Kind) {
+						at := interval.StartedAt
+						if at.Before(held.StartedAt) {
+							at = held.StartedAt
+						}
+						entries[i].Intervals[j].EndedAt, entries[i].Intervals[j].Outcome, entries[i].Intervals[j].HeldSince = &at, wsm.TabOutcomeRestarted, nil
+					}
+				}
+			}
 			for j, held := range entries[i].Intervals {
 				if held.Round == interval.Round && held.Kind == interval.Kind {
+					// As the store does: a live round's hold outlives its
+					// re-record, and settling it clears the hold.
+					if interval.EndedAt == nil {
+						interval.HeldSince = held.HeldSince
+					}
 					entries[i].Intervals[j] = interval
 					f.ledger[id] = entries
 					return nil
@@ -4492,6 +4577,13 @@ type fakeDeployChecks struct {
 	// and closeErr fail them.
 	reopened, closed    []ids.WorkspaceID
 	reopenErr, closeErr error
+	// stopped records each deploy check stopped at once; stopErr fails it.
+	stopped []ids.WorkspaceID
+	stopErr error
+	// stoodBy and resumed record each finish's stand-by and each return to
+	// work; standByErr fails a stand-by.
+	stoodBy, resumed []ids.WorkspaceID
+	standByErr       error
 	// efforts records each effort set, "ROLE:WS", and
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
@@ -4546,6 +4638,27 @@ func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
 	defer f.mu.Unlock()
 	f.reopened = append(f.reopened, ws)
 	return f.reopenErr
+}
+
+func (f *fakeDeployChecks) StandBy(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stoodBy = append(f.stoodBy, ws)
+	return f.standByErr
+}
+
+func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumed = append(f.resumed, ws)
+	return nil
+}
+
+func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.stopped = append(f.stopped, ws)
+	return f.stopErr
 }
 
 func (f *fakeDeployChecks) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, error) {

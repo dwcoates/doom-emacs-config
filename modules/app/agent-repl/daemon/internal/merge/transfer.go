@@ -443,6 +443,9 @@ func (o *orchestrator) awaitOwnEnd(log dlog.Logger, op string, ws ids.WorkspaceI
 func (o *orchestrator) forgetMoved(ws ids.WorkspaceID) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
+	if lease, ok := o.ledgerOf[ws]; ok {
+		o.bubbleTabs.forget(lease)
+	}
 	delete(o.ledgerOf, ws)
 	delete(o.repoOf, ws)
 	delete(o.resumes, ws)
@@ -655,7 +658,12 @@ func (o *orchestrator) requeueAdmitted(ctx context.Context, op string, repo wsm.
 		o.deps.Log.Global().Error(op, why.unleased, withField(fields, "error", err.Error()))
 		return err
 	}
-	ledger := o.mintLedger(ws)
+	entry, err := o.entryOf(ctx, repo, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
+		return err
+	}
+	ledger := o.ledgerOfEntry(entry)
 	if err := o.deps.DB.RequeuePausedMerge(ctx, repo, ws, lease.ID, ledger); err != nil {
 		o.deps.Log.Global().Error(op, why.failed, withField(fields, "error", err.Error()))
 		return err

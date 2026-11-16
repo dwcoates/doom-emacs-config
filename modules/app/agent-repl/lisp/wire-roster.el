@@ -1374,7 +1374,7 @@ as its queue holds it (an async merge's merge workspace)."
 
 (defconst agent-repl-wire--roster-merge-queue-instants
   '((startedAtMs . :started-at-ms) (endedAtMs . :ended-at-ms) (queuedAtMs . :queued-at-ms)
-    (sinceMs . :since-ms))
+    (sinceMs . :since-ms) (heldSinceMs . :held-since-ms))
   "Each epoch-ms field a merge queue's span messages carry, and its keyword.")
 
 (defun agent-repl-wire--decode-roster-merge-queue-span (message-name value fields)
@@ -1393,9 +1393,9 @@ Returns a plist keyed by each field's keyword
 (defun agent-repl-wire-decode-roster-merge-queue-stage (value)
   "Decode VALUE as `RosterMergeQueueStage'.
 A plist `(:label LABEL :round ROUND :state (:arm ARM :value SPAN))', ARM
-`:live', `:succeeded' or `:failed'."
+`:live', `:held', `:succeeded' or `:failed'."
   (let ((object (agent-repl-wire--object "RosterMergeQueueStage" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueStage" object '(label round live succeeded failed))
+    (agent-repl-wire--check-keys "RosterMergeQueueStage" object '(label round live succeeded failed held))
     (agent-repl-wire--decoded
      "RosterMergeQueueStage"
      (list :label (agent-repl-wire--decode-string "RosterMergeQueueStage" 'label object)
@@ -1407,20 +1407,17 @@ A plist `(:label LABEL :round ROUND :state (:arm ARM :value SPAN))', ARM
                      (succeeded :succeeded ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
                                                          "RosterMergeQueueStageSucceeded" v '(startedAtMs endedAtMs))))
                      (failed :failed ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
-                                                   "RosterMergeQueueStageFailed" v '(startedAtMs endedAtMs))))))))))
+                                                   "RosterMergeQueueStageFailed" v '(startedAtMs endedAtMs))))
+                     (held :held ,(lambda (v) (agent-repl-wire--decode-roster-merge-queue-span
+                                               "RosterMergeQueueStageHeld" v '(startedAtMs heldSinceMs))))))))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-head-merging (value)
   "Decode VALUE as `RosterMergeQueueHeadMerging'.
-A plist `(:suspended SUSPENDED)': SUSPENDED is t while nothing of the
-merge's work runs."
+An empty plist: the message carries nothing since its `suspended' mark
+retired; a held merge's stages say it is held themselves."
   (let ((object (agent-repl-wire--object "RosterMergeQueueHeadMerging" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueHeadMerging" object '(suspended))
-    (agent-repl-wire--decoded
-     "RosterMergeQueueHeadMerging"
-     (list :suspended (and (agent-repl-wire--present-p object 'suspended)
-                           (progn (agent-repl-wire--decode-empty
-                                   "RosterMergeQueueHeadSuspended" (agent-repl-wire--raw object 'suspended))
-                                  t))))))
+    (agent-repl-wire--check-keys "RosterMergeQueueHeadMerging" object '())
+    (agent-repl-wire--decoded "RosterMergeQueueHeadMerging" nil)))
 
 (defun agent-repl-wire-decode-roster-merge-queue-head (value)
   "Decode VALUE as `RosterMergeQueueHead'.
@@ -1542,12 +1539,14 @@ mediation the queue waits on, nil while it waits on none
   "Decode VALUE as `RosterMergeQueueMediation'.
 A plist `(:standing STANDING :target TARGET)': where the deploy check the
 queue waits on stands, `:waiting' (the deploy still rolls out),
-`:checking' (the chain's intake assesses it) or `:fixing' (a remediation
-workspace fixes it), and TARGET, the workspace ref a click on its label
+`:checking' (the chain's intake assesses it), `:fixing' (a remediation
+workspace fixes it) or `:finishing' (a remediation's or an escalation's fix
+is gated, landed and deployed while its workspace stands by hidden), and
+TARGET, the workspace ref a click on its label
 selects.  TARGET is nil only while a chain's first deploy rolls out, whose
 intake does not exist yet; the standing is never unset."
   (let ((object (agent-repl-wire--object "RosterMergeQueueMediation" value)))
-    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking fixing))
+    (agent-repl-wire--check-keys "RosterMergeQueueMediation" object '(waiting checking fixing finishing))
     (let ((standing (agent-repl-wire--decode-oneof
                      "RosterMergeQueueMediation" 'standing object
                      `((waiting :waiting ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
@@ -1555,7 +1554,9 @@ intake does not exist yet; the standing is never unset."
                        (checking :checking ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
                                                          "RosterMergeQueueMediationChecking" v t)))
                        (fixing :fixing ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
-                                                     "RosterMergeQueueMediationFixing" v t)))))))
+                                                     "RosterMergeQueueMediationFixing" v t)))
+                       (finishing :finishing ,(lambda (v) (agent-repl-wire--decode-roster-mediation-standing
+                                                           "RosterMergeQueueMediationFinishing" v t)))))))
       (agent-repl-wire--decoded
        "RosterMergeQueueMediation"
        (list :standing (plist-get standing :arm)

@@ -1600,11 +1600,6 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .merged-group[data-paused] > .merged-group-head,
 #ws-sidebar .merged-group[data-paused] > .merged-group-head > .sb-label { color: var(--canonical-orange); --copy-control-rest: 1; }
 #ws-sidebar .merged-group[data-paused] .sb-mq-glyph { color: var(--merge-paused); }
-/* A HEAD NOTHING OF WHOSE WORK RUNS draws its live stage as a still grey dot
-   rather than the breathing purple one (owner request, 2026-10-27;
-   frontend.v1.RosterMergeQueueHeadMerging.suspended). */
-#ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] { color: var(--muted); }
-#ws-sidebar .sb-mq-head[data-suspended] .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { color: var(--muted); animation: none; }
 /* A GROUP'S NAME STANDS OFF THE TEXT AROUND IT BY --inside-rule-gap
    (owner request, 2026-10-31), measured from text to text in WebKit as the
    rules between the sections are: the section header's baseline above the
@@ -5436,6 +5431,9 @@ html[data-page-unshown] {
   white-space: pre;
   animation: pfooter-status-color 3.64s ease-in-out infinite alternate;
 }
+/* A HELD MERGE'S STEP IS GREY AND STILL (frontend.v1.FooterStatusMerging.held):
+   its merge is suspended at it, or its queue holds every merge in it. */
+.footer-status[data-held] { color: var(--muted); }
 .pfooter-wave-letter {
   display: inline-block;
   transform-origin: 50% 100%;
@@ -9052,6 +9050,12 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
    the check, the cross and the question mark keep the badge's size. */
 .merge-tab-glyph.is-live,
 #ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph { font-size: 0.7em; }
+/* A HELD TAB'S DOT IS GREY AND STILL (owner ruling, 2026-11-16): its merge
+   is suspended at it, or its queue holds every merge in it, so nothing
+   breathes; it keeps the live dot's size, since it is the step that runs
+   next. */
+.merge-tab-glyph.is-held,
+#ws-sidebar .sb-mq-stage[data-state="held"] .sb-mq-stage-glyph { color: var(--muted); animation: none; font-size: 0.7em; }
 /* A replayed commit's badge (tab-strip.ts): its short hash at the duration's
    size, in a darker grey than the duration, beside a subject in the badge's
    own color. */

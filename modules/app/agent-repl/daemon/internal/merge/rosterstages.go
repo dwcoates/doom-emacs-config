@@ -1,9 +1,7 @@
 package merge
 
 import (
-	"cmp"
 	"fmt"
-	"slices"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -37,68 +35,34 @@ func stageGroup(kind string) (group string, collapsed bool, ok bool) {
 	return "", false, false
 }
 
-// stage is one drawn stage as it is accumulated over its rounds.
-type stage struct {
-	label   string
-	round   int
-	started int64
-	ended   int64
-	live    bool
-	// lastStart and outcome are the latest round's, whose outcome a settled
-	// collapsed stage takes.
-	lastStart int64
-	outcome   string
+// stagesOf answers the stages INTERVALS draw on the roster, in the order each
+// began: the rendering of the merge's one view (viewOf) under QUEUEHELD.
+func stagesOf(intervals []wsm.TabInterval, queueHeld bool) ([]*frontendv1.RosterMergeQueueStage, error) {
+	view, err := viewOf(intervals, queueHeld)
+	if err != nil {
+		return nil, err
+	}
+	return rosterStages(view), nil
 }
 
-// stagesOf answers the stages INTERVALS draw, in the order each began. A kind
-// or an outcome the ledger has no business holding is an error: the ledger is
-// written only by openTab and closeTab, so either is a contract violation.
-func stagesOf(intervals []wsm.TabInterval) ([]*frontendv1.RosterMergeQueueStage, error) {
-	byKey := map[string]*stage{}
-	var order []*stage
-	for _, interval := range intervals {
-		group, collapsed, ok := stageGroup(interval.Kind)
-		if !ok {
-			return nil, fmt.Errorf("merge: the ledger holds a tab of kind %q, which draws no stage", interval.Kind)
-		}
-		round := interval.Round
-		if collapsed {
-			round = 1
-		}
-		key := roundKey(group, round)
-		st, seen := byKey[key]
-		started := interval.StartedAt.UnixMilli()
-		if !seen {
-			st = &stage{label: tabWord(group), round: round, started: started}
-			byKey[key] = st
-			order = append(order, st)
-		}
-		st.started = min(st.started, started)
-		if interval.EndedAt == nil {
-			st.live = true
-		} else {
-			st.ended = max(st.ended, interval.EndedAt.UnixMilli())
-		}
-		if !seen || started >= st.lastStart {
-			st.lastStart = started
-			st.outcome = interval.Outcome
-		}
-	}
-	slices.SortStableFunc(order, func(a, b *stage) int { return cmp.Compare(a.started, b.started) })
-	out := make([]*frontendv1.RosterMergeQueueStage, 0, len(order))
-	for _, st := range order {
+// rosterStages renders VIEW as the roster's stage strip.
+func rosterStages(view mergeView) []*frontendv1.RosterMergeQueueStage {
+	out := make([]*frontendv1.RosterMergeQueueStage, 0, len(view.stages))
+	for _, st := range view.stages {
 		drawn := &frontendv1.RosterMergeQueueStage{Label: st.label, Round: uint32(st.round)}
-		switch {
-		case st.live:
-			drawn.State = &frontendv1.RosterMergeQueueStage_Live{Live: &frontendv1.RosterMergeQueueStageLive{StartedAtMs: st.started}}
-		case st.outcome == "succeeded":
-			drawn.State = &frontendv1.RosterMergeQueueStage_Succeeded{Succeeded: &frontendv1.RosterMergeQueueStageSucceeded{StartedAtMs: st.started, EndedAtMs: st.ended}}
-		case st.outcome == "failed" || st.outcome == "restarted" || st.outcome == "abandoned":
-			drawn.State = &frontendv1.RosterMergeQueueStage_Failed{Failed: &frontendv1.RosterMergeQueueStageFailed{StartedAtMs: st.started, EndedAtMs: st.ended}}
+		switch st.state {
+		case stageLive:
+			drawn.State = &frontendv1.RosterMergeQueueStage_Live{Live: &frontendv1.RosterMergeQueueStageLive{StartedAtMs: st.startedMS}}
+		case stageHeld:
+			drawn.State = &frontendv1.RosterMergeQueueStage_Held{Held: &frontendv1.RosterMergeQueueStageHeld{StartedAtMs: st.startedMS, HeldSinceMs: st.heldMS}}
+		case stageSucceeded:
+			drawn.State = &frontendv1.RosterMergeQueueStage_Succeeded{Succeeded: &frontendv1.RosterMergeQueueStageSucceeded{StartedAtMs: st.startedMS, EndedAtMs: st.endedMS}}
+		case stageFailed:
+			drawn.State = &frontendv1.RosterMergeQueueStage_Failed{Failed: &frontendv1.RosterMergeQueueStageFailed{StartedAtMs: st.startedMS, EndedAtMs: st.endedMS}}
 		default:
-			return nil, fmt.Errorf("merge: the ledger closed a %s tab with outcome %q, which draws no stage state", st.label, st.outcome)
+			panic(fmt.Sprintf("merge: a view stage of %s has no state", st.label))
 		}
 		out = append(out, drawn)
 	}
-	return out, nil
+	return out
 }

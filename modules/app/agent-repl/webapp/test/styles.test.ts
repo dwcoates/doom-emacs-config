@@ -6529,6 +6529,7 @@ describe("the sidebar's merge queue view", () => {
     { name: "highlights its head card on hover as a row", shared: "#ws-sidebar:not(.sb-hover-suspended) .row:hover", own: "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover" },
     { name: "highlights a waiting merge on hover as a row", shared: "#ws-sidebar:not(.sb-hover-suspended) .row:hover", own: "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover" },
     { name: "colours a live stage's glyph as the bubble's live tab", shared: ".merge-tab-glyph.is-live", own: '#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph' },
+    { name: "colours a held stage's glyph as the bubble's held tab", shared: ".merge-tab-glyph.is-held", own: '#ws-sidebar .sb-mq-stage[data-state="held"] .sb-mq-stage-glyph' },
     { name: "colours a passed stage's glyph as the bubble's passed tab", shared: ".merge-tab-glyph.is-succeeded", own: '#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph' },
     { name: "colours a failed stage's glyph as the bubble's failed tab", shared: ".merge-tab-glyph.is-failed", own: '#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph' },
   ])("$name", ({ shared, own }) => {
@@ -6546,6 +6547,7 @@ describe("the sidebar's merge queue view", () => {
       "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-head:hover",
       "#ws-sidebar:not(.sb-hover-suspended) .sb-mq-waiting:hover",
       '#ws-sidebar .sb-mq-stage[data-state="live"] .sb-mq-stage-glyph',
+      '#ws-sidebar .sb-mq-stage[data-state="held"] .sb-mq-stage-glyph',
       '#ws-sidebar .sb-mq-stage[data-state="succeeded"] .sb-mq-stage-glyph',
       '#ws-sidebar .sb-mq-stage[data-state="failed"] .sb-mq-stage-glyph',
     ];

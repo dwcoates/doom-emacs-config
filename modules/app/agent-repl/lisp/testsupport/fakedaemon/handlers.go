@@ -728,3 +728,7 @@ func (s *fakeServer) CommentOnPullRequest(ctx context.Context, req *connect.Requ
 func (s *fakeServer) NotifyWorkspace(ctx context.Context, req *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
 	return handleUnary[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse](ctx, s, "NotifyWorkspace", req.Msg)
 }
+
+func (s *fakeServer) AcceptHandedWorkspace(ctx context.Context, req *connect.Request[v1.AcceptHandedWorkspaceRequest]) (*connect.Response[v1.AcceptHandedWorkspaceResponse], error) {
+	return handleUnary[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse](ctx, s, "AcceptHandedWorkspace", req.Msg)
+}

@@ -19,6 +19,7 @@ import "agentrepl/v1/endpoint_subscribe_github_merge_queue.proto";
 import "agentrepl/v1/endpoint_unsubscribe_github_merge_queue.proto";
 import "agentrepl/v1/endpoint_list_github_merge_queue_subscriptions.proto";
 import "agentrepl/v1/endpoint_adjust_feed_text_scale.proto";
+import "agentrepl/v1/endpoint_accept_handed_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_host_workspace.proto";
 import "agentrepl/v1/endpoint_adopt_web_workspace.proto";
 import "agentrepl/v1/endpoint_answer_cold_gate.proto";
@@ -635,6 +636,10 @@ service AgentRepl {
   // Emacs's half of the handover rendezvous, called on the NEW daemon. See
   // endpoint_adopt_host_workspace.proto.
   rpc AdoptHostWorkspace(AdoptHostWorkspaceRequest) returns (AdoptHostWorkspaceResponse);
+
+  // An older daemon's announcement to the newest that it is about to move a
+  // workspace there. See endpoint_accept_handed_workspace.proto.
+  rpc AcceptHandedWorkspace(AcceptHandedWorkspaceRequest) returns (AcceptHandedWorkspaceResponse);
 
   // Every slash command the workspace's agent runtime answers, for the
   // composer's completion. See endpoint_list_slash_commands.proto.

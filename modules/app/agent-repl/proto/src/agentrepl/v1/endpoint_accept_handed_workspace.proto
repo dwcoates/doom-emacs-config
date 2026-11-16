@@ -1,0 +1,68 @@
+// endpoint_accept_handed_workspace.proto — AcceptHandedWorkspace: an OLDER
+// daemon tells the NEWEST daemon of its state root that it is about to move
+// a workspace there (docs/investigations/2026-11-16-several-daemons-plan.md,
+// phase 3).
+//
+// Several daemons may serve one state root at once: the newest holds the
+// boot claim, and each older one keeps the workspaces that were busy at its
+// handover until each is free to move. A workspace freed on an older daemon
+// moves straight to the newest, read from daemon.addr at each move, never
+// through every generation in turn. The newest was never told of it in a
+// handover manifest, so the older daemon announces the one workspace here,
+// and only then transfers it exactly as it transfers one to its own
+// successor: the newest arms its adoption rendezvous for the workspace, and
+// adopts it once the older daemon releases its serving row.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message AcceptHandedWorkspaceRequest {
+  // The workspace about to move here. REQUIRED.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The instance id of the older daemon moving it, which serves it until its
+  // transfer lands. REQUIRED.
+  string outgoing_daemon = 2;
+  // Whether the workspace's host stream (Emacs) was open when the move was
+  // decided: the rendezvous waits for that participant's call.
+  bool expected_host = 3;
+  // Whether the workspace's web stream (its page) was open when the move was
+  // decided.
+  bool expected_web = 4;
+}
+
+message AcceptHandedWorkspaceResponse {
+  oneof result {
+    AcceptHandedWorkspaceSuccess success = 1;
+    AcceptHandedWorkspaceError error = 2;
+  }
+}
+
+// This daemon armed its rendezvous for the workspace: the caller may
+// transfer it here now.
+message AcceptHandedWorkspaceSuccess {}
+
+message AcceptHandedWorkspaceError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    AcceptHandedWorkspaceUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    AcceptHandedWorkspaceWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon is no longer the newest: it is handing over itself. The
+    // caller reads the newest daemon again and announces the move there.
+    AcceptHandedWorkspaceNotNewest not_newest = 3;
+  }
+}
+
+message AcceptHandedWorkspaceUnknownWorkspace {}
+
+message AcceptHandedWorkspaceWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+
+message AcceptHandedWorkspaceNotNewest {}

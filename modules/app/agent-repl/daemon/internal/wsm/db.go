@@ -525,6 +525,12 @@ type DB interface {
 	// OpenMergeLedger opens a workspace's ledger for one merge lease.
 	OpenMergeLedger(ctx context.Context, id WorkspaceID, lease LeaseID) error
 	// RecordTabInterval appends one round's tab interval to a lease's ledger.
+	// HoldMergeRound marks the live round of a merge's ledger held since a
+	// time, or clears its hold, in one write (mergeledger.go).
+	HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time) (bool, error)
+	// HeldMergeRounds answers every ledger whose live round is held, and
+	// since when (mergeledger.go).
+	HeldMergeRounds(ctx context.Context) (map[LeaseID]time.Time, error)
 	RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)
@@ -711,6 +717,22 @@ type DB interface {
 	// MediationRoleOf answers the owed mediation a workspace is the intake
 	// or the last remediation of, nil for neither (mediation.go).
 	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)
+	// DeployProblems answers every problem a repository's deploy checks
+	// keep (deployproblems.go).
+	DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProblem, error)
+	// OwnDeployProblems makes a workspace the owner of the problems named,
+	// open again from the instant given.
+	OwnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, owner WorkspaceID, findings string, at time.Time) error
+	// FixDeployProblemsOf marks every open problem an owner owns fixed.
+	FixDeployProblemsOf(ctx context.Context, owner WorkspaceID, at time.Time) (int, error)
+	// CheckedThrough answers where a repository's deploy checks have read
+	// its logs up to.
+	CheckedThrough(ctx context.Context, repo RepoKey) (time.Time, bool, error)
+	// RecordMediationWindow records the window the owed check's intake was
+	// told and the instant it was read to.
+	RecordMediationWindow(ctx context.Context, repo RepoKey, owed time.Time, w CheckWindow) (bool, error)
+	// MediationWindowOf answers the window the owed check's intake was told.
+	MediationWindowOf(ctx context.Context, repo RepoKey) (CheckWindow, bool, error)
 	// RecordDeployEscalation records WS as the deploy escalation workspace
 	// of REPO's queue, whose finish lands directly.
 	RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo RepoKey, at time.Time) error
@@ -1023,6 +1045,9 @@ type DB interface {
 	PutDurableFeedRow(ctx context.Context, row DurableFeedRow) error
 	// DurableFeedRows loads every durable feed row of one workspace.
 	DurableFeedRows(ctx context.Context, id WorkspaceID) ([]DurableFeedRow, error)
+	// DurableFeedRowRank answers where one durable row is recorded
+	// (durablefeedrows.go).
+	DurableFeedRowRank(ctx context.Context, id WorkspaceID, rowID string) (int, string, bool, error)
 	// ClearDurableFeedRows drops every durable feed row of one workspace.
 	ClearDurableFeedRows(ctx context.Context, id WorkspaceID) error
 

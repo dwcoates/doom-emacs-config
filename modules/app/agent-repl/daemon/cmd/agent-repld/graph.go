@@ -29,6 +29,7 @@ import (
 	"agent-repld/internal/commandcatalog"
 	"agent-repld/internal/composermentions"
 	"agent-repld/internal/creategate"
+	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/deployedversion"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/desktopnotify"
@@ -936,9 +937,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishHost:   relay.PublishHostWorkspace,
 		// THE WEBHOST DRAWS THE SHOWN WORKSPACE'S GATE from the roster, so the
 		// gate is on screen while the workspace's page is still loading.
-		GateDock:   sidebarResolver.SetColdGate,
-		DB:         p.DB,
-		Instance:   p.Instance,
+		GateDock: sidebarResolver.SetColdGate,
+		DB:       p.DB,
+		Instance: p.Instance,
+		InstanceRunning: func(instance ids.InstanceID) (bool, error) {
+			return daemonaddr.Alive(p.Layout.DaemonAddr(), string(instance))
+		},
 		Accounts:   accounts,
 		Supervisor: supervisor,
 		Sinks: sessionwatcher.Sinks{
@@ -1290,9 +1294,21 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
 		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
-		ShimBuild:       shimBundle.Build,
-		ColdGate:        fleet.RaiseColdGate,
-		Progress:        deployEdges,
+		YieldBootClaim:  p.Claim.Yield,
+		NewestDaemon: func() (string, error) {
+			ad, err := daemonaddr.ReadAdvertisement(p.Layout.DaemonAddr())
+			return ad.Address, err
+		},
+		AnnounceHanded: announceHanded,
+		LiveElders: func() ([]string, error) {
+			return daemonaddr.LiveOthers(p.Layout.DaemonAddr(), string(p.Instance))
+		},
+		AwaitElders: func(ctx context.Context, elders []string) error {
+			return daemonaddr.AwaitGone(ctx, p.Layout.DaemonAddr(), elders)
+		},
+		ShimBuild: shimBundle.Build,
+		ColdGate:  fleet.RaiseColdGate,
+		Progress:  deployEdges,
 		// THE ROLLOUT'S ONLY EXIT IS THE HANDOVER, whose shims a successor
 		// adopts.
 		Exit:     orderlyExit(func() { p.Exit(standDownHandover) }),
@@ -1317,6 +1333,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// The metrics surface's version series and the rail's header state it.
 	deployedVersion := deployedversion.NewLoop(git, paths.Checkout, log, p.Metrics, sidebarResolver)
 	deployer, restarter, err := buildDeployer(ctx, deployerParams{
+		WifiTools:  wifiConfig.Tools,
 		Surfaces:   p.Surfaces,
 		Checkout:   paths.Checkout,
 		ShimMain:   paths.ShimMain,

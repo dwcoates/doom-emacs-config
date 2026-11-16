@@ -33,12 +33,15 @@ func checked(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
-	h.briefs[BriefDeployIntake] = []string{"deploy_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
-	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems"}
+	h.briefs[BriefDeployIntake] = []string{"deploy_started", "window_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
+	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
 	h.briefs[BriefDeployRemediation] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
 	h.briefs[BriefRemediationBehind] = []string{"main_branch", "why", "attempt", "max_attempts"}
+	// A CHECK IS TOLD AFTER ITS DEPLOY BEGAN, so its window runs forward from
+	// the deploy's start to the clock (wsm.RecordMediationWindow).
+	h.now = deployStarted.Add(time.Minute)
 	return h
 }
 
@@ -305,8 +308,8 @@ func TestATurnThatDecidesNothingLetsTheQueueThroughTellsTheUserAndEndsTheChain(t
 		Message: "the intake's turn ended deciding nothing about the deploy; the queue is let through and the user is told"}); !ok {
 		t.Fatalf("records = %v, want the undecided check at ERROR", h.logs.Records())
 	}
-	if !slices.Equal(h.checks.closed, []ids.WorkspaceID{"ws-intake"}) {
-		t.Fatalf("closed %v, want the chain's intake closed", h.checks.closed)
+	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
+		t.Fatalf("stopped %v, want the chain's intake stopped", h.checks.stopped)
 	}
 }
 
@@ -473,8 +476,8 @@ func TestDecideMediation(t *testing.T) {
 			if err != nil || owedCheck(t, h) != nil || h.bannerRaised(desktopnotify.KindDeployMediated) != tt.wantBanner {
 				t.Fatalf("DecideMediation = %v, owed %+v, banner %v; want released, banner %v", err, owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated), tt.wantBanner)
 			}
-			if !slices.Equal(h.checks.closed, []ids.WorkspaceID{"ws-intake"}) {
-				t.Fatalf("closed %v, want the chain's intake closed", h.checks.closed)
+			if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
+				t.Fatalf("stopped %v, want the chain's intake stopped", h.checks.stopped)
 			}
 		})
 	}
@@ -654,8 +657,8 @@ func TestACheckNoIntakeDecidesIsReleased(t *testing.T) {
 			if m := owedCheck(t, h); (m == nil) != tt.wantReleased {
 				t.Fatalf("still owed %+v, want released %v", m, tt.wantReleased)
 			}
-			if closed := slices.Equal(h.checks.closed, []ids.WorkspaceID{"ws-intake"}); closed != tt.wantReleased {
-				t.Fatalf("closed %v, want the intake closed %v", h.checks.closed, tt.wantReleased)
+			if stopped := slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}); stopped != tt.wantReleased {
+				t.Fatalf("stopped %v, want the intake stopped %v", h.checks.stopped, tt.wantReleased)
 			}
 		})
 	}
@@ -680,12 +683,12 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	}
 }
 
-func TestAnIntakeThatCannotBeClosedAtTheChainsEndIsRecorded(t *testing.T) {
+func TestAnIntakeThatCannotBeStoppedAtTheChainsEndIsRecorded(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	h.checks.closeErr = errors.New("still busy")
+	h.checks.stopErr = errors.New("still busy")
 
 	// Act
 	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
@@ -694,8 +697,23 @@ func TestAnIntakeThatCannotBeClosedAtTheChainsEndIsRecorded(t *testing.T) {
 	if err != nil || owedCheck(t, h) != nil {
 		t.Fatalf("DecideMediation = %v, want the approval to release the queue regardless", err)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the chain ended but its intake could not be closed"}); !ok {
-		t.Fatalf("records = %v, want the failed close at ERROR", h.logs.Records())
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the chain ended but its intake could not be stopped"}); !ok {
+		t.Fatalf("records = %v, want the failed stop at ERROR", h.logs.Records())
+	}
+}
+
+func TestAnApprovalStopsItsIntakeAtOnce(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
+
+	// Assert
+	if err != nil || !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || len(h.checks.closed) != 0 {
+		t.Fatalf("DecideMediation = %v, stopped %v, closed %v; want the intake stopped at once and never closed at its turn's end", err, h.checks.stopped, h.checks.closed)
 	}
 }
 

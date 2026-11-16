@@ -263,8 +263,11 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
   if (parts.substatusRequired) requireCase(parts.substatus ?? {}, `${path}.${status.case}.substatus`);
   const step =
     parts.substatus === undefined || parts.substatus.case === undefined ? undefined : parts.substatus;
+  // A HELD MERGE'S STEP STANDS STILL (frontend.v1.FooterStatusMerging.held):
+  // the bubble's tabs and the roster's stages are drawn from the same hold.
+  const held = status.case === "merging" && status.value.held !== undefined;
   return [
-    drawFooterStatusWord(status.case, step),
+    drawFooterStatusWord(status.case, step, held),
     drawFooterStatusActivity(activity, deps, activityPath),
   ];
 }
@@ -286,12 +289,14 @@ export function drawFooterStatus(u: FooterStatus, deps: StripDeps): HTMLElement[
 export function drawFooterStatusWord(
   armCase: string,
   step?: SubStatusOneof & { case: string },
+  held = false,
 ): HTMLElement {
   const cell = document.createElement("div");
   cell.className = `pfooter-cell pfooter-phase footer-status arm-${armCase} ${statusArmClass(armCase)}`;
   cell.setAttribute("data-arm", armCase);
   if (step !== undefined) cell.setAttribute("data-substatus", step.case);
-  drawStatusWord(cell, statusCellWord(armCase, step?.case), statusWordWaves(armCase, step?.case));
+  if (held) cell.setAttribute("data-held", "");
+  drawStatusWord(cell, statusCellWord(armCase, step?.case), !held && statusWordWaves(armCase, step?.case));
 
   switch (step?.case) {
     case "enqueued":

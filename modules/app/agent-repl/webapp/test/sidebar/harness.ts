@@ -555,7 +555,6 @@ export function mergingHead(
   init: {
     stages?: MessageInitShape<typeof RosterMergeQueueHeadSchema>["stages"];
     subject?: RosterMergeQueueSubject;
-    suspended?: boolean;
     headSinceMs?: bigint;
   } = {},
 ): RosterMergeQueueHead {
@@ -563,7 +562,7 @@ export function mergingHead(
     subject: init.subject ?? queueSubject(id),
     stages: init.stages ?? [],
     headSinceMs: init.headSinceMs ?? BigInt(NOW),
-    standing: { case: "merging", value: { suspended: init.suspended === true ? {} : undefined } },
+    standing: { case: "merging", value: {} },
   });
 }
 

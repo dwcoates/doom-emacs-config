@@ -210,15 +210,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("agent-repld merge-queue mediation dispatch -fresh");
   });
 
-  it("has the deploy intake hold the queue only for what the deploy it checks caused", () => {
+  it("has the deploy intake approve only when every group has an owner", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("deploy_intake", home);
-    // Assert — owner ruling 2026-11-14: a defect the deploy did not cause
-    // never holds the queue.
-    expect(text).toContain("A SEEN BEFORE group, or any defect that predates the deploy, never holds the queue.");
-    expect(text).toContain("`agent-repld workspace prompt merge-queue-stall-triage");
+    // Assert — owner ruling 2026-11-16: an old problem nobody owns is
+    // dispatched or escalated, never approved past, and never filed with a
+    // named workspace.
+    expect(text).toContain("Every group is OWNED, or the window holds none");
+    expect(text).toContain("A SEEN BEFORE or RECURRED group is dispatched as a NEW one is");
+    expect(text).not.toContain("merge-queue-stall-triage");
   });
 
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {

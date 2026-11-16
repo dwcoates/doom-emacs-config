@@ -181,7 +181,7 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at) VALUES (?, 0, ?, NULL, ?, '', ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(repo_key) DO UPDATE SET mediation_owed_at = excluded.mediation_owed_at,
-			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = '',
+			   mediation_prompted_at = NULL, mediation_version = excluded.mediation_version, mediation_turn = '', mediation_window = '', mediation_window_start = NULL,
 			   mediation_chain_started_at = excluded.mediation_chain_started_at, mediation_chain_redeploys = excluded.mediation_chain_redeploys,
 			   mediation_intake = excluded.mediation_intake, mediation_remediation = excluded.mediation_remediation, mediation_dispatched = excluded.mediation_dispatched,
 			   mediation_dispatched_at = excluded.mediation_dispatched_at`,
@@ -259,7 +259,7 @@ func (s *store) MarkMediationPrompted(ctx context.Context, repo RepoKey, owed, a
 // releases nothing a newer deploy owes.
 func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error) {
 	return s.mediationWrite(ctx, "daemon.wsm.release_mediation", repo, owed,
-		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '', mediation_dispatched = 0, mediation_dispatched_at = NULL WHERE repo_key = ? AND mediation_owed_at = ?`)
+		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '', mediation_dispatched = 0, mediation_dispatched_at = NULL WHERE repo_key = ? AND mediation_owed_at = ?`)
 }
 
 // mediationWrite runs QUERY against the mediation of REPO owed at OWED, its

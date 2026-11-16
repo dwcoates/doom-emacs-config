@@ -759,4 +759,7 @@ type DurableRows interface {
 	PutDurableFeedRow(ctx context.Context, row wsm.DurableFeedRow) error
 	DurableFeedRows(ctx context.Context, id ids.WorkspaceID) ([]wsm.DurableFeedRow, error)
 	ClearDurableFeedRows(ctx context.Context, id ids.WorkspaceID) error
+	// DurableFeedRowRank answers the plane and order key one durable row is
+	// recorded at, found false for a row never recorded.
+	DurableFeedRowRank(ctx context.Context, id ids.WorkspaceID, rowID string) (plane int, key string, found bool, err error)
 }

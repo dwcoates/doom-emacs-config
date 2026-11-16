@@ -512,4 +512,8 @@ const (
 	MediationChecking
 	// MediationFixing: a remediation workspace fixes it (`fixing reload`).
 	MediationFixing
+	// MediationFinishing: a remediation's or an escalation's fix is gated,
+	// landed and deployed while its workspace stands by (`finishing reload`).
+	// Remediation names that workspace.
+	MediationFinishing
 )

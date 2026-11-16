@@ -43,6 +43,9 @@ type claim struct {
 	// departed is true once Depart ran: a boot claim taken after it takes no
 	// serving lock, because this daemon is no longer serving.
 	departed bool
+	// yielded is true once Yield ran: the boot claim went to the successor,
+	// and this claim never takes it again.
+	yielded bool
 	// taken is closed the moment this claim holds the boot claim, by
 	// whichever path took it (bind, Publish, or the wait below).
 	taken chan struct{}
@@ -237,6 +240,9 @@ func (c *claim) Publish() error {
 	// one -- the incumbent held it -- and publishing daemon.addr is the moment
 	// it becomes the daemon of this state root. Failing to take it here is a
 	// refusal, never a publish that advertises an address nobody claims.
+	if c.yielded {
+		return fmt.Errorf("advertise %q: the boot claim was yielded to a successor, so this daemon advertises nothing", c.addrPath)
+	}
 	if c.lock == nil {
 		// A WAIT FOR THE CLAIM IS ALREADY QUEUED IN THE KERNEL, and the
 		// claim is ITS to take: a second, single-shot take on another
@@ -307,6 +313,23 @@ func (c *claim) Depart() error {
 	}
 	if err := c.lock.depart(); err != nil {
 		return fmt.Errorf("depart from the state root beside %q: %w", c.addrPath, err)
+	}
+	return nil
+}
+
+// Yield implements Claim.
+func (c *claim) Yield() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.departed, c.yielded = true, true
+	c.published = false
+	if c.lock == nil {
+		return nil
+	}
+	lock := c.lock
+	c.lock = nil
+	if err := lock.release(); err != nil {
+		return fmt.Errorf("yield the boot claim beside %q: %w", c.addrPath, err)
 	}
 	return nil
 }
@@ -393,6 +416,11 @@ func (c *claim) AwaitBootClaim(ctx context.Context) error {
 			c.mu.Unlock()
 			return fmt.Errorf("await the boot claim beside %q: the claim was closed", c.addrPath)
 		}
+		// A YIELDED CLAIM GAVE THE BOOT CLAIM AWAY, and never takes it back.
+		if c.yielded {
+			c.mu.Unlock()
+			return fmt.Errorf("await the boot claim beside %q: the claim was yielded to a successor", c.addrPath)
+		}
 		// THE LOCK FILE IS OPENED UNDER c.mu, before the wait goes to its
 		// goroutine, so Close -- which takes c.mu -- either precedes the
 		// open (and the wait never starts) or follows it. A goroutine that
@@ -439,7 +467,7 @@ func (c *claim) waitForBootClaim(f *os.File, settled chan struct{}) {
 		c.bootWaitErr = err
 		return
 	}
-	if c.lock != nil || c.closed {
+	if c.lock != nil || c.closed || c.yielded {
 		if rerr := lock.release(); rerr != nil {
 			c.bootWaitErr = rerr
 			return
