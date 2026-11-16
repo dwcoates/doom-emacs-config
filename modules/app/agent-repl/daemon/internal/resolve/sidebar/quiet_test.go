@@ -254,3 +254,25 @@ func TestAQuietRosterPublishesAChangedMergedSet(t *testing.T) {
 		})
 	}
 }
+
+func TestAMergedWorkspaceMovingOntoADepartureArmWhileQuietIsStillADeparture(t *testing.T) {
+	// Arrange: the registry closed the live workspace as merged before the
+	// orchestrator's merged facts arrived, so it is in the merged set, in no
+	// stream, while its arm still projects the merge's run.
+	r, gate, _, changes, surfaces := quietResolver(t)
+	r.SetMerge(theWS, mergeStates["queued"])
+	r.SetRegistry(registry(mergedAt(string(theWS), 0)))
+	gate.Set(true)
+
+	// Act: the merge's run starts, a departure arm.
+	r.SetMerge(theWS, mergeStates["merging"])
+
+	// Assert: its status change is reported and the departure recorded, as
+	// for a row a stream carries.
+	if got := changes(); len(got) == 0 || got[len(got)-1] != theWS {
+		t.Fatalf("status changes = %v, want %s's move onto merging", got, theWS)
+	}
+	if _, ok := dlog.FindRecord(surfaces.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sidebar.quiet_departure"}); !ok {
+		t.Fatalf("no daemon.sidebar.quiet_departure record: %v", surfaces.Records())
+	}
+}
