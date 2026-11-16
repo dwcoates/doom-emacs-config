@@ -316,7 +316,7 @@ t_unknown_deployed_revision_errors_per_system() {
     if [ "$RC" -eq 0 ] \
        && [ "$(jq_get "$OUT" 'sysmap["webapp"]["commits_behind"]')" = "None" ] \
        && [ "$(jq_get "$OUT" '"not present in this checkout" in sysmap["webapp"]["error"]')" = "True" ] \
-       && [ "$(jq_get "$OUT" 'len(d["systems"])')" = "7" ]; then
+       && [ "$(jq_get "$OUT" 'len(d["systems"])')" = "8" ]; then
         pass "a stamp naming an unknown revision errors that system only, exit stays 0"
     else
         fail "a stamp naming an unknown revision errors that system only, exit stays 0" \

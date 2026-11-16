@@ -41,6 +41,9 @@
 #               the DEFAULT target set and store/sidecar are not.
 #   7. zettel  — Go, built with `go build` -> ~/.cache/agent-repl/bin/zettel,
 #               the knowledge-graph service (a launchd service like the store)
+#   8. tests   — Go, built with `go build` ->
+#               ~/.cache/agent-repl/bin/agent-repl-tests, the test service that
+#               runs every merge gate (a launchd service like the store)
 #
 # Staleness rule (per artifact): rebuild iff the artifact is missing, or the
 # SOURCE REVISION it was built from is not the source revision standing here
@@ -81,6 +84,7 @@
 #   sidecar -> DIR/cache-bin/shim-claude-sidecar
 #   lock    -> DIR/cache-bin/shim-lock
 #   zettel  -> DIR/cache-bin/zettel
+#   tests   -> DIR/cache-bin/agent-repl-tests
 #              (each + .<name>.built-sha, .<name>.source-tree in DIR/cache-bin/)
 #
 # Every `go build` passes -buildvcs=false; see GO_BUILD_FLAGS below.
@@ -126,7 +130,7 @@
 #
 # Usage:
 #   build-frontend.sh [--force] [--dry-run] [-v] [--out DIR]
-#                     [shim|webapp|daemon|store|sidecar|lock|zettel|deps|gc ...]
+#                     [shim|webapp|daemon|store|sidecar|lock|zettel|tests|deps|gc ...]
 #     --force            rebuild the selected artifacts unconditionally
 #     --out DIR          staging mode: build every selected target into the
 #                        layout above under the ABSOLUTE DIR, never in place
@@ -166,6 +170,7 @@ STORE_DIR="$ROOT/agent-shim/shim-store"
 SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
 LOCK_DIR="$ROOT/agent-shim/shim-lock"
 ZETTEL_DIR="$ROOT/zettel"
+TESTS_DIR="$ROOT/testservice"
 SHARED_LOGGING_DIR="$ROOT/agent-shim/logging/go"
 PROTO_GO_DIR="$ROOT/proto/gen/go"
 PROTO_HELPERS_DIR="$ROOT/proto/helpers/go"
@@ -211,7 +216,7 @@ while [ $# -gt 0 ]; do
             OUT_DIR="$2"
             shift
             ;;
-        shim|webapp|daemon|store|sidecar|lock|zettel|deps|gc) TARGETS+=("$1") ;;
+        shim|webapp|daemon|store|sidecar|lock|zettel|tests|deps|gc) TARGETS+=("$1") ;;
         -h|--help)
             # The whole header comment, however long it grows.
             sed -n '2,/^set -euo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
@@ -266,6 +271,7 @@ STORE_ARTIFACT="$CACHE_BIN/shim-store"
 SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
 LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
 ZETTEL_ARTIFACT="$CACHE_BIN/zettel"
+TESTS_ARTIFACT="$CACHE_BIN/agent-repl-tests"
 
 # Built-sha stamps, written beside each artifact after a SUCCESSFUL build so
 # readiness-report.sh can say which source revision the deployed artifact is
@@ -286,6 +292,7 @@ STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
 SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
 LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
 ZETTEL_SHA_STAMP="$CACHE_BIN/.zettel.built-sha"
+TESTS_SHA_STAMP="$CACHE_BIN/.agent-repl-tests.built-sha"
 
 # Source-tree stamps, beside each artifact and shaped exactly like the built-sha
 # stamps. These are the staleness authority: what the artifact standing here was
@@ -299,6 +306,7 @@ STORE_TREE_STAMP="$CACHE_BIN/.shim-store.source-tree"
 SIDECAR_TREE_STAMP="$CACHE_BIN/.shim-claude-sidecar.source-tree"
 LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
 ZETTEL_TREE_STAMP="$CACHE_BIN/.zettel.source-tree"
+TESTS_TREE_STAMP="$CACHE_BIN/.agent-repl-tests.source-tree"
 
 # Flags every `go build` here passes, in place and staged alike.
 #
@@ -722,6 +730,7 @@ for target in "${TARGETS[@]}"; do
         sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" "$SIDECAR_SHA_STAMP" "$SIDECAR_TREE_STAMP" ;;
         lock)   build_service shim-lock "$LOCK_DIR" "$LOCK_ARTIFACT" "$LOCK_SHA_STAMP" "$LOCK_TREE_STAMP" ;;
         zettel) build_service zettel "$ZETTEL_DIR" "$ZETTEL_ARTIFACT" "$ZETTEL_SHA_STAMP" "$ZETTEL_TREE_STAMP" ;;
+        tests)  build_service agent-repl-tests "$TESTS_DIR" "$TESTS_ARTIFACT" "$TESTS_SHA_STAMP" "$TESTS_TREE_STAMP" ;;
         gc)     EXPLICIT_GC=1 ;;
         # Unreachable: the argument parser allowlists these same names. It is
         # here so that adding a target THERE and forgetting it here fails

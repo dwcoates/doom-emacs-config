@@ -87,6 +87,7 @@ make_tree() {
              "$root/agent-shim/shim-store" \
              "$root/agent-shim/shim-lock" \
              "$root/zettel" \
+             "$root/testservice" \
              "$root/agent-shim/logging/go" \
              "$root/proto/gen/go" \
              "$root/proto/helpers/go" \
@@ -105,6 +106,7 @@ make_tree() {
     echo "package main" > "$root/agent-shim/claude/shim-sidecar/main.go"
     echo "package main" > "$root/agent-shim/shim-lock/main.go"
     echo "package main" > "$root/zettel/main.go"
+    echo "package main" > "$root/testservice/main.go"
     echo "package logging" > "$root/agent-shim/logging/go/timestamp.go"
     echo "package proto" > "$root/proto/gen/go/proto.go"
     echo '{"scripts":{"build":"true"}}' > "$root/agent-shim/claude/shim/package.json"
@@ -114,6 +116,7 @@ make_tree() {
     echo "module sidecar" > "$root/agent-shim/claude/shim-sidecar/go.mod"
     echo "module lock" > "$root/agent-shim/shim-lock/go.mod"
     echo "module zettel" > "$root/zettel/go.mod"
+    echo "module testservice" > "$root/testservice/go.mod"
     echo "module logging" > "$root/agent-shim/logging/go/go.mod"
     echo "module proto" > "$root/proto/gen/go/go.mod"
     echo "module protohelpers" > "$root/proto/helpers/go/go.mod"
@@ -2078,6 +2081,7 @@ build_group_staging() {
     t_out_stages_a_cache_bin_service sidecar shim-claude-sidecar
     t_out_stages_a_cache_bin_service lock shim-lock
     t_out_stages_a_cache_bin_service zettel zettel
+    t_out_stages_a_cache_bin_service tests agent-repl-tests
     t_out_writes_nothing_live
     t_in_place_fresh_fixture_builds_nothing
     t_out_builds_fresh_targets_unconditionally
