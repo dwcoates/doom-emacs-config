@@ -1119,6 +1119,9 @@ type TabInterval struct {
 	EndedAt *time.Time
 	// Outcome is the round's result, empty while it runs.
 	Outcome string
+	// HeldSince is when the merge was suspended at this live round, nil while
+	// it runs or once it settled (Store.HoldMergeRound).
+	HeldSince *time.Time
 }
 
 // MergeLedgerEntry is one workspace's merge-lease ledger row: the lease and

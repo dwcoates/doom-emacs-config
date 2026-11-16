@@ -523,6 +523,9 @@ type DB interface {
 	// OpenMergeLedger opens a workspace's ledger for one merge lease.
 	OpenMergeLedger(ctx context.Context, id WorkspaceID, lease LeaseID) error
 	// RecordTabInterval appends one round's tab interval to a lease's ledger.
+	// HoldMergeRound marks the live round of a merge's ledger held since a
+	// time, or clears its hold, in one write (mergeledger.go).
+	HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time) (bool, error)
 	RecordTabInterval(ctx context.Context, lease LeaseID, interval TabInterval) error
 	// MergeLedger loads a workspace's ledger entries, all-or-nothing.
 	MergeLedger(ctx context.Context, id WorkspaceID) ([]MergeLedgerEntry, error)

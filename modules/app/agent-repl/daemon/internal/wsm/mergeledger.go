@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/dlog"
 )
@@ -63,7 +64,7 @@ func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval T
 		}
 		if interval.EndedAt == nil {
 			res, err := tx.ExecContext(ctx,
-				`UPDATE merge_tab_intervals SET ended_at = MAX(started_at, ?), outcome = ?
+				`UPDATE merge_tab_intervals SET ended_at = MAX(started_at, ?), outcome = ?, held_since = NULL
 				 WHERE lease_id = ? AND ended_at IS NULL AND NOT (round = ? AND kind = ?)`,
 				nanos(interval.StartedAt), TabOutcomeRestarted, lease, interval.Round, interval.Kind)
 			if err != nil {
@@ -78,11 +79,46 @@ func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval T
 		_, err = tx.ExecContext(ctx,
 			`INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome) VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(lease_id, round, kind) DO UPDATE SET
-			   started_at = excluded.started_at, ended_at = excluded.ended_at, outcome = excluded.outcome`,
+			   started_at = excluded.started_at, ended_at = excluded.ended_at, outcome = excluded.outcome,
+			   held_since = CASE WHEN excluded.ended_at IS NULL THEN merge_tab_intervals.held_since END`,
 			lease, interval.Round, interval.Kind, nanos(interval.StartedAt), nullNanos(interval.EndedAt), interval.Outcome)
 		return err
 	})
 }
+
+// HoldMergeRound marks the live round of LEASE's ledger HELD since AT, or
+// clears its hold when AT is nil, and answers whether a live round was there
+// to mark. It is the ONE writer of a round's hold (merge's suspend and
+// resume): a held round is one whose merge is suspended at it, which every
+// view of the merge draws from this one column. A settled round is never
+// held: settling a round clears its hold in the same write
+// (RecordTabInterval).
+func (s *store) HoldMergeRound(ctx context.Context, lease LeaseID, at *time.Time) (bool, error) {
+	const op = "daemon.wsm.hold_merge_round"
+	fields := dlog.Context{"lease": string(lease), "held": at != nil}
+	if lease == "" {
+		err := errors.New("wsm: a merge round's hold names its ledger")
+		s.log.Error(op, "refused a merge round hold that names no ledger", withError(fields, err))
+		return false, err
+	}
+	held := false
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE merge_tab_intervals SET held_since = ? WHERE lease_id = ? AND ended_at IS NULL`, nullNanos(at), lease)
+		if err != nil {
+			return err
+		}
+		n, err := res.RowsAffected()
+		held = n > 0
+		return err
+	})
+	return held, err
+}
+
+// mergeRoundHoldDDL is the layout-153 addition: when the live round of a
+// merge's ledger was suspended, NULL while it runs (HoldMergeRound).
+const mergeRoundHoldDDL = `
+ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
+`
 
 // TabOutcomeRestarted is the outcome of a round a later step cut before it
 // settled (RecordTabInterval).
@@ -166,7 +202,7 @@ func (s *store) MergeLedgerWorkspace(ctx context.Context, lease LeaseID) (Worksp
 // tabIntervals loads one lease's rounds in order, all-or-nothing.
 func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval, error) {
 	rows, err := s.q(ctx).QueryContext(ctx,
-		`SELECT round, kind, started_at, ended_at, outcome FROM merge_tab_intervals WHERE lease_id = ? ORDER BY round, started_at, kind`, lease)
+		`SELECT round, kind, started_at, ended_at, outcome, held_since FROM merge_tab_intervals WHERE lease_id = ? ORDER BY round, started_at, kind`, lease)
 	if err != nil {
 		return nil, err
 	}
@@ -177,8 +213,9 @@ func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval,
 			interval TabInterval
 			started  int64
 			ended    sql.NullInt64
+			held     sql.NullInt64
 		)
-		if err := rows.Scan(&interval.Round, &interval.Kind, &started, &ended, &interval.Outcome); err != nil {
+		if err := rows.Scan(&interval.Round, &interval.Kind, &started, &ended, &interval.Outcome, &held); err != nil {
 			return nil, err
 		}
 		if interval.Round < 1 {
@@ -186,6 +223,10 @@ func (s *store) tabIntervals(ctx context.Context, lease LeaseID) ([]TabInterval,
 		}
 		interval.StartedAt = fromNanos(started)
 		interval.EndedAt = optTime(ended)
+		interval.HeldSince = optTime(held)
+		if interval.HeldSince != nil && interval.EndedAt != nil {
+			return nil, &DecodeError{Table: "merge_tab_intervals", Row: string(lease), Field: "held_since", Err: fmt.Errorf("round %d of %s is settled and held", interval.Round, interval.Kind)}
+		}
 		loaded = append(loaded, interval)
 	}
 	if err := rows.Err(); err != nil {
