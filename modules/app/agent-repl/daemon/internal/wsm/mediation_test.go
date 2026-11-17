@@ -466,14 +466,17 @@ func tellAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
 
 func TestMediationRoleOfAnswersTheChainAWorkspaceWorksOn(t *testing.T) {
 	tests := []struct {
-		name       string
-		ws         WorkspaceID
-		wantRole   bool
-		wantIntake bool
+		name            string
+		intake          WorkspaceID
+		ws              WorkspaceID
+		wantRole        bool
+		wantIntake      bool
+		wantRemediation bool
 	}{
-		{name: "the chain's intake", ws: "intake", wantRole: true, wantIntake: true},
-		{name: "the chain's last remediation", ws: "remedy", wantRole: true},
-		{name: "a workspace with no role", ws: "bystander"},
+		{name: "the chain's intake", intake: "intake", ws: "intake", wantRole: true, wantIntake: true},
+		{name: "the chain's last remediation", intake: "intake", ws: "remedy", wantRole: true, wantRemediation: true},
+		{name: "the mediator that dispatched to itself is both", intake: "remedy", ws: "remedy", wantRole: true, wantIntake: true, wantRemediation: true},
+		{name: "a workspace with no role", intake: "intake", ws: "bystander"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -482,7 +485,7 @@ func TestMediationRoleOfAnswersTheChainAWorkspaceWorksOn(t *testing.T) {
 			ctx := context.Background()
 			repo := RepoKey(t.TempDir())
 			oweAt(t, s, repo, instant)
-			if _, err := s.RecordMediationIntake(ctx, repo, instant, "intake"); err != nil {
+			if _, err := s.RecordMediationIntake(ctx, repo, instant, tt.intake); err != nil {
 				t.Fatal(err)
 			}
 			dispatchAt(t, s, repo, instant)
@@ -494,8 +497,8 @@ func TestMediationRoleOfAnswersTheChainAWorkspaceWorksOn(t *testing.T) {
 			if err != nil || (role != nil) != tt.wantRole {
 				t.Fatalf("MediationRoleOf = (%+v, %v), want a role: %v", role, err, tt.wantRole)
 			}
-			if role != nil && (role.Intake != tt.wantIntake || !role.Mediation.OwedAt.Equal(instant) || !role.Mediation.Dispatched) {
-				t.Fatalf("role = %+v, want intake %v on the dispatched mediation", role, tt.wantIntake)
+			if role != nil && (role.Intake != tt.wantIntake || role.Remediation != tt.wantRemediation || !role.Mediation.OwedAt.Equal(instant) || !role.Mediation.Dispatched) {
+				t.Fatalf("role = %+v, want intake %v and remediation %v on the dispatched mediation", role, tt.wantIntake, tt.wantRemediation)
 			}
 		})
 	}

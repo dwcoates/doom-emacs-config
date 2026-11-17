@@ -40,7 +40,7 @@ func TestAQueueWithNoStandingWorkspaceInARoleAnswersNone(t *testing.T) {
 	s, repo := owingQueue(t)
 
 	// Act
-	_, found, err := s.StandingDeployCheckOf(context.Background(), repo, StandingFixer)
+	_, found, err := s.StandingDeployCheckOf(context.Background(), repo, StandingMediator)
 
 	// Assert
 	if err != nil || found {
@@ -52,15 +52,15 @@ func TestMarkStandingBriefedMarksTheRolesWorkspace(t *testing.T) {
 	// Arrange
 	s, repo := owingQueue(t)
 	ctx := context.Background()
-	if err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, "ws-r"); err != nil {
+	if err := s.RecordStandingDeployCheck(ctx, repo, StandingMediator, "ws-r"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	err := s.MarkStandingBriefed(ctx, repo, StandingFixer)
+	err := s.MarkStandingBriefed(ctx, repo, StandingMediator)
 
 	// Assert
-	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingFixer)
+	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingMediator)
 	if err != nil || readErr != nil || !got.Briefed {
 		t.Fatalf("MarkStandingBriefed = %v, then %+v (%v), want it briefed", err, got, readErr)
 	}
@@ -71,7 +71,7 @@ func TestMarkStandingBriefedRefusesARoleWithNoWorkspace(t *testing.T) {
 	s, repo := owingQueue(t)
 
 	// Act
-	err := s.MarkStandingBriefed(context.Background(), repo, StandingFixer)
+	err := s.MarkStandingBriefed(context.Background(), repo, StandingMediator)
 
 	// Assert
 	if err == nil {
@@ -83,18 +83,18 @@ func TestReplacingAStandingWorkspaceLeavesTheNewOneUnbriefed(t *testing.T) {
 	// Arrange
 	s, repo := owingQueue(t)
 	ctx := context.Background()
-	if err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, "ws-old"); err != nil {
+	if err := s.RecordStandingDeployCheck(ctx, repo, StandingMediator, "ws-old"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkStandingBriefed(ctx, repo, StandingFixer); err != nil {
+	if err := s.MarkStandingBriefed(ctx, repo, StandingMediator); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, "ws-new")
+	err := s.RecordStandingDeployCheck(ctx, repo, StandingMediator, "ws-new")
 
 	// Assert
-	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingFixer)
+	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingMediator)
 	if err != nil || readErr != nil || got != (StandingDeployCheck{Workspace: "ws-new"}) {
 		t.Fatalf("after the replace %+v (%v, %v), want ws-new unbriefed", got, err, readErr)
 	}
@@ -253,7 +253,7 @@ func TestAWorkspaceReadsWhetherItIsAStandingDeployCheck(t *testing.T) {
 	s, repo := owingQueue(t)
 	ctx := context.Background()
 	standing, other := testWorkspace(t, s), testWorkspace(t, s)
-	if err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, standing.ID); err != nil {
+	if err := s.RecordStandingDeployCheck(ctx, repo, StandingMediator, standing.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -314,5 +314,54 @@ func TestANewerDeployForgetsTheOlderOnesEnding(t *testing.T) {
 	// Assert
 	if m, err := s.MediationOf(ctx, repo); err != nil || m == nil || m.DeployEnding != "" {
 		t.Fatalf("MediationOf = (%+v, %v), want the newer check with no ending yet", m, err)
+	}
+}
+
+func TestForgetStandingDeployCheck(t *testing.T) {
+	tests := []struct {
+		name       string
+		recorded   bool
+		wantForgot bool
+	}{
+		{name: "a recorded role is forgotten", recorded: true, wantForgot: true},
+		{name: "a role with no workspace forgets nothing"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, repo := owingQueue(t)
+			ctx := context.Background()
+			if tt.recorded {
+				if err := s.RecordStandingDeployCheck(ctx, repo, StandingIntake, "ws-intake"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.RecordStandingDeployCheck(ctx, repo, StandingMediator, "ws-mediator"); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			forgot, err := s.ForgetStandingDeployCheck(ctx, repo, StandingIntake)
+
+			// Assert
+			_, intake, _ := s.StandingDeployCheckOf(ctx, repo, StandingIntake)
+			mediator, kept, _ := s.StandingDeployCheckOf(ctx, repo, StandingMediator)
+			if err != nil || forgot != tt.wantForgot || intake || !kept || mediator.Workspace != "ws-mediator" {
+				t.Fatalf("Forget = (%v, %v), intake %v, mediator (%+v, %v); want only the intake forgotten", forgot, err, intake, mediator, kept)
+			}
+		})
+	}
+}
+
+func TestForgetStandingDeployCheckRefusesARoleOutsideTheStore(t *testing.T) {
+	// Arrange
+	s, repo := owingQueue(t)
+
+	// Act
+	_, err := s.ForgetStandingDeployCheck(context.Background(), repo, "auditor")
+
+	// Assert
+	if err == nil {
+		t.Fatal("ForgetStandingDeployCheck = nil, want the role refused")
 	}
 }

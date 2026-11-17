@@ -94,14 +94,16 @@ message SessionProfileAgent {
 message SessionProfileAgentLanding {
   // Tag 3 (`mediating`) was the standing deploy mediator's landing, which
   // checked and fixed every deploy itself; the per-chain deploy intake
-  // replaces it.
-  reserved 3;
-  reserved "mediating";
+  // replaced it. Tag 4 (`deploy_intake`) was that intake's, which only
+  // stated problems; the standing deploy mediator replaces it again
+  // (2026-11-17), as `deploy_mediator`.
+  reserved 3, 4;
+  reserved "mediating", "deploy_intake";
   // Exactly one is set.
   oneof landing {
     SessionProfileAgentLandingThroughQueue through_queue = 1;
     SessionProfileAgentLandingBypassingQueue bypassing_queue = 2;
-    SessionProfileAgentLandingDeployIntake deploy_intake = 4;
+    SessionProfileAgentLandingDeployMediator deploy_mediator = 5;
   }
 }
 // The ordinary landing: every change reaches the main branch through the
@@ -112,13 +114,14 @@ message SessionProfileAgentLandingThroughQueue {}
 // on the main branch itself, and the queue is let through at the end of each
 // of its turns.
 message SessionProfileAgentLandingBypassingQueue {}
-// A deploy intake's landing: the workspace is the intake of a chain of its
-// repository's deploys (repoconfig.v1.LifecycleConfig.deploy_checks). It
-// changes nothing: it states the problems each deploy of its chain caused,
-// from the facts its brief hands it, and decides the deploy through the
-// merge queue (agentrepl.v1.UpdateMergeQueueMediation): approve, escalate,
-// or dispatch a fix to a remediation workspace.
-message SessionProfileAgentLandingDeployIntake {}
+// The deploy mediator's landing: the workspace is its repository's standing
+// deploy mediator (repoconfig.v1.LifecycleConfig.deploy_checks). It checks
+// every deploy from the facts its brief hands it and decides it through the
+// merge queue (agentrepl.v1.UpdateMergeQueueMediation): approve, escalate to
+// the user, whom it then settles the deploy with, or dispatch the problems to
+// itself, fix them and finish, landing directly on the main branch. (Added
+// 2026-11-17.)
+message SessionProfileAgentLandingDeployMediator {}
 
 // How the agent's workspace stands within its repository. The set arm IS the
 // standing.

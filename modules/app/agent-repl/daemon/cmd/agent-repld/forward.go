@@ -355,36 +355,20 @@ func (f *verbsForwarder) letQueueThroughAfterBypassTurn(ctx context.Context, ws 
 // built after the merge orchestrator.
 type deployChecks struct{ f *verbsForwarder }
 
-func (d deployChecks) CreateDeployIntake(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	verbs, err := d.f.bound("the merge queue made a deploy intake")
+func (d deployChecks) CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
+	verbs, err := d.f.bound("the merge queue made a deploy mediator")
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return verbs.CreateDeployIntake(ctx, repoDir, name)
+	return verbs.CreateDeployMediator(ctx, repoDir, name)
 }
 
-func (d deployChecks) CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	verbs, err := d.f.bound("the merge queue made a deploy remediation")
-	if err != nil {
-		return wsm.Workspace{}, err
-	}
-	return verbs.CreateDeployRemediation(ctx, repoDir, name)
-}
-
-func (d deployChecks) CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error) {
-	verbs, err := d.f.bound("the merge queue made a deploy escalation")
-	if err != nil {
-		return wsm.Workspace{}, err
-	}
-	return verbs.CreateDeployEscalation(ctx, repoDir, name)
-}
-
-func (d deployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, role merge.DeployCheckRole) error {
-	verbs, err := d.f.bound("the merge queue set a deploy check workspace's effort")
+func (d deployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue set the deploy mediator's effort")
 	if err != nil {
 		return err
 	}
-	return verbs.SetDeployCheckEffort(ctx, ws, role)
+	return verbs.SetDeployMediatorEffort(ctx, ws)
 }
 
 func (d deployChecks) Reopen(ctx context.Context, ws ids.WorkspaceID) error {

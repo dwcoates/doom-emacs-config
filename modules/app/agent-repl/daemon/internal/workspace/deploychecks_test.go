@@ -11,205 +11,126 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
-	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
 )
 
-func TestTheDeployCheckWorkspacesAreMadeOnTheirModelsWithNoPrompt(t *testing.T) {
-	tests := []struct {
-		name       string
-		spec       CreateSpec
-		wantModel  string
-		wantHidden bool
-	}{
-		{name: "the intake is hidden on sonnet", spec: deployCheckSpec("/repo", "deploy-intake-x", intakeModel, true), wantModel: "sonnet", wantHidden: true},
-		{name: "the remediation is visible on opus", spec: deployCheckSpec("/repo", "deploy-remediation-x", remediationModel, false), wantModel: "opus"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Assert
-			if tt.spec.RepoDir != "/repo" || tt.spec.Model != tt.wantModel || tt.spec.Hidden != tt.wantHidden || tt.spec.InitialPrompt != "" {
-				t.Fatalf("spec = %+v, want an unprompted workspace on %s, hidden %v", tt.spec, tt.wantModel, tt.wantHidden)
-			}
-		})
+func TestTheDeployMediatorIsMadeHiddenOnOpusWithNoPrompt(t *testing.T) {
+	// Act
+	spec := deployMediatorSpec("/repo", "deploy-mediator")
+
+	// Assert
+	if spec.RepoDir != "/repo" || spec.Name != "deploy-mediator" || spec.Model != "opus" || !spec.Hidden || spec.InitialPrompt != "" {
+		t.Fatalf("spec = %+v, want an unprompted, hidden workspace on opus", spec)
 	}
 }
 
-func TestADeployCheckWorkspaceIsMadeUnpromptedWithNoSession(t *testing.T) {
-	tests := []struct {
-		name   string
-		create func(v *verbs, repoDir string) error
-	}{
-		{name: "the intake", create: func(v *verbs, repoDir string) error {
-			_, err := v.CreateDeployIntake(context.Background(), repoDir, "deploy-intake-20261114-120000")
-			return err
-		}},
-		{name: "the remediation", create: func(v *verbs, repoDir string) error {
-			_, err := v.CreateDeployRemediation(context.Background(), repoDir, "deploy-remediation-20261114-120000")
-			return err
-		}},
-		{name: "the escalation", create: func(v *verbs, repoDir string) error {
-			_, err := v.CreateDeployEscalation(context.Background(), repoDir, "deploy-escalation-20261114-120000")
-			return err
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
-
-			// Act
-			err := tt.create(f.verbs.(*verbs), mainWorktree(t, f))
-
-			// Assert
-			if err != nil {
-				t.Fatalf("create: %v", err)
-			}
-			if len(f.fleet.efforts) != 0 {
-				t.Fatalf("efforts = %+v, want none set at the create", f.fleet.efforts)
-			}
-			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "made the deploy check workspace"}); !ok {
-				t.Fatalf("records = %+v, want the made workspace recorded", f.log.logger.Records())
-			}
-		})
-	}
-}
-
-func TestOnlyAnEscalationIsMadeInRemoteControl(t *testing.T) {
-	tests := []struct {
-		name   string
-		create func(v *verbs, repoDir string) (wsm.Workspace, error)
-		wantOn bool
-	}{
-		{name: "the intake", create: func(v *verbs, repoDir string) (wsm.Workspace, error) {
-			return v.CreateDeployIntake(context.Background(), repoDir, "deploy-intake-20261114-120000")
-		}},
-		{name: "the remediation", create: func(v *verbs, repoDir string) (wsm.Workspace, error) {
-			return v.CreateDeployRemediation(context.Background(), repoDir, "deploy-remediation-20261114-120000")
-		}},
-		{name: "the escalation", wantOn: true, create: func(v *verbs, repoDir string) (wsm.Workspace, error) {
-			return v.CreateDeployEscalation(context.Background(), repoDir, "deploy-escalation-20261114-120000")
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
-
-			// Act
-			made, err := tt.create(f.verbs.(*verbs), mainWorktree(t, f))
-
-			// Assert
-			if err != nil {
-				t.Fatalf("create: %v", err)
-			}
-			f.db.remoteMu.Lock()
-			standing := f.db.remote[made.ID]
-			f.db.remoteMu.Unlock()
-			if standing.On != tt.wantOn {
-				t.Fatalf("remote control %+v, want on %v", standing, tt.wantOn)
-			}
-		})
-	}
-}
-
-func TestAnEscalationWhoseRemoteControlCannotBeRecordedIsNotMade(t *testing.T) {
+func TestTheDeployMediatorIsMadeUnpromptedInRemoteControl(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
-	f.db.remoteSetErr = errors.New("database is locked")
 
 	// Act
-	_, err := f.verbs.(*verbs).CreateDeployEscalation(context.Background(), mainWorktree(t, f), "deploy-escalation-20261114-120000")
+	made, err := f.verbs.(*verbs).CreateDeployMediator(context.Background(), mainWorktree(t, f), "deploy-mediator")
 
 	// Assert
-	if err == nil {
-		t.Fatal("CreateDeployEscalation = nil, want the escalation refused")
+	if err != nil {
+		t.Fatalf("CreateDeployMediator: %v", err)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks,
-		Message: "the escalation workspace was made but its remote control could not be turned on"}); !ok {
-		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	if len(f.fleet.efforts) != 0 {
+		t.Fatalf("efforts = %+v, want none set at the create", f.fleet.efforts)
+	}
+	f.db.remoteMu.Lock()
+	standing := f.db.remote[made.ID]
+	f.db.remoteMu.Unlock()
+	if !standing.On {
+		t.Fatalf("remote control %+v, want it on", standing)
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "made the deploy mediator"}); !ok {
+		t.Fatalf("records = %+v, want the made mediator recorded", f.log.logger.Records())
 	}
 }
 
-func TestADeployCheckWorkspaceIsSetToItsRolesEffort(t *testing.T) {
+func TestADeployMediatorThatCannotBeMadeIsRecorded(t *testing.T) {
 	tests := []struct {
-		name string
-		role merge.DeployCheckRole
-		want conversationv1.AgentEffortLevel
+		name    string
+		arrange func(t *testing.T, f *fixture) string
+		message string
 	}{
-		{name: "the intake at low effort", role: merge.DeployCheckIntake, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW},
-		{name: "the remediation at low effort", role: merge.DeployCheckRemediation, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW},
-		{name: "the escalation at medium effort", role: merge.DeployCheckEscalation, want: conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM},
+		{name: "no repository to make it in", message: "the deploy mediator could not be made",
+			arrange: func(t *testing.T, f *fixture) string { return t.TempDir() + "/not-a-repository" }},
+		{name: "a remote control that cannot be recorded", message: "the deploy mediator was made but its remote control could not be turned on",
+			arrange: func(t *testing.T, f *fixture) string {
+				f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
+				f.db.remoteSetErr = errors.New("database is locked")
+				return mainWorktree(t, f)
+			}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newFixture(t)
-			ws := f.workspace("w1", t.TempDir()).ID
-			f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{intakeEffort, remediationEffort, escalationEffort}, true
+			repoDir := tt.arrange(t, f)
 
 			// Act
-			err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, tt.role)
+			_, err := f.verbs.(*verbs).CreateDeployMediator(context.Background(), repoDir, "deploy-mediator")
 
 			// Assert
-			if err != nil || len(f.fleet.efforts) != 1 || f.fleet.efforts[0].Level != tt.want {
-				t.Fatalf("SetDeployCheckEffort = %v, efforts %+v; want one at %v", err, f.fleet.efforts, tt.want)
+			if err == nil {
+				t.Fatal("CreateDeployMediator = nil, want the failure answered")
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: tt.message}); !ok {
+				t.Fatalf("records = %+v, want %q at ERROR", f.log.logger.Records(), tt.message)
 			}
 		})
 	}
 }
 
-func TestASessionlessDeployCheckWorkspaceHasItsEffortPickedForItsStart(t *testing.T) {
+func TestTheDeployMediatorIsSetToLowEffort(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	ws := f.workspace("w1", t.TempDir()).ID
+	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{mediatorEffort}, true
+
+	// Act
+	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
+
+	// Assert
+	if err != nil || len(f.fleet.efforts) != 1 || f.fleet.efforts[0].Level != conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW {
+		t.Fatalf("SetDeployMediatorEffort = %v, efforts %+v; want one at low", err, f.fleet.efforts)
+	}
+}
+
+func TestASessionlessDeployMediatorHasItsEffortPickedForItsStart(t *testing.T) {
 	// Arrange: no session yet, so no effort selector is served.
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
 
 	// Act
-	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, merge.DeployCheckIntake)
+	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
 
 	// Assert
-	if err != nil || f.topbarPicked != intakeEffort || len(f.fleet.efforts) != 0 {
-		t.Fatalf("SetDeployCheckEffort = %v, picked %v, set %+v; want the intake's effort picked and nothing set", err, f.topbarPicked, f.fleet.efforts)
+	if err != nil || f.topbarPicked != mediatorEffort || len(f.fleet.efforts) != 0 {
+		t.Fatalf("SetDeployMediatorEffort = %v, picked %v, set %+v; want its effort picked and nothing set", err, f.topbarPicked, f.fleet.efforts)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "picked the deploy check workspace's effort; its session starts at it"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "picked the deploy mediator's effort; its session starts at it"}); !ok {
 		t.Fatalf("records = %+v, want the pick at INFO", f.log.logger.Records())
 	}
 }
 
-func TestADeployCheckWorkspaceWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
-	// Arrange: the live session serves no level the role asks for; only the
-	// escalation's medium, never the intake's low.
+func TestADeployMediatorWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
+	// Arrange: the live session serves no low effort.
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
-	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{escalationEffort}, true
+	f.cards.efforts, f.cards.hasEfforts = []conversationv1.AgentEffortLevel{conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_MEDIUM}, true
 
 	// Act
-	err := f.verbs.(*verbs).SetDeployCheckEffort(context.Background(), ws, merge.DeployCheckIntake)
+	err := f.verbs.(*verbs).SetDeployMediatorEffort(context.Background(), ws)
 
 	// Assert
 	if err == nil {
-		t.Fatal("SetDeployCheckEffort set an effort the model does not serve")
+		t.Fatal("SetDeployMediatorEffort set an effort the model does not serve")
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy check workspace's effort could not be set"}); !ok {
-		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
-	}
-}
-
-func TestADeployCheckWorkspaceThatCannotBeMadeIsRecorded(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-
-	// Act
-	_, err := f.verbs.(*verbs).CreateDeployIntake(context.Background(), t.TempDir()+"/not-a-repository", "deploy-intake-x")
-
-	// Assert
-	if err == nil {
-		t.Fatal("CreateDeployIntake made a workspace in no repository")
-	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy check workspace could not be made"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy mediator's effort could not be set"}); !ok {
 		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
 	}
 }

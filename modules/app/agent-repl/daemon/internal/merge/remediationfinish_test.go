@@ -78,7 +78,6 @@ func TestLandsDirectlyAnswersTheWorkspaceAFixIsDispatchedTo(t *testing.T) {
 		want bool
 	}{
 		{name: "the remediation at work", ws: "ws-fixer", want: true},
-		{name: "the chain's intake", ws: "ws-intake"},
 		{name: "a deploy escalation workspace", ws: "ws-escalation", want: true},
 		{name: "any other workspace", ws: theWorkspace},
 	}
@@ -291,11 +290,11 @@ func TestAFinishOfAWorkspaceNoFixIsDispatchedToFailsLoudly(t *testing.T) {
 	h := finishing(t)
 
 	// Act
-	err := h.o.FinishRemediation(context.Background(), "ws-intake", aRemediationPatch)
+	err := h.o.FinishRemediation(context.Background(), theWorkspace, aRemediationPatch)
 
 	// Assert
 	if err == nil {
-		t.Fatal("FinishRemediation finished the intake")
+		t.Fatal("FinishRemediation finished a workspace no fix is dispatched to")
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
 		Message: "a direct finish reached a workspace that lands through the queue"}); !ok {
@@ -468,7 +467,7 @@ func TestADeployedEscalationsFinishIsEnded(t *testing.T) {
 	if err := h.db.RecordDeployEscalation(ctx, "ws-escalation", mediationKey(h), deployStarted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted, ServesEscalation: true}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-escalation", wsm.RemediationGating, wsm.RemediationDeploying, deployStarted); err != nil {
@@ -543,7 +542,7 @@ func TestAClosedEscalationsFinishIsEnded(t *testing.T) {
 	if err := h.db.RecordDeployEscalation(ctx, "ws-escalation", mediationKey(h), deployStarted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-escalation", Repo: mediationKey(h), StartedAt: deployStarted, ServesEscalation: true}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -690,9 +689,9 @@ func TestTheDeployCheckLabelDrawsEachStepOfAFinish(t *testing.T) {
 		{name: "a landing finish still tests its fix", path: []wsm.RemediationStep{wsm.RemediationLanding},
 			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationTesting, Remediation: "ws-fixer"}},
 		{name: "a finish its gate sent back fixes again", path: []wsm.RemediationStep{wsm.RemediationFixing},
-			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-fixer"}},
+			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-fixer", Remediation: "ws-fixer"}},
 		{name: "a deploying finish hot-loads, selecting the chain's intake", path: []wsm.RemediationStep{wsm.RemediationLanding, wsm.RemediationDeploying},
-			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting, Intake: "ws-intake"}},
+			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting, Intake: "ws-fixer"}},
 		{name: "a finish deploying after its chain ended hot-loads, selecting nothing", path: []wsm.RemediationStep{wsm.RemediationLanding, wsm.RemediationDeploying}, chained: true,
 			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting}},
 	}
@@ -752,7 +751,7 @@ func toldStages(h *harness, since int) []string {
 func TestEveryStepOfAFinishRedrawsTheDeployCheckLabel(t *testing.T) {
 	testing_ := fmt.Sprintf("%d:ws-fixer", sidebar.MediationTesting)
 	fixing := fmt.Sprintf("%d:ws-fixer", sidebar.MediationFixing)
-	hotLoading := fmt.Sprintf("%d:ws-intake", sidebar.MediationWaiting)
+	hotLoading := fmt.Sprintf("%d:ws-fixer", sidebar.MediationWaiting)
 	// THE FIX'S DEPLOY OWES A CHECK FOR A FRESH INTAKE, not yet made: the
 	// intake that dispatched it decided once.
 	hotLoadingFresh := fmt.Sprintf("%d:", sidebar.MediationWaiting)
@@ -792,6 +791,40 @@ func TestEveryStepOfAFinishRedrawsTheDeployCheckLabel(t *testing.T) {
 			// Assert
 			if got := toldStages(h, since); !slices.Equal(got, tt.want) {
 				t.Fatalf("labels told %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAFinishServesWhatItsCheckHoldsItFor(t *testing.T) {
+	tests := []struct {
+		name      string
+		escalated bool
+		want      bool
+	}{
+		{name: "a fix dispatched to it is its chain's"},
+		{name: "an escalation it settles is served", escalated: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			if tt.escalated {
+				if _, err := h.db.EscalateMediation(context.Background(), mediationKey(h), deployStarted, "{}"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.db.RecordMediationEscalation(context.Background(), mediationKey(h), deployStarted, "ws-fixer"); err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}}
+
+			// Act
+			err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+			// Assert
+			if f := finishOf(t, h); err != nil || f == nil || f.ServesEscalation != tt.want {
+				t.Fatalf("FinishRemediation = %v, finish %+v; want serves escalation %v", err, f, tt.want)
 			}
 		})
 	}

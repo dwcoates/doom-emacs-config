@@ -448,9 +448,12 @@ func (s *store) DispatchMediation(ctx context.Context, repo RepoKey, owed, at ti
 type MediationRole struct {
 	Repo      RepoKey
 	Mediation Mediation
-	// Intake reports the workspace is the chain's intake; otherwise it is
-	// the chain's last remediation.
-	Intake bool
+	// Intake reports the workspace is the check's intake, told of its deploy,
+	// and Remediation that it is the chain's last remediation. The standing
+	// deploy mediator is both once it dispatches a fix to itself (owner
+	// ruling, 2026-11-17).
+	Intake      bool
+	Remediation bool
 }
 
 // MediationRoleOf answers the owed mediation WS is the intake or the last
@@ -479,7 +482,7 @@ func (s *store) MediationRoleOf(ctx context.Context, ws WorkspaceID) (*Mediation
 		if err != nil || m == nil {
 			return err
 		}
-		out = &MediationRole{Repo: RepoKey(repo), Mediation: *m, Intake: m.Intake == ws}
+		out = &MediationRole{Repo: RepoKey(repo), Mediation: *m, Intake: m.Intake == ws, Remediation: m.Remediation == ws}
 		return nil
 	})
 	return out, err

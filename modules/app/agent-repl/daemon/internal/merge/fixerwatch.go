@@ -77,7 +77,7 @@ func (o *orchestrator) FixerTurnEnded(ctx context.Context, ws wsm.WorkspaceID) {
 		o.mediationFailed(ctx, dlog.Context{"workspace": string(ws)}, "could not read whether the workspace whose turn ended is a dispatched fixer; its check is settled by the next pass", err)
 		return
 	}
-	if role == nil || role.Intake || !role.Mediation.Dispatched || role.Mediation.Remediation != ws {
+	if role == nil || !role.Remediation || !role.Mediation.Dispatched {
 		return
 	}
 	o.deps.Log.Global().Info(opMediation, "the dispatched fixer's turn ended; its check is settled", dlog.Context{"workspace": string(ws), "repo": string(role.Repo)})

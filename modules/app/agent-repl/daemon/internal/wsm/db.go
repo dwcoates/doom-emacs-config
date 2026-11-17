@@ -766,6 +766,9 @@ type DB interface {
 	RecordStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName, ws WorkspaceID) error
 	// MarkStandingBriefed records a standing workspace briefed in its role.
 	MarkStandingBriefed(ctx context.Context, repo RepoKey, role DeployCheckRoleName) error
+	// ForgetStandingDeployCheck deletes a queue's standing workspace in a
+	// role, answering whether it had one (deploystanding.go).
+	ForgetStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (bool, error)
 	// NoteDeployCheckWork restarts a queue's quiet run and arms its compaction.
 	NoteDeployCheckWork(ctx context.Context, repo RepoKey) error
 	// NoteQuietDeployCheck counts a quiet check, answering whether the

@@ -97,7 +97,29 @@ type RemediationFinish struct {
 	// --gated-at); empty until a gate passes.
 	GatedHead   string
 	LandedPaths []string
+	// ServesEscalation is whether the finish settles an escalated check:
+	// it outlives its chain until its own deploy. A finish of a fix
+	// dispatched for a check is its chain's, kept until the chain ends, so
+	// the next check's brief names what it landed. It is the check's at the
+	// finish's start, never its workspace's: the deploy mediator does both.
+	ServesEscalation bool
 }
+
+// remediationEscalationDDL is the layout-167 addition: the escalation a
+// remediation finish serves (RemediationFinish.ServesEscalation), which was
+// read off its workspace (deploy_escalations) until one workspace both fixed
+// dispatches and settled escalations (owner ruling, 2026-11-17). Rows from
+// before keep the rule they were begun under. IT IS ADDITIVE: a defaulted
+// column the previous build never names.
+const remediationEscalationDDL = `
+ALTER TABLE deploy_remediation_finishes ADD COLUMN serves_escalation INTEGER NOT NULL DEFAULT 0;
+` + remediationEscalationBackfill
+
+// remediationEscalationBackfill marks every finish begun before the column
+// as its workspace's rule had it: one of a recorded escalation serves it.
+const remediationEscalationBackfill = `
+UPDATE deploy_remediation_finishes SET serves_escalation = 1 WHERE workspace_id IN (SELECT workspace_id FROM deploy_escalations);
+`
 
 // ErrRemediationFinishing refuses a finish of a remediation workspace whose
 // finish is already gating, landing or deploying.
@@ -131,18 +153,18 @@ func (s *store) BeginRemediationFinish(ctx context.Context, f RemediationFinish)
 		switch {
 		case prior == nil:
 			_, err = tx.ExecContext(ctx,
-				`INSERT INTO deploy_remediation_finishes (workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at) VALUES (?, ?, ?, ?, 0, ?, ?, ?)`,
-				string(f.Workspace), string(key), string(RemediationGating), nanos(f.StartedAt), part, line, nanos(f.StartedAt))
-			out = RemediationFinish{Workspace: f.Workspace, Repo: key, Step: RemediationGating, StepAt: f.StartedAt.UTC(), Version: f.Version, StartedAt: f.StartedAt.UTC()}
+				`INSERT INTO deploy_remediation_finishes (workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, serves_escalation) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)`,
+				string(f.Workspace), string(key), string(RemediationGating), nanos(f.StartedAt), part, line, nanos(f.StartedAt), f.ServesEscalation)
+			out = RemediationFinish{Workspace: f.Workspace, Repo: key, Step: RemediationGating, StepAt: f.StartedAt.UTC(), Version: f.Version, StartedAt: f.StartedAt.UTC(), ServesEscalation: f.ServesEscalation}
 		case prior.Step == RemediationFixing || prior.Step == RemediationDeployed:
 			out = *prior
 			if prior.Step == RemediationDeployed {
 				out.GateRounds = 0
 			}
 			_, err = tx.ExecContext(ctx,
-				`UPDATE deploy_remediation_finishes SET step = ?, step_at = ?, version_part = ?, changelog_line = ?, gate_rounds = ? WHERE workspace_id = ?`,
-				string(RemediationGating), nanos(f.StartedAt), part, line, out.GateRounds, string(f.Workspace))
-			out.Step, out.StepAt, out.Version = RemediationGating, f.StartedAt.UTC(), f.Version
+				`UPDATE deploy_remediation_finishes SET step = ?, step_at = ?, version_part = ?, changelog_line = ?, gate_rounds = ?, serves_escalation = ? WHERE workspace_id = ?`,
+				string(RemediationGating), nanos(f.StartedAt), part, line, out.GateRounds, f.ServesEscalation, string(f.Workspace))
+			out.Step, out.StepAt, out.Version, out.ServesEscalation = RemediationGating, f.StartedAt.UTC(), f.Version, f.ServesEscalation
 		default:
 			return ErrRemediationFinishing
 		}
@@ -236,10 +258,10 @@ func joinPaths(a, b []string) string {
 }
 
 // EndRemediationFinishesOf removes every remediation finish of REPO's queue,
-// answering how many: its chain ended. A deploy escalation workspace's
-// finish is no chain's (deploy_escalations): it outlives every chain until
-// its own deploy, and a chain that ended meanwhile forgot it, stranding its
-// failed gate (2026-11-15, deploy-escalation-20261115-174608).
+// answering how many: its chain ended. A finish that serves an escalation
+// (RemediationFinish.ServesEscalation) is no chain's: it outlives every chain
+// until its own deploy, and a chain that ended meanwhile forgot it, stranding
+// its failed gate (2026-11-15, deploy-escalation-20261115-174608).
 func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int, error) {
 	const op = "daemon.wsm.end_remediation_finishes_of"
 	key, err := normalizeRepoKey(repo)
@@ -249,7 +271,7 @@ func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int
 	}
 	n := 0
 	err = s.write(ctx, op, dlog.Context{"repo": string(key)}, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND workspace_id NOT IN (SELECT workspace_id FROM deploy_escalations)`, string(key))
+		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_remediation_finishes WHERE repo_key = ? AND serves_escalation = 0`, string(key))
 		if err != nil {
 			return err
 		}
@@ -343,7 +365,7 @@ func (s *store) EndRemediationFinish(ctx context.Context, ws WorkspaceID) (bool,
 }
 
 // remediationFinishQuery reads the finish columns; callers add the WHERE.
-const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths, gated_head FROM deploy_remediation_finishes`
+const remediationFinishQuery = `SELECT workspace_id, repo_key, step, step_at, gate_rounds, version_part, changelog_line, started_at, landed_head, landed_paths, gated_head, serves_escalation FROM deploy_remediation_finishes`
 
 // scanRemediationFinish decodes ROW, nil when there is none.
 func scanRemediationFinish(row *sql.Row) (*RemediationFinish, error) {
@@ -363,11 +385,12 @@ func scanRemediationFinishRow(row interface{ Scan(...any) error }) (RemediationF
 	var ws, repo, step, part, line, head, paths, gated string
 	var stepAt, started int64
 	var rounds int
-	if err := row.Scan(&ws, &repo, &step, &stepAt, &rounds, &part, &line, &started, &head, &paths, &gated); err != nil {
+	var escalation bool
+	if err := row.Scan(&ws, &repo, &step, &stepAt, &rounds, &part, &line, &started, &head, &paths, &gated, &escalation); err != nil {
 		return RemediationFinish{}, err
 	}
 	f := RemediationFinish{Workspace: WorkspaceID(ws), Repo: RepoKey(repo), Step: RemediationStep(step), StepAt: fromNanos(stepAt),
-		GateRounds: rounds, StartedAt: fromNanos(started), LandedHead: head, GatedHead: gated}
+		GateRounds: rounds, StartedAt: fromNanos(started), LandedHead: head, GatedHead: gated, ServesEscalation: escalation}
 	if paths != "" {
 		f.LandedPaths = strings.Split(paths, "\n")
 	}

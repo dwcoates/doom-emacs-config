@@ -285,12 +285,9 @@ func TestAChainsEndKeepsADeployEscalationsFinish(t *testing.T) {
 	ctx := context.Background()
 	repo := RepoKey(t.TempDir())
 	for _, ws := range []WorkspaceID{"remedy", "escalation"} {
-		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant}); err != nil {
+		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant, ServesEscalation: ws == "escalation"}); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if err := s.RecordDeployEscalation(ctx, "escalation", repo, instant); err != nil {
-		t.Fatal(err)
 	}
 
 	// Act
@@ -407,5 +404,81 @@ func TestALandingFinishWithNoGatedCommitGoesBackToItsGate(t *testing.T) {
 				t.Fatalf("finish = %+v (%v), want step %s", f, err, tt.want)
 			}
 		})
+	}
+}
+
+func TestAFinishKeepsWhetherItServesAnEscalation(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{name: "a dispatched fix's finish is its chain's"},
+		{name: "an escalation's finish serves it", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ctx := context.Background()
+			repo := RepoKey(t.TempDir())
+
+			// Act
+			begun, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "mediator", Repo: repo, StartedAt: instant, ServesEscalation: tt.want})
+
+			// Assert
+			read, readErr := s.RemediationFinishOf(ctx, "mediator")
+			if err != nil || readErr != nil || begun.ServesEscalation != tt.want || read == nil || read.ServesEscalation != tt.want {
+				t.Fatalf("Begin = (%+v, %v), read (%+v, %v); want serves escalation %v", begun, err, read, readErr, tt.want)
+			}
+		})
+	}
+}
+
+func TestARebegunFinishTakesTheKindOfItsNewWork(t *testing.T) {
+	// Arrange: the mediator's escalation fix deployed; it now fixes a dispatch.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "mediator", Repo: repo, StartedAt: instant, ServesEscalation: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AdvanceRemediationFinish(ctx, "mediator", RemediationGating, RemediationDeployed, instant); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	begun, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: "mediator", Repo: repo, StartedAt: instant.Add(time.Hour)})
+
+	// Assert
+	read, _ := s.RemediationFinishOf(ctx, "mediator")
+	if err != nil || begun.ServesEscalation || read.ServesEscalation {
+		t.Fatalf("Begin = (%+v, %v), read %+v; want the dispatch's kind", begun, err, read)
+	}
+}
+
+func TestTheBackfillMarksAnEarlierEscalationsFinish(t *testing.T) {
+	// Arrange: two finishes from before the column, one of an escalation.
+	s, _ := testStore(t)
+	ctx := context.Background()
+	repo := RepoKey(t.TempDir())
+	for _, ws := range []WorkspaceID{"remedy", "escalation"} {
+		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := s.RecordDeployEscalation(ctx, "escalation", repo, instant); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := s.db().ExecContext(ctx, remediationEscalationBackfill); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	remedy, _ := s.RemediationFinishOf(ctx, "remedy")
+	escalation, _ := s.RemediationFinishOf(ctx, "escalation")
+	if remedy.ServesEscalation || !escalation.ServesEscalation {
+		t.Fatalf("remedy %+v, escalation %+v; want only the escalation's finish marked", remedy, escalation)
 	}
 }

@@ -153,7 +153,7 @@ func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
 			toldWith(t, h, tt.groups...)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
+			err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"})
 
 			// Assert
 			if tt.wantArm == "" {
@@ -199,7 +199,7 @@ func TestAnEscalationOwnsTheGroupsNobodyOwnedAndIsToldTheOldOnes(t *testing.T) {
 	toldWith(t, h, sinkGroup(wsm.WindowRecurred), other)
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the user must grant the helper"})
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "the user must grant the helper"})
 
 	// Assert
 	problems, readErr := h.db.DeployProblems(context.Background(), mediationKey(h))
@@ -211,6 +211,20 @@ func TestAnEscalationOwnsTheGroupsNobodyOwnedAndIsToldTheOldOnes(t *testing.T) {
 			t.Fatalf("problem %+v, want the escalation owning it", p)
 		}
 	}
+}
+
+func TestADaemonsEscalationBriefListsTheOldGroups(t *testing.T) {
+	// Arrange
+	other := wsm.WindowGroup{Operation: "daemon.persistentwifi.failover", Message: "no networks", Class: wsm.WindowNew}
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	toldWith(t, h, sinkGroup(wsm.WindowRecurred), other)
+
+	// Act
+	escalatedByTheDaemon(t, h, "the deploy mediator ended its turn without deciding the deploy")
+
+	// Assert
 	old := h.briefValues[len(h.briefValues)-1]["old_problems"]
 	if !strings.Contains(old, sinkKey.Operation+": "+sinkKey.Message+" (came back after its fix deployed") || strings.Contains(old, other.Operation) {
 		t.Fatalf("old_problems = %q, want the recurred group listed and the new one left to the findings", old)
@@ -307,7 +321,7 @@ func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
 			toldWith(t, h, tt.group)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: tt.decision, Summary: "s", Problems: []DeployProblem{{Statement: "s", Evidence: []string{sinkRecord.Raw}}}})
+			err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: tt.decision, Summary: "s", Problems: []DeployProblem{{Statement: "s", Evidence: []string{sinkRecord.Raw}}}})
 
 			// Assert
 			var refused *RefusalError

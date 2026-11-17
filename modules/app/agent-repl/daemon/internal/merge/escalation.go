@@ -149,7 +149,7 @@ func routeEscalation(owners map[wsm.ProblemKey]ids.WorkspaceID, window wsm.Check
 // escalation takes and whether the routes could be read. An update that
 // cannot be sent is recorded at ERROR and answered: its groups stay with
 // their owner, untold, for the next check.
-func (o *orchestrator) tellEscalations(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, window wsm.CheckWindow, problems []DeployProblem, escalating bool, fields dlog.Context) (escalationRoutes, bool) {
+func (o *orchestrator) tellEscalations(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, window wsm.CheckWindow, problems []DeployProblem, escalating bool, said ids.WorkspaceID, fields dlog.Context) (escalationRoutes, bool) {
 	owners, err := o.openEscalationOwners(ctx, q.key)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read which open escalations own the deploy's problems; none is told, and nothing is escalated anew", withField(fields, "error", err.Error()))
@@ -157,15 +157,25 @@ func (o *orchestrator) tellEscalations(ctx context.Context, q checkedQueue, m ws
 	}
 	routes := routeEscalation(owners, window, problems, escalating)
 	for _, ws := range routes.order {
-		o.updateEscalation(ctx, q, m, ws, summary, *routes.updates[ws], fields)
+		o.updateEscalation(ctx, q, m, ws, summary, *routes.updates[ws], said, fields)
 	}
 	return routes, true
 }
 
 // updateEscalation sends open escalation WS update U of check M, which owns
 // U's new groups again.
-func (o *orchestrator) updateEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, ws ids.WorkspaceID, summary string, u escalationUpdate, fields dlog.Context) {
+func (o *orchestrator) updateEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, ws ids.WorkspaceID, summary string, u escalationUpdate, said ids.WorkspaceID, fields dlog.Context) {
 	fields = withField(withField(withField(fields, "escalation", string(ws)), "problems", len(u.problems)+len(u.recurred)), "persisting", len(u.persisting))
+	// THE MEDIATOR IS NEVER TOLD WHAT IT SAID ITSELF: a decision of its own
+	// owns the problems it routes to it, with no update prompted.
+	if ws == said {
+		if u.news() {
+			o.ownProblems(ctx, q.key, ws, u.problems, u.recurred, "found again by the mediator's own check", fields)
+			o.deps.Banners.Mediated(ws, summary)
+		}
+		o.deps.Log.Global().Info(opMediation, "the mediator's own decision routed problems it already owns back to it; it is not prompted with what it said", fields)
+		return
+	}
 	brief, err := o.deps.Briefs(BriefDeployEscalationUpdate, map[string]string{
 		"repo_dir":       q.repository.Dir,
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
@@ -219,18 +229,25 @@ func renderUpdateGroups(heading string, keys []wsm.ProblemKey) string {
 // made it (makeStanding), so the role is the daemon's, never the agent's to
 // choose (owner ruling, 2026-11-15). Each failure is recorded at ERROR and
 // answered.
-func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) (ids.WorkspaceID, error) {
+func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said ids.WorkspaceID, fields dlog.Context) (ids.WorkspaceID, error) {
 	repoDir := q.repository.Dir
 	fields = withField(fields, "summary", summary)
 	failed := func(message string, err error) (ids.WorkspaceID, error) {
 		o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
 		return "", err
 	}
-	escalation, err := o.standingFixer(ctx, q, DeployCheckEscalation, fields)
+	escalation, err := o.readyMediator(ctx, q, true, fields)
 	if err != nil {
-		return failed("the standing fixer could not be readied for the escalation; the user is not told of the escalated deploy", err)
+		return failed("the deploy mediator could not be readied for the escalation; the user is not told of the escalated deploy", err)
 	}
 	fields["workspace"] = string(escalation.ws)
+	// THE MEDIATOR THAT ESCALATED IN ITS OWN TURN TELLS THE USER ITSELF, as
+	// its rules say: it is shown and the user is notified, with no brief.
+	if escalation.ws == said {
+		o.deps.Banners.Mediated(escalation.ws, summary)
+		o.deps.Log.Global().Info(opMediation, "the mediator escalated in its own turn; it is shown and the user notified", withField(fields, "problems", len(problems)))
+		return escalation.ws, nil
+	}
 	brief, err := o.deps.Briefs(BriefDeployEscalation, map[string]string{
 		"repo_dir":       repoDir,
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
@@ -244,11 +261,8 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	if _, err := o.submitCheckPrompt(ctx, escalation.ws, wsm.NewTurnID(), brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
 		return failed("the escalation workspace's brief could not be submitted; the user is not told", err)
 	}
-	if !escalation.briefed {
-		o.markBriefed(ctx, q, DeployCheckEscalation, fields)
-	}
 	o.deps.Banners.Mediated(escalation.ws, summary)
-	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the standing fixer", withField(fields, "problems", len(problems)))
+	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the deploy mediator", withField(fields, "problems", len(problems)))
 	return escalation.ws, nil
 }
 

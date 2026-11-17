@@ -4654,22 +4654,23 @@ func TestParkedKeepaliveSurfacesAnUnreadableStanding(t *testing.T) {
 	}
 }
 
-func TestADeployIntakesSessionLandsAsTheIntake(t *testing.T) {
+func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
 	cases := []struct {
-		name       string
-		role       *wsm.MediationRole
-		wantIntake bool
+		name         string
+		standing     bool
+		wantMediator bool
 	}{
-		{name: "the chain's intake, by its recorded role", role: &wsm.MediationRole{Intake: true}, wantIntake: true},
-		{name: "the chain's remediation lands through the queue", role: &wsm.MediationRole{}},
-		{name: "a workspace with no role"},
+		{name: "the repository's deploy mediator, by its standing", standing: true, wantMediator: true},
+		{name: "any other workspace lands through the queue"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			f := newFleetFixture(t)
 			ws := resumable(f)
-			f.db.roles = map[ids.WorkspaceID]*wsm.MediationRole{ws: tc.role}
+			record := f.db.workspaces[ws]
+			record.StandingDeployCheck = tc.standing
+			f.db.workspaces[ws] = record
 
 			// Act
 			got, err := f.fleet.sessionProfile(context.Background(), dlog.NewTestLogger(), ws)
@@ -4678,32 +4679,13 @@ func TestADeployIntakesSessionLandsAsTheIntake(t *testing.T) {
 			if err != nil {
 				t.Fatalf("sessionProfile: %v", err)
 			}
-			if intake := got.GetAgent().GetLanding().GetDeployIntake() != nil; intake != tc.wantIntake {
-				t.Fatalf("deploy intake landing = %v, want %v", intake, tc.wantIntake)
+			if mediator := got.GetAgent().GetLanding().GetDeployMediator() != nil; mediator != tc.wantMediator {
+				t.Fatalf("deploy mediator landing = %v, want %v", mediator, tc.wantMediator)
 			}
-			if !tc.wantIntake && got.GetAgent().GetLanding().GetThroughQueue() == nil {
+			if !tc.wantMediator && got.GetAgent().GetLanding().GetThroughQueue() == nil {
 				t.Fatalf("landing = %v, want through the queue", got.GetAgent().GetLanding())
 			}
 		})
-	}
-}
-
-func TestASessionWhoseDeployCheckRoleCannotBeReadIsNotStarted(t *testing.T) {
-	// Arrange
-	f := newFleetFixture(t)
-	ws := resumable(f)
-	f.db.rolesErr = errors.New("store unreadable")
-	log := dlog.NewTestLogger()
-
-	// Act
-	_, err := f.fleet.sessionProfile(context.Background(), log, ws)
-
-	// Assert
-	if err == nil {
-		t.Fatal("sessionProfile = nil error, want the unreadable role")
-	}
-	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opBringUp, Message: "whether the workspace is a deploy intake could not be read; the session was not started"}); !ok {
-		t.Fatalf("no ERROR record of the unreadable role: %+v", log.Records())
 	}
 }
 

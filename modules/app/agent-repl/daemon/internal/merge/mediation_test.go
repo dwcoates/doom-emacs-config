@@ -39,7 +39,6 @@ func checked(t *testing.T) *harness {
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
 	h.briefs[BriefDeployEscalationUpdate] = []string{"repo_dir", "deploy_started", "summary", "problems", "recurred", "persisting"}
 	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}
-	h.briefs[BriefDeployRemediation] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
 	h.briefs[BriefRemediationBehind] = []string{"main_branch", "why", "attempt", "max_attempts"}
@@ -98,14 +97,24 @@ func owedCheck(t *testing.T, h *harness) *wsm.Mediation {
 	return m
 }
 
-// withIntake records "ws-intake" as the intake of the check owed at OWED,
-// registered as a workspace of the harness's repository.
+// withIntake records "ws-fixer", the queue's deploy mediator, as the
+// workspace the check owed at OWED is told to, registered as a workspace of
+// the harness's repository.
 func withIntake(t *testing.T, h *harness, owed time.Time) {
 	t.Helper()
 	h.db.mu.Lock()
-	h.db.workspaces["ws-intake"] = wsm.Workspace{ID: "ws-intake", Name: "deploy-intake-x", Repo: theRepository}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository}
 	h.db.mu.Unlock()
-	if ok, err := h.db.RecordMediationIntake(context.Background(), mediationKey(h), owed, "ws-intake"); err != nil || !ok {
+	if _, standing, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator); err != nil || !standing {
+		if err := h.db.RecordStandingDeployCheck(context.Background(), mediationKey(h), wsm.StandingMediator, "ws-fixer"); err != nil {
+			t.Fatal(err)
+		}
+		// A MADE MEDIATOR LANDS DIRECTLY, as makeMediator records it.
+		if err := h.db.RecordDeployEscalation(context.Background(), "ws-fixer", mediationKey(h), owed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if ok, err := h.db.RecordMediationIntake(context.Background(), mediationKey(h), owed, "ws-fixer"); err != nil || !ok {
 		t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
 	}
 }
@@ -122,7 +131,7 @@ func told(t *testing.T, h *harness, owed time.Time, turn ids.TurnID) {
 func decideInTurn(t *testing.T, h *harness, d Decision) {
 	t.Helper()
 	h.queue.onSubmit = func(sub promptqueue.Submission) {
-		if sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION && sub.WS == "ws-intake" {
+		if sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION && sub.WS == "ws-fixer" {
 			if err := h.o.DecideMediation(context.Background(), sub.WS, d); err != nil {
 				t.Errorf("DecideMediation: %v", err)
 			}
@@ -145,13 +154,13 @@ func submissionsTo(h *harness, ws ids.WorkspaceID, prefix string) []promptqueue.
 
 // intakeSubmissions is every prompt the harness submitted to the intake.
 func intakeSubmissions(h *harness) []promptqueue.Submission {
-	return submissionsTo(h, "ws-intake", "")
+	return submissionsTo(h, "ws-fixer", "")
 }
 
 // intakeTellings is every brief telling the intake of a deploy, the
 // resuming briefs of its undecided turns left out.
 func intakeTellings(h *harness) []promptqueue.Submission {
-	return submissionsTo(h, "ws-intake", BriefDeployIntake+" ")
+	return submissionsTo(h, "ws-fixer", BriefDeployIntake+" ")
 }
 
 // checkWorkspacesMade is every intake and remediation workspace made, the
@@ -196,17 +205,17 @@ func TestADeployOwesACheckOnlyWhereItsDeploysAreChecked(t *testing.T) {
 	}
 }
 
-func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
-	// Arrange: the chain's first deploy.
+func TestARoundMakesTheQueuesMediatorAndTellsItUncompacted(t *testing.T) {
+	// Arrange: the queue's first deploy.
 	h := checked(t)
 	owe(t, h)
 
 	// Act
 	h.o.Mediate(context.Background())
 
-	// Assert: the round ended undecided, so an escalation was made after.
-	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != "deploy-intake-standing" {
-		t.Fatalf("made %v, want one intake for the chain", h.checks.made)
+	// Assert: one mediator made, which the undecided check is escalated to.
+	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != mediatorName {
+		t.Fatalf("made %v, want one mediator for the queue", h.checks.made)
 	}
 	for _, sub := range intakeSubmissions(h) {
 		if sub.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
@@ -254,13 +263,14 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	// Act
 	h.o.Mediate(context.Background())
 
-	// Assert: one intake made, told of each deploy, its session ended by each decision.
+	// Assert: one mediator made and told of each deploy; its approval ends
+	// its session, and its dispatch leaves it running to fix.
 	made := h.checks.made
-	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{"deploy-intake-standing", "deploy-fixer"}) {
-		t.Fatalf("intake told %d times, made %v; want the one standing intake told of each deploy", len(intakeTellings(h)), made)
+	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{mediatorName}) {
+		t.Fatalf("mediator told %d times, made %v; want the one mediator told of each deploy", len(intakeTellings(h)), made)
 	}
-	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake", "ws-intake"}) || len(h.checks.closed) != 0 {
-		t.Fatalf("stopped %v, closed %v; want each decision to end the intake's session and close nothing", h.checks.stopped, h.checks.closed)
+	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-fixer"}) || len(h.checks.closed) != 0 {
+		t.Fatalf("stopped %v, closed %v; want only the approval to end the mediator's session, and nothing closed", h.checks.stopped, h.checks.closed)
 	}
 }
 
@@ -283,8 +293,8 @@ func TestAnIntakeThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
 	}
 }
 
-func TestTheStandingIntakeOfACheckThatEndedWaitsForTheNext(t *testing.T) {
-	// Arrange: the check is released while its intake is found.
+func TestTheMediatorOfACheckThatEndedWaitsForTheNext(t *testing.T) {
+	// Arrange: the check is released while its mediator is found.
 	h := checked(t)
 	owe(t, h)
 	m := owedCheck(t, h)
@@ -296,9 +306,9 @@ func TestTheStandingIntakeOfACheckThatEndedWaitsForTheNext(t *testing.T) {
 	ws, err := h.o.intakeOf(context.Background(), checkedQueue{registeredQueue: registeredQueue{key: mediationKey(h)}}, *m, dlog.Context{})
 
 	// Assert
-	standing, found, readErr := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingIntake)
-	if err != nil || ws != "" || len(h.checks.closed) != 0 || readErr != nil || !found || standing.Workspace != "ws-intake" {
-		t.Fatalf("intakeOf = (%q, %v), closed %v, standing (%+v, %v); want none answered and the standing intake kept open", ws, err, h.checks.closed, standing, found)
+	standing, found, readErr := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator)
+	if err != nil || ws != "" || len(h.checks.closed) != 0 || readErr != nil || !found || standing.Workspace != "ws-fixer" {
+		t.Fatalf("intakeOf = (%q, %v), closed %v, standing (%+v, %v); want none answered and the mediator kept open", ws, err, h.checks.closed, standing, found)
 	}
 }
 
@@ -321,23 +331,8 @@ func TestATurnThatDecidesNothingTwiceEscalatesAndHoldsTheQueue(t *testing.T) {
 		Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, and the check is escalated to the user"}); !ok {
 		t.Fatalf("records = %v, want the undecided check at ERROR", h.logs.Records())
 	}
-	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
-		t.Fatalf("stopped %v, want the chain's intake stopped", h.checks.stopped)
-	}
-}
-
-func TestATurnUndecidedTwiceIsEscalatedBeforeItsIntakeIsStopped(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	decided := decidedAtStop(t, h)
-
-	// Act
-	h.o.Mediate(context.Background())
-
-	// Assert
-	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !*decided {
-		t.Fatalf("stopped %v, escalated at the stop %v; want the check escalated before its intake is stopped", h.checks.stopped, *decided)
+	if len(h.checks.stopped) != 0 {
+		t.Fatalf("stopped %v, want the mediator left to settle the escalation with the user", h.checks.stopped)
 	}
 }
 
@@ -355,7 +350,7 @@ func TestATurnThatEscalatedKeepsTheQueueHeldAndResumesNothing(t *testing.T) {
 		t.Fatalf("check %+v, resumed %d times; want it held by its escalation and the intake never resumed", owedCheck(t, h), len(resumingBriefs(h)))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
-		Message: "the intake's turn ended with the deploy escalated; the queue stays held for the user"}); !ok {
+		Message: "the mediator's turn ended with the deploy escalated; the queue stays held for the user"}); !ok {
 		t.Fatalf("records = %v, want the escalated turn's end recorded", h.logs.Records())
 	}
 }
@@ -451,7 +446,7 @@ func TestACheckAlreadyToldIsReattachedToItsTurn(t *testing.T) {
 			withIntake(t, h, deployStarted)
 			told(t, h, deployStarted, "turn-told")
 			if tt.delivered {
-				h.db.turns["ws-intake"] = append(h.db.turns["ws-intake"], wsm.Turn{ID: "turn-told", Workspace: "ws-intake"})
+				h.db.turns["ws-fixer"] = append(h.db.turns["ws-fixer"], wsm.Turn{ID: "turn-told", Workspace: "ws-fixer"})
 			}
 
 			// Act
@@ -491,11 +486,11 @@ func TestDecideMediation(t *testing.T) {
 		wantHeld   bool
 		escalated  bool
 	}{
-		{name: "an approval releases the deploy and ends the chain", from: "ws-intake", decision: MediationApprove},
-		{name: "an escalation holds it and tells the user", from: "ws-intake", decision: MediationEscalate, wantBanner: true, wantHeld: true},
+		{name: "an approval releases the deploy and ends the chain", from: "ws-fixer", decision: MediationApprove},
+		{name: "an escalation holds it and tells the user", from: "ws-fixer", decision: MediationEscalate, wantBanner: true, wantHeld: true},
 		{name: "a decision from any other workspace is refused", from: theWorkspace, decision: MediationApprove, wantArm: ArmNotMediator},
-		{name: "a decision on a deploy a fix was dispatched for is refused", from: "ws-intake", dispatched: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
-		{name: "a decision on a deploy escalated already is refused", from: "ws-intake", escalated: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
+		{name: "a decision on a deploy a fix was dispatched for is refused", from: "ws-fixer", dispatched: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
+		{name: "a decision on a deploy escalated already is refused", from: "ws-fixer", escalated: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -549,7 +544,7 @@ func TestADecisionFromARepositoryThatChecksNoMoreIsRefused(t *testing.T) {
 	h.config.DeployChecks = nil
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"})
 
 	// Assert
 	var refused *RefusalError
@@ -570,12 +565,12 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 		{name: "a later deploy rolling out selects the chain's intake", arrange: func(t *testing.T, h *harness) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting, Intake: "ws-intake"}},
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting, Intake: "ws-fixer"}},
 		{name: "an assessed deploy selects the intake", arrange: func(t *testing.T, h *harness) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			told(t, h, deployStarted, "turn-1")
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationChecking, Intake: "ws-intake"}},
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationChecking, Intake: "ws-fixer"}},
 		{name: "a dispatched deploy selects the remediation", arrange: func(t *testing.T, h *harness) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
@@ -583,7 +578,7 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 				t.Fatal(err)
 			}
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-fixer"}},
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-fixer", Remediation: "ws-fixer"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -735,7 +730,7 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	}
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "clean"})
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"})
 
 	// Assert
 	finishes, readErr := h.db.RemediationFinishes(context.Background())
@@ -763,15 +758,18 @@ func TestAnIntakeThatCannotBeStoppedAtItsTurnsEndIsRecorded(t *testing.T) {
 	}
 }
 
-// TestATurnThatDecidedStopsItsIntakeWhenItEnds covers the owner's
-// 2026-11-17 ruling: the intake's session ends once the turn that decided
-// ended, with the decision already recorded, never mid-run.
-func TestATurnThatDecidedStopsItsIntakeWhenItEnds(t *testing.T) {
+// TestOnlyAnApprovalEndsTheMediatorsSessionWhenItsTurnEnds covers the
+// owner's 2026-11-17 rulings: the session ends once the turn that decided
+// ended, with the decision already recorded, never mid-run; and the
+// mediator fixes what it dispatched and settles what it escalated, so those
+// leave its session running.
+func TestOnlyAnApprovalEndsTheMediatorsSessionWhenItsTurnEnds(t *testing.T) {
 	tests := []struct {
-		name     string
-		decision Decision
+		name        string
+		decision    Decision
+		wantStopped []ids.WorkspaceID
 	}{
-		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "clean"}},
+		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "clean"}, wantStopped: []ids.WorkspaceID{"ws-fixer"}},
 		{name: "a dispatch", decision: Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}},
 		{name: "an escalation", decision: Decision{Kind: MediationEscalate, Summary: "yours"}},
 	}
@@ -787,8 +785,8 @@ func TestATurnThatDecidedStopsItsIntakeWhenItEnds(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !*decided || len(h.checks.closed) != 0 {
-				t.Fatalf("stopped %v, decided at the stop %v, closed %v; want the intake stopped once after its decision, never closed", h.checks.stopped, *decided, h.checks.closed)
+			if !slices.Equal(h.checks.stopped, tt.wantStopped) || len(h.checks.closed) != 0 || (len(tt.wantStopped) > 0 && !*decided) {
+				t.Fatalf("stopped %v, decided at the stop %v, closed %v; want stopped %v after the decision, never closed", h.checks.stopped, *decided, h.checks.closed, tt.wantStopped)
 			}
 		})
 	}
@@ -844,7 +842,7 @@ func TestEveryCheckEndIsTimedOnceByHowItEnded(t *testing.T) {
 			h := checked(t)
 			owe(t, h)
 			h.queue.onSubmit = func(sub promptqueue.Submission) {
-				if sub.Origin == brief && sub.WS == "ws-intake" && tt.inTurn != nil {
+				if sub.Origin == brief && sub.WS == "ws-fixer" && tt.inTurn != nil {
 					tt.inTurn(t, h, sub.WS)
 				}
 			}
@@ -885,7 +883,7 @@ func TestAChainOfRemediationsIsRecordedWhenTheQueueAdvances(t *testing.T) {
 	brief := conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION
 	rounds := 0
 	h.queue.onSubmit = func(sub promptqueue.Submission) {
-		if sub.Origin != brief || sub.WS != "ws-intake" {
+		if sub.Origin != brief || sub.WS != "ws-fixer" {
 			return
 		}
 		rounds++
@@ -966,7 +964,7 @@ func TestASecondPassForACheckWhoseRoundRunsIsRecorded(t *testing.T) {
 	}
 }
 
-func TestTheIntakesRoleIsRecordedBeforeItsEffortStartsItsSession(t *testing.T) {
+func TestTheMediatorsStandingIsRecordedBeforeItsEffortStartsItsSession(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -975,8 +973,8 @@ func TestTheIntakesRoleIsRecordedBeforeItsEffortStartsItsSession(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if len(h.checks.efforts) == 0 || h.checks.efforts[0] != "intake:ws-intake:recorded=true" {
-		t.Fatalf("efforts %v, want the intake's set once its role was recorded", h.checks.efforts)
+	if len(h.checks.efforts) == 0 || h.checks.efforts[0] != "mediator:ws-fixer:standing=true" {
+		t.Fatalf("efforts %v, want the mediator's set once its standing was recorded", h.checks.efforts)
 	}
 }
 
@@ -1001,7 +999,7 @@ func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
 
 // resumingBriefs is every resuming brief the harness submitted to the intake.
 func resumingBriefs(h *harness) []promptqueue.Submission {
-	return submissionsTo(h, "ws-intake", BriefDeployIntakeResumed)
+	return submissionsTo(h, "ws-fixer", BriefDeployIntakeResumed)
 }
 
 func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) {
@@ -1022,7 +1020,7 @@ func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) 
 			owe(t, h)
 			if tt.decide {
 				h.queue.onSubmit = func(sub promptqueue.Submission) {
-					if sub.WS == "ws-intake" && strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
+					if sub.WS == "ws-fixer" && strings.HasPrefix(submittedText(sub), BriefDeployIntakeResumed) {
 						if err := h.o.DecideMediation(context.Background(), sub.WS, Decision{Kind: MediationApprove, Summary: "nothing new"}); err != nil {
 							t.Errorf("DecideMediation: %v", err)
 						}
@@ -1044,9 +1042,9 @@ func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) 
 			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
 				t.Fatalf("released %v, want %v", released, tt.wantReleased)
 			}
-			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-fixer" })
+			escalated := owedCheck(t, h) != nil && owedCheck(t, h).Escalated()
 			if escalated != tt.wantEscalate {
-				t.Fatalf("made %v, want an escalation %v", h.checks.made, tt.wantEscalate)
+				t.Fatalf("check %+v, want an escalation %v", owedCheck(t, h), tt.wantEscalate)
 			}
 			_, fault := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
 				Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, and the check is escalated to the user"})
