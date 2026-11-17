@@ -208,20 +208,20 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("This session is the deploy mediator: the one workspace agent-repl keeps to check every deploy");
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
     expect(text).toContain("agent-repld merge-queue mediation dispatch -summary");
-    expect(text).toContain("Problems this workspace can fix, of any standing but OWNED: dispatch them, then fix them in the same turn.");
+    expect(text).toContain("Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.");
     expect(text).toContain("agent-repld workspace finished here -version-part patch");
     expect(text).not.toContain("-fresh");
   });
 
-  it("has the deploy mediator approve only when every group has an owner", () => {
+  it("has the deploy mediator approve only when it took on every group", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("deploy_mediator", home);
-    // Assert — owner ruling 2026-11-16: an old problem nobody owns is
+    // Assert — owner ruling 2026-11-16: an old problem never taken on is
     // dispatched or escalated, never approved past, and never filed with a
     // named workspace.
-    expect(text).toContain("Every group is OWNED, or the window holds none");
+    expect(text).toContain("Every group is TAKEN ON, or the window holds none");
     expect(text).toContain("A SEEN BEFORE or RECURRED group is dispatched as a NEW one is");
     expect(text).not.toContain("merge-queue-stall-triage");
   });
