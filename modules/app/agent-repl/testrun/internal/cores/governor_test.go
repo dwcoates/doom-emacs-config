@@ -1228,3 +1228,29 @@ func TestGovernorThatCannotReadThePowerHoldsEveryUnitBackAndSaysSoOnce(t *testin
 		t.Fatalf("errors = %v; want the power read's failure said once", errs)
 	}
 }
+
+func TestLimitsSaidNamesBothLimits(t *testing.T) {
+	// Act
+	got := LimitsSaid()
+
+	// Assert
+	want := "the tests to an average of 55% of the host and the host to 70% on AC power in High Power Mode, and to 35% and 50% otherwise"
+	if got != want {
+		t.Fatalf("LimitsSaid() = %q; want %q", got, want)
+	}
+}
+
+func TestTheGovernorSaysItsLimitsWithLimitsSaid(t *testing.T) {
+	// Arrange
+	r := newGovRig(t, t.TempDir())
+
+	// Act
+	r.measured(0, 0)
+	r.halt()
+
+	// Assert
+	infos, _ := r.log.lines()
+	if len(infos) == 0 || !strings.HasSuffix(infos[0], "holding "+LimitsSaid()) {
+		t.Fatalf("infos = %v; want the governor's first line to say LimitsSaid()", infos)
+	}
+}

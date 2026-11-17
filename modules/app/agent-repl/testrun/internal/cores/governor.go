@@ -117,6 +117,11 @@ func (l Limits) CeilingCores(numCPU int) float64 {
 	return float64(numCPU) * float64(l.Ceiling) / 100
 }
 
+// LimitsSaid names both limits for the log: the powered ones and the base.
+func LimitsSaid() string {
+	return fmt.Sprintf("the tests to an average of %d%% of the host and the host to %d%% on AC power in High Power Mode, and to %d%% and %d%% otherwise", PoweredLimits.Target, PoweredLimits.Ceiling, BaseLimits.Target, BaseLimits.Ceiling)
+}
+
 // HostPower is the power the host runs on, as the governor reads it.
 type HostPower struct {
 	// Source is AC power or the battery.
@@ -414,7 +419,7 @@ func (g *Governor) Run(ctx context.Context) {
 		return
 	}
 	defer held.f.Close()
-	g.Log.Infof("CPU governor: this run governs every test on the host's %d cores, holding the tests to an average of %d%% and the host to %d%% on AC power in High Power Mode, and to %d%% and %d%% otherwise", g.NumCPU, PoweredLimits.Target, PoweredLimits.Ceiling, BaseLimits.Target, BaseLimits.Ceiling)
+	g.Log.Infof("CPU governor: this run governs every test on the host's %d cores, holding %s", g.NumCPU, LimitsSaid())
 	wake, stopWake, err := listenWake(g.Pool.Dir)
 	if err != nil {
 		// Units are still decided on at every read; each waits up to a Tick

@@ -415,7 +415,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		return 1
 	}
 	if plan.Governed {
-		log.Infof("core budget: up to %d seats of the host's %d cores, shared by every test run on the host through %s; the CPU governor holds the tests to an average of %d%% of the host and the host to %d%% on AC power in High Power Mode, and to %d%% and %d%% otherwise; this run ranks %d", slots, runtime.NumCPU(), cores.DefaultDir, cores.PoweredLimits.Target, cores.PoweredLimits.Ceiling, cores.BaseLimits.Target, cores.BaseLimits.Ceiling, rank)
+		log.Infof("core budget: up to %d seats of the host's %d cores, shared by every test run on the host through %s; the CPU governor holds %s; this run ranks %d", slots, runtime.NumCPU(), cores.DefaultDir, cores.LimitsSaid(), rank)
 	} else {
 		if err := os.MkdirAll(plan.Dir, 0o755); err != nil {
 			log.Errorf("create the ungoverned run's own core pool %s: %v", plan.Dir, err)
