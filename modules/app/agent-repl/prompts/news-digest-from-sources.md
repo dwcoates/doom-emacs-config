@@ -31,6 +31,8 @@ future change with a date, written as the source states it ("2026-11-01",
 "early November"), omitted otherwise; and "links" to where it was read, most
 authoritative first, each with a short "label". EVERY LINK URL MUST BE ONE OF
 THE URLS GIVEN BELOW, copied exactly. Never invent, shorten or alter a URL.
+EVERY ITEM CARRIES AT LEAST ONE LINK: an item kept from an earlier digest
+keeps its links, and an item no URL below backs is left out.
 
 Then judge EVERY item, whatever its kind, on one more question: could it
 REGRESS agent-repl? agent-repl is an editor tool that drives Claude
