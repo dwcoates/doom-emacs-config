@@ -31,14 +31,11 @@
 - A complete change is a full feature addition or change, a full fix, or a full addendum to an already-landed change.
 - Commit it on a branch: the workspace's own branch, or, in a repository's main workspace, a branch cut in its own worktree off the main branch.
 - Land it in this order:
-  1. Wait until no deploy check is at work (below).
+  1. Wait until no deploy check is at work (Defer to the deploy mediator, below).
   2. Pause the queue (above).
   3. If the main branch moved since the work began, rebase onto it and resolve every conflict.
   4. Land it with `land-direct.sh` (below).
   5. Resume the queue.
-- Never interrupt a deploy check at work: a deploy rolling out, its mediator assessing or fixing it, or the mediator's fix finishing.
-  - They typically run in tandem with a bypass session, and a direct landing's deploy cuts them: it replaces the check they are deciding, and its handover moves their sessions mid-turn.
-  - `agent-repld merge-queue status -repository here` shows the check: while its `advance` stands `mediating`, or a remediation or escalation workspace is landing its finish, wait for it to end and work the next change meanwhile.
 - Land it: `~/.config/doom/modules/app/agent-repl/bin/land-direct.sh <repository-dir> <minor|patch|none> "<changelog line>" <branch>`.
   - It lands one branch, and only through its gate: the branch checked out and committed in its worktree, rebased onto the main branch, and the full suite passing on it (`agent-repld test run -every-suite`, run by the script itself).
   - It then merges the branch into the main branch, writes the changelog line, and tags the next version.
@@ -51,6 +48,22 @@
   - Each defect the deploy shows is fixed on the branch, landed and deployed again the same way, and that deploy is watched in turn.
   - The work is done only once a deploy shows nothing to fix.
 - Report the landing: the version, and what the watch found and fixed.
+
+### Defer to the deploy mediator, and watch it as it runs
+
+- The repository's deploy mediator checks every deploy, and this workspace defers to it in procedure (owner ruling, 2026-11-17).
+  - A deploy check is at work while a deploy rolls out, the mediator assesses or fixes it, or the mediator's fix finishes.
+  - `agent-repld merge-queue status -repository here` shows it: its `advance` stands `mediating`, or the mediator's finish is landing.
+- While a deploy check is at work, this workspace never contends with it.
+  - It never lands, deploys, bounces or restarts anything, pauses the queue, or runs a full suite.
+  - It never prompts, closes, compacts or otherwise acts on the mediator's workspace.
+  - A direct landing's deploy replaces the check the mediator is deciding, and its handover moves the mediator's session mid-turn; a full suite takes the host's cores from the mediator's own gate.
+  - It works its next change meanwhile, running only the tests that change adds or changes.
+- Watch the mediator as it runs: follow every check through its stages until it ends, with `merge-queue status`, the logs, and the mediator's own turns.
+  - Subscribe to it while a check is at work: `agent-repld workspace subscribe <the mediator> -events turn_ended,needs_input`.
+- A mediator that stalls, fails a round, cannot be made, or decides against the evidence needs remediation itself: diagnose it from its records and fix agent-repl on this workspace's branch.
+  - That fix lands like any other, once no check is at work.
+  - When the mediator's own failure is what keeps the check at work, nothing else can end it: land the fix anyway, naming that failure in the changelog line.
 
 ### Bypass mode never uses the merge queue, and does its own work
 

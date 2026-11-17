@@ -187,6 +187,20 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("hard-stopped");
   });
 
+  it("has a queue-bypass session defer to the deploy mediator and watch it as it runs", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("bypassing_queue", home);
+    // Assert — owner ruling 2026-11-17: a full suite run during a check
+    // contended with the mediator; the bypass session defers to it and
+    // remediates it when it fails.
+    expect(text).toContain("this workspace defers to it in procedure");
+    expect(text).toContain("It never lands, deploys, bounces or restarts anything, pauses the queue, or runs a full suite.");
+    expect(text).toContain("Watch the mediator as it runs");
+    expect(text).toContain("needs remediation itself");
+  });
+
   it("governs a queue-bypass session's test runs unless the user asks for an ungoverned one", () => {
     // Arrange
     const home = homeOnThisRepository();
