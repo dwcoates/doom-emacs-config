@@ -291,7 +291,7 @@ func (c *client) runVia(ctx context.Context, operation, exe, dir string, extra [
 			// A REMOTE THE NETWORK CANNOT REACH is the machine offline or its
 			// resolver down, which this daemon expects and cannot fix; the
 			// caller still gets the failure, and the next attempt answers.
-			c.log.Global().Info(operation, "git could not reach the remote; the network is down or the host does not resolve", in.logContext())
+			c.log.Global().Info(operation, "git could not reach the remote; the network is down or the host does not resolve", dlog.AsTransient(in.logContext()))
 			return "", failure
 		}
 		c.log.Global().Error(operation, "git exited nonzero", in.logContext())
@@ -307,6 +307,12 @@ var unreachableRemote = []string{
 	"Could not resolve host:",
 	"Network is unreachable",
 	"No route to host",
+	// A CONNECTION THE NETWORK DROPPED mid-call is the same outage, passing
+	// on its own (2026-11-17 16:50: `Connection reset by 140.82.112.3 port
+	// 22` during ls-remote, recorded at ERROR).
+	"Connection reset by",
+	"Connection timed out",
+	"Operation timed out",
 }
 
 // remoteUnreachable reports whether STDERR says the remote could not be

@@ -2998,3 +2998,32 @@ func TestARebaseThatKeepsItsCommitsRestoresNothing(t *testing.T) {
 		t.Fatalf("git was asked %v, want no branch restored", h.git.calls)
 	}
 }
+
+// TestAMergeAtAColdGatedWorkspaceFailsForTheUserAtInfo covers a fixing
+// attempt whose prompt the workspace's cold gate refuses (2026-11-17 16:22):
+// the merge fails naming the gate, recorded at INFO, never a merge fault.
+func TestAMergeAtAColdGatedWorkspaceFailsForTheUserAtInfo(t *testing.T) {
+	// Arrange: a failing gate sends a fixing prompt to a cold-gated session.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gateFails("daemon")
+	h.queue.mu.Lock()
+	h.queue.err = &promptqueue.ColdGateRefusal{Detail: "the conversation is cold at 839,928 context tokens"}
+	h.queue.mu.Unlock()
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateFailed || !strings.Contains(got.Detail, "cold gate") {
+		t.Fatalf("facts = %+v, want the merge failed naming the cold gate", got)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.cold_gated"}); !ok {
+		t.Fatalf("records = %v, want the cold gate at INFO", h.logs.Records())
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.fault"}); ok {
+		t.Fatalf("records = %v, want no merge fault", h.logs.Records())
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agent-repld/internal/childproc"
+	"agent-repld/internal/dlog"
 )
 
 // --- the environment contract, as a pure function -----------------------
@@ -1012,6 +1013,8 @@ func TestARemoteTheNetworkCannotReachIsRecordedAtInfo(t *testing.T) {
 	}{
 		{name: "an ssh host that does not resolve", stderr: "ssh: Could not resolve hostname github.com: nodename nor servname provided, or not known\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
 		{name: "an https host that does not resolve", stderr: "fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com\n", wantLevel: "info"},
+		{name: "an ssh connection the network reset", stderr: "Connection reset by 140.82.112.3 port 22\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
+		{name: "an ssh connection that timed out", stderr: "ssh: connect to host github.com port 22: Operation timed out\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
 		{name: "a remote that refused", stderr: "ERROR: Repository not found.\nfatal: Could not read from remote repository.\n", wantLevel: "error"},
 	}
 	for _, tt := range tests {
@@ -1032,6 +1035,9 @@ func TestARemoteTheNetworkCannotReachIsRecordedAtInfo(t *testing.T) {
 			for _, r := range logs.records() {
 				if r.Level == "info" && r.Message == "git could not reach the remote; the network is down or the host does not resolve" {
 					got = "info"
+					if transient, _ := r.Context[dlog.TransientKey].(bool); !transient {
+						t.Fatalf("record %+v is not marked transient", r)
+					}
 				}
 				if r.Level == "error" && r.Message == "git exited nonzero" {
 					got = "error"
