@@ -11,6 +11,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -265,11 +266,14 @@ func TestACacheThatLapsedBeforeItsKeepaliveCameDueWasNotMissed(t *testing.T) {
 
 func TestACacheThatLapsedWhileTheWorkspaceOwedNoKeepaliveWasNotMissed(t *testing.T) {
 	// Arrange: due a minute ago, the cache lapsed thirty seconds ago, and the
-	// workspace began owing keep-alives again only after the due (it was
-	// withheld until then).
+	// row says the workspace began owing keep-alives again only after the due
+	// (it was withheld until then, under whichever daemon).
 	due := now.Add(-time.Minute)
 	h := dueHarness(t, lapsedAt(due.Add(30*time.Second)))
-	h.keeper.owedFrom[theWorkspace] = due.Add(time.Second)
+	rec := h.db.records[theWorkspace]
+	from := due.Add(time.Second)
+	rec.KeepaliveOwedFrom = &from
+	h.db.records[theWorkspace] = rec
 
 	// Act
 	h.keeper.sendBeat(context.Background(), theWorkspace, now)
@@ -283,31 +287,140 @@ func TestACacheThatLapsedWhileTheWorkspaceOwedNoKeepaliveWasNotMissed(t *testing
 	}
 }
 
-func TestAWorkspaceOwingKeepalivesAgainIsOwedFromThatInstant(t *testing.T) {
-	// Arrange: the workspace owed none, then owes them again.
-	h := newHarness(t, beatable(visible(), 10*time.Minute))
-	log := dlog.NewTestLogger()
-	h.keeper.owesNone(log, theWorkspace, "it is hidden, so it runs no session")
+// TestASuccessorKeeperJudgesADueItsPredecessorOwedNoneForAsNoMiss pins the
+// 2026-11-17 miss: one daemon decided the workspace owed none, a successor
+// that never saw that decision found it owed again, and the beat due in
+// between lapsed. The decision on the row carries across.
+func TestASuccessorKeeperJudgesADueItsPredecessorOwedNoneForAsNoMiss(t *testing.T) {
+	// Arrange
+	due := now.Add(-time.Minute)
+	h := dueHarness(t, lapsedAt(due.Add(30*time.Second)))
+	predecessor := newHarness(t, h.db.records[theWorkspace])
+	predecessor.db = h.db
+	predecessor.keeper.deps.DB = h.db
+	predecessor.keeper.owesNone(context.Background(), dlog.NewTestLogger(), h.db.records[theWorkspace], "it is withheld, so it runs no session")
+	h.keeper.owesAgain(context.Background(), dlog.NewTestLogger(), h.db.records[theWorkspace])
 
 	// Act
-	h.keeper.owesAgain(log, theWorkspace)
+	h.keeper.sendBeat(context.Background(), theWorkspace, now)
 
 	// Assert
-	if from, ok := h.keeper.owedFrom[theWorkspace]; !ok || !from.Equal(h.clock.Now()) {
-		t.Fatalf("owedFrom = %v (%v), want the clock's %v", from, ok, h.clock.Now())
+	if standing := h.faults.standing(t, health.KindKeepaliveUndelivered); len(standing) != 0 || h.found(dlog.RecordQuery{Level: "error"}) {
+		t.Fatalf("faults %+v, records %+v; want no miss", standing, h.log.Records())
 	}
 }
 
-func TestAWorkspaceThatOwedKeepalivesAllAlongHasNoOwedFrom(t *testing.T) {
+func TestAMissThatCannotReadTheRowIsNotJudged(t *testing.T) {
 	// Arrange
-	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	due := now.Add(-time.Minute)
+	h := dueHarness(t, lapsedAt(due.Add(30*time.Second)))
+	h.db.readErr = errors.New("registry down")
+	log := dlog.NewTestLogger()
 
 	// Act
-	h.keeper.owesAgain(dlog.NewTestLogger(), theWorkspace)
+	missed := h.keeper.missed(context.Background(), log, theWorkspace, due, due.Add(30*time.Second))
 
 	// Assert
-	if from, ok := h.keeper.owedFrom[theWorkspace]; ok {
-		t.Fatalf("owedFrom = %v, want none for a workspace that owed keep-alives all along", from)
+	if missed || len(h.faults.standing(t, health.KindKeepaliveUndelivered)) != 0 {
+		t.Fatalf("missed = %v, faults %+v; want no judgment", missed, h.faults.standing(t, health.KindKeepaliveUndelivered))
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrive,
+		Message: "could not read when the workspace began owing keep-alives; whether the keeper missed the lapsed beat is not judged"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["cause"]), "registry down") {
+		t.Fatalf("records = %+v, want the read's failure at ERROR with its cause", log.Records())
+	}
+}
+
+func TestOwingRecordsTheDecisionOnTheRow(t *testing.T) {
+	stamped := now.Add(-time.Hour)
+	tests := []struct {
+		name       string
+		arrange    func(rec *wsm.Workspace)
+		act        func(h *harness, rec wsm.Workspace)
+		wantNone   *time.Time
+		wantFrom   *time.Time
+		wantWrites int
+	}{
+		{name: "owing none stamps when it began", arrange: func(*wsm.Workspace) {},
+			act: func(h *harness, rec wsm.Workspace) {
+				h.keeper.owesNone(context.Background(), dlog.NewTestLogger(), rec, "why")
+			},
+			wantNone: &now, wantWrites: 1},
+		{name: "a standing decision is not written again", arrange: func(rec *wsm.Workspace) { rec.KeepaliveOwedNoneAt = &stamped },
+			act: func(h *harness, rec wsm.Workspace) {
+				h.keeper.owesNone(context.Background(), dlog.NewTestLogger(), rec, "why")
+			},
+			wantNone: &stamped},
+		{name: "owing again stamps when, from the row alone", arrange: func(rec *wsm.Workspace) { rec.KeepaliveOwedNoneAt = &stamped },
+			act: func(h *harness, rec wsm.Workspace) {
+				h.keeper.owesAgain(context.Background(), dlog.NewTestLogger(), rec)
+			},
+			wantFrom: &now, wantWrites: 1},
+		{name: "a workspace that owed them all along writes nothing", arrange: func(*wsm.Workspace) {},
+			act: func(h *harness, rec wsm.Workspace) {
+				h.keeper.owesAgain(context.Background(), dlog.NewTestLogger(), rec)
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, beatable(visible(), 10*time.Minute))
+			rec := h.db.records[theWorkspace]
+			tt.arrange(&rec)
+			h.db.records[theWorkspace] = rec
+
+			// Act
+			tt.act(h, rec)
+
+			// Assert
+			got := h.db.records[theWorkspace]
+			if !clocktest.SameInstant(got.KeepaliveOwedNoneAt, tt.wantNone) || !clocktest.SameInstant(got.KeepaliveOwedFrom, tt.wantFrom) || h.db.owingWrites != tt.wantWrites {
+				t.Fatalf("row = (none %v, from %v), writes %d; want (%v, %v), %d",
+					got.KeepaliveOwedNoneAt, got.KeepaliveOwedFrom, h.db.owingWrites, tt.wantNone, tt.wantFrom, tt.wantWrites)
+			}
+		})
+	}
+}
+
+func TestAJoiningSuccessorWritesNoOwingDecision(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.db.readOnly = true
+	log := dlog.NewTestLogger()
+
+	// Act
+	h.keeper.owesNone(context.Background(), log, h.db.records[theWorkspace], "it has no session")
+
+	// Assert
+	if h.db.owingWrites != 0 || h.db.records[theWorkspace].KeepaliveOwedNoneAt != nil {
+		t.Fatalf("writes = %d, row = %+v; want nothing written on a read-only handle", h.db.owingWrites, h.db.records[theWorkspace])
+	}
+	if _, errored := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error"}); errored {
+		t.Fatalf("records = %+v, want no ERROR for a joining successor", log.Records())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "debug", Operation: opDrive,
+		Message: "the state handle is not promoted yet; whether the workspace owes keep-alives is recorded once it writes"}); !ok {
+		t.Fatalf("records = %+v, want the deferred write at DEBUG", log.Records())
+	}
+}
+
+func TestAnOwingDecisionThatCannotBeWrittenIsAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.db.owingErr = errors.New("database is locked")
+	log := dlog.NewTestLogger()
+
+	// Act
+	h.keeper.owesNone(context.Background(), log, h.db.records[theWorkspace], "it is withheld, so it runs no session")
+
+	// Assert
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opDrive,
+		Message: "could not record whether the workspace owes keep-alives; a lapse judged against the row may misjudge a miss"})
+	if !ok || record.Context["owing"] != false || !strings.Contains(fmt.Sprint(record.Context["cause"]), "database is locked") {
+		t.Fatalf("records = %+v, want the failed write at ERROR with its cause", log.Records())
+	}
+	if h.db.records[theWorkspace].KeepaliveOwedNoneAt != nil {
+		t.Fatalf("row = %+v, want it unchanged", h.db.records[theWorkspace])
 	}
 }
 

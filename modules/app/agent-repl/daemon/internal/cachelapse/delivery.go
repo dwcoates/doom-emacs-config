@@ -93,9 +93,20 @@ func (k *Keeper) missed(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID
 	if lapsed.Before(due) {
 		return false
 	}
-	if from, ok := k.owedFrom[ws]; ok && due.Before(from) {
+	// THE ROW SAYS WHEN IT BEGAN OWING THEM (wsm.SetKeepaliveOwing), written
+	// by whichever daemon decided it, so a successor judges a due that fell
+	// under its predecessor as that predecessor saw it.
+	record, err := k.deps.DB.Workspace(ctx, ws)
+	if err != nil {
+		if !leaving(ctx, log, opDrive, "reading when the workspace began owing keep-alives", err) {
+			log.Error(opDrive, "could not read when the workspace began owing keep-alives; whether the keeper missed the lapsed beat is not judged",
+				dlog.WithCause(dlog.Merge(dueField(due), dlog.Context{"lapsed_at": lapsed}), err))
+		}
+		return false
+	}
+	if from := record.KeepaliveOwedFrom; from != nil && due.Before(*from) {
 		log.Info(opDrive, "the cache lapsed while the workspace owed no keep-alive; the keeper missed nothing", dlog.Merge(dueField(due), dlog.Context{
-			"lapsed_at": lapsed, "owed_from": from,
+			"lapsed_at": lapsed, "owed_from": *from,
 		}))
 		return false
 	}

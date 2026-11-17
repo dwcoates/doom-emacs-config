@@ -661,8 +661,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/sweepguard":                 {"daemon/internal/"},
 	"internal/textline":                   {"daemon/internal/"},
 	"internal/transportcut":               {"daemon/"},
-	"internal/clock/clocktest": {"daemon/internal/clock/", "daemon/internal/newsdigest/", "daemon/internal/repodivergence/",
-		"daemon/internal/worktreereap/"},
+	"internal/clock/clocktest":            {"daemon/"},
 	// The scans pinning named call sites in other packages.
 	"internal/atomicfile": {"daemon/internal/classifierupdate/update.go", "daemon/internal/daemonaddr/claim.go",
 		"daemon/internal/rollout/carry.go", "daemon/internal/rollout/manifest.go", "daemon/internal/rollout/spawn.go"},

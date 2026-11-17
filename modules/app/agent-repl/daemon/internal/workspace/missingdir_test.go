@@ -134,6 +134,84 @@ func TestSettleMissingDirectoryLeavesAWorkspaceThatOwesANuke(t *testing.T) {
 	}
 }
 
+// TestSettleMissingDirectoryActsOnTheRowReadAfterTheStat pins the re-read: a
+// caller's row read before a landing stamped and closed it never sends a
+// restore into the removal still holding the branch (deploy
+// 2026-11-17T00:29:50).
+func TestSettleMissingDirectoryActsOnTheRowReadAfterTheStat(t *testing.T) {
+	merged := time.Unix(1, 0)
+	tests := []struct {
+		name   string
+		landed func(ws wsm.Workspace) wsm.Workspace
+	}{
+		{name: "merged and closed meanwhile", landed: func(ws wsm.Workspace) wsm.Workspace {
+			ws.MergedAt, ws.Closed = &merged, true
+			return ws
+		}},
+		{name: "closed meanwhile", landed: func(ws wsm.Workspace) wsm.Workspace {
+			ws.Closed = true
+			return ws
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			ws := goneWorkspace(t, f)
+			withBranch(f, ws)
+			stale := f.db.workspaces["w1"]
+			f.db.with(tt.landed(stale))
+
+			// Act.
+			restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, stale, errGone)
+
+			// Assert.
+			if err != nil || restored {
+				t.Fatalf("SettleMissingDirectory = (%v, %v), want (false, nil)", restored, err)
+			}
+			if closures := f.db.closures["w1"]; len(closures) != 0 {
+				t.Fatalf("closures = %+v, want none for a row already closed", closures)
+			}
+			for _, call := range f.git.gitCalls {
+				if strings.HasPrefix(call, "restore ") {
+					t.Fatalf("git calls = %v, want no restore", f.git.gitCalls)
+				}
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: testMissingDirOp, Message: "the workspace directory is gone and the workspace was closed meanwhile; it is left closed"}); !ok {
+				t.Fatalf("records = %+v, want the closed row recorded", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestSettleMissingDirectorySurfacesAFailedReRead(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	f.db.workspaceErr = errors.New("registry down")
+
+	// Act.
+	restored, err := f.verbs.SettleMissingDirectory(context.Background(), testMissingDirOp, ws, errGone)
+
+	// Assert.
+	if restored || err == nil || !strings.Contains(err.Error(), "registry down") {
+		t.Fatalf("SettleMissingDirectory = (%v, %v), want the read's failure", restored, err)
+	}
+	record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: testMissingDirOp})
+	if !ok || record.Context["cause"] != "registry down" || record.Context[dlog.KeyWorkspaceID] != "w1" {
+		t.Fatalf("ERROR record = (%+v, %v), want the read's cause and the workspace", record, ok)
+	}
+	if closures := f.db.closures["w1"]; len(closures) != 0 {
+		t.Fatalf("closures = %+v, want none after a failed read", closures)
+	}
+	for _, call := range f.git.gitCalls {
+		if strings.HasPrefix(call, "restore ") {
+			t.Fatalf("git calls = %v, want no restore", f.git.gitCalls)
+		}
+	}
+}
+
 func TestSettleMissingDirectorySurfacesAFailedClose(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

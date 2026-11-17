@@ -53,6 +53,36 @@ type fakeDB struct {
 	bypass           map[ids.WorkspaceID]wsm.QueueBypass
 	parkedKeepalives []time.Time
 	parkedCold       []ids.WorkspaceID
+	// owingErr fails SetKeepaliveOwing; owingWrites counts every write.
+	owingErr    error
+	owingWrites int
+	// readOnly stands for a joining successor's unpromoted handle.
+	readOnly bool
+}
+
+func (f *fakeDB) ReadOnly() bool { return f.readOnly }
+
+// SetKeepaliveOwing records the owing decision on the record, as the store's
+// one statement each does.
+func (f *fakeDB) SetKeepaliveOwing(_ context.Context, id wsm.WorkspaceID, owing bool, at time.Time) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.owingErr != nil {
+		return f.owingErr
+	}
+	rec, ok := f.records[id]
+	if !ok {
+		return wsm.ErrNotFound
+	}
+	f.owingWrites++
+	switch {
+	case !owing && rec.KeepaliveOwedNoneAt == nil:
+		rec.KeepaliveOwedNoneAt = &at
+	case owing && rec.KeepaliveOwedNoneAt != nil:
+		rec.KeepaliveOwedFrom, rec.KeepaliveOwedNoneAt = &at, nil
+	}
+	f.records[id] = rec
+	return nil
 }
 
 func (f *fakeDB) QueueBypass(_ context.Context, id wsm.WorkspaceID) (wsm.QueueBypass, error) {

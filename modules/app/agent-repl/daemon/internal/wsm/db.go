@@ -799,6 +799,9 @@ type DB interface {
 	// SetLastKeepalive records when a workspace's keep-alive was last sent
 	// (lastkeepalive.go).
 	SetLastKeepalive(ctx context.Context, id WorkspaceID, at time.Time) error
+	// SetKeepaliveOwing records the keeper's decision that a workspace owes
+	// keep-alives, or owes none (keepaliveowing.go).
+	SetKeepaliveOwing(ctx context.Context, id WorkspaceID, owing bool, at time.Time) error
 	// MarkParentUpdated records that a child's open parent was given the
 	// child's one update (ParentFollowedEvents).
 	MarkParentUpdated(ctx context.Context, child WorkspaceID, at time.Time) error

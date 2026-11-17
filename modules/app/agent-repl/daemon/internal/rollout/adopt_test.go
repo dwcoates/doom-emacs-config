@@ -1838,10 +1838,13 @@ func TestAHandoverAdoptionClaimsOnTheJoiningReadOnlyHandle(t *testing.T) {
 	// successor still holds the read-only handle it joined with.
 	h := newFileHarness(t)
 	first, _ := joinedWithOneOfTwo(t, h)
+	// THE HANDLE IS SWAPPED BEFORE THE RELEASE: the joined rendezvous waits on
+	// the release, so an adoption may start the instant it lands, and a swap
+	// after it raced that adoption's promote and claim onto two handles.
+	h.joiningHandle(t)
 	if err := h.db.ReleaseServing(context.Background(), first, selfInstance); err != nil {
 		t.Fatalf("ReleaseServing: %v", err)
 	}
-	h.joiningHandle(t)
 
 	// Act
 	if err := h.c.AdoptHost(context.Background(), first); err != nil {

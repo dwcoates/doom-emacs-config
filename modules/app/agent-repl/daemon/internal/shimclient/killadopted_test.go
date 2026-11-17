@@ -709,3 +709,81 @@ func TestAwaitAdoptedExitRecordsAGroupItCannotRead(t *testing.T) {
 	default:
 	}
 }
+
+// TestKillEscalationNamesWhatOutlivedSIGTERM pins the escalation's record: it
+// names every live member of the group, and only a leader still standing is a
+// shim that ignored SIGTERM (WARN); members its exited leader left behind are
+// recorded at INFO, and a group that cannot be listed at ERROR. Each case still
+// escalates to SIGKILL.
+func TestKillEscalationNamesWhatOutlivedSIGTERM(t *testing.T) {
+	tests := []struct {
+		name        string
+		members     func(leader int) ([]procgroup.Member, error)
+		wantLevel   string
+		wantMessage string
+		wantMembers []string
+	}{
+		{
+			name: "the leader still stands",
+			members: func(leader int) ([]procgroup.Member, error) {
+				return []procgroup.Member{{Pid: leader, Comm: "node", State: "running"}}, nil
+			},
+			wantLevel: "warn", wantMessage: "the adopted shim ignored SIGTERM; escalating",
+		},
+		{
+			name: "only what the exited leader left",
+			members: func(int) ([]procgroup.Member, error) {
+				return []procgroup.Member{{Pid: 4242, Comm: "sleep", State: "sleeping"}}, nil
+			},
+			wantLevel: "info", wantMessage: "the adopted shim exited, and processes it left in its group outlived SIGTERM's grace; they are killed",
+			wantMembers: []string{"4242 sleep (sleeping)"},
+		},
+		{
+			name:      "the group cannot be listed",
+			members:   func(int) ([]procgroup.Member, error) { return nil, errors.New("sysctl refused") },
+			wantLevel: "error", wantMessage: "could not list the adopted shim's process group still standing after SIGTERM; escalating",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			p := startPeer(t, 0)
+			c := adoptedClientFor(p.uds, 2*time.Second)
+			var signalled []syscall.Signal
+			c.signalGroupOf = func(_ int, sig syscall.Signal) error {
+				signalled = append(signalled, sig)
+				return nil
+			}
+			c.awaitGroup = func(context.Context, int) error {
+				if len(signalled) == 1 {
+					return context.DeadlineExceeded
+				}
+				return nil
+			}
+			c.groupMembers = func(int) ([]procgroup.Member, error) { return tt.members(p.pid) }
+
+			// Act.
+			err := c.Kill(context.Background(), KillAttribution{Actor: "test", Reason: "stop"})
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Kill() error = %v, want nil", err)
+			}
+			if len(signalled) != 2 || signalled[0] != syscall.SIGTERM || signalled[1] != syscall.SIGKILL {
+				t.Fatalf("signalled %v, want SIGTERM then SIGKILL", signalled)
+			}
+			record, ok := dlog.FindRecord(c.log.(*dlog.TestLogger).Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.shimclient.kill", Message: tt.wantMessage})
+			if !ok || record.Context["pid"] != p.pid {
+				t.Fatalf("no %s record %q naming the shim: %+v", tt.wantLevel, tt.wantMessage, c.log.(*dlog.TestLogger).Records())
+			}
+			if tt.wantMembers != nil && fmt.Sprint(record.Context["members"]) != fmt.Sprint(tt.wantMembers) {
+				t.Fatalf("members = %v, want %v", record.Context["members"], tt.wantMembers)
+			}
+			if tt.wantLevel != "warn" {
+				if _, warned := dlog.FindRecord(c.log.(*dlog.TestLogger).Records(), dlog.RecordQuery{Level: "warn"}); warned {
+					t.Fatalf("a WARN was recorded: %+v", c.log.(*dlog.TestLogger).Records())
+				}
+			}
+		})
+	}
+}
