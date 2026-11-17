@@ -900,7 +900,7 @@ func (v *verbs) releaseMergedHolder(ctx context.Context, log dlog.Logger, branch
 		log.Error(opReleaseName, "could not resolve the closed holder's repository; it keeps the name", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("create %q: %w", branch, err)
 	}
-	if err := v.retireTree(ctx, log, opReleaseName, record, repoDir, v.deps.Now(), "", fields); err != nil {
+	if err := v.retireTree(ctx, log, opReleaseName, record, repoDir, v.now(), "", fields); err != nil {
 		return false, fmt.Errorf("create %q: %w", branch, err)
 	}
 	log.Info(opReleaseName, "retired the closed workspace holding the supplied name: everything it held was already merged", fields)
