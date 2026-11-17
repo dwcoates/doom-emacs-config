@@ -591,6 +591,57 @@ func TestAFinishedRemediationStandsByAndReturnsOnlyWithWork(t *testing.T) {
 	}
 }
 
+// TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds covers the owner's
+// 2026-11-17 ruling: the finish command is never cut mid-run, so the
+// stand-by awaits the turn that finished, and a wait that fails stands
+// nothing by and is recorded.
+func TestAFinishedWorkspaceStandsByOnlyOnceItsTurnEnds(t *testing.T) {
+	tests := []struct {
+		name        string
+		awaitErr    error
+		wantStoodBy []ids.WorkspaceID
+		wantRecord  string
+	}{
+		{name: "the turn that finished ends, then it stands by", wantStoodBy: []ids.WorkspaceID{"ws-fixer"}},
+		{name: "a turn that cannot be awaited stands nothing by", awaitErr: errors.New("watcher gone"),
+			wantRecord: "the finished workspace's turn could not be awaited; it does not stand by"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := finishing(t)
+			h.db.mu.Lock()
+			h.db.turns["ws-fixer"] = []wsm.Turn{{ID: "t-finish", Workspace: "ws-fixer"}}
+			h.db.mu.Unlock()
+			awaited := make(chan ids.TurnID, 1)
+			h.mu.Lock()
+			h.awaitStarted, h.awaitErr = awaited, tt.awaitErr
+			h.mu.Unlock()
+
+			// Act
+			_ = h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+			// Assert
+			select {
+			case turn := <-awaited:
+				if turn != "t-finish" {
+					t.Fatalf("awaited %q, want the turn that finished", turn)
+				}
+			default:
+				t.Fatal("the turn that finished was never awaited")
+			}
+			if !slices.Equal(h.checks.stoodBy, tt.wantStoodBy) {
+				t.Fatalf("stood by %v, want %v", h.checks.stoodBy, tt.wantStoodBy)
+			}
+			if tt.wantRecord != "" {
+				if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish, Message: tt.wantRecord}); !ok {
+					t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.wantRecord)
+				}
+			}
+		})
+	}
+}
+
 func TestAFinishedWorkspaceThatCannotStandByIsRecordedAndStillLands(t *testing.T) {
 	// Arrange
 	h := finishing(t)

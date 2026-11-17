@@ -533,24 +533,16 @@ func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm
 }
 
 // endChain records how check M of queue REPO, the last of its chain, ended
-// as OUTCOME, forgets what the chain's remediations landed, and ends the
-// chain's intake's session at once: the next deploy begins another chain,
-// which the same standing intake takes. The intake deciding inside its own turn is cut mid-turn, so it
-// writes nothing past its decision (owner ruling, 2026-11-16).
+// as OUTCOME and forgets what the chain's remediations landed: the next
+// deploy begins another chain, which the same standing intake takes. The
+// intake's session ends when its turn does (intakeTurnEnded), never mid-turn.
 func (o *orchestrator) endChain(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, outcome string) {
 	o.observeMediationEnd(m, outcome, o.deps.Now())
 	fields := dlog.Context{"repo": string(repo), "intake": string(m.Intake), "outcome": outcome, "chain_started": m.ChainStartedAt.UTC().Format(time.RFC3339Nano)}
 	if _, err := o.deps.DB.EndRemediationFinishesOf(ctx, repo); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the chain ended but what its remediations landed could not be forgotten", withField(fields, "error", err.Error()))
 	}
-	if m.Intake == "" {
-		return
-	}
-	if err := o.deps.DeployChecks.StopNow(ctx, m.Intake); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the chain ended but its intake could not be stopped", withField(fields, "error", err.Error()))
-		return
-	}
-	o.deps.Log.Global().Info(opMediation, "the chain ended; its intake is stopped", fields)
+	o.deps.Log.Global().Info(opMediation, "the chain ended; its intake's session ends with its turn", fields)
 }
 
 // checkClaim is one check's round: the queue and the deploy it checks. A
@@ -758,14 +750,21 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 	}
 	if !owes(m, owed) {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with its check decided or replaced by a newer deploy", fields)
+		// A NEWER DEPLOY'S CHECK IS TOLD TO THIS SAME INTAKE, by the round
+		// that owns it, so only a decided check ends the session here.
+		if m == nil {
+			o.stopIntake(ctx, q.key, ws, fields)
+		}
 		return
 	}
 	if m.Dispatched {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with a fix dispatched; the queue stays held for the remediation", withField(fields, "remediation", string(m.Remediation)))
+		o.stopIntake(ctx, q.key, ws, fields)
 		return
 	}
 	if m.Escalated() {
 		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with the deploy escalated; the queue stays held for the user", withField(fields, "escalation", string(m.Escalation)))
+		o.stopIntake(ctx, q.key, ws, fields)
 		return
 	}
 	// AN INTAKE CANNOT END ITS TURN UNDECIDED (owner ruling, 2026-11-16):
@@ -782,7 +781,8 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		return
 	}
 	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, and the check is escalated to the user", fields)
-	o.holdEscalated(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue waits for you", nil, window, ws, fields)
+	o.holdEscalated(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue waits for you", nil, window, fields)
+	o.stopIntake(ctx, q.key, ws, fields)
 }
 
 // errMediationStopped answers a decision made while this daemon stops: the
@@ -906,7 +906,6 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		if err := o.dispatch(ctx, q, m, ws, d, fields); err != nil {
 			return err
 		}
-		o.stopIntake(ctx, q.key, ws, fields)
 		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
 		return nil
 	}
@@ -925,7 +924,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	// closes it.
 	if d.Kind == MediationEscalate {
 		o.deps.Log.Global().Info(opMediation, "the intake escalated the deploy; the queue is held for the user", fields)
-		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, ws, fields)
+		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, fields)
 		return nil
 	}
 	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
@@ -1242,21 +1241,12 @@ type escalationBrief struct {
 // escalation workspace is made or found (escalateOwning) and recorded on
 // it. The hold ends only when the escalation's own fix deploys
 // (wsm.OweMediation) or the user closes the escalation (escalationClosed).
-//
-// INTAKE, when not empty, is the intake that escalated, stopped right after
-// the record and never before it: the stop ends the intake's turn, and the
-// round awaiting that turn must read the check escalated, or it resumes a
-// dead session as undecided (2026-11-17 02:40: the stop came first, and the
-// resume was refused query_dead).
-func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, intake ids.WorkspaceID, fields dlog.Context) {
+func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) {
 	encoded, err := json.Marshal(escalationBrief{Summary: summary, Problems: problems})
 	if err != nil {
 		panic(fmt.Sprintf("merge: an escalation's brief of strings did not encode: %v", err))
 	}
 	held, err := o.deps.DB.EscalateMediation(ctx, q.key, m.OwedAt, string(encoded))
-	if intake != "" {
-		o.stopIntake(ctx, q.key, intake, fields)
-	}
 	if err != nil {
 		o.mediationFailed(ctx, fields, "the check could not be recorded as escalated; nothing is escalated and the queue stays held", err)
 		return
@@ -1309,9 +1299,12 @@ func (o *orchestrator) remakeHeldEscalation(ctx context.Context, q checkedQueue,
 	o.makeHeldEscalation(ctx, q, m, brief.Summary, brief.Problems, window, fields)
 }
 
-// stopIntake closes intake WS once it decided a check of queue REPO: an
-// intake decides once (owner ruling, 2026-11-16), and a newer deploy's check
-// is told to a fresh one (wsm.OweMediation).
+// stopIntake ends intake WS's session once the turn that decided a check of
+// queue REPO ended: an intake decides once (owner ruling, 2026-11-16). THE
+// STOP WAITS FOR THE TURN'S END, never cuts it (owner ruling, 2026-11-17): a
+// decision command cut mid-run was saved in the intake's transcript as
+// "User rejected tool use", and the intake read its own decisions as the
+// user's rejections on its next brief and decided nothing.
 func (o *orchestrator) stopIntake(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, fields dlog.Context) {
 	if err := o.deps.DeployChecks.StopNow(ctx, ws); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the intake decided but its session could not be ended", withField(withField(fields, "intake", string(ws)), "error", err.Error()))

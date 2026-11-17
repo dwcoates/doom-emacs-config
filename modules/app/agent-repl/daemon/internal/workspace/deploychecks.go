@@ -128,11 +128,11 @@ func (v *verbs) SetDeployCheckEffort(ctx context.Context, ws wsm.WorkspaceID, ro
 	return nil
 }
 
-// StopDeployCheck implements Verbs: ends deploy check workspace WS's session
-// at once, killed mid-turn, never at its turn's end (owner ruling,
-// 2026-11-16). An intake's decision is durable before the chain ends it, so
-// what the turn would have said after it is nothing anyone reads: a turn
-// left to end wrote a reply an approved, hidden intake should never have.
+// StopDeployCheck implements Verbs: ends deploy check workspace WS's
+// session. The merge queue calls it once the intake's deciding turn ENDED
+// (owner ruling, 2026-11-17, replacing 2026-11-16's cut mid-turn): a cut
+// decision command was saved as "User rejected tool use", which the intake
+// then read as the user's rejection.
 //
 // THE WORKSPACE STAYS OPEN: a standing intake takes every check of its
 // repository (owner ruling, 2026-11-17), its conversation kept, and the next
@@ -145,13 +145,13 @@ func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	if _, err := v.endSession(ctx, log, ws); err != nil {
 		return fmt.Errorf("stop the deploy check %s: %w", ws, err)
 	}
-	log.Info(opDeployChecks, "stopped the deploy check workspace's session at once; its turn is cut, not ended, and the workspace stays open", nil)
+	log.Info(opDeployChecks, "stopped the deploy check workspace's session after its turn ended; the workspace stays open", nil)
 	return nil
 }
 
 // StandByDeployCheck implements Verbs: a fixer whose finish the daemon
-// accepted is hidden and its session ended at once, its turn cut, before it
-// can write a reply. The fixer is in sight only while it is at work holding
+// accepted is hidden and its session ended, once the turn that finished
+// ended (merge.orchestrator.standFinishedBy awaits it). The fixer is in sight only while it is at work holding
 // its queue (owner ruling, 2026-11-17): from its finish on, its repository's
 // deploy check label is how it is reached. It stays open and warm
 // (wsm.Workspace.StandingDeployCheck), and its next brief shows it again.

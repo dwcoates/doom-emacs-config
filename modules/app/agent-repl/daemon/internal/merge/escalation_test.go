@@ -472,8 +472,7 @@ func TestRouteEscalationSortsEachGroupAndFinding(t *testing.T) {
 }
 
 // decidedAtStop arms H's intake stop to read whether the check owed at
-// deployStarted is decided when the stop ends the intake's turn, the moment
-// the round awaiting that turn reads it.
+// deployStarted is decided when the stop ends the intake's session.
 func decidedAtStop(t *testing.T, h *harness) *bool {
 	t.Helper()
 	decided := new(bool)
@@ -488,7 +487,11 @@ func decidedAtStop(t *testing.T, h *harness) *bool {
 	return decided
 }
 
-func TestEveryDecisionIsRecordedBeforeItStopsItsIntake(t *testing.T) {
+// TestADecisionNeverStopsItsIntake covers the owner's 2026-11-17 ruling: a
+// decision command is never cut mid-run, since a cut was saved in the
+// intake's transcript as "User rejected tool use"; the intake's session ends
+// with the turn that decided (intakeTurnEnded).
+func TestADecisionNeverStopsItsIntake(t *testing.T) {
 	tests := []struct {
 		name     string
 		decision Decision
@@ -503,53 +506,13 @@ func TestEveryDecisionIsRecordedBeforeItStopsItsIntake(t *testing.T) {
 			h := checked(t)
 			owe(t, h)
 			withIntake(t, h, deployStarted)
-			decided := decidedAtStop(t, h)
 
 			// Act
 			err := h.o.DecideMediation(context.Background(), "ws-intake", tt.decision)
 
 			// Assert
-			if err != nil || !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !*decided {
-				t.Fatalf("DecideMediation = %v, stopped %v, decided at the stop %v; want the decision recorded before the stop", err, h.checks.stopped, *decided)
-			}
-		})
-	}
-}
-
-func TestADecisionThatStopsItsIntakeRunsOnALiveContext(t *testing.T) {
-	tests := []struct {
-		name     string
-		decision Decision
-	}{
-		{name: "an escalation", decision: Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}},
-		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "nothing new"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange: stopping the intake ends the session that sent the
-			// decision, cancelling its request.
-			h := checked(t)
-			owe(t, h)
-			withIntake(t, h, deployStarted)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			h.checks.onStopNow = cancel
-
-			// Act
-			err := h.o.DecideMediation(ctx, "ws-intake", tt.decision)
-
-			// Assert
-			if err != nil || !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
-				t.Fatalf("DecideMediation = %v, stopped %v; want the intake stopped", err, h.checks.stopped)
-			}
-			if ctx.Err() == nil {
-				t.Fatal("the stop did not cancel the request, so the test proves nothing")
-			}
-			if !slices.Equal(h.checks.createCtxErrs, map[bool][]error{true: {nil}, false: nil}[tt.decision.Kind == MediationEscalate]) {
-				t.Fatalf("escalation creation context errors %v, want one on a live context for an escalation", h.checks.createCtxErrs)
-			}
-			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error"}); ok {
-				t.Fatalf("records = %v, want no error", h.logs.Records())
+			if err != nil || len(h.checks.stopped) != 0 {
+				t.Fatalf("DecideMediation = %v, stopped %v; want the decision recorded and the intake left to end its turn", err, h.checks.stopped)
 			}
 		})
 	}

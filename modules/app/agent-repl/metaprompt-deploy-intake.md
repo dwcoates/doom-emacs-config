@@ -37,7 +37,7 @@
 
 - Every group is OWNED, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`.
   - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
-  - Every decision ends this session at once, so the command is the turn's last act.
+  - Every decision is the turn's last act: end the turn right after it, with a one-line reply at most, and agent-repl ends this session once the turn ends.
 - Something is wrong that the user should settle (a choice about how something looks or behaves, a NEW test reuse fact, or no problem an agent could fix from the evidence): escalate, with the findings on standard input as a dispatch's are:
 
 ```bash
