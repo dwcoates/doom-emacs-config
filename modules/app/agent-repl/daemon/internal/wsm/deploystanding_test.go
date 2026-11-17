@@ -39,7 +39,7 @@ func TestAQueueWithNoStandingWorkspaceInARoleAnswersNone(t *testing.T) {
 	s, repo := owingQueue(t)
 
 	// Act
-	_, found, err := s.StandingDeployCheckOf(context.Background(), repo, StandingEscalation)
+	_, found, err := s.StandingDeployCheckOf(context.Background(), repo, StandingFixer)
 
 	// Assert
 	if err != nil || found {
@@ -51,15 +51,15 @@ func TestMarkStandingBriefedMarksTheRolesWorkspace(t *testing.T) {
 	// Arrange
 	s, repo := owingQueue(t)
 	ctx := context.Background()
-	if err := s.RecordStandingDeployCheck(ctx, repo, StandingRemediation, "ws-r"); err != nil {
+	if err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, "ws-r"); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	err := s.MarkStandingBriefed(ctx, repo, StandingRemediation)
+	err := s.MarkStandingBriefed(ctx, repo, StandingFixer)
 
 	// Assert
-	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingRemediation)
+	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingFixer)
 	if err != nil || readErr != nil || !got.Briefed {
 		t.Fatalf("MarkStandingBriefed = %v, then %+v (%v), want it briefed", err, got, readErr)
 	}
@@ -70,7 +70,7 @@ func TestMarkStandingBriefedRefusesARoleWithNoWorkspace(t *testing.T) {
 	s, repo := owingQueue(t)
 
 	// Act
-	err := s.MarkStandingBriefed(context.Background(), repo, StandingEscalation)
+	err := s.MarkStandingBriefed(context.Background(), repo, StandingFixer)
 
 	// Assert
 	if err == nil {
@@ -82,18 +82,18 @@ func TestReplacingAStandingWorkspaceLeavesTheNewOneUnbriefed(t *testing.T) {
 	// Arrange
 	s, repo := owingQueue(t)
 	ctx := context.Background()
-	if err := s.RecordStandingDeployCheck(ctx, repo, StandingEscalation, "ws-old"); err != nil {
+	if err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, "ws-old"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.MarkStandingBriefed(ctx, repo, StandingEscalation); err != nil {
+	if err := s.MarkStandingBriefed(ctx, repo, StandingFixer); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	err := s.RecordStandingDeployCheck(ctx, repo, StandingEscalation, "ws-new")
+	err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, "ws-new")
 
 	// Assert
-	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingEscalation)
+	got, _, readErr := s.StandingDeployCheckOf(ctx, repo, StandingFixer)
 	if err != nil || readErr != nil || got != (StandingDeployCheck{Workspace: "ws-new"}) {
 		t.Fatalf("after the replace %+v (%v, %v), want ws-new unbriefed", got, err, readErr)
 	}
@@ -244,5 +244,24 @@ func TestOweCompaction(t *testing.T) {
 				t.Fatalf("OweCompaction = (%v, %v), owed (%+v, %v, %v); want (%v), owed %+v", owed, err, got, found, readErr, tt.want, tt.wantOwed)
 			}
 		})
+	}
+}
+
+func TestAWorkspaceReadsWhetherItIsAStandingDeployCheck(t *testing.T) {
+	// Arrange
+	s, repo := owingQueue(t)
+	ctx := context.Background()
+	standing, other := testWorkspace(t, s), testWorkspace(t, s)
+	if err := s.RecordStandingDeployCheck(ctx, repo, StandingFixer, standing.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	gotStanding, err1 := s.Workspace(ctx, standing.ID)
+	gotOther, err2 := s.Workspace(ctx, other.ID)
+
+	// Assert
+	if err1 != nil || err2 != nil || !gotStanding.StandingDeployCheck || gotOther.StandingDeployCheck {
+		t.Fatalf("StandingDeployCheck = (%v, %v), errors (%v, %v); want only the recorded one", gotStanding.StandingDeployCheck, gotOther.StandingDeployCheck, err1, err2)
 	}
 }

@@ -12,7 +12,8 @@ import (
 
 // deployStandingDDL is the layout-164 addition: the STANDING deploy check
 // workspaces (owner ruling, 2026-11-17). A repository whose queue checks its
-// deploys keeps one intake, one remediation and one escalation workspace
+// deploys keeps one intake and one fixer workspace (a remediation and an
+// escalation in one)
 // across every deploy, so each role's conversation carries what the earlier
 // checks found and fixed; the daemon prompts the standing one rather than
 // making a workspace per check.
@@ -31,7 +32,7 @@ import (
 const deployStandingDDL = `
 CREATE TABLE deploy_check_standing (
   repo_key     TEXT NOT NULL,
-  role         TEXT NOT NULL CHECK (role IN ('intake', 'remediation', 'escalation')),
+  role         TEXT NOT NULL CHECK (role IN ('intake', 'fixer')),
   workspace_id TEXT NOT NULL,
   briefed      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (repo_key, role)
@@ -43,16 +44,17 @@ ALTER TABLE merge_queue_repos ADD COLUMN deploy_compaction_armed INTEGER NOT NUL
 // DeployCheckRoleName is one standing deploy check role as the store spells it.
 type DeployCheckRoleName string
 
-// The three standing roles.
+// The two standing roles.
 const (
 	StandingIntake      DeployCheckRoleName = "intake"
-	StandingRemediation DeployCheckRoleName = "remediation"
-	StandingEscalation  DeployCheckRoleName = "escalation"
+	// StandingFixer both remediates a dispatch and settles an escalation with
+	// the user (owner ruling, 2026-11-17): one workspace, two briefs.
+	StandingFixer DeployCheckRoleName = "fixer"
 )
 
 // StandingDeployCheckRoles is every standing role, in the order a deploy
 // meets them.
-var StandingDeployCheckRoles = []DeployCheckRoleName{StandingIntake, StandingRemediation, StandingEscalation}
+var StandingDeployCheckRoles = []DeployCheckRoleName{StandingIntake, StandingFixer}
 
 // QuietChecksBeforeCompaction is how many checks in a row must end with no
 // dispatch and no escalation before an armed queue's standing workspaces are
@@ -66,7 +68,7 @@ type StandingDeployCheck struct {
 	Briefed bool
 }
 
-// validStandingRole refuses a role outside the three.
+// validStandingRole refuses a role outside the two.
 func validStandingRole(role DeployCheckRoleName) error {
 	if slices.Contains(StandingDeployCheckRoles, role) {
 		return nil

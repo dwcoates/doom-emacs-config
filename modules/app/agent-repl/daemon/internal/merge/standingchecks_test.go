@@ -52,7 +52,7 @@ func TestStandingWorkspaceAnswersTheQueuesOne(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			standingIn(t, h, wsm.StandingEscalation, "ws-standing", tt.closed)
+			standingIn(t, h, wsm.StandingFixer, "ws-standing", tt.closed)
 
 			// Act
 			got, err := h.o.standingWorkspace(context.Background(), queueOf(t, h), DeployCheckEscalation, dlog.Context{})
@@ -101,7 +101,7 @@ func TestStandingWorkspaceMakesANewOneWhenTheRecordedOneIsGone(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	if err := h.db.RecordStandingDeployCheck(context.Background(), mediationKey(h), wsm.StandingRemediation, "ws-gone"); err != nil {
+	if err := h.db.RecordStandingDeployCheck(context.Background(), mediationKey(h), wsm.StandingFixer, "ws-gone"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +190,7 @@ func TestAQuietRunAfterWorkCompactsEveryStandingWorkspace(t *testing.T) {
 			for _, s := range []struct {
 				role wsm.DeployCheckRoleName
 				ws   ids.WorkspaceID
-			}{{wsm.StandingIntake, "ws-intake"}, {wsm.StandingRemediation, "ws-remedy"}, {wsm.StandingEscalation, "ws-escalate"}} {
+			}{{wsm.StandingIntake, "ws-intake"}, {wsm.StandingFixer, "ws-remedy"}, {wsm.StandingFixer, "ws-escalate"}} {
 				standingIn(t, h, s.role, s.ws, false)
 			}
 			if tt.work {
@@ -306,13 +306,13 @@ func TestTheChecksWorkspacesAreAdoptedAsTheStandingOnes(t *testing.T) {
 	for _, want := range []struct {
 		role wsm.DeployCheckRoleName
 		ws   ids.WorkspaceID
-	}{{wsm.StandingIntake, "ws-intake"}, {wsm.StandingEscalation, "ws-old-escalation"}} {
+	}{{wsm.StandingIntake, "ws-intake"}, {wsm.StandingFixer, "ws-old-escalation"}} {
 		got, found, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), want.role)
 		if err != nil || !found || got != (wsm.StandingDeployCheck{Workspace: want.ws, Briefed: true}) {
 			t.Fatalf("standing %s = (%+v, %v, %v), want %s adopted, briefed", want.role, got, found, err, want.ws)
 		}
 	}
-	if _, found, _ := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingRemediation); found {
+	if _, found, _ := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingFixer); found {
 		t.Fatal("a remediation was adopted though the check has none")
 	}
 }
@@ -364,7 +364,7 @@ func TestEarlierEscalationsAreRetiredOnceTheStandingOneExists(t *testing.T) {
 			oneOffEscalation(t, h, "ws-a", false)
 			oneOffEscalation(t, h, "ws-closed", true)
 			if tt.standing {
-				standingIn(t, h, wsm.StandingEscalation, "ws-escalate", false)
+				standingIn(t, h, wsm.StandingFixer, "ws-escalate", false)
 				oneOffEscalation(t, h, "ws-escalate", false)
 			}
 			m := &wsm.Mediation{Escalation: tt.held}
@@ -385,7 +385,7 @@ func TestAnEarlierEscalationThatCannotBeRetiredIsRecorded(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	oneOffEscalation(t, h, "ws-a", false)
-	standingIn(t, h, wsm.StandingEscalation, "ws-escalate", false)
+	standingIn(t, h, wsm.StandingFixer, "ws-escalate", false)
 	h.checks.closeErr = errors.New("database is locked")
 
 	// Act

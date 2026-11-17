@@ -129,6 +129,8 @@ func TestRuns(t *testing.T) {
 		{name: "a collapsed one-shot runs, as the fold spares it", ws: Workspace{OneShot: true}, repoFolded: true, want: true},
 		{name: "a collapsed workspace with a merge pending runs, as the fold spares it", ws: Workspace{MergePending: true}, repoFolded: true, want: true},
 		{name: "a hidden one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Hidden: true}, want: false},
+		{name: "a hidden standing deploy check runs", ws: Workspace{Hidden: true, StandingDeployCheck: true}, want: true},
+		{name: "a collapsed standing deploy check runs", ws: Workspace{StandingDeployCheck: true}, repoFolded: true, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,6 +156,7 @@ func TestKeepaliveHeld(t *testing.T) {
 		{name: "a hidden workspace lets its cache lapse", ws: Workspace{Hidden: true}, want: true},
 		{name: "a hidden workspace the user is looking at keeps its cache warm", ws: Workspace{Hidden: true, Current: true}, want: false},
 		{name: "a reopened merged hidden workspace lets its cache lapse", ws: Workspace{Hidden: true, MergedAt: &merged}, want: true},
+		{name: "a hidden standing deploy check keeps its cache warm", ws: Workspace{Hidden: true, StandingDeployCheck: true}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

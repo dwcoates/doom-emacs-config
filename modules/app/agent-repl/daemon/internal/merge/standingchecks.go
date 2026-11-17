@@ -34,9 +34,9 @@ func standingRole(role DeployCheckRole) wsm.DeployCheckRoleName {
 	case DeployCheckIntake:
 		return wsm.StandingIntake
 	case DeployCheckRemediation:
-		return wsm.StandingRemediation
+		return wsm.StandingFixer
 	case DeployCheckEscalation:
-		return wsm.StandingEscalation
+		return wsm.StandingFixer
 	}
 	panic(fmt.Sprintf("merge: no standing role for %v", role))
 }
@@ -211,7 +211,7 @@ func (o *orchestrator) adoptStanding(ctx context.Context, q checkedQueue, m *wsm
 	for _, at := range []struct {
 		role wsm.DeployCheckRoleName
 		ws   ids.WorkspaceID
-	}{{wsm.StandingIntake, m.Intake}, {wsm.StandingRemediation, m.Remediation}, {wsm.StandingEscalation, m.Escalation}} {
+	}{{wsm.StandingIntake, m.Intake}, {wsm.StandingFixer, m.Remediation}, {wsm.StandingFixer, m.Escalation}} {
 		if at.ws == "" {
 			continue
 		}
@@ -243,7 +243,7 @@ func (o *orchestrator) adoptStanding(ctx context.Context, q checkedQueue, m *wsm
 // queue is the user's to release. Each is closed at its running turn's end.
 func (o *orchestrator) retireOneOffEscalations(ctx context.Context, q checkedQueue, m *wsm.Mediation) {
 	fields := dlog.Context{"repo": string(q.key)}
-	standing, found, err := o.deps.DB.StandingDeployCheckOf(ctx, q.key, wsm.StandingEscalation)
+	standing, found, err := o.deps.DB.StandingDeployCheckOf(ctx, q.key, wsm.StandingFixer)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read the standing escalation; no earlier escalation is retired", withField(fields, "error", err.Error()))
 		return

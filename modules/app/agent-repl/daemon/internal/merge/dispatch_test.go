@@ -34,10 +34,10 @@ func withRemediation(t *testing.T, h *harness) {
 	h.db.mu.Lock()
 	h.db.workspaces["ws-remedy"] = wsm.Workspace{ID: "ws-remedy", Name: "deploy-remediation", Repo: theRepository, Closed: true}
 	h.db.mu.Unlock()
-	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), wsm.StandingRemediation, "ws-remedy"); err != nil {
+	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), wsm.StandingFixer, "ws-remedy"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), wsm.StandingRemediation); err != nil {
+	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), wsm.StandingFixer); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
