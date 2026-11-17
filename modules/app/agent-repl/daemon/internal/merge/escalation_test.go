@@ -653,15 +653,16 @@ func TestAnIntakeThatCannotBeClosedAfterItsDecisionIsRecorded(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	decideInTurn(t, h, Decision{Kind: MediationEscalate, Summary: "yours"})
 	h.checks.stopErr = errors.New("kill refused")
 
-	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours"})
+	// Act: the session ends once the escalating turn ends (owner ruling,
+	// 2026-11-17), so the failed stop comes after the decision is recorded.
+	h.o.Mediate(context.Background())
 
 	// Assert: the decision stands, and the failed close is the record's.
-	if err != nil || heldEscalation(t, h) != "ws-fixer" {
-		t.Fatalf("DecideMediation = %v, want the escalation held", err)
+	if heldEscalation(t, h) != "ws-fixer" {
+		t.Fatalf("check %+v, want the escalation held", owedCheck(t, h))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake decided but its session could not be ended"}); !ok {
 		t.Fatalf("records = %v, want the failed close at ERROR", h.logs.Records())
