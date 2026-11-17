@@ -46,8 +46,11 @@ import { BUBBLE_EXPANDED_ONLY_CLASS } from "../src/bubble/expanded-only.js";
 import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../src/bubble/collapsed-thumbnail.js";
 import { HELD_STATUS_BADGES } from "../src/held/held-prompt.js";
 import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/response.js";
-import { cascadedValue, cascadedValueIn, inDocument, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
+import { cascadedValue, cascadedValueIn, inDocument, inRail, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
+import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/band-fit.js";
+import { DEPLOYS_GROUP_CLASS, DEPLOYS_GROUP_FOLDED_CLASS } from "../src/sidebar/deploys-fold.js";
+import { MERGED_GROUP_HEAD_CLASS } from "../src/sidebar/roster.js";
 import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
 import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
 import { createControl } from "../src/control.js";
@@ -7007,5 +7010,81 @@ describe("the feed content's text cursor (owner ruling, 2026-11-08)", () => {
 
     // Assert
     expect(cursors).toEqual(["default"]);
+  });
+});
+
+/**
+ * A BAND HEADER'S HOVER BOX IS ONE BOX, FOLDED OR OPEN (owner request,
+ * 2026-11-17): Merge Queue's and Recently Merged's header draws its hover wash
+ * over its own box, so that box keeps the same padding and margins whether the
+ * band is folded or open, and an open band's first repository group starts
+ * below it rather than eating into it.
+ */
+describe("a band header's hover box, folded or open", () => {
+  /** The rail's bands with BAND folded as FOLDED, each open band holding one repository group. */
+  function bands(band: string, folded: boolean): HTMLElement {
+    const pane = document.createElement("div");
+    pane.className = "sb-pane";
+    for (const cls of [MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS]) {
+      const section = document.createElement("div");
+      section.className = `repo ${cls}`;
+      if (cls === band && folded) section.classList.add(DEPLOYS_GROUP_FOLDED_CLASS);
+      const head = document.createElement("div");
+      head.className = "repo-head";
+      const rows = document.createElement("div");
+      rows.className = "rows";
+      const group = document.createElement("div");
+      group.className = DEPLOYS_GROUP_CLASS;
+      const groupHead = document.createElement("div");
+      groupHead.className = MERGED_GROUP_HEAD_CLASS;
+      group.append(groupHead);
+      rows.append(group);
+      section.append(head, rows);
+      pane.append(section);
+    }
+    return pane;
+  }
+
+  const BOX = ["padding-top", "padding-bottom", "margin-top", "margin-bottom", "line-height", "font-size"] as const;
+
+  /** BAND's header box declarations, BAND folded as FOLDED. */
+  function headBox(band: string, folded: boolean): Record<string, string> {
+    return inRail(bands(band, folded), (rail) => {
+      const head = rail.querySelector(`.${band} > .repo-head`) as HTMLElement;
+      return Object.fromEntries(BOX.map((property) => [property, cascadedValue(head, property)]));
+    });
+  }
+
+  /** The box declarations of BAND's first repository group's header, BAND open. */
+  function firstGroupHead(band: string): { paddingTop: string; marginTop: string } {
+    return inRail(bands(band, false), (rail) => {
+      const groupHead = rail.querySelector(`.${band} > .rows > .${DEPLOYS_GROUP_CLASS}:first-child > .${MERGED_GROUP_HEAD_CLASS}`) as HTMLElement;
+      return { paddingTop: cascadedValue(groupHead, "padding-top"), marginTop: cascadedValue(groupHead, "margin-top") };
+    });
+  }
+
+  it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("draws %s's header box the same open as folded", (band) => {
+    // Arrange / Act
+    const open = headBox(band, false);
+    const folded = headBox(band, true);
+
+    // Assert
+    expect(open).toEqual(folded);
+  });
+
+  it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("pads %s's open header box below its text", (band) => {
+    // Arrange / Act
+    const open = headBox(band, false);
+
+    // Assert
+    expect(open["padding-bottom"]).toBe("var(--hidden-rule-lead)");
+  });
+
+  it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("starts %s's first group below its header box, with no padding or pull into it", (band) => {
+    // Arrange / Act
+    const first = firstGroupHead(band);
+
+    // Assert
+    expect({ paddingTop: first.paddingTop, negativeMargin: first.marginTop.startsWith("-") }).toEqual({ paddingTop: "0px", negativeMargin: false });
   });
 });
