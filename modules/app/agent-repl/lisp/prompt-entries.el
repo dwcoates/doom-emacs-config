@@ -532,11 +532,11 @@ The composer's `M-k' in insert mode on an entry line: `3.3 - ' opens
 
 ;;;; ---- Stepping an entry along its tree ----
 ;;
-;; `C-o' and `C-i' on an entry line, in command or insert mode, relabel the
+;; `C-i' and `C-o' on an entry line, in command or insert mode, relabel the
 ;; entry to answer another node of the tree the entry targets, the entry's
-;; words kept.  `C-o' steps on, to the node read after it: its first child
+;; words kept.  `C-i' steps on, to the node read after it: its first child
 ;; (`3.2 - ' becomes `3.2.1 - '), else its next sibling (`3.3 - '), else the
-;; next sibling of its nearest ancestor that has one (`4 - ').  `C-i' steps
+;; next sibling of its nearest ancestor that has one (`4 - ').  `C-o' steps
 ;; back, to its previous sibling (`3.2 - ' becomes `3.1 - '), else up to its
 ;; parent (`3.1 - ' becomes `3 - '), so a root steps back to the previous
 ;; root (`3 - ' becomes `2 - ').  The daemon finds the node
@@ -575,7 +575,7 @@ format of the label."
 
 (defun agent-repl-prompt-entries-step-on ()
   "Relabel point's entry to answer the node read after its own.
-The composer's `C-o' on an entry line: `3.2 - ' becomes `3.2.1 - ', or
+The composer's `C-i' on an entry line: `3.2 - ' becomes `3.2.1 - ', or
 `3.3 - ' when 3.2 has no child, or `4 - ' when 3 has no later child, its
 words kept, the node found in the tree the entry targets.  The tree's
 last node keeps its label, and the composer says so."
@@ -583,8 +583,8 @@ last node keeps its label, and the composer says so."
   (agent-repl-prompt-entries--step :following "%s is the last node to answer"))
 
 (defun agent-repl-prompt-entries-step-back ()
-  "Relabel point's entry to answer the node before its own, `C-o' undone.
-The composer's `C-i' on an entry line: `3.2 - ' becomes `3.1 - ', or
+  "Relabel point's entry to answer the node before its own, `C-i' undone.
+The composer's `C-o' on an entry line: `3.2 - ' becomes `3.1 - ', or
 `3 - ' when 3.2 is its parent's first child, its words kept, the node
 found in the tree the entry targets, as `O' finds it.  A root steps
 back to the previous root (`3 - ' becomes `2 - ').  The first root keeps
@@ -635,10 +635,10 @@ line, so the key lookup goes on to the next map."
   `(menu-item "" ,command :filter agent-repl-prompt-entries--on-entry-filter))
 
 (defconst agent-repl-prompt-entries--entry-keys
-  `((,(kbd "C-o") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-on))
-    ([C-i] . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-back)))
+  `(([C-i] . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-on))
+    (,(kbd "C-o") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-step-back)))
   "The composer's entry-only keys in command and insert mode, as (KEY . BINDING).
-`C-o' steps on and `C-i' steps back on an entry line, and both fall through
+`C-i' steps on and `C-o' steps back on an entry line, and both fall through
 elsewhere.  `[C-i]' is the event Doom decodes a GUI `C-i' into when a
 binding for it stands, so `TAB' keeps its own meaning.")
 
@@ -655,8 +655,8 @@ and all fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
-`o' and `O' in command mode open a line on a neighbor's label; `C-o' and
-`C-i' in command and insert mode step an entry line's entry
+`o' and `O' in command mode open a line on a neighbor's label; `C-i' and
+`C-o' in command and insert mode step an entry line's entry
 \(`agent-repl-prompt-entries--entry-keys'), and `M-j' and `M-k' in insert
 mode open its sibling (`agent-repl-prompt-entries--insert-entry-keys')."
   (evil-define-key* 'normal agent-repl-input-mode-map

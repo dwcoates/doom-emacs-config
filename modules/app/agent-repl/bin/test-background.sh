@@ -352,16 +352,23 @@ if [ -n "$QUERY" ]; then
     fi
 
     # --- 2c'. on macOS a test process keeps the CPU priority of normal work -
-    # The harness was wrapped by the helper, and no CPU clamp is set (owner
-    # ruling 2026-11-13): a test process runs above utility's 20 (a process
-    # at nice alone runs at 31, measured 2026-11-13).
+    # No CPU clamp is set (owner ruling 2026-11-13: a test process runs above
+    # utility's 20). The scheduler's live `ps pri` is not the check: macOS
+    # decays it with the process's recent CPU use, so a busy gate host read
+    # 20 or below from an unclamped process (2026-11-17). What decides it is
+    # whether the helper reaches for `taskpolicy`, the only call that clamps,
+    # so a stub `taskpolicy` ahead on PATH records any call.
     if [ "$HOST_OS" = Darwin ]; then
-        out="$(ps -o pri= -p "$$" 2>&1 | tr -d ' ')" || true
-        if [[ $out =~ ^[0-9]+$ ]] && [ "$out" -gt 20 ]; then
-            pass "Darwin (real): a test process keeps the CPU priority of normal work, above utility's 20"
+        STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/taskpolicy-stub.XXXXXX")"
+        printf '#!/bin/sh\necho called > "%s/called"\nexec "$@"\n' "$STUB_DIR" >"$STUB_DIR/taskpolicy"
+        chmod +x "$STUB_DIR/taskpolicy"
+        PATH="$STUB_DIR:$PATH" env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c true >/dev/null 2>&1 || true
+        if [ ! -e "$STUB_DIR/called" ]; then
+            pass "Darwin (real): a test process keeps the CPU priority of normal work, the helper never calling taskpolicy"
         else
-            fail "Darwin (real): a test process keeps the CPU priority of normal work, above utility's 20" "priority: $out"
+            fail "Darwin (real): a test process keeps the CPU priority of normal work, the helper never calling taskpolicy" "taskpolicy was called"
         fi
+        rm -rf "$STUB_DIR"
     fi
 
     # --- 2d. the wrap EXECs: the caller's pid is the command's ----------------
