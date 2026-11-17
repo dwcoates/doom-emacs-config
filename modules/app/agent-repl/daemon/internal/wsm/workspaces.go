@@ -1048,6 +1048,9 @@ func hideColumns(hidden bool, at time.Time) []workspaceColumn {
 		{name: "hidden_at", value: hiddenAt},
 		{name: "cache_lapses_at", value: nil},
 		{name: "cache_lapse_gated_tokens", value: nil},
+		// An ordinary move forgets which family hide hid the workspace;
+		// HideFamily marks its members after.
+		{name: "hidden_with", value: nil},
 	}
 }
 

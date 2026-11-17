@@ -2065,12 +2065,14 @@ func TestHideColumns(t *testing.T) {
 			{name: "hidden_at", value: nanos(at)},
 			{name: "cache_lapses_at", value: nil},
 			{name: "cache_lapse_gated_tokens", value: nil},
+			{name: "hidden_with", value: nil},
 		}},
 		{name: "a show clears its instant and the lapse", hidden: false, want: []workspaceColumn{
 			{name: "hidden", value: false},
 			{name: "hidden_at", value: nil},
 			{name: "cache_lapses_at", value: nil},
 			{name: "cache_lapse_gated_tokens", value: nil},
+			{name: "hidden_with", value: nil},
 		}},
 	}
 	for _, tt := range tests {
