@@ -2392,6 +2392,16 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			})
 			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
 		}
+		if errors.Is(err, dlog.ErrWorkspaceDirGone) {
+			// THE WORKSPACE'S DIRECTORY IS GONE (a landing reaped the
+			// worktree): no shim can ever start in it, which is no fault of
+			// the workspace's. The chain is kept, so a keep-alive's restore
+			// retires what it owes (cachelapse.Keeper.restored).
+			log.Info(opBringUp, "no shim is brought up: the workspace's directory is gone", dlog.Context{
+				"workspace": string(ws), "cause": err.Error(),
+			})
+			return nil, pathNone, fmt.Errorf("%w: %w", err, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false))
+		}
 		if err != nil {
 			log.Error(opBringUp, "the shim did not come up", dlog.Context{"cause": err.Error()})
 			// A BRING-UP DEATH IS A WORKSPACE FAULT, not only a failed rpc.

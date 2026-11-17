@@ -4783,3 +4783,28 @@ func TestASummaryAndAStartRefuseAMissingTranscriptAlike(t *testing.T) {
 		t.Fatalf("refusal = %+v, want the shared spelling %+v", got, want)
 	}
 }
+
+// TestABringUpInAGoneWorkspaceDirectoryIsNoFault covers a spawn the
+// supervisor answers ErrWorkspaceDirGone (a landing reaped the worktree,
+// 2026-11-17 16:18): the bring-up records it at INFO, keeps the chain for the
+// keep-alive's restore to retire, and never records the shim at ERROR.
+func TestABringUpInAGoneWorkspaceDirectoryIsNoFault(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.supervisor.spawnErr = fmt.Errorf("shimclient: start %q in /gone: %w", "node", dlog.ErrWorkspaceDirGone)
+
+	// Act.
+	err := f.fleet.Start(context.Background(), ws.ID)
+
+	// Assert.
+	if !errors.Is(err, dlog.ErrWorkspaceDirGone) {
+		t.Fatalf("Start = %v, want ErrWorkspaceDirGone kept", err)
+	}
+	if records := recordsAt(f.log, opBringUp, "error"); len(records) != 0 {
+		t.Fatalf("error records = %v, want none", records)
+	}
+	if records := recordsAt(f.log, opBringUp, "info"); len(records) == 0 {
+		t.Fatalf("info records = %v, want the gone directory recorded", records)
+	}
+}

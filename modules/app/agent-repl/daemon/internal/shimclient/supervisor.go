@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"sync"
@@ -398,8 +399,21 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	if err := startErr; err != nil {
 		closeGate(log, opener, readyR)
 		s.mu.Unlock()
+		// A WORKSPACE DIRECTORY GONE FAILS THE CHILD'S CHDIR, which Go
+		// reports as `fork/exec <node>: no such file or directory`, naming
+		// node, which exists (2026-11-17 16:18: a landed one-shot's parked
+		// session revived for its keep-alive after its worktree was reaped,
+		// fourteen ERRORs blaming /opt/homebrew/bin/node). The directory is
+		// read after the failure, so the answer is the directory's own state,
+		// and the caller's ErrWorkspaceDirGone branch retires what it owes.
+		if _, statErr := os.Stat(spec.WorkspaceDir); errors.Is(statErr, fs.ErrNotExist) {
+			log.Info("daemon.shimclient.spawn", "the workspace's directory is gone, so no shim can start in it", dlog.Context{
+				"node": spec.NodeBin, "cwd": spec.WorkspaceDir, "error": err.Error(),
+			})
+			return nil, fmt.Errorf("shimclient: start %q in %s: %w: %w", spec.NodeBin, spec.WorkspaceDir, dlog.ErrWorkspaceDirGone, err)
+		}
 		log.Error("daemon.shimclient.spawn", "spawn failed", dlog.Context{
-			"node": spec.NodeBin, "error": err.Error(),
+			"node": spec.NodeBin, "cwd": spec.WorkspaceDir, "error": err.Error(),
 		})
 		return nil, fmt.Errorf("shimclient: start %q: %w", spec.NodeBin, err)
 	}
