@@ -37,10 +37,10 @@ agent-repld merge-queue mediation escalate -problems -summary "<what is wrong, i
 JSON
 ```
 
-  - This workspace never talks to the user: agent-repl briefs the repository's standing escalation workspace with the summary and findings, and notifies the user, whose click opens it.
+  - This workspace never talks to the user: agent-repl briefs the repository's standing fixer with the summary and findings, to propose a plan and finish once the user agrees, and notifies the user, whose click opens it.
   - The queue lands nothing until the escalation's fix deploys and is approved, or the user releases the queue.
   - The escalation workspace is told every SEEN BEFORE, RECURRED and OWNED group beside the findings, and owns every group it is told that nobody owned.
-- Problems an agent can fix, of any standing but OWNED: dispatch them, with their evidence, to the repository's standing remediation workspace.
+- Problems an agent can fix, of any standing but OWNED: dispatch them, with their evidence, to the repository's standing fixer, which fixes and finishes on its own.
   - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem nobody has ended.
   - Each problem quotes at least one of its group's records verbatim: agent-repl reads the group from it, and the remediation owns that group until its fix deploys.
   - The problems go on standard input as JSON, most serious first, each with its verbatim evidence:

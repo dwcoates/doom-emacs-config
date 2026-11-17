@@ -1,5 +1,5 @@
 <!-- used by: daemon internal/merge/escalation.go (escalate); placeholders: {{repo_dir}}, {{deploy_started}}, {{summary}}, {{problems}}, {{old_problems}} -->
-The deploy of {{repo_dir}} that began at {{deploy_started}} was escalated to the user, and its merge queue lands nothing until this workspace's fix deploys and its deploy check approves it, or the user releases the queue (the "release" beside "zettel needs you", or `agent-repld merge-queue release-escalation -repository here`). This is the repository's one standing escalation workspace: every escalated deploy comes here, so earlier ones in this conversation may bear on this one. The deploy check's summary:
+The deploy of {{repo_dir}} that began at {{deploy_started}} was escalated to the user, and its merge queue lands nothing until this workspace's fix deploys and its deploy check approves it, or the user releases the queue (the "release" beside "zettel needs you", or `agent-repld merge-queue release-escalation -repository here`). This is the repository's standing fixer: every dispatched fix and every escalated deploy comes here, so earlier ones in this conversation may bear on this one. Its worktree was brought to the main branch's tip for this brief. The deploy check's summary:
 
 {{summary}}
 

@@ -534,7 +534,7 @@ export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
  * 2026-11-16), its words fixed text the same for every repository, written
  * lowercase for the header to draw uppercase: `hot-loading zettel` while a
  * build rolls out, `assessing zettel health` while the chain's intake checks
- * it, `fixing zettel issues` while a remediation workspace fixes what the
+ * it, `fixing zettel` while a remediation workspace fixes what the
  * intake or its own gate found, `testing zettel fixes` while a
  * remediation's or an escalation's finished fix runs its gate and lands, its
  * workspace standing by hidden, `zettel needs you` while an escalated check
@@ -553,7 +553,7 @@ export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: Sideba
       return mediationLabel(sc, "assessing zettel health", "Zettel's health after the last landing is being assessed; the queue waits for it",
         requireMessage(standing.value.target, `${path}.standing.checking.target`), `${path}.standing.checking.target`);
     case "fixing":
-      return mediationLabel(sc, "fixing zettel issues", "a remediation is fixing the issues the last landing caused in Zettel; the queue waits for its fix",
+      return mediationLabel(sc, "fixing zettel", "the fixer is fixing the issues the last landing caused in Zettel; the queue waits for its fix",
         requireMessage(standing.value.target, `${path}.standing.fixing.target`), `${path}.standing.fixing.target`);
     case "testing":
       return mediationLabel(sc, "testing zettel fixes", "a remediation's fix is running its full gate, then lands; the queue waits for it",

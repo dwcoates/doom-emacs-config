@@ -4668,7 +4668,7 @@ func (x *RosterRepoMergeQueue) GetMediation() *RosterMergeQueueMediation {
 //
 // The label's words are the standing's, fixed text the same for every
 // repository (owner ruling, 2026-11-16): `HOT-LOADING ZETTEL`, `ASSESSING
-// ZETTEL HEALTH`, `FIXING ZETTEL ISSUES`, `TESTING ZETTEL FIXES` or
+// ZETTEL HEALTH`, `FIXING ZETTEL`, `TESTING ZETTEL FIXES` or
 // `ZETTEL NEEDS YOU`. A click
 // on it selects the workspace at work, when one is. Tag 1 (`subject`) is
 // RETIRED: no workspace is drawn as a queue row for the check. Tag 5
@@ -4789,7 +4789,7 @@ type RosterMergeQueueMediation_Checking struct {
 
 type RosterMergeQueueMediation_Fixing struct {
 	// A remediation workspace is fixing what the intake found, or what its
-	// own finish's gate failed on (`FIXING ZETTEL ISSUES`).
+	// own finish's gate failed on (`FIXING ZETTEL`).
 	Fixing *RosterMergeQueueMediationFixing `protobuf:"bytes,4,opt,name=fixing,proto3,oneof"`
 }
 
@@ -4913,7 +4913,7 @@ func (x *RosterMergeQueueMediationChecking) GetTarget() *RosterMergeQueueMediati
 	return nil
 }
 
-// FIXING ZETTEL ISSUES.
+// FIXING ZETTEL.
 type RosterMergeQueueMediationFixing struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. What a click on the label selects: the remediation workspace.
