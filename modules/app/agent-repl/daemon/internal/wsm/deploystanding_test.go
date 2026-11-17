@@ -3,6 +3,7 @@ package wsm
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // owingQueue answers a store with REPO's queue owing a check, so the queue
@@ -263,5 +264,55 @@ func TestAWorkspaceReadsWhetherItIsAStandingDeployCheck(t *testing.T) {
 	// Assert
 	if err1 != nil || err2 != nil || !gotStanding.StandingDeployCheck || gotOther.StandingDeployCheck {
 		t.Fatalf("StandingDeployCheck = (%v, %v), errors (%v, %v); want only the recorded one", gotStanding.StandingDeployCheck, gotOther.StandingDeployCheck, err1, err2)
+	}
+}
+
+func TestRecordMediationEnding(t *testing.T) {
+	tests := []struct {
+		name    string
+		owed    time.Time
+		ending  DeployEnding
+		want    bool
+		wantErr bool
+		stored  DeployEnding
+	}{
+		{name: "the owed check takes its deploy's ending", owed: instant, ending: DeployStoppedShort, want: true, stored: DeployStoppedShort},
+		{name: "an older deploy's ending is not recorded on a newer check", owed: instant.Add(-time.Minute), ending: DeployFinished},
+		{name: "an ending that is none of the three is refused", owed: instant, ending: "exploded", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, repo := owingQueue(t)
+			ctx := context.Background()
+
+			// Act
+			got, err := s.RecordMediationEnding(ctx, repo, tt.owed, tt.ending)
+
+			// Assert
+			m, readErr := s.MediationOf(ctx, repo)
+			if (err != nil) != tt.wantErr || got != tt.want || readErr != nil || m == nil || m.DeployEnding != tt.stored {
+				t.Fatalf("RecordMediationEnding = (%v, %v), stored %+v (%v); want (%v), %q stored", got, err, m, readErr, tt.want, tt.stored)
+			}
+		})
+	}
+}
+
+func TestANewerDeployForgetsTheOlderOnesEnding(t *testing.T) {
+	// Arrange
+	s, repo := owingQueue(t)
+	ctx := context.Background()
+	if _, err := s.RecordMediationEnding(ctx, repo, instant, DeployStoppedShort); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := s.OweMediation(ctx, repo, instant.Add(time.Minute), ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if m, err := s.MediationOf(ctx, repo); err != nil || m == nil || m.DeployEnding != "" {
+		t.Fatalf("MediationOf = (%+v, %v), want the newer check with no ending yet", m, err)
 	}
 }

@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"time"
 
+	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/wsm"
 )
 
 // opMediationHook is the operation the deploy edges' hand-off to the merge
@@ -72,7 +75,8 @@ func (h *mediationHook) rounds() {
 // nothing new for an intake to read. A deploy that ended here without
 // beginning here (one a successor took over) never changed nothing: it
 // moved the daemon.
-func (h *mediationHook) ended(unchanged bool) {
+func (h *mediationHook) ended(ending deployprogress.Ending) {
+	unchanged := ending == deployprogress.EndedUnchanged
 	h.mu.Lock()
 	owed := h.owed
 	h.owed = time.Time{}
@@ -86,10 +90,31 @@ func (h *mediationHook) ended(unchanged bool) {
 		unchanged = false
 	}
 	inflight.Go(func() {
+		// THE ENDING IS RECORDED BEFORE THE ROUND, so the intake is told
+		// whether the deploy finished or stopped short (owner ruling,
+		// 2026-11-17). A deploy that ended here without beginning here has
+		// no start to name its check by; its ending is the successor's.
+		if !owed.IsZero() {
+			// An ending that cannot be recorded is recorded by the orchestrator.
+			_ = o.NoteDeployEnding(h.ctx, owed, wsmEnding(ending))
+		}
 		if unchanged {
 			// A check that cannot be released is recorded by the orchestrator.
 			_ = o.ReleaseUnchangedDeploy(h.ctx, owed)
 		}
 		o.Mediate(h.ctx)
 	})
+}
+
+// wsmEnding is ENDING as a deploy's check records it.
+func wsmEnding(ending deployprogress.Ending) wsm.DeployEnding {
+	switch ending {
+	case deployprogress.EndedFinished:
+		return wsm.DeployFinished
+	case deployprogress.EndedUnchanged:
+		return wsm.DeployUnchanged
+	case deployprogress.EndedStoppedShort:
+		return wsm.DeployStoppedShort
+	}
+	panic(fmt.Sprintf("agent-repld: a deploy ending the edges never tell: %d", ending))
 }

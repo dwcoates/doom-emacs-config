@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -435,5 +436,83 @@ func TestTheStandingFixerStaysOpenAfterItsFixDeploys(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish,
 		Message: "the landed fix deployed; the standing fixer stays open for the next brief"}); !ok {
 		t.Fatalf("records = %v, want the fixer kept open recorded", h.logs.Records())
+	}
+}
+
+func TestNoteDeployEndingRecordsTheEndingOnTheOwedCheck(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+
+	// Act
+	err := h.o.NoteDeployEnding(context.Background(), deployStarted, wsm.DeployStoppedShort)
+
+	// Assert
+	if m := owedCheck(t, h); err != nil || m == nil || m.DeployEnding != wsm.DeployStoppedShort {
+		t.Fatalf("NoteDeployEnding = %v, check %+v; want it stopped short", err, m)
+	}
+}
+
+func TestRenderEndingSaysHowTheDeployEnded(t *testing.T) {
+	tests := []struct {
+		ending wsm.DeployEnding
+		want   string
+	}{
+		{wsm.DeployFinished, "It finished: every component built and rolled out."},
+		{wsm.DeployUnchanged, "It finished, changing nothing."},
+		{wsm.DeployStoppedShort, "It STOPPED SHORT of finishing"},
+		{"", "How it ended was not recorded"},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.ending), func(t *testing.T) {
+			// Act / Assert
+			if got := RenderEnding(tt.ending); !strings.HasPrefix(got, tt.want) {
+				t.Fatalf("RenderEnding(%q) = %q, want it to open %q", tt.ending, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheIntakeIsToldHowItsDeployEnded(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	if err := h.o.NoteDeployEnding(context.Background(), deployStarted, wsm.DeployStoppedShort); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	var told string
+	for _, values := range h.briefValues {
+		if v, ok := values["ending"]; ok {
+			told = v
+		}
+	}
+	if !strings.HasPrefix(told, "It STOPPED SHORT") {
+		t.Fatalf("the intake's brief ended %q, want it told the deploy stopped short", told)
+	}
+}
+
+func TestAnEndingThatCannotBeRecordedIsAnsweredAndRecorded(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.db.mu.Lock()
+	h.db.endingErr = errors.New("database is locked")
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.NoteDeployEnding(context.Background(), deployStarted, wsm.DeployFinished)
+
+	// Assert
+	if err == nil {
+		t.Fatal("NoteDeployEnding = nil, want the failure answered")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "could not record how the deploy ended on its check; the intake is told without it"}); !ok {
+		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }

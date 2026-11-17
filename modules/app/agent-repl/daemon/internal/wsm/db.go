@@ -761,6 +761,8 @@ type DB interface {
 	// NoteQuietDeployCheck counts a quiet check, answering whether the
 	// standing workspaces compact now.
 	NoteQuietDeployCheck(ctx context.Context, repo RepoKey) (bool, error)
+	// RecordMediationEnding records how the checked deploy ended on its check.
+	RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error)
 	// OweCompaction records that a workspace's next start compacts its conversation.
 	OweCompaction(ctx context.Context, ws WorkspaceID) (bool, error)
 	// DeployEscalationOf answers the queue WS escalates a deploy of.

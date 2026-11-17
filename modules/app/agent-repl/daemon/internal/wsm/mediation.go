@@ -26,6 +26,9 @@ ALTER TABLE merge_queue_repos ADD COLUMN mediation_turn TEXT NOT NULL DEFAULT ''
 
 // Mediation is the deploy mediation a repository owes.
 type Mediation struct {
+	// DeployEnding is how the checked deploy ended (RecordMediationEnding),
+	// empty while it has not, or for a check owed before endings were kept.
+	DeployEnding DeployEnding
 	// OwedAt is the deploy's start: the instant the window its mediator
 	// checks opens, and the identity of this mediation.
 	OwedAt time.Time
@@ -247,7 +250,7 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 			   mediation_chain_started_at = excluded.mediation_chain_started_at, mediation_chain_redeploys = excluded.mediation_chain_redeploys,
 			   mediation_intake = excluded.mediation_intake, mediation_remediation = excluded.mediation_remediation, mediation_dispatched = excluded.mediation_dispatched,
 			   mediation_dispatched_at = excluded.mediation_dispatched_at, mediation_escalation = excluded.mediation_escalation,
-			   mediation_escalation_brief = excluded.mediation_escalation_brief`,
+			   mediation_escalation_brief = excluded.mediation_escalation_brief, mediation_deploy_ending = ''`,
 			key, nanos(at), version, nanos(chainStart), redeploys, string(intake), string(remediation), carried, dispatchedAt, string(escalation), escalationBrief)
 		return err
 	})
@@ -258,7 +261,7 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 }
 
 // mediationQuery reads one repository's mediation columns, keyed by repo.
-const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at, mediation_escalation, mediation_escalation_brief FROM merge_queue_repos WHERE repo_key = ?`
+const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at, mediation_escalation, mediation_escalation_brief, mediation_deploy_ending FROM merge_queue_repos WHERE repo_key = ?`
 
 // scanMediation decodes ROW of mediationQuery, REPO's: nil when the
 // repository has no row or owes no mediation. It is the one mediation
@@ -266,10 +269,10 @@ const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediati
 // write that owes one records its chain.
 func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 	var owed, prompted, chainStart, dispatchedAt, resumedOwed sql.NullInt64
-	var version, turn, intake, remediation, escalation, escalationBrief string
+	var version, turn, intake, remediation, escalation, escalationBrief, ending string
 	var redeploys int
 	var dispatched bool
-	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &intake, &remediation, &dispatched, &dispatchedAt, &resumedOwed, &escalation, &escalationBrief)
+	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &intake, &remediation, &dispatched, &dispatchedAt, &resumedOwed, &escalation, &escalationBrief, &ending)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -281,7 +284,7 @@ func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 	}
 	m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn), ChainStartedAt: fromNanos(chainStart.Int64), ChainRedeploys: redeploys,
 		Intake: WorkspaceID(intake), Remediation: WorkspaceID(remediation), Dispatched: dispatched, Resumed: resumedOwed.Valid && resumedOwed.Int64 == owed.Int64,
-		Escalation: WorkspaceID(escalation), EscalationBrief: escalationBrief}
+		Escalation: WorkspaceID(escalation), EscalationBrief: escalationBrief, DeployEnding: DeployEnding(ending)}
 	if prompted.Valid {
 		at := fromNanos(prompted.Int64)
 		m.PromptedAt = &at

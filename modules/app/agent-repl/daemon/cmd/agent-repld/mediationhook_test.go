@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/wsm"
 )
 
 // mediationOrchestrator records the mediation calls it is given.
@@ -25,6 +27,13 @@ func (o *mediationOrchestrator) ReleaseUnchangedDeploy(_ context.Context, at tim
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.calls = append(o.calls, "release "+at.UTC().Format(time.RFC3339))
+	return nil
+}
+
+func (o *mediationOrchestrator) NoteDeployEnding(_ context.Context, at time.Time, ending wsm.DeployEnding) error {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.calls = append(o.calls, "ending "+string(ending)+" "+at.UTC().Format(time.RFC3339))
 	return nil
 }
 
@@ -51,7 +60,7 @@ func TestAMediationHookCarriesBothEdgesOnceBound(t *testing.T) {
 
 	// Act
 	h.began()
-	h.ended(false)
+	h.ended(deployprogress.EndedFinished)
 
 	// Assert
 	<-o.mediated
@@ -105,8 +114,8 @@ func TestADeployThatChangedNothingReleasesItsChecksBeforeTheRounds(t *testing.T)
 		want      []string
 		wantError bool
 	}{
-		{name: "an unchanged deploy that began here", began: true, unchanged: true, want: []string{"release 2026-11-13T21:00:00Z", "mediate"}},
-		{name: "a deploy that changed something", began: true, want: []string{"mediate"}},
+		{name: "an unchanged deploy that began here", began: true, unchanged: true, want: []string{"ending unchanged 2026-11-13T21:00:00Z", "release 2026-11-13T21:00:00Z", "mediate"}},
+		{name: "a deploy that changed something", began: true, want: []string{"ending finished 2026-11-13T21:00:00Z", "mediate"}},
 		{name: "an unchanged deploy that never began here", unchanged: true, want: []string{"mediate"}, wantError: true},
 	}
 	for _, tt := range tests {
@@ -121,7 +130,11 @@ func TestADeployThatChangedNothingReleasesItsChecksBeforeTheRounds(t *testing.T)
 			}
 
 			// Act
-			h.ended(tt.unchanged)
+			ending := deployprogress.EndedFinished
+			if tt.unchanged {
+				ending = deployprogress.EndedUnchanged
+			}
+			h.ended(ending)
 
 			// Assert
 			<-o.mediated
@@ -153,5 +166,44 @@ func TestABootsRoundsReleaseNothing(t *testing.T) {
 	defer o.mu.Unlock()
 	if !slices.Equal(o.calls, []string{"mediate"}) {
 		t.Fatalf("calls %v, want the rounds alone", o.calls)
+	}
+}
+
+func TestADeployThatStoppedShortRecordsItsEndingBeforeTheRounds(t *testing.T) {
+	// Arrange
+	at := time.Date(2026, 11, 13, 21, 0, 0, 0, time.UTC)
+	o := &mediationOrchestrator{mediated: make(chan struct{})}
+	h := &mediationHook{ctx: context.Background(), now: func() time.Time { return at }, log: dlog.NewTestLogger()}
+	h.bind(o)
+	h.began()
+
+	// Act
+	h.ended(deployprogress.EndedStoppedShort)
+
+	// Assert
+	<-o.mediated
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if want := []string{"ending stopped_short 2026-11-13T21:00:00Z", "mediate"}; !slices.Equal(o.calls, want) {
+		t.Fatalf("calls %v, want %v", o.calls, want)
+	}
+}
+
+func TestWsmEndingNamesEveryEnding(t *testing.T) {
+	tests := []struct {
+		ending deployprogress.Ending
+		want   wsm.DeployEnding
+	}{
+		{deployprogress.EndedFinished, wsm.DeployFinished},
+		{deployprogress.EndedUnchanged, wsm.DeployUnchanged},
+		{deployprogress.EndedStoppedShort, wsm.DeployStoppedShort},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.want), func(t *testing.T) {
+			// Act / Assert
+			if got := wsmEnding(tt.ending); got != tt.want {
+				t.Fatalf("wsmEnding(%d) = %q, want %q", tt.ending, got, tt.want)
+			}
+		})
 	}
 }

@@ -266,6 +266,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	}
 	brief, err := o.deps.Briefs(BriefDeployIntake, map[string]string{
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
+		"ending":         RenderEnding(m.DeployEnding),
 		"window_started": since.UTC().Format(time.RFC3339),
 		"repo_dir":       q.repository.Dir,
 		"version":        mediationVersion(m),
@@ -333,4 +334,21 @@ func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Med
 		b.WriteString(fmt.Sprintf(" %s landed %s, changing %s.", name, f.LandedHead, strings.Join(f.LandedPaths, ", ")))
 	}
 	return b.String(), nil
+}
+
+// RenderEnding is how the checked deploy ended, as the intake's brief says
+// it: a deploy that stopped short is a problem of the deploy itself, its
+// records in the window like any other's.
+func RenderEnding(ending wsm.DeployEnding) string {
+	switch ending {
+	case wsm.DeployFinished:
+		return "It finished: every component built and rolled out."
+	case wsm.DeployUnchanged:
+		return "It finished, changing nothing."
+	case wsm.DeployStoppedShort:
+		return "It STOPPED SHORT of finishing: a build, a restart or a rollout failed or could not finish. That failure is this deploy's problem; its records are among the findings below."
+	case "":
+		return "How it ended was not recorded; read it from the findings below."
+	}
+	panic(fmt.Sprintf("merge: a deploy ending the store never records: %q", ending))
 }

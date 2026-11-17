@@ -272,6 +272,9 @@ type Orchestrator interface {
 	// began AT owes in every repository that checks its deploys, when that
 	// deploy changed nothing and the check began its own chain.
 	ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error
+	// NoteDeployEnding records how the deploy that began at AT ended on
+	// every check it owes, for the intake's brief (mediation.go).
+	NoteDeployEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error
 	// Mediate runs an intake round for every check owed, and takes up every
 	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.

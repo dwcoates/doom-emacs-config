@@ -106,6 +106,8 @@ type fakeDB struct {
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
 	checks wsm.DB
+	// endingErr fails RecordMediationEnding.
+	endingErr error
 	// escalationRecordErr fails RecordDeployEscalation.
 	escalationRecordErr  error
 	mediationErr         error
@@ -402,6 +404,16 @@ func (f *fakeDB) MarkStandingBriefed(ctx context.Context, repo wsm.RepoKey, role
 	return f.checks.MarkStandingBriefed(ctx, repo, role)
 }
 
+func (f *fakeDB) RecordMediationEnding(ctx context.Context, repo wsm.RepoKey, owed time.Time, ending wsm.DeployEnding) (bool, error) {
+	f.mu.Lock()
+	err := f.endingErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return f.checks.RecordMediationEnding(ctx, repo, owed, ending)
+}
+
 func (f *fakeDB) NoteDeployCheckWork(ctx context.Context, repo wsm.RepoKey) error {
 	return f.checks.NoteDeployCheckWork(ctx, repo)
 }
@@ -409,7 +421,6 @@ func (f *fakeDB) NoteDeployCheckWork(ctx context.Context, repo wsm.RepoKey) erro
 func (f *fakeDB) NoteQuietDeployCheck(ctx context.Context, repo wsm.RepoKey) (bool, error) {
 	return f.checks.NoteQuietDeployCheck(ctx, repo)
 }
-
 
 func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
 	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)

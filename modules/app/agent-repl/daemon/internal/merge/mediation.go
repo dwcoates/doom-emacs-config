@@ -289,6 +289,42 @@ func (o *orchestrator) OweMediations(ctx context.Context, at time.Time) error {
 	return errors.Join(errs...)
 }
 
+// NoteDeployEnding records ENDING on every check the deploy that began at AT
+// owes, so the intake told of it states whether it finished or stopped short
+// (owner ruling, 2026-11-17: a failed build or rollout is checked as any
+// deploy is). A check a newer deploy replaced takes nothing. Each failure is
+// recorded at ERROR and answered; the check is told without its ending.
+func (o *orchestrator) NoteDeployEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error {
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, dlog.Context{"deploy_started": at.UTC().Format(time.RFC3339Nano)})
+		return nil
+	}
+	defer leave()
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	defer context.AfterFunc(life, cancel)()
+	queues, err := o.checkedQueues(ctx, opMediation)
+	if err != nil {
+		o.mediationFailed(ctx, nil, "could not list the repositories a deploy's ending is recorded in; its checks are told without it", err)
+		return err
+	}
+	var errs []error
+	for _, q := range queues {
+		fields := dlog.Context{"repo": string(q.key), "deploy_started": at.UTC().Format(time.RFC3339Nano), "ending": string(ending)}
+		recorded, err := o.deps.DB.RecordMediationEnding(ctx, q.key, at, ending)
+		if err != nil {
+			errs = append(errs, err)
+			o.deps.Log.Global().Error(opMediation, "could not record how the deploy ended on its check; the intake is told without it", withField(fields, "error", err.Error()))
+			continue
+		}
+		if recorded {
+			o.deps.Log.Global().Info(opMediation, "recorded how the deploy ended on its check", fields)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // ReleaseUnchangedDeploy implements Orchestrator: the deploy that began AT
 // changed nothing, every component up to date, so the check it owes is
 // released unchecked and its queue advances (2026-11-14: a deploy that

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"time"
 
 	"agent-repld/internal/dlog"
 )
@@ -27,6 +28,9 @@ import (
 //   - merge_queue_repos.deploy_compaction_armed: whether a dispatch or an
 //     escalation came since the standing workspaces were last compacted, so
 //     the next quiet run compacts them again.
+//   - merge_queue_repos.mediation_deploy_ending: how the checked deploy
+//     ended, so the intake is told whether it deployed or stopped short
+//     (owner ruling, 2026-11-17: a failed build or rollout is checked too).
 //
 // IT IS ADDITIVE: a new table and two defaulted columns the previous build
 // never names.
@@ -41,6 +45,7 @@ CREATE TABLE deploy_check_standing (
 CREATE INDEX deploy_check_standing_by_workspace ON deploy_check_standing(workspace_id);
 ALTER TABLE merge_queue_repos ADD COLUMN deploy_quiet_checks INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE merge_queue_repos ADD COLUMN deploy_compaction_armed INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE merge_queue_repos ADD COLUMN mediation_deploy_ending TEXT NOT NULL DEFAULT '';
 `
 
 // DeployCheckRoleName is one standing deploy check role as the store spells it.
@@ -252,4 +257,49 @@ func (s *store) OweCompaction(ctx context.Context, ws WorkspaceID) (bool, error)
 		return err
 	})
 	return owed, err
+}
+
+// DeployEnding is how a deploy ended, as its check records it.
+type DeployEnding string
+
+// The endings a deploy's edges tell (deployprogress.Edges).
+const (
+	// DeployFinished: every component built and rolled out.
+	DeployFinished DeployEnding = "finished"
+	// DeployUnchanged: it finished, every component already up to date.
+	DeployUnchanged DeployEnding = "unchanged"
+	// DeployStoppedShort: it stopped before finishing: a build, a restart or
+	// a rollout failed or could not finish.
+	DeployStoppedShort DeployEnding = "stopped_short"
+)
+
+// RecordMediationEnding records ENDING on the check REPO owes for the deploy
+// that began at OWED, answering whether that check is the one owed: a newer
+// deploy's check takes no ending of an older one.
+func (s *store) RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error) {
+	const op = "daemon.wsm.record_mediation_ending"
+	repo, err := normalizeRepoKey(repo)
+	fields := dlog.Context{"repo": string(repo), "owed_at": nanos(owed), "ending": string(ending)}
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
+		return false, err
+	}
+	switch ending {
+	case DeployFinished, DeployUnchanged, DeployStoppedShort:
+	default:
+		err := fmt.Errorf("wsm: %q is no deploy ending", ending)
+		s.log.Error(op, "refused an ending that is none of the three", withError(fields, err))
+		return false, err
+	}
+	var recorded bool
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE merge_queue_repos SET mediation_deploy_ending = ? WHERE repo_key = ? AND mediation_owed_at = ?`,
+			string(ending), string(repo), nanos(owed))
+		if err != nil {
+			return err
+		}
+		recorded, err = touchedRow(res)
+		return err
+	})
+	return recorded, err
 }
