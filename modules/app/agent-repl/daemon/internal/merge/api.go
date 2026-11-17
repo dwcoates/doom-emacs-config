@@ -272,6 +272,9 @@ type Orchestrator interface {
 	// began AT owes in every repository that checks its deploys, when that
 	// deploy changed nothing and the check began its own chain.
 	ReleaseUnchangedDeploy(ctx context.Context, at time.Time) error
+	// NoteDeployEnding records how the deploy that began at AT ended on
+	// every check it owes, for the intake's brief (mediation.go).
+	NoteDeployEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error
 	// Mediate runs an intake round for every check owed, and takes up every
 	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.
@@ -279,6 +282,9 @@ type Orchestrator interface {
 	// DecideMediation is the chain's intake WS's decision on the deploy its
 	// chain owes a check of (mediation.go).
 	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
+	// ReleaseEscalation releases the hold a repository's escalation puts on
+	// its queue (remediationfinish.go).
+	ReleaseEscalation(ctx context.Context, scope RepositoryScope) error
 	// LandsDirectly answers whether WS's finish lands directly
 	// (FinishRemediation): a deploy remediation a fix is dispatched to, or a
 	// deploy escalation workspace the daemon made.
@@ -694,6 +700,12 @@ type Deps struct {
 	// never cuts one (testsclient): the gate starts its run there, records the
 	// run's id in its progress, and a resumed merge watches the same run.
 	Tests GateService
+	// GateEnv is added to the environment of every gate's run on the test
+	// service ("KEY=value"): the daemon's own PATH, which names the
+	// toolchains a gate builds and tests with. The service runs under its
+	// service manager's bare environment, and a gate without it could not
+	// start (2026-11-17 13:07: "go is not on PATH", and the queue paused).
+	GateEnv []string
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter
@@ -836,6 +848,12 @@ type DeployCheckWorkspaces interface {
 	// Resume shows a standing-by workspace again, for the brief sending it
 	// back to work.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error
+	// Refresh brings the standing fixer's worktree to its parent's tip
+	// before a new brief.
+	Refresh(ctx context.Context, ws ids.WorkspaceID) error
+	// Compact compacts a standing deploy check's conversation by Haiku now,
+	// answering whether it had one to compact.
+	Compact(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 }
 
 // Meter records the merge queue's metrics. Each call is an atomic add and

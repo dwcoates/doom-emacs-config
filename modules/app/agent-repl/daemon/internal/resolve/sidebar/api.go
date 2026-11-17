@@ -516,7 +516,7 @@ const (
 	// HEALTH`).
 	MediationChecking
 	// MediationFixing: a remediation workspace fixes it, or what its own
-	// finish's gate failed on (`FIXING ZETTEL ISSUES`).
+	// finish's gate failed on (`FIXING ZETTEL`).
 	MediationFixing
 	// MediationTesting: a remediation's or an escalation's finished fix runs
 	// its full gate and lands while its workspace stands by (`TESTING ZETTEL

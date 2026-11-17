@@ -35,7 +35,7 @@ func checked(t *testing.T) *harness {
 	t.Helper()
 	h := newHarness(t)
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
-	h.briefs[BriefDeployIntake] = []string{"deploy_started", "window_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
+	h.briefs[BriefDeployIntake] = []string{"deploy_started", "ending", "window_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
 	h.briefs[BriefDeployEscalationUpdate] = []string{"repo_dir", "deploy_started", "summary", "problems", "recurred", "persisting"}
 	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}
@@ -159,7 +159,7 @@ func intakeTellings(h *harness) []promptqueue.Submission {
 func checkWorkspacesMade(h *harness) []string {
 	var out []string
 	for _, name := range h.checks.made {
-		if !strings.HasPrefix(name, "deploy-escalation-") {
+		if name != "deploy-fixer" {
 			out = append(out, name)
 		}
 	}
@@ -205,7 +205,7 @@ func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: the round ended undecided, so an escalation was made after.
-	if made := checkWorkspacesMade(h); len(made) != 1 || !strings.HasPrefix(made[0], "deploy-intake-") {
+	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != "deploy-intake" {
 		t.Fatalf("made %v, want one intake for the chain", h.checks.made)
 	}
 	for _, sub := range intakeSubmissions(h) {
@@ -242,9 +242,8 @@ func TestADeployThatIsNotTheFixsKeepsTheIntakeUntold(t *testing.T) {
 	}
 }
 
-func TestEachDeployOfTheChainIsToldToAFreshIntake(t *testing.T) {
-	// Arrange: the intake dispatches the first deploy, and is closed; its fix
-	// deploys.
+func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
+	// Arrange: the intake dispatches the first deploy; its fix deploys.
 	h := checked(t)
 	owe(t, h)
 	decideInTurn(t, h, Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem})
@@ -255,23 +254,13 @@ func TestEachDeployOfTheChainIsToldToAFreshIntake(t *testing.T) {
 	// Act
 	h.o.Mediate(context.Background())
 
-	// Assert: two intakes made, each told once and closed by its decision.
-	intakeBriefs := len(intakeTellings(h))
-	made := checkWorkspacesMade(h)
-	intakes := 0
-	for _, name := range made {
-		if strings.HasPrefix(name, "deploy-intake-") {
-			intakes++
-		}
+	// Assert: one intake made, told of each deploy, its session ended by each decision.
+	made := h.checks.made
+	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{"deploy-intake", "deploy-fixer"}) {
+		t.Fatalf("intake told %d times, made %v; want the one standing intake told of each deploy", len(intakeTellings(h)), made)
 	}
-	if intakeBriefs != 2 || intakes != 2 || len(made) != 3 {
-		t.Fatalf("intake told %d times, made %v; want a fresh intake told of each deploy, and one remediation made", intakeBriefs, h.checks.made)
-	}
-	if !slices.Contains(made, intakeName(deployStarted)) || !slices.Contains(made, intakeName(deployStarted.Add(time.Minute))) {
-		t.Fatalf("made %v, want each intake named for its own deploy, so no two share a name", made)
-	}
-	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake", "ws-intake"}) {
-		t.Fatalf("stopped %v, want each intake closed by its decision", h.checks.stopped)
+	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake", "ws-intake"}) || len(h.checks.closed) != 0 {
+		t.Fatalf("stopped %v, closed %v; want each decision to end the intake's session and close nothing", h.checks.stopped, h.checks.closed)
 	}
 }
 
@@ -294,8 +283,8 @@ func TestAnIntakeThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
 	}
 }
 
-func TestAnIntakeMadeForACheckThatEndedIsClosed(t *testing.T) {
-	// Arrange: the check is released while its intake is made.
+func TestTheStandingIntakeOfACheckThatEndedWaitsForTheNext(t *testing.T) {
+	// Arrange: the check is released while its intake is found.
 	h := checked(t)
 	owe(t, h)
 	m := owedCheck(t, h)
@@ -307,8 +296,9 @@ func TestAnIntakeMadeForACheckThatEndedIsClosed(t *testing.T) {
 	ws, err := h.o.intakeOf(context.Background(), checkedQueue{registeredQueue: registeredQueue{key: mediationKey(h)}}, *m, dlog.Context{})
 
 	// Assert
-	if err != nil || ws != "" || !slices.Equal(h.checks.closed, []ids.WorkspaceID{"ws-intake"}) {
-		t.Fatalf("intakeOf = (%q, %v), closed %v; want none answered and the made intake closed", ws, err, h.checks.closed)
+	standing, found, readErr := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingIntake)
+	if err != nil || ws != "" || len(h.checks.closed) != 0 || readErr != nil || !found || standing.Workspace != "ws-intake" {
+		t.Fatalf("intakeOf = (%q, %v), closed %v, standing (%+v, %v); want none answered and the standing intake kept open", ws, err, h.checks.closed, standing, found)
 	}
 }
 
@@ -321,7 +311,7 @@ func TestATurnThatDecidesNothingTwiceEscalatesAndHoldsTheQueue(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if heldEscalation(t, h) != "ws-escalate" {
+	if heldEscalation(t, h) != "ws-fixer" {
 		t.Fatalf("check %+v, want the undecided check held by an escalation", owedCheck(t, h))
 	}
 	if !h.bannerRaised(desktopnotify.KindDeployMediated) {
@@ -361,7 +351,7 @@ func TestATurnThatEscalatedKeepsTheQueueHeldAndResumesNothing(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if heldEscalation(t, h) != "ws-escalate" || len(resumingBriefs(h)) != 0 {
+	if heldEscalation(t, h) != "ws-fixer" || len(resumingBriefs(h)) != 0 {
 		t.Fatalf("check %+v, resumed %d times; want it held by its escalation and the intake never resumed", owedCheck(t, h), len(resumingBriefs(h)))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
@@ -381,7 +371,7 @@ func TestATurnThatDispatchedKeepsTheQueueHeld(t *testing.T) {
 
 	// Assert
 	m := owedCheck(t, h)
-	if m == nil || !m.Dispatched || m.Remediation != "ws-remedy" {
+	if m == nil || !m.Dispatched || m.Remediation != "ws-fixer" {
 		t.Fatalf("check %+v, want it dispatched to the remediation and still owed", m)
 	}
 	if h.bannerRaised(desktopnotify.KindDeployMediated) || len(h.checks.closed) != 0 {
@@ -395,7 +385,7 @@ func TestADispatchedCheckHasNoRound(t *testing.T) {
 	owe(t, h)
 	withIntake(t, h, deployStarted)
 	told(t, h, deployStarted, "turn-told")
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -514,7 +504,7 @@ func TestDecideMediation(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			if tt.dispatched {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -541,7 +531,7 @@ func TestDecideMediation(t *testing.T) {
 			if err != nil || (owedCheck(t, h) != nil) != tt.wantHeld || h.bannerRaised(desktopnotify.KindDeployMediated) != tt.wantBanner {
 				t.Fatalf("DecideMediation = %v, owed %+v, banner %v; want held %v, banner %v", err, owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated), tt.wantHeld, tt.wantBanner)
 			}
-			if tt.wantHeld && heldEscalation(t, h) != "ws-escalate" {
+			if tt.wantHeld && heldEscalation(t, h) != "ws-fixer" {
 				t.Fatalf("check %+v, want it held by the escalation", owedCheck(t, h))
 			}
 			if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
@@ -590,10 +580,10 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			told(t, h, deployStarted, "turn-1")
-			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 				t.Fatal(err)
 			}
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-remedy"}},
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-fixer"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -740,7 +730,7 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-remedy", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -815,7 +805,7 @@ func TestEveryCheckEndIsTimedOnceByHowItEnded(t *testing.T) {
 		{name: "an escalation holds the check, so it ends untimed", inTurn: decide(Decision{Kind: MediationEscalate, Summary: "yours"}),
 			want: []string{toldSpan}},
 		{name: "an escalation the user closes", inTurn: decide(Decision{Kind: MediationEscalate, Summary: "yours"}),
-			after: func(t *testing.T, h *harness) { h.o.OnWorkspaceClosed(context.Background(), "ws-escalate") },
+			after: func(t *testing.T, h *harness) { h.o.OnWorkspaceClosed(context.Background(), "ws-fixer") },
 			want:  []string{toldSpan, assessed(MediationEscalated), total(MediationEscalated)}},
 		{name: "a dispatch whose fix deploys", inTurn: decide(Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}),
 			after: func(t *testing.T, h *harness) { fixDeploysAt(t, h, deployStarted.Add(time.Minute)) },
@@ -1038,7 +1028,7 @@ func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) 
 			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
 				t.Fatalf("released %v, want %v", released, tt.wantReleased)
 			}
-			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") })
+			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-fixer" })
 			if escalated != tt.wantEscalate {
 				t.Fatalf("made %v, want an escalation %v", h.checks.made, tt.wantEscalate)
 			}
@@ -1091,7 +1081,7 @@ func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
 			if owedCheck(t, h) == nil {
 				t.Fatal("the check was released, want the queue held")
 			}
-			if slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") }) {
+			if slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-fixer" }) {
 				t.Fatalf("made %v, want no escalation", h.checks.made)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
@@ -1414,28 +1404,6 @@ func TestAnUnchangedDeploysReleaseCutByTheDaemonsExitIsNoFailure(t *testing.T) {
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error"}); ok {
 				t.Fatalf("records = %v, want no error", h.logs.Records())
-			}
-		})
-	}
-}
-
-func TestAnIntakeIsNamedForItsOwnDeployToTheMillisecond(t *testing.T) {
-	tests := []struct {
-		name string
-		owed time.Time
-		want string
-	}{
-		{name: "a deploy on the second", owed: time.Date(2026, 11, 16, 22, 26, 58, 0, time.UTC), want: "deploy-intake-20261116-222658-000"},
-		{name: "a deploy within the second", owed: time.Date(2026, 11, 16, 22, 26, 58, 80_000_000, time.UTC), want: "deploy-intake-20261116-222658-080"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := intakeName(tt.owed)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("intakeName = %q, want %q", got, tt.want)
 			}
 		})
 	}

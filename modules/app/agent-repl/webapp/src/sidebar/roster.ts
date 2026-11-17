@@ -103,7 +103,7 @@ import {
   type DeploysGroupSection,
 } from "./deploys-fold.js";
 import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
-import { drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
+import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { foldViewKey } from "./view.js";
 import {
   drawRosterRowDetailCommits,
@@ -937,6 +937,7 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
   // and before a short one of its own.
   if (queue.mediation !== undefined) {
     head.appendChild(drawQueueMediationLabel(queue.mediation, sc, `${queuePath}.mediation`));
+    if (queue.mediation.standing.case === "escalated") head.appendChild(drawEscalationRelease(key, sc));
     head.appendChild(drawQueueStatusTailRule());
   }
   drawQueuedGroupHead(group, head, queue, key, sc, queuePath);

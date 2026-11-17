@@ -85,6 +85,10 @@ func (ws Workspace) LetsCacheLapse() bool {
 // subsection is collapsed, is started by nothing; a hidden one already running is kept until
 // its cache lapses (cachelapse.Keeper).
 //
+// A STANDING DEPLOY CHECK RUNS (owner ruling, 2026-11-17): the repository's
+// deploy intake and fixer are kept warm across deploys, the hidden intake
+// included, so no check waits on a cold cache.
+//
 // EVERY WORKSPACE IN A MERGE QUEUE RUNS (MERGEQUEUED: an entry of it stands
 // in a merge queue, waiting or running; owner ruling, 2026-10-26), hidden,
 // closed or in a collapsed section alike: its session is what carries the
@@ -107,7 +111,7 @@ func (ws Workspace) LetsCacheLapse() bool {
 // 2026-11-03), so a folded one-shot's unattended work would otherwise stop at
 // the next daemon start.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
-	if ws.Current || mergeQueued {
+	if ws.Current || mergeQueued || ws.StandingDeployCheck {
 		return true
 	}
 	if ws.MergeHidden() {
@@ -129,5 +133,5 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 // the user is not looking at it. The session's start and the keeper's cadence
 // read it, and LetsCacheLapse is it or a close.
 func (ws Workspace) KeepaliveHeld() bool {
-	return ws.InHiddenSection() && !ws.Current
+	return ws.InHiddenSection() && !ws.Current && !ws.StandingDeployCheck
 }

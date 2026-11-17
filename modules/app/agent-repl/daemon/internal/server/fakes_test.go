@@ -1220,6 +1220,10 @@ func (f *fakeQueue) RollBackHeld(context.Context, ids.WorkspaceID) (wsm.HeldProm
 
 // fakeMerge answers the orchestrator's four server-facing verbs.
 type fakeMerge struct {
+	// releasedEscalations is every ReleaseEscalation asked, and
+	// escalationReleaseErr what each answers.
+	releasedEscalations  []merge.RepositoryScope
+	escalationReleaseErr error
 	merge.Orchestrator
 	// decisions records every DecideMediation, which decideErr answers.
 	decisions []fakeDecision
@@ -1466,6 +1470,11 @@ type fakeDecision struct {
 func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d merge.Decision) error {
 	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: d})
 	return f.decideErr
+}
+
+func (f *fakeMerge) ReleaseEscalation(_ context.Context, scope merge.RepositoryScope) error {
+	f.releasedEscalations = append(f.releasedEscalations, scope)
+	return f.escalationReleaseErr
 }
 
 func (f *fakeMerge) LandsDirectly(_ context.Context, ws ids.WorkspaceID) (bool, error) {

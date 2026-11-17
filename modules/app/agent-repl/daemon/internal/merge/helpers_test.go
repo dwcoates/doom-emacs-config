@@ -106,6 +106,8 @@ type fakeDB struct {
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
 	checks wsm.DB
+	// endingErr fails RecordMediationEnding.
+	endingErr error
 	// escalationRecordErr fails RecordDeployEscalation.
 	escalationRecordErr  error
 	mediationErr         error
@@ -390,6 +392,36 @@ func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediat
 	return f.checks.MediationOf(ctx, repo)
 }
 
+func (f *fakeDB) StandingDeployCheckOf(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) (wsm.StandingDeployCheck, bool, error) {
+	return f.checks.StandingDeployCheckOf(ctx, repo, role)
+}
+
+func (f *fakeDB) RecordStandingDeployCheck(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName, ws ids.WorkspaceID) error {
+	return f.checks.RecordStandingDeployCheck(ctx, repo, role, ws)
+}
+
+func (f *fakeDB) MarkStandingBriefed(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) error {
+	return f.checks.MarkStandingBriefed(ctx, repo, role)
+}
+
+func (f *fakeDB) RecordMediationEnding(ctx context.Context, repo wsm.RepoKey, owed time.Time, ending wsm.DeployEnding) (bool, error) {
+	f.mu.Lock()
+	err := f.endingErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return f.checks.RecordMediationEnding(ctx, repo, owed, ending)
+}
+
+func (f *fakeDB) NoteDeployCheckWork(ctx context.Context, repo wsm.RepoKey) error {
+	return f.checks.NoteDeployCheckWork(ctx, repo)
+}
+
+func (f *fakeDB) NoteQuietDeployCheck(ctx context.Context, repo wsm.RepoKey) (bool, error) {
+	return f.checks.NoteQuietDeployCheck(ctx, repo)
+}
+
 func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
 	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)
 }
@@ -420,6 +452,10 @@ func (f *fakeDB) RecordDeployEscalation(ctx context.Context, ws ids.WorkspaceID,
 
 func (f *fakeDB) DeployEscalationOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
 	return f.checks.DeployEscalationOf(ctx, ws)
+}
+
+func (f *fakeDB) DeployEscalationsOf(ctx context.Context, repo wsm.RepoKey) ([]ids.WorkspaceID, error) {
+	return f.checks.DeployEscalationsOf(ctx, repo)
 }
 
 func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationFinish) (wsm.RemediationFinish, error) {
@@ -3156,6 +3192,8 @@ type harness struct {
 	// briefValues records the values each brief was spliced with, which is how
 	// the escalation constants are asserted to reach the agent.
 	briefValues []map[string]string
+	// briefNames records the name of each brief composed, in order.
+	briefNames []string
 	// turnCloses answers AwaitTurnEnd, consumed in order.
 	turnCloses []wsm.TurnClose
 	// startedSessions records the revivals a configured prompt caused.
@@ -3616,6 +3654,7 @@ func (h *harness) deps() Deps {
 		},
 		TestRunner: h.runner,
 		Tests:      h.tests,
+		GateEnv:    []string{"PATH=/toolchains/bin"},
 		Painter:    fakePainter{},
 		PublishRegistry: func(context.Context) error {
 			h.mu.Lock()
@@ -3771,6 +3810,7 @@ func (h *harness) loadBrief(name string, values map[string]string) (string, erro
 	}
 	h.mu.Lock()
 	h.briefValues = append(h.briefValues, values)
+	h.briefNames = append(h.briefNames, name)
 	h.mu.Unlock()
 	return text, nil
 }
@@ -4612,6 +4652,10 @@ type fakeDeployChecks struct {
 	standByErr       error
 	// resumeErr fails every Resume.
 	resumeErr error
+	// refreshed and compacted record each fixer refresh and each compaction;
+	// refreshErr and compactErr fail them.
+	refreshed, compacted   []ids.WorkspaceID
+	refreshErr, compactErr error
 	// onStopNow runs inside each stop, as ending the stopped session does.
 	onStopNow func()
 	// createCtxErrs records each check workspace's creation context error.
@@ -4656,7 +4700,7 @@ func (f *fakeDeployChecks) CreateDeployIntake(_ context.Context, _, name string)
 }
 
 func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name string) (wsm.Workspace, error) {
-	return f.make("ws-remedy", name)
+	return f.make("ws-fixer", name)
 }
 
 func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name string) (wsm.Workspace, error) {
@@ -4667,7 +4711,7 @@ func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name s
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return f.make("ws-escalate", name)
+	return f.make("ws-fixer", name)
 }
 
 func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
@@ -4686,6 +4730,20 @@ func (f *fakeDeployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) erro
 	f.stoodBy = append(f.stoodBy, ws)
 	f.standByCtxErrs = append(f.standByCtxErrs, ctx.Err())
 	return f.standByErr
+}
+
+func (f *fakeDeployChecks) Refresh(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshed = append(f.refreshed, ws)
+	return f.refreshErr
+}
+
+func (f *fakeDeployChecks) Compact(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compacted = append(f.compacted, ws)
+	return f.compactErr == nil, f.compactErr
 }
 
 func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {

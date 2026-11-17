@@ -11,6 +11,7 @@ export const UPDATE_MERGE_QUEUE_SENTENCES = {
   noSuchQueuedMerge: () => "this merge is no longer waiting on the queue",
   notPaused: () => "the queue is no longer paused",
   unknownRepository: () => "the daemon no longer has that repository",
+  noEscalationHeld: () => "no escalation holds this queue now",
 } satisfies SentenceTable;
 
 /** UpdateMergeQueue's refusal, worded from UPDATE_MERGE_QUEUE_SENTENCES. */

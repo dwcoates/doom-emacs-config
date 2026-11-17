@@ -37,7 +37,7 @@ func TestTheHoldsSplitTheHeadFromSpeculativeWork(t *testing.T) {
 				}
 			}
 			if tt.check == "dispatched" {
-				if _, err := h.db.DispatchMediation(ctx, h.repoKey(), epochPause, epochPause, "ws-remedy"); err != nil {
+				if _, err := h.db.DispatchMediation(ctx, h.repoKey(), epochPause, epochPause, "ws-fixer"); err != nil {
 					t.Fatal(err)
 				}
 			}

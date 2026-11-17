@@ -433,17 +433,53 @@ func (o *orchestrator) escalationClosed(ctx context.Context, ws ids.WorkspaceID,
 		if m == nil || !m.Escalated() || m.Escalation != ws {
 			continue
 		}
-		released, err := o.releaseCheck(ctx, q.key, *m, MediationEscalated)
-		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "the user closed the escalation, but its check could not be released; the queue stays held", withField(withField(fields, "repo", string(q.key)), "error", err.Error()))
-			continue
-		}
-		if released {
-			o.deps.Log.Global().Info(opMediation, "the user closed the escalation; its check is released and the queue advances", withField(fields, "repo", string(q.key)))
-			o.republishMediation(ctx, q.key)
-			o.kick(q.key)
-		}
+		_ = o.releaseEscalated(ctx, q.key, *m, "the user closed the escalation", fields)
 	}
+}
+
+// ReleaseEscalation releases the hold the escalation of SCOPE's queue puts on
+// it: the user's own gesture on the standing escalation's row, or the command
+// line (owner ruling, 2026-11-17). The escalation workspace stays open. A
+// queue no escalation holds is refused no_escalation_held.
+func (o *orchestrator) ReleaseEscalation(ctx context.Context, scope RepositoryScope) error {
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		return errMediationStopped
+	}
+	defer leave()
+	ctx = life
+	repo, err := o.queueKeyOf(ctx, opMediation, "a release of an escalation's hold", scope)
+	if err != nil {
+		return err
+	}
+	fields := dlog.Context{"repo": string(repo)}
+	m, err := o.deps.DB.MediationOf(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read whether an escalation holds the queue; its hold stands", withField(fields, "error", err.Error()))
+		return err
+	}
+	if m == nil || !m.Escalated() {
+		o.deps.Log.Global().Info(opMediation, "refused a release of an escalation's hold: no escalation holds the queue", fields)
+		return refuse(ArmNoEscalationHeld, "", "no escalation holds the queue of %s", repo)
+	}
+	return o.releaseEscalated(ctx, repo, *m, "the user released the escalation's hold", withField(fields, "escalation", string(m.Escalation)))
+}
+
+// releaseEscalated releases escalated check M of queue REPO, as WHY says,
+// and moves the queue on.
+func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, why string, fields dlog.Context) error {
+	fields = withField(fields, "repo", string(repo))
+	released, err := o.releaseCheck(ctx, repo, m, MediationEscalated)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, why+", but its check could not be released; the queue stays held", withField(fields, "error", err.Error()))
+		return err
+	}
+	if released {
+		o.deps.Log.Global().Info(opMediation, why+"; its check is released and the queue advances", fields)
+		o.republishMediation(ctx, repo)
+		o.kick(repo)
+	}
+	return nil
 }
 
 // remediationLand lands F's branch directly on the main branch
@@ -591,14 +627,21 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 
 // closeRemediation closes F's workspace as a landed merge closes its own: it
 // is stamped merged and closed, its session stopped, its worktree removed and
-// its landed branch retired. A later dispatch restores it from its branch
-// (workspace Open), cut again at the main branch's tip.
+// its landed branch retired. The repository's standing fixer is the one
+// workspace it leaves open, for the next brief.
 func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	record, err := o.deps.DB.Workspace(ctx, f.Workspace)
 	if err != nil {
 		return err
 	}
 	if record.Closed {
+		return nil
+	}
+	// THE STANDING FIXER STAYS OPEN (owner ruling, 2026-11-17): warm, in
+	// its repository's section, with its conversation and its worktree, for
+	// the next brief, which brings its worktree to the main branch's tip.
+	if record.StandingDeployCheck {
+		o.deps.Log.Global().Info(opRemediationFinish, "the landed fix deployed; the standing fixer stays open for the next brief", fields)
 		return nil
 	}
 	if err := o.deps.DB.SetMergedAt(ctx, f.Workspace, o.deps.Now(), nil); err != nil {

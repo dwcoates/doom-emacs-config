@@ -260,7 +260,9 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 		v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the cache could not be marked cold", err)
 		return fmt.Errorf("mark the cache of the workspace whose cold gate was answered, %q, cold: %w", ws, err)
 	}
-	if record.InHiddenSection() {
+	// A STANDING DEPLOY CHECK STAYS WHERE IT IS: it runs and is kept warm
+	// hidden or not (wsm.Workspace.Runs), so the hidden intake is never shown.
+	if record.InHiddenSection() && !record.StandingDeployCheck {
 		if err := v.recordHidden(ctx, log, ws, false); err != nil {
 			// recordHidden recorded the failure at ERROR as its owner.
 			v.reraiseRefusedColdGate(log, ws, served.VendorSessionID, choice, "the workspace could not be shown", err)

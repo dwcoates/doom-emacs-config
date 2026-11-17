@@ -1123,7 +1123,7 @@ message RosterRepoMergeQueue {
 //
 // The label's words are the standing's, fixed text the same for every
 // repository (owner ruling, 2026-11-16): `HOT-LOADING ZETTEL`, `ASSESSING
-// ZETTEL HEALTH`, `FIXING ZETTEL ISSUES`, `TESTING ZETTEL FIXES` or
+// ZETTEL HEALTH`, `FIXING ZETTEL`, `TESTING ZETTEL FIXES` or
 // `ZETTEL NEEDS YOU`. A click
 // on it selects the workspace at work, when one is. Tag 1 (`subject`) is
 // RETIRED: no workspace is drawn as a queue row for the check. Tag 5
@@ -1140,7 +1140,7 @@ message RosterMergeQueueMediation {
     // The chain's intake is checking the deploy (`ASSESSING ZETTEL HEALTH`).
     RosterMergeQueueMediationChecking checking = 3;
     // A remediation workspace is fixing what the intake found, or what its
-    // own finish's gate failed on (`FIXING ZETTEL ISSUES`).
+    // own finish's gate failed on (`FIXING ZETTEL`).
     RosterMergeQueueMediationFixing fixing = 4;
     // A remediation's or an escalation's finished fix runs its full gate
     // and then lands (`TESTING ZETTEL FIXES`). The workspace itself stands
@@ -1166,7 +1166,7 @@ message RosterMergeQueueMediationChecking {
   // hidden workspace the selection shows.
   RosterMergeQueueMediationTarget target = 1;
 }
-// FIXING ZETTEL ISSUES.
+// FIXING ZETTEL.
 message RosterMergeQueueMediationFixing {
   // REQUIRED. What a click on the label selects: the remediation workspace.
   RosterMergeQueueMediationTarget target = 1;

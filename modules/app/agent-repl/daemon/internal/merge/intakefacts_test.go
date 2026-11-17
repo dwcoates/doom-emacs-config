@@ -162,19 +162,19 @@ func TestTheChainSoFarNamesWhatEachRemediationLanded(t *testing.T) {
 	ctx := context.Background()
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
 	h.db.mu.Lock()
-	h.db.workspaces["ws-remedy"] = wsm.Workspace{ID: "ws-remedy", Name: "deploy-remediation-x", Repo: theRepository}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-remediation-x", Repo: theRepository}
 	h.db.mu.Unlock()
-	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-remedy", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-remedy", wsm.RemediationGating, wsm.RemediationLanding, deployStarted); err != nil {
+	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationLanding, deployStarted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.RecordRemediationLanded(ctx, "ws-remedy", "abc123", []string{"daemon/x.go"}, deployStarted); err != nil {
+	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", "abc123", []string{"daemon/x.go"}, deployStarted); err != nil {
 		t.Fatal(err)
 	}
 	oweAt(t, h, deployStarted.Add(time.Minute))
@@ -197,7 +197,7 @@ func TestTheChainSoFarWhoseRemediationNameCannotBeReadIsAnError(t *testing.T) {
 	ctx := context.Background()
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
 	q, _, _ := h.o.checkedQueueOf(ctx, mediationKey(h))
@@ -213,7 +213,7 @@ func TestTheChainSoFarWhoseRemediationNameCannotBeReadIsAnError(t *testing.T) {
 	if err == nil || got != "" {
 		t.Fatalf("chainSoFar = (%q, %v), want an error and no account", got, err)
 	}
-	if rec, ok := h.recordFor("error", opMediation); !ok || rec.Context["workspace"] != "ws-remedy" {
+	if rec, ok := h.recordFor("error", opMediation); !ok || rec.Context["workspace"] != "ws-fixer" {
 		t.Fatalf("ERROR record = %+v (%v), want the unread name recorded", rec, ok)
 	}
 }

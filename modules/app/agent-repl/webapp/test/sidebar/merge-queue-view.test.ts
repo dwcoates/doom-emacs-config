@@ -32,12 +32,15 @@ import { roundSuffix, STATE_GLYPHS } from "../../src/feed/merge/tab-strip.js";
 import { MERGE_GLYPH } from "../../src/merge-glyph.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { UPDATE_MERGE_QUEUE_SENTENCES } from "../../src/rpc/merge-queue-refusal.js";
 import {
   drawCardLine,
   drawHeadClock,
   drawQueueControlLine,
   MERGE_QUEUE_CONTROL_CLASS,
   MERGE_QUEUE_GLYPH_CLASS,
+  MERGE_QUEUE_RELEASE_CLASS,
+  drawEscalationRelease,
   queueGlyphTitle,
   queueSwitchOf,
   toggleQueue,
@@ -352,6 +355,37 @@ describe("toggleQueue", () => {
       create(UpdateMergeQueueResponseSchema, { result: { case: "error", value: { cause: { case: "notPaused", value: {} } } } }),
     );
     await expect(toggleQueue(document.createElement("div"), sc, REPOSITORY.key, create(RosterRepoMergeQueueSchema, { paused: paused() }))).resolves.toBe(false);
+  });
+});
+
+describe("the escalation's release", () => {
+  it("is a named button", () => {
+    // Act
+    const release = drawEscalationRelease(REPOSITORY.key, queueDaemon().sc);
+
+    // Assert
+    expect([release.getAttribute("role"), release.textContent, release.classList.contains(MERGE_QUEUE_RELEASE_CLASS)]).toEqual(["button", "release", true]);
+  });
+
+  it("asks the daemon to release the repository's escalation for the user on a click", async () => {
+    // Arrange
+    const { asked, sc } = queueDaemon();
+    const release = drawEscalationRelease(REPOSITORY.key, sc);
+    document.body.appendChild(release);
+
+    // Act
+    release.click();
+    await settled();
+
+    // Assert
+    expect(asked.map((r) => [r.action.case, r.action.case === "releaseEscalation" ? r.action.value.repository?.id : undefined, r.requester?.asker.case])).toEqual([
+      ["releaseEscalation", "repo-1", "user"],
+    ]);
+    release.remove();
+  });
+
+  it("words the no-escalation-held refusal", () => {
+    expect(UPDATE_MERGE_QUEUE_SENTENCES.noEscalationHeld()).toBe("no escalation holds this queue now");
   });
 });
 
@@ -707,12 +741,12 @@ describe("drawQueueMediationLabel", () => {
       "Zettel is hot-loading the last landing; its health is assessed once it has, and the queue waits for it"],
     ["assessing zettel health", { case: "checking" as const, value: { target: target("intake") } },
       "Zettel's health after the last landing is being assessed; the queue waits for it"],
-    ["fixing zettel issues", { case: "fixing" as const, value: { target: target("remedy") } },
-      "a remediation is fixing the issues the last landing caused in Zettel; the queue waits for its fix"],
+    ["fixing zettel", { case: "fixing" as const, value: { target: target("remedy") } },
+      "the fixer is fixing the issues the last landing caused in Zettel; the queue waits for its fix"],
     ["testing zettel fixes", { case: "testing" as const, value: { target: target("remedy") } },
       "a remediation's fix is running its full gate, then lands; the queue waits for it"],
     ["zettel needs you", { case: "escalated" as const, value: { target: target("escalation") } },
-      "a deploy check was escalated to you; the queue waits until its fix lands or you close its escalation"],
+      "a deploy check was escalated to you; the queue waits until its fix lands or you release it"],
   ])("reads %s, titled to match, for its standing", (want, standing, title) => {
     const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), daemon().sc, "m");
     expect([label.textContent, label.title, label.classList.contains(MERGE_QUEUE_MEDIATION_CLASS)]).toEqual([want, title, true]);

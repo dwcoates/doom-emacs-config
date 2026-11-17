@@ -419,16 +419,25 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 // does not (it moved on after landing). Nothing here ever moves a branch any
 // way but forward. A git that could not answer or act fails the open.
 func (v *verbs) advanceMerged(ctx context.Context, log dlog.Logger, record wsm.Workspace) error {
+	return v.advanceToParent(ctx, log, record, opOpen, "open", "reopened merged workspace")
+}
+
+// advanceToParent fast-forwards RECORD's worktree to its parent branch's
+// tip, recording under OP, its failure naming VERB and its records naming
+// SUBJECT. A worktree with no parent branch recorded, a parent branch gone,
+// uncommitted changes, or commits the parent does not hold stays at its
+// branch's tip, and says why: nothing is ever discarded to advance it.
+func (v *verbs) advanceToParent(ctx context.Context, log dlog.Logger, record wsm.Workspace, op, verb, subject string) error {
 	fields := dlog.Context{"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch}
 	stays := func(why string) error {
 		fields["why"] = why
-		log.Info(opOpen, "the reopened merged workspace stays at its branch's tip", fields)
+		log.Info(op, "the "+subject+" stays at its branch's tip", fields)
 		return nil
 	}
 	fail := func(what string, err error) error {
 		fields["cause"] = err.Error()
-		log.Error(opOpen, "could not advance the reopened merged workspace to its parent's tip: "+what, fields)
-		return fmt.Errorf("open %q: advance the merged workspace to %q: %s: %w", record.ID, record.ParentBranch, what, err)
+		log.Error(op, "could not advance the "+subject+" to its parent's tip: "+what, fields)
+		return fmt.Errorf("%s %q: advance the %s to %q: %s: %w", verb, record.ID, subject, record.ParentBranch, what, err)
 	}
 	if record.ParentBranch == "" {
 		return stays("no parent branch was recorded")
@@ -457,7 +466,7 @@ func (v *verbs) advanceMerged(ctx context.Context, log dlog.Logger, record wsm.W
 	if err := v.deps.Git.FastForward(ctx, record.Dir, record.ParentBranch); err != nil {
 		return fail("fast-forward", err)
 	}
-	log.Info(opOpen, "advanced the reopened merged workspace to its parent's tip", fields)
+	log.Info(op, "advanced the "+subject+" to its parent's tip", fields)
 	return nil
 }
 

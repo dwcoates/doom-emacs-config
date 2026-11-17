@@ -1070,12 +1070,8 @@ func TestUpdateMergeQueueHandsTheIntakesDecisionOn(t *testing.T) {
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{
 				Problems: []*agentreplv1.DeployProblem{{Statement: "the reaper errors", Evidence: []string{"{record}"}}}}}},
 			want: merge.Decision{Kind: merge.MediationEscalate, Summary: "clean", Problems: problems}},
-		{name: "a fresh dispatch", decision: aDispatch(&agentreplv1.UpdateMergeQueueMediationDispatch{
-			Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}),
+		{name: "a dispatch", decision: aDispatch(&agentreplv1.UpdateMergeQueueMediationDispatch{}),
 			want: merge.Decision{Kind: merge.MediationDispatch, Summary: "clean", Problems: problems}},
-		{name: "a restoring dispatch", decision: aDispatch(&agentreplv1.UpdateMergeQueueMediationDispatch{
-			Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Restore{Restore: &agentreplv1.UpdateMergeQueueMediationDispatchRestore{}}}),
-			want: merge.Decision{Kind: merge.MediationDispatch, Summary: "clean", Problems: problems, Restore: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1097,6 +1093,40 @@ func TestUpdateMergeQueueHandsTheIntakesDecisionOn(t *testing.T) {
 	}
 }
 
+func TestUpdateMergeQueueReleasesTheRepositorysEscalation(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Requester: userRequester(),
+		Action: &agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation{ReleaseEscalation: &agentreplv1.UpdateMergeQueueReleaseEscalation{
+			Repository: &workspacev1.RepositoryRef{Id: "repo-1", Dir: "/tmp/repo"}}}}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateMergeQueue = (%v, %v), want success", resp, err)
+	}
+	if len(h.Merge.releasedEscalations) != 1 || h.Merge.releasedEscalations[0] != (merge.RepositoryScope{ID: "repo-1", Dir: "/tmp/repo"}) {
+		t.Fatalf("releases = %+v, want the repository's", h.Merge.releasedEscalations)
+	}
+}
+
+func TestUpdateMergeQueueRefusesAReleaseNamingNoRepository(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Requester: userRequester(),
+		Action:    &agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation{ReleaseEscalation: &agentreplv1.UpdateMergeQueueReleaseEscalation{}}}))
+
+	// Assert.
+	if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Merge.releasedEscalations) != 0 {
+		t.Fatalf("UpdateMergeQueue = %v, releases %d; want invalid and nothing released", err, len(h.Merge.releasedEscalations))
+	}
+}
+
 func TestUpdateMergeQueueAnswersAMediationRefusal(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -1105,8 +1135,8 @@ func TestUpdateMergeQueueAnswersAMediationRefusal(t *testing.T) {
 	}{
 		{name: "not the intake", refusal: &merge.RefusalError{Arm: merge.ArmNotMediator, Reason: "no intake"},
 			got: func(e *agentreplv1.UpdateMergeQueueError) bool { return e.GetNotMediator() != nil }},
-		{name: "nothing to restore", refusal: &merge.RefusalError{Arm: merge.ArmNoRemediationToRestore, Reason: "none"},
-			got: func(e *agentreplv1.UpdateMergeQueueError) bool { return e.GetNoRemediationToRestore() != nil }},
+		{name: "no escalation held", refusal: &merge.RefusalError{Arm: merge.ArmNoEscalationHeld, Reason: "none"},
+			got: func(e *agentreplv1.UpdateMergeQueueError) bool { return e.GetNoEscalationHeld() != nil }},
 		{name: "the bound reached", refusal: &merge.RefusalError{Arm: merge.ArmRemediationBoundReached, Reason: "four",
 			Fields: map[string]any{"remediations_before_escalation": uint32(4)}},
 			got: func(e *agentreplv1.UpdateMergeQueueError) bool {
@@ -1155,25 +1185,20 @@ func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}}},
 		{name: "the user deciding", requester: userRequester(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}}},
-		{name: "a dispatch choosing no remediation workspace", requester: agent(), mediation: aDispatch(&agentreplv1.UpdateMergeQueueMediationDispatch{})},
 		{name: "a dispatch stating no problem", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
-			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
-				Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}}}},
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{}}}},
 		{name: "a problem with no statement", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
-				Problems:    []*agentreplv1.DeployProblem{{Statement: " ", Evidence: []string{"r"}}},
-				Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}}}},
+				Problems: []*agentreplv1.DeployProblem{{Statement: " ", Evidence: []string{"r"}}}}}}},
 		{name: "a problem with no evidence", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
-				Problems:    []*agentreplv1.DeployProblem{{Statement: "s"}},
-				Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}}}},
+				Problems: []*agentreplv1.DeployProblem{{Statement: "s"}}}}}},
 		{name: "an escalation's problem with no evidence", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{
 				Problems: []*agentreplv1.DeployProblem{{Statement: "s"}}}}}},
 		{name: "a blank evidence record", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
-				Problems:    []*agentreplv1.DeployProblem{{Statement: "s", Evidence: []string{" "}}},
-				Remediation: &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}}}}},
+				Problems: []*agentreplv1.DeployProblem{{Statement: "s", Evidence: []string{" "}}}}}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

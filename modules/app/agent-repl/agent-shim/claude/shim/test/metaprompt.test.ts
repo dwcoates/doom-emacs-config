@@ -203,11 +203,13 @@ describe("this repository's committed metaprompt", () => {
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("deploy_intake", home);
-    // Assert — owner rulings 2026-11-14.
-    expect(text).toContain("This session is a deploy intake: a hidden workspace agent-repl makes to check one deploy");
+    // Assert — owner rulings 2026-11-14, and 2026-11-17: one standing intake
+    // checks every deploy, and dispatches go to the standing fixer.
+    expect(text).toContain("This session is the deploy intake: the one hidden workspace agent-repl keeps to check every deploy");
     expect(text).toContain("It never researches a cause and never prescribes a fix.");
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
-    expect(text).toContain("agent-repld merge-queue mediation dispatch -fresh");
+    expect(text).toContain("agent-repld merge-queue mediation dispatch -summary");
+    expect(text).not.toContain("-fresh");
   });
 
   it("has the deploy intake approve only when every group has an owner", () => {

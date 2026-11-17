@@ -995,6 +995,13 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			if eject := ejectCold; eject != nil {
 				inflight.Go(func() { eject(ws) })
 			}
+			// A GATE ON A STANDING DEPLOY CHECK IS ANSWERED AT ONCE, off the
+			// raise (owner ruling, 2026-11-17): no deploy check waits on one.
+			inflight.Go(func() {
+				if err := verbsRef.answerDeployCheckColdGate(context.Background(), ws); err != nil {
+					log.Error("daemon.workspace.deploy_checks", "the cold gate on a standing deploy check could not be answered", dlog.Context{"workspace": string(ws), "cause": err.Error()})
+				}
+			})
 		},
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
@@ -1459,6 +1466,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
 		Tests:           testsclient.New(p.Opts.testsSocket),
+		GateEnv:         gateEnv(os.Getenv("PATH")),
 		HookRunner:      scripts,
 		Builtins:        lifecycleconfig.Builtins{CheckoutRoot: paths.Checkout},
 		SelfAddress:     p.Claim.Address(),
@@ -2780,4 +2788,15 @@ func successorEnviron(manifest string, log dlog.Logger) func() ([]string, error)
 		}
 		return env, nil
 	}
+}
+
+// gateEnv is what every merge gate's run adds to the test service's own
+// environment: the daemon's PATH, which names the toolchains a gate builds
+// and tests with (merge.Deps.GateEnv). A daemon with no PATH could start no
+// gate, which is a launch defect and panics at the composition root.
+func gateEnv(path string) []string {
+	if path == "" {
+		panic("agent-repld: the daemon runs with no PATH, so no merge gate could find its toolchains")
+	}
+	return []string{"PATH=" + path}
 }

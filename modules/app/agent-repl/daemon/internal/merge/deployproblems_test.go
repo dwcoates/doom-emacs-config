@@ -90,11 +90,11 @@ func TestAWindowGroupStandsAgainstTheProblemsKept(t *testing.T) {
 		{name: "a group nobody names, unseen before, is new", group: FindingGroup{Operation: "a", Message: "m"}, want: wsm.WindowNew},
 		{name: "a group nobody names, seen before, is seen before", group: FindingGroup{Operation: "a", Message: "m", Before: 2}, want: wsm.WindowSeenBefore},
 		{name: "a group a problem at work names is owned", group: FindingGroup{Operation: "a", Message: "m"},
-			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-remedy"}}, want: wsm.WindowOwned},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-fixer"}}, want: wsm.WindowOwned},
 		{name: "a group a fixed problem names recurred", group: FindingGroup{Operation: "a", Message: "m", Before: 1},
-			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-remedy", FixedAt: &fixed}}, want: wsm.WindowRecurred},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-fixer", FixedAt: &fixed}}, want: wsm.WindowRecurred},
 		{name: "a recurred group carries its problem's fixes", group: FindingGroup{Operation: "a", Message: "m", Before: 1},
-			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-remedy", FixedAt: &fixed, Fixes: 3}}, want: wsm.WindowRecurred},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-fixer", FixedAt: &fixed, Fixes: 3}}, want: wsm.WindowRecurred},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -105,7 +105,7 @@ func TestAWindowGroupStandsAgainstTheProblemsKept(t *testing.T) {
 			if err != nil || len(got) != 1 || got[0].Class != tt.want {
 				t.Fatalf("classifyFindings = (%+v, %v), want %s", got, err, tt.want)
 			}
-			if tt.problems != nil && got[0].Owner != "name-of-ws-remedy" {
+			if tt.problems != nil && got[0].Owner != "name-of-ws-fixer" {
 				t.Fatalf("owner = %q, want the problem's owner by name", got[0].Owner)
 			}
 			if tt.problems != nil && got[0].Fixes != tt.problems[0].Fixes {
@@ -185,7 +185,7 @@ func TestADispatchMakesItsRemediationTheOwnerOfTheGroupsItQuotes(t *testing.T) {
 
 	// Assert
 	problems, readErr := h.db.DeployProblems(context.Background(), mediationKey(h))
-	if err != nil || readErr != nil || len(problems) != 1 || problems[0].Key != sinkKey || problems[0].Owner != "ws-remedy" || problems[0].Findings != "the sink warning recurs" {
+	if err != nil || readErr != nil || len(problems) != 1 || problems[0].Key != sinkKey || problems[0].Owner != "ws-fixer" || problems[0].Findings != "the sink warning recurs" {
 		t.Fatalf("dispatch = %v, problems (%+v, %v); want the remediation owning the quoted group", err, problems, readErr)
 	}
 }
@@ -207,7 +207,7 @@ func TestAnEscalationOwnsTheGroupsNobodyOwnedAndIsToldTheOldOnes(t *testing.T) {
 		t.Fatalf("escalate = %v, problems (%+v, %v); want both unowned groups owned", err, problems, readErr)
 	}
 	for _, p := range problems {
-		if p.Owner != "ws-escalate" {
+		if p.Owner != "ws-fixer" {
 			t.Fatalf("problem %+v, want the escalation owning it", p)
 		}
 	}
@@ -221,16 +221,16 @@ func TestARemediationsDeployMarksItsProblemsFixed(t *testing.T) {
 	// Arrange
 	h := finishing(t)
 	ctx := context.Background()
-	if err := h.db.OwnDeployProblems(ctx, mediationKey(h), []wsm.ProblemKey{sinkKey}, "ws-remedy", "the sink warning", deployStarted); err != nil {
+	if err := h.db.OwnDeployProblems(ctx, mediationKey(h), []wsm.ProblemKey{sinkKey}, "ws-fixer", "the sink warning", deployStarted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-remedy", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-remedy", wsm.RemediationGating, wsm.RemediationLanding, deployStarted); err != nil {
+	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationLanding, deployStarted); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.RecordRemediationLanded(ctx, "ws-remedy", tipAfter, nil, deployStarted); err != nil {
+	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", tipAfter, nil, deployStarted); err != nil {
 		t.Fatal(err)
 	}
 
@@ -275,7 +275,7 @@ func TestDecidedProblemsThatCannotBeRecordedAsOwnedAreAnError(t *testing.T) {
 
 	// Act: a problem quoting a record whose group names no operation is
 	// refused by the store.
-	h.o.ownProblems(context.Background(), mediationKey(h), "ws-remedy", []DeployProblem{{Statement: "s"}}, []wsm.ProblemKey{{Message: "no operation"}}, "unstated", dlog.Context{})
+	h.o.ownProblems(context.Background(), mediationKey(h), "ws-fixer", []DeployProblem{{Statement: "s"}}, []wsm.ProblemKey{{Message: "no operation"}}, "unstated", dlog.Context{})
 
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the decided problems could not be recorded as owned; the next check finds them unowned"}); !ok {

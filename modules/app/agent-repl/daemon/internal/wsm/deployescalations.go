@@ -39,6 +39,29 @@ func (s *store) RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo
 	})
 }
 
+// DeployEscalationsOf answers every deploy escalation workspace recorded for
+// REPO's queue, oldest first.
+func (s *store) DeployEscalationsOf(ctx context.Context, repo RepoKey) ([]WorkspaceID, error) {
+	const op = "daemon.wsm.deploy_escalations_of"
+	var out []WorkspaceID
+	err := s.read(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context) error {
+		rows, err := s.q(ctx).QueryContext(ctx, `SELECT workspace_id FROM deploy_escalations WHERE repo_key = ? ORDER BY made_at, workspace_id`, string(repo))
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var ws string
+			if err := rows.Scan(&ws); err != nil {
+				return err
+			}
+			out = append(out, WorkspaceID(ws))
+		}
+		return rows.Err()
+	})
+	return out, err
+}
+
 // DeployEscalationOf answers the queue WS was made the deploy escalation
 // workspace of, and false when it is none.
 func (s *store) DeployEscalationOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error) {

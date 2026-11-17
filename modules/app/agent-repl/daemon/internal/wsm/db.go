@@ -747,6 +747,24 @@ type DB interface {
 	// RecordDeployEscalation records WS as the deploy escalation workspace
 	// of REPO's queue, whose finish lands directly.
 	RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo RepoKey, at time.Time) error
+	// DeployEscalationsOf answers every deploy escalation recorded for a queue.
+	DeployEscalationsOf(ctx context.Context, repo RepoKey) ([]WorkspaceID, error)
+	// StandingDeployCheckOf answers a queue's standing deploy check workspace
+	// in one role (deploystanding.go).
+	StandingDeployCheckOf(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (StandingDeployCheck, bool, error)
+	// RecordStandingDeployCheck makes a workspace a queue's standing one in a role, unbriefed.
+	RecordStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName, ws WorkspaceID) error
+	// MarkStandingBriefed records a standing workspace briefed in its role.
+	MarkStandingBriefed(ctx context.Context, repo RepoKey, role DeployCheckRoleName) error
+	// NoteDeployCheckWork restarts a queue's quiet run and arms its compaction.
+	NoteDeployCheckWork(ctx context.Context, repo RepoKey) error
+	// NoteQuietDeployCheck counts a quiet check, answering whether the
+	// standing workspaces compact now.
+	NoteQuietDeployCheck(ctx context.Context, repo RepoKey) (bool, error)
+	// RecordMediationEnding records how the checked deploy ended on its check.
+	RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error)
+	// OweCompaction records that a workspace's next start compacts its conversation.
+	OweCompaction(ctx context.Context, ws WorkspaceID) (bool, error)
 	// DeployEscalationOf answers the queue WS escalates a deploy of.
 	DeployEscalationOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error)
 	// BeginRemediationFinish records a remediation workspace's finish at its

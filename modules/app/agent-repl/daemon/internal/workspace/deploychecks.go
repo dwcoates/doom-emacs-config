@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
@@ -127,47 +128,128 @@ func (v *verbs) SetDeployCheckEffort(ctx context.Context, ws wsm.WorkspaceID, ro
 	return nil
 }
 
-// StopDeployCheck implements Verbs: ends deploy check workspace WS at once,
-// its session killed mid-turn, never at its turn's end (owner ruling,
+// StopDeployCheck implements Verbs: ends deploy check workspace WS's session
+// at once, killed mid-turn, never at its turn's end (owner ruling,
 // 2026-11-16). An intake's decision is durable before the chain ends it, so
 // what the turn would have said after it is nothing anyone reads: a turn
 // left to end wrote a reply an approved, hidden intake should never have.
+//
+// THE WORKSPACE STAYS OPEN: a standing intake takes every check of its
+// repository (owner ruling, 2026-11-17), its conversation kept, and the next
+// check's brief starts its session again.
 func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "StopDeployCheck", ws)
 	if err != nil {
 		return err
 	}
-	if err := v.deps.DB.MarkClosed(ctx, ws, wsm.Closure{At: v.now(), By: wsm.CloseByAgent, How: wsm.HowKilled}); err != nil {
-		log.Error(opDeployChecks, "the deploy check workspace could not be marked closed ahead of its stop", dlog.Context{"cause": err.Error()})
-		return fmt.Errorf("stop the deploy check %s: record closed: %w", ws, err)
-	}
-	v.republishRegistry(ctx, log, opDeployChecks)
-	if err := v.kill(ctx, log, ws, wsm.CloseByAgent); err != nil {
+	if _, err := v.endSession(ctx, log, ws); err != nil {
 		return fmt.Errorf("stop the deploy check %s: %w", ws, err)
 	}
-	log.Info(opDeployChecks, "stopped the deploy check workspace at once; its turn is cut, not ended", nil)
+	log.Info(opDeployChecks, "stopped the deploy check workspace's session at once; its turn is cut, not ended, and the workspace stays open", nil)
 	return nil
 }
 
-// StandByDeployCheck implements Verbs: a remediation or escalation workspace
-// WS whose finish the daemon accepted is hidden and its session ended at
-// once, its turn cut, before it can write a reply; the workspace stays open,
-// shown by its repository's deploy check label as finishing (owner
-// requirement, 2026-11-16). A gate that sends it back brings it back
-// (ResumeDeployCheck); its fix's deploy closes it.
+// StandByDeployCheck implements Verbs: a fixer whose finish the daemon
+// accepted has its session ended at once, its turn cut, before it can write
+// a reply; the workspace stays open and in sight (owner ruling, 2026-11-17),
+// kept warm, and its repository's deploy check label says it is finishing.
+// A gate that sends it back brings its session up again with its brief.
 func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "StandByDeployCheck", ws)
 	if err != nil {
 		return err
 	}
-	if err := v.recordHidden(ctx, log, ws, true); err != nil {
-		return fmt.Errorf("stand the deploy check %s by: hide: %w", ws, err)
-	}
 	if _, err := v.endSession(ctx, log, ws); err != nil {
 		return fmt.Errorf("stand the deploy check %s by: %w", ws, err)
 	}
-	log.Info(opDeployChecks, "the finished deploy check workspace stands by: hidden, its session ended, open until its fix deploys", nil)
+	log.Info(opDeployChecks, "the finished deploy check workspace stands by: its session ended, the workspace open", nil)
 	return nil
+}
+
+// CompactDeployCheck implements Verbs: compacts standing deploy check WS's
+// conversation by the cold gate's summarizer (Haiku) NOW, answering whether
+// it did (owner ruling, 2026-11-17): the compaction is owed to the session's
+// next start (wsm.OweCompaction), and the session is ended and started
+// again at once to carry it out, so no later check waits on it. A workspace
+// with no conversation has nothing to compact, and one running a turn (the
+// user's, in the fixer) is never cut: its next start compacts it.
+func (v *verbs) CompactDeployCheck(ctx context.Context, ws wsm.WorkspaceID) (bool, error) {
+	_, log, err := v.owned(ctx, "CompactDeployCheck", ws)
+	if err != nil {
+		return false, err
+	}
+	if _, err := v.deps.DB.OweCompaction(ctx, ws); err != nil {
+		log.Error(opDeployChecks, "the deploy check workspace's compaction could not be owed", dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("compact the deploy check %s: owe the compaction: %w", ws, err)
+	}
+	owed, found, err := v.deps.DB.OwedStartWork(ctx, ws)
+	if err != nil {
+		log.Error(opDeployChecks, "could not read the deploy check workspace's owed start work", dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("compact the deploy check %s: read the owed start work: %w", ws, err)
+	}
+	if !found || !owed.Compact {
+		log.Info(opDeployChecks, "the deploy check workspace has no conversation to compact", dlog.Context{"owed": found})
+		return false, nil
+	}
+	// A TURN RUNNING IS NEVER CUT FOR A COMPACTION: a turn the user started
+	// in the fixer keeps it, and the compaction stays owed to its next start.
+	open, err := v.deps.DB.OpenTurns(ctx, ws)
+	if err != nil {
+		log.Error(opDeployChecks, "could not read whether a turn runs in the deploy check workspace; it is not compacted now", dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("compact the deploy check %s: read its open turns: %w", ws, err)
+	}
+	if len(open) > 0 {
+		log.Info(opDeployChecks, "a turn runs in the deploy check workspace; its compaction waits for its next start", dlog.Context{"open_turns": len(open)})
+		return false, nil
+	}
+	if v.deps.Sessions.Live(ws) {
+		if _, err := v.endSession(ctx, log, ws); err != nil {
+			return false, fmt.Errorf("compact the deploy check %s: end the session: %w", ws, err)
+		}
+	}
+	if err := v.deps.Sessions.Start(ctx, ws); err != nil {
+		log.Error(opDeployChecks, "the deploy check workspace's session could not start to compact", dlog.Context{"cause": err.Error()})
+		return false, fmt.Errorf("compact the deploy check %s: start the compacting session: %w", ws, err)
+	}
+	log.Info(opDeployChecks, "compacted the deploy check workspace's conversation; its session runs on the summary", nil)
+	return true, nil
+}
+
+// AnswerDeployCheckColdGate implements Verbs: answers the cold gate that
+// stands on standing deploy check WS with compact-and-resume at once, by the
+// cold gate's default summarizer (Haiku), so a held brief goes on without
+// the user (owner ruling, 2026-11-17: no deploy check waits on a cold gate).
+// A workspace that is no standing deploy check, or has no gate standing, is
+// left as it is.
+func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "AnswerDeployCheckColdGate", ws)
+	if err != nil {
+		return err
+	}
+	if !record.StandingDeployCheck {
+		return nil
+	}
+	if _, standing := v.deps.Cards.ColdGate(ws); !standing {
+		return nil
+	}
+	summarizer := defaultSummarizer()
+	log.Info(opDeployChecks, "a cold gate stands on the standing deploy check; it is answered compact-and-resume at once", nil)
+	return v.AnswerColdGate(ctx, ws, &agentreplv1.AnswerColdGateRequest{
+		Choice: &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: &agentreplv1.AnswerColdGateCompact{
+			Model: summarizer.GetModel(), Scope: summarizer.GetScope()}},
+	})
+}
+
+// RefreshDeployCheck implements Verbs: brings standing fixer WS's worktree
+// to its parent branch's tip before a new brief (advanceToParent), so its
+// work starts from every fix landed since. A worktree holding uncommitted
+// work or commits the main branch lacks stays where it is, and says so.
+func (v *verbs) RefreshDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "RefreshDeployCheck", ws)
+	if err != nil {
+		return err
+	}
+	return v.advanceToParent(ctx, log, record, opDeployChecks, "refresh", "standing deploy fixer")
 }
 
 // ResumeDeployCheck implements Verbs: shows standing-by deploy check

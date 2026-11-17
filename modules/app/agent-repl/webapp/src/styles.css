@@ -1581,6 +1581,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    own follows. */
 #ws-sidebar .merged-group-head::after { order: 1; }
 #ws-sidebar .merged-group-head > .sb-mq-mediation { order: 2; flex: 0 0 auto; margin-left: 0; }
+#ws-sidebar .merged-group-head > .sb-mq-release { order: 2; flex: 0 0 auto; margin-left: 0.5em; color: var(--blocked); text-decoration: underline; cursor: pointer; }
 #ws-sidebar .merged-group-head > .sb-mq-status-tail { order: 3; flex: 0 0 0.65rem; height: 1px; background: var(--border); }
 /* A FOLDED GROUP shows its header alone: its queue and its merged rows are
    drawn as nothing until it opens. */

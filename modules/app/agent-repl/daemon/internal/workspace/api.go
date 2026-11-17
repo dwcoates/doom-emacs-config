@@ -476,6 +476,15 @@ type Verbs interface {
 	// StopDeployCheck ends deploy check workspace WS at once, its session
 	// killed mid-turn (deploychecks.go).
 	StopDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
+	// AnswerDeployCheckColdGate answers a cold gate standing on a standing
+	// deploy check with compact-and-resume at once.
+	AnswerDeployCheckColdGate(ctx context.Context, ws ids.WorkspaceID) error
+	// CompactDeployCheck compacts a standing deploy check's conversation by
+	// Haiku now, answering whether it had one to compact.
+	CompactDeployCheck(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// RefreshDeployCheck brings a standing fixer's worktree to its parent's
+	// tip before a new brief.
+	RefreshDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// StandByDeployCheck hides a finished deploy check workspace and ends
 	// its session at once, keeping it open (deploychecks.go).
 	StandByDeployCheck(ctx context.Context, ws ids.WorkspaceID) error

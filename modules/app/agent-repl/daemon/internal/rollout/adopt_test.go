@@ -214,9 +214,16 @@ func TestAnAdoptCallerThatGivesUpFirstAnswersNotYetAdopted(t *testing.T) {
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	arm(t, h, ws, Participants{Host: true, Web: true})
+	// THE DAEMON'S ADOPTION IS HELD until the caller has answered: the
+	// daemon adopts every armed workspace itself, so an adoption finishing
+	// first would rightly answer the caller success, and the race between it
+	// and the caller's cancel would decide the test.
+	held := make(chan struct{})
+	h.fleet.onAdopt = func(ids.WorkspaceID) { <-held }
+	t.Cleanup(func() { close(held) })
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Act: the host calls and nothing else ever will.
+	// Act: the host calls and gives up before the adoption settles.
 	done := make(chan error, 1)
 	go func() { done <- h.c.AdoptHost(ctx, ws) }()
 	cancel()

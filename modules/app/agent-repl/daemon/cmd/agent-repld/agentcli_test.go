@@ -2549,6 +2549,46 @@ func TestEveryQueueVerbNamesTheCallingWorkspaceAsWhoAsked(t *testing.T) {
 	}
 }
 
+func TestReleaseEscalationNamesItsRepository(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(mergeQueueNoun, "release-escalation", "-repository", "here")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	if got := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetReleaseEscalation().GetRepository(); got == nil {
+		t.Fatal("the release named no repository")
+	}
+}
+
+func TestReleaseEscalationRefusesNoOneRepository(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no repository", args: []string{"release-escalation"}},
+		{name: "every repository", args: []string{"release-escalation", "-repository", "all"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code == exitSuccess || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, sent %d; want a usage failure and nothing sent", code, len(f.client.requests))
+			}
+		})
+	}
+}
+
 func TestPauseSendsHardOnlyWhenAsked(t *testing.T) {
 	tests := []struct {
 		name string
@@ -3569,36 +3609,24 @@ func TestMediationSendsTheDecisionAndItsSummary(t *testing.T) {
 const aProblemJSON = `[{"statement": "the reaper errors on every pass", "evidence": ["{\"level\":\"error\"}"]}]`
 
 func TestMediationDispatchesTheProblemsReadFromStandardInput(t *testing.T) {
-	tests := []struct {
-		name        string
-		flag        string
-		wantRestore bool
-	}{
-		{name: "to a fresh remediation workspace", flag: "-fresh"},
-		{name: "to the chain's last remediation workspace", flag: "-restore", wantRestore: true},
+	// Arrange
+	f := newCLIFixture()
+	f.stdin = aProblemJSON
+
+	// Act
+	code := f.run(mergeQueueNoun, "mediation", "dispatch", "-summary", "the reaper broke")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newCLIFixture()
-			f.stdin = aProblemJSON
-
-			// Act
-			code := f.run(mergeQueueNoun, "mediation", "dispatch", tt.flag, "-summary", "the reaper broke")
-
-			// Assert
-			if code != exitSuccess {
-				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
-			}
-			m := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation()
-			d := m.GetDispatch()
-			if d == nil || (d.GetRestore() != nil) != tt.wantRestore || (d.GetFresh() != nil) == tt.wantRestore || m.GetSummary() != "the reaper broke" {
-				t.Fatalf("mediation = %v, want a dispatch restoring %v", m, tt.wantRestore)
-			}
-			if len(d.GetProblems()) != 1 || d.GetProblems()[0].GetStatement() != "the reaper errors on every pass" || d.GetProblems()[0].GetEvidence()[0] != `{"level":"error"}` {
-				t.Fatalf("problems = %v, want the one read, its evidence verbatim", d.GetProblems())
-			}
-		})
+	m := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation()
+	d := m.GetDispatch()
+	if d == nil || m.GetSummary() != "the reaper broke" {
+		t.Fatalf("mediation = %v, want a dispatch", m)
+	}
+	if len(d.GetProblems()) != 1 || d.GetProblems()[0].GetStatement() != "the reaper errors on every pass" || d.GetProblems()[0].GetEvidence()[0] != `{"level":"error"}` {
+		t.Fatalf("problems = %v, want the one read, its evidence verbatim", d.GetProblems())
 	}
 }
 
@@ -3643,13 +3671,11 @@ func TestMediationRefusesAMalformedCall(t *testing.T) {
 		{name: "no decision", args: []string{"mediation", "-summary", "x"}, want: "approve, escalate or dispatch"},
 		{name: "an unknown decision", args: []string{"mediation", "reject", "-summary", "x"}, want: "not \"reject\""},
 		{name: "no summary", args: []string{"mediation", "approve"}, want: "-summary is required"},
-		{name: "a remediation choice on an approval", args: []string{"mediation", "approve", "-fresh", "-summary", "x"}, want: "choose a dispatch's remediation workspace"},
-		{name: "a dispatch choosing neither", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: aProblemJSON, want: "exactly one of -fresh or -restore"},
-		{name: "a dispatch choosing both", args: []string{"mediation", "dispatch", "-fresh", "-restore", "-summary", "x"}, stdin: aProblemJSON, want: "exactly one of -fresh or -restore"},
-		{name: "a dispatch whose problems are not JSON", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
-		{name: "a dispatch with an unknown field", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: `[{"statement":"s","evidence":["e"],"cause":"c"}]`, want: "as a JSON list"},
-		{name: "a dispatch of no problem", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: "[]", want: "at least one problem"},
-		{name: "a dispatch reading -problems", args: []string{"mediation", "dispatch", "-fresh", "-problems", "-summary", "x"}, stdin: aProblemJSON, want: "a dispatch always reads its problems"},
+		{name: "the retired remediation choice", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: aProblemJSON, want: "-fresh"},
+		{name: "a dispatch whose problems are not JSON", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
+		{name: "a dispatch with an unknown field", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: `[{"statement":"s","evidence":["e"],"cause":"c"}]`, want: "as a JSON list"},
+		{name: "a dispatch of no problem", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: "[]", want: "at least one problem"},
+		{name: "a dispatch reading -problems", args: []string{"mediation", "dispatch", "-problems", "-summary", "x"}, stdin: aProblemJSON, want: "a dispatch always reads its problems"},
 		{name: "an escalation whose problems are not JSON", args: []string{"mediation", "escalate", "-problems", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
 	}
 	for _, tt := range tests {

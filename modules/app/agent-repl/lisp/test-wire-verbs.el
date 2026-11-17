@@ -2220,12 +2220,13 @@ encoded here."
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
   "UpdateMergeQueueRequest's action oneof has exactly the arms encoded here,
-and `mediation', which only the deploy mediator sends, through the CLI."
+`mediation', which only the deploy mediator sends, through the CLI, and
+`releaseEscalation', which the sidebar and the CLI send."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "mediation" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
+                 '("evict" "mediation" "moveDown" "moveTo" "moveUp" "pause" "releaseEscalation" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -3404,12 +3405,12 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"noMediationOwed\":{}}"))
                    '(:cause (:arm :no-mediation-owed :value nil))))))
 
-(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-remediation-to-restore-arm ()
-  "UpdateMergeQueueError's `no_remediation_to_restore' arm decodes empty."
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-escalation-held-arm ()
+  "UpdateMergeQueueError's `no_escalation_held' arm decodes empty."
   (agent-repl-test-wire-verbs--with-common
     (should (equal (agent-repl-wire-decode-update-merge-queue-error
-                    (agent-repl-test-wire-verbs--parse "{\"noRemediationToRestore\":{}}"))
-                   '(:cause (:arm :no-remediation-to-restore :value nil))))))
+                    (agent-repl-test-wire-verbs--parse "{\"noEscalationHeld\":{}}"))
+                   '(:cause (:arm :no-escalation-held :value nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-remediation-bound-reached-arm ()
   "UpdateMergeQueueError's `remediation_bound_reached' arm decodes its bound."
@@ -3683,7 +3684,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "noRemediationToRestore" "remediationBoundReached" "problemsUnowned" "problemsRecurring")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-update-merge-queue-error-decodes-problems-recurring ()

@@ -3,11 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
 )
@@ -211,7 +214,7 @@ func TestADeployCheckWorkspaceThatCannotBeMadeIsRecorded(t *testing.T) {
 	}
 }
 
-func TestADeployCheckWorkspaceStoppedAtOnceIsKilledAndClosedByItsAgent(t *testing.T) {
+func TestADeployCheckWorkspaceStoppedAtOnceIsKilledAndLeftOpen(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
@@ -223,34 +226,29 @@ func TestADeployCheckWorkspaceStoppedAtOnceIsKilledAndClosedByItsAgent(t *testin
 	if err != nil || len(f.shim.killedSession) != 1 || !f.shim.killedSession[0] {
 		t.Fatalf("StopDeployCheck = %v, kills %v; want one forced kill", err, f.shim.killedSession)
 	}
-	closures := f.db.closures[ws]
-	if len(closures) != 2 || closures[0].By != wsm.CloseByAgent || closures[0].How != wsm.HowKilled || closures[1].By != wsm.CloseByAgent {
-		t.Fatalf("close records = %+v, want the stop's and the teardown's, both its agent's", closures)
+	if closures := f.db.closures[ws]; len(closures) != 0 || f.db.closedFlags[ws] {
+		t.Fatalf("close records = %+v, want the standing workspace left open", closures)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks, Message: "stopped the deploy check workspace at once; its turn is cut, not ended"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks,
+		Message: "stopped the deploy check workspace's session at once; its turn is cut, not ended, and the workspace stays open"}); !ok {
 		t.Fatalf("records = %+v, want the stop recorded", f.log.logger.Records())
 	}
 }
 
-func TestADeployCheckWorkspaceThatCannotBeMarkedClosedIsNotKilled(t *testing.T) {
+func TestStoppingAnUnknownDeployCheckWorkspaceKillsNothing(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
-	f.db.setClosedErr = errors.New("disk gone")
 
 	// Act
-	err := f.verbs.(*verbs).StopDeployCheck(context.Background(), ws)
+	err := f.verbs.(*verbs).StopDeployCheck(context.Background(), "no-such-workspace")
 
 	// Assert
 	if err == nil || len(f.shim.killedSession) != 0 {
 		t.Fatalf("StopDeployCheck = %v, kills %v; want a refusal and no kill", err, f.shim.killedSession)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: "the deploy check workspace could not be marked closed ahead of its stop"}); !ok {
-		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
-	}
 }
 
-func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
+func TestAFinishedDeployCheckWorkspaceStandsByInSightAndOpen(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
@@ -259,23 +257,125 @@ func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
 	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
 
 	// Assert
-	if err != nil || len(f.shim.killedSession) != 1 || !f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
-		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, hidden and still open", err, f.shim.killedSession, f.db.workspaces[ws])
+	if err != nil || len(f.shim.killedSession) != 1 || f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
+		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, in sight and still open", err, f.shim.killedSession, f.db.workspaces[ws])
 	}
 }
 
-func TestADeployCheckWorkspaceThatCannotBeHiddenIsNotStoodBy(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
-	f.db.setHiddenErr = errors.New("disk gone")
+func TestCompactDeployCheck(t *testing.T) {
+	tests := []struct {
+		name        string
+		compactable bool
+		openTurn    bool
+		live        bool
+		want        bool
+		wantKills   int
+		wantStarts  int
+		message     string
+	}{
+		{name: "a conversation is compacted by a fresh start", compactable: true, want: true, wantStarts: 1,
+			message: "compacted the deploy check workspace's conversation; its session runs on the summary"},
+		{name: "a live session is ended before the compacting start", compactable: true, live: true, want: true, wantKills: 1, wantStarts: 1,
+			message: "compacted the deploy check workspace's conversation; its session runs on the summary"},
+		{name: "no conversation has nothing to compact", message: "the deploy check workspace has no conversation to compact"},
+		{name: "a running turn is never cut", compactable: true, openTurn: true, live: true,
+			message: "a turn runs in the deploy check workspace; its compaction waits for its next start"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := f.workspace("w1", t.TempDir()).ID
+			f.db.compactable = map[ids.WorkspaceID]bool{ws: tt.compactable}
+			if tt.openTurn {
+				f.db.openTurns = append(f.db.openTurns, wsm.Turn{Workspace: ws, ID: "t1"})
+			}
+			if tt.live {
+				f.fleet.live[ws] = true
+			}
 
-	// Act
-	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
+			// Act
+			got, err := f.verbs.(*verbs).CompactDeployCheck(context.Background(), ws)
 
-	// Assert
-	if err == nil || len(f.shim.killedSession) != 0 {
-		t.Fatalf("StandByDeployCheck = %v, kills %v; want a refusal and its session left", err, f.shim.killedSession)
+			// Assert
+			if err != nil || got != tt.want || len(f.shim.killedSession) != tt.wantKills || len(f.fleet.started) != tt.wantStarts {
+				t.Fatalf("CompactDeployCheck = (%v, %v), kills %d, starts %d; want (%v), %d kills, %d starts", got, err, len(f.shim.killedSession), len(f.fleet.started), tt.want, tt.wantKills, tt.wantStarts)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Operation: opDeployChecks, Message: tt.message}); !ok {
+				t.Fatalf("records = %+v, want %q", f.log.logger.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestCompactDeployCheckAnswersWhatItCannotDo(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture, ws ids.WorkspaceID)
+		message string
+	}{
+		{name: "a compaction that cannot be owed", message: "the deploy check workspace's compaction could not be owed",
+			arrange: func(f *fixture, _ ids.WorkspaceID) { f.db.oweCompactionErr = errors.New("database is locked") }},
+		{name: "open turns that cannot be read", message: "could not read whether a turn runs in the deploy check workspace; it is not compacted now",
+			arrange: func(f *fixture, ws ids.WorkspaceID) {
+				f.db.compactable = map[ids.WorkspaceID]bool{ws: true}
+				f.db.openTurnsErr = errors.New("database is locked")
+			}},
+		{name: "a session that cannot start", message: "the deploy check workspace's session could not start to compact",
+			arrange: func(f *fixture, ws ids.WorkspaceID) {
+				f.db.compactable = map[ids.WorkspaceID]bool{ws: true}
+				f.fleet.startErr = errors.New("the shim died")
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			ws := f.workspace("w1", t.TempDir()).ID
+			tt.arrange(f, ws)
+
+			// Act
+			_, err := f.verbs.(*verbs).CompactDeployCheck(context.Background(), ws)
+
+			// Assert
+			if err == nil {
+				t.Fatal("CompactDeployCheck = nil, want the failure answered")
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks, Message: tt.message}); !ok {
+				t.Fatalf("records = %+v, want %q at ERROR", f.log.logger.Records(), tt.message)
+			}
+		})
+	}
+}
+
+func TestAnswerDeployCheckColdGateAnswersOnlyAStandingDeployChecksGate(t *testing.T) {
+	tests := []struct {
+		name     string
+		standing bool
+		gate     bool
+	}{
+		{name: "a workspace that is no standing deploy check is left as it is", gate: true},
+		{name: "a standing deploy check with no gate is left as it is", standing: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			record := f.workspace("w1", t.TempDir())
+			record.StandingDeployCheck = tt.standing
+			f.db.workspaces[record.ID] = record
+			if tt.gate {
+				f.cards.coldGate = &ServedColdGate{VendorSessionID: "v-1"}
+			}
+
+			// Act
+			err := f.verbs.(*verbs).AnswerDeployCheckColdGate(context.Background(), record.ID)
+
+			// Assert
+			if err != nil || len(f.cards.ended) != 0 {
+				t.Fatalf("AnswerDeployCheckColdGate = %v, ended %v; want nothing answered", err, f.cards.ended)
+			}
+		})
 	}
 }
 
@@ -293,5 +393,66 @@ func TestAResumedDeployCheckWorkspaceIsShownAgain(t *testing.T) {
 	// Assert
 	if err != nil || f.db.workspaces[ws].Hidden {
 		t.Fatalf("ResumeDeployCheck = %v, record %+v; want it shown again", err, f.db.workspaces[ws])
+	}
+}
+
+func TestRefreshDeployCheckBringsTheFixerToItsParentsTip(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	record := f.workspace("w1", t.TempDir())
+	record.ParentBranch = "master"
+	f.db.with(record)
+	f.git.existingBranches = map[string]bool{record.Branch: true, "master": true}
+
+	// Act
+	err := f.verbs.(*verbs).RefreshDeployCheck(context.Background(), record.ID)
+
+	// Assert
+	if want := record.Dir + "->master"; err != nil || len(f.git.fastForwarded) != 1 || f.git.fastForwarded[0] != want {
+		t.Fatalf("RefreshDeployCheck = %v, fast-forwards %v; want exactly %q", err, f.git.fastForwarded, want)
+	}
+}
+
+func TestRefreshDeployCheckFailsLoudlyWhenTheAdvanceCannotRun(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	record := f.workspace("w1", t.TempDir())
+	record.ParentBranch = "master"
+	f.db.with(record)
+	f.git.existingBranches = map[string]bool{record.Branch: true, "master": true}
+	f.git.fastForwardErr = errors.New("not a fast-forward")
+
+	// Act
+	err := f.verbs.(*verbs).RefreshDeployCheck(context.Background(), record.ID)
+
+	// Assert
+	if err == nil {
+		t.Fatal("RefreshDeployCheck = nil, want the failed advance answered")
+	}
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opDeployChecks,
+		Message: "could not advance the standing deploy fixer to its parent's tip: fast-forward"}); !ok {
+		t.Fatalf("records = %+v, want the failure at ERROR", f.log.logger.Records())
+	}
+}
+
+func TestEveryAdvanceToAParentsTipGoesThroughOneHelper(t *testing.T) {
+	// Arrange
+	sources := map[string]string{}
+	for _, file := range []string{"open.go", "deploychecks.go"} {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[file] = string(body)
+	}
+
+	// Assert: both callers share advanceToParent, and only it fast-forwards.
+	for file, src := range sources {
+		if !strings.Contains(src, "v.advanceToParent(") {
+			t.Fatalf("%s does not advance through advanceToParent", file)
+		}
+	}
+	if strings.Count(sources["open.go"]+sources["deploychecks.go"], "Git.FastForward(") != 1 {
+		t.Fatal("a second fast-forward to a parent's tip was written beside advanceToParent")
 	}
 }

@@ -1,10 +1,11 @@
 ## Landing as a deploy intake
 
-### This workspace is the intake of one deploy
+### This workspace is the repository's standing deploy intake
 
-- This session is a deploy intake: a hidden workspace agent-repl makes to check one deploy before the merge queue lands past it.
-  - It decides that deploy once, with one command, and agent-repl closes it the moment the decision is recorded.
-  - The next deploy of the chain, such as a remediation's, is told to a fresh intake; the brief states the chain so far.
+- This session is the deploy intake: the one hidden workspace agent-repl keeps to check every deploy of its repository before the merge queue lands past it.
+  - It decides each deploy once, with one command, and agent-repl ends this session the moment the decision is recorded.
+  - The next deploy, such as a remediation's, starts this session again with its own brief, which states the chain so far.
+  - Earlier checks in this conversation are context, never the facts of the deploy at hand: each brief's facts decide its deploy.
   - The repository's lifecycle config turns the checks on (`deploy_checks` in `.agent-repl/lifecycle.yaml`).
   - The design is `modules/app/agent-repl/docs/investigations/2026-11-14-deploy-intake-plan.md`.
 - The deploy is decided in the turn its brief starts.
@@ -27,7 +28,7 @@
 
 - Every group is OWNED, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`.
   - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
-  - Every decision closes this session at once, so the command is the turn's last act.
+  - Every decision ends this session at once, so the command is the turn's last act.
 - Something is wrong that the user should settle (a choice about how something looks or behaves, a NEW test reuse fact, or no problem an agent could fix from the evidence): escalate, with the findings on standard input as a dispatch's are:
 
 ```bash
@@ -36,18 +37,16 @@ agent-repld merge-queue mediation escalate -problems -summary "<what is wrong, i
 JSON
 ```
 
-  - This workspace never talks to the user: agent-repl makes a visible escalation workspace from the summary and findings, and notifies the user, whose click opens it.
-  - The queue lands nothing until the escalation's fix deploys and is approved, or the user closes the escalation.
+  - This workspace never talks to the user: agent-repl briefs the repository's standing fixer with the summary and findings, to propose a plan and finish once the user agrees, and notifies the user, whose click opens it.
+  - The queue lands nothing until the escalation's fix deploys and is approved, or the user releases the queue.
   - The escalation workspace is told every SEEN BEFORE, RECURRED and OWNED group beside the findings, and owns every group it is told that nobody owned.
-- Problems an agent can fix, of any standing but OWNED: dispatch them, with their evidence, to a remediation workspace.
+- Problems an agent can fix, of any standing but OWNED: dispatch them, with their evidence, to the repository's standing fixer, which fixes and finishes on its own.
   - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem nobody has ended.
   - Each problem quotes at least one of its group's records verbatim: agent-repl reads the group from it, and the remediation owns that group until its fix deploys.
-  - `-restore` reopens the chain's last remediation workspace: choose it when a problem's records name the files or the change its landed fix made.
-  - `-fresh` makes a new remediation workspace: choose it when the problems are unrelated to any earlier fix of the chain.
   - The problems go on standard input as JSON, most serious first, each with its verbatim evidence:
 
 ```bash
-agent-repld merge-queue mediation dispatch -fresh -summary "<one sentence>" <<'JSON'
+agent-repld merge-queue mediation dispatch -summary "<one sentence>" <<'JSON'
 [{"statement": "<what is wrong, as the evidence shows it>", "evidence": ["<a record, verbatim>"]}]
 JSON
 ```

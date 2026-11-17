@@ -1320,6 +1320,12 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	if evict := req.GetEvict(); evict != nil {
 		return validateWorkspaceRef("evict.workspace", evict.GetWorkspace())
 	}
+	if release := req.GetReleaseEscalation(); release != nil {
+		if release.Repository == nil {
+			return invalid("release_escalation.repository", "a release names the repository whose queue the escalation holds")
+		}
+		return validateRepositoryRef("release_escalation.repository", release.GetRepository())
+	}
 	if up := req.GetMoveUp(); up != nil {
 		return validateWorkspaceRef("move_up.workspace", up.GetWorkspace())
 	}
@@ -1360,12 +1366,9 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	return nil
 }
 
-// validateDispatch refuses a dispatch naming no problem, a problem with no
-// statement or no evidence, or no choice of remediation workspace.
+// validateDispatch refuses a dispatch naming no problem, or a problem with
+// no statement or no evidence.
 func validateDispatch(d *agentreplv1.UpdateMergeQueueMediationDispatch) *connect.Error {
-	if d.GetRemediation() == nil {
-		return invalid("mediation.dispatch.remediation", "a dispatch says whether it restores the chain's last remediation or makes a fresh one")
-	}
 	if len(d.GetProblems()) == 0 {
 		return invalid("mediation.dispatch.problems", "a dispatch states at least one problem")
 	}

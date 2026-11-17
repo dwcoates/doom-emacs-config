@@ -280,6 +280,20 @@ func TestAGateTheDaemonsExitCutLeavesItsRunGoing(t *testing.T) {
 	}
 }
 
+func TestAGateRunCarriesTheDaemonsToolchainPath(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	heldInGate(t, h)
+
+	// Assert.
+	started := h.tests.started()
+	if len(started) != 1 || len(started[0].Env) != 1 || started[0].Env[0] != "PATH=/toolchains/bin" {
+		t.Fatalf("started %+v, want the gate's run started with the daemon's PATH", started)
+	}
+}
+
 func TestAGateLabelsItsRunWithItsWorkspaceAndRound(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

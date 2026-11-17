@@ -1,5 +1,5 @@
-<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{deploy_started}}, {{window_started}}, {{repo_dir}}, {{version}}, {{chain}}, {{bound}}, {{facts}}, {{reuse}} -->
-A deploy of {{repo_dir}} began at {{deploy_started}} ({{version}}), and its merge queue lands nothing past it until you decide it.
+<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{deploy_started}}, {{ending}}, {{window_started}}, {{repo_dir}}, {{version}}, {{chain}}, {{bound}}, {{facts}}, {{reuse}} -->
+A deploy of {{repo_dir}} began at {{deploy_started}} ({{version}}), and its merge queue lands nothing past it until you decide it. {{ending}}
 
 The chain so far: {{chain}} The chain may deploy {{bound}} remediations in a row; at the bound, escalate.
 
