@@ -755,6 +755,7 @@ order a close lands by."
     (cl-letf (((symbol-function 'agent-repl--gesture-log-ws)
                (lambda (_shown gesture) (push gesture gestures) "log"))
               ((symbol-function 'agent-repl--navigable-tab-names) (lambda () '("a" "b")))
+              ((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
               ((symbol-function 'agent-repl-roster-tab-order) (lambda () '("a" "b")))
               ((symbol-function 'agent-repl-roster-selection-recency-order) (lambda (names) names))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "a"))
@@ -1066,9 +1067,9 @@ whether the new-thread prompt ran, `logged' and `said'."
     (should (equal (agent-repl--recent-workspace-and-thread-names) '("w" "chat/t")))))
 
 (ert-deftest agent-repl-test-commands-recency-walk-stays-on-the-drawn-tabs ()
-  "`s-[' and `s-]' walk the navigable tabs only: a thread looked at last is no step."
+  "`s-[' and `s-]' walk the drawn tabs only: a thread looked at last is no step."
   (let ((agent-repl--workspace-history '("chat/t" "b" "a")))
-    (cl-letf (((symbol-function 'agent-repl--navigable-tab-names) (lambda () '("a" "b")))
+    (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () '("a" "b")))
               ((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore))
       (should (equal (agent-repl--recency-ring "a") '("b" "a"))))))
 
@@ -1288,7 +1289,7 @@ Binds `requests' to the (WS TRIGGER) pairs requested and `records' to the
 formatted `info' records, newest first."
   (declare (indent 3))
   `(let ((requests nil) (records nil))
-     (cl-letf (((symbol-function 'agent-repl--navigable-tab-names) (lambda () ,drawn))
+     (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () ,drawn))
                ((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
                ((symbol-function 'agent-repl-host-pending-selection) (lambda () ,pending))
                ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
@@ -1331,7 +1332,7 @@ formatted `info' records, newest first."
   "A step from a placeholder records under a scope naming its gesture."
   ;; Arrange
   (let ((scopes nil))
-    (cl-letf (((symbol-function 'agent-repl--navigable-tab-names) (lambda () nil))
+    (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () nil))
               ((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
               ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
               ((symbol-function 'agent-repl--ws-log-name) (lambda (_) nil))
@@ -3151,7 +3152,7 @@ so no close pushes a tab to the back any more."
   (agent-repl-test--with-clean-state
     ;; Arrange
     (let ((scopes nil))
-      (cl-letf (((symbol-function 'agent-repl--navigable-tab-names) (lambda () nil))
+      (cl-letf (((symbol-function 'agent-repl--drawn-tab-names) (lambda () nil))
                 ((symbol-function 'agent-repl-roster-tab-order) (lambda () nil))
                 ((symbol-function 'agent-repl--ws-current-name) (lambda () "main"))
                 ((symbol-function 'agent-repl-host-pending-selection) (lambda () nil))
@@ -3174,7 +3175,7 @@ so no close pushes a tab to the back any more."
     (agent-repl-switch-to-workspace 2)
     (should (equal agent-repl-test-commands--switched "b"))))
 
-;;;; ---- A tab the user hid is no stop; a tab a collapsed section folds is ----
+;;;; ---- A hidden or folded tab is no stop of a walk; a folded one is the picker's ----
 
 (ert-deftest agent-repl-test-commands-switch-right-passes-over-a-user-hidden-tab ()
   "Cycling right never lands on a tab the user hid."
@@ -3190,24 +3191,24 @@ so no close pushes a tab to the back any more."
       (agent-repl-switch-left)
       (should (equal agent-repl-test-commands--switched "b")))))
 
-(ert-deftest agent-repl-test-commands-switch-right-lands-on-a-folded-tab ()
-  "A tab a collapsed section folds is a stop: the daemon opens the section."
+(ert-deftest agent-repl-test-commands-switch-right-passes-over-a-folded-tab ()
+  "Cycling right never lands on a tab a collapsed section folds."
   (agent-repl-test-commands--with-hidden-bar '("a" "folded" "b") '("folded") "a"
     (agent-repl-switch-right)
-    (should (equal agent-repl-test-commands--switched "folded"))))
+    (should (equal agent-repl-test-commands--switched "b"))))
 
-(ert-deftest agent-repl-test-commands-switch-left-lands-on-a-folded-tab-wrapping ()
-  "Cycling left off the first tab wraps onto a folded last tab."
+(ert-deftest agent-repl-test-commands-switch-left-passes-over-a-folded-tab-wrapping ()
+  "Cycling left off the first tab wraps past a folded last tab."
   (agent-repl-test-commands--with-hidden-bar '("a" "b" "folded") '("folded") "a"
     (agent-repl-switch-left)
-    (should (equal agent-repl-test-commands--switched "folded"))))
+    (should (equal agent-repl-test-commands--switched "b"))))
 
-(ert-deftest agent-repl-test-commands-recency-ring-holds-a-folded-tab ()
-  "`s-[' and `s-]' reach a tab a collapsed section folds."
+(ert-deftest agent-repl-test-commands-recency-ring-leaves-out-a-folded-tab ()
+  "`s-[' and `s-]' never reach a tab a collapsed section folds."
   (let ((agent-repl--workspace-history '("folded" "b" "a")))
     (agent-repl-test-commands--with-hidden-bar '("a" "b" "folded") '("folded") "a"
       (cl-letf (((symbol-function 'agent-repl-roster-last-selected-ms) #'ignore))
-        (should (equal (agent-repl--recency-ring "a") '("folded" "b" "a")))))))
+        (should (equal (agent-repl--recency-ring "a") '("b" "a")))))))
 
 (ert-deftest agent-repl-test-commands-picker-offers-a-folded-tab ()
   "The picker offers the folded tab the numerals cannot reach."

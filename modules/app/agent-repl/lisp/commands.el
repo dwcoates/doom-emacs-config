@@ -1554,12 +1554,13 @@ and the daemon gives it no number."
 (defun agent-repl--navigable-tab-names ()
   "Return the workspace names a navigation gesture may land on, in tab order.
 
-THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A chord that walks
-or picks a workspace (`s-{', `s-[', `SPC p p', the jumps) may select one in a
-folded section or subsection: the section stays folded and the roster draws
-that workspace alone inside it until the user switches away.  The numeral
-chords stay on `agent-repl--drawn-tab-names', because a folded tab has no
-number.  A tab the user hid is a stop of neither."
+THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A gesture that
+picks a workspace (the picker, the jumps) may select one in a folded
+section or subsection: the section stays folded and the roster draws that
+workspace alone inside it until the user switches away.  The numerals and
+the walking chords (`s-{', `s-[') stay on `agent-repl--drawn-tab-names',
+because a folded tab has no number and no place on the bar.  A tab the
+user hid is a stop of neither."
   (and (fboundp 'agent-repl-roster-navigable-tab-order)
        (agent-repl-roster-navigable-tab-order)))
 
@@ -1588,7 +1589,8 @@ CURRENT has no tab or nothing is drawn."
   "Request the DRAWN tab N steps from the current workspace along a ring.
 RING-FN is called with the workspace the step starts from and answers
 every tab in the ring's order (`agent-repl--cycle-target''s ALL); the drawn
-tabs are the ones the step may land on.  OP names the gesture's records
+tabs are the ones the step may land on, so a tab a collapsed section folds
+is passed over, as the numerals pass it over (owner request, 2026-11-17).  OP names the gesture's records
 \(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
 switch request's (`agent-repl-host-request-switch').
 
@@ -1609,7 +1611,7 @@ the user made left nothing on disk: realtest 4 drove four real chords, every
 one switched correctly, and not one could be read back afterwards.  A routine
 action is never promoted to `warn' to make it easier to find -- the realtest
 harvest fails a run on every warning."
-  (let* ((names (agent-repl--navigable-tab-names))
+  (let* ((names (agent-repl--drawn-tab-names))
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
          (all (funcall ring-fn current))
@@ -1684,12 +1686,13 @@ start from."
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl--recency-ring (current)
-  "Return the navigable tabs, and CURRENT, most recently selected first.
+  "Return the drawn tabs, and CURRENT, most recently selected first.
 The ONE selection-recency order (`agent-repl-roster-selection-recency-order')
-over the tabs navigation reaches (`agent-repl--navigable-tab-names'), so
-`s-[' and `s-]' reach exactly the tabs `s-{' and `s-}' do.  CURRENT joins the
-ring when it is not among them, so it still has a place to step from."
-  (let ((drawn (agent-repl--navigable-tab-names)))
+over the drawn tabs (`agent-repl--drawn-tab-names'), so `s-[' and `s-]'
+reach exactly the tabs `s-{' and `s-}' do, and pass over a folded one.
+CURRENT joins the ring when it is not among them, so it still has a place
+to step from."
+  (let ((drawn (agent-repl--drawn-tab-names)))
     (agent-repl-roster-selection-recency-order
      (if (or (null current) (member current drawn))
          drawn
