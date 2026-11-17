@@ -485,6 +485,16 @@ func TestOpenRefusesAGoneWorkspaceWithNothingToRestoreFrom(t *testing.T) {
 			},
 			says: "so is its repository",
 		},
+		{
+			name: "a later workspace took its directory after it landed",
+			arrange: func(_ *testing.T, f *fixture, ws wsm.Workspace) {
+				withBranch(f, ws)
+				merged := time.Unix(1_700_000_000, 0).UTC()
+				ws.MergedAt, ws.Dir = &merged, wsm.VacatedDir(ws.Dir, ws.ID)
+				f.db.with(ws)
+			},
+			says: "a later workspace now holds its directory",
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
