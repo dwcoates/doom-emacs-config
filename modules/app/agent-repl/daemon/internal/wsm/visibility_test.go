@@ -204,3 +204,44 @@ func TestLetsCacheLapseOfASelectedWorkspace(t *testing.T) {
 		})
 	}
 }
+
+func TestKeptWarmIgnoresCollapsingAndHonorsAHide(t *testing.T) {
+	hiddenAt := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name   string
+		ws     Workspace
+		queued bool
+		want   bool
+	}{
+		{name: "a drawn workspace is kept warm", ws: Workspace{ID: "w"}, want: true},
+		{name: "a hidden workspace lets its cache lapse", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}},
+		{name: "a hidden workspace the user is looking at is kept warm", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt, Current: true}, want: true},
+		{name: "a hidden workspace with a merge queued is kept warm", ws: Workspace{ID: "w", Hidden: true, HiddenAt: &hiddenAt}, queued: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.ws.KeptWarm(tt.queued)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("KeptWarm = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestACollapsedWorkspaceThatRunsNothingIsStillKeptWarm pins the ruling's
+// difference from Runs: a collapse withholds the session, never the cache.
+func TestACollapsedWorkspaceThatRunsNothingIsStillKeptWarm(t *testing.T) {
+	// Arrange
+	ws := Workspace{ID: "w"}
+
+	// Act
+	runs, warm := ws.Runs(true, false), ws.KeptWarm(false)
+
+	// Assert
+	if runs || !warm {
+		t.Fatalf("Runs collapsed = %v, KeptWarm = %v; want a collapsed workspace withheld from running but kept warm", runs, warm)
+	}
+}
