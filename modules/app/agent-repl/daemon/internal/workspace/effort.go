@@ -106,20 +106,28 @@ func (f *Fleet) SetEffort(ctx context.Context, log dlog.Logger, ws ids.Workspace
 // A REFUSAL RETRACTS NOTHING SILENTLY. The selector keeps naming the pick,
 // so the session would run at a level the strip does not show; the failure is
 // logged and stated on the warning strip, the reader's one error surface.
+//
+// EACH PUT-BACK RECORDS HOW LONG THE SHIM TOOK (elapsed_ms): the call has no
+// bound of its own yet, and its bound is sized from these measurements before
+// the put-back is detached from its caller's cancel, as the remote-control
+// put-back is (owner ruling, 2026-11-17).
 func (f *Fleet) reapplyEffort(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclientEffort) {
 	level, picked := f.deps.Topbar.PickedEffort(ws)
 	if !picked {
 		return
 	}
-	if _, err := applyEffort(ctx, client, level); err != nil {
+	asked := f.now()
+	_, err := applyEffort(ctx, client, level)
+	elapsed := f.now().Sub(asked).Milliseconds()
+	if err != nil {
 		log.Error(opSetEffort, "the new shim could not be put back at the picked effort", dlog.Context{
-			"effort": level.String(), "cause": err.Error(),
+			"effort": level.String(), "cause": err.Error(), "elapsed_ms": elapsed,
 		})
 		f.deps.Topbar.RaiseWarning(ws, opSetEffort,
 			fmt.Sprintf("the session restarted and could not be put back at effort %s: %v", effortlevel.Word(level), err))
 		return
 	}
-	log.Info(opSetEffort, "put the new shim back at the picked effort", dlog.Context{"effort": level.String()})
+	log.Info(opSetEffort, "put the new shim back at the picked effort", dlog.Context{"effort": level.String(), "elapsed_ms": elapsed})
 }
 
 // shimclientEffort is the slice of the shim client an effort change uses.
