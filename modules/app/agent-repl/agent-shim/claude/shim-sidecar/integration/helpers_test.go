@@ -46,6 +46,7 @@ import (
 	"golang.org/x/net/http2/h2c"
 	"google.golang.org/protobuf/proto"
 
+	sharedlogging "agentrepl/logging"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
@@ -2291,9 +2292,14 @@ type logRecord struct {
 
 // readLog parses the sidecar log STRICTLY: every non-empty line must be a JSON
 // object, because the contract is JSONL and a stray plain-text line is a defect.
+//
+// THE LOG AND ITS WARNINGS FILE ARE ONE LOG: the sidecar writes every warn and
+// error record only to the warnings file (proto/vocab/log-warnings-sink.json),
+// so both are read and merged in timestamp order.
 func readLog(t *testing.T, path string) []logRecord {
 	t.Helper()
-	out := readLogFile(t, path)
+	out := append(readLogFile(t, path), readLogFile(t, sharedlogging.WarningsPath(path))...)
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
 	if value, ok := clientLogsByGlobalPath.Load(path); ok {
 		out = append(out, value.(*fakeClientLog).recordsSnapshot()...)
 	}
