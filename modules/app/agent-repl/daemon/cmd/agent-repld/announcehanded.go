@@ -25,11 +25,18 @@ import (
 const acceptHandedBound = 50 * time.Millisecond
 
 // announceHanded tells the daemon at ADDRESS that OUTGOING is about to move
-// WS there (rollout.Deps.AnnounceHanded). Its not_newest refusal is
-// rollout.ErrNotNewest; any other refusal or failure is an error naming it.
+// WS there (rollout.Deps.AnnounceHanded), bounded by acceptHandedBound. Its
+// not_newest refusal is rollout.ErrNotNewest; any other refusal or failure is
+// an error naming it.
 func announceHanded(ctx context.Context, address string, ws wsm.Workspace, outgoing ids.InstanceID, expected rollout.Participants) error {
 	ctx, cancel := context.WithTimeout(ctx, acceptHandedBound)
 	defer cancel()
+	return sendHanded(ctx, address, ws, outgoing, expected)
+}
+
+// sendHanded is announceHanded's call and its answer's reading, under
+// whatever bound CTX carries.
+func sendHanded(ctx context.Context, address string, ws wsm.Workspace, outgoing ids.InstanceID, expected rollout.Participants) error {
 	client := newDaemonClient(address)
 	resp, err := client.AcceptHandedWorkspace(ctx, connect.NewRequest(&agentreplv1.AcceptHandedWorkspaceRequest{
 		Workspace:      ws.Ref(),
