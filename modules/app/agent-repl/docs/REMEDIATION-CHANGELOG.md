@@ -1546,3 +1546,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): Deploy checks know only the one deploy mediator, and every check starts over
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A history read cut by its request's end is recorded at INFO, not ERROR
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A closed workspace holding only merged work frees its name when a create claims it
+- 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode, gate deferred: the daemon it runs through was crash-looping): The merged holder's retirement no longer panics the daemon on a nil clock
