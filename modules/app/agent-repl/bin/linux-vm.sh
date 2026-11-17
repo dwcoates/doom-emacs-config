@@ -25,6 +25,8 @@ set -euo pipefail
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 MODULE_DIR="$(cd "$THIS_DIR/.." && pwd -P)"
+# shellcheck source=lib-grep-in.sh
+. "$THIS_DIR/lib-grep-in.sh"
 VM="${AGENT_REPL_LINUX_VM:-agent-repl-linux}"
 LIMA_DIR="${LIMA_HOME:-$HOME/.lima}/$VM"
 # The VM's checkout sits where a Linux user's would, so the installer runs from
@@ -52,7 +54,13 @@ die() { log "outcome=failed $*"; exit 1; }
 
 usage() { sed -n '3,8p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 
-vm_exists() { limactl list --quiet 2>/dev/null | grep -qx "$VM"; }
+# The listing is captured whole before grep reads it: a grep that matches early
+# would kill a writer piped into it (bin/lib-grep-in.sh).
+vm_exists() {
+  local names
+  names="$(limactl list --quiet)" || die "step=list cause=\"limactl list failed\""
+  grep_in "$names" -qx "$VM"
+}
 
 # The VM's configured mounts, one per line: none answers nothing.
 vm_mounts() {
