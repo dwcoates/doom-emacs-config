@@ -6321,6 +6321,10 @@ describe("the repository's subsections and the drag", () => {
     expect(stylesheet).toMatch(new RegExp(`${FOLDED_ROWS} \\.ws:not\\(\\.surfaced\\):has\\(\\.surfaced\\) > :not\\(\\.kids\\)\\s*\\{\\s*display:\\s*none`));
   });
 
+  it("folds a repository block away with its divider unless a surfaced row stands in it", () => {
+    expect(stylesheet).toMatch(new RegExp(`${FOLDED_ROWS} \\.sb-repo-block:not\\(:has\\(\\.surfaced\\)\\)\\s*\\{\\s*display:\\s*none`));
+  });
+
   it("folds a collapsed subsection's and a folded row's children away unless a surfaced row stands in them", () => {
     expect([
       declarationsOf("#ws-sidebar .sb-subsection.folded > .rows:not(:has(.surfaced))"),
