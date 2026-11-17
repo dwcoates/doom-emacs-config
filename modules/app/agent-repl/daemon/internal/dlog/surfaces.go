@@ -844,10 +844,33 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 
 // resolveOpenLocked answers ws's open sink NAME, opening it when this runtime
 // has not yet. s.mu is held.
+//
+// A SINK AND ITS WARNINGS TWIN OPEN TOGETHER (openPairLocked), so a twin
+// exists whenever its sink does. Opened on its first warning instead, a twin
+// whose workspace directory had gone meanwhile could not open, and the
+// warning lost its workspace to the central sink.
 func (s *surfaces) resolveOpenLocked(ws *workspaceSinks, name string) (*sink, error) {
 	if sk, ok := ws.sinks[name]; ok {
 		return sk, nil
 	}
+	base, twin := strings.CutSuffix(name, logging.WarningsSink(""))
+	if !twin {
+		return s.openPairLocked(ws, name)
+	}
+	if _, err := s.openPairLocked(ws, base); err != nil {
+		return nil, err
+	}
+	sk, ok := ws.sinks[name]
+	if !ok {
+		panic(fmt.Sprintf("dlog: opening workspace %s's %s sink left its warnings twin unopened", ws.id, base))
+	}
+	return sk, nil
+}
+
+// openPairLocked opens ws's sink NAME and its warnings twin, whose target is
+// the sink's by the one rule every reader applies (logging.WarningsPath). s.mu
+// is held.
+func (s *surfaces) openPairLocked(ws *workspaceSinks, name string) (*sink, error) {
 	if !ws.detached {
 		// A NEW SINK OF A LINKED WORKSPACE IS A MkdirAll INSIDE ITS DIRECTORY,
 		// so it is never opened once that directory is gone: the open would
@@ -860,18 +883,21 @@ func (s *surfaces) resolveOpenLocked(ws *workspaceSinks, name string) (*sink, er
 			return nil, fmt.Errorf("resolve workspace %q for its %s log sink: %w: %w", ws.dir, name, ErrWorkspaceDirGone, err)
 		}
 	}
-	key := ws.id + "/" + name
-	target := s.targets[key]
-	if base, twin := strings.CutSuffix(name, logging.WarningsSink("")); twin && target == "" {
-		// A WARNINGS TWIN'S TARGET IS ITS SINK'S, NAMED BY THE ONE RULE EVERY
-		// READER APPLIES (logging.WarningsPath): whoever holds a log file
-		// finds its warnings beside it without a search of its own.
-		baseSink, err := s.resolveOpenLocked(ws, base)
-		if err != nil {
-			return nil, err
-		}
-		target = logging.WarningsPath(baseSink.target)
+	sk, err := s.openOneLocked(ws, name, s.targets[ws.id+"/"+name])
+	if err != nil {
+		return nil, err
 	}
+	if _, err := s.openOneLocked(ws, logging.WarningsSink(name), logging.WarningsPath(sk.target)); err != nil {
+		delete(ws.sinks, name)
+		return nil, errors.Join(err, sk.close())
+	}
+	return sk, nil
+}
+
+// openOneLocked opens ws's sink NAME on TARGET (a fresh or standing one when
+// empty) and records it. s.mu is held.
+func (s *surfaces) openOneLocked(ws *workspaceSinks, name, target string) (*sink, error) {
+	key := ws.id + "/" + name
 	remembered := s.targets[key] != ""
 	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, target, !ws.detached)
 	if err != nil {

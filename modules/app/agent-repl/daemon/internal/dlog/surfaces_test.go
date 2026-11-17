@@ -2469,3 +2469,47 @@ func TestAWarningsTwinsTargetIsItsSinksTargetByTheWarningsPathRule(t *testing.T)
 		t.Fatalf("daemon.warn.log names %q, want %q beside daemon.log's %q", twin, logging.WarningsPath(main), main)
 	}
 }
+
+func TestASinkOpensWithItsWarningsTwin(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Lstat(filepath.Join(dir, ".claude", "emacs", "daemon.warn.log")); err != nil {
+		t.Fatalf("daemon.warn.log after the sink opened: %v, want its link made with the sink's", err)
+	}
+}
+
+func TestAWarningAfterTheWorkspaceDirectoryWentStaysTheWorkspaces(t *testing.T) {
+	// Arrange: the sink opened while the directory stood, then the directory went.
+	s, runLogPath := testSurfaces(t)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	twinTarget, err := os.Readlink(filepath.Join(dir, ".claude", "emacs", "daemon.warn.log"))
+	if err != nil {
+		t.Fatalf("read daemon.warn.log's link: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	log.Warn("daemon.test.after_removal", "a warning after the removal", nil)
+
+	// Assert.
+	if !hasOperation(readRecords(t, twinTarget), "daemon.test.after_removal") {
+		t.Fatalf("the workspace's warnings target does not carry the warning")
+	}
+	if hasOperation(readRecords(t, logging.WarningsPath(runLogPath)), "daemon.test.after_removal") {
+		t.Fatalf("the warning fell back to the central sink")
+	}
+}
