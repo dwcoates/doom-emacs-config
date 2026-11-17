@@ -47,6 +47,11 @@ const shimSpawnGateFD = 4
 // client.awaitReady.
 const shimReadyFD = 5
 
+// shimWarningsFD is the descriptor the shim writes its warn and error records
+// to: fd 6, the already-open warnings twin of its log (agentrepl/logging
+// warnings.go), fourth of cmd.ExtraFiles.
+const shimWarningsFD = 6
+
 // ShimReadyBound is how long a spawned shim has, from its spawn gate opening,
 // to report itself listening on the readiness pipe before the bring-up fails.
 //
@@ -346,7 +351,7 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 		log.Error("daemon.shimclient.spawn", "could not make the readiness pipe", dlog.Context{"error": err.Error()})
 		return nil, fmt.Errorf("shimclient: make the readiness pipe: %w", err)
 	}
-	cmd.ExtraFiles = []*os.File{spec.LogSink, gate, readyW}
+	cmd.ExtraFiles = []*os.File{spec.LogSink, gate, readyW, spec.LogWarningsSink}
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	log.Debug("daemon.shimclient.spawn", "spawning shim", dlog.Context{
@@ -654,6 +659,7 @@ func shimArgs(spec Spec) []string {
 		"--log-fd", fmt.Sprintf("%d", shimLogFD),
 		"--spawn-gate-fd", fmt.Sprintf("%d", shimSpawnGateFD),
 		"--ready-fd", fmt.Sprintf("%d", shimReadyFD),
+		"--warnings-fd", fmt.Sprintf("%d", shimWarningsFD),
 	}
 	if spec.Fake {
 		args = append(args, "--fake")
@@ -732,6 +738,9 @@ func validateSpec(spec Spec) error {
 	}
 	if spec.LogSink == nil {
 		return &SpecError{Field: "LogSink", Reason: "is nil; fd 3 must be the already-open shim log sink"}
+	}
+	if spec.LogWarningsSink == nil {
+		return &SpecError{Field: "LogWarningsSink", Reason: "is nil; fd 6 must be the already-open shim warnings sink"}
 	}
 	return nil
 }

@@ -484,7 +484,7 @@ describe("createRealQuery", () => {
       },
     }));
     const log = await import("../../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
     const mod = await import("../../src/sdk/real-query.js");
     return { createRealQuery: mod.createRealQuery, calls, sites, query };
   }
@@ -784,7 +784,7 @@ describe("asQueryLike", () => {
   // The shim's logger is configured once per process, so once for the suite.
   beforeAll(async () => {
     const log = await import("../../src/log.js");
-    log.configureLog({ fd: 3, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/ws", workspaceId: "00000000000000ff", agentReplSessionId: "real-query-suite" });
   });
 
   const COMPLETE = {

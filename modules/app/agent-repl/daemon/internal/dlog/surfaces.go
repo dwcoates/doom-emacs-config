@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -280,7 +281,7 @@ var errSurfacesClosed = errors.New("log surfaces are closed")
 // own typed answer, so a closed sink costs the record, never the answer.
 type droppedSink struct{ s *surfaces }
 
-func (d droppedSink) write(line []byte) error {
+func (d droppedSink) write(_ string, line []byte) error {
 	d.s.dropWarnOnce.Do(func() {
 		fmt.Fprintf(os.Stderr,
 			"agent-repl daemon: LOG SURFACES CLOSED: workspace records arriving after Close are dropped\nfirst dropped record: %s",
@@ -317,17 +318,23 @@ type workspaceDest struct {
 //     worktree -- which is exactly the condition WorkspaceOrCentral names: the
 //     record lands in the central sink and the condition is reported once per
 //     directory at DEBUG.
-func (d workspaceDest) write(line []byte) error {
-	_, sk, err := d.s.resolve(d.dir, d.name)
+func (d workspaceDest) write(level string, line []byte) error {
+	_, sk, err := d.s.resolve(d.dir, sinkFor(d.name, level))
 	if err == nil {
 		return sk.write(line)
 	}
 	if errors.Is(err, errSurfacesClosed) {
-		return droppedSink{s: d.s}.write(line)
+		return droppedSink{s: d.s}.write(level, line)
 	}
 	d.s.noteCentralFallback(d.dir, err)
-	return d.s.runLog.write(line)
+	return d.s.runLog.write(level, line)
 }
+
+// sinkDest is a destination that is one already-resolved sink: the record's
+// level picked it (sinkFor) before it was resolved.
+type sinkDest struct{ sk *sink }
+
+func (d sinkDest) write(_ string, line []byte) error { return d.sk.write(line) }
 
 // Workspace resolves the logger whose durable sink is the canonical
 // <dir>/.claude/emacs/daemon.log. It fails rather than falling back to the
@@ -449,32 +456,44 @@ func (s *surfaces) noteCentralFallback(dir string, cause error) {
 		})
 }
 
-// ShimSink borrows the already-open shim log sink for one workspace, to be
-// passed as the spawned shim's fd 3. The handle is non-closeable.
+// ShimSink borrows the already-open shim log sink and its warnings twin for
+// one workspace, to be passed as the spawned shim's descriptors. The handle is
+// non-closeable.
 func (s *surfaces) ShimSink(dir string) (Borrowed, error) {
-	ws, sk, err := s.resolve(dir, "shim")
-	if err != nil {
-		return nil, err
-	}
-	rolled, err := sk.rotateShim()
-	if err != nil {
-		return nil, err
+	files := make([]*os.File, 0, 2)
+	var ws *workspaceSinks
+	for _, name := range []string{"shim", logging.WarningsSink("shim")} {
+		resolved, sk, err := s.resolve(dir, name)
+		if err != nil {
+			return nil, err
+		}
+		ws = resolved
+		rolled, err := sk.rotateShim()
+		if err != nil {
+			return nil, err
+		}
+		if rolled {
+			log, err := s.Workspace(ws.dir)
+			if err != nil {
+				return nil, err
+			}
+			log.Info("daemon.dlog.shim_rotated", "rotated a shim log while rolling the workspace's shim", Context{
+				"sink":       name + ".log",
+				"target":     sk.target,
+				"generation": sk.target + ".1",
+			})
+		}
+		f, err := sk.borrowFile()
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, f)
 	}
 	warnLog, err := s.Workspace(ws.dir)
 	if err != nil {
 		return nil, err
 	}
-	if rolled {
-		warnLog.Info("daemon.dlog.shim_rotated", "rotated shim.log while rolling the workspace's shim", Context{
-			"target":     sk.target,
-			"generation": sk.target + ".1",
-		})
-	}
-	f, err := sk.borrowFile()
-	if err != nil {
-		return nil, err
-	}
-	return &borrowed{f: f, log: warnLog, name: "shim.log"}, nil
+	return &borrowed{f: files[0], warnings: files[1], log: warnLog, name: "shim.log"}, nil
 }
 
 // ShimRollRequests exposes the hard-ceiling requests emitted by the cap scan.
@@ -498,13 +517,13 @@ func (s *surfaces) ClientLog(dir string, rec ClientRecord) error {
 	// record lands in the CENTRAL sink, still naming its workspace, and the
 	// condition is stated once per workspace. Every other resolve failure
 	// stays a failure.
-	var dest interface{ write([]byte) error }
+	var dest destination
 	var who workspaceIdentity
 	central := false
-	ws, sk, err := s.resolve(dir, prepared.sink)
+	ws, sk, err := s.resolve(dir, sinkFor(prepared.sink, rec.Level))
 	switch {
 	case err == nil:
-		dest, who = sk, workspaceIdentity{dir: ws.dir, id: ws.id, dirHash: ws.dirHash}
+		dest, who = sinkDest{sk: sk}, workspaceIdentity{dir: ws.dir, id: ws.id, dirHash: ws.dirHash}
 	case errors.Is(err, ErrWorkspaceDirGone):
 		gone, gerr := s.goneWorkspace(dir)
 		if gerr != nil {
@@ -572,7 +591,7 @@ func (s *surfaces) prepareClient(rec ClientRecord) (preparedClient, bool, error)
 
 // writeClient writes a prepared record to DEST with FIELDS merged over the
 // client's own context, and mirrors it to the terminal.
-func (s *surfaces) writeClient(dest interface{ write([]byte) error }, p preparedClient, fields Context) error {
+func (s *surfaces) writeClient(dest destination, p preparedClient, fields Context) error {
 	ctx := merge(p.rec.Context, fields)
 	if p.stamped {
 		// The client sent no instant; say whose clock the timestamp is,
@@ -587,7 +606,7 @@ func (s *surfaces) writeClient(dest interface{ write([]byte) error }, p prepared
 	}
 	out := newRecordWithVerbosity(p.at, p.runtime, p.rec.Level, verbosity, p.rec.Operation, p.rec.Message, ctx, 0)
 	line := out.marshal()
-	if err := dest.write(line); err != nil {
+	if err := dest.write(p.rec.Level, line); err != nil {
 		return err
 	}
 	s.count(p.runtime, p.rec.Level, p.rec.Operation)
@@ -816,8 +835,18 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		}
 		ws = entry
 	}
+	sk, err := s.resolveOpenLocked(ws, name)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ws, sk, nil
+}
+
+// resolveOpenLocked answers ws's open sink NAME, opening it when this runtime
+// has not yet. s.mu is held.
+func (s *surfaces) resolveOpenLocked(ws *workspaceSinks, name string) (*sink, error) {
 	if sk, ok := ws.sinks[name]; ok {
-		return ws, sk, nil
+		return sk, nil
 	}
 	if !ws.detached {
 		// A NEW SINK OF A LINKED WORKSPACE IS A MkdirAll INSIDE ITS DIRECTORY,
@@ -828,19 +857,30 @@ func (s *surfaces) resolve(dir, name string) (*workspaceSinks, *sink, error) {
 		// already open are untouched (their records live in logsDir), which
 		// is why this is checked only here and not on every resolve.
 		if _, err := os.Stat(ws.dir); errors.Is(err, fs.ErrNotExist) {
-			return nil, nil, fmt.Errorf("resolve workspace %q for its %s log sink: %w: %w", ws.dir, name, ErrWorkspaceDirGone, err)
+			return nil, fmt.Errorf("resolve workspace %q for its %s log sink: %w: %w", ws.dir, name, ErrWorkspaceDirGone, err)
 		}
 	}
 	key := ws.id + "/" + name
+	target := s.targets[key]
+	if base, twin := strings.CutSuffix(name, logging.WarningsSink("")); twin && target == "" {
+		// A WARNINGS TWIN'S TARGET IS ITS SINK'S, NAMED BY THE ONE RULE EVERY
+		// READER APPLIES (logging.WarningsPath): whoever holds a log file
+		// finds its warnings beside it without a search of its own.
+		baseSink, err := s.resolveOpenLocked(ws, base)
+		if err != nil {
+			return nil, err
+		}
+		target = logging.WarningsPath(baseSink.target)
+	}
 	remembered := s.targets[key] != ""
-	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, s.targets[key], !ws.detached)
+	sk, err := openSink(s.logsDir, ws.dir, ws.id, name, target, !ws.detached)
 	if err != nil {
-		return nil, nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
+		return nil, fmt.Errorf("open %s.log for workspace %s: %w", name, ws.id, err)
 	}
 	s.targets[key] = sk.target
 	ws.sinks[name] = sk
 	s.reportSinkOpened(ws, name, sk, remembered)
-	return ws, sk, nil
+	return sk, nil
 }
 
 // newWorkspaceEntryLocked mints and records one workspace's sink entry: its
@@ -1042,11 +1082,15 @@ func (s *surfaces) reportSinkFailure(ws *workspaceSinks, name string, cause erro
 	s.mirror.enqueue(rec.Level, line)
 
 	s.mu.Lock()
-	daemonSink := ws.sinks["daemon"]
+	daemonSink := ws.sinks[sinkFor("daemon", rec.Level)]
 	s.mu.Unlock()
 	if daemonSink == nil {
-		s.emergency(RuntimeDaemon, cause, line)
-		return
+		_, opened, err := s.resolve(ws.dir, sinkFor("daemon", rec.Level))
+		if err != nil {
+			s.emergency(RuntimeDaemon, errors.Join(cause, err), line)
+			return
+		}
+		daemonSink = opened
 	}
 	if err := daemonSink.write(line); err != nil {
 		s.emergency(RuntimeDaemon, err, line)

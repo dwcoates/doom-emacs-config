@@ -16,7 +16,7 @@ process.env.AGENT_REPL_LOG_LEVEL = "debug";
 process.env.AGENT_REPL_LOG_LEVEL_UNTIL = String(Math.floor(Date.now() / 1000) + 300);
 
 const { configureLog } = await import("../src/log.js");
-configureLog({ fd: 3, cwd: "/test/workspace", workspaceId: "00000000000000aa", agentReplSessionId: "test-agent-session" });
+configureLog({ fd: 3, warningsFd: 6, cwd: "/test/workspace", workspaceId: "00000000000000aa", agentReplSessionId: "test-agent-session" });
 
 // Normal shim records deliberately echo to stderr in production. Suppress
 // those expected records centrally so ordinary behavioral tests do not flood

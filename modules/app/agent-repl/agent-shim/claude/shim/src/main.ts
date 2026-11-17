@@ -3,11 +3,12 @@
  *
  * # The spawn contract, whole
  *
- *   node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
+ *   node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 --warnings-fd 6 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
  *   node dist/main.js --version
  *
  * The inherited descriptors (fd 3 the log, fd 4 the spawn gate, fd 5 the
- * readiness pipe) are specified once, in AGENTS.md "The spawn contract".
+ * readiness pipe, fd 6 the log's warnings file) are specified once, in
+ * AGENTS.md "The spawn contract".
  *
  * NOTHING ELSE. Every legacy flag is gone, and an unrecognized one is a startup
  * FAILURE rather than a warning: a daemon that spawns a shim with a flag this
@@ -120,19 +121,22 @@ export interface CliArgs {
   readonly spawnGateFd?: 4;
   /** The inherited readiness pipe (ready.ts). Always 5; absent, nothing is reported. */
   readonly readyFd?: 5;
+  /** The inherited, already-open warnings twin of the log descriptor. Always 6. */
+  readonly warningsFd?: 6;
   /** Drive the mocked vendor instead of the real SDK. */
   readonly fake: boolean;
   /** Print the version and exit, touching nothing. */
   readonly version: boolean;
 }
 
-/** The four accepted flags, plus --version. Anything else is a failure. */
+/** The six accepted flags, plus --version. Anything else is a failure. */
 export function parseArgs(argv: readonly string[]): CliArgs {
   let listen: string | undefined;
   let storeSocket: string | undefined;
   let logFd: 3 | undefined;
   let spawnGateFd: 4 | undefined;
   let readyFd: 5 | undefined;
+  let warningsFd: 6 | undefined;
   let fake = false;
   let version = false;
 
@@ -181,6 +185,15 @@ export function parseArgs(argv: readonly string[]): CliArgs {
         readyFd = READY_FD;
         break;
       }
+      case "--warnings-fd": {
+        const value = next();
+        // Only fd 6, for the reason --log-fd takes only fd 3.
+        if (value !== "6") {
+          throw new Error(`shim: invalid --warnings-fd ${JSON.stringify(value)}; the warnings sink is inherited fd 6`);
+        }
+        warningsFd = 6;
+        break;
+      }
       case "--fake":
         fake = true;
         break;
@@ -190,7 +203,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
       default:
         throw new Error(
           `shim: unknown argument ${JSON.stringify(String(arg))}; the spawn contract is ` +
-            "--listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake] [--version]",
+            "--listen <uds> --store-socket <uds> --log-fd 3 --warnings-fd 6 [--spawn-gate-fd 4] [--ready-fd 5] [--fake] [--version]",
         );
     }
   }
@@ -201,6 +214,7 @@ export function parseArgs(argv: readonly string[]): CliArgs {
     ...(logFd === undefined ? {} : { logFd }),
     ...(spawnGateFd === undefined ? {} : { spawnGateFd }),
     ...(readyFd === undefined ? {} : { readyFd }),
+    ...(warningsFd === undefined ? {} : { warningsFd }),
     fake,
     version,
   };
@@ -209,9 +223,10 @@ export function parseArgs(argv: readonly string[]): CliArgs {
 /** The flags a serving shim cannot start without. */
 export function requireServingArgs(
   args: CliArgs,
-): asserts args is CliArgs & { listen: string; logFd: 3 } {
+): asserts args is CliArgs & { listen: string; logFd: 3; warningsFd: 6 } {
   if (args.listen === undefined) throw new Error("shim: --listen <uds> is required");
   if (args.logFd === undefined) throw new Error("shim: --log-fd 3 is required");
+  if (args.warningsFd === undefined) throw new Error("shim: --warnings-fd 6 is required");
 }
 
 // ---------------------------------------------------------------------------
@@ -936,6 +951,7 @@ export async function main(deps: MainDeps = PRODUCTION_MAIN_DEPS): Promise<void>
   const correlation = logCorrelation(environment, workspaceId);
   deps.configureLog({
     fd: args.logFd,
+    warningsFd: args.warningsFd,
     cwd,
     workspaceId,
     agentReplSessionId: correlation.agentReplSessionId,

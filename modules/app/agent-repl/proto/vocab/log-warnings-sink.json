@@ -13,8 +13,10 @@
     "warnings_levels are the levels routed to the warnings file; every other",
     "level goes to the log. A path's warnings file is named by inserting",
     "'.warn' before a final '.log' extension, or appending '.warn.log' when the",
-    "path has none. A per-workspace sink named N (a canonical link N.log) has",
-    "its warnings twin named N.warn (a canonical link N.warn.log)."
+    "path has none, so every reader finds any log file's warnings beside it",
+    "by that one rule. A per-workspace sink named N (a canonical link N.log",
+    "naming a target T) has its warnings twin named N.warn (a canonical link",
+    "N.warn.log naming T's warnings file)."
   ],
   "warnings_levels": ["warn", "error"],
   "log_levels": ["debug", "info"],

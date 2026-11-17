@@ -8,7 +8,7 @@ import (
 
 // Argv is the shim's spawn contract, as the fake parses it:
 //
-//	<main.js> --listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
+//	<main.js> --listen <uds> --store-socket <uds> --log-fd 3 --warnings-fd 6 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
 //
 // The daemon runs `node <main.js> ...`; the harness substitutes this binary
 // for node, so argv[1] is the module path and the flags follow.
@@ -17,6 +17,10 @@ type Argv struct {
 	Listen      string
 	StoreSocket string
 	LogFD       int
+	// WarningsFD is the log's warnings twin, where a warn or error record
+	// goes. The fake writes only debug records, so it never writes it, but
+	// it requires it as the shim does.
+	WarningsFD int
 	// SpawnGateFD is the descriptor the shim waits on before it binds, -1
 	// when the launcher gates nothing.
 	SpawnGateFD int
@@ -31,11 +35,12 @@ type Argv struct {
 func ParseArgv(args []string) (Argv, error) {
 	var a Argv
 	a.LogFD = -1
+	a.WarningsFD = -1
 	a.SpawnGateFD = -1
 	a.ReadyFD = -1
 	for i := 0; i < len(args); i++ {
 		switch arg := args[i]; arg {
-		case "--listen", "--store-socket", "--log-fd", "--spawn-gate-fd", "--ready-fd":
+		case "--listen", "--store-socket", "--log-fd", "--warnings-fd", "--spawn-gate-fd", "--ready-fd":
 			if i+1 >= len(args) {
 				return Argv{}, fmt.Errorf("fakeshim: %s wants a value", arg)
 			}
@@ -51,6 +56,12 @@ func ParseArgv(args []string) (Argv, error) {
 					return Argv{}, fmt.Errorf("fakeshim: --log-fd %q: %w", args[i], err)
 				}
 				a.LogFD = fd
+			case "--warnings-fd":
+				fd, err := strconv.Atoi(args[i])
+				if err != nil {
+					return Argv{}, fmt.Errorf("fakeshim: --warnings-fd %q: %w", args[i], err)
+				}
+				a.WarningsFD = fd
 			case "--spawn-gate-fd":
 				fd, err := strconv.Atoi(args[i])
 				if err != nil {
@@ -87,6 +98,9 @@ func ParseArgv(args []string) (Argv, error) {
 	}
 	if a.LogFD < 0 {
 		return Argv{}, errors.New("fakeshim: --log-fd is missing")
+	}
+	if a.WarningsFD < 0 {
+		return Argv{}, errors.New("fakeshim: --warnings-fd is missing")
 	}
 	return a, nil
 }

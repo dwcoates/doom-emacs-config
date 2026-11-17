@@ -88,7 +88,7 @@ scripts/
 ## The spawn contract
 
 ```
-node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
+node dist/main.js --listen <uds> --store-socket <uds> --log-fd 3 --warnings-fd 6 [--spawn-gate-fd 4] [--ready-fd 5] [--fake]
 node dist/main.js --version
 ```
 
@@ -96,9 +96,13 @@ Nothing else. An unrecognized flag is a startup **failure**, not a warning: it
 means the daemon and this build disagree about the contract.
 
 - **The inherited descriptors.** This section is their one home; the daemon's
-  `shimclient` (`shimLogFD`, `shimSpawnGateFD`, `shimReadyFD`) and the
+  `shimclient` (`shimLogFD`, `shimSpawnGateFD`, `shimReadyFD`,
+  `shimWarningsFD`) and the
   integration suite's `fakeshim` both honor it as written here.
-  - **fd 3** is the durable log sink, already open.
+  - **fd 3** is the durable log sink, already open: every debug and info
+    record.
+  - **fd 6** is the log's warnings file, already open: every warn and error
+    record, and only those (`proto/vocab/log-warnings-sink.json`).
   - **fd 4, the spawn gate** (`src/spawn-gate.ts`): the read end of a pipe.
     The shim binds NOTHING until it reads one byte, which the daemon writes
     only once the shim's pid is durable; EOF is a daemon that died first, and

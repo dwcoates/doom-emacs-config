@@ -711,3 +711,89 @@ func TestWarningDeclarationReadsEveryDeclarationForm(t *testing.T) {
 		})
 	}
 }
+
+// timedRecordLine is one record of OPERATION at the instant AT.
+func timedRecordLine(operation, at string) string {
+	return fmt.Sprintf(`{"timestamp":%q,"level":"info","operation":%q,"message":"m"}`, at, operation)
+}
+
+func TestReadLogMergesTheLogsWarningsFileInTimestampOrder(t *testing.T) {
+	// Arrange: the warning was written between the log's two records.
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	log := timedRecordLine("first", "2026-11-17T01:00:00Z") + "\n" + timedRecordLine("third", "2026-11-17T01:00:02Z") + "\n"
+	warnings := timedRecordLine("second", "2026-11-17T01:00:01Z") + "\n"
+	if err := os.WriteFile(path, []byte(log), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "daemon.run.warn.log"), []byte(warnings), 0o600); err != nil {
+		t.Fatalf("write the warnings file: %v", err)
+	}
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	var ops []string
+	for _, r := range got {
+		ops = append(ops, r.Operation)
+	}
+	if !slices.Equal(ops, []string{"first", "second", "third"}) {
+		t.Fatalf("ReadLog operations = %v, want the log and its warnings file merged in time order", ops)
+	}
+}
+
+func TestReadLogOfAWarningsFileReadsItAlone(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.run.warn.log")
+	if err := os.WriteFile(path, []byte(timedRecordLine("warned", "2026-11-17T01:00:00Z")+"\n"), 0o600); err != nil {
+		t.Fatalf("write the warnings file: %v", err)
+	}
+
+	// Act
+	got := ReadLog(t, path)
+
+	// Assert
+	if len(got) != 1 || got[0].Operation != "warned" {
+		t.Fatalf("ReadLog = %v, want the warnings file's one record", got)
+	}
+}
+
+func TestReadLogRefusesARecordWhoseTimestampDoesNotParse(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.run.log")
+	if err := os.WriteFile(path, []byte(timedRecordLine("a", "yesterday")+"\n"), 0o600); err != nil {
+		t.Fatalf("write the log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "daemon.run.warn.log"), []byte(timedRecordLine("b", "2026-11-17T01:00:00Z")+"\n"), 0o600); err != nil {
+		t.Fatalf("write the warnings file: %v", err)
+	}
+
+	// Act
+	_, err := readLogRecords(t, path)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "timestamp does not parse") {
+		t.Fatalf("readLogRecords = %v, want a refusal naming the timestamp", err)
+	}
+}
+
+func TestLogFilesNamesALogAndItsWarningsFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want []string
+	}{
+		{"/s/logs/daemon.run.log", []string{"/s/logs/daemon.run.log", "/s/logs/daemon.run.warn.log"}},
+		{"/s/logs/daemon.run.warn.log", []string{"/s/logs/daemon.run.warn.log"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			// Act
+			got := logFiles(tt.path)
+
+			// Assert
+			if !slices.Equal(got, tt.want) {
+				t.Fatalf("logFiles(%q) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}

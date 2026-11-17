@@ -2351,18 +2351,19 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
 		}
 		client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
-			WorkspaceID:  ws,
-			WorkspaceDir: dir,
-			UDSPath:      udsPath,
-			StoreSocket:  f.deps.StoreSocket,
-			ConfigDir:    configDir,
-			SessionID:    hostSessionID,
-			ShimBuildSHA: build,
-			NodeBin:      f.deps.NodeBin,
-			MainJS:       f.deps.MainJS,
-			Fake:         f.deps.Fake,
-			LogSink:      sink.File(),
-			ForbidVendor: f.deps.ForbidVendor,
+			WorkspaceID:     ws,
+			WorkspaceDir:    dir,
+			UDSPath:         udsPath,
+			StoreSocket:     f.deps.StoreSocket,
+			ConfigDir:       configDir,
+			SessionID:       hostSessionID,
+			ShimBuildSHA:    build,
+			NodeBin:         f.deps.NodeBin,
+			MainJS:          f.deps.MainJS,
+			Fake:            f.deps.Fake,
+			LogSink:         sink.File(),
+			LogWarningsSink: sink.WarningsFile(),
+			ForbidVendor:    f.deps.ForbidVendor,
 			// THE PID IS DURABLE FROM THE FORK. Spawn blocks until the shim
 			// has bound and answered; a daemon killed inside that window
 			// leaves a shim its successor cannot tell from no shim at all.

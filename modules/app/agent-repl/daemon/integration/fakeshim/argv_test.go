@@ -7,7 +7,7 @@ import (
 
 func TestParseArgvAcceptsTheSpawnContract(t *testing.T) {
 	// Arrange
-	args := []string{"/opt/shim/dist/main.js", "--listen", "/tmp/ws.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3", "--spawn-gate-fd", "4", "--ready-fd", "5", "--fake"}
+	args := []string{"/opt/shim/dist/main.js", "--listen", "/tmp/ws.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3", "--warnings-fd", "6", "--spawn-gate-fd", "4", "--ready-fd", "5", "--fake"}
 
 	// Act
 	got, err := ParseArgv(args)
@@ -16,7 +16,7 @@ func TestParseArgvAcceptsTheSpawnContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseArgv = error %v, want the parsed contract", err)
 	}
-	want := Argv{MainJS: "/opt/shim/dist/main.js", Listen: "/tmp/ws.sock", StoreSocket: "/tmp/store.sock", LogFD: 3, SpawnGateFD: 4, ReadyFD: 5, Fake: true}
+	want := Argv{MainJS: "/opt/shim/dist/main.js", Listen: "/tmp/ws.sock", StoreSocket: "/tmp/store.sock", LogFD: 3, WarningsFD: 6, SpawnGateFD: 4, ReadyFD: 5, Fake: true}
 	if got != want {
 		t.Fatalf("ParseArgv = %+v, want %+v", got, want)
 	}
@@ -24,7 +24,7 @@ func TestParseArgvAcceptsTheSpawnContract(t *testing.T) {
 
 func TestParseArgvWithoutFakeFlag(t *testing.T) {
 	// Arrange
-	args := []string{"main.js", "--listen", "a", "--store-socket", "b", "--log-fd", "3"}
+	args := []string{"main.js", "--listen", "a", "--store-socket", "b", "--log-fd", "3", "--warnings-fd", "6"}
 
 	// Act
 	got, err := ParseArgv(args)
@@ -49,6 +49,8 @@ func TestParseArgvRejectsIncompleteContracts(t *testing.T) {
 		{name: "no store socket", args: []string{"main.js", "--listen", "a", "--log-fd", "3"}, wantSub: "--store-socket is missing"},
 		{name: "no log fd", args: []string{"main.js", "--listen", "a", "--store-socket", "b"}, wantSub: "--log-fd is missing"},
 		{name: "dangling value", args: []string{"main.js", "--listen"}, wantSub: "wants a value"},
+		{name: "no warnings fd", args: []string{"main.js", "--listen", "a", "--store-socket", "b", "--log-fd", "3"}, wantSub: "--warnings-fd is missing"},
+		{name: "non numeric warnings fd", args: []string{"main.js", "--listen", "a", "--store-socket", "b", "--log-fd", "3", "--warnings-fd", "six"}, wantSub: "--warnings-fd"},
 		{name: "non numeric log fd", args: []string{"main.js", "--listen", "a", "--store-socket", "b", "--log-fd", "three"}, wantSub: "--log-fd"},
 		{name: "unknown flag", args: []string{"main.js", "--turbo", "--listen", "a", "--store-socket", "b", "--log-fd", "3"}, wantSub: "unknown flag"},
 		{name: "second positional", args: []string{"main.js", "other.js", "--listen", "a", "--store-socket", "b", "--log-fd", "3"}, wantSub: "unexpected positional"},

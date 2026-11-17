@@ -36,10 +36,11 @@ const (
 )
 
 // daemonLogFamily matches the base of every log family the daemon writes under
-// the state root's logs directory: the run log, the stdio log, and the
-// per-workspace targets createTarget mints (an older instance's 8-hex
-// directory-hash names included).
-var daemonLogFamily = regexp.MustCompile(`^(daemon\.run\.log|daemon\.stdio\.log|agent-repl-[0-9a-f]+-(daemon|shim|webapp|sidecar)-[A-Za-z0-9]+\.log)$`)
+// the state root's logs directory: the run log and its warnings file, the
+// stdio log, and the per-workspace targets createTarget mints for every sink
+// and its warnings twin (an older instance's 8-hex directory-hash names
+// included).
+var daemonLogFamily = regexp.MustCompile(`^(daemon\.run(\.warn)?\.log|daemon\.stdio\.log|agent-repl-[0-9a-f]+-(daemon|shim|webapp|sidecar)-[A-Za-z0-9]+(\.warn)?\.log)$`)
 
 // isDaemonLogFamily answers whether base names a daemon-written log family.
 func isDaemonLogFamily(base string) bool { return daemonLogFamily.MatchString(base) }
@@ -92,11 +93,13 @@ func (s *surfaces) retainOnce(now time.Time) {
 	var pass retentionPass
 	s.retainSinks(now, &pass)
 
-	if result, err := s.runLog.file.Expire(now); err != nil {
-		s.retentionFailed(&pass, "the run log could not be aged", Context{"log": s.runLog.path, "cause": err.Error()})
-	} else {
-		pass.runLogRolled = result.RolledCurrent
-		pass.noteRemoved(result.Removed)
+	for _, file := range []*logging.RotatingFile{s.runLog.file, s.runLog.warnings} {
+		if result, err := file.Expire(now); err != nil {
+			s.retentionFailed(&pass, "the run log could not be aged", Context{"log": file.Path(), "cause": err.Error()})
+		} else {
+			pass.runLogRolled = pass.runLogRolled || result.RolledCurrent
+			pass.noteRemoved(result.Removed)
+		}
 	}
 
 	s.mu.Lock()

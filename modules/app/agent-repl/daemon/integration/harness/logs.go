@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/logging"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/grantedclock"
@@ -167,7 +169,7 @@ func awaitLogRecordAfter(t testing.TB, wait context.Context, path, what string, 
 		}
 		return false
 	}
-	if !awaitChange(t, wait, check, followFiles(path)) {
+	if !awaitChange(t, wait, check, followLog(path)) {
 		records := readLog(t, path)
 		t.Fatalf("waiting for %s in %s: %v\n%s; %s\n%s", what, path, grantedclock.Explain(wait), anchorAccount(records, after, pred), looks, logTail(records, failureTailRecords))
 	}
@@ -326,7 +328,63 @@ func readLog(t testing.TB, path string) []LogRecord {
 
 // readLogRecords is readLog answering its failure instead of failing t, for a
 // reader on a goroutine of its own (fault.go's record latch).
+//
+// A LOG'S WARNINGS ARE ITS RECORDS TOO. Every runtime writes its warn and
+// error records only to the log's warnings file (agentrepl/logging
+// warnings.go), so a log is read whole as the log and that file together,
+// merged in timestamp order.
 func readLogRecords(t testing.TB, path string) ([]LogRecord, error) {
+	files := logFiles(path)
+	if len(files) == 1 {
+		return readFileRecords(t, path)
+	}
+	var merged []LogRecord
+	for _, file := range files {
+		records, err := readFileRecords(t, file)
+		if err != nil {
+			return nil, err
+		}
+		merged = append(merged, records...)
+	}
+	var parseErr error
+	slices.SortStableFunc(merged, func(a, b LogRecord) int {
+		at, aerr := time.Parse(time.RFC3339Nano, a.Timestamp)
+		bt, berr := time.Parse(time.RFC3339Nano, b.Timestamp)
+		if aerr != nil || berr != nil {
+			parseErr = errors.Join(parseErr, aerr, berr)
+			return 0
+		}
+		return at.Compare(bt)
+	})
+	if parseErr != nil {
+		return nil, fmt.Errorf("%s: a record's timestamp does not parse: %w", path, parseErr)
+	}
+	return merged, nil
+}
+
+// logFiles answers the files a log at PATH is read from: the log and its
+// warnings file, or PATH alone when it is itself a warnings file.
+func logFiles(path string) []string {
+	if isWarningsFile(path) {
+		return []string{path}
+	}
+	return []string{path, logging.WarningsPath(path)}
+}
+
+// followLog is what a wait on the log at PATH follows: the log and its
+// warnings file, and their directories.
+func followLog(path string) func() []string {
+	return followFiles(logFiles(path)...)
+}
+
+// isWarningsFile reports whether PATH is a log's warnings file, which a reader
+// of that log already reads beside it (logFiles).
+func isWarningsFile(path string) bool {
+	return strings.HasSuffix(path, logging.WarningsPath(""))
+}
+
+// readFileRecords reads one log file as readLog describes.
+func readFileRecords(t testing.TB, path string) ([]LogRecord, error) {
 	tail := logReaderFor(t, path)
 	tail.mu.Lock()
 	defer tail.mu.Unlock()
@@ -552,6 +610,8 @@ func (d *Daemon) WorkspaceLogTargets() []string {
 	if err != nil {
 		d.t.Fatalf("harness: glob %s: %v", pattern, err)
 	}
+	// A target's warnings file is read with it (readLog), never twice.
+	matches = slices.DeleteFunc(matches, isWarningsFile)
 	sort.Strings(matches)
 	return matches
 }
@@ -645,7 +705,7 @@ func (d *Daemon) AwaitShimLoggedRequestMatching(workspaceDir, rpc, what string, 
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	check := func() bool { return ShimLoggedRequest(d.t, workspaceDir, rpc, into) && pred() }
-	if !awaitChange(d.t, wait, check, followFiles(WorkspaceLogPath(workspaceDir, "shim"))) {
+	if !awaitChange(d.t, wait, check, followLog(WorkspaceLogPath(workspaceDir, "shim"))) {
 		d.t.Fatalf("waiting for %s (the shim's last logged %s request): %v", what, rpc, grantedclock.Explain(wait))
 	}
 }
@@ -657,7 +717,7 @@ func (d *Daemon) AwaitShimLoggedRequest(workspaceDir, rpc string, into proto.Mes
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
 	check := func() bool { return ShimLoggedRequest(d.t, workspaceDir, rpc, into) }
-	if !awaitChange(d.t, wait, check, followFiles(WorkspaceLogPath(workspaceDir, "shim"))) {
+	if !awaitChange(d.t, wait, check, followLog(WorkspaceLogPath(workspaceDir, "shim"))) {
 		d.t.Fatalf("waiting for the shim to log a %s request: %v", rpc, grantedclock.Explain(wait))
 	}
 }
@@ -713,7 +773,7 @@ func (d *Daemon) AwaitWorkspaceLogRecordCount(workspaceDir, what string, n int, 
 		}
 		return seen >= n
 	}
-	if !awaitChange(d.t, wait, check, followFiles(path)) {
+	if !awaitChange(d.t, wait, check, followLog(path)) {
 		d.t.Fatalf("waiting for %d %s in %s (saw %d): %v", n, what, path, seen, grantedclock.Explain(wait))
 	}
 }
@@ -764,6 +824,8 @@ func WorkspaceLogTargets(t testing.TB, workspaceDir, sink string) []string {
 	if err != nil {
 		t.Fatalf("harness: glob the %s sink targets %s: %v", sink, pattern, err)
 	}
+	// A target's warnings file is read with it (readLog), never twice.
+	targets = slices.DeleteFunc(targets, isWarningsFile)
 	mod := make(map[string]time.Time, len(targets))
 	for _, target := range targets {
 		info, err := os.Stat(target)
@@ -918,7 +980,7 @@ func (d *Daemon) AwaitShimVerbOrder(workspaceDir string, verbs ...string) []stri
 		order = ShimVerbOrder(d.t, workspaceDir)
 		return containsAll(order, verbs)
 	}
-	if !awaitChange(d.t, wait, check, followFiles(WorkspaceLogPath(workspaceDir, "shim"))) {
+	if !awaitChange(d.t, wait, check, followLog(WorkspaceLogPath(workspaceDir, "shim"))) {
 		d.t.Fatalf("waiting for the shim to receive %v (saw %v): %v", verbs, order, grantedclock.Explain(wait))
 	}
 	return order

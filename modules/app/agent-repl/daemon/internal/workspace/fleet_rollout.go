@@ -370,13 +370,14 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		ConfigDir:    configDir,
 		// The relaunched shim carries the SAME host session identity: a
 		// relaunch rotates the process, never the session.
-		SessionID:    session.HostSessionID,
-		ShimBuildSHA: build,
-		NodeBin:      f.deps.NodeBin,
-		MainJS:       f.deps.MainJS,
-		Fake:         f.deps.Fake,
-		LogSink:      sink.File(),
-		ForbidVendor: f.deps.ForbidVendor,
+		SessionID:       session.HostSessionID,
+		ShimBuildSHA:    build,
+		NodeBin:         f.deps.NodeBin,
+		MainJS:          f.deps.MainJS,
+		Fake:            f.deps.Fake,
+		LogSink:         sink.File(),
+		LogWarningsSink: sink.WarningsFile(),
+		ForbidVendor:    f.deps.ForbidVendor,
 		// THE PRELAUNCH IS A SPAWN LIKE ANY OTHER, and it spends the same
 		// Node startup unrecorded. See Spec.Spawned.
 		Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },

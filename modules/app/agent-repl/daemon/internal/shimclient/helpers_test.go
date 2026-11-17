@@ -103,12 +103,16 @@ func runHelper(mode string) {
 		_ = ready.Close()
 	}
 
-	sink := os.NewFile(shimLogFD, "shim-log")
-	if sink != nil {
-		payload, err := json.Marshal(record)
-		if err == nil {
-			_, _ = sink.Write(append(payload, '\n'))
-			_ = sink.Sync()
+	// The record goes to fd 3 and to fd 6 alike, so a test can prove each
+	// was the sink the daemon passed.
+	for _, fd := range []uintptr{shimLogFD, shimWarningsFD} {
+		sink := os.NewFile(fd, "shim-log")
+		if sink != nil {
+			payload, err := json.Marshal(record)
+			if err == nil {
+				_, _ = sink.Write(append(payload, '\n'))
+				_ = sink.Sync()
+			}
 		}
 	}
 
@@ -209,15 +213,29 @@ func shortDir(t *testing.T) string {
 // BLOCKS until the child has reported itself, so no test ever polls.
 type helperSink struct {
 	r *os.File
+	// warnings reads the child's fd 6.
+	warnings *os.File
 }
 
 // record blocks for the record the child wrote to fd 3.
 func (h *helperSink) record(t *testing.T) helperRecord {
 	t.Helper()
+	return readHelperRecord(t, h.r, "fd 3")
+}
 
-	line, err := bufio.NewReader(h.r).ReadString('\n')
+// warningsRecord blocks for the record the child wrote to fd 6.
+func (h *helperSink) warningsRecord(t *testing.T) helperRecord {
+	t.Helper()
+	return readHelperRecord(t, h.warnings, "fd 6")
+}
+
+// readHelperRecord blocks for one record the child wrote to the pipe R reads.
+func readHelperRecord(t *testing.T, r *os.File, fd string) helperRecord {
+	t.Helper()
+
+	line, err := bufio.NewReader(r).ReadString('\n')
 	if err != nil {
-		t.Fatalf("read the child's fd 3 record: %v", err)
+		t.Fatalf("read the child's %s record: %v", fd, err)
 	}
 	var record helperRecord
 	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &record); err != nil {
@@ -241,6 +259,11 @@ func newTestSpec(t *testing.T, dir, udsPath, mode string) (Spec, *helperSink) {
 		t.Fatalf("os.Pipe(): %v", err)
 	}
 	t.Cleanup(func() { r.Close(); w.Close() })
+	warningsR, warningsW, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe(): %v", err)
+	}
+	t.Cleanup(func() { warningsR.Close(); warningsW.Close() })
 
 	t.Setenv(helperModeEnv, mode)
 	spec := Spec{
@@ -255,8 +278,10 @@ func newTestSpec(t *testing.T, dir, udsPath, mode string) (Spec, *helperSink) {
 		Fake:         true,
 		LogSink:      w,
 		StateDir:     filepath.Join(dir, "state"),
+		// fd 6.
+		LogWarningsSink: warningsW,
 	}
-	return spec, &helperSink{r: r}
+	return spec, &helperSink{r: r, warnings: warningsR}
 }
 
 // spawnReady spawns a shim against the in-process fake and returns once the

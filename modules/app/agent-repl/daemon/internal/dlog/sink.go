@@ -25,6 +25,23 @@ const HardCapBytes = CapBytes + CapBytes/10
 // writes it.
 var SinkNames = []string{"daemon", "shim", "webapp", "sidecar"}
 
+// sinkFor names the sink a record at LEVEL of the sink NAME lands in: NAME's
+// warnings twin for a warn or error record (agentrepl/logging warnings.go),
+// NAME itself for every other.
+func sinkFor(name, level string) string {
+	if logging.IsWarningsLevel(level) {
+		return logging.WarningsSink(name)
+	}
+	return name
+}
+
+// isShimSink reports whether NAME is the shim's log or its warnings twin: the
+// two files the shim writes through inherited descriptors, so the daemon
+// rolls them only with the shim's process.
+func isShimSink(name string) bool {
+	return name == "shim" || name == logging.WarningsSink("shim")
+}
+
 // linkDirRel is the canonical per-workspace log directory, relative to the
 // workspace.
 var linkDirRel = filepath.Join(".claude", "emacs")
@@ -57,7 +74,7 @@ var ErrSinkClosed = errors.New("log sink is closed")
 // symlink: it always creates its own target and atomically replaces the link,
 // so whatever the workspace had there is displaced rather than written to.
 type sink struct {
-	// name is one of SinkNames.
+	// name is one of SinkNames or its warnings twin (sinkFor).
 	name string
 	// workspaceDir and workspaceID attribute every failure this sink reports.
 	workspaceDir string
@@ -297,7 +314,7 @@ func (s *sink) write(line []byte) error {
 	if s.closed {
 		return s.closedErrLocked()
 	}
-	if s.name == "shim" {
+	if isShimSink(s.name) {
 		return s.writeShimLocked(line)
 	}
 	rolled := s.size > 0 && s.size+int64(len(line)) > s.cap
@@ -364,7 +381,7 @@ func (s *sink) scan() (scanResult, error) {
 	if s.closed {
 		return scanResult{}, s.closedErrLocked()
 	}
-	if s.name != "shim" {
+	if !isShimSink(s.name) {
 		return scanResult{}, nil
 	}
 	info, err := s.file.File().Stat()
@@ -426,7 +443,7 @@ func (s *sink) expire(now time.Time) (sinkExpiry, error) {
 	}
 	var out sinkExpiry
 	if expired {
-		if s.name == "shim" {
+		if isShimSink(s.name) {
 			if !s.rotatePending {
 				s.rotatePending = true
 				out.marked = true
@@ -482,7 +499,7 @@ func (s *sink) rotateShim() (bool, error) {
 	if s.closed {
 		return false, s.closedErrLocked()
 	}
-	if s.name != "shim" || !s.rotatePending {
+	if !isShimSink(s.name) || !s.rotatePending {
 		return false, nil
 	}
 	if err := s.verifyLinkLocked("shim process roll"); err != nil {

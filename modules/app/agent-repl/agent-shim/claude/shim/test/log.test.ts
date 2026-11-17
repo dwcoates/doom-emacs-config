@@ -38,7 +38,7 @@ describe("shim runtime logging", () => {
 
   async function configured() {
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
     return log;
   }
 
@@ -85,7 +85,7 @@ describe("shim runtime logging", () => {
     // Arrange.
     process.env.AGENT_REPL_LOG_LEVEL = minimum;
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
     const terminal = stderr();
     const logger = log.bindLog({ operation: "shim.test.threshold" });
 
@@ -100,11 +100,29 @@ describe("shim runtime logging", () => {
     expect(terminal.map((line) => JSON.parse(line) as { level: string }).map((record) => record.level)).toEqual(expected);
   });
 
+  it.each([
+    ["debug", 3],
+    ["info", 3],
+    ["warn", 6],
+    ["error", 6],
+  ] as const)("writes a %s record only to fd %i", async (level, fd) => {
+    // Arrange.
+    const log = await configured();
+    mockedWriteSync.mockClear();
+
+    // Act.
+    log.bindLog({ operation: "shim.test.routed" })[level]({}, "a routed record");
+
+    // Assert.
+    const fds = (mockedWriteSync.mock.calls as unknown as Array<[number]>).map(([written]) => written);
+    expect(fds).toEqual([fd]);
+  });
+
   it("uses info as the persistence and mirror threshold when AGENT_REPL_LOG_LEVEL is absent", async () => {
     // Arrange.
     delete process.env.AGENT_REPL_LOG_LEVEL;
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
     const terminal = stderr();
     const logger = log.bindLog({ operation: "shim.test.default-threshold" });
 
@@ -175,7 +193,7 @@ describe("shim runtime logging", () => {
     const configureAt = async (clock: { at: number }) => {
       const log = await freshLog();
       log.configureLog({
-        fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1",
+        fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1",
         now: () => clock.at,
       });
       return log;
@@ -234,7 +252,7 @@ describe("shim runtime logging", () => {
       const log = await freshLog();
 
       // Act + Assert.
-      expect(() => log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" })).toThrow(
+      expect(() => log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" })).toThrow(
         /AGENT_REPL_LOG_LEVEL_UNTIL must be a Unix second/,
       );
       expect(mockedWriteSync).not.toHaveBeenCalled();
@@ -247,7 +265,7 @@ describe("shim runtime logging", () => {
     const log = await freshLog();
 
     // Act + Assert.
-    expect(() => log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" })).toThrow(
+    expect(() => log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" })).toThrow(
       /AGENT_REPL_LOG_LEVEL must be one of debug\|info\|warn\|error/,
     );
     expect(mockedWriteSync).not.toHaveBeenCalled();
@@ -260,7 +278,7 @@ describe("shim runtime logging", () => {
 
   it("states the daemon's workspace id without resolving cwd, and propagates learned Claude identity", async () => {
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/workspace/link-is-intentional", workspaceId: "00000000000000dd", agentReplSessionId: "a" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/workspace/link-is-intentional", workspaceId: "00000000000000dd", agentReplSessionId: "a" });
     const logger = log.bindLog({ operation: "shim.test.identity" });
     logger.debug({}, "before");
     log.setClaudeSessionId("claude-42");
@@ -276,7 +294,7 @@ describe("shim runtime logging", () => {
   it("never derives the workspace id from the workspace directory", async () => {
     // Arrange.
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/workspace/link-is-intentional", workspaceId: "0100059cb65649bc", agentReplSessionId: "a" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/workspace/link-is-intentional", workspaceId: "0100059cb65649bc", agentReplSessionId: "a" });
 
     // Act.
     log.bindLog({ operation: "shim.test.identity" }).debug({}, "one record");
@@ -290,7 +308,7 @@ describe("shim runtime logging", () => {
   it("keeps its own md5 workspace key as a context field", async () => {
     // Arrange.
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/workspace/link-is-intentional", workspaceId: "0100059cb65649bc", agentReplSessionId: "a" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/workspace/link-is-intentional", workspaceId: "0100059cb65649bc", agentReplSessionId: "a" });
 
     // Act.
     log.bindLog({ operation: "shim.test.identity" }).debug({}, "one record");
@@ -317,7 +335,7 @@ describe("shim runtime logging", () => {
     process.env.AGENT_REPL_LOG_LEVEL = "info";
     process.env.AGENT_REPL_LOG_VERBOSE = "1";
     const log = await freshLog();
-    log.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
     const terminal = stderr();
 
     // Act.
@@ -340,12 +358,14 @@ describe("shim runtime logging", () => {
   });
 
   it.each([
-    [{ fd: -1, cwd: "/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent" }, "fd"],
-    [{ fd: 3, cwd: "", workspaceId: "00000000000000dd", agentReplSessionId: "agent" }, "cwd"],
-    [{ fd: 3, cwd: "/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "" }, "session id"],
+    [{ fd: -1, warningsFd: 6, cwd: "/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent" }, "fd"],
+    [{ fd: 3, warningsFd: -1, cwd: "/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent" }, "warnings fd"],
+    [{ fd: 3, warningsFd: 3, cwd: "/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent" }, "warnings fd"],
+    [{ fd: 3, warningsFd: 6, cwd: "", workspaceId: "00000000000000dd", agentReplSessionId: "agent" }, "cwd"],
+    [{ fd: 3, warningsFd: 6, cwd: "/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "" }, "session id"],
     // A WORKSPACE RECORD OWES A WORKSPACE ID, so an absent one is a refusal
     // rather than a record filed under nothing.
-    [{ fd: 3, cwd: "/workspace", workspaceId: "", agentReplSessionId: "agent" }, "workspace id"],
+    [{ fd: 3, warningsFd: 6, cwd: "/workspace", workspaceId: "", agentReplSessionId: "agent" }, "workspace id"],
   ])("rejects invalid logger configuration %o without sink mutation", async (config, expected) => {
     const log = await freshLog();
     expect(() => log.configureLog(config)).toThrow(expected);
@@ -354,7 +374,7 @@ describe("shim runtime logging", () => {
 
   it("rejects a second logger configuration without replacing the original sink", async () => {
     const log = await configured();
-    expect(() => log.configureLog({ fd: 4, cwd: "/other", workspaceId: "00000000000000dd", agentReplSessionId: "other" })).toThrow("already been configured");
+    expect(() => log.configureLog({ fd: 4, warningsFd: 7, cwd: "/other", workspaceId: "00000000000000dd", agentReplSessionId: "other" })).toThrow("already been configured");
     log.bindLog({ operation: "shim.test.immutable" }).debug({}, "first sink remains");
     expect(mockedWriteSync).toHaveBeenCalledWith(3, expect.any(Buffer), 0, expect.any(Number));
   });
@@ -392,7 +412,7 @@ describe("shim runtime logging", () => {
     const log = await freshLog();
     const terminal = stderr();
     expect(() => log.bindLog({ operation: "shim.test.unconfigured" }).debug({}, "nope")).toThrow("not configured");
-    log.configureLog({ fd: 3, cwd: "/canonical", workspaceId: "00000000000000dd", agentReplSessionId: "a" });
+    log.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical", workspaceId: "00000000000000dd", agentReplSessionId: "a" });
     expect(() => log.bindLog({}).debug({}, "nope")).toThrow("operation");
     expect(mockedWriteSync).not.toHaveBeenCalled();
     expect(terminal).toEqual([]);
@@ -446,7 +466,7 @@ describe("shim runtime logging", () => {
     });
     expect(record(bootstrapTerminal[0]).message).toContain("bootstrap");
     vi.clearAllMocks();
-    bootstrapLog.configureLog({ fd: 3, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
+    bootstrapLog.configureLog({ fd: 3, warningsFd: 6, cwd: "/canonical/workspace", workspaceId: "00000000000000dd", agentReplSessionId: "agent-session-1" });
     const configuredTerminal = stderr();
     bootstrapFatal(new Error("configured"));
     expect(logRecordsSince(0)[0]).toMatchObject({
