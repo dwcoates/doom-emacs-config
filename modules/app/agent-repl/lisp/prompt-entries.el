@@ -397,8 +397,8 @@ connection stands, the daemon refused, or it never answered."
 (defun agent-repl-prompt-entries-opening (label)
   "The words that open a blank entry answering LABEL: `LABEL - '.
 Every line Emacs opens on an entry is opened with them: `M-j', `M-k',
-`C-SPC' and `C-S-SPC' beside an entry, and a click on a response's branch in the webview
-\(`agent-repl-input-compose-entry')."
+`C-SPC' and `C-S-SPC' beside an entry, and a click on a response's branch in
+the webview \(`agent-repl-input-compose-entry')."
   (concat label " - "))
 
 (defun agent-repl-prompt-entries--label-at-point ()
@@ -559,8 +559,8 @@ last node keeps its label, and the composer says so."
   "Relabel point's entry to answer the node before its own, `C-i' undone.
 The composer's `C-o' on an entry line: `3.2 - ' becomes `3.1 - ', or
 `3 - ' when 3.2 is its parent's first child, its words kept, the node
-found in the tree the entry targets, as the neighbor lookup finds it.  A root steps
-back to the previous root (`3 - ' becomes `2 - ').  The first root keeps
+found in the tree the entry targets, as the neighbor lookup finds it.  A root
+steps back to the previous root (`3 - ' becomes `2 - ').  The first root keeps
 its label, and the composer says so."
   (interactive)
   (agent-repl-prompt-entries--step :previous "%s is the first node to answer"))
@@ -632,7 +632,8 @@ and all fall through elsewhere.")
   "Bind the composer's entry-aware keys.
 `C-i' and `C-o' in command and insert mode step an entry line's entry
 \(`agent-repl-prompt-entries--entry-keys'), and `M-j', `M-k', `C-SPC' and
-`C-S-SPC' in insert mode open its sibling (`agent-repl-prompt-entries--insert-entry-keys')."
+`C-S-SPC' in insert mode open its sibling
+\(`agent-repl-prompt-entries--insert-entry-keys')."
   (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--entry-keys)
     (evil-define-key* '(normal insert) agent-repl-input-mode-map key binding))
   (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--insert-entry-keys)
