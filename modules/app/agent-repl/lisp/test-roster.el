@@ -3823,6 +3823,31 @@ Each element is (WS LINE)."
 
 ;;;; ---- Reading the switcher's facts off a row ----
 
+(ert-deftest agent-repl-test-roster-row-closed-at-reads-every-cause ()
+  "A recorded close states its instant whoever closed it."
+  ;; Arrange / Act / Assert
+  (dolist (arm '(:user :agent :merge :daemon))
+    (should (equal (agent-repl-roster-row-closed-at
+                    (list :closure (list :at-ms 42 :by (list :arm arm :value nil))))
+                   42))))
+
+(ert-deftest agent-repl-test-roster-row-closed-at-of-an-unrecorded-close-is-nil ()
+  "A close with no record states no instant."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl-roster-row-closed-at '(:closure nil))))
+
+(ert-deftest agent-repl-test-roster-row-closed-by-reads-the-cause ()
+  "A recorded close names who closed it."
+  ;; Arrange / Act / Assert
+  (should (eq (agent-repl-roster-row-closed-by
+               '(:closure (:at-ms 42 :by (:arm :daemon :value nil))))
+              :daemon)))
+
+(ert-deftest agent-repl-test-roster-row-closed-by-of-an-unrecorded-close-is-nil ()
+  "A close with no record names no cause."
+  ;; Arrange / Act / Assert
+  (should-not (agent-repl-roster-row-closed-by '(:closure nil))))
+
 (ert-deftest agent-repl-test-roster-row-closed-by-user-at-reads-a-users-close ()
   "A user's close answers its instant."
   (should (equal (agent-repl-roster-row-closed-by-user-at

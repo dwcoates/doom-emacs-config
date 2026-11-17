@@ -2408,6 +2408,99 @@ and `--switched' to the workspace whose switch was requested of the daemon."
       (should (equal (car offered) "c30"))
       (should (equal (car (last offered)) "c06")))))
 
+;;;; ---- `SPC p p' offers a recently closed workspace for a while ----
+
+(defconst agent-repl-test-commands--now-ms (* 10 24 60 60 1000)
+  "The instant the switcher's window tests read the roster at.")
+
+(defconst agent-repl-test-commands--hour-ms (* 60 60 1000)
+  "One hour, in ms.")
+
+(defun agent-repl-test-commands--offered-at (rows &optional merged)
+  "Answer what `SPC p p' offers over ROWS and MERGED, read at the tests' now."
+  (cl-letf (((symbol-function 'agent-repl--now-unix-ms)
+             (lambda () agent-repl-test-commands--now-ms)))
+    (agent-repl-test-commands--offered-by #'agent-repl-switch-to-project rows nil merged)))
+
+(defun agent-repl-test-commands--ago (ms)
+  "Answer the epoch-ms instant MS before the tests' now."
+  (- agent-repl-test-commands--now-ms ms))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-what-an-agent-closed-within-three-days ()
+  "A workspace an agent closed under three days ago is offered."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--closed-row
+                     "by-agent" :agent (agent-repl-test-commands--ago (* 71 agent-repl-test-commands--hour-ms))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-commands--offered-at rows) '("by-agent")))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-what-the-daemon-closed-within-three-days ()
+  "A workspace the daemon closed under three days ago is offered."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--closed-row
+                     "by-daemon" :daemon (agent-repl-test-commands--ago agent-repl-test-commands--hour-ms)))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-commands--offered-at rows) '("by-daemon")))))
+
+(ert-deftest agent-repl-test-commands-switcher-leaves-out-what-an-agent-closed-three-days-ago ()
+  "A workspace an agent closed three days ago or more is left to `SPC p P'."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "open" "id-open" 100)
+                    (agent-repl-test-commands--closed-row
+                     "by-agent" :agent (agent-repl-test-commands--ago agent-repl--switch-closed-window-ms)))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-commands--offered-at rows) '("open")))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-what-a-merge-closed-within-a-day ()
+  "A workspace a merge closed under a day ago is offered."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--closed-row
+                     "by-merge" :merge (agent-repl-test-commands--ago (* 23 agent-repl-test-commands--hour-ms))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-commands--offered-at rows) '("by-merge")))))
+
+(ert-deftest agent-repl-test-commands-switcher-leaves-out-what-a-merge-closed-a-day-ago ()
+  "A workspace a merge closed a day ago or more is left to `SPC p P'."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--row "open" "id-open" 100)
+                    (agent-repl-test-commands--closed-row
+                     "by-merge" :merge (agent-repl-test-commands--ago agent-repl--switch-merged-window-ms)))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-commands--offered-at rows) '("open")))))
+
+(ert-deftest agent-repl-test-commands-switcher-offers-every-merge-within-a-day-past-the-limit ()
+  "Every workspace merged under a day ago is offered, however many there are."
+  ;; Arrange
+  (let ((merged (cl-loop for i from 1 to 30
+                         collect (agent-repl-test-commands--merged-row
+                                  (format "m%02d" i) (agent-repl-test-commands--ago (* i 60 1000))))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-at nil merged)))
+      ;; Assert
+      (should (= (length offered) 30)))))
+
+(ert-deftest agent-repl-test-commands-switcher-still-offers-the-limit-of-older-merges ()
+  "Past a day, the most recently merged are still offered up to the limit."
+  ;; Arrange
+  (let ((merged (cl-loop for i from 1 to 30
+                         collect (agent-repl-test-commands--merged-row
+                                  (format "m%02d" i)
+                                  (agent-repl-test-commands--ago (+ agent-repl--switch-merged-window-ms i))))))
+    ;; Act
+    (let ((offered (agent-repl-test-commands--offered-at nil merged)))
+      ;; Assert
+      (should (= (length offered) agent-repl--switch-recent-limit))
+      (should (member "m01" offered))
+      (should-not (member "m26" offered)))))
+
+(ert-deftest agent-repl-test-commands-switcher-still-offers-an-older-user-close ()
+  "Past three days, a workspace the user closed is still offered within the limit."
+  ;; Arrange
+  (let ((rows (list (agent-repl-test-commands--closed-row
+                     "mine" :user (agent-repl-test-commands--ago (* 2 agent-repl--switch-closed-window-ms))))))
+    ;; Act / Assert
+    (should (equal (agent-repl-test-commands--offered-at rows) '("mine")))))
+
 (ert-deftest agent-repl-test-commands-switch-to-any-offers-every-known-workspace ()
   "`SPC p P' offers every known workspace, however it was closed."
   ;; Arrange
