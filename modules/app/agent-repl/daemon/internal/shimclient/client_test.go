@@ -1827,7 +1827,9 @@ func TestAStreamOpenTheShimsDeathCutIsNotARefusal(t *testing.T) {
 	}{
 		{name: "the death was decided before the open failed", staging: diedBefore, wantLevel: "info", wrongLvl: "error", wantDied: true},
 		{name: "the process was exiting with its reap not yet in", staging: exitingUnreaped, wantLevel: "info", wrongLvl: "error", wantDied: true},
-		{name: "the shim is alive", staging: neverDied, wantLevel: "error", wrongLvl: "info", wantDied: false},
+		// A LIVE shim's own unavailable answer is its store's outage
+		// (answeredStoreUnreachable), recorded at INFO, never its death.
+		{name: "the shim is alive", staging: neverDied, wantLevel: "info", wrongLvl: "error", wantDied: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

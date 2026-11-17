@@ -1909,7 +1909,15 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 		c.log.Info(operation, "the shim refused the stream open: it holds no such handle; the caller rules on whether that was expected", fields)
 		return refused
 	}
-	// AN OPEN THE STORE'S OUTAGE REFUSED IS NOT THE SHIM FAILING. The shim
+	// AN OPEN THE SHIM'S DEATH CUT IS NOT A REFUSAL. The shim never answered;
+	// its process ended, which daemon.shimclient.exit records once.
+	if info, died := c.diedUnder(err); died {
+		c.log.Info(operation, "the stream open failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info))
+		refused.Err = shimDied(err)
+		return refused
+	}
+	// AN OPEN THE STORE'S OUTAGE REFUSED IS NOT THE SHIM FAILING, once the
+	// shim's death is ruled out above (a dying shim's cut can read the same). The shim
 	// answered, and it records the outage as its store_unreachable session
 	// fault; the caller re-opens at the store's pace. MEASURED, deploy
 	// 2026-11-17T00:10:46Z: a store restart's WatchBash answer was recorded
@@ -1917,13 +1925,6 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 	if answeredStoreUnreachable(err) {
 		c.log.Info(operation, "the shim answered that the store is unreachable; the shim records the outage as its store_unreachable session fault", fields)
 		refused.Err = fmt.Errorf("%w: %w", ErrStoreUnreachable, err)
-		return refused
-	}
-	// AN OPEN THE SHIM'S DEATH CUT IS NOT A REFUSAL. The shim never answered;
-	// its process ended, which daemon.shimclient.exit records once.
-	if info, died := c.diedUnder(err); died {
-		c.log.Info(operation, "the stream open failed because the shim died; the death is recorded by daemon.shimclient.exit", deathFields(fields, info))
-		refused.Err = shimDied(err)
 		return refused
 	}
 	c.log.Error(operation, "shim stream refused", fields)
