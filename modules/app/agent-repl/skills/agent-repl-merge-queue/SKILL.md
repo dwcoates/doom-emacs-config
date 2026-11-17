@@ -260,10 +260,12 @@ Either kind:
     mediator across every deploy, on Opus at low effort: it checks each
     deploy, fixes what it dispatches to itself in the same turn (finishing on
     its own), and settles an escalation with the user (finishing once they
-    agree). It stays open, warm and in sight in its repository's section for
-    good, and the queue's purple label opens it too; its
-    conversation is compacted by Haiku the moment three quiet checks follow a
-    dispatch or an escalation, never cleared.
+    agree). It is made in the daemon's own branch namespace
+    (`agent-repl/standing/deploy-mediator`), where no create, rename or async
+    merge may name a branch. It stays open, warm and in sight in its
+    repository's section for good, and the queue's purple label opens it too;
+    its conversation is compacted by Haiku the moment three quiet checks
+    follow a dispatch or an escalation, never cleared.
   - The sidebar labels the repository in purple: "HOT-LOADING ZETTEL" while
     a build rolls out (a landing's or a landed fix's), "ASSESSING ZETTEL
     HEALTH" while the mediator checks it, "FIXING ZETTEL" while the
