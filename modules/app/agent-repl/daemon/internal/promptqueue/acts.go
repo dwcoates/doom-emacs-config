@@ -20,6 +20,8 @@ import (
 // SubmitSessionAct sends a session act down the ONE delivery path, so it cannot
 // overtake a prompt the user already queued: a model change that jumped the
 // queue would run the queued prompt on a model the user did not choose for it.
+// The one exception is a permission-mode change, which bypasses the queue and
+// every hold (below).
 //
 // AN ACT THAT MUST WAIT IS A HELD ENTRY, EXACTLY AS A PROMPT IS (owner rule,
 // 2026-09-30): durable, on the tray, in first-in-first-out order with the
@@ -79,6 +81,14 @@ func (q *queue) SubmitSessionAct(ctx context.Context, ws ids.WorkspaceID, act Ac
 	// workspace was refused `no_session` and never woke it.
 	if _, shim := q.deps.Client(ws); !shim {
 		return q.holdActForRevival(ctx, ws, act, cut, log)
+	}
+
+	// A PERMISSION-MODE CHANGE NEVER WAITS: unlike a model or effort change it
+	// alters nothing a queued prompt was composed against, so it goes to the
+	// shim at once, ahead of a running turn, a standing hold, and every held
+	// entry, and is never held or classified.
+	if act.Kind == ActSetPermissionMode {
+		return q.runAct(ctx, d, act, nil, log)
 	}
 
 	if cut {
