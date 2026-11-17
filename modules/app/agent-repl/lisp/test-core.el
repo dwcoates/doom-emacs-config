@@ -3326,9 +3326,16 @@ tests pollution-free).  Every retained generation is removed afterwards."
     (buffer-string)))
 
 (defun agent-repl-test--log-records (path)
-  "Return every JSONL record written to PATH, parsed, oldest first."
-  (mapcar (lambda (line) (json-parse-string line :object-type 'alist))
-          (split-string (agent-repl-test--read-file path) "\n" t)))
+  "Return every JSONL record written to the log at PATH, parsed, oldest first.
+The log's warnings file holds its warn and error records
+\(`agent-repl--log-warnings-path'), so both are read, merged by timestamp."
+  (sort (mapcar (lambda (line) (json-parse-string line :object-type 'alist))
+                (mapcan (lambda (file)
+                          (and (file-exists-p file)
+                               (split-string (agent-repl-test--read-file file) "\n" t)))
+                        (list path (agent-repl--log-warnings-path path))))
+        (lambda (a b) (string< (or (alist-get 'timestamp a) "")
+                               (or (alist-get 'timestamp b) "")))))
 
 (defun agent-repl-test--log-record-for (path operation)
   "Return the first record in PATH whose `operation' contains OPERATION."
