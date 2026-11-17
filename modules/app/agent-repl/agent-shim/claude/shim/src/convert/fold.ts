@@ -430,7 +430,9 @@ function dispatch(message: SdkMessage, context: FoldContext, state: FoldState): 
       // cut it, and it settles as cut before the terminal.
       const ending = turnEnding(message);
       const cutUnits = state.streams.endTurn(ending);
-      const settled = ending === "completed" ? [] : settleCutUnits(message, context, cutUnits, ending);
+      // A COMPLETED TURN ANSWERS ONLY UNITS A RETRY REPLACED (endTurn): their
+      // request failed and was sent again.
+      const settled = cutUnits.length === 0 ? [] : settleCutUnits(message, context, cutUnits, ending === "completed" ? "failed" : ending);
       // A CUT NEVER OUTLIVES ITS TURN. One still held here is a summary the
       // vendor never stated, and holding it into the next turn is what left a
       // compaction undrawn for minutes. It lands before the terminal, which

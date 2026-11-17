@@ -204,15 +204,31 @@ func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, standBy b
 }
 
 // standFinishedBy stands the workspace of finish F by and republishes its
-// queue. THE WORKSPACE STANDS BY THE MOMENT ITS FINISH IS ACCEPTED (owner
-// requirement, 2026-11-16): its session ends before its turn can write a
-// reply, and it leaves the working rows for its repository's
+// queue. THE WORKSPACE STANDS BY ONCE THE TURN THAT FINISHED ENDS (owner
+// ruling, 2026-11-17, replacing 2026-11-16's stand-by at once): it leaves the working rows for its repository's
 // `TESTING ZETTEL FIXES` label. CTX IS THE MEDIATION'S LIFETIME, NEVER THE
 // FINISH REQUEST'S: the session the stand-by ends is the one that sent the
 // request, so ending it cancels the request's context mid-stand-by. A
 // stand-by that fails is recorded and the finish goes on: the fix still
 // lands, with the workspace still drawn.
 func (o *orchestrator) standFinishedBy(ctx context.Context, f wsm.RemediationFinish) {
+	// THE STAND-BY WAITS FOR THE TURN THAT FINISHED, never cuts it (owner
+	// ruling, 2026-11-17): a finish command cut mid-run is saved in the
+	// transcript as "User rejected tool use", which the fixer then read as
+	// the user's rejection of its own finish.
+	open, err := o.deps.DB.OpenTurns(ctx, f.Workspace)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace's open turns could not be read; it does not stand by", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "error": err.Error()})
+		o.republishMediation(ctx, f.Repo)
+		return
+	}
+	for _, turn := range open {
+		if _, err := o.deps.AwaitTurnEnd(ctx, f.Workspace, turn.ID); err != nil {
+			o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace's turn could not be awaited; it does not stand by", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "turn": string(turn.ID), "error": err.Error()})
+			o.republishMediation(ctx, f.Repo)
+			return
+		}
+	}
 	if err := o.deps.DeployChecks.StandBy(ctx, f.Workspace); err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace could not stand by; its session runs on and it stays among the working rows", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "error": err.Error()})
 	}
@@ -411,7 +427,7 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
 		return nil
 	}
-	o.holdEscalated(ctx, q, *m, summary, nil, window, "", fields)
+	o.holdEscalated(ctx, q, *m, summary, nil, window, fields)
 	return nil
 }
 

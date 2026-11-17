@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
@@ -39,6 +40,10 @@ type LogReader func(ctx context.Context, repoDir string, since, until time.Time)
 // each line verbatim. The reader's own account of its sinks shares its
 // output and is no record: only a line opening a JSON object is one, and one
 // that does not decode is an error naming it.
+//
+// A RECORD MARKED TRANSIENT (dlog.TransientKey) is left out: a passing
+// outage of something outside agent-repl is no problem a deploy caused or a
+// fixer could fix (owner ruling, 2026-11-17).
 func ParseLogLines(text string) ([]LogRecord, error) {
 	var out []LogRecord
 	for i, line := range strings.Split(text, "\n") {
@@ -46,12 +51,16 @@ func ParseLogLines(text string) ([]LogRecord, error) {
 			continue
 		}
 		var rec struct {
-			Level     string `json:"level"`
-			Operation string `json:"operation"`
-			Message   string `json:"message"`
+			Level     string         `json:"level"`
+			Operation string         `json:"operation"`
+			Message   string         `json:"message"`
+			Context   map[string]any `json:"context"`
 		}
 		if err := json.Unmarshal([]byte(line), &rec); err != nil {
 			return nil, fmt.Errorf("merge: log line %d is no record: %w", i+1, err)
+		}
+		if transient, _ := rec.Context[dlog.TransientKey].(bool); transient {
+			continue
 		}
 		out = append(out, LogRecord{Level: rec.Level, Operation: rec.Operation, Message: rec.Message, Raw: line})
 	}

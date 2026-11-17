@@ -214,7 +214,7 @@ func TestADeployCheckWorkspaceThatCannotBeMadeIsRecorded(t *testing.T) {
 	}
 }
 
-func TestADeployCheckWorkspaceStoppedAtOnceIsKilledAndLeftOpen(t *testing.T) {
+func TestAStoppedDeployCheckWorkspaceIsKilledAndLeftOpen(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
@@ -230,7 +230,7 @@ func TestADeployCheckWorkspaceStoppedAtOnceIsKilledAndLeftOpen(t *testing.T) {
 		t.Fatalf("close records = %+v, want the standing workspace left open", closures)
 	}
 	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks,
-		Message: "stopped the deploy check workspace's session at once; its turn is cut, not ended, and the workspace stays open"}); !ok {
+		Message: "stopped the deploy check workspace's session after its turn ended; the workspace stays open"}); !ok {
 		t.Fatalf("records = %+v, want the stop recorded", f.log.logger.Records())
 	}
 }

@@ -60,3 +60,28 @@ func TestWithCauseStampsTheErrorOnACopy(t *testing.T) {
 		t.Fatalf("fields = %v, want the caller's map untouched", fields)
 	}
 }
+
+func TestAsTransientMarksACopy(t *testing.T) {
+	tests := []struct {
+		name   string
+		fields Context
+		want   Context
+	}{
+		{name: "fields are kept beside the mark", fields: Context{"kind": "unreachable"}, want: Context{"kind": "unreachable", TransientKey: true}},
+		{name: "nil fields are the mark alone", want: Context{TransientKey: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := AsTransient(tt.fields)
+
+			// Assert.
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("AsTransient = %v, want %v", got, tt.want)
+			}
+			if _, written := tt.fields[TransientKey]; written {
+				t.Fatalf("AsTransient wrote through to its argument: %v", tt.fields)
+			}
+		})
+	}
+}

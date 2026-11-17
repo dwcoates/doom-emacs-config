@@ -28,6 +28,10 @@ func TestParseLogLinesKeepsEachRecordVerbatim(t *testing.T) {
 			want: []LogRecord{{Level: "warn", Operation: "a", Message: "m", Raw: `{"level":"warn","operation":"a","message":"m"}`}}},
 		{name: "nothing logged", text: ""},
 		{name: "a record that does not decode", text: "{\"level\":", wantErr: true},
+		{name: "a record marked transient is left out", text: "{\"level\":\"warn\",\"operation\":\"daemon.ghclient.get\",\"message\":\"GitHub could not be reached\",\"context\":{\"transient\":true}}\n"},
+		{name: "a record marked not transient is kept",
+			text: "{\"level\":\"warn\",\"operation\":\"a\",\"message\":\"m\",\"context\":{\"transient\":false}}\n",
+			want: []LogRecord{{Level: "warn", Operation: "a", Message: "m", Raw: `{"level":"warn","operation":"a","message":"m","context":{"transient":false}}`}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
