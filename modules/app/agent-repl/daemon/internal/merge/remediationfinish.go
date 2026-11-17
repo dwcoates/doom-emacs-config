@@ -476,6 +476,11 @@ func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m
 	}
 	if released {
 		o.deps.Log.Global().Info(opMediation, why+"; its check is released and the queue advances", fields)
+		// A RELEASED ESCALATION'S FIXER IS HIDDEN: no check holds the queue
+		// for it any more, and its session is left as it is.
+		if err := o.deps.DeployChecks.Hide(ctx, m.Escalation); err != nil {
+			o.deps.Log.Global().Error(opMediation, "the released escalation's fixer could not be hidden", withField(fields, "error", err.Error()))
+		}
 		o.republishMediation(ctx, repo)
 		o.kick(repo)
 	}

@@ -248,7 +248,7 @@ func TestStoppingAnUnknownDeployCheckWorkspaceKillsNothing(t *testing.T) {
 	}
 }
 
-func TestAFinishedDeployCheckWorkspaceStandsByInSightAndOpen(t *testing.T) {
+func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
@@ -257,8 +257,38 @@ func TestAFinishedDeployCheckWorkspaceStandsByInSightAndOpen(t *testing.T) {
 	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
 
 	// Assert
-	if err != nil || len(f.shim.killedSession) != 1 || f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
-		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, in sight and still open", err, f.shim.killedSession, f.db.workspaces[ws])
+	if err != nil || len(f.shim.killedSession) != 1 || !f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
+		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, hidden and still open", err, f.shim.killedSession, f.db.workspaces[ws])
+	}
+}
+
+func TestHideDeployCheck(t *testing.T) {
+	tests := []struct {
+		name       string
+		hidden     bool
+		closed     bool
+		wantHidden bool
+	}{
+		{name: "a fixer in sight is hidden, its session untouched", wantHidden: true},
+		{name: "a hidden fixer is left as it is", hidden: true, wantHidden: true},
+		{name: "a closed fixer is left as it is", closed: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			record := f.workspace("w1", t.TempDir())
+			record.Hidden, record.Closed = tt.hidden, tt.closed
+			f.db.workspaces[record.ID] = record
+
+			// Act
+			err := f.verbs.(*verbs).HideDeployCheck(context.Background(), record.ID)
+
+			// Assert
+			if err != nil || f.db.workspaces[record.ID].Hidden != tt.wantHidden || len(f.shim.killedSession) != 0 {
+				t.Fatalf("HideDeployCheck = %v, hidden %v, kills %v; want hidden %v and no kill", err, f.db.workspaces[record.ID].Hidden, f.shim.killedSession, tt.wantHidden)
+			}
+		})
 	}
 }
 

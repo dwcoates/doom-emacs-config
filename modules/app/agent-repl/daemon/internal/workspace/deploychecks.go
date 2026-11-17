@@ -150,19 +150,41 @@ func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 }
 
 // StandByDeployCheck implements Verbs: a fixer whose finish the daemon
-// accepted has its session ended at once, its turn cut, before it can write
-// a reply; the workspace stays open and in sight (owner ruling, 2026-11-17),
-// kept warm, and its repository's deploy check label says it is finishing.
-// A gate that sends it back brings its session up again with its brief.
+// accepted is hidden and its session ended at once, its turn cut, before it
+// can write a reply. The fixer is in sight only while it is at work holding
+// its queue (owner ruling, 2026-11-17): from its finish on, its repository's
+// deploy check label is how it is reached. It stays open and warm
+// (wsm.Workspace.StandingDeployCheck), and its next brief shows it again.
 func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "StandByDeployCheck", ws)
 	if err != nil {
 		return err
 	}
+	if err := v.recordHidden(ctx, log, ws, true); err != nil {
+		return fmt.Errorf("stand the deploy check %s by: hide: %w", ws, err)
+	}
 	if _, err := v.endSession(ctx, log, ws); err != nil {
 		return fmt.Errorf("stand the deploy check %s by: %w", ws, err)
 	}
-	log.Info(opDeployChecks, "the finished deploy check workspace stands by: its session ended, the workspace open", nil)
+	log.Info(opDeployChecks, "the finished deploy check workspace stands by: hidden, its session ended, open and warm for its next brief", nil)
+	return nil
+}
+
+// HideDeployCheck implements Verbs: hides standing fixer WS, which no check
+// holds its queue for any more (a released escalation, a fixer left in
+// sight by an earlier build), its session untouched.
+func (v *verbs) HideDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
+	record, log, err := v.owned(ctx, "HideDeployCheck", ws)
+	if err != nil {
+		return err
+	}
+	if record.Hidden || record.Closed {
+		return nil
+	}
+	if err := v.recordHidden(ctx, log, ws, true); err != nil {
+		return fmt.Errorf("hide the deploy check %s: %w", ws, err)
+	}
+	log.Info(opDeployChecks, "the deploy check workspace holds its queue no more; it is hidden, its session untouched", nil)
 	return nil
 }
 

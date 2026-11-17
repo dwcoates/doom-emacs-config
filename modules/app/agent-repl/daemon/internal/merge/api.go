@@ -848,6 +848,9 @@ type DeployCheckWorkspaces interface {
 	// Resume shows a standing-by workspace again, for the brief sending it
 	// back to work.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error
+	// Hide hides a standing fixer no check holds its queue for, its session
+	// untouched.
+	Hide(ctx context.Context, ws ids.WorkspaceID) error
 	// Refresh brings the standing fixer's worktree to its parent's tip
 	// before a new brief.
 	Refresh(ctx context.Context, ws ids.WorkspaceID) error

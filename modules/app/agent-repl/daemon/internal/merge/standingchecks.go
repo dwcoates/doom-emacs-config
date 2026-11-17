@@ -151,7 +151,57 @@ func (o *orchestrator) standingFixer(ctx context.Context, q checkedQueue, role D
 		o.deps.Log.Global().Error(opMediation, "the standing fixer's effort could not be set for its brief; it is not briefed", withField(fields, "error", err.Error()))
 		return standing{}, fmt.Errorf("merge: set the standing fixer %s's effort: %w", fixer.ws, err)
 	}
+	// THE FIXER IS IN SIGHT ONLY WHILE IT IS AT WORK HOLDING ITS QUEUE (owner
+	// ruling, 2026-11-17): a brief shows it, and its finish or a release
+	// hides it again.
+	if err := o.deps.DeployChecks.Resume(ctx, fixer.ws); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the standing fixer could not be shown for its brief; it is not briefed", withField(fields, "error", err.Error()))
+		return standing{}, fmt.Errorf("merge: show the standing fixer %s: %w", fixer.ws, err)
+	}
 	return fixer, nil
+}
+
+// settleFixerSight shows queue Q's standing fixer while check M has it at
+// work holding the queue (a dispatch whose finish has not been accepted, or
+// an escalation), and hides it otherwise (owner ruling, 2026-11-17). Every
+// pass settles it, so a fixer a transition left in the wrong sight, or an
+// earlier build left in sight, is put right.
+func (o *orchestrator) settleFixerSight(ctx context.Context, q checkedQueue, m *wsm.Mediation) {
+	fields := dlog.Context{"repo": string(q.key)}
+	recorded, found, err := o.deps.DB.StandingDeployCheckOf(ctx, q.key, wsm.StandingFixer)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read the standing fixer to settle whether it is in sight", withField(fields, "error", err.Error()))
+		return
+	}
+	if !found {
+		return
+	}
+	fixer := recorded.Workspace
+	fields = withField(fields, "fixer", string(fixer))
+	record, err := o.deps.DB.Workspace(ctx, fixer)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read the standing fixer to settle whether it is in sight", withField(fields, "error", err.Error()))
+		return
+	}
+	atWork := m != nil && ((m.Dispatched && m.Remediation == fixer) || (m.Escalated() && m.Escalation == fixer))
+	if atWork && m.Dispatched {
+		finish, err := o.finishUnderWay(ctx, q.key)
+		if err != nil {
+			o.deps.Log.Global().Error(opMediation, "could not read whether the fixer's finish is under way to settle whether it is in sight", withField(fields, "error", err.Error()))
+			return
+		}
+		atWork = finish == nil || finish.Workspace != fixer
+	}
+	switch {
+	case atWork && record.Hidden:
+		if err := o.deps.DeployChecks.Resume(ctx, fixer); err != nil {
+			o.deps.Log.Global().Error(opMediation, "the standing fixer at work could not be shown", withField(fields, "error", err.Error()))
+		}
+	case !atWork && !record.Hidden:
+		if err := o.deps.DeployChecks.Hide(ctx, fixer); err != nil {
+			o.deps.Log.Global().Error(opMediation, "the standing fixer no check holds its queue for could not be hidden", withField(fields, "error", err.Error()))
+		}
+	}
 }
 
 // markBriefed records queue Q's standing workspace in ROLE briefed in its

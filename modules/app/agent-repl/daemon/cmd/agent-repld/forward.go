@@ -419,6 +419,14 @@ func (d deployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
 	return verbs.StandByDeployCheck(ctx, ws)
 }
 
+func (d deployChecks) Hide(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue hid a standing fixer no check holds its queue for")
+	if err != nil {
+		return err
+	}
+	return verbs.HideDeployCheck(ctx, ws)
+}
+
 func (d deployChecks) Refresh(ctx context.Context, ws ids.WorkspaceID) error {
 	verbs, err := d.f.bound("the merge queue refreshed the standing fixer's worktree")
 	if err != nil {
