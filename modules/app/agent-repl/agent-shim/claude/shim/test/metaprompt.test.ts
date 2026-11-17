@@ -304,8 +304,20 @@ describe("this repository's committed metaprompt", () => {
     const text = readMetaprompt(home);
     // Assert
     expect(text).toContain("A link the workspace was created to investigate or act on");
-    expect(text).toContain("Every pull request the workspace creates is stored the moment its URL is known");
+    expect(text).toContain("Every pull request an agent makes MUST be stored as the workspace's owned and canonical link");
+    expect(text).toContain("It is stored owned the moment its URL is known.");
     expect(text).toContain("without asking me any questions or for permission");
+  });
+
+  it("requires every open pull request an agent makes to be shown in the menu, ahead of merged ones and references", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("Canonical means that while the pull request is open, it is one of the menu's shown links.");
+    expect(text).toContain("First come the open pull requests the workspace's agents made, newest first.");
+    expect(text).toContain("A merged or closed pull request, and any other reference, gives up its place to these first.");
   });
 
   it("requires a pull request outside the workspace's repository to be cited as repo-name#number on every mention", () => {
