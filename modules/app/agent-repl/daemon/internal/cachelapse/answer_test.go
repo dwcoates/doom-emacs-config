@@ -149,3 +149,70 @@ func TestTheAnswerBoundIsAnArmedDeadline(t *testing.T) {
 		t.Fatalf("earliest = %v (%t), want the answer's bound", next, armed)
 	}
 }
+
+// failedKeepalive is the shim's failed answer to a keep-alive.
+func failedKeepalive() *conversationv1.SessionKeepaliveFailed {
+	return &conversationv1.SessionKeepaliveFailed{Detail: "Can't reach the API server (ENOTFOUND)"}
+}
+
+func TestAFailedKeepaliveAnswersTheStandDownItAwaits(t *testing.T) {
+	// Arrange.
+	h := awaiting(t)
+
+	// Act.
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeKeepaliveFailed, failed: failedKeepalive()})
+
+	// Assert.
+	t.Run("the session is stood down at its beat", func(t *testing.T) {
+		if len(h.cycled) != 1 || h.cycled[0].ws != theWorkspace || !h.cycled[0].beat.Equal(now) {
+			t.Fatalf("cycle stand-downs = %+v, want one at the beat", h.cycled)
+		}
+	})
+	t.Run("the answer is no longer awaited", func(t *testing.T) {
+		if len(h.keeper.answering) != 0 || len(h.keeper.answerBy) != 0 {
+			t.Fatalf("answers awaited = %v, bounds %v, want none", h.keeper.answering, h.keeper.answerBy)
+		}
+	})
+	t.Run("it is recorded at INFO with the failure's detail", func(t *testing.T) {
+		record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opDrive,
+			Message: "the keep-alive's request failed; its session is stood down, and the cache lapses at its old anchor"})
+		if !ok || record.Context["detail"] != "Can't reach the API server (ENOTFOUND)" {
+			t.Fatalf("records = %v, want the INFO record carrying the detail", h.log.Records())
+		}
+	})
+	t.Run("nothing is recorded at WARN when the bound later passes", func(t *testing.T) {
+		h.clock.Set(now.Add(AnswerBound))
+		h.keeper.answersDue()
+		if record, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "warn", Operation: opDrive}); ok {
+			t.Fatalf("WARN record %+v, want none for an answered keep-alive", record)
+		}
+	})
+}
+
+func TestAFailedKeepaliveWithNoStandDownAwaitedStandsNothingDown(t *testing.T) {
+	// Arrange: a lapse the request moved already answered the keep-alive.
+	h := awaiting(t)
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeLapse, lapse: restated(now.Add(time.Hour))})
+
+	// Act.
+	h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeKeepaliveFailed, failed: failedKeepalive()})
+
+	// Assert.
+	if len(h.cycled) != 1 {
+		t.Fatalf("cycle stand-downs = %+v, want only the lapse's", h.cycled)
+	}
+}
+
+func TestOnKeepaliveFailedQueuesTheFailedAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, visible())
+
+	// Act.
+	h.keeper.OnKeepaliveFailed(theWorkspace, failedKeepalive())
+
+	// Assert.
+	queued := h.keeper.take()
+	if len(queued) != 1 || queued[0].kind != edgeKeepaliveFailed || queued[0].failed.GetDetail() != "Can't reach the API server (ENOTFOUND)" {
+		t.Fatalf("queued = %+v, want the failed answer", queued)
+	}
+}

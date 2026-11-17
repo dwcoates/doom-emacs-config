@@ -61,6 +61,33 @@ func (k *Keeper) answered(ws ids.WorkspaceID, stated *conversationv1.SessionCach
 	k.deps.CycleDown(ws, sent)
 }
 
+// answeredFailed stands WS's session down when FAILED, a keep-alive whose
+// turn ended in a failure, answers the keep-alive its stand-down awaits. A
+// failure with nothing awaited is one whose lapse already answered it, since
+// the shim restates a lapse its request moved before the failure on the same
+// ordered stream (conversation.v1.SessionKeepaliveFailed).
+//
+// INFO: the vendor answered, and the cache lapses at its old anchor exactly as
+// it would have; the failure itself is the shim's to record (its vendor
+// failure record, its network fault). Before this answer existed the session
+// waited out AnswerBound and was recorded unanswered at WARN (2026-11-17
+// 13:19:20: answered in 0.3s on ENOTFOUND, warned at 13:21:19).
+func (k *Keeper) answeredFailed(ws ids.WorkspaceID, failed *conversationv1.SessionKeepaliveFailed) {
+	sent, waiting := k.answering[ws]
+	if !waiting {
+		k.deps.Log.Global().Debug(opDrive, "a failed keep-alive with no stand-down awaiting it; its lapse already answered", dlog.Context{
+			"workspace": string(ws), "detail": failed.GetDetail(),
+		})
+		return
+	}
+	delete(k.answering, ws)
+	delete(k.answerBy, ws)
+	k.deps.Log.Global().Info(opDrive, "the keep-alive's request failed; its session is stood down, and the cache lapses at its old anchor", dlog.Context{
+		"workspace": string(ws), "sent": sent, "detail": failed.GetDetail(),
+	})
+	k.deps.CycleDown(ws, sent)
+}
+
 // answersDue stands down every session whose keep-alive went unanswered past
 // AnswerBound: the shim is not held up for an answer that is not coming.
 func (k *Keeper) answersDue() {

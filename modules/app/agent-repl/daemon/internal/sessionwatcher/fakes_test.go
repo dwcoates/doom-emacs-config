@@ -1108,6 +1108,10 @@ func (s *cacheLapseSink) OnCacheLapse(_ ids.WorkspaceID, lapse *conversationv1.S
 	s.rec.emit(event{sink: "cachelapse", method: "OnCacheLapse", detail: strconv.FormatInt(lapse.GetLapsesAtMs(), 10)})
 }
 
+func (s *cacheLapseSink) OnKeepaliveFailed(_ ids.WorkspaceID, failed *conversationv1.SessionKeepaliveFailed) {
+	s.rec.emit(event{sink: "cachelapse", method: "OnKeepaliveFailed", detail: failed.GetDetail()})
+}
+
 type lifecycleSink struct {
 	rec *recorder
 	// onTurnEnded, when set, runs inside OnTurnEnded: what the queue would do
