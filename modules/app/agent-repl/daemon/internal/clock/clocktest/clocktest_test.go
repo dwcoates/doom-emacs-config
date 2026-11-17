@@ -1,8 +1,11 @@
 package clocktest
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,5 +94,69 @@ func TestTheMigratedSuitesShareTheScriptedClock(t *testing.T) {
 				t.Errorf("%s declares its own After; use clocktest.Scripted", file)
 			}
 		}
+	}
+}
+
+func TestSameInstant(t *testing.T) {
+	early := epoch
+	alsoEarly := epoch.In(time.FixedZone("elsewhere", 3600))
+	late := epoch.Add(time.Second)
+	tests := []struct {
+		name string
+		a, b *time.Time
+		want bool
+	}{
+		{name: "both nil", want: true},
+		{name: "one nil", a: &early, want: false},
+		{name: "the other nil", b: &early, want: false},
+		{name: "the same instant in another zone", a: &early, b: &alsoEarly, want: true},
+		{name: "different instants", a: &early, b: &late, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := SameInstant(tt.a, tt.b)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("SameInstant(%v, %v) = %v, want %v", tt.a, tt.b, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestOptionalInstantComparisonsHaveOneHome fails when a test file of the
+// daemon hand-rolls its own comparison of two optional instants instead of
+// calling SameInstant.
+func TestOptionalInstantComparisonsHaveOneHome(t *testing.T) {
+	// Arrange.
+	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shape := regexp.MustCompile(`func \w+\(\w+, \w+ \*time\.Time\) bool`)
+	var sites []string
+
+	// Act.
+	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
+			return err
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for range shape.FindAll(source, -1) {
+			sites = append(sites, strings.TrimPrefix(path, root+string(filepath.Separator)))
+		}
+		return nil
+	})
+
+	// Assert.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{filepath.Join("internal", "clock", "clocktest", "clocktest.go")}; !slices.Equal(sites, want) {
+		t.Fatalf("optional instants are compared at %v, want only SameInstant in %v", sites, want)
 	}
 }

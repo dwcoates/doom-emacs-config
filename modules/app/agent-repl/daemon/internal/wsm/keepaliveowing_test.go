@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"agent-repld/internal/clock/clocktest"
 )
 
 func TestSetKeepaliveOwing(t *testing.T) {
@@ -47,7 +49,7 @@ func TestSetKeepaliveOwing(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Workspace = %v", err)
 			}
-			if !sameOptTime(got.KeepaliveOwedNoneAt, tt.wantNone) || !sameOptTime(got.KeepaliveOwedFrom, tt.wantFrom) {
+			if !clocktest.SameInstant(got.KeepaliveOwedNoneAt, tt.wantNone) || !clocktest.SameInstant(got.KeepaliveOwedFrom, tt.wantFrom) {
 				t.Fatalf("row = (none %v, from %v), want (%v, %v)", got.KeepaliveOwedNoneAt, got.KeepaliveOwedFrom, tt.wantNone, tt.wantFrom)
 			}
 		})
@@ -67,12 +69,4 @@ func TestSetKeepaliveOwingRefusesAnUnknownWorkspace(t *testing.T) {
 			t.Fatalf("SetKeepaliveOwing(owing %v) = %v, want ErrNotFound", owing, err)
 		}
 	}
-}
-
-// sameOptTime reports whether two optional instants are both nil or equal.
-func sameOptTime(a, b *time.Time) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return a.Equal(*b)
 }

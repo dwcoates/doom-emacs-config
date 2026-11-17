@@ -49,3 +49,10 @@ func (s *Scripted) After(d time.Duration) <-chan time.Time {
 	s.Asked <- d
 	return s.Fire
 }
+
+// SameInstant reports whether two optional instants are the same: both nil,
+// or both set and equal. It is THE ONE comparison of optional instants the
+// tests use (TestOptionalInstantComparisonsHaveOneHome).
+func SameInstant(a, b *time.Time) bool {
+	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
+}

@@ -11,6 +11,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -373,7 +374,7 @@ func TestOwingRecordsTheDecisionOnTheRow(t *testing.T) {
 
 			// Assert
 			got := h.db.records[theWorkspace]
-			if !sameInstant(got.KeepaliveOwedNoneAt, tt.wantNone) || !sameInstant(got.KeepaliveOwedFrom, tt.wantFrom) || h.db.owingWrites != tt.wantWrites {
+			if !clocktest.SameInstant(got.KeepaliveOwedNoneAt, tt.wantNone) || !clocktest.SameInstant(got.KeepaliveOwedFrom, tt.wantFrom) || h.db.owingWrites != tt.wantWrites {
 				t.Fatalf("row = (none %v, from %v), writes %d; want (%v, %v), %d",
 					got.KeepaliveOwedNoneAt, got.KeepaliveOwedFrom, h.db.owingWrites, tt.wantNone, tt.wantFrom, tt.wantWrites)
 			}
@@ -399,14 +400,6 @@ func TestAnOwingDecisionThatCannotBeWrittenIsAnError(t *testing.T) {
 	if h.db.records[theWorkspace].KeepaliveOwedNoneAt != nil {
 		t.Fatalf("row = %+v, want it unchanged", h.db.records[theWorkspace])
 	}
-}
-
-// sameInstant reports whether two optional instants are both nil or equal.
-func sameInstant(a, b *time.Time) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	return a.Equal(*b)
 }
 
 func TestAParkedSessionThatCouldNotBeRestoredIsUndelivered(t *testing.T) {

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"agent-repld/internal/clock/clocktest"
 )
 
 var (
@@ -74,7 +76,7 @@ func TestBacklogColdGateLeavesAWorkspaceAsItIs(t *testing.T) {
 				t.Fatalf("BacklogColdGate = %v, %v; want left as it is", moved, err)
 			}
 			after := workspaceNow(t, s, ws.ID)
-			if after.Hidden != before.Hidden || !sameInstant(after.HiddenAt, before.HiddenAt) || !sameInstant(after.BackloggedGateAt, before.BackloggedGateAt) {
+			if after.Hidden != before.Hidden || !clocktest.SameInstant(after.HiddenAt, before.HiddenAt) || !clocktest.SameInstant(after.BackloggedGateAt, before.BackloggedGateAt) {
 				t.Fatalf("the row moved: before hidden=%v at %v gate %v, after hidden=%v at %v gate %v",
 					before.Hidden, before.HiddenAt, before.BackloggedGateAt, after.Hidden, after.HiddenAt, after.BackloggedGateAt)
 			}
@@ -165,11 +167,6 @@ func TestANeverBackloggedWorkspaceRecordsNoGate(t *testing.T) {
 	if got := workspaceNow(t, s, ws.ID); got.BackloggedGateAt != nil {
 		t.Fatalf("backlogged gate = %v, want none", got.BackloggedGateAt)
 	}
-}
-
-// sameInstant reports whether two optional instants are the same.
-func sameInstant(a, b *time.Time) bool {
-	return (a == nil) == (b == nil) && (a == nil || a.Equal(*b))
 }
 
 func TestBacklogsColdGate(t *testing.T) {
