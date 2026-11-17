@@ -4670,7 +4670,9 @@ func (x *RosterRepoMergeQueue) GetMediation() *RosterMergeQueueMediation {
 // repository (owner ruling, 2026-11-16): `HOT-LOADING ZETTEL`, `ASSESSING
 // ZETTEL HEALTH`, `FIXING ZETTEL`, `TESTING ZETTEL FIXES` or
 // `ZETTEL NEEDS YOU`. A click
-// on it selects the workspace at work, when one is. Tag 1 (`subject`) is
+// on it selects the repository's deploy mediator, the one workspace that
+// checks every deploy, fixes what it dispatches and settles an escalation
+// with the user, when one is made. Tag 1 (`subject`) is
 // RETIRED: no workspace is drawn as a queue row for the check. Tag 5
 // (`finishing`) is RETIRED: a finish's gate and landing are `testing`, its
 // deploy `waiting`, and a gate that sends the workspace back is `fixing`.
@@ -4783,13 +4785,13 @@ type RosterMergeQueueMediation_Waiting struct {
 }
 
 type RosterMergeQueueMediation_Checking struct {
-	// The chain's intake is checking the deploy (`ASSESSING ZETTEL HEALTH`).
+	// The deploy mediator is checking the deploy (`ASSESSING ZETTEL HEALTH`).
 	Checking *RosterMergeQueueMediationChecking `protobuf:"bytes,3,opt,name=checking,proto3,oneof"`
 }
 
 type RosterMergeQueueMediation_Fixing struct {
-	// A remediation workspace is fixing what the intake found, or what its
-	// own finish's gate failed on (`FIXING ZETTEL`).
+	// The deploy mediator is fixing what it found, or what its own
+	// finish's gate failed on (`FIXING ZETTEL`).
 	Fixing *RosterMergeQueueMediationFixing `protobuf:"bytes,4,opt,name=fixing,proto3,oneof"`
 }
 
@@ -4820,10 +4822,10 @@ func (*RosterMergeQueueMediation_Escalated) isRosterMergeQueueMediation_Standing
 // HOT-LOADING ZETTEL.
 type RosterMergeQueueMediationWaiting struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// What a click on the label selects: the chain's intake, which checks the
-	// deploy once it has rolled out. UNSET for a chain's first deploy, and for
-	// an escalation's fix deploying after its chain ended, which have no
-	// intake; the label is then not clickable.
+	// What a click on the label selects: the deploy mediator, which checks the
+	// deploy once it has rolled out. UNSET while the repository's first check
+	// rolls out, before its mediator is made; the label is then not
+	// clickable.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3,oneof" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4869,8 +4871,8 @@ func (x *RosterMergeQueueMediationWaiting) GetTarget() *RosterMergeQueueMediatio
 // ASSESSING ZETTEL HEALTH.
 type RosterMergeQueueMediationChecking struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. What a click on the label selects: the chain's intake, a
-	// hidden workspace the selection shows.
+	// REQUIRED. What a click on the label selects: the deploy mediator,
+	// hidden while it checks, which the selection shows.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4916,7 +4918,7 @@ func (x *RosterMergeQueueMediationChecking) GetTarget() *RosterMergeQueueMediati
 // FIXING ZETTEL.
 type RosterMergeQueueMediationFixing struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. What a click on the label selects: the remediation workspace.
+	// REQUIRED. What a click on the label selects: the deploy mediator.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -4962,8 +4964,8 @@ func (x *RosterMergeQueueMediationFixing) GetTarget() *RosterMergeQueueMediation
 // TESTING ZETTEL FIXES.
 type RosterMergeQueueMediationTesting struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. What a click on the label selects: the workspace whose fix is
-	// being tested, standing by hidden.
+	// REQUIRED. What a click on the label selects: the deploy mediator, whose
+	// fix is being tested while it stands by hidden.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -5009,9 +5011,9 @@ func (x *RosterMergeQueueMediationTesting) GetTarget() *RosterMergeQueueMediatio
 // ZETTEL NEEDS YOU.
 type RosterMergeQueueMediationEscalated struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// What a click on the label selects: the escalation workspace where the
-	// user settles the check. UNSET only while that workspace is still being
-	// made; the label is then not clickable.
+	// What a click on the label selects: the deploy mediator, where the user
+	// settles the check. UNSET only when the repository has no mediator
+	// recorded; the label is then not clickable.
 	Target        *RosterMergeQueueMediationTarget `protobuf:"bytes,1,opt,name=target,proto3,oneof" json:"target,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

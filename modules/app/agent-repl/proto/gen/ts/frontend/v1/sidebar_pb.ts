@@ -2497,7 +2497,9 @@ export const RosterRepoMergeQueueSchema: GenMessage<RosterRepoMergeQueue> = /*@_
  * repository (owner ruling, 2026-11-16): `HOT-LOADING ZETTEL`, `ASSESSING
  * ZETTEL HEALTH`, `FIXING ZETTEL`, `TESTING ZETTEL FIXES` or
  * `ZETTEL NEEDS YOU`. A click
- * on it selects the workspace at work, when one is. Tag 1 (`subject`) is
+ * on it selects the repository's deploy mediator, the one workspace that
+ * checks every deploy, fixes what it dispatches and settles an escalation
+ * with the user, when one is made. Tag 1 (`subject`) is
  * RETIRED: no workspace is drawn as a queue row for the check. Tag 5
  * (`finishing`) is RETIRED: a finish's gate and landing are `testing`, its
  * deploy `waiting`, and a gate that sends the workspace back is `fixing`.
@@ -2521,7 +2523,7 @@ export type RosterMergeQueueMediation = Message<"frontend.v1.RosterMergeQueueMed
     case: "waiting";
   } | {
     /**
-     * The chain's intake is checking the deploy (`ASSESSING ZETTEL HEALTH`).
+     * The deploy mediator is checking the deploy (`ASSESSING ZETTEL HEALTH`).
      *
      * @generated from field: frontend.v1.RosterMergeQueueMediationChecking checking = 3;
      */
@@ -2529,8 +2531,8 @@ export type RosterMergeQueueMediation = Message<"frontend.v1.RosterMergeQueueMed
     case: "checking";
   } | {
     /**
-     * A remediation workspace is fixing what the intake found, or what its
-     * own finish's gate failed on (`FIXING ZETTEL`).
+     * The deploy mediator is fixing what it found, or what its own
+     * finish's gate failed on (`FIXING ZETTEL`).
      *
      * @generated from field: frontend.v1.RosterMergeQueueMediationFixing fixing = 4;
      */
@@ -2573,10 +2575,10 @@ export const RosterMergeQueueMediationSchema: GenMessage<RosterMergeQueueMediati
  */
 export type RosterMergeQueueMediationWaiting = Message<"frontend.v1.RosterMergeQueueMediationWaiting"> & {
   /**
-   * What a click on the label selects: the chain's intake, which checks the
-   * deploy once it has rolled out. UNSET for a chain's first deploy, and for
-   * an escalation's fix deploying after its chain ended, which have no
-   * intake; the label is then not clickable.
+   * What a click on the label selects: the deploy mediator, which checks the
+   * deploy once it has rolled out. UNSET while the repository's first check
+   * rolls out, before its mediator is made; the label is then not
+   * clickable.
    *
    * @generated from field: optional frontend.v1.RosterMergeQueueMediationTarget target = 1;
    */
@@ -2597,8 +2599,8 @@ export const RosterMergeQueueMediationWaitingSchema: GenMessage<RosterMergeQueue
  */
 export type RosterMergeQueueMediationChecking = Message<"frontend.v1.RosterMergeQueueMediationChecking"> & {
   /**
-   * REQUIRED. What a click on the label selects: the chain's intake, a
-   * hidden workspace the selection shows.
+   * REQUIRED. What a click on the label selects: the deploy mediator,
+   * hidden while it checks, which the selection shows.
    *
    * @generated from field: frontend.v1.RosterMergeQueueMediationTarget target = 1;
    */
@@ -2619,7 +2621,7 @@ export const RosterMergeQueueMediationCheckingSchema: GenMessage<RosterMergeQueu
  */
 export type RosterMergeQueueMediationFixing = Message<"frontend.v1.RosterMergeQueueMediationFixing"> & {
   /**
-   * REQUIRED. What a click on the label selects: the remediation workspace.
+   * REQUIRED. What a click on the label selects: the deploy mediator.
    *
    * @generated from field: frontend.v1.RosterMergeQueueMediationTarget target = 1;
    */
@@ -2640,8 +2642,8 @@ export const RosterMergeQueueMediationFixingSchema: GenMessage<RosterMergeQueueM
  */
 export type RosterMergeQueueMediationTesting = Message<"frontend.v1.RosterMergeQueueMediationTesting"> & {
   /**
-   * REQUIRED. What a click on the label selects: the workspace whose fix is
-   * being tested, standing by hidden.
+   * REQUIRED. What a click on the label selects: the deploy mediator, whose
+   * fix is being tested while it stands by hidden.
    *
    * @generated from field: frontend.v1.RosterMergeQueueMediationTarget target = 1;
    */
@@ -2662,9 +2664,9 @@ export const RosterMergeQueueMediationTestingSchema: GenMessage<RosterMergeQueue
  */
 export type RosterMergeQueueMediationEscalated = Message<"frontend.v1.RosterMergeQueueMediationEscalated"> & {
   /**
-   * What a click on the label selects: the escalation workspace where the
-   * user settles the check. UNSET only while that workspace is still being
-   * made; the label is then not clickable.
+   * What a click on the label selects: the deploy mediator, where the user
+   * settles the check. UNSET only when the repository has no mediator
+   * recorded; the label is then not clickable.
    *
    * @generated from field: optional frontend.v1.RosterMergeQueueMediationTarget target = 1;
    */
