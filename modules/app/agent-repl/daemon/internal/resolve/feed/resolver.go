@@ -81,6 +81,12 @@ type resolver struct {
 // wsState is one workspace's whole feed universe plus the accumulation every
 // piecemeal frame folds into.
 type wsState struct {
+	// sourceUps counts the history sources that came up (SourceUp) and the
+	// watches that opened (kickWaitingReaders): a read that found no source
+	// compares it with the count it began at, so a source that came up while
+	// the read was in flight loads the page at once (awaitSource), never lost
+	// between the failed read and the reader's mark.
+	sourceUps uint64
 	// answeredAt is when agent output a reader sees as the agent answering
 	// (answersPrompt) was last first drawn live in the root feed, or when this
 	// state was born if none has been since: the feed cannot vouch for what
