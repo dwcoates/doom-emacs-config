@@ -69,7 +69,13 @@ var queueRefusals = func() []describedRefusal {
 					want: "the chain has no remediation workspace to restore yet; dispatch a fresh one instead"},
 				refusalCase{name: "remediation_bound_reached",
 					err:  armed(update, "remediation_bound_reached", &agentreplv1.UpdateMergeQueueRemediationBoundReached{RemediationsBeforeEscalation: 3}),
-					want: "the chain has deployed 3 remediations in a row, its repository's bound, so only an escalation is accepted now"}),
+					want: "the chain has deployed 3 remediations in a row, its repository's bound, so only an escalation is accepted now"},
+				refusalCase{name: "problems_unowned",
+					err:  armed(update, "problems_unowned", &agentreplv1.UpdateMergeQueueProblemsUnowned{Groups: []string{"a: b (new)", "c: d (unowned)"}}),
+					want: "the check's window holds problems no one owns, so it cannot be approved; dispatch or escalate them instead: a: b (new); c: d (unowned)"},
+				refusalCase{name: "problems_recurring",
+					err:  armed(update, "problems_recurring", &agentreplv1.UpdateMergeQueueProblemsRecurring{Groups: []string{"a: b (3 fixes)"}}),
+					want: "the check's window holds problems that came back after more than two of their fixes deployed, so only an escalation is accepted: a: b (3 fixes)"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeUpdateQueueRefusal("ws", e.(*agentreplv1.UpdateMergeQueueError))
 			}},

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
@@ -108,6 +109,12 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 	case *agentreplv1.UpdateMergeQueueError_RemediationBoundReached:
 		return fmt.Sprintf("the chain has deployed %d remediations in a row, its repository's bound, so only an escalation is accepted now",
 			r.RemediationBoundReached.GetRemediationsBeforeEscalation()), nil
+	case *agentreplv1.UpdateMergeQueueError_ProblemsUnowned:
+		return fmt.Sprintf("the check's window holds problems no one owns, so it cannot be approved; dispatch or escalate them instead: %s",
+			strings.Join(r.ProblemsUnowned.GetGroups(), "; ")), nil
+	case *agentreplv1.UpdateMergeQueueError_ProblemsRecurring:
+		return fmt.Sprintf("the check's window holds problems that came back after more than two of their fixes deployed, so only an escalation is accepted: %s",
+			strings.Join(r.ProblemsRecurring.GetGroups(), "; ")), nil
 	}
 	return "", undescribed("updating the merge queue", e)
 }
