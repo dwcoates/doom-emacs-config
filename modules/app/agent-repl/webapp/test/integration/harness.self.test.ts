@@ -19,12 +19,13 @@
  */
 import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
 import { log } from "../../src/log";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
+import { realSetImmediate } from "../real-clock";
 import { ROOT_FEED } from "./fake-daemon";
 import { PERMISSION_POSED_AT_MS, WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit } from "./fixtures";
 
@@ -138,6 +139,69 @@ function bootingFiles(): { file: string; source: string }[] {
     .map((file) => ({ file, source: readFileSync(resolve(dir, file), "utf8") }))
     .filter(({ source }) => source.includes("startHarness("));
 }
+
+/**
+ * Rewrite one element on every turn of the REAL event loop until stopped: a
+ * page that redraws itself with nothing driving it, which no settle converges
+ * on.
+ */
+function redrawForever(): () => void {
+  const element = document.createElement("div");
+  element.setAttribute("data-self-redraw", "");
+  document.body.append(element);
+  let running = true;
+  let count = 0;
+  const step = (): void => {
+    if (!running) return;
+    element.textContent = String((count += 1));
+    realSetImmediate(step);
+  };
+  realSetImmediate(step);
+  return () => {
+    running = false;
+  };
+}
+
+describe("leaving the page", () => {
+  it("quiets the page before its daemon stops", async () => {
+    // Arrange
+    const h = await startHarness();
+    harness = h;
+
+    // Act
+    await h.stop();
+
+    // Assert: no stream of this page is left to reconnect to a gone daemon.
+    expect(h.ctx.isQuiesced()).toBe(true);
+  });
+
+  it("puts the real clock back after a boot the daemon refused", async () => {
+    // Arrange / Act
+    await expect(
+      startHarness({ arrange: (fake) => fake.refuse("adoptWebWorkspace", "unknownWorkspace") }),
+    ).rejects.toThrow();
+
+    // Assert
+    expect(vi.isFakeTimers()).toBe(false);
+  });
+
+  it("puts the real clock back when its own teardown fails", async () => {
+    // Arrange: a page whose teardown settle can never converge.
+    const h = await startHarness();
+    harness = h;
+    const stop = redrawForever();
+
+    // Act
+    try {
+      await expect(h.stop()).rejects.toThrow(/never stopped changing/);
+    } finally {
+      stop();
+    }
+
+    // Assert
+    expect([vi.isFakeTimers(), h.ctx.isQuiesced()]).toEqual([false, true]);
+  });
+});
 
 describe("the cold boot", () => {
   it("finds the files that boot the app", () => {

@@ -45,17 +45,11 @@
 import type { JsonObject } from "@bufbuild/protobuf";
 
 import type { MountedApp } from "../integration/harness";
+import { realNow } from "../real-clock";
+import { settleUntil } from "./drive";
 
-/**
- * The REAL clock, captured before anything fakes it.
- *
- * `performance.now()` rather than `Date.now()`: jsdom resolves the former to
- * sub-millisecond floats, and §C row 3b already warns that a millisecond
- * quantum is marginal against these budgets. The function is bound at module
- * evaluation, which ESM guarantees happens before any test body runs and so
- * before `mountApp` calls `vi.useFakeTimers`.
- */
-export const realNow: () => number = globalThis.performance.now.bind(globalThis.performance);
+/** The REAL clock (test/real-clock.ts), which every interval here is read off. */
+export { realNow };
 
 /**
  * The REAL microtask queue, captured for the same reason and at the same
@@ -261,19 +255,14 @@ export async function awaitSample(
   void armed.then((ms) => {
     closed = ms;
   });
-  const deadline = realNow() + budgetMs;
-  for (;;) {
-    await app.settle();
-    if (closed !== undefined) return closed;
-    if (realNow() >= deadline) {
-      probe.disarm();
-      throw new Error(
-        `${what}: the probe never closed within ${budgetMs}ms; ` +
-          `failure arms: [${app.failureArms().join(", ")}]; ` +
-          `refusal arms: [${app.refusalArms().join(", ")}]`,
-      );
-    }
-  }
+  const { met } = await settleUntil(app, () => closed !== undefined, realNow() + budgetMs, realNow);
+  if (met) return closed as number;
+  probe.disarm();
+  throw new Error(
+    `${what}: the probe never closed within ${budgetMs}ms; ` +
+      `failure arms: [${app.failureArms().join(", ")}]; ` +
+      `refusal arms: [${app.refusalArms().join(", ")}]`,
+  );
 }
 
 /**

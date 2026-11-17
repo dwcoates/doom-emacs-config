@@ -138,21 +138,43 @@ async function awaitSettled(
   // whole budget: the submission was never sent, so nothing downstream had
   // anything to answer. A wall-clock budget cannot tell those apart on its own,
   // and the round count can: an ordinary 5s budget completes hundreds.
-  let rounds = 0;
+  const { met, settles } = await settleUntil(app, predicate, deadline, () => Date.now());
+  if (met) return;
+  throw new Error(
+    `${phrase} within ${budgetMs}ms ` +
+      `(${settles} settle rounds in ${Date.now() - started}ms of wall clock; ` +
+      `a low count for the budget means this page was starved of CPU rather than left unanswered); ` +
+      `row kinds drawn: [${drawnKinds(app).join(", ")}]; ` +
+      `failure arms: [${app.failureArms().join(", ")}]; ` +
+      `refusal arms: [${app.refusalArms().join(", ")}]`,
+  );
+}
+
+/**
+ * Settle APP until MET holds or NOW reaches DEADLINE, running BETWEEN after
+ * every settle that did not meet it. Answers whether MET held, and how many
+ * settles ran.
+ *
+ * THE ONE BUDGETED WAIT OF THIS LAYER: every wait on a budget is this loop,
+ * and the caller names its own failure. NOW is the caller's clock, because
+ * the callers read different ones: `Date.now` follows real time here
+ * (`shouldAdvanceTime`) unless the caller jumps the page's clock itself, and
+ * then the caller reads `realNow` (test/real-clock.ts).
+ */
+export async function settleUntil(
+  app: MountedApp,
+  met: () => boolean,
+  deadline: number,
+  now: () => number,
+  between?: () => Promise<void>,
+): Promise<{ met: boolean; settles: number }> {
+  let settles = 0;
   for (;;) {
     await app.settle();
-    rounds++;
-    if (predicate()) return;
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `${phrase} within ${budgetMs}ms ` +
-          `(${rounds} settle rounds in ${Date.now() - started}ms of wall clock; ` +
-          `a low count for the budget means this page was starved of CPU rather than left unanswered); ` +
-          `row kinds drawn: [${drawnKinds(app).join(", ")}]; ` +
-          `failure arms: [${app.failureArms().join(", ")}]; ` +
-          `refusal arms: [${app.refusalArms().join(", ")}]`,
-      );
-    }
+    settles += 1;
+    if (met()) return { met: true, settles };
+    if (now() >= deadline) return { met: false, settles };
+    await between?.();
   }
 }
 

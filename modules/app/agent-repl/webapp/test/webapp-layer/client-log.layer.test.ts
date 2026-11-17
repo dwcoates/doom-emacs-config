@@ -30,9 +30,10 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
 import { log } from "../../src/log";
-import { BOOT_BUDGET_MS, TURN_TEST_MS, awaitDrawn, bootLayer, rows, submit, textOf } from "./drive";
+import { BOOT_BUDGET_MS, TURN_TEST_MS, awaitDrawn, bootLayer, rows, settleUntil, submit, textOf } from "./drive";
 import { realDaemon, workspaceLogPath } from "./real-daemon";
 import { warningsSink } from "../../../agent-shim/logging/ts/warnings.js";
+import { realNow } from "../real-clock";
 
 /**
  * The operation the planted record carries.
@@ -114,19 +115,21 @@ async function awaitForwarded(
   predicate: (record: DaemonLogRecord) => boolean,
   budgetMs = FORWARD_BUDGET_MS,
 ): Promise<DaemonLogRecord> {
-  const deadline = Date.now() + budgetMs;
-  for (;;) {
-    await app.settle();
-    const found = webappLog().find(predicate);
-    if (found !== undefined) return found;
-    if (Date.now() >= deadline) {
-      throw new Error(
-        `${what} never reached the daemon's webapp.log within ${budgetMs}ms; ` +
-          `operations forwarded: [${webappLog().map((r) => r.operation ?? "?").join(", ")}]`,
-      );
-    }
-    await app.tick(2_000);
-  }
+  // THE REAL CLOCK: the page's own is moved two seconds a round below, so a
+  // budget read off it ran out after three rounds whatever real time passed.
+  let found: DaemonLogRecord | undefined;
+  const { met } = await settleUntil(
+    app,
+    () => (found = webappLog().find(predicate)) !== undefined,
+    realNow() + budgetMs,
+    realNow,
+    () => app.tick(2_000),
+  );
+  if (met) return found as DaemonLogRecord;
+  throw new Error(
+    `${what} never reached the daemon's webapp.log within ${budgetMs}ms; ` +
+      `operations forwarded: [${webappLog().map((r) => r.operation ?? "?").join(", ")}]`,
+  );
 }
 
 beforeAll(async () => {
