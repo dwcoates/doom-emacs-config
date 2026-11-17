@@ -123,6 +123,13 @@
 - This rule is the design-level sibling of the invariants rule above.
   - Deliberate design features (an event classification, a replay protocol) are not fallbacks; the rule targets machinery whose only purpose is absorbing an anticipated failure.
 
+### Never fix a defect with an instruction that explains away one bug
+
+- NEVER propose or add an agent instruction whose only purpose is to explain away one specific bug or its leftovers.
+  - Examples are a brief line telling an agent that stale records in its history were a bug and should be ignored.
+  - Such a line outlives the bug, and it teaches every later reader of the harness about a defect that no longer exists.
+- Fix the defect itself, and repair the state it left behind once (owner ruling, 2026-11-17).
+
 ### "Structurally impossible" ALWAYS beats "very improbable"
 
 - When a failure mode can be made STRUCTURALLY IMPOSSIBLE by organizing the architecture or communication differently, that design is ALWAYS preferred over one where the failure is merely improbable.
