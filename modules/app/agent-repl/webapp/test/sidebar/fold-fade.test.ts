@@ -11,6 +11,7 @@ import {
 import { SURFACED_ROW_CLASS } from "../../src/sidebar/row.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import stylesheet from "../../src/styles.css?raw";
+import { keyframesOf, rulesOf } from "../stylesheet.js";
 
 /** A row freshly drawn for ID, in ROOT. */
 const drawn = (root: HTMLElement, id: string): HTMLElement => {
@@ -158,6 +159,9 @@ describe("the fold fade's styling", () => {
   });
 
   it("fades from full ink to none", () => {
-    expect(stylesheet).toMatch(/@keyframes ws-fold-fade \{\s*from \{ opacity: 1; \}\s*to \{ opacity: 0; \}\s*\}/);
+    expect(rulesOf(keyframesOf("ws-fold-fade")).map((rule) => [rule.selectors, rule.declarations.trim()])).toEqual([
+      [["from"], "opacity: 1;"],
+      [["to"], "opacity: 0;"],
+    ]);
   });
 });

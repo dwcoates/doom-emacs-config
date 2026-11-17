@@ -1590,7 +1590,8 @@ CURRENT has no tab or nothing is drawn."
 RING-FN is called with the workspace the step starts from and answers
 every tab in the ring's order (`agent-repl--cycle-target''s ALL); the drawn
 tabs are the ones the step may land on, so a tab a collapsed section folds
-is passed over, as the numerals pass it over (owner request, 2026-11-17).  OP names the gesture's records
+is passed over, as the numerals pass it over (owner request, 2026-11-17).
+OP names the gesture's records
 \(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
 switch request's (`agent-repl-host-request-switch').
 
