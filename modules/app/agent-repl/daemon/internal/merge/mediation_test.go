@@ -610,6 +610,9 @@ func TestOwedFromRefusesAToldCheckWithNoWorkspaceAtWork(t *testing.T) {
 		{name: "rolling out counts the chain's remediations", m: wsm.Mediation{OwedAt: at, ChainRedeploys: 2, Intake: "i"},
 			want: &OwedMediation{Repository: theRepository, Stage: CheckRollingOut, Intake: "i", InARow: 2}},
 		{name: "a told check with no intake is a broken store", m: wsm.Mediation{OwedAt: at, PromptedAt: &at}, wantErr: true},
+		{name: "a dispatch carried into a newer deploy's check is fixing with no intake",
+			m:    wsm.Mediation{OwedAt: at, ChainRedeploys: 2, Remediation: "r", Dispatched: true},
+			want: &OwedMediation{Repository: theRepository, Stage: CheckFixing, Remediation: "r", InARow: 2}},
 		{name: "a dispatched check with no remediation is a broken store", m: wsm.Mediation{OwedAt: at, PromptedAt: &at, Intake: "i", Dispatched: true}, wantErr: true},
 	}
 	for _, tt := range tests {

@@ -968,7 +968,8 @@ func (o *orchestrator) owedMediation(ctx context.Context, repo wsm.RepoKey) (*Ow
 }
 
 // owedFrom is check M of repository REPO as the queue's status reads it. A
-// told check names its intake: one recorded nowhere is a broken store.
+// check names the workspace its stage has at work: one recorded nowhere is a
+// broken store.
 func owedFrom(repo ids.RepoID, m wsm.Mediation) (*OwedMediation, error) {
 	out := &OwedMediation{Repository: repo, Intake: m.Intake, InARow: m.ChainRedeploys}
 	switch {
@@ -982,7 +983,12 @@ func owedFrom(repo ids.RepoID, m wsm.Mediation) (*OwedMediation, error) {
 	default:
 		out.Stage = CheckRollingOut
 	}
-	if (out.Stage != CheckRollingOut && m.Intake == "") || (out.Stage == CheckFixing && m.Remediation == "") {
+	// THE WORKSPACE AT WORK IS THE STAGE'S OWN: the intake while it assesses,
+	// the remediation while it fixes. A dispatch carried into a newer deploy's
+	// check keeps its remediation but not the intake that decided (an intake
+	// decides once, wsm.OweMediation), so a fixing check with no intake is
+	// ordinary (2026-11-17 00:37: the roster refused it 50 times).
+	if (out.Stage == CheckAssessing && m.Intake == "") || (out.Stage == CheckFixing && m.Remediation == "") {
 		return nil, fmt.Errorf("merge: the check of %s owed at %v is %d with no workspace at work (%+v)", repo, m.OwedAt, out.Stage, m)
 	}
 	return out, nil

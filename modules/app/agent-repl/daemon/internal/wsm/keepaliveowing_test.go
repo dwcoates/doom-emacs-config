@@ -70,3 +70,47 @@ func TestSetKeepaliveOwingRefusesAnUnknownWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestTheOwingHistoryStepStampsOnlyUndecidedRows(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ctx := context.Background()
+	undecided := testWorkspaceNamed(t, s, "undecided")
+	none := testWorkspaceNamed(t, s, "owes-none")
+	again := testWorkspaceNamed(t, s, "owes-again")
+	if err := s.SetKeepaliveOwing(ctx, none.ID, false, instant); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKeepaliveOwing(ctx, again.ID, false, instant); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetKeepaliveOwing(ctx, again.ID, true, instant.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	before := time.Now().Truncate(time.Second)
+
+	// Act
+	_, err := s.db().ExecContext(ctx, keepaliveOwingHistoryDDL)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("the step = %v", err)
+	}
+	read := func(ws Workspace) Workspace {
+		got, err := s.Workspace(ctx, ws.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := read(undecided); got.KeepaliveOwedFrom == nil || got.KeepaliveOwedFrom.Before(before) || got.KeepaliveOwedNoneAt != nil {
+		t.Fatalf("undecided row = (none %v, from %v), want owed from the step on", got.KeepaliveOwedNoneAt, got.KeepaliveOwedFrom)
+	}
+	if got := read(none); got.KeepaliveOwedFrom != nil || !clocktest.SameInstant(got.KeepaliveOwedNoneAt, &instant) {
+		t.Fatalf("owes-none row = (none %v, from %v), want its decision kept", got.KeepaliveOwedNoneAt, got.KeepaliveOwedFrom)
+	}
+	again2 := instant.Add(time.Hour)
+	if got := read(again); !clocktest.SameInstant(got.KeepaliveOwedFrom, &again2) {
+		t.Fatalf("owes-again row from = %v, want its decision kept", got.KeepaliveOwedFrom)
+	}
+}

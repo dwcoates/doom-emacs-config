@@ -27,6 +27,18 @@ ALTER TABLE workspaces ADD COLUMN keepalive_owed_none_at INTEGER;
 ALTER TABLE workspaces ADD COLUMN keepalive_owed_from INTEGER;
 `
 
+// keepaliveOwingHistoryDDL is the layout-163 step: every row the keeper has
+// decided nothing about since layout 162 is stamped as owing keep-alives from
+// the migration on. NO DECISION WAS RECORDED BEFORE LAYOUT 162, so a beat due
+// before it is one nobody can say was owed, and a successor judged a beat due
+// fifteen days earlier a miss (2026-11-17 00:32, workspace 9e138edb98644474,
+// due 2026-11-02). A row the keeper decided keeps its decision. A fresh file
+// needs no step: its rows' history begins with them.
+const keepaliveOwingHistoryDDL = `
+UPDATE workspaces SET keepalive_owed_from = CAST(strftime('%s', 'now') AS INTEGER) * 1000000000
+ WHERE keepalive_owed_from IS NULL AND keepalive_owed_none_at IS NULL;
+`
+
 // SetKeepaliveOwing records the keeper's decision that workspace ID owes
 // keep-alives (OWING) or owes none, made at AT. Owing none keeps the earliest
 // instant of a standing decision; owing again stamps keepalive_owed_from only
