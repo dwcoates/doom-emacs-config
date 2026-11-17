@@ -1560,6 +1560,7 @@ func TestARefusedStreamOpenIsRecordedAtTheLevelItsCodeMeans(t *testing.T) {
 		{name: "the store holds no rows for the run", code: connect.CodeNotFound, wantLevel: "info", wrongLvl: "error"},
 		{name: "the shim has no such handle yet", code: connect.CodeFailedPrecondition, wantLevel: "info", wrongLvl: "error"},
 		{name: "the shim failed the open", code: connect.CodeInternal, wantLevel: "error", wrongLvl: "info"},
+		{name: "the store is unreachable", code: connect.CodeUnavailable, wantLevel: "info", wrongLvl: "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1582,6 +1583,50 @@ func TestARefusedStreamOpenIsRecordedAtTheLevelItsCodeMeans(t *testing.T) {
 			}
 			if hasRecordAt(log, tt.wrongLvl, "daemon.shimclient.watch_bash") {
 				t.Fatalf("the refused open was ALSO recorded at %q: %+v", tt.wrongLvl, log.Records())
+			}
+		})
+	}
+}
+
+// TestAStoreOutageOpenIsClassifiedStoreUnreachable pins the classification
+// the session watcher rules on: the shim's own unavailable answer is
+// ErrStoreUnreachable, never a severing.
+func TestAStoreOutageOpenIsClassifiedStoreUnreachable(t *testing.T) {
+	// Arrange.
+	f, uds := startFakeShim(t, shortDir(t))
+	f.watchBashRefusal = connect.NewError(connect.CodeUnavailable, errors.New("WatchBash(toolu_1): the store is unreachable"))
+	c := newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+
+	// Act.
+	_, err := c.WatchBash(context.Background(), &conversationv1.DetachedWorkId{Value: "toolu_1"})
+
+	// Assert.
+	if !errors.Is(err, ErrStoreUnreachable) {
+		t.Fatalf("WatchBash() error = %v, want ErrStoreUnreachable in its chain", err)
+	}
+}
+
+// TestAnsweredStoreUnreachable pins that only the shim's WIRE answer is the
+// store's outage: an unavailable this client made itself (a dial to a socket
+// that is gone) is a transport failure.
+func TestAnsweredStoreUnreachable(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a client-synthesized unavailable", err: connect.NewError(connect.CodeUnavailable, errors.New("dial unix: no such file")), want: false},
+		{name: "another code", err: connect.NewError(connect.CodeInternal, errors.New("boom")), want: false},
+		{name: "no connect error", err: errors.New("EOF"), want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			got := answeredStoreUnreachable(tt.err)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("answeredStoreUnreachable(%v) = %v, want %v", tt.err, got, tt.want)
 			}
 		})
 	}
@@ -1782,7 +1827,9 @@ func TestAStreamOpenTheShimsDeathCutIsNotARefusal(t *testing.T) {
 	}{
 		{name: "the death was decided before the open failed", staging: diedBefore, wantLevel: "info", wrongLvl: "error", wantDied: true},
 		{name: "the process was exiting with its reap not yet in", staging: exitingUnreaped, wantLevel: "info", wrongLvl: "error", wantDied: true},
-		{name: "the shim is alive", staging: neverDied, wantLevel: "error", wrongLvl: "info", wantDied: false},
+		// A LIVE shim's own unavailable answer is its store's outage
+		// (answeredStoreUnreachable), recorded at INFO, never its death.
+		{name: "the shim is alive", staging: neverDied, wantLevel: "info", wrongLvl: "error", wantDied: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

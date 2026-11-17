@@ -143,6 +143,10 @@ type watcher struct {
 	// just established. A link that comes back with every stream still
 	// standing has nothing to re-open.
 	degraded bool
+	// storeDown reports that the fleet is degraded because the shim ANSWERED
+	// an open that the store is unreachable (openEndedByStoreOutageLocked),
+	// on a link that stays connected; the paced re-open is its probe.
+	storeDown bool
 	// severingRaised reports that this watcher raised a severing at the
 	// lifecycle (OnLinkFault, LinkFaultSevered) that no agent watch opening
 	// since has ended (linkRestoredLocked).
@@ -1612,7 +1616,7 @@ func (w *watcher) armPacedReopenLocked() {
 		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		if w.closed || w.gen != gen || !w.degraded || w.link != shimclient.LinkRedialing || w.endingLocked() {
+		if w.closed || w.gen != gen || !w.degraded || (w.link != shimclient.LinkRedialing && !w.storeDown) || w.endingLocked() {
 			return
 		}
 		if _, reaped := w.client.Reaped(); reaped {
@@ -1638,6 +1642,7 @@ func (w *watcher) reopenLocked(reason string) {
 	// The fleet is whole again from here: any open below that fails calls
 	// severedLocked, which sets the flag afresh.
 	w.degraded = false
+	w.storeDown = false
 	w.log.Debug("daemon.sessionwatcher.state_transition", "the watch fleet entered a fresh generation", dlog.Context{
 		"state": "watch_generation", "before": beforeGeneration, "after": w.gen,
 		"degraded_before": beforeDegraded, "degraded_after": false,
@@ -1812,7 +1817,8 @@ func (w *watcher) openSession(t *openTicket) {
 	w.sessionOpening = nil
 	if err != nil {
 		if !w.openEndedByTeardownLocked("session", "", err) &&
-			!w.openEndedByDeathLocked("watch_session", "WatchSession could not be opened because the shim died", err) {
+			!w.openEndedByDeathLocked("watch_session", "WatchSession could not be opened because the shim died", err) &&
+			!w.openEndedByStoreOutageLocked("watch_session", "WatchSession could not be opened because the store is unreachable", err) {
 			w.severedLocked("watch_session", "WatchSession could not be opened", err)
 		}
 		w.mu.Unlock()
@@ -1933,6 +1939,7 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 		switch {
 		case w.openEndedByTeardownLocked("agent", watchKey(a.id), err):
 		case w.openEndedByDeathLocked("watch_agent", "WatchAgent could not be opened because the shim died", err):
+		case w.openEndedByStoreOutageLocked("watch_agent", "WatchAgent could not be opened because the store is unreachable", err):
 		case refusedOpen(err):
 			w.openRefusedLocked("watch_agent", watchKey(a.id), w.refusalStandingLocked(a), &a.refusals, err)
 		default:
@@ -1995,6 +2002,7 @@ func (w *watcher) openShell(t *openTicket, s *shellWatch) {
 		switch {
 		case w.openEndedByTeardownLocked("shell", key, err):
 		case w.openEndedByDeathLocked("watch_bash", "WatchBash could not be opened because the shim died", err):
+		case w.openEndedByStoreOutageLocked("watch_bash", "WatchBash could not be opened because the store is unreachable", err):
 		case refusedOpen(err):
 			w.openRefusedLocked("watch_bash", key, refusalBroken, &s.refusals, err)
 		default:
@@ -2749,6 +2757,36 @@ func (w *watcher) endedByDeathLocked(operation, detail string, err error, info s
 	}
 	w.log.Info("daemon.sessionwatcher."+operation, "a standing stream ended because the shim died; the death is recorded by daemon.shimclient.exit", ctx)
 	w.degraded = true
+}
+
+// openEndedByStoreOutageLocked records a watch open the shim answered with
+// the store being unreachable (shimclient.ErrStoreUnreachable), and answers
+// whether it was one.
+//
+// A STORE OUTAGE IS NOT A SEVERED LINK. The shim answered over a link that is
+// whole, and it records the outage once, as its own store_unreachable session
+// fault. Severing raised a second fault, link_severed, and an ERROR for the
+// same outage (deploy 2026-11-17T00:10:46Z, a store restart). The fleet is
+// still re-opened at the store's pace, as a severing under a live shim is
+// (armPacedReopenLocked): the paced re-open is the probe that meets the store
+// back, and the link stays drawn connected.
+func (w *watcher) openEndedByStoreOutageLocked(operation, detail string, err error) bool {
+	if !errors.Is(err, shimclient.ErrStoreUnreachable) {
+		return false
+	}
+	ctx := dlog.Context{"detail": detail, "shim_pid": w.client.PID(), "error": err.Error()}
+	if w.paced > 0 {
+		ctx["paced_reopen"] = w.paced
+	}
+	w.log.Info("daemon.sessionwatcher."+operation,
+		"the store is unreachable, so the shim could not serve the watch; the shim stands on its store_unreachable fault and the fleet re-opens at the store's pace", ctx)
+	if w.storeDown {
+		return true
+	}
+	w.degraded = true
+	w.storeDown = true
+	w.armPacedReopenLocked()
+	return true
 }
 
 // openEndedByDeathLocked records a watch open the shim's death cut, which the

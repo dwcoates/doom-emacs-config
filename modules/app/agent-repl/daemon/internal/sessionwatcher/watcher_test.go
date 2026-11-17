@@ -4240,3 +4240,114 @@ func TestAnAgentWatchOpeningRestoresNoLinkThatWasNotSevered(t *testing.T) {
 		})
 	}
 }
+
+// storeOutageOpenError is the open the shim answers while its store is
+// unreachable, as shimclient classifies it (shimclient.ErrStoreUnreachable).
+func storeOutageOpenError(procedure string) error {
+	return &shimclient.StreamOpenError{
+		Procedure: procedure,
+		Err: fmt.Errorf("%w: %w", shimclient.ErrStoreUnreachable,
+			connect.NewError(connect.CodeUnavailable, errors.New("the store is unreachable"))),
+	}
+}
+
+// refuseAgentOnStoreOutage opens a stray agent watch the shim answers with
+// the store being unreachable, and joins the open.
+func refuseAgentOnStoreOutage(t *testing.T, h *harness) {
+	t.Helper()
+	h.client.setAgentErr(storeOutageOpenError("WatchAgent"))
+	h.routeNow(func(w *watcher) { w.openAgentStreamLocked(&agentWatch{id: agentID("agent-outage")}) })
+	h.client.awaitRefusedOpen(t, "WatchAgent")
+}
+
+// TestAStoreOutageOnAnOpenRaisesNoLinkFault pins the deploy of
+// 2026-11-17T00:10:46Z: a store restart's refused WatchBash severed a whole
+// link and raised link_severed beside the shim's own store_unreachable fault.
+// The shim answered over a whole link, so no link fault is raised.
+func TestAStoreOutageOnAnOpenRaisesNoLinkFault(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act
+	refuseAgentOnStoreOutage(t, h)
+
+	// Assert
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_agent")
+	if faults := linkFaultsIn(h.rec.drain()); len(faults) != 0 {
+		t.Fatalf("link faults on a store outage = %+v, want none", faults)
+	}
+}
+
+// TestAStoreOutageOnAnOpenRecordsNoError pins the record: the outage is the
+// shim's fault to report, so the watcher records it at INFO.
+func TestAStoreOutageOnAnOpenRecordsNoError(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act
+	refuseAgentOnStoreOutage(t, h)
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.watch_agent")
+
+	// Assert
+	for _, r := range h.log.Records() {
+		if r.Level == "error" || r.Level == "warn" {
+			t.Fatalf("a store outage recorded %s %s %q, want INFO only", r.Level, r.Operation, r.Message)
+		}
+	}
+}
+
+// TestAStoreOutageOnAnOpenReopensTheFleetOnItsPace covers the probe: the
+// fleet is re-opened after reopenPace, on a link that stays connected.
+func TestAStoreOutageOnAnOpenReopensTheFleetOnItsPace(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	refuseAgentOnStoreOutage(t, h)
+
+	// Act
+	if pace := h.clock.awaitArmed(t); pace != reopenPace {
+		t.Fatalf("armed %s, want the re-open pace %s", pace, reopenPace)
+	}
+	h.clock.fireLast()
+
+	// Assert
+	h.client.nextSessionOpen(t)
+	h.awaitRecord(t, "info", "daemon.sessionwatcher.paced_reopen")
+}
+
+// TestASecondStoreOutageBeforeThePaceArmsNoSecondReopen: one outage is one
+// paced re-open, however many opens it refuses.
+func TestASecondStoreOutageBeforeThePaceArmsNoSecondReopen(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	refuseAgentOnStoreOutage(t, h)
+	h.clock.awaitArmed(t)
+
+	// Act
+	refuseAgentOnStoreOutage(t, h)
+
+	// Assert
+	h.clock.noneArmed(t)
+}
+
+// TestAStoreOutageKeepsTheLinkConnected: the link is whole, so it is never
+// drawn redialing for the store's outage.
+func TestAStoreOutageKeepsTheLinkConnected(t *testing.T) {
+	// Arrange
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+
+	// Act
+	refuseAgentOnStoreOutage(t, h)
+	h.clock.awaitArmed(t)
+
+	// Assert
+	for _, e := range h.rec.drain() {
+		if e.name() == "lifecycle.OnLinkChanged" && e.attached != nil && !*e.attached {
+			t.Fatal("a store outage drew the link detached")
+		}
+	}
+}
