@@ -53,6 +53,18 @@ func (ws Workspace) InHiddenSection() bool {
 	return ws.Hidden && !(ws.Closed && ws.MergedAt != nil)
 }
 
+// KeptWarm reports whether the workspace's prompt cache is kept warm by
+// keep-alives, given whether a merge of it is queued: whether it would run
+// with every section unfolded. COLLAPSING HAS NO EFFECT ON KEEP-ALIVES
+// (owner ruling, 2026-11-17): a collapsed section saves the tab bar's space
+// and its sessions' memory, never a cache; only a hide lets one lapse
+// (LetsCacheLapse). Before it, a collapsed workspace owed no keep-alive, and
+// its cache lapsed an hour after its last one (2026-11-16: four workspaces
+// cold-gated three hours after their last turn).
+func (ws Workspace) KeptWarm(mergeQueued bool) bool {
+	return ws.Runs(false, mergeQueued)
+}
+
 // LetsCacheLapse reports whether the workspace's prompt cache is left to lapse
 // (cachelapse.Keeper): its keep-alives are held, its projected lapse is kept on
 // its row, and its session is stood down when the lapse comes. A workspace in

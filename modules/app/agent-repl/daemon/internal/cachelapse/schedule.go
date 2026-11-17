@@ -167,13 +167,9 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if why, capped := k.runCapped(ctx, log, ws, record, queued); capped {
 		return none(why)
 	}
-	runs, _, err := bringup.OnlyVisible(ctx, k.deps.DB, log, []wsm.Workspace{record})
-	if err != nil {
-		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace runs", "could not read whether the workspace runs; its keep-alive is not armed", nil, err)
-		return beatPlan{}, false
-	}
-	if len(runs) == 0 {
-		return none("it is withheld, so it runs no session")
+	// A COLLAPSED SECTION WITHHOLDS NO KEEP-ALIVE (wsm.Workspace.KeptWarm).
+	if !record.KeptWarm(queued) {
+		return none("it is hidden, so it runs no session")
 	}
 	session, found, err := k.deps.DB.Session(ctx, ws)
 	if err != nil {

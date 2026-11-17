@@ -287,7 +287,7 @@ func TestAWorkspaceOwingKeepalivesAgainIsOwedFromThatInstant(t *testing.T) {
 	// Arrange: the workspace owed none, then owes them again.
 	h := newHarness(t, beatable(visible(), 10*time.Minute))
 	log := dlog.NewTestLogger()
-	h.keeper.owesNone(log, theWorkspace, "it is withheld, so it runs no session")
+	h.keeper.owesNone(log, theWorkspace, "it is hidden, so it runs no session")
 
 	// Act
 	h.keeper.owesAgain(log, theWorkspace)

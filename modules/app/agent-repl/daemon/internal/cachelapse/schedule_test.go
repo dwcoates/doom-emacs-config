@@ -1,6 +1,7 @@
 package cachelapse
 
 import (
+	"agent-repld/internal/sourcescan"
 	"context"
 	"errors"
 	"fmt"
@@ -966,5 +967,19 @@ func TestAnUnregisteredWorkspaceForgetsItsDecision(t *testing.T) {
 	// Assert
 	if _, kept := h.keeper.noBeat[theWorkspace]; kept {
 		t.Fatal("an unregistered workspace's decision was kept")
+	}
+}
+
+// TestTheKeepaliveScheduleNeverReadsTheFolds pins the ruling structurally: the
+// beat plan judges a workspace by wsm.Workspace.KeptWarm alone, and reads no
+// section's fold, so collapsing can never withhold a keep-alive.
+func TestTheKeepaliveScheduleNeverReadsTheFolds(t *testing.T) {
+	// Act
+	folds := sourcescan.Sites(t, "bringup.OnlyVisible(")
+	warm := sourcescan.Sites(t, ".KeptWarm(")
+
+	// Assert
+	if len(folds) != 0 || !slices.Equal(warm, []string{"schedule.go"}) {
+		t.Fatalf("OnlyVisible read in %v, KeptWarm read in %v; want the folds read nowhere and KeptWarm in schedule.go", folds, warm)
 	}
 }
