@@ -1,6 +1,7 @@
 package merge
 
 import (
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 	"context"
 	"errors"
@@ -548,7 +549,20 @@ func newChain(t *testing.T) *chain {
 	h.tests.runner = c.runner
 	c.wire(h.o)
 	c.git.branch("feature", "a1")
+	// THE FIXING AGENT COMMITS ITS FIX, as a patch "fix" on the branch of the
+	// merge it repairs.
+	h.queue.fixing = func(sub promptqueue.Submission) { c.git.commitOn(chainBranch(sub.WS), "fix") }
 	return c
+}
+
+// chainBranch is the branch WS's merge lands in the chain's world: the
+// harness's own workspace's "feature", and "b-WS" for every other one
+// (queue).
+func chainBranch(ws ids.WorkspaceID) string {
+	if ws == theWorkspace {
+		return "feature"
+	}
+	return "b-" + string(ws)
 }
 
 // wire points an orchestrator at the chain's world.
@@ -568,7 +582,7 @@ func (c *chain) wire(o *orchestrator) {
 // queue puts another workspace's merge in line, its branch carrying patches.
 func (c *chain) queue(t *testing.T, ws ids.WorkspaceID, patches ...string) {
 	t.Helper()
-	branch := "b-" + string(ws)
+	branch := chainBranch(ws)
 	c.branches[ws] = branch
 	c.git.branch(branch, patches...)
 	queueAnother(t, c.h, ws, string(ws))

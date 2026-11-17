@@ -109,6 +109,10 @@ type progressDoc struct {
 	// reached the session is composed again whole.
 	FailingArchive string `json:"failing_archive,omitempty"`
 	FailingTail    string `json:"failing_tail,omitempty"`
+	// FixFromHead is the head the failing suite ran on, which the fixing
+	// turn was given to fix: a turn that ends with the branch still there
+	// committed nothing, and no suite runs again on it (testAndFix).
+	FixFromHead string `json:"fix_from_head,omitempty"`
 	// TestRun is the test service's run of the live tests round's gate, set
 	// the moment the run starts: a resumed merge watches that run again
 	// rather than start another, so a daemon deploy never cuts a gate. Empty

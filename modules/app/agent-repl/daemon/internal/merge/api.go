@@ -76,18 +76,6 @@ const (
 // merge never rebases over work it would lose.
 const MaxCommitPrompts = 2
 
-// EscalationFile is the file the test-fix agent writes in the worktree it
-// fixes to end the fixing attempts without a passing suite, and EscalationMarker is the
-// exact first line that makes it one. THE DAEMON SUBSTITUTES BOTH INTO THE
-// BRIEF: a user-edited brief must not be able to drift into instructing the
-// agent to write a record nothing reads.
-const (
-	// EscalationFile is the marker file's target-relative path.
-	EscalationFile = ".agent-repl-merge-escalation"
-	// EscalationMarker is the marker file's required first line.
-	EscalationMarker = "MERGE ESCALATION: ARCHITECTURAL CHANGE REQUIRED"
-)
-
 // QueueOfferAnswer is the user's answer to the merge-queue question
 // (agentrepl.v1.AnswerMergeQueueOfferRequest's decision arms).
 type QueueOfferAnswer int
@@ -175,6 +163,9 @@ type Orchestrator interface {
 	// which gives back its lease, its queue entry, its ledger interval and its
 	// repository's slot, and the call returns once that is done.
 	Evict(ctx context.Context, ws ids.WorkspaceID) error
+	// GiveUp ends WS's merge at its own agent's word, from a repair turn the
+	// queue gave it, saying REASON (giveup.go).
+	GiveUp(ctx context.Context, ws ids.WorkspaceID, reason string) error
 	// Requeue puts a merge that left its queue without landing back in line
 	// as itself: the same workspace, branch and request (offqueue.go).
 	Requeue(ctx context.Context, req Requeue) (Requeued, error)

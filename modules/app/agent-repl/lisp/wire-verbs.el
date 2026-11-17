@@ -2066,7 +2066,8 @@ The merge a placement asked to stand behind is in no queue."
     (restartFailed . :restart-failed) (daemonShutdown . :daemon-shutdown)
     (pickFailed . :pick-failed) (finishFailed . :finish-failed)
     (aheadDidNotLand . :ahead-did-not-land)
-    (hiddenAtColdGate . :hidden-at-cold-gate) (adopted . :adopted))
+    (hiddenAtColdGate . :hidden-at-cold-gate) (adopted . :adopted)
+    (gaveUp . :gave-up))
   "Every arm of MergeQueueStatusOffQueueCause, as (WIRE-SYMBOL . KEYWORD).
 Each arm is an empty message: the arm is the cause.")
 
@@ -4045,6 +4046,11 @@ repository owes no deploy mediation."
 holds the repository's queue to release."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoEscalationHeld" json))
 
+(defun agent-repl-wire-decode-update-merge-queue-no-repair-turn (json)
+  "Decode UpdateMergeQueueNoRepairTurn from JSON.  Empty: the workspace runs
+no repair turn of its merge to give it up from."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoRepairTurn" json))
+
 (defun agent-repl-wire-decode-update-merge-queue-remediation-bound-reached (json)
   "Decode UpdateMergeQueueRemediationBoundReached from JSON into
 `(:remediations-before-escalation N)': the bound the chain reached."
@@ -4121,6 +4127,10 @@ refusing anything but an escalation."
   "Decode UpdateMergeQueueError's `no_escalation_held' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-no-escalation-held json))
 
+(defun agent-repl-wire-decode-update-merge-queue-error-no-repair-turn (json)
+  "Decode UpdateMergeQueueError's `no_repair_turn' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-no-repair-turn json))
+
 (defun agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached (json)
   "Decode UpdateMergeQueueError's `remediation_bound_reached' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-remediation-bound-reached json))
@@ -4130,7 +4140,7 @@ refusing anything but an escalation."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld noRepairTurn))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4145,6 +4155,7 @@ arm this codec does not know is refused as an unknown field."
          (list 'notMediator :not-mediator #'agent-repl-wire-decode-update-merge-queue-error-not-mediator)
          (list 'noMediationOwed :no-mediation-owed #'agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed)
          (list 'noEscalationHeld :no-escalation-held #'agent-repl-wire-decode-update-merge-queue-error-no-escalation-held)
+         (list 'noRepairTurn :no-repair-turn #'agent-repl-wire-decode-update-merge-queue-error-no-repair-turn)
          (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached)
          (list 'problemsUnowned :problems-unowned #'agent-repl-wire-decode-update-merge-queue-error-problems-unowned)
          (list 'problemsRecurring :problems-recurring #'agent-repl-wire-decode-update-merge-queue-error-problems-recurring))))))

@@ -43,6 +43,15 @@ message UpdateMergeQueueRequest {
     // `agent-repld`'s command line. The escalation workspace stays open, and
     // the check it held is released. (Added 2026-11-17.)
     UpdateMergeQueueReleaseEscalation release_escalation = 16;
+    // A merge's own agent gives its merge up from a repair turn the queue
+    // gave it -- a conflict resolution or a fixing attempt -- when it cannot
+    // finish the repair: the merge leaves the queue at once, as an eviction
+    // does (agentrepl.v1.MergeQueueStatusOffQueueCause.gave_up), and no test
+    // run starts on its account. The ONE way an agent ends its own merge: a
+    // repair is never left broken on purpose to fail it (owner ruling,
+    // 2026-11-17). The requester must be the workspace whose merge it is.
+    // (Added 2026-11-17.)
+    UpdateMergeQueueGiveUp give_up = 17;
   }
   // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
   // agent (`agent-repld`'s command line). Every action on a queue is recorded
@@ -92,6 +101,14 @@ message UpdateMergeQueuePause {
 message UpdateMergeQueueReleaseEscalation {
   // REQUIRED. The repository whose queue the escalation holds.
   workspace.v1.RepositoryRef repository = 1;
+}
+message UpdateMergeQueueGiveUp {
+  // REQUIRED. Whose merge: the workspace the repair turn runs in, which is
+  // also the requester.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // REQUIRED, never blank. Why the repair cannot be finished, in a sentence
+  // or two, for the user who takes the work back.
+  string reason = 2;
 }
 message UpdateMergeQueueResume {
   // WHICH repository's queue. UNSET = every repository that has a queue
@@ -265,6 +282,9 @@ message UpdateMergeQueueError {
     // A release of an escalation's hold while no escalation holds the
     // repository's queue. (Added 2026-11-17.)
     UpdateMergeQueueNoEscalationHeld no_escalation_held = 21;
+    // A give-up from a workspace running no repair turn of its merge (a
+    // conflict resolution or a fixing attempt). (Added 2026-11-17.)
+    UpdateMergeQueueNoRepairTurn no_repair_turn = 22;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -296,6 +316,8 @@ message UpdateMergeQueueNotMediator {}
 message UpdateMergeQueueNoMediationOwed {}
 // The no-escalation-held refusal. No fields: nothing holds the queue for the user.
 message UpdateMergeQueueNoEscalationHeld {}
+// The no-repair-turn refusal. No fields: the caller knows its own turn.
+message UpdateMergeQueueNoRepairTurn {}
 // The unowned-problems refusal.
 message UpdateMergeQueueProblemsUnowned {
   // Each unowned group, as "OPERATION: MESSAGE (CLASS)", in the window's

@@ -5,9 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -97,6 +94,11 @@ type run struct {
 	chainBase string
 	tested    *testedDoc
 	fixesUsed int
+	// failedHead is the head the last gate failed on, which the fixing
+	// attempt after it is given to fix; empty before a failure and after a
+	// pass. A head still there at the next gate committed nothing
+	// (testAndFix).
+	failedHead string
 	// briefAhead is the workspace of the merge ahead that a speculative step's
 	// brief names, the run goroutine's own.
 	briefAhead ids.WorkspaceID
@@ -1142,23 +1144,6 @@ func (r *run) drawLive(ctx context.Context, round tabRound, step footer.MergeSte
 	defer r.agenticMu.Unlock()
 	r.agentic = &agenticTab{round: round, publish: publish}
 	r.redrawAgentic()
-}
-
-// readEscalation reports whether the fixing agent wrote the escalation record,
-// and returns what it said. The marker must be the file's FIRST line: the
-// daemon parses exactly the constant it substituted, so an edited brief cannot
-// drift into instructing an agent to write a record nothing reads.
-func readEscalation(dir string) (string, bool) {
-	body, err := os.ReadFile(filepath.Join(dir, EscalationFile))
-	if err != nil {
-		return "", false
-	}
-	text := string(body)
-	first, rest, _ := strings.Cut(text, "\n")
-	if strings.TrimSpace(first) != EscalationMarker {
-		return "", false
-	}
-	return strings.TrimSpace(rest), true
 }
 
 // workspaceName is a workspace's name as drawn, read for the operation OP. A

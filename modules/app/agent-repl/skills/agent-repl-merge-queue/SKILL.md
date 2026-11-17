@@ -108,14 +108,20 @@ Either kind:
 ## 3. Answer the merge's prompts (later turns)
 
 - a. A conflict-resolution prompt: resolve the conflicted files in the worktree
-  the prompt names and `git add` them. CRITICAL: NEVER run
-  `git rebase --continue`, `--abort` or `--skip`; the queue continues the
+  the prompt names, so the result builds, and `git add` them. CRITICAL: NEVER
+  run `git rebase --continue`, `--abort` or `--skip`; the queue continues the
   rebase itself.
 - b. A test-failure prompt: remediate as a TARGETED loop over exactly the
   failing cases it hands over: run them with the commands it gives, fix, rerun,
   until every one passes; then commit the fix with its tests and end the turn.
   CRITICAL: NEVER run a whole suite or `bin/test-all.sh` while remediating, and
-  NEVER end the turn while a handed-over case still fails.
+  NEVER end the turn while a handed-over case still fails. A turn that commits
+  nothing fails the merge without another run.
+- When a conflict or a failure cannot be repaired correctly, give the merge up
+  from that turn: `merge-queue give-up -reason TEXT`, then end the turn saying
+  why. The merge leaves the queue at once and no test run starts. CRITICAL:
+  NEVER leave a repair broken, unresolved or uncommitted on purpose to make the
+  merge fail; that spends a whole test run on a merge that cannot land.
 - c. A report of how a merge ended (landed, failed or evicted): report it in
   one line, then go to step 3e for a round of an instrumentation loop;
   otherwise STOP. A merge that left without landing stays off the queue with

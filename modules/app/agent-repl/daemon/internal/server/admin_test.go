@@ -908,6 +908,9 @@ func TestEveryQueuedMergeArmSharesOneAnswer(t *testing.T) {
 		{name: "move_down", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
 			return &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_MoveDown{MoveDown: &agentreplv1.UpdateMergeQueueMoveDown{Workspace: ref}}}
 		}},
+		{name: "give_up", req: func(ref *workspacev1.WorkspaceRef) *agentreplv1.UpdateMergeQueueRequest {
+			return giveUpRequest(ref, ref, "the conflict needs a redesign")
+		}},
 	}
 	cases := []struct {
 		name      string
@@ -930,7 +933,7 @@ func TestEveryQueuedMergeArmSharesOneAnswer(t *testing.T) {
 				h := newHarness(t)
 				if tc.refused {
 					refusal := &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Reason: "nothing queued"}
-					h.Merge.evictErr, h.Merge.moveErr = refusal, refusal
+					h.Merge.evictErr, h.Merge.moveErr, h.Merge.giveUpErr = refusal, refusal, refusal
 				}
 
 				// Act.
@@ -943,11 +946,76 @@ func TestEveryQueuedMergeArmSharesOneAnswer(t *testing.T) {
 				if !tc.wantArm(resp.Msg) {
 					t.Fatalf("result = %v, want the %s answer", resp.Msg.GetResult(), tc.name)
 				}
-				if drove := len(h.Merge.evicted)+len(h.Merge.moves) > 0; drove != tc.wantDrove {
+				if drove := len(h.Merge.evicted)+len(h.Merge.moves)+len(h.Merge.givenUp) > 0; drove != tc.wantDrove {
 					t.Fatalf("orchestrator driven = %v, want %v", drove, tc.wantDrove)
 				}
 			})
 		}
+	}
+}
+
+// giveUpRequest is a give-up of WS's merge, asked by ASKER, saying REASON.
+func giveUpRequest(asker, ws *workspacev1.WorkspaceRef, reason string) *agentreplv1.UpdateMergeQueueRequest {
+	return &agentreplv1.UpdateMergeQueueRequest{Requester: workspaceRequester(asker), Action: &agentreplv1.UpdateMergeQueueRequest_GiveUp{
+		GiveUp: &agentreplv1.UpdateMergeQueueGiveUp{Workspace: ws, Reason: reason}}}
+}
+
+func TestUpdateMergeQueueGivesUpTheAskersOwnMergeWithItsReason(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(giveUpRequest(ref(), ref(), "the conflict needs a redesign")))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("UpdateMergeQueue = (%v, %v), want success", resp, err)
+	}
+	if want := string(testWorkspaceID) + ": the conflict needs a redesign"; len(h.Merge.givenUp) != 1 || h.Merge.givenUp[0] != want {
+		t.Fatalf("given up %v, want %q", h.Merge.givenUp, want)
+	}
+}
+
+func TestUpdateMergeQueueRefusesAGiveUpThatIsNotTheMergesOwnAgents(t *testing.T) {
+	other := &workspacev1.WorkspaceRef{Id: "ws-other", Dir: "/tmp/other"}
+	tests := []struct {
+		name string
+		req  *agentreplv1.UpdateMergeQueueRequest
+	}{
+		{name: "another workspace's agent", req: giveUpRequest(other, ref(), "the conflict needs a redesign")},
+		{name: "the user", req: &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_GiveUp{
+			GiveUp: &agentreplv1.UpdateMergeQueueGiveUp{Workspace: ref(), Reason: "the conflict needs a redesign"}}}},
+		{name: "a blank reason", req: giveUpRequest(ref(), ref(), "  ")},
+		{name: "no workspace", req: &agentreplv1.UpdateMergeQueueRequest{Requester: workspaceRequester(ref()), Action: &agentreplv1.UpdateMergeQueueRequest_GiveUp{
+			GiveUp: &agentreplv1.UpdateMergeQueueGiveUp{Reason: "the conflict needs a redesign"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(tt.req))
+
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.Merge.givenUp) != 0 {
+				t.Fatalf("UpdateMergeQueue = %v, given up %v; want invalid and nothing given up", err, h.Merge.givenUp)
+			}
+		})
+	}
+}
+
+func TestUpdateMergeQueueAnswersAGiveUpWithNoRepairTurnAsItsArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.Merge.giveUpErr = &merge.RefusalError{Arm: merge.ArmNoRepairTurn, Reason: "no repair turn runs"}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(giveUpRequest(ref(), ref(), "the conflict needs a redesign")))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError().GetNoRepairTurn() == nil {
+		t.Fatalf("UpdateMergeQueue = (%v, %v), want no_repair_turn", resp, err)
 	}
 }
 

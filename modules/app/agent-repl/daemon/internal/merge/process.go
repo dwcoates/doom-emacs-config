@@ -1016,6 +1016,15 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 		if out, err := r.branchConfigUnreadable(ctx, head); err != nil || out != nil {
 			return "", out, err
 		}
+		// A FIXING ATTEMPT THAT COMMITTED NOTHING RUNS NO SUITE (owner ruling,
+		// 2026-11-17): the gate would run again on the very head that failed,
+		// spending a whole run to fail as before. An agent that cannot fix
+		// the failures gives its merge up (GiveUp); a turn that ends with no
+		// commit fails the merge here.
+		if r.failedHead != "" && head == r.failedHead {
+			out := r.fixesCommittedNothing(ctx, head)
+			return "", &out, nil
+		}
 		if attempt == fromAttempt && !resumeTests {
 			reused, err := r.reuseTested(ctx, tip, head)
 			if err != nil {
@@ -1055,6 +1064,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			// A PASSING GATE ENDS THE RUN OF FAILURES: a later failure (a
 			// start-over on a moved target) starts its count afresh.
 			r.fixesUsed = 0
+			r.failedHead = ""
 			// THE PASS IS KEPT FOR A START-OVER (owner ruling, 2026-10-12): a
 			// merge whose target moves before it commits rebases again, and
 			// when that rebase gives the very tree that passed, the tests are
@@ -1069,6 +1079,7 @@ func (r *run) testAndFix(ctx context.Context, tip, targetBranch string, fromAtte
 			out := r.fixesExhausted(ctx, verdict.result.ArchivePath, nil)
 			return "", &out, nil
 		}
+		r.failedHead = head
 		// THE WHOLE SUITE RAN AND FAILED: a head with a merge in line behind it
 		// steps aside to fix out of line, for the fixing-tests slot, so that
 		// merge takes the head (remediate.go); otherwise it fixes in place.
@@ -1115,6 +1126,17 @@ func (r *run) branchConfigUnreadable(ctx context.Context, head string) (*outcome
 		"workspace": string(r.ws), "dir": r.subject.dir, "head": head, "error": err.Error()})
 	out := failedIn(footer.FailedOther, why)
 	return &out, nil
+}
+
+// fixesCommittedNothing fails a merge whose fixing attempt ended with the
+// branch still at HEAD, the head its suite failed on: the record at INFO, and
+// the tests tab settled failed, with the one summary.
+func (r *run) fixesCommittedNothing(ctx context.Context, head string) outcome {
+	summary := fmt.Sprintf("the fixing attempt committed nothing to %s, so the suite is not run again on %s, the head it failed on", r.subject.branch, short(head))
+	r.o.log(ctx, r.ws).Info("daemon.merge.fixes", "the fixing attempt committed nothing; the merge fails without running the suite again", dlog.Context{
+		"workspace": string(r.ws), "head": head, "branch": r.subject.branch})
+	r.settleTesting(summary)
+	return failedIn(footer.FailedTests, summary)
 }
 
 // fixesExhausted fails a merge whose last fixing attempt left suites failing:
@@ -1173,7 +1195,7 @@ func (r *run) promptFixThen(ctx context.Context, attempt int, suites []string, a
 	turn := wsm.NewTurnID()
 	record := func(d *progressDoc) {
 		d.FixAttempt, d.Turn, d.FailingSuites = attempt, string(turn), suites
-		d.FailingArchive, d.FailingTail = archive, tail
+		d.FailingArchive, d.FailingTail, d.FixFromHead = archive, tail, r.failedHead
 	}
 	var close wsm.TurnClose
 	if mayStepAside {
@@ -1198,8 +1220,6 @@ func (r *run) fixBrief(attempt int, suites []string, archive, tail, failingTests
 		"failure_tail":       tail,
 		"attempt":            fmt.Sprintf("%d", attempt),
 		"max_attempts":       fmt.Sprintf("%d", MaxFixAttempts),
-		"escalation_file":    EscalationFile,
-		"escalation_marker":  EscalationMarker,
 		"failing_tests_file": filepath.Join(r.subject.dir, FailingTestsFile),
 		"failing_tests":      failingTests,
 	})
@@ -1226,16 +1246,10 @@ func (r *run) fixSettled(ctx context.Context, round tabRound, n, attempt int, su
 			"workspace": string(r.ws), "attempt": attempt, "of": MaxFixAttempts, "close": close.String()})
 		return r.promptFix(ctx, attempt, suites, archive, tail, targetBranch)
 	}
-	why := ""
-	if escalated, gaveUp := r.consumeEscalation(ctx); gaveUp {
-		why = "the agent escalated: " + firstLine(escalated)
-	} else if line, refused, err := r.machineryChanged(ctx, targetBranch); err != nil {
+	if line, refused, err := r.machineryChanged(ctx, targetBranch); err != nil {
 		return nil, err
 	} else if refused {
-		why = line
-	}
-	if why != "" {
-		return r.fixGaveUp(ctx, round, n, attempt, why), nil
+		return r.fixGaveUp(ctx, round, n, attempt, line), nil
 	}
 	// A FIXING TURN NEVER HANDS THE MERGE BACK WITH UNCOMMITTED WORK: the
 	// rebase that follows refuses a dirty worktree, which once failed a whole
@@ -1388,6 +1402,7 @@ func (r *run) resumeFix(ctx context.Context, res *progressDoc, targetBranch stri
 	if err != nil {
 		return nil, err
 	}
+	r.failedHead = res.FixFromHead
 	return r.fixSettled(ctx, round, n, res.FixAttempt, res.FailingSuites, res.FailingArchive, res.FailingTail, targetBranch, close, true)
 }
 
@@ -1616,21 +1631,6 @@ func (r *run) dropTree(ctx context.Context) {
 		r.o.log(ctx, r.ws).Error("daemon.merge.tree", "could not remove the queue's merge tree", dlog.Context{
 			"workspace": string(r.ws), "tree": tree, "error": err.Error()})
 	}
-}
-
-// consumeEscalation reads the escalation record from the worktree the agent
-// fixes in and REMOVES it, so a record is answered once.
-func (r *run) consumeEscalation(ctx context.Context) (string, bool) {
-	why, gaveUp := readEscalation(r.subject.dir)
-	if !gaveUp {
-		return "", false
-	}
-	path := filepath.Join(r.subject.dir, EscalationFile)
-	if err := os.Remove(path); err != nil {
-		r.o.log(ctx, r.ws).Error("daemon.merge.fixes", "could not remove the escalation record it read", dlog.Context{
-			"workspace": string(r.ws), "path": path, "error": err.Error()})
-	}
-	return why, true
 }
 
 // mergeMachinery is what a repair may never change in the middle of a merge:

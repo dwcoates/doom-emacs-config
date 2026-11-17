@@ -547,6 +547,7 @@ var exitCauses = map[string]string{
 	"CauseWorkspaceClosed":    string(CauseWorkspaceClosed),
 	"CauseDaemonShutdown":     string(CauseDaemonShutdown),
 	"CauseAheadDidNotLand":    string(CauseAheadDidNotLand),
+	"CauseAgentGaveUp":        string(CauseAgentGaveUp),
 	"causeMerged":             causeMerged,
 	"causeFailed":             causeFailed,
 	"causeRestartFailed":      causeRestartFailed,

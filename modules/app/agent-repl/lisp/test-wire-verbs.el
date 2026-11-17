@@ -2220,13 +2220,14 @@ encoded here."
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
   "UpdateMergeQueueRequest's action oneof has exactly the arms encoded here,
-`mediation', which only the deploy mediator sends, through the CLI, and
-`releaseEscalation', which the sidebar and the CLI send."
+`mediation', which only the deploy mediator sends, through the CLI,
+`releaseEscalation', which the sidebar and the CLI send, and `giveUp',
+which only a merge's own agent sends, through the CLI."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "mediation" "moveDown" "moveTo" "moveUp" "pause" "releaseEscalation" "resume"))))
+                 '("evict" "giveUp" "mediation" "moveDown" "moveTo" "moveUp" "pause" "releaseEscalation" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
@@ -3412,6 +3413,13 @@ carries."
                     (agent-repl-test-wire-verbs--parse "{\"noEscalationHeld\":{}}"))
                    '(:cause (:arm :no-escalation-held :value nil))))))
 
+(ert-deftest agent-repl-test-wire-verbs-merge-queue-error-no-repair-turn-arm ()
+  "UpdateMergeQueueError's `no_repair_turn' arm decodes empty."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-update-merge-queue-error
+                    (agent-repl-test-wire-verbs--parse "{\"noRepairTurn\":{}}"))
+                   '(:cause (:arm :no-repair-turn :value nil))))))
+
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-error-remediation-bound-reached-arm ()
   "UpdateMergeQueueError's `remediation_bound_reached' arm decodes its bound."
   (agent-repl-test-wire-verbs--with-common
@@ -3684,7 +3692,7 @@ at."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go" "UpdateMergeQueueError")
                        #'string<)
-                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld")
+                 (sort (list "unknownWorkspace" "workspaceRefMismatch" "transferringAway" "notYetAdopted" "alreadyPaused" "notPaused" "noSuchQueuedMerge" "unknownRepository" "notMediator" "noMediationOwed" "remediationBoundReached" "problemsUnowned" "problemsRecurring" "noEscalationHeld" "noRepairTurn")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-verbs-update-merge-queue-error-decodes-problems-recurring ()

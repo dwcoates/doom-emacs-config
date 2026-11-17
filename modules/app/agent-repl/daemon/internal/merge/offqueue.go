@@ -73,6 +73,9 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 	causeHiddenAtColdGate: func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_HiddenAtColdGate{HiddenAtColdGate: &agentreplv1.MergeQueueStatusOffQueueCauseHiddenAtColdGate{}}}
 	},
+	string(CauseAgentGaveUp): func() *agentreplv1.MergeQueueStatusOffQueueCause {
+		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_GaveUp{GaveUp: &agentreplv1.MergeQueueStatusOffQueueCauseGaveUp{}}}
+	},
 	wsm.MergeLeftAdopted: func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_Adopted{Adopted: &agentreplv1.MergeQueueStatusOffQueueCauseAdopted{}}}
 	},

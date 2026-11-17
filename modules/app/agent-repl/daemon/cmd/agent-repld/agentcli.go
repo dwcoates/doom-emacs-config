@@ -213,6 +213,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"pause":              {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
 		"resume":             {usage: "resume -repository here|DIR|all", run: queuePause(false)},
 		"release-escalation": {usage: "release-escalation -repository here|DIR", run: queueReleaseEscalation},
+		"give-up":            {usage: "give-up -reason TEXT", run: queueGiveUp},
 		"subscribe":          {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
 		"mediation":          {usage: "mediation approve|escalate [-problems]|dispatch -summary TEXT (problems are JSON on stdin)", run: queueMediation},
 		"unsubscribe":        {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
@@ -2383,6 +2384,33 @@ func queueReleaseEscalation(c *cliCall, args []string) int {
 	}
 	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation{
 		ReleaseEscalation: &agentreplv1.UpdateMergeQueueReleaseEscalation{Repository: scope}}})
+}
+
+// queueGiveUp gives the calling workspace's own merge up from the repair
+// turn the queue gave it (agentrepl.v1.UpdateMergeQueueRequest.give_up): the
+// one way an agent ends its own merge.
+func queueGiveUp(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	reason := fs.String("reason", "", "why the repair cannot be finished, in a sentence or two (required)")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("give-up takes no merge: an agent gives up only its own workspace's merge")
+	}
+	if strings.TrimSpace(*reason) == "" {
+		return c.usageFailed("-reason says why the repair cannot be finished")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	ref, ok := c.calling()
+	if !ok {
+		return exitFailure
+	}
+	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_GiveUp{
+		GiveUp: &agentreplv1.UpdateMergeQueueGiveUp{Workspace: ref, Reason: *reason}}})
 }
 
 // queueMediation is the deploy intake's decision on the deploy its chain

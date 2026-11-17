@@ -451,6 +451,9 @@ const (
 	// queue without landing (wsm.MergeQueueEntry.AheadFailed): a merge placed
 	// behind another depends on it, so it never runs without it.
 	CauseAheadDidNotLand AbandonCause = "ahead_did_not_land"
+	// CauseAgentGaveUp is the merge's own agent giving it up from a repair
+	// turn the queue gave it (GiveUp).
+	CauseAgentGaveUp AbandonCause = "gave_up"
 )
 
 // The causes a queue entry leaves its queue for that are NOT abandonments:
@@ -488,6 +491,7 @@ var abandonSummaries = map[AbandonCause]string{
 	CauseWorkspaceClosed: "the workspace was closed while this merge was waiting in the queue",
 	CauseDaemonShutdown:  "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
 	CauseAheadDidNotLand: "the merge this one was placed behind left the queue without landing",
+	CauseAgentGaveUp:     "the merge's own agent gave it up",
 }
 
 // runningSummaries are the resolved sentences of a merge abandoned AFTER it
@@ -499,6 +503,7 @@ var runningSummaries = map[AbandonCause]string{
 	CauseUserDrop:        "the operator evicted this merge while it was running",
 	CauseUserDequeue:     "the user took this merge out of the queue while it was running",
 	CauseWorkspaceClosed: "the workspace was closed while this merge was running",
+	CauseAgentGaveUp:     "the merge's own agent gave it up from its repair turn",
 }
 
 // releases reports whether C is a RELEASE the user or the operator asked for

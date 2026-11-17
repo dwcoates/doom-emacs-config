@@ -249,6 +249,8 @@ type fakeDB struct {
 	progressReadErr error
 	adopted         []wsm.LeaseID
 	held            map[wsm.TurnID]wsm.HeldPrompt
+	// openTurnsErr fails every read of a workspace's open turns.
+	openTurnsErr error
 	// delivered is every turn the prompt queue took (fakeQueue.Submit), as
 	// the turn store records a submitted turn: RecordedTurns knows it.
 	delivered map[wsm.TurnID]bool
@@ -813,6 +815,9 @@ func (f *fakeDB) HasTurns(_ context.Context, id ids.WorkspaceID) (bool, error) {
 func (f *fakeDB) OpenTurns(_ context.Context, id ids.WorkspaceID) ([]wsm.Turn, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.openTurnsErr != nil {
+		return nil, f.openTurnsErr
+	}
 	return append([]wsm.Turn(nil), f.turns[id]...), nil
 }
 
@@ -1727,6 +1732,11 @@ func (f *fakeDB) UnsubscribeMergeQueue(_ context.Context, subscriber wsm.Workspa
 // interface is declared, so a call the orchestrator adds later is a compile
 // error rather than a surprise at run time.
 type fakeGit struct {
+	// fixCommits counts the fixing turns that committed to the merge's
+	// branch ("feature"), each moving its head (fixCommitted), and
+	// fixesCommitNothing makes every fixing turn end with no commit.
+	fixCommits         int
+	fixesCommitNothing bool
 	// trees scripts TreeOf's answer per commit, and treeSeq its answers in
 	// order ahead of trees (TreeOf).
 	trees   map[string]string
@@ -1965,16 +1975,30 @@ func (g *fakeGit) ResolveRef(_ context.Context, _, ref string) (string, error) {
 	// A SCRIPTED SEQUENCE answers in order and then keeps answering its last
 	// value, so a ref that moves once (a repair commit, a target that moved
 	// under the gate) is scripted as its two values.
+	sha := "0000000000000000000000000000000000000000"
 	if seq := g.refSeqs[ref]; len(seq) > 0 {
 		if len(seq) > 1 {
 			g.refSeqs[ref] = seq[1:]
 		}
-		return seq[0], nil
+		sha = seq[0]
+	} else if scripted, ok := g.refs[ref]; ok {
+		sha = scripted
 	}
-	if sha, ok := g.refs[ref]; ok {
-		return sha, nil
+	// THE FIXING AGENT COMMITS: each fixing turn moves the merge's branch.
+	if ref == "feature" && g.fixCommits > 0 {
+		sha = fmt.Sprintf("%s-fix%d", sha, g.fixCommits)
 	}
-	return "0000000000000000000000000000000000000000", nil
+	return sha, nil
+}
+
+// fixCommitted stands for a fixing turn's commit to the merge's branch,
+// unless fixesCommitNothing.
+func (g *fakeGit) fixCommitted() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.fixesCommitNothing {
+		g.fixCommits++
+	}
 }
 
 func (g *fakeGit) CreateWorktree(context.Context, string, string, string, string) error {
@@ -2517,7 +2541,10 @@ type fakeQueue struct {
 	submitCtxErrs []error
 	// onSubmit, when set, is told each submission as it is made, outside the
 	// lock, standing for what the session does while the turn runs.
-	onSubmit    func(sub promptqueue.Submission)
+	onSubmit func(sub promptqueue.Submission)
+	// fixing stands for a fixing turn's commit, told each fixing attempt's
+	// submission (fakeGit.fixCommitted; the chain's chainGit.commitOn).
+	fixing      func(sub promptqueue.Submission)
 	disposition promptqueue.Disposition
 	err         error
 	// leaseEvents records, per OnLeaseChanged, whether the workspace's merge
@@ -2571,8 +2598,11 @@ func (q *fakeQueue) Submit(ctx context.Context, sub promptqueue.Submission) (pro
 	q.mu.Lock()
 	q.submissions = append(q.submissions, sub)
 	q.submitCtxErrs = append(q.submitCtxErrs, ctx.Err())
-	hook := q.onSubmit
+	hook, fixing := q.onSubmit, q.fixing
 	q.mu.Unlock()
+	if fixing != nil && sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR {
+		fixing(sub)
+	}
 	if hook != nil {
 		hook(sub)
 	}
@@ -3635,7 +3665,7 @@ func newHarness(t *testing.T) *harness {
 	h.events = &fakeQueueEvents{}
 	h.names = &fakeNames{}
 	h.banners = &fakeBanners{told: func() int { return len(h.detached.sent()) }}
-	h.queue = &fakeQueue{db: h.db}
+	h.queue = &fakeQueue{db: h.db, fixing: func(promptqueue.Submission) { h.git.fixCommitted() }}
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
@@ -3644,7 +3674,7 @@ func newHarness(t *testing.T) *harness {
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
 	h.briefs[BriefConflictResolve] = []string{"conflict_commit", "source_branch", "worktree_dir", "target_branch", "conflicted_files"}
-	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
+	h.briefs[BriefTestFailureResolve] = []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests"}
 	h.briefs[BriefFixCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefRebaseCommit] = []string{"source_branch", "worktree_dir", "target_branch", "prompt", "max_prompts"}
 	h.briefs[BriefHookPrompt] = []string{"prompt"}
@@ -3959,16 +3989,6 @@ func (h *harness) configurePromptHooks(before, after []string) {
 	}
 	job.Hooks = hooks
 	h.db.jobs[theWorkspace] = job
-}
-
-// escalate writes the record the fixes agent uses to end its loop without a
-// passing suite, in its own worktree.
-func (h *harness) escalate(why string) {
-	h.t.Helper()
-	body := EscalationMarker + "\n" + why + "\n"
-	if err := os.WriteFile(filepath.Join(h.sourceD, EscalationFile), []byte(body), 0o644); err != nil {
-		h.t.Fatalf("writing the escalation record: %v", err)
-	}
 }
 
 // leaseID reports the lease the harness's merge holds.

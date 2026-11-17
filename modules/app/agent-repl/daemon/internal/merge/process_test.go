@@ -323,37 +323,6 @@ func TestFixesLoopOpensASecondRunInTheOneTestsTab(t *testing.T) {
 	}
 }
 
-// TestEscalationNeedsTheExactMarker covers the wire format of the loop's exit: a
-// file whose first line is not the substituted marker is not an escalation.
-func TestEscalationNeedsTheExactMarker(t *testing.T) {
-	tests := []struct {
-		name string
-		body string
-		want bool
-	}{
-		{name: "the marker exactly", body: EscalationMarker + "\nbecause", want: true},
-		{name: "a different first line", body: "I give up\n" + EscalationMarker, want: false},
-		{name: "an empty file", body: "", want: false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange: a target carrying the candidate record.
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, EscalationFile), []byte(tc.body), 0o644); err != nil {
-				t.Fatalf("writing the record: %v", err)
-			}
-
-			// Act.
-			_, got := readEscalation(dir)
-
-			// Assert.
-			if got != tc.want {
-				t.Fatalf("readEscalation answered %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
 // TestTestsTabCarriesPaintedSpans covers the tab's content: the daemon parses
 // the terminal's escapes once and the client paints classes.
 func TestTestsTabCarriesPaintedSpans(t *testing.T) {
@@ -774,10 +743,10 @@ func TestAFailedMergeLeavesTheTargetUntouched(t *testing.T) {
 		name  string
 		setup func(h *harness)
 	}{
-		{name: "the agent escalates a failing gate", setup: func(h *harness) {
+		{name: "the fixing attempt commits nothing to a failing gate", setup: func(h *harness) {
 			h.landsCleanly("abc123def4567")
 			h.gateFails("daemon")
-			h.escalate("the storage layer needs redesigning")
+			h.git.fixesCommitNothing = true
 		}},
 		{name: "the merge conflicts and the agent resolves nothing", setup: func(h *harness) {
 			h.git.outcomes = append(h.git.outcomes, mergeConflicted("a.go"))
@@ -1068,33 +1037,6 @@ func TestATestRepairKeepsAResolvedConflictsMachineryAsTheBranchs(t *testing.T) {
 	}
 	if loggedLike(h, logLike{op: "daemon.merge.machinery"}) {
 		t.Fatalf("a test repair was refused for the resolution's machinery: %+v", h.logs.Records())
-	}
-}
-
-// --- the escalation record is answered once ------------------------------
-
-// TestTheEscalationRecordIsRemovedOnceRead covers the record's lifetime: it is
-// consumed, so it neither lingers in a tree nor re-parks the next attempt.
-func TestTheEscalationRecordIsRemovedOnceRead(t *testing.T) {
-	// Arrange.
-	h := newHarness(t)
-	h.emacsRepo()
-	h.landsCleanly("abc123def4567")
-	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
-	h.gateFails("daemon")
-	h.escalate("the storage layer needs redesigning")
-	enqueue(t, h)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Act.
-	if err := h.admit(ctx); err != nil {
-		t.Fatalf("admitting: %v", err)
-	}
-
-	// Assert.
-	if _, err := os.Stat(filepath.Join(h.sourceD, EscalationFile)); !os.IsNotExist(err) {
-		t.Fatalf("the escalation record is still there (stat err %v), want it consumed", err)
 	}
 }
 
@@ -1742,20 +1684,25 @@ func TestTheFixesTabCarriesItsAttemptAndTheBound(t *testing.T) {
 	}
 }
 
-func TestAnEscalatedFixFailsTheMergeInTests(t *testing.T) {
-	// Arrange.
+func TestAFixThatCommitsNothingFailsTheMergeInTestsWithoutRunningTheSuiteAgain(t *testing.T) {
+	// Arrange: the fixing turn ends with the branch where it stood.
 	h := newHarness(t)
 	landing(h, 1)
 	h.runner.runs = nil
 	h.gateFails("daemon")
-	h.escalate("this needs a redesign")
+	h.gatePasses("daemon")
+	h.git.fixesCommitNothing = true
 
 	// Act.
 	admitted(t, h)
 
-	// Assert.
-	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "tests" {
-		t.Fatalf("facts = %+v, want merge failed in tests", got)
+	// Assert: failed in tests, the suite run once, never on the same head
+	// again.
+	if got := h.footer.last(); got.State != StateFailed || got.FailedArea != "tests" || !strings.Contains(got.Detail, "committed nothing") {
+		t.Fatalf("facts = %+v, want merge failed in tests for a fix that committed nothing", got)
+	}
+	if len(h.runner.runs) != 1 {
+		t.Fatalf("scripted runs left %d, want the second gate never run", len(h.runner.runs))
 	}
 }
 

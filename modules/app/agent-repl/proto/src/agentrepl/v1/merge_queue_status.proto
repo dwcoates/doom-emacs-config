@@ -95,6 +95,9 @@ message MergeQueueStatusOffQueueCause {
     // increment, changelog line or deploy hooks: a requeue onto a versioned
     // main branch must supply the increment (RequeueMergeRequest.version).
     MergeQueueStatusOffQueueCauseAdopted adopted = 10;
+    // ITS OWN AGENT GAVE IT UP from a repair turn the queue gave it
+    // (agentrepl.v1.UpdateMergeQueueRequest.give_up). (Added 2026-11-17.)
+    MergeQueueStatusOffQueueCauseGaveUp gave_up = 11;
   }
 }
 // Evicted. No fields: the arm is the fact.
@@ -117,6 +120,9 @@ message MergeQueueStatusOffQueueCauseAheadDidNotLand {}
 message MergeQueueStatusOffQueueCauseHiddenAtColdGate {}
 // Adopted with no request values. No fields: the arm is the fact.
 message MergeQueueStatusOffQueueCauseAdopted {}
+// Given up by its own agent. No fields: the arm is the fact, and the agent's
+// reason is in its own reply and the daemon's record.
+message MergeQueueStatusOffQueueCauseGaveUp {}
 
 // Whether a queue advances.
 message MergeQueueStatusAdvance {

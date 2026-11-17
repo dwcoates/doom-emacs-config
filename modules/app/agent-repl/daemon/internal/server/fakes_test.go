@@ -1263,6 +1263,9 @@ type fakeMerge struct {
 	moveErr           error
 	// evicted records every workspace Evict was asked to take off the queue.
 	evicted []ids.WorkspaceID
+	// givenUp is every GiveUp asked, with its reason, which giveUpErr answers.
+	givenUp   []string
+	giveUpErr error
 	// requeues records every Requeue, answered requeued and requeueErr;
 	// discards every Discard, answered discarded and discardErr, each running
 	// the close it was handed when discarded is async.
@@ -1402,6 +1405,11 @@ func (f *fakeMerge) Discard(ctx context.Context, ws ids.WorkspaceID, close func(
 		}
 	}
 	return f.discarded, nil
+}
+
+func (f *fakeMerge) GiveUp(_ context.Context, ws ids.WorkspaceID, reason string) error {
+	f.givenUp = append(f.givenUp, string(ws)+": "+reason)
+	return f.giveUpErr
 }
 
 func (f *fakeMerge) Evict(_ context.Context, ws ids.WorkspaceID) error {

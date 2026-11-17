@@ -46,23 +46,3 @@ func TestBriefsFromReadsTheDirectoryAtEveryUse(t *testing.T) {
 		t.Fatalf("the second load answered %v, want the brief the directory now holds", err)
 	}
 }
-
-// TestEscalationConstantsAreTheOnesTheBriefIsSplicedWith covers the wire format
-// of the fixes loop's only non-passing exit: the daemon substitutes and then
-// parses exactly these, so an edited brief cannot drift.
-func TestEscalationConstantsAreTheOnesTheBriefIsSplicedWith(t *testing.T) {
-	// Arrange: the constants as the daemon holds them.
-	file, marker := EscalationFile, EscalationMarker
-
-	// Act.
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, file), []byte(marker+"\nwhy\n"), 0o644); err != nil {
-		t.Fatalf("writing the record: %v", err)
-	}
-	_, escalated := readEscalation(dir)
-
-	// Assert.
-	if !escalated {
-		t.Fatal("the record the constants describe was not recognized as an escalation")
-	}
-}

@@ -302,6 +302,9 @@ func TestATargetThatMovedBeforeCommittingStartsTheMergeOver(t *testing.T) {
 	s.repo.CommitIn(s.repo.Dir, "main.txt", "moved while fixing\n")
 	s.script.SetExitCode(0)
 	s.script.SetStdout("daemon: starting\ndaemon: passed in 1s\n")
+	// The fixing agent commits its fix: a turn that commits nothing fails the
+	// merge without another run.
+	harness.CommitWork(t, s.f.ws.GetDir(), "fix.txt")
 	pushConcludedTurn(s.f.shim, mainAgent, "fixed")
 	row := awaitRow(t, s.f, root, "the merge's terminal", isMergeTerminal)
 	merge := row.GetActivity().GetMerge()

@@ -112,6 +112,12 @@ func (s *server) UpdateMergeQueue(
 		return connect.NewResponse(resp), nil
 	}
 
+	if give := req.Msg.GetGiveUp(); give != nil {
+		return s.actOnQueuedMerge(ctx, rpc, give.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
+			return s.deps.Merge.GiveUp(ctx, ws, give.GetReason())
+		})
+	}
+
 	if release := req.Msg.GetReleaseEscalation(); release != nil {
 		if err := s.deps.Merge.ReleaseEscalation(ctx, *scopeOf(release.GetRepository())); err != nil {
 			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
@@ -206,6 +212,8 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "mediation"
 	case *agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation:
 		return "release_escalation"
+	case *agentreplv1.UpdateMergeQueueRequest_GiveUp:
+		return "give_up"
 	}
 	panic(fmt.Sprintf("server: UpdateMergeQueue arm %T past validation has no name", req.GetAction()))
 }
@@ -215,6 +223,9 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 func mergeQueueTarget(req *agentreplv1.UpdateMergeQueueRequest) *workspacev1.WorkspaceRef {
 	if evict := req.GetEvict(); evict != nil {
 		return evict.GetWorkspace()
+	}
+	if give := req.GetGiveUp(); give != nil {
+		return give.GetWorkspace()
 	}
 	if ref, _, ok := mergeMoveOf(req); ok {
 		return ref

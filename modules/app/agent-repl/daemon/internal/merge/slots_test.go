@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -312,7 +313,7 @@ func TestAStepAsideTheStoreRefusesRepairsInPlace(t *testing.T) {
 	c.drainUntil(t, "the head landing", func() bool { return len(c.git.landedOwn()) == 1 })
 
 	// Assert
-	if got := c.git.landedOwn(); len(got[0]) != 1 || got[0][0] != "a1" {
+	if got := c.git.landedOwn(); !slices.Equal(got[0], []string{"a1", "fix"}) {
 		t.Fatalf("first landing brought %v, want a1 fixed at the head", got)
 	}
 	if n := c.prompts(theWorkspace, fixOrigin); n != 1 {

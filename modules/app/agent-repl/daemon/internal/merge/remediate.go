@@ -80,6 +80,10 @@ const (
 	AsideForConflicts
 )
 
+// asideReasons is every AsideReason: the repairs a merge's own agent is
+// given a turn for.
+var asideReasons = []AsideReason{AsideForTests, AsideForConflicts}
+
 // String names the reason in records.
 func (why AsideReason) String() string {
 	switch why {
