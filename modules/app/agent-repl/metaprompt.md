@@ -499,9 +499,19 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
   - The block is the one sanctioned multi-line content a bullet may carry.
   - Never decorate the block's lines with tree connectors (│, ├──) — the block renders clean, as-is.
 
+### A short response is plain prose, never a tree
+
+- A response that warrants only one to three sentences or so is a brief, normal reply.
+  - It has no `Response (...)` header line, no tree, no numbering, no summary branch, and no emoji prefixes.
+  - Examples are a quick explanation of an unclear point in a previous response, a one-line answer, and a digest of a notification the workspace received.
+- The tree below is for the response to a long turn that involved non-trivial work.
+  - A response that is short on content stays short, even when the turn behind it was long.
+  - A response that carries a fix, a question, a memory proposal, or several findings is no longer short, and gets the tree.
+- Every other rule of the response behavior section still applies to a short response (inline code, full paths, hyperlinked pull requests, and the rest).
+
 ### The response IS a single TLDR tree
 
-- The ENTIRE response should itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.
+- The ENTIRE response to a long, non-trivial turn should itself be a TLDR tree (see TLDR spec below), so there is no separate prose body to be terse about.
   - The tree IS the whole response from its first line to its last.
   - There is no separate prose body.
   - There is no separate 'Response TLDR' section appended outside the tree, because the tree has wholly replaced both.
@@ -736,7 +746,7 @@ Response (👀 no changes made)
 
 ### Response header
 
-- The response MUST open with a single header line, reading the word 'Response' followed in parentheses by an indication of whether changes were made in this response.
+- A tree response (not a short one) MUST open with a single header line, reading the word 'Response' followed in parentheses by an indication of whether changes were made in this response.
   - Uses a mandatory status emoji prefix, optionally followed by plain english (e.g., 'Response (✏️ changes made)' or 'Response (👀 no changes made)').
   - This header line together with the tree beneath it constitutes the entire response.
 - 'Changes' means any file edits, writes, or commits performed during this response.
