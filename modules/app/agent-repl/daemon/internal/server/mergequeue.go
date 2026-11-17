@@ -11,7 +11,6 @@ import (
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/workspace"
@@ -125,32 +124,22 @@ func (s *server) mergeQueueStatus(ctx context.Context, ref *workspacev1.Reposito
 	return out, nil
 }
 
-// mediatingOf renders the deploy check a queue waits on: its stage, with the
-// workspaces at work, and the chain's remediations in a row.
+// mediatingOf renders the deploy check a queue waits on: its stage, the
+// repository's deploy mediator, and the chain's remediations in a row.
 func mediatingOf(m merge.OwedMediation) *agentreplv1.MergeQueueStatusAdvanceMediating {
-	ref := func(ws ids.WorkspaceID) *workspacev1.WorkspaceRef { return &workspacev1.WorkspaceRef{Id: string(ws)} }
 	out := &agentreplv1.MergeQueueStatusAdvanceMediating{RemediationsInARow: uint32(m.InARow)}
+	if m.Mediator != "" {
+		out.DeployMediator = &workspacev1.WorkspaceRef{Id: string(m.Mediator)}
+	}
 	switch m.Stage {
 	case merge.CheckRollingOut:
-		rolling := &agentreplv1.MergeQueueStatusAdvanceMediatingRollingOut{}
-		if m.Intake != "" {
-			rolling.Intake = ref(m.Intake)
-		}
-		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_RollingOut{RollingOut: rolling}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_RollingOut{RollingOut: &agentreplv1.MergeQueueStatusAdvanceMediatingRollingOut{}}
 	case merge.CheckAssessing:
-		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Assessing{Assessing: &agentreplv1.MergeQueueStatusAdvanceMediatingAssessing{Intake: ref(m.Intake)}}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Assessing{Assessing: &agentreplv1.MergeQueueStatusAdvanceMediatingAssessing{}}
 	case merge.CheckFixing:
-		fixing := &agentreplv1.MergeQueueStatusAdvanceMediatingFixing{Remediation: ref(m.Remediation)}
-		if m.Intake != "" {
-			fixing.Intake = ref(m.Intake)
-		}
-		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Fixing{Fixing: fixing}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Fixing{Fixing: &agentreplv1.MergeQueueStatusAdvanceMediatingFixing{}}
 	case merge.CheckEscalated:
-		escalated := &agentreplv1.MergeQueueStatusAdvanceMediatingEscalated{}
-		if m.Escalation != "" {
-			escalated.Escalation = ref(m.Escalation)
-		}
-		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Escalated{Escalated: escalated}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Escalated{Escalated: &agentreplv1.MergeQueueStatusAdvanceMediatingEscalated{}}
 	default:
 		panic(fmt.Sprintf("server: a deploy check stands at no stage (%+v)", m))
 	}

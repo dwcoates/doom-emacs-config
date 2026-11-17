@@ -340,21 +340,17 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 		{name: "a queue neither paused nor owing a check runs", want: "running"},
 		{name: "a paused queue is paused", paused: true, want: "paused"},
 		{name: "a paused queue owing a check is paused", paused: true, want: "paused",
-			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Intake: "ws-intake"}},
-		{name: "a chain's first deploy rolls out with no intake", want: "rolling_out: in a row 0",
+			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Mediator: "ws-mediator"}},
+		{name: "a repository's first deploy rolls out with no mediator", want: "rolling_out: in a row 0",
 			mediation: &merge.OwedMediation{Stage: merge.CheckRollingOut}},
-		{name: "a later deploy rolls out with its chain's intake", want: "rolling_out ws-intake: in a row 1",
-			mediation: &merge.OwedMediation{Stage: merge.CheckRollingOut, Intake: "ws-intake", InARow: 1}},
-		{name: "an assessed deploy names its intake", want: "assessing ws-intake: in a row 0",
-			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Intake: "ws-intake"}},
-		{name: "a fixed deploy names its remediation and intake", want: "fixing ws-remedy ws-intake: in a row 2",
-			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Intake: "ws-intake", Remediation: "ws-remedy", InARow: 2}},
-		{name: "a carried dispatch names its remediation and no intake", want: "fixing ws-remedy : in a row 2",
-			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Remediation: "ws-remedy", InARow: 2}},
-		{name: "an escalated deploy names its escalation", want: "escalated ws-escalate: in a row 1",
-			mediation: &merge.OwedMediation{Stage: merge.CheckEscalated, Escalation: "ws-escalate", InARow: 1}},
-		{name: "an escalation still being made names none", want: "escalated: in a row 0",
-			mediation: &merge.OwedMediation{Stage: merge.CheckEscalated}},
+		{name: "a later deploy rolls out naming the mediator", want: "rolling_out ws-mediator: in a row 1",
+			mediation: &merge.OwedMediation{Stage: merge.CheckRollingOut, Mediator: "ws-mediator", InARow: 1}},
+		{name: "an assessed deploy names the mediator", want: "assessing ws-mediator: in a row 0",
+			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Mediator: "ws-mediator"}},
+		{name: "a fixed deploy names the mediator", want: "fixing ws-mediator: in a row 2",
+			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Mediator: "ws-mediator", InARow: 2}},
+		{name: "an escalated deploy names the mediator", want: "escalated ws-mediator: in a row 1",
+			mediation: &merge.OwedMediation{Stage: merge.CheckEscalated, Mediator: "ws-mediator", InARow: 1}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -374,17 +370,17 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 				got = "paused"
 			case *agentreplv1.MergeQueueStatusAdvance_Mediating:
 				m := state.Mediating
-				switch stage := m.GetStage().(type) {
+				switch m.GetStage().(type) {
 				case *agentreplv1.MergeQueueStatusAdvanceMediating_RollingOut:
-					got = strings.TrimSpace("rolling_out " + stage.RollingOut.GetIntake().GetId())
+					got = "rolling_out"
 				case *agentreplv1.MergeQueueStatusAdvanceMediating_Assessing:
-					got = "assessing " + stage.Assessing.GetIntake().GetId()
+					got = "assessing"
 				case *agentreplv1.MergeQueueStatusAdvanceMediating_Fixing:
-					got = "fixing " + stage.Fixing.GetRemediation().GetId() + " " + stage.Fixing.GetIntake().GetId()
+					got = "fixing"
 				case *agentreplv1.MergeQueueStatusAdvanceMediating_Escalated:
-					got = strings.TrimSpace("escalated " + stage.Escalated.GetEscalation().GetId())
+					got = "escalated"
 				}
-				got += fmt.Sprintf(": in a row %d", m.GetRemediationsInARow())
+				got = strings.TrimSpace(got+" "+m.GetDeployMediator().GetId()) + fmt.Sprintf(": in a row %d", m.GetRemediationsInARow())
 			}
 			if got != tt.want {
 				t.Fatalf("advance = %q, want %q", got, tt.want)

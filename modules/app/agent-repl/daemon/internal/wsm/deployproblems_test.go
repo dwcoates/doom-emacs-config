@@ -11,47 +11,54 @@ import (
 
 var sinkWarning = ProblemKey{Operation: "agent-repl.elisp-core-log-central-fallback", Message: "elisp.core.log-central-fallback"}
 
-func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
+func TestADeployProblemIsTakenOnFixedAndReopenedOnItsRecurrence(t *testing.T) {
 	tests := []struct {
 		name         string
 		arrange      func(t *testing.T, s *store, repo RepoKey)
-		wantOwner    WorkspaceID
 		wantFixed    bool
 		wantFindings []string
 		wantFixes    int
 	}{
-		{name: "a dispatched problem is owned and open",
+		{name: "a dispatched problem is open",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				own(t, s, repo, "remedy-1", "the sink warning", instant)
+				takeOn(t, s, repo, "the sink warning", instant)
 			},
-			wantOwner: "remedy-1", wantFindings: []string{"the sink warning"}},
-		{name: "its owner's deploy marks it fixed",
+			wantFindings: []string{"the sink warning"}},
+		{name: "the mediator's deploy marks it fixed",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				own(t, s, repo, "remedy-1", "the sink warning", instant)
-				if n, err := s.FixDeployProblemsOf(context.Background(), "remedy-1", instant.Add(time.Hour)); err != nil || n != 1 {
-					t.Fatalf("FixDeployProblemsOf = (%d, %v), want one fixed", n, err)
+				takeOn(t, s, repo, "the sink warning", instant)
+				if n, err := s.FixDeployProblems(context.Background(), repo, instant.Add(time.Hour)); err != nil || n != 1 {
+					t.Fatalf("FixDeployProblems = (%d, %v), want one fixed", n, err)
 				}
 			},
-			wantOwner: "remedy-1", wantFixed: true, wantFindings: []string{"the sink warning"}, wantFixes: 1},
-		{name: "a recurrence's new owner reopens it with the earlier findings kept",
+			wantFixed: true, wantFindings: []string{"the sink warning"}, wantFixes: 1},
+		{name: "a recurrence reopens it with the earlier findings kept",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				own(t, s, repo, "remedy-1", "the sink warning", instant)
-				if _, err := s.FixDeployProblemsOf(context.Background(), "remedy-1", instant.Add(time.Hour)); err != nil {
+				takeOn(t, s, repo, "the sink warning", instant)
+				if _, err := s.FixDeployProblems(context.Background(), repo, instant.Add(time.Hour)); err != nil {
 					t.Fatal(err)
 				}
-				own(t, s, repo, "remedy-2", "it recurred on a direct landing", instant.Add(2*time.Hour))
+				takeOn(t, s, repo, "it recurred on a direct landing", instant.Add(2*time.Hour))
 			},
-			wantOwner: "remedy-2", wantFindings: []string{"the sink warning", "it recurred on a direct landing"}, wantFixes: 1},
-		{name: "every deployed fix is counted, across owners",
+			wantFindings: []string{"the sink warning", "it recurred on a direct landing"}, wantFixes: 1},
+		{name: "every deployed fix is counted",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				for i, owner := range []WorkspaceID{"remedy-1", "remedy-2", "remedy-3"} {
-					own(t, s, repo, owner, "again", instant.Add(time.Duration(i)*time.Hour))
-					if _, err := s.FixDeployProblemsOf(context.Background(), owner, instant.Add(time.Duration(i)*time.Hour+time.Minute)); err != nil {
+				for i := range 3 {
+					takeOn(t, s, repo, "again", instant.Add(time.Duration(i)*time.Hour))
+					if _, err := s.FixDeployProblems(context.Background(), repo, instant.Add(time.Duration(i)*time.Hour+time.Minute)); err != nil {
 						t.Fatal(err)
 					}
 				}
 			},
-			wantOwner: "remedy-3", wantFixed: true, wantFindings: []string{"again", "again", "again"}, wantFixes: 3},
+			wantFixed: true, wantFindings: []string{"again", "again", "again"}, wantFixes: 3},
+		{name: "another repository's fix leaves it open",
+			arrange: func(t *testing.T, s *store, repo RepoKey) {
+				takeOn(t, s, repo, "the sink warning", instant)
+				if n, err := s.FixDeployProblems(context.Background(), RepoKey(t.TempDir()), instant.Add(time.Hour)); err != nil || n != 0 {
+					t.Fatalf("FixDeployProblems = (%d, %v), want none fixed", n, err)
+				}
+			},
+			wantFindings: []string{"the sink warning"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -68,8 +75,8 @@ func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
 				t.Fatalf("DeployProblems = (%+v, %v), want one", problems, err)
 			}
 			p := problems[0]
-			if p.Key != sinkWarning || p.Owner != tt.wantOwner || (p.FixedAt != nil) != tt.wantFixed || !p.OpenedAt.Equal(instant) {
-				t.Fatalf("problem = %+v, want owner %s fixed %v opened at %v", p, tt.wantOwner, tt.wantFixed, instant)
+			if p.Key != sinkWarning || (p.FixedAt != nil) != tt.wantFixed || !p.OpenedAt.Equal(instant) {
+				t.Fatalf("problem = %+v, want fixed %v opened at %v", p, tt.wantFixed, instant)
 			}
 			if got := strings.Split(p.Findings, "\n"); strings.Join(got, "|") != strings.Join(tt.wantFindings, "|") {
 				t.Fatalf("findings = %q, want %q", got, tt.wantFindings)
@@ -81,25 +88,25 @@ func TestADeployProblemIsOwnedFixedAndTakenOverOnItsRecurrence(t *testing.T) {
 	}
 }
 
-// own makes OWNER the owner of the sink warning in REPO at AT.
-func own(t *testing.T, s *store, repo RepoKey, owner WorkspaceID, findings string, at time.Time) {
+// takeOn records that the mediator took on the sink warning in REPO at AT.
+func takeOn(t *testing.T, s *store, repo RepoKey, findings string, at time.Time) {
 	t.Helper()
-	if err := s.OwnDeployProblems(context.Background(), repo, []ProblemKey{sinkWarning}, owner, findings, at); err != nil {
-		t.Fatalf("OwnDeployProblems: %v", err)
+	if err := s.TakeOnDeployProblems(context.Background(), repo, []ProblemKey{sinkWarning}, findings, at); err != nil {
+		t.Fatalf("TakeOnDeployProblems: %v", err)
 	}
 }
 
-func TestOwningDeployProblemsRefusesAnIncompleteOwnership(t *testing.T) {
+func TestTakingOnDeployProblemsRefusesAnIncompleteCall(t *testing.T) {
 	tests := []struct {
 		name     string
 		keys     []ProblemKey
-		owner    WorkspaceID
 		findings string
+		at       time.Time
 	}{
-		{name: "no group", owner: "remedy", findings: "x"},
-		{name: "no owner", keys: []ProblemKey{sinkWarning}, findings: "x"},
-		{name: "no findings", keys: []ProblemKey{sinkWarning}, owner: "remedy", findings: " "},
-		{name: "a group with no operation", keys: []ProblemKey{{Message: "m"}}, owner: "remedy", findings: "x"},
+		{name: "no group", findings: "x", at: instant},
+		{name: "no findings", keys: []ProblemKey{sinkWarning}, findings: " ", at: instant},
+		{name: "no instant", keys: []ProblemKey{sinkWarning}, findings: "x"},
+		{name: "a group with no operation", keys: []ProblemKey{{Message: "m"}}, findings: "x", at: instant},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -108,17 +115,36 @@ func TestOwningDeployProblemsRefusesAnIncompleteOwnership(t *testing.T) {
 			repo := RepoKey(t.TempDir())
 
 			// Act
-			err := s.OwnDeployProblems(context.Background(), repo, tt.keys, tt.owner, tt.findings, instant)
+			err := s.TakeOnDeployProblems(context.Background(), repo, tt.keys, tt.findings, tt.at)
 
 			// Assert
 			problems, _ := s.DeployProblems(context.Background(), repo)
 			if err == nil || len(problems) != 0 {
-				t.Fatalf("OwnDeployProblems = %v, problems %+v; want a refusal and nothing written", err, problems)
+				t.Fatalf("TakeOnDeployProblems = %v, problems %+v; want a refusal and nothing written", err, problems)
 			}
-			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.own_deploy_problems"}); !ok {
+			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.take_on_deploy_problems"}); !ok {
 				t.Fatalf("no ERROR record of the refusal: %+v", logs.Records())
 			}
 		})
+	}
+}
+
+func TestFixingDeployProblemsWithNoInstantIsRefused(t *testing.T) {
+	// Arrange
+	s, logs := testStore(t)
+	repo := RepoKey(t.TempDir())
+	takeOn(t, s, repo, "the sink warning", instant)
+
+	// Act
+	_, err := s.FixDeployProblems(context.Background(), repo, time.Time{})
+
+	// Assert
+	problems, _ := s.DeployProblems(context.Background(), repo)
+	if err == nil || len(problems) != 1 || problems[0].FixedAt != nil {
+		t.Fatalf("FixDeployProblems = %v, problems %+v; want a refusal and the problem still open", err, problems)
+	}
+	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.fix_deploy_problems"}); !ok {
+		t.Fatalf("no ERROR record of the refusal: %+v", logs.Records())
 	}
 }
 

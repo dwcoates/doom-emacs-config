@@ -139,11 +139,11 @@ type Workspace struct {
 	// it and that turn is still running: the roster draws it inside the fold
 	// (SurfaceHeldWork).
 	Surfaced bool
-	// StandingDeployCheck reports whether the workspace is its repository's
-	// standing deploy intake or fixer (deploy_check_standing): it runs and is
-	// kept warm like any open workspace, hidden or not (owner ruling,
-	// 2026-11-17), so a deploy's check never waits on a cold cache.
-	StandingDeployCheck bool
+	// DeployMediator reports whether the workspace is its repository's deploy
+	// mediator (deploy_mediators): it runs and is kept warm like any open
+	// workspace, hidden or not (owner ruling, 2026-11-17), so a deploy's check
+	// never waits on a cold cache.
+	DeployMediator bool
 	// Current reports whether the workspace is the user's selection
 	// (SetCurrent): the one they are looking at. At most one workspace is.
 	Current bool

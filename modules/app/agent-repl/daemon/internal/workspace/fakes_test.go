@@ -72,11 +72,6 @@ type fakeDB struct {
 	holds   map[ids.TurnID]wsm.HeldPrompt
 	holdErr error
 
-	// roles are the deploy check roles workspaces hold; rolesErr fails
-	// their read.
-	roles    map[ids.WorkspaceID]*wsm.MediationRole
-	rolesErr error
-
 	// bypass is each workspace's queue-bypass standing; bypassErr fails its read.
 	bypass    map[ids.WorkspaceID]wsm.QueueBypass
 	bypassErr error
@@ -4564,14 +4559,6 @@ func (f *fakeDB) ReleaseQueueBypass(_ context.Context, ws ids.WorkspaceID) error
 	standing.Holds = false
 	f.setBypass(ws, standing)
 	return nil
-}
-
-// MediationRoleOf answers the role recorded for WS, or rolesErr.
-func (f *fakeDB) MediationRoleOf(_ context.Context, ws ids.WorkspaceID) (*wsm.MediationRole, error) {
-	if f.rolesErr != nil {
-		return nil, f.rolesErr
-	}
-	return f.roles[ws], nil
 }
 
 // setBypass scripts the workspace's queue bypass standing.

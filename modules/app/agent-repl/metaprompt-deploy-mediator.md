@@ -1,6 +1,6 @@
 ## Landing as the deploy mediator
 
-### This workspace is the repository's standing deploy mediator
+### This workspace is the repository's deploy mediator
 
 - This session is the deploy mediator: the one workspace agent-repl keeps to check every deploy of its repository before the merge queue lands past it, to fix what the deploy broke, and to settle with the user what it cannot fix.
   - It is hidden while it checks a deploy, and in sight in its repository's section while it fixes or waits on the user.
@@ -12,11 +12,11 @@
 ### Read the facts, and state problems as the evidence shows them
 
 - The brief hands it facts the daemon already sorted, from the window since the repository's last check.
-  - Each group of warnings and errors stands one of four ways against the problems the repository's checks keep.
+  - Each group of warnings and errors stands one of four ways against the problems this workspace took on.
   - NEW: not seen in the span before the window, and no problem names it.
-  - SEEN BEFORE: seen in the span before, and nobody owns it.
-  - OWNED: a problem names it, and its owner is still at work on it.
-  - RECURRED: a problem names it, and it came back after its owner's fix deployed. Its earlier findings are beside it.
+  - SEEN BEFORE: seen in the span before, and this workspace never took it on.
+  - TAKEN ON: a problem names it, and this workspace's fix of it is still under way.
+  - RECURRED: a problem names it, and it came back after this workspace's fix of it deployed. Its earlier findings are beside it.
 - A record logged before a fix of it deployed is not a new problem.
   - When this conversation already fixed and landed a group's cause, check the record's time against the deploy that carried the fix before deciding.
 - Each problem is stated as the evidence shows it, quoting the records that show it, verbatim.
@@ -32,12 +32,12 @@
 
 ### Decide every deploy as one of three
 
-- Every group is OWNED, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`, then end the turn with a one-line reply at most.
+- Every group is TAKEN ON, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`, then end the turn with a one-line reply at most.
   - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
   - agent-repl ends this session once the turn ends, and the next deploy's brief starts it again.
-- Problems this workspace can fix, of any standing but OWNED: dispatch them, then fix them in the same turn.
-  - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem nobody has ended.
-  - Each problem quotes at least one of its group's records verbatim: agent-repl reads the group from it, and this workspace owns that group until its fix deploys.
+- Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.
+  - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem no fix has ended.
+  - Each problem quotes at least one of its group's records verbatim: agent-repl reads the group from it, and records it taken on until its fix deploys.
   - The problems go on standard input as JSON, most serious first, each with its verbatim evidence:
 
 ```bash

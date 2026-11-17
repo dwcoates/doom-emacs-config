@@ -4669,7 +4669,7 @@ func TestADeployMediatorsSessionLandsAsTheMediator(t *testing.T) {
 			f := newFleetFixture(t)
 			ws := resumable(f)
 			record := f.db.workspaces[ws]
-			record.StandingDeployCheck = tc.standing
+			record.DeployMediator = tc.standing
 			f.db.workspaces[ws] = record
 
 			// Act

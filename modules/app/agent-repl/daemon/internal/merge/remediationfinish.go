@@ -69,26 +69,18 @@ const landDirectScript = "bin/land-direct.sh"
 // is that with headroom for a cold disk.
 const landDirectBoundSeconds = 5
 
-// LandsDirectly implements Orchestrator: WS is a deploy check workspace whose
-// finish lands directly -- the remediation of an owed check a fix is
-// dispatched for, or a deploy escalation workspace the daemon made.
+// LandsDirectly implements Orchestrator: WS is a deploy mediator, whose
+// finish lands directly whichever work it finishes.
 func (o *orchestrator) LandsDirectly(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
 	repo, err := o.directLandingRepo(ctx, ws)
 	return repo != "", err
 }
 
-// directLandingRepo answers the queue WS lands directly for, empty when its
-// finish goes through the queue.
+// directLandingRepo answers the queue WS is the deploy mediator of, empty
+// when its finish goes through the queue.
 func (o *orchestrator) directLandingRepo(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, error) {
-	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
-	if err != nil {
-		return "", err
-	}
-	if role != nil && role.Remediation && role.Mediation.Dispatched {
-		return role.Repo, nil
-	}
-	repo, escalation, err := o.deps.DB.DeployEscalationOf(ctx, ws)
-	if err != nil || !escalation {
+	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
+	if err != nil || !isMediator {
 		return "", err
 	}
 	return repo, nil
@@ -105,7 +97,7 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 		return err
 	}
 	if repo == "" {
-		err := fmt.Errorf("merge: workspace %s is no remediation a fix is dispatched to and no deploy escalation", ws)
+		err := fmt.Errorf("merge: workspace %s is no repository's deploy mediator", ws)
 		o.deps.Log.Global().Error(opRemediationFinish, "a direct finish reached a workspace that lands through the queue", withField(fields, "error", err.Error()))
 		return err
 	}
@@ -122,15 +114,16 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 	case version != nil && !versioned:
 		return unexpectedVersion(ws, reasonUnversionedRepository, "the repository's deploy config %s versions nothing", target.repoRoot)
 	}
-	// THE FINISH SERVES WHAT THE CHECK HOLDS IT FOR: an escalation the user
-	// settles with it, or a fix dispatched to it (RemediationFinish.
-	// ServesEscalation).
+	// THE FINISH SERVES WHAT THE CHECK HOLDS THE MEDIATOR FOR: a fix it
+	// dispatched, kept until its chain ends, or anything else (an escalation
+	// the user settles with it), kept until its own deploy
+	// (RemediationFinish.ServesEscalation).
 	m, err := o.deps.DB.MediationOf(ctx, repo)
 	if err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "could not read the check the finish serves", withField(fields, "error", err.Error()))
 		return err
 	}
-	servesEscalation := m == nil || !m.Dispatched || m.Remediation != ws
+	servesEscalation := m == nil || !m.Dispatched
 	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: repo, StartedAt: o.deps.Now(), Version: version, ServesEscalation: servesEscalation})
 	if errors.Is(err, wsm.ErrRemediationFinishing) {
 		o.deps.Log.Global().Info(opRemediationFinish, "refused a remediation finish while its finish runs", fields)
@@ -394,77 +387,50 @@ func (o *orchestrator) resumeRemediation(ctx context.Context, f wsm.RemediationF
 }
 
 // giveUpRemediation escalates F's chain to the user: its gate failed
-// MaxFixAttempts times. The daemon escalates for the intake, so the queue is
-// never left held by a remediation that cannot land.
+// MaxFixAttempts times. The daemon escalates for the mediator, so the queue
+// is never left held by a fix that cannot land.
 func (o *orchestrator) giveUpRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateGivenUp, f.GateRounds)
-	// A REMEDIATION GIVEN UP IS SHOWN AGAIN, beside the escalation it hands
-	// its chain to: nothing finishes it now.
+	// A MEDIATOR WHOSE FIX IS GIVEN UP IS SHOWN AGAIN, for the escalation
+	// it is handed: nothing finishes the fix now.
 	if err := o.deps.DeployChecks.Resume(ctx, f.Workspace); err != nil {
 		return err
 	}
-	name, err := o.workspaceName(ctx, opRemediationFinish, f.Workspace)
-	if err != nil {
-		return err
-	}
-	summary := fmt.Sprintf("the deploy remediation %s could not pass its gate after %d fixing attempts; the queue waits for you", name, MaxFixAttempts)
-	return o.escalateForIntake(ctx, f.Repo, f.Workspace, summary, withField(fields, "gave_up", true))
+	summary := fmt.Sprintf("the deploy mediator's fix could not pass its gate after %d fixing attempts; the queue waits for you", MaxFixAttempts)
+	return o.escalateForMediator(ctx, f.Repo, summary, withField(fields, "gave_up", true))
 }
 
-// escalateForIntake releases the check REPO owes as an escalation the daemon
-// makes for its chain's intake, putting SUMMARY before the user on behalf of
-// remediation workspace WS.
-func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, summary string, fields dlog.Context) error {
+// escalateForMediator escalates the check REPO owes as the daemon's
+// escalation for its deploy mediator, putting SUMMARY before the user.
+func (o *orchestrator) escalateForMediator(ctx context.Context, repo wsm.RepoKey, summary string, fields dlog.Context) error {
 	m, err := o.deps.DB.MediationOf(ctx, repo)
 	if err != nil {
 		return err
 	}
 	if m == nil {
-		o.deps.Log.Global().Info(opRemediationFinish, "the chain the remediation worked for ended already; nothing is escalated", fields)
+		o.deps.Log.Global().Info(opRemediationFinish, "the chain the mediator's fix worked for ended already; nothing is escalated", fields)
 		return nil
 	}
 	window, err := o.toldWindow(ctx, repo, fields)
 	if err != nil {
 		return err
 	}
-	o.deps.Log.Global().Error(opRemediationFinish, "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue is held for them", withField(fields, "summary", summary))
+	o.deps.Log.Global().Error(opRemediationFinish, "the deploy mediator cannot land its fix; the chain is escalated to the user and the queue is held for them", withField(fields, "summary", summary))
 	q, ok, err := o.checkedQueueOf(ctx, repo)
 	if err != nil {
 		return err
 	}
 	if !ok {
-		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
+		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up fix is put before nobody", fields)
 		return nil
 	}
-	o.holdEscalated(ctx, q, *m, summary, nil, window, "", fields)
+	o.holdEscalated(ctx, q, *m, summary, nil, window, false, fields)
 	return nil
 }
 
-// escalationClosed releases the check escalation WS holds, when one does:
-// the user closing the escalation is their ruling that the queue moves on
-// (owner ruling, 2026-11-16).
-func (o *orchestrator) escalationClosed(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
-	queues, err := o.checkedQueues(ctx, opMediation)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not list the queues a closed escalation may hold; its hold stands", withField(fields, "error", err.Error()))
-		return
-	}
-	for _, q := range queues {
-		m, err := o.deps.DB.MediationOf(ctx, q.key)
-		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not read whether a closed escalation holds a queue; its hold stands", withField(withField(fields, "repo", string(q.key)), "error", err.Error()))
-			continue
-		}
-		if m == nil || !m.Escalated() || m.Escalation != ws {
-			continue
-		}
-		_ = o.releaseEscalated(ctx, q.key, *m, "the user closed the escalation", fields)
-	}
-}
-
 // ReleaseEscalation releases the hold the escalation of SCOPE's queue puts on
-// it: the user's own gesture on the standing escalation's row, or the command
-// line (owner ruling, 2026-11-17). The escalation workspace stays open. A
+// it: the user's own gesture on the mediator's row, or the command
+// line (owner ruling, 2026-11-17). The mediator stays open. A
 // queue no escalation holds is refused no_escalation_held.
 func (o *orchestrator) ReleaseEscalation(ctx context.Context, scope RepositoryScope) error {
 	life, leave, entered := o.enterMediation()
@@ -487,7 +453,7 @@ func (o *orchestrator) ReleaseEscalation(ctx context.Context, scope RepositorySc
 		o.deps.Log.Global().Info(opMediation, "refused a release of an escalation's hold: no escalation holds the queue", fields)
 		return refuse(ArmNoEscalationHeld, "", "no escalation holds the queue of %s", repo)
 	}
-	return o.releaseEscalated(ctx, repo, *m, "the user released the escalation's hold", withField(fields, "escalation", string(m.Escalation)))
+	return o.releaseEscalated(ctx, repo, *m, "the user released the escalation's hold", fields)
 }
 
 // releaseEscalated releases escalated check M of queue REPO, as WHY says,
@@ -501,11 +467,9 @@ func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m
 	}
 	if released {
 		o.deps.Log.Global().Info(opMediation, why+"; its check is released and the queue advances", fields)
-		// A RELEASED ESCALATION'S FIXER IS HIDDEN: no check holds the queue
-		// for it any more, and its session is left as it is.
-		if err := o.deps.DeployChecks.Hide(ctx, m.Escalation); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the released escalation's fixer could not be hidden", withField(fields, "error", err.Error()))
-		}
+		// A RELEASED ESCALATION'S MEDIATOR IS HIDDEN: no check holds the
+		// queue for it any more, and its session is left as it is.
+		o.hideMediator(ctx, repo, fields)
 		o.republishMediation(ctx, repo)
 		o.kick(repo)
 	}
@@ -638,8 +602,8 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 		moved = true
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's deploy began; it owes the chain's next check", dlog.Context{"workspace": string(f.Workspace), "repo": string(repo)})
 		// ITS PROBLEMS ARE FIXED, NOT CLOSED: a later window that logs one
-		// again finds it RECURRED, with this owner's findings beside it.
-		if _, err := o.deps.DB.FixDeployProblemsOf(ctx, f.Workspace, at); err != nil {
+		// again finds it RECURRED, with the mediator's findings beside it.
+		if _, err := o.deps.DB.FixDeployProblems(ctx, repo, at); err != nil {
 			errs = append(errs, err)
 		}
 		// AN ESCALATION'S FINISH IS DONE AT ITS DEPLOY: no chain's end
@@ -655,7 +619,7 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 
 // closeRemediation closes F's workspace as a landed merge closes its own: it
 // is stamped merged and closed, its session stopped, its worktree removed and
-// its landed branch retired. The repository's standing fixer is the one
+// its landed branch retired. The repository's deploy mediator is the one
 // workspace it leaves open, for the next brief.
 func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	record, err := o.deps.DB.Workspace(ctx, f.Workspace)
@@ -665,11 +629,11 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 	if record.Closed {
 		return nil
 	}
-	// THE STANDING FIXER STAYS OPEN (owner ruling, 2026-11-17): warm, in
+	// THE DEPLOY MEDIATOR STAYS OPEN (owner ruling, 2026-11-17): warm, in
 	// its repository's section, with its conversation and its worktree, for
 	// the next brief, which brings its worktree to the main branch's tip.
-	if record.StandingDeployCheck {
-		o.deps.Log.Global().Info(opRemediationFinish, "the landed fix deployed; the standing fixer stays open for the next brief", fields)
+	if record.DeployMediator {
+		o.deps.Log.Global().Info(opRemediationFinish, "the landed fix deployed; the deploy mediator stays open for the next brief", fields)
 		return nil
 	}
 	if err := o.deps.DB.SetMergedAt(ctx, f.Workspace, o.deps.Now(), nil); err != nil {
@@ -695,58 +659,50 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 	return nil
 }
 
-// remediationClosed hands the hold back when remediation WS closes before
-// its fix is deploying: nobody else fixes the deploy, so the daemon
-// escalates the chain for its intake, and the queue is never left held with
-// no owner.
+// remediationClosed settles the check deploy mediator WS's queue holds it
+// for when the user closes it: a fix dispatched and not yet deploying is
+// escalated for it, since nobody else fixes the deploy; an escalation is
+// released, the close being the user's ruling that the queue moves on
+// (owner ruling, 2026-11-16); and a finish that serves an escalation ends,
+// since nobody finishes it now. Any other workspace's close is no check's.
 func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
-	// A FIX DISPATCHED TO IT IS JUDGED FIRST: the deploy mediator is also
-	// recorded as an escalation (it lands directly whichever work it does),
-	// and ending its finish as an escalation's would hide the fix it left
-	// unlanded, leaving the queue held by a closed workspace.
-	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
+	repo, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
 	if err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a remediation at work", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a deploy mediator", withField(fields, "error", err.Error()))
 		return
 	}
-	if role != nil && role.Remediation && role.Mediation.Dispatched {
-		o.dispatchedRemediationClosed(ctx, ws, *role, fields)
+	if !isMediator {
 		return
 	}
-	// A CLOSED ESCALATION'S FINISH IS OVER: no chain's end forgets it, so its
-	// close does, or a record would stand for a workspace nobody finishes.
-	if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, ws); err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a deploy escalation", withField(fields, "error", err.Error()))
-	} else if escalation {
-		ended, err := o.deps.DB.EndRemediationFinish(ctx, ws)
-		if err != nil {
-			o.deps.Log.Global().Error(opRemediationFinish, "a closed deploy escalation's finish could not be ended", withField(fields, "error", err.Error()))
-		} else if ended {
-			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy escalation's finish was ended", fields)
-		}
-		o.escalationClosed(ctx, ws, fields)
+	fields["repo"] = string(repo)
+	m, err := o.deps.DB.MediationOf(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read the check a closed deploy mediator held its queue for", withField(fields, "error", err.Error()))
+		return
 	}
-}
-
-// dispatchedRemediationClosed escalates the chain of ROLE's check when WS,
-// the remediation it is dispatched to, closed before its fix was deploying.
-func (o *orchestrator) dispatchedRemediationClosed(ctx context.Context, ws ids.WorkspaceID, role wsm.MediationRole, fields dlog.Context) {
 	f, err := o.deps.DB.RemediationFinishOf(ctx, ws)
 	if err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "could not read a closed remediation's finish", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read a closed deploy mediator's finish", withField(fields, "error", err.Error()))
 		return
 	}
-	if f != nil && (f.Step == wsm.RemediationDeploying || f.Step == wsm.RemediationDeployed) {
+	deploying := f != nil && (f.Step == wsm.RemediationDeploying || f.Step == wsm.RemediationDeployed)
+	switch {
+	case m != nil && m.Dispatched && !deploying:
+		summary := "the deploy mediator was closed before its fix landed; the queue waits for you"
+		if err := o.escalateForMediator(ctx, repo, summary, fields); err != nil {
+			o.deps.Log.Global().Error(opRemediationFinish, "the deploy mediator closed before its fix landed, and its chain could not be escalated; the queue stays held", withField(fields, "error", err.Error()))
+		}
 		return
+	case m != nil && m.Escalated():
+		_ = o.releaseEscalated(ctx, repo, *m, "the user closed the deploy mediator holding the escalation", fields)
 	}
-	name, err := o.workspaceName(ctx, opRemediationFinish, ws)
-	if err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "a remediation closed before landing, and its chain could not be escalated without its name; the queue stays held", withField(fields, "error", err.Error()))
-		return
-	}
-	summary := fmt.Sprintf("the deploy remediation %s was closed before its fix landed; the queue waits for you", name)
-	if err := o.escalateForIntake(ctx, role.Repo, ws, summary, fields); err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "a remediation closed before landing, and its chain could not be escalated; the queue stays held", withField(fields, "error", err.Error()))
+	if f != nil && f.ServesEscalation && !deploying {
+		ended, err := o.deps.DB.EndRemediationFinish(ctx, ws)
+		if err != nil {
+			o.deps.Log.Global().Error(opRemediationFinish, "a closed deploy mediator's finish could not be ended", withField(fields, "error", err.Error()))
+		} else if ended {
+			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy mediator's finish was ended", fields)
+		}
 	}
 }

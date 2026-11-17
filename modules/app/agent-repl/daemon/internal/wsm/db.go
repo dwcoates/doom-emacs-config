@@ -719,33 +719,27 @@ type DB interface {
 	// resumed already.
 	MarkMediationResumed(ctx context.Context, repo RepoKey, owed time.Time, turn TurnID) (bool, error)
 	// EscalateMediation records that the owed mediation is escalated with
-	// BRIEF, before its workspace is made; RecordMediationEscalation records
-	// that workspace. Each answers false when the mediation is no longer the
-	// one owed.
+	// BRIEF, before the mediator and the user are told; MarkEscalationTold
+	// records that they were. Each answers false when the mediation is no
+	// longer the one owed.
 	EscalateMediation(ctx context.Context, repo RepoKey, owed time.Time, brief string) (bool, error)
-	RecordMediationEscalation(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
+	MarkEscalationTold(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
 	// ReleaseMediation clears the mediation owed at OWED, if it still is.
 	ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error)
-	// RecordMediationIntake records a chain's intake workspace on the
-	// mediation owed at OWED (mediation.go).
-	RecordMediationIntake(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
-	// DispatchMediation records a fix dispatched to remediation workspace WS
-	// for the mediation owed at OWED (mediation.go).
-	DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, ws WorkspaceID, turn FixerTurn) (bool, error)
-	// RecordFixerTurn records a later brief given the fixer a fix is
-	// dispatched to (fixerturn.go).
-	RecordFixerTurn(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID, turn FixerTurn) (bool, error)
-	// MediationRoleOf answers the owed mediation a workspace is the intake
-	// or the last remediation of, nil for neither (mediation.go).
-	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)
+	// DispatchMediation records a fix the mediator dispatched to itself for
+	// the mediation owed at OWED (mediation.go).
+	DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, turn FixerTurn) (bool, error)
+	// RecordFixerTurn records a later brief given the mediator while its fix
+	// is dispatched (fixerturn.go).
+	RecordFixerTurn(ctx context.Context, repo RepoKey, owed time.Time, turn FixerTurn) (bool, error)
 	// DeployProblems answers every problem a repository's deploy checks
 	// keep (deployproblems.go).
 	DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProblem, error)
-	// OwnDeployProblems makes a workspace the owner of the problems named,
-	// open again from the instant given.
-	OwnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, owner WorkspaceID, findings string, at time.Time) error
-	// FixDeployProblemsOf marks every open problem an owner owns fixed.
-	FixDeployProblemsOf(ctx context.Context, owner WorkspaceID, at time.Time) (int, error)
+	// TakeOnDeployProblems records that the mediator took on the problems
+	// named, open again from the instant given (deployproblems.go).
+	TakeOnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, findings string, at time.Time) error
+	// FixDeployProblems marks every open problem of a repository fixed.
+	FixDeployProblems(ctx context.Context, repo RepoKey, at time.Time) (int, error)
 	// CheckedThrough answers where a repository's deploy checks have read
 	// its logs up to.
 	CheckedThrough(ctx context.Context, repo RepoKey) (time.Time, bool, error)
@@ -754,32 +748,24 @@ type DB interface {
 	RecordMediationWindow(ctx context.Context, repo RepoKey, owed time.Time, w CheckWindow) (bool, error)
 	// MediationWindowOf answers the window the owed check's intake was told.
 	MediationWindowOf(ctx context.Context, repo RepoKey) (CheckWindow, bool, error)
-	// RecordDeployEscalation records WS as the deploy escalation workspace
-	// of REPO's queue, whose finish lands directly.
-	RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo RepoKey, at time.Time) error
-	// DeployEscalationsOf answers every deploy escalation recorded for a queue.
-	DeployEscalationsOf(ctx context.Context, repo RepoKey) ([]WorkspaceID, error)
-	// StandingDeployCheckOf answers a queue's standing deploy check workspace
-	// in one role (deploystanding.go).
-	StandingDeployCheckOf(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (StandingDeployCheck, bool, error)
-	// RecordStandingDeployCheck makes a workspace a queue's standing one in a role, unbriefed.
-	RecordStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName, ws WorkspaceID) error
-	// MarkStandingBriefed records a standing workspace briefed in its role.
-	MarkStandingBriefed(ctx context.Context, repo RepoKey, role DeployCheckRoleName) error
-	// ForgetStandingDeployCheck deletes a queue's standing workspace in a
-	// role, answering whether it had one (deploystanding.go).
-	ForgetStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (bool, error)
+	// DeployMediatorOf answers a queue's deploy mediator (deploystanding.go).
+	DeployMediatorOf(ctx context.Context, repo RepoKey) (DeployMediator, bool, error)
+	// RecordDeployMediator makes a workspace a queue's deploy mediator, unbriefed.
+	RecordDeployMediator(ctx context.Context, repo RepoKey, ws WorkspaceID) error
+	// MarkMediatorBriefed records a queue's deploy mediator briefed in its role.
+	MarkMediatorBriefed(ctx context.Context, repo RepoKey) error
+	// MediatorRepoOf answers the queue whose deploy mediator WS is, and
+	// whether it is one (deploystanding.go).
+	MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error)
 	// NoteDeployCheckWork restarts a queue's quiet run and arms its compaction.
 	NoteDeployCheckWork(ctx context.Context, repo RepoKey) error
 	// NoteQuietDeployCheck counts a quiet check, answering whether the
-	// standing workspaces compact now.
+	// mediator compacts now.
 	NoteQuietDeployCheck(ctx context.Context, repo RepoKey) (bool, error)
 	// RecordMediationEnding records how the checked deploy ended on its check.
 	RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error)
 	// OweCompaction records that a workspace's next start compacts its conversation.
 	OweCompaction(ctx context.Context, ws WorkspaceID) (bool, error)
-	// DeployEscalationOf answers the queue WS escalates a deploy of.
-	DeployEscalationOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error)
 	// BeginRemediationFinish records a remediation workspace's finish at its
 	// gate (remediationfinish.go).
 	BeginRemediationFinish(ctx context.Context, f RemediationFinish) (RemediationFinish, error)

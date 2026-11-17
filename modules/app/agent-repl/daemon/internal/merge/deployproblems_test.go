@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -90,41 +89,25 @@ func TestAWindowGroupStandsAgainstTheProblemsKept(t *testing.T) {
 		{name: "a group nobody names, unseen before, is new", group: FindingGroup{Operation: "a", Message: "m"}, want: wsm.WindowNew},
 		{name: "a group nobody names, seen before, is seen before", group: FindingGroup{Operation: "a", Message: "m", Before: 2}, want: wsm.WindowSeenBefore},
 		{name: "a group a problem at work names is owned", group: FindingGroup{Operation: "a", Message: "m"},
-			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-fixer"}}, want: wsm.WindowOwned},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}}}, want: wsm.WindowOwned},
 		{name: "a group a fixed problem names recurred", group: FindingGroup{Operation: "a", Message: "m", Before: 1},
-			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-fixer", FixedAt: &fixed}}, want: wsm.WindowRecurred},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, FixedAt: &fixed}}, want: wsm.WindowRecurred},
 		{name: "a recurred group carries its problem's fixes", group: FindingGroup{Operation: "a", Message: "m", Before: 1},
-			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-fixer", FixedAt: &fixed, Fixes: 3}}, want: wsm.WindowRecurred},
+			problems: []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, FixedAt: &fixed, Fixes: 3}}, want: wsm.WindowRecurred},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, err := classifyFindings([]FindingGroup{tt.group}, tt.problems, func(ws ids.WorkspaceID) (string, error) { return "name-of-" + string(ws), nil })
+			got := classifyFindings([]FindingGroup{tt.group}, tt.problems)
 
 			// Assert
-			if err != nil || len(got) != 1 || got[0].Class != tt.want {
-				t.Fatalf("classifyFindings = (%+v, %v), want %s", got, err, tt.want)
-			}
-			if tt.problems != nil && got[0].Owner != "name-of-ws-fixer" {
-				t.Fatalf("owner = %q, want the problem's owner by name", got[0].Owner)
+			if len(got) != 1 || got[0].Class != tt.want {
+				t.Fatalf("classifyFindings = %+v, want %s", got, tt.want)
 			}
 			if tt.problems != nil && got[0].Fixes != tt.problems[0].Fixes {
 				t.Fatalf("fixes = %d, want the problem's %d", got[0].Fixes, tt.problems[0].Fixes)
 			}
 		})
-	}
-}
-
-func TestAnOwnerWhoseNameCannotBeReadFailsTheClassing(t *testing.T) {
-	// Arrange
-	problems := []wsm.DeployProblem{{Key: wsm.ProblemKey{Operation: "a", Message: "m"}, Owner: "ws-gone"}}
-
-	// Act
-	_, err := classifyFindings([]FindingGroup{{Operation: "a", Message: "m"}}, problems, func(ids.WorkspaceID) (string, error) { return "", errors.New("no such workspace") })
-
-	// Assert
-	if err == nil {
-		t.Fatal("classifyFindings drew an owner it could not name")
 	}
 }
 
@@ -139,7 +122,7 @@ func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
 		{name: "an empty window is approved"},
 		{name: "a new group refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew)}, wantArm: ArmProblemsUnowned,
 			wantKept: []string{sinkKey.Operation + ": " + sinkKey.Message + " (new)"}},
-		{name: "an old group nobody owns refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowSeenBefore)}, wantArm: ArmProblemsUnowned,
+		{name: "an old group never taken on refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowSeenBefore)}, wantArm: ArmProblemsUnowned,
 			wantKept: []string{sinkKey.Operation + ": " + sinkKey.Message + " (seen_before)"}},
 		{name: "a group back after its fix refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowRecurred)}, wantArm: ArmProblemsUnowned,
 			wantKept: []string{sinkKey.Operation + ": " + sinkKey.Message + " (recurred)"}},
@@ -149,11 +132,11 @@ func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			toldWith(t, h, tt.groups...)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"})
+			err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"})
 
 			// Assert
 			if tt.wantArm == "" {
@@ -167,17 +150,17 @@ func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
 				t.Fatalf("DecideMediation = %v, want the %s refusal naming %v", err, tt.wantArm, tt.wantKept)
 			}
 			if owedCheck(t, h) == nil || len(h.checks.stopped) != 0 {
-				t.Fatalf("stopped %v, want the check still owed and the intake left at work", h.checks.stopped)
+				t.Fatalf("stopped %v, want the check still owed and the mediator left at work", h.checks.stopped)
 			}
 		})
 	}
 }
 
-func TestADispatchMakesItsRemediationTheOwnerOfTheGroupsItQuotes(t *testing.T) {
+func TestADispatchTakesOnTheGroupsItQuotes(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	toldWith(t, h, sinkGroup(wsm.WindowSeenBefore))
 
 	// Act
@@ -185,30 +168,30 @@ func TestADispatchMakesItsRemediationTheOwnerOfTheGroupsItQuotes(t *testing.T) {
 
 	// Assert
 	problems, readErr := h.db.DeployProblems(context.Background(), mediationKey(h))
-	if err != nil || readErr != nil || len(problems) != 1 || problems[0].Key != sinkKey || problems[0].Owner != "ws-fixer" || problems[0].Findings != "the sink warning recurs" {
-		t.Fatalf("dispatch = %v, problems (%+v, %v); want the remediation owning the quoted group", err, problems, readErr)
+	if err != nil || readErr != nil || len(problems) != 1 || problems[0].Key != sinkKey || problems[0].FixedAt != nil || problems[0].Findings != "the sink warning recurs" {
+		t.Fatalf("dispatch = %v, problems (%+v, %v); want the quoted group taken on", err, problems, readErr)
 	}
 }
 
-func TestAnEscalationOwnsTheGroupsNobodyOwnedAndIsToldTheOldOnes(t *testing.T) {
+func TestAnEscalationTakesOnTheGroupsNeverTakenOn(t *testing.T) {
 	// Arrange
 	other := wsm.WindowGroup{Operation: "daemon.persistentwifi.failover", Message: "no networks", Class: wsm.WindowNew}
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	toldWith(t, h, sinkGroup(wsm.WindowRecurred), other)
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "the user must grant the helper"})
+	err := decideTold(h, Decision{Kind: MediationEscalate, Summary: "the user must grant the helper"})
 
 	// Assert
 	problems, readErr := h.db.DeployProblems(context.Background(), mediationKey(h))
 	if err != nil || readErr != nil || len(problems) != 2 {
-		t.Fatalf("escalate = %v, problems (%+v, %v); want both unowned groups owned", err, problems, readErr)
+		t.Fatalf("escalate = %v, problems (%+v, %v); want both groups taken on", err, problems, readErr)
 	}
 	for _, p := range problems {
-		if p.Owner != "ws-fixer" {
-			t.Fatalf("problem %+v, want the escalation owning it", p)
+		if p.FixedAt != nil {
+			t.Fatalf("problem %+v, want it open", p)
 		}
 	}
 }
@@ -218,7 +201,7 @@ func TestADaemonsEscalationBriefListsTheOldGroups(t *testing.T) {
 	other := wsm.WindowGroup{Operation: "daemon.persistentwifi.failover", Message: "no networks", Class: wsm.WindowNew}
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	toldWith(t, h, sinkGroup(wsm.WindowRecurred), other)
 
 	// Act
@@ -235,7 +218,7 @@ func TestARemediationsDeployMarksItsProblemsFixed(t *testing.T) {
 	// Arrange
 	h := finishing(t)
 	ctx := context.Background()
-	if err := h.db.OwnDeployProblems(ctx, mediationKey(h), []wsm.ProblemKey{sinkKey}, "ws-fixer", "the sink warning", deployStarted); err != nil {
+	if err := h.db.TakeOnDeployProblems(ctx, mediationKey(h), []wsm.ProblemKey{sinkKey}, "the sink warning", deployStarted); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
@@ -281,19 +264,19 @@ func TestAProblemsEvidenceNamesTheGroupsItQuotes(t *testing.T) {
 	}
 }
 
-func TestDecidedProblemsThatCannotBeRecordedAsOwnedAreAnError(t *testing.T) {
+func TestDecidedProblemsThatCannotBeTakenOnAreAnError(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 
 	// Act: a problem quoting a record whose group names no operation is
 	// refused by the store.
-	h.o.ownProblems(context.Background(), mediationKey(h), "ws-fixer", []DeployProblem{{Statement: "s"}}, []wsm.ProblemKey{{Message: "no operation"}}, "unstated", dlog.Context{})
+	h.o.takeOnProblems(context.Background(), mediationKey(h), []DeployProblem{{Statement: "s"}}, []wsm.ProblemKey{{Message: "no operation"}}, "unstated", dlog.Context{})
 
 	// Assert
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the decided problems could not be recorded as owned; the next check finds them unowned"}); !ok {
-		t.Fatalf("records = %v, want the failed ownership at ERROR", h.logs.Records())
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the decided problems could not be recorded as taken on; the next check finds them untaken"}); !ok {
+		t.Fatalf("records = %v, want the failed record at ERROR", h.logs.Records())
 	}
 }
 
@@ -317,11 +300,11 @@ func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			toldWith(t, h, tt.group)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: tt.decision, Summary: "s", Problems: []DeployProblem{{Statement: "s", Evidence: []string{sinkRecord.Raw}}}})
+			err := decideTold(h, Decision{Kind: tt.decision, Summary: "s", Problems: []DeployProblem{{Statement: "s", Evidence: []string{sinkRecord.Raw}}}})
 
 			// Assert
 			var refused *RefusalError
@@ -356,7 +339,7 @@ func TestTheBriefMarksAProblemPastItsFixes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got := RenderFindings([]FindingGroup{{Operation: "a", Message: "m", Level: "error", Count: 1, Class: wsm.WindowRecurred, Owner: "remedy", Fixes: tt.fixes}})
+			got := RenderFindings([]FindingGroup{{Operation: "a", Message: "m", Level: "error", Count: 1, Class: wsm.WindowRecurred, Fixes: tt.fixes}})
 
 			// Assert
 			if marked := strings.Contains(got, "only an escalation is accepted"); marked != tt.want {

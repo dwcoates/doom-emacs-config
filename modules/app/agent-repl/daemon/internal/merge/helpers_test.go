@@ -108,8 +108,8 @@ type fakeDB struct {
 	checks wsm.DB
 	// endingErr fails RecordMediationEnding.
 	endingErr error
-	// escalationRecordErr fails RecordDeployEscalation.
-	escalationRecordErr  error
+	// mediatorRecordErr fails RecordDeployMediator.
+	mediatorRecordErr    error
 	mediationErr         error
 	dispatchErr          error
 	remediationFinishErr error
@@ -382,10 +382,6 @@ func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed t
 	return f.checks.EscalateMediation(ctx, repo, owed, brief)
 }
 
-func (f *fakeDB) RecordMediationEscalation(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
-	return f.checks.RecordMediationEscalation(ctx, repo, owed, ws)
-}
-
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }
@@ -400,20 +396,30 @@ func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediat
 	return f.checks.MediationOf(ctx, repo)
 }
 
-func (f *fakeDB) StandingDeployCheckOf(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) (wsm.StandingDeployCheck, bool, error) {
-	return f.checks.StandingDeployCheckOf(ctx, repo, role)
+func (f *fakeDB) DeployMediatorOf(ctx context.Context, repo wsm.RepoKey) (wsm.DeployMediator, bool, error) {
+	return f.checks.DeployMediatorOf(ctx, repo)
 }
 
-func (f *fakeDB) RecordStandingDeployCheck(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName, ws ids.WorkspaceID) error {
-	return f.checks.RecordStandingDeployCheck(ctx, repo, role, ws)
+func (f *fakeDB) MediatorRepoOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	return f.checks.MediatorRepoOf(ctx, ws)
 }
 
-func (f *fakeDB) ForgetStandingDeployCheck(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) (bool, error) {
-	return f.checks.ForgetStandingDeployCheck(ctx, repo, role)
+func (f *fakeDB) RecordDeployMediator(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	err := f.mediatorRecordErr
+	f.mu.Unlock()
+	if err != nil {
+		return err
+	}
+	return f.checks.RecordDeployMediator(ctx, repo, ws)
 }
 
-func (f *fakeDB) MarkStandingBriefed(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) error {
-	return f.checks.MarkStandingBriefed(ctx, repo, role)
+func (f *fakeDB) MarkMediatorBriefed(ctx context.Context, repo wsm.RepoKey) error {
+	return f.checks.MarkMediatorBriefed(ctx, repo)
+}
+
+func (f *fakeDB) MarkEscalationTold(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+	return f.checks.MarkEscalationTold(ctx, repo, owed)
 }
 
 func (f *fakeDB) RecordMediationEnding(ctx context.Context, repo wsm.RepoKey, owed time.Time, ending wsm.DeployEnding) (bool, error) {
@@ -434,47 +440,21 @@ func (f *fakeDB) NoteQuietDeployCheck(ctx context.Context, repo wsm.RepoKey) (bo
 	return f.checks.NoteQuietDeployCheck(ctx, repo)
 }
 
-func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
-	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)
-}
-
 // aFixerTurn is a fixer's brief for a dispatch a test records by hand.
 var aFixerTurn = wsm.FixerTurn{ID: "turn-fixer", Brief: "fix the deploy's problems", Origin: 1}
 
-func (f *fakeDB) RecordFixerTurn(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID, turn wsm.FixerTurn) (bool, error) {
-	return f.checks.RecordFixerTurn(ctx, repo, owed, ws, turn)
+func (f *fakeDB) RecordFixerTurn(ctx context.Context, repo wsm.RepoKey, owed time.Time, turn wsm.FixerTurn) (bool, error) {
+	return f.checks.RecordFixerTurn(ctx, repo, owed, turn)
 }
 
-func (f *fakeDB) DispatchMediation(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, ws ids.WorkspaceID, turn wsm.FixerTurn) (bool, error) {
+func (f *fakeDB) DispatchMediation(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, turn wsm.FixerTurn) (bool, error) {
 	f.mu.Lock()
 	err := f.dispatchErr
 	f.mu.Unlock()
 	if err != nil {
 		return false, err
 	}
-	return f.checks.DispatchMediation(ctx, repo, owed, at, ws, turn)
-}
-
-func (f *fakeDB) MediationRoleOf(ctx context.Context, ws ids.WorkspaceID) (*wsm.MediationRole, error) {
-	return f.checks.MediationRoleOf(ctx, ws)
-}
-
-func (f *fakeDB) RecordDeployEscalation(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, at time.Time) error {
-	f.mu.Lock()
-	err := f.escalationRecordErr
-	f.mu.Unlock()
-	if err != nil {
-		return err
-	}
-	return f.checks.RecordDeployEscalation(ctx, ws, repo, at)
-}
-
-func (f *fakeDB) DeployEscalationOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
-	return f.checks.DeployEscalationOf(ctx, ws)
-}
-
-func (f *fakeDB) DeployEscalationsOf(ctx context.Context, repo wsm.RepoKey) ([]ids.WorkspaceID, error) {
-	return f.checks.DeployEscalationsOf(ctx, repo)
+	return f.checks.DispatchMediation(ctx, repo, owed, at, turn)
 }
 
 func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationFinish) (wsm.RemediationFinish, error) {
@@ -491,12 +471,12 @@ func (f *fakeDB) DeployProblems(ctx context.Context, repo wsm.RepoKey) ([]wsm.De
 	return f.checks.DeployProblems(ctx, repo)
 }
 
-func (f *fakeDB) OwnDeployProblems(ctx context.Context, repo wsm.RepoKey, keys []wsm.ProblemKey, owner ids.WorkspaceID, findings string, at time.Time) error {
-	return f.checks.OwnDeployProblems(ctx, repo, keys, owner, findings, at)
+func (f *fakeDB) TakeOnDeployProblems(ctx context.Context, repo wsm.RepoKey, keys []wsm.ProblemKey, findings string, at time.Time) error {
+	return f.checks.TakeOnDeployProblems(ctx, repo, keys, findings, at)
 }
 
-func (f *fakeDB) FixDeployProblemsOf(ctx context.Context, owner ids.WorkspaceID, at time.Time) (int, error) {
-	return f.checks.FixDeployProblemsOf(ctx, owner, at)
+func (f *fakeDB) FixDeployProblems(ctx context.Context, repo wsm.RepoKey, at time.Time) (int, error) {
+	return f.checks.FixDeployProblems(ctx, repo, at)
 }
 
 func (f *fakeDB) CheckedThrough(ctx context.Context, repo wsm.RepoKey) (time.Time, bool, error) {
@@ -4748,7 +4728,7 @@ type fakeDeployChecks struct {
 }
 
 func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
-	_, standing, err := f.db.StandingDeployCheckOf(ctx, f.key(), wsm.StandingMediator)
+	_, standing, err := f.db.DeployMediatorOf(ctx, f.key())
 	if err != nil {
 		return err
 	}

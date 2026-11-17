@@ -2650,7 +2650,7 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 		// recorded before its first prompt brought this session up
 		// (deploychecks.go), so every turn of it, a check's or a fix's, runs
 		// under the one system prompt.
-		if record.StandingDeployCheck {
+		if record.DeployMediator {
 			return agentProfileLanding(standing, deployMediatorLanding()), nil
 		}
 		return agentProfile(standing, bypass.Holds), nil
