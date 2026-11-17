@@ -1746,6 +1746,25 @@ func TestResolveBaseAnswersTheCommit(t *testing.T) {
 	}
 }
 
+// TestNoVerbReadsTheClockAroundItsNilDefault pins that every verb reads the
+// clock through v.now(), which falls back to time.Now when Deps.Now is nil
+// as production leaves it: a direct v.deps.Now() call panicked the daemon on
+// every deploy check (2026-11-17 17:35, releaseMergedHolder).
+func TestNoVerbReadsTheClockAroundItsNilDefault(t *testing.T) {
+	// Act.
+	var offenders []string
+	for _, file := range sourcescan.Production(t) {
+		if strings.Contains(string(file.Source), "v.deps.Now()") {
+			offenders = append(offenders, file.Name)
+		}
+	}
+
+	// Assert.
+	if len(offenders) != 0 {
+		t.Fatalf("files calling v.deps.Now() directly = %v, want every read through v.now()", offenders)
+	}
+}
+
 // TestNoCreatePathAsksAboutAncestry pins that a create never asks git whether
 // a base lies on the primary branch: a workspace is always cut from its
 // source's tip. The package's one ancestry question -- whether a reopened
