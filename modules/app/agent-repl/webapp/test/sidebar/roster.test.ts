@@ -1102,13 +1102,22 @@ describe("a queue group's header with a deploy check", () => {
     pane(drawn).querySelector(".merge-queue-section .merged-group-head") as HTMLElement;
   const order = (head: HTMLElement): string[] =>
     Array.from(head.children).map((child) =>
-      child.classList.contains("sb-label") ? "repo" : child.classList.contains("sb-mq-mediation") ? "status" : child.classList.contains("sb-mq-status-tail") ? "tail" : child.textContent?.startsWith("(") ? "count" : "other",
+      child.classList.contains("sb-label") ? "repo" : child.classList.contains("sb-mq-mediation") ? "status" : child.classList.contains("sb-mq-status-tail") ? "tail" : child.classList.contains("sb-mq-release") ? "release" : child.textContent?.startsWith("(") ? "count" : "other",
     );
 
   it("puts the status after the count, followed by its own short rule", () => {
     const band = mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), mediation: { standing: { case: "waiting", value: {} } } } })], false);
     const drawn = drawWorkspaceRoster(roster({ mergeQueue: band }), sidebarContext());
     expect(order(groupHead(drawn))).toEqual(["repo", "count", "status", "tail"]);
+  });
+
+  it("draws the escalation's release after an escalated status", () => {
+    const band = mergeQueueBand(
+      [queueGroup({ id: "repo-1", queue: { head: mergingHead("w1"), mediation: { standing: { case: "escalated", value: {} } } } })],
+      false,
+    );
+    const drawn = drawWorkspaceRoster(roster({ mergeQueue: band }), sidebarContext());
+    expect(order(groupHead(drawn))).toEqual(["repo", "count", "status", "release", "tail"]);
   });
 
   it("draws no tail rule without a deploy check", () => {
