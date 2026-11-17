@@ -45,7 +45,11 @@ import {
   mergedBand,
   mergedGroup,
   mergedSection,
+  mergeQueueBand,
+  mergingHead,
   primaryPointer,
+  queueGroup,
+  waitingMerge,
   settleOwedDragClick,
   repoSection,
   roster,
@@ -60,6 +64,8 @@ import { STAND_IN_ATTRIBUTE } from "../../src/sidebar/row.js";
 import type { FailureSink } from "../../src/failure/sink.js";
 import { recordingFailures } from "../failure-sink.js";
 import { boxRect } from "../dom-rect.js";
+import { MERGE_QUEUE_SUBJECT_CLASS } from "../../src/sidebar/merge-queue-view.js";
+import { QUEUE_CURRENT_CLASS } from "../../src/sidebar/queue-selection.js";
 
 /** A storage a test can inspect, and one that throws on every access. */
 function memoryStorage(seed: Record<string, string> = {}): Storage {
@@ -1250,6 +1256,57 @@ describe("the webhost's page on screen leads the roster", () => {
 
     // Assert
     expect(highlighted(host)).toEqual(["ws-1"]);
+  });
+});
+
+describe("the selected workspace's merges in the Merge Queue", () => {
+  /** Rows ws-1 and ws-2, CURRENT the one named current, and a queue whose head is ws-2's merge and whose line holds ws-1's. */
+  function queued(current: string): WorkspaceRoster {
+    const drawn = twoRows(current);
+    drawn.mergeQueue = mergeQueueBand([
+      queueGroup({ id: "repo-1", queue: { head: mergingHead("ws-2"), waiting: [waitingMerge("ws-1")] } }),
+    ]);
+    return drawn;
+  }
+
+  /** The workspaces whose queue lines are highlighted. */
+  function queueHighlighted(host: HTMLElement): string[] {
+    return [...host.querySelectorAll(`.${MERGE_QUEUE_SUBJECT_CLASS}.${QUEUE_CURRENT_CLASS}`)].map((el) => el.getAttribute("data-workspace") ?? "");
+  }
+
+  it("highlights the current workspace's merge when a push draws the queue", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    // Act
+    mountWebhostSidebar(host, ctxFor([queued("ws-1")]), { storage: null, timers: fakeTimers() });
+    await settle();
+    // Assert
+    expect(queueHighlighted(host)).toEqual(["ws-1"]);
+  });
+
+  it("moves the queue's highlight with a push that changes only the selection", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const stream = pushedRosters();
+    mountWebhostSidebar(host, ctxFor([], stream.impl), { storage: null, timers: fakeTimers() });
+    stream.push(queued("ws-1"));
+    await settle();
+    // Act
+    stream.push(queued("ws-2"));
+    await settle();
+    // Assert
+    expect(queueHighlighted(host)).toEqual(["ws-2"]);
+  });
+
+  it("moves the queue's highlight to the page the webhost shows at once", async () => {
+    // Arrange
+    const host = document.createElement("nav");
+    const sidebar = mountWebhostSidebar(host, ctxFor([queued("ws-1")]), { storage: null, timers: fakeTimers() });
+    await settle();
+    // Act
+    sidebar.markShown("ws-2");
+    // Assert
+    expect(queueHighlighted(host)).toEqual(["ws-2"]);
   });
 });
 

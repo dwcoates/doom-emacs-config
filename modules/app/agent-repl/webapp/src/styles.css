@@ -1912,6 +1912,9 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   --row-highlight-tint: color-mix(in srgb, white 4.4%, color-mix(in srgb, var(--card) 69%, var(--sidebar-base)));
 }
 #ws-sidebar .ws.current > .row { background-color: var(--row-highlight-tint); }
+/* THE SELECTED WORKSPACE'S MERGES IN THE MERGE QUEUE wear the same fill
+   (owner request, 2026-11-17; src/sidebar/queue-selection.ts). */
+#ws-sidebar .sb-mq-subject.current { background-color: var(--row-highlight-tint); }
 /* A REFUSED COLLAPSE FLASHES THE SELECTED ROW (owner request, 2026-10-27): the
    highlight fades out and back over 0.7s. The class is set by
    src/sidebar/section-fold.ts and removed when the animation ends. */
