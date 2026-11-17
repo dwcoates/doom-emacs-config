@@ -41,7 +41,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
-import { LogTail, StreamRecords, type RecordSink } from "./log.js";
+import { LogTail, MergedRecords, StreamRecords, type RecordSink } from "./log.js";
 import { createShimClients, type ShimClients } from "./client.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -92,6 +92,8 @@ export interface ShimDirectories {
   readonly spoolRoot: string;
   /** The file fd 3 is bound to (unless the spawn asked for a pipe). */
   readonly logPath: string;
+  /** The file fd 6 is bound to: the log's warnings file, every warn and error record. */
+  readonly warningsPath: string;
   /** The shim.v1 socket. */
   readonly listen: string;
   /** The store.v1 socket. */
@@ -185,6 +187,7 @@ export function makeDirectories(): ShimDirectories {
     lockDir: path.join(root, "locks"),
     spoolRoot: path.join(root, "spool"),
     logPath: path.join(root, "shim.log"),
+    warningsPath: path.join(root, "shim.warn.log"),
     // NAMED AFTER A WORKSPACE ID, exactly as the daemon names it: the shim
     // reads `workspace_id` off this basename and refuses a socket that does not
     // spell one.
@@ -195,6 +198,7 @@ export function makeDirectories(): ShimDirectories {
     mkdirSync(dir, { recursive: true });
   }
   closeSync(openSync(dirs.logPath, "a"));
+  closeSync(openSync(dirs.warningsPath, "a"));
   return dirs;
 }
 
@@ -224,6 +228,8 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
           dirs.storeSocket,
           "--log-fd",
           "3",
+          "--warnings-fd",
+          "6",
           "--fake",
           ...(options.extraArgv ?? []),
         ];
@@ -282,12 +288,15 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
   }
 
   const logFd = options.logPipe === true ? undefined : openSync(dirs.logPath, "a");
+  // fd 6 is the log's warnings file, as the daemon hands it (`--warnings-fd 6`).
+  const warningsFd = openSync(dirs.warningsPath, "a");
   const child = spawn(process.execPath, [SHIM_BUNDLE, ...argv], {
     cwd: dirs.workspace,
     env,
-    stdio: ["ignore", "pipe", "pipe", logFd ?? "pipe"],
+    stdio: ["ignore", "pipe", "pipe", logFd ?? "pipe", "ignore", "ignore", warningsFd],
   });
   if (logFd !== undefined) closeSync(logFd);
+  closeSync(warningsFd);
 
   let stderrText = "";
   child.stdout?.on("data", (chunk: Buffer) => {
@@ -306,19 +315,20 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
   // A pipe's records arrive as data events; a file's are tailed on fs.watch.
   // Either way the suites read one interface, so only the poisoned-sink test
   // knows which sink it got.
-  const log: RecordSink =
-    pipeEnd === null ? LogTail.open(dirs.logPath) : new StreamRecords(pipeEnd);
-  // THE SHIM'S EXIT ENDS ITS FILE'S RECORDS: nothing else writes that file,
-  // so a wait still pending then can never be satisfied and rejects with the
-  // exit at once (RecordSink.endOfRecords). A pipe's records end on the
-  // pipe's own end, once every byte in it has been read.
-  if (pipeEnd === null) {
-    void exited.then((exit) => {
-      log.endOfRecords(
-        `the shim exited (code ${String(exit.code)}, signal ${String(exit.signal)}); its stderr:\n${stderrText}`,
-      );
-    });
-  }
+  // THE LOG AND ITS WARNINGS FILE ARE ONE RECORD: every warn and error record
+  // lands only in the warnings file (proto/vocab/log-warnings-sink.json).
+  const mainRecords: RecordSink = pipeEnd === null ? LogTail.open(dirs.logPath) : new StreamRecords(pipeEnd);
+  const warningRecords = LogTail.open(dirs.warningsPath);
+  const log: RecordSink = new MergedRecords(mainRecords, warningRecords);
+  // THE SHIM'S EXIT ENDS ITS FILES' RECORDS: nothing else writes them, so a
+  // wait still pending then can never be satisfied and rejects with the exit
+  // at once (RecordSink.endOfRecords). A pipe's records end on the pipe's own
+  // end, once every byte in it has been read.
+  void exited.then((exit) => {
+    const reason = `the shim exited (code ${String(exit.code)}, signal ${String(exit.signal)}); its stderr:\n${stderrText}`;
+    if (pipeEnd === null) mainRecords.endOfRecords(reason);
+    warningRecords.endOfRecords(reason);
+  });
   const handle: ShimHandle = {
     dirs,
     child,

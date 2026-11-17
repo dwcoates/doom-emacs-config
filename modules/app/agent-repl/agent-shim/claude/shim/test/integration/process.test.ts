@@ -85,7 +85,7 @@ describe("required environment", () => {
     const env = { ...servingEnv(dirs), AGENT_REPL_OWNED: undefined };
 
     const run = await runShim(
-      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--warnings-fd", "6", "--fake"],
       env,
     );
 
@@ -98,7 +98,7 @@ describe("required environment", () => {
     const env = { ...servingEnv(dirs), CLAUDE_CONFIG_DIR: undefined };
 
     const run = await runShim(
-      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--warnings-fd", "6", "--fake"],
       env,
     );
 
@@ -111,7 +111,7 @@ describe("required environment", () => {
     const env = { ...servingEnv(dirs), SHIM_BUILD_SHA: undefined };
 
     const run = await runShim(
-      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--warnings-fd", "6", "--fake"],
       env,
     );
 
@@ -126,7 +126,7 @@ describe("required environment", () => {
     const env = { ...servingEnv(dirs), AGENT_REPL_OWNED: undefined };
 
     const run = await runShim(
-      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--fake"],
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "3", "--warnings-fd", "6", "--fake"],
       env,
     );
 
@@ -159,6 +159,8 @@ describe("the spawn contract's argv", () => {
           dirs.storeSocket,
           "--log-fd",
           "3",
+          "--warnings-fd",
+          "6",
           "--fake",
           ...legacy,
         ],
@@ -177,7 +179,7 @@ describe("the spawn contract's argv", () => {
     const dirs = makeDirectories();
 
     const run = await runShim(
-      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "4", "--fake"],
+      ["--listen", dirs.listen, "--store-socket", dirs.storeSocket, "--log-fd", "4", "--warnings-fd", "6", "--fake"],
       servingEnv(dirs),
     );
 
@@ -236,6 +238,8 @@ describe("the workspace lock", () => {
         first.dirs.storeSocket,
         "--log-fd",
         "3",
+        "--warnings-fd",
+        "6",
         "--fake",
       ],
     });
@@ -398,6 +402,8 @@ describe("--listen over an existing socket file", () => {
         first.dirs.storeSocket,
         "--log-fd",
         "3",
+        "--warnings-fd",
+        "6",
         "--fake",
       ],
     });
@@ -514,6 +520,8 @@ describe("the durable log sink", () => {
         dirs.storeSocket,
         "--log-fd",
         "3",
+        "--warnings-fd",
+        "6",
         "--fake",
       ],
       servingEnv(dirs),
@@ -565,7 +573,7 @@ describe("the store socket", () => {
     const dirs = makeDirectories();
     const env = { ...servingEnv(dirs), AGENT_REPL_STORE_SOCKET: undefined };
 
-    const run = await runShim(["--listen", dirs.listen, "--log-fd", "3", "--fake"], env);
+    const run = await runShim(["--listen", dirs.listen, "--log-fd", "3", "--warnings-fd", "6", "--fake"], env);
 
     expect(run.exit.code).not.toBe(0);
     expect(run.stderr).toContain("store socket");

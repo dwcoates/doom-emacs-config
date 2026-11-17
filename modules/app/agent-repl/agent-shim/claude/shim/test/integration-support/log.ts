@@ -313,3 +313,47 @@ export function parseRecords(text: string): LogRecord[] {
       }
     });
 }
+
+/**
+ * Two sinks read as one: a shim's log and its warnings file, where every warn
+ * and error record lands and nothing else (proto/vocab/log-warnings-sink.json).
+ * Records are ordered by their timestamps, which one process stamps in the
+ * order it writes them.
+ */
+export class MergedRecords implements RecordSink {
+  constructor(
+    private readonly log: RecordSink,
+    private readonly warnings: RecordSink,
+  ) {}
+
+  records(): LogRecord[] {
+    return [...this.log.records(), ...this.warnings.records()].sort(
+      (a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp),
+    );
+  }
+
+  /** The first matching record either sink holds or receives; rejects only once neither can. */
+  async record(predicate: LogPredicate): Promise<LogRecord> {
+    const already = this.records().find(predicate);
+    if (already !== undefined) return already;
+    return new Promise<LogRecord>((resolve, reject) => {
+      let rejected = 0;
+      const failed = (error: unknown): void => {
+        rejected += 1;
+        if (rejected === 2) reject(error instanceof Error ? error : new Error(String(error)));
+      };
+      this.log.record(predicate).then(resolve, failed);
+      this.warnings.record(predicate).then(resolve, failed);
+    });
+  }
+
+  endOfRecords(reason: string): void {
+    this.log.endOfRecords(reason);
+    this.warnings.endOfRecords(reason);
+  }
+
+  close(): void {
+    this.log.close();
+    this.warnings.close();
+  }
+}
