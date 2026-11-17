@@ -23,14 +23,20 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 //
 // THE SET IS RESOLVED, NOT RAW. It holds every workspace the roster carries
 // that is not closed -- the Open section's and the hidden section's alike,
-// since a hidden workspace is still one the user can name and select. A name
-// two of them share names one of them only when exactly one of those is in
-// the viewer's own repository, and then names that one; otherwise the name
-// names no ONE workspace and is no target, drawn as plain text and never
-// completed, rather than linked to a workspace that might be the wrong one.
-// The viewing workspace's own is never a target (a link to the page the
-// reader is already on would switch nowhere), and a name it carries names no
-// other workspace either, so the reader's own workspace's name never switches
+// since a hidden workspace is still one the user can name and select -- and
+// every workspace CLOSED within the daemon's recent window (five days, at or
+// after the instant five days before the resolve). A name two of them share
+// names one of them only when exactly one of those is in the viewer's own
+// repository, and then names that one; otherwise the name names no ONE
+// workspace and is no target, drawn as plain text and never completed, rather
+// than linked to a workspace that might be the wrong one. A name a workspace
+// that is not closed carries is settled among those alone: a closed workspace
+// sharing it is no target, so a reused name never costs the live workspace
+// its link. A closed workspace whose close predates the daemon's close record
+// is no target, since the daemon cannot vouch for when it closed. The viewing
+// workspace's own is never a target (a link to the page the reader is
+// already on would switch nowhere), and a name it carries names no other
+// workspace either, so the reader's own workspace's name never switches
 // somewhere else.
 //
 // ONE SET, TWO READERS. The page receives it on `WatchWorkspaceMentions` and
@@ -42,7 +48,9 @@ option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 // change a page re-links its drawn bubbles for and a composer re-marks for.
 message WorkspaceMentionTargets {
   // The targets: the Open section's in its drawn order, then the hidden
-  // section's in its drawn order. Every name is distinct.
+  // section's in its drawn order, then the recently closed ones (the
+  // recently merged, then the other closed, each in the roster's order).
+  // Every name is distinct.
   repeated WorkspaceMentionTarget targets = 1;
 }
 
@@ -53,6 +61,18 @@ message WorkspaceMentionTarget {
   WorkspaceMentionName name = 1;
   // The workspace a click selects (`SelectWorkspace`), echoed verbatim.
   workspace.v1.WorkspaceRef workspace = 2;
+  // Whether the workspace is open or closed when the set was resolved. THE
+  // SET ARM IS WHAT A CLICK DOES: an open target is selected, a closed one is
+  // REOPENED (`OpenWorkspace`) and then selected. The link is drawn the same
+  // either way. Always set; an unset standing is a contract breach the page
+  // rejects loudly.
+  oneof standing {
+    // The workspace is open: a click selects it.
+    WorkspaceMentionTargetOpen open = 3;
+    // The workspace closed within the recent window: a click reopens it,
+    // then selects it.
+    WorkspaceMentionTargetClosed closed = 4;
+  }
   // The repository the workspace belongs to, which the composer annotates
   // the completion with. UNSET only for a workspace whose repository the
   // daemon's registry does not carry, which the roster already logs; the
@@ -66,6 +86,15 @@ message WorkspaceMentionRepository {
   // The repository's name, as the sidebar heads its section. Never empty.
   string name = 1;
 }
+
+// An open mention target. DELIBERATELY EMPTY: the arm is the fact, and a
+// click on it is an ordinary workspace switch.
+message WorkspaceMentionTargetOpen {}
+
+// A recently closed mention target. DELIBERATELY EMPTY: the arm is the fact,
+// and a click on it reopens the workspace before selecting it, as the
+// sidebar's closed entries do.
+message WorkspaceMentionTargetClosed {}
 
 // A workspace's name, exactly as the sidebar draws it. A mention is a WHOLE
 // occurrence of it anywhere in a bubble's prose: an inline code span whose

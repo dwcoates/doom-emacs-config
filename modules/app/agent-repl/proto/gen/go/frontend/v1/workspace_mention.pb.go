@@ -39,14 +39,20 @@ const (
 //
 // THE SET IS RESOLVED, NOT RAW. It holds every workspace the roster carries
 // that is not closed -- the Open section's and the hidden section's alike,
-// since a hidden workspace is still one the user can name and select. A name
-// two of them share names one of them only when exactly one of those is in
-// the viewer's own repository, and then names that one; otherwise the name
-// names no ONE workspace and is no target, drawn as plain text and never
-// completed, rather than linked to a workspace that might be the wrong one.
-// The viewing workspace's own is never a target (a link to the page the
-// reader is already on would switch nowhere), and a name it carries names no
-// other workspace either, so the reader's own workspace's name never switches
+// since a hidden workspace is still one the user can name and select -- and
+// every workspace CLOSED within the daemon's recent window (five days, at or
+// after the instant five days before the resolve). A name two of them share
+// names one of them only when exactly one of those is in the viewer's own
+// repository, and then names that one; otherwise the name names no ONE
+// workspace and is no target, drawn as plain text and never completed, rather
+// than linked to a workspace that might be the wrong one. A name a workspace
+// that is not closed carries is settled among those alone: a closed workspace
+// sharing it is no target, so a reused name never costs the live workspace
+// its link. A closed workspace whose close predates the daemon's close record
+// is no target, since the daemon cannot vouch for when it closed. The viewing
+// workspace's own is never a target (a link to the page the reader is
+// already on would switch nowhere), and a name it carries names no other
+// workspace either, so the reader's own workspace's name never switches
 // somewhere else.
 //
 // ONE SET, TWO READERS. The page receives it on `WatchWorkspaceMentions` and
@@ -59,7 +65,9 @@ const (
 type WorkspaceMentionTargets struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The targets: the Open section's in its drawn order, then the hidden
-	// section's in its drawn order. Every name is distinct.
+	// section's in its drawn order, then the recently closed ones (the
+	// recently merged, then the other closed, each in the roster's order).
+	// Every name is distinct.
 	Targets       []*WorkspaceMentionTarget `protobuf:"bytes,1,rep,name=targets,proto3" json:"targets,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -110,6 +118,17 @@ type WorkspaceMentionTarget struct {
 	Name *WorkspaceMentionName `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// The workspace a click selects (`SelectWorkspace`), echoed verbatim.
 	Workspace *v1.WorkspaceRef `protobuf:"bytes,2,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	// Whether the workspace is open or closed when the set was resolved. THE
+	// SET ARM IS WHAT A CLICK DOES: an open target is selected, a closed one is
+	// REOPENED (`OpenWorkspace`) and then selected. The link is drawn the same
+	// either way. Always set; an unset standing is a contract breach the page
+	// rejects loudly.
+	//
+	// Types that are valid to be assigned to Standing:
+	//
+	//	*WorkspaceMentionTarget_Open
+	//	*WorkspaceMentionTarget_Closed
+	Standing isWorkspaceMentionTarget_Standing `protobuf_oneof:"standing"`
 	// The repository the workspace belongs to, which the composer annotates
 	// the completion with. UNSET only for a workspace whose repository the
 	// daemon's registry does not carry, which the roster already logs; the
@@ -163,12 +182,56 @@ func (x *WorkspaceMentionTarget) GetWorkspace() *v1.WorkspaceRef {
 	return nil
 }
 
+func (x *WorkspaceMentionTarget) GetStanding() isWorkspaceMentionTarget_Standing {
+	if x != nil {
+		return x.Standing
+	}
+	return nil
+}
+
+func (x *WorkspaceMentionTarget) GetOpen() *WorkspaceMentionTargetOpen {
+	if x != nil {
+		if x, ok := x.Standing.(*WorkspaceMentionTarget_Open); ok {
+			return x.Open
+		}
+	}
+	return nil
+}
+
+func (x *WorkspaceMentionTarget) GetClosed() *WorkspaceMentionTargetClosed {
+	if x != nil {
+		if x, ok := x.Standing.(*WorkspaceMentionTarget_Closed); ok {
+			return x.Closed
+		}
+	}
+	return nil
+}
+
 func (x *WorkspaceMentionTarget) GetRepository() *WorkspaceMentionRepository {
 	if x != nil {
 		return x.Repository
 	}
 	return nil
 }
+
+type isWorkspaceMentionTarget_Standing interface {
+	isWorkspaceMentionTarget_Standing()
+}
+
+type WorkspaceMentionTarget_Open struct {
+	// The workspace is open: a click selects it.
+	Open *WorkspaceMentionTargetOpen `protobuf:"bytes,3,opt,name=open,proto3,oneof"`
+}
+
+type WorkspaceMentionTarget_Closed struct {
+	// The workspace closed within the recent window: a click reopens it,
+	// then selects it.
+	Closed *WorkspaceMentionTargetClosed `protobuf:"bytes,4,opt,name=closed,proto3,oneof"`
+}
+
+func (*WorkspaceMentionTarget_Open) isWorkspaceMentionTarget_Standing() {}
+
+func (*WorkspaceMentionTarget_Closed) isWorkspaceMentionTarget_Standing() {}
 
 // The repository a mention target's workspace belongs to, as the composer's
 // completion annotation draws it.
@@ -217,6 +280,83 @@ func (x *WorkspaceMentionRepository) GetName() string {
 	return ""
 }
 
+// An open mention target. DELIBERATELY EMPTY: the arm is the fact, and a
+// click on it is an ordinary workspace switch.
+type WorkspaceMentionTargetOpen struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceMentionTargetOpen) Reset() {
+	*x = WorkspaceMentionTargetOpen{}
+	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceMentionTargetOpen) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceMentionTargetOpen) ProtoMessage() {}
+
+func (x *WorkspaceMentionTargetOpen) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceMentionTargetOpen.ProtoReflect.Descriptor instead.
+func (*WorkspaceMentionTargetOpen) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_workspace_mention_proto_rawDescGZIP(), []int{3}
+}
+
+// A recently closed mention target. DELIBERATELY EMPTY: the arm is the fact,
+// and a click on it reopens the workspace before selecting it, as the
+// sidebar's closed entries do.
+type WorkspaceMentionTargetClosed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WorkspaceMentionTargetClosed) Reset() {
+	*x = WorkspaceMentionTargetClosed{}
+	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WorkspaceMentionTargetClosed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WorkspaceMentionTargetClosed) ProtoMessage() {}
+
+func (x *WorkspaceMentionTargetClosed) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WorkspaceMentionTargetClosed.ProtoReflect.Descriptor instead.
+func (*WorkspaceMentionTargetClosed) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_workspace_mention_proto_rawDescGZIP(), []int{4}
+}
+
 // A workspace's name, exactly as the sidebar draws it. A mention is a WHOLE
 // occurrence of it anywhere in a bubble's prose: an inline code span whose
 // whole text is the name, or the name in plain text bounded by characters no
@@ -231,7 +371,7 @@ type WorkspaceMentionName struct {
 
 func (x *WorkspaceMentionName) Reset() {
 	*x = WorkspaceMentionName{}
-	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[3]
+	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -243,7 +383,7 @@ func (x *WorkspaceMentionName) String() string {
 func (*WorkspaceMentionName) ProtoMessage() {}
 
 func (x *WorkspaceMentionName) ProtoReflect() protoreflect.Message {
-	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[3]
+	mi := &file_frontend_v1_workspace_mention_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -256,7 +396,7 @@ func (x *WorkspaceMentionName) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WorkspaceMentionName.ProtoReflect.Descriptor instead.
 func (*WorkspaceMentionName) Descriptor() ([]byte, []int) {
-	return file_frontend_v1_workspace_mention_proto_rawDescGZIP(), []int{3}
+	return file_frontend_v1_workspace_mention_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *WorkspaceMentionName) GetText() string {
@@ -272,16 +412,22 @@ const file_frontend_v1_workspace_mention_proto_rawDesc = "" +
 	"\n" +
 	"#frontend/v1/workspace_mention.proto\x12\vfrontend.v1\x1a\x1cworkspace/v1/workspace.proto\"X\n" +
 	"\x17WorkspaceMentionTargets\x12=\n" +
-	"\atargets\x18\x01 \x03(\v2#.frontend.v1.WorkspaceMentionTargetR\atargets\"\xe6\x01\n" +
+	"\atargets\x18\x01 \x03(\v2#.frontend.v1.WorkspaceMentionTargetR\atargets\"\xf6\x02\n" +
 	"\x16WorkspaceMentionTarget\x125\n" +
 	"\x04name\x18\x01 \x01(\v2!.frontend.v1.WorkspaceMentionNameR\x04name\x128\n" +
-	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12L\n" +
+	"\tworkspace\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12=\n" +
+	"\x04open\x18\x03 \x01(\v2'.frontend.v1.WorkspaceMentionTargetOpenH\x00R\x04open\x12C\n" +
+	"\x06closed\x18\x04 \x01(\v2).frontend.v1.WorkspaceMentionTargetClosedH\x00R\x06closed\x12L\n" +
 	"\n" +
-	"repository\x18\x05 \x01(\v2'.frontend.v1.WorkspaceMentionRepositoryH\x00R\n" +
-	"repository\x88\x01\x01B\r\n" +
+	"repository\x18\x05 \x01(\v2'.frontend.v1.WorkspaceMentionRepositoryH\x01R\n" +
+	"repository\x88\x01\x01B\n" +
+	"\n" +
+	"\bstandingB\r\n" +
 	"\v_repository\"0\n" +
 	"\x1aWorkspaceMentionRepository\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\"*\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"\x1c\n" +
+	"\x1aWorkspaceMentionTargetOpen\"\x1e\n" +
+	"\x1cWorkspaceMentionTargetClosed\"*\n" +
 	"\x14WorkspaceMentionName\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04textB(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
 
@@ -297,24 +443,28 @@ func file_frontend_v1_workspace_mention_proto_rawDescGZIP() []byte {
 	return file_frontend_v1_workspace_mention_proto_rawDescData
 }
 
-var file_frontend_v1_workspace_mention_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_frontend_v1_workspace_mention_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_frontend_v1_workspace_mention_proto_goTypes = []any{
-	(*WorkspaceMentionTargets)(nil),    // 0: frontend.v1.WorkspaceMentionTargets
-	(*WorkspaceMentionTarget)(nil),     // 1: frontend.v1.WorkspaceMentionTarget
-	(*WorkspaceMentionRepository)(nil), // 2: frontend.v1.WorkspaceMentionRepository
-	(*WorkspaceMentionName)(nil),       // 3: frontend.v1.WorkspaceMentionName
-	(*v1.WorkspaceRef)(nil),            // 4: workspace.v1.WorkspaceRef
+	(*WorkspaceMentionTargets)(nil),      // 0: frontend.v1.WorkspaceMentionTargets
+	(*WorkspaceMentionTarget)(nil),       // 1: frontend.v1.WorkspaceMentionTarget
+	(*WorkspaceMentionRepository)(nil),   // 2: frontend.v1.WorkspaceMentionRepository
+	(*WorkspaceMentionTargetOpen)(nil),   // 3: frontend.v1.WorkspaceMentionTargetOpen
+	(*WorkspaceMentionTargetClosed)(nil), // 4: frontend.v1.WorkspaceMentionTargetClosed
+	(*WorkspaceMentionName)(nil),         // 5: frontend.v1.WorkspaceMentionName
+	(*v1.WorkspaceRef)(nil),              // 6: workspace.v1.WorkspaceRef
 }
 var file_frontend_v1_workspace_mention_proto_depIdxs = []int32{
 	1, // 0: frontend.v1.WorkspaceMentionTargets.targets:type_name -> frontend.v1.WorkspaceMentionTarget
-	3, // 1: frontend.v1.WorkspaceMentionTarget.name:type_name -> frontend.v1.WorkspaceMentionName
-	4, // 2: frontend.v1.WorkspaceMentionTarget.workspace:type_name -> workspace.v1.WorkspaceRef
-	2, // 3: frontend.v1.WorkspaceMentionTarget.repository:type_name -> frontend.v1.WorkspaceMentionRepository
-	4, // [4:4] is the sub-list for method output_type
-	4, // [4:4] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	5, // 1: frontend.v1.WorkspaceMentionTarget.name:type_name -> frontend.v1.WorkspaceMentionName
+	6, // 2: frontend.v1.WorkspaceMentionTarget.workspace:type_name -> workspace.v1.WorkspaceRef
+	3, // 3: frontend.v1.WorkspaceMentionTarget.open:type_name -> frontend.v1.WorkspaceMentionTargetOpen
+	4, // 4: frontend.v1.WorkspaceMentionTarget.closed:type_name -> frontend.v1.WorkspaceMentionTargetClosed
+	2, // 5: frontend.v1.WorkspaceMentionTarget.repository:type_name -> frontend.v1.WorkspaceMentionRepository
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_workspace_mention_proto_init() }
@@ -322,14 +472,17 @@ func file_frontend_v1_workspace_mention_proto_init() {
 	if File_frontend_v1_workspace_mention_proto != nil {
 		return
 	}
-	file_frontend_v1_workspace_mention_proto_msgTypes[1].OneofWrappers = []any{}
+	file_frontend_v1_workspace_mention_proto_msgTypes[1].OneofWrappers = []any{
+		(*WorkspaceMentionTarget_Open)(nil),
+		(*WorkspaceMentionTarget_Closed)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_workspace_mention_proto_rawDesc), len(file_frontend_v1_workspace_mention_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

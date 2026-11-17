@@ -24,7 +24,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file frontend/v1/workspace_mention.proto.
  */
 export const file_frontend_v1_workspace_mention: GenFile = /*@__PURE__*/
-  fileDesc("CiNmcm9udGVuZC92MS93b3Jrc3BhY2VfbWVudGlvbi5wcm90bxILZnJvbnRlbmQudjEiTwoXV29ya3NwYWNlTWVudGlvblRhcmdldHMSNAoHdGFyZ2V0cxgBIAMoCzIjLmZyb250ZW5kLnYxLldvcmtzcGFjZU1lbnRpb25UYXJnZXQiyQEKFldvcmtzcGFjZU1lbnRpb25UYXJnZXQSLwoEbmFtZRgBIAEoCzIhLmZyb250ZW5kLnYxLldvcmtzcGFjZU1lbnRpb25OYW1lEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSQAoKcmVwb3NpdG9yeRgFIAEoCzInLmZyb250ZW5kLnYxLldvcmtzcGFjZU1lbnRpb25SZXBvc2l0b3J5SACIAQFCDQoLX3JlcG9zaXRvcnkiKgoaV29ya3NwYWNlTWVudGlvblJlcG9zaXRvcnkSDAoEbmFtZRgBIAEoCSIkChRXb3Jrc3BhY2VNZW50aW9uTmFtZRIMCgR0ZXh0GAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
+  fileDesc("CiNmcm9udGVuZC92MS93b3Jrc3BhY2VfbWVudGlvbi5wcm90bxILZnJvbnRlbmQudjEiTwoXV29ya3NwYWNlTWVudGlvblRhcmdldHMSNAoHdGFyZ2V0cxgBIAMoCzIjLmZyb250ZW5kLnYxLldvcmtzcGFjZU1lbnRpb25UYXJnZXQiywIKFldvcmtzcGFjZU1lbnRpb25UYXJnZXQSLwoEbmFtZRgBIAEoCzIhLmZyb250ZW5kLnYxLldvcmtzcGFjZU1lbnRpb25OYW1lEi0KCXdvcmtzcGFjZRgCIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYSNwoEb3BlbhgDIAEoCzInLmZyb250ZW5kLnYxLldvcmtzcGFjZU1lbnRpb25UYXJnZXRPcGVuSAASOwoGY2xvc2VkGAQgASgLMikuZnJvbnRlbmQudjEuV29ya3NwYWNlTWVudGlvblRhcmdldENsb3NlZEgAEkAKCnJlcG9zaXRvcnkYBSABKAsyJy5mcm9udGVuZC52MS5Xb3Jrc3BhY2VNZW50aW9uUmVwb3NpdG9yeUgBiAEBQgoKCHN0YW5kaW5nQg0KC19yZXBvc2l0b3J5IioKGldvcmtzcGFjZU1lbnRpb25SZXBvc2l0b3J5EgwKBG5hbWUYASABKAkiHAoaV29ya3NwYWNlTWVudGlvblRhcmdldE9wZW4iHgocV29ya3NwYWNlTWVudGlvblRhcmdldENsb3NlZCIkChRXb3Jrc3BhY2VNZW50aW9uTmFtZRIMCgR0ZXh0GAEgASgJQihaJmFnZW50cmVwbC9wcm90by9mcm9udGVuZC92MTtmcm9udGVuZHYxYgZwcm90bzM", [file_workspace_v1_workspace]);
 
 /**
  * Every workspace a response or prompt may mention, as one viewing workspace
@@ -32,14 +32,20 @@ export const file_frontend_v1_workspace_mention: GenFile = /*@__PURE__*/
  *
  * THE SET IS RESOLVED, NOT RAW. It holds every workspace the roster carries
  * that is not closed -- the Open section's and the hidden section's alike,
- * since a hidden workspace is still one the user can name and select. A name
- * two of them share names one of them only when exactly one of those is in
- * the viewer's own repository, and then names that one; otherwise the name
- * names no ONE workspace and is no target, drawn as plain text and never
- * completed, rather than linked to a workspace that might be the wrong one.
- * The viewing workspace's own is never a target (a link to the page the
- * reader is already on would switch nowhere), and a name it carries names no
- * other workspace either, so the reader's own workspace's name never switches
+ * since a hidden workspace is still one the user can name and select -- and
+ * every workspace CLOSED within the daemon's recent window (five days, at or
+ * after the instant five days before the resolve). A name two of them share
+ * names one of them only when exactly one of those is in the viewer's own
+ * repository, and then names that one; otherwise the name names no ONE
+ * workspace and is no target, drawn as plain text and never completed, rather
+ * than linked to a workspace that might be the wrong one. A name a workspace
+ * that is not closed carries is settled among those alone: a closed workspace
+ * sharing it is no target, so a reused name never costs the live workspace
+ * its link. A closed workspace whose close predates the daemon's close record
+ * is no target, since the daemon cannot vouch for when it closed. The viewing
+ * workspace's own is never a target (a link to the page the reader is
+ * already on would switch nowhere), and a name it carries names no other
+ * workspace either, so the reader's own workspace's name never switches
  * somewhere else.
  *
  * ONE SET, TWO READERS. The page receives it on `WatchWorkspaceMentions` and
@@ -55,7 +61,9 @@ export const file_frontend_v1_workspace_mention: GenFile = /*@__PURE__*/
 export type WorkspaceMentionTargets = Message<"frontend.v1.WorkspaceMentionTargets"> & {
   /**
    * The targets: the Open section's in its drawn order, then the hidden
-   * section's in its drawn order. Every name is distinct.
+   * section's in its drawn order, then the recently closed ones (the
+   * recently merged, then the other closed, each in the roster's order).
+   * Every name is distinct.
    *
    * @generated from field: repeated frontend.v1.WorkspaceMentionTarget targets = 1;
    */
@@ -89,6 +97,34 @@ export type WorkspaceMentionTarget = Message<"frontend.v1.WorkspaceMentionTarget
    * @generated from field: workspace.v1.WorkspaceRef workspace = 2;
    */
   workspace?: WorkspaceRef | undefined;
+
+  /**
+   * Whether the workspace is open or closed when the set was resolved. THE
+   * SET ARM IS WHAT A CLICK DOES: an open target is selected, a closed one is
+   * REOPENED (`OpenWorkspace`) and then selected. The link is drawn the same
+   * either way. Always set; an unset standing is a contract breach the page
+   * rejects loudly.
+   *
+   * @generated from oneof frontend.v1.WorkspaceMentionTarget.standing
+   */
+  standing: {
+    /**
+     * The workspace is open: a click selects it.
+     *
+     * @generated from field: frontend.v1.WorkspaceMentionTargetOpen open = 3;
+     */
+    value: WorkspaceMentionTargetOpen;
+    case: "open";
+  } | {
+    /**
+     * The workspace closed within the recent window: a click reopens it,
+     * then selects it.
+     *
+     * @generated from field: frontend.v1.WorkspaceMentionTargetClosed closed = 4;
+     */
+    value: WorkspaceMentionTargetClosed;
+    case: "closed";
+  } | { case: undefined; value?: undefined };
 
   /**
    * The repository the workspace belongs to, which the composer annotates
@@ -131,6 +167,39 @@ export const WorkspaceMentionRepositorySchema: GenMessage<WorkspaceMentionReposi
   messageDesc(file_frontend_v1_workspace_mention, 2);
 
 /**
+ * An open mention target. DELIBERATELY EMPTY: the arm is the fact, and a
+ * click on it is an ordinary workspace switch.
+ *
+ * @generated from message frontend.v1.WorkspaceMentionTargetOpen
+ */
+export type WorkspaceMentionTargetOpen = Message<"frontend.v1.WorkspaceMentionTargetOpen"> & {
+};
+
+/**
+ * Describes the message frontend.v1.WorkspaceMentionTargetOpen.
+ * Use `create(WorkspaceMentionTargetOpenSchema)` to create a new message.
+ */
+export const WorkspaceMentionTargetOpenSchema: GenMessage<WorkspaceMentionTargetOpen> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_workspace_mention, 3);
+
+/**
+ * A recently closed mention target. DELIBERATELY EMPTY: the arm is the fact,
+ * and a click on it reopens the workspace before selecting it, as the
+ * sidebar's closed entries do.
+ *
+ * @generated from message frontend.v1.WorkspaceMentionTargetClosed
+ */
+export type WorkspaceMentionTargetClosed = Message<"frontend.v1.WorkspaceMentionTargetClosed"> & {
+};
+
+/**
+ * Describes the message frontend.v1.WorkspaceMentionTargetClosed.
+ * Use `create(WorkspaceMentionTargetClosedSchema)` to create a new message.
+ */
+export const WorkspaceMentionTargetClosedSchema: GenMessage<WorkspaceMentionTargetClosed> = /*@__PURE__*/
+  messageDesc(file_frontend_v1_workspace_mention, 4);
+
+/**
  * A workspace's name, exactly as the sidebar draws it. A mention is a WHOLE
  * occurrence of it anywhere in a bubble's prose: an inline code span whose
  * whole text is the name, or the name in plain text bounded by characters no
@@ -152,5 +221,5 @@ export type WorkspaceMentionName = Message<"frontend.v1.WorkspaceMentionName"> &
  * Use `create(WorkspaceMentionNameSchema)` to create a new message.
  */
 export const WorkspaceMentionNameSchema: GenMessage<WorkspaceMentionName> = /*@__PURE__*/
-  messageDesc(file_frontend_v1_workspace_mention, 3);
+  messageDesc(file_frontend_v1_workspace_mention, 5);
 
