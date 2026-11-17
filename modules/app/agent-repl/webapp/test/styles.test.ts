@@ -7064,3 +7064,22 @@ describe("a band header's hover box, folded or open", () => {
     expect(open).toEqual(folded);
   });
 });
+
+describe("the escalation's release", () => {
+  const release = "#ws-sidebar .merged-group-head > .sb-mq-release";
+
+  it("is muted text, never the label's purple and never a button's chrome", () => {
+    const rule = declarationsOf(release) ?? "";
+    expect([/color:\s*var\(--muted\)/.test(rule), /var\(--blocked\)/.test(rule), /border:\s*0/.test(rule), /background:\s*none/.test(rule), /text-transform:\s*none/.test(rule)]).toEqual([
+      true,
+      false,
+      true,
+      true,
+      true,
+    ]);
+  });
+
+  it("says it acts only on a hover", () => {
+    expect([declarationsOf(release), declarationsOf(`${release}:hover`)].map((rule) => /text-decoration:\s*underline/.test(rule ?? ""))).toEqual([false, true]);
+  });
+});
