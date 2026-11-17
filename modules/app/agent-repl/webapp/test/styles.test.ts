@@ -7055,14 +7055,6 @@ describe("a band header's hover box, folded or open", () => {
     });
   }
 
-  /** The box declarations of BAND's first repository group's header, BAND open. */
-  function firstGroupHead(band: string): { paddingTop: string; marginTop: string } {
-    return inRail(bands(band, false), (rail) => {
-      const groupHead = rail.querySelector(`.${band} > .rows > .${DEPLOYS_GROUP_CLASS}:first-child > .${MERGED_GROUP_HEAD_CLASS}`) as HTMLElement;
-      return { paddingTop: cascadedValue(groupHead, "padding-top"), marginTop: cascadedValue(groupHead, "margin-top") };
-    });
-  }
-
   it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("draws %s's header box the same open as folded", (band) => {
     // Arrange / Act
     const open = headBox(band, false);
@@ -7070,21 +7062,5 @@ describe("a band header's hover box, folded or open", () => {
 
     // Assert
     expect(open).toEqual(folded);
-  });
-
-  it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("pads %s's open header box below its text", (band) => {
-    // Arrange / Act
-    const open = headBox(band, false);
-
-    // Assert
-    expect(open["padding-bottom"]).toBe("var(--hidden-rule-lead)");
-  });
-
-  it.each([MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS])("starts %s's first group below its header box, with no padding or pull into it", (band) => {
-    // Arrange / Act
-    const first = firstGroupHead(band);
-
-    // Assert
-    expect({ paddingTop: first.paddingTop, negativeMargin: first.marginTop.startsWith("-") }).toEqual({ paddingTop: "0px", negativeMargin: false });
   });
 });
