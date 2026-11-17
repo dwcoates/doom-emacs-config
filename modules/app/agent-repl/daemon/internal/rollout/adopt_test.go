@@ -35,7 +35,7 @@ func writeHandoverManifest(t *testing.T, h *harness, ws ids.WorkspaceID, expecte
 		t.Fatalf("Workspace: %v", err)
 	}
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon:    ids.InstanceID("daemon-outgoing-previous"),
+		Daemon:    previousInstance,
 		Successor: "127.0.0.1:7788",
 		WrittenAt: instant,
 		Sessions: []ManifestSession{{
@@ -603,7 +603,7 @@ func TestAnAdoptionTheIncumbentTookBackDialsNothing(t *testing.T) {
 	// it released.
 	h := newHarness(t, func(d *Deps) { d.DB = servingBlindDB{DB: d.DB} })
 	ws, _ := h.workspace(t)
-	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("daemon-outgoing-previous")); err != nil {
+	if err := h.db.ClaimServing(context.Background(), ws, previousInstance); err != nil {
 		t.Fatalf("ClaimServing(incumbent): %v", err)
 	}
 
@@ -645,7 +645,7 @@ func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
 	second, _ := h.workspace(t)
 	firstRecord, _ := h.db.Workspace(context.Background(), first)
 	secondRecord, _ := h.db.Workspace(context.Background(), second)
-	const outgoing = ids.InstanceID("daemon-outgoing-previous")
+	const outgoing = previousInstance
 	if err := h.c.writeManifest(context.Background(), Manifest{
 		Daemon: outgoing, WrittenAt: instant,
 		Sessions: []ManifestSession{
@@ -839,7 +839,7 @@ func writeHeadlessManifest(t *testing.T, h *harness, workspaces ...ids.Workspace
 		})
 	}
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon:    ids.InstanceID("daemon-outgoing-previous"),
+		Daemon:    previousInstance,
 		Successor: "127.0.0.1:7788",
 		WrittenAt: instant,
 		Sessions:  sessions,
@@ -1646,7 +1646,7 @@ func TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime(t *testing.T) 
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	arm(t, h, ws, Participants{Web: true})
-	const outgoing = ids.InstanceID("daemon-outgoing-previous")
+	const outgoing = previousInstance
 	if err := h.db.ClaimServing(context.Background(), ws, outgoing); err != nil {
 		t.Fatalf("ClaimServing(outgoing): %v", err)
 	}
