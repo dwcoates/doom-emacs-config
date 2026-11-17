@@ -21,6 +21,7 @@ import {
   anchorLapsesAtMs,
   transcriptCacheAnchor,
   KeepaliveScope,
+  keepaliveFailed,
   keepalivePromptText,
   REAL_SCHEDULER,
   SPAN_UUIDS_PER_TURN,
@@ -29,6 +30,8 @@ import {
   type KeepaliveAttribution,
 } from "../../src/engine/keepalive.js";
 import { SendLedger } from "../../src/engine/sends.js";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
+import { conversationv1 } from "../../src/proto.js";
 import { CACHE_TTL_1H_MS, CACHE_TTL_5M_MS } from "../../src/engine/cold.js";
 import type { SdkMessage } from "../../src/sdk/types.js";
 import { ManualScheduler } from "./fakes.js";
@@ -2360,5 +2363,61 @@ describe("the anchor a transcript's last request states", () => {
 
     // Assert
     expect(handRolled).toEqual([]);
+  });
+});
+
+describe("keepaliveFailed", () => {
+  const failureFrame = (failure: MessageInitShape<typeof conversationv1.AgentFailureSchema>): conversationv1.AgentFrame =>
+    create(conversationv1.AgentFrameSchema, {
+      result: { case: "failure", value: create(conversationv1.AgentFailureSchema, failure) },
+    });
+  const detailOf = (update: conversationv1.SessionUpdate | undefined): string | undefined =>
+    update?.update.case === "keepaliveFailed" ? update.update.value.detail : undefined;
+
+  it("states nothing for a keep-alive that succeeded, whose answer is its restated lapse", () => {
+    // Arrange.
+    const frame = create(conversationv1.AgentFrameSchema, {
+      result: { case: "success", value: create(conversationv1.AgentSuccessSchema, {}) },
+    });
+
+    // Act / Assert.
+    expect(keepaliveFailed(frame)).toBeUndefined();
+  });
+
+  it("states the vendor's own sentence when the API failed the request", () => {
+    // Arrange.
+    const frame = failureFrame({
+      errors: ["an earlier error"],
+      failure: {
+        case: "apiRequestFailed",
+        value: create(conversationv1.ApiRequestFailedSchema, {
+          message: "API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)",
+        }),
+      },
+    });
+
+    // Act / Assert.
+    expect(detailOf(keepaliveFailed(frame))).toBe("API Error: Can't reach the API server — check your internet or DNS (ENOTFOUND)");
+  });
+
+  it("states the last error when the failure carries no sentence of its own", () => {
+    // Arrange.
+    const frame = failureFrame({
+      errors: ["first", "last"],
+      failure: { case: "executionError", value: create(conversationv1.AgentExecutionErrorSchema, {}) },
+    });
+
+    // Act / Assert.
+    expect(detailOf(keepaliveFailed(frame))).toBe("last");
+  });
+
+  it("states the failure's arm when the vendor gave no words at all", () => {
+    // Arrange.
+    const frame = failureFrame({
+      failure: { case: "executionError", value: create(conversationv1.AgentExecutionErrorSchema, {}) },
+    });
+
+    // Act / Assert.
+    expect(detailOf(keepaliveFailed(frame))).toBe("executionError");
   });
 });

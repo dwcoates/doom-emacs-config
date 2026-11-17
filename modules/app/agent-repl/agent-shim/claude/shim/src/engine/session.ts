@@ -197,6 +197,7 @@ import {
   KEEPALIVE_INTERVAL_MS,
   KeepaliveCadence,
   KeepaliveRewind,
+  keepaliveFailed,
   KeepaliveScope,
   keepalivePromptText,
   REAL_SCHEDULER,
@@ -2558,10 +2559,28 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (!converterDefectThisTurn) noteConverterHealthy();
       converterDefectThisTurn = false;
       if (!attribution.keepalive) vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
+      else stateKeepaliveFailure(output.turnEnded.frame);
       await endVendorTurn(verdict.turn);
     } finally {
       refreshVendorActivity("vendor_message");
     }
+  }
+
+  /**
+   * A keep-alive turn ended: a failed one is stated on the session stream as
+   * the keep-alive's answer (engine/keepalive.ts `keepaliveFailed`). PUSHED
+   * HERE, never through the served plane, which drops every keep-alive-tagged
+   * fact; a lapse the request moved was restated from its assistant record,
+   * ahead of this on the same stream.
+   */
+  function stateKeepaliveFailure(frame: conversationv1.AgentFrame): void {
+    const failed = keepaliveFailed(frame);
+    if (failed === undefined) return;
+    LOGGER.info(
+      { detail: failed.update.case === "keepaliveFailed" ? failed.update.value.detail : undefined },
+      "the keep-alive's turn ended in a failure; it is stated as the keep-alive's answer",
+    );
+    pushes.push(failed);
   }
 
   /** The shim turn a vendor turn answers, or absence when it answers none of ours. */
