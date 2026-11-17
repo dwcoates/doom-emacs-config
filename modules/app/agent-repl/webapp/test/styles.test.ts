@@ -7079,7 +7079,8 @@ describe("the escalation's release", () => {
     ]);
   });
 
-  it("says it acts only on a hover", () => {
-    expect([declarationsOf(release), declarationsOf(`${release}:hover`)].map((rule) => /text-decoration:\s*underline/.test(rule ?? ""))).toEqual([false, true]);
+  it("says it acts only on a hover, and only while the rail's hovers are not suspended", () => {
+    const hover = "#ws-sidebar:not(.sb-hover-suspended) .merged-group-head > .sb-mq-release:hover";
+    expect([declarationsOf(release), declarationsOf(hover)].map((rule) => /text-decoration:\s*underline/.test(rule ?? ""))).toEqual([false, true]);
   });
 });

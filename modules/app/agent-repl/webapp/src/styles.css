@@ -1628,7 +1628,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    muted text, the header's case and weight left behind, never the label's
    purple, never a button's chrome; only a hover says it acts. */
 #ws-sidebar .merged-group-head > .sb-mq-release { order: 2; flex: 0 0 auto; margin-left: 0.5em; padding: 0; border: 0; background: none; font: inherit; font-size: 0.85em; font-weight: normal; letter-spacing: normal; text-transform: none; color: var(--muted); opacity: 0.6; cursor: pointer; }
-#ws-sidebar .merged-group-head > .sb-mq-release:hover { opacity: 1; text-decoration: underline; }
+#ws-sidebar:not(.sb-hover-suspended) .merged-group-head > .sb-mq-release:hover { opacity: 1; text-decoration: underline; }
 #ws-sidebar .merged-group-head > .sb-mq-status-tail { order: 3; flex: 0 0 0.65rem; height: 1px; background: var(--border); }
 /* A FOLDED GROUP shows its header alone: its queue and its merged rows are
    drawn as nothing until it opens. */
