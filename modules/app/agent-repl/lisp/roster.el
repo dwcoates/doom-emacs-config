@@ -331,9 +331,19 @@ The composer marks the open workspaces' names it holds against it
   "Return the epoch-ms instant the USER closed ROW, or nil.
 Nil for an open row, for one the daemon, an agent or a merge closed, and
 for a close that predates the daemon's record (`RosterRowClosure')."
-  (let ((closure (plist-get row :closure)))
-    (and (eq (plist-get (plist-get closure :by) :arm) :user)
-         (plist-get closure :at-ms))))
+  (and (eq (agent-repl-roster-row-closed-by row) :user)
+       (agent-repl-roster-row-closed-at row)))
+
+(defun agent-repl-roster-row-closed-at (row)
+  "Return the epoch-ms instant ROW was closed, by any cause, or nil.
+Nil for an open row and for a close that predates the daemon's record
+\(`RosterRowClosure')."
+  (plist-get (plist-get row :closure) :at-ms))
+
+(defun agent-repl-roster-row-closed-by (row)
+  "Return who closed ROW: `:user', `:agent', `:merge' or `:daemon', or nil.
+Nil for an open row and for a close that predates the daemon's record."
+  (plist-get (plist-get (plist-get row :closure) :by) :arm))
 
 (defun agent-repl-roster-row-merged-at (row)
   "Return the epoch-ms instant ROW's merge landed, or nil.

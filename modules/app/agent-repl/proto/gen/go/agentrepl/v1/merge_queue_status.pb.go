@@ -1280,8 +1280,11 @@ type MergeQueueStatusAdvanceMediatingFixing struct {
 	// REQUIRED. The remediation workspace doing the fix, visible in the
 	// sidebar like any workspace.
 	Remediation *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=remediation,proto3" json:"remediation,omitempty"`
-	// REQUIRED. The chain's intake, which checks the fix's deploy.
-	Intake        *v1.WorkspaceRef `protobuf:"bytes,2,opt,name=intake,proto3" json:"intake,omitempty"`
+	// The intake that dispatched the fix. UNSET once a newer deploy carried
+	// the dispatch on: an intake decides once, so the newer deploy's check,
+	// and the fix's own, are told to a fresh intake (owner ruling,
+	// 2026-11-16).
+	Intake        *v1.WorkspaceRef `protobuf:"bytes,2,opt,name=intake,proto3,oneof" json:"intake,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2098,10 +2101,11 @@ const file_agentrepl_v1_merge_queue_status_proto_rawDesc = "" +
 	"\n" +
 	"escalation\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\n" +
 	"escalation\x88\x01\x01B\r\n" +
-	"\v_escalation\"\x9a\x01\n" +
+	"\v_escalation\"\xaa\x01\n" +
 	"&MergeQueueStatusAdvanceMediatingFixing\x12<\n" +
-	"\vremediation\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\vremediation\x122\n" +
-	"\x06intake\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06intake\"\xa2\x02\n" +
+	"\vremediation\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\vremediation\x127\n" +
+	"\x06intake\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\x06intake\x88\x01\x01B\t\n" +
+	"\a_intake\"\xa2\x02\n" +
 	"\x15MergeQueueStatusEntry\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -2266,6 +2270,7 @@ func file_agentrepl_v1_merge_queue_status_proto_init() {
 	}
 	file_agentrepl_v1_merge_queue_status_proto_msgTypes[17].OneofWrappers = []any{}
 	file_agentrepl_v1_merge_queue_status_proto_msgTypes[19].OneofWrappers = []any{}
+	file_agentrepl_v1_merge_queue_status_proto_msgTypes[20].OneofWrappers = []any{}
 	file_agentrepl_v1_merge_queue_status_proto_msgTypes[22].OneofWrappers = []any{
 		(*MergeQueueStatusEntryKind_OwnBranch)(nil),
 		(*MergeQueueStatusEntryKind_AsyncMerge)(nil),

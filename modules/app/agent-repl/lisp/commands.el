@@ -118,6 +118,8 @@
 (declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-by-user-at "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-at "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-by "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-commit-count "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-summary "agent-repl-roster" (row))
 (declare-function agent-repl-status-roster-mark "agent-repl-status" (arm &optional glyph))
@@ -778,6 +780,17 @@ killed, this many of each (owner request, 2026-10-14): enough to reach
 yesterday's work, few enough that the list stays a list of what is
 current.  `SPC p P' offers every known workspace regardless.")
 
+(defconst agent-repl--switch-closed-window-ms (* 3 24 60 60 1000)
+  "How long `SPC p p' offers a workspace after it was closed, in ms.
+Three days whoever closed it (owner request, 2026-11-17), so a workspace an
+agent or the daemon closed is reachable while it is still recent work.
+A workspace a merge closed is offered for
+`agent-repl--switch-merged-window-ms' instead.")
+
+(defconst agent-repl--switch-merged-window-ms (* 24 60 60 1000)
+  "How long `SPC p p' offers a workspace after a merge closed it, in ms.
+One day (owner request, 2026-11-17).")
+
 (defconst agent-repl--switch-hidden-glyph "◌"
   "The mark a HIDDEN workspace draws in the switcher in place of its dot.
 A dotted ring: the workspace is there but kept out of sight.  It is inked
@@ -950,35 +963,59 @@ order: `sort' is stable."
         (lambda (a b) (> (agent-repl--switch-selected-ms a)
                          (agent-repl--switch-selected-ms b)))))
 
-(defun agent-repl--switch-curated (entries)
-  "Return the ENTRIES `SPC p p' offers.
+(defun agent-repl--switch-closed-recently-p (row now-ms)
+  "Return non-nil when ROW was closed recently enough for `SPC p p' at NOW-MS.
+A merged row, or one a merge closed, within
+`agent-repl--switch-merged-window-ms' of its merge or close; any other
+closed row within
+`agent-repl--switch-closed-window-ms' of its close.  A close that predates
+the daemon's record states no instant, and is never recent."
+  (let ((merged-at (agent-repl-roster-row-merged-at row)))
+    (if merged-at
+        (< (- now-ms merged-at) agent-repl--switch-merged-window-ms)
+      (let ((closed-at (agent-repl-roster-row-closed-at row)))
+        (and closed-at
+             (< (- now-ms closed-at)
+                (if (eq (agent-repl-roster-row-closed-by row) :merge)
+                    agent-repl--switch-merged-window-ms
+                  agent-repl--switch-closed-window-ms)))))))
+
+(defun agent-repl--switch-curated (entries now-ms)
+  "Return the ENTRIES `SPC p p' offers, read at NOW-MS.
 
 THE WORKSPACES THAT ARE CURRENT, AND THE RECENT ONES (owner request,
-2026-10-14): every open workspace, every hidden one, the
-`agent-repl--switch-recent-limit' most recently MERGED, and as many of
-the ones the USER most recently closed or killed -- by their own gesture,
-which the daemon's close record says (`RosterRowClosure').  A workspace
-the daemon, an agent or a merge closed is left to `SPC p P', and so is
-one whose close predates that record: nothing says the user closed it.
+2026-10-14): every open workspace, every hidden one, every one closed
+recently (`agent-repl--switch-closed-recently-p': three days after any
+close, one after a merge, owner request 2026-11-17), and beyond those the
+`agent-repl--switch-recent-limit' most recently MERGED, and as many of the
+ones the USER most recently closed or killed -- by their own gesture,
+which the daemon's close record says (`RosterRowClosure').  An older
+workspace the daemon, an agent or a merge closed is left to `SPC p P', and
+so is one whose close predates that record: nothing says when it closed.
 
 A live local workspace with no roster row yet is open by construction --
 a tab is standing for it here -- and is never dropped.
 
 The order they are offered in is `agent-repl--switch-by-recency''s, applied
 by the caller."
-  (let (open hidden merged closed)
+  (let (open hidden recent merged closed)
     (dolist (entry entries)
       (let ((row (plist-get entry :row)))
         (pcase (plist-get entry :section)
           (:hidden (push entry hidden))
-          (:merged (push entry merged))
+          (:merged (if (agent-repl--switch-closed-recently-p row now-ms)
+                       (push entry recent)
+                     (push entry merged)))
           (_ (cond
               ((or (null row) (not (agent-repl-roster-row-closed-p row)))
                (push entry open))
+              ((agent-repl--switch-closed-recently-p row now-ms)
+               (push entry recent))
               ((agent-repl-roster-row-closed-by-user-at row)
                (push entry closed)))))))
     (append (nreverse open)
             (nreverse hidden)
+            (nreverse recent)
             (agent-repl--switch-most-recent
              (nreverse merged)
              (lambda (entry) (agent-repl-roster-row-merged-at (plist-get entry :row))))
@@ -1179,10 +1216,11 @@ perspective of its own and re-point the workspace being left.
 
 A CANDIDATE WITH NO REF CANNOT BE OPENED and says so: the ref is
 daemon-minted and there is no spelling of it Emacs could construct."
-  (let* ((known (agent-repl--switch-candidates))
+  (let* ((now-ms (agent-repl--now-unix-ms))
+         (known (agent-repl--switch-candidates))
          (candidates (agent-repl--switch-display-alist
                       (agent-repl--switch-by-recency
-                       (if all known (agent-repl--switch-curated known))))))
+                       (if all known (agent-repl--switch-curated known now-ms))))))
     (unless candidates
       (user-error "agent-repl: no known workspaces"))
     (let* ((current (agent-repl--ws-current-name))
@@ -1193,7 +1231,7 @@ daemon-minted and there is no spelling of it Emacs could construct."
            (choice (agent-repl--switch-read (if all "Switch to any workspace: "
                                               "Switch to workspace: ")
                                             (agent-repl--switch-table
-                                             candidates (agent-repl--now-unix-ms) main)
+                                             candidates now-ms main)
                                             main))
            (entry (cdr (assoc choice candidates)))
            (ws (plist-get entry :ws))
@@ -1516,12 +1554,13 @@ and the daemon gives it no number."
 (defun agent-repl--navigable-tab-names ()
   "Return the workspace names a navigation gesture may land on, in tab order.
 
-THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A chord that walks
-or picks a workspace (`s-{', `s-[', `SPC p p', the jumps) may select one in a
-folded section or subsection: the section stays folded and the roster draws
-that workspace alone inside it until the user switches away.  The numeral
-chords stay on `agent-repl--drawn-tab-names', because a folded tab has no
-number.  A tab the user hid is a stop of neither."
+THE DRAWN TABS, AND THE TABS A COLLAPSED SECTION FOLDS.  A gesture that
+picks a workspace (the picker, the jumps) may select one in a folded
+section or subsection: the section stays folded and the roster draws that
+workspace alone inside it until the user switches away.  The numerals and
+the walking chords (`s-{', `s-[') stay on `agent-repl--drawn-tab-names',
+because a folded tab has no number and no place on the bar.  A tab the
+user hid is a stop of neither."
   (and (fboundp 'agent-repl-roster-navigable-tab-order)
        (agent-repl-roster-navigable-tab-order)))
 
@@ -1550,7 +1589,9 @@ CURRENT has no tab or nothing is drawn."
   "Request the DRAWN tab N steps from the current workspace along a ring.
 RING-FN is called with the workspace the step starts from and answers
 every tab in the ring's order (`agent-repl--cycle-target''s ALL); the drawn
-tabs are the ones the step may land on.  OP names the gesture's records
+tabs are the ones the step may land on, so a tab a collapsed section folds
+is passed over, as the numerals pass it over (owner request, 2026-11-17).
+OP names the gesture's records
 \(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
 switch request's (`agent-repl-host-request-switch').
 
@@ -1571,7 +1612,7 @@ the user made left nothing on disk: realtest 4 drove four real chords, every
 one switched correctly, and not one could be read back afterwards.  A routine
 action is never promoted to `warn' to make it easier to find -- the realtest
 harvest fails a run on every warning."
-  (let* ((names (agent-repl--navigable-tab-names))
+  (let* ((names (agent-repl--drawn-tab-names))
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
          (all (funcall ring-fn current))
@@ -1646,12 +1687,13 @@ start from."
   (agent-repl--step-workspace 1 #'agent-repl--working-ring "working-cycle" 'cycle))
 
 (defun agent-repl--recency-ring (current)
-  "Return the navigable tabs, and CURRENT, most recently selected first.
+  "Return the drawn tabs, and CURRENT, most recently selected first.
 The ONE selection-recency order (`agent-repl-roster-selection-recency-order')
-over the tabs navigation reaches (`agent-repl--navigable-tab-names'), so
-`s-[' and `s-]' reach exactly the tabs `s-{' and `s-}' do.  CURRENT joins the
-ring when it is not among them, so it still has a place to step from."
-  (let ((drawn (agent-repl--navigable-tab-names)))
+over the drawn tabs (`agent-repl--drawn-tab-names'), so `s-[' and `s-]'
+reach exactly the tabs `s-{' and `s-}' do, and pass over a folded one.
+CURRENT joins the ring when it is not among them, so it still has a place
+to step from."
+  (let ((drawn (agent-repl--drawn-tab-names)))
     (agent-repl-roster-selection-recency-order
      (if (or (null current) (member current drawn))
          drawn

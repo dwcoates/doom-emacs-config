@@ -140,7 +140,11 @@ func mediatingOf(m merge.OwedMediation) *agentreplv1.MergeQueueStatusAdvanceMedi
 	case merge.CheckAssessing:
 		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Assessing{Assessing: &agentreplv1.MergeQueueStatusAdvanceMediatingAssessing{Intake: ref(m.Intake)}}
 	case merge.CheckFixing:
-		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Fixing{Fixing: &agentreplv1.MergeQueueStatusAdvanceMediatingFixing{Remediation: ref(m.Remediation), Intake: ref(m.Intake)}}
+		fixing := &agentreplv1.MergeQueueStatusAdvanceMediatingFixing{Remediation: ref(m.Remediation)}
+		if m.Intake != "" {
+			fixing.Intake = ref(m.Intake)
+		}
+		out.Stage = &agentreplv1.MergeQueueStatusAdvanceMediating_Fixing{Fixing: fixing}
 	case merge.CheckEscalated:
 		escalated := &agentreplv1.MergeQueueStatusAdvanceMediatingEscalated{}
 		if m.Escalation != "" {

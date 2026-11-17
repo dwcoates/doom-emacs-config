@@ -18,6 +18,7 @@ import type { RowHover } from "./row-hover.js";
 import type { RowMenus } from "./row-menu.js";
 import type { RowReveal } from "./reveal.js";
 import type { SelectionFade } from "./selection-fade.js";
+import type { FoldFade } from "./fold-fade.js";
 import type { DrawnView, SidebarView } from "./view.js";
 
 /** The one thing a drawn row asks of the attention registry. */
@@ -63,6 +64,8 @@ export interface RailContext {
   reveal: RowReveal;
   /** The highlighted row's number fade, across redraws (`selection-fade.ts`). */
   selectionFade: SelectionFade;
+  /** The fade of a row a fold stops drawing, across redraws (`fold-fade.ts`). */
+  foldFade: FoldFade;
   /**
    * The workspace whose page the webhost shows, while the roster has not yet
    * named it current (`markShown`, sidebar.ts), or null. While it stands, it

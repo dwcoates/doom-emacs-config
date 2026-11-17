@@ -185,8 +185,11 @@ message MergeQueueStatusAdvanceMediatingFixing {
   // REQUIRED. The remediation workspace doing the fix, visible in the
   // sidebar like any workspace.
   workspace.v1.WorkspaceRef remediation = 1;
-  // REQUIRED. The chain's intake, which checks the fix's deploy.
-  workspace.v1.WorkspaceRef intake = 2;
+  // The intake that dispatched the fix. UNSET once a newer deploy carried
+  // the dispatch on: an intake decides once, so the newer deploy's check,
+  // and the fix's own, are told to a fresh intake (owner ruling,
+  // 2026-11-16).
+  optional workspace.v1.WorkspaceRef intake = 2;
 }
 
 // One merge in line.

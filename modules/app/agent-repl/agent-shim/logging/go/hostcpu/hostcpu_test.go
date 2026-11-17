@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestBusy(t *testing.T) {
@@ -103,4 +104,30 @@ func TestReadAnswersTheHostsCountersInOrder(t *testing.T) {
 func near(a, b Times) bool {
 	const eps = 1e-9
 	return math.Abs(a.User-b.User) < eps && math.Abs(a.System-b.System) < eps && math.Abs(a.Idle-b.Idle) < eps && math.Abs(a.Nice-b.Nice) < eps
+}
+
+func TestReadMovesForwardAcrossWorkTheCallerDid(t *testing.T) {
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skipf("no reader on %s", runtime.GOOS)
+	}
+	// Arrange: the reads straddle five of the kernel's 10ms ticks of this
+	// goroutine's own work, so a reader answering a cached copy (Darwin's
+	// rate-limited host_statistics) answers the same counters twice.
+	first, err := Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+	for end := time.Now().Add(50 * time.Millisecond); time.Now().Before(end); {
+	}
+
+	// Act
+	second, err := Read()
+	if err != nil {
+		t.Fatalf("Read: %v", err)
+	}
+
+	// Assert
+	if _, err := second.Busy(first); err != nil {
+		t.Fatalf("Busy across 50ms of work = %v; want counters that moved forward", err)
+	}
 }

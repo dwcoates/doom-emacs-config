@@ -16,6 +16,12 @@ var ErrNothingToWatch = errors.New("kernelevent: none of the followed paths exis
 // so Follow skips it as it skips a missing path.
 var ErrUnwatchable = errors.New("kernelevent: the kernel cannot watch this kind of file")
 
+// ErrLinkReplaced is Watch.Add's error for a symlink renamed over while the
+// kernel resolved it, which Darwin refuses EINVAL. Its directory reports the
+// rename, so Follow skips it as it skips a missing path, and watches the new
+// link at the change.
+var ErrLinkReplaced = errors.New("kernelevent: the symlink was replaced while it was opened")
+
 // Follow reports changes under PATHS on the channel it answers, until ctx
 // ends or the stop it answers is called: nil once per change (changes that
 // land before the reader takes one are coalesced into it), or an error once,
@@ -23,8 +29,10 @@ var ErrUnwatchable = errors.New("kernelevent: the kernel cannot watch this kind 
 //
 // EVERY PATH IS RE-WATCHED AFTER EACH CHANGE, so a path made, removed or
 // replaced later (a log rotated, a database's -wal file recreated, a
-// directory made) is watched as soon as it exists. A missing path is
-// skipped; once none of PATHS exists the error is ErrNothingToWatch.
+// directory made) is watched as soon as it exists. A missing path, and a
+// symlink replaced while it was opened, is skipped, so a caller following a
+// path that may come and go follows its directory too; once none of PATHS
+// can be watched the error is ErrNothingToWatch.
 //
 // NO CHANGE IS MISSED. The first watch is registered before Follow returns,
 // and each later one before the change that preceded it is reported, so a
@@ -82,7 +90,7 @@ func watchExisting(paths []string) (*Watch, error) {
 	watched := 0
 	for _, p := range paths {
 		err := w.Add(p)
-		if errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrUnwatchable) {
+		if skipped(err) {
 			continue
 		}
 		if err != nil {
@@ -96,6 +104,13 @@ func watchExisting(paths []string) (*Watch, error) {
 		return nil, fmt.Errorf("%w: %v", ErrNothingToWatch, paths)
 	}
 	return w, nil
+}
+
+// skipped reports whether watchExisting passes over a path Watch.Add refused
+// with ERR: one missing, unwatchable, or a symlink replaced while it was
+// opened, each of which its directory reports.
+func skipped(err error) bool {
+	return errors.Is(err, os.ErrNotExist) || errors.Is(err, ErrUnwatchable) || errors.Is(err, ErrLinkReplaced)
 }
 
 // Source starts one followed report of changes: Follow's shape, which

@@ -40,6 +40,7 @@ export function openScope(rail: RailContext): DrawScope {
     rowMenus: rail.rowMenus,
     reveal: rail.reveal,
     selectionFade: rail.selectionFade,
+    foldFade: rail.foldFade,
     shownAhead: () => rail.shownAhead(),
     arrange: rail.arrange,
     deploysFold: rail.deploysFold,
