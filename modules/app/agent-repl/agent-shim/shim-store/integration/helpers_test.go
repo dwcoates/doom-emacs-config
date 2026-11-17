@@ -11,6 +11,7 @@
 package integration
 
 import (
+	sharedlogging "agentrepl/logging"
 	"agentrepl/shim-store/internal/testclose"
 	"agentrepl/testrun/testenv"
 	"bufio"
@@ -26,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -828,17 +830,28 @@ type logRecord struct {
 	Context   map[string]any `json:"context"`
 }
 
-// logRecords parses the whole log file. A line that will not parse is a defect
-// in the store's log sink and fails the test rather than being skipped.
+// logRecords parses the whole log, the log file and its warnings file merged
+// in timestamp order: the store writes every warn and error record only to the
+// warnings file (proto/vocab/log-warnings-sink.json). A line that will not
+// parse is a defect in the store's log sink and fails the test rather than
+// being skipped.
 func (s *storeProcess) logRecords() []logRecord {
 	s.t.Helper()
+	records := append(s.logFileRecords(s.logPath), s.logFileRecords(sharedlogging.WarningsPath(s.logPath))...)
+	sort.SliceStable(records, func(i, j int) bool { return records[i].Timestamp < records[j].Timestamp })
+	return records
+}
 
-	f, err := os.Open(s.logPath)
+// logFileRecords parses one of the store's log files; an absent one holds none.
+func (s *storeProcess) logFileRecords(path string) []logRecord {
+	s.t.Helper()
+
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
-		s.t.Fatalf("opening the store log %q: %v", s.logPath, err)
+		s.t.Fatalf("opening the store log %q: %v", path, err)
 	}
 	defer testclose.OrFail(s.t, f)
 
@@ -852,12 +865,12 @@ func (s *storeProcess) logRecords() []logRecord {
 		}
 		var rec logRecord
 		if err := json.Unmarshal([]byte(text), &rec); err != nil {
-			s.t.Fatalf("store log %q line %d is not JSON: %v\nline: %s", s.logPath, line, err, text)
+			s.t.Fatalf("store log %q line %d is not JSON: %v\nline: %s", path, line, err, text)
 		}
 		records = append(records, rec)
 	}
 	if err := scanner.Err(); err != nil {
-		s.t.Fatalf("reading the store log %q: %v", s.logPath, err)
+		s.t.Fatalf("reading the store log %q: %v", path, err)
 	}
 	return records
 }
