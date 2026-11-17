@@ -892,9 +892,18 @@ export function drawRepositoryGroup(
   group.setAttribute(DEPLOYS_REPOSITORY_ATTRIBUTE, key.id);
   body.classList.add(MERGED_GROUP_BODY_CLASS);
   group.append(head, body);
-  head.addEventListener("click", () => sc.deploysFold.toggle(group));
+  head.addEventListener("click", (event) => {
+    // A HEADER DRAWING A DEPLOY CHECK STATUS IS CLICKABLE ONLY ON ITS TEXTS
+    // (owner request, 2026-11-16): a click on the bare header, which is its
+    // rules and gaps, folds nothing.
+    if (head.classList.contains(QUEUE_STATUS_HEAD_CLASS) && event.target === head) return;
+    sc.deploysFold.toggle(group);
+  });
   return group;
 }
+
+/** The class a queue group's header wears while it draws a deploy check status. */
+export const QUEUE_STATUS_HEAD_CLASS = "sb-mq-status-head";
 
 /** The class of the short rule after a queue group's deploy check status. */
 export const QUEUE_STATUS_TAIL_RULE_CLASS = "sb-mq-status-tail";
@@ -936,6 +945,7 @@ export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: 
   // 2026-11-16): `-- <repo> (count) ------ <status> --`, after the long rule
   // and before a short one of its own.
   if (queue.mediation !== undefined) {
+    head.classList.add(QUEUE_STATUS_HEAD_CLASS);
     head.appendChild(drawQueueMediationLabel(queue.mediation, sc, `${queuePath}.mediation`));
     if (queue.mediation.standing.case === "escalated") head.appendChild(drawEscalationRelease(key, sc));
     head.appendChild(drawQueueStatusTailRule());

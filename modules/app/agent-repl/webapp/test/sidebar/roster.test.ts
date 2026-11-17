@@ -1120,6 +1120,38 @@ describe("a queue group's header with a deploy check", () => {
     expect(order(groupHead(drawn))).toEqual(["repo", "count", "status", "release", "tail"]);
   });
 
+  /** Draws a group with SC's fold spied on, returning the header and the groups SC's fold was asked to toggle. */
+  const drawSpied = (mediation: boolean): { head: HTMLElement; toggled: HTMLElement[] } => {
+    const toggled: HTMLElement[] = [];
+    const sc = sidebarContext();
+    sc.deploysFold.toggle = (group: HTMLElement): void => {
+      toggled.push(group);
+    };
+    const queue = mediation
+      ? { head: mergingHead("w1"), mediation: { standing: { case: "waiting" as const, value: {} } } }
+      : { head: mergingHead("w1") };
+    const drawn = drawWorkspaceRoster(roster({ mergeQueue: mergeQueueBand([queueGroup({ id: "repo-1", queue })], false) }), sc);
+    return { head: groupHead(drawn), toggled };
+  };
+
+  it("folds nothing when the bare header, its rules and gaps, is clicked", () => {
+    const { head, toggled } = drawSpied(true);
+    head.click();
+    expect(toggled).toEqual([]);
+  });
+
+  it("still folds the group when its repository label is clicked", () => {
+    const { head, toggled } = drawSpied(true);
+    (head.querySelector(".sb-label") as HTMLElement).click();
+    expect(toggled).toEqual([head.parentElement]);
+  });
+
+  it("still folds the group on a bare header click without a deploy check", () => {
+    const { head, toggled } = drawSpied(false);
+    head.click();
+    expect(toggled).toEqual([head.parentElement]);
+  });
+
   it("draws no tail rule without a deploy check", () => {
     const band = mergeQueueBand([queueGroup({ id: "repo-1", queue: { head: mergingHead("w1") } })], false);
     const drawn = drawWorkspaceRoster(roster({ mergeQueue: band }), sidebarContext());
