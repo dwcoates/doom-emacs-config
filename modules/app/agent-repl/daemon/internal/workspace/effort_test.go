@@ -191,6 +191,38 @@ func TestANewShimIsPutBackAtThePickedEffort(t *testing.T) {
 	}
 }
 
+func TestAPutBackRecordsHowLongTheShimTook(t *testing.T) {
+	tests := []struct {
+		name  string
+		err   error
+		level string
+	}{
+		{name: "a put-back that took", level: "info"},
+		{name: "a refused put-back", err: errors.New("socket closed"), level: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			f.picked = effortLow
+			f.client.effortErr = tt.err
+
+			// Act.
+			_ = f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			records := recordsAt(f.log, opSetEffort, tt.level)
+			if len(records) != 1 {
+				t.Fatalf("records = %v, want one at %s", records, tt.level)
+			}
+			if _, ok := records[0]["elapsed_ms"]; !ok {
+				t.Fatalf("record = %v, want elapsed_ms", records[0])
+			}
+		})
+	}
+}
+
 func TestANewShimIsAskedNothingWithNoPick(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

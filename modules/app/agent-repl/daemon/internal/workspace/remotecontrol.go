@@ -181,7 +181,16 @@ func (f *Fleet) putRemoteControlInForce(ctx context.Context, log dlog.Logger, ws
 // says the mode is on, so the failure is logged at ERROR and stated on the
 // warning strip, the reader's one error surface, as a failed effort put-back
 // is.
+//
+// THE PUT-BACK OUTLIVES ITS CALLER'S CANCEL, the mode's read included: it
+// runs once the session is up, while the bring-up's caller may already have
+// gone (2026-11-17 13:43: store-peer-messages-timeout's read was canceled
+// right after "the session is up", and its new shim came up with no bridge).
+// The whole put-back is bounded by RemoteControlBound, which applyRemoteControl's
+// own call sits within.
 func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclientRemoteControl) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RemoteControlBound)
+	defer cancel()
 	gate := f.remoteControlGate(ws)
 	gate.Lock()
 	defer gate.Unlock()

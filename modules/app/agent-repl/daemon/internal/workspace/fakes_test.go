@@ -119,6 +119,8 @@ type fakeDB struct {
 	remote   map[ids.WorkspaceID]wsm.RemoteControl
 	// remoteUnscripted is what a workspace with no scripted standing reads.
 	remoteUnscripted wsm.RemoteControl
+	// remoteReadCtxErr is the context error each RemoteControl read saw.
+	remoteReadCtxErr []error
 	remoteErr        error
 	remoteSetErr     error
 	bridgeErr        error
@@ -4819,9 +4821,10 @@ func (d *fakeVisitDrain) VisitDown(ws ids.WorkspaceID, since time.Time) {
 }
 
 // RemoteControl answers the workspace's scripted standing, off when none was.
-func (d *fakeDB) RemoteControl(_ context.Context, id ids.WorkspaceID) (wsm.RemoteControl, error) {
+func (d *fakeDB) RemoteControl(ctx context.Context, id ids.WorkspaceID) (wsm.RemoteControl, error) {
 	d.remoteMu.Lock()
 	defer d.remoteMu.Unlock()
+	d.remoteReadCtxErr = append(d.remoteReadCtxErr, ctx.Err())
 	if d.remoteErr != nil {
 		return wsm.RemoteControl{}, d.remoteErr
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
@@ -351,6 +352,35 @@ func TestANewShimIsPutInRemoteControlWhenTheModeIsOn(t *testing.T) {
 	if len(f.client.remoteControls) != 1 || !f.client.remoteControls[0].GetEnabled() ||
 		f.client.remoteControls[0].GetReattachBridgeSessionId() != "bridge-kept" {
 		t.Fatalf("SetSessionRemoteControl asks = %v, want one on re-binding the kept bridge", f.client.remoteControls)
+	}
+}
+
+func TestARemoteControlPutBackOutlivesItsCallersCancel(t *testing.T) {
+	// Arrange: the bring-up's caller is gone by the time the put-back runs
+	// (2026-11-17 13:43, store-peer-messages-timeout).
+	f, ws := startedFleet(t)
+	f.db.setRemote(ws.ID, wsm.RemoteControl{On: true})
+	f.client.remoteControls = nil
+	var seen error
+	probe := &cancelProbe{fakeClient: f.client, seen: &seen}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act.
+	f.fleet.reapplyRemoteControl(ctx, f.log.logger, ws.ID, probe)
+
+	// Assert.
+	f.db.remoteMu.Lock()
+	reads := slices.Clone(f.db.remoteReadCtxErr)
+	f.db.remoteMu.Unlock()
+	if len(reads) == 0 || reads[len(reads)-1] != nil {
+		t.Fatalf("mode reads saw %v, want the last one uncut by the caller", reads)
+	}
+	if seen != nil || len(f.client.remoteControls) != 1 {
+		t.Fatalf("the shim call saw %v with asks %v, want one uncut put-back", seen, f.client.remoteControls)
+	}
+	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 {
+		t.Errorf("error records = %v, want none", records)
 	}
 }
 
