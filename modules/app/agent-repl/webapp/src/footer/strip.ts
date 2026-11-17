@@ -83,7 +83,7 @@ import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import { CHIP_PANELS, type FooterChipPanel, type FooterPanel } from "./expanded.js";
-import { statusCellWord, statusWords, textLine } from "./parts.js";
+import { statusCellWord, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
 import { countNoun } from "../count-noun.js";
@@ -435,9 +435,9 @@ function statusParts(
         substatusRequired: false,
       };
     }
-    case "updating":
     // A FINAL RESPONSE BEING UPDATED declares no substatus oneof either: the
     // shimmering bubble shows which response, so the arm's word stands.
+    case "updating":
     case "starting":
       // A BOOTING SESSION declares no substatus oneof (owner ruling,
       // 2026-10-13: booting is an expected step, never a fault), so the arm's
