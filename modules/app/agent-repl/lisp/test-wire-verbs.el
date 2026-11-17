@@ -2483,6 +2483,15 @@ protojson spells it as."
                    '(:cause (:arm :invalid-name
                              :value (:name "ABC//fix" :component "" :rule :prefix)))))))
 
+(ert-deftest agent-repl-test-wire-verbs-create-error-invalid-name-reserved-arm ()
+  "The `reserved' rule decodes, naming the reserved first component."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (agent-repl-wire-decode-create-workspace-error
+                    (agent-repl-test-wire-verbs--parse
+                     "{\"invalidName\":{\"name\":\"agent-repl/standing/deploy-intake\",\"component\":\"agent-repl\",\"reserved\":{}}}"))
+                   '(:cause (:arm :invalid-name
+                             :value (:name "agent-repl/standing/deploy-intake" :component "agent-repl" :rule :reserved)))))))
+
 (ert-deftest agent-repl-test-wire-verbs-create-error-invalid-name-unset-rule-is-a-breach ()
   "An `invalid_name' arm with no rule set is a contract breach."
   (agent-repl-test-wire-verbs--with-common
