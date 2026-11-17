@@ -141,6 +141,8 @@ type fakeClient struct {
 	// onStart, when set, runs as StartSession is asked, so a test reads what
 	// stood while the start ran.
 	onStart func()
+	// killCtxErr is the context error each Kill saw.
+	killCtxErr []error
 	// onKill is the supervisor's deregistration, armed by the fake spawn: the
 	// real client releases the supervisor's hold on its exit decode.
 	onKill func()
@@ -445,7 +447,8 @@ func (s *fakeBridgeStream) read(frame *shimv1.HoldParkedBridgeResponse, ok bool)
 
 func (s *fakeBridgeStream) Close() {}
 
-func (c *fakeClient) Kill(_ context.Context, attr shimclient.KillAttribution) error {
+func (c *fakeClient) Kill(ctx context.Context, attr shimclient.KillAttribution) error {
+	c.killCtxErr = append(c.killCtxErr, ctx.Err())
 	if c.killErr != nil {
 		return c.killErr
 	}
