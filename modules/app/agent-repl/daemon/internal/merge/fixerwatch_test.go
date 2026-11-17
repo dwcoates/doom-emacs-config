@@ -171,7 +171,6 @@ func TestFixerTurnEndedSettlesOnlyADispatchedFixersCheck(t *testing.T) {
 		wantEscalated bool
 	}{
 		{name: "the dispatched fixer's turn end settles its check", ws: "ws-fixer", wantEscalated: true},
-		{name: "the intake's turn end is no fixer's", ws: "ws-intake"},
 		{name: "another workspace's turn end is no check's", ws: "ws-one"},
 	}
 	for _, tt := range tests {

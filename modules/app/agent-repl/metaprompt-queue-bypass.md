@@ -36,7 +36,7 @@
   3. If the main branch moved since the work began, rebase onto it and resolve every conflict.
   4. Land it with `land-direct.sh` (below).
   5. Resume the queue.
-- Never interrupt a deploy check at work: a deploy rolling out, its intake assessing it, a remediation fixing it, or a remediation or escalation finishing.
+- Never interrupt a deploy check at work: a deploy rolling out, its mediator assessing or fixing it, or the mediator's fix finishing.
   - They typically run in tandem with a bypass session, and a direct landing's deploy cuts them: it replaces the check they are deciding, and its handover moves their sessions mid-turn.
   - `agent-repld merge-queue status -repository here` shows the check: while its `advance` stands `mediating`, or a remediation or escalation workspace is landing its finish, wait for it to end and work the next change meanwhile.
 - Land it: `~/.config/doom/modules/app/agent-repl/bin/land-direct.sh <repository-dir> <minor|patch|none> "<changelog line>" <branch>`.

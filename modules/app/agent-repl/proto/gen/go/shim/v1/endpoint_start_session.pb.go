@@ -318,7 +318,7 @@ type SessionProfileAgentLanding struct {
 	//
 	//	*SessionProfileAgentLanding_ThroughQueue
 	//	*SessionProfileAgentLanding_BypassingQueue
-	//	*SessionProfileAgentLanding_DeployIntake
+	//	*SessionProfileAgentLanding_DeployMediator
 	Landing       isSessionProfileAgentLanding_Landing `protobuf_oneof:"landing"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -379,10 +379,10 @@ func (x *SessionProfileAgentLanding) GetBypassingQueue() *SessionProfileAgentLan
 	return nil
 }
 
-func (x *SessionProfileAgentLanding) GetDeployIntake() *SessionProfileAgentLandingDeployIntake {
+func (x *SessionProfileAgentLanding) GetDeployMediator() *SessionProfileAgentLandingDeployMediator {
 	if x != nil {
-		if x, ok := x.Landing.(*SessionProfileAgentLanding_DeployIntake); ok {
-			return x.DeployIntake
+		if x, ok := x.Landing.(*SessionProfileAgentLanding_DeployMediator); ok {
+			return x.DeployMediator
 		}
 	}
 	return nil
@@ -400,15 +400,15 @@ type SessionProfileAgentLanding_BypassingQueue struct {
 	BypassingQueue *SessionProfileAgentLandingBypassingQueue `protobuf:"bytes,2,opt,name=bypassing_queue,json=bypassingQueue,proto3,oneof"`
 }
 
-type SessionProfileAgentLanding_DeployIntake struct {
-	DeployIntake *SessionProfileAgentLandingDeployIntake `protobuf:"bytes,4,opt,name=deploy_intake,json=deployIntake,proto3,oneof"`
+type SessionProfileAgentLanding_DeployMediator struct {
+	DeployMediator *SessionProfileAgentLandingDeployMediator `protobuf:"bytes,5,opt,name=deploy_mediator,json=deployMediator,proto3,oneof"`
 }
 
 func (*SessionProfileAgentLanding_ThroughQueue) isSessionProfileAgentLanding_Landing() {}
 
 func (*SessionProfileAgentLanding_BypassingQueue) isSessionProfileAgentLanding_Landing() {}
 
-func (*SessionProfileAgentLanding_DeployIntake) isSessionProfileAgentLanding_Landing() {}
+func (*SessionProfileAgentLanding_DeployMediator) isSessionProfileAgentLanding_Landing() {}
 
 // The ordinary landing: every change reaches the main branch through the
 // repository's merge queue.
@@ -488,32 +488,33 @@ func (*SessionProfileAgentLandingBypassingQueue) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{5}
 }
 
-// A deploy intake's landing: the workspace is the intake of a chain of its
-// repository's deploys (repoconfig.v1.LifecycleConfig.deploy_checks). It
-// changes nothing: it states the problems each deploy of its chain caused,
-// from the facts its brief hands it, and decides the deploy through the
-// merge queue (agentrepl.v1.UpdateMergeQueueMediation): approve, escalate,
-// or dispatch a fix to a remediation workspace.
-type SessionProfileAgentLandingDeployIntake struct {
+// The deploy mediator's landing: the workspace is its repository's standing
+// deploy mediator (repoconfig.v1.LifecycleConfig.deploy_checks). It checks
+// every deploy from the facts its brief hands it and decides it through the
+// merge queue (agentrepl.v1.UpdateMergeQueueMediation): approve, escalate to
+// the user, whom it then settles the deploy with, or dispatch the problems to
+// itself, fix them and finish, landing directly on the main branch. (Added
+// 2026-11-17.)
+type SessionProfileAgentLandingDeployMediator struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SessionProfileAgentLandingDeployIntake) Reset() {
-	*x = SessionProfileAgentLandingDeployIntake{}
+func (x *SessionProfileAgentLandingDeployMediator) Reset() {
+	*x = SessionProfileAgentLandingDeployMediator{}
 	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SessionProfileAgentLandingDeployIntake) String() string {
+func (x *SessionProfileAgentLandingDeployMediator) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SessionProfileAgentLandingDeployIntake) ProtoMessage() {}
+func (*SessionProfileAgentLandingDeployMediator) ProtoMessage() {}
 
-func (x *SessionProfileAgentLandingDeployIntake) ProtoReflect() protoreflect.Message {
+func (x *SessionProfileAgentLandingDeployMediator) ProtoReflect() protoreflect.Message {
 	mi := &file_shim_v1_endpoint_start_session_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -525,8 +526,8 @@ func (x *SessionProfileAgentLandingDeployIntake) ProtoReflect() protoreflect.Mes
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SessionProfileAgentLandingDeployIntake.ProtoReflect.Descriptor instead.
-func (*SessionProfileAgentLandingDeployIntake) Descriptor() ([]byte, []int) {
+// Deprecated: Use SessionProfileAgentLandingDeployMediator.ProtoReflect.Descriptor instead.
+func (*SessionProfileAgentLandingDeployMediator) Descriptor() ([]byte, []int) {
 	return file_shim_v1_endpoint_start_session_proto_rawDescGZIP(), []int{6}
 }
 
@@ -1852,15 +1853,15 @@ const file_shim_v1_endpoint_start_session_proto_rawDesc = "" +
 	"\x04kind\"\x96\x01\n" +
 	"\x13SessionProfileAgent\x12@\n" +
 	"\bstanding\x18\x01 \x01(\v2$.shim.v1.SessionProfileAgentStandingR\bstanding\x12=\n" +
-	"\alanding\x18\x02 \x01(\v2#.shim.v1.SessionProfileAgentLandingR\alanding\"\xc6\x02\n" +
+	"\alanding\x18\x02 \x01(\v2#.shim.v1.SessionProfileAgentLandingR\alanding\"\xe1\x02\n" +
 	"\x1aSessionProfileAgentLanding\x12V\n" +
 	"\rthrough_queue\x18\x01 \x01(\v2/.shim.v1.SessionProfileAgentLandingThroughQueueH\x00R\fthroughQueue\x12\\\n" +
-	"\x0fbypassing_queue\x18\x02 \x01(\v21.shim.v1.SessionProfileAgentLandingBypassingQueueH\x00R\x0ebypassingQueue\x12V\n" +
-	"\rdeploy_intake\x18\x04 \x01(\v2/.shim.v1.SessionProfileAgentLandingDeployIntakeH\x00R\fdeployIntakeB\t\n" +
-	"\alandingJ\x04\b\x03\x10\x04R\tmediating\"(\n" +
+	"\x0fbypassing_queue\x18\x02 \x01(\v21.shim.v1.SessionProfileAgentLandingBypassingQueueH\x00R\x0ebypassingQueue\x12\\\n" +
+	"\x0fdeploy_mediator\x18\x05 \x01(\v21.shim.v1.SessionProfileAgentLandingDeployMediatorH\x00R\x0edeployMediatorB\t\n" +
+	"\alandingJ\x04\b\x03\x10\x04J\x04\b\x04\x10\x05R\tmediatingR\rdeploy_intake\"(\n" +
 	"&SessionProfileAgentLandingThroughQueue\"*\n" +
-	"(SessionProfileAgentLandingBypassingQueue\"(\n" +
-	"&SessionProfileAgentLandingDeployIntake\"\xd3\x01\n" +
+	"(SessionProfileAgentLandingBypassingQueue\"*\n" +
+	"(SessionProfileAgentLandingDeployMediator\"\xd3\x01\n" +
 	"\x1bSessionProfileAgentStanding\x12R\n" +
 	"\x0emain_workspace\x18\x01 \x01(\v2).shim.v1.SessionProfileAgentMainWorkspaceH\x00R\rmainWorkspace\x12X\n" +
 	"\x10linked_workspace\x18\x02 \x01(\v2+.shim.v1.SessionProfileAgentLinkedWorkspaceH\x00R\x0flinkedWorkspaceB\x06\n" +
@@ -1943,7 +1944,7 @@ var file_shim_v1_endpoint_start_session_proto_goTypes = []any{
 	(*SessionProfileAgentLanding)(nil),               // 3: shim.v1.SessionProfileAgentLanding
 	(*SessionProfileAgentLandingThroughQueue)(nil),   // 4: shim.v1.SessionProfileAgentLandingThroughQueue
 	(*SessionProfileAgentLandingBypassingQueue)(nil), // 5: shim.v1.SessionProfileAgentLandingBypassingQueue
-	(*SessionProfileAgentLandingDeployIntake)(nil),   // 6: shim.v1.SessionProfileAgentLandingDeployIntake
+	(*SessionProfileAgentLandingDeployMediator)(nil), // 6: shim.v1.SessionProfileAgentLandingDeployMediator
 	(*SessionProfileAgentStanding)(nil),              // 7: shim.v1.SessionProfileAgentStanding
 	(*SessionProfileAgentMainWorkspace)(nil),         // 8: shim.v1.SessionProfileAgentMainWorkspace
 	(*SessionProfileAgentLinkedWorkspace)(nil),       // 9: shim.v1.SessionProfileAgentLinkedWorkspace
@@ -1984,7 +1985,7 @@ var file_shim_v1_endpoint_start_session_proto_depIdxs = []int32{
 	3,  // 6: shim.v1.SessionProfileAgent.landing:type_name -> shim.v1.SessionProfileAgentLanding
 	4,  // 7: shim.v1.SessionProfileAgentLanding.through_queue:type_name -> shim.v1.SessionProfileAgentLandingThroughQueue
 	5,  // 8: shim.v1.SessionProfileAgentLanding.bypassing_queue:type_name -> shim.v1.SessionProfileAgentLandingBypassingQueue
-	6,  // 9: shim.v1.SessionProfileAgentLanding.deploy_intake:type_name -> shim.v1.SessionProfileAgentLandingDeployIntake
+	6,  // 9: shim.v1.SessionProfileAgentLanding.deploy_mediator:type_name -> shim.v1.SessionProfileAgentLandingDeployMediator
 	8,  // 10: shim.v1.SessionProfileAgentStanding.main_workspace:type_name -> shim.v1.SessionProfileAgentMainWorkspace
 	9,  // 11: shim.v1.SessionProfileAgentStanding.linked_workspace:type_name -> shim.v1.SessionProfileAgentLinkedWorkspace
 	11, // 12: shim.v1.SessionProfileChat.system_prompt:type_name -> shim.v1.SessionProfileChatSystemPrompt
@@ -2033,7 +2034,7 @@ func file_shim_v1_endpoint_start_session_proto_init() {
 	file_shim_v1_endpoint_start_session_proto_msgTypes[3].OneofWrappers = []any{
 		(*SessionProfileAgentLanding_ThroughQueue)(nil),
 		(*SessionProfileAgentLanding_BypassingQueue)(nil),
-		(*SessionProfileAgentLanding_DeployIntake)(nil),
+		(*SessionProfileAgentLanding_DeployMediator)(nil),
 	}
 	file_shim_v1_endpoint_start_session_proto_msgTypes[7].OneofWrappers = []any{
 		(*SessionProfileAgentStanding_MainWorkspace)(nil),

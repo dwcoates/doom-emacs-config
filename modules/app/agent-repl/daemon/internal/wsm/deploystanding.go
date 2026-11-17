@@ -51,17 +51,22 @@ ALTER TABLE merge_queue_repos ADD COLUMN mediation_deploy_ending TEXT NOT NULL D
 // DeployCheckRoleName is one standing deploy check role as the store spells it.
 type DeployCheckRoleName string
 
-// The two standing roles.
+// The standing roles.
 const (
+	// StandingMediator checks every deploy, fixes what it dispatches and
+	// settles an escalation with the user (owner ruling, 2026-11-17: one
+	// deploy workspace). The store spells it "fixer", the role it played
+	// before it took the intake's checks too.
+	StandingMediator DeployCheckRoleName = "fixer"
+	// StandingIntake is RETIRED (owner ruling, 2026-11-17): the mediator
+	// checks every deploy. A queue that still records one has it retired
+	// (ForgetStandingDeployCheck) and its workspace closed.
 	StandingIntake DeployCheckRoleName = "intake"
-	// StandingFixer both remediates a dispatch and settles an escalation with
-	// the user (owner ruling, 2026-11-17): one workspace, two briefs.
-	StandingFixer DeployCheckRoleName = "fixer"
 )
 
-// StandingDeployCheckRoles is every standing role, in the order a deploy
-// meets them.
-var StandingDeployCheckRoles = []DeployCheckRoleName{StandingIntake, StandingFixer}
+// StandingDeployCheckRoles is every role the store keeps a row in, the
+// retired intake's included so its row can be read and forgotten.
+var StandingDeployCheckRoles = []DeployCheckRoleName{StandingMediator, StandingIntake}
 
 // QuietChecksBeforeCompaction is how many checks in a row must end with no
 // dispatch and no escalation before an armed queue's standing workspaces are
@@ -142,6 +147,33 @@ func (s *store) RecordStandingDeployCheck(ctx context.Context, repo RepoKey, rol
 			string(repo), string(role), string(ws))
 		return err
 	})
+}
+
+// ForgetStandingDeployCheck deletes REPO's standing workspace in ROLE,
+// answering whether it had one. The workspace itself is the caller's to
+// close.
+func (s *store) ForgetStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (bool, error) {
+	const op = "daemon.wsm.forget_standing_deploy_check"
+	repo, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
+		return false, err
+	}
+	fields := dlog.Context{"repo": string(repo), "role": string(role)}
+	if err := validStandingRole(role); err != nil {
+		s.log.Error(op, "refused to forget a role that is not a standing one", withError(fields, err))
+		return false, err
+	}
+	forgot := false
+	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_check_standing WHERE repo_key = ? AND role = ?`, string(repo), string(role))
+		if err != nil {
+			return err
+		}
+		forgot, err = touchedRow(res)
+		return err
+	})
+	return forgot, err
 }
 
 // MarkStandingBriefed records that REPO's standing workspace in ROLE was

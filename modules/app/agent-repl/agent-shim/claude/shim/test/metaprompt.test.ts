@@ -198,25 +198,26 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Run one ungoverned only when the user asks for it, by adding `-ungoverned -as-user`.");
   });
 
-  it("gives the deploy intake its own section: state problems, never fix them, and decide every deploy", () => {
+  it("gives the deploy mediator its own section: check every deploy, and fix what it dispatches itself", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
-    const text = readLandingSection("deploy_intake", home);
-    // Assert — owner rulings 2026-11-14, and 2026-11-17: one standing intake
-    // checks every deploy, and dispatches go to the standing fixer.
-    expect(text).toContain("This session is the deploy intake: the one hidden workspace agent-repl keeps to check every deploy");
-    expect(text).toContain("It never researches a cause and never prescribes a fix.");
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-17: one standing mediator checks every
+    // deploy, fixes what it dispatches, and settles escalations with the user.
+    expect(text).toContain("This session is the deploy mediator: the one workspace agent-repl keeps to check every deploy");
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
     expect(text).toContain("agent-repld merge-queue mediation dispatch -summary");
+    expect(text).toContain("Problems this workspace can fix, of any standing but OWNED: dispatch them, then fix them in the same turn.");
+    expect(text).toContain("agent-repld workspace finished here -version-part patch");
     expect(text).not.toContain("-fresh");
   });
 
-  it("has the deploy intake approve only when every group has an owner", () => {
+  it("has the deploy mediator approve only when every group has an owner", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
-    const text = readLandingSection("deploy_intake", home);
+    const text = readLandingSection("deploy_mediator", home);
     // Assert — owner ruling 2026-11-16: an old problem nobody owns is
     // dispatched or escalated, never approved past, and never filed with a
     // named workspace.

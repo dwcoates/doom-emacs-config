@@ -17,4 +17,4 @@ Escalating a problem an open escalation workspace owns sends it back to that wor
 
 Also read `~/.claude/skills/agent-repl-runtime/run.sh --doctor`: a fault it reports is dispatched or escalated unless its records are OWNED above.
 
-Decide this deploy in this turn, as your session's rules say: approve only when every group is OWNED, and otherwise dispatch or escalate every NEW, SEEN BEFORE and RECURRED group.
+Decide this deploy in this turn, as your session's rules say: approve only when every group is OWNED, and otherwise dispatch or escalate every NEW, SEEN BEFORE and RECURRED group. A problem you dispatch, you fix and finish in this same turn.

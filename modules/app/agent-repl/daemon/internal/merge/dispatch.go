@@ -13,52 +13,42 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// THE DISPATCH (owner rulings, 2026-11-14 and 2026-11-17). The intake hands
-// the problems a deploy caused to the repository's STANDING FIXER
-// (standingFixer), in sight: the same workspace takes every dispatch and
-// every escalation, so it knows every fix it made and what it ruled out. It
-// stays open after its fix deploys; each brief first brings its worktree to
-// the main branch's tip. The chain's bound on remediations in a row is
-// enforced here, so an intake that miscounts cannot exceed it.
+// THE DISPATCH (owner rulings, 2026-11-14 and 2026-11-17). The deploy
+// mediator dispatches the problems a deploy caused to ITSELF, and fixes them
+// in the same turn: it knows every fix it made and what it ruled out. The
+// dispatch shows it in its repository's section while it fixes, and its
+// finish lands directly. The chain's bound on remediations in a row is
+// enforced here, so a mediator that miscounts cannot exceed it.
 
-// The briefs a remediation workspace is prompted with.
-const (
-	// BriefDeployRemediation is the standing remediation's first prompt,
-	// stating its role in full.
-	BriefDeployRemediation = "deploy-remediation"
-	// BriefDeployRemediationRestored is every later one: only the new
-	// findings.
-	BriefDeployRemediationRestored = "deploy-remediation-restored"
-)
+// BriefDeployRemediationRestored is the prompt that stands for a
+// dispatch's work: the mediator's turn the dispatch is recorded on is
+// submitted with it again only if a restart cut that turn before it reached
+// the session (watchFixer).
+const BriefDeployRemediationRestored = "deploy-remediation-restored"
 
-// dispatch hands decision D's problems, on check M of queue Q, to a
-// remediation workspace, as intake WS decided, and records the dispatch: the
-// queue's hold is then owned by that workspace until its fix's deploy is
-// checked in turn.
+// dispatch records decision D's problems, on check M of queue Q, dispatched
+// to the mediator WS that decided them, which fixes them in the turn it
+// decided in: the queue's hold is then owned by WS until its fix's deploy is
+// checked in turn. Its turn is the check's fixer turn (watchFixer): a turn
+// that ends with no finish of WS's under way escalates the check.
 func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Mediation, ws ids.WorkspaceID, d Decision, fields dlog.Context) error {
-	fields = withField(fields, "problems", len(d.Problems))
+	fields = withField(withField(fields, "problems", len(d.Problems)), "remediation", string(ws))
 	if m.ChainRedeploys >= q.bound {
 		o.deps.Log.Global().Warn(opMediation, "refused a dispatch past the chain's bound on remediations in a row; only an escalation is accepted", withField(withField(fields, "bound", q.bound), "in_a_row", m.ChainRedeploys))
 		err := refuse(ArmRemediationBoundReached, ws, "the chain deployed %d remediations in a row, its repository's bound; escalate instead", m.ChainRedeploys)
 		err.Fields = map[string]any{"remediations_before_escalation": uint32(q.bound)}
 		return err
 	}
-	remediation, err := o.standingFixer(ctx, q, DeployCheckRemediation, fields)
+	brief, err := o.remediationBrief(q.repository.Dir, m, d)
 	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the dispatch's brief could not be composed; nothing is dispatched and the queue stays held for the mediator", withField(fields, "error", err.Error()))
 		return err
 	}
-	remedy := remediation.ws
-	fields["remediation"] = string(remedy)
-	brief, err := o.remediationBrief(q.repository.Dir, remediation.briefed, m, d)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the remediation's brief could not be composed; nothing is dispatched and the queue stays held for the intake", withField(fields, "error", err.Error()))
-		return err
-	}
-	turn := wsm.FixerTurn{ID: wsm.NewTurnID(), Brief: brief, Origin: int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)}
+	turn := wsm.FixerTurn{ID: m.Turn, Brief: brief, Origin: int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)}
 	at := o.deps.Now()
-	recorded, err := o.deps.DB.DispatchMediation(ctx, q.key, m.OwedAt, at, remedy, turn)
+	recorded, err := o.deps.DB.DispatchMediation(ctx, q.key, m.OwedAt, at, ws, turn)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the remediation workspace is ready but the dispatch could not be recorded; the queue stays held for the intake", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "the dispatch could not be recorded; the queue stays held for the mediator", withField(fields, "error", err.Error()))
 		return err
 	}
 	if !recorded {
@@ -67,17 +57,12 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	o.observeDispatch(m, at)
 	o.noteCheckWork(ctx, q.key, fields)
-	// THE DISPATCH STANDS EITHER WAY: a brief that did not reach the queue is
-	// submitted again by the round that waits on the fixer (watchFixer).
-	if _, err := o.submitCheckPrompt(ctx, remedy, turn.ID, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the remediation's brief could not be submitted; the round that waits on the fixer submits it again", withField(fields, "error", err.Error()))
-		return err
+	// THE MEDIATOR IS IN SIGHT WHILE IT FIXES (owner ruling, 2026-11-17).
+	if err := o.deps.DeployChecks.Resume(ctx, ws); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the dispatch is recorded but the mediator could not be shown while it fixes; the next pass shows it", withField(fields, "error", err.Error()))
 	}
-	if !remediation.briefed {
-		o.markBriefed(ctx, q, DeployCheckRemediation, fields)
-	}
-	o.ownProblems(ctx, q.key, remedy, d.Problems, nil, "dispatched to the remediation", fields)
-	o.deps.Log.Global().Info(opMediation, "the intake dispatched the deploy's problems; the queue stays held for the remediation", fields)
+	o.ownProblems(ctx, q.key, ws, d.Problems, nil, "dispatched to the mediator", fields)
+	o.deps.Log.Global().Info(opMediation, "the mediator dispatched the deploy's problems to itself; the queue stays held while it fixes them", fields)
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
 	return nil
@@ -95,22 +80,14 @@ func (o *orchestrator) observeDispatch(m wsm.Mediation, at time.Time) {
 	}
 }
 
-// remediationBrief is the standing remediation workspace's brief, of the
-// repository at REPODIR, with decision D's problems on check M: its first
-// brief states its role in full, and every one after, once BRIEFED, only the
-// new findings. Its conversation is never cleared, only compacted by Haiku
-// after a quiet run (compactStanding).
-func (o *orchestrator) remediationBrief(repoDir string, briefed bool, m wsm.Mediation, d Decision) (string, error) {
-	name := BriefDeployRemediation
-	if briefed {
-		name = BriefDeployRemediationRestored
-	}
-	brief, err := o.deps.Briefs(name, map[string]string{
+// remediationBrief is the prompt that stands for decision D's work on check
+// M of the repository at REPODIR (BriefDeployRemediationRestored).
+func (o *orchestrator) remediationBrief(repoDir string, m wsm.Mediation, d Decision) (string, error) {
+	return o.deps.Briefs(BriefDeployRemediationRestored, map[string]string{
 		"repo_dir":       repoDir,
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
 		"problems":       renderProblems(d.Problems),
 	})
-	return brief, err
 }
 
 // renderProblems is the problems as a brief quotes them: each statement,

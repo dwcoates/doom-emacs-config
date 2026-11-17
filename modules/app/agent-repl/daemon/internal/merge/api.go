@@ -788,45 +788,14 @@ type Deps struct {
 
 // DeployCheckWorkspaces is what the deploy checks need of the workspaces
 // (workspace.Verbs, bound after the queue is built).
-// DeployCheckRole is the part a deploy check workspace plays, which decides
-// the effort it works at (workspace.SetDeployCheckEffort).
-type DeployCheckRole int
-
-const (
-	deployCheckRoleUnset DeployCheckRole = iota
-	// DeployCheckIntake states the deploy's problems and decides.
-	DeployCheckIntake
-	// DeployCheckRemediation fixes the problems an intake dispatched.
-	DeployCheckRemediation
-	// DeployCheckEscalation settles an escalated deploy with the user.
-	DeployCheckEscalation
-)
-
-// String names the role in records.
-func (r DeployCheckRole) String() string {
-	switch r {
-	case DeployCheckIntake:
-		return "intake"
-	case DeployCheckRemediation:
-		return "remediation"
-	case DeployCheckEscalation:
-		return "escalation"
-	}
-	return fmt.Sprintf("deploy_check_role(%d)", int(r))
-}
-
 type DeployCheckWorkspaces interface {
-	// CreateDeployIntake makes a chain's hidden intake, unprompted.
-	CreateDeployIntake(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// CreateDeployRemediation makes a visible remediation workspace,
-	// unprompted.
-	CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// CreateDeployEscalation makes a visible escalation workspace,
-	// unprompted, on the remediation's model.
-	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployCheckEffort sets a made workspace to ROLE's effort; it starts
-	// a sessionless workspace's shim, so the role is recorded before it.
-	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, role DeployCheckRole) error
+	// CreateDeployMediator makes a repository's deploy mediator, hidden,
+	// unprompted and in remote control.
+	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// SetDeployMediatorEffort sets the deploy mediator to its effort; it
+	// starts a sessionless workspace's shim, so its standing is recorded
+	// before it.
+	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
 	// Reopen opens a closed remediation workspace again, its worktree cut
 	// again on its branch at the main branch's tip.
 	Reopen(ctx context.Context, ws ids.WorkspaceID) error

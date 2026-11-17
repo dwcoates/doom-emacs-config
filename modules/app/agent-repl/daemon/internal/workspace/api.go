@@ -419,20 +419,13 @@ type Verbs interface {
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
 	// request.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
-	// CreateDeployIntake makes the hidden deploy intake NAME of the repository at
-	// REPODIR, unprompted, on the intake's model (deploychecks.go).
-	CreateDeployIntake(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// CreateDeployRemediation makes the visible deploy remediation workspace NAME of
-	// the repository at REPODIR, unprompted, on the remediation's model
+	// CreateDeployMediator makes the hidden deploy mediator NAME of the
+	// repository at REPODIR, unprompted and in remote control
 	// (deploychecks.go).
-	CreateDeployRemediation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// CreateDeployEscalation makes the visible escalation workspace NAME of
-	// the repository at REPODIR, unprompted, on the remediation's model
+	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
+	// SetDeployMediatorEffort sets the deploy mediator to its effort
 	// (deploychecks.go).
-	CreateDeployEscalation(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
-	// SetDeployCheckEffort sets a deploy check workspace to its role's
-	// effort, once its role is recorded (deploychecks.go).
-	SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, role merge.DeployCheckRole) error
+	SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error
 	// StartMergeWorkspace brings up merge workspace WS's session when none is
 	// live, making the fork it still owes: what a hand-off that finds the
 	// merge workspace a restart left behind needs before its pick can run.

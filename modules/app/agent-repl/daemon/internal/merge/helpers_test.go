@@ -408,6 +408,10 @@ func (f *fakeDB) RecordStandingDeployCheck(ctx context.Context, repo wsm.RepoKey
 	return f.checks.RecordStandingDeployCheck(ctx, repo, role, ws)
 }
 
+func (f *fakeDB) ForgetStandingDeployCheck(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) (bool, error) {
+	return f.checks.ForgetStandingDeployCheck(ctx, repo, role)
+}
+
 func (f *fakeDB) MarkStandingBriefed(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) error {
 	return f.checks.MarkStandingBriefed(ctx, repo, role)
 }
@@ -3669,7 +3673,7 @@ func newHarness(t *testing.T) *harness {
 	h.git = newFakeGit(h.next)
 	h.feed = &fakeFeed{seq: h.next}
 	h.rollout = &fakeRollout{db: h.db, detached: h.detached}
-	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository}
+	h.checks = &fakeDeployChecks{db: h.db, repo: theRepository, key: func() wsm.RepoKey { return scopedKey(h) }}
 	h.standing = newFakeStanding()
 	h.targetD = t.TempDir()
 	h.sourceD = t.TempDir()
@@ -4701,6 +4705,9 @@ type fakeDeployChecks struct {
 	mu   sync.Mutex
 	db   *fakeDB
 	repo wsm.RepoID
+	// key answers the harness's queue key, which the mediator's standing is
+	// recorded under.
+	key func() wsm.RepoKey
 	// made names every workspace made, in order; createErr fails a make.
 	made      []string
 	createErr error
@@ -4740,14 +4747,14 @@ type fakeDeployChecks struct {
 	effortErr error
 }
 
-func (f *fakeDeployChecks) SetDeployCheckEffort(ctx context.Context, ws ids.WorkspaceID, deployRole DeployCheckRole) error {
-	role, err := f.db.MediationRoleOf(ctx, ws)
+func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
+	_, standing, err := f.db.StandingDeployCheckOf(ctx, f.key(), wsm.StandingMediator)
 	if err != nil {
 		return err
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.efforts = append(f.efforts, fmt.Sprintf("%s:%s:recorded=%v", deployRole, ws, role != nil))
+	f.efforts = append(f.efforts, fmt.Sprintf("mediator:%s:standing=%v", ws, standing))
 	return f.effortErr
 }
 
@@ -4765,15 +4772,7 @@ func (f *fakeDeployChecks) make(prefix, name string) (wsm.Workspace, error) {
 	return ws, nil
 }
 
-func (f *fakeDeployChecks) CreateDeployIntake(_ context.Context, _, name string) (wsm.Workspace, error) {
-	return f.make("ws-intake", name)
-}
-
-func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name string) (wsm.Workspace, error) {
-	return f.make("ws-fixer", name)
-}
-
-func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name string) (wsm.Workspace, error) {
+func (f *fakeDeployChecks) CreateDeployMediator(ctx context.Context, _, name string) (wsm.Workspace, error) {
 	f.mu.Lock()
 	err := f.escalationErr
 	f.createCtxErrs = append(f.createCtxErrs, ctx.Err())

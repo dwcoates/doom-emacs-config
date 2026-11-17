@@ -33,23 +33,36 @@ func escalationBriefs(h *harness) []promptqueue.Submission {
 	return submissionsTo(h, "ws-fixer", BriefDeployEscalation+" ")
 }
 
-func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) {
+// escalatedByTheDaemon holds the owed check escalated with SUMMARY by the
+// daemon, as a stopped fixer or an undecided turn is: no workspace said it.
+func escalatedByTheDaemon(t *testing.T, h *harness, summary string) {
+	t.Helper()
+	m := owedCheck(t, h)
+	window, err := h.o.toldWindow(context.Background(), mediationKey(h), dlog.Context{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.o.holdEscalated(context.Background(), queueOf(t, h), *m, summary, nil, window, "", dlog.Context{})
+}
+
+func TestEveryEscalationPutsTheDeployBeforeTheUserInTheMediator(t *testing.T) {
 	tests := []struct {
 		name         string
 		act          func(t *testing.T, h *harness)
+		wantBriefed  bool
 		wantSummary  string
 		wantProblems string
 	}{
-		{name: "the intake's escalation carries its findings",
+		{name: "the mediator's own escalation is told by the mediator, never briefed back to it",
 			act: func(t *testing.T, h *harness) {
-				if err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}); err != nil {
+				if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}); err != nil {
 					t.Fatalf("DecideMediation: %v", err)
 				}
-			}, wantSummary: "pages regressed", wantProblems: "1. the reaper errors on every pass"},
-		{name: "a turn that decided nothing",
+			}},
+		{name: "a turn that decided nothing", wantBriefed: true,
 			act:         func(t *testing.T, h *harness) { h.o.Mediate(context.Background()) },
-			wantSummary: "the deploy intake ended its turn without deciding the deploy", wantProblems: "states no separate findings"},
-		{name: "a remediation closed before it landed",
+			wantSummary: "the deploy mediator ended its turn without deciding the deploy", wantProblems: "states no separate findings"},
+		{name: "a remediation closed before it landed", wantBriefed: true,
 			act: func(t *testing.T, h *harness) {
 				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 					t.Fatal(err)
@@ -74,25 +87,27 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 			// Act
 			tt.act(t, h)
 
-			// Assert: the check stays owed, holding the queue for the user.
+			// Assert: the check stays owed, holding the queue for the user in
+			// the mediator, shown and announced.
 			if got := heldEscalation(t, h); got != "ws-fixer" {
-				t.Fatalf("the check waits on escalation %q, want the escalation workspace", got)
+				t.Fatalf("the check waits on escalation %q, want the mediator", got)
 			}
-			if len(h.checks.made) == 0 || h.checks.made[len(h.checks.made)-1] != "deploy-fixer" {
-				t.Fatalf("made %v, want an escalation workspace made last", h.checks.made)
+			if !slices.Contains(h.checks.resumed, "ws-fixer") || !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
+				t.Fatalf("resumed %v; want the mediator shown and the user notified with a click opening it", h.checks.resumed)
 			}
-			if !slices.ContainsFunc(h.checks.efforts, func(e string) bool { return strings.HasPrefix(e, "escalation:ws-fixer:") }) {
-				t.Fatalf("efforts %v, want the escalation at the remediation's effort", h.checks.efforts)
+			subs := escalationBriefs(h)
+			if !tt.wantBriefed {
+				if len(subs) != 0 {
+					t.Fatalf("briefed the mediator %d times with its own escalation, want never", len(subs))
+				}
+				return
 			}
-			if subs := escalationBriefs(h); len(subs) != 1 {
+			if len(subs) != 1 {
 				t.Fatalf("briefed the escalation %d times, want once", len(subs))
 			}
 			values := h.briefValues[len(h.briefValues)-1]
 			if !strings.Contains(values["summary"], tt.wantSummary) || !strings.Contains(values["problems"], tt.wantProblems) {
 				t.Fatalf("brief values %v, want the summary %q and findings %q", values, tt.wantSummary, tt.wantProblems)
-			}
-			if !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
-				t.Fatal("the user was not notified with a click opening the escalation workspace")
 			}
 		})
 	}
@@ -101,18 +116,19 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 	tests := []struct {
 		name    string
+		byUs    bool
 		arrange func(h *harness)
 		message string
 	}{
-		{name: "a workspace that cannot be made", message: "the standing fixer could not be readied for the escalation; the user is not told of the escalated deploy",
-			arrange: func(h *harness) { h.checks.escalationErr = errors.New("disk full") }},
-		{name: "an effort that cannot be set", message: "the standing fixer's effort could not be set for its brief; it is not briefed",
+		{name: "a mediator that cannot be shown", message: "the deploy mediator could not be shown for its brief; it is not briefed",
+			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent hidden") }},
+		{name: "an effort that cannot be set", message: "the deploy mediator's effort could not be set; it is not briefed",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
-		{name: "a brief that cannot be composed", message: "the escalation workspace's brief could not be composed; it is not briefed and the user is not told",
-			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
-		{name: "a worktree that cannot be refreshed", message: "the standing fixer's worktree could not be brought to the main branch's tip; it is not briefed",
+		{name: "a worktree that cannot be refreshed", message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
 			arrange: func(h *harness) { h.checks.refreshErr = errors.New("git gone") }},
-		{name: "a brief that cannot be submitted", message: "the escalation workspace's brief could not be submitted; the user is not told",
+		{name: "a daemon's brief that cannot be composed", byUs: true, message: "the escalation workspace's brief could not be composed; it is not briefed and the user is not told",
+			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
+		{name: "a daemon's brief that cannot be submitted", byUs: true, message: "the escalation workspace's brief could not be submitted; the user is not told",
 			arrange: func(h *harness) { h.queue.err = errors.New("queue closed") }},
 	}
 	for _, tt := range tests {
@@ -124,59 +140,44 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 			tt.arrange(h)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours"})
+			if tt.byUs {
+				escalatedByTheDaemon(t, h, "yours")
+			} else if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
+				t.Fatalf("DecideMediation = %v", err)
+			}
 
 			// Assert: the queue stays held for the user, escalated with no
 			// workspace for the next pass to make, and the lost escalation is
 			// the record's to tell.
-			if err != nil || heldEscalation(t, h) != "" {
-				t.Fatalf("DecideMediation = %v, want the check held, escalated with no workspace", err)
+			if heldEscalation(t, h) != "" {
+				t.Fatal("want the check held, escalated with no workspace")
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {
 				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
 			}
 			if h.bannerRaised(desktopnotify.KindDeployMediated) {
-				t.Fatal("the user was notified of an escalation workspace that was never briefed")
+				t.Fatal("the user was notified of an escalation that never reached its workspace")
 			}
 		})
 	}
 }
 
-func TestAnEscalationWorkspaceIsRecordedAsLandingDirectly(t *testing.T) {
-	// Arrange
+func TestAMadeMediatorThatCannotBeRecordedAsLandingDirectlyIsNotAnswered(t *testing.T) {
+	// Arrange: no mediator stands yet.
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
-
-	// Act
-	if err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}); err != nil {
-		t.Fatalf("DecideMediation: %v", err)
-	}
-
-	// Assert
-	repo, found, err := h.db.DeployEscalationOf(context.Background(), "ws-fixer")
-	if err != nil || !found || repo != mediationKey(h) {
-		t.Fatalf("DeployEscalationOf = (%q, %v, %v), want the escalation recorded for its queue", repo, found, err)
-	}
-}
-
-func TestAnEscalationThatCannotBeRecordedIsNotBriefed(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	withIntake(t, h, deployStarted)
 	h.db.mu.Lock()
 	h.db.escalationRecordErr = errors.New("database is locked")
 	h.db.mu.Unlock()
 
 	// Act
-	_ = h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem})
+	_, err := h.o.mediatorOf(context.Background(), queueOf(t, h), dlog.Context{})
 
 	// Assert
-	if subs := escalationBriefs(h); len(subs) != 0 {
-		t.Fatalf("briefed the escalation %d times, want none", len(subs))
+	if err == nil {
+		t.Fatal("mediatorOf = nil, want the failed record answered")
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the standing fixer could not be recorded as landing directly"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the deploy mediator could not be recorded as landing directly"}); !ok {
 		t.Fatalf("records = %+v, want the failed record at ERROR", h.logs.Records())
 	}
 }
@@ -241,9 +242,10 @@ func problemOf(t *testing.T, h *harness, key wsm.ProblemKey) wsm.DeployProblem {
 	return wsm.DeployProblem{}
 }
 
-// escalationMade reports whether a new escalation workspace was made.
+// escalationMade reports whether the mediator took a new escalation: it was
+// shown for it.
 func escalationMade(h *harness) bool {
-	return len(escalationBriefs(h)) > 0
+	return slices.Contains(h.checks.resumed, "ws-fixer")
 }
 
 func TestAProblemAnOpenEscalationOwnsGoesBackToIt(t *testing.T) {
@@ -278,7 +280,7 @@ func TestAProblemAnOpenEscalationOwnsGoesBackToIt(t *testing.T) {
 			toldWith(t, h, tt.groups...)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: tt.problems})
+			err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: tt.problems})
 
 			// Assert: the check waits on the escalation that took it.
 			holder := oldEscalation
@@ -329,7 +331,7 @@ func TestADecisionConfirmsToTheOpenEscalationThatItsProblemsPersist(t *testing.T
 			toldWith(t, h, wsm.WindowGroup{Operation: aProblemKey.Operation, Message: aProblemKey.Message, Class: wsm.WindowOwned})
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", tt.decision)
+			err := decideTold(h, tt.decision)
 
 			// Assert
 			if err != nil {
@@ -345,8 +347,8 @@ func TestADecisionConfirmsToTheOpenEscalationThatItsProblemsPersist(t *testing.T
 			if p := problemOf(t, h, aProblemKey); p.Findings != "the location grant" {
 				t.Fatalf("problem %+v, want its findings unchanged by a confirmation", p)
 			}
-			if escalationMade(h) {
-				t.Fatalf("made %v, want no escalation", h.checks.made)
+			if m := owedCheck(t, h); m != nil && m.Escalated() {
+				t.Fatalf("check %+v, want no escalation", m)
 			}
 		})
 	}
@@ -380,7 +382,7 @@ func TestAnEscalationsUpdateThatCannotBeSentIsRecorded(t *testing.T) {
 			tt.arrange(h)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
+			err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
 
 			// Assert: the check waits on the escalation it went back to.
 			if got := heldEscalation(t, h); err != nil || got != oldEscalation {
@@ -410,7 +412,7 @@ func TestOwnersThatCannotBeReadEscalateNothing(t *testing.T) {
 	h.db.mu.Unlock()
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
 
 	// Assert: the check stays held, escalated with no workspace.
 	if err != nil || heldEscalation(t, h) != "" {
@@ -508,7 +510,7 @@ func TestADecisionNeverStopsItsIntake(t *testing.T) {
 			withIntake(t, h, deployStarted)
 
 			// Act
-			err := h.o.DecideMediation(context.Background(), "ws-intake", tt.decision)
+			err := decideTold(h, tt.decision)
 
 			// Assert
 			if err != nil || len(h.checks.stopped) != 0 {
@@ -528,7 +530,7 @@ func TestADecisionWhileTheDaemonStopsLeavesTheCheckOwed(t *testing.T) {
 	}
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationApprove, Summary: "nothing new"})
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "nothing new"})
 
 	// Assert
 	if !errors.Is(err, errMediationStopped) || owedCheck(t, h) == nil {
@@ -544,7 +546,7 @@ func TestADecisionWhileTheDaemonStopsLeavesTheCheckOwed(t *testing.T) {
 func escalatedBy(t *testing.T, h *harness) ids.WorkspaceID {
 	t.Helper()
 	withIntake(t, h, deployStarted)
-	if err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours", Problems: aProblem}); err != nil {
+	if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "yours", Problems: aProblem}); err != nil {
 		t.Fatalf("DecideMediation: %v", err)
 	}
 	return heldEscalation(t, h)
@@ -626,15 +628,17 @@ func TestAnUnrelatedDeployLeavesTheEscalationsHold(t *testing.T) {
 }
 
 func TestAnEscalationThatCouldNotBeMadeIsMadeByTheNextPass(t *testing.T) {
-	// Arrange: the first escalation workspace could not be made.
+	// Arrange: the mediator could not be readied for the escalation.
 	h := checked(t)
 	owe(t, h)
-	h.checks.escalationErr = errors.New("disk full")
-	if escalatedBy(t, h) != "" {
-		t.Fatal("the check names an escalation that was never made")
+	withIntake(t, h, deployStarted)
+	h.checks.refreshErr = errors.New("git gone")
+	escalatedByTheDaemon(t, h, "the reaper errors on every pass")
+	if heldEscalation(t, h) != "" {
+		t.Fatal("the check names an escalation that was never readied")
 	}
 	h.checks.mu.Lock()
-	h.checks.escalationErr = nil
+	h.checks.refreshErr = nil
 	h.checks.mu.Unlock()
 
 	// Act
@@ -649,22 +653,29 @@ func TestAnEscalationThatCouldNotBeMadeIsMadeByTheNextPass(t *testing.T) {
 	}
 }
 
-func TestAnIntakeThatCannotBeClosedAfterItsDecisionIsRecorded(t *testing.T) {
-	// Arrange
+func TestTheMediatorIsNeverToldWhatItSaidItself(t *testing.T) {
+	// Arrange: the mediator owns a problem from its earlier escalation, and
+	// its own check escalates it again.
 	h := checked(t)
 	owe(t, h)
-	decideInTurn(t, h, Decision{Kind: MediationEscalate, Summary: "yours"})
-	h.checks.stopErr = errors.New("kill refused")
-
-	// Act: the session ends once the escalating turn ends (owner ruling,
-	// 2026-11-17), so the failed stop comes after the decision is recorded.
-	h.o.Mediate(context.Background())
-
-	// Assert: the decision stands, and the failed close is the record's.
-	if heldEscalation(t, h) != "ws-fixer" {
-		t.Fatalf("check %+v, want the escalation held", owedCheck(t, h))
+	withIntake(t, h, deployStarted)
+	if err := h.db.OwnDeployProblems(context.Background(), mediationKey(h), []wsm.ProblemKey{aProblemKey}, "ws-fixer", "the location grant", deployStarted); err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake decided but its session could not be ended"}); !ok {
-		t.Fatalf("records = %v, want the failed close at ERROR", h.logs.Records())
+	toldWith(t, h, wsm.WindowGroup{Operation: aProblemKey.Operation, Message: aProblemKey.Message, Class: wsm.WindowOwned})
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "the grant is missing", Problems: aProblem})
+
+	// Assert: held by the mediator, no update or brief prompted to it, and
+	// the problem still its own.
+	if got := heldEscalation(t, h); err != nil || got != "ws-fixer" {
+		t.Fatalf("DecideMediation = %v, check waits on %q; want the mediator", err, got)
+	}
+	if updates, briefs := updatesTo(h, "ws-fixer"), escalationBriefs(h); len(updates) != 0 || len(briefs) != 0 {
+		t.Fatalf("updates %v, briefs %d; want the mediator told nothing it said", updates, len(briefs))
+	}
+	if p := problemOf(t, h, aProblemKey); p.Owner != "ws-fixer" {
+		t.Fatalf("problem %+v, want the mediator owning it", p)
 	}
 }

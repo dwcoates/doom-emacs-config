@@ -250,36 +250,37 @@ Either kind:
   'after X lands' is this, never a queue subscription.
 - A repository whose `.agent-repl/lifecycle.yaml` sets `deploy_checks` holds
   its queue's head after every deploy until the deploy is checked.
-  - Deploys in a row form a chain. The repository keeps two standing
-    workspaces across every deploy: a hidden intake, and `deploy-fixer`,
-    which takes both a dispatch (fix and finish on its own) and an
-    escalation (propose a plan, finish once the user agrees). Both stay open
-    and warm; the fixer is in sight only while it holds the queue, and the
-    queue's purple label opens it otherwise; their conversations are compacted by Haiku the moment three
-    quiet checks follow a dispatch or an escalation, never cleared.
+  - Deploys in a row form a chain. The repository keeps ONE standing deploy
+    mediator across every deploy, on Opus at low effort: it checks each
+    deploy, fixes what it dispatches to itself in the same turn (finishing on
+    its own), and settles an escalation with the user (finishing once they
+    agree). It stays open and warm; it is in sight only while it fixes or
+    waits on the user, and the queue's purple label opens it otherwise; its
+    conversation is compacted by Haiku the moment three quiet checks follow a
+    dispatch or an escalation, never cleared.
   - The sidebar labels the repository in purple: "HOT-LOADING ZETTEL" while
     a build rolls out (a landing's or a landed fix's), "ASSESSING ZETTEL
-    HEALTH" while the intake checks it, "FIXING ZETTEL" while a
-    remediation workspace fixes it or what its gate failed on, "TESTING
+    HEALTH" while the mediator checks it, "FIXING ZETTEL" while the
+    mediator fixes it or what its gate failed on, "TESTING
     ZETTEL FIXES" while a finished fix runs its gate and lands. A click
     selects the workspace at work.
   - `merge-queue status` answers its advance as `mediating`, with its stage
-    (`rolling_out`, `assessing` or `fixing`, naming the intake and the
-    remediation) and `remediations_in_a_row`; `paused` wins while the queue
+    (`rolling_out`, `assessing` or `fixing`, naming the mediator) and
+    `remediations_in_a_row`; `paused` wins while the queue
     is also paused.
-  - Only the chain's intake decides, with
+  - Only the mediator decides, from the turn its check's brief started, with
     `merge-queue mediation approve|escalate -summary TEXT`, or
     `merge-queue mediation dispatch -summary TEXT` reading the
     problems from standard input as a JSON list of `{"statement", "evidence"}`.
-  - Refusals: `not_mediator` (not the chain's intake), `no_mediation_owed` (a
+  - Refusals: `not_mediator` (not the workspace the check was told to), `no_mediation_owed` (a
     fix is dispatched already), `remediation_bound_reached` (the chain's bound;
     only an escalation is accepted).
   - An escalated check holds the queue until the escalation's fix deploys and
     is approved, or the user releases it: the sidebar's "release" beside
     "ZETTEL NEEDS YOU", or `merge-queue release-escalation -repository
     here|DIR`, refused `no_escalation_held` when no escalation holds the
-    queue. The fixer stays open.
-  - A remediation workspace's `workspace finished` answers `landing_directly`:
+    queue. The mediator stays open.
+  - The mediator's `workspace finished` answers `landing_directly`:
     it never joins the queue. Its gate, direct landing and deploy run
     unattended; a failed gate comes back to it as a resumed turn.
 - Holding or releasing a repository's deploys is `/agent-repl-runtime`'s.

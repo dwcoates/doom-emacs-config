@@ -424,6 +424,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			continue
 		}
 		o.adoptStanding(ctx, q, m)
+		o.retireStandingIntake(ctx, q, m)
 		o.retireOneOffEscalations(ctx, q, m)
 		o.settleFixerSight(ctx, q, m)
 		if m == nil {
@@ -664,35 +665,32 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed tim
 	o.mediationFailed(ctx, fields, message, err)
 }
 
-// intakeOf answers the intake of check M: the queue's standing intake
-// (standingWorkspace), recorded on M before anything prompts it, so its
-// prompt brings its session up as the intake. Empty when M was replaced or
-// released meanwhile: the standing intake then waits for the next check.
+// intakeOf answers the workspace check M is told to: the queue's deploy
+// mediator (readyMediator), recorded on M before anything prompts it, and
+// left hidden, since it is in sight only while it fixes or waits on the
+// user. Empty when M was replaced or released meanwhile: the mediator then
+// waits for the next check.
 func (o *orchestrator) intakeOf(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Intake != "" {
 		return m.Intake, nil
 	}
-	intake, err := o.standingWorkspace(ctx, q, DeployCheckIntake, fields)
+	mediator, err := o.readyMediator(ctx, q, false, fields)
 	if err != nil {
-		return "", fmt.Errorf("merge: the queue's standing intake: %w", err)
+		return "", fmt.Errorf("merge: the queue's deploy mediator: %w", err)
 	}
-	recorded, err := o.deps.DB.RecordMediationIntake(ctx, q.key, m.OwedAt, intake.ws)
+	recorded, err := o.deps.DB.RecordMediationIntake(ctx, q.key, m.OwedAt, mediator.ws)
 	if err != nil {
-		return "", fmt.Errorf("merge: record the standing intake %s on the check: %w", intake.ws, err)
+		return "", fmt.Errorf("merge: record the deploy mediator %s on the check: %w", mediator.ws, err)
 	}
 	if !recorded {
-		o.deps.Log.Global().Info(opMediation, "the check was replaced or released before its intake was recorded on it; the standing intake waits for the next check", withField(fields, "intake", string(intake.ws)))
+		o.deps.Log.Global().Info(opMediation, "the check was replaced or released before its mediator was recorded on it; the mediator waits for the next check", withField(fields, "intake", string(mediator.ws)))
 		return "", nil
 	}
-	// THE ROLE IS RECORDED BEFORE THE EFFORT IS SET: setting it starts a
-	// made intake's shim, whose landing reads the role.
-	if intake.made {
-		if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, intake.ws, DeployCheckIntake); err != nil {
-			return "", fmt.Errorf("merge: set the standing intake %s's effort: %w", intake.ws, err)
-		}
+	if !mediator.briefed {
+		o.markBriefed(ctx, q, fields)
 	}
-	o.deps.Log.Global().Info(opMediation, "the standing intake takes the check", withField(fields, "intake", string(intake.ws)))
-	return intake.ws, nil
+	o.deps.Log.Global().Info(opMediation, "the deploy mediator takes the check", withField(fields, "intake", string(mediator.ws)))
+	return mediator.ws, nil
 }
 
 // tellIntake tells the chain's intake WS of M in BRIEF, answering the brief's
@@ -765,14 +763,15 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		}
 		return
 	}
+	// THE MEDIATOR'S SESSION RUNS ON WHILE IT HOLDS ITS QUEUE AT WORK: a
+	// dispatch is its own to fix (its finish stands it by), and an
+	// escalation is its own to settle with the user.
 	if m.Dispatched {
-		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with a fix dispatched; the queue stays held for the remediation", withField(fields, "remediation", string(m.Remediation)))
-		o.stopIntake(ctx, q.key, ws, fields)
+		o.deps.Log.Global().Info(opMediation, "the mediator's turn ended with a fix dispatched; the queue stays held for the fix", withField(fields, "remediation", string(m.Remediation)))
 		return
 	}
 	if m.Escalated() {
-		o.deps.Log.Global().Info(opMediation, "the intake's turn ended with the deploy escalated; the queue stays held for the user", withField(fields, "escalation", string(m.Escalation)))
-		o.stopIntake(ctx, q.key, ws, fields)
+		o.deps.Log.Global().Info(opMediation, "the mediator's turn ended with the deploy escalated; the queue stays held for the user", withField(fields, "escalation", string(m.Escalation)))
 		return
 	}
 	// AN INTAKE CANNOT END ITS TURN UNDECIDED (owner ruling, 2026-11-16):
@@ -789,8 +788,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		return
 	}
 	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, and the check is escalated to the user", fields)
-	o.holdEscalated(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue waits for you", nil, window, fields)
-	o.stopIntake(ctx, q.key, ws, fields)
+	o.holdEscalated(ctx, q, *m, "the deploy mediator ended its turn without deciding the deploy, again after it was resumed to decide it; the queue waits for you", nil, window, "", fields)
 }
 
 // errMediationStopped answers a decision made while this daemon stops: the
@@ -914,7 +912,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		if err := o.dispatch(ctx, q, m, ws, d, fields); err != nil {
 			return err
 		}
-		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
+		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, ws, fields)
 		return nil
 	}
 	// AN APPROVAL LEAVES NO PROBLEM WITHOUT AN OWNER (owner ruling,
@@ -932,7 +930,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	// closes it.
 	if d.Kind == MediationEscalate {
 		o.deps.Log.Global().Info(opMediation, "the intake escalated the deploy; the queue is held for the user", fields)
-		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, fields)
+		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, ws, fields)
 		return nil
 	}
 	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
@@ -944,7 +942,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	}
 	o.deps.Log.Global().Info(opMediation, "the intake decided the deploy; the queue advances", withField(fields, "released", released))
 	if released {
-		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
+		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, ws, fields)
 	}
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
@@ -1217,8 +1215,8 @@ func (o *orchestrator) ownProblems(ctx context.Context, repo wsm.RepoKey, owner 
 // which then owns them. It answers the escalation the check waits on: the
 // new one, or the first open one its problems went back to. An escalation
 // that cannot be made records its own failure and answers false.
-func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) (ids.WorkspaceID, bool) {
-	routes, ok := o.tellEscalations(ctx, q, m, summary, window, problems, true, fields)
+func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said ids.WorkspaceID, fields dlog.Context) (ids.WorkspaceID, bool) {
+	routes, ok := o.tellEscalations(ctx, q, m, summary, window, problems, true, said, fields)
 	if !ok {
 		return "", false
 	}
@@ -1226,7 +1224,7 @@ func (o *orchestrator) escalateOwning(ctx context.Context, q checkedQueue, m wsm
 		o.deps.Log.Global().Info(opMediation, "every escalated problem went to the open escalation that owns it; no new escalation is made", withField(fields, "escalations", len(routes.order)))
 		return routes.order[0], true
 	}
-	made, err := o.escalate(ctx, q, m, summary, routes.fresh, window, fields)
+	made, err := o.escalate(ctx, q, m, summary, routes.fresh, window, said, fields)
 	if err != nil {
 		return "", false
 	}
@@ -1249,7 +1247,7 @@ type escalationBrief struct {
 // escalation workspace is made or found (escalateOwning) and recorded on
 // it. The hold ends only when the escalation's own fix deploys
 // (wsm.OweMediation) or the user closes the escalation (escalationClosed).
-func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) {
+func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said ids.WorkspaceID, fields dlog.Context) {
 	encoded, err := json.Marshal(escalationBrief{Summary: summary, Problems: problems})
 	if err != nil {
 		panic(fmt.Sprintf("merge: an escalation's brief of strings did not encode: %v", err))
@@ -1265,15 +1263,15 @@ func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.
 	}
 	o.noteCheckWork(ctx, q.key, fields)
 	o.republishMediation(ctx, q.key)
-	o.makeHeldEscalation(ctx, q, m, summary, problems, window, fields)
+	o.makeHeldEscalation(ctx, q, m, summary, problems, window, said, fields)
 }
 
 // makeHeldEscalation makes or finds the escalation escalated check M of queue
 // Q waits on, and records it on the check. A workspace that cannot be made or
 // recorded leaves the check escalated with none, holding the queue, and the
 // next pass makes it again (intakeRound).
-func (o *orchestrator) makeHeldEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) {
-	ws, ok := o.escalateOwning(ctx, q, m, summary, problems, window, fields)
+func (o *orchestrator) makeHeldEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said ids.WorkspaceID, fields dlog.Context) {
+	ws, ok := o.escalateOwning(ctx, q, m, summary, problems, window, said, fields)
 	if !ok {
 		o.deps.Log.Global().Error(opMediation, "the escalated check has no escalation workspace; the queue stays held, and the next pass makes it again", fields)
 		return
@@ -1304,7 +1302,7 @@ func (o *orchestrator) remakeHeldEscalation(ctx context.Context, q checkedQueue,
 		return
 	}
 	o.deps.Log.Global().Info(opMediation, "the escalated check has no escalation workspace; it is made again", fields)
-	o.makeHeldEscalation(ctx, q, m, brief.Summary, brief.Problems, window, fields)
+	o.makeHeldEscalation(ctx, q, m, brief.Summary, brief.Problems, window, "", fields)
 }
 
 // stopIntake ends intake WS's session once the turn that decided a check of

@@ -23,7 +23,7 @@ export type WorkspaceStanding = "main_workspace" | "linked_workspace";
  * (metaprompt.ts) and whether the merge-queue skill is switched off
  * (sdk/real-query.ts).
  */
-export type WorkspaceLanding = "through_queue" | "bypassing_queue" | "deploy_intake";
+export type WorkspaceLanding = "through_queue" | "bypassing_queue" | "deploy_mediator";
 
 /** The skill a bypassing session never loads: its rules are the ones bypassed. */
 export const MERGE_QUEUE_SKILL = "agent-repl-merge-queue";
@@ -91,8 +91,8 @@ function landingFromProto(landing: shimv1.SessionProfileAgentLanding | undefined
       return "through_queue";
     case "bypassingQueue":
       return "bypassing_queue";
-    case "deployIntake":
-      return "deploy_intake";
+    case "deployMediator":
+      return "deploy_mediator";
     default:
       throw new Error("shim session: StartSession reached the engine with an agent profile that names no landing");
   }

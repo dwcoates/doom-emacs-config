@@ -84,7 +84,7 @@ func (o *orchestrator) directLandingRepo(ctx context.Context, ws ids.WorkspaceID
 	if err != nil {
 		return "", err
 	}
-	if role != nil && !role.Intake && role.Mediation.Dispatched {
+	if role != nil && role.Remediation && role.Mediation.Dispatched {
 		return role.Repo, nil
 	}
 	repo, escalation, err := o.deps.DB.DeployEscalationOf(ctx, ws)
@@ -122,7 +122,16 @@ func (o *orchestrator) FinishRemediation(ctx context.Context, ws ids.WorkspaceID
 	case version != nil && !versioned:
 		return unexpectedVersion(ws, reasonUnversionedRepository, "the repository's deploy config %s versions nothing", target.repoRoot)
 	}
-	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: repo, StartedAt: o.deps.Now(), Version: version})
+	// THE FINISH SERVES WHAT THE CHECK HOLDS IT FOR: an escalation the user
+	// settles with it, or a fix dispatched to it (RemediationFinish.
+	// ServesEscalation).
+	m, err := o.deps.DB.MediationOf(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read the check the finish serves", withField(fields, "error", err.Error()))
+		return err
+	}
+	servesEscalation := m == nil || !m.Dispatched || m.Remediation != ws
+	f, err := o.deps.DB.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: ws, Repo: repo, StartedAt: o.deps.Now(), Version: version, ServesEscalation: servesEscalation})
 	if errors.Is(err, wsm.ErrRemediationFinishing) {
 		o.deps.Log.Global().Info(opRemediationFinish, "refused a remediation finish while its finish runs", fields)
 		return refuse(ArmAlreadyMerging, ws, "this remediation's finish is already running")
@@ -427,7 +436,7 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
 		return nil
 	}
-	o.holdEscalated(ctx, q, *m, summary, nil, window, fields)
+	o.holdEscalated(ctx, q, *m, summary, nil, window, "", fields)
 	return nil
 }
 
@@ -635,9 +644,7 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 		}
 		// AN ESCALATION'S FINISH IS DONE AT ITS DEPLOY: no chain's end
 		// forgets it (wsm.EndRemediationFinishesOf), so its deploy does.
-		if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, f.Workspace); err != nil {
-			errs = append(errs, err)
-		} else if escalation {
+		if f.ServesEscalation {
 			if _, err := o.deps.DB.EndRemediationFinish(ctx, f.Workspace); err != nil {
 				errs = append(errs, err)
 			}
@@ -694,6 +701,19 @@ func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFi
 // no owner.
 func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID) {
 	fields := dlog.Context{"workspace": string(ws)}
+	// A FIX DISPATCHED TO IT IS JUDGED FIRST: the deploy mediator is also
+	// recorded as an escalation (it lands directly whichever work it does),
+	// and ending its finish as an escalation's would hide the fix it left
+	// unlanded, leaving the queue held by a closed workspace.
+	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a remediation at work", withField(fields, "error", err.Error()))
+		return
+	}
+	if role != nil && role.Remediation && role.Mediation.Dispatched {
+		o.dispatchedRemediationClosed(ctx, ws, *role, fields)
+		return
+	}
 	// A CLOSED ESCALATION'S FINISH IS OVER: no chain's end forgets it, so its
 	// close does, or a record would stand for a workspace nobody finishes.
 	if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, ws); err != nil {
@@ -706,16 +726,12 @@ func (o *orchestrator) remediationClosed(ctx context.Context, ws ids.WorkspaceID
 			o.deps.Log.Global().Info(opRemediationFinish, "a closed deploy escalation's finish was ended", fields)
 		}
 		o.escalationClosed(ctx, ws, fields)
-		return
 	}
-	role, err := o.deps.DB.MediationRoleOf(ctx, ws)
-	if err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "could not read whether a closed workspace was a remediation at work", withField(fields, "error", err.Error()))
-		return
-	}
-	if role == nil || role.Intake || !role.Mediation.Dispatched {
-		return
-	}
+}
+
+// dispatchedRemediationClosed escalates the chain of ROLE's check when WS,
+// the remediation it is dispatched to, closed before its fix was deploying.
+func (o *orchestrator) dispatchedRemediationClosed(ctx context.Context, ws ids.WorkspaceID, role wsm.MediationRole, fields dlog.Context) {
 	f, err := o.deps.DB.RemediationFinishOf(ctx, ws)
 	if err != nil {
 		o.deps.Log.Global().Error(opRemediationFinish, "could not read a closed remediation's finish", withField(fields, "error", err.Error()))

@@ -2646,16 +2646,12 @@ func (f *Fleet) sessionProfile(ctx context.Context, log dlog.Logger, ws ids.Work
 			log.Error(opBringUp, "the workspace's queue bypass standing could not be read; the session was not started", dlog.Context{"cause": err.Error()})
 			return nil, fmt.Errorf("start session for %q: read the queue bypass standing: %w", ws, err)
 		}
-		// A CHAIN'S DEPLOY INTAKE LANDS AS THE INTAKE, by the role its chain
+		// A REPOSITORY'S DEPLOY MEDIATOR LANDS AS THE MEDIATOR, by its standing,
 		// recorded before its first prompt brought this session up
-		// (deploychecks.go).
-		intake, err := isDeployIntake(ctx, f.deps.DB, ws)
-		if err != nil {
-			log.Error(opBringUp, "whether the workspace is a deploy intake could not be read; the session was not started", dlog.Context{"cause": err.Error()})
-			return nil, fmt.Errorf("start session for %q: read whether it is a deploy intake: %w", ws, err)
-		}
-		if intake {
-			return agentProfileLanding(standing, deployIntakeLanding()), nil
+		// (deploychecks.go), so every turn of it, a check's or a fix's, runs
+		// under the one system prompt.
+		if record.StandingDeployCheck {
+			return agentProfileLanding(standing, deployMediatorLanding()), nil
 		}
 		return agentProfile(standing, bypass.Holds), nil
 	}
@@ -2691,9 +2687,9 @@ func agentProfileLanding(standing *shimv1.SessionProfileAgentStanding, landing *
 	return &shimv1.SessionProfile{Kind: &shimv1.SessionProfile_Agent{Agent: &shimv1.SessionProfileAgent{Standing: standing, Landing: landing}}}
 }
 
-// deployIntakeLanding is a chain's deploy intake's landing.
-func deployIntakeLanding() *shimv1.SessionProfileAgentLanding {
-	return &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_DeployIntake{DeployIntake: &shimv1.SessionProfileAgentLandingDeployIntake{}}}
+// deployMediatorLanding is a repository's deploy mediator's landing.
+func deployMediatorLanding() *shimv1.SessionProfileAgentLanding {
+	return &shimv1.SessionProfileAgentLanding{Landing: &shimv1.SessionProfileAgentLanding_DeployMediator{DeployMediator: &shimv1.SessionProfileAgentLandingDeployMediator{}}}
 }
 
 // ParkedKeepalive answers the keep-alive request for WS's parked conversation
