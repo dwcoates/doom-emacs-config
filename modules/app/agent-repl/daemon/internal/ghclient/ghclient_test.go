@@ -141,7 +141,7 @@ func TestACallThatFailsIsTypedAndRecorded(t *testing.T) {
 		{name: "a 502 is unreachable", out: answer("502 Bad Gateway", nil, "upstream"),
 			want: Failure{Kind: KindUnreachable, Status: 502, Message: "upstream"}, message: "GitHub answered with a server error, an outage of its own; the caller records the failed call", level: "info"},
 		{name: "no status line is unreachable with what gh said", stderr: "error connecting to api.github.com\n",
-			want: Failure{Kind: KindUnreachable, Message: "error connecting to api.github.com"}, message: "GitHub could not be reached", level: "error"},
+			want: Failure{Kind: KindUnreachable, Message: "error connecting to api.github.com"}, message: "GitHub could not be reached", level: "warn"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
