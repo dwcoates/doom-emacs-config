@@ -469,6 +469,51 @@ func TestRouteEscalationSortsEachGroupAndFinding(t *testing.T) {
 	}
 }
 
+// decidedAtStop arms H's intake stop to read whether the check owed at
+// deployStarted is decided when the stop ends the intake's turn, the moment
+// the round awaiting that turn reads it.
+func decidedAtStop(t *testing.T, h *harness) *bool {
+	t.Helper()
+	decided := new(bool)
+	h.checks.onStopNow = func() {
+		m, err := h.db.MediationOf(context.Background(), mediationKey(h))
+		if err != nil {
+			t.Errorf("MediationOf at the stop = %v", err)
+			return
+		}
+		*decided = !owes(m, deployStarted) || m.Dispatched || m.Escalated()
+	}
+	return decided
+}
+
+func TestEveryDecisionIsRecordedBeforeItStopsItsIntake(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision Decision
+	}{
+		{name: "an escalation", decision: Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem}},
+		{name: "a dispatch", decision: Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}},
+		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "nothing new"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			decided := decidedAtStop(t, h)
+
+			// Act
+			err := h.o.DecideMediation(context.Background(), "ws-intake", tt.decision)
+
+			// Assert
+			if err != nil || !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !*decided {
+				t.Fatalf("DecideMediation = %v, stopped %v, decided at the stop %v; want the decision recorded before the stop", err, h.checks.stopped, *decided)
+			}
+		})
+	}
+}
+
 func TestADecisionThatStopsItsIntakeRunsOnALiveContext(t *testing.T) {
 	tests := []struct {
 		name     string

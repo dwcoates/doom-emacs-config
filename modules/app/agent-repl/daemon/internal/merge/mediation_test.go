@@ -336,6 +336,21 @@ func TestATurnThatDecidesNothingTwiceEscalatesAndHoldsTheQueue(t *testing.T) {
 	}
 }
 
+func TestATurnUndecidedTwiceIsEscalatedBeforeItsIntakeIsStopped(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	decided := decidedAtStop(t, h)
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) || !*decided {
+		t.Fatalf("stopped %v, escalated at the stop %v; want the check escalated before its intake is stopped", h.checks.stopped, *decided)
+	}
+}
+
 func TestATurnThatEscalatedKeepsTheQueueHeldAndResumesNothing(t *testing.T) {
 	// Arrange
 	h := checked(t)
