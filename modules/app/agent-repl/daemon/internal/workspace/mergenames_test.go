@@ -405,6 +405,96 @@ func TestCreateRefusesASuppliedNameAnUnlandedWorkspaceHolds(t *testing.T) {
 	}
 }
 
+// TestCreateRetiresAClosedHolderWhoseWorkIsAllMerged covers the release of
+// a supplied name a closed, never-landed workspace holds
+// (releaseMergedHolder): one holding nothing its parent branch lacks is
+// retired as a landed merge leaves its workspace and the name is built on;
+// any other keeps the name, refused as name_held, with nothing torn down.
+func TestCreateRetiresAClosedHolderWhoseWorkIsAllMerged(t *testing.T) {
+	cases := []struct {
+		name        string
+		arrange     func(f *fixture, holder *wsm.Workspace)
+		wantRetired bool
+	}{
+		{name: "a clean holder whose HEAD is inside its parent branch is retired", arrange: func(*fixture, *wsm.Workspace) {}, wantRetired: true},
+		{name: "a dirty holder keeps the name", arrange: func(f *fixture, _ *wsm.Workspace) { f.git.dirty = true }},
+		{name: "a holder with commits its parent branch lacks keeps the name",
+			arrange: func(f *fixture, _ *wsm.Workspace) { f.git.offPrimary = map[string]bool{"HEAD": true} }},
+		{name: "a holder whose worktree is gone keeps the name",
+			arrange: func(_ *fixture, holder *wsm.Workspace) { holder.Dir = filepath.Join(holder.Dir, "gone") }},
+		{name: "a holder an open workspace was cut from keeps the name",
+			arrange: func(f *fixture, _ *wsm.Workspace) {
+				child := f.workspace("ws-child", t.TempDir())
+				parent := ids.WorkspaceID("ws-inv")
+				child.Parent = &parent
+				f.db.with(child)
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "ABC")
+			t.Setenv(LegacyPrefixEnv, "")
+			repoDir := mainWorktree(t, f)
+			holder := wsm.Workspace{ID: "ws-inv", Name: "ABC/deploy-mediator-retired", Branch: "ABC/deploy-mediator", Repo: f.db.repositories[0].ID,
+				Closed: true, ParentBranch: "master", Dir: t.TempDir()}
+			f.git.existingBranches = map[string]bool{"master": true}
+			tc.arrange(f, &holder)
+			f.db.with(holder)
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "deploy-mediator"})
+
+			// Assert
+			if !tc.wantRetired {
+				if refusal, ok := AsRefusal(err); !ok || refusal.Arm != ArmNameHeld {
+					t.Fatalf("Create = %v, want the name_held refusal", err)
+				}
+				if len(f.git.removedClean) != 0 || f.db.workspaces["ws-inv"].MergedAt != nil || len(f.git.created) != 0 {
+					t.Fatalf("removed %+v, merged %v, created %+v; want the holder kept and nothing built", f.git.removedClean, f.db.workspaces["ws-inv"].MergedAt, f.git.created)
+				}
+				return
+			}
+			if len(f.git.removedClean) != 1 || f.git.removedClean[0].WorktreeDir != holder.Dir || f.db.workspaces["ws-inv"].MergedAt == nil {
+				t.Fatalf("removed %+v, merged %v; want the holder retired", f.git.removedClean, f.db.workspaces["ws-inv"].MergedAt)
+			}
+			if len(f.git.created) != 1 || f.git.created[0].Branch != "ABC/deploy-mediator" {
+				t.Fatalf("Create = %v, created %+v; want the workspace built on the freed name", err, f.git.created)
+			}
+			if len(operationRecords(f, dlog.LevelInfo, opReleaseName)) != 1 {
+				t.Fatalf("records = %+v, want one INFO %s record", f.log.logger.Records(), opReleaseName)
+			}
+		})
+	}
+}
+
+// TestCreateFailsLoudlyWhenAClosedHoldersWorkCannotBeJudged covers the
+// release's git read: a holder whose ancestry cannot be read fails the
+// create, recorded at ERROR, with nothing torn down or built.
+func TestCreateFailsLoudlyWhenAClosedHoldersWorkCannotBeJudged(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "ABC")
+	t.Setenv(LegacyPrefixEnv, "")
+	repoDir := mainWorktree(t, f)
+	f.db.with(wsm.Workspace{ID: "ws-inv", Name: "ABC/deploy-mediator", Branch: "ABC/deploy-mediator", Repo: f.db.repositories[0].ID,
+		Closed: true, ParentBranch: "master", Dir: t.TempDir()})
+	f.git.existingBranches = map[string]bool{"master": true}
+	f.git.ancestorErr = errors.New("git gone")
+
+	// Act
+	_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "deploy-mediator"})
+
+	// Assert
+	if err == nil || len(f.git.removedClean) != 0 || len(f.git.created) != 0 {
+		t.Fatalf("Create = %v, removed %+v, created %+v; want the failure answered and nothing done", err, f.git.removedClean, f.git.created)
+	}
+	if len(operationRecords(f, dlog.LevelError, opReleaseName)) != 1 {
+		t.Fatalf("records = %+v, want one ERROR %s record", f.log.logger.Records(), opReleaseName)
+	}
+}
+
 // TestCreateFailsLoudlyWhenTheHeldNameCheckCannotReadTheRegistry covers the
 // registry read under the name claim: a read that fails fails the create,
 // recorded at ERROR, and builds nothing.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -852,10 +853,65 @@ func (v *verbs) claimSupplied(ctx context.Context, log dlog.Logger, repoDir, nam
 	return branch, v.claimLocked(branch), nil
 }
 
+// opReleaseName is releaseMergedHolder's operation.
+const opReleaseName = "daemon.workspace.release_merged_name"
+
+// releaseMergedHolder retires RECORD, a CLOSED workspace that holds BRANCH,
+// a supplied name's branch, as its name or its branch without ever having
+// landed, when everything it holds is already inside its parent branch
+// (parentHoldsAll) and no open workspace was cut from it (owner ruling,
+// 2026-11-17). Such a workspace holds nothing a landing would keep, yet
+// held its name forever (the deploy mediator's name, after the deploy checks
+// started over). It is retired as a landed merge leaves its workspace
+// (retireTree), answering true, so the name is free; any other holder is
+// left as it is, answering false, and keeps the name. The caller holds
+// v.names.mu.
+func (v *verbs) releaseMergedHolder(ctx context.Context, log dlog.Logger, branch string, record wsm.Workspace) (bool, error) {
+	fields := dlog.Context{"branch": branch, "workspace": string(record.ID), "dir": record.Dir, "parent_branch": record.ParentBranch}
+	if _, err := os.Stat(record.Dir); errors.Is(err, fs.ErrNotExist) {
+		log.Debug(opReleaseName, "the closed holder of the supplied name has no worktree to judge; it keeps the name", fields)
+		return false, nil
+	} else if err != nil {
+		log.Error(opReleaseName, "could not read the closed holder's worktree; it keeps the name", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("create %q: stat %s: %w", branch, record.Dir, err)
+	}
+	kept, failed, err := v.parentHoldsAll(ctx, record)
+	if err != nil {
+		log.Error(opReleaseName, "could not judge whether the closed holder of the supplied name holds only merged work: "+failed+"; it keeps the name", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("create %q: judge the closed holder %s: %s: %w", branch, record.ID, failed, err)
+	}
+	if kept != "" {
+		fields["kept"] = kept
+		log.Debug(opReleaseName, "the closed holder of the supplied name holds work its parent branch lacks; it keeps the name", fields)
+		return false, nil
+	}
+	child, err := v.parentOfOpen(ctx, record)
+	if err != nil {
+		log.Error(opReleaseName, "could not read whether an open workspace was cut from the closed holder; it keeps the name", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("create %q: %w", branch, err)
+	}
+	if child != "" {
+		fields["child"] = string(child)
+		log.Debug(opReleaseName, "an open workspace was cut from the closed holder of the supplied name; it keeps the name", fields)
+		return false, nil
+	}
+	repoDir, err := v.repoDirOf(ctx, record)
+	if err != nil {
+		log.Error(opReleaseName, "could not resolve the closed holder's repository; it keeps the name", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("create %q: %w", branch, err)
+	}
+	if err := v.retireTree(ctx, log, opReleaseName, record, repoDir, v.deps.Now(), "", fields); err != nil {
+		return false, fmt.Errorf("create %q: %w", branch, err)
+	}
+	log.Info(opReleaseName, "retired the closed workspace holding the supplied name: everything it held was already merged", fields)
+	return true, nil
+}
+
 // refuseHeldLocked refuses BRANCH, a supplied name's branch, when a registered
 // workspace that has not landed holds it as its name or its branch
-// (ArmNameHeld, naming that workspace and whether it is open). The caller
-// holds v.names.mu.
+// (ArmNameHeld, naming that workspace and whether it is open). A closed
+// holder holding only merged work is retired instead, freeing the name
+// (releaseMergedHolder). The caller holds v.names.mu.
 func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch string) error {
 	records, err := v.deps.DB.ListWorkspaces(ctx)
 	if err != nil {
@@ -865,6 +921,15 @@ func (v *verbs) refuseHeldLocked(ctx context.Context, log dlog.Logger, branch st
 	for _, record := range records {
 		if record.MergedAt != nil || (record.Name != branch && record.Branch != branch) {
 			continue
+		}
+		if record.Closed && !record.Current {
+			released, err := v.releaseMergedHolder(ctx, log, branch, record)
+			if err != nil {
+				return err
+			}
+			if released {
+				continue
+			}
 		}
 		return refuseWith(log, "CreateWorkspace", ArmNameHeld,
 			fmt.Sprintf("the name %q is already workspace %s's name or branch, and it has not landed", branch, record.ID), false,
