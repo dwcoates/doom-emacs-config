@@ -107,7 +107,7 @@ func (g *gateRun) serviceRun(ctx context.Context, dir string, argv []string) (st
 	if err != nil {
 		return "", err
 	}
-	run, err = r.o.deps.Tests.Start(ctx, testsclient.Spec{Dir: dir, Argv: argv, Label: fmt.Sprintf("%s round %d", name, g.round.n)})
+	run, err = r.o.deps.Tests.Start(ctx, testsclient.Spec{Dir: dir, Argv: argv, Env: r.o.deps.GateEnv, Label: fmt.Sprintf("%s round %d", name, g.round.n)})
 	if err != nil {
 		return "", &gateUnstartedError{err: err}
 	}

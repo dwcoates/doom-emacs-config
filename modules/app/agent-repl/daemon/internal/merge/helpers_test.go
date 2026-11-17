@@ -3654,6 +3654,7 @@ func (h *harness) deps() Deps {
 		},
 		TestRunner: h.runner,
 		Tests:      h.tests,
+		GateEnv:    []string{"PATH=/toolchains/bin"},
 		Painter:    fakePainter{},
 		PublishRegistry: func(context.Context) error {
 			h.mu.Lock()

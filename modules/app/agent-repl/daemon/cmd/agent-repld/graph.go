@@ -1466,6 +1466,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		TestMetricsRoot: p.Metrics.Root(),
 		TestRunner:      scripts,
 		Tests:           testsclient.New(p.Opts.testsSocket),
+		GateEnv:         gateEnv(os.Getenv("PATH")),
 		HookRunner:      scripts,
 		Builtins:        lifecycleconfig.Builtins{CheckoutRoot: paths.Checkout},
 		SelfAddress:     p.Claim.Address(),
@@ -2787,4 +2788,15 @@ func successorEnviron(manifest string, log dlog.Logger) func() ([]string, error)
 		}
 		return env, nil
 	}
+}
+
+// gateEnv is what every merge gate's run adds to the test service's own
+// environment: the daemon's PATH, which names the toolchains a gate builds
+// and tests with (merge.Deps.GateEnv). A daemon with no PATH could start no
+// gate, which is a launch defect and panics at the composition root.
+func gateEnv(path string) []string {
+	if path == "" {
+		panic("agent-repld: the daemon runs with no PATH, so no merge gate could find its toolchains")
+	}
+	return []string{"PATH=" + path}
 }

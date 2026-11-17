@@ -996,3 +996,22 @@ func TestDeployConfigFiles(t *testing.T) {
 		})
 	}
 }
+
+func TestGateEnvCarriesTheDaemonsPath(t *testing.T) {
+	// Act / Assert
+	if got := gateEnv("/opt/homebrew/bin:/usr/bin"); !slices.Equal(got, []string{"PATH=/opt/homebrew/bin:/usr/bin"}) {
+		t.Fatalf("gateEnv = %v, want the PATH alone", got)
+	}
+}
+
+func TestGateEnvRefusesADaemonWithNoPath(t *testing.T) {
+	// Arrange
+	defer func() {
+		if recover() == nil {
+			t.Fatal("gateEnv with no PATH did not panic")
+		}
+	}()
+
+	// Act
+	gateEnv("")
+}

@@ -700,6 +700,12 @@ type Deps struct {
 	// never cuts one (testsclient): the gate starts its run there, records the
 	// run's id in its progress, and a resumed merge watches the same run.
 	Tests GateService
+	// GateEnv is added to the environment of every gate's run on the test
+	// service ("KEY=value"): the daemon's own PATH, which names the
+	// toolchains a gate builds and tests with. The service runs under its
+	// service manager's bare environment, and a gate without it could not
+	// start (2026-11-17 13:07: "go is not on PATH", and the queue paused).
+	GateEnv []string
 	// Painter turns the gate's ANSI output into paint spans. The client never
 	// parses an escape.
 	Painter paint.Painter
