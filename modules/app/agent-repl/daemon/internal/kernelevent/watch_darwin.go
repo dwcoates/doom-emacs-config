@@ -34,16 +34,14 @@ func NewWatch() (*Watch, error) {
 }
 
 // Add watches PATH. A path that does not exist is refused with an error
-// wrapping fs.ErrNotExist, and one the kernel cannot watch (a unix socket:
-// open(2) refuses it EOPNOTSUPP) with one wrapping ErrUnwatchable; its
-// directory is what reports it made or removed.
+// wrapping fs.ErrNotExist, one the kernel cannot watch (a unix socket:
+// open(2) refuses it EOPNOTSUPP) with one wrapping ErrUnwatchable, and a
+// symlink being replaced under the open with one wrapping ErrLinkReplaced;
+// its directory is what reports each of them made, removed or replaced.
 func (w *Watch) Add(path string) error {
 	fd, err := unix.Open(path, unix.O_EVTONLY|unix.O_CLOEXEC, 0)
-	if errors.Is(err, unix.EOPNOTSUPP) {
-		return &os.PathError{Op: "watch", Path: path, Err: ErrUnwatchable}
-	}
 	if err != nil {
-		return &os.PathError{Op: "watch", Path: path, Err: err}
+		return openError(path, err)
 	}
 	change := unix.Kevent_t{Ident: uint64(fd), Filter: unix.EVFILT_VNODE, Flags: unix.EV_ADD | unix.EV_CLEAR, Fflags: vnodeChanges}
 	if _, err := unix.Kevent(w.kq, []unix.Kevent_t{change}, nil, nil); err != nil {
@@ -52,6 +50,25 @@ func (w *Watch) Add(path string) error {
 	}
 	w.fds = append(w.fds, fd)
 	return nil
+}
+
+// openError is Add's error for PATH, which open(2) refused with ERR.
+//
+// A SYMLINK RENAMED OVER WHILE open(2) RESOLVES IT IS REFUSED EINVAL. Darwin
+// answers so whenever the link is replaced mid-resolution, as the daemon
+// replaces a workspace's canonical log link (dlog.replaceLink renames a fresh
+// link onto it). The link is not missing and not broken: its directory reports
+// the rename, and the next watch opens the new link.
+func openError(path string, err error) error {
+	switch {
+	case errors.Is(err, unix.EOPNOTSUPP):
+		err = ErrUnwatchable
+	case errors.Is(err, unix.EINVAL):
+		if info, lerr := os.Lstat(path); lerr == nil && info.Mode()&os.ModeSymlink != 0 {
+			err = ErrLinkReplaced
+		}
+	}
+	return &os.PathError{Op: "watch", Path: path, Err: err}
 }
 
 // Wait blocks until a change has been reported since the last Wait, or ctx

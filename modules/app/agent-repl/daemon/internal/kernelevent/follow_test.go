@@ -198,3 +198,27 @@ func TestFollowSkipsASocketAndFollowsItsDirectory(t *testing.T) {
 		t.Fatalf("Follow reported %v, want the directory's change", err)
 	}
 }
+
+func TestSkippedPassesOverOnlyWhatADirectoryReports(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a missing path", err: &os.PathError{Op: "watch", Err: os.ErrNotExist}, want: true},
+		{name: "an unwatchable path", err: &os.PathError{Op: "watch", Err: ErrUnwatchable}, want: true},
+		{name: "a symlink replaced while opened", err: &os.PathError{Op: "watch", Err: ErrLinkReplaced}, want: true},
+		{name: "any other refusal", err: &os.PathError{Op: "watch", Err: os.ErrPermission}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := skipped(tt.err)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("skipped(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
