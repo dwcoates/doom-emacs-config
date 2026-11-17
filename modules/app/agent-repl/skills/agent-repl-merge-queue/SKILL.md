@@ -248,7 +248,8 @@ Either kind:
     workspaces across every deploy: a hidden intake, and `deploy-fixer`,
     which takes both a dispatch (fix and finish on its own) and an
     escalation (propose a plan, finish once the user agrees). Both stay open
-    and warm; their conversations are compacted by Haiku the moment three
+    and warm; the fixer is in sight only while it holds the queue, and the
+    queue's purple label opens it otherwise; their conversations are compacted by Haiku the moment three
     quiet checks follow a dispatch or an escalation, never cleared.
   - The sidebar labels the repository in purple: "HOT-LOADING ZETTEL" while
     a build rolls out (a landing's or a landed fix's), "ASSESSING ZETTEL

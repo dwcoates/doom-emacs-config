@@ -425,6 +425,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 		}
 		o.adoptStanding(ctx, q, m)
 		o.retireOneOffEscalations(ctx, q, m)
+		o.settleFixerSight(ctx, q, m)
 		if m == nil {
 			continue
 		}

@@ -516,3 +516,118 @@ func TestAnEndingThatCannotBeRecordedIsAnsweredAndRecorded(t *testing.T) {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }
+
+// fixerInSight records "ws-fixer" as the harness queue's standing fixer,
+// HIDDEN or in sight.
+func fixerInSight(t *testing.T, h *harness, hidden bool) {
+	t.Helper()
+	standingIn(t, h, wsm.StandingFixer, "ws-fixer", false)
+	h.db.mu.Lock()
+	record := h.db.workspaces["ws-fixer"]
+	record.Hidden = hidden
+	h.db.workspaces["ws-fixer"] = record
+	h.db.mu.Unlock()
+}
+
+func TestTheFixerIsInSightOnlyWhileAtWorkHoldingItsQueue(t *testing.T) {
+	tests := []struct {
+		name       string
+		hidden     bool
+		arrange    func(t *testing.T, h *harness)
+		wantShown  []ids.WorkspaceID
+		wantHidden []ids.WorkspaceID
+	}{
+		{name: "a hidden fixer a fix is dispatched to is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
+			arrange: func(t *testing.T, h *harness) {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		{name: "a fixer whose finish is under way is hidden", wantHidden: []ids.WorkspaceID{"ws-fixer"},
+			arrange: func(t *testing.T, h *harness) {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		{name: "a hidden fixer a check is escalated to is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
+			arrange: func(t *testing.T, h *harness) {
+				if _, err := h.db.EscalateMediation(context.Background(), mediationKey(h), deployStarted, "{}"); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := h.db.RecordMediationEscalation(context.Background(), mediationKey(h), deployStarted, "ws-fixer"); err != nil {
+					t.Fatal(err)
+				}
+			}},
+		{name: "a fixer in sight that no check holds the queue for is hidden", arrange: func(*testing.T, *harness) {}, wantHidden: []ids.WorkspaceID{"ws-fixer"}},
+		{name: "a hidden fixer no check holds the queue for is left hidden", hidden: true, arrange: func(*testing.T, *harness) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			fixerInSight(t, h, tt.hidden)
+			tt.arrange(t, h)
+
+			// Act
+			h.o.settleFixerSight(context.Background(), queueOf(t, h), owedCheck(t, h))
+
+			// Assert
+			if !slices.Equal(h.checks.resumed, tt.wantShown) || !slices.Equal(h.checks.hidden, tt.wantHidden) {
+				t.Fatalf("shown %v, hidden %v; want shown %v, hidden %v", h.checks.resumed, h.checks.hidden, tt.wantShown, tt.wantHidden)
+			}
+		})
+	}
+}
+
+func TestABriefShowsTheFixer(t *testing.T) {
+	tests := []struct {
+		name      string
+		resumeErr error
+		wantErr   bool
+	}{
+		{name: "the fixer is shown before its brief"},
+		{name: "a fixer that cannot be shown is not briefed", resumeErr: errors.New("database is locked"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withIntake(t, h, deployStarted)
+			h.checks.resumeErr = tt.resumeErr
+
+			// Act
+			err := dispatched(h, Decision{})
+
+			// Assert
+			if !slices.Contains(h.checks.resumed, "ws-fixer") || (err != nil) != tt.wantErr {
+				t.Fatalf("dispatch = %v, shown %v; want the fixer shown, an error %v", err, h.checks.resumed, tt.wantErr)
+			}
+			if tt.wantErr && len(h.queue.submissions) != 0 {
+				t.Fatalf("submitted %d, want the unshown fixer unbriefed", len(h.queue.submissions))
+			}
+		})
+	}
+}
+
+func TestAReleasedEscalationsFixerIsHidden(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	if err := h.o.DecideMediation(context.Background(), "ws-intake", Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := h.o.ReleaseEscalation(context.Background(), theScope)
+
+	// Assert
+	if err != nil || !slices.Contains(h.checks.hidden, "ws-fixer") {
+		t.Fatalf("ReleaseEscalation = %v, hidden %v; want the released fixer hidden", err, h.checks.hidden)
+	}
+}
