@@ -585,6 +585,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	o.deps.Meter.SetRemediationsInARow(m.ChainRedeploys)
 	if m.Dispatched {
 		o.deps.Log.Global().Info(opMediation, "a fix is dispatched for this deploy; its remediation workspace is at work, and its deploy owes the next check", withField(fields, "remediation", string(m.Remediation)))
+		o.watchFixer(ctx, q, m, fields)
 		return
 	}
 	if m.Escalated() {
@@ -640,6 +641,13 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		return
 	}
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
+	// A CHECK THE INTAKE DISPATCHED IS WATCHED BY THIS SAME ROUND: the claim
+	// it holds kept every pass the dispatch ran from starting another.
+	if now, err := o.deps.DB.MediationOf(ctx, q.key); err != nil {
+		o.mediationFailed(ctx, fields, "could not read the check after its intake's turn ended; the next pass waits on its fixer", err)
+	} else if owes(now, m.OwedAt) && now.Dispatched {
+		o.watchFixer(ctx, q, *now, fields)
+	}
 }
 
 // awaitFailed settles a failed await of the intake's turn on the check owed

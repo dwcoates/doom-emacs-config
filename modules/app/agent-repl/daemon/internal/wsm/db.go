@@ -731,7 +731,10 @@ type DB interface {
 	RecordMediationIntake(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID) (bool, error)
 	// DispatchMediation records a fix dispatched to remediation workspace WS
 	// for the mediation owed at OWED (mediation.go).
-	DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, ws WorkspaceID) (bool, error)
+	DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, ws WorkspaceID, turn FixerTurn) (bool, error)
+	// RecordFixerTurn records a later brief given the fixer a fix is
+	// dispatched to (fixerturn.go).
+	RecordFixerTurn(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID, turn FixerTurn) (bool, error)
 	// MediationRoleOf answers the owed mediation a workspace is the intake
 	// or the last remediation of, nil for neither (mediation.go).
 	MediationRoleOf(ctx context.Context, ws WorkspaceID) (*MediationRole, error)

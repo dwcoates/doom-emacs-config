@@ -400,7 +400,7 @@ func TestAnAdoptedRemediationLandsDirectlyAsTheFixer(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-old-remedy"); err != nil {
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-old-remedy", aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 
@@ -539,13 +539,13 @@ func TestTheFixerIsInSightOnlyWhileAtWorkHoldingItsQueue(t *testing.T) {
 	}{
 		{name: "a hidden fixer a fix is dispatched to is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 			}},
 		{name: "a fixer whose finish is under way is hidden", wantHidden: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {

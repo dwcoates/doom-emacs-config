@@ -286,7 +286,7 @@ func oweAt(t *testing.T, s *store, repo RepoKey, at time.Time) {
 // workspace "remedy".
 func dispatchAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
 	t.Helper()
-	if ok, err := s.DispatchMediation(context.Background(), repo, owed, owed.Add(time.Second), "remedy"); err != nil || !ok {
+	if ok, err := s.DispatchMediation(context.Background(), repo, owed, owed.Add(time.Second), "remedy", aFixerTurn); err != nil || !ok {
 		t.Fatalf("DispatchMediation = (%v, %v), want it recorded", ok, err)
 	}
 }
@@ -424,10 +424,10 @@ func TestTheChainsRoleWritesRefuseWhatTheyCannotRecord(t *testing.T) {
 			}},
 		{name: "a second dispatch for one deploy",
 			write: func(s *store, repo RepoKey) (bool, error) {
-				if _, err := s.DispatchMediation(context.Background(), repo, instant, instant, "first"); err != nil {
+				if _, err := s.DispatchMediation(context.Background(), repo, instant, instant, "first", aFixerTurn); err != nil {
 					return false, err
 				}
-				return s.DispatchMediation(context.Background(), repo, instant, instant, "second")
+				return s.DispatchMediation(context.Background(), repo, instant, instant, "second", aFixerTurn)
 			}},
 		{name: "an intake that names no workspace", wantError: true,
 			write: func(s *store, repo RepoKey) (bool, error) {
@@ -435,7 +435,7 @@ func TestTheChainsRoleWritesRefuseWhatTheyCannotRecord(t *testing.T) {
 			}},
 		{name: "a dispatch that names no workspace", wantError: true,
 			write: func(s *store, repo RepoKey) (bool, error) {
-				return s.DispatchMediation(context.Background(), repo, instant, instant, "")
+				return s.DispatchMediation(context.Background(), repo, instant, instant, "", aFixerTurn)
 			}},
 	}
 	for _, tt := range tests {
@@ -543,7 +543,7 @@ func TestTheChainsLastDispatchInstantPassesAlongItAndEndsWithIt(t *testing.T) {
 	repo := RepoKey(t.TempDir())
 	oweAt(t, s, repo, instant)
 	dispatched := instant.Add(time.Second)
-	if ok, err := s.DispatchMediation(ctx, repo, instant, dispatched, "remedy"); err != nil || !ok {
+	if ok, err := s.DispatchMediation(ctx, repo, instant, dispatched, "remedy", aFixerTurn); err != nil || !ok {
 		t.Fatalf("DispatchMediation = (%v, %v)", ok, err)
 	}
 
@@ -621,7 +621,7 @@ func TestAnIntakeIsResumedOnceOnTheMediationOwed(t *testing.T) {
 			}},
 		{name: "a mediation a fix was dispatched for", owed: instant,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				if ok, err := s.DispatchMediation(context.Background(), repo, instant, instant, "remedy"); err != nil || !ok {
+				if ok, err := s.DispatchMediation(context.Background(), repo, instant, instant, "remedy", aFixerTurn); err != nil || !ok {
 					t.Fatalf("DispatchMediation = (%v, %v)", ok, err)
 				}
 			}},

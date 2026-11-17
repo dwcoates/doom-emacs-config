@@ -275,6 +275,9 @@ type Orchestrator interface {
 	// NoteDeployEnding records how the deploy that began at AT ended on
 	// every check it owes, for the intake's brief (mediation.go).
 	NoteDeployEnding(ctx context.Context, at time.Time, ending wsm.DeployEnding) error
+	// FixerTurnEnded settles the check a fixer is dispatched for when a
+	// turn of WS, that fixer, ended (fixerwatch.go).
+	FixerTurnEnded(ctx context.Context, ws wsm.WorkspaceID)
 	// Mediate runs an intake round for every check owed, and takes up every
 	// remediation finish a restart cut: a deploy
 	// finished, or a successor took over.

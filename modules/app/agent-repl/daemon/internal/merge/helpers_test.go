@@ -249,6 +249,9 @@ type fakeDB struct {
 	progressReadErr error
 	adopted         []wsm.LeaseID
 	held            map[wsm.TurnID]wsm.HeldPrompt
+	// delivered is every turn the prompt queue took (fakeQueue.Submit), as
+	// the turn store records a submitted turn: RecordedTurns knows it.
+	delivered map[wsm.TurnID]bool
 }
 
 // bindHeldPrompt stands for wsm.bindMergeHold: a prompt held under the
@@ -336,9 +339,12 @@ func newFakeDB() *fakeDB {
 		policies:      map[wsm.LeaseID]wsm.LeasePolicy{},
 		progress:      map[ids.WorkspaceID]wsm.MergeProgress{},
 		held:          map[wsm.TurnID]wsm.HeldPrompt{},
-		drainOwed:     map[wsm.RepoKey]bool{},
-		checks:        inMemoryChecks(),
-		contextUsage:  map[ids.WorkspaceID]wsm.ContextUsageRecord{},
+		// A DISPATCH A TEST RECORDS BY HAND names aFixerTurn, a brief that
+		// reached its fixer.
+		delivered:    map[wsm.TurnID]bool{aFixerTurn.ID: true},
+		drainOwed:    map[wsm.RepoKey]bool{},
+		checks:       inMemoryChecks(),
+		contextUsage: map[ids.WorkspaceID]wsm.ContextUsageRecord{},
 	}
 }
 
@@ -426,14 +432,21 @@ func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, ow
 	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)
 }
 
-func (f *fakeDB) DispatchMediation(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, ws ids.WorkspaceID) (bool, error) {
+// aFixerTurn is a fixer's brief for a dispatch a test records by hand.
+var aFixerTurn = wsm.FixerTurn{ID: "turn-fixer", Brief: "fix the deploy's problems", Origin: 1}
+
+func (f *fakeDB) RecordFixerTurn(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID, turn wsm.FixerTurn) (bool, error) {
+	return f.checks.RecordFixerTurn(ctx, repo, owed, ws, turn)
+}
+
+func (f *fakeDB) DispatchMediation(ctx context.Context, repo wsm.RepoKey, owed, at time.Time, ws ids.WorkspaceID, turn wsm.FixerTurn) (bool, error) {
 	f.mu.Lock()
 	err := f.dispatchErr
 	f.mu.Unlock()
 	if err != nil {
 		return false, err
 	}
-	return f.checks.DispatchMediation(ctx, repo, owed, at, ws)
+	return f.checks.DispatchMediation(ctx, repo, owed, at, ws, turn)
 }
 
 func (f *fakeDB) MediationRoleOf(ctx context.Context, ws ids.WorkspaceID) (*wsm.MediationRole, error) {
@@ -622,6 +635,9 @@ func (f *fakeDB) RecordedTurns(_ context.Context, id ids.WorkspaceID, turns []ws
 	defer f.mu.Unlock()
 	out := map[wsm.TurnID]bool{}
 	for _, want := range turns {
+		if f.delivered[want] {
+			out[want] = true
+		}
 		for _, t := range f.turns[id] {
 			if t.ID == want {
 				out[want] = true
@@ -2560,7 +2576,15 @@ func (q *fakeQueue) Submit(ctx context.Context, sub promptqueue.Submission) (pro
 	if hook != nil {
 		hook(sub)
 	}
-	return q.disposition, q.err
+	q.mu.Lock()
+	disposition, err := q.disposition, q.err
+	q.mu.Unlock()
+	if err == nil && disposition.RefusedArm == "" {
+		q.db.mu.Lock()
+		q.db.delivered[sub.Turn] = true
+		q.db.mu.Unlock()
+	}
+	return disposition, err
 }
 
 func (q *fakeQueue) Release(context.Context, ids.WorkspaceID, ids.TurnID) error { return nil }

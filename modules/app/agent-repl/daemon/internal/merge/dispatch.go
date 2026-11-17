@@ -49,8 +49,14 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	remedy := remediation.ws
 	fields["remediation"] = string(remedy)
+	brief, err := o.remediationBrief(q.repository.Dir, remediation.briefed, m, d)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the remediation's brief could not be composed; nothing is dispatched and the queue stays held for the intake", withField(fields, "error", err.Error()))
+		return err
+	}
+	turn := wsm.FixerTurn{ID: wsm.NewTurnID(), Brief: brief, Origin: int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)}
 	at := o.deps.Now()
-	recorded, err := o.deps.DB.DispatchMediation(ctx, q.key, m.OwedAt, at, remedy)
+	recorded, err := o.deps.DB.DispatchMediation(ctx, q.key, m.OwedAt, at, remedy, turn)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the remediation workspace is ready but the dispatch could not be recorded; the queue stays held for the intake", withField(fields, "error", err.Error()))
 		return err
@@ -61,7 +67,10 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	o.observeDispatch(m, at)
 	o.noteCheckWork(ctx, q.key, fields)
-	if err := o.briefRemediation(ctx, q.repository.Dir, remedy, remediation.briefed, m, d, fields); err != nil {
+	// THE DISPATCH STANDS EITHER WAY: a brief that did not reach the queue is
+	// submitted again by the round that waits on the fixer (watchFixer).
+	if _, err := o.submitCheckPrompt(ctx, remedy, turn.ID, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the remediation's brief could not be submitted; the round that waits on the fixer submits it again", withField(fields, "error", err.Error()))
 		return err
 	}
 	if !remediation.briefed {
@@ -86,12 +95,12 @@ func (o *orchestrator) observeDispatch(m wsm.Mediation, at time.Time) {
 	}
 }
 
-// briefRemediation prompts the standing remediation workspace WS, of the
+// remediationBrief is the standing remediation workspace's brief, of the
 // repository at REPODIR, with decision D's problems on check M: its first
 // brief states its role in full, and every one after, once BRIEFED, only the
 // new findings. Its conversation is never cleared, only compacted by Haiku
 // after a quiet run (compactStanding).
-func (o *orchestrator) briefRemediation(ctx context.Context, repoDir string, ws ids.WorkspaceID, briefed bool, m wsm.Mediation, d Decision, fields dlog.Context) error {
+func (o *orchestrator) remediationBrief(repoDir string, briefed bool, m wsm.Mediation, d Decision) (string, error) {
 	name := BriefDeployRemediation
 	if briefed {
 		name = BriefDeployRemediationRestored
@@ -101,15 +110,7 @@ func (o *orchestrator) briefRemediation(ctx context.Context, repoDir string, ws 
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
 		"problems":       renderProblems(d.Problems),
 	})
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the remediation's brief could not be composed; the dispatch stands with its workspace unprompted", withField(fields, "error", err.Error()))
-		return err
-	}
-	if _, err := o.submitCheckPrompt(ctx, ws, wsm.NewTurnID(), brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the remediation's brief could not be submitted; the dispatch stands with its workspace unprompted", withField(fields, "error", err.Error()))
-		return err
-	}
-	return nil
+	return brief, err
 }
 
 // renderProblems is the problems as a brief quotes them: each statement,

@@ -9,6 +9,7 @@ import (
 
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
 )
@@ -205,5 +206,42 @@ func TestWsmEndingNamesEveryEnding(t *testing.T) {
 				t.Fatalf("wsmEnding(%d) = %q, want %q", tt.ending, got, tt.want)
 			}
 		})
+	}
+}
+
+// fixerTurns is a mediationOrchestrator that records the turn ends it is told.
+type fixerTurns struct {
+	mediationOrchestrator
+	ended chan ids.WorkspaceID
+}
+
+func (o *fixerTurns) FixerTurnEnded(_ context.Context, ws ids.WorkspaceID) { o.ended <- ws }
+
+func TestATurnsEndReachesTheBoundOrchestrator(t *testing.T) {
+	// Arrange
+	o := &fixerTurns{ended: make(chan ids.WorkspaceID, 1)}
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	h.bind(o)
+
+	// Act
+	h.turnEnded("ws-fixer")
+
+	// Assert
+	if got := <-o.ended; got != "ws-fixer" {
+		t.Fatalf("told %q, want ws-fixer's turn end", got)
+	}
+}
+
+func TestATurnsEndBeforeTheBindingIsNoError(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: log}
+
+	// Act
+	h.turnEnded("ws-fixer")
+
+	// Assert: the queue's first pass reads every turn's close.
+	if records := log.Records(); len(records) != 0 {
+		t.Fatalf("records = %+v, want none", records)
 	}
 }

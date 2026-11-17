@@ -47,7 +47,7 @@ func finishing(t *testing.T) *harness {
 	owe(t, h)
 	withIntake(t, h, deployStarted)
 	h.register("ws-fixer", "deploy-remediation-x")
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 	h.git.mu.Lock()

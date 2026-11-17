@@ -48,7 +48,10 @@ type lifecycleSink struct {
 	// (graph.go): a session coming up has its keep-alive cadence reconciled
 	// with its workspace's visibility.
 	caches sessionUpNotifiee
-	log    dlog.Logger
+	// mediation settles a dispatched fixer's check at each of its turns'
+	// ends, after the queue stamped the turn's close.
+	mediation turnEndNotifiee
+	log       dlog.Logger
 	// linksMu guards detached: the workspaces whose link is down, so a link
 	// coming back is told from its first attachment (reattached).
 	linksMu  sync.Mutex
@@ -472,9 +475,17 @@ func (s *lifecycleSink) OnDeparted(ws ids.WorkspaceID, departed sessionwatcher.W
 	s.queue.OnDeparted(ws, departed, departure)
 }
 
-// OnTurnEnded pops the queue and releases a hold-for-turn-end.
+// OnTurnEnded pops the queue and releases a hold-for-turn-end, then tells
+// the deploy checks: THE CLOSE IS STAMPED FIRST (the queue's turn end), so a
+// dispatched fixer's check reads the turn as ended.
 func (s *lifecycleSink) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, how sessionwatcher.TurnClose) {
 	s.queue.OnTurnEnded(ws, turn, how)
+	s.mediation.turnEnded(ws)
+}
+
+// turnEndNotifiee is told of every turn's end (mediationHook).
+type turnEndNotifiee interface {
+	turnEnded(ws ids.WorkspaceID)
 }
 
 // OnLiveWorkChanged has no consumer beyond the watcher itself: FREENESS is

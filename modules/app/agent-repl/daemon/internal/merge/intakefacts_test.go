@@ -166,7 +166,7 @@ func TestTheChainSoFarNamesWhatEachRemediationLanded(t *testing.T) {
 	ctx := context.Background()
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 	h.db.mu.Lock()
@@ -201,7 +201,7 @@ func TestTheChainSoFarWhoseRemediationNameCannotBeReadIsAnError(t *testing.T) {
 	ctx := context.Background()
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 	q, _, _ := h.o.checkedQueueOf(ctx, mediationKey(h))
