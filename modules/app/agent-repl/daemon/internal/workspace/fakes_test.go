@@ -124,9 +124,9 @@ type fakeDB struct {
 	remoteReadCtxErr []error
 	// setGateCtxErr is the context error each SetColdGate write saw.
 	setGateCtxErr []error
-	remoteErr        error
-	remoteSetErr     error
-	bridgeErr        error
+	remoteErr     error
+	remoteSetErr  error
+	bridgeErr     error
 
 	// queuedMu guards queued, the creates held for the network, by key;
 	// queuedPutErr fails holding one and queuedReadErr reading them.
