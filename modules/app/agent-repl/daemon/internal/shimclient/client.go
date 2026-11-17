@@ -1009,6 +1009,20 @@ func (c *client) killWithin(ctx context.Context, bound time.Duration, attr KillA
 // `daemon.shimclient.exit`.
 var ErrShimDied = errors.New("the shim died")
 
+// ErrStoreUnreachable marks a shim stream open the shim ANSWERED with
+// unavailable: its one meaning in the shim's contract is that the shim's own
+// read of the store gave up (service/failures.ts storeUnavailable). The shim
+// is serving and its link is whole; the outage is the store's, and the shim
+// records it once as its own store_unreachable session fault.
+var ErrStoreUnreachable = errors.New("the shim answered that the store is unreachable")
+
+// answeredStoreUnreachable reports whether err is the shim's own unavailable
+// answer: a WIRE error, so a client-synthesized unavailable (a dial to a shim
+// socket that is gone) is never mistaken for one.
+func answeredStoreUnreachable(err error) bool {
+	return connect.CodeOf(err) == connect.CodeUnavailable && connect.IsWireError(err)
+}
+
 // shimDied wraps a failure that the shim's death caused.
 func shimDied(err error) error {
 	return fmt.Errorf("%w: %w", ErrShimDied, err)
@@ -1893,6 +1907,16 @@ func (c *client) refusedOpen(ctx context.Context, verb string, err error) error 
 	switch connect.CodeOf(err) {
 	case connect.CodeNotFound, connect.CodeFailedPrecondition:
 		c.log.Info(operation, "the shim refused the stream open: it holds no such handle; the caller rules on whether that was expected", fields)
+		return refused
+	}
+	// AN OPEN THE STORE'S OUTAGE REFUSED IS NOT THE SHIM FAILING. The shim
+	// answered, and it records the outage as its store_unreachable session
+	// fault; the caller re-opens at the store's pace. MEASURED, deploy
+	// 2026-11-17T00:10:46Z: a store restart's WatchBash answer was recorded
+	// here at ERROR beside the shim's own fault for the same outage.
+	if answeredStoreUnreachable(err) {
+		c.log.Info(operation, "the shim answered that the store is unreachable; the shim records the outage as its store_unreachable session fault", fields)
+		refused.Err = fmt.Errorf("%w: %w", ErrStoreUnreachable, err)
 		return refused
 	}
 	// AN OPEN THE SHIM'S DEATH CUT IS NOT A REFUSAL. The shim never answered;
