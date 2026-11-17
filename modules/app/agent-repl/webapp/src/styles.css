@@ -1469,7 +1469,13 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .repo.open-section.folded:has(+ .repo.hidden-section) > .repo-head {
   padding-bottom: calc(var(--repo-head-pad-bottom) + var(--hidden-rule-lead));
 }
-#ws-sidebar .repo:is(.merge-queue-section, .merged-section).folded:has(+ .repo:is(.merged-section, .hidden-section)) > .repo-head {
+/* A BAND HEADER'S HOVER BOX IS ONE BOX, FOLDED OR OPEN (owner request,
+   2026-11-17): Merge Queue's and Recently Merged's header keeps the bottom
+   padding that spans it to the next band's rule while folded, open as well,
+   so its hover wash is the same size either way, and an open band's body
+   starts below that box (the first group's name, below) rather than eating
+   into it. */
+#ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .repo-head {
   padding-bottom: var(--hidden-rule-lead);
 }
 #ws-sidebar .sb-scroll:has(> .sb-roster) { padding-top: 0; }
@@ -1628,13 +1634,14 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    rules between the sections are: the section header's baseline above the
    first group, a row's baseline or a folded group's name above a later
    group, and a queue's or a row's text below an open group's name. The
-   Merge Queue and Recently Merged headers end at their text, so the first
-   group's name hangs by the gap alone. */
-#ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .repo-head { padding-bottom: 0; }
+   Merge Queue and Recently Merged headers end at their hover box, whose
+   bottom padding already stands off their text, so the first group's name
+   hangs straight under that box with no padding of its own above it. */
 #ws-sidebar .merged-group-head {
   padding-top: calc(var(--inside-rule-gap) - 3px);
   padding-bottom: calc(var(--inside-rule-gap) - 4.5px);
 }
+#ws-sidebar .repo:is(.merge-queue-section, .merged-section) > .rows > .merged-group:first-child > .merged-group-head { padding-top: 0; }
 /* A row reaches 4.5px further below its baseline than a group's header does,
    so a group under an open group's last row draws that much nearer. */
 #ws-sidebar .merged-group:not(.folded):not([data-group-section="merge-queue"]) + .merged-group { margin-top: -4.5px; }

@@ -1874,17 +1874,16 @@ describe("the Merge Queue section's queues", () => {
   it.each([
     { cls: "merge-queue-section" },
     { cls: "merged-section" },
-  ])("hangs the first group's name under the $cls header by the inside gap alone", ({ cls }) => {
+  ])("hangs the first group's name straight under the $cls header's hover box", ({ cls }) => {
     const drawn = drawWorkspaceRoster(
       withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })], [mergedGroup({ id: "b", rows: [merged("m1")] })]),
       sidebarContext(),
     );
     const head = pane(drawn).querySelector<HTMLElement>(`.${cls} > .repo-head`)!;
     const groupHead = pane(drawn).querySelector<HTMLElement>(`.${cls} > .rows .merged-group-head`)!;
-    expect(inRail(drawn, () => [cascadedValue(head, "padding-bottom"), cascadedValue(groupHead, "padding-top")])).toEqual([
-      "0px",
-      "calc(var(--inside-rule-gap) - 3px)",
-    ]);
+    expect(
+      inRail(drawn, () => [cascadedValue(head, "padding-bottom"), cascadedValue(groupHead, "padding-top"), cascadedValue(groupHead, "margin-top").startsWith("-")]),
+    ).toEqual(["var(--hidden-rule-lead)", "0px", false]);
   });
 
   it("sets the inside rules' gap 40% under the gap of the rules between the sections", () => {
