@@ -713,10 +713,17 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	d.registerDir = dir
 	d.registered = append(d.registered, facts)
 	if existing, ok := d.byDir[dir]; ok {
-		if facts.CreationJob != "" {
+		switch {
+		case facts.CreationJob != "" && existing.MergedAt != nil:
+			// A CREATE MOVES A LANDED ROW OFF ITS DIRECTORY, as the store does.
+			delete(d.byDir, dir)
+			existing.Dir = wsm.VacatedDir(dir, existing.ID)
+			d.with(existing)
+		case facts.CreationJob != "":
 			return wsm.Workspace{}, false, fmt.Errorf("fake: a create's directory %s is already registered", dir)
+		default:
+			return existing, false, nil
 		}
-		return existing, false, nil
 	}
 	// A CREATE'S ROW TAKES ITS JOB'S ID and marks the job materialized in
 	// the same write, as the store does; a missing job is the store's

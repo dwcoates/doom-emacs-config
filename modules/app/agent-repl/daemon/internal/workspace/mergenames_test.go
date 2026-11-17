@@ -469,6 +469,47 @@ func TestCreateRetiresAClosedHolderWhoseWorkIsAllMerged(t *testing.T) {
 	}
 }
 
+// TestCreateBuildsAtTheDirectoryARetiredHolderLeft covers the create a
+// retired holder freed its name for (2026-11-17, the deploy mediator): the
+// holder sat at the very directory the name derives, and once it is retired
+// the create registers there, the landed holder moved off it
+// (wsm.VacatedDir), rather than refused and undone.
+func TestCreateBuildsAtTheDirectoryARetiredHolderLeft(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	t.Setenv(PrefixEnv, "ABC")
+	t.Setenv(LegacyPrefixEnv, "")
+	repoDir := mainWorktree(t, f)
+	derived, err := WorktreeDir(repoDir, "ABC/deploy-mediator")
+	if err != nil {
+		t.Fatalf("WorktreeDir: %v", err)
+	}
+	if err := os.MkdirAll(derived, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if derived, err = normalizeDir(derived); err != nil {
+		t.Fatalf("normalizeDir: %v", err)
+	}
+	f.db.with(wsm.Workspace{ID: "ws-inv", Kind: wsm.WorkspaceKindRepository, Name: "ABC/deploy-mediator", Branch: "ABC/deploy-mediator", Repo: f.db.repositories[0].ID,
+		Closed: true, ParentBranch: "master", Dir: derived})
+	f.git.existingBranches = map[string]bool{"master": true}
+
+	// Act
+	record, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repoDir, Name: "deploy-mediator"})
+
+	// Assert
+	if err != nil || record.Dir != derived {
+		t.Fatalf("Create = (%+v, %v), want the workspace registered at %s", record, err, derived)
+	}
+	holder := f.db.workspaces["ws-inv"]
+	if holder.MergedAt == nil || holder.Dir != wsm.VacatedDir(derived, "ws-inv") {
+		t.Fatalf("holder = %+v, want it retired and moved off %s", holder, derived)
+	}
+	if len(f.git.nuked) != 0 {
+		t.Fatalf("nuked = %+v, want the create kept", f.git.nuked)
+	}
+}
+
 // TestCreateFailsLoudlyWhenAClosedHoldersWorkCannotBeJudged covers the
 // release's git read: a holder whose ancestry cannot be read fails the
 // create, recorded at ERROR, with nothing torn down or built.
