@@ -450,6 +450,16 @@ func testASessionlessWorkspaceHandedOverDrawsItsFeedWithNoPrompt(t *testing.T) {
 		t.Fatalf("the incumbent's exit code = %d, want an orderly 0 after the handover", code)
 	}
 	adAwaitAddrFileChange(t, w.Daemon, addr)
+	// THE SUCCESSOR WRITES daemon.addr AS THE INCUMBENT EXITS, BEFORE ITS OWN
+	// ADOPTION OF THE WORKSPACE FINISHES, and until it does it answers the
+	// workspace not_yet_adopted (the ordering by refusal this file's header
+	// names). The feed is opened once the successor has recorded the
+	// adoption, never on the address file alone (2026-11-17 gate: opened
+	// 5ms before "adopted the workspace", refused not_yet_adopted).
+	w.Daemon.AwaitRunLogRecordFromAnyProcess("the successor adopting the workspace", func(r harness.LogRecord) bool {
+		return r.PID != w.Daemon.PID() && r.Operation == "daemon.rollout.adopt" && r.Message == "adopted the workspace" &&
+			r.Context["workspace"] == ws.GetId()
+	})
 
 	// Assert: with no prompt sent anywhere, the successor's feed draws the
 	// conversation's turn.
