@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -416,6 +417,14 @@ func TestAdoptParkedHoldsTheShimWithNoWatcherAndRaisesTheGate(t *testing.T) {
 	ws := f.workspace("w1")
 	f.db.sessions[ws.ID] = wsm.Session{Workspace: ws.ID, VendorSessionID: "vendor-1", HostSessionID: "host-1"}
 	cold := &conversationv1.SessionCold{ContextTokens: 123456}
+	// THE GATE'S STAND-DOWN IS HELD BEHIND THE ASSERTIONS: AdoptParked
+	// detaches it (settleGateShim), and it begins by reading the remote-control
+	// mode, so holding that read keeps the hold this test asserts in place.
+	// Unheld, the detached stand-down dropped the entry first under the gate's
+	// CPU load.
+	f.db.remoteMu.Lock()
+	settle := sync.OnceFunc(f.db.remoteMu.Unlock)
+	t.Cleanup(settle)
 
 	// Act.
 	if _, err := f.fleet.AdoptParked(context.Background(), ws.ID, cold); err != nil {
