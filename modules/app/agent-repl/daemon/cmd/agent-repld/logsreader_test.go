@@ -50,7 +50,7 @@ func TestTheLogsReaderFailsLoudly(t *testing.T) {
 		want   string
 	}{
 		{name: "a reader that cannot run", runner: &fakeLines{err: errors.New("no such file")}, want: "no such file"},
-		{name: "a reader that outlives its bound", runner: &fakeLines{run: scriptrunner.Run{TimedOut: true}}, want: "outlived its bound"},
+		{name: "a reader that outlives its bound", runner: &fakeLines{run: scriptrunner.Run{TimedOut: true}}, want: "outlived its bound of 3s (measured at 860ms)"},
 		{name: "a reader that exits non-zero", runner: &fakeLines{run: scriptrunner.Run{ExitCode: 2, Output: "logs: no sink"}}, want: "exited 2"},
 		{name: "a record that does not decode", runner: &fakeLines{run: scriptrunner.Run{Output: "{\"level\":"}}, want: "no record"},
 	}

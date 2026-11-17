@@ -87,6 +87,57 @@ type sink struct {
 	// *Messages* text snapshot named with --messages. The latter two are
 	// synthesized into records rather than parsed as JSON.
 	format string
+	// warnings marks the warnings twin of a JSONL sink (warningsSinks): its
+	// base is the sink's warnings file and its targets end ".warn.log".
+	warnings bool
+	// logBase is a warnings twin's sink's own base. A twin with no file is
+	// the empty sink of a runtime that never warned when logBase exists, and
+	// no sink at all when it does not.
+	logBase string
+}
+
+// warningsSuffix ends every warnings file: logging.WarningsPath
+// (agent-shim/logging/go/warnings.go) inserts ".warn" before a final ".log".
+// This reader is one standalone file built without the module, so the rule
+// is restated here; proto/vocab/log-warnings-sink.json is the contract and
+// bin/test-logs.sh reads fixtures named by it.
+const warningsSuffix = ".warn.log"
+
+// warningsPath names the warnings file of the log at PATH.
+func warningsPath(path string) string {
+	if base, ok := strings.CutSuffix(path, ".log"); ok {
+		return base + warningsSuffix
+	}
+	return path + warningsSuffix
+}
+
+// warningsSinks answers what a read at MINIMUM opens for SINKS.
+//
+// WARN AND ERROR RECORDS LIVE ONLY IN WARNINGS FILES. Every runtime writes its
+// warn and error records to a warnings file beside its log and nothing else
+// there (proto/vocab/log-warnings-sink.json), so a read of warnings and errors
+// opens each JSONL sink's warnings twin INSTEAD of the sink: the deploy
+// intake's read of a window outlived its 18s bound filtering 10 GB of every
+// record ever written (2026-11-17). A read below warn opens both. A stderr or
+// messages source has no twin and is read either way.
+func warningsSinks(sinks []sink, minimum int) []sink {
+	onlyWarnings := minimum >= levelRank["warn"]
+	out := make([]sink, 0, 2*len(sinks))
+	for _, selected := range sinks {
+		if selected.format != "jsonl" {
+			out = append(out, selected)
+			continue
+		}
+		if !onlyWarnings {
+			out = append(out, selected)
+		}
+		twin := selected
+		twin.base = warningsPath(selected.base)
+		twin.warnings = true
+		twin.logBase = selected.base
+		out = append(out, twin)
+	}
+	return out
 }
 
 type sinkFinding struct {
@@ -215,6 +266,7 @@ func run() error {
 		return err
 	}
 
+	sinks = warningsSinks(sinks, filter.minLevel)
 	records, findings, readable, sequence, states, orphanCount, err := readInitial(sinks, filter)
 	if err != nil {
 		return err
@@ -370,6 +422,11 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 		orphanCount += orphans
 		state := followState{sink: selectedSink, path: current, line: 1}
 		sinkReadable := false
+		// A WARNINGS TWIN WITH NO FILE IS AN EMPTY SINK, NOT AN UNREADABLE
+		// ONE, when its runtime writes the sink's log: a runtime that never
+		// warned never wrote it. A finding about it, or no log either, makes
+		// it unreadable.
+		sinkFailed := len(discovered) > 0
 		for _, path := range files {
 			if _, duplicate := seen[path]; duplicate {
 				sinkReadable = true
@@ -391,6 +448,7 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 			if err != nil {
 				if unreadable, ok := err.(*unreadableLogError); ok {
 					findings = append(findings, unreadableFinding(selectedSink, path, unreadable.err))
+					sinkFailed = true
 					continue
 				}
 				return nil, nil, 0, 0, nil, 0, err
@@ -411,7 +469,7 @@ func readInitial(sinks []sink, filter filters) ([]record, []sinkFinding, int, in
 				state.info, state.offset = info, info.Size()
 			}
 		}
-		if sinkReadable {
+		if sinkReadable || (selectedSink.warnings && !sinkFailed && logPresent(selectedSink.logBase)) {
 			readable++
 		}
 		states = append(states, state)
@@ -467,7 +525,10 @@ func generationFiles(selectedSink sink) ([]string, string, []sinkFinding, int) {
 			files = append(files, path)
 		}
 	}
-	if present, finding := regularFilePresent(selectedSink, current, !agedOut); finding != nil {
+	// A CENTRAL WARNINGS FILE MAY BE ABSENT: its runtime never warned. A
+	// twin's canonical link naming nothing is a defect like any other link.
+	required := !agedOut && (!selectedSink.warnings || selectedSink.canonicalSymlink)
+	if present, finding := regularFilePresent(selectedSink, current, required); finding != nil {
 		findings = append(findings, *finding)
 	} else if present {
 		files = append(files, current)
@@ -515,7 +576,7 @@ func targetsByID(selectedSink sink, dir, except string) ([]string, []sinkFinding
 	if dir == "" || selectedSink.workspaceID == "" {
 		return nil, nil
 	}
-	entries, err := os.ReadDir(dir)
+	names, err := listDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -523,14 +584,12 @@ func targetsByID(selectedSink sink, dir, except string) ([]string, []sinkFinding
 		return nil, []sinkFinding{unreadableFinding(selectedSink, dir, err)}
 	}
 	prefix := "agent-repl-" + selectedSink.workspaceID + "-" + selectedSink.runtime + "-"
-	const suffix = ".log"
 	var orphans []string
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, suffix) {
+	for _, name := range names {
+		// A sink's targets end ".log" and its warnings twin's ".warn.log":
+		// each reads its own, never the other's.
+		if !strings.HasPrefix(name, prefix) || !strings.HasSuffix(name, ".log") ||
+			strings.HasSuffix(name, warningsSuffix) != selectedSink.warnings {
 			continue
 		}
 		path := filepath.Join(dir, name)
@@ -541,6 +600,38 @@ func targetsByID(selectedSink sink, dir, except string) ([]string, []sinkFinding
 	}
 	sort.Strings(orphans)
 	return orphans, nil
+}
+
+// logPresent reports whether a sink's own base is on disk: its canonical
+// link, or its central file.
+func logPresent(base string) bool {
+	_, err := os.Lstat(base)
+	return err == nil
+}
+
+// dirListings holds each directory's file names, listed once per read: every
+// workspace sink and its twin search the same logs directory for its targets,
+// and listing a directory of thousands of files per sink cost the read once
+// per sink.
+var dirListings = map[string][]string{}
+
+// listDir answers DIR's regular-entry names, listing it on the first ask.
+func listDir(dir string) ([]string, error) {
+	if names, ok := dirListings[dir]; ok {
+		return names, nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			names = append(names, entry.Name())
+		}
+	}
+	dirListings[dir] = names
+	return names, nil
 }
 
 func regularFilePresent(selectedSink sink, path string, required bool) (bool, *sinkFinding) {
