@@ -118,6 +118,8 @@
 (declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-by-user-at "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-at "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-closed-by "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-commit-count "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-summary "agent-repl-roster" (row))
 (declare-function agent-repl-status-roster-mark "agent-repl-status" (arm &optional glyph))
@@ -963,8 +965,9 @@ order: `sort' is stable."
 
 (defun agent-repl--switch-closed-recently-p (row now-ms)
   "Return non-nil when ROW was closed recently enough for `SPC p p' at NOW-MS.
-A merged row, or one a merge closed, within `agent-repl--switch-merged-window-ms'
-of its merge or close; any other closed row within
+A merged row, or one a merge closed, within
+`agent-repl--switch-merged-window-ms' of its merge or close; any other
+closed row within
 `agent-repl--switch-closed-window-ms' of its close.  A close that predates
 the daemon's record states no instant, and is never recent."
   (let ((merged-at (agent-repl-roster-row-merged-at row)))
