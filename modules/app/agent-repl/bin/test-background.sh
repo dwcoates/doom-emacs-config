@@ -359,7 +359,7 @@ if [ -n "$QUERY" ]; then
     # whether the helper reaches for `taskpolicy`, the only call that clamps,
     # so a stub `taskpolicy` ahead on PATH records any call.
     if [ "$HOST_OS" = Darwin ]; then
-        STUB_DIR="$(mktemp -d)"
+        STUB_DIR="$(mktemp -d "${TMPDIR:-/tmp}/taskpolicy-stub.XXXXXX")"
         printf '#!/bin/sh\necho called > "%s/called"\nexec "$@"\n' "$STUB_DIR" >"$STUB_DIR/taskpolicy"
         chmod +x "$STUB_DIR/taskpolicy"
         PATH="$STUB_DIR:$PATH" env -u AGENT_REPL_BACKGROUND_PRIORITY bash "$HELPER" bash -c true >/dev/null 2>&1 || true
