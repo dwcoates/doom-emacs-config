@@ -73,7 +73,7 @@ func TestStandingWorkspaceMakesOneForARoleWithNone(t *testing.T) {
 		wantName    string
 		wantEfforts []string
 	}{
-		{name: "an intake, its effort left for its check", role: DeployCheckIntake, wantName: "deploy-intake"},
+		{name: "an intake, its effort left for its check", role: DeployCheckIntake, wantName: "deploy-intake-standing"},
 		{name: "the fixer for a remediation, its effort left for its brief", role: DeployCheckRemediation, wantName: "deploy-fixer"},
 		{name: "the fixer for an escalation, its effort left for its brief", role: DeployCheckEscalation, wantName: "deploy-fixer"},
 	}

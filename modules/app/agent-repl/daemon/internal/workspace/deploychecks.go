@@ -222,12 +222,16 @@ func (v *verbs) CompactDeployCheck(ctx context.Context, ws wsm.WorkspaceID) (boo
 // A workspace that is no standing deploy check, or has no gate standing, is
 // left as it is.
 func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceID) error {
-	record, log, err := v.owned(ctx, "AnswerDeployCheckColdGate", ws)
-	if err != nil {
+	// EVERY GATE RAISED COMES HERE, so a workspace that is no standing deploy
+	// check is passed over before any ownership is asked: a handover raises
+	// gates again on workspaces this daemon has not adopted yet (2026-11-17
+	// 13:24: five not_yet_adopted ERRORs, none a deploy check).
+	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.StandingDeployCheck {
 		return err
 	}
-	if !record.StandingDeployCheck {
-		return nil
+	_, log, err := v.owned(ctx, "AnswerDeployCheckColdGate", ws)
+	if err != nil {
+		return err
 	}
 	if _, standing := v.deps.Cards.ColdGate(ws); !standing {
 		return nil

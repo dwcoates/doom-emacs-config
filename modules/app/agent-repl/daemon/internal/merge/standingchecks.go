@@ -23,8 +23,13 @@ import (
 
 // standingNames is each standing role's workspace name. A repository holds
 // each name once; a closed standing workspace keeps it, and is reopened.
+//
+// "deploy-intake" IS TAKEN: it is the branch of the 2026-11-14 work that
+// built the deploy intake, and a create refuses a name whose branch stands
+// (2026-11-17 13:24: name_branch_exists, and the queue's check had no
+// intake).
 var standingNames = map[wsm.DeployCheckRoleName]string{
-	wsm.StandingIntake: "deploy-intake",
+	wsm.StandingIntake: "deploy-intake-standing",
 	wsm.StandingFixer:  "deploy-fixer",
 }
 
