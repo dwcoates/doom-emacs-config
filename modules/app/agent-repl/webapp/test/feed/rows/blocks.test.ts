@@ -29,7 +29,7 @@ import imageThumbnail from "../../../../proto/vocab/image-thumbnail.json";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../../src/bubble/quote.js";
 import { BUBBLE_COLLAPSED_THUMBNAIL_CLASS } from "../../../src/bubble/collapsed-thumbnail.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, createBubbleBody, paintBody } from "../../../src/bubble/body.js";
-import { WorkspaceMentionTargetsSchema } from "../../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
+import { mentionTargets, openTarget } from "../mention-targets.js";
 import { applyMentionTargets, resetMentionTargets } from "../../../src/feed/workspace-mentions.js";
 import { plainProse } from "../../prose.js";
 import { CODE_RUN_CLASS } from "../../../src/run-control.js";
@@ -68,7 +68,7 @@ describe("drawFeedTextBlock", () => {
   it("links a workspace's name in the text to that workspace", () => {
     // ARRANGE
     applyMentionTargets(
-      create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "alpha" }, workspace: { id: "ws-alpha", dir: "/d" } }] }),
+      mentionTargets(openTarget("alpha", "ws-alpha", "/d")),
       () => [],
     );
     // ACT

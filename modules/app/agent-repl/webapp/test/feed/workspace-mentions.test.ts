@@ -7,6 +7,10 @@ import {
   type SelectInEditorRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_in_editor_pb";
 import {
+  OpenWorkspaceResponseSchema,
+  type OpenWorkspaceRequest,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_workspace_pb";
+import {
   WatchWorkspaceMentionsResponseSchema,
   type WatchWorkspaceMentionsRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_mentions_pb";
@@ -27,19 +31,18 @@ import {
 } from "../../src/feed/workspace-mentions.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { scriptedAppContext } from "../rpc/app-context.js";
-import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
 import { RecordingSink, WORKSPACE } from "./harness.js";
+import { closedTarget, mentionTargets, openTarget } from "./mention-targets.js";
 
 afterEach(() => {
   resetMentionTargets();
   document.body.replaceChildren();
 });
 
-/** Targets naming each of NAMES, its workspace id `ws-<name>`. */
+/** Open targets naming each of NAMES, its workspace id `ws-<name>`. */
 function targets(...names: string[]): WorkspaceMentionTargets {
-  return create(WorkspaceMentionTargetsSchema, {
-    targets: names.map((name) => ({ name: { text: name }, workspace: { id: `ws-${name}`, dir: `/w/${name}` } })),
-  });
+  return mentionTargets(...names.map((name) => openTarget(name)));
 }
 
 /** A response's prose, a mention scope, holding the rendered HTML BODY. */
@@ -264,6 +267,7 @@ describe("readMentionTargets", () => {
     { name: "a target with an empty name", served: create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "" }, workspace: { id: "a" } }] }) },
     { name: "a target with no workspace", served: create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "a" } }] }) },
     { name: "a target whose workspace has no id", served: create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "a" }, workspace: { id: "" } }] }) },
+    { name: "a target with no standing", served: create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "a" }, workspace: { id: "a" } }] }) },
     { name: "a name served twice", served: targets("a", "a") },
   ];
   for (const tc of malformed) {
@@ -285,6 +289,21 @@ describe("readMentionTargets", () => {
   });
 });
 
+describe("a recently closed target", () => {
+  it("links exactly as an open target does", () => {
+    // ARRANGE
+    applyMentionTargets(mentionTargets(openTarget("alpha"), closedTarget("gone")), () => []);
+    const root = tree("<code>alpha</code> and <code>gone</code>");
+    // ACT
+    linkWorkspaceMentionsInText(root);
+    // ASSERT
+    const [open, closed] = [...root.querySelectorAll(`.${WORKSPACE_MENTION_CLASS}`)];
+    expect(mentions(root)).toEqual(["alpha=ws-alpha", "gone=ws-gone"]);
+    expect(closed.className).toBe(open.className);
+    expect(closed.tagName).toBe(open.tagName);
+  });
+});
+
 describe("installWorkspaceMentionClicks", () => {
   /** A page whose SelectInEditor records its requests, with ROOT's clicks installed. */
   function page(root: HTMLElement) {
@@ -302,6 +321,90 @@ describe("installWorkspaceMentionClicks", () => {
     const uninstall = installWorkspaceMentionClicks(ctx, root);
     return { calls, selected, uninstall };
   }
+
+  /**
+   * A page whose OpenWorkspace answers OPENED (a refusal arm when not "success")
+   * and whose SelectInEditor succeeds, each recording its requests in order.
+   */
+  function reopeningPage(root: HTMLElement, opened: "success" | "refused") {
+    const order: string[] = [];
+    const opens = recorded<OpenWorkspaceRequest>();
+    const selects = recorded<SelectInEditorRequest>();
+    const ctx = scriptedAppContext(
+      {
+        openWorkspace: (req) => {
+          order.push("open");
+          opens.record(req);
+          return opened === "success"
+            ? create(OpenWorkspaceResponseSchema, { result: { case: "success", value: {} } })
+            : create(OpenWorkspaceResponseSchema, {
+                result: { case: "error", value: { cause: { case: "vendorStartFailed", value: { detail: "the vendor refused" } } } },
+              });
+        },
+        selectInEditor: (req) => {
+          order.push("select");
+          selects.record(req);
+          return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
+        },
+      },
+      { workspace: WORKSPACE, failures: new RecordingSink() },
+    );
+    const uninstall = installWorkspaceMentionClicks(ctx, root);
+    return { order, opens, selects, uninstall };
+  }
+
+  it("reopens a closed target's workspace, then selects it", async () => {
+    // ARRANGE
+    applyMentionTargets(mentionTargets(closedTarget("gone")), () => []);
+    const root = tree("<code>gone</code>");
+    linkWorkspaceMentionsInText(root);
+    const { order, opens, selects, uninstall } = reopeningPage(root, "success");
+    // ACT
+    root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`)?.click();
+    // ASSERT
+    await selects.reached(1);
+    expect(order).toEqual(["open", "select"]);
+    expect(opens.calls[0].workspace?.id).toBe("ws-gone");
+    expect(selects.calls[0].workspace?.id).toBe("ws-gone");
+    uninstall();
+  });
+
+  it("only selects an open target's workspace, never reopening it", async () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const root = tree("<code>alpha</code>");
+    linkWorkspaceMentionsInText(root);
+    const { order, selects, uninstall } = reopeningPage(root, "success");
+    // ACT
+    root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`)?.click();
+    // ASSERT
+    await selects.reached(1);
+    expect(order).toEqual(["select"]);
+    uninstall();
+  });
+
+  it("draws a refused reopen at the mention, records it once, and selects nothing", async () => {
+    // ARRANGE
+    const capture = captureLogRecords();
+    applyMentionTargets(mentionTargets(closedTarget("gone")), () => []);
+    const root = tree("<code>gone</code>");
+    linkWorkspaceMentionsInText(root);
+    const { order, opens, uninstall } = reopeningPage(root, "refused");
+    const mention = root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`);
+    // ACT
+    mention?.click();
+    // ASSERT
+    await opens.reached(1);
+    const refusal = await awaitDom(root, "the reopen's refusal", () => mention?.querySelector(".workspace-mention-refusal") ?? null);
+    expect(refusal.getAttribute("data-arm")).toBe("vendorStartFailed");
+    const record = await forwardedRecord(capture, "feed.workspace-mention-refused");
+    expect(record.level.case).toBe("warn");
+    expect(record.context).toMatchObject({ rpc: "OpenWorkspace", arm: "vendorStartFailed", workspace: "ws-gone" });
+    const refusedRecords = (await forwardedRecords(capture)).filter((r) => r.operation === "feed.workspace-mention-refused");
+    expect(refusedRecords).toHaveLength(1);
+    expect(order).toEqual(["open"]);
+    uninstall();
+  });
 
   it("selects the mentioned workspace, echoed verbatim", async () => {
     // ARRANGE

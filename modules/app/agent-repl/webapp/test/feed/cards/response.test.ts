@@ -70,7 +70,7 @@ import { BUBBLE_QUESTION_CLASS, QUESTION_ROW_ATTRIBUTE } from "../../../src/feed
 import { responseUsageOf } from "../../../src/feed/response-usage.js";
 import { COMPOSER_ENTRY_CLASS, createComposerEntryHighlight } from "../../../src/feed/composer-entry.js";
 import { applyMentionTargets, resetMentionTargets, WORKSPACE_MENTION_ATTRIBUTE } from "../../../src/feed/workspace-mentions.js";
-import { WorkspaceMentionTargetsSchema } from "../../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
+import { mentionTargets, openTarget } from "../mention-targets.js";
 
 const SINK: FailureSink = { report: () => {}, retract: () => {} };
 
@@ -952,7 +952,7 @@ describe("the wrapped tree a settled response carries", () => {
   it("links a workspace its tree mentions to that workspace on paint", () => {
     // Arrange — the page's targets name the workspace `first`.
     applyMentionTargets(
-      create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "first" }, workspace: { id: "ws-first", dir: "/w/first" } }] }),
+      mentionTargets(openTarget("first")),
       () => [],
     );
     try {
@@ -973,7 +973,7 @@ describe("the wrapped tree a settled response carries", () => {
   it("links a workspace its prose mentions outside any tree, without its code markers", () => {
     // Arrange — the page's targets name the workspace `first`.
     applyMentionTargets(
-      create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "first" }, workspace: { id: "ws-first", dir: "/w/first" } }] }),
+      mentionTargets(openTarget("first")),
       () => [],
     );
     try {
