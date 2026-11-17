@@ -218,6 +218,15 @@ export class StreamBlocks {
    * with a `message_stop` and no assistant line.
    */
   #heldForTurn: CutUnit[] = [];
+  /**
+   * Held units a LATER response on the main stream replaced: the vendor
+   * dropped the response that started them and retried, so no assistant line
+   * will ever settle them. Whatever the turn's ending, they settle as cut at
+   * its end (endTurn), never as a violation (2026-11-17 13:55: deploy-fixer's
+   * msg_011Ch8caxv6YPQ8zAoBbCgvg was dropped after its first block and the
+   * request sent again three times).
+   */
+  #supersededForTurn: CutUnit[] = [];
 
   /** How many streams have a response open. */
   get openStreams(): number {
@@ -238,6 +247,7 @@ export class StreamBlocks {
     const key = streamKeyOf(parentToolUseId);
     const held = this.#open.get(key);
     if (held !== undefined) reportUnsettled(key, held, "message_start");
+    if (key === MAIN_STREAM) this.#supersede(messageId);
     const state = freshBlockState(messageId);
     this.#open.set(key, state);
     return state;
@@ -298,9 +308,12 @@ export class StreamBlocks {
    * none; a turn that was stopped or failed cut them, and answers them for
    * settling as cut (settleCutUnits). A stop or a failure can end the turn
    * with no `message_stop`; a subagent's stream is not the turn's and outlives
-   * it when backgrounded.
+   * it when backgrounded. Units a retry replaced (#supersede) are answered for
+   * settling as cut however the turn ended.
    */
   endTurn(ending: TurnEnding): readonly CutUnit[] {
+    const superseded = this.#supersededForTurn;
+    this.#supersededForTurn = [];
     const units: Array<CutUnit & { readonly at: UnsettledAt }> = this.#heldForTurn.map((u) => ({ ...u, at: "message_stop" }));
     this.#heldForTurn = [];
     const state = this.#open.get(MAIN_STREAM);
@@ -311,7 +324,7 @@ export class StreamBlocks {
     this.#drop(MAIN_STREAM, "turn_end");
     if (ending === "completed") {
       for (const u of units) reportOneUnsettled(MAIN_STREAM, u.messageId, u.index, u.unit, u.at);
-      return [];
+      return superseded;
     }
     for (const u of units) {
       LOGGER.info(
@@ -319,7 +332,23 @@ export class StreamBlocks {
         "the turn cut a unit its stream started; it settles as cut",
       );
     }
-    return units.map(({ messageId, index, unit }) => ({ messageId, index, unit }));
+    return [...superseded, ...units.map(({ messageId, index, unit }) => ({ messageId, index, unit }))];
+  }
+
+  /**
+   * A new response on the main stream replaces every response held at its
+   * `message_stop` with no assistant line: the vendor dropped it and sent the
+   * request again, so its units move to the superseded set (endTurn).
+   */
+  #supersede(messageId: string): void {
+    for (const u of this.#heldForTurn) {
+      LOGGER.info(
+        { message_id: u.messageId, activity_id: u.unit.activityId.value, block_index: u.index, replaced_by: messageId },
+        "a new response replaced one the vendor dropped after it started a unit; the unit settles as cut at the turn's end",
+      );
+    }
+    this.#supersededForTurn.push(...this.#heldForTurn);
+    this.#heldForTurn = [];
   }
 
   /**

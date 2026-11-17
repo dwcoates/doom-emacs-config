@@ -3240,6 +3240,59 @@ describe("a streamed unit the turn cut", () => {
     expect(cutTerminals(entries).size).toBe(2);
   });
 
+  describe("when the vendor dropped the response and sent the request again", () => {
+    const REPLACED = "a new response replaced one the vendor dropped after it started a unit; the unit settles as cut at the turn's end";
+    const done = {
+      type: "result",
+      subtype: "success",
+      is_error: false,
+      result: "done",
+      uuid: "uuid-done",
+      session_id: "session-1",
+    } as unknown as SdkMessage;
+
+    /** Fold the dropped response, the retry's start, then a completed turn. */
+    function foldRetried(): { entries: readonly PersistEntry[]; messages: string[] } {
+      const fold = createFold();
+      const context = foldContext();
+      let entries: readonly PersistEntry[] = [];
+      const records = logRecordsDuring(() => {
+        for (const message of cutResponse()) fold.onSdkMessage(message, context);
+        fold.onSdkMessage(on({ type: "message_start", message: { id: "msg_retry" } }, "u-retry"), context);
+        fold.onSdkMessage(on({ type: "message_stop" }, "u-retry-stop"), context);
+        entries = fold.onSdkMessage(done, context).entries;
+      });
+      return { entries, messages: records.map((r) => r.message) };
+    }
+
+    it("reports no violation for the dropped response's units", () => {
+      // Arrange, Act.
+      const { messages } = foldRetried();
+
+      // Assert.
+      expect(messages).not.toContain(UNSETTLED);
+    });
+
+    it("records each replaced unit at INFO", () => {
+      // Arrange, Act.
+      const { messages } = foldRetried();
+
+      // Assert.
+      expect(messages.filter((m) => m === REPLACED)).toHaveLength(2);
+    });
+
+    it("settles the dropped response as request_failed when the turn completed", () => {
+      // Arrange, Act.
+      const { entries } = foldRetried();
+
+      // Assert.
+      const item = cutTerminals(entries).get("msg_cut:1");
+      if (item?.case !== "response" || item.value.result.case !== "failure") throw new Error("expected a failed response");
+      expect(item.value.result.value.reason?.reason.case).toBe("requestFailed");
+      expect(cutTerminals(entries).size).toBe(2);
+    });
+  });
+
   it("still reports a violation and settles nothing when the turn completed", () => {
     // Arrange, Act.
     const { entries, messages } = foldCut({
