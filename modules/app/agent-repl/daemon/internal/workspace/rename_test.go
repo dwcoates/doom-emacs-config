@@ -170,6 +170,7 @@ func TestSetNameRefusesANameThatBreaksTheNamingRule(t *testing.T) {
 	}{
 		{name: "a slug that is not lowercase hyphenated words", requested: "Better Name", component: "Better Name", rule: NameRuleSlug},
 		{name: "a prefix that is not letters and digits", requested: "A B/better", component: "A B", rule: NameRulePrefix},
+		{name: "a name in the daemon's reserved namespace", requested: "agent-repl/standing/deploy-intake", component: "agent-repl", rule: NameRuleReserved},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

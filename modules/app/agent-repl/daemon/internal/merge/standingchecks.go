@@ -21,8 +21,11 @@ import (
 // (wsm.Workspace.DeployMediator). The daemon makes it only for a queue
 // that has none, and reopens it when the user closed it.
 
-// mediatorName is the name a made mediator takes. A repository holds it
-// once; a closed mediator keeps it, and is reopened.
+// mediatorName is the slug a made mediator takes; the workspace verbs make
+// it under the daemon's own branch namespace (workspace.StandingBranch), so
+// no branch a person or an agent cut can hold it. A repository holds it
+// once; a closed mediator keeps it, and is reopened. A mediator recorded
+// before the namespace keeps the name it was made under.
 const mediatorName = "deploy-mediator"
 
 // standing is a queue's mediator, as a check finds it.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 )
@@ -22,8 +24,8 @@ func TestTheDeployMediatorIsMadeShownOnOpusWithNoPrompt(t *testing.T) {
 	spec := deployMediatorSpec("/repo", "deploy-mediator")
 
 	// Assert
-	if spec.RepoDir != "/repo" || spec.Name != "deploy-mediator" || spec.Model != "opus" || spec.Hidden || spec.InitialPrompt != "" {
-		t.Fatalf("spec = %+v, want an unprompted workspace on opus, in sight", spec)
+	if spec.RepoDir != "/repo" || spec.Name != StandingBranch("deploy-mediator") || !spec.standing || spec.Model != "opus" || spec.Hidden || spec.InitialPrompt != "" {
+		t.Fatalf("spec = %+v, want an unprompted standing workspace on opus, in sight, in the reserved namespace", spec)
 	}
 }
 
@@ -493,6 +495,74 @@ func TestCompactRequeuedMergeColdGate(t *testing.T) {
 			}
 			if len(f.queue.gateFates) != 1 || f.queue.gateFates[0] != promptqueue.GateKeep {
 				t.Fatalf("gate fates = %v, want the held prompts kept", f.queue.gateFates)
+			}
+		})
+	}
+}
+
+func TestTheDeployMediatorIsMadeInTheReservedNamespaceBesideAHandMadeBranch(t *testing.T) {
+	// Arrange: a branch a person cut under the mediator's slug, held by no
+	// workspace (as the 2026-11-17 `deploy-intake` was at 3913181be5).
+	f := newFixture(t)
+	f.db.modelCatalogs = map[string]*conversationv1.ModelCatalog{"/config": catalogOf("opus", "sonnet")}
+	t.Setenv(PrefixEnv, "")
+	t.Setenv(LegacyPrefixEnv, "")
+	repo := mainWorktree(t, f)
+	f.git.existingBranches = map[string]bool{"deploy-mediator": true}
+
+	// Act
+	made, err := f.verbs.(*verbs).CreateDeployMediator(context.Background(), repo, "deploy-mediator")
+
+	// Assert: made on its own branch and directory; the person's branch is
+	// untouched.
+	want := StandingBranch("deploy-mediator")
+	if err != nil {
+		t.Fatalf("CreateDeployMediator: %v", err)
+	}
+	if made.Name != want || made.Branch != want {
+		t.Fatalf("made = %+v, want name and branch %q", made, want)
+	}
+	if len(f.git.created) != 1 || f.git.created[0].Branch != want || filepath.Base(f.git.created[0].WorktreeDir) != ".agent-repl-standing-deploy-mediator" {
+		t.Fatalf("created = %+v, want one worktree on %q in its dot-led directory", f.git.created, want)
+	}
+	if len(f.git.nuked) != 0 {
+		t.Fatalf("nuked = %+v, want the hand-made branch untouched", f.git.nuked)
+	}
+}
+
+func TestACreateInTheReservedNamespaceIsRefused(t *testing.T) {
+	tests := []struct {
+		name     string
+		supplied string
+	}{
+		{name: "a standing workspace's branch", supplied: "agent-repl/standing/deploy-mediator"},
+		{name: "the namespace's root", supplied: "agent-repl"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			t.Setenv(PrefixEnv, "")
+			t.Setenv(LegacyPrefixEnv, "")
+			repo := mainWorktree(t, f)
+
+			// Act
+			_, err := f.verbs.Create(context.Background(), CreateSpec{originator: lifecycleconfig.OriginatorUserOrWorkspace, RepoDir: repo, Name: tt.supplied})
+
+			// Assert: refused typed, recorded, and nothing claimed or built.
+			refusal, ok := AsRefusal(err)
+			if !ok || refusal.Arm != ArmInvalidName || refusal.Fields["component"] != ReservedNamespace || refusal.Fields["rule"] != NameRuleReserved {
+				t.Fatalf("Create = %v, want the %s refusal under the %s rule", err, ArmInvalidName, NameRuleReserved)
+			}
+			if len(f.git.created) != 0 {
+				t.Fatalf("created = %+v, want nothing built", f.git.created)
+			}
+			if claimed := f.verbs.(*verbs).names.claimed; len(claimed) != 0 {
+				t.Fatalf("claimed = %+v, want no claim", claimed)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opRefusal})
+			if !ok || record.Context["arm"] != ArmInvalidName || record.Context["rpc"] != "CreateWorkspace" {
+				t.Fatalf("records = %+v, want an INFO refusal of CreateWorkspace naming %s", f.log.logger.Records(), ArmInvalidName)
 			}
 		})
 	}

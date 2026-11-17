@@ -32,13 +32,16 @@ const (
 	mediatorEffort = conversationv1.AgentEffortLevel_AGENT_EFFORT_LEVEL_LOW
 )
 
-// deployMediatorSpec is the create of the deploy mediator NAME of the
-// repository at REPODIR: shown, since it stands in its repository's section
-// for good (owner ruling, 2026-11-19), on the mediator's model, with no
-// initial prompt.
+// deployMediatorSpec is the create of the deploy mediator for slug NAME
+// (`deploy-mediator`) of the repository at REPODIR: shown, since it stands in
+// its repository's section for good (owner ruling, 2026-11-19), on the
+// mediator's model, with no initial prompt. Its name and branch lie in the
+// daemon's own namespace (StandingBranch), so no branch a person or an agent
+// cut can ever hold them.
 func deployMediatorSpec(repoDir, name string) CreateSpec {
 	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
-	spec.RepoDir, spec.Name, spec.Model = repoDir, name, mediatorModel
+	spec.RepoDir, spec.Name, spec.Model = repoDir, StandingBranch(name), mediatorModel
+	spec.standing = true
 	return spec
 }
 

@@ -123,6 +123,12 @@ type CreateSpec struct {
 	// value a bare CreateSpec{} carries is no kind, which validateCreate
 	// refuses.
 	originator lifecycleconfig.Originator
+	// standing is whether the create is one of the daemon's own standing
+	// workspaces (deployCheckSpec), whose Name is a branch in the reserved
+	// namespace (StandingBranch). Settable only inside this package, so no
+	// request off the wire can make one: the naming rule refuses every
+	// other create's name there (NameRuleReserved).
+	standing bool
 	// Model is the model the session starts under, empty for the vendor's
 	// default.
 	Model string
