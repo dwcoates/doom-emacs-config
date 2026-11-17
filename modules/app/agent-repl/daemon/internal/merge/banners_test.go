@@ -80,8 +80,9 @@ func (b *fakeBanners) kinds() []raisedBanner {
 }
 
 // TestEveryEndOfARunningMergeRaisesOnlyItsQueuedAndResolvedBanners pins that
-// a merge raises exactly two banners, whichever way it ends: one as it is put
-// in line, and one as it leaves the queue for good.
+// a merge raises at most two banners, whichever way it ends: one as it is put
+// in line, and one as it leaves the queue for good, which a merge the user or
+// the operator released does not raise.
 func TestEveryEndOfARunningMergeRaisesOnlyItsQueuedAndResolvedBanners(t *testing.T) {
 	for _, tc := range releaseCases() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,11 +90,13 @@ func TestEveryEndOfARunningMergeRaisesOnlyItsQueuedAndResolvedBanners(t *testing
 			h := ended(t, tc.phase, tc.res)
 
 			// Assert.
-			end := "abandoned"
-			if tc.phase == phaseLanded {
-				end = "landed"
+			want := []raisedBanner{{ws: theWorkspace, kind: "queued"}}
+			switch {
+			case tc.phase == phaseLanded:
+				want = append(want, raisedBanner{ws: theWorkspace, kind: "landed"})
+			case tc.res.name != "evicted" && tc.res.name != "dequeued":
+				want = append(want, raisedBanner{ws: theWorkspace, kind: "abandoned"})
 			}
-			want := []raisedBanner{{ws: theWorkspace, kind: "queued"}, {ws: theWorkspace, kind: end}}
 			if got := h.banners.kinds(); !reflect.DeepEqual(got, want) {
 				t.Fatalf("banners = %+v, want %+v", got, want)
 			}

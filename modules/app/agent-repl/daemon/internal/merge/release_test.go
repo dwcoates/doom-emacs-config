@@ -6,6 +6,7 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
@@ -231,5 +232,91 @@ func TestEvictingAMergeWithARebaseStandingAbortsItAndSaysSo(t *testing.T) {
 	}
 	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.abandoned", text: "abandoned a running merge", context: map[string]string{"rebase_aborted": "true"}}) {
 		t.Fatalf("no record says the rebase was aborted: %+v", c.h.logs.Records())
+	}
+}
+
+func TestAReleasedMergeIsHandedBackReleasedAndRaisesNoResolvedBanner(t *testing.T) {
+	tests := []struct {
+		name  string
+		end   func(t *testing.T) *harness
+		cause AbandonCause
+	}{
+		{name: "an evicted queued in-place merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
+			h := newHarness(t)
+			enqueue(t, h)
+			if err := h.o.Evict(context.Background(), theWorkspace); err != nil {
+				t.Fatalf("Evict: %v", err)
+			}
+			return h
+		}},
+		{name: "an evicted queued detached merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
+			h := newHarness(t)
+			if err := requestDetached(t, h, RequestedByUser); err != nil {
+				t.Fatalf("Enqueue: %v", err)
+			}
+			if err := h.o.Evict(context.Background(), theMergeWorkspace); err != nil {
+				t.Fatalf("Evict: %v", err)
+			}
+			return h
+		}},
+		{name: "an evicted running in-place merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
+			return ended(t, phaseRunning, resolutions[0])
+		}},
+		{name: "an evicted running detached merge", cause: CauseUserDrop, end: func(t *testing.T) *harness {
+			return endedObserved(t, phaseRunning, resolutions[0], func(h *harness) { markMergeWorkspace(h, otherWorkspace) })
+		}},
+		{name: "a dequeued running in-place merge", cause: CauseUserDequeue, end: func(t *testing.T) *harness {
+			return ended(t, phaseRunning, resolutions[1])
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange and Act.
+			h := tt.end(t)
+
+			// Assert: one handback, marked released with its cause.
+			sent := h.detached.sent()
+			if len(sent) != 1 || sent[0].outcome.Cause != tt.cause || !sent[0].outcome.Released() {
+				t.Fatalf("handbacks = %+v, want one marked released by %s", sent, tt.cause)
+			}
+			// Assert: no resolved banner, and the skip recorded at INFO.
+			for _, b := range h.banners.kinds() {
+				if b.kind != "queued" {
+					t.Fatalf("banners = %+v, want no resolved banner for a released merge", h.banners.kinds())
+				}
+			}
+			rec, ok := h.recordFor(dlog.LevelInfo, "daemon.merge.ended")
+			if !ok || rec.Context["cause"] != string(tt.cause) || rec.Context["outcome"] != "abandoned" {
+				t.Fatalf("record = %+v (found %v), want the skipped banner recorded with its cause", rec, ok)
+			}
+		})
+	}
+}
+
+func TestOnlyAnAbandonmentReleasedByItsCauseIsReleased(t *testing.T) {
+	tests := []struct {
+		name string
+		out  DetachedOutcome
+		want bool
+	}{
+		{name: "evicted", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDrop}, want: true},
+		{name: "dequeued", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseUserDequeue}, want: true},
+		{name: "its workspace closed", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseWorkspaceClosed}},
+		{name: "the daemon shut down", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseDaemonShutdown}},
+		{name: "the merge ahead did not land", out: DetachedOutcome{Kind: DetachedAbandoned, Cause: CauseAheadDidNotLand}},
+		{name: "never forked", out: DetachedOutcome{Kind: DetachedAbandoned}},
+		{name: "failed", out: DetachedOutcome{Kind: DetachedFailed}},
+		{name: "landed", out: DetachedOutcome{Kind: DetachedLanded}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.out.Released()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Released() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
