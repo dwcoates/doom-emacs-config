@@ -12,6 +12,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 )
@@ -30,7 +31,10 @@ type fakeHistory struct {
 	// reads are the reads made, in order.
 	reads []historyRead
 	// failFrom fails every read from this 1-based read number on; 0 never.
+	// failWith is the error a failed read answers, "store unreachable"
+	// when unset.
 	failFrom int
+	failWith error
 	// noSource answers every read ErrNoHistorySource.
 	noSource bool
 	// readDone, when set, is sent one value after every read, so a test
@@ -80,6 +84,9 @@ func (f *fakeHistory) ReadHistory(_ context.Context, _ ids.WorkspaceID, target *
 		return nil, ErrNoHistorySource
 	}
 	if f.failFrom > 0 && len(f.reads) >= f.failFrom {
+		if f.failWith != nil {
+			return nil, f.failWith
+		}
 		return nil, errors.New("store unreachable")
 	}
 	book := f.books[target.GetValue()]
@@ -418,6 +425,41 @@ func TestOpenFeedWhoseReadFailsIsHistoryUnavailable(t *testing.T) {
 	// Assert.
 	if !errors.Is(err, ErrHistoryUnavailable) {
 		t.Fatalf("OpenPage err = %v, want ErrHistoryUnavailable", err)
+	}
+}
+
+func TestAFailedReadIsRecordedAtItsLevelAndKeepsItsCause(t *testing.T) {
+	tests := []struct {
+		name      string
+		cause     error
+		wantLevel string
+		wantCut   bool
+	}{
+		{name: "a read its request's end cut is recorded at INFO, the cut kept", cause: context.Canceled, wantLevel: "info", wantCut: true},
+		{name: "a read past its deadline is recorded at INFO, the cut kept", cause: context.DeadlineExceeded, wantLevel: "info", wantCut: true},
+		{name: "a read that broke is recorded at ERROR", cause: errors.New("store unreachable"), wantLevel: "error"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			store := h.mainBook(3, promptsBook(5))
+			store.failFrom, store.failWith = 1, tt.cause
+
+			// Act.
+			_, _, _, err := h.resolver.OpenPage(context.Background(), testWorkspace, rootFeed())
+
+			// Assert.
+			if !errors.Is(err, ErrHistoryUnavailable) || !errors.Is(err, tt.cause) || ctxend.Is(err) != tt.wantCut {
+				t.Fatalf("OpenPage err = %v, want ErrHistoryUnavailable wrapping %v", err, tt.cause)
+			}
+			if got := h.recordsAt(tt.wantLevel, "daemon.feed.history_load_failed"); len(got) != 1 {
+				t.Fatalf("%s records = %v, want one", tt.wantLevel, got)
+			}
+			if tt.wantCut && len(h.recordsAt("error", "daemon.feed.history_load_failed")) != 0 {
+				t.Fatalf("records = %v, want no ERROR for a cut read", h.log.Records())
+			}
+		})
 	}
 }
 

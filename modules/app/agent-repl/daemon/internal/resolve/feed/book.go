@@ -10,6 +10,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
@@ -357,10 +358,14 @@ func (r *resolver) load(ctx context.Context, plan loadPlan) (loaded, error) {
 		return loaded{}, err
 	}
 	if err != nil {
-		log.Error("daemon.feed.history_load_failed",
+		// A READ CUT BY ITS REQUEST'S END is abandoned, never broken (a
+		// reader that left, a handover moving the workspace): it is recorded
+		// at INFO, and the cause is kept so every caller sees it as a cut.
+		ctxend.Log(err, log.Info, log.Error, "daemon.feed.history_load_failed",
+			"a page a reader's request needed was not read: the request ended first",
 			"a page a reader's request needed could not be read",
 			dlog.Context{"agent": plan.target.GetValue(), "newest": plan.newest, "cause": err.Error()})
-		return loaded{}, fmt.Errorf("%w: %v", ErrHistoryUnavailable, err)
+		return loaded{}, fmt.Errorf("%w: %w", ErrHistoryUnavailable, err)
 	}
 	entries := page.GetEntries()
 	if len(entries) == 0 && page.GetFloor() == nil {
