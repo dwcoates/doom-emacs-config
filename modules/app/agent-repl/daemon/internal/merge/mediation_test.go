@@ -205,7 +205,7 @@ func TestARoundMakesTheChainsIntakeAndTellsItUncompacted(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: the round ended undecided, so an escalation was made after.
-	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != "deploy-intake" {
+	if made := checkWorkspacesMade(h); len(made) != 1 || made[0] != "deploy-intake-standing" {
 		t.Fatalf("made %v, want one intake for the chain", h.checks.made)
 	}
 	for _, sub := range intakeSubmissions(h) {
@@ -256,7 +256,7 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 
 	// Assert: one intake made, told of each deploy, its session ended by each decision.
 	made := h.checks.made
-	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{"deploy-intake", "deploy-fixer"}) {
+	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{"deploy-intake-standing", "deploy-fixer"}) {
 		t.Fatalf("intake told %d times, made %v; want the one standing intake told of each deploy", len(intakeTellings(h)), made)
 	}
 	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake", "ws-intake"}) || len(h.checks.closed) != 0 {
