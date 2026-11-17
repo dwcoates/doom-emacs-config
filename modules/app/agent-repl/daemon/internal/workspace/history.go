@@ -6,6 +6,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/feed"
@@ -130,7 +131,9 @@ func (f *Fleet) adoptPersistedBook(ctx context.Context, ws ids.WorkspaceID) (str
 func (f *Fleet) historyBook(ctx context.Context, ws ids.WorkspaceID, target *conversationv1.AgentId) (book string, stated, recorded bool, err error) {
 	own, has, err := f.deps.DB.WorkspaceBook(ctx, ws)
 	if err != nil {
-		f.deps.Log.Global().Error("daemon.workspace.history_book",
+		log := f.deps.Log.Global()
+		ctxend.Log(err, log.Info, log.Error, "daemon.workspace.history_book",
+			"the workspace's recorded book was not read: the read's request ended first",
 			"could not read the workspace's recorded book; its history is not read",
 			dlog.Context{"workspace": string(ws), "cause": err.Error()})
 		return "", false, false, fmt.Errorf("read the recorded book of %q: %w", ws, err)

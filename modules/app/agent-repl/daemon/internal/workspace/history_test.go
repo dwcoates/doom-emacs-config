@@ -568,6 +568,27 @@ func TestFleetReadHistoryWhoseBookCannotBeReadIsAFailure(t *testing.T) {
 	}
 }
 
+func TestFleetReadHistoryWhoseBookReadWasCutIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.bookErr = context.Canceled
+
+	// Act.
+	_, err := f.fleet.ReadHistory(context.Background(), ws.ID, nil, nil)
+
+	// Assert.
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the cut surfaced", err)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "info"); len(got) != 1 {
+		t.Fatalf("history_book INFO records = %v, want one", got)
+	}
+	if got := recordsAt(f.log, "daemon.workspace.history_book", "error"); len(got) != 0 {
+		t.Fatalf("history_book ERROR records = %v, want none for a cut read", got)
+	}
+}
+
 func TestFleetReadHistoryOfARecordedBookSurfacesAFailedStoreRead(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)
