@@ -102,6 +102,7 @@ import {
   MERGE_QUEUE_CONTROL_CLASS,
   MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
+  MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
 } from "./merge-queue-view.js";
@@ -149,8 +150,8 @@ export const EMPTY_SUBSECTION_ATTRIBUTE = "data-empty";
 /**
  * What one line is: a row, a folded repository section's header, the
  * header of a subsection that is folded or empty, a queue's head card,
- * headless queue's glyph line or waiting merge, or a folded Deploys group's
- * header.
+ * headless queue's glyph line, a waiting merge, a GitHub standing or a merge
+ * off its queue, or a folded Deploys group's header.
  */
 const LINE_SELECTOR = [
   ".row",
@@ -162,6 +163,7 @@ const LINE_SELECTOR = [
   `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
   `.${MERGE_QUEUE_WAITING_CLASS}`,
   `.${MERGE_QUEUE_GITHUB_CLASS}`,
+  `.${MERGE_QUEUE_OFF_QUEUE_CLASS}`,
   `.${DEPLOYS_GROUP_CLASS}.${DEPLOYS_GROUP_FOLDED_CLASS} > .merged-group-head`,
 ].join(", ");
 

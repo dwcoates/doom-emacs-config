@@ -372,6 +372,15 @@ describe("regionLines", () => {
   });
 
 
+  it("counts a merge off its queue as a line", () => {
+    // Arrange
+    const box = document.createElement("div");
+    box.innerHTML = '<div class="repo"><div class="repo-head"></div><div class="rows sb-merge-queue"><div class="sb-mq-head"></div><div class="sb-mq-off-queue"></div></div></div>';
+    for (const el of box.querySelectorAll<HTMLElement>(".repo-head, .sb-mq-head, .sb-mq-off-queue")) el.getBoundingClientRect = () => rect(0, ROW);
+    // Act / Assert
+    expect(regionLines(box).map((el) => el.className)).toEqual(["sb-mq-head", "sb-mq-off-queue"]);
+  });
+
   it("counts a headless queue's glyph line as a line", () => {
     // Arrange
     const box = document.createElement("div");
