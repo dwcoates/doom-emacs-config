@@ -1544,3 +1544,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 deploy-fixer (landed in queue bypass mode): A keep-alive that fails is answered at once instead of warned unanswered; a remote-control bridge the network refused is asked again once it returns; cold gates record and stand down despite a cancelled caller; network-loss git and hotspot failures are transient INFO; an effort pick on a sessionless shim is no error
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): One standing deploy mediator, on Opus at low effort, now checks every deploy, fixes what it dispatches itself, and settles escalations with the user; the separate deploy intake is retired
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): Deploy checks know only the one deploy mediator, and every check starts over
+- 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A history read cut by its request's end is recorded at INFO, not ERROR
