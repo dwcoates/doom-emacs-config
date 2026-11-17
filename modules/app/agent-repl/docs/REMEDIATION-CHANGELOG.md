@@ -1539,3 +1539,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): The standing deploy fixer is hidden together with the workspaces it made, so a fixer with an open child stands by instead of being refused
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A deploy fixer that ends its turn without landing a fix now escalates its check to the user, instead of holding the queue forever
 - 2026-11-17 deploy-fixer (landed in queue bypass mode): a reaped worktree's spawn is named as the gone directory at INFO; a forced RAM disk detach no longer fails a passing run; a history source that comes up during a failed read loads the waiting reader's page at once
+- 2026-11-17 deploy-fixer (landed in queue bypass mode): a merge at a cold-gated workspace fails at INFO naming the gate; a git connection the network reset is transient; the fixer finishes only once every problem it was given is fixed
