@@ -7,12 +7,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/netstate"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -439,6 +441,105 @@ func TestAFailedRemoteControlPutBackIsLoggedAndStatedOnTheStrip(t *testing.T) {
 	}
 	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 1 {
 		t.Errorf("error records = %v, want one", records)
+	}
+}
+
+func TestABridgeTheNetworkRefusedIsOwedUntilTheNetworkIsRestored(t *testing.T) {
+	// Arrange: the vendor refuses the new shim's bridge while the network is
+	// down (2026-11-17 13:39:16, eval-cache-torch-human).
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.setRemote(ws.ID, wsm.RemoteControl{On: true})
+	f.network.down(netstate.EvidenceFaultOpen)
+	f.client.remoteControlResponse = vendorRefusedRemoteControl()
+	asked := make(chan struct{}, 2)
+	calls := 0
+	f.client.onRemoteControl = func() {
+		// THE PUT-BACK AFTER THE RESTORATION IS ANSWERED: the vendor reaches
+		// claude.ai again.
+		if calls++; calls == 2 {
+			f.client.remoteControlResponse = nil
+		}
+		asked <- struct{}{}
+	}
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	<-asked
+	f.network.restore()
+	select {
+	case <-asked:
+	case <-time.After(time.Minute):
+		t.Fatal("the bridge was not asked again once the network was restored")
+	}
+	if !f.fleet.DrainStarts(time.Minute) {
+		t.Fatal("the owed put-back did not leave")
+	}
+
+	// Assert.
+	t.Run("the refusal is recorded at INFO and marked transient", func(t *testing.T) {
+		records := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opRemoteControl,
+			Message: "the vendor could not bridge the new shim while the network is down; it is asked again once the network is restored"})
+		if len(records) != 1 || records[0].Context[dlog.TransientKey] != true || records[0].Context["evidence"] != string(netstate.EvidenceFaultOpen) {
+			t.Fatalf("records = %+v, want one transient INFO naming its evidence", records)
+		}
+	})
+	t.Run("nothing is recorded at ERROR or stated on the strip", func(t *testing.T) {
+		if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 0 || len(f.topbarWarnings) != 0 {
+			t.Fatalf("errors %v, warnings %v; want neither for a refusal the network caused", records, f.topbarWarnings)
+		}
+	})
+	t.Run("the restoration puts the bridge in force", func(t *testing.T) {
+		if len(f.client.remoteControls) != 2 || !f.client.remoteControls[1].GetEnabled() {
+			t.Fatalf("asks = %v, want the refused one and its put-back", f.client.remoteControls)
+		}
+		if records := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opRemoteControl,
+			Message: "put the new shim in remote control"}); len(records) != 1 {
+			t.Fatalf("records = %+v, want the put-back recorded once", records)
+		}
+	})
+}
+
+func TestABridgeTheNetworkRefusedIsNotAskedAgainOnceTheDaemonStandsDown(t *testing.T) {
+	// Arrange.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.setRemote(ws.ID, wsm.RemoteControl{On: true})
+	f.network.down(netstate.EvidenceCLIWords)
+	f.client.remoteControlResponse = vendorRefusedRemoteControl()
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Act.
+	left := f.fleet.DrainStarts(time.Minute)
+
+	// Assert.
+	if !left || len(f.client.remoteControls) != 1 {
+		t.Fatalf("left %v after asks %v, want the owed put-back gone with the daemon and nothing asked again", left, f.client.remoteControls)
+	}
+}
+
+func TestABridgeRefusalThatWasNotTheNetworksIsAnError(t *testing.T) {
+	// Arrange: the network is up, so the refusal is the vendor's own.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	f.db.setRemote(ws.ID, wsm.RemoteControl{On: true})
+	f.client.remoteControlResponse = vendorRefusedRemoteControl()
+
+	// Act.
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+
+	// Assert.
+	if len(f.network.classified) != 1 || !strings.Contains(f.network.classified[0], "remote control is disabled by policy") {
+		t.Fatalf("classified %v, want the refusal's own words asked once", f.network.classified)
+	}
+	if records := recordsAt(f.log, opRemoteControl, "error"); len(records) != 1 {
+		t.Fatalf("error records = %v, want the refusal at ERROR", records)
 	}
 }
 

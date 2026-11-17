@@ -741,6 +741,9 @@ func vendorRefusal(label *shimv1.StartSessionVendorStartFailed, detail string) *
 }
 
 type fleetFixture struct {
+	// network is the daemon's network state the fleet classifies a refused
+	// bridge by; it is up until a test takes it down.
+	network *fakeNetwork
 	// paid receives every cold gate the fleet answered through PayColdGate;
 	// payErr is what each answer returns.
 	paid   chan paidGate
@@ -970,11 +973,13 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		adoptBound:   adoptBound,
 
 		socketState: shimsocket.StateAbsent,
+		network:     newFakeNetwork(),
 	}
 	f.supervisor = &fakeSupervisor{client: f.client}
 	f.bundle = &fakeBundle{build: "installed-build"}
 
 	fleet, err := NewFleet(FleetDeps{
+		Network:      f.network,
 		StoreHistory: f.store,
 		PersistedBook: func(dir string) (string, bool, error) {
 			if f.persistedErr != nil {
@@ -1242,6 +1247,21 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				ChatSystemPrompt: func() (string, error) { return "", nil },
 				NetworkChanged:   func() <-chan struct{} { return nil },
 				Standing:         func(context.Context, ids.WorkspaceID) (Standing, error) { return 0, nil },
+			},
+		},
+		{
+			name: "no network state",
+			deps: FleetDeps{
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				PersistedBook: func(string) (string, bool, error) { return "", false, nil },
+				SocketPath:    func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{}, ShimLife: &fakeShimLife{},
+				ChatSystemPrompt: func() (string, error) { return "", nil },
+				NetworkChanged:   func() <-chan struct{} { return nil },
+				Standing:         func(context.Context, ids.WorkspaceID) (Standing, error) { return 0, nil },
+				PayColdGate:      func(context.Context, ids.WorkspaceID, *agentreplv1.AnswerColdGateRequest) error { return nil },
 			},
 		},
 		{

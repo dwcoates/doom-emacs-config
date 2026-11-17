@@ -218,6 +218,9 @@ func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws id
 			log.Info(opRemoteControl, "the new shim's session ended before its bridge was asked; the next bring-up puts it in force", dlog.Context{"cause": err.Error()})
 			return
 		}
+		if f.owedForNetwork(ctx, log, ws, client, err) {
+			return
+		}
 		log.Error(opRemoteControl, "the new shim could not be put in remote control", dlog.Context{
 			"remote_control_recorded": standing.Recorded, "cause": err.Error(),
 		})
@@ -226,6 +229,43 @@ func (f *Fleet) reapplyRemoteControl(ctx context.Context, log dlog.Logger, ws id
 		return
 	}
 	log.Info(opRemoteControl, "put the new shim in remote control", dlog.Context{"remote_control_recorded": standing.Recorded})
+}
+
+// owedForNetwork answers whether ERR, the vendor's refusal of a new shim's
+// bridge, was the network's (netstate's verdict); when it was, the put-back is
+// owed and asked again once the network is restored.
+//
+// A BRIDGE THE NETWORK REFUSED IS OWED, NEVER DROPPED: the vendor cannot reach
+// claude.ai while the network is down, and nothing else asks for the bridge
+// again once it is back (2026-11-17 13:39:16, eval-cache-torch-human: "Couldn't
+// reconnect to your Remote Control session" twenty seconds after its shim
+// recorded ENOTFOUND, and no bridge after the network returned at 13:42:10).
+// The latch is taken before this returns, so a restoration racing the
+// classification is never missed, and the put-back runs again whole: it reads
+// the mode afresh, and a shim gone by then is recorded as gone.
+func (f *Fleet) owedForNetwork(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, client shimclientRemoteControl, err error) bool {
+	var refusal *ShimRefusal
+	if !errors.As(err, &refusal) || refusal.Arm != ArmShimVendorRefused {
+		return false
+	}
+	verdict := f.deps.Network.Classify(ctx, err.Error())
+	if !verdict.Network {
+		return false
+	}
+	restored := f.deps.Network.Restored()
+	// INFO, MARKED TRANSIENT: the outage is the machine's surroundings, which
+	// netstate records, and the restoration answers it.
+	log.Info(opRemoteControl, "the vendor could not bridge the new shim while the network is down; it is asked again once the network is restored",
+		dlog.AsTransient(dlog.Context{"evidence": string(verdict.Evidence), "cause": err.Error()}))
+	f.Detach(func(life context.Context) {
+		select {
+		case <-restored:
+		case <-life.Done():
+			return
+		}
+		f.reapplyRemoteControl(life, f.logFor(life, ws), ws, client)
+	})
+	return true
 }
 
 // shimclientRemoteControl is the slice of the shim client a remote-control
