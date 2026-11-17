@@ -648,7 +648,11 @@ func (v *Volume) Release() error {
 				detached = false
 				errs = append(errs, fmt.Errorf("detach the RAM disk %s (held by: %s): %w; forced: %w", v.Device, holders, err, forceErr))
 			} else {
-				errs = append(errs, fmt.Errorf("the RAM disk %s detached only when forced, so something still held it (held by: %s): %w", v.Device, holders, err))
+				// A FORCED DETACH THAT TOOK IS NO FAILURE OF THE RUN (owner
+				// ruling, 2026-11-17): every test passed, and the disk is
+				// gone. The hold is still recorded at ERROR in the run's log,
+				// naming its holders, so it is never silent.
+				v.m.Log.Errorf("RAM disk release: the RAM disk %s detached only when forced, so something still held it (held by: %s): %v", v.Device, holders, err)
 			}
 		}
 	}

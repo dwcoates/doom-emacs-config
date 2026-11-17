@@ -166,6 +166,33 @@ func TestSpawnUsesTheWorkspaceDirAsCwd(t *testing.T) {
 	}
 }
 
+// TestASpawnInAGoneWorkspaceDirectoryIsNamedAsSuch covers the start that
+// fails because the workspace's directory is gone: Go names node in the
+// error, so the supervisor names the directory, answers ErrWorkspaceDirGone
+// and records it at INFO, never "spawn failed" (2026-11-17 16:18).
+func TestASpawnInAGoneWorkspaceDirectoryIsNamedAsSuch(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	_, uds := startFakeShim(t, dir)
+	spec, _ := newTestSpec(t, dir, uds, helperIdle)
+	spec.WorkspaceDir = filepath.Join(dir, "reaped-worktree")
+	sup, surfaces := newSupervisorLogging(t)
+
+	// Act.
+	_, err := sup.Spawn(context.Background(), spec)
+
+	// Assert.
+	if !errors.Is(err, dlog.ErrWorkspaceDirGone) {
+		t.Fatalf("Spawn = %v, want ErrWorkspaceDirGone", err)
+	}
+	if _, ok := dlog.FindRecord(surfaces.log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.shimclient.spawn", Message: "the workspace's directory is gone, so no shim can start in it"}); !ok {
+		t.Fatalf("records = %+v, want the gone directory at INFO", surfaces.log.Records())
+	}
+	if _, ok := dlog.FindRecord(surfaces.log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.shimclient.spawn", Message: "spawn failed"}); ok {
+		t.Fatalf("records = %+v, want no spawn failure at ERROR", surfaces.log.Records())
+	}
+}
+
 // TestSpawnPassesTheLogSinkAsFD3 asserts fd 3 is the already-open sink: the
 // child's own write landed in the parent's file.
 func TestSpawnPassesTheLogSinkAsFD3(t *testing.T) {

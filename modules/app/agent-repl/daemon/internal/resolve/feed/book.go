@@ -250,6 +250,8 @@ func bookTarget(addr feedid.Feed) (*conversationv1.AgentId, bool) {
 // loadPlan is what one feed would read next, decided under the lock and read
 // off it.
 type loadPlan struct {
+	// sourceUps is the workspace's wsState.sourceUps when the plan was made.
+	sourceUps uint64
 	// addr is the feed whose book is read: the asking feed's own, or the root
 	// for a merge tab (bookTarget).
 	addr   feedid.Feed
@@ -516,6 +518,7 @@ const historyKickBound = 10 * time.Second
 // feed before a session was up to read it from (bookState.awaitingSource). A
 // watch of AGENT just opened, so its session is up now. Called with r.mu held.
 func (r *resolver) kickWaitingReaders(s *wsState, agent *conversationv1.AgentId) {
+	s.sourceUps++
 	addr := feedid.Feed{Root: true}
 	if agent.GetValue() != "" && !s.rootFeedAgent(agent.GetValue()) {
 		addr = feedid.Feed{Agent: agent}
@@ -539,6 +542,7 @@ func (r *resolver) SourceUp(ws ids.WorkspaceID) {
 	if !ok {
 		return
 	}
+	s.sourceUps++
 	waiting := 0
 	for key, f := range s.feeds {
 		if !f.book.awaitingSource {
@@ -647,6 +651,7 @@ func (r *resolver) loadPushedSourced(ctx context.Context, ws ids.WorkspaceID, ad
 		plan, ok = r.planLoad(s, f, false)
 		ok = ok && !bounded
 	}
+	plan.sourceUps = s.sourceUps
 	r.mu.Unlock()
 	if !ok {
 		r.lockedLogger(ws).Debug("daemon.feed.load_pushed_nothing",

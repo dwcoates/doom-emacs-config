@@ -449,7 +449,7 @@ func TestReleaseForcesARefusedDetachAndSaysSo(t *testing.T) {
 	err = v.Release()
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "only when forced") {
+	if err != nil || !forcedLogged(m, "only when forced") {
 		t.Fatalf("Release = %v, want the forced detach reported", err)
 	}
 	if last := h.calls[len(h.calls)-1]; last != "hdiutil detach -force /dev/disk9" {
@@ -471,7 +471,7 @@ func TestReleaseNamesWhoHeldTheVolumeBeforeForcing(t *testing.T) {
 	err = v.Release()
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "held by: tail[77001])") {
+	if err != nil || !forcedLogged(m, "held by: tail[77001])") {
 		t.Fatalf("Release = %v, want the holder named once", err)
 	}
 }
@@ -510,7 +510,7 @@ func TestReleaseSaysSoWhenLsofSeesNoHolder(t *testing.T) {
 	err = v.Release()
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "held by: no process of this user lsof could see, and it sees no root process") {
+	if err != nil || !forcedLogged(m, "held by: no process of this user lsof could see, and it sees no root process") {
 		t.Fatalf("Release = %v, want lsof's empty answer stated", err)
 	}
 }
@@ -529,7 +529,7 @@ func TestReleaseNamesAnLsofFailureInPlaceOfTheHolders(t *testing.T) {
 	err = v.Release()
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "unknown, lsof failed: exit status 2") {
+	if err != nil || !forcedLogged(m, "unknown, lsof failed: exit status 2") {
 		t.Fatalf("Release = %v, want lsof's failure named", err)
 	}
 }
@@ -2925,4 +2925,16 @@ func TestEveryDiskListingReadsTheHelpersThroughListDisks(t *testing.T) {
 	if len(sites) != 2 {
 		t.Fatalf("process table reads at %v, want only listDisks's and leaksLocked's", sites)
 	}
+}
+
+// forcedLogged reports whether M's log holds an ERROR line of a forced
+// detach that contains FRAG: a forced detach that took is recorded, never
+// answered as the release's failure (owner ruling, 2026-11-17).
+func forcedLogged(m Manager, frag string) bool {
+	for _, line := range m.Log.(*fakeLog).snapshot() {
+		if strings.HasPrefix(line, "ERROR RAM disk release: the RAM disk") && strings.Contains(line, frag) {
+			return true
+		}
+	}
+	return false
 }

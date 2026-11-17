@@ -36,6 +36,12 @@ type fakeHistory struct {
 	// readDone, when set, is sent one value after every read, so a test
 	// knows a read running off its goroutine has been answered.
 	readDone chan struct{}
+	// inRead, when set, runs at the start of every read, before the store's
+	// lock, with the read's 1-based number: a test acts while a read is in
+	// flight.
+	inRead func(n int)
+	// readsBegun counts the reads begun, for inRead.
+	readsBegun int
 	// heads serves every page's turn heads, as a store that fills them does;
 	// false serves none, as the store did before it did.
 	heads bool
@@ -57,6 +63,13 @@ func newFakeHistory(pageSize int) *fakeHistory {
 
 // ReadHistory serves one page of a book.
 func (f *fakeHistory) ReadHistory(_ context.Context, _ ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
+	f.mu.Lock()
+	f.readsBegun++
+	n, inRead := f.readsBegun, f.inRead
+	f.mu.Unlock()
+	if inRead != nil {
+		inRead(n)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.readDone != nil {
@@ -958,6 +971,39 @@ func TestAKickWhoseSourceWentIsLoadedByTheNextSource(t *testing.T) {
 	}
 	store.mu.Lock()
 	store.noSource = false
+	store.mu.Unlock()
+
+	// Act.
+	h.resolver.SourceUp(testWorkspace)
+
+	// Assert.
+	awaitPushed(t, rows, h.promptRowID("turn-0"), h.promptRowID("turn-1"))
+}
+
+// TestASourceThatCameUpDuringAFailedReadLoadsThePageAtOnce covers the gap
+// between a kick's read finding no source and the reader's mark: a source
+// that came up in it was lost until the next one (the gate's run,
+// 2026-11-17), and now loads the page at once (awaitSource).
+func TestASourceThatCameUpDuringAFailedReadLoadsThePageAtOnce(t *testing.T) {
+	// Arrange: the kick's first read answers no source, and a source comes
+	// up while it is in flight.
+	h := newHarness(t)
+	store := h.mainBook(3, promptsBook(2))
+	store.noSource = true
+	rows := h.follow(rootFeed(), "reader-1")
+	store.mu.Lock()
+	store.readsBegun = 0
+	store.inRead = func(n int) {
+		switch n {
+		case 1:
+			// The read in flight still finds no source.
+			h.resolver.SourceUp(testWorkspace)
+		case 2:
+			store.mu.Lock()
+			store.noSource = false
+			store.mu.Unlock()
+		}
+	}
 	store.mu.Unlock()
 
 	// Act.

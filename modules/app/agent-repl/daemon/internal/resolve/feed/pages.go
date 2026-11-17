@@ -53,6 +53,9 @@ func (r *resolver) walkPage(ctx context.Context, ws ids.WorkspaceID, feed feedid
 	for {
 		r.mu.Lock()
 		page, token, plan, err := r.stepPage(ws, feed, w, &step)
+		if plan != nil {
+			plan.sourceUps = plan.state.sourceUps
+		}
 		// THE HELD SECTION IS READ UNDER THE LOCK THAT PINNED THE TOKEN, so it is
 		// the section as of the pin, and the tail delivers every change after it.
 		var held *frontendv1.FeedHeld
@@ -474,7 +477,15 @@ func (r *resolver) awaitSource(plan loadPlan) {
 	if r.workspaces[plan.state.id] != plan.state {
 		return
 	}
-	r.feed(plan.state, plan.addr).book.awaitingSource = true
+	f := r.feed(plan.state, plan.addr)
+	if plan.state.sourceUps != plan.sourceUps {
+		// A SOURCE CAME UP WHILE THE READ WAS IN FLIGHT, after its kick (if
+		// any) had already cleared the mark: waiting for the next one would
+		// leave the reader without its history until then.
+		r.kickWaitingFeed(plan.state, f, plan.addr, "a history source came up while a read found none; the newest page is loaded for its reader at once")
+		return
+	}
+	f.book.awaitingSource = true
 }
 
 // planGap answers the store page a walk must read before serving the page that
