@@ -528,3 +528,35 @@ func rawStoreRecords(t *testing.T, sink *bytes.Buffer) []map[string]any {
 	}
 	return out
 }
+
+func TestOpenLoggerWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
+	// Arrange.
+	t.Setenv("AGENT_REPL_LOG_LEVEL", "info")
+	root := t.TempDir()
+	logPath := filepath.Join(root, "log", "shim-store.log")
+	log, closeLog, err := openLogger(filepath.Join(root, "sock", "store.sock"), filepath.Join(root, "store", "events.db"), logPath)
+	if err != nil {
+		t.Fatalf("openLogger = %v, want nil", err)
+	}
+
+	// Act.
+	log.Log(logging.Fields{Operation: "test.warning", Level: "warn"}, "a warning")
+	log.Log(logging.Fields{Operation: "test.info"}, "an info record")
+	closeLog()
+
+	// Assert.
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	warnings, err := os.ReadFile(sharedlogging.WarningsPath(logPath))
+	if err != nil {
+		t.Fatalf("read the warnings file: %v", err)
+	}
+	if strings.Contains(string(body), "test.warning") || !strings.Contains(string(body), "test.info") {
+		t.Fatalf("log = %q, want the info record and no warning", body)
+	}
+	if !strings.Contains(string(warnings), "test.warning") || strings.Contains(string(warnings), "test.info") {
+		t.Fatalf("warnings = %q, want the warning alone", warnings)
+	}
+}

@@ -406,16 +406,20 @@ func openLogger(socketPath, dbPath, logPath string) (*logging.Logger, func(), er
 	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("creating dir for %q: %w", logPath, err)}
 	}
-	lf, err := sharedlogging.OpenRotating(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
+	// WARN AND ERROR RECORDS GO TO THEIR OWN FILE (agentrepl/logging
+	// warnings.go), each file rotated and aged on its own.
+	lf, err := sharedlogging.OpenRotatingPair(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
 	log := logging.NewDurableOnlyWindow(lf, os.Stderr, sharedlogging.NewWindow(selection, time.Now))
 	log = log.With(logging.Fields{Component: "store", DatabasePath: dbPath, Socket: socketPath})
 	log.NoteLevelSelection(selection)
-	stopExpiring := sharedlogging.StartExpiring(lf, reportLogExpiry(log, logPath))
+	stopExpiringLog := sharedlogging.StartExpiring(lf.Log, reportLogExpiry(log, logPath))
+	stopExpiringWarnings := sharedlogging.StartExpiring(lf.Warnings, reportLogExpiry(log, sharedlogging.WarningsPath(logPath)))
 	return log, func() {
-		stopExpiring()
+		stopExpiringLog()
+		stopExpiringWarnings()
 		_ = lf.Close()
 	}, nil
 }

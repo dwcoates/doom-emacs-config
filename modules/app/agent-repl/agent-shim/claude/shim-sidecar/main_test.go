@@ -847,3 +847,34 @@ func TestReportLogExpiry(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenLoggerWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
+	// Arrange.
+	base := t.TempDir()
+	logPath := filepath.Join(base, "sidecar.log")
+	logf, closeLog, err := openLoggerTo(&bytes.Buffer{}, filepath.Join(base, "store.sock"), base, logPath)
+	if err != nil {
+		t.Fatalf("openLoggerTo: %v", err)
+	}
+
+	// Act.
+	logf.With(logging.Context{Operation: "test-warning", Level: "warn"}).Log("a warning")
+	logf.With(logging.Context{Operation: "test-info"}).Log("an info record")
+	closeLog()
+
+	// Assert.
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read the log: %v", err)
+	}
+	warnings, err := os.ReadFile(sharedlogging.WarningsPath(logPath))
+	if err != nil {
+		t.Fatalf("read the warnings file: %v", err)
+	}
+	if strings.Contains(string(body), "test-warning") || !strings.Contains(string(body), "test-info") {
+		t.Fatalf("log = %q, want the info record and no warning", body)
+	}
+	if !strings.Contains(string(warnings), "test-warning") || strings.Contains(string(warnings), "test-info") {
+		t.Fatalf("warnings = %q, want the warning alone", warnings)
+	}
+}
