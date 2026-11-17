@@ -1,4 +1,4 @@
-<!-- used by: daemon internal/merge/process.go (run.fix); placeholders: {{source_branch}}, {{worktree_dir}}, {{target_branch}}, {{failing_suites}}, {{archive_path}}, {{failure_tail}}, {{attempt}}, {{max_attempts}}, {{escalation_file}}, {{escalation_marker}}, {{failing_tests_file}}, {{failing_tests}} -->
+<!-- used by: daemon internal/merge/process.go (run.fix); placeholders: {{source_branch}}, {{worktree_dir}}, {{target_branch}}, {{failing_suites}}, {{archive_path}}, {{failure_tail}}, {{attempt}}, {{max_attempts}}, {{failing_tests_file}}, {{failing_tests}} -->
 The merge queue rebased {{source_branch}} onto {{target_branch}}'s tip in the worktree {{worktree_dir}}, and the repository's test suite FAILS on the rebased branch. Failing suites: {{failing_suites}}. {{target_branch}} has NOT moved: it moves only once the suite passes.
 
 Failing output (tail; the whole run is archived at {{archive_path}}):
@@ -24,8 +24,8 @@ IF A FAILING TEST CANNOT BE RUN ON ITS OWN (its suite has no targeted invocation
 
 Do NOT change the merge machinery while this merge is running: nothing under `modules/app/agent-repl/daemon/internal/merge/` or `modules/app/agent-repl/testrun/`, and not `modules/app/agent-repl/bin/test-all.sh`. The running daemon is what gates this merge, so a change there cannot fix it; a repair that makes one fails the merge. A fix to the merge or its gate lands through a branch of its own.
 
-If you conclude that a correct fix requires unforeseen non-trivial ARCHITECTURAL changes — a redesign rather than a repair — stop fixing and write the file `{{escalation_file}}` at the root of {{worktree_dir}} (do not commit it), whose FIRST line is exactly:
+NEVER END THE TURN WITHOUT A COMMITTED FIX, and never leave a fix broken on purpose to make the merge fail: a turn that commits nothing fails the merge, and a broken fix spends a whole run of the suite on a merge that cannot land. If you conclude that you cannot fix the failures correctly -- a correct fix needs an architectural change, a redesign rather than a repair, or a decision that is the user's -- give the merge up instead, then end your turn with a reply explaining the problem:
 
-{{escalation_marker}}
+`agent-repld merge-queue give-up -reason "<why the failures cannot be fixed here, in a sentence or two>"`
 
-and whose remaining lines explain, in your own words, what the architectural problem is and why no local fix is correct. The queue reads that file, removes it, and fails the merge with your explanation as the reason a human will read. Do not write that file for a failure you simply have not finished working on.
+The merge leaves the queue at once, no test run starts for it, and the workspace is yours again. Do not give up a failure you simply have not finished working on.

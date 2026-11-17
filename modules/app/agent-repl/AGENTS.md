@@ -1417,6 +1417,21 @@ like an improvement still needs that conversation. Code:
   to `MaxCommitPrompts` times, and fails the merge only if the worktree is
   still dirty after the last prompt. This covers fixing turns in line, out of
   line and resumed after a restart, since every one ends in `fixSettled`.
+- **A fixing attempt that commits nothing runs no suite** (owner ruling,
+  2026-11-17). A gate whose head is still the head the last gate failed on
+  fails the merge in tests without running (`run.testAndFix`,
+  `run.failedHead`, kept in the progress record as `fix_from_head`): it would
+  spend a whole run to fail as before.
+- **A repair its agent cannot finish is given up, never left broken** (owner
+  ruling, 2026-11-17). From a conflict resolution or a fixing attempt, the
+  merge's own agent runs `agentrepl.v1.UpdateMergeQueueRequest.give_up`
+  (`agent-repld merge-queue give-up -reason TEXT`): the merge leaves the queue
+  at once as an eviction takes it (`orchestrator.GiveUp`, cause `gave_up`), a
+  standing rebase is aborted, and no test run starts. A give-up from a
+  workspace running no repair turn is refused `no_repair_turn`. The briefs
+  (`prompts/merge-conflict-resolve.md`, `prompts/merge-test-failure-resolve.md`)
+  forbid leaving a repair broken, unresolved or uncommitted to make the merge
+  fail.
 - **A rebase never fails on uncommitted changes it meets.** When the
   worktree is dirty at the rebase's clean check, or git refuses to start the
   rebase over changes (`gitclient.ErrDirtyWorktree`), the merge keeps its

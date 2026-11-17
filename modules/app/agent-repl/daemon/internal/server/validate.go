@@ -1320,6 +1320,19 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 	if evict := req.GetEvict(); evict != nil {
 		return validateWorkspaceRef("evict.workspace", evict.GetWorkspace())
 	}
+	if give := req.GetGiveUp(); give != nil {
+		if err := validateWorkspaceRef("give_up.workspace", give.GetWorkspace()); err != nil {
+			return err
+		}
+		if strings.TrimSpace(give.GetReason()) == "" {
+			return invalid("give_up.reason", "a give-up says why the repair cannot be finished")
+		}
+		// ONLY A MERGE'S OWN AGENT GIVES IT UP: the user evicts.
+		if asker := requesterID(req.GetRequester()); asker == nil || string(*asker) != give.GetWorkspace().GetId() {
+			return invalid("requester", "a merge is given up only by the agent of the workspace whose merge it is")
+		}
+		return nil
+	}
 	if release := req.GetReleaseEscalation(); release != nil {
 		if release.Repository == nil {
 			return invalid("release_escalation.repository", "a release names the repository whose queue the escalation holds")

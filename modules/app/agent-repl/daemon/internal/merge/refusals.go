@@ -44,6 +44,9 @@ const (
 	// ArmNoSuchQueuedMerge refuses an evict or a queue-offer answer for a workspace
 	// with nothing on the queue (UpdateMergeQueueError.no_such_queued_merge).
 	ArmNoSuchQueuedMerge = "no_such_queued_merge"
+	// ArmNoRepairTurn refuses a give-up from a workspace running no repair
+	// turn of its merge (UpdateMergeQueueError.no_repair_turn).
+	ArmNoRepairTurn = "no_repair_turn"
 	// ArmNoOfferStanding refuses an answer to the merge-queue question when
 	// none stands (AnswerMergeQueueOfferError.no_offer_standing).
 	ArmNoOfferStanding = "no_offer_standing"

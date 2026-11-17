@@ -115,8 +115,8 @@ func TestARemediatedMergeReturnsAndLandsAfterTheMergeAtTheHead(t *testing.T) {
 	c.drain(t)
 
 	// Assert
-	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"a1"}) {
-		t.Fatalf("landings brought %v, want b1 then a1", got)
+	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"a1", "fix"}) {
+		t.Fatalf("landings brought %v, want b1 then a1 with its fix", got)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestAFailingHeadWithNobodyBehindItFixesInPlace(t *testing.T) {
 	c.drain(t)
 
 	// Assert
-	if got := c.git.landedOwn(); len(got) != 1 || !slices.Equal(got[0], []string{"a1"}) {
+	if got := c.git.landedOwn(); len(got) != 1 || !slices.Equal(got[0], []string{"a1", "fix"}) {
 		t.Fatalf("landings brought %v, want a1 fixed in place", got)
 	}
 }
@@ -910,7 +910,7 @@ func TestAConflictStepAsideSpendsNoFixingAttempt(t *testing.T) {
 	if n := c.prompts(theWorkspace, fixOrigin); n != 1 {
 		t.Fatalf("fixing prompts = %d, want its one fixing attempt still to spend", n)
 	}
-	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"a1"}) {
+	if got := c.git.landedOwn(); len(got) != 2 || !slices.Equal(got[1], []string{"a1", "fix"}) {
 		t.Fatalf("landings brought %v, want a1 to land once fixed", got)
 	}
 }

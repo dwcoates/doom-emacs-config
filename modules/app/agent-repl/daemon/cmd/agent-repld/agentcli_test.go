@@ -3694,3 +3694,46 @@ func TestMediationRefusesAMalformedCall(t *testing.T) {
 		})
 	}
 }
+
+func TestGiveUpNamesTheCallersOwnMergeAndItsReason(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(mergeQueueNoun, "give-up", "-reason", "the conflict needs a redesign")
+
+	// Assert
+	if code != exitSuccess {
+		t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+	}
+	req := only[*agentreplv1.UpdateMergeQueueRequest](t, f)
+	give := req.GetGiveUp()
+	if give.GetWorkspace().GetId() != "ws-caller" || give.GetReason() != "the conflict needs a redesign" || req.GetRequester().GetWorkspace().GetWorkspace().GetId() != "ws-caller" {
+		t.Fatalf("request = %v, want the caller's own merge given up by the caller, with its reason", req)
+	}
+}
+
+func TestGiveUpRefusesWhatItCannotSend(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "no reason", args: []string{"give-up"}},
+		{name: "a blank reason", args: []string{"give-up", "-reason", "  "}},
+		{name: "another merge", args: []string{"give-up", "-reason", "why", "ws-other"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code == exitSuccess || len(f.client.requests) != 0 {
+				t.Fatalf("exit %d, sent %d; want a usage failure and nothing sent", code, len(f.client.requests))
+			}
+		})
+	}
+}

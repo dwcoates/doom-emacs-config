@@ -425,7 +425,7 @@ func TestTheHookPromptBriefKeepsItsPlaceholderSet(t *testing.T) {
 
 func TestTheFixingAttemptBriefKeepsItsPlaceholderSet(t *testing.T) {
 	// Arrange.
-	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "escalation_file", "escalation_marker", "failing_tests_file", "failing_tests"}
+	want := []string{"source_branch", "worktree_dir", "target_branch", "failing_suites", "archive_path", "failure_tail", "attempt", "max_attempts", "failing_tests_file", "failing_tests"}
 
 	// Act.
 	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")

@@ -68,40 +68,6 @@ func TestPromptTabCarriesItsFailureSummary(t *testing.T) {
 	}
 }
 
-// TestReadEscalationIgnoresAMissingRecord covers the ordinary case: no record
-// means the agent is still working the problem.
-func TestReadEscalationIgnoresAMissingRecord(t *testing.T) {
-	// Arrange: a target with no record.
-	dir := t.TempDir()
-
-	// Act.
-	_, escalated := readEscalation(dir)
-
-	// Assert.
-	if escalated {
-		t.Fatal("a target with no record read as an escalation")
-	}
-}
-
-// TestReadEscalationReturnsTheAgentsReason covers what the parked line carries:
-// the agent's own words, which is what a human reads.
-func TestReadEscalationReturnsTheAgentsReason(t *testing.T) {
-	// Arrange: a record with a reason under the marker.
-	dir := t.TempDir()
-	body := EscalationMarker + "\nthe storage layer needs redesigning\n"
-	if err := os.WriteFile(filepath.Join(dir, EscalationFile), []byte(body), 0o644); err != nil {
-		t.Fatalf("writing the record: %v", err)
-	}
-
-	// Act.
-	why, escalated := readEscalation(dir)
-
-	// Assert.
-	if !escalated || why != "the storage layer needs redesigning" {
-		t.Fatalf("readEscalation answered (%q, %v), want the agent's reason", why, escalated)
-	}
-}
-
 // TestTheAdmissionPauseRunsAfterTheDisplacedCapture covers the test seam's one
 // guarantee: it is reached with the capture already durable, which is the
 // window a crash has to land in.

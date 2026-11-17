@@ -182,6 +182,7 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	gate.awaitStart(d, b.ws.GetDir())
 	// A's fix ends while B's tests run: A returns next after B, never
 	// evicting it.
+	harness.CommitWork(t, a.ws.GetDir(), "fix.txt")
 	pushConcludedTurn(a.shim, mainAgent, "alpha-fix")
 	remediateLog(a, "back in line")
 	// B fails: it steps aside in turn, and A, next, takes the head, runs
@@ -194,6 +195,7 @@ func TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap(t *
 	aMerge := awaitRow(t, a, aRoot, "alpha's terminal", isMergeTerminal)
 	d.AwaitLandingDeployed()
 	// B's fix ends; B runs alone and passes.
+	harness.CommitWork(t, b.ws.GetDir(), "fix.txt")
 	pushConcludedTurn(b.shim, mainAgent, "beta-fix")
 	gate.awaitStart(d, b.ws.GetDir())
 	gate.release(0)
