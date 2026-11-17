@@ -31,7 +31,7 @@
  * EACH LENGTH LIVES HERE, ONCE: a row is handed its animation's length in
  * the animation's duration property, which the stylesheet's animation reads.
  */
-import { queryAll } from "../dom.js";
+import { drawnRowsOf } from "./drawn-rows.js";
 import { log } from "../log.js";
 
 /** How long the highlighted row's number takes to rise into white, in milliseconds. */
@@ -112,9 +112,7 @@ export function createSelectionFade(root: ParentNode, now: () => number = () => 
 
   /** Paint every drawn copy of workspace ID's row. */
   const paintDrawn = (id: string): void => {
-    for (const row of queryAll<HTMLElement>(root, "[data-roster-row]")) {
-      if (row.getAttribute("data-roster-row") === id) paint(id, row);
-    }
+    for (const row of drawnRowsOf(root, id)) paint(id, row);
   };
 
   /** Move the highlight from wherever it is to NEXT (null: no row): the left row's number turns grey at once, NEXT's rises. */

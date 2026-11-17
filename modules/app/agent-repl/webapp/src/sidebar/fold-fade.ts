@@ -18,7 +18,7 @@
  * of those rules, and the fade's own, is scoped to a fold, so a row whose
  * mark went because the fold opened is drawn as any open row is.
  */
-import { queryAll } from "../dom.js";
+import { drawnRowsOf } from "./drawn-rows.js";
 import { log } from "../log.js";
 import { SURFACED_ROW_CLASS } from "./row.js";
 
@@ -74,9 +74,7 @@ export function createFoldFade(
   const end = (id: string, start: number): void => {
     if (fades.get(id) !== start) return;
     fades.delete(id);
-    for (const row of queryAll<HTMLElement>(root, "[data-roster-row]")) {
-      if (row.getAttribute("data-roster-row") === id) paint(id, row);
-    }
+    for (const row of drawnRowsOf(root, id)) paint(id, row);
   };
 
   return {
