@@ -85,12 +85,7 @@ func (r *run) attempt(ctx context.Context) (outcome, bool, error) {
 	}
 	// A BRANCH ALREADY ON THE TARGET HAS LANDED: there is nothing to rebase,
 	// gate or commit.
-	contained, err := r.git.IsAncestor(ctx, r.subject.dir, r.subject.branch, tip)
-	if err != nil {
-		return outcome{}, false, fmt.Errorf("merge: asking whether %s is already on %s: %w", r.subject.branch, targetBranch, err)
-	}
-	if contained {
-		out, err := r.alreadyOn(ctx, targetBranch)
+	if out, landed, err := r.concludeIfLanded(ctx, tip, targetBranch); err != nil || landed {
 		return out, false, err
 	}
 	if gaveUp, err := r.rebase(ctx, tip, targetBranch); err != nil || gaveUp != nil {
@@ -136,6 +131,12 @@ func (r *run) goOnAfterResumedStep(ctx context.Context, tip, targetBranch string
 func (r *run) rebaseOntoMoved(ctx context.Context, tip, now, targetBranch string, fromAttempt int) (outcome, bool, error) {
 	r.o.log(ctx, r.ws).Info("daemon.merge.resume", "the target moved while the merge was suspended; it rebases onto the new tip before it goes on", dlog.Context{
 		"workspace": string(r.ws), "lease": string(r.lease.ID), "target": targetBranch, "rebased_on": tip, "tip": now})
+	if out, landed, err := r.concludeIfLanded(ctx, now, targetBranch); err != nil || landed {
+		if landed {
+			r.retireTestRun(ctx, "the target's new tip already carries the branch's work")
+		}
+		return out, false, err
+	}
 	if gaveUp, err := r.rebase(ctx, now, targetBranch); err != nil || gaveUp != nil {
 		if gaveUp != nil {
 			return *gaveUp, false, nil
@@ -224,6 +225,54 @@ func (r *run) resumeAttempt(ctx context.Context, res *progressDoc) (outcome, boo
 	default:
 		return r.resumeCommit(ctx, res)
 	}
+}
+
+// landedOn answers whether the target's tip already carries the branch: the
+// branch is an ancestor of tip, or merging it into tip would change nothing,
+// because its work reached the target under other commits. A rebase of the
+// second kind drops every commit of the branch as empty, which keptCommits
+// would refuse as lost work (2026-11-17 13:44: workspace-cycle-skip-folded's
+// one commit was already on master as b9dff7395a, and its merge failed). The
+// tree comparison tells the two apart: a branch whose work the tip lacks
+// changes the merged tree, or conflicts, so it still rebases and is still
+// guarded.
+func (r *run) landedOn(ctx context.Context, tip, targetBranch string) (bool, error) {
+	dir, branch := r.subject.dir, r.subject.branch
+	ancestor, err := r.git.IsAncestor(ctx, dir, branch, tip)
+	if err != nil {
+		return false, fmt.Errorf("merge: asking whether %s is already on %s: %w", branch, targetBranch, err)
+	}
+	if ancestor {
+		return true, nil
+	}
+	merged, err := r.git.MergeTree(ctx, dir, tip, branch)
+	if err != nil {
+		return false, fmt.Errorf("merge: asking whether %s's work is already on %s: %w", branch, targetBranch, err)
+	}
+	if merged.Conflicted {
+		return false, nil
+	}
+	tipTree, err := r.git.TreeOf(ctx, dir, tip)
+	if err != nil {
+		return false, fmt.Errorf("merge: reading the tree of %s's tip %s: %w", targetBranch, short(tip), err)
+	}
+	if merged.Tree != tipTree {
+		return false, nil
+	}
+	r.o.log(ctx, r.ws).Info("daemon.merge.rebase", "the target's tip already carries the branch's work under other commits; merging it would change nothing", dlog.Context{
+		"workspace": string(r.ws), "branch": branch, "target": targetBranch, "tip": tip, "tree": tipTree})
+	return true, nil
+}
+
+// concludeIfLanded concludes the merge as already on the target when tip
+// carries the branch (landedOn), and answers landed false otherwise.
+func (r *run) concludeIfLanded(ctx context.Context, tip, targetBranch string) (outcome, bool, error) {
+	contained, err := r.landedOn(ctx, tip, targetBranch)
+	if err != nil || !contained {
+		return outcome{}, false, err
+	}
+	out, err := r.alreadyOn(ctx, targetBranch)
+	return out, true, err
 }
 
 // alreadyOn concludes a merge whose branch the target already contains: it has

@@ -1715,7 +1715,14 @@ type fakeGit struct {
 	// order ahead of trees (TreeOf).
 	trees   map[string]string
 	treeSeq []string
-	mu      sync.Mutex
+	// workLanded makes MergeTree answer the tip's own tree: the branch's work
+	// is already on the target under other commits (landedOn).
+	workLanded bool
+	// mergeAddsWork makes MergeTree answer a clean merge that changes the
+	// tip's tree, and mergeTreeErr makes it fail.
+	mergeAddsWork bool
+	mergeTreeErr  error
+	mu            sync.Mutex
 	// standing answers RebaseInProgress: a rebase stands in the worktree.
 	standing bool
 	// cleanSeq answers IsClean in order ahead of every other answer: a
@@ -2399,8 +2406,24 @@ func (g *fakeGit) TreeOf(_ context.Context, _, ref string) (string, error) {
 	return "tree-of-" + ref, nil
 }
 
-func (g *fakeGit) MergeTree(context.Context, string, string, string) (gitclient.MergeTreeOutcome, error) {
-	return gitclient.MergeTreeOutcome{}, errors.New("merge fake git: MergeTree is not a merge operation")
+// MergeTree answers the merge of a branch into tip (landedOn). By default it
+// conflicts, so the branch has work the tip lacks and no tree is read (the
+// scripted treeSeq stays for the gate's own reads); workLanded answers tip's
+// own tree (TreeOf), mergeAddsWork a clean tree tip's differs from, and
+// mergeTreeErr a failure.
+func (g *fakeGit) MergeTree(_ context.Context, _, base, _ string) (gitclient.MergeTreeOutcome, error) {
+	g.record("merge_tree")
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	switch {
+	case g.mergeTreeErr != nil:
+		return gitclient.MergeTreeOutcome{}, g.mergeTreeErr
+	case g.workLanded:
+		return gitclient.MergeTreeOutcome{Tree: "tree-of-" + base}, nil
+	case g.mergeAddsWork:
+		return gitclient.MergeTreeOutcome{Tree: "merged-into-" + base}, nil
+	}
+	return gitclient.MergeTreeOutcome{Tree: "conflicted-into-" + base, Conflicted: true}, nil
 }
 
 // DeleteBranchAt records a landed branch's deletion (landedbranch.Retire, at

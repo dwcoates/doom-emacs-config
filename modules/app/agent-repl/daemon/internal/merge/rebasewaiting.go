@@ -224,9 +224,9 @@ func (r *run) rebaseInBackground(ctx context.Context, fields dlog.Context) backg
 	}
 	// A BRANCH THE TARGET ALREADY CONTAINS is left to the front, which
 	// concludes it with nothing to land (alreadyOn).
-	contained, err := r.git.IsAncestor(ctx, subject.dir, subject.branch, tip)
+	contained, err := r.landedOn(ctx, tip, targetBranch)
 	if err != nil {
-		return backgroundEnd{err: fmt.Errorf("merge: asking whether %s is already on %s: %w", subject.branch, targetBranch, err)}
+		return backgroundEnd{err: err}
 	}
 	if contained {
 		return backgroundEnd{}

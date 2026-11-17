@@ -884,6 +884,81 @@ func TestABranchAlreadyOnTheTargetMakesNoMerge(t *testing.T) {
 	}
 }
 
+// --- a branch whose work is already on the target (2026-11-17 13:44, workspace-cycle-skip-folded)
+
+// TestABranchWhoseWorkIsAlreadyOnTheTargetConcludesAsMerged covers landedOn:
+// a branch whose work reached the target under other commits concludes as
+// already on it, before any rebase could drop its commits as empty, while a
+// branch whose merge would change the tip, or conflicts, still rebases.
+func TestABranchWhoseWorkIsAlreadyOnTheTargetConcludesAsMerged(t *testing.T) {
+	tests := []struct {
+		name          string
+		workLanded    bool
+		mergeAddsWork bool
+		wantState     string
+		wantRebased   bool
+		wantTreeRead  bool
+	}{
+		{name: "work already on the tip concludes merged with nothing to land", workLanded: true, wantState: StateMerged, wantTreeRead: true},
+		{name: "a merge that changes the tip's tree rebases the branch", mergeAddsWork: true, wantState: StateMerged, wantRebased: true, wantTreeRead: true},
+		{name: "a merge that conflicts rebases the branch and reads no tree", wantState: StateMerged, wantRebased: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			landing(h, 1)
+			h.git.mu.Lock()
+			h.git.workLanded, h.git.mergeAddsWork = tt.workLanded, tt.mergeAddsWork
+			h.git.mu.Unlock()
+
+			// Act.
+			admitted(t, h)
+
+			// Assert.
+			if got := h.footer.last(); got.State != tt.wantState {
+				t.Fatalf("facts = %+v, want %q", got, tt.wantState)
+			}
+			if h.git.seen("start_rebase") != tt.wantRebased {
+				t.Fatalf("git was asked %v, want rebased %v", h.git.calls, tt.wantRebased)
+			}
+			if read := h.git.seen("tree_of"); tt.wantTreeRead && !read {
+				t.Fatalf("git was asked %v, want the tip's tree read", h.git.calls)
+			}
+			_, logged := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.rebase",
+				Message: "the target's tip already carries the branch's work under other commits; merging it would change nothing"})
+			if logged != tt.workLanded {
+				t.Fatalf("records = %+v, want the landed-work record %v", h.logs.Records(), tt.workLanded)
+			}
+		})
+	}
+}
+
+// TestAFailedReadOfWhetherTheWorkLandedFailsTheMerge covers landedOn's error:
+// the merge stops loudly and nothing is rebased or landed.
+func TestAFailedReadOfWhetherTheWorkLandedFailsTheMerge(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	landing(h, 1)
+	h.git.mu.Lock()
+	h.git.mergeTreeErr = errors.New("merge-tree refused")
+	h.git.mu.Unlock()
+
+	// Act.
+	admitted(t, h)
+
+	// Assert.
+	if got := h.footer.last(); got.State != StateFailed {
+		t.Fatalf("facts = %+v, want the merge failed", got)
+	}
+	if h.git.seen("start_rebase") || h.git.seen("fast_forward") || h.git.seen("merge_no_ff") {
+		t.Fatalf("git was asked %v, want nothing rebased or landed", h.git.calls)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.merge.fault"}); !ok {
+		t.Fatalf("records = %+v, want the merge's fault at ERROR", h.logs.Records())
+	}
+}
+
 // --- a repair never changes the merge machinery mid-merge ----------------
 
 // TestMachineryTheBranchAlreadyChangedIsNotARepairsChange covers the other
