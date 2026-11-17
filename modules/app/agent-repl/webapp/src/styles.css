@@ -7028,9 +7028,10 @@ bubble-body.bubble-body { display: block; }
    parked on its cold gate's choice. The name alone, in every section, never
    the mark or the when-column. ONE RULE for a row's name and a merge queue
    line's (src/sidebar/cold-gate-name.ts, owner request 2026-11-17), both
-   wearing its one class; the :is() keeps the rule's weight over a row
+   wearing its one class; the row's selector keeps its weight over a row
    name's tint and viewed grey. */
-#ws-sidebar :is(.ws > .row > .name, .sb-mq-name).cold-gated {
+#ws-sidebar .ws > .row > .name.cold-gated,
+#ws-sidebar .sb-mq-name.cold-gated {
   --name-rest: color-mix(in srgb, var(--muted) 55%, transparent);
   text-decoration: line-through;
   color: color-mix(in srgb, var(--muted) 55%, transparent);
