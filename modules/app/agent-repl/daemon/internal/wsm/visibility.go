@@ -111,7 +111,7 @@ func (ws Workspace) LetsCacheLapse() bool {
 // 2026-11-03), so a folded one-shot's unattended work would otherwise stop at
 // the next daemon start.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
-	if ws.Current || mergeQueued || ws.StandingDeployCheck {
+	if ws.Current || mergeQueued || ws.DeployMediator {
 		return true
 	}
 	if ws.MergeHidden() {
@@ -133,5 +133,5 @@ func (ws Workspace) Runs(folded, mergeQueued bool) bool {
 // the user is not looking at it. The session's start and the keeper's cadence
 // read it, and LetsCacheLapse is it or a close.
 func (ws Workspace) KeepaliveHeld() bool {
-	return ws.InHiddenSection() && !ws.Current && !ws.StandingDeployCheck
+	return ws.InHiddenSection() && !ws.Current && !ws.DeployMediator
 }

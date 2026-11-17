@@ -935,8 +935,8 @@ func fixtureAt(t *testing.T, version int) string {
 // guessed at.
 func TestEveryMigrationDeclaresItsKind(t *testing.T) {
 	for _, m := range migrations {
-		if m.Kind != MigrationAdditive && m.Kind != MigrationBreaking {
-			t.Errorf("migration %d (%s) declares kind %v, want additive or breaking", m.To, m.Name, m.Kind)
+		if m.Kind != MigrationAdditive && m.Kind != MigrationBreaking && m.Kind != MigrationContract {
+			t.Errorf("migration %d (%s) declares kind %v, want additive, breaking or contract", m.To, m.Name, m.Kind)
 		}
 	}
 }
@@ -1035,8 +1035,11 @@ func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
 	// Arrange: the real list ends in a breaking step (deploy_hooks renames the
 	// columns the previous build writes), so the join is run over it with the
 	// breaking steps marked additive, which is the chain a join takes.
+	// The join takes every step up to the last additive one, and leaves
+	// the contract steps after it to the takeover.
 	markBreakingStepsAdditive(t)
-	path := fixtureAt(t, LayoutVersion-1)
+	joinsTo := lastAdditiveLayout(t)
+	path := fixtureAt(t, joinsTo-1)
 
 	// Act
 	handle, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
@@ -1050,9 +1053,23 @@ func TestOpenJoiningCarriesAnAdditiveChainForward(t *testing.T) {
 	if !s.ReadOnly() {
 		t.Fatalf("the joining handle writes, want it read-only")
 	}
-	if got := rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`); got != LayoutVersion {
-		t.Fatalf("layout after the join = %d, want %d", got, LayoutVersion)
+	if got := rawScalar[int](t, path, `SELECT version FROM layout WHERE id = 1`); got != joinsTo {
+		t.Fatalf("layout after the join = %d, want %d", got, joinsTo)
 	}
+}
+
+// lastAdditiveLayout answers the To of the migration list's last additive
+// step: where a join carries a file, the contract steps after it waiting for
+// the takeover.
+func lastAdditiveLayout(t *testing.T) int {
+	t.Helper()
+	for i := len(migrations) - 1; i >= 0; i-- {
+		if migrations[i].Kind == MigrationAdditive {
+			return migrations[i].To
+		}
+	}
+	t.Fatal("the migration list has no additive step")
+	return 0
 }
 
 func TestOpenJoiningRefusesABreakingChainAndChangesNothing(t *testing.T) {

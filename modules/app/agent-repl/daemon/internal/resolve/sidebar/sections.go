@@ -275,9 +275,9 @@ func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log
 		}
 		record, ok := byID[ws]
 		if !ok {
-			log.Error(op, "the workspace at work on a deploy check is one the registry does not carry, so the label selects nothing", dlog.Context{
+			log.Error(op, "the deploy mediator is one the registry does not carry, so the label selects nothing", dlog.Context{
 				"workspace_id": string(ws), "repository_id": string(m.Repo), "stage": int(m.Stage),
-				"invariant_violation": "a deploy check's workspace at work is registered"})
+				"invariant_violation": "a deploy mediator is registered"})
 			return nil
 		}
 		return &frontendv1.RosterMergeQueueMediationTarget{Workspace: record.Ref()}
@@ -285,25 +285,25 @@ func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log
 	switch m.Stage {
 	case MediationWaiting:
 		return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Waiting{
-			Waiting: &frontendv1.RosterMergeQueueMediationWaiting{Target: target(m.Intake)}}}
+			Waiting: &frontendv1.RosterMergeQueueMediationWaiting{Target: target(m.Mediator)}}}
 	case MediationChecking:
-		if t := target(m.Intake); t != nil {
+		if t := target(m.Mediator); t != nil {
 			return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Checking{
 				Checking: &frontendv1.RosterMergeQueueMediationChecking{Target: t}}}
 		}
 	case MediationFixing:
-		if t := target(m.Remediation); t != nil {
+		if t := target(m.Mediator); t != nil {
 			return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Fixing{
 				Fixing: &frontendv1.RosterMergeQueueMediationFixing{Target: t}}}
 		}
 	case MediationTesting:
-		if t := target(m.Remediation); t != nil {
+		if t := target(m.Mediator); t != nil {
 			return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Testing{
 				Testing: &frontendv1.RosterMergeQueueMediationTesting{Target: t}}}
 		}
 	case MediationEscalated:
 		return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Escalated{
-			Escalated: &frontendv1.RosterMergeQueueMediationEscalated{Target: target(m.Escalation)}}}
+			Escalated: &frontendv1.RosterMergeQueueMediationEscalated{Target: target(m.Mediator)}}}
 	default:
 		panic(fmt.Sprintf("sidebar: a deploy check stands at no stage (%+v)", m))
 	}

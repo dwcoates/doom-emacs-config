@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -80,10 +79,9 @@ type FindingGroup struct {
 	// Sample is the group's first record, verbatim.
 	Sample string
 	// Class is how the group stands against the problems the repository's
-	// deploy checks keep (classifyFindings); Owner names the problem's owner
-	// and Findings what its owners were told, for an owned or recurred one.
+	// deploy checks keep (classifyFindings); Findings is what the mediator
+	// stated of the problem, for an owned or recurred one.
 	Class    wsm.WindowClass
-	Owner    string
 	Findings string
 	// Fixes is how many fixes of the group's problem deployed.
 	Fixes int
@@ -95,11 +93,10 @@ func (g FindingGroup) Key() wsm.ProblemKey {
 }
 
 // classifyFindings stands each of GROUPS against PROBLEMS, the problems the
-// repository's deploy checks keep, naming each problem's owner through NAME:
-// a group a problem names is OWNED while its owner is at work and RECURRED
-// once its fix deployed; any other is NEW or SEEN BEFORE by the span before.
-// An owner whose name cannot be read is NAME's error, answered.
-func classifyFindings(groups []FindingGroup, problems []wsm.DeployProblem, name func(ids.WorkspaceID) (string, error)) ([]FindingGroup, error) {
+// mediator took on: a group a problem names is TAKEN ON while the mediator is
+// at work on it and RECURRED once its fix deployed; any other is NEW or SEEN
+// BEFORE by the span before.
+func classifyFindings(groups []FindingGroup, problems []wsm.DeployProblem) []FindingGroup {
 	byKey := make(map[wsm.ProblemKey]wsm.DeployProblem, len(problems))
 	for _, p := range problems {
 		byKey[p.Key] = p
@@ -118,15 +115,11 @@ func classifyFindings(groups []FindingGroup, problems []wsm.DeployProblem, name 
 			g.Class = wsm.WindowSeenBefore
 		}
 		if kept {
-			owner, err := name(p.Owner)
-			if err != nil {
-				return nil, err
-			}
-			g.Owner, g.Findings, g.Fixes = owner, p.Findings, p.Fixes
+			g.Findings, g.Fixes = p.Findings, p.Fixes
 		}
 		out[i] = g
 	}
-	return out, nil
+	return out
 }
 
 // windowGroups is GROUPS as a check's window records them.
@@ -194,8 +187,8 @@ func severity(level string) int {
 }
 
 // RenderFindings is the brief's facts: one block per group, its standing,
-// its sample quoted verbatim and, for a problem the repository keeps, its
-// owner and its earlier findings, or a line saying the window holds none.
+// its sample quoted verbatim and, for a problem the mediator took on, its
+// earlier findings, or a line saying the window holds none.
 func RenderFindings(groups []FindingGroup) string {
 	if len(groups) == 0 {
 		return "No system logged a warning or an error in the window."
@@ -210,20 +203,20 @@ func RenderFindings(groups []FindingGroup) string {
 		case wsm.WindowNew:
 			standing = "NEW"
 		case wsm.WindowSeenBefore:
-			standing = fmt.Sprintf("SEEN BEFORE, owned by nobody (%d in the span before)", g.Before)
+			standing = fmt.Sprintf("SEEN BEFORE, never taken on (%d in the span before)", g.Before)
 		case wsm.WindowOwned:
-			standing = fmt.Sprintf("OWNED by %s, still at work on it", g.Owner)
+			standing = "TAKEN ON, your fix of it still under way"
 		case wsm.WindowRecurred:
-			standing = fmt.Sprintf("RECURRED after %s's fix deployed", g.Owner)
+			standing = "RECURRED after your fix deployed"
 			if pastItsFixes(g.Class, g.Fixes) {
-				standing = fmt.Sprintf("RECURRED after %s's fix deployed, after %d fixes in all: only an escalation is accepted", g.Owner, g.Fixes)
+				standing = fmt.Sprintf("RECURRED after your fix deployed, after %d fixes in all: only an escalation is accepted", g.Fixes)
 			}
 		default:
 			panic(fmt.Sprintf("merge: a finding group with no class: %+v", g))
 		}
 		b.WriteString(fmt.Sprintf("- %s: %d %s of %s: %s\n  %s\n", standing, g.Count, strings.ToUpper(g.Level), g.Operation, g.Message, g.Sample))
 		if g.Findings != "" {
-			b.WriteString("  Its owners were told: " + strings.ReplaceAll(g.Findings, "\n", " / ") + "\n")
+			b.WriteString("  You found before: " + strings.ReplaceAll(g.Findings, "\n", " / ") + "\n")
 		}
 	}
 	return b.String()
@@ -259,12 +252,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	if err != nil {
 		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
 	}
-	groups, err := classifyFindings(SortFindings(window, before), problems, func(ws ids.WorkspaceID) (string, error) {
-		return o.workspaceName(ctx, opMediation, ws)
-	})
-	if err != nil {
-		return "", wsm.CheckWindow{}, err
-	}
+	groups := classifyFindings(SortFindings(window, before), problems)
 	chain, err := o.chainSoFar(ctx, q, m)
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
@@ -316,31 +304,24 @@ func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.
 }
 
 // chainSoFar is the brief's account of check M's chain: its first deploy, or
-// how many remediations it deployed in a row and what each landed.
+// how many of the mediator's fixes it deployed in a row and what each
+// landed.
 func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, error) {
-	if m.ChainRedeploys == 0 && m.Remediation == "" {
-		return "this is the chain's first deploy; no remediation has been dispatched.", nil
+	if m.ChainRedeploys == 0 && !m.Dispatched {
+		return "this is the chain's first deploy; no fix has been dispatched.", nil
 	}
 	finishes, err := o.deps.DB.RemediationFinishes(ctx)
 	if err != nil {
-		return "", fmt.Errorf("merge: read what the chain's remediations landed: %w", err)
-	}
-	last, err := o.workspaceName(ctx, opMediation, m.Remediation)
-	if err != nil {
-		return "", err
+		return "", fmt.Errorf("merge: read what the chain's fixes landed: %w", err)
 	}
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("the chain began at %s and has deployed %d remediations in a row; its last remediation workspace is %s.",
-		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys, last))
+	b.WriteString(fmt.Sprintf("the chain began at %s and has deployed %d of your fixes in a row.",
+		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys))
 	for _, f := range finishes {
 		if !sameQueue(f.Repo, q.key) || f.LandedHead == "" {
 			continue
 		}
-		name, err := o.workspaceName(ctx, opMediation, f.Workspace)
-		if err != nil {
-			return "", err
-		}
-		b.WriteString(fmt.Sprintf(" %s landed %s, changing %s.", name, f.LandedHead, strings.Join(f.LandedPaths, ", ")))
+		b.WriteString(fmt.Sprintf(" Your fix landed %s, changing %s.", f.LandedHead, strings.Join(f.LandedPaths, ", ")))
 	}
 	return b.String(), nil
 }

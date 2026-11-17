@@ -51,8 +51,8 @@ func TestAFixersBriefMustNameItsTurnAndText(t *testing.T) {
 			oweAt(t, s, repo, instant)
 
 			// Act
-			dispatched, dispatchErr := s.DispatchMediation(ctx, repo, instant, instant, "remedy", tt.turn)
-			recorded, recordErr := s.RecordFixerTurn(ctx, repo, instant, "remedy", tt.turn)
+			dispatched, dispatchErr := s.DispatchMediation(ctx, repo, instant, instant, tt.turn)
+			recorded, recordErr := s.RecordFixerTurn(ctx, repo, instant, tt.turn)
 
 			// Assert
 			m, _ := s.MediationOf(ctx, repo)
@@ -71,15 +71,13 @@ func TestRecordFixerTurn(t *testing.T) {
 	tests := []struct {
 		name     string
 		dispatch bool
-		ws       WorkspaceID
 		owed     time.Time
 		want     bool
 		wantTurn FixerTurn
 	}{
-		{name: "the fixer the check is dispatched to takes its later brief", dispatch: true, ws: "remedy", owed: instant, want: true, wantTurn: later},
-		{name: "another workspace's brief is not the check's", dispatch: true, ws: "other", owed: instant, wantTurn: aFixerTurn},
-		{name: "a check dispatched to no fixer records none", ws: "remedy", owed: instant},
-		{name: "an older deploy's check records nothing on the newer", dispatch: true, ws: "remedy", owed: instant.Add(-time.Minute), wantTurn: aFixerTurn},
+		{name: "a dispatched check takes the mediator's later brief", dispatch: true, owed: instant, want: true, wantTurn: later},
+		{name: "a check with no fix dispatched records none", owed: instant},
+		{name: "an older deploy's check records nothing on the newer", dispatch: true, owed: instant.Add(-time.Minute), wantTurn: aFixerTurn},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -92,7 +90,7 @@ func TestRecordFixerTurn(t *testing.T) {
 			}
 
 			// Act
-			got, err := s.RecordFixerTurn(context.Background(), repo, tt.owed, tt.ws, later)
+			got, err := s.RecordFixerTurn(context.Background(), repo, tt.owed, later)
 
 			// Assert
 			if err != nil || got != tt.want || fixerTurnOf(t, s, repo) != tt.wantTurn {

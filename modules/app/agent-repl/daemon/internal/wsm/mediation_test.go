@@ -261,12 +261,8 @@ func TestTheMigrationChainsAMediationAlreadyOwed(t *testing.T) {
 	path := fixtureAt(t, 134)
 	execRaw(t, path, `INSERT INTO merge_queue_repos (repo_key, paused, mediation_owed_at) VALUES ('/tmp/repo-1', 0, 1000)`)
 
-	// Act
-	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
-	if err != nil {
-		t.Fatalf("Open: %v", err)
-	}
-	defer handle.Close()
+	// Act: layout 135 alone, since layout 168 releases every owed check.
+	execRaw(t, path, mediationChainDDL)
 
 	// Assert
 	if got := rawScalar[int](t, path, `SELECT mediation_chain_started_at FROM merge_queue_repos WHERE repo_key = '/tmp/repo-1'`); got != 1000 {
@@ -282,11 +278,11 @@ func oweAt(t *testing.T, s *store, repo RepoKey, at time.Time) {
 	}
 }
 
-// dispatchAt records a fix for REPO's mediation owed at OWED dispatched to
-// workspace "remedy".
+// dispatchAt records a fix the mediator dispatched to itself for REPO's
+// mediation owed at OWED.
 func dispatchAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
 	t.Helper()
-	if ok, err := s.DispatchMediation(context.Background(), repo, owed, owed.Add(time.Second), "remedy", aFixerTurn); err != nil || !ok {
+	if ok, err := s.DispatchMediation(context.Background(), repo, owed, owed.Add(time.Second), aFixerTurn); err != nil || !ok {
 		t.Fatalf("DispatchMediation = (%v, %v), want it recorded", ok, err)
 	}
 }
@@ -318,60 +314,36 @@ func fixDeploysAt(t *testing.T, s *store, repo RepoKey, at time.Time) {
 	}
 }
 
-// TestTheChainsRolesPassAlongItAndEndWithIt covers the chain's intake and
-// remediation workspaces: recorded once, the remediation carried to each
-// newer deploy of the chain and the intake only while it has not decided,
-// the dispatch owed afresh for each deploy, and all cleared by the release.
-func TestTheChainsRolesPassAlongItAndEndWithIt(t *testing.T) {
+// TestTheChainsDispatchPassesAlongItAndEndsWithIt covers the mediator's
+// dispatch: recorded on the owed check, carried to each newer deploy of the
+// chain but the fix's own, and cleared by the release.
+func TestTheChainsDispatchPassesAlongItAndEndsWithIt(t *testing.T) {
 	tests := []struct {
-		name    string
-		arrange func(t *testing.T, s *store, repo RepoKey)
-		want    *Mediation
+		name           string
+		arrange        func(t *testing.T, s *store, repo RepoKey)
+		wantDispatched bool
 	}{
-		{name: "the intake and the dispatch are recorded on the owed mediation",
+		{name: "the dispatch is recorded on the owed check", wantDispatched: true,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
-				if ok, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil || !ok {
-					t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
-				}
 				dispatchAt(t, s, repo, instant)
-			},
-			want: &Mediation{Intake: "intake", Remediation: "remedy", Dispatched: true}},
-		{name: "the fix's deploy carries the remediation, owes its own dispatch, and a fresh intake",
+			}},
+		{name: "the fix's deploy owes its own dispatch",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
-				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
-					t.Fatal(err)
-				}
 				dispatchAt(t, s, repo, instant)
 				fixDeploysAt(t, s, repo, instant.Add(time.Minute))
-			},
-			want: &Mediation{Remediation: "remedy", Dispatched: false}},
-		{name: "a deploy that is not the fix's carries the remediation and the dispatch, but not the intake that decided",
+			}},
+		{name: "a deploy that is not the fix's carries the dispatch", wantDispatched: true,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
-				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
-					t.Fatal(err)
-				}
 				dispatchAt(t, s, repo, instant)
 				oweAt(t, s, repo, instant.Add(time.Minute))
-			},
-			want: &Mediation{Remediation: "remedy", Dispatched: true}},
-		{name: "an undecided check's intake carries on to the newer deploy's",
+			}},
+		{name: "the release clears the dispatch",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				oweAt(t, s, repo, instant)
-				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
-					t.Fatal(err)
-				}
-				oweAt(t, s, repo, instant.Add(time.Minute))
-			},
-			want: &Mediation{Intake: "intake"}},
-		{name: "the release clears the roles", want: nil,
-			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				oweAt(t, s, repo, instant)
-				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
-					t.Fatal(err)
-				}
+				dispatchAt(t, s, repo, instant)
 				if _, err := s.ReleaseMediation(context.Background(), repo, instant); err != nil {
 					t.Fatal(err)
 				}
@@ -387,55 +359,30 @@ func TestTheChainsRolesPassAlongItAndEndWithIt(t *testing.T) {
 			// Act
 			tt.arrange(t, s, repo)
 
-			// Assert: the roles, or none after a release (the next deploy
-			// begins a new chain with none).
+			// Assert
 			m, err := s.MediationOf(context.Background(), repo)
-			want := tt.want
-			if want == nil {
-				want = &Mediation{}
-			}
-			if err != nil || m == nil || m.Intake != want.Intake || m.Remediation != want.Remediation || m.Dispatched != want.Dispatched {
-				t.Fatalf("MediationOf = (%+v, %v), want roles %+v", m, err, want)
+			if err != nil || m == nil || m.Dispatched != tt.wantDispatched {
+				t.Fatalf("MediationOf = (%+v, %v), want dispatched %v", m, err, tt.wantDispatched)
 			}
 		})
 	}
 }
 
-// TestTheChainsRoleWritesRefuseWhatTheyCannotRecord covers the writes'
-// refusals: a stale mediation, a second intake, a second dispatch, and no
-// workspace.
-func TestTheChainsRoleWritesRefuseWhatTheyCannotRecord(t *testing.T) {
+func TestASecondDispatchOrOneForACheckNoLongerOwedIsNotRecorded(t *testing.T) {
 	tests := []struct {
-		name      string
-		write     func(s *store, repo RepoKey) (bool, error)
-		wantOK    bool
-		wantError bool
+		name  string
+		write func(s *store, repo RepoKey) (bool, error)
 	}{
-		{name: "an intake for a mediation no longer owed",
+		{name: "a dispatch for a check no longer owed",
 			write: func(s *store, repo RepoKey) (bool, error) {
-				return s.RecordMediationIntake(context.Background(), repo, instant.Add(-time.Minute), "intake")
-			}},
-		{name: "a second intake for the chain",
-			write: func(s *store, repo RepoKey) (bool, error) {
-				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "first"); err != nil {
-					return false, err
-				}
-				return s.RecordMediationIntake(context.Background(), repo, instant, "second")
+				return s.DispatchMediation(context.Background(), repo, instant.Add(-time.Minute), instant, aFixerTurn)
 			}},
 		{name: "a second dispatch for one deploy",
 			write: func(s *store, repo RepoKey) (bool, error) {
-				if _, err := s.DispatchMediation(context.Background(), repo, instant, instant, "first", aFixerTurn); err != nil {
+				if _, err := s.DispatchMediation(context.Background(), repo, instant, instant, aFixerTurn); err != nil {
 					return false, err
 				}
-				return s.DispatchMediation(context.Background(), repo, instant, instant, "second", aFixerTurn)
-			}},
-		{name: "an intake that names no workspace", wantError: true,
-			write: func(s *store, repo RepoKey) (bool, error) {
-				return s.RecordMediationIntake(context.Background(), repo, instant, "")
-			}},
-		{name: "a dispatch that names no workspace", wantError: true,
-			write: func(s *store, repo RepoKey) (bool, error) {
-				return s.DispatchMediation(context.Background(), repo, instant, instant, "", aFixerTurn)
+				return s.DispatchMediation(context.Background(), repo, instant, instant, aFixerTurn)
 			}},
 	}
 	for _, tt := range tests {
@@ -449,8 +396,8 @@ func TestTheChainsRoleWritesRefuseWhatTheyCannotRecord(t *testing.T) {
 			ok, err := tt.write(s, repo)
 
 			// Assert
-			if ok != tt.wantOK || (err != nil) != tt.wantError {
-				t.Fatalf("write = (%v, %v), want ok %v, error %v", ok, err, tt.wantOK, tt.wantError)
+			if ok || err != nil {
+				t.Fatalf("write = (%v, %v), want nothing recorded and no error", ok, err)
 			}
 		})
 	}
@@ -464,81 +411,6 @@ func tellAt(t *testing.T, s *store, repo RepoKey, owed time.Time) {
 	}
 }
 
-func TestMediationRoleOfAnswersTheChainAWorkspaceWorksOn(t *testing.T) {
-	tests := []struct {
-		name            string
-		intake          WorkspaceID
-		ws              WorkspaceID
-		wantRole        bool
-		wantIntake      bool
-		wantRemediation bool
-	}{
-		{name: "the chain's intake", intake: "intake", ws: "intake", wantRole: true, wantIntake: true},
-		{name: "the chain's last remediation", intake: "intake", ws: "remedy", wantRole: true, wantRemediation: true},
-		{name: "the mediator that dispatched to itself is both", intake: "remedy", ws: "remedy", wantRole: true, wantIntake: true, wantRemediation: true},
-		{name: "a workspace with no role", intake: "intake", ws: "bystander"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			ctx := context.Background()
-			repo := RepoKey(t.TempDir())
-			oweAt(t, s, repo, instant)
-			if _, err := s.RecordMediationIntake(ctx, repo, instant, tt.intake); err != nil {
-				t.Fatal(err)
-			}
-			dispatchAt(t, s, repo, instant)
-
-			// Act
-			role, err := s.MediationRoleOf(ctx, tt.ws)
-
-			// Assert
-			if err != nil || (role != nil) != tt.wantRole {
-				t.Fatalf("MediationRoleOf = (%+v, %v), want a role: %v", role, err, tt.wantRole)
-			}
-			if role != nil && (role.Intake != tt.wantIntake || role.Remediation != tt.wantRemediation || !role.Mediation.OwedAt.Equal(instant) || !role.Mediation.Dispatched) {
-				t.Fatalf("role = %+v, want intake %v and remediation %v on the dispatched mediation", role, tt.wantIntake, tt.wantRemediation)
-			}
-		})
-	}
-}
-
-func TestMediationRoleOfAnswersNoneOnceTheChainIsReleased(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	oweAt(t, s, repo, instant)
-	if _, err := s.RecordMediationIntake(ctx, repo, instant, "intake"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := s.ReleaseMediation(ctx, repo, instant); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	role, err := s.MediationRoleOf(ctx, "intake")
-
-	// Assert
-	if err != nil || role != nil {
-		t.Fatalf("MediationRoleOf = (%+v, %v), want none", role, err)
-	}
-}
-
-func TestMediationRoleOfRefusesNoWorkspace(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-
-	// Act
-	_, err := s.MediationRoleOf(context.Background(), "")
-
-	// Assert
-	if err == nil || !loggedOperation(log, "daemon.wsm.mediation_role_of", "error") {
-		t.Fatalf("MediationRoleOf(\"\") = %v, want a refusal recorded at ERROR: %v", err, log.Records())
-	}
-}
-
 func TestTheChainsLastDispatchInstantPassesAlongItAndEndsWithIt(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -546,7 +418,7 @@ func TestTheChainsLastDispatchInstantPassesAlongItAndEndsWithIt(t *testing.T) {
 	repo := RepoKey(t.TempDir())
 	oweAt(t, s, repo, instant)
 	dispatched := instant.Add(time.Second)
-	if ok, err := s.DispatchMediation(ctx, repo, instant, dispatched, "remedy", aFixerTurn); err != nil || !ok {
+	if ok, err := s.DispatchMediation(ctx, repo, instant, dispatched, aFixerTurn); err != nil || !ok {
 		t.Fatalf("DispatchMediation = (%v, %v)", ok, err)
 	}
 
@@ -624,7 +496,7 @@ func TestAnIntakeIsResumedOnceOnTheMediationOwed(t *testing.T) {
 			}},
 		{name: "a mediation a fix was dispatched for", owed: instant,
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				if ok, err := s.DispatchMediation(context.Background(), repo, instant, instant, "remedy", aFixerTurn); err != nil || !ok {
+				if ok, err := s.DispatchMediation(context.Background(), repo, instant, instant, aFixerTurn); err != nil || !ok {
 					t.Fatalf("DispatchMediation = (%v, %v)", ok, err)
 				}
 			}},
@@ -730,18 +602,18 @@ func TestResumingAnIntakeInNoTurnIsRefused(t *testing.T) {
 	}
 }
 
-// escalateAt escalates the mediation REPO owes at OWED, recording WS as its
-// escalation when WS is set.
-func escalateAt(t *testing.T, s *store, repo RepoKey, owed time.Time, ws WorkspaceID) {
+// escalateAt escalates the mediation REPO owes at OWED, marking the mediator
+// and the user told when TOLD.
+func escalateAt(t *testing.T, s *store, repo RepoKey, owed time.Time, told bool) {
 	t.Helper()
 	if ok, err := s.EscalateMediation(context.Background(), repo, owed, `{"summary":"s"}`); err != nil || !ok {
 		t.Fatalf("EscalateMediation = (%v, %v)", ok, err)
 	}
-	if ws == "" {
+	if !told {
 		return
 	}
-	if ok, err := s.RecordMediationEscalation(context.Background(), repo, owed, ws); err != nil || !ok {
-		t.Fatalf("RecordMediationEscalation = (%v, %v)", ok, err)
+	if ok, err := s.MarkEscalationTold(context.Background(), repo, owed); err != nil || !ok {
+		t.Fatalf("MarkEscalationTold = (%v, %v)", ok, err)
 	}
 }
 
@@ -751,34 +623,31 @@ func TestAnEscalatedMediationHoldsThroughEveryDeployButItsFixs(t *testing.T) {
 		arrange func(t *testing.T, s *store, repo RepoKey)
 		want    Mediation
 	}{
-		{name: "escalated with its workspace",
-			arrange: func(t *testing.T, s *store, repo RepoKey) { escalateAt(t, s, repo, instant, "esc") },
-			want:    Mediation{Escalation: "esc", EscalationBrief: `{"summary":"s"}`}},
+		{name: "escalated and told",
+			arrange: func(t *testing.T, s *store, repo RepoKey) { escalateAt(t, s, repo, instant, true) },
+			want:    Mediation{EscalationBrief: `{"summary":"s"}`, EscalationTold: true}},
 		{name: "an escalation ends a dispatch it carried",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
 				dispatchAt(t, s, repo, instant)
-				escalateAt(t, s, repo, instant, "esc")
+				escalateAt(t, s, repo, instant, true)
 			},
-			want: Mediation{Remediation: "remedy", Escalation: "esc", EscalationBrief: `{"summary":"s"}`}},
-		{name: "another deploy carries the escalation, with no intake",
+			want: Mediation{EscalationBrief: `{"summary":"s"}`, EscalationTold: true}},
+		{name: "another deploy carries the told escalation",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				if _, err := s.RecordMediationIntake(context.Background(), repo, instant, "intake"); err != nil {
-					t.Fatal(err)
-				}
-				escalateAt(t, s, repo, instant, "esc")
+				escalateAt(t, s, repo, instant, true)
 				oweAt(t, s, repo, instant.Add(time.Minute))
 			},
-			want: Mediation{Escalation: "esc", EscalationBrief: `{"summary":"s"}`}},
-		{name: "an escalation still being made is carried too",
+			want: Mediation{EscalationBrief: `{"summary":"s"}`, EscalationTold: true}},
+		{name: "an escalation not yet told is carried untold",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				escalateAt(t, s, repo, instant, "")
+				escalateAt(t, s, repo, instant, false)
 				oweAt(t, s, repo, instant.Add(time.Minute))
 			},
 			want: Mediation{EscalationBrief: `{"summary":"s"}`}},
-		{name: "the escalation's own fix deploying ends the hold",
+		{name: "the mediator's own fix deploying ends the hold",
 			arrange: func(t *testing.T, s *store, repo RepoKey) {
-				escalateAt(t, s, repo, instant, "esc")
-				finishDeploying(t, s, repo, "esc", instant.Add(30*time.Second))
+				escalateAt(t, s, repo, instant, true)
+				finishDeploying(t, s, repo, "mediator", instant.Add(30*time.Second))
 				oweAt(t, s, repo, instant.Add(time.Minute))
 			},
 			want: Mediation{}},
@@ -795,8 +664,8 @@ func TestAnEscalatedMediationHoldsThroughEveryDeployButItsFixs(t *testing.T) {
 
 			// Assert
 			m, err := s.MediationOf(context.Background(), repo)
-			if err != nil || m == nil || m.Escalation != tt.want.Escalation || m.EscalationBrief != tt.want.EscalationBrief ||
-				m.Escalated() != (tt.want.EscalationBrief != "") || m.Intake != tt.want.Intake || m.Dispatched || m.Remediation != tt.want.Remediation {
+			if err != nil || m == nil || m.EscalationBrief != tt.want.EscalationBrief || m.EscalationTold != tt.want.EscalationTold ||
+				m.Escalated() != (tt.want.EscalationBrief != "") || m.Dispatched {
 				t.Fatalf("MediationOf = (%+v, %v), want %+v", m, err, tt.want)
 			}
 		})
@@ -826,14 +695,18 @@ func TestTheEscalationWritesRefuseWhatTheyCannotRecord(t *testing.T) {
 			write: func(s *store, repo RepoKey) (bool, error) {
 				return s.EscalateMediation(context.Background(), repo, instant, "")
 			}},
-		{name: "a workspace recorded on a check not escalated",
+		{name: "told on a check not escalated",
 			write: func(s *store, repo RepoKey) (bool, error) {
-				return s.RecordMediationEscalation(context.Background(), repo, instant, "esc")
+				return s.MarkEscalationTold(context.Background(), repo, instant)
 			}},
-		{name: "an escalation recorded with no workspace", wantErr: true,
+		{name: "told on an escalation no longer owed",
 			write: func(s *store, repo RepoKey) (bool, error) {
-				return s.RecordMediationEscalation(context.Background(), repo, instant, "")
-			}},
+				if _, err := s.EscalateMediation(context.Background(), repo, instant, `{"summary":"s"}`); err != nil {
+					return false, err
+				}
+				return s.MarkEscalationTold(context.Background(), repo, instant.Add(-time.Minute))
+			},
+			wantRead: Mediation{EscalationBrief: `{"summary":"s"}`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -850,7 +723,7 @@ func TestTheEscalationWritesRefuseWhatTheyCannotRecord(t *testing.T) {
 			if wrote || (err != nil) != tt.wantErr || rerr != nil {
 				t.Fatalf("write = (%v, %v), read %v; want nothing written, an error %v", wrote, err, rerr, tt.wantErr)
 			}
-			if m.Escalation != tt.wantRead.Escalation || m.EscalationBrief != tt.wantRead.EscalationBrief {
+			if m.EscalationTold || m.EscalationBrief != tt.wantRead.EscalationBrief {
 				t.Fatalf("MediationOf = %+v, want %+v", m, tt.wantRead)
 			}
 		})

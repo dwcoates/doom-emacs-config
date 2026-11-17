@@ -37,17 +37,18 @@ func (t FixerTurn) valid() error {
 	return nil
 }
 
-// RecordFixerTurn records TURN as the latest brief the daemon gave WS, the
-// fixer the mediation REPO owes at OWED is dispatched to. It answers false
-// when that mediation is no longer the one owed, or is not dispatched to WS.
-func (s *store) RecordFixerTurn(ctx context.Context, repo RepoKey, owed time.Time, ws WorkspaceID, turn FixerTurn) (bool, error) {
+// RecordFixerTurn records TURN as the latest brief the daemon gave the
+// mediator while the mediation REPO owes at OWED is dispatched. It answers
+// false when that mediation is no longer the one owed, or is not
+// dispatched.
+func (s *store) RecordFixerTurn(ctx context.Context, repo RepoKey, owed time.Time, turn FixerTurn) (bool, error) {
 	const op = "daemon.wsm.record_fixer_turn"
 	if err := turn.valid(); err != nil {
-		s.log.Error(op, "refused a fixer's brief that is incomplete", withError(dlog.Context{"repo": string(repo), "workspace": string(ws)}, err))
+		s.log.Error(op, "refused a fixer's brief that is incomplete", withError(dlog.Context{"repo": string(repo)}, err))
 		return false, err
 	}
 	return s.mediationWrite(ctx, op, repo, owed,
 		`UPDATE merge_queue_repos SET mediation_fixer_turn = ?, mediation_fixer_brief = ?, mediation_fixer_origin = ?
-		 WHERE mediation_dispatched = 1 AND mediation_remediation = ? AND repo_key = ? AND mediation_owed_at = ?`,
-		string(turn.ID), turn.Brief, turn.Origin, string(ws))
+		 WHERE mediation_dispatched = 1 AND repo_key = ? AND mediation_owed_at = ?`,
+		string(turn.ID), turn.Brief, turn.Origin)
 }

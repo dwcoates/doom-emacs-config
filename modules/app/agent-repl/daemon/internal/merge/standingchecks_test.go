@@ -23,18 +23,18 @@ func queueOf(t *testing.T, h *harness) checkedQueue {
 	return q
 }
 
-// standingIn records WS, open or CLOSED, as the harness queue's standing
-// workspace in ROLE, briefed.
-func standingIn(t *testing.T, h *harness, role wsm.DeployCheckRoleName, ws ids.WorkspaceID, closed bool) {
+// mediatorIn records WS, open or CLOSED, as the harness queue's deploy
+// mediator, briefed.
+func mediatorIn(t *testing.T, h *harness, ws ids.WorkspaceID, closed bool) {
 	t.Helper()
 	ctx := context.Background()
 	h.db.mu.Lock()
-	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: "deploy-" + string(role), Repo: theRepository, Closed: closed}
+	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: mediatorName, Repo: theRepository, Closed: closed}
 	h.db.mu.Unlock()
-	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), role, ws); err != nil {
+	if err := h.db.RecordDeployMediator(ctx, mediationKey(h), ws); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), role); err != nil {
+	if err := h.db.MarkMediatorBriefed(ctx, mediationKey(h)); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -53,7 +53,7 @@ func TestMediatorOfAnswersTheQueuesOne(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			standingIn(t, h, wsm.StandingMediator, "ws-standing", tt.closed)
+			mediatorIn(t, h, "ws-standing", tt.closed)
 
 			// Act
 			got, err := h.o.mediatorOf(context.Background(), queueOf(t, h), dlog.Context{})
@@ -73,7 +73,7 @@ func TestMediatorOfMakesOneForAQueueWithNone(t *testing.T) {
 	}{
 		{name: "a queue with no mediator recorded", arrange: func(*testing.T, *harness) {}},
 		{name: "a queue whose recorded mediator is gone from the registry", arrange: func(t *testing.T, h *harness) {
-			if err := h.db.RecordStandingDeployCheck(context.Background(), mediationKey(h), wsm.StandingMediator, "ws-gone"); err != nil {
+			if err := h.db.RecordDeployMediator(context.Background(), mediationKey(h), "ws-gone"); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -92,12 +92,12 @@ func TestMediatorOfMakesOneForAQueueWithNone(t *testing.T) {
 			if err != nil || got != (standing{ws: "ws-fixer"}) || !slices.Equal(h.checks.made, []string{mediatorName}) {
 				t.Fatalf("mediatorOf = (%+v, %v), made %v; want %s made", got, err, h.checks.made, mediatorName)
 			}
-			recorded, found, readErr := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator)
+			recorded, found, readErr := h.db.DeployMediatorOf(context.Background(), mediationKey(h))
 			if readErr != nil || !found || recorded.Workspace != got.ws {
 				t.Fatalf("standing record = (%+v, %v, %v), want the made mediator", recorded, found, readErr)
 			}
-			if _, lands, err := h.db.DeployEscalationOf(context.Background(), got.ws); err != nil || !lands {
-				t.Fatalf("DeployEscalationOf = (%v, %v), want the made mediator recorded as landing directly", lands, err)
+			if repo, err := h.o.directLandingRepo(context.Background(), got.ws); err != nil || repo == "" {
+				t.Fatalf("directLandingRepo = (%q, %v), want the made mediator landing directly", repo, err)
 			}
 		})
 	}
@@ -111,14 +111,14 @@ func TestMediatorOfAnswersWhatItCannotDo(t *testing.T) {
 	}{
 		{name: "a mediator that cannot be read", message: "could not read the deploy mediator",
 			arrange: func(t *testing.T, h *harness) {
-				standingIn(t, h, wsm.StandingMediator, "ws-standing", false)
+				mediatorIn(t, h, "ws-standing", false)
 				h.db.mu.Lock()
 				h.db.workspaceErr = errors.New("database is locked")
 				h.db.mu.Unlock()
 			}},
 		{name: "a closed one that cannot be reopened", message: "the deploy mediator could not be reopened",
 			arrange: func(t *testing.T, h *harness) {
-				standingIn(t, h, wsm.StandingMediator, "ws-standing", true)
+				mediatorIn(t, h, "ws-standing", true)
 				h.checks.reopenErr = errors.New("branch gone")
 			}},
 		{name: "one that cannot be made", message: "the deploy mediator could not be made",
@@ -207,61 +207,6 @@ func TestReadyMediatorAnswersWhatItCannotDo(t *testing.T) {
 	}
 }
 
-func TestTheRetiredIntakeIsClosedAndForgotten(t *testing.T) {
-	tests := []struct {
-		name       string
-		closed     bool
-		toldIt     bool
-		wantClosed []ids.WorkspaceID
-		wantKept   bool
-	}{
-		{name: "an open intake is closed and forgotten", wantClosed: []ids.WorkspaceID{"ws-old-intake"}},
-		{name: "a closed intake is only forgotten", closed: true},
-		{name: "an intake still told the owed check waits for its decision", toldIt: true, wantKept: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := checked(t)
-			owe(t, h)
-			standingIn(t, h, wsm.StandingIntake, "ws-old-intake", tt.closed)
-			if tt.toldIt {
-				if ok, err := h.db.RecordMediationIntake(context.Background(), mediationKey(h), deployStarted, "ws-old-intake"); err != nil || !ok {
-					t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
-				}
-			}
-
-			// Act
-			h.o.retireStandingIntake(context.Background(), queueOf(t, h), owedCheck(t, h))
-
-			// Assert
-			_, kept, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingIntake)
-			if err != nil || kept != tt.wantKept || !slices.Equal(h.checks.closed, tt.wantClosed) {
-				t.Fatalf("intake kept %v (%v), closed %v; want kept %v, closed %v", kept, err, h.checks.closed, tt.wantKept, tt.wantClosed)
-			}
-		})
-	}
-}
-
-func TestARetiredIntakeThatCannotBeClosedIsKeptAndRecorded(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	standingIn(t, h, wsm.StandingIntake, "ws-old-intake", false)
-	h.checks.closeErr = errors.New("worktree busy")
-
-	// Act
-	h.o.retireStandingIntake(context.Background(), queueOf(t, h), owedCheck(t, h))
-
-	// Assert
-	if _, kept, _ := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingIntake); !kept {
-		t.Fatal("the intake was forgotten though it could not be closed; want it kept for the next pass")
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the retired intake could not be closed; it is retired at the next pass"}); !ok {
-		t.Fatalf("records = %v, want the failure recorded", h.logs.Records())
-	}
-}
-
 // approvedChecks has the harness's standing intake approve N deploys in a
 // row, each a minute after the last, from deployStarted.
 func approvedChecks(t *testing.T, h *harness, n int) {
@@ -269,8 +214,8 @@ func approvedChecks(t *testing.T, h *harness, n int) {
 	for i := range n {
 		at := deployStarted.Add(time.Duration(i) * time.Minute)
 		oweAt(t, h, at)
-		withIntake(t, h, at)
-		if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
+		withMediator(t, h)
+		if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
 			t.Fatalf("DecideMediation: %v", err)
 		}
 	}
@@ -292,7 +237,7 @@ func TestAQuietRunAfterWorkCompactsTheMediator(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			standingIn(t, h, wsm.StandingMediator, "ws-fixer", false)
+			mediatorIn(t, h, "ws-fixer", false)
 			if tt.work {
 				if err := h.db.NoteDeployCheckWork(context.Background(), mediationKey(h)); err != nil {
 					t.Fatal(err)
@@ -314,22 +259,22 @@ func TestADispatchArmsTheCompaction(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	if err := dispatched(h, Decision{}); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
-	withIntake(t, h, deployStarted.Add(time.Minute))
+	withMediator(t, h)
 
 	// Act: the fix's deploy and two more are approved.
-	if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
+	if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
 		t.Fatal(err)
 	}
 	for i := 2; i <= 3; i++ {
 		at := deployStarted.Add(time.Duration(i) * time.Minute)
 		oweAt(t, h, at)
-		withIntake(t, h, at)
-		if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
+		withMediator(t, h)
+		if err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -354,9 +299,9 @@ func TestReleaseEscalation(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			if tt.escalated {
-				if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
+				if err := decideTold(h, Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -386,149 +331,12 @@ func TestReleaseEscalation(t *testing.T) {
 	}
 }
 
-func TestTheChecksWorkspacesAreAdoptedAsTheStandingOnes(t *testing.T) {
-	// Arrange: a check escalated to a workspace made before the standing ones.
-	h := checked(t)
-	owe(t, h)
-	// The check was told to an intake before the mediator stood.
-	if ok, err := h.db.RecordMediationIntake(context.Background(), mediationKey(h), deployStarted, "ws-old-intake"); err != nil || !ok {
-		t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
-	}
-	if _, err := h.db.EscalateMediation(context.Background(), mediationKey(h), deployStarted, "{}"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.db.RecordMediationEscalation(context.Background(), mediationKey(h), deployStarted, "ws-old-escalation"); err != nil {
-		t.Fatal(err)
-	}
-	m := owedCheck(t, h)
-
-	// Act
-	h.o.adoptStanding(context.Background(), queueOf(t, h), m)
-
-	// Assert
-	got, found, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator)
-	if err != nil || !found || got != (wsm.StandingDeployCheck{Workspace: "ws-old-escalation", Briefed: true}) {
-		t.Fatalf("mediator = (%+v, %v, %v), want the escalation adopted, briefed", got, found, err)
-	}
-	if _, intake, _ := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingIntake); intake {
-		t.Fatal("the check's intake was adopted; the intake is retired")
-	}
-}
-
-func TestAdoptionKeepsAStandingWorkspaceTheQueueHasAlready(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	standingIn(t, h, wsm.StandingMediator, "ws-standing", false)
-	if _, err := h.db.EscalateMediation(context.Background(), mediationKey(h), deployStarted, "{}"); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.db.RecordMediationEscalation(context.Background(), mediationKey(h), deployStarted, "ws-old-escalation"); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	h.o.adoptStanding(context.Background(), queueOf(t, h), owedCheck(t, h))
-
-	// Assert
-	if got, _, _ := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator); got.Workspace != "ws-standing" {
-		t.Fatalf("mediator = %+v, want the one the queue had", got)
-	}
-}
-
-// oneOffEscalation records WS as an escalation made for the harness queue,
-// open or CLOSED.
-func oneOffEscalation(t *testing.T, h *harness, ws ids.WorkspaceID, closed bool) {
-	t.Helper()
-	h.db.mu.Lock()
-	h.db.workspaces[ws] = wsm.Workspace{ID: ws, Name: "deploy-escalation-" + string(ws), Repo: theRepository, Closed: closed}
-	h.db.mu.Unlock()
-	if err := h.db.RecordDeployEscalation(context.Background(), ws, mediationKey(h), deployStarted); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func TestEarlierEscalationsAreRetiredOnceTheStandingOneExists(t *testing.T) {
-	tests := []struct {
-		name        string
-		standing    bool
-		held        ids.WorkspaceID
-		wantRetired []ids.WorkspaceID
-	}{
-		{name: "an open earlier escalation is retired", standing: true, wantRetired: []ids.WorkspaceID{"ws-a"}},
-		{name: "the escalation holding the queue is kept", standing: true, held: "ws-a"},
-		{name: "nothing is retired before the standing one exists"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := checked(t)
-			owe(t, h)
-			oneOffEscalation(t, h, "ws-a", false)
-			oneOffEscalation(t, h, "ws-closed", true)
-			if tt.standing {
-				standingIn(t, h, wsm.StandingMediator, "ws-fixer", false)
-				oneOffEscalation(t, h, "ws-fixer", false)
-			}
-			m := &wsm.Mediation{Escalation: tt.held}
-
-			// Act
-			h.o.retireOneOffEscalations(context.Background(), queueOf(t, h), m)
-
-			// Assert
-			if !slices.Equal(h.checks.closed, tt.wantRetired) {
-				t.Fatalf("closed %v, want %v", h.checks.closed, tt.wantRetired)
-			}
-		})
-	}
-}
-
-func TestAnEarlierEscalationThatCannotBeRetiredIsRecorded(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	oneOffEscalation(t, h, "ws-a", false)
-	standingIn(t, h, wsm.StandingMediator, "ws-fixer", false)
-	h.checks.closeErr = errors.New("database is locked")
-
-	// Act
-	h.o.retireOneOffEscalations(context.Background(), queueOf(t, h), nil)
-
-	// Assert
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "an earlier escalation could not be retired"}); !ok {
-		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
-	}
-}
-
-func TestAnAdoptedRemediationLandsDirectlyAsTheFixer(t *testing.T) {
-	// Arrange: a check dispatched to a remediation made before the fixer.
-	h := checked(t)
-	owe(t, h)
-	// The check was told to an intake before the mediator stood.
-	if ok, err := h.db.RecordMediationIntake(context.Background(), mediationKey(h), deployStarted, "ws-old-intake"); err != nil || !ok {
-		t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
-	}
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-old-remedy", aFixerTurn); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	h.o.adoptStanding(context.Background(), queueOf(t, h), owedCheck(t, h))
-
-	// Assert
-	got, found, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator)
-	repo, lands, landErr := h.db.DeployEscalationOf(context.Background(), "ws-old-remedy")
-	if err != nil || !found || got.Workspace != "ws-old-remedy" || landErr != nil || !lands || repo != mediationKey(h) {
-		t.Fatalf("fixer (%+v, %v, %v), lands directly (%v, %v); want the remediation adopted, landing directly", got, found, err, lands, landErr)
-	}
-}
-
 func TestTheStandingFixerStaysOpenAfterItsFixDeploys(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
 	h.db.mu.Lock()
-	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, StandingDeployCheck: true}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, DeployMediator: true}
 	h.db.mu.Unlock()
 
 	// Act
@@ -542,7 +350,7 @@ func TestTheStandingFixerStaysOpenAfterItsFixDeploys(t *testing.T) {
 		t.Fatalf("closeRemediation = %v, closed %v; want the fixer left open", err, record.Closed)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish,
-		Message: "the landed fix deployed; the standing fixer stays open for the next brief"}); !ok {
+		Message: "the landed fix deployed; the deploy mediator stays open for the next brief"}); !ok {
 		t.Fatalf("records = %v, want the fixer kept open recorded", h.logs.Records())
 	}
 }
@@ -625,11 +433,11 @@ func TestAnEndingThatCannotBeRecordedIsAnsweredAndRecorded(t *testing.T) {
 	}
 }
 
-// fixerInSight records "ws-fixer" as the harness queue's standing fixer,
-// HIDDEN or in sight.
-func fixerInSight(t *testing.T, h *harness, hidden bool) {
+// mediatorInSight records "ws-fixer" as the harness queue's deploy
+// mediator, HIDDEN or in sight.
+func mediatorInSight(t *testing.T, h *harness, hidden bool) {
 	t.Helper()
-	standingIn(t, h, wsm.StandingMediator, "ws-fixer", false)
+	mediatorIn(t, h, "ws-fixer", false)
 	h.db.mu.Lock()
 	record := h.db.workspaces["ws-fixer"]
 	record.Hidden = hidden
@@ -637,7 +445,7 @@ func fixerInSight(t *testing.T, h *harness, hidden bool) {
 	h.db.mu.Unlock()
 }
 
-func TestTheFixerIsInSightOnlyWhileAtWorkHoldingItsQueue(t *testing.T) {
+func TestTheMediatorIsInSightOnlyWhileAtWorkHoldingItsQueue(t *testing.T) {
 	tests := []struct {
 		name       string
 		hidden     bool
@@ -645,43 +453,40 @@ func TestTheFixerIsInSightOnlyWhileAtWorkHoldingItsQueue(t *testing.T) {
 		wantShown  []ids.WorkspaceID
 		wantHidden []ids.WorkspaceID
 	}{
-		{name: "a hidden fixer a fix is dispatched to is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
+		{name: "a hidden mediator a fix is dispatched for is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 			}},
-		{name: "a fixer whose finish is under way is hidden", wantHidden: []ids.WorkspaceID{"ws-fixer"},
+		{name: "a mediator whose finish is under way is hidden", wantHidden: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 				if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
 					t.Fatal(err)
 				}
 			}},
-		{name: "a hidden fixer a check is escalated to is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
+		{name: "a hidden mediator whose check is escalated is shown", hidden: true, wantShown: []ids.WorkspaceID{"ws-fixer"},
 			arrange: func(t *testing.T, h *harness) {
 				if _, err := h.db.EscalateMediation(context.Background(), mediationKey(h), deployStarted, "{}"); err != nil {
 					t.Fatal(err)
 				}
-				if _, err := h.db.RecordMediationEscalation(context.Background(), mediationKey(h), deployStarted, "ws-fixer"); err != nil {
-					t.Fatal(err)
-				}
 			}},
-		{name: "a fixer in sight that no check holds the queue for is hidden", arrange: func(*testing.T, *harness) {}, wantHidden: []ids.WorkspaceID{"ws-fixer"}},
-		{name: "a hidden fixer no check holds the queue for is left hidden", hidden: true, arrange: func(*testing.T, *harness) {}},
+		{name: "a mediator in sight that no check holds the queue for is hidden", arrange: func(*testing.T, *harness) {}, wantHidden: []ids.WorkspaceID{"ws-fixer"}},
+		{name: "a hidden mediator no check holds the queue for is left hidden", hidden: true, arrange: func(*testing.T, *harness) {}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			fixerInSight(t, h, tt.hidden)
+			mediatorInSight(t, h, tt.hidden)
 			tt.arrange(t, h)
 
 			// Act
-			h.o.settleFixerSight(context.Background(), queueOf(t, h), owedCheck(t, h))
+			h.o.settleMediatorSight(context.Background(), queueOf(t, h), owedCheck(t, h))
 
 			// Assert
 			if !slices.Equal(h.checks.resumed, tt.wantShown) || !slices.Equal(h.checks.hidden, tt.wantHidden) {
@@ -691,12 +496,12 @@ func TestTheFixerIsInSightOnlyWhileAtWorkHoldingItsQueue(t *testing.T) {
 	}
 }
 
-func TestAReleasedEscalationsFixerIsHidden(t *testing.T) {
+func TestAReleasedEscalationsMediatorIsHidden(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
-	if err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
+	withMediator(t, h)
+	if err := decideTold(h, Decision{Kind: MediationEscalate, Summary: "yours"}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -705,6 +510,6 @@ func TestAReleasedEscalationsFixerIsHidden(t *testing.T) {
 
 	// Assert
 	if err != nil || !slices.Contains(h.checks.hidden, "ws-fixer") {
-		t.Fatalf("ReleaseEscalation = %v, hidden %v; want the released fixer hidden", err, h.checks.hidden)
+		t.Fatalf("ReleaseEscalation = %v, hidden %v; want the released mediator hidden", err, h.checks.hidden)
 	}
 }

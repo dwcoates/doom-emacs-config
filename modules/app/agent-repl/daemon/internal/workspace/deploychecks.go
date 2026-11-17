@@ -112,7 +112,7 @@ func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 // ended (merge.orchestrator.standFinishedBy awaits it). The fixer is in sight only while it is at work holding
 // its queue (owner ruling, 2026-11-17): from its finish on, its repository's
 // deploy check label is how it is reached. It stays open and warm
-// (wsm.Workspace.StandingDeployCheck), and its next brief shows it again.
+// (wsm.Workspace.DeployMediator), and its next brief shows it again.
 func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "StandByDeployCheck", ws)
 	if err != nil {
@@ -206,7 +206,7 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 	// check is passed over before any ownership is asked: a handover raises
 	// gates again on workspaces this daemon has not adopted yet (2026-11-17
 	// 13:24: five not_yet_adopted ERRORs, none a deploy check).
-	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.StandingDeployCheck {
+	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.DeployMediator {
 		return err
 	}
 	_, log, err := v.owned(ctx, "AnswerDeployCheckColdGate", ws)

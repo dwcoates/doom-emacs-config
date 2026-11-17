@@ -496,13 +496,10 @@ func (v VendorStart) String() string {
 type QueueMediation struct {
 	Repo  ids.RepoID
 	Stage MediationStage
-	// Intake is the chain's intake, empty while a chain's first deploy rolls
-	// out; Remediation the workspace at work, set at MediationFixing and
-	// MediationTesting; Escalation the escalation workspace the check waits
-	// on, set at MediationEscalated once it is made.
-	Intake      ids.WorkspaceID
-	Remediation ids.WorkspaceID
-	Escalation  ids.WorkspaceID
+	// Mediator is the repository's deploy mediator, the label's target at
+	// every stage; empty only while the repository's first check rolls out,
+	// before the mediator is made.
+	Mediator ids.WorkspaceID
 }
 
 // MediationStage is where a deploy check stands, as its label draws it.
@@ -512,18 +509,16 @@ const (
 	// MediationWaiting: a deploy rolls out, a landing's or a landed fix's
 	// (`HOT-LOADING ZETTEL`).
 	MediationWaiting MediationStage = iota + 1
-	// MediationChecking: the chain's intake checks it (`ASSESSING ZETTEL
-	// HEALTH`).
+	// MediationChecking: the mediator checks it (`ASSESSING ZETTEL HEALTH`).
 	MediationChecking
-	// MediationFixing: a remediation workspace fixes it, or what its own
-	// finish's gate failed on (`FIXING ZETTEL`).
+	// MediationFixing: the mediator fixes it, or what its own finish's gate
+	// failed on (`FIXING ZETTEL`).
 	MediationFixing
-	// MediationTesting: a remediation's or an escalation's finished fix runs
-	// its full gate and lands while its workspace stands by (`TESTING ZETTEL
-	// FIXES`). Remediation names that workspace.
+	// MediationTesting: the mediator's finished fix runs its full gate and
+	// lands while the mediator stands by (`TESTING ZETTEL FIXES`).
 	MediationTesting
 	// MediationEscalated: the check was escalated, and the queue waits on the
-	// user until the escalation's fix deploys and is approved or the user
-	// closes the escalation (`ZETTEL NEEDS YOU`). Escalation names it.
+	// user until the mediator's fix deploys and is approved or the user
+	// releases the hold (`ZETTEL NEEDS YOU`).
 	MediationEscalated
 )

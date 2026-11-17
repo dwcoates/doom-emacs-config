@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"agent-repld/internal/dlog"
@@ -22,7 +21,7 @@ import (
 //   - deploy_check_standing: each queue's workspace in each role, and whether
 //     it was briefed yet (its first brief states the role in full, every
 //     later one only the new check), indexed by workspace for every
-//     workspace read's StandingDeployCheck column.
+//     workspace read's DeployMediator column.
 //   - merge_queue_repos.deploy_quiet_checks: the checks in a row that ended
 //     with no dispatch and no escalation.
 //   - merge_queue_repos.deploy_compaction_armed: whether a dispatch or an
@@ -33,7 +32,8 @@ import (
 //     (owner ruling, 2026-11-17: a failed build or rollout is checked too).
 //
 // IT IS ADDITIVE: a new table and two defaulted columns the previous build
-// never names.
+// never names. Its table is RETIRED by layouts 168 and 169
+// (deployMediatorsDDL): the daemon knows only the deploy mediator.
 const deployStandingDDL = `
 CREATE TABLE deploy_check_standing (
   repo_key     TEXT NOT NULL,
@@ -48,67 +48,95 @@ ALTER TABLE merge_queue_repos ADD COLUMN deploy_compaction_armed INTEGER NOT NUL
 ALTER TABLE merge_queue_repos ADD COLUMN mediation_deploy_ending TEXT NOT NULL DEFAULT '';
 `
 
-// DeployCheckRoleName is one standing deploy check role as the store spells it.
-type DeployCheckRoleName string
+// deployMediatorsDDL is the layout-168 addition, THE RESTART OF THE DEPLOY
+// CHECKS (owner ruling, 2026-11-17): one deploy mediator per repository
+// checks every deploy, fixes what it dispatches and settles an escalation
+// with the user, and the daemon knows no other deploy check workspace. Every
+// check starts over as though the feature never ran:
+//
+//   - deploy_mediators: each queue's mediator, and whether it was briefed
+//     yet (its first brief states the role in full, every later one only the
+//     new check), indexed by workspace for every workspace read's
+//     DeployMediator column. It starts empty, so each queue's next check
+//     makes a fresh mediator; the retired deploy_check_standing, which
+//     named the intake and fixer workspaces, is dropped by layout 169.
+//   - deploy_mediator_problems: the problems the mediator took on, with no
+//     owner, since the mediator owns every one. It starts empty too; the
+//     retired deploy_problems is dropped by layout 169.
+//   - every check the queues owe is released, with the quiet run, the
+//     compaction arming and every remediation finish under way, so no check
+//     is carried into the new build. A bypass landing waits for every deploy
+//     check at work to end before it lands, so none is at work across this
+//     step.
+//
+// IT IS ADDITIVE: new tables and a defaulted column the previous build never
+// names, and a release the previous build reads as any check's release.
+const deployMediatorsDDL = `
+CREATE TABLE deploy_mediators (
+  repo_key     TEXT PRIMARY KEY CHECK (repo_key <> ''),
+  workspace_id TEXT NOT NULL CHECK (workspace_id <> ''),
+  briefed      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX deploy_mediators_by_workspace ON deploy_mediators(workspace_id);
+CREATE TABLE deploy_mediator_problems (
+  repo_key   TEXT NOT NULL CHECK (repo_key <> ''),
+  operation  TEXT NOT NULL CHECK (operation <> ''),
+  message    TEXT NOT NULL,
+  opened_at  INTEGER NOT NULL CHECK (opened_at > 0),
+  fixed_at   INTEGER,
+  findings   TEXT NOT NULL DEFAULT '',
+  fixes      INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (repo_key, operation, message)
+);
+ALTER TABLE merge_queue_repos ADD COLUMN mediation_escalation_told INTEGER NOT NULL DEFAULT 0;
+UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_version = '', mediation_turn = '',
+  mediation_resumed_owed_at = NULL, mediation_window = '', mediation_window_start = NULL, checked_through = NULL,
+  mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '',
+  mediation_dispatched = 0, mediation_dispatched_at = NULL, mediation_escalation = '', mediation_escalation_brief = '',
+  mediation_deploy_ending = '', mediation_fixer_turn = '', mediation_fixer_brief = '', mediation_fixer_origin = 0,
+  deploy_quiet_checks = 0, deploy_compaction_armed = 0;
+DELETE FROM deploy_remediation_finishes;
+`
 
-// The standing roles.
-const (
-	// StandingMediator checks every deploy, fixes what it dispatches and
-	// settles an escalation with the user (owner ruling, 2026-11-17: one
-	// deploy workspace). The store spells it "fixer", the role it played
-	// before it took the intake's checks too.
-	StandingMediator DeployCheckRoleName = "fixer"
-	// StandingIntake is RETIRED (owner ruling, 2026-11-17): the mediator
-	// checks every deploy. A queue that still records one has it retired
-	// (ForgetStandingDeployCheck) and its workspace closed.
-	StandingIntake DeployCheckRoleName = "intake"
-)
-
-// StandingDeployCheckRoles is every role the store keeps a row in, the
-// retired intake's included so its row can be read and forgotten.
-var StandingDeployCheckRoles = []DeployCheckRoleName{StandingMediator, StandingIntake}
+// retiredDeployChecksDDL is the layout-169 contract: the shapes of the
+// intake, fixer and escalation workspaces the deploy mediator replaced
+// (deployMediatorsDDL), which no build from layout 168 on reads.
+const retiredDeployChecksDDL = `
+DROP TABLE deploy_check_standing;
+DROP TABLE deploy_escalations;
+DROP TABLE deploy_problems;
+ALTER TABLE merge_queue_repos DROP COLUMN mediation_intake;
+ALTER TABLE merge_queue_repos DROP COLUMN mediation_remediation;
+ALTER TABLE merge_queue_repos DROP COLUMN mediation_escalation;
+`
 
 // QuietChecksBeforeCompaction is how many checks in a row must end with no
-// dispatch and no escalation before an armed queue's standing workspaces are
-// compacted (owner ruling, 2026-11-17: "a period of three consecutive merges").
+// dispatch and no escalation before an armed queue's mediator is compacted
+// (owner ruling, 2026-11-17: "a period of three consecutive merges").
 const QuietChecksBeforeCompaction = 3
 
-// StandingDeployCheck is a queue's workspace in one role.
-type StandingDeployCheck struct {
+// DeployMediator is a queue's deploy mediator.
+type DeployMediator struct {
 	Workspace WorkspaceID
-	// Briefed is whether the workspace was prompted in its role yet.
+	// Briefed is whether the mediator was prompted in its role yet.
 	Briefed bool
 }
 
-// validStandingRole refuses a role outside the two.
-func validStandingRole(role DeployCheckRoleName) error {
-	if slices.Contains(StandingDeployCheckRoles, role) {
-		return nil
-	}
-	return fmt.Errorf("wsm: %q is no standing deploy check role", role)
-}
-
-// StandingDeployCheckOf answers REPO's standing workspace in ROLE, and
-// whether it has one.
-func (s *store) StandingDeployCheckOf(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (StandingDeployCheck, bool, error) {
+// DeployMediatorOf answers REPO's deploy mediator, and whether it has one.
+func (s *store) DeployMediatorOf(ctx context.Context, repo RepoKey) (DeployMediator, bool, error) {
+	const op = "daemon.wsm.deploy_mediator_of"
 	repo, err := normalizeRepoKey(repo)
 	if err != nil {
-		s.log.Error("daemon.wsm.standing_deploy_check", "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return StandingDeployCheck{}, false, err
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
+		return DeployMediator{}, false, err
 	}
 	var (
-		out   StandingDeployCheck
+		out   DeployMediator
 		found bool
 	)
-	fields := dlog.Context{"repo": string(repo), "role": string(role)}
-	if err := validStandingRole(role); err != nil {
-		s.log.Error("daemon.wsm.standing_deploy_check", "refused a read of a role that is not a standing one", withError(fields, err))
-		return out, false, err
-	}
-	err = s.read(ctx, "daemon.wsm.standing_deploy_check", fields, func(ctx context.Context) error {
+	err = s.read(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context) error {
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT workspace_id, briefed FROM deploy_check_standing WHERE repo_key = ? AND role = ?`,
-			string(repo), string(role)).Scan(&out.Workspace, &out.Briefed)
+			`SELECT workspace_id, briefed FROM deploy_mediators WHERE repo_key = ?`, string(repo)).Scan(&out.Workspace, &out.Briefed)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -121,87 +149,78 @@ func (s *store) StandingDeployCheckOf(ctx context.Context, repo RepoKey, role De
 	return out, found, err
 }
 
-// RecordStandingDeployCheck makes WS REPO's standing workspace in ROLE,
-// unbriefed, replacing any workspace the role had.
-func (s *store) RecordStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName, ws WorkspaceID) error {
+// MediatorRepoOf answers the queue whose deploy mediator WS is, and whether
+// it is one.
+func (s *store) MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error) {
+	const op = "daemon.wsm.mediator_repo_of"
+	var (
+		repo  string
+		found bool
+	)
+	err := s.read(ctx, op, dlog.Context{"workspace": string(ws)}, func(ctx context.Context) error {
+		err := s.q(ctx).QueryRowContext(ctx, `SELECT repo_key FROM deploy_mediators WHERE workspace_id = ?`, string(ws)).Scan(&repo)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		found = true
+		return nil
+	})
+	return RepoKey(repo), found, err
+}
+
+// RecordDeployMediator makes WS REPO's deploy mediator, unbriefed, replacing
+// any mediator the queue had.
+func (s *store) RecordDeployMediator(ctx context.Context, repo RepoKey, ws WorkspaceID) error {
+	const op = "daemon.wsm.record_deploy_mediator"
 	repo, err := normalizeRepoKey(repo)
+	fields := dlog.Context{"repo": string(repo), "workspace": string(ws)}
 	if err != nil {
-		s.log.Error("daemon.wsm.record_standing_deploy_check", "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return err
-	}
-	const op = "daemon.wsm.record_standing_deploy_check"
-	fields := dlog.Context{"repo": string(repo), "role": string(role), "workspace": string(ws)}
-	if err := validStandingRole(role); err != nil {
-		s.log.Error(op, "refused a standing workspace in a role that is not a standing one", withError(fields, err))
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return err
 	}
 	if repo == "" || ws == "" {
-		err := errors.New("wsm: a standing deploy check names its queue and its workspace")
-		s.log.Error(op, "refused a standing deploy check that names no queue or workspace", withError(fields, err))
+		err := errors.New("wsm: a deploy mediator names its queue and its workspace")
+		s.log.Error(op, "refused a deploy mediator that names no queue or workspace", withError(fields, err))
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO deploy_check_standing (repo_key, role, workspace_id, briefed) VALUES (?, ?, ?, 0)
-			 ON CONFLICT(repo_key, role) DO UPDATE SET workspace_id = excluded.workspace_id, briefed = 0`,
-			string(repo), string(role), string(ws))
+			`INSERT INTO deploy_mediators (repo_key, workspace_id, briefed) VALUES (?, ?, 0)
+			 ON CONFLICT(repo_key) DO UPDATE SET workspace_id = excluded.workspace_id, briefed = 0`,
+			string(repo), string(ws))
 		return err
 	})
 }
 
-// ForgetStandingDeployCheck deletes REPO's standing workspace in ROLE,
-// answering whether it had one. The workspace itself is the caller's to
-// close.
-func (s *store) ForgetStandingDeployCheck(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (bool, error) {
-	const op = "daemon.wsm.forget_standing_deploy_check"
+// MarkMediatorBriefed records that REPO's deploy mediator was briefed in its
+// role. A queue with no mediator is refused: only a mediator the daemon
+// recorded is briefed.
+func (s *store) MarkMediatorBriefed(ctx context.Context, repo RepoKey) error {
+	const op = "daemon.wsm.mark_mediator_briefed"
 	repo, err := normalizeRepoKey(repo)
 	if err != nil {
 		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return false, err
-	}
-	fields := dlog.Context{"repo": string(repo), "role": string(role)}
-	if err := validStandingRole(role); err != nil {
-		s.log.Error(op, "refused to forget a role that is not a standing one", withError(fields, err))
-		return false, err
-	}
-	forgot := false
-	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `DELETE FROM deploy_check_standing WHERE repo_key = ? AND role = ?`, string(repo), string(role))
-		if err != nil {
-			return err
-		}
-		forgot, err = touchedRow(res)
-		return err
-	})
-	return forgot, err
-}
-
-// MarkStandingBriefed records that REPO's standing workspace in ROLE was
-// briefed in its role. A role with no standing workspace is refused: only a
-// workspace the daemon recorded is briefed.
-func (s *store) MarkStandingBriefed(ctx context.Context, repo RepoKey, role DeployCheckRoleName) error {
-	repo, err := normalizeRepoKey(repo)
-	if err != nil {
-		s.log.Error("daemon.wsm.mark_standing_briefed", "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
-	const op = "daemon.wsm.mark_standing_briefed"
-	return s.write(ctx, op, dlog.Context{"repo": string(repo), "role": string(role)}, func(ctx context.Context, tx *sql.Tx) error {
-		res, err := tx.ExecContext(ctx, `UPDATE deploy_check_standing SET briefed = 1 WHERE repo_key = ? AND role = ?`, string(repo), string(role))
+	return s.write(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE deploy_mediators SET briefed = 1 WHERE repo_key = ?`, string(repo))
 		if err != nil {
 			return err
 		}
 		if n, err := res.RowsAffected(); err != nil {
 			return err
 		} else if n != 1 {
-			return fmt.Errorf("wsm: queue %s has no standing %s workspace to mark briefed", repo, role)
+			return fmt.Errorf("wsm: queue %s has no deploy mediator to mark briefed", repo)
 		}
 		return nil
 	})
 }
 
 // NoteDeployCheckWork records that a check of REPO dispatched a fix or was
-// escalated: the quiet run starts over, and the standing workspaces owe a
+// escalated: the quiet run starts over, and the mediator owes a
 // compaction once a quiet run completes.
 func (s *store) NoteDeployCheckWork(ctx context.Context, repo RepoKey) error {
 	repo, err := normalizeRepoKey(repo)
@@ -218,7 +237,7 @@ func (s *store) NoteDeployCheckWork(ctx context.Context, repo RepoKey) error {
 
 // NoteQuietDeployCheck records that a check of REPO ended with no dispatch
 // and no escalation, answering whether the quiet run just completed on an
-// armed queue: the caller then compacts its standing workspaces, and the
+// armed queue: the caller then compacts its mediator, and the
 // queue is disarmed until a dispatch or an escalation arms it again.
 func (s *store) NoteQuietDeployCheck(ctx context.Context, repo RepoKey) (bool, error) {
 	repo, err := normalizeRepoKey(repo)

@@ -1879,18 +1879,18 @@ func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.
 		wantLabel  string
 		wantTarget string
 	}{
-		{name: "a chain's first deploy rolling out selects nothing", mediation: sidebar.QueueMediation{Stage: sidebar.MediationWaiting}, wantLabel: "waiting"},
-		{name: "a later deploy rolling out selects the chain's intake", mediation: sidebar.QueueMediation{Stage: sidebar.MediationWaiting, Intake: "w2"},
+		{name: "a repository's first deploy rolling out selects nothing", mediation: sidebar.QueueMediation{Stage: sidebar.MediationWaiting}, wantLabel: "waiting"},
+		{name: "a later deploy rolling out selects the mediator", mediation: sidebar.QueueMediation{Stage: sidebar.MediationWaiting, Mediator: "w2"},
 			wantLabel: "waiting", wantTarget: "w2"},
-		{name: "an assessed deploy selects the intake", mediation: sidebar.QueueMediation{Stage: sidebar.MediationChecking, Intake: "w2"},
+		{name: "an assessed deploy selects the mediator", mediation: sidebar.QueueMediation{Stage: sidebar.MediationChecking, Mediator: "w2"},
 			wantLabel: "checking", wantTarget: "w2"},
-		{name: "a fixed deploy selects the remediation", mediation: sidebar.QueueMediation{Stage: sidebar.MediationFixing, Intake: "w2", Remediation: "w3"},
-			wantLabel: "fixing", wantTarget: "w3"},
-		{name: "a fix under test selects the workspace standing by", mediation: sidebar.QueueMediation{Stage: sidebar.MediationTesting, Remediation: "w3"},
-			wantLabel: "testing", wantTarget: "w3"},
-		{name: "an escalated check selects its escalation", mediation: sidebar.QueueMediation{Stage: sidebar.MediationEscalated, Escalation: "w3"},
-			wantLabel: "escalated", wantTarget: "w3"},
-		{name: "an escalation still being made selects nothing", mediation: sidebar.QueueMediation{Stage: sidebar.MediationEscalated},
+		{name: "a fixed deploy selects the mediator", mediation: sidebar.QueueMediation{Stage: sidebar.MediationFixing, Mediator: "w2"},
+			wantLabel: "fixing", wantTarget: "w2"},
+		{name: "a fix under test selects the mediator standing by", mediation: sidebar.QueueMediation{Stage: sidebar.MediationTesting, Mediator: "w2"},
+			wantLabel: "testing", wantTarget: "w2"},
+		{name: "an escalated check selects the mediator", mediation: sidebar.QueueMediation{Stage: sidebar.MediationEscalated, Mediator: "w2"},
+			wantLabel: "escalated", wantTarget: "w2"},
+		{name: "an escalated check with no mediator recorded selects nothing", mediation: sidebar.QueueMediation{Stage: sidebar.MediationEscalated},
 			wantLabel: "escalated"},
 	}
 	for _, tc := range cases {
@@ -1902,7 +1902,7 @@ func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.
 			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &m})
 
 			// Act.
-			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "intake"), workspace("w3", "remedy")))
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "deploy-mediator")))
 
 			// Assert.
 			groups := queuedGroups(latest(t, r))
@@ -1930,7 +1930,7 @@ func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.
 	}
 }
 
-func TestADeployChecksWorkspaceTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
+func TestADeployMediatorTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
 	cases := []struct {
 		name      string
 		stage     sidebar.MediationStage
@@ -1943,7 +1943,7 @@ func TestADeployChecksWorkspaceTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			r, logs := newResolver(t)
-			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Repo: repo.ID, Stage: tc.stage, Intake: "gone"}})
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Repo: repo.ID, Stage: tc.stage, Mediator: "gone"}})
 
 			// Act.
 			r.SetRegistry(queueView(workspace("w1", "one")))
@@ -1954,7 +1954,7 @@ func TestADeployChecksWorkspaceTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
 				t.Fatalf("groups = %v, want a label drawn %v", groups, tc.wantLabel)
 			}
 			if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.sidebar.merge_queue",
-				Message: "the workspace at work on a deploy check is one the registry does not carry, so the label selects nothing"}); !ok {
+				Message: "the deploy mediator is one the registry does not carry, so the label selects nothing"}); !ok {
 				t.Fatalf("records = %v, want the unregistered workspace at ERROR", logs.Records())
 			}
 		})

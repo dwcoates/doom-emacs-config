@@ -37,7 +37,6 @@ func checked(t *testing.T) *harness {
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
 	h.briefs[BriefDeployIntake] = []string{"deploy_started", "ending", "window_started", "repo_dir", "version", "chain", "bound", "facts", "reuse"}
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
-	h.briefs[BriefDeployEscalationUpdate] = []string{"repo_dir", "deploy_started", "summary", "problems", "recurred", "persisting"}
 	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
@@ -52,24 +51,23 @@ func checked(t *testing.T) *harness {
 // to.
 func mediationKey(h *harness) wsm.RepoKey { return scopedKey(h) }
 
-// fixDeploysAt makes the deploy at AT the fix's: the chain's last
-// remediation's finish lands just before it, so its deploy replaces the
-// dispatched check (wsm.OweMediation ends a dispatch only at its fix's deploy).
+// fixDeploysAt makes the deploy at AT the fix's: the mediator's finish
+// lands just before it, so its deploy replaces the dispatched check
+// (wsm.OweMediation ends a dispatch only at its fix's deploy).
 func fixDeploysAt(t *testing.T, h *harness, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	m := owedCheck(t, h)
-	if m == nil || m.Remediation == "" {
-		t.Fatalf("check %+v, want a remediation whose fix deploys", m)
+	if m := owedCheck(t, h); m == nil || !m.Dispatched {
+		t.Fatalf("check %+v, want a dispatch whose fix deploys", m)
 	}
 	landed := at.Add(-time.Second)
-	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: m.Remediation, Repo: mediationKey(h), StartedAt: landed}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: landed}); err != nil {
 		t.Fatalf("BeginRemediationFinish: %v", err)
 	}
-	if _, err := h.db.AdvanceRemediationFinish(ctx, m.Remediation, wsm.RemediationGating, wsm.RemediationLanding, landed); err != nil {
+	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationLanding, landed); err != nil {
 		t.Fatalf("AdvanceRemediationFinish: %v", err)
 	}
-	if _, err := h.db.RecordRemediationLanded(ctx, m.Remediation, "abc123", nil, landed); err != nil {
+	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", "abc123", nil, landed); err != nil {
 		t.Fatalf("RecordRemediationLanded: %v", err)
 	}
 	oweAt(t, h, at)
@@ -97,25 +95,18 @@ func owedCheck(t *testing.T, h *harness) *wsm.Mediation {
 	return m
 }
 
-// withIntake records "ws-fixer", the queue's deploy mediator, as the
-// workspace the check owed at OWED is told to, registered as a workspace of
-// the harness's repository.
-func withIntake(t *testing.T, h *harness, owed time.Time) {
+// withMediator records ws-fixer as the harness queue's deploy mediator, when
+// it has none. A test decides on the owed check through decideTold, which
+// tells the check first.
+func withMediator(t *testing.T, h *harness) {
 	t.Helper()
 	h.db.mu.Lock()
-	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: mediatorName, Repo: theRepository}
 	h.db.mu.Unlock()
-	if _, standing, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator); err != nil || !standing {
-		if err := h.db.RecordStandingDeployCheck(context.Background(), mediationKey(h), wsm.StandingMediator, "ws-fixer"); err != nil {
+	if _, found, err := h.db.DeployMediatorOf(context.Background(), mediationKey(h)); err != nil || !found {
+		if err := h.db.RecordDeployMediator(context.Background(), mediationKey(h), "ws-fixer"); err != nil {
 			t.Fatal(err)
 		}
-		// A MADE MEDIATOR LANDS DIRECTLY, as makeMediator records it.
-		if err := h.db.RecordDeployEscalation(context.Background(), "ws-fixer", mediationKey(h), owed); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if ok, err := h.db.RecordMediationIntake(context.Background(), mediationKey(h), owed, "ws-fixer"); err != nil || !ok {
-		t.Fatalf("RecordMediationIntake = (%v, %v)", ok, err)
 	}
 }
 
@@ -274,7 +265,7 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	}
 }
 
-func TestAnIntakeThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
+func TestAMediatorThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -284,31 +275,12 @@ func TestAnIntakeThatCannotBeMadeLeavesTheQueueHeld(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if m := owedCheck(t, h); m == nil || m.Intake != "" {
-		t.Fatalf("check %+v, want it still owed with no intake", m)
+	if m := owedCheck(t, h); m == nil || m.Prompted() {
+		t.Fatalf("check %+v, want it still owed and untold", m)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the chain's intake could not be found or made; the queue stays held for it"}); !ok {
+		Message: "the deploy mediator could not be found or made; the queue stays held for it"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
-	}
-}
-
-func TestTheMediatorOfACheckThatEndedWaitsForTheNext(t *testing.T) {
-	// Arrange: the check is released while its mediator is found.
-	h := checked(t)
-	owe(t, h)
-	m := owedCheck(t, h)
-	if _, err := h.db.ReleaseMediation(context.Background(), mediationKey(h), deployStarted); err != nil {
-		t.Fatal(err)
-	}
-
-	// Act
-	ws, err := h.o.intakeOf(context.Background(), checkedQueue{registeredQueue: registeredQueue{key: mediationKey(h)}}, *m, dlog.Context{})
-
-	// Assert
-	standing, found, readErr := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingMediator)
-	if err != nil || ws != "" || len(h.checks.closed) != 0 || readErr != nil || !found || standing.Workspace != "ws-fixer" {
-		t.Fatalf("intakeOf = (%q, %v), closed %v, standing (%+v, %v); want none answered and the mediator kept open", ws, err, h.checks.closed, standing, found)
 	}
 }
 
@@ -366,8 +338,8 @@ func TestATurnThatDispatchedKeepsTheQueueHeld(t *testing.T) {
 
 	// Assert
 	m := owedCheck(t, h)
-	if m == nil || !m.Dispatched || m.Remediation != "ws-fixer" {
-		t.Fatalf("check %+v, want it dispatched to the remediation and still owed", m)
+	if m == nil || !m.Dispatched {
+		t.Fatalf("check %+v, want it dispatched and still owed", m)
 	}
 	if h.bannerRaised(desktopnotify.KindDeployMediated) || len(h.checks.closed) != 0 {
 		t.Fatalf("banner %v, closed %v; want neither while the fix is at work", h.bannerRaised(desktopnotify.KindDeployMediated), h.checks.closed)
@@ -378,9 +350,9 @@ func TestADispatchedCheckHasNoRound(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	told(t, h, deployStarted, "turn-told")
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 
@@ -400,7 +372,7 @@ func TestARoundWhoseTurnCannotBeAwaitedKeepsTheQueueHeld(t *testing.T) {
 	}{
 		{name: "an intake told in this round"},
 		{name: "an intake told before, its turn reattached", arrange: func(t *testing.T, h *harness) {
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			told(t, h, deployStarted, "turn-told")
 		}},
 	}
@@ -443,7 +415,7 @@ func TestACheckAlreadyToldIsReattachedToItsTurn(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			told(t, h, deployStarted, "turn-told")
 			if tt.delivered {
 				h.db.turns["ws-fixer"] = append(h.db.turns["ws-fixer"], wsm.Turn{ID: "turn-told", Workspace: "ws-fixer"})
@@ -485,21 +457,26 @@ func TestDecideMediation(t *testing.T) {
 		wantBanner bool
 		wantHeld   bool
 		escalated  bool
+		untold     bool
 	}{
 		{name: "an approval releases the deploy and ends the chain", from: "ws-fixer", decision: MediationApprove},
 		{name: "an escalation holds it and tells the user", from: "ws-fixer", decision: MediationEscalate, wantBanner: true, wantHeld: true},
 		{name: "a decision from any other workspace is refused", from: theWorkspace, decision: MediationApprove, wantArm: ArmNotMediator},
 		{name: "a decision on a deploy a fix was dispatched for is refused", from: "ws-fixer", dispatched: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
 		{name: "a decision on a deploy escalated already is refused", from: "ws-fixer", escalated: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
+		{name: "a decision on a deploy the mediator was not told of is refused", from: "ws-fixer", untold: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
+			if !tt.untold {
+				told(t, h, deployStarted, "turn-told")
+			}
 			if tt.dispatched {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -540,11 +517,11 @@ func TestADecisionFromARepositoryThatChecksNoMoreIsRefused(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	h.config.DeployChecks = nil
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"})
+	err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"})
 
 	// Assert
 	var refused *RefusalError
@@ -560,25 +537,25 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 		want    *sidebar.QueueMediation
 	}{
 		{name: "a queue owing nothing draws nothing"},
-		{name: "a chain's first deploy rolling out has no intake to select", arrange: func(t *testing.T, h *harness) { owe(t, h) },
+		{name: "a repository's first deploy rolling out has no mediator to select", arrange: func(t *testing.T, h *harness) { owe(t, h) },
 			want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting}},
-		{name: "a later deploy rolling out selects the chain's intake", arrange: func(t *testing.T, h *harness) {
+		{name: "a later deploy rolling out selects the mediator", arrange: func(t *testing.T, h *harness) {
 			owe(t, h)
-			withIntake(t, h, deployStarted)
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting, Intake: "ws-fixer"}},
-		{name: "an assessed deploy selects the intake", arrange: func(t *testing.T, h *harness) {
+			withMediator(t, h)
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationWaiting, Mediator: "ws-fixer"}},
+		{name: "an assessed deploy selects the mediator", arrange: func(t *testing.T, h *harness) {
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			told(t, h, deployStarted, "turn-1")
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationChecking, Intake: "ws-fixer"}},
-		{name: "a dispatched deploy selects the remediation", arrange: func(t *testing.T, h *harness) {
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationChecking, Mediator: "ws-fixer"}},
+		{name: "a dispatched deploy selects the mediator", arrange: func(t *testing.T, h *harness) {
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			told(t, h, deployStarted, "turn-1")
-			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
+			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 				t.Fatal(err)
 			}
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-fixer", Remediation: "ws-fixer"}},
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Mediator: "ws-fixer"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -599,26 +576,32 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 	}
 }
 
-func TestOwedFromRefusesAToldCheckWithNoWorkspaceAtWork(t *testing.T) {
+func TestOwedFromRefusesACheckPastItsRolloutWithNoMediator(t *testing.T) {
 	at := deployStarted
 	tests := []struct {
-		name    string
-		m       wsm.Mediation
-		want    *OwedMediation
-		wantErr bool
+		name     string
+		m        wsm.Mediation
+		mediator ids.WorkspaceID
+		want     *OwedMediation
+		wantErr  bool
 	}{
-		{name: "rolling out counts the chain's remediations", m: wsm.Mediation{OwedAt: at, ChainRedeploys: 2, Intake: "i"},
-			want: &OwedMediation{Repository: theRepository, Stage: CheckRollingOut, Intake: "i", InARow: 2}},
-		{name: "a told check with no intake is a broken store", m: wsm.Mediation{OwedAt: at, PromptedAt: &at}, wantErr: true},
-		{name: "a dispatch carried into a newer deploy's check is fixing with no intake",
-			m:    wsm.Mediation{OwedAt: at, ChainRedeploys: 2, Remediation: "r", Dispatched: true},
-			want: &OwedMediation{Repository: theRepository, Stage: CheckFixing, Remediation: "r", InARow: 2}},
-		{name: "a dispatched check with no remediation is a broken store", m: wsm.Mediation{OwedAt: at, PromptedAt: &at, Intake: "i", Dispatched: true}, wantErr: true},
+		{name: "rolling out counts the chain's remediations", m: wsm.Mediation{OwedAt: at, ChainRedeploys: 2}, mediator: "m",
+			want: &OwedMediation{Repository: theRepository, Stage: CheckRollingOut, Mediator: "m", InARow: 2}},
+		{name: "a repository's first deploy rolling out has no mediator", m: wsm.Mediation{OwedAt: at},
+			want: &OwedMediation{Repository: theRepository, Stage: CheckRollingOut}},
+		{name: "a told check is assessing", m: wsm.Mediation{OwedAt: at, PromptedAt: &at}, mediator: "m",
+			want: &OwedMediation{Repository: theRepository, Stage: CheckAssessing, Mediator: "m"}},
+		{name: "a dispatched check is fixing", m: wsm.Mediation{OwedAt: at, ChainRedeploys: 2, Dispatched: true}, mediator: "m",
+			want: &OwedMediation{Repository: theRepository, Stage: CheckFixing, Mediator: "m", InARow: 2}},
+		{name: "an escalated check is escalated", m: wsm.Mediation{OwedAt: at, EscalationBrief: "{}"}, mediator: "m",
+			want: &OwedMediation{Repository: theRepository, Stage: CheckEscalated, Mediator: "m"}},
+		{name: "a told check with no mediator is a broken store", m: wsm.Mediation{OwedAt: at, PromptedAt: &at}, wantErr: true},
+		{name: "a dispatched check with no mediator is a broken store", m: wsm.Mediation{OwedAt: at, Dispatched: true}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			got, err := owedFrom(theRepository, tt.m)
+			got, err := owedFrom(theRepository, tt.m, tt.mediator)
 
 			// Assert
 			if (err != nil) != tt.wantErr || fmt.Sprint(got) != fmt.Sprint(tt.want) {
@@ -699,7 +682,7 @@ func TestACheckNoIntakeDecidesIsReleased(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			tt.dropChecks(h)
 			checkedNow, err := h.o.checkedQueues(context.Background(), opMediation)
 			if err != nil {
@@ -724,13 +707,13 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
 		t.Fatal(err)
 	}
 
 	// Act
-	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "clean"})
+	err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"})
 
 	// Assert
 	finishes, readErr := h.db.RemediationFinishes(context.Background())
@@ -992,7 +975,7 @@ func TestAnIntakeWhoseEffortCannotBeSetIsNotTold(t *testing.T) {
 		t.Fatalf("submitted %d, want no brief and the check still owed", len(h.queue.submissions))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the chain's intake could not be found or made; the queue stays held for it"}); !ok {
+		Message: "the deploy mediator could not be found or made; the queue stays held for it"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }
@@ -1110,7 +1093,7 @@ func TestAResumedIntakesTurnIsReattachedWithItsResumingBrief(t *testing.T) {
 	// before the resuming turn reached its session.
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	told(t, h, deployStarted, "turn-told")
 	if ok, err := h.db.MarkMediationResumed(context.Background(), mediationKey(h), deployStarted, "turn-resumed"); err != nil || !ok {
 		t.Fatalf("MarkMediationResumed = (%v, %v)", ok, err)
@@ -1197,7 +1180,7 @@ func TestADeployThatChangedNothingIsReleasedUnchecked(t *testing.T) {
 			wantMessage: "the deploy changed nothing; its check is released unchecked and the queue advances"},
 		{name: "a check carrying an earlier check's chain", release: later,
 			arrange: func(t *testing.T, h *harness) {
-				withIntake(t, h, deployStarted)
+				withMediator(t, h)
 				oweAt(t, h, later)
 			},
 			wantMessage: "the deploy changed nothing, but its check carries an earlier chain; the chain's intake checks it"},
@@ -1272,7 +1255,7 @@ func TestReleaseCheckEndsTheChainOfOnlyACheckItReleased(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			m := *owedCheck(t, h)
 			m.OwedAt = tt.owed
 

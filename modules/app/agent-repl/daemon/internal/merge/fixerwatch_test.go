@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -55,7 +56,7 @@ func TestADispatchedFixerWhoseTurnEndedWithoutAFixIsEscalated(t *testing.T) {
 		t.Fatalf("check %+v, want it escalated to the fixer with why", owedCheck(t, h))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
-		Message: "the deploy remediation cannot land its fix; the chain is escalated to the user and the queue is held for them"}); !ok {
+		Message: "the deploy mediator cannot land its fix; the chain is escalated to the user and the queue is held for them"}); !ok {
 		t.Fatalf("records = %v, want the escalation recorded", h.logs.Records())
 	}
 }
@@ -72,7 +73,7 @@ func TestADispatchedFixerAtWorkHoldsTheQueue(t *testing.T) {
 	if len(h.awaitedTurns) != 0 {
 		t.Fatalf("awaited %v, want nothing waited on", h.awaitedTurns)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: "the fixer's turn is under way; its end runs the check's next round"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation, Message: "the mediator's fix turn is under way; its end runs the check's next round"}); !ok {
 		t.Fatalf("records = %v, want the turn under way recorded", h.logs.Records())
 	}
 }
@@ -97,7 +98,7 @@ func TestAFixersBriefThatNeverReachedTheQueueIsSubmittedAsItWas(t *testing.T) {
 	// submitted.
 	h := finishing(t)
 	brief := wsm.FixerTurn{ID: "turn-unsent", Brief: "the gate failed; fix it", Origin: int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR)}
-	if ok, err := h.db.RecordFixerTurn(context.Background(), mediationKey(h), deployStarted, "ws-fixer", brief); err != nil || !ok {
+	if ok, err := h.db.RecordFixerTurn(context.Background(), mediationKey(h), deployStarted, brief); err != nil || !ok {
 		t.Fatalf("RecordFixerTurn = (%v, %v)", ok, err)
 	}
 
@@ -112,36 +113,21 @@ func TestAFixersBriefThatNeverReachedTheQueueIsSubmittedAsItWas(t *testing.T) {
 	}
 }
 
-func TestADispatchAnEarlierBuildRecordedStandsOnTheFixersOpenTurns(t *testing.T) {
-	tests := []struct {
-		name          string
-		open          bool
-		wantEscalated bool
-	}{
-		{name: "an open turn holds the queue for the fixer", open: true},
-		{name: "no open turn is a fixer that stopped", wantEscalated: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := finishing(t)
-			if tt.open {
-				h.db.mu.Lock()
-				h.db.turns["ws-fixer"] = append(h.db.turns["ws-fixer"], wsm.Turn{ID: "turn-user", Workspace: "ws-fixer"})
-				h.db.mu.Unlock()
-			}
-			m := *owedCheck(t, h)
-			m.FixerTurn = wsm.FixerTurn{}
+func TestADispatchWithNoFixTurnIsABrokenStore(t *testing.T) {
+	// Arrange: a dispatch is only ever recorded with its turn, so a check
+	// read without one is an invariant violation.
+	h := finishing(t)
+	m := *owedCheck(t, h)
+	m.FixerTurn = wsm.FixerTurn{}
 
-			// Act
-			watch(t, h, m)
-
-			// Assert
-			if got := owedCheck(t, h).Escalated(); got != tt.wantEscalated {
-				t.Fatalf("escalated %v, want %v", got, tt.wantEscalated)
-			}
-		})
-	}
+	// Act
+	defer func() {
+		// Assert
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "dispatched with no fix turn recorded") {
+			t.Fatalf("recovered %v, want the missing fix turn to panic", r)
+		}
+	}()
+	watch(t, h, m)
 }
 
 func TestAFixerThatStoppedButCannotBeEscalatedHoldsTheQueueLoudly(t *testing.T) {
@@ -158,8 +144,8 @@ func TestAFixerThatStoppedButCannotBeEscalatedHoldsTheQueueLoudly(t *testing.T) 
 
 	// Assert
 	rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the fixer stopped without a fix but its check could not be escalated; the queue stays held"})
-	if !ok || rec.Context["error"] != "database is locked" || rec.Context["remediation"] != "ws-fixer" {
+		Message: "the mediator stopped without a fix but its check could not be escalated; the queue stays held"})
+	if !ok || rec.Context["error"] != "database is locked" || rec.Context["mediator"] != "ws-fixer" {
 		t.Fatalf("records = %v, want the failed escalation recorded with its cause", h.logs.Records())
 	}
 }
@@ -193,23 +179,28 @@ func TestFixerTurnEndedSettlesOnlyADispatchedFixersCheck(t *testing.T) {
 func TestBriefFixer(t *testing.T) {
 	tests := []struct {
 		name       string
-		ws         ids.WorkspaceID
+		escalated  bool
 		wantRecord bool
 	}{
-		{name: "the dispatched fixer's brief is recorded on its check before it is submitted", ws: "ws-fixer", wantRecord: true},
-		{name: "a fixer no dispatch is out to is briefed and not watched", ws: "ws-other"},
+		{name: "the mediator's brief on a dispatched check is recorded before it is submitted", wantRecord: true},
+		{name: "a brief while no fix is dispatched is submitted and not watched", escalated: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			h := finishing(t)
+			if tt.escalated {
+				if _, err := h.db.EscalateMediation(context.Background(), mediationKey(h), deployStarted, "{}"); err != nil {
+					t.Fatal(err)
+				}
+			}
 
 			// Act
-			err := h.o.briefFixer(context.Background(), mediationKey(h), tt.ws, "the gate failed; fix it", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, dlog.Context{})
+			err := h.o.briefFixer(context.Background(), mediationKey(h), "ws-fixer", "the gate failed; fix it", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, dlog.Context{})
 
 			// Assert
 			subs := h.queue.submissions
-			if err != nil || len(subs) == 0 || subs[0].WS != tt.ws || submittedText(subs[0]) != "the gate failed; fix it" {
+			if err != nil || len(subs) == 0 || subs[0].WS != "ws-fixer" || submittedText(subs[0]) != "the gate failed; fix it" {
 				t.Fatalf("briefFixer = %v, submitted %+v; want the brief submitted", err, subs)
 			}
 			recorded := owedCheck(t, h).FixerTurn
@@ -234,7 +225,7 @@ func TestBriefFixerThatCannotReadItsCheckSubmitsNothing(t *testing.T) {
 	if err == nil || len(h.queue.submissions) != 0 {
 		t.Fatalf("briefFixer = %v, submitted %d; want the failure answered and nothing submitted", err, len(h.queue.submissions))
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "could not read the check the fixer's brief is for; it is not briefed"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "could not read the check the mediator's brief is for; it is not briefed"}); !ok {
 		t.Fatalf("records = %v, want the failure recorded", h.logs.Records())
 	}
 }

@@ -1070,8 +1070,13 @@ type MergeQueueStatusAdvanceMediating struct {
 	// How many remediations the chain has deployed in a row so far, 0 for a
 	// chain's first deploy.
 	RemediationsInARow uint32 `protobuf:"varint,6,opt,name=remediations_in_a_row,json=remediationsInARow,proto3" json:"remediations_in_a_row,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	// The repository's deploy mediator: the one workspace that checks every
+	// deploy, fixes what it dispatches and settles an escalation with the
+	// user, whatever the stage. UNSET only while the repository's first check
+	// rolls out, before the mediator is made for it.
+	DeployMediator *v1.WorkspaceRef `protobuf:"bytes,8,opt,name=deploy_mediator,json=deployMediator,proto3,oneof" json:"deploy_mediator,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *MergeQueueStatusAdvanceMediating) Reset() {
@@ -1154,6 +1159,13 @@ func (x *MergeQueueStatusAdvanceMediating) GetRemediationsInARow() uint32 {
 	return 0
 }
 
+func (x *MergeQueueStatusAdvanceMediating) GetDeployMediator() *v1.WorkspaceRef {
+	if x != nil {
+		return x.DeployMediator
+	}
+	return nil
+}
+
 type isMergeQueueStatusAdvanceMediating_Stage interface {
 	isMergeQueueStatusAdvanceMediating_Stage()
 }
@@ -1164,20 +1176,20 @@ type MergeQueueStatusAdvanceMediating_RollingOut struct {
 }
 
 type MergeQueueStatusAdvanceMediating_Assessing struct {
-	// The chain's intake is checking the deploy.
+	// The deploy mediator is checking the deploy.
 	Assessing *MergeQueueStatusAdvanceMediatingAssessing `protobuf:"bytes,4,opt,name=assessing,proto3,oneof"`
 }
 
 type MergeQueueStatusAdvanceMediating_Fixing struct {
-	// A remediation workspace is fixing what the intake dispatched; no new
+	// The deploy mediator is fixing what it dispatched to itself; no new
 	// speculative work starts in the queue until its fix lands.
 	Fixing *MergeQueueStatusAdvanceMediatingFixing `protobuf:"bytes,5,opt,name=fixing,proto3,oneof"`
 }
 
 type MergeQueueStatusAdvanceMediating_Escalated struct {
 	// The check was escalated, and the queue waits on the user until the
-	// escalation's fix deploys and is approved or the user closes the
-	// escalation (owner ruling, 2026-11-16); no intake decides it.
+	// mediator's fix deploys and is approved or the user releases the hold;
+	// no check of a later deploy decides it.
 	Escalated *MergeQueueStatusAdvanceMediatingEscalated `protobuf:"bytes,7,opt,name=escalated,proto3,oneof"`
 }
 
@@ -1189,13 +1201,9 @@ func (*MergeQueueStatusAdvanceMediating_Fixing) isMergeQueueStatusAdvanceMediati
 
 func (*MergeQueueStatusAdvanceMediating_Escalated) isMergeQueueStatusAdvanceMediating_Stage() {}
 
-// Rolling out.
+// Rolling out: the deploy has not finished, so the mediator is not told yet.
 type MergeQueueStatusAdvanceMediatingRollingOut struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The chain's intake, which checks the deploy once it has rolled out.
-	// UNSET for a chain's first deploy, whose intake is made when the rollout
-	// ends.
-	Intake        *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=intake,proto3,oneof" json:"intake,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1230,18 +1238,9 @@ func (*MergeQueueStatusAdvanceMediatingRollingOut) Descriptor() ([]byte, []int) 
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{18}
 }
 
-func (x *MergeQueueStatusAdvanceMediatingRollingOut) GetIntake() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Intake
-	}
-	return nil
-}
-
-// Assessing.
+// Assessing: the mediator was told of the deploy and has not decided it.
 type MergeQueueStatusAdvanceMediatingAssessing struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. The chain's intake, a hidden workspace.
-	Intake        *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=intake,proto3" json:"intake,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1276,19 +1275,10 @@ func (*MergeQueueStatusAdvanceMediatingAssessing) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{19}
 }
 
-func (x *MergeQueueStatusAdvanceMediatingAssessing) GetIntake() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Intake
-	}
-	return nil
-}
-
-// Escalated.
+// Escalated: the mediator put the deploy before the user, in sight and in
+// remote control.
 type MergeQueueStatusAdvanceMediatingEscalated struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// The escalation workspace the user settles the check in. UNSET only
-	// while it is still being made.
-	Escalation    *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=escalation,proto3,oneof" json:"escalation,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1323,24 +1313,10 @@ func (*MergeQueueStatusAdvanceMediatingEscalated) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{20}
 }
 
-func (x *MergeQueueStatusAdvanceMediatingEscalated) GetEscalation() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Escalation
-	}
-	return nil
-}
-
-// Fixing.
+// Fixing: the mediator dispatched the deploy's problems to itself and is
+// fixing them, in sight in its repository's section.
 type MergeQueueStatusAdvanceMediatingFixing struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED. The remediation workspace doing the fix, visible in the
-	// sidebar like any workspace.
-	Remediation *v1.WorkspaceRef `protobuf:"bytes,1,opt,name=remediation,proto3" json:"remediation,omitempty"`
-	// The intake that dispatched the fix. UNSET once a newer deploy carried
-	// the dispatch on: an intake decides once, so the newer deploy's check,
-	// and the fix's own, are told to a fresh intake (owner ruling,
-	// 2026-11-16).
-	Intake        *v1.WorkspaceRef `protobuf:"bytes,2,opt,name=intake,proto3,oneof" json:"intake,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1373,20 +1349,6 @@ func (x *MergeQueueStatusAdvanceMediatingFixing) ProtoReflect() protoreflect.Mes
 // Deprecated: Use MergeQueueStatusAdvanceMediatingFixing.ProtoReflect.Descriptor instead.
 func (*MergeQueueStatusAdvanceMediatingFixing) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_merge_queue_status_proto_rawDescGZIP(), []int{21}
-}
-
-func (x *MergeQueueStatusAdvanceMediatingFixing) GetRemediation() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Remediation
-	}
-	return nil
-}
-
-func (x *MergeQueueStatusAdvanceMediatingFixing) GetIntake() *v1.WorkspaceRef {
-	if x != nil {
-		return x.Intake
-	}
-	return nil
 }
 
 // One merge in line.
@@ -2141,29 +2103,22 @@ const file_agentrepl_v1_merge_queue_status_proto_rawDesc = "" +
 	"\tmediating\x18\x03 \x01(\v2..agentrepl.v1.MergeQueueStatusAdvanceMediatingH\x00R\tmediatingB\a\n" +
 	"\x05state\" \n" +
 	"\x1eMergeQueueStatusAdvanceRunning\"\x1f\n" +
-	"\x1dMergeQueueStatusAdvancePaused\"\xd9\x03\n" +
+	"\x1dMergeQueueStatusAdvancePaused\"\xb7\x04\n" +
 	" MergeQueueStatusAdvanceMediating\x12[\n" +
 	"\vrolling_out\x18\x03 \x01(\v28.agentrepl.v1.MergeQueueStatusAdvanceMediatingRollingOutH\x00R\n" +
 	"rollingOut\x12W\n" +
 	"\tassessing\x18\x04 \x01(\v27.agentrepl.v1.MergeQueueStatusAdvanceMediatingAssessingH\x00R\tassessing\x12N\n" +
 	"\x06fixing\x18\x05 \x01(\v24.agentrepl.v1.MergeQueueStatusAdvanceMediatingFixingH\x00R\x06fixing\x12W\n" +
 	"\tescalated\x18\a \x01(\v27.agentrepl.v1.MergeQueueStatusAdvanceMediatingEscalatedH\x00R\tescalated\x121\n" +
-	"\x15remediations_in_a_row\x18\x06 \x01(\rR\x12remediationsInARowB\a\n" +
-	"\x05stageJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\bmediatorR\x04name\"p\n" +
-	"*MergeQueueStatusAdvanceMediatingRollingOut\x127\n" +
-	"\x06intake\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\x06intake\x88\x01\x01B\t\n" +
-	"\a_intake\"_\n" +
-	")MergeQueueStatusAdvanceMediatingAssessing\x122\n" +
-	"\x06intake\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x06intake\"{\n" +
-	")MergeQueueStatusAdvanceMediatingEscalated\x12?\n" +
-	"\n" +
-	"escalation\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\n" +
-	"escalation\x88\x01\x01B\r\n" +
-	"\v_escalation\"\xaa\x01\n" +
-	"&MergeQueueStatusAdvanceMediatingFixing\x12<\n" +
-	"\vremediation\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\vremediation\x127\n" +
-	"\x06intake\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\x06intake\x88\x01\x01B\t\n" +
-	"\a_intake\"\xa2\x02\n" +
+	"\x15remediations_in_a_row\x18\x06 \x01(\rR\x12remediationsInARow\x12H\n" +
+	"\x0fdeploy_mediator\x18\b \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x01R\x0edeployMediator\x88\x01\x01B\a\n" +
+	"\x05stageB\x12\n" +
+	"\x10_deploy_mediatorJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\bmediatorR\x04name\":\n" +
+	"*MergeQueueStatusAdvanceMediatingRollingOutJ\x04\b\x01\x10\x02R\x06intake\"9\n" +
+	")MergeQueueStatusAdvanceMediatingAssessingJ\x04\b\x01\x10\x02R\x06intake\"=\n" +
+	")MergeQueueStatusAdvanceMediatingEscalatedJ\x04\b\x01\x10\x02R\n" +
+	"escalation\"I\n" +
+	"&MergeQueueStatusAdvanceMediatingFixingJ\x04\b\x01\x10\x02J\x04\b\x02\x10\x03R\vremediationR\x06intake\"\xa2\x02\n" +
 	"\x15MergeQueueStatusEntry\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -2275,29 +2230,25 @@ var file_agentrepl_v1_merge_queue_status_proto_depIdxs = []int32{
 	19, // 22: agentrepl.v1.MergeQueueStatusAdvanceMediating.assessing:type_name -> agentrepl.v1.MergeQueueStatusAdvanceMediatingAssessing
 	21, // 23: agentrepl.v1.MergeQueueStatusAdvanceMediating.fixing:type_name -> agentrepl.v1.MergeQueueStatusAdvanceMediatingFixing
 	20, // 24: agentrepl.v1.MergeQueueStatusAdvanceMediating.escalated:type_name -> agentrepl.v1.MergeQueueStatusAdvanceMediatingEscalated
-	34, // 25: agentrepl.v1.MergeQueueStatusAdvanceMediatingRollingOut.intake:type_name -> workspace.v1.WorkspaceRef
-	34, // 26: agentrepl.v1.MergeQueueStatusAdvanceMediatingAssessing.intake:type_name -> workspace.v1.WorkspaceRef
-	34, // 27: agentrepl.v1.MergeQueueStatusAdvanceMediatingEscalated.escalation:type_name -> workspace.v1.WorkspaceRef
-	34, // 28: agentrepl.v1.MergeQueueStatusAdvanceMediatingFixing.remediation:type_name -> workspace.v1.WorkspaceRef
-	34, // 29: agentrepl.v1.MergeQueueStatusAdvanceMediatingFixing.intake:type_name -> workspace.v1.WorkspaceRef
-	34, // 30: agentrepl.v1.MergeQueueStatusEntry.workspace:type_name -> workspace.v1.WorkspaceRef
-	23, // 31: agentrepl.v1.MergeQueueStatusEntry.kind:type_name -> agentrepl.v1.MergeQueueStatusEntryKind
-	26, // 32: agentrepl.v1.MergeQueueStatusEntry.stage:type_name -> agentrepl.v1.MergeQueueStatusEntryStage
-	24, // 33: agentrepl.v1.MergeQueueStatusEntryKind.own_branch:type_name -> agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
-	25, // 34: agentrepl.v1.MergeQueueStatusEntryKind.async_merge:type_name -> agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
-	34, // 35: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge.requester:type_name -> workspace.v1.WorkspaceRef
-	31, // 36: agentrepl.v1.MergeQueueStatusEntryStage.waiting:type_name -> agentrepl.v1.MergeQueueStatusEntryStageWaiting
-	32, // 37: agentrepl.v1.MergeQueueStatusEntryStage.running:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRunning
-	27, // 38: agentrepl.v1.MergeQueueStatusEntryStage.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
-	28, // 39: agentrepl.v1.MergeQueueStatusEntryStage.resolving_conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
-	29, // 40: agentrepl.v1.MergeQueueStatusEntryStage.awaiting_repair:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair
-	30, // 41: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair.slot:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot
-	27, // 42: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
-	43, // [43:43] is the sub-list for method output_type
-	43, // [43:43] is the sub-list for method input_type
-	43, // [43:43] is the sub-list for extension type_name
-	43, // [43:43] is the sub-list for extension extendee
-	0,  // [0:43] is the sub-list for field type_name
+	34, // 25: agentrepl.v1.MergeQueueStatusAdvanceMediating.deploy_mediator:type_name -> workspace.v1.WorkspaceRef
+	34, // 26: agentrepl.v1.MergeQueueStatusEntry.workspace:type_name -> workspace.v1.WorkspaceRef
+	23, // 27: agentrepl.v1.MergeQueueStatusEntry.kind:type_name -> agentrepl.v1.MergeQueueStatusEntryKind
+	26, // 28: agentrepl.v1.MergeQueueStatusEntry.stage:type_name -> agentrepl.v1.MergeQueueStatusEntryStage
+	24, // 29: agentrepl.v1.MergeQueueStatusEntryKind.own_branch:type_name -> agentrepl.v1.MergeQueueStatusEntryKindOwnBranch
+	25, // 30: agentrepl.v1.MergeQueueStatusEntryKind.async_merge:type_name -> agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge
+	34, // 31: agentrepl.v1.MergeQueueStatusEntryKindAsyncMerge.requester:type_name -> workspace.v1.WorkspaceRef
+	31, // 32: agentrepl.v1.MergeQueueStatusEntryStage.waiting:type_name -> agentrepl.v1.MergeQueueStatusEntryStageWaiting
+	32, // 33: agentrepl.v1.MergeQueueStatusEntryStage.running:type_name -> agentrepl.v1.MergeQueueStatusEntryStageRunning
+	27, // 34: agentrepl.v1.MergeQueueStatusEntryStage.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
+	28, // 35: agentrepl.v1.MergeQueueStatusEntryStage.resolving_conflicts:type_name -> agentrepl.v1.MergeQueueStatusEntryStageResolvingConflicts
+	29, // 36: agentrepl.v1.MergeQueueStatusEntryStage.awaiting_repair:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair
+	30, // 37: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepair.slot:type_name -> agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot
+	27, // 38: agentrepl.v1.MergeQueueStatusEntryStageAwaitingRepairSlot.fixing_tests:type_name -> agentrepl.v1.MergeQueueStatusEntryStageFixingTests
+	39, // [39:39] is the sub-list for method output_type
+	39, // [39:39] is the sub-list for method input_type
+	39, // [39:39] is the sub-list for extension type_name
+	39, // [39:39] is the sub-list for extension extendee
+	0,  // [0:39] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_merge_queue_status_proto_init() }
@@ -2329,9 +2280,6 @@ func file_agentrepl_v1_merge_queue_status_proto_init() {
 		(*MergeQueueStatusAdvanceMediating_Fixing)(nil),
 		(*MergeQueueStatusAdvanceMediating_Escalated)(nil),
 	}
-	file_agentrepl_v1_merge_queue_status_proto_msgTypes[18].OneofWrappers = []any{}
-	file_agentrepl_v1_merge_queue_status_proto_msgTypes[20].OneofWrappers = []any{}
-	file_agentrepl_v1_merge_queue_status_proto_msgTypes[21].OneofWrappers = []any{}
 	file_agentrepl_v1_merge_queue_status_proto_msgTypes[23].OneofWrappers = []any{
 		(*MergeQueueStatusEntryKind_OwnBranch)(nil),
 		(*MergeQueueStatusEntryKind_AsyncMerge)(nil),

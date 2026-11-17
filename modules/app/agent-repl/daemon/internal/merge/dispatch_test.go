@@ -47,24 +47,24 @@ func withRemediation(t *testing.T, h *harness) {
 	h.db.mu.Lock()
 	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, Closed: true}
 	h.db.mu.Unlock()
-	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), wsm.StandingMediator, "ws-fixer"); err != nil {
+	if err := h.db.RecordDeployMediator(ctx, mediationKey(h), "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), wsm.StandingMediator); err != nil {
+	if err := h.db.MarkMediatorBriefed(ctx, mediationKey(h)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
-	withIntake(t, h, deployStarted.Add(time.Minute))
+	withMediator(t, h)
 }
 
 func TestADispatchIsTheMediatorsOwnFixOfItsTurnAndShowsIt(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 
 	// Act
 	err := dispatched(h, Decision{})
@@ -72,7 +72,7 @@ func TestADispatchIsTheMediatorsOwnFixOfItsTurnAndShowsIt(t *testing.T) {
 	// Assert: dispatched to the mediator itself, its told turn the one the
 	// check waits on, and nothing new made or briefed.
 	m := owedCheck(t, h)
-	if err != nil || m == nil || !m.Dispatched || m.Remediation != "ws-fixer" || m.LastDispatchedAt == nil {
+	if err != nil || m == nil || !m.Dispatched || m.LastDispatchedAt == nil {
 		t.Fatalf("dispatch = %v, check %+v; want it dispatched to the mediator", err, m)
 	}
 	if m.FixerTurn.ID != "turn-told" || m.FixerTurn.Origin != int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION) {
@@ -94,7 +94,7 @@ func TestALaterDispatchEndsTheEarlierRemediationRedispatched(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	withRemediation(t, h)
 
 	// Act
@@ -120,12 +120,12 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 			arrange: func(t *testing.T, h *harness) {
 				for i := 1; i <= theBound; i++ {
 					at := deployStarted.Add(time.Duration(i-1) * time.Minute)
-					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, "ws-fixer", aFixerTurn); err != nil {
+					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, aFixerTurn); err != nil {
 						t.Fatal(err)
 					}
 					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
 				}
-				withIntake(t, h, deployStarted.Add(time.Duration(theBound)*time.Minute))
+				withMediator(t, h)
 			}},
 	}
 	for _, tt := range tests {
@@ -133,7 +133,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			if tt.arrange != nil {
 				tt.arrange(t, h)
 			}
@@ -175,7 +175,7 @@ func TestADispatchThatCannotBeMadeLeavesTheQueueHeldForTheMediator(t *testing.T)
 			// Arrange
 			h := checked(t)
 			owe(t, h)
-			withIntake(t, h, deployStarted)
+			withMediator(t, h)
 			tt.arrange(t, h)
 
 			// Act
@@ -199,7 +199,7 @@ func TestADispatchWhoseMediatorCannotBeShownStandsAndIsRecorded(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
-	withIntake(t, h, deployStarted)
+	withMediator(t, h)
 	h.checks.resumeErr = errors.New("parent hidden")
 
 	// Act

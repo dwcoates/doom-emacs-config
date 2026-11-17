@@ -154,48 +154,46 @@ message MergeQueueStatusAdvanceMediating {
   oneof stage {
     // The deploy is still rolling out, so nobody is checking it yet.
     MergeQueueStatusAdvanceMediatingRollingOut rolling_out = 3;
-    // The chain's intake is checking the deploy.
+    // The deploy mediator is checking the deploy.
     MergeQueueStatusAdvanceMediatingAssessing assessing = 4;
-    // A remediation workspace is fixing what the intake dispatched; no new
+    // The deploy mediator is fixing what it dispatched to itself; no new
     // speculative work starts in the queue until its fix lands.
     MergeQueueStatusAdvanceMediatingFixing fixing = 5;
     // The check was escalated, and the queue waits on the user until the
-    // escalation's fix deploys and is approved or the user closes the
-    // escalation (owner ruling, 2026-11-16); no intake decides it.
+    // mediator's fix deploys and is approved or the user releases the hold;
+    // no check of a later deploy decides it.
     MergeQueueStatusAdvanceMediatingEscalated escalated = 7;
   }
   // How many remediations the chain has deployed in a row so far, 0 for a
   // chain's first deploy.
   uint32 remediations_in_a_row = 6;
+  // The repository's deploy mediator: the one workspace that checks every
+  // deploy, fixes what it dispatches and settles an escalation with the
+  // user, whatever the stage. UNSET only while the repository's first check
+  // rolls out, before the mediator is made for it.
+  optional workspace.v1.WorkspaceRef deploy_mediator = 8;
 }
-// Rolling out.
+// Rolling out: the deploy has not finished, so the mediator is not told yet.
 message MergeQueueStatusAdvanceMediatingRollingOut {
-  // The chain's intake, which checks the deploy once it has rolled out.
-  // UNSET for a chain's first deploy, whose intake is made when the rollout
-  // ends.
-  optional workspace.v1.WorkspaceRef intake = 1;
+  reserved 1;
+  reserved "intake";
 }
-// Assessing.
+// Assessing: the mediator was told of the deploy and has not decided it.
 message MergeQueueStatusAdvanceMediatingAssessing {
-  // REQUIRED. The chain's intake, a hidden workspace.
-  workspace.v1.WorkspaceRef intake = 1;
+  reserved 1;
+  reserved "intake";
 }
-// Escalated.
+// Escalated: the mediator put the deploy before the user, in sight and in
+// remote control.
 message MergeQueueStatusAdvanceMediatingEscalated {
-  // The escalation workspace the user settles the check in. UNSET only
-  // while it is still being made.
-  optional workspace.v1.WorkspaceRef escalation = 1;
+  reserved 1;
+  reserved "escalation";
 }
-// Fixing.
+// Fixing: the mediator dispatched the deploy's problems to itself and is
+// fixing them, in sight in its repository's section.
 message MergeQueueStatusAdvanceMediatingFixing {
-  // REQUIRED. The remediation workspace doing the fix, visible in the
-  // sidebar like any workspace.
-  workspace.v1.WorkspaceRef remediation = 1;
-  // The intake that dispatched the fix. UNSET once a newer deploy carried
-  // the dispatch on: an intake decides once, so the newer deploy's check,
-  // and the fix's own, are told to a fresh intake (owner ruling,
-  // 2026-11-16).
-  optional workspace.v1.WorkspaceRef intake = 2;
+  reserved 1, 2;
+  reserved "remediation", "intake";
 }
 
 // One merge in line.

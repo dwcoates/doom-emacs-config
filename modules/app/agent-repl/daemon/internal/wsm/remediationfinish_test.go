@@ -300,50 +300,6 @@ func TestAChainsEndKeepsADeployEscalationsFinish(t *testing.T) {
 	}
 }
 
-func TestADeployEscalationIsRecordedAndRead(t *testing.T) {
-	tests := []struct {
-		name      string
-		record    bool
-		wantFound bool
-	}{
-		{name: "a recorded escalation", record: true, wantFound: true},
-		{name: "any other workspace"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			repo := RepoKey(t.TempDir())
-			if tt.record {
-				if err := s.RecordDeployEscalation(context.Background(), "escalation", repo, instant); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			// Act
-			got, found, err := s.DeployEscalationOf(context.Background(), "escalation")
-
-			// Assert
-			if err != nil || found != tt.wantFound || (found && got != repo) {
-				t.Fatalf("DeployEscalationOf = (%q, %v, %v), want found %v", got, found, err, tt.wantFound)
-			}
-		})
-	}
-}
-
-func TestARecordOfADeployEscalationNamingNothingIsRefused(t *testing.T) {
-	// Arrange
-	s, log := testStore(t)
-
-	// Act
-	err := s.RecordDeployEscalation(context.Background(), "", "", instant)
-
-	// Assert
-	if err == nil || !loggedOperation(log, "daemon.wsm.record_deploy_escalation", "error") {
-		t.Fatalf("RecordDeployEscalation = %v, want a refusal recorded at ERROR: %v", err, log.Records())
-	}
-}
-
 func TestAPassedRemediationGateRecordsTheCommitItPassedOn(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
@@ -457,28 +413,20 @@ func TestARebegunFinishTakesTheKindOfItsNewWork(t *testing.T) {
 }
 
 func TestTheBackfillMarksAnEarlierEscalationsFinish(t *testing.T) {
-	// Arrange: two finishes from before the column, one of an escalation.
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-	for _, ws := range []WorkspaceID{"remedy", "escalation"} {
-		if _, err := s.BeginRemediationFinish(ctx, RemediationFinish{Workspace: ws, Repo: repo, StartedAt: instant}); err != nil {
-			t.Fatal(err)
-		}
+	// Arrange: a file at layout 166 with two finishes, one of an escalation.
+	path := fixtureAt(t, 166)
+	for _, ws := range []string{"remedy", "escalation"} {
+		execRaw(t, path, `INSERT INTO deploy_remediation_finishes (workspace_id, repo_key, step, step_at, started_at) VALUES (?, '/tmp/repo', 'gating', 1, 1)`, ws)
 	}
-	if err := s.RecordDeployEscalation(ctx, "escalation", repo, instant); err != nil {
-		t.Fatal(err)
-	}
+	execRaw(t, path, `INSERT INTO deploy_escalations (workspace_id, repo_key, made_at) VALUES ('escalation', '/tmp/repo', 1)`)
 
 	// Act
-	if _, err := s.db().ExecContext(ctx, remediationEscalationBackfill); err != nil {
-		t.Fatal(err)
-	}
+	execRaw(t, path, remediationEscalationDDL)
 
 	// Assert
-	remedy, _ := s.RemediationFinishOf(ctx, "remedy")
-	escalation, _ := s.RemediationFinishOf(ctx, "escalation")
-	if remedy.ServesEscalation || !escalation.ServesEscalation {
-		t.Fatalf("remedy %+v, escalation %+v; want only the escalation's finish marked", remedy, escalation)
+	remedy := rawScalar[int](t, path, `SELECT serves_escalation FROM deploy_remediation_finishes WHERE workspace_id = 'remedy'`)
+	escalation := rawScalar[int](t, path, `SELECT serves_escalation FROM deploy_remediation_finishes WHERE workspace_id = 'escalation'`)
+	if remedy != 0 || escalation != 1 {
+		t.Fatalf("serves_escalation remedy %d, escalation %d; want only the escalation's finish marked", remedy, escalation)
 	}
 }

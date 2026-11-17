@@ -30,9 +30,9 @@ const BriefDeployRemediationRestored = "deploy-remediation-restored"
 // to the mediator WS that decided them, which fixes them in the turn it
 // decided in: the queue's hold is then owned by WS until its fix's deploy is
 // checked in turn. Its turn is the check's fixer turn (watchFixer): a turn
-// that ends with no finish of WS's under way escalates the check.
+// that ends with no finish under way escalates the check.
 func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Mediation, ws ids.WorkspaceID, d Decision, fields dlog.Context) error {
-	fields = withField(withField(fields, "problems", len(d.Problems)), "remediation", string(ws))
+	fields = withField(fields, "problems", len(d.Problems))
 	if m.ChainRedeploys >= q.bound {
 		o.deps.Log.Global().Warn(opMediation, "refused a dispatch past the chain's bound on remediations in a row; only an escalation is accepted", withField(withField(fields, "bound", q.bound), "in_a_row", m.ChainRedeploys))
 		err := refuse(ArmRemediationBoundReached, ws, "the chain deployed %d remediations in a row, its repository's bound; escalate instead", m.ChainRedeploys)
@@ -46,7 +46,7 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	turn := wsm.FixerTurn{ID: m.Turn, Brief: brief, Origin: int32(conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)}
 	at := o.deps.Now()
-	recorded, err := o.deps.DB.DispatchMediation(ctx, q.key, m.OwedAt, at, ws, turn)
+	recorded, err := o.deps.DB.DispatchMediation(ctx, q.key, m.OwedAt, at, turn)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the dispatch could not be recorded; the queue stays held for the mediator", withField(fields, "error", err.Error()))
 		return err
@@ -61,7 +61,7 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	if err := o.deps.DeployChecks.Resume(ctx, ws); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the dispatch is recorded but the mediator could not be shown while it fixes; the next pass shows it", withField(fields, "error", err.Error()))
 	}
-	o.ownProblems(ctx, q.key, ws, d.Problems, nil, "dispatched to the mediator", fields)
+	o.takeOnProblems(ctx, q.key, d.Problems, nil, "dispatched to the mediator", fields)
 	o.deps.Log.Global().Info(opMediation, "the mediator dispatched the deploy's problems to itself; the queue stays held while it fixes them", fields)
 	o.republishMediation(ctx, q.key)
 	o.kick(q.key)
