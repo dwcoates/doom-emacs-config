@@ -117,7 +117,7 @@ export const RAIL_BODY_CLASS = "sb-scroll";
  * The element LINE scrolls in: a band row's section rows region, or, for a
  * chat thread's row, the rail's body, as the Chat app's list is no band.
  */
-function scrollerOf(line: HTMLElement): HTMLElement {
+export function scrollerOf(line: HTMLElement): HTMLElement {
   const thread = line.closest("[data-thread-section]") !== null;
   const scroller = line.closest<HTMLElement>(thread ? `.${RAIL_BODY_CLASS}` : REGION_SELECTOR);
   if (scroller === null) {
@@ -208,14 +208,27 @@ function laidOutLines(region: HTMLElement): HTMLElement[] {
  * showed whole.
  */
 export function scrollLineIntoBand(line: HTMLElement): BandScroll | null {
+  return scrollLineAmong(line, laidOutLines(scrollerOf(line)));
+}
+
+/**
+ * THE ONE SELECTION SCROLL every highlighted line shares, a row's
+ * (`scrollLineIntoBand`) and a merge queue line's (`queue-selection.ts`):
+ * scroll LINE's viewport only as far as LINE and its neighbors among LINES
+ * (the viewport's laid-out lines, top to bottom) need to show whole. Answers
+ * how it moved, or null when they already showed whole.
+ */
+export function scrollLineAmong(line: HTMLElement, lines: readonly HTMLElement[]): BandScroll | null {
   const region = scrollerOf(line);
   const view = viewOf(region);
-  const lines = laidOutLines(region);
   const index = lines.indexOf(line);
   if (index < 0) {
-    log.error("the selected row's line is not among its viewport's laid-out lines", {
+    log.error("the selected line is not among its viewport's laid-out lines", {
       operation: "sidebar.selection-scroll.unlisted",
-      context: { workspace: line.parentElement?.getAttribute("data-roster-row") ?? null, lines: lines.length },
+      context: {
+        workspace: line.parentElement?.getAttribute("data-roster-row") ?? line.getAttribute("data-workspace"),
+        lines: lines.length,
+      },
     });
     throw new Error("sidebar selection scroll: the selected line is not among its viewport's laid-out lines");
   }
