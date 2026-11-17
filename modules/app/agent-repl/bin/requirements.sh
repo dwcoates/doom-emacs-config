@@ -866,9 +866,12 @@ service_definition() { service_definition_path "$(field "$1" .label)"; }
 # /usr/bin/env never changes. A `command` service needs env to find its
 # program on PATH on either platform.
 #
-# A macOS SERVICE IS `ProcessType` `Standard`, NEVER `Background`: the live
-# editor waits on these services, and Background is darwinbg (efficiency cores,
-# throttled disk I/O), which loses every I/O contention to a `nice 19` suite.
+# A macOS SERVICE IS `ProcessType` `Interactive`: the live editor waits on
+# these services, and the test service's runs keep normal work's CPU priority
+# (owner ruling 2026-11-13). Measured 2026-11-17 on battery: a launchd agent and
+# its children run at priority 20 (utility's clamp) under `Standard` or no
+# ProcessType, 4 under `Adaptive` and darwinbg under `Background`, and 31
+# (normal work's, as a shell's child) only under `Interactive`.
 rendered_service() {
   printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg platform "$(platform)" --arg cache "$CACHE_ROOT" \
     --arg path "$(command_service_path)" --arg restart "$SERVICE_RESTART_SECONDS" --arg stop "$SERVICE_STOP_SECONDS" '
@@ -899,7 +902,7 @@ rendered_service() {
          "    <key>KeepAlive</key>", "    <true/>",
          "    <key>ThrottleInterval</key>", "    <integer>\($restart)</integer>",
          "    <key>ExitTimeOut</key>", "    <integer>\($stop)</integer>",
-         "    <key>ProcessType</key>", "    <string>Standard</string>",
+         "    <key>ProcessType</key>", "    <string>Interactive</string>",
          "    <key>StandardOutPath</key>", "    <string>\($out | xml)</string>",
          "    <key>StandardErrorPath</key>", "    <string>\($err | xml)</string>",
          "</dict>", "</plist>"]
