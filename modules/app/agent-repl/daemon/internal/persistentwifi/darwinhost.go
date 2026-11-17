@@ -1,6 +1,7 @@
 package persistentwifi
 
 import (
+	"agentrepl/logging/hostpower"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -150,7 +151,7 @@ func (h *darwinHost) ReadEnergy(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return parseEnergyMode(out), nil
+	return hostpower.ParseEnergyMode(out), nil
 }
 
 func (h *darwinHost) LowPowerEnergy() string { return energyModeLowPower }

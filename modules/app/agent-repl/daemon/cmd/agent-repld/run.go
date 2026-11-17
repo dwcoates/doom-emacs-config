@@ -16,7 +16,6 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
-	"agent-repld/internal/hostpower"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
@@ -29,6 +28,7 @@ import (
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging/hostpower"
 )
 
 // process is what the boot spine resolved before any component was built. It is

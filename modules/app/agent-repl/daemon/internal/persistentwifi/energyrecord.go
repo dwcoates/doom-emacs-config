@@ -37,7 +37,7 @@ type EnergyStore interface {
 // persistent-wifi directory, beside the frozen set (appfreeze.RecordFile).
 const EnergyRecordFile = "energy-mode.json"
 
-// powerModeValue is a well-formed `pmset` powermode value (energyModeLine's).
+// powerModeValue is a well-formed `pmset` powermode value (hostpower.ParseEnergyMode's).
 var powerModeValue = regexp.MustCompile(`^\d+$`)
 
 // EnergyFileStore keeps the record as one JSON file, replaced atomically and

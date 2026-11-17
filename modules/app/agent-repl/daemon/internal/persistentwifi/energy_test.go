@@ -9,21 +9,6 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-func TestParseEnergyMode(t *testing.T) {
-	cases := []struct{ name, out, want string }{
-		{name: "low", out: pmsetIn(true, "1"), want: "1"},
-		{name: "high", out: pmsetIn(true, "2"), want: "2"},
-		{name: "none named", out: pmsetIn(true, ""), want: ""},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := parseEnergyMode(tc.out); got != tc.want {
-				t.Fatalf("parseEnergyMode() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestDecideRestore(t *testing.T) {
 	cases := []struct {
 		name, energy, kept string
