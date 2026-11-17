@@ -978,6 +978,20 @@ describe("the family", () => {
     expect(drawn.querySelector("[data-roster-row='ws-2']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(false);
   });
 
+  it("hands every drawn row of a family to the fold fade with its surfaced mark", () => {
+    // Arrange
+    const applied: Array<[string, boolean]> = [];
+    const sc = { ...sidebarContext(), foldFade: { apply: (id: string, _row: HTMLElement, surfaced: boolean) => applied.push([id, surfaced]) } };
+    const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }));
+    family.children[0]!.surfaced = true;
+
+    // Act
+    drawRosterFamily(family, sc, "R");
+
+    // Assert
+    expect(applied.sort()).toEqual([["ws-1", false], ["ws-2", true]]);
+  });
+
   it("refuses a list row naming no row as a malformed view", () => {
     const bad = openRow(row({ id: "ws-1" }));
     bad.row = undefined;

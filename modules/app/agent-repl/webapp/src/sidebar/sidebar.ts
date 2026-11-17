@@ -61,6 +61,7 @@ import { createUnseenGate, unseenEnv, type UnseenEnv } from "./unseen.js";
 import { placeChildren } from "./children.js";
 import { queryAll } from "../dom.js";
 import { createSelectionFade } from "./selection-fade.js";
+import { createFoldFade } from "./fold-fade.js";
 import { createRailScrollKeep } from "./scroll-keep.js";
 import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
 import type { RosterVersion, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -274,6 +275,7 @@ function mountSidebarIn(
     attention,
     reveal,
     selectionFade: createSelectionFade(body),
+    foldFade: createFoldFade(body),
     shownAhead: () => shownAhead,
     arrange: { hold: createArrangeHold((roster) => drawRoster(roster)), layer: arrangeLayer, status: arrangeStatus },
     // A CHANGE IS FITTED AT ONCE: the rows shown or let go are the Deploys

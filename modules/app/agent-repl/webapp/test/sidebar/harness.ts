@@ -66,6 +66,7 @@ import { createRowMenus } from "../../src/sidebar/row-menu.js";
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
 import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
+import { createFoldFade } from "../../src/sidebar/fold-fade.js";
 import { rosterApps, type TestThread } from "../roster-apps.js";
 
 /** The webview's own workspace. */
@@ -233,6 +234,7 @@ export function sidebarContext(
     attention: new AttentionRegistry(timers),
     reveal,
     selectionFade: createSelectionFade(document),
+    foldFade: createFoldFade(document),
     shownAhead: () => null,
     arrange: {
       hold: createArrangeHold(() => undefined),

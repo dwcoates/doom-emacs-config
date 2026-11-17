@@ -167,6 +167,9 @@ export function pathedFamilies(rows: readonly RowFamily[], path: string): Pathed
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
   const drawn = drawRosterRow(requireMessage(family.row, `${path}.row`), sc, `${path}.row`, place, family, path, family.childrenFold);
   if (family.surfaced === true) drawn.classList.add(SURFACED_ROW_CLASS);
+  const id = drawn.getAttribute("data-roster-row");
+  if (id === null) throw new Error(`${path}.row: a drawn row names its workspace`);
+  sc.foldFade.apply(id, drawn, family.surfaced === true);
   return drawn;
 }
 
