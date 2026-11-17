@@ -439,29 +439,12 @@ func (v *verbs) advanceToParent(ctx context.Context, log dlog.Logger, record wsm
 		log.Error(op, "could not advance the "+subject+" to its parent's tip: "+what, fields)
 		return fmt.Errorf("%s %q: advance the %s to %q: %s: %w", verb, record.ID, subject, record.ParentBranch, what, err)
 	}
-	if record.ParentBranch == "" {
-		return stays("no parent branch was recorded")
-	}
-	exists, err := v.deps.Git.BranchExists(ctx, record.Dir, record.ParentBranch)
+	kept, failed, err := v.parentHoldsAll(ctx, record)
 	if err != nil {
-		return fail("probe the parent branch", err)
+		return fail(failed, err)
 	}
-	if !exists {
-		return stays("the parent branch no longer exists")
-	}
-	clean, err := v.deps.Git.IsClean(ctx, record.Dir)
-	if err != nil {
-		return fail("read whether the worktree is clean", err)
-	}
-	if !clean {
-		return stays("the worktree holds uncommitted changes")
-	}
-	inside, err := v.deps.Git.IsAncestor(ctx, record.Dir, "HEAD", record.ParentBranch)
-	if err != nil {
-		return fail("read whether the branch is inside its parent", err)
-	}
-	if !inside {
-		return stays("the branch holds commits its parent does not")
+	if kept != "" {
+		return stays(kept)
 	}
 	if err := v.deps.Git.FastForward(ctx, record.Dir, record.ParentBranch); err != nil {
 		return fail("fast-forward", err)
@@ -535,4 +518,39 @@ func resolvedParent(path string) string {
 		return path
 	}
 	return filepath.Join(parent, filepath.Base(path))
+}
+
+// parentHoldsAll judges whether RECORD's worktree holds nothing its parent
+// branch lacks: a parent branch recorded and present, a clean worktree, and
+// a HEAD inside the parent branch. It answers why it does not (KEPT), empty
+// when it does; and FAILED, what could not be read, with the git error.
+// Both a reopened merged workspace's advance (advanceMerged) and the release
+// of a name a closed workspace holds (releaseMergedHolder) ask it, so
+// the package asks git about ancestry in this one place.
+func (v *verbs) parentHoldsAll(ctx context.Context, record wsm.Workspace) (kept, failed string, err error) {
+	if record.ParentBranch == "" {
+		return "no parent branch was recorded", "", nil
+	}
+	exists, err := v.deps.Git.BranchExists(ctx, record.Dir, record.ParentBranch)
+	if err != nil {
+		return "", "probe the parent branch", err
+	}
+	if !exists {
+		return "the parent branch no longer exists", "", nil
+	}
+	clean, err := v.deps.Git.IsClean(ctx, record.Dir)
+	if err != nil {
+		return "", "read whether the worktree is clean", err
+	}
+	if !clean {
+		return "the worktree holds uncommitted changes", "", nil
+	}
+	inside, err := v.deps.Git.IsAncestor(ctx, record.Dir, "HEAD", record.ParentBranch)
+	if err != nil {
+		return "", "read whether the branch is inside its parent", err
+	}
+	if !inside {
+		return "the branch holds commits its parent does not", "", nil
+	}
+	return "", "", nil
 }
