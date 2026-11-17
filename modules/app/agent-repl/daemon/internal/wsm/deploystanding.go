@@ -53,7 +53,7 @@ type DeployCheckRoleName string
 
 // The two standing roles.
 const (
-	StandingIntake      DeployCheckRoleName = "intake"
+	StandingIntake DeployCheckRoleName = "intake"
 	// StandingFixer both remediates a dispatch and settles an escalation with
 	// the user (owner ruling, 2026-11-17): one workspace, two briefs.
 	StandingFixer DeployCheckRoleName = "fixer"

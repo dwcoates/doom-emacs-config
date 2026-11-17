@@ -2220,12 +2220,13 @@ encoded here."
 
 (ert-deftest agent-repl-test-wire-verbs-merge-queue-action-arms-pinned ()
   "UpdateMergeQueueRequest's action oneof has exactly the arms encoded here,
-and `mediation', which only the deploy mediator sends, through the CLI."
+`mediation', which only the deploy mediator sends, through the CLI, and
+`releaseEscalation', which the sidebar and the CLI send."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_update_merge_queue.pb.go"
                         "UpdateMergeQueueRequest")
                        #'string<)
-                 '("evict" "mediation" "moveDown" "moveTo" "moveUp" "pause" "resume"))))
+                 '("evict" "mediation" "moveDown" "moveTo" "moveUp" "pause" "releaseEscalation" "resume"))))
 
 (ert-deftest agent-repl-test-wire-verbs-daemon-health-arms-pinned ()
   "DaemonHealthSuccess's health oneof has exactly the two verdict arms decoded
