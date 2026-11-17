@@ -2169,13 +2169,18 @@ unlinks files there would hold the frame off screen to tidy a directory."
   "Return the regexp matching a basename only Emacs writes, generations included.
 Three shapes: a target minted into the OS temporary root before the durable
 directory (`agent-repl-emacs-*'), a durable workspace target
-\(`agent-repl-<id>-emacs-*'), and the central sink, under whatever name
-`agent-repl-log-file-name' gives it.  The daemon's targets share the durable
-directory and NEVER match: the daemon ages its own."
+\(`agent-repl-<id>-emacs-*'), and the central sink and its warnings file,
+under whatever name `agent-repl-log-file-name' gives it.  A target's
+warnings file (`agent-repl--log-warnings-path') matches its target's
+shape.  The daemon's targets share the durable directory and NEVER match:
+the daemon ages its own."
   (concat "\\`\\(" (regexp-quote agent-repl--emacs-log-target-prefix) ".*\\.log"
           "\\|agent-repl-[0-9a-f]+-emacs-.*\\.log"
           "\\|" (regexp-quote (file-name-nondirectory
                                (expand-file-name agent-repl-log-file-name)))
+          "\\|" (regexp-quote (file-name-nondirectory
+                               (agent-repl--log-warnings-path
+                                (expand-file-name agent-repl-log-file-name))))
           "\\)\\(\\.[0-9]+\\)?\\'"))
 
 (defvar agent-repl-roster-view)
@@ -2366,16 +2371,57 @@ using the logging ladder here would recurse."
                (> (+ size bytes) agent-repl-log-size-cap-bytes))
       (agent-repl--log-rotate-generations path))))
 
-(defun agent-repl--do-log-to-file (text &optional ws)
-  "Append TEXT as a line to the logfile when `agent-repl-log-to-file' is non-nil.
+(defun agent-repl--log-warnings-level-p (level)
+  "Return non-nil when a record at LEVEL belongs in its log's warnings file.
+Every runtime writes its warn and error records ONLY to a warnings file
+beside its log, and the rest only to the log, so a reader of warnings
+opens the small warnings files alone (proto/vocab/log-warnings-sink.json).
+An unknown LEVEL is a call-site bug and signals."
+  (pcase level
+    ((or "warn" "error") t)
+    ((or "debug" "info") nil)
+    (_ (error "agent-repl: invalid log level %S" level))))
+
+(defun agent-repl--log-warnings-path (path)
+  "Return the warnings file of the log at PATH.
+`.warn' goes before a final `.log', or `.warn.log' is appended to a path
+with no such extension (proto/vocab/log-warnings-sink.json)."
+  (if (string-suffix-p ".log" path)
+      (concat (substring path 0 (- (length ".log"))) ".warn.log")
+    (concat path ".warn.log")))
+
+(defun agent-repl--log-warnings-target (log-path ws)
+  "Return the warnings file of LOG-PATH, WS's target or the central sink.
+For a workspace that is not detached, its canonical `emacs.warn.log'
+link is (re)pointed at that file, as `emacs.log' names LOG-PATH.
+
+Never logs: this runs inside the file sink (see
+`agent-repl--do-log-to-file'), so the logging ladder would re-enter it."
+  (let ((warnings (agent-repl--log-warnings-path log-path)))
+    (when (and ws (not (agent-repl--log-workspace-detached-p ws)))
+      (let ((canonical (agent-repl--log-warnings-path
+                        (agent-repl--workspace-emacs-log-path
+                         (plist-get (agent-repl--workspace-log-identity ws) :project-dir)))))
+        (unless (agent-repl--workspace-log-link-current-p canonical warnings)
+          (agent-repl--install-workspace-log-link canonical warnings))))
+    warnings))
+
+(defun agent-repl--do-log-to-file (text level &optional ws)
+  "Append TEXT, a record at LEVEL, as a line to its logfile.
+Does nothing unless `agent-repl-log-to-file' is non-nil.  A warn or error
+record goes ONLY to the log's warnings file
+\(`agent-repl--log-warnings-level-p'), every other only to the log.
 Sink failures, including rotation failures, emit the emergency diagnostic and
 signal an error; persistence must never silently degrade.
 The size check runs before every append so a record is never split across
 generations."
   (when agent-repl-log-to-file
-    (let ((path (if ws
-                    (agent-repl--workspace-emacs-log-target ws)
-                  (agent-repl--logfile-path))))
+    (let* ((log-path (if ws
+                         (agent-repl--workspace-emacs-log-target ws)
+                       (agent-repl--logfile-path)))
+           (path (if (agent-repl--log-warnings-level-p level)
+                     (agent-repl--log-warnings-target log-path ws)
+                   log-path)))
       (condition-case err
           (let* ((line (concat text "\n"))
                  (bytes (string-bytes (encode-coding-string line 'utf-8 t))))
@@ -2624,7 +2670,7 @@ formatted message and the display text are not built."
                                       agent-repl--central-log-fallback-format
                                       (list unroutable class reason)
                                       nil nil unroutable)
-              nil)))))
+              fallback-level nil)))))
     (let* ((agent-repl--log-dir-confirmed (list :confirmed))
            (routing (agent-repl--resolve-log-workspace ws (or operation-fmt fmt)))
            (routing-error (plist-get routing :routing-error))
@@ -2651,11 +2697,11 @@ formatted message and the display text are not built."
                                                    nil operation-fmt offender))
 		 (text (agent-repl--build-log-text nil fmt args)))
             (when agent-repl-log-to-file
-              (agent-repl--do-log-to-file record nil))
+              (agent-repl--do-log-to-file record "error" nil))
             (agent-repl--note-unroutable-log-workspace offender)
             (when (and agent-repl-log-to-file
                        (agent-repl--log-record-persists-p level verbosity))
-              (agent-repl--do-log-to-file original nil))
+              (agent-repl--do-log-to-file original level nil))
             (unless fatal
               (pcase message-mode
 		('quiet (agent-repl--emit-message text nil))
@@ -2694,7 +2740,7 @@ formatted message and the display text are not built."
 		(setq record (agent-repl--log-record sink-ws level verbosity fmt args
                                                      pseudo-ws operation-fmt unroutable-ws))
 		(when to-file
-                  (agent-repl--do-log-to-file record sink-ws)))
+                  (agent-repl--do-log-to-file record level sink-ws)))
             (error
              (unless (and sink-ws
                           (or (agent-repl--log-tree-departing-p sink-ws err)
@@ -2709,7 +2755,7 @@ formatted message and the display text are not built."
                (setq record (agent-repl--log-record nil level verbosity fmt args
                                                     nil operation-fmt sink-ws))
                (when to-file
-                 (agent-repl--do-log-to-file record nil)))
+                 (agent-repl--do-log-to-file record level nil)))
              (setq sink-ws nil
                    to-buffer nil)))
           (let ((text (and (or message-mode fatal)

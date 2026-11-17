@@ -1769,8 +1769,8 @@ own run log, never in the OS temporary root the system may sweep."
          (agent-repl-log-to-file t))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--logfile-path) (lambda () logpath)))
-          (agent-repl--do-log-to-file "first line")
-          (agent-repl--do-log-to-file "second line")
+          (agent-repl--do-log-to-file "first line" "info")
+          (agent-repl--do-log-to-file "second line" "info")
           (should (= (logand (file-modes logpath) #o777) #o600))
           (let ((contents (with-temp-buffer
                             (insert-file-contents logpath)
@@ -1786,7 +1786,7 @@ own run log, never in the OS temporary root the system may sweep."
          (agent-repl-log-to-file nil))
     (unwind-protect
         (cl-letf (((symbol-function 'agent-repl--logfile-path) (lambda () logpath)))
-          (agent-repl--do-log-to-file "should not appear")
+          (agent-repl--do-log-to-file "should not appear" "info")
           (should-not (file-exists-p logpath)))
       (delete-directory tmpdir t))))
 
@@ -1823,7 +1823,7 @@ own run log, never in the OS temporary root the system may sweep."
   (let ((agent-repl-log-to-file t))
     (cl-letf (((symbol-function 'agent-repl--logfile-path)
                (lambda () "/nonexistent/dir/impossible.log")))
-      (should-error (agent-repl--do-log-to-file "test")))))
+      (should-error (agent-repl--do-log-to-file "test" "info")))))
 
 ;;;; ---- Tests: JSONL workspace logging contract ----
 
@@ -2356,7 +2356,7 @@ pre-registration records and the rest of its records land in one file."
                    (lambda (fmt &rest args)
                      (setq emergency (apply #'format fmt args)))))
           ;; Act / Assert
-          (should-error (agent-repl--do-log-to-file "record"))
+          (should-error (agent-repl--do-log-to-file "record" "info"))
           (should (string-match-p "LOG SINK FAILURE" emergency)))))))
 
 ;;;; ---- Tests: dir-has-git-p ----
@@ -3312,11 +3312,12 @@ tests pollution-free).  Every retained generation is removed afterwards."
                (agent-repl-log-file-name ,sym)
                (agent-repl-log-file-level 'debug))
            ,@body)
-       (when (file-exists-p ,sym) (delete-file ,sym))
-       (dotimes (index agent-repl-log-generation-count)
-         (let ((generation (agent-repl--log-generation-path ,sym (1+ index))))
-           (when (file-exists-p generation)
-             (delete-file generation)))))))
+       (dolist (file (list ,sym (agent-repl--log-warnings-path ,sym)))
+         (when (file-exists-p file) (delete-file file))
+         (dotimes (index agent-repl-log-generation-count)
+           (let ((generation (agent-repl--log-generation-path file (1+ index))))
+             (when (file-exists-p generation)
+               (delete-file generation))))))))
 
 (defun agent-repl-test--read-file (path)
   "Return PATH's complete contents for logging assertions."
@@ -3431,7 +3432,7 @@ The master kill-switch overrides the always-on file-write decoupling."
     (let ((agent-repl-log-size-cap-bytes 8))
       (write-region "1234567" nil path)
       ;; Act
-      (agent-repl--do-log-to-file "new")
+      (agent-repl--do-log-to-file "new" "info")
       ;; Assert
       (should (equal (agent-repl-test--read-file path) "new\n"))
       (should (equal (agent-repl-test--read-file (concat path ".1")) "1234567")))))
@@ -3458,7 +3459,7 @@ The master kill-switch overrides the always-on file-write decoupling."
   (agent-repl-test--with-temp-logfile path
     (delete-file path)
     (let ((agent-repl-log-size-cap-bytes 4))
-      (agent-repl--do-log-to-file "oversize")
+      (agent-repl--do-log-to-file "oversize" "info")
       ;; Assert
       (should (equal (agent-repl-test--read-file path) "oversize\n"))
       (should-not (file-exists-p (concat path ".1"))))))
@@ -3998,7 +3999,7 @@ ladder made a debug line abort `doom-init-ui-hook'."
     (with-temp-buffer
       (setq-local agent-repl--owning-workspace "buffer-ws")
       (cl-letf (((symbol-function 'agent-repl--do-log-to-file)
-                 (lambda (_record ws) (setq sink-workspace ws)))
+                 (lambda (_record _level ws) (setq sink-workspace ws)))
                 ((symbol-function 'message) #'ignore))
         ;; Act
         (agent-repl--info
@@ -5655,7 +5656,7 @@ name -- but it never claims the unregistered workspace as its sink."
             (sinks nil))
         (cl-letf (((symbol-function 'display-warning) #'ignore)
                   ((symbol-function 'agent-repl--do-log-to-file)
-                   (lambda (_record ws) (push ws sinks))))
+                   (lambda (_record _level ws) (push ws sinks))))
           ;; Act
           (agent-repl--log "being-created" "creation prologue probe"))
         ;; Assert
@@ -7851,3 +7852,90 @@ A hand-rolled `let' of an ivy alist around a read would drift from it."
         (insert-file-contents (expand-file-name file dir))
         (should (save-excursion (search-forward "(agent-repl--completing-read-under-ivy" nil t)))
         (should-not (re-search-forward "(let\\*? ((ivy-[a-z-]+-alist" nil t))))))
+
+;;;; ---- Tests: warn and error records live in their own file ----
+
+(defvar agent-repl-test--warnings-sink-fixture-path
+  (expand-file-name "../proto/vocab/log-warnings-sink.json"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The warnings-sink fixture, resolved at load beside this file.")
+
+(defun agent-repl-test--read-warnings-sink-fixture ()
+  "Return the warnings-sink fixture as a plist."
+  (with-temp-buffer
+    (insert-file-contents agent-repl-test--warnings-sink-fixture-path)
+    (json-parse-buffer :object-type 'plist :array-type 'list :null-object nil)))
+
+(ert-deftest agent-repl-test-log-warnings-level-routes-every-fixture-level ()
+  "Each level of proto/vocab/log-warnings-sink.json is routed as Go and TypeScript route it."
+  ;; Arrange
+  (let ((fixture (agent-repl-test--read-warnings-sink-fixture)))
+    ;; Act / Assert
+    (dolist (level (plist-get fixture :warnings_levels))
+      (should (agent-repl--log-warnings-level-p level)))
+    (dolist (level (plist-get fixture :log_levels))
+      (should-not (agent-repl--log-warnings-level-p level)))))
+
+(ert-deftest agent-repl-test-log-warnings-level-refuses-an-unknown-level ()
+  "An unknown level is a call-site bug, never a guess."
+  ;; Arrange / Act / Assert
+  (should-error (agent-repl--log-warnings-level-p "fatal")))
+
+(ert-deftest agent-repl-test-log-warnings-path-names-every-fixture-path ()
+  "Each path of proto/vocab/log-warnings-sink.json names its warnings file."
+  (dolist (case (plist-get (agent-repl-test--read-warnings-sink-fixture) :paths))
+    ;; Arrange / Act / Assert
+    (should (equal (agent-repl--log-warnings-path (plist-get case :path))
+                   (plist-get case :warnings)))))
+
+(ert-deftest agent-repl-test-do-log-to-file-writes-a-warning-only-to-the-warnings-file ()
+  "A warn or error record goes to the central sink's warnings file alone."
+  ;; Arrange
+  (agent-repl-test--with-temp-logfile path
+    ;; Act
+    (agent-repl--do-log-to-file "an info record" "info")
+    (agent-repl--do-log-to-file "a warning" "warn")
+    (agent-repl--do-log-to-file "an error" "error")
+    ;; Assert
+    (should (equal (agent-repl-test--read-file path) "an info record\n"))
+    (should (equal (agent-repl-test--read-file (agent-repl--log-warnings-path path))
+                   "a warning\nan error\n"))))
+
+(ert-deftest agent-repl-test-emacs-log-file-re-matches-the-central-warnings-file ()
+  "The retention sweep ages the central sink's warnings file as its own."
+  ;; Arrange
+  (let ((agent-repl-log-file-name "/state/logs/emacs.central.log"))
+    ;; Act
+    (let ((re (agent-repl--emacs-log-file-re)))
+      ;; Assert
+      (should (string-match-p re "emacs.central.warn.log"))
+      (should (string-match-p re "emacs.central.warn.log.2"))
+      (should (string-match-p re "agent-repl-0123456789abcdef-emacs-Ab12Cd.warn.log"))
+      (should-not (string-match-p re "agent-repl-0123456789abcdef-daemon-1.warn.log")))))
+
+(ert-deftest agent-repl-test-log-workspace-warning-lands-in-the-linked-warnings-file ()
+  "A workspace's warning goes to its target's warnings file, which `emacs.warn.log' names."
+  (agent-repl-test--with-clean-state
+    (let* ((project (make-temp-file "agent-repl-workspace-warn-" t))
+           (ws "warn-ws")
+           (agent-repl-log-to-file nil)
+           (agent-repl--workspace-log-targets (make-hash-table :test #'equal)))
+      (unwind-protect
+          (progn
+            ;; Arrange
+            (agent-repl--ws-put ws :project-dir project)
+            (agent-repl--ws-put ws :ref (list :id "0123456789abcdef" :dir project))
+            ;; Act
+            (let ((agent-repl-log-to-file t))
+              (cl-letf (((symbol-function 'message) #'ignore))
+                (agent-repl--log ws "an ordinary record")
+                (agent-repl--warn ws "elisp.test.warning: a warning")))
+            ;; Assert
+            (let* ((target (plist-get (agent-repl--workspace-log-target-entry ws) :target))
+                   (warnings (agent-repl--log-warnings-path target)))
+              (should (equal (file-symlink-p (expand-file-name ".claude/emacs/emacs.warn.log" project))
+                             warnings))
+              (should (string-match-p "a warning" (agent-repl-test--read-file warnings)))
+              (should-not (string-match-p "a warning" (agent-repl-test--read-file target)))
+              (should (string-match-p "an ordinary record" (agent-repl-test--read-file target)))))
+        (delete-directory project t)))))
