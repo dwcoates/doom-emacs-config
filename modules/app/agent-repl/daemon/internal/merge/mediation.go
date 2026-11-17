@@ -49,9 +49,9 @@ const (
 	// ArmNoMediationOwed refuses a decision when the intake's deploy owes no
 	// check: a fix was dispatched for it already.
 	ArmNoMediationOwed = "no_mediation_owed"
-	// ArmNoRemediationToRestore refuses a dispatch restoring the chain's last
-	// remediation when the chain has none.
-	ArmNoRemediationToRestore = "no_remediation_to_restore"
+	// ArmNoEscalationHeld refuses a release of an escalation's hold when no
+	// escalation holds the queue.
+	ArmNoEscalationHeld = "no_escalation_held"
 	// ArmRemediationBoundReached refuses a dispatch once the chain deployed
 	// as many remediations in a row as its repository allows.
 	ArmRemediationBoundReached = "remediation_bound_reached"
@@ -104,10 +104,8 @@ type Decision struct {
 	Kind    MediationDecision
 	Summary string
 	// Problems are a dispatch's or an escalation's findings, with their
-	// evidence; Restore is a dispatch's: whether the chain's last remediation
-	// workspace takes them rather than a fresh one.
+	// evidence.
 	Problems []DeployProblem
-	Restore  bool
 }
 
 // The spans of a deploy check a Meter records: how long its deploy rolled out
@@ -389,6 +387,8 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			}
 			continue
 		}
+		o.adoptStanding(ctx, q, m)
+		o.retireOneOffEscalations(ctx, q, m)
 		if m == nil {
 			continue
 		}
@@ -486,13 +486,19 @@ func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm
 		return false, err
 	}
 	o.endChain(ctx, repo, m, outcome)
+	// A CHECK RELEASED WITH NOTHING TO FIX IS QUIET: approved, or a deploy
+	// that changed nothing. Its count is what compacts the standing
+	// workspaces after their work (noteQuietCheck).
+	if outcome == MediationApproved || outcome == MediationUnchanged {
+		o.noteQuietCheck(ctx, repo, dlog.Context{"repo": string(repo), "outcome": outcome})
+	}
 	return true, nil
 }
 
 // endChain records how check M of queue REPO, the last of its chain, ended
-// as OUTCOME, forgets what the chain's remediations landed, and stops the
-// chain's intake at once: the next deploy begins another chain with a fresh
-// intake. The intake deciding inside its own turn is cut mid-turn, so it
+// as OUTCOME, forgets what the chain's remediations landed, and ends the
+// chain's intake's session at once: the next deploy begins another chain,
+// which the same standing intake takes. The intake deciding inside its own turn is cut mid-turn, so it
 // writes nothing past its decision (owner ruling, 2026-11-16).
 func (o *orchestrator) endChain(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, outcome string) {
 	o.observeMediationEnd(m, outcome, o.deps.Now())
@@ -621,46 +627,35 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed tim
 	o.mediationFailed(ctx, fields, message, err)
 }
 
-// intakeOf answers the intake of check M, making it, hidden and unprompted,
-// for a check that has none (each decided check's newer deploy gets a fresh
-// one, wsm.OweMediation) and recording it on M
-// before anything prompts it: its first prompt then brings its session up
-// as the intake. Empty when M was replaced or released meanwhile.
+// intakeOf answers the intake of check M: the queue's standing intake
+// (standingWorkspace), recorded on M before anything prompts it, so its
+// prompt brings its session up as the intake. Empty when M was replaced or
+// released meanwhile: the standing intake then waits for the next check.
 func (o *orchestrator) intakeOf(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Intake != "" {
 		return m.Intake, nil
 	}
-	// EACH CHECK'S INTAKE IS NAMED FOR ITS OWN DEPLOY, never its chain's
-	// start: an intake decides once, so a chain makes one per deploy, and
-	// the closed intake of an earlier deploy still holds its name
-	// (2026-11-16 22:27: a chain's second intake was refused name_held, and
-	// the queue stayed held for 90 minutes).
-	name := intakeName(m.OwedAt)
-	made, err := o.deps.DeployChecks.CreateDeployIntake(ctx, q.repository.Dir, name)
+	intake, err := o.standingWorkspace(ctx, q, DeployCheckIntake, fields)
 	if err != nil {
-		return "", fmt.Errorf("merge: make the chain's intake %s: %w", name, err)
+		return "", fmt.Errorf("merge: the queue's standing intake: %w", err)
 	}
-	recorded, err := o.deps.DB.RecordMediationIntake(ctx, q.key, m.OwedAt, made.ID)
+	recorded, err := o.deps.DB.RecordMediationIntake(ctx, q.key, m.OwedAt, intake.ws)
 	if err != nil {
-		return "", fmt.Errorf("merge: record the chain's intake %s: %w", name, err)
+		return "", fmt.Errorf("merge: record the standing intake %s on the check: %w", intake.ws, err)
 	}
 	if !recorded {
-		// THE CHECK ENDED WHILE ITS INTAKE WAS MADE: the made workspace
-		// serves no chain, so it is closed; a replacing deploy's round makes
-		// its own.
-		o.deps.Log.Global().Info(opMediation, "the check was replaced or released while its intake was made; the made intake is closed", withField(fields, "intake", string(made.ID)))
-		if _, err := o.deps.DeployChecks.CloseSelf(ctx, made.ID); err != nil {
-			o.deps.Log.Global().Error(opMediation, "an intake made for a check that ended could not be closed", withField(withField(fields, "intake", string(made.ID)), "error", err.Error()))
-		}
+		o.deps.Log.Global().Info(opMediation, "the check was replaced or released before its intake was recorded on it; the standing intake waits for the next check", withField(fields, "intake", string(intake.ws)))
 		return "", nil
 	}
-	// THE ROLE IS RECORDED BEFORE THE EFFORT IS SET: setting it starts the
-	// sessionless intake's shim, whose landing reads the role.
-	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, DeployCheckIntake); err != nil {
-		return "", fmt.Errorf("merge: set the chain's intake %s's effort: %w", name, err)
+	// THE ROLE IS RECORDED BEFORE THE EFFORT IS SET: setting it starts a
+	// made intake's shim, whose landing reads the role.
+	if intake.made {
+		if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, intake.ws, DeployCheckIntake); err != nil {
+			return "", fmt.Errorf("merge: set the standing intake %s's effort: %w", intake.ws, err)
+		}
 	}
-	o.deps.Log.Global().Info(opMediation, "made the chain's intake", withField(withField(fields, "intake", string(made.ID)), "name", name))
-	return made.ID, nil
+	o.deps.Log.Global().Info(opMediation, "the standing intake takes the check", withField(fields, "intake", string(intake.ws)))
+	return intake.ws, nil
 }
 
 // tellIntake tells the chain's intake WS of M in BRIEF, answering the brief's
@@ -800,12 +795,6 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 		return
 	}
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
-}
-
-// intakeName is the name of the intake of the check owed at OWED, to the
-// millisecond, so no two checks share one.
-func intakeName(owed time.Time) string {
-	return "deploy-intake-" + strings.ReplaceAll(owed.UTC().Format("20060102-150405.000"), ".", "-")
 }
 
 // mediationVersion is how the brief names M's build.
@@ -1239,6 +1228,7 @@ func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.
 		o.deps.Log.Global().Info(opMediation, "the check was replaced, released or escalated already; it is not escalated again", fields)
 		return
 	}
+	o.noteCheckWork(ctx, q.key, fields)
 	o.republishMediation(ctx, q.key)
 	o.makeHeldEscalation(ctx, q, m, summary, problems, window, fields)
 }
@@ -1287,10 +1277,10 @@ func (o *orchestrator) remakeHeldEscalation(ctx context.Context, q checkedQueue,
 // is told to a fresh one (wsm.OweMediation).
 func (o *orchestrator) stopIntake(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, fields dlog.Context) {
 	if err := o.deps.DeployChecks.StopNow(ctx, ws); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the intake decided but could not be closed", withField(withField(fields, "intake", string(ws)), "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "the intake decided but its session could not be ended", withField(withField(fields, "intake", string(ws)), "error", err.Error()))
 		return
 	}
-	o.deps.Log.Global().Info(opMediation, "the intake decided and is closed; it decides nothing more", withField(withField(fields, "intake", string(ws)), "repo", string(repo)))
+	o.deps.Log.Global().Info(opMediation, "the intake decided and its session is ended; it decides this check no more, and stands for the next", withField(withField(fields, "intake", string(ws)), "repo", string(repo)))
 }
 
 // finishUnderWay answers the direct finish under way in REPO's queue:

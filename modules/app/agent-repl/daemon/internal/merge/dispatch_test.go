@@ -24,20 +24,30 @@ func dispatched(h *harness, d Decision) error {
 	return h.o.DecideMediation(context.Background(), "ws-intake", d)
 }
 
-// withRemediation records "ws-remedy" as the chain's last remediation: a fix
-// dispatched to it for the check owed at deployStarted, whose deploy began a
-// minute later and is told to the check's fresh intake ("ws-intake" again,
-// as the harness names every intake).
+// withRemediation records "ws-remedy" as the queue's standing remediation,
+// briefed and closed by its landed fix: a fix dispatched to it for the check
+// owed at deployStarted, whose deploy began a minute later and is told to
+// the standing intake.
 func withRemediation(t *testing.T, h *harness) {
 	t.Helper()
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+	ctx := context.Background()
+	h.db.mu.Lock()
+	h.db.workspaces["ws-remedy"] = wsm.Workspace{ID: "ws-remedy", Name: "deploy-remediation", Repo: theRepository, Closed: true}
+	h.db.mu.Unlock()
+	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), wsm.StandingRemediation, "ws-remedy"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), wsm.StandingRemediation); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
 	withIntake(t, h, deployStarted.Add(time.Minute))
 }
 
-func TestAFreshDispatchMakesAVisibleRemediationAndBriefsItTheProblems(t *testing.T) {
+func TestTheFirstDispatchMakesTheStandingRemediationAndBriefsItTheProblems(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -51,7 +61,7 @@ func TestAFreshDispatchMakesAVisibleRemediationAndBriefsItTheProblems(t *testing
 	if err != nil || m == nil || !m.Dispatched || m.Remediation != "ws-remedy" || m.LastDispatchedAt == nil {
 		t.Fatalf("dispatch = %v, check %+v; want it dispatched to the made remediation", err, m)
 	}
-	if len(h.checks.made) != 1 || !strings.HasPrefix(h.checks.made[0], "deploy-remediation-") {
+	if !slices.Equal(h.checks.made, []string{"deploy-remediation"}) || h.briefNames[len(h.briefNames)-1] != BriefDeployRemediation {
 		t.Fatalf("made %v, want one remediation workspace", h.checks.made)
 	}
 	subs := h.queue.submissions
@@ -67,56 +77,35 @@ func TestAFreshDispatchMakesAVisibleRemediationAndBriefsItTheProblems(t *testing
 	}
 }
 
-func TestARestoredDispatchReopensTheLastRemediation(t *testing.T) {
-	tests := []struct {
-		name        string
-		percent     int64
-		wantCompact bool
-	}{
-		{name: "a small context is briefed as it is", percent: 20},
-		{name: "a large context is compacted before its brief", percent: restoredCompactPercent, wantCompact: true},
+func TestALaterDispatchReopensTheStandingRemediationAndBriefsOnlyTheNews(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	withRemediation(t, h)
+
+	// Act
+	err := dispatched(h, Decision{})
+
+	// Assert
+	if err != nil || !slices.Equal(h.checks.reopened, []ids.WorkspaceID{"ws-remedy"}) || len(h.checks.made) != 0 {
+		t.Fatalf("dispatch = %v, reopened %v, made %v; want the standing remediation reopened", err, h.checks.reopened, h.checks.made)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			h := checked(t)
-			owe(t, h)
-			withIntake(t, h, deployStarted)
-			withRemediation(t, h)
-			h.db.contextUsage["ws-remedy"] = wsm.ContextUsageRecord{Usage: &conversationv1.SessionContextUsage{Percentage: tt.percent}}
-
-			// Act
-			err := dispatched(h, Decision{Restore: true})
-
-			// Assert
-			if err != nil || !slices.Equal(h.checks.reopened, []ids.WorkspaceID{"ws-remedy"}) || len(h.checks.made) != 0 {
-				t.Fatalf("dispatch = %v, reopened %v, made %v; want the last remediation reopened", err, h.checks.reopened, h.checks.made)
-			}
-			var origins []conversationv1.PromptOrigin
-			for _, sub := range h.queue.submissions {
-				origins = append(origins, sub.Origin)
-			}
-			want := []conversationv1.PromptOrigin{conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION}
-			if tt.wantCompact {
-				want = append([]conversationv1.PromptOrigin{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT}, want...)
-			}
-			if !slices.Equal(origins, want) {
-				t.Fatalf("submitted %v, want %v", origins, want)
-			}
-			if !slices.Contains(h.meter.all(), "remediation:"+RemediationRedispatched) {
-				t.Fatalf("recorded %v, want the earlier remediation ended redispatched", h.meter.all())
-			}
-		})
+	if len(h.queue.submissions) != 1 || h.briefNames[len(h.briefNames)-1] != BriefDeployRemediationRestored {
+		t.Fatalf("submitted %v, briefs %v; want one brief of only the news", h.queue.submissions, h.briefNames)
+	}
+	if !slices.Contains(h.meter.all(), "remediation:"+RemediationRedispatched) {
+		t.Fatalf("recorded %v, want the earlier remediation ended redispatched", h.meter.all())
 	}
 }
 
-func TestARestoredRemediationIsShownAgain(t *testing.T) {
+func TestTheStandingRemediationIsShownAgain(t *testing.T) {
 	tests := []struct {
 		name      string
 		resumeErr error
 		wantErr   bool
 	}{
-		{name: "a restored remediation is shown"},
+		{name: "the standing remediation is shown"},
 		{name: "one that cannot be shown holds the queue for the intake", resumeErr: errors.New("database is locked"), wantErr: true},
 	}
 	for _, tt := range tests {
@@ -129,11 +118,11 @@ func TestARestoredRemediationIsShownAgain(t *testing.T) {
 			h.checks.resumeErr = tt.resumeErr
 
 			// Act
-			err := dispatched(h, Decision{Restore: true})
+			err := dispatched(h, Decision{})
 
 			// Assert
 			if !slices.Equal(h.checks.resumed, []ids.WorkspaceID{"ws-remedy"}) {
-				t.Fatalf("resumed %v, want the restored remediation shown", h.checks.resumed)
+				t.Fatalf("resumed %v, want the standing remediation shown", h.checks.resumed)
 			}
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("dispatch = %v, want an error %v", err, tt.wantErr)
@@ -148,7 +137,7 @@ func TestARestoredRemediationIsShownAgain(t *testing.T) {
 				t.Fatalf("submitted %v, want the hidden remediation unbriefed", h.queue.submissions)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-				Message: "the restored remediation workspace could not be shown; the queue stays held for the intake"}); !ok {
+				Message: "the standing remediation workspace could not be shown; the queue stays held for the intake"}); !ok {
 				t.Fatalf("records = %v, want the failed show at ERROR", h.logs.Records())
 			}
 		})
@@ -159,11 +148,9 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 	tests := []struct {
 		name      string
 		arrange   func(t *testing.T, h *harness)
-		restore   bool
 		wantArm   string
 		wantBound bool
 	}{
-		{name: "a restore when the chain has no remediation", restore: true, wantArm: ArmNoRemediationToRestore},
 		{name: "a dispatch once the chain reached its bound", wantArm: ArmRemediationBoundReached, wantBound: true,
 			arrange: func(t *testing.T, h *harness) {
 				for i := 1; i <= theBound; i++ {
@@ -187,7 +174,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 			}
 
 			// Act
-			err := dispatched(h, Decision{Restore: tt.restore})
+			err := dispatched(h, Decision{})
 
 			// Assert
 			var refused *RefusalError
@@ -210,13 +197,12 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 func TestADispatchWhoseWorkspaceCannotBeReadiedLeavesTheQueueHeldForTheIntake(t *testing.T) {
 	tests := []struct {
 		name    string
-		restore bool
 		arrange func(t *testing.T, h *harness)
 		message string
 	}{
-		{name: "a fresh workspace that cannot be made", message: "the remediation workspace could not be made; the queue stays held for the intake",
+		{name: "a standing workspace that cannot be made", message: "the standing deploy check workspace could not be made",
 			arrange: func(t *testing.T, h *harness) { h.checks.createErr = errors.New("disk full") }},
-		{name: "a restored workspace that cannot be reopened", restore: true, message: "the chain's last remediation workspace could not be reopened; the queue stays held for the intake",
+		{name: "a standing workspace that cannot be reopened", message: "the standing deploy check workspace could not be reopened",
 			arrange: func(t *testing.T, h *harness) {
 				withRemediation(t, h)
 				h.checks.reopenErr = errors.New("branch gone")
@@ -233,7 +219,7 @@ func TestADispatchWhoseWorkspaceCannotBeReadiedLeavesTheQueueHeldForTheIntake(t 
 			tt.arrange(t, h)
 
 			// Act
-			err := dispatched(h, Decision{Restore: tt.restore})
+			err := dispatched(h, Decision{})
 
 			// Assert
 			if err == nil {
@@ -286,14 +272,14 @@ func TestRenderProblemsNumbersEachWithItsEvidence(t *testing.T) {
 	}
 }
 
-func TestAFreshRemediationsEffortIsSetOnceItsDispatchIsRecorded(t *testing.T) {
+func TestAMadeRemediationsEffortIsSetOnceItsDispatchIsRecorded(t *testing.T) {
 	tests := []struct {
 		name        string
-		restore     bool
+		standing    bool
 		wantEfforts []string
 	}{
-		{name: "a fresh remediation", wantEfforts: []string{"remediation:ws-remedy:recorded=true"}},
-		{name: "a restored remediation keeps the effort it ran at", restore: true},
+		{name: "a made remediation", wantEfforts: []string{"remediation:ws-remedy:recorded=true"}},
+		{name: "the standing remediation keeps the effort it ran at", standing: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -301,12 +287,12 @@ func TestAFreshRemediationsEffortIsSetOnceItsDispatchIsRecorded(t *testing.T) {
 			h := checked(t)
 			owe(t, h)
 			withIntake(t, h, deployStarted)
-			if tt.restore {
+			if tt.standing {
 				withRemediation(t, h)
 			}
 
 			// Act
-			err := dispatched(h, Decision{Restore: tt.restore})
+			err := dispatched(h, Decision{})
 
 			// Assert
 			if err != nil || !slices.Equal(h.checks.efforts, tt.wantEfforts) {

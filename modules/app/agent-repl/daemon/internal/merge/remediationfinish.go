@@ -433,17 +433,53 @@ func (o *orchestrator) escalationClosed(ctx context.Context, ws ids.WorkspaceID,
 		if m == nil || !m.Escalated() || m.Escalation != ws {
 			continue
 		}
-		released, err := o.releaseCheck(ctx, q.key, *m, MediationEscalated)
-		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "the user closed the escalation, but its check could not be released; the queue stays held", withField(withField(fields, "repo", string(q.key)), "error", err.Error()))
-			continue
-		}
-		if released {
-			o.deps.Log.Global().Info(opMediation, "the user closed the escalation; its check is released and the queue advances", withField(fields, "repo", string(q.key)))
-			o.republishMediation(ctx, q.key)
-			o.kick(q.key)
-		}
+		_ = o.releaseEscalated(ctx, q.key, *m, "the user closed the escalation", fields)
 	}
+}
+
+// ReleaseEscalation releases the hold the escalation of SCOPE's queue puts on
+// it: the user's own gesture on the standing escalation's row, or the command
+// line (owner ruling, 2026-11-17). The escalation workspace stays open. A
+// queue no escalation holds is refused no_escalation_held.
+func (o *orchestrator) ReleaseEscalation(ctx context.Context, scope RepositoryScope) error {
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		return errMediationStopped
+	}
+	defer leave()
+	ctx = life
+	repo, err := o.queueKeyOf(ctx, opMediation, "a release of an escalation's hold", scope)
+	if err != nil {
+		return err
+	}
+	fields := dlog.Context{"repo": string(repo)}
+	m, err := o.deps.DB.MediationOf(ctx, repo)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read whether an escalation holds the queue; its hold stands", withField(fields, "error", err.Error()))
+		return err
+	}
+	if m == nil || !m.Escalated() {
+		o.deps.Log.Global().Info(opMediation, "refused a release of an escalation's hold: no escalation holds the queue", fields)
+		return refuse(ArmNoEscalationHeld, "", "no escalation holds the queue of %s", repo)
+	}
+	return o.releaseEscalated(ctx, repo, *m, "the user released the escalation's hold", withField(fields, "escalation", string(m.Escalation)))
+}
+
+// releaseEscalated releases escalated check M of queue REPO, as WHY says,
+// and moves the queue on.
+func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m wsm.Mediation, why string, fields dlog.Context) error {
+	fields = withField(fields, "repo", string(repo))
+	released, err := o.releaseCheck(ctx, repo, m, MediationEscalated)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, why+", but its check could not be released; the queue stays held", withField(fields, "error", err.Error()))
+		return err
+	}
+	if released {
+		o.deps.Log.Global().Info(opMediation, why+"; its check is released and the queue advances", fields)
+		o.republishMediation(ctx, repo)
+		o.kick(repo)
+	}
+	return nil
 }
 
 // remediationLand lands F's branch directly on the main branch

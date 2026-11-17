@@ -112,6 +112,14 @@ func (s *server) UpdateMergeQueue(
 		return connect.NewResponse(resp), nil
 	}
 
+	if release := req.Msg.GetReleaseEscalation(); release != nil {
+		if err := s.deps.Merge.ReleaseEscalation(ctx, *scopeOf(release.GetRepository())); err != nil {
+			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
+		}
+		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{Success: &agentreplv1.UpdateMergeQueueSuccess{}}
+		return connect.NewResponse(resp), nil
+	}
+
 	var scope *merge.RepositoryScope
 	var err error
 	if pause := req.Msg.GetPause(); pause != nil {
@@ -196,6 +204,8 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "move_to"
 	case *agentreplv1.UpdateMergeQueueRequest_Mediation:
 		return "mediation"
+	case *agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation:
+		return "release_escalation"
 	}
 	panic(fmt.Sprintf("server: UpdateMergeQueue arm %T past validation has no name", req.GetAction()))
 }
@@ -426,7 +436,7 @@ func decisionOf(m *agentreplv1.UpdateMergeQueueMediation) merge.Decision {
 		d.Kind, d.Problems = merge.MediationEscalate, problemsOf(m.GetEscalate().GetProblems())
 	case *agentreplv1.UpdateMergeQueueMediation_Dispatch:
 		dispatch := m.GetDispatch()
-		d.Kind, d.Restore, d.Problems = merge.MediationDispatch, dispatch.GetRestore() != nil, problemsOf(dispatch.GetProblems())
+		d.Kind, d.Problems = merge.MediationDispatch, problemsOf(dispatch.GetProblems())
 	}
 	return d
 }

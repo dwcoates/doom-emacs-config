@@ -78,7 +78,7 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 			if got := heldEscalation(t, h); got != "ws-escalate" {
 				t.Fatalf("the check waits on escalation %q, want the escalation workspace", got)
 			}
-			if len(h.checks.made) == 0 || !strings.HasPrefix(h.checks.made[len(h.checks.made)-1], "deploy-escalation-") {
+			if len(h.checks.made) == 0 || h.checks.made[len(h.checks.made)-1] != "deploy-escalation" {
 				t.Fatalf("made %v, want an escalation workspace made last", h.checks.made)
 			}
 			if !slices.Contains(h.checks.efforts, "escalation:ws-escalate:recorded=false") {
@@ -104,9 +104,9 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 		arrange func(h *harness)
 		message string
 	}{
-		{name: "a workspace that cannot be made", message: "the escalation workspace could not be made; the user is not told of the escalated deploy",
+		{name: "a workspace that cannot be made", message: "the standing escalation workspace could not be found or made; the user is not told of the escalated deploy",
 			arrange: func(h *harness) { h.checks.escalationErr = errors.New("disk full") }},
-		{name: "an effort that cannot be set", message: "the escalation workspace's effort could not be set; it is not briefed and the user is not told",
+		{name: "an effort that cannot be set", message: "the standing deploy check workspace's effort could not be set",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
 		{name: "a brief that cannot be composed", message: "the escalation workspace's brief could not be composed; it is not briefed and the user is not told",
 			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
@@ -174,7 +174,7 @@ func TestAnEscalationThatCannotBeRecordedIsNotBriefed(t *testing.T) {
 	if subs := escalationBriefs(h); len(subs) != 0 {
 		t.Fatalf("briefed the escalation %d times, want none", len(subs))
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the escalation workspace could not be recorded as landing directly; it is not briefed and the user is not told"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the standing escalation could not be recorded as landing directly"}); !ok {
 		t.Fatalf("records = %+v, want the failed record at ERROR", h.logs.Records())
 	}
 }
@@ -241,7 +241,7 @@ func problemOf(t *testing.T, h *harness, key wsm.ProblemKey) wsm.DeployProblem {
 
 // escalationMade reports whether a new escalation workspace was made.
 func escalationMade(h *harness) bool {
-	return slices.ContainsFunc(h.checks.made, func(n string) bool { return strings.HasPrefix(n, "deploy-escalation-") })
+	return slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-escalation" })
 }
 
 func TestAProblemAnOpenEscalationOwnsGoesBackToIt(t *testing.T) {
@@ -698,7 +698,7 @@ func TestAnIntakeThatCannotBeClosedAfterItsDecisionIsRecorded(t *testing.T) {
 	if err != nil || heldEscalation(t, h) != "ws-escalate" {
 		t.Fatalf("DecideMediation = %v, want the escalation held", err)
 	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake decided but could not be closed"}); !ok {
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake decided but its session could not be ended"}); !ok {
 		t.Fatalf("records = %v, want the failed close at ERROR", h.logs.Records())
 	}
 }

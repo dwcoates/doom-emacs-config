@@ -38,6 +38,11 @@ message UpdateMergeQueueRequest {
     // (repoconfig.v1.LifecycleConfig.deploy_checks). Only the chain's intake
     // may decide, and only while a check is owed. (Added 2026-11-13.)
     UpdateMergeQueueMediation mediation = 15;
+    // Release the hold a repository's escalation puts on its queue: the
+    // user's own gesture on the standing escalation workspace's row, or
+    // `agent-repld`'s command line. The escalation workspace stays open, and
+    // the check it held is released. (Added 2026-11-17.)
+    UpdateMergeQueueReleaseEscalation release_escalation = 16;
   }
   // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
   // agent (`agent-repld`'s command line). Every action on a queue is recorded
@@ -82,6 +87,11 @@ message UpdateMergeQueuePause {
   // a pause the owner had asked for, and the queue ran overnight). (Added
   // 2026-11-15.)
   bool to_land = 3;
+}
+// The release of an escalation's hold.
+message UpdateMergeQueueReleaseEscalation {
+  // REQUIRED. The repository whose queue the escalation holds.
+  workspace.v1.RepositoryRef repository = 1;
 }
 message UpdateMergeQueueResume {
   // WHICH repository's queue. UNSET = every repository that has a queue
@@ -170,31 +180,20 @@ message UpdateMergeQueueMediationEscalate {
   // alone (the chain's bound reached with nothing new to state).
   repeated DeployProblem problems = 1;
 }
-// A dispatch: what to fix, and which remediation workspace fixes it. The
-// intake states problems and their evidence only; it never researches a
-// cause or prescribes a fix, which is the remediation workspace's work.
+// A dispatch: what to fix. The repository's one standing remediation
+// workspace takes it (owner ruling, 2026-11-17). The intake states problems
+// and their evidence only; it never researches a cause or prescribes a fix,
+// which is the remediation workspace's work.
 message UpdateMergeQueueMediationDispatch {
+  // Tags 2-3 are RETIRED with the choice between restoring the chain's last
+  // remediation workspace and making a fresh one (2026-11-17): a repository
+  // has one standing remediation workspace, which takes every dispatch.
+  reserved 2, 3;
+  reserved "restore", "fresh";
   // REQUIRED, at least one. Each problem this deploy caused, in the order
   // the intake judged them most serious first.
   repeated DeployProblem problems = 1;
-  // REQUIRED. Which remediation workspace takes the problems; the arm IS the
-  // choice.
-  oneof remediation {
-    // Reopen the chain's last remediation workspace, because the problems
-    // are in, or caused by, its own landed fix: it knows what it changed and
-    // what it ruled out. Refused when the chain has no remediation yet.
-    UpdateMergeQueueMediationDispatchRestore restore = 2;
-    // Create a new remediation workspace with a fresh context, because the
-    // problems are unrelated to any earlier fix of the chain.
-    UpdateMergeQueueMediationDispatchFresh fresh = 3;
-  }
 }
-// Restore the chain's last remediation workspace. No fields: the chain
-// records which workspace that is.
-message UpdateMergeQueueMediationDispatchRestore {}
-// Create a fresh remediation workspace. No fields: the daemon names and
-// places it.
-message UpdateMergeQueueMediationDispatchFresh {}
 
 // One problem a deploy caused, as the intake states it to the remediation
 // workspace.
@@ -224,6 +223,10 @@ message UpdateMergeQueueError {
   // Tags 11-12 are RETIRED with the racing switch (2026-11-11).
   reserved 9, 10, 11, 12, 13, 14;
   reserved "rollouts_already_held", "rollouts_not_held", "not_subscribed", "subscriber_closed", "racing_already_disabled", "racing_not_disabled";
+  // Tag 17 is RETIRED with the restore of the chain's last remediation
+  // workspace (2026-11-17): the standing remediation takes every dispatch.
+  reserved 17;
+  reserved "no_remediation_to_restore";
   oneof cause {
     // The workspace id is not in the daemon's registry.
     UpdateMergeQueueUnknownWorkspace unknown_workspace = 1;
@@ -248,9 +251,6 @@ message UpdateMergeQueueError {
     UpdateMergeQueueNotMediator not_mediator = 15;
     // A mediation decision while the intake's repository owes no check.
     UpdateMergeQueueNoMediationOwed no_mediation_owed = 16;
-    // A dispatch that restores the chain's last remediation workspace, when
-    // the chain has none yet: dispatch it fresh instead.
-    UpdateMergeQueueNoRemediationToRestore no_remediation_to_restore = 17;
     // A dispatch once the chain has deployed as many remediations in a row as
     // its repository allows: only an escalation is accepted now.
     UpdateMergeQueueRemediationBoundReached remediation_bound_reached = 18;
@@ -262,6 +262,9 @@ message UpdateMergeQueueError {
     // came back after more than two of its fixes deployed: only an
     // escalation is accepted (owner ruling, 2026-11-16).
     UpdateMergeQueueProblemsRecurring problems_recurring = 20;
+    // A release of an escalation's hold while no escalation holds the
+    // repository's queue. (Added 2026-11-17.)
+    UpdateMergeQueueNoEscalationHeld no_escalation_held = 21;
   }
 }
 message UpdateMergeQueueUnknownWorkspace {}
@@ -291,8 +294,8 @@ message UpdateMergeQueueUnknownRepository {}
 message UpdateMergeQueueNotMediator {}
 // The no-check-owed refusal. No fields.
 message UpdateMergeQueueNoMediationOwed {}
-// The nothing-to-restore refusal. No fields: the chain has no remediation.
-message UpdateMergeQueueNoRemediationToRestore {}
+// The no-escalation-held refusal. No fields: nothing holds the queue for the user.
+message UpdateMergeQueueNoEscalationHeld {}
 // The unowned-problems refusal.
 message UpdateMergeQueueProblemsUnowned {
   // Each unowned group, as "OPERATION: MESSAGE (CLASS)", in the window's

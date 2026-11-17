@@ -747,6 +747,8 @@ type DB interface {
 	// RecordDeployEscalation records WS as the deploy escalation workspace
 	// of REPO's queue, whose finish lands directly.
 	RecordDeployEscalation(ctx context.Context, ws WorkspaceID, repo RepoKey, at time.Time) error
+	// DeployEscalationsOf answers every deploy escalation recorded for a queue.
+	DeployEscalationsOf(ctx context.Context, repo RepoKey) ([]WorkspaceID, error)
 	// StandingDeployCheckOf answers a queue's standing deploy check workspace
 	// in one role (deploystanding.go).
 	StandingDeployCheckOf(ctx context.Context, repo RepoKey, role DeployCheckRoleName) (StandingDeployCheck, bool, error)

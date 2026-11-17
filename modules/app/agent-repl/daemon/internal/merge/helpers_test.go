@@ -106,6 +106,8 @@ type fakeDB struct {
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
 	checks wsm.DB
+	// owedCompactions is every workspace owed a compaction, in order.
+	owedCompactions []ids.WorkspaceID
 	// escalationRecordErr fails RecordDeployEscalation.
 	escalationRecordErr  error
 	mediationErr         error
@@ -390,6 +392,33 @@ func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediat
 	return f.checks.MediationOf(ctx, repo)
 }
 
+func (f *fakeDB) StandingDeployCheckOf(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) (wsm.StandingDeployCheck, bool, error) {
+	return f.checks.StandingDeployCheckOf(ctx, repo, role)
+}
+
+func (f *fakeDB) RecordStandingDeployCheck(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName, ws ids.WorkspaceID) error {
+	return f.checks.RecordStandingDeployCheck(ctx, repo, role, ws)
+}
+
+func (f *fakeDB) MarkStandingBriefed(ctx context.Context, repo wsm.RepoKey, role wsm.DeployCheckRoleName) error {
+	return f.checks.MarkStandingBriefed(ctx, repo, role)
+}
+
+func (f *fakeDB) NoteDeployCheckWork(ctx context.Context, repo wsm.RepoKey) error {
+	return f.checks.NoteDeployCheckWork(ctx, repo)
+}
+
+func (f *fakeDB) NoteQuietDeployCheck(ctx context.Context, repo wsm.RepoKey) (bool, error) {
+	return f.checks.NoteQuietDeployCheck(ctx, repo)
+}
+
+func (f *fakeDB) OweCompaction(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	f.owedCompactions = append(f.owedCompactions, ws)
+	f.mu.Unlock()
+	return true, nil
+}
+
 func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
 	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)
 }
@@ -420,6 +449,10 @@ func (f *fakeDB) RecordDeployEscalation(ctx context.Context, ws ids.WorkspaceID,
 
 func (f *fakeDB) DeployEscalationOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
 	return f.checks.DeployEscalationOf(ctx, ws)
+}
+
+func (f *fakeDB) DeployEscalationsOf(ctx context.Context, repo wsm.RepoKey) ([]ids.WorkspaceID, error) {
+	return f.checks.DeployEscalationsOf(ctx, repo)
 }
 
 func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationFinish) (wsm.RemediationFinish, error) {
@@ -3156,6 +3189,8 @@ type harness struct {
 	// briefValues records the values each brief was spliced with, which is how
 	// the escalation constants are asserted to reach the agent.
 	briefValues []map[string]string
+	// briefNames records the name of each brief composed, in order.
+	briefNames []string
 	// turnCloses answers AwaitTurnEnd, consumed in order.
 	turnCloses []wsm.TurnClose
 	// startedSessions records the revivals a configured prompt caused.
@@ -3771,6 +3806,7 @@ func (h *harness) loadBrief(name string, values map[string]string) (string, erro
 	}
 	h.mu.Lock()
 	h.briefValues = append(h.briefValues, values)
+	h.briefNames = append(h.briefNames, name)
 	h.mu.Unlock()
 	return text, nil
 }

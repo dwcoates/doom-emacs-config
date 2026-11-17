@@ -279,6 +279,9 @@ type Orchestrator interface {
 	// DecideMediation is the chain's intake WS's decision on the deploy its
 	// chain owes a check of (mediation.go).
 	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
+	// ReleaseEscalation releases the hold a repository's escalation puts on
+	// its queue (remediationfinish.go).
+	ReleaseEscalation(ctx context.Context, scope RepositoryScope) error
 	// LandsDirectly answers whether WS's finish lands directly
 	// (FinishRemediation): a deploy remediation a fix is dispatched to, or a
 	// deploy escalation workspace the daemon made.

@@ -13,12 +13,14 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// THE ESCALATION (owner ruling, 2026-11-15). The intake never talks to the
-// user. Every escalation of a check -- the intake's own, and the daemon's
-// for it (a turn that decided nothing, a remediation given up or closed) --
-// makes a NEW VISIBLE workspace, on the remediation's model and effort, whose
-// prompt is the summary and the findings with their evidence, and posts a
-// desktop notification whose click opens that workspace.
+// THE ESCALATION (owner rulings, 2026-11-15 and 2026-11-17). The intake
+// never talks to the user. Every escalation of a check -- the intake's own,
+// and the daemon's for it (a turn that decided nothing, a remediation given
+// up or closed) -- goes to the repository's STANDING escalation workspace
+// (standingWorkspace), visible, in remote control, whose prompt is the
+// summary and the findings with their evidence, and posts a desktop
+// notification whose click opens that workspace. The same workspace takes
+// every escalation, so it knows each one it settled before.
 
 // BriefDeployEscalation is an escalation workspace's first prompt.
 const BriefDeployEscalation = "deploy-escalation"
@@ -211,31 +213,26 @@ func renderUpdateGroups(heading string, keys []wsm.ProblemKey) string {
 	return b.String()
 }
 
-// escalate puts check M of queue Q before the user as
-// SUMMARY with PROBLEMS, answering the escalation workspace. Each failure is
-// recorded at ERROR and answered: the check is released already, so the
-// escalation is lost to the user and the record is its account.
+// escalate puts check M of queue Q before the user as SUMMARY with
+// PROBLEMS, in the queue's standing escalation workspace, answering it. Its
+// finish lands directly, as a remediation's does, recorded when the daemon
+// made it (makeStanding), so the role is the daemon's, never the agent's to
+// choose (owner ruling, 2026-11-15). Each failure is recorded at ERROR and
+// answered.
 func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) (ids.WorkspaceID, error) {
 	repoDir := q.repository.Dir
-	name := "deploy-escalation-" + o.deps.Now().UTC().Format("20060102-150405")
-	fields = withField(withField(fields, "escalation", name), "summary", summary)
+	fields = withField(fields, "summary", summary)
 	failed := func(message string, err error) (ids.WorkspaceID, error) {
 		o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
 		return "", err
 	}
-	made, err := o.deps.DeployChecks.CreateDeployEscalation(ctx, repoDir, name)
+	escalation, err := o.standingWorkspace(ctx, q, DeployCheckEscalation, fields)
 	if err != nil {
-		return failed("the escalation workspace could not be made; the user is not told of the escalated deploy", err)
+		return failed("the standing escalation workspace could not be found or made; the user is not told of the escalated deploy", err)
 	}
-	fields["workspace"] = string(made.ID)
-	// ITS FINISH LANDS DIRECTLY, as a remediation's does (FinishRemediation):
-	// recorded before it is briefed, so the role is the daemon's, never the
-	// agent's to choose (owner ruling, 2026-11-15).
-	if err := o.deps.DB.RecordDeployEscalation(ctx, made.ID, q.key, o.deps.Now()); err != nil {
-		return failed("the escalation workspace could not be recorded as landing directly; it is not briefed and the user is not told", err)
-	}
-	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, DeployCheckEscalation); err != nil {
-		return failed("the escalation workspace's effort could not be set; it is not briefed and the user is not told", err)
+	fields["workspace"] = string(escalation.ws)
+	if err := o.deps.DeployChecks.Resume(ctx, escalation.ws); err != nil {
+		return failed("the standing escalation workspace could not be shown; it is not briefed and the user is not told", err)
 	}
 	brief, err := o.deps.Briefs(BriefDeployEscalation, map[string]string{
 		"repo_dir":       repoDir,
@@ -247,12 +244,15 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	if err != nil {
 		return failed("the escalation workspace's brief could not be composed; it is not briefed and the user is not told", err)
 	}
-	if _, err := o.submitCheckPrompt(ctx, made.ID, wsm.NewTurnID(), brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
+	if _, err := o.submitCheckPrompt(ctx, escalation.ws, wsm.NewTurnID(), brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION); err != nil {
 		return failed("the escalation workspace's brief could not be submitted; the user is not told", err)
 	}
-	o.deps.Banners.Mediated(made.ID, summary)
-	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in a new escalation workspace", withField(fields, "problems", len(problems)))
-	return made.ID, nil
+	if !escalation.briefed {
+		o.markBriefed(ctx, q, DeployCheckEscalation, fields)
+	}
+	o.deps.Banners.Mediated(escalation.ws, summary)
+	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the standing escalation workspace", withField(fields, "problems", len(problems)))
+	return escalation.ws, nil
 }
 
 // renderOldProblems is every group of WINDOW that is not NEW, as the

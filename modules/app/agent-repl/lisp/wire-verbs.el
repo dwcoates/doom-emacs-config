@@ -4040,10 +4040,10 @@ workspace is no repository's deploy mediator."
 repository owes no deploy mediation."
   (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoMediationOwed" json))
 
-(defun agent-repl-wire-decode-update-merge-queue-no-remediation-to-restore (json)
-  "Decode UpdateMergeQueueNoRemediationToRestore from JSON.  Empty: the
-chain has no remediation workspace to restore."
-  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoRemediationToRestore" json))
+(defun agent-repl-wire-decode-update-merge-queue-no-escalation-held (json)
+  "Decode UpdateMergeQueueNoEscalationHeld from JSON.  Empty: no escalation
+holds the repository's queue to release."
+  (agent-repl-wire-verbs--decode-empty "UpdateMergeQueueNoEscalationHeld" json))
 
 (defun agent-repl-wire-decode-update-merge-queue-remediation-bound-reached (json)
   "Decode UpdateMergeQueueRemediationBoundReached from JSON into
@@ -4117,9 +4117,9 @@ refusing anything but an escalation."
   "Decode UpdateMergeQueueError's `no_mediation_owed' cause arm from JSON."
   (agent-repl-wire-decode-update-merge-queue-no-mediation-owed json))
 
-(defun agent-repl-wire-decode-update-merge-queue-error-no-remediation-to-restore (json)
-  "Decode UpdateMergeQueueError's `no_remediation_to_restore' cause arm from JSON."
-  (agent-repl-wire-decode-update-merge-queue-no-remediation-to-restore json))
+(defun agent-repl-wire-decode-update-merge-queue-error-no-escalation-held (json)
+  "Decode UpdateMergeQueueError's `no_escalation_held' cause arm from JSON."
+  (agent-repl-wire-decode-update-merge-queue-no-escalation-held json))
 
 (defun agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached (json)
   "Decode UpdateMergeQueueError's `remediation_bound_reached' cause arm from JSON."
@@ -4130,7 +4130,7 @@ refusing anything but an escalation."
 THE ARM IS THE REFUSAL, so an unset cause is a contract breach and an
 arm this codec does not know is refused as an unknown field."
   (let ((message "UpdateMergeQueueError"))
-    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed noRemediationToRestore remediationBoundReached problemsUnowned problemsRecurring))
+    (agent-repl-wire-verbs--check-keys message json '(unknownWorkspace workspaceRefMismatch transferringAway notYetAdopted alreadyPaused notPaused noSuchQueuedMerge unknownRepository notMediator noMediationOwed remediationBoundReached problemsUnowned problemsRecurring noEscalationHeld))
     (list :cause
           (agent-repl-wire-verbs--decode-oneof
            message "cause" json
@@ -4144,7 +4144,7 @@ arm this codec does not know is refused as an unknown field."
          (list 'unknownRepository :unknown-repository #'agent-repl-wire-decode-update-merge-queue-error-unknown-repository)
          (list 'notMediator :not-mediator #'agent-repl-wire-decode-update-merge-queue-error-not-mediator)
          (list 'noMediationOwed :no-mediation-owed #'agent-repl-wire-decode-update-merge-queue-error-no-mediation-owed)
-         (list 'noRemediationToRestore :no-remediation-to-restore #'agent-repl-wire-decode-update-merge-queue-error-no-remediation-to-restore)
+         (list 'noEscalationHeld :no-escalation-held #'agent-repl-wire-decode-update-merge-queue-error-no-escalation-held)
          (list 'remediationBoundReached :remediation-bound-reached #'agent-repl-wire-decode-update-merge-queue-error-remediation-bound-reached)
          (list 'problemsUnowned :problems-unowned #'agent-repl-wire-decode-update-merge-queue-error-problems-unowned)
          (list 'problemsRecurring :problems-recurring #'agent-repl-wire-decode-update-merge-queue-error-problems-recurring))))))

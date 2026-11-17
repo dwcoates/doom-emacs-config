@@ -204,17 +204,18 @@ var cliNouns = map[string]map[string]cliCommand{
 		"place":                  {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
 	},
 	mergeQueueNoun: {
-		"status":      {usage: "status [-repository here|DIR]", run: queueStatus},
-		"dequeue":     {usage: "dequeue MERGE|here", run: queueDequeue},
-		"move-up":     {usage: "move-up MERGE|here", run: queueMove(true)},
-		"move-down":   {usage: "move-down MERGE|here", run: queueMove(false)},
-		"requeue":     {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
-		"discard":     {usage: "discard MERGE|here", run: queueDiscard},
-		"pause":       {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
-		"resume":      {usage: "resume -repository here|DIR|all", run: queuePause(false)},
-		"subscribe":   {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
-		"mediation":   {usage: "mediation approve|escalate [-problems]|dispatch -fresh|-restore -summary TEXT (problems are JSON on stdin)", run: queueMediation},
-		"unsubscribe": {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
+		"status":             {usage: "status [-repository here|DIR]", run: queueStatus},
+		"dequeue":            {usage: "dequeue MERGE|here", run: queueDequeue},
+		"move-up":            {usage: "move-up MERGE|here", run: queueMove(true)},
+		"move-down":          {usage: "move-down MERGE|here", run: queueMove(false)},
+		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
+		"discard":            {usage: "discard MERGE|here", run: queueDiscard},
+		"pause":              {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
+		"resume":             {usage: "resume -repository here|DIR|all", run: queuePause(false)},
+		"release-escalation": {usage: "release-escalation -repository here|DIR", run: queueReleaseEscalation},
+		"subscribe":          {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
+		"mediation":          {usage: "mediation approve|escalate [-problems]|dispatch -summary TEXT (problems are JSON on stdin)", run: queueMediation},
+		"unsubscribe":        {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
 		"register": {usage: "register here|PATH", run: repositoryRegister},
@@ -2362,15 +2363,35 @@ func queuePause(pause bool) func(c *cliCall, args []string) int {
 	}
 }
 
+// queueReleaseEscalation releases the hold a repository's escalation puts on
+// its queue; the standing escalation workspace stays open.
+func queueReleaseEscalation(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	repository := fs.String("repository", "", "here, or a main checkout; required")
+	if _, ok := c.parse(fs, args); !ok {
+		return exitFailure
+	}
+	if *repository == "" || *repository == allRepositories {
+		return c.usageFailed("-repository names one repository, here or a main checkout: an escalation holds one queue")
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	scope, ok := c.repository(*repository)
+	if !ok {
+		return exitFailure
+	}
+	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation{
+		ReleaseEscalation: &agentreplv1.UpdateMergeQueueReleaseEscalation{Repository: scope}}})
+}
+
 // queueMediation is the deploy intake's decision on the deploy its chain
 // owes a check of: approve, escalate, or dispatch the problems the deploy
-// caused, read from standard input as JSON, to a fresh or the restored
+// caused, read from standard input as JSON, to the repository's standing
 // remediation workspace.
 func queueMediation(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	summary := fs.String("summary", "", "what it found, in a sentence or two (required)")
-	fresh := fs.Bool("fresh", false, "dispatch to a fresh remediation workspace")
-	restore := fs.Bool("restore", false, "dispatch to the chain's last remediation workspace, reopened")
 	withProblems := fs.Bool("problems", false, "an escalation's findings follow on stdin as JSON, as a dispatch's do")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
@@ -2380,9 +2401,6 @@ func queueMediation(c *cliCall, args []string) int {
 		return c.usageFailed("name the decision: approve, escalate or dispatch")
 	}
 	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
-	if positionals[0] != "dispatch" && (*fresh || *restore) {
-		return c.usageFailed("-fresh and -restore choose a dispatch's remediation workspace")
-	}
 	if positionals[0] != "escalate" && *withProblems {
 		return c.usageFailed("-problems reads an escalation's findings; a dispatch always reads its problems")
 	}
@@ -2400,11 +2418,11 @@ func queueMediation(c *cliCall, args []string) int {
 		}
 		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: escalate}
 	case "dispatch":
-		dispatch, err := readDispatch(c.deps.stdin, *fresh, *restore)
+		problems, err := readProblems(c.deps.stdin)
 		if err != nil {
 			return c.usageFailed("%v", err)
 		}
-		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: dispatch}
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{Problems: problems}}
 	default:
 		return c.usageFailed("the decision is approve, escalate or dispatch, not %q", positionals[0])
 	}
@@ -2415,25 +2433,6 @@ func queueMediation(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Mediation{Mediation: m}})
-}
-
-// readDispatch reads a dispatch's problems from IN (readProblems), to the
-// remediation workspace FRESH or RESTORE chooses (exactly one).
-func readDispatch(in io.Reader, fresh, restore bool) (*agentreplv1.UpdateMergeQueueMediationDispatch, error) {
-	if fresh == restore {
-		return nil, errors.New("a dispatch names exactly one of -fresh or -restore")
-	}
-	problems, err := readProblems(in)
-	if err != nil {
-		return nil, err
-	}
-	out := &agentreplv1.UpdateMergeQueueMediationDispatch{Problems: problems}
-	if fresh {
-		out.Remediation = &agentreplv1.UpdateMergeQueueMediationDispatch_Fresh{Fresh: &agentreplv1.UpdateMergeQueueMediationDispatchFresh{}}
-	} else {
-		out.Remediation = &agentreplv1.UpdateMergeQueueMediationDispatch_Restore{Restore: &agentreplv1.UpdateMergeQueueMediationDispatchRestore{}}
-	}
-	return out, nil
 }
 
 // readProblems reads a decision's problems from IN: a JSON list of
