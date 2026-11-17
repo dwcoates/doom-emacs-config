@@ -8,7 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
-	"strings"
+
+	"agentrepl/logging"
 )
 
 // WHERE THE LOGS ARE is settled by modules/app/agent-repl/logging-contract.md,
@@ -163,7 +164,7 @@ func EnumerateSources(env Env) ([]Source, error) {
 	var sources []Source
 
 	if env.ModuleLog != "" {
-		warnings := strings.TrimSuffix(env.ModuleLog, ".log") + ".warn.log"
+		warnings := logging.WarningsPath(env.ModuleLog)
 		sources = append(sources,
 			Source{Name: "emacs.global", Path: env.ModuleLog, Kind: KindJSONL},
 			Source{Name: "emacs.global", Path: env.ModuleLog + ".prev", Kind: KindJSONL},

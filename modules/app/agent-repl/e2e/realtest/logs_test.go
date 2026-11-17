@@ -6,8 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"testing"
+
+	"agentrepl/logging"
 )
 
 func TestEnumerateNamesEveryCanonicalWorkspaceSinkAndItsWarningsTwin(t *testing.T) {
@@ -165,7 +166,7 @@ func TestEnumerateNamesTheModuleLogAndItsPreviousSibling(t *testing.T) {
 	for _, src := range sources {
 		paths = append(paths, src.Path)
 	}
-	warnings := strings.TrimSuffix(moduleLog, ".log") + ".warn.log"
+	warnings := logging.WarningsPath(moduleLog)
 	if !slices.Equal(paths, []string{moduleLog, moduleLog + ".prev", warnings}) {
 		t.Errorf("enumerated %q, want the module log, its .prev sibling and its warnings file", paths)
 	}
