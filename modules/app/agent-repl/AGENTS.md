@@ -133,7 +133,7 @@ helper every test entry point goes through.
 
 - macOS: the CPU is NOT demoted (owner ruling 2026-11-13); the CPU
   governor alone moderates the tests (the tests average 35% of the host and
-  never push it above 50%). A test at a lower scheduler priority runs slower
+  never push it above 50%, or 55% and 70% on AC power in High Power Mode). A test at a lower scheduler priority runs slower
   whenever the owner's work is busy, and trips time limits measured at full
   speed: the utility clamp (`taskpolicy -c utility`) tried 2026-11-13 killed
   short units at their limits. `nice` stays as the run's rank; it demotes
@@ -246,11 +246,13 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 ### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across the host's core budget: at most 35% of
-`runtime.NumCPU()` seats, rounded down (`cores.Budget`, `cores.CapPercent`),
-with each unit admitted by the CPU governor only while the tests stay within
-their 35% target and the host within its 50% ceiling (owner rulings
-2026-10-20, 2026-10-23, 2026-10-30 and 2026-11-13). The budget is
+and schedules it across the host's core budget: at most 55% of
+`runtime.NumCPU()` seats, rounded down (`cores.Budget`, the highest target,
+`cores.PoweredLimits`), with each unit admitted by the CPU governor only while
+the tests stay within their target and the host within its ceiling: 35% and
+50% (`cores.BaseLimits`), or 55% and 70% on AC power in High Power Mode
+(owner rulings 2026-10-20, 2026-10-23, 2026-10-30, 2026-11-13 and
+2026-11-17). The budget is
 shared by every test run on the host (below), and the whole run is at
 background priority (`bin/background.sh`), so it always yields the CPU to
 the owner's live runtime, input handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating
@@ -389,9 +391,13 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
 - THE TESTS HAVE A TARGET AND THE HOST A CEILING (owner ruling,
   2026-11-13, replacing the 2026-10-26 cap on the host's TOTAL CPU, which let
   the owner's other work eat the tests' share). Every test on the host
-  together should average `cores.CapPercent` (35%, 5.6 of 16 cores), and the
-  tests must never bring the whole host above `cores.CeilingPercent` (50%, 8
-  cores). `cores.Governor` reads every second the host's busy cores
+  together should average the target (`cores.BaseLimits`: 35%, 5.6 of 16
+  cores), and the tests must never bring the whole host above the ceiling
+  (50%, 8 cores). On AC power in High Power Mode the limits are
+  `cores.PoweredLimits`, 55% and 70% (owner ruling, 2026-11-17): the governor
+  reads the host's power (`agentrepl/logging/hostpower`) at every read, so
+  unplugging, lid open or closed, returns the base limits for the next unit
+  admitted. `cores.Governor` reads every second the host's busy cores
   (`agentrepl/logging/hostcpu`) and the tests' own cores: every process
   carrying `cores.NestedEnv`, which each run sets on its units and every
   descendant inherits, counted own CPU plus reaped children's

@@ -1,6 +1,8 @@
 // Package hostpower reads the source the host runs on -- AC power or its
 // battery -- the platform's own way (power_darwin.go, host_linux.go,
-// host_other.go). The runtime metrics record it beside every process sample.
+// host_other.go), and the energy mode `pmset` names (energy.go): the one
+// reader of the host's power for every agent-repl program that needs it (the
+// daemon's runtime metrics and persistent Wi-Fi, testrun's CPU governor).
 package hostpower
 
 // Power is the source the host runs on.

@@ -1,6 +1,7 @@
 package persistentwifi
 
 import (
+	"agentrepl/logging/hostpower"
 	"context"
 	"errors"
 	"strings"
@@ -190,7 +191,7 @@ const (
 	hotspot  = "Test Hotspot"
 	// energyModeHighPower is `pmset`'s High Power Mode, a mode the user may
 	// choose.
-	energyModeHighPower = "2"
+	energyModeHighPower = hostpower.EnergyModeHighPower
 )
 
 // pmsetIn is `pmset -g` for a mode on or off and an energy mode in use (empty

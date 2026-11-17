@@ -35,6 +35,7 @@ import (
 	testrunv1 "agentrepl/proto/testrun/v1"
 
 	"agentrepl/logging/hostcpu"
+	"agentrepl/logging/hostpower"
 
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cores"
@@ -414,7 +415,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		return 1
 	}
 	if plan.Governed {
-		log.Infof("core budget: up to %d seats of the host's %d cores, shared by every test run on the host through %s; the CPU governor holds the tests to an average of %d%% of the host and the host to %d%%; this run ranks %d", slots, runtime.NumCPU(), cores.DefaultDir, cores.CapPercent, cores.CeilingPercent, rank)
+		log.Infof("core budget: up to %d seats of the host's %d cores, shared by every test run on the host through %s; the CPU governor holds %s; this run ranks %d", slots, runtime.NumCPU(), cores.DefaultDir, cores.LimitsSaid(), rank)
 	} else {
 		if err := os.MkdirAll(plan.Dir, 0o755); err != nil {
 			log.Errorf("create the ungoverned run's own core pool %s: %v", plan.Dir, err)
@@ -471,7 +472,10 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 			return 1
 		}
 		testsCPU := &cores.TestsCPU{Scan: marked.Scan}
-		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
+		// The host's power, which sets the governor's limits (cores.Limits).
+		power := &hostpower.Host{}
+		readPower := func() (cores.HostPower, error) { return cores.ReadHostPower(power, power.EnergyMode) }
+		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
 	}
 	return cli.Run(ctx, cli.Deps{
 		Events:      emitter,

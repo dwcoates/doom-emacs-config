@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"agentrepl/logging/hostpower"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
@@ -14,7 +15,7 @@ import (
 // energyModeLowPower is `pmset -a powermode`'s Low Power Mode, which the
 // lid-closed quiet state runs; leaving it restores whatever mode was in use
 // before (energy.go). The sudoers grant names `powermode 0`, `1` and `2`.
-const energyModeLowPower = "1"
+const energyModeLowPower = hostpower.EnergyModeLowPower
 
 // powerSettings are the three `pmset -a` settings the mode writes, in order:
 // sleep disabled outright, the network kept up over sleep, and wake on network

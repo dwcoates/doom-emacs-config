@@ -13,16 +13,90 @@ import (
 	"time"
 
 	"agentrepl/logging/hostcpu"
+	"agentrepl/logging/hostpower"
 	"agentrepl/testrun/internal/seats"
 )
 
 func TestTargetAndCeilingCores(t *testing.T) {
-	// Act
-	target, ceiling := TargetCores(16), CeilingCores(16)
+	cases := []struct {
+		name                    string
+		limits                  Limits
+		wantTarget, wantCeiling float64
+	}{
+		{name: "the base limits are 35% and 50% of sixteen cores", limits: BaseLimits, wantTarget: 5.6, wantCeiling: 8},
+		{name: "the powered limits are 55% and 70% of sixteen cores", limits: PoweredLimits, wantTarget: 8.8, wantCeiling: 11.2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			target, ceiling := tc.limits.TargetCores(16), tc.limits.CeilingCores(16)
 
-	// Assert: the owner's 35% and 50% of sixteen cores.
-	if target != 5.6 || ceiling != 8 {
-		t.Fatalf("target %v, ceiling %v; want 5.6 and 8", target, ceiling)
+			// Assert
+			if target != tc.wantTarget || ceiling != tc.wantCeiling {
+				t.Fatalf("target %v, ceiling %v; want %v and %v", target, ceiling, tc.wantTarget, tc.wantCeiling)
+			}
+		})
+	}
+}
+
+func TestHostPowerLimits(t *testing.T) {
+	cases := []struct {
+		name  string
+		power HostPower
+		want  Limits
+	}{
+		{name: "AC power in High Power Mode allows the powered limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower}, want: PoweredLimits},
+		{name: "AC power in Low Power Mode keeps the base limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeLowPower}, want: BaseLimits},
+		{name: "AC power in the automatic mode keeps the base limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: "0"}, want: BaseLimits},
+		{name: "AC power on a host with no energy mode keeps the base limits", power: HostPower{Source: hostpower.PowerAC}, want: BaseLimits},
+		{name: "the battery in High Power Mode keeps the base limits", power: HostPower{Source: hostpower.PowerBattery, EnergyMode: hostpower.EnergyModeHighPower}, want: BaseLimits},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := tc.power.Limits()
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Limits() = %+v; want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+// powerSource is a hostpower.PowerSource answering one reading.
+type powerSource struct {
+	power hostpower.Power
+	err   error
+}
+
+func (p powerSource) Power() (hostpower.Power, error) { return p.power, p.err }
+
+func TestReadHostPower(t *testing.T) {
+	noSource, noMode := errors.New("IOPSCopyPowerSourcesInfo answered nothing"), errors.New("pmset -g exited 1")
+	cases := []struct {
+		name    string
+		source  powerSource
+		mode    string
+		modeErr error
+		want    HostPower
+		wantErr error
+	}{
+		{name: "the source and the energy mode together", source: powerSource{power: hostpower.PowerAC}, mode: hostpower.EnergyModeHighPower,
+			want: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower}},
+		{name: "a source that cannot be read answers its error", source: powerSource{err: noSource}, mode: hostpower.EnergyModeHighPower, wantErr: noSource},
+		{name: "an energy mode that cannot be read answers its error", source: powerSource{power: hostpower.PowerAC}, modeErr: noMode, wantErr: noMode},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, err := ReadHostPower(tc.source, func() (string, error) { return tc.mode, tc.modeErr })
+
+			// Assert
+			if !errors.Is(err, tc.wantErr) || got != tc.want {
+				t.Fatalf("ReadHostPower = %+v, %v; want %+v, %v", got, err, tc.want, tc.wantErr)
+			}
+		})
 	}
 }
 
@@ -54,12 +128,14 @@ func TestExpectedCores(t *testing.T) {
 }
 
 func TestAdmits(t *testing.T) {
-	// Sixteen cores: the tests' target is 5.6, the host's ceiling 8.
+	// Sixteen cores: the tests' target is 5.6, the host's ceiling 8, under
+	// the base limits; 8.8 and 11.2 under the powered ones.
 	cases := []struct {
-		name  string
-		load  Load
-		cores float64
-		want  bool
+		name   string
+		limits Limits
+		load   Load
+		cores  float64
+		want   bool
 	}{
 		{name: "tests under their target but the host at its ceiling admit nothing",
 			load: Load{HostCores: 8, TestsCores: 1, Running: true}, cores: 1, want: false},
@@ -83,15 +159,29 @@ func TestAdmits(t *testing.T) {
 			load: Load{HostCores: 8}, cores: 1, want: false},
 		{name: "lingering test processes do not hold the first unit back",
 			load: Load{HostCores: 9, TestsCores: 6}, cores: 1, want: true},
+		{name: "the powered target admits a unit the base target holds back",
+			limits: PoweredLimits, load: Load{HostCores: 5, TestsCores: 5, Running: true}, cores: 2, want: true},
+		{name: "a unit that would take the tests past the powered target waits",
+			limits: PoweredLimits, load: Load{HostCores: 8, TestsCores: 8, Running: true}, cores: 1, want: false},
+		{name: "the powered ceiling still bounds the host",
+			limits: PoweredLimits, load: Load{HostCores: 10, TestsCores: 2, Running: true}, cores: 2, want: false},
+		{name: "the first unit starts while the rest of the host is under the powered ceiling",
+			limits: PoweredLimits, load: Load{HostCores: 11}, cores: 6.1, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			limits := tc.limits
+			if limits == (Limits{}) {
+				limits = BaseLimits
+			}
+
 			// Act
-			got := Admits(16, tc.load, tc.cores)
+			got := Admits(16, limits, tc.load, tc.cores)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("Admits(16, %+v, %v) = %v; want %v", tc.load, tc.cores, got, tc.want)
+				t.Fatalf("Admits(16, %+v, %+v, %v) = %v; want %v", limits, tc.load, tc.cores, got, tc.want)
 			}
 		})
 	}
@@ -105,7 +195,7 @@ func TestReadState(t *testing.T) {
 		want    CPUState
 		wantErr string
 	}{
-		{name: "no governor has stated anything: nothing waits for the CPU", want: CPUState{CapPercent: CapPercent, CeilingPercent: CeilingPercent}},
+		{name: "no governor has stated anything: nothing waits for the CPU", want: CPUState{CapPercent: 35, CeilingPercent: 50}},
 		{name: "a stated wait", write: true, file: `{"waiting_for_cpu":true,"busy_percent":71.5,"tests_percent":30,"cap_percent":35,"ceiling_percent":50}`, want: CPUState{WaitingForCPU: true, BusyPercent: 71.5, TestsPercent: 30, CapPercent: 35, CeilingPercent: 50}},
 		{name: "a corrupt state is refused", write: true, file: `{"waiting_for_cpu":`, wantErr: "read the CPU governor's state"},
 	}
@@ -139,7 +229,7 @@ func TestReadState(t *testing.T) {
 func TestWriteStateReadsBackWhole(t *testing.T) {
 	// Arrange
 	dir := t.TempDir()
-	want := CPUState{WaitingForCPU: true, BusyPercent: 80, CapPercent: CapPercent}
+	want := CPUState{WaitingForCPU: true, BusyPercent: 80, CapPercent: BaseLimits.Target}
 
 	// Act
 	if err := writeState(dir, want); err != nil {
@@ -172,7 +262,7 @@ func TestHoldThatWaitsForTheCPUSaysSoAndWhenItEnds(t *testing.T) {
 	// the only seat.
 	log := &recLog{waits: make(chan struct{}, 1)}
 	h := NewHost(t.TempDir(), 1, 19, log)
-	if err := writeState(h.Pool.Dir, CPUState{WaitingForCPU: true, BusyPercent: 72, TestsPercent: 30, CapPercent: CapPercent, CeilingPercent: CeilingPercent}); err != nil {
+	if err := writeState(h.Pool.Dir, CPUState{WaitingForCPU: true, BusyPercent: 72, TestsPercent: 30, CapPercent: BaseLimits.Target, CeilingPercent: BaseLimits.Ceiling}); err != nil {
 		t.Fatal(err)
 	}
 	var mu sync.Mutex
@@ -290,6 +380,22 @@ type host struct {
 	testsCPU float64
 	err      error
 	testsErr error
+	// power is the host's power; powerErr fails its read.
+	power    HostPower
+	powerErr error
+}
+
+// plug sets the host's power.
+func (h *host) plug(power HostPower, err error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.power, h.powerErr = power, err
+}
+
+func (h *host) readPower() (HostPower, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.power, h.powerErr
 }
 
 func (h *host) set(busy, tests float64) {
@@ -360,7 +466,7 @@ func newGovRig(t *testing.T, dir string) *govRig {
 	t.Helper()
 	return &govRig{
 		pool:   seats.Pool{Dir: dir, Prefix: "core", N: 10, What: "core"},
-		host:   &host{},
+		host:   &host{power: onBattery},
 		clock:  &clock{now: time.Date(2026, 11, 13, 9, 0, 0, 0, time.UTC)},
 		ledger: &ledger{dir: dir},
 		log:    &govLog{},
@@ -373,7 +479,7 @@ func newGovRig(t *testing.T, dir string) *govRig {
 func (r *govRig) start() {
 	ctx, stop := context.WithCancel(context.Background())
 	r.stop = stop
-	g := &Governor{Pool: r.pool, NumCPU: 16, Read: r.host.read, Tests: r.host.readTests, Now: r.clock.Now, Ticks: r.ticks, Log: r.log, Stepped: func(d Decision) { r.steps <- d }}
+	g := &Governor{Pool: r.pool, NumCPU: 16, Read: r.host.read, Tests: r.host.readTests, Power: r.host.readPower, Now: r.clock.Now, Ticks: r.ticks, Log: r.log, Stepped: func(d Decision) { r.steps <- d }}
 	go func() {
 		g.Run(ctx)
 		close(r.done)
@@ -749,7 +855,7 @@ func TestGovernorSaysEachChangeOnce(t *testing.T) {
 	var said []string
 	for _, l := range infos {
 		switch {
-		case strings.Contains(l, "until the host's and the tests' load is read"):
+		case strings.Contains(l, "until the host's power and the host's and the tests' load are read"):
 			said = append(said, "unread")
 		case strings.Contains(l, "CPU available"):
 			said = append(said, "available")
@@ -1000,4 +1106,151 @@ func TestDropOnArrivalLetsTheLockGo(t *testing.T) {
 		t.Fatal(err)
 	}
 	next.Close()
+}
+
+var (
+	// onBattery is a host on its battery in Low Power Mode, under the base
+	// limits.
+	onBattery = HostPower{Source: hostpower.PowerBattery, EnergyMode: hostpower.EnergyModeLowPower}
+	// pluggedIn is a host on AC power in High Power Mode, under the powered
+	// limits: a closed lid under persistent Wi-Fi keeps High Power Mode on AC
+	// power, so it reads the same.
+	pluggedIn = HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower}
+)
+
+func TestGovernorHoldsTheTestsToTheLimitsTheHostsPowerAllows(t *testing.T) {
+	// Sixteen cores, the tests using 6 of them: over the base target of 5.6,
+	// under the powered one of 8.8.
+	cases := []struct {
+		name        string
+		power       HostPower
+		wantAdmit   bool
+		wantLimits  Limits
+		wantPercent [2]int
+	}{
+		{name: "on the battery the base target holds the next unit back", power: onBattery, wantLimits: BaseLimits, wantPercent: [2]int{35, 50}},
+		{name: "on AC power in High Power Mode the powered target lets it start", power: pluggedIn, wantAdmit: true, wantLimits: PoweredLimits, wantPercent: [2]int{55, 70}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r := newGovRig(t, t.TempDir())
+			r.host.plug(tc.power, nil)
+			held := r.running(t, UnitRecord{Unit: "old", Rank: 19, Width: 1, Cores: 6}, r.clock.Now().Add(-time.Minute))
+			defer held.Release()
+			r.ask(t, UnitRecord{Unit: "u", Rank: 19, Width: 1, Cores: 1})
+
+			// Act
+			d := r.measured(6, 6)
+			defer r.halt()
+
+			// Assert
+			if d.Admit != tc.wantAdmit || d.Limits != tc.wantLimits {
+				t.Fatalf("decision = %+v; want admitted %v under %+v", d, tc.wantAdmit, tc.wantLimits)
+			}
+			if s, err := ReadState(r.pool.Dir); err != nil || [2]int{s.CapPercent, s.CeilingPercent} != tc.wantPercent {
+				t.Fatalf("state = %+v, %v; want the limits %v stated", s, err, tc.wantPercent)
+			}
+		})
+	}
+}
+
+func TestGovernorReturnsToTheBaseLimitsWhenTheHostIsUnplugged(t *testing.T) {
+	// Arrange: plugged in, the next unit fits the powered target.
+	r := newGovRig(t, t.TempDir())
+	r.host.plug(pluggedIn, nil)
+	held := r.running(t, UnitRecord{Unit: "old", Rank: 19, Width: 1, Cores: 6}, r.clock.Now().Add(-time.Minute))
+	defer held.Release()
+	r.ask(t, UnitRecord{Unit: "u", Rank: 19, Width: 1, Cores: 1})
+	before := r.measured(6, 6)
+	defer r.halt()
+
+	// Act
+	r.host.plug(onBattery, nil)
+	after := r.tick(6, 6)
+
+	// Assert
+	if !before.Admit || after.Admit || after.Limits != BaseLimits {
+		t.Fatalf("decisions = %+v, then %+v; want admitted plugged in, held back under the base limits once unplugged", before, after)
+	}
+}
+
+func TestGovernorSaysEachChangeOfItsLimitsOnce(t *testing.T) {
+	// Arrange
+	r := newGovRig(t, t.TempDir())
+	r.host.plug(pluggedIn, nil)
+	r.measured(0, 0)
+	defer r.halt()
+
+	// Act: the same limits again, then unplugged twice over.
+	r.tick(0, 0)
+	r.host.plug(onBattery, nil)
+	r.tick(0, 0)
+	r.host.plug(HostPower{Source: hostpower.PowerBattery, EnergyMode: hostpower.EnergyModeHighPower}, nil)
+	r.tick(0, 0)
+
+	// Assert
+	infos, _ := r.log.lines()
+	var said []string
+	for _, l := range infos {
+		if strings.Contains(l, "CPU governor: the host runs on") {
+			said = append(said, l)
+		}
+	}
+	want := []string{
+		"CPU governor: the host runs on ac power in High Power Mode, so the tests average at most 55% (8.8 cores) and the host reaches at most 70% (11.2 cores)",
+		"CPU governor: the host runs on battery power in Low Power Mode, so the tests average at most 35% (5.6 cores) and the host reaches at most 50% (8.0 cores)",
+	}
+	if strings.Join(said, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("said %q; want %q", said, want)
+	}
+}
+
+func TestGovernorThatCannotReadThePowerHoldsEveryUnitBackAndSaysSoOnce(t *testing.T) {
+	// Arrange
+	r := newGovRig(t, t.TempDir())
+	r.ask(t, UnitRecord{Unit: "u1", Rank: 19, Width: 1, Cores: 1})
+	r.measured(0, 0)
+	defer r.halt()
+
+	// Act
+	r.host.plug(HostPower{}, errors.New("pmset -g did not answer within 150ms"))
+	first := r.tick(0, 0)
+	second := r.tick(0, 0)
+
+	// Assert
+	if first.Measured || first.Admit || !first.Gated || second.Admit {
+		t.Fatalf("decisions = %+v, %+v; want unmeasured and gated", first, second)
+	}
+	_, errs := r.log.lines()
+	want := "cannot read the host's power, so no test unit starts until it can: pmset -g did not answer within 150ms"
+	if len(errs) != 1 || !strings.Contains(errs[0], want) {
+		t.Fatalf("errors = %v; want the power read's failure said once", errs)
+	}
+}
+
+func TestLimitsSaidNamesBothLimits(t *testing.T) {
+	// Act
+	got := LimitsSaid()
+
+	// Assert
+	want := "the tests to an average of 55% of the host and the host to 70% on AC power in High Power Mode, and to 35% and 50% otherwise"
+	if got != want {
+		t.Fatalf("LimitsSaid() = %q; want %q", got, want)
+	}
+}
+
+func TestTheGovernorSaysItsLimitsWithLimitsSaid(t *testing.T) {
+	// Arrange
+	r := newGovRig(t, t.TempDir())
+
+	// Act
+	r.measured(0, 0)
+	r.halt()
+
+	// Assert
+	infos, _ := r.log.lines()
+	if len(infos) == 0 || !strings.HasSuffix(infos[0], "holding "+LimitsSaid()) {
+		t.Fatalf("infos = %v; want the governor's first line to say LimitsSaid()", infos)
+	}
 }
