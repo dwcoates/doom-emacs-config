@@ -31,6 +31,7 @@ import (
 	"agent-repld/internal/server"
 	"agent-repld/internal/server/servertest"
 	"agent-repld/internal/wsm"
+	"agentrepl/logging"
 
 	"agentrepl/logging/metrics"
 )
@@ -119,6 +120,9 @@ func parseRunLog(t *testing.T, raw []byte) []dlog.Record {
 	t.Helper()
 	var out []dlog.Record
 	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		if line == "" {
+			continue
+		}
 		var record dlog.Record
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("parse daemon.run.log record %q: %v", line, err)
@@ -718,14 +722,21 @@ func TestTheStateRootLayoutIsCreated(t *testing.T) {
 	}
 }
 
-// runLogRecords answers every record of a state root's run log.
+// runLogRecords answers every record of a state root's run log: the log and
+// its warnings file, where every warn and error record lands
+// (proto/vocab/log-warnings-sink.json).
 func runLogRecords(t *testing.T, root string) []dlog.Record {
 	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	path := filepath.Join(root, "logs", "daemon.run.log")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read daemon.run.log: %v", err)
 	}
-	return parseRunLog(t, raw)
+	warnings, err := os.ReadFile(logging.WarningsPath(path))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read daemon.run.warn.log: %v", err)
+	}
+	return append(parseRunLog(t, raw), parseRunLog(t, warnings)...)
 }
 
 func TestTheBootOpensAFreshWorkspaceStateAndLeavesTheLegacyDatabaseAlone(t *testing.T) {
@@ -1187,11 +1198,21 @@ func TestReconcileAnswersACompletedBoot(t *testing.T) {
 func runLogRecord(t *testing.T, root, operation, level string) map[string]any {
 	t.Helper()
 
-	raw, err := os.ReadFile(filepath.Join(root, "logs", "daemon.run.log"))
+	// The run log and its warnings file, where every warn and error record
+	// lands (proto/vocab/log-warnings-sink.json).
+	path := filepath.Join(root, "logs", "daemon.run.log")
+	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile daemon.run.log: %v", err)
 	}
-	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+	warnings, err := os.ReadFile(logging.WarningsPath(path))
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("ReadFile daemon.run.warn.log: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)+"\n"+string(warnings)), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
 		var record map[string]any
 		if err := json.Unmarshal([]byte(line), &record); err != nil {
 			t.Fatalf("parse daemon.run.log record %q: %v", line, err)

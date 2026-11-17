@@ -338,14 +338,19 @@ func readLogRecords(t testing.TB, path string) ([]LogRecord, error) {
 	if len(files) == 1 {
 		return readFileRecords(t, path)
 	}
-	var merged []LogRecord
-	for _, file := range files {
-		records, err := readFileRecords(t, file)
-		if err != nil {
-			return nil, err
-		}
-		merged = append(merged, records...)
+	logRecords, err := readFileRecords(t, files[0])
+	if err != nil {
+		return nil, err
 	}
+	warningRecords, err := readFileRecords(t, files[1])
+	if err != nil {
+		return nil, err
+	}
+	// A log whose warnings file holds nothing is its own order: nothing to merge.
+	if len(warningRecords) == 0 {
+		return logRecords, nil
+	}
+	merged := append(slices.Clip(logRecords), warningRecords...)
 	var parseErr error
 	slices.SortStableFunc(merged, func(a, b LogRecord) int {
 		at, aerr := time.Parse(time.RFC3339Nano, a.Timestamp)
