@@ -913,6 +913,7 @@ func New(deps Deps) (Controller, error) {
 		reported:      make(map[ids.WorkspaceID]string),
 		settled:       make(chan struct{}),
 	}
+	c.serving = newServingWatch(c)
 	c.intake.answer = c.servesIntakeLocked()
 	c.queue.answer = c.servesQueueLocked()
 	// NO TAKEOVER IS COMING until Join says one is.

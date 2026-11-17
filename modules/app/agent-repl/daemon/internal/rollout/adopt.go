@@ -1156,17 +1156,30 @@ func (c *controller) outgoingDaemon(ws ids.WorkspaceID) (ids.InstanceID, error) 
 // finish. Claiming before the serving row clears lets the successor race the
 // incumbent's release and can strand every transfer notice behind that error.
 func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID, outgoing ids.InstanceID, fields dlog.Context) error {
-	// The watch is taken before the first read, so a release in between is
+	// ONE WATCH ANSWERS EVERY WAITING ADOPTION (servingWatch), which takes
+	// its change watch before its first read, so a release in between is
 	// reported.
-	changes, stop := c.handoverChanges(ctx)
+	waiter, stop := c.serving.watch(ws)
 	defer stop()
 	waiting := false
 	for {
-		owner, err := c.deps.DB.Serving(ctx, ws)
-		if err != nil {
-			c.log.Error(opAdopt, "could not read serving ownership while waiting for the incumbent", dlog.WithCause(fields, err))
-			return fmt.Errorf("rollout: adopt %q: read serving ownership: %w", ws, err)
+		var read servingRead
+		select {
+		case <-ctx.Done():
+			err := context.Cause(ctx)
+			c.log.Error(opAdopt, "the adoption lifetime ended before the incumbent released serving ownership", dlog.WithCause(fields, err))
+			return fmt.Errorf("rollout: adopt %q: wait for incumbent serving release: %w", ws, err)
+		case read = <-waiter.reads:
 		}
+		if read.watchFailed {
+			c.log.Error(opAdopt, "could not watch the state database for the incumbent's release", dlog.WithCause(fields, read.err))
+			return fmt.Errorf("rollout: adopt %q: watch for incumbent serving release: %w", ws, read.err)
+		}
+		if read.err != nil {
+			c.log.Error(opAdopt, "could not read serving ownership while waiting for the incumbent", dlog.WithCause(fields, read.err))
+			return fmt.Errorf("rollout: adopt %q: read serving ownership: %w", ws, read.err)
+		}
+		owner := read.owner
 		if owner == nil {
 			c.log.Debug(opAdopt, "the incumbent released serving ownership; adoption may begin",
 				dlog.Merge(fields, dlog.Context{"serving_daemon": ""}))
@@ -1186,17 +1199,6 @@ func (c *controller) awaitServingRelease(ctx context.Context, ws ids.WorkspaceID
 			c.log.Info(opAdopt, "waiting for the incumbent to release serving ownership at freeness",
 				dlog.Merge(fields, dlog.Context{"serving_daemon": string(*owner)}))
 			waiting = true
-		}
-		select {
-		case <-ctx.Done():
-			err := context.Cause(ctx)
-			c.log.Error(opAdopt, "the adoption lifetime ended before the incumbent released serving ownership", dlog.WithCause(fields, err))
-			return fmt.Errorf("rollout: adopt %q: wait for incumbent serving release: %w", ws, err)
-		case err := <-changes:
-			if err != nil {
-				c.log.Error(opAdopt, "could not watch the state database for the incumbent's release", dlog.WithCause(fields, err))
-				return fmt.Errorf("rollout: adopt %q: watch for incumbent serving release: %w", ws, err)
-			}
 		}
 	}
 }

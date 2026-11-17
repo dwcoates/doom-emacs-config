@@ -48,6 +48,8 @@ const (
 type controller struct {
 	deps Deps
 	log  dlog.Logger
+	// serving answers every adoption waiting on its serving release.
+	serving *servingWatch
 
 	// mu guards every field below it. It is released ONLY through unlock,
 	// which is where a change of ServesIntake's or ServesQueue's answer is
