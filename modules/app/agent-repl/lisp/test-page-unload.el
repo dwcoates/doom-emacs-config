@@ -336,42 +336,19 @@ Answers the outcomes, newest first: (dropped) or (kept WHY)."
       ;; Assert
       (should (equal droppers '(hand-rolled by-symbol))))))
 
-;;;; ---- A hot reload heals the rows an unannounced drop left severed ----
+;;;; ---- A hot reload reports nothing ----
 
-(ert-deftest agent-repl-test-pu-every-pageless-workspace-is-reported ()
-  "Each open workspace the host holds no page for is reported, once each."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
-    (setq agent-repl-test-pu--pages '("alpha"))
-    ;; Act
-    (let ((sent (agent-repl-page-unload-report-pageless)))
-      ;; Assert
-      (should (equal (list sent (reverse agent-repl-test-pu--events))
-                     '(2 ((report "beta") (report "gamma"))))))))
-
-(ert-deftest agent-repl-test-pu-a-pageless-workspace-already-reporting-is-skipped ()
-  "A workspace whose report is in flight is not reported a second time."
+(ert-deftest agent-repl-test-pu-a-hot-reload-reports-no-page ()
+  "Loading page-unload.el again sends the daemon no page report.
+A reload once reported every pageless workspace at once, and the burst
+of 111 reports timed out in the deploy of 2026-11-17 23:52."
   ;; Arrange
   (agent-repl-test-pu--with '("alpha" "beta")
     (setq agent-repl-test-pu--pages nil)
-    (agent-repl--ws-put "alpha" :page-unloading t)
     ;; Act
-    (agent-repl-page-unload-report-pageless)
+    (load (symbol-file (quote agent-repl-page-unload-start) (quote defun)) nil t)
     ;; Assert
-    (should (equal (reverse agent-repl-test-pu--events) '((report "beta"))))))
-
-(ert-deftest agent-repl-test-pu-a-pageless-report-records-its-outcome ()
-  "A landed report and one that did not land are each recorded."
-  ;; Arrange
-  (agent-repl-test-pu--with '("alpha")
-    (setq agent-repl-test-pu--pages nil)
-    (agent-repl-page-unload-report-pageless)
-    (setq agent-repl-test-pu--report 'refused)
-    ;; Act
-    (agent-repl-page-unload-report-pageless)
-    ;; Assert
-    (should (agent-repl-test-pu--said-p "elisp.page-unload.pageless-reported ws=alpha"))
-    (should (agent-repl-test-pu--said-p "elisp.page-unload.pageless-unreported ws=alpha"))))
+    (should (null agent-repl-test-pu--events))))
 
 ;;;; ---- Buckets ----
 
