@@ -334,7 +334,13 @@ func spawningUnitKey(work *conversationv1.AgentDetachedWork, originUnit sql.Null
 	if _, detached := work.GetOrigin().(*conversationv1.AgentDetachedWork_Detached); !detached || !originUnit.Valid || originUnit.String == "" {
 		return sql.NullString{}
 	}
-	return sql.NullString{String: activityUpsertKeyPrefix + originUnit.String, Valid: true}
+	return unitRowKey(originUnit.String)
+}
+
+// unitRowKey is the upsert key of the unit ACTIVITYID's own row, whose book is
+// the owner of every detached run that left it.
+func unitRowKey(activityID string) sql.NullString {
+	return sql.NullString{String: activityUpsertKeyPrefix + activityID, Valid: true}
 }
 
 // claimDetachedWorkForUnitBook makes the agent whose book holds a unit's own

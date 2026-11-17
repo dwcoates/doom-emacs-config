@@ -486,3 +486,26 @@ func TestAUnitRowWhoseClaimFailsIsRefusedAndLogged(t *testing.T) {
 		t.Fatalf("unit rows = %d, want the refused batch to store nothing", got)
 	}
 }
+
+func TestUnitRowKeyIsTheActivityRowsUpsertKey(t *testing.T) {
+	// Act
+	got := unitRowKey("act-shell")
+
+	// Assert
+	if !got.Valid || got.String != activityUpsertKeyPrefix+"act-shell" {
+		t.Fatalf("unitRowKey = %+v, want the valid key %q", got, activityUpsertKeyPrefix+"act-shell")
+	}
+}
+
+func TestAnAnnouncementAndARunFrameNameTheSameUnitRow(t *testing.T) {
+	// Arrange: the two writers of a run's owner read the same unit row.
+	work := detachedWork("act-shell", "act-shell", causeRequestedArm())
+
+	// Act
+	fromAnnouncement := spawningUnitKey(work, sql.NullString{String: "act-shell", Valid: true})
+
+	// Assert
+	if fromAnnouncement != unitRowKey("act-shell") {
+		t.Fatalf("announcement's unit key = %+v, want the run frame's %+v", fromAnnouncement, unitRowKey("act-shell"))
+	}
+}
