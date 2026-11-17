@@ -83,6 +83,45 @@ func TestAColdGateWhoseRecordWillNotWriteStillStands(t *testing.T) {
 	}
 }
 
+func TestAColdGateWhoseCallerGaveUpIsStillRecordedAndStandsItsShimDown(t *testing.T) {
+	// Arrange: the caller's context is cancelled as the shim answers cold,
+	// as a merge's repair turn withdrawn at the gate cancels its start.
+	f := newFleetFixture(t)
+	ws := resumable(f)
+	f.client.response = coldResponse()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	f.client.onStart = cancel
+
+	// Act.
+	_ = f.fleet.Start(ctx, ws)
+
+	// Assert.
+	t.Run("the gate is recorded on a context the caller cannot cancel", func(t *testing.T) {
+		if len(f.db.setGateCtxErr) != 1 || f.db.setGateCtxErr[0] != nil {
+			t.Fatalf("SetColdGate saw %v, want one write on a live context", f.db.setGateCtxErr)
+		}
+		if _, ok := f.db.gates[ws]; !ok {
+			t.Fatal("no gate recorded, want the shim's gate recorded")
+		}
+	})
+	t.Run("the remote-control mode is read on a context the caller cannot cancel", func(t *testing.T) {
+		if len(f.db.remoteReadCtxErr) != 1 || f.db.remoteReadCtxErr[0] != nil {
+			t.Fatalf("RemoteControl saw %v, want one read on a live context", f.db.remoteReadCtxErr)
+		}
+	})
+	t.Run("the gate's shim is killed within its grace, not escalated", func(t *testing.T) {
+		if len(f.client.killCtxErr) != 1 || f.client.killCtxErr[0] != nil {
+			t.Fatalf("Kill saw %v, want one kill on a live context", f.client.killCtxErr)
+		}
+	})
+	t.Run("nothing is recorded at ERROR", func(t *testing.T) {
+		if rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error"}); ok {
+			t.Fatalf("ERROR record %+v, want none", rec)
+		}
+	})
+}
+
 func TestAStartOfARecordedGateRaisesItAndSpawnsNothing(t *testing.T) {
 	// Arrange: a gate recorded before this daemon, with no shim behind it.
 	f := newFleetFixture(t)

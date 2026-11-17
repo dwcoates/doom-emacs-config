@@ -122,9 +122,11 @@ type fakeDB struct {
 	remoteUnscripted wsm.RemoteControl
 	// remoteReadCtxErr is the context error each RemoteControl read saw.
 	remoteReadCtxErr []error
-	remoteErr        error
-	remoteSetErr     error
-	bridgeErr        error
+	// setGateCtxErr is the context error each SetColdGate write saw.
+	setGateCtxErr []error
+	remoteErr     error
+	remoteSetErr  error
+	bridgeErr     error
 
 	// queuedMu guards queued, the creates held for the network, by key;
 	// queuedPutErr fails holding one and queuedReadErr reading them.
@@ -586,7 +588,8 @@ func (d *fakeDB) ColdGate(_ context.Context, id ids.WorkspaceID) (wsm.ColdGateRe
 	return rec, ok, nil
 }
 
-func (d *fakeDB) SetColdGate(_ context.Context, id ids.WorkspaceID, rec wsm.ColdGateRecord) error {
+func (d *fakeDB) SetColdGate(ctx context.Context, id ids.WorkspaceID, rec wsm.ColdGateRecord) error {
+	d.setGateCtxErr = append(d.setGateCtxErr, ctx.Err())
 	if d.setGateErr != nil {
 		return d.setGateErr
 	}

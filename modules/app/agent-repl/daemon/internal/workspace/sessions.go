@@ -138,6 +138,10 @@ type ShimBundle interface {
 
 // FleetDeps are what the session fleet needs to bring a session up.
 type FleetDeps struct {
+	// Network is the daemon's network state (netstate.Monitor): a new shim's
+	// bridge the vendor refused while the network is down is asked again once
+	// it is restored. REQUIRED.
+	Network Network
 	// GateDock states a workspace's shown cold gate to the webhost's dock
 	// (sidebar.Resolver.SetColdGate): its row id and card, or nil for both
 	// when none is shown. Nil states nothing.
@@ -618,6 +622,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the serving standing; a workspace this daemon does not serve is never brought up by it")
 	case deps.PayColdGate == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the cold gate's answer; a prompt typed on claude.ai into a parked workspace answers its gate pay through it")
+	case deps.Network == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the network state; a bridge the network refused is asked again at its restoration by it")
 	}
 	probe := deps.Probe
 	if probe == nil {

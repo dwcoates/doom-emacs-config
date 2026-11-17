@@ -350,6 +350,10 @@ message SessionUpdate {
     // EVENT, stated on every read that answered plan figures. See
     // SessionPlanUsage, which carries the arm's whole contract.
     SessionPlanUsage plan_usage = 42;
+    // EVENT: a keep-alive's request ended in a failure, so the cache was not
+    // re-anchored and still lapses at the instant last stated. See
+    // SessionKeepaliveFailed, which carries the arm's whole contract.
+    SessionKeepaliveFailed keepalive_failed = 43;
   }
   // Tag 6 (`account_usage`, the account's sampled usage allowance, with its
   // outcomes, unavailability reasons and seat spend) is RETIRED: its sample
@@ -554,6 +558,30 @@ message SessionCacheLapseGated {
 
 // The cold gate will not ask. DELIBERATELY EMPTY: the arm is the verdict.
 message SessionCacheLapseUngated {}
+
+// A keep-alive the shim submitted ended in a failure (the API unreachable, the
+// vendor answering with an error), so its request re-anchored nothing.
+//
+// A KEEP-ALIVE'S ANSWER IS ONE OF TWO EVENTS on this stream: the restated
+// lapse (SessionCacheLapse) when its request answered and moved the cache, or
+// this when its turn ended in a failure. A consumer awaiting a keep-alive's
+// answer (the daemon, which stands an idle session down only once its
+// keep-alive is answered) takes this as the answer, so it never waits out its
+// bound for an answer that already came.
+//
+// PRODUCER OBLIGATIONS: the shim states it once for every keep-alive turn
+// whose terminal is a failure, and never for a skipped keep-alive or one whose
+// submission failed (shim.v1.SendKeepalive answers those itself). A lapse the
+// failed turn's request still moved is restated BEFORE this, on this same
+// ordered stream, so a consumer that already took that lapse as the answer
+// ignores this. Nothing else of a keep-alive's turn is pushed.
+message SessionKeepaliveFailed {
+  // The failure as the vendor stated it in the turn's terminal (its own
+  // sentence, or its error class when it gave none), verbatim, for the record.
+  // It names the failure and is never parsed: whether the network caused it is
+  // the shim's network fault's to say (SessionFaultNetworkUnreachable).
+  string detail = 1;
+}
 
 // ---- Detached agents waiting to be resumed after a network outage ----
 //

@@ -112,12 +112,41 @@
  * every such event {@link KeepaliveRewind.clearAnchor}s it and the next real
  * prompt after keep-alives simply carries them instead of rewinding.
  */
+import { create } from "@bufbuild/protobuf";
 import { bindLog } from "../log.js";
+import { conversationv1 } from "../proto.js";
 import type { SdkMessage } from "../sdk/types.js";
 import { coverageContext, leftContextCached, type CacheCoverage, type CacheRequest, type TranscriptFacts } from "./cold.js";
 import type { SendVerdict } from "./sends.js";
 
 const LOGGER = bindLog({ component: "shim-engine-keepalive", operation: "shim.engine.keepalive" });
+
+/**
+ * The keep-alive's failed answer for a keep-alive turn whose terminal FRAME is
+ * a failure, or absence when the turn succeeded (its answer is then the lapse
+ * its request restated). THE KEEP-ALIVE'S ANSWER IS ONE OF THE TWO: the daemon
+ * stands an idle session down once its keep-alive is answered, and a failed
+ * request restates no lapse, so without this the daemon waits out its bound
+ * for an answer that already came (2026-11-17 13:19:20: a keep-alive failed on
+ * ENOTFOUND 0.3s after its send, and the daemon warned it unanswered two
+ * minutes later). The detail is the vendor's own sentence when the API failed
+ * the request, else its last error, else the failure's arm.
+ */
+export function keepaliveFailed(frame: conversationv1.AgentFrame): conversationv1.SessionUpdate | undefined {
+  if (frame.result.case !== "failure") return undefined;
+  const failure = frame.result.value;
+  // AN EMPTY SENTENCE IS NO ACCOUNT, so each candidate is taken only when it
+  // says something.
+  const said = [
+    failure.failure.case === "apiRequestFailed" ? failure.failure.value.message : "",
+    failure.errors.at(-1) ?? "",
+    failure.failure.case ?? "",
+  ].find((candidate) => candidate !== "");
+  const detail = said ?? "the keep-alive's turn failed without an account";
+  return create(conversationv1.SessionUpdateSchema, {
+    update: { case: "keepaliveFailed", value: create(conversationv1.SessionKeepaliveFailedSchema, { detail }) },
+  });
+}
 
 /** Every keep-alive prompt BEGINS with this literal. */
 export const KEEPALIVE_PROMPT_MARKER = "<!--agent-repl:keepalive-->";

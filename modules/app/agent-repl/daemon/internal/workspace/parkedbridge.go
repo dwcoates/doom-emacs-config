@@ -90,7 +90,14 @@ func (f *Fleet) bridgeGateInRemoteControl(ctx context.Context, ws ids.WorkspaceI
 // gate's bridge (holdBridgeAtGate, run detached: it takes the start gate
 // itself and watches the bridge for as long as it stands). A mode that cannot
 // be read is stated loudly and treated as off.
+//
+// WHAT A GATE KEEPS OF ITS SHIM OUTLIVES WHOEVER RAISED THE GATE, as its
+// record does (recordGate): on the caller's context the mode read was refused
+// and the stand-down's kill escalated to SIGKILL inside its grace (2026-11-17
+// 14:01:58, resizable-sidebar-sections: "context canceled"). The store bounds
+// the read, and the kill bounds itself with its grace.
 func (f *Fleet) gateShim(ctx context.Context, ws ids.WorkspaceID, off func(context.Context, ids.WorkspaceID)) {
+	ctx = context.WithoutCancel(ctx)
 	log := f.logFor(ctx, ws)
 	standing, err := f.deps.DB.RemoteControl(ctx, ws)
 	if err != nil {

@@ -3577,6 +3577,26 @@ func TestRouteCacheLapseHandsTheProjectionToTheKeeper(t *testing.T) {
 	}
 }
 
+// TestRouteKeepaliveFailedHandsTheAnswerToTheKeeper covers that a keep-alive's
+// failed answer reaches the cache keeper as stated.
+func TestRouteKeepaliveFailedHandsTheAnswerToTheKeeper(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: sessionStarted("")})
+	h.quiet()
+	update := &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_KeepaliveFailed{KeepaliveFailed: &conversationv1.SessionKeepaliveFailed{
+		Detail: "Can't reach the API server (ENOTFOUND)",
+	}}}
+
+	// Act.
+	got := h.routeNow(func(w *watcher) { w.routeSessionUpdateLocked(update) })
+
+	// Assert.
+	e := requireEvent(t, got, "cachelapse.OnKeepaliveFailed")
+	if e.detail != "Can't reach the API server (ENOTFOUND)" {
+		t.Fatalf("the keeper was handed %q, want the failure's detail", e.detail)
+	}
+}
+
 // TestRouteCommandCatalogHandsOverTheWholeCatalog covers that the table is
 // handed the catalog the session stated, every command of it, in order.
 func TestRouteCommandCatalogHandsOverTheWholeCatalog(t *testing.T) {

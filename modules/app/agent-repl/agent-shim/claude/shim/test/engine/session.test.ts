@@ -8108,6 +8108,78 @@ async function pushedUpdates<T>(
   return seen;
 }
 
+describe("a keep-alive's failed answer", () => {
+  it("states a keep-alive whose turn ended in a failure on the session stream", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.fold.resultFor = () => ({
+      case: "failure",
+      value: create(conversationv1.AgentFailureSchema, {
+        failure: {
+          case: "apiRequestFailed",
+          value: create(conversationv1.ApiRequestFailedSchema, { message: "Can't reach the API server (ENOTFOUND)" }),
+        },
+      }),
+    });
+
+    // Act.
+    const failed = await pushedUpdates(
+      h,
+      (update) => (update.case === "keepaliveFailed" ? update.value.detail : undefined),
+      () => keepaliveTurn(h, []),
+    );
+
+    // Assert.
+    expect(failed).toEqual(["Can't reach the API server (ENOTFOUND)"]);
+  });
+
+  it("states nothing for a keep-alive whose turn succeeded", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.fold.resultFor = () => ({ case: "success", value: create(conversationv1.AgentSuccessSchema, {}) });
+
+    // Act.
+    const failed = await pushedUpdates(
+      h,
+      (update) => (update.case === "keepaliveFailed" ? update.value : undefined),
+      () => keepaliveTurn(h, []),
+    );
+
+    // Assert.
+    expect(failed).toEqual([]);
+  });
+
+  it("states nothing for a real turn that ended in a failure", async () => {
+    // Arrange.
+    const h = harness();
+    await started(h);
+    h.fold.resultFor = () => ({
+      case: "failure",
+      value: create(conversationv1.AgentFailureSchema, {
+        failure: {
+          case: "apiRequestFailed",
+          value: create(conversationv1.ApiRequestFailedSchema, {
+            message: "overloaded",
+            kind: { case: "overloaded", value: create(conversationv1.ApiOverloadedSchema, {}) },
+          }),
+        },
+      }),
+    });
+
+    // Act.
+    const failed = await pushedUpdates(
+      h,
+      (update) => (update.case === "keepaliveFailed" ? update.value : undefined),
+      () => realTurn(h, "turn-1", []),
+    );
+
+    // Assert.
+    expect(failed).toEqual([]);
+  });
+});
+
 describe("ResolveVendorTask", () => {
   const request = (): shimv1.ResolveVendorTaskRequest =>
     create(shimv1.ResolveVendorTaskRequestSchema, {

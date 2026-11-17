@@ -34,7 +34,15 @@ import (
 // recordGate records the gate the shim judged for WS. A record that cannot be
 // written is an ERROR and leaves the gate standing in memory: this daemon
 // stands it as before, and a later start asks the shim again.
+//
+// THE RECORD OUTLIVES ITS CALLER: the gate is the shim's judgment, already
+// raised, and whoever asked for the start may have given up on it since (a
+// merge's repair turn withdrawn as the gate refused it). On the caller's
+// context the record was refused (2026-11-17 14:01:58, resizable-sidebar-
+// sections: "wsm: begin transaction: context canceled"). The store bounds the
+// write itself.
 func (f *Fleet) recordGate(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, rec wsm.ColdGateRecord) {
+	ctx = context.WithoutCancel(ctx)
 	if err := f.deps.DB.SetColdGate(ctx, ws, rec); err != nil {
 		log.Error(opColdGate, "could not record the cold gate; it stands for this daemon only, and a later start asks the shim again",
 			dlog.Context{"vendor_session_id": rec.VendorSessionID, "cause": err.Error()})

@@ -190,6 +190,15 @@ func (w *watcher) routeSessionUpdateArmLocked(update *conversationv1.SessionUpda
 		})
 		w.sinks.CacheLapse.OnCacheLapse(w.ws, u.CacheLapse)
 
+	case *conversationv1.SessionUpdate_KeepaliveFailed:
+		// A KEEP-ALIVE'S FAILED ANSWER, no view's: the keeper takes it as the
+		// answer the session's stand-down awaits.
+		w.log.Debug("daemon.sessionwatcher.session_update", "session fact routed to the cache keeper", dlog.Context{
+			"arm":    sessionArm(update),
+			"detail": u.KeepaliveFailed.GetDetail(),
+		})
+		w.sinks.CacheLapse.OnKeepaliveFailed(w.ws, u.KeepaliveFailed)
+
 	case *conversationv1.SessionUpdate_QueryDied:
 		w.log.Debug("daemon.sessionwatcher.routing_decision", "selected a session routing branch", dlog.Context{"function": "routeSessionUpdateLocked", "branch": "case *conversationv1.SessionUpdate_QueryDied"})
 		w.routeQueryDiedLocked(update)
@@ -354,6 +363,8 @@ func sessionArm(update *conversationv1.SessionUpdate) string {
 		return "vendor_activity"
 	case *conversationv1.SessionUpdate_PlanUsage:
 		return "plan_usage"
+	case *conversationv1.SessionUpdate_KeepaliveFailed:
+		return "keepalive_failed"
 	default:
 		return "unset"
 	}

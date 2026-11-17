@@ -217,6 +217,9 @@ const (
 	// edgeParkedAnswered is a parked conversation's keep-alive answered, or
 	// failed.
 	edgeParkedAnswered
+	// edgeKeepaliveFailed is a keep-alive whose turn ended in a failure, the
+	// answer its request gave when it re-anchored nothing.
+	edgeKeepaliveFailed
 )
 
 // edge is one queued event.
@@ -230,6 +233,8 @@ type edge struct {
 	// parked is a parked keep-alive's answer (edgeParkedAnswered), with err
 	// when it failed.
 	parked *shimv1.SendKeepaliveSuccess
+	// failed is a failed keep-alive's account (edgeKeepaliveFailed).
+	failed *conversationv1.SessionKeepaliveFailed
 	// workEnded is a free edge's (edgeFree): work ended, rather than an
 	// attach coming up free.
 	workEnded bool
@@ -344,6 +349,12 @@ func New(deps Deps) (*Keeper, error) {
 // (sessionwatcher.CacheLapseSink). It never blocks.
 func (k *Keeper) OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionCacheLapse) {
 	k.enqueue(edge{ws: ws, kind: edgeLapse, lapse: lapse, why: "the shim stated its projected lapse"})
+}
+
+// OnKeepaliveFailed takes a keep-alive whose turn ended in a failure
+// (sessionwatcher.CacheLapseSink). It never blocks.
+func (k *Keeper) OnKeepaliveFailed(ws ids.WorkspaceID, failed *conversationv1.SessionKeepaliveFailed) {
+	k.enqueue(edge{ws: ws, kind: edgeKeepaliveFailed, failed: failed, why: "the shim stated a failed keep-alive"})
 }
 
 // SessionFree is WS's session falling free (no turn, no live detached work):
@@ -541,6 +552,8 @@ func (k *Keeper) apply(ctx context.Context, e edge) {
 		k.switched(ctx, e.ws)
 	case edgeParkedAnswered:
 		k.parkedAnswered(ctx, e.ws, e.parked, e.err)
+	case edgeKeepaliveFailed:
+		k.answeredFailed(e.ws, e.failed)
 	default:
 		k.reconcile(ctx, e.ws, e.why)
 	}

@@ -626,6 +626,9 @@ type CommandCatalogSink interface {
 // watcher: every projected lapse a held shim states, as stated.
 type CacheLapseSink interface {
 	OnCacheLapse(ws ids.WorkspaceID, lapse *conversationv1.SessionCacheLapse)
+	// OnKeepaliveFailed is a keep-alive whose turn ended in a failure: the
+	// answer its request gave when it re-anchored nothing.
+	OnKeepaliveFailed(ws ids.WorkspaceID, failed *conversationv1.SessionKeepaliveFailed)
 }
 
 // MergeSink is the merge queue, seen from the watcher: every permission and
