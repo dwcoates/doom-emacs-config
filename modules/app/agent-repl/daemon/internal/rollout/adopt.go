@@ -573,6 +573,22 @@ func (c *controller) rendezvousCall(ctx context.Context, ws ids.WorkspaceID, ope
 	if armed && carriedOK {
 		c.followCarriedLocked(ws, e, carried, sealedBy)
 	}
+	if !armed && !c.joiningMode {
+		// A SUCCESSOR THAT TOOK OVER BEFORE ITS WATCH READ THE MANIFEST has
+		// armed nothing yet: it takes over at the end of the incumbent's
+		// transfer pass, and its file watch reads the manifest on its own
+		// schedule (2026-11-16, an adopt refused no_transfer_announced 20ms
+		// after the takeover). The incumbent writes the manifest before it
+		// pushes any transfer notice, so one read here finds every transfer a
+		// caller can have heard of; a caller of no transfer reads none.
+		c.unlock()
+		if err := c.armFromManifest(); err != nil {
+			c.log.Error(operation, "could not re-read the intent manifest", dlog.WithCause(fields, err))
+			return err
+		}
+		c.mu.Lock()
+		e, armed = c.rendezvous[ws]
+	}
 	if !armed && c.joiningMode {
 		// THE MANIFEST MAY NOT HAVE ARRIVED YET. The incumbent writes it only
 		// after the successor has reported its address, so a successor that

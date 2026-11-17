@@ -292,6 +292,28 @@ func TestACallerThatGivesUpNamesTheParticipantItWaitedOn(t *testing.T) {
 	}
 }
 
+func TestAnAdoptAfterTheTakeoverArmsFromAManifestItsWatchHasNotRead(t *testing.T) {
+	// Arrange: this daemon took over (joining no more) before its watch read
+	// the manifest naming the workspace.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHandoverManifest(t, h, ws, Participants{Host: true})
+	h.c.mu.Lock()
+	h.c.joiningMode = false
+	h.c.mu.Unlock()
+
+	// Act
+	err := h.c.AdoptHost(context.Background(), ws)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("AdoptHost: %v, want the transfer found in the manifest", err)
+	}
+	if got := h.fleet.Adoptions(); len(got) != 1 || got[0] != ws {
+		t.Fatalf("adoptions = %v, want the workspace adopted", got)
+	}
+}
+
 func TestAdoptWebAnswersNoTransferAnnouncedOnAnOrdinaryPageBoot(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

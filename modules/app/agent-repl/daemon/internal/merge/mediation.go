@@ -58,6 +58,10 @@ const (
 	// ArmProblemsUnowned refuses an approval while the check's window holds a
 	// group no one owns: NEW, SEEN BEFORE, or RECURRED after its fix.
 	ArmProblemsUnowned = "problems_unowned"
+	// ArmProblemsRecurring refuses anything but an escalation while the
+	// check's window holds a group that came back after more than
+	// maxFixesBeforeEscalation of its fixes deployed.
+	ArmProblemsRecurring = "problems_recurring"
 )
 
 // MediationDecision is what an intake decided of a deploy.
@@ -617,15 +621,21 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed tim
 	o.mediationFailed(ctx, fields, message, err)
 }
 
-// intakeOf answers the intake of the chain check M belongs to, making it,
-// hidden and unprompted, for a chain's first deploy and recording it on M
+// intakeOf answers the intake of check M, making it, hidden and unprompted,
+// for a check that has none (each decided check's newer deploy gets a fresh
+// one, wsm.OweMediation) and recording it on M
 // before anything prompts it: its first prompt then brings its session up
 // as the intake. Empty when M was replaced or released meanwhile.
 func (o *orchestrator) intakeOf(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Intake != "" {
 		return m.Intake, nil
 	}
-	name := "deploy-intake-" + m.ChainStartedAt.UTC().Format("20060102-150405")
+	// EACH CHECK'S INTAKE IS NAMED FOR ITS OWN DEPLOY, never its chain's
+	// start: an intake decides once, so a chain makes one per deploy, and
+	// the closed intake of an earlier deploy still holds its name
+	// (2026-11-16 22:27: a chain's second intake was refused name_held, and
+	// the queue stayed held for 90 minutes).
+	name := intakeName(m.OwedAt)
 	made, err := o.deps.DeployChecks.CreateDeployIntake(ctx, q.repository.Dir, name)
 	if err != nil {
 		return "", fmt.Errorf("merge: make the chain's intake %s: %w", name, err)
@@ -793,6 +803,12 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
 }
 
+// intakeName is the name of the intake of the check owed at OWED, to the
+// millisecond, so no two checks share one.
+func intakeName(owed time.Time) string {
+	return "deploy-intake-" + strings.ReplaceAll(owed.UTC().Format("20060102-150405.000"), ".", "-")
+}
+
 // mediationVersion is how the brief names M's build.
 func mediationVersion(m wsm.Mediation) string {
 	if m.Version == "" {
@@ -848,22 +864,26 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		o.deps.Log.Global().Warn(opMediation, "refused a decision on a deploy escalated already", withField(fields, "escalation", string(m.Escalation)))
 		return refuse(ArmNoMediationOwed, ws, "this deploy is escalated to the user already; the queue waits for them")
 	}
+	window, err := o.toldWindow(ctx, q.key, fields)
+	if err != nil {
+		return err
+	}
+	// A PROBLEM PAST ITS FIXES IS THE USER'S (owner ruling, 2026-11-16): while
+	// the window holds one, only an escalation is accepted.
+	if recurring := recurringGroups(window); d.Kind != MediationEscalate && len(recurring) > 0 {
+		refusal := &RefusalError{Arm: ArmProblemsRecurring, Workspace: ws,
+			Reason: fmt.Sprintf("the window holds %d groups that came back after more than %d of their fixes deployed; escalate", len(recurring), maxFixesBeforeEscalation),
+			Fields: map[string]any{"groups": recurring}}
+		logRefusal(o.deps.Log.Global(), opMediation, "refused a decision other than an escalation while the window holds problems past their fixes", withField(fields, "recurring", recurring), refusal)
+		return refusal
+	}
 	if d.Kind == MediationDispatch {
 		if err := o.dispatch(ctx, q, m, ws, d, fields); err != nil {
 			return err
 		}
 		o.stopIntake(ctx, q.key, ws, fields)
-		// THE DISPATCH IS RECORDED BEFORE ANY ESCALATION IS TOLD: a window
-		// that cannot be read for the confirmations leaves the dispatch
-		// standing, and the record of the failure is toldWindow's.
-		if window, err := o.toldWindow(ctx, q.key, fields); err == nil {
-			o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
-		}
+		o.tellEscalations(ctx, q, m, d.Summary, window, nil, false, fields)
 		return nil
-	}
-	window, err := o.toldWindow(ctx, q.key, fields)
-	if err != nil {
-		return err
 	}
 	// AN APPROVAL LEAVES NO PROBLEM WITHOUT AN OWNER (owner ruling,
 	// 2026-11-16): a warning or error nobody owns, old or new, is dispatched
@@ -1045,6 +1065,29 @@ func (o *orchestrator) toldWindow(ctx context.Context, repo wsm.RepoKey, fields 
 		o.deps.Log.Global().Info(opMediation, "the check was told by a previous build, which recorded no window; its decision is judged against none", fields)
 	}
 	return window, nil
+}
+
+// maxFixesBeforeEscalation is how many fixes of one problem may deploy
+// before its recurrence is the user's (owner ruling, 2026-11-16): a problem
+// that comes back after more than two is escalated, never dispatched again.
+const maxFixesBeforeEscalation = 2
+
+// pastItsFixes reports whether a group of CLASS whose problem's fixes
+// deployed FIXES times came back past what a remediation may try.
+func pastItsFixes(class wsm.WindowClass, fixes int) bool {
+	return class == wsm.WindowRecurred && fixes > maxFixesBeforeEscalation
+}
+
+// recurringGroups names every group of WINDOW that came back past its fixes
+// (pastItsFixes), as "OPERATION: MESSAGE (N fixes)", in its order.
+func recurringGroups(window wsm.CheckWindow) []string {
+	var out []string
+	for _, g := range window.Groups {
+		if pastItsFixes(g.Class, g.Fixes) {
+			out = append(out, fmt.Sprintf("%s: %s (%d fixes)", g.Operation, g.Message, g.Fixes))
+		}
+	}
+	return out
 }
 
 // unownedGroups names every group of WINDOW no one owns, as
