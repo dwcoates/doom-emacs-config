@@ -411,7 +411,7 @@ func (o *orchestrator) escalateForIntake(ctx context.Context, repo wsm.RepoKey, 
 		o.deps.Log.Global().Error(opRemediationFinish, "the repository checks its deploys no more, so the given-up remediation is put before nobody", fields)
 		return nil
 	}
-	o.holdEscalated(ctx, q, *m, summary, nil, window, fields)
+	o.holdEscalated(ctx, q, *m, summary, nil, window, "", fields)
 	return nil
 }
 

@@ -750,8 +750,7 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 		return
 	}
 	o.deps.Log.Global().Error(opMediation, "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, and the check is escalated to the user", fields)
-	o.stopIntake(ctx, q.key, ws, fields)
-	o.holdEscalated(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue waits for you", nil, window, fields)
+	o.holdEscalated(ctx, q, *m, "the deploy intake ended its turn without deciding the deploy, again after it was resumed to decide it; the queue waits for you", nil, window, ws, fields)
 }
 
 // errMediationStopped answers a decision made while this daemon stops: the
@@ -900,8 +899,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	// closes it.
 	if d.Kind == MediationEscalate {
 		o.deps.Log.Global().Info(opMediation, "the intake escalated the deploy; the queue is held for the user", fields)
-		o.stopIntake(ctx, q.key, ws, fields)
-		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, fields)
+		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, ws, fields)
 		return nil
 	}
 	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
@@ -1218,12 +1216,21 @@ type escalationBrief struct {
 // escalation workspace is made or found (escalateOwning) and recorded on
 // it. The hold ends only when the escalation's own fix deploys
 // (wsm.OweMediation) or the user closes the escalation (escalationClosed).
-func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, fields dlog.Context) {
+//
+// INTAKE, when not empty, is the intake that escalated, stopped right after
+// the record and never before it: the stop ends the intake's turn, and the
+// round awaiting that turn must read the check escalated, or it resumes a
+// dead session as undecided (2026-11-17 02:40: the stop came first, and the
+// resume was refused query_dead).
+func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, intake ids.WorkspaceID, fields dlog.Context) {
 	encoded, err := json.Marshal(escalationBrief{Summary: summary, Problems: problems})
 	if err != nil {
 		panic(fmt.Sprintf("merge: an escalation's brief of strings did not encode: %v", err))
 	}
 	held, err := o.deps.DB.EscalateMediation(ctx, q.key, m.OwedAt, string(encoded))
+	if intake != "" {
+		o.stopIntake(ctx, q.key, intake, fields)
+	}
 	if err != nil {
 		o.mediationFailed(ctx, fields, "the check could not be recorded as escalated; nothing is escalated and the queue stays held", err)
 		return
