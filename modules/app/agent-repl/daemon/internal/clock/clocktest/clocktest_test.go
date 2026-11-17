@@ -130,15 +130,12 @@ func TestSameInstant(t *testing.T) {
 // calling SameInstant.
 func TestOptionalInstantComparisonsHaveOneHome(t *testing.T) {
 	// Arrange.
-	root, err := filepath.Abs(filepath.Join("..", "..", ".."))
-	if err != nil {
-		t.Fatal(err)
-	}
+	root := filepath.Join("..", "..", "..")
 	shape := regexp.MustCompile(`func \w+\(\w+, \w+ \*time\.Time\) bool`)
 	var sites []string
 
 	// Act.
-	err = filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".go") {
 			return err
 		}

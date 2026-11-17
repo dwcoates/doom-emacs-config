@@ -266,7 +266,16 @@ func (k *Keeper) owesAgain(ctx context.Context, log dlog.Logger, record wsm.Work
 // recordOwing writes whether WS owes keep-alives (OWING) to its row, at the
 // clock's now. A write that fails is recorded at ERROR: a lapse judged
 // against the row may then call a beat that was never owed a miss.
+//
+// A JOINING SUCCESSOR WRITES NOTHING: its handle is read-only until its
+// promotion, and the incumbent, still the sole writer, records its own
+// decisions. The row still reads as it did, so this keeper's first plan
+// after the promotion writes the decision then.
 func (k *Keeper) recordOwing(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, owing bool, fields dlog.Context) {
+	if k.deps.DB.ReadOnly() {
+		log.Debug(opDrive, "the state handle is not promoted yet; whether the workspace owes keep-alives is recorded once it writes", dlog.Merge(fields, dlog.Context{"owing": owing}))
+		return
+	}
 	if err := k.deps.DB.SetKeepaliveOwing(ctx, ws, owing, k.deps.Clock.Now()); err != nil && !leaving(ctx, log, opDrive, "recording whether the workspace owes keep-alives", err) {
 		log.Error(opDrive, "could not record whether the workspace owes keep-alives; a lapse judged against the row may misjudge a miss",
 			dlog.WithCause(dlog.Merge(fields, dlog.Context{"owing": owing}), err))

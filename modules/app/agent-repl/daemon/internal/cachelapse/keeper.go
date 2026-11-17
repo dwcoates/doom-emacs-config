@@ -112,6 +112,9 @@ type DB interface {
 	// (wsm.Workspace.KeepaliveOwedNoneAt, KeepaliveOwedFrom): a beat due
 	// while it owed none is no miss, whichever daemon judges the lapse.
 	SetKeepaliveOwing(ctx context.Context, id wsm.WorkspaceID, owing bool, at time.Time) error
+	// ReadOnly reports whether the handle is a joining successor's, not yet
+	// promoted: the incumbent is still the sole writer.
+	ReadOnly() bool
 	// Session reads a workspace's session record: its engagement clock and
 	// its park.
 	Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error)

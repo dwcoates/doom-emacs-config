@@ -382,6 +382,28 @@ func TestOwingRecordsTheDecisionOnTheRow(t *testing.T) {
 	}
 }
 
+func TestAJoiningSuccessorWritesNoOwingDecision(t *testing.T) {
+	// Arrange
+	h := newHarness(t, beatable(visible(), 10*time.Minute))
+	h.db.readOnly = true
+	log := dlog.NewTestLogger()
+
+	// Act
+	h.keeper.owesNone(context.Background(), log, h.db.records[theWorkspace], "it has no session")
+
+	// Assert
+	if h.db.owingWrites != 0 || h.db.records[theWorkspace].KeepaliveOwedNoneAt != nil {
+		t.Fatalf("writes = %d, row = %+v; want nothing written on a read-only handle", h.db.owingWrites, h.db.records[theWorkspace])
+	}
+	if _, errored := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error"}); errored {
+		t.Fatalf("records = %+v, want no ERROR for a joining successor", log.Records())
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "debug", Operation: opDrive,
+		Message: "the state handle is not promoted yet; whether the workspace owes keep-alives is recorded once it writes"}); !ok {
+		t.Fatalf("records = %+v, want the deferred write at DEBUG", log.Records())
+	}
+}
+
 func TestAnOwingDecisionThatCannotBeWrittenIsAnError(t *testing.T) {
 	// Arrange
 	h := newHarness(t, beatable(visible(), 10*time.Minute))

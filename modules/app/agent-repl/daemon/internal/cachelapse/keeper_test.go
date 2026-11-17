@@ -56,7 +56,11 @@ type fakeDB struct {
 	// owingErr fails SetKeepaliveOwing; owingWrites counts every write.
 	owingErr    error
 	owingWrites int
+	// readOnly stands for a joining successor's unpromoted handle.
+	readOnly bool
 }
+
+func (f *fakeDB) ReadOnly() bool { return f.readOnly }
 
 // SetKeepaliveOwing records the owing decision on the record, as the store's
 // one statement each does.
