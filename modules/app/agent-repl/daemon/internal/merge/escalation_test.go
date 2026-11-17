@@ -51,7 +51,7 @@ func TestEveryEscalationPutsTheDeployBeforeTheUserInANewWorkspace(t *testing.T) 
 			wantSummary: "the deploy intake ended its turn without deciding the deploy", wantProblems: "states no separate findings"},
 		{name: "a remediation closed before it landed",
 			act: func(t *testing.T, h *harness) {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 				// A closed workspace's record stays readable, as the

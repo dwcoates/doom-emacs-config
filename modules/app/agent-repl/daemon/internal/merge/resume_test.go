@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1152,5 +1153,48 @@ func TestAReattachedTurnWhoseDeliveryCannotBeAskedFailsWithTheCause(t *testing.T
 	defer h.mu.Unlock()
 	if len(h.awaitedTurns) != 0 {
 		t.Fatalf("awaited %v, want nothing awaited after a failed delivery", h.awaitedTurns)
+	}
+}
+
+func TestEveryLookupOfWhereATurnStandsGoesThroughBringTurnOn(t *testing.T) {
+	// Act
+	held := sourcescan.Sites(t, "DB.HeldPromptByTurn(")
+	delivered := sourcescan.Sites(t, "Queue.DeliverHeld(")
+	submitted := sourcescan.Sites(t, "Queue.Submit(context.WithoutCancel(")
+
+	// Assert: one lookup, in resume.go, and one hand-off, in run.go.
+	if !slices.Equal(held, []string{"resume.go"}) || !slices.Equal(delivered, []string{"resume.go"}) || !slices.Equal(submitted, []string{"run.go"}) {
+		t.Fatalf("held read at %v, delivered at %v, handed off at %v; want bringTurnOn and handOff alone", held, delivered, submitted)
+	}
+}
+
+func TestBringTurnOnNeverWaitsForTheTurn(t *testing.T) {
+	tests := []struct {
+		name      string
+		arrange   func(h *harness)
+		wantPlace turnPlace
+		wantSubs  int
+	}{
+		{name: "a running turn is under way", wantPlace: turnUnderWay, arrange: func(h *harness) {
+			h.db.mu.Lock()
+			h.db.turns[theWorkspace] = append(h.db.turns[theWorkspace], wsm.Turn{Workspace: theWorkspace, ID: "turn-1"})
+			h.db.mu.Unlock()
+		}},
+		{name: "a turn no store knows is submitted and under way", wantPlace: turnUnderWay, wantSubs: 1, arrange: func(*harness) {}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			tt.arrange(h)
+
+			// Act
+			place, _, err := h.o.bringTurnOn(context.Background(), theWorkspace, dlog.Context{}, "turn-1", "fix it", fixOrigin)
+
+			// Assert
+			if err != nil || place != tt.wantPlace || len(h.queue.submissions) != tt.wantSubs || len(h.awaitedTurns) != 0 {
+				t.Fatalf("bringTurnOn = (%v, %v), submitted %d, awaited %v; want %v, %d submitted, nothing awaited", place, err, len(h.queue.submissions), h.awaitedTurns, tt.wantPlace, tt.wantSubs)
+			}
+		})
 	}
 }

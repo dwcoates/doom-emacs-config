@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/wsm"
@@ -67,6 +68,21 @@ func (h *mediationHook) rounds() {
 	if o := h.bound("rounds"); o != nil {
 		inflight.Go(func() { o.Mediate(h.ctx) })
 	}
+}
+
+// turnEnded settles, off the caller's goroutine, the check a fixer is
+// dispatched for when WS, whose turn just ended, is that fixer
+// (merge.Orchestrator.FixerTurnEnded). A turn that ends before the merge
+// queue is built is no loss and no error: the queue's first pass reads every
+// turn's recorded close.
+func (h *mediationHook) turnEnded(ws ids.WorkspaceID) {
+	h.mu.RLock()
+	o := h.o
+	h.mu.RUnlock()
+	if o == nil {
+		return
+	}
+	inflight.Go(func() { o.FixerTurnEnded(h.ctx, ws) })
 }
 
 // ended runs the rounds of every mediation owed, off the caller's goroutine.

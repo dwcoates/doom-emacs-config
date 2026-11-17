@@ -74,6 +74,11 @@ type Mediation struct {
 	// (owner ruling, 2026-11-16). Empty while the check is not escalated.
 	Escalation      WorkspaceID
 	EscalationBrief string
+	// FixerTurn is the latest brief the daemon gave the dispatched fixer:
+	// set with the dispatch, and again by each brief after it (a failed
+	// gate's). Zero while no fix is dispatched, and on a dispatch an earlier
+	// build recorded.
+	FixerTurn FixerTurn
 	// Resumed reports that the intake's turn on this mediation ended once
 	// deciding nothing, and the intake was resumed in Turn to decide it
 	// (owner ruling, 2026-11-16): a second such end is the intake's fault.
@@ -226,6 +231,10 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 		chainStart, redeploys := at, 0
 		var intake, remediation WorkspaceID
 		var dispatchedAt sql.NullInt64
+		var fixer FixerTurn
+		if prior != nil && carried {
+			fixer = prior.FixerTurn
+		}
 		if prior != nil {
 			chainStart, redeploys = prior.ChainStartedAt, prior.ChainRedeploys
 			remediation = prior.Remediation
@@ -250,8 +259,10 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 			   mediation_chain_started_at = excluded.mediation_chain_started_at, mediation_chain_redeploys = excluded.mediation_chain_redeploys,
 			   mediation_intake = excluded.mediation_intake, mediation_remediation = excluded.mediation_remediation, mediation_dispatched = excluded.mediation_dispatched,
 			   mediation_dispatched_at = excluded.mediation_dispatched_at, mediation_escalation = excluded.mediation_escalation,
-			   mediation_escalation_brief = excluded.mediation_escalation_brief, mediation_deploy_ending = ''`,
-			key, nanos(at), version, nanos(chainStart), redeploys, string(intake), string(remediation), carried, dispatchedAt, string(escalation), escalationBrief)
+			   mediation_escalation_brief = excluded.mediation_escalation_brief, mediation_deploy_ending = '',
+			   mediation_fixer_turn = ?, mediation_fixer_brief = ?, mediation_fixer_origin = ?`,
+			key, nanos(at), version, nanos(chainStart), redeploys, string(intake), string(remediation), carried, dispatchedAt, string(escalation), escalationBrief,
+			string(fixer.ID), fixer.Brief, fixer.Origin)
 		return err
 	})
 	if err != nil {
@@ -261,7 +272,7 @@ func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, ve
 }
 
 // mediationQuery reads one repository's mediation columns, keyed by repo.
-const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at, mediation_escalation, mediation_escalation_brief, mediation_deploy_ending FROM merge_queue_repos WHERE repo_key = ?`
+const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediation_version, mediation_turn, mediation_chain_started_at, mediation_chain_redeploys, mediation_intake, mediation_remediation, mediation_dispatched, mediation_dispatched_at, mediation_resumed_owed_at, mediation_escalation, mediation_escalation_brief, mediation_deploy_ending, mediation_fixer_turn, mediation_fixer_brief, mediation_fixer_origin FROM merge_queue_repos WHERE repo_key = ?`
 
 // scanMediation decodes ROW of mediationQuery, REPO's: nil when the
 // repository has no row or owes no mediation. It is the one mediation
@@ -269,10 +280,11 @@ const mediationQuery = `SELECT mediation_owed_at, mediation_prompted_at, mediati
 // write that owes one records its chain.
 func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 	var owed, prompted, chainStart, dispatchedAt, resumedOwed sql.NullInt64
-	var version, turn, intake, remediation, escalation, escalationBrief, ending string
+	var version, turn, intake, remediation, escalation, escalationBrief, ending, fixerTurn, fixerBrief string
 	var redeploys int
+	var fixerOrigin int32
 	var dispatched bool
-	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &intake, &remediation, &dispatched, &dispatchedAt, &resumedOwed, &escalation, &escalationBrief, &ending)
+	err := row.Scan(&owed, &prompted, &version, &turn, &chainStart, &redeploys, &intake, &remediation, &dispatched, &dispatchedAt, &resumedOwed, &escalation, &escalationBrief, &ending, &fixerTurn, &fixerBrief, &fixerOrigin)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -284,7 +296,8 @@ func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 	}
 	m := &Mediation{OwedAt: fromNanos(owed.Int64), Version: version, Turn: TurnID(turn), ChainStartedAt: fromNanos(chainStart.Int64), ChainRedeploys: redeploys,
 		Intake: WorkspaceID(intake), Remediation: WorkspaceID(remediation), Dispatched: dispatched, Resumed: resumedOwed.Valid && resumedOwed.Int64 == owed.Int64,
-		Escalation: WorkspaceID(escalation), EscalationBrief: escalationBrief, DeployEnding: DeployEnding(ending)}
+		Escalation: WorkspaceID(escalation), EscalationBrief: escalationBrief, DeployEnding: DeployEnding(ending),
+		FixerTurn: FixerTurn{ID: TurnID(fixerTurn), Brief: fixerBrief, Origin: fixerOrigin}}
 	if prompted.Valid {
 		at := fromNanos(prompted.Int64)
 		m.PromptedAt = &at
@@ -371,7 +384,7 @@ func (s *store) RecordMediationEscalation(ctx context.Context, repo RepoKey, owe
 // releases nothing a newer deploy owes.
 func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Time) (bool, error) {
 	return s.mediationWrite(ctx, "daemon.wsm.release_mediation", repo, owed,
-		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_resumed_owed_at = NULL, mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '', mediation_dispatched = 0, mediation_dispatched_at = NULL, mediation_escalation = '', mediation_escalation_brief = '' WHERE repo_key = ? AND mediation_owed_at = ?`)
+		`UPDATE merge_queue_repos SET mediation_owed_at = NULL, mediation_prompted_at = NULL, mediation_turn = '', mediation_resumed_owed_at = NULL, mediation_window = '', mediation_window_start = NULL, mediation_chain_started_at = NULL, mediation_chain_redeploys = 0, mediation_intake = '', mediation_remediation = '', mediation_dispatched = 0, mediation_dispatched_at = NULL, mediation_escalation = '', mediation_escalation_brief = '', mediation_fixer_turn = '', mediation_fixer_brief = '', mediation_fixer_origin = 0 WHERE repo_key = ? AND mediation_owed_at = ?`)
 }
 
 // mediationWrite runs QUERY against the mediation of REPO owed at OWED, its
@@ -412,15 +425,22 @@ func (s *store) RecordMediationIntake(ctx context.Context, repo RepoKey, owed ti
 // DispatchMediation records that the intake dispatched a fix, at AT, for the
 // mediation REPO owes at OWED to remediation workspace WS, which becomes the
 // chain's last remediation, answering false when that mediation is no
-// longer the one owed or was dispatched already.
-func (s *store) DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, ws WorkspaceID) (bool, error) {
+// longer the one owed or was dispatched already. TURN, the brief the fixer
+// is given, is recorded in the same write (FixerTurn), so no dispatch stands
+// without the turn that waits on its fix.
+func (s *store) DispatchMediation(ctx context.Context, repo RepoKey, owed, at time.Time, ws WorkspaceID, turn FixerTurn) (bool, error) {
+	if err := turn.valid(); err != nil {
+		s.log.Error("daemon.wsm.dispatch_mediation", "refused a dispatch whose fixer's brief is incomplete", withError(dlog.Context{"repo": string(repo)}, err))
+		return false, err
+	}
 	if ws == "" {
 		err := errors.New("wsm: a dispatch names its remediation workspace")
 		s.log.Error("daemon.wsm.dispatch_mediation", "refused a dispatch that names no workspace", withError(dlog.Context{"repo": string(repo)}, err))
 		return false, err
 	}
 	return s.mediationWrite(ctx, "daemon.wsm.dispatch_mediation", repo, owed,
-		`UPDATE merge_queue_repos SET mediation_remediation = ?, mediation_dispatched = 1, mediation_dispatched_at = ? WHERE mediation_dispatched = 0 AND repo_key = ? AND mediation_owed_at = ?`, string(ws), nanos(at))
+		`UPDATE merge_queue_repos SET mediation_remediation = ?, mediation_dispatched = 1, mediation_dispatched_at = ?, mediation_fixer_turn = ?, mediation_fixer_brief = ?, mediation_fixer_origin = ? WHERE mediation_dispatched = 0 AND repo_key = ? AND mediation_owed_at = ?`,
+		string(ws), nanos(at), string(turn.ID), turn.Brief, turn.Origin)
 }
 
 // MediationRole is the owed mediation a workspace holds a role in: its

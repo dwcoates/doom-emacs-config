@@ -40,7 +40,7 @@ func withRemediation(t *testing.T, h *harness) {
 	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), wsm.StandingFixer); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
@@ -149,7 +149,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 			arrange: func(t *testing.T, h *harness) {
 				for i := 1; i <= theBound; i++ {
 					at := deployStarted.Add(time.Duration(i-1) * time.Minute)
-					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, "ws-fixer"); err != nil {
+					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, "ws-fixer", aFixerTurn); err != nil {
 						t.Fatal(err)
 					}
 					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
@@ -244,10 +244,10 @@ func TestADispatchWhoseBriefCannotBeSubmittedIsAnsweredWithTheDispatchStanding(t
 		t.Fatal("dispatch = nil, want the unsubmitted brief answered")
 	}
 	if m := owedCheck(t, h); m == nil || !m.Dispatched {
-		t.Fatalf("check %+v, want the dispatch recorded, the remediation visible to brief by hand", m)
+		t.Fatalf("check %+v, want the dispatch recorded, its brief kept for the round that waits on the fixer", m)
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the remediation's brief could not be submitted; the dispatch stands with its workspace unprompted"}); !ok {
+		Message: "the remediation's brief could not be submitted; the round that waits on the fixer submits it again"}); !ok {
 		t.Fatalf("records = %v, want the unsubmitted brief at ERROR", h.logs.Records())
 	}
 }

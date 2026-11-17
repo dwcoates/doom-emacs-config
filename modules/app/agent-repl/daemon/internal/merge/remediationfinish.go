@@ -377,7 +377,7 @@ func (o *orchestrator) resumeRemediation(ctx context.Context, f wsm.RemediationF
 		return err
 	}
 	defer o.republishMediation(ctx, f.Repo)
-	if _, err := o.submitCheckPrompt(ctx, f.Workspace, wsm.NewTurnID(), text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR); err != nil {
+	if err := o.briefFixer(ctx, f.Repo, f.Workspace, text, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, fields); err != nil {
 		return err
 	}
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's gate sent it back to work; its next finish gates again", withField(withField(fields, "brief", brief), "attempt", f.GateRounds+1))

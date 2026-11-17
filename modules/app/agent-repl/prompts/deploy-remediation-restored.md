@@ -3,4 +3,4 @@ The deploy intake found that the deploy that began at {{deploy_started}} caused 
 
 {{problems}}
 
-Fix them as before, with tests, and commit; then finish again: `agent-repld workspace finished here -version-part patch -changelog-line "<what the fix changes>"`.
+Fix them as before, with tests, and commit; then finish again: `agent-repld workspace finished here -version-part patch -changelog-line "<what the fix changes>"`. If you find a problem you cannot or should not fix (its cause is unknown, or the fix asked for would only hide it), do not finish: say why in your reply and end the turn. A turn that ends without a finish puts the check before the user, who decides it with you here.

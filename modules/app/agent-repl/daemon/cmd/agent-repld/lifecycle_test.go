@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1137,4 +1138,33 @@ func TestAnEdgeBeforeTheStandDownsAreWiredIsAnError(t *testing.T) {
 		}
 	}
 	t.Fatalf("records = %+v, want the unwired edge at ERROR", log.Records())
+}
+
+// turnEndOrder records, in one sequence, the queue's turn ends and the
+// deploy checks' (turnEndNotifiee).
+type turnEndOrder struct {
+	promptqueue.Queue
+	told []string
+}
+
+func (o *turnEndOrder) OnTurnEnded(ws ids.WorkspaceID, turn ids.TurnID, _ sessionwatcher.TurnClose) {
+	o.told = append(o.told, "queue "+string(ws)+"/"+string(turn))
+}
+
+func (o *turnEndOrder) turnEnded(ws ids.WorkspaceID) {
+	o.told = append(o.told, "checks "+string(ws))
+}
+
+func TestATurnsEndReachesTheQueueAndThenTheDeployChecks(t *testing.T) {
+	// Arrange
+	order := &turnEndOrder{}
+	sink := &lifecycleSink{queue: order, mediation: order, log: dlog.NewTestLogger()}
+
+	// Act
+	sink.OnTurnEnded("ws-1", "turn-1", wsm.CloseCompleted)
+
+	// Assert: the queue stamps the close before the checks read it.
+	if !slices.Equal(order.told, []string{"queue ws-1/turn-1", "checks ws-1"}) {
+		t.Fatalf("told %v, want the queue, then the deploy checks", order.told)
+	}
 }

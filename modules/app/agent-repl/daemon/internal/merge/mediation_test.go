@@ -385,7 +385,7 @@ func TestADispatchedCheckHasNoRound(t *testing.T) {
 	owe(t, h)
 	withIntake(t, h, deployStarted)
 	told(t, h, deployStarted, "turn-told")
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 		t.Fatal(err)
 	}
 
@@ -504,7 +504,7 @@ func TestDecideMediation(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			if tt.dispatched {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -580,7 +580,7 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			told(t, h, deployStarted, "turn-1")
-			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
+			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer", aFixerTurn); err != nil {
 				t.Fatal(err)
 			}
 		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-fixer"}},
