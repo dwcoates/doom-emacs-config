@@ -24,6 +24,15 @@
   - OWNED: a problem names it, and its owner is still at work on it.
   - RECURRED: a problem names it, and it came back after its owner's fix deployed. Its earlier findings are beside it.
 
+### A transient fault is never escalated, and an unmarked one is dispatched to be marked
+
+- A transient fault is a failure of something outside agent-repl that passes on its own, such as a network blip or a third-party endpoint's error.
+  - It is never a problem the deploy caused, since the systems it touches are assumed well tested.
+  - agent-repl leaves every record marked transient (a `"transient": true` context field) out of the window, so such records never reach this brief.
+- A group whose records evidently show a transient fault but carry no mark is a logging defect, never an outage to fix.
+  - Dispatch it at once, its statement saying the record should be marked transient where it is logged (the daemon's `dlog.AsTransient`, or its equivalent in the record's runtime).
+  - Never escalate it, and never dispatch a fix of the outage itself.
+
 ### Decide every deploy as one of three
 
 - Every group is OWNED, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`.

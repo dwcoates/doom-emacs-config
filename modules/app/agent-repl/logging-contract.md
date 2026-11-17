@@ -290,6 +290,13 @@ Identifiers belong in their dedicated fields, never only inside `message`.
 Dynamic values and error causes belong in `context`, never in an incompatible
 per-call text convention.
 
+A warning or error of a failure outside agent-repl that passes on its own (a
+network blip, a third-party endpoint's error) carries `"transient": true` in
+`context` (the daemon's `dlog.AsTransient`). The deploy checks leave every
+record so marked out of the window they judge a deploy by, so a passing outage
+never holds a merge queue; a record that evidently is transient and carries no
+mark is a logging defect.
+
 ## Operation queries
 
 Operators query stable `operation` values rather than matching human-readable
