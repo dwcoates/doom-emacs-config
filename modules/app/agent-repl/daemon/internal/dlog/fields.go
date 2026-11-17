@@ -24,3 +24,15 @@ func Merge(base, extra Context) Context {
 func WithCause(fields Context, err error) Context {
 	return Merge(fields, Context{"cause": err.Error()})
 }
+
+// TransientKey is the context key that marks a record TRANSIENT: a failure of
+// something outside agent-repl that passes on its own (a network blip, a
+// third-party endpoint's error), never a defect of agent-repl's. The deploy
+// checks leave every record so marked out of their window
+// (merge.ParseLogLines), so a passing outage never holds a merge queue.
+const TransientKey = "transient"
+
+// AsTransient answers a copy of FIELDS marked transient (TransientKey).
+func AsTransient(fields Context) Context {
+	return Merge(fields, Context{TransientKey: true})
+}

@@ -327,8 +327,9 @@ func (c *client) call(ctx context.Context, op, method, path string, args []strin
 		}
 		f := &Failure{Kind: KindUnreachable, Method: method, Path: path, Message: detail}
 		// warn: losing the network is an expected outage the caller records
-		// as a failed call, never a defect of the daemon's own.
-		c.cfg.Log.Warn(op, "GitHub could not be reached", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "stderr": detail}))
+		// as a failed call, never a defect of the daemon's own, and it passes
+		// on its own, so the deploy checks leave it out (dlog.AsTransient).
+		c.cfg.Log.Warn(op, "GitHub could not be reached", dlog.AsTransient(dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "stderr": detail})))
 		return Response{}, f
 	}
 	fields["status"] = resp.Status

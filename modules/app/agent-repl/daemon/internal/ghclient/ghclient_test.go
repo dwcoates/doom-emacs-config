@@ -127,6 +127,9 @@ func TestACallThatFailsIsTypedAndRecorded(t *testing.T) {
 		want    Failure
 		message string
 		level   string
+		// transient is whether the record is marked as a passing outage
+		// (dlog.AsTransient), which the deploy checks leave out.
+		transient bool
 	}{
 		{name: "a 401 is unauthorized", out: answer("401 Unauthorized", nil, `{"message":"Bad credentials"}`),
 			want: Failure{Kind: KindUnauthorized, Status: 401, Message: "Bad credentials"}, message: "GitHub refused the call", level: "error"},
@@ -141,7 +144,7 @@ func TestACallThatFailsIsTypedAndRecorded(t *testing.T) {
 		{name: "a 502 is unreachable", out: answer("502 Bad Gateway", nil, "upstream"),
 			want: Failure{Kind: KindUnreachable, Status: 502, Message: "upstream"}, message: "GitHub answered with a server error, an outage of its own; the caller records the failed call", level: "info"},
 		{name: "no status line is unreachable with what gh said", stderr: "error connecting to api.github.com\n",
-			want: Failure{Kind: KindUnreachable, Message: "error connecting to api.github.com"}, message: "GitHub could not be reached", level: "warn"},
+			want: Failure{Kind: KindUnreachable, Message: "error connecting to api.github.com"}, message: "GitHub could not be reached", level: "warn", transient: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -161,6 +164,9 @@ func TestACallThatFailsIsTypedAndRecorded(t *testing.T) {
 			record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: tt.level, Operation: "daemon.ghclient.get", Message: tt.message})
 			if !ok || record.Context["path"] != "repos/o/r/pulls/1" || record.Context["kind"] != string(tt.want.Kind) {
 				t.Fatalf("no %s record naming the path and kind: %+v", tt.level, log.Records())
+			}
+			if transient, _ := record.Context[dlog.TransientKey].(bool); transient != tt.transient {
+				t.Fatalf("record %+v is marked transient %v, want %v", record.Context, transient, tt.transient)
 			}
 		})
 	}
