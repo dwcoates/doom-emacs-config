@@ -178,6 +178,16 @@ func TestTestRunFollowsAHandover(t *testing.T) {
 				}
 			},
 		},
+		{
+			name:      "a successor handing over in turn says what the refusal means",
+			successor: []*agentreplv1.RunTestsResponse{handedOverFrame("127.0.0.1:1")},
+			assert: func(t *testing.T, _ int, _, errOut string, _ *testRunsDaemon) {
+				want := sayHandedOver("ws-caller", "127.0.0.1:1", "run the tests again once the restart finishes")
+				if !strings.Contains(errOut, want) {
+					t.Fatalf("stderr = %q, want %q", errOut, want)
+				}
+			},
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -468,5 +478,45 @@ func TestTestRunRefusesASelectionOutsideTheNamedWorktree(t *testing.T) {
 	// Assert
 	if code != exitFailure || !strings.Contains(errOut, "outside the workspace's worktree") {
 		t.Fatalf("exit %d, stderr %q; want the selection refused as outside the worktree", code, errOut)
+	}
+}
+
+func TestSayRunRefused(t *testing.T) {
+	cases := []struct {
+		name    string
+		refusal *agentreplv1.RunTestsError
+		want    string
+	}{
+		{name: "an unknown workspace", refusal: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunTestsUnknownWorkspace{}}},
+			want: sayNoWorkspace("ws-1")},
+		{name: "a workspace handed to a successor", refusal: handedOverFrame("127.0.0.1:9").GetError(),
+			want: sayHandedOver("ws-1", "127.0.0.1:9", "run the tests again once the restart finishes")},
+		{name: "a refusal its frame already says", refusal: &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_NoSelection{NoSelection: &agentreplv1.RunTestsNoSelection{}}}},
+		{name: "a frame that is no refusal", refusal: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := sayRunRefused("ws-1", tc.refusal)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("sayRunRefused = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTestRunSaysAnUnknownWorkspaceRefusal(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{{Frame: &agentreplv1.RunTestsResponse_Error{Error: &agentreplv1.RunTestsError{
+		Cause: &agentreplv1.RunTestsError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.RunTestsUnknownWorkspace{}}}}}}}
+
+	// Act
+	code, _, errOut := runTestCLI(t, daemon, "run", "-go", "pkg=TestA")
+
+	// Assert
+	if want := sayNoWorkspace(daemon.got.GetWorkspace().GetId()); code != exitRefused || !strings.Contains(errOut, want) {
+		t.Fatalf("exit %d, stderr %q; want exit %d saying %q", code, errOut, exitRefused, want)
 	}
 }

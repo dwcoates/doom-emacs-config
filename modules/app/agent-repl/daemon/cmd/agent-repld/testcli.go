@@ -205,6 +205,9 @@ func streamTestRunOn(c *cliCall, req *agentreplv1.RunTestsRequest, follow bool) 
 			return exitFailure, ""
 		}
 		fmt.Fprintln(c.out, string(text))
+		if said := sayRunRefused(req.GetWorkspace().GetId(), frame.GetError()); said != "" {
+			c.failed("%s", said)
+		}
 		switch {
 		case frame.GetError().GetRunnerFailed() != nil:
 			code = exitFailure
@@ -396,4 +399,20 @@ func commaList(what, list string) ([]string, error) {
 		out = append(out, item)
 	}
 	return out, nil
+}
+
+// sayRunRefused is the sentence a test run refused for its workspace's
+// standing says on stderr, in the wording every workspace verb shares, so a
+// refusal reads as its cause rather than only as its frame (2026-11-13: a run
+// refused mid-handover printed a bare unknownWorkspace). It answers "" for
+// any other frame, whose own printing says enough.
+func sayRunRefused(ws string, refusal *agentreplv1.RunTestsError) string {
+	switch r := refusal.GetCause().(type) {
+	case *agentreplv1.RunTestsError_UnknownWorkspace:
+		return sayNoWorkspace(ws)
+	case *agentreplv1.RunTestsError_TransferringAway:
+		return sayHandedOver(ws, r.TransferringAway.GetAddress(), "run the tests again once the restart finishes")
+	default:
+		return ""
+	}
 }
