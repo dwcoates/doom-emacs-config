@@ -373,10 +373,15 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 	}
 	failedAt := c.clock.Now()
 	every, backedOff := c.failover.failed(failedAt)
+	// INFO, MARKED TRANSIENT: a hotspot that is out of sight or will not take
+	// a join (the phone's hotspot off, the phone away, macOS's `tmpErr`) is
+	// the machine's surroundings, which this daemon expects and cannot fix,
+	// and the retry schedule answers it when the hotspot comes back
+	// (2026-11-17 14:30: `Could not find network Dodge's iPhone.`).
 	c.recordFailoverCause(cause, func(cause string) {
-		c.log.Warn(opFailover, "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule",
-			dlog.Context{"hotspot": c.cfg.Hotspot, "outcome": hotspotArm(outcome), "cause": cause,
-				"retry_every": every.String()})
+		c.log.Info(opFailover, "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule",
+			dlog.AsTransient(dlog.Context{"hotspot": c.cfg.Hotspot, "outcome": hotspotArm(outcome), "cause": cause,
+				"retry_every": every.String()}))
 	})
 	if backedOff {
 		c.log.Info(opFailover, "the Wi-Fi failover backs off: it is now tried less often",

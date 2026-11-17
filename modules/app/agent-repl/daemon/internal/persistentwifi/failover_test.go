@@ -11,6 +11,8 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/dlog"
 )
 
 // argJoinNamed is one `networksetup -setairportnetwork en0 <name>` call.
@@ -312,7 +314,7 @@ func TestTheLidOpeningStandsTheFailoverDown(t *testing.T) {
 	}
 }
 
-func TestAFailedAttemptIsRetriedOnTheScheduleAndWarnsOnce(t *testing.T) {
+func TestAFailedAttemptIsRetriedOnTheScheduleAndRecordedOnceAsTransient(t *testing.T) {
 	// Arrange.
 	h := lostClosed(t)
 	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."})
@@ -327,9 +329,12 @@ func TestAFailedAttemptIsRetriedOnTheScheduleAndWarnsOnce(t *testing.T) {
 	if before != 1 || h.r.count(argJoin) != 2 {
 		t.Fatalf("joins = %d before the retry and %d after, want 1 and 2", before, h.r.count(argJoin))
 	}
-	warns := h.failoverRecords("warn", "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule")
-	if len(warns) != 1 || warns[0]["cause"] != "Could not find network Test Hotspot." {
-		t.Fatalf("warnings = %+v, want one for the standing cause", warns)
+	infos := h.failoverRecords("info", "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule")
+	if len(infos) != 1 || infos[0]["cause"] != "Could not find network Test Hotspot." || infos[0][dlog.TransientKey] != true {
+		t.Fatalf("records = %+v, want one transient INFO for the standing cause", infos)
+	}
+	if warns := h.failoverRecords("warn", "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule"); len(warns) != 0 {
+		t.Fatalf("warnings = %+v, want none", warns)
 	}
 }
 
