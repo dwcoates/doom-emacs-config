@@ -1732,6 +1732,15 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 }
 #ws-sidebar .sb-mq-off-queue-control:first-of-type { margin-left: auto; }
 #ws-sidebar:not(.sb-hover-suspended) .sb-mq-off-queue-control:hover { color: var(--fg); }
+/* THE MERGES OFF A QUEUE STAND BELOW A THIN RULE (owner request,
+   2026-11-17): a subtle grey hairline between them and the merges in line,
+   inset so it reaches neither of the rail's margins; drawn only when both
+   are there (merge-queue-view.ts). */
+#ws-sidebar .sb-mq-off-queue-rule {
+  height: 0;
+  margin: 0.2rem 1.2rem;
+  border-top: 1px solid color-mix(in srgb, var(--muted) 35%, transparent);
+}
 #ws-sidebar .merged-group[data-group-section="merge-queue"]:not(.folded):has(+ .merged-group) > .rows > :last-child {
   margin-bottom: calc(6.25px - var(--mq-below-text));
 }
@@ -7017,8 +7026,11 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .ws[data-opening="true"] > .row { cursor: default; }
 /* A COLD GATE STRIKES THE NAME (owner ruling, 2026-10-13): the workspace is
    parked on its cold gate's choice. The name alone, in every section, never
-   the mark or the when-column. */
-#ws-sidebar .ws[data-arm="coldGate"] > .row > .name {
+   the mark or the when-column. ONE RULE for a row's name and a merge queue
+   line's (src/sidebar/cold-gate-name.ts, owner request 2026-11-17), both
+   wearing its one class; the :is() keeps the rule's weight over a row
+   name's tint and viewed grey. */
+#ws-sidebar :is(.ws > .row > .name, .sb-mq-name).cold-gated {
   --name-rest: color-mix(in srgb, var(--muted) 55%, transparent);
   text-decoration: line-through;
   color: color-mix(in srgb, var(--muted) 55%, transparent);

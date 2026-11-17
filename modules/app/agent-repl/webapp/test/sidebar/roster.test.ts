@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { clone, create } from "@bufbuild/protobuf";
 import {
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewRequest,
@@ -13,6 +13,7 @@ import {
   RosterOpenHeaderSchema,
   RosterRepoSectionSchema,
   WorkspaceRosterSchema,
+  RosterColdGateSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -54,8 +55,10 @@ import { REARRANGED_ATTRIBUTE } from "../../src/drag.js";
 import {
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
+  MERGE_QUEUE_WAITING_CLASS,
 } from "../../src/sidebar/merge-queue-view.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
+import { COLD_GATED_NAME_CLASS } from "../../src/sidebar/cold-gate-name.js";
 import { formatAge } from "../../src/duration.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import {
@@ -2125,6 +2128,41 @@ describe("the Merge Queue section's queues", () => {
     expect(redrawn === section).toBe(kept);
   });
 
+  // A COLD GATE RAISED OR ANSWERED REDRAWS THE QUEUE (cold-gate-name.ts): the
+  // queue's own wire is unchanged, and its line's strike reads the roster's
+  // standing cold gates.
+  it.each([
+    { name: "strikes a merge whose workspace a push gates", gates: ["w2"], struck: true },
+    { name: "keeps a merge unstruck while no gate stands on its workspace", gates: [], struck: false },
+  ])("$name", ({ gates, struck }) => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const made = withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } })]);
+    drawer.draw(made);
+    const gated = clone(WorkspaceRosterSchema, made);
+    gated.coldGates = gates.map((id) => create(RosterColdGateSchema, { workspace: { id, dir: `/w/${id}` } }));
+
+    // Act
+    const drawn = drawer.draw(gated);
+
+    // Assert
+    const name = drawn.querySelector(`.merge-queue-section .${MERGE_QUEUE_WAITING_CLASS} .sb-mq-name`);
+    expect(name?.classList.contains(COLD_GATED_NAME_CLASS)).toBe(struck);
+  });
+
+  it("keeps the queue's section while the push leaves its cold gates as they were", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const made = withQueues([queueGroup({ id: "a", queue: { head: mergingHead("w1") } })]);
+    made.coldGates = [create(RosterColdGateSchema, { workspace: { id: "w1", dir: "/w/w1" } })];
+    const section = drawer.draw(made).querySelector(".merge-queue-section");
+
+    // Act
+    const redrawn = drawer.draw(clone(WorkspaceRosterSchema, made)).querySelector(".merge-queue-section");
+
+    // Assert
+    expect(redrawn).toBe(section);
+  });
 });
 
 describe("the roster drawer: a push redraws only what it changed", () => {

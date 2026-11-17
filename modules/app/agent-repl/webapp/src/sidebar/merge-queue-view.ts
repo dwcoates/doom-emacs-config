@@ -61,6 +61,7 @@ import { labelledControl } from "../control.js";
 import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
 import { fireVerb } from "./verbs.js";
+import { markColdGatedName, type ColdGated } from "./cold-gate-name.js";
 
 /**
  * The attribute a queue group carries while its queue is paused: `pause`, or
@@ -272,9 +273,17 @@ export const MERGE_QUEUE_REMEDIATING_CLASS = "sb-mq-remediating";
  * the order it will run. A listed queue has its head unless its line is empty
  * and a merge stands out of line. A press on a waiting merge drags it among
  * the waiting (`queueDrag`). A queue without a head draws REPOSITORY's queue
- * glyph on a line of its own in the head's place.
+ * glyph on a line of its own in the head's place. A merge whose workspace
+ * COLD_GATED names is drawn struck (`cold-gate-name.ts`), and the merges off
+ * the queue stand below a thin rule when merges in it stand above them.
  */
-export function drawRosterMergeQueue(u: RosterRepoMergeQueue, repository: QueueRepository, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterMergeQueue(
+  u: RosterRepoMergeQueue,
+  repository: QueueRepository,
+  sc: SidebarContext,
+  path: string,
+  coldGated: ColdGated,
+): HTMLElement {
   const body = document.createElement("div");
   body.className = `rows ${MERGE_QUEUE_CLASS}`;
   const glyph = drawQueueGlyph(u, repository, sc);
@@ -284,25 +293,28 @@ export function drawRosterMergeQueue(u: RosterRepoMergeQueue, repository: QueueR
   // (frontend.v1.RosterRepoMergeQueue.head); anywhere else it is required.
   const repairs = repairsOf(u, path);
   if (u.head !== undefined || (repairs.length === 0 && u.github.length === 0 && u.offQueue.length === 0 && u.mediation === undefined)) {
-    body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, glyph, sc, `${path}.head`));
+    body.appendChild(drawRosterMergeQueueHead(requireMessage(u.head, `${path}.head`), u.paused, glyph, sc, `${path}.head`, coldGated));
   } else {
     body.appendChild(drawQueueControlLine(glyph));
   }
   for (const repair of repairs) {
-    body.appendChild(drawRosterMergeQueueRepair(repair, sc));
+    body.appendChild(drawRosterMergeQueueRepair(repair, sc, coldGated));
   }
   const refs = new Map<HTMLElement, WorkspaceRef>();
   u.waiting.forEach((waiting, index) => {
     const waitingPath = `${path}.waiting[${index}]`;
-    const line = drawRosterMergeQueueWaiting(waiting, index + 1, sc, waitingPath);
+    const line = drawRosterMergeQueueWaiting(waiting, index + 1, sc, waitingPath, coldGated);
     refs.set(line, waitingMergeRef(waiting, waitingPath));
     body.appendChild(line);
   });
   u.github.forEach((github, index) => {
-    body.appendChild(drawRosterMergeQueueGithub(github, sc, `${path}.github[${index}]`));
+    body.appendChild(drawRosterMergeQueueGithub(github, sc, `${path}.github[${index}]`, coldGated));
   });
+  // THE MERGES OFF THE QUEUE STAND BELOW A THIN RULE (owner request,
+  // 2026-11-17), drawn only when merges in the queue stand above them.
+  if (u.offQueue.length > 0 && queueCount(u) > 0) body.appendChild(drawOffQueueRule());
   u.offQueue.forEach((off, index) => {
-    body.appendChild(drawRosterMergeQueueOffQueue(off, sc, `${path}.off_queue[${index}]`));
+    body.appendChild(drawRosterMergeQueueOffQueue(off, sc, `${path}.off_queue[${index}]`, coldGated));
   });
   body.addEventListener("pointerdown", (event) => {
     if (event.button !== 0 || !event.isPrimary) return;
@@ -390,13 +402,14 @@ export function drawRosterMergeQueueHead(
   glyph: HTMLElement,
   sc: SidebarContext,
   path: string,
+  coldGated: ColdGated,
 ): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const standing = requireCase(u.standing, `${path}.standing`);
   const card = drawSubjectControl(subject, sc, MERGE_QUEUE_HEAD_CLASS, `${path}.subject`);
   card.setAttribute("data-standing", standing.case);
 
-  const line = drawCardLine(subject, glyph, `${path}.subject`);
+  const line = drawCardLine(subject, glyph, `${path}.subject`, coldGated);
   card.appendChild(line);
 
   if (u.stages.length > 0) {
@@ -516,10 +529,10 @@ export function repairsOf(u: RosterRepoMergeQueue, path = "queue"): QueueRepair[
  * the repair as a queue label (drawQueueLabel), and how long it has held or
  * awaited its slot. A click reveals its merge bubble, as the head's does.
  */
-export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext): HTMLElement {
+export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext, coldGated: ColdGated): HTMLElement {
   const subject = requireMessage(u.subject, `${u.path}.subject`);
   const line = drawSubjectControl(subject, sc, `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`, `${u.path}.subject`);
-  line.append(drawSubjectName(subject, `${u.path}.subject`));
+  line.append(drawSubjectName(subject, `${u.path}.subject`, coldGated));
   line.appendChild(drawQueueLabel(u.words, MERGE_QUEUE_REASON_CLASS, u.title));
   line.appendChild(drawClock(sc, msOf(u.sinceMs, `${u.path}.since_ms`)));
   return line;
@@ -666,13 +679,14 @@ export function drawRosterMergeQueueWaiting(
   position: number,
   sc: SidebarContext,
   path: string,
+  coldGated: ColdGated,
 ): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_WAITING_CLASS, `${path}.subject`);
   const numeral = document.createElement("span");
   numeral.className = MERGE_QUEUE_POSITION_CLASS;
   numeral.textContent = `${position}`;
-  const name = drawSubjectName(subject, `${path}.subject`);
+  const name = drawSubjectName(subject, `${path}.subject`, coldGated);
   line.append(numeral, name);
   appendAsyncOf(line, name, subject, `${path}.subject`);
   line.appendChild(drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
@@ -684,12 +698,13 @@ export const MERGE_QUEUE_CARD_LINE_CLASS = "sb-mq-head-line";
 
 /**
  * The head card's name line: the merge GLYPH, then the name U is credited
- * under. The card appends what follows the name on its own line.
+ * under, struck when COLD_GATED names its workspace. The card appends what
+ * follows the name on its own line.
  */
-export function drawCardLine(u: RosterMergeQueueSubject, glyph: HTMLElement, path: string): HTMLElement {
+export function drawCardLine(u: RosterMergeQueueSubject, glyph: HTMLElement, path: string, coldGated: ColdGated): HTMLElement {
   const line = document.createElement("div");
   line.className = MERGE_QUEUE_CARD_LINE_CLASS;
-  line.append(glyph, drawSubjectName(u, path));
+  line.append(glyph, drawSubjectName(u, path, coldGated));
   return line;
 }
 
@@ -699,12 +714,12 @@ export function drawCardLine(u: RosterMergeQueueSubject, glyph: HTMLElement, pat
  * its GitHub place ("#3 of 5"), and how long its pull request has stood in
  * the queue. GitHub, not this queue, orders it, so it is no grip.
  */
-export function drawRosterMergeQueueGithub(u: RosterMergeQueueGithubEntry, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterMergeQueueGithub(u: RosterMergeQueueGithubEntry, sc: SidebarContext, path: string, coldGated: ColdGated): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const place = requireMessage(u.place, `${path}.place`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_GITHUB_CLASS, `${path}.subject`);
   const mark = drawQueueLabel(githubPlaceText(place), "sb-mq-github-place", "its pull request's place in the GitHub merge queue");
-  line.append(drawSubjectName(subject, `${path}.subject`), mark, drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
+  line.append(drawSubjectName(subject, `${path}.subject`, coldGated), mark, drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
   return line;
 }
 
@@ -714,6 +729,20 @@ export const MERGE_QUEUE_OFF_QUEUE_CLASS = "sb-mq-off-queue";
 /** The class of an off-queue merge's requeue and discard controls. */
 export const MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS = "sb-mq-off-queue-control";
 
+/** The class of the thin rule between the merges in a queue and those off it. */
+export const MERGE_QUEUE_OFF_QUEUE_RULE_CLASS = "sb-mq-off-queue-rule";
+
+/** The thin rule drawn above a queue's merges off it. It draws nothing but itself. */
+function drawOffQueueRule(): HTMLElement {
+  const rule = document.createElement("div");
+  rule.className = MERGE_QUEUE_OFF_QUEUE_RULE_CLASS;
+  rule.setAttribute("aria-hidden", "true");
+  return rule;
+}
+
+/** The requeue control's hover while its merge's workspace stands at its cold gate. */
+export const COLD_GATED_REQUEUE_TITLE = "open this workspace to answer its cold gate";
+
 /**
  * One merge that left its queue without landing and whose request still
  * stands, drawn after everything in the queue: its name, why it left, and two
@@ -721,37 +750,47 @@ export const MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS = "sb-mq-off-queue-control";
  * (`RequeueMerge`), the other ending its request (`DiscardMerge`, which
  * closes an async merge's merge workspace). A click on the line itself
  * selects as a waiting merge's does; it is no grip.
+ *
+ * A MERGE WHOSE WORKSPACE STANDS AT ITS COLD GATE IS NOT REQUEUED (owner
+ * request, 2026-11-17): the gate would take it off the queue again at once,
+ * with nothing said. Its requeue control instead selects that workspace, as
+ * a row's click does, so its cold gate is on screen to be answered; the
+ * daemon refuses such a requeue from any other client (`cold_gated`).
  */
-export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: SidebarContext, path: string, coldGated: ColdGated): HTMLElement {
   const subject = requireMessage(u.subject, `${path}.subject`);
   const cause = requireMessage(u.cause, `${path}.cause`);
   const requeue = requireMessage(requireMessage(u.requeue, `${path}.requeue`).merge, `${path}.requeue.merge`);
   const discard = requireMessage(requireMessage(u.discard, `${path}.discard`).merge, `${path}.discard.merge`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_OFF_QUEUE_CLASS, `${path}.subject`);
   const label = drawQueueLabel(cause.text, "sb-mq-off-queue-cause", "why this merge left the queue");
-  const name = drawSubjectName(subject, `${path}.subject`);
+  const name = drawSubjectName(subject, `${path}.subject`, coldGated);
   line.append(name);
   appendAsyncOf(line, name, subject, `${path}.subject`);
   line.append(label);
   line.appendChild(
-    drawOffQueueControl("↺", "requeue", "put this merge back in line, at the back", (control) =>
-      fireVerb(control, {
-        sc,
-        rpc: "RequeueMerge",
-        // The webapp acts on the queue for the user alone, and says so.
-        call: (client) =>
-          client.requeueMerge({
-            workspace: requeue,
-            placement: { place: { case: "back", value: {} } },
-            requester: userRequester(),
+    coldGated.has(requeue.id)
+      ? drawOffQueueControl("↺", "requeue", COLD_GATED_REQUEUE_TITLE, { operation: "sidebar.merge-queue.cold-gate-select", doing: "selecting the workspace of a merge off its queue that stands at its cold gate, in place of requeueing it" }, requeue, (control) =>
+          guardMalformed(sc.ctx, "sidebar.merge-queue.cold-gate-select", selectWorkspace(control, sc, requeue)),
+        )
+      : drawOffQueueControl("↺", "requeue", "put this merge back in line, at the back", { operation: "sidebar.merge-queue.requeue", doing: "requeueing a merge off its queue from the sidebar" }, requeue, (control) =>
+          fireVerb(control, {
+            sc,
+            rpc: "RequeueMerge",
+            // The webapp acts on the queue for the user alone, and says so.
+            call: (client) =>
+              client.requeueMerge({
+                workspace: requeue,
+                placement: { place: { case: "back", value: {} } },
+                requester: userRequester(),
+              }),
+            schema: RequeueMergeResponseSchema,
+            refusalText: requeueMergeRefusal,
           }),
-        schema: RequeueMergeResponseSchema,
-        refusalText: requeueMergeRefusal,
-      }),
-    ),
+        ),
   );
   line.appendChild(
-    drawOffQueueControl("✕", "discard", "discard this merge's request", (control) =>
+    drawOffQueueControl("✕", "discard", "discard this merge's request", { operation: "sidebar.merge-queue.discard", doing: "discarding a merge off its queue from the sidebar" }, discard, (control) =>
       fireVerb(control, {
         sc,
         rpc: "DiscardMerge",
@@ -764,16 +803,30 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
   return line;
 }
 
-/** One requeue or discard control: GLYPH, hovering TITLE, whose click runs ACT and never selects the line. */
-function drawOffQueueControl(glyph: string, verb: string, title: string, act: (control: HTMLElement) => Promise<boolean>): HTMLElement {
+/** What an off-queue control's click records, before it acts. */
+interface OffQueueRecord {
+  operation: string;
+  doing: string;
+}
+
+/**
+ * One requeue or discard control: GLYPH, hovering TITLE, whose click records
+ * RECORD for MERGE and runs ACT, and never selects the line.
+ */
+function drawOffQueueControl(
+  glyph: string,
+  verb: string,
+  title: string,
+  record: OffQueueRecord,
+  merge: WorkspaceRef,
+  act: (control: HTMLElement) => Promise<unknown>,
+): HTMLElement {
   const control = labelledControl({
     className: MERGE_QUEUE_OFF_QUEUE_CONTROL_CLASS,
     hook: ["data-verb", verb],
     label: glyph,
     onClick: (control) => {
-      log.info(`${verb === "requeue" ? "requeueing" : "discarding"} a merge off its queue from the sidebar`, {
-        operation: `sidebar.merge-queue.${verb}`,
-      });
+      log.info(record.doing, { operation: record.operation, context: { workspace: merge.id } });
       void act(control);
     },
   });
@@ -818,12 +871,17 @@ function appendAsyncOf(line: HTMLElement, name: HTMLElement, u: RosterMergeQueue
   name.removeAttribute("title");
 }
 
-/** A merge's name, with an async merge saying so on hover. */
-function drawSubjectName(u: RosterMergeQueueSubject, path: string): HTMLElement {
+/**
+ * A merge's name, with an async merge saying so on hover, struck as a
+ * cold-gated workspace's name is when COLD_GATED names the merge's own
+ * workspace (`RosterMergeQueueSubject.merge`, whose session the gate parks).
+ */
+function drawSubjectName(u: RosterMergeQueueSubject, path: string, coldGated: ColdGated): HTMLElement {
   const mode = requireCase(requireMessage(u.mode, `${path}.mode`).mode, `${path}.mode.mode`);
   const name = document.createElement("span");
   name.className = "sb-mq-name";
   name.textContent = u.name;
+  if (coldGated.has(requireMessage(u.merge, `${path}.merge`).id)) markColdGatedName(name);
   switch (mode.case) {
     case "sync":
       break;
