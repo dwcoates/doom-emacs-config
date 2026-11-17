@@ -130,6 +130,38 @@ func TestFleetSetEffortRefusesNoSessionWithNoLiveShim(t *testing.T) {
 	}
 }
 
+func TestFleetSetEffortOnAShimWithNoSessionIsTheNoSessionRefusalAtInfo(t *testing.T) {
+	// Arrange: the shim is up and has no session yet.
+	f := newFleetFixture(t)
+	ws := f.workspace("w1")
+	if err := f.fleet.Start(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	f.client.effortResponse = effortFailure(&shimv1.SetSessionEffortFailure{
+		Cause:  &shimv1.SetSessionEffortFailure_NoSession{NoSession: &shimv1.SetSessionEffortNoSession{}},
+		Detail: "no session has been started on this shim",
+	})
+
+	// Act.
+	err := f.fleet.SetEffort(context.Background(), f.log.logger, ws.ID, effortHigh)
+
+	// Assert.
+	t.Run("the caller gets the no_session refusal", func(t *testing.T) {
+		var refusal *ShimRefusal
+		if !errors.As(err, &refusal) || refusal.Arm != ArmShimNoSession {
+			t.Fatalf("err = %v, want the no_session refusal", err)
+		}
+	})
+	t.Run("it is recorded at INFO, never ERROR", func(t *testing.T) {
+		if records := recordsAt(f.log, opSetEffort, "error"); len(records) != 0 {
+			t.Fatalf("error records = %v, want none", records)
+		}
+		if records := recordsAt(f.log, opSetEffort, "info"); len(records) != 1 || records[0]["effort"] != effortHigh.String() {
+			t.Fatalf("info records = %v, want one naming the level", records)
+		}
+	})
+}
+
 func TestFleetSetEffortStatesTheConfirmedLevelToTheTopbar(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

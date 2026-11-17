@@ -85,6 +85,17 @@ func (f *Fleet) SetEffort(ctx context.Context, log dlog.Logger, ws ids.Workspace
 		return &ShimRefusal{Verb: "SetSessionEffort", Arm: ArmShimNoSession, Detail: "the workspace has no live session"}
 	}
 	effective, err := applyEffort(ctx, client, level)
+	if refusedNoSession(err) {
+		// A SHIM WITH NO SESSION YET (one prelaunched inert, one whose session
+		// ended) is the same answer as no shim at all, which the caller turns
+		// into a kept pick and a revived session (verbs.SetEffort); it is no
+		// failure of the switch (2026-11-17 14:49:38, deploy-fixer: a deploy
+		// check's pick met its replacement shim before its session started).
+		log.Info(opSetEffort, "the workspace's shim holds no session yet to set an effort on", dlog.Context{
+			"effort": level.String(), "cause": err.Error(),
+		})
+		return err
+	}
 	if err != nil {
 		log.Error(opSetEffort, "the shim did not switch the effort", dlog.Context{
 			"effort": level.String(), "cause": err.Error(),
