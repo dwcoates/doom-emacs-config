@@ -3952,7 +3952,7 @@ func (h *harness) deps() Deps {
 			}
 			return *h.displaced, true, nil
 		},
-		Freeness:          h.freeness,
+		Freeness: h.freeness,
 		AtColdGate: func(ws ids.WorkspaceID) bool {
 			h.mu.Lock()
 			defer h.mu.Unlock()
