@@ -24,9 +24,21 @@ import (
 // imports dlog, so a test import of wsm would be a cycle.
 const mintedIDWidth = 16
 
-// readRecords parses a JSONL file into records. A path that does not exist is
-// no records, which is what "nothing was written here" looks like.
+// readRecords parses a log into records: the JSONL file and, for a log that is
+// not itself a warnings file, its warnings file, where every warn and error
+// record lands (proto/vocab/log-warnings-sink.json). A path that does not
+// exist is no records, which is what "nothing was written here" looks like.
 func readRecords(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	records := readFileRecords(t, path)
+	if !strings.HasSuffix(path, logging.WarningsPath("")) {
+		records = append(records, readFileRecords(t, logging.WarningsPath(path))...)
+	}
+	return records
+}
+
+// readFileRecords parses one JSONL file into records; an absent file is none.
+func readFileRecords(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -2263,10 +2275,16 @@ func TestSurfacesOffATerminalMirrorErrorsAndPersistEverything(t *testing.T) {
 	}
 
 	// Assert
+	// The run log and its warnings file, where the error record lands.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the run log: %v", err)
 	}
+	warnings, err := os.ReadFile(logging.WarningsPath(path))
+	if err != nil {
+		t.Fatalf("read the run log's warnings file: %v", err)
+	}
+	data = append(data, warnings...)
 	persisted := strings.Contains(string(data), "daemon.test.quiet") && strings.Contains(string(data), "daemon.test.loud")
 	mirrored := terminal.String()
 	if !persisted || !strings.Contains(mirrored, "daemon.test.loud") || strings.Contains(mirrored, "daemon.test.quiet") {
@@ -2328,8 +2346,10 @@ func TestOpenSinksSnapshotsEveryOpenSink(t *testing.T) {
 	for _, e := range entries {
 		got[e.ws.dir+"|"+e.name] = e.sk == e.ws.sinks[e.name]
 	}
+	// Each sink opens with its warnings twin (openPairLocked).
 	want := map[string]bool{
 		sinkKey(t, first) + "|daemon": true, sinkKey(t, first) + "|webapp": true, sinkKey(t, second) + "|daemon": true,
+		sinkKey(t, first) + "|daemon.warn": true, sinkKey(t, first) + "|webapp.warn": true, sinkKey(t, second) + "|daemon.warn": true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("openSinks = %v, want %v", got, want)
@@ -2355,7 +2375,7 @@ func TestGlobalWarningLandsOnlyInTheRunLogsWarningsFile(t *testing.T) {
 	s.Global().Warn("daemon.test.warning", "a warning", nil)
 
 	// Assert.
-	if hasOperation(readRecords(t, runLogPath), "daemon.test.warning") {
+	if hasOperation(readFileRecords(t, runLogPath), "daemon.test.warning") {
 		t.Fatalf("the warning reached the run log")
 	}
 	if !hasOperation(readRecords(t, logging.WarningsPath(runLogPath)), "daemon.test.warning") {
@@ -2389,10 +2409,10 @@ func TestWorkspaceRecordLandsInTheSinkItsLevelPicks(t *testing.T) {
 			}[tt.level]("daemon.test.record", "a record", nil)
 
 			// Assert.
-			if !hasOperation(workspaceRecords(t, dir, tt.sink), "daemon.test.record") {
+			if !hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", tt.sink+".log")), "daemon.test.record") {
 				t.Fatalf("%s.log does not carry the %s record", tt.sink, tt.level)
 			}
-			if hasOperation(workspaceRecords(t, dir, tt.other), "daemon.test.record") {
+			if hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", tt.other+".log")), "daemon.test.record") {
 				t.Fatalf("%s.log carries the %s record too", tt.other, tt.level)
 			}
 		})
@@ -2414,7 +2434,7 @@ func TestClientLogLandsAWarningInTheClientsWarningsSink(t *testing.T) {
 	if !hasOperation(workspaceRecords(t, dir, "webapp.warn"), "webapp.test.warning") {
 		t.Fatalf("webapp.warn.log does not carry the forwarded warning")
 	}
-	if hasOperation(workspaceRecords(t, dir, "webapp"), "webapp.test.warning") {
+	if hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", "webapp.log")), "webapp.test.warning") {
 		t.Fatalf("webapp.log carries the forwarded warning too")
 	}
 }

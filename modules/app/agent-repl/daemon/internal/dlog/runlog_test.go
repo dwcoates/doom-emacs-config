@@ -104,9 +104,10 @@ func TestRunLogRetainsExactlyNGenerations(t *testing.T) {
 	}
 
 	// Assert.
-	entries, err := os.ReadDir(dir)
+	// The run log's own family, its warnings file aside.
+	entries, err := filepath.Glob(path + "*")
 	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+		t.Fatalf("Glob: %v", err)
 	}
 	if len(entries) != 3 {
 		t.Fatalf("files = %d, want current plus two generations", len(entries))
