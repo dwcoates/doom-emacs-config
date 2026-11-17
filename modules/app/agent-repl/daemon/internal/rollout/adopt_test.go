@@ -62,6 +62,15 @@ func arm(t *testing.T, h *harness, ws ids.WorkspaceID, expected Participants) {
 	}
 }
 
+// holdAdoption holds H's daemon-side adoption of every workspace until the
+// test ends, set before any arm so no adoption can begin unheld.
+func holdAdoption(t *testing.T, h *harness) {
+	t.Helper()
+	held := make(chan struct{})
+	h.fleet.onAdopt = func(ids.WorkspaceID) { <-held }
+	t.Cleanup(func() { close(held) })
+}
+
 func TestJoinAdoptsAHeadlessWorkspaceAtOnce(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -213,14 +222,13 @@ func TestAnAdoptCallerThatGivesUpFirstAnswersNotYetAdopted(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	// THE DAEMON'S ADOPTION IS HELD until the caller has answered, from
+	// before the arm: the daemon adopts every armed workspace itself, from
+	// the arm's own manifest read, so an adoption finishing first would
+	// rightly answer the caller success, and the race between it and the
+	// caller's cancel would decide the test.
+	holdAdoption(t, h)
 	arm(t, h, ws, Participants{Host: true, Web: true})
-	// THE DAEMON'S ADOPTION IS HELD until the caller has answered: the
-	// daemon adopts every armed workspace itself, so an adoption finishing
-	// first would rightly answer the caller success, and the race between it
-	// and the caller's cancel would decide the test.
-	held := make(chan struct{})
-	h.fleet.onAdopt = func(ids.WorkspaceID) { <-held }
-	t.Cleanup(func() { close(held) })
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Act: the host calls and gives up before the adoption settles.
@@ -273,9 +281,11 @@ func TestAWaitingParticipantIsRecordedAtInfo(t *testing.T) {
 // TestACallerThatGivesUpNamesTheParticipantItWaitedOn pins the other edge: a
 // caller whose context ends first says so at INFO, naming who never called.
 func TestACallerThatGivesUpNamesTheParticipantItWaitedOn(t *testing.T) {
-	// Arrange
+	// Arrange: the adoption is held, or it finishes first and the caller is
+	// answered "already adopted" (the gate's run, 2026-11-17).
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	holdAdoption(t, h)
 	arm(t, h, ws, Participants{Host: true, Web: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
