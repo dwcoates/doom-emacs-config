@@ -412,15 +412,10 @@ func settleRun(ctx context.Context, d Deps, a Args, in settleInputs) (int, strin
 
 	if a.Record {
 		// `run` only STAGES --record: it never writes test_time.csv itself.
-		// bin/test-all.sh runs the whole suite schedule inside
-		// .claude/safe-test-run.sh's git-state net, and a run that appended
-		// its own timing row to a tracked file from inside that net left the
-		// append looking exactly like drift the run caused — DRIFT DETECTED,
-		// a preserved checkpoint tag, and a --record run that could never
-		// exit 0. The actual CSV write is `testrun finish-record`'s alone,
-		// and test-all.sh runs it only after the net has already taken its
-		// clean post-run snapshot, so the write never lands inside the
-		// window the net inspects.
+		// The actual CSV write is `testrun finish-record`'s alone, and
+		// bin/test-all.sh runs it only after .claude/safe-test-run.sh's
+		// git-state net has returned clean, so a run that failed or moved a
+		// ref records nothing.
 		if err := stageRecord(d, in.repo, a.RecordOut, in.startBranch, in.startCommit, passed); err != nil {
 			return fail("staging this run's timing record failed: %v", err)
 		}

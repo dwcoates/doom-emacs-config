@@ -322,6 +322,14 @@ They are owned elsewhere; read them, do not restate them:
   in memory (the in-memory state seam; the log pipe was tried and rejected,
   pitfall 2). Our own systems
   otherwise run for real.
+  - A test found running real `git`, whoever wrote it and however long it has
+    stood, is fixed in the same work to use the fake git (`bin/fake-git.sh`,
+    `daemon/integration/fakegit`); finding it is never a reason to leave it
+    or to report it as pre-existing (owner ruling, 2026-11-17).
+  - This replaces the before-and-after checkout comparison
+    `.claude/safe-test-run.sh` used to make, which could not tell a test's
+    change from the agent's own edits; the wrapper now checks only the refs
+    the run's own git moves.
 - Each system's `## Performance lessons (living document)` section in its
   AGENTS.md: that system's own lessons.
 

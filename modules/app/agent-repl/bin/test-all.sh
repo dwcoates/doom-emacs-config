@@ -53,8 +53,8 @@
 #
 # The whole suite run runs at background priority (bin/background.sh), which
 # keeps the owner's live runtime ahead of it, and inside
-# .claude/safe-test-run.sh's git-state net, so a unit that touched the
-# checkout's git state is caught. Every run on the host shares one core
+# .claude/safe-test-run.sh's git-state net, so a ref a unit's own git moved
+# is caught. Every run on the host shares one core
 # budget, held unit by unit in priority order, that keeps the host's total
 # CPU use under 35% (testrun/internal/cores; owner rulings 2026-10-20,
 # 2026-10-26 and 2026-10-30).
@@ -62,8 +62,8 @@
 # --record ITSELF NEVER RUNS INSIDE THAT NET. `testrun run --record` only
 # STAGES this run's timing rows (to $RUN_TMP, outside the checkout); this
 # script commits them to test_time.csv via `testrun finish-record` only
-# after the net has returned clean, so a canonical history run's own
-# declared write is never mistaken for the drift the net exists to catch.
+# after the net has returned clean, so a run that failed or moved a ref
+# records nothing.
 # See testrun/internal/cli/run.go's "testrun run only STAGES --record".
 
 # Tests run only at background priority: re-exec once through bin/background.sh.
