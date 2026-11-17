@@ -894,7 +894,31 @@ func (r *run) end(ctx context.Context, err error) {
 	if r.stopped(settle, err) {
 		return
 	}
+	// A WORKSPACE PARKED AT ITS COLD GATE refuses the merge's prompt by the
+	// gate's own name: that is the user's state to answer, never a fault of
+	// the merge's (2026-11-17 16:22: pr-merged-notice-not-close-merge, cold
+	// at 839,928 tokens, recorded as a merge fault at ERROR). The merge fails
+	// at INFO, naming the gate, and is requeued once the gate is answered.
+	var gated *promptqueue.ColdGateRefusal
+	if errors.As(err, &gated) {
+		r.coldGated(settle, gated)
+		return
+	}
 	r.abort(settle, err.Error())
+}
+
+// coldGated ends a run whose workspace's session refused its prompt at the
+// cold gate: a failed merge in the area "other", recorded at INFO, whose
+// summary tells the user to answer the gate and requeue.
+func (r *run) coldGated(ctx context.Context, gated *promptqueue.ColdGateRefusal) {
+	r.enterTerminal(terminalOwedFailed)
+	defer r.leaveTerminal()
+	summary := "the workspace is parked at its cold gate (" + gated.Detail + "); answer the gate, then requeue the merge"
+	r.o.log(ctx, r.ws).Info("daemon.merge.cold_gated", "a merge needed the workspace's session, which is parked at its cold gate; it fails for the user to answer the gate", dlog.Context{
+		"workspace": string(r.ws), "lease": string(r.lease.ID), "detail": gated.Detail})
+	r.teardown(ctx, outcome{failed: summary, area: footer.FailedOther}, func() {
+		r.failedTerminal(ctx, summary, footer.FailedOther)
+	})
 }
 
 // outcome is how a method ended.
