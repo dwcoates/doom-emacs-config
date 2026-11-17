@@ -144,6 +144,13 @@ type DB interface {
 	// SetHidden records whether a workspace sits in the roster's hidden
 	// section; an unknown workspace is ErrNotFound.
 	SetHidden(ctx context.Context, id WorkspaceID, hidden bool, at time.Time) error
+	// HideFamily hides a workspace with every open workspace its hide would
+	// be refused for, each marked as hidden with it, and answers those
+	// members (familyhide.go).
+	HideFamily(ctx context.Context, root WorkspaceID, at time.Time) ([]WorkspaceID, error)
+	// ShowFamily shows a workspace and the members HideFamily hid with it,
+	// and answers the members shown (familyhide.go).
+	ShowFamily(ctx context.Context, root WorkspaceID) ([]WorkspaceID, error)
 	// BacklogColdGate moves a shown workspace whose cold gate stood too long
 	// into the hidden section, once per gate, and answers whether it moved it.
 	BacklogColdGate(ctx context.Context, id WorkspaceID, gateLapsedAt, at time.Time) (bool, error)

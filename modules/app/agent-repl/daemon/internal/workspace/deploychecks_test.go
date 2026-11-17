@@ -486,3 +486,101 @@ func TestEveryAdvanceToAParentsTipGoesThroughOneHelper(t *testing.T) {
 		t.Fatal("a second fast-forward to a parent's tip was written beside advanceToParent")
 	}
 }
+
+// fixerWithChild is a standing fixer with an open child it made.
+func fixerWithChild(t *testing.T, f *fixture) (fixer, child ids.WorkspaceID) {
+	t.Helper()
+	fixer = f.workspace("fixer", t.TempDir()).ID
+	record := f.workspace("child", t.TempDir())
+	record.Parent = &fixer
+	f.db.workspaces[record.ID] = record
+	return fixer, record.ID
+}
+
+func TestHidingTheFixerHidesTheWorkspacesItMade(t *testing.T) {
+	tests := []struct {
+		name  string
+		hide  func(v *verbs, ws ids.WorkspaceID) error
+		kills int
+	}{
+		{name: "a fixer standing by at its finish", kills: 1, hide: func(v *verbs, ws ids.WorkspaceID) error {
+			return v.StandByDeployCheck(context.Background(), ws)
+		}},
+		{name: "a fixer whose queue no check holds", hide: func(v *verbs, ws ids.WorkspaceID) error {
+			return v.HideDeployCheck(context.Background(), ws)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			fixer, child := fixerWithChild(t, f)
+
+			// Act
+			err := tt.hide(f.verbs.(*verbs), fixer)
+
+			// Assert
+			if err != nil || !f.db.workspaces[fixer].Hidden || !f.db.workspaces[child].Hidden || len(f.shim.killedSession) != tt.kills {
+				t.Fatalf("hide = %v, fixer hidden %v, child hidden %v, kills %v; want both hidden", err, f.db.workspaces[fixer].Hidden, f.db.workspaces[child].Hidden, f.shim.killedSession)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opSetHidden, Message: "hid the deploy check workspace with its family"}); !ok {
+				t.Fatalf("records = %+v, want the family's hide recorded", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestResumingTheFixerShowsTheWorkspacesHiddenWithIt(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	fixer, child := fixerWithChild(t, f)
+	if err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), fixer); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err := f.verbs.(*verbs).ResumeDeployCheck(context.Background(), fixer)
+
+	// Assert
+	if err != nil || f.db.workspaces[fixer].Hidden || f.db.workspaces[child].Hidden {
+		t.Fatalf("ResumeDeployCheck = %v, fixer hidden %v, child hidden %v; want both shown", err, f.db.workspaces[fixer].Hidden, f.db.workspaces[child].Hidden)
+	}
+}
+
+func TestAFamilyHideOrShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
+	tests := []struct {
+		name    string
+		act     func(v *verbs, ws ids.WorkspaceID) error
+		message string
+	}{
+		{name: "a stand-by", message: "could not hide the deploy check workspace with its family", act: func(v *verbs, ws ids.WorkspaceID) error {
+			return v.StandByDeployCheck(context.Background(), ws)
+		}},
+		{name: "a hide", message: "could not hide the deploy check workspace with its family", act: func(v *verbs, ws ids.WorkspaceID) error {
+			return v.HideDeployCheck(context.Background(), ws)
+		}},
+		{name: "a resume", message: "could not show the deploy check workspace with its family", act: func(v *verbs, ws ids.WorkspaceID) error {
+			return v.ResumeDeployCheck(context.Background(), ws)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			fixer, _ := fixerWithChild(t, f)
+			f.db.familyHiddenErr = errors.New("database is locked")
+
+			// Act
+			err := tt.act(f.verbs.(*verbs), fixer)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), "database is locked") || len(f.shim.killedSession) != 0 {
+				t.Fatalf("err = %v, kills %v; want the store's failure surfaced and no session ended", err, f.shim.killedSession)
+			}
+			rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetHidden, Message: tt.message})
+			if !ok || rec.Context["cause"] != "database is locked" {
+				t.Fatalf("records = %+v, want the failure recorded with its cause", f.log.logger.Records())
+			}
+		})
+	}
+}

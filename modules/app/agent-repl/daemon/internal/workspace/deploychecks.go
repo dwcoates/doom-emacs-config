@@ -160,7 +160,7 @@ func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) erro
 	if err != nil {
 		return err
 	}
-	if err := v.recordHidden(ctx, log, ws, true); err != nil {
+	if err := v.hideFamily(ctx, log, ws); err != nil {
 		return fmt.Errorf("stand the deploy check %s by: hide: %w", ws, err)
 	}
 	if _, err := v.endSession(ctx, log, ws); err != nil {
@@ -181,7 +181,7 @@ func (v *verbs) HideDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	if record.Hidden || record.Closed {
 		return nil
 	}
-	if err := v.recordHidden(ctx, log, ws, true); err != nil {
+	if err := v.hideFamily(ctx, log, ws); err != nil {
 		return fmt.Errorf("hide the deploy check %s: %w", ws, err)
 	}
 	log.Info(opDeployChecks, "the deploy check workspace holds its queue no more; it is hidden, its session untouched", nil)
@@ -286,11 +286,59 @@ func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error
 	if err != nil {
 		return err
 	}
-	if err := v.recordHidden(ctx, log, ws, false); err != nil {
+	if err := v.showFamily(ctx, log, ws); err != nil {
 		return fmt.Errorf("resume the deploy check %s: show: %w", ws, err)
 	}
 	log.Info(opDeployChecks, "the deploy check workspace is shown again; its brief brings its session up", nil)
 	return nil
+}
+
+// hideFamily hides standing deploy check WS with the workspaces it made
+// (owner ruling, 2026-11-17: "hide its kids too"): a fixer is drawn only
+// while it holds its queue, and a hide of it alone is refused while any
+// child of it is open (wsm.HasOpenChildrenError).
+func (v *verbs) hideFamily(ctx context.Context, log dlog.Logger, ws wsm.WorkspaceID) error {
+	members, err := v.deps.DB.HideFamily(ctx, ws, v.now())
+	if err != nil {
+		log.Error(opSetHidden, "could not hide the deploy check workspace with its family", dlog.Context{"cause": err.Error()})
+		return err
+	}
+	log.Info(opSetHidden, "hid the deploy check workspace with its family", dlog.Context{"hidden": true, "family": familyIDs(members)})
+	v.familyMoved(ctx, log, ws, members)
+	return nil
+}
+
+// showFamily shows standing deploy check WS and the workspaces hidden with
+// it.
+func (v *verbs) showFamily(ctx context.Context, log dlog.Logger, ws wsm.WorkspaceID) error {
+	members, err := v.deps.DB.ShowFamily(ctx, ws)
+	if err != nil {
+		if refusedByFamily(log, opSetHidden, err) {
+			return err
+		}
+		log.Error(opSetHidden, "could not show the deploy check workspace with its family", dlog.Context{"cause": err.Error()})
+		return err
+	}
+	log.Info(opSetHidden, "showed the deploy check workspace with its family", dlog.Context{"hidden": false, "family": familyIDs(members)})
+	v.familyMoved(ctx, log, ws, members)
+	return nil
+}
+
+// familyMoved is hiddenRecorded for ROOT and every member moved with it.
+func (v *verbs) familyMoved(ctx context.Context, log dlog.Logger, root wsm.WorkspaceID, members []wsm.WorkspaceID) {
+	v.hiddenRecorded(ctx, log, root, opSetHidden)
+	for _, member := range members {
+		v.deps.CacheLapses.VisibilityChanged(member)
+	}
+}
+
+// familyIDs names a family's members for a record.
+func familyIDs(members []wsm.WorkspaceID) []string {
+	out := make([]string, len(members))
+	for i, id := range members {
+		out[i] = string(id)
+	}
+	return out
 }
 
 // withWorkspace is FIELDS naming workspace WS.

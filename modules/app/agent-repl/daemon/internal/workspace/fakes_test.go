@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -223,6 +224,10 @@ type fakeDB struct {
 	workspaceErr error
 	// setHiddenErr fails the hidden-flag write.
 	setHiddenErr error
+	// familyHiddenErr fails HideFamily and ShowFamily.
+	familyHiddenErr error
+	// hiddenWith is which family hide hid each workspace (HideFamily).
+	hiddenWith map[ids.WorkspaceID]ids.WorkspaceID
 	// backlogErr fails the cold-gate backlog write; backlogs records the
 	// gate each backlog was asked for.
 	backlogErr error
@@ -1253,6 +1258,77 @@ func (d *fakeDB) SetHidden(_ context.Context, id ids.WorkspaceID, hidden bool, a
 	}
 	d.workspaces[id] = ws
 	return nil
+}
+
+// HideFamily hides ROOT with its open descendants that are shown, as the
+// store does (wsm familyhide.go), marking each.
+func (d *fakeDB) HideFamily(_ context.Context, root ids.WorkspaceID, at time.Time) ([]ids.WorkspaceID, error) {
+	if d.familyHiddenErr != nil {
+		return nil, d.familyHiddenErr
+	}
+	if _, ok := d.workspaces[root]; !ok {
+		return nil, wsm.ErrNotFound
+	}
+	if d.hiddenWith == nil {
+		d.hiddenWith = map[ids.WorkspaceID]ids.WorkspaceID{}
+	}
+	var members []ids.WorkspaceID
+	for _, id := range slices.Sorted(maps.Keys(d.workspaces)) {
+		ws := d.workspaces[id]
+		if id == root || ws.Closed || ws.Hidden || !d.descends(id, root) {
+			continue
+		}
+		stamped := at
+		ws.Hidden, ws.HiddenAt = true, &stamped
+		d.workspaces[id] = ws
+		d.hiddenWith[id] = root
+		members = append(members, id)
+	}
+	ws := d.workspaces[root]
+	stamped := at
+	ws.Hidden, ws.HiddenAt = true, &stamped
+	d.workspaces[root] = ws
+	return members, nil
+}
+
+// ShowFamily shows ROOT and what HideFamily hid with it.
+func (d *fakeDB) ShowFamily(_ context.Context, root ids.WorkspaceID) ([]ids.WorkspaceID, error) {
+	if d.familyHiddenErr != nil {
+		return nil, d.familyHiddenErr
+	}
+	ws, ok := d.workspaces[root]
+	if !ok {
+		return nil, wsm.ErrNotFound
+	}
+	ws.Hidden, ws.HiddenAt = false, nil
+	d.workspaces[root] = ws
+	var members []ids.WorkspaceID
+	for _, id := range slices.Sorted(maps.Keys(d.workspaces)) {
+		if d.hiddenWith[id] != root || d.workspaces[id].Closed {
+			continue
+		}
+		member := d.workspaces[id]
+		member.Hidden, member.HiddenAt = false, nil
+		d.workspaces[id] = member
+		delete(d.hiddenWith, id)
+		members = append(members, id)
+	}
+	return members, nil
+}
+
+// descends reports whether ID's recorded parents lead to ROOT.
+func (d *fakeDB) descends(id, root ids.WorkspaceID) bool {
+	for seen := 0; seen <= len(d.workspaces); seen++ {
+		parent := d.workspaces[id].Parent
+		if parent == nil {
+			return false
+		}
+		if *parent == root {
+			return true
+		}
+		id = *parent
+	}
+	return false
 }
 
 // BacklogColdGate judges as the store does (wsm.Workspace.BacklogsColdGate).
