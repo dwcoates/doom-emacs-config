@@ -323,6 +323,19 @@ func TestTheBriefAsksForTheRiskMark(t *testing.T) {
 	}
 }
 
+func TestTheBriefRequiresALinkOnEveryItem(t *testing.T) {
+	// Act
+	brief, err := prompts.Load(repoPromptsDir, Brief)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !strings.Contains(brief.Body, "EVERY ITEM CARRIES AT LEAST ONE LINK") {
+		t.Fatalf("the brief does not require a link on every item, which validItem refuses an item without:\n%s", brief.Body)
+	}
+}
+
 func TestCondenseReportsAMissingBriefAsAModelFailure(t *testing.T) {
 	// Arrange
 	c := condenser{headless: &fakeRunner{text: answerJSON}, promptsDir: t.TempDir()}
