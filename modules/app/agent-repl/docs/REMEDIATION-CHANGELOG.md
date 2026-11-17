@@ -1537,3 +1537,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): The test CPU governor allows 55% of the host for tests and 70% overall on AC power in High Power Mode, and keeps 35% and 50% otherwise
 - 2026-11-17 deploy-fixer (landed in queue bypass mode): metaprompt: an agent never fixes a defect with an instruction that explains away one specific bug; todo records the sidecar's missing not_offered mark
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): The standing deploy fixer is hidden together with the workspaces it made, so a fixer with an open child stands by instead of being refused
+- 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A deploy fixer that ends its turn without landing a fix now escalates its check to the user, instead of holding the queue forever
