@@ -479,6 +479,9 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 - Every pull request named anywhere in the response MUST be a markdown hyperlink to its GitHub URL.
   - The link TEXT is the PR's name (its title), because a bare number identifies nothing to a reader who does not memorize numbers.
   - The number may ride along inside the link text or a parenthetical (e.g. `[Retire the topbar's accounting line (#7026)](https://github.com/ORG/REPO/pull/7026)`), but it is NEVER the sole identifier.
+- Every reference to a PR the workspace newly created MUST say whether it is a draft.
+  - It reads like ", and is a draft" or ", and is ready for review", placed right after the PR's link.
+  - The state comes from the creating command or `gh pr view --json isDraft`, never a guess.
 - A PR mentioned without a resolvable URL is reported as such rather than linked to a guessed one.
   - Fabricating a plausible PR URL is worse than omitting the link, because a wrong link reads as verified.
   - Resolve the real URL (e.g. `gh pr view <n> --json url`) before writing the link.
