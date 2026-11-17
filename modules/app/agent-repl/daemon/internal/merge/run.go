@@ -1055,23 +1055,31 @@ func (o *orchestrator) submit(ctx context.Context, ws ids.WorkspaceID, turn ids.
 // the prompt: the hand-off is whole by then, so a suspension that follows
 // leaves the turn living on in the session.
 func (o *orchestrator) submitThen(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin, submitted func()) (wsm.TurnClose, error) {
-	// THE HAND-OFF IS WHOLE. A merge stopped mid-step (a race to land it
-	// lost, a pause, the daemon's exit) lets its turn live on in the session
-	// and reattaches to it on resume, so the delivery it began is never cut
-	// halfway: only the wait for the turn's end is the run's to cancel.
-	disposition, err := o.deps.Queue.Submit(context.WithoutCancel(ctx), promptqueue.Submission{
-		WS: ws, Turn: turn, Said: saidText(text), Origin: origin,
-	})
-	if err != nil {
+	if err := o.handOff(ctx, ws, turn, text, origin); err != nil {
 		return wsm.CloseFailed, err
-	}
-	if disposition.RefusedArm != "" {
-		return wsm.CloseFailed, fmt.Errorf("merge: the queue refused a merge prompt: %s", disposition.RefusedArm)
 	}
 	if submitted != nil {
 		submitted()
 	}
 	return o.deps.AwaitTurnEnd(ctx, ws, turn)
+}
+
+// handOff puts TEXT in WS's prompt queue as TURN. THE HAND-OFF IS WHOLE. A
+// merge stopped mid-step (a race to land it lost, a pause, the daemon's
+// exit) lets its turn live on in the session and reattaches to it on resume,
+// so the delivery it began is never cut halfway: only the wait for the
+// turn's end is the run's to cancel.
+func (o *orchestrator) handOff(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) error {
+	disposition, err := o.deps.Queue.Submit(context.WithoutCancel(ctx), promptqueue.Submission{
+		WS: ws, Turn: turn, Said: saidText(text), Origin: origin,
+	})
+	if err != nil {
+		return err
+	}
+	if disposition.RefusedArm != "" {
+		return fmt.Errorf("merge: the queue refused a merge prompt: %s", disposition.RefusedArm)
+	}
+	return nil
 }
 
 // drawPrompt stands a configured prompt's round live, in its own tab.

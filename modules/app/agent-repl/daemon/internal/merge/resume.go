@@ -162,36 +162,64 @@ func (r *run) reattachTurn(ctx context.Context, turn ids.TurnID, text string, or
 // ended, by the rule run.reattachTurn states; FIELDS name the merge in each
 // record.
 func (o *orchestrator) reattachTurn(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (wsm.TurnClose, error) {
+	place, closed, err := o.bringTurnOn(ctx, ws, fields, turn, text, origin)
+	if err != nil {
+		return wsm.CloseFailed, err
+	}
+	if place == turnEnded {
+		return closed, nil
+	}
+	return o.deps.AwaitTurnEnd(ctx, ws, turn)
+}
+
+// turnPlace is where a submitted turn stands once bringTurnOn found it.
+type turnPlace int
+
+const (
+	// turnEnded is a turn with a recorded close.
+	turnEnded turnPlace = iota + 1
+	// turnUnderWay is a turn running in the session, or delivered or
+	// submitted on its way there.
+	turnUnderWay
+)
+
+// bringTurnOn finds where TURN of WS stands, by the rule run.reattachTurn
+// states, and brings one that is not under way on: a turn HELD in the prompt
+// queue is delivered, and one no store knows is submitted with TEXT under the
+// same id. It answers turnEnded with the turn's close, or turnUnderWay. It
+// never waits for the turn: reattachTurn waits, and the deploy fixer's watch
+// is told of the turn's end by its edge (watchFixer).
+func (o *orchestrator) bringTurnOn(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context, turn ids.TurnID, text string, origin conversationv1.PromptOrigin) (turnPlace, wsm.TurnClose, error) {
 	const op = "daemon.merge.resume"
 	fields = withField(withField(fields, "workspace", string(ws)), "turn", string(turn))
 	if turn == "" {
-		return wsm.CloseFailed, fmt.Errorf("merge: the progress record names no turn to reattach to")
+		return 0, wsm.CloseFailed, fmt.Errorf("merge: the progress record names no turn to reattach to")
 	}
 	closes, err := o.deps.DB.TurnCloses(ctx, ws, []ids.TurnID{turn})
 	if err != nil {
-		return wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn ended: %w", err)
+		return 0, wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn ended: %w", err)
 	}
 	if closed, ok := closes[turn]; ok {
 		o.log(ctx, ws).Info(op, "the merge's turn ended while the daemon was down; the merge goes on from its end",
 			withField(fields, "close", closed.How.String()))
-		return closed.How, nil
+		return turnEnded, closed.How, nil
 	}
 	recorded, err := o.deps.DB.RecordedTurns(ctx, ws, []ids.TurnID{turn})
 	if err != nil {
-		return wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn was delivered: %w", err)
+		return 0, wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn was delivered: %w", err)
 	}
 	if recorded[turn] {
 		o.log(ctx, ws).Info(op, "reattached to the merge's turn, still running in the session", fields)
-		return o.deps.AwaitTurnEnd(ctx, ws, turn)
+		return turnUnderWay, 0, nil
 	}
 	held, found, err := o.deps.DB.HeldPromptByTurn(ctx, turn)
 	if err != nil {
-		return wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn is held: %w", err)
+		return 0, wsm.CloseFailed, fmt.Errorf("merge: reading whether the merge's turn is held: %w", err)
 	}
 	if found && held.Tombstone == nil {
 		o.log(ctx, ws).Info(op, "the merge's turn is still held in the prompt queue; the merge waits for it", fields)
 		if err := o.ensureSession(ctx, ws); err != nil {
-			return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's held turn: %w", err)
+			return 0, wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's held turn: %w", err)
 		}
 		// THE QUEUE IS ASKED TO DELIVER IT NOW: the edge that would have
 		// delivered it (a turn's end, a drain's end) may have come and gone
@@ -199,21 +227,24 @@ func (o *orchestrator) reattachTurn(ctx context.Context, ws ids.WorkspaceID, fie
 		// edge left to come (2026-11-15 05:56:36: the head waited on its held
 		// turn until it was evicted).
 		if err := o.deps.Queue.DeliverHeld(ctx, ws); err != nil {
-			return wsm.CloseFailed, fmt.Errorf("merge: delivering the merge's held turn: %w", err)
+			return 0, wsm.CloseFailed, fmt.Errorf("merge: delivering the merge's held turn: %w", err)
 		}
-		return o.deps.AwaitTurnEnd(ctx, ws, turn)
+		return turnUnderWay, 0, nil
 	}
 	// A TURN NEVER DELIVERED IS SUBMITTED WITH THE TEXT ITS RECORD CARRIES; a
 	// record with none (an earlier build's step aside, whose run delivered
 	// its brief itself) has nothing to submit, and says so.
 	if text == "" {
-		return wsm.CloseFailed, fmt.Errorf("merge: the merge's turn %s never reached the session and its record carries no text to submit", turn)
+		return 0, wsm.CloseFailed, fmt.Errorf("merge: the merge's turn %s never reached the session and its record carries no text to submit", turn)
 	}
 	o.log(ctx, ws).Info(op, "the merge's turn never reached the session before the restart; it is submitted now", fields)
 	if err := o.ensureSession(ctx, ws); err != nil {
-		return wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's turn: %w", err)
+		return 0, wsm.CloseFailed, fmt.Errorf("merge: starting a session for the merge's turn: %w", err)
 	}
-	return o.submit(ctx, ws, turn, text, origin)
+	if err := o.handOff(ctx, ws, turn, text, origin); err != nil {
+		return 0, wsm.CloseFailed, err
+	}
+	return turnUnderWay, 0, nil
 }
 
 // suspend lets go of what a run holds IN THIS PROCESS when a suspension took
