@@ -137,36 +137,30 @@ t_wrapped_arguments_arrive_intact() {
 t_head_moved_by_the_command_is_drift() {
     new_case
     run_net -- sh -c 'echo y >moved && git add -A && git commit -m moved'
-    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"HEAD changed: $HEAD0 -> "* ]] && [ -n "$(checkpoints)" ]; then
-        pass "a HEAD the command moved is drift, and the checkpoint stays"
+    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"refs this run's own git moved"* ]] \
+        && [[ "$OUT" == *"$HEAD0 "*" refs/heads/"* ]] && [ -n "$(checkpoints)" ]; then
+        pass "a HEAD the command's own git moved is drift, and the checkpoint stays"
     else
-        fail "a HEAD the command moved is drift, and the checkpoint stays" "rc=$RC out=$OUT"
+        fail "a HEAD the command's own git moved is drift, and the checkpoint stays" "rc=$RC out=$OUT"
     fi
 }
 
-t_status_dirtied_by_the_command_is_drift() {
+# A working tree is never compared before and after the run: a snapshot
+# cannot say who changed it, and the workspace's own agent edits while its
+# tests run.
+t_a_dirtied_working_tree_is_not_drift() {
     new_case
     run_net -- sh -c 'echo dirty >"$0"' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
-    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"Working tree status changed"* ]]; then
-        pass "a working tree the command dirtied is drift"
+    if [ "$RC" -eq 0 ] && [[ "$OUT" != *"DRIFT DETECTED"* ]] && [ -z "$(checkpoints)" ]; then
+        pass "a working tree changed during the run is not drift"
     else
-        fail "a working tree the command dirtied is drift" "rc=$RC out=$OUT"
-    fi
-}
-
-t_status_drift_names_each_path_that_moved() {
-    new_case
-    run_net -- sh -c 'echo dirty >"$0"' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
-    if [ "$RC" -eq 2 ] && [[ "$OUT" == *"+  M modules/app/agent-repl/lisp/test-agent-repl.el"* ]]; then
-        pass "a working tree the command dirtied is reported naming the path, on the after side"
-    else
-        fail "a working tree the command dirtied is reported naming the path, on the after side" "rc=$RC out=$OUT"
+        fail "a working tree changed during the run is not drift" "rc=$RC out=$OUT"
     fi
 }
 
 t_failure_outranks_drift() {
     new_case
-    run_net -- sh -c 'echo dirty >"$0"; exit 7' "$REPO/modules/app/agent-repl/lisp/test-agent-repl.el"
+    run_net -- sh -c 'git update-ref refs/heads/leaked "$0"; exit 7' "$HEAD0"
     if [ "$RC" -eq 7 ] && [[ "$OUT" == *"DRIFT DETECTED"* ]]; then
         pass "a failing command that also drifted exits with its own status and reports the drift"
     else
@@ -312,7 +306,7 @@ t_the_wrapped_command_carries_the_run_marker
 t_wrapped_exit_status_passes_through
 t_wrapped_arguments_arrive_intact
 t_head_moved_by_the_command_is_drift
-t_status_dirtied_by_the_command_is_drift
+t_a_dirtied_working_tree_is_not_drift
 t_failure_outranks_drift
 t_a_ref_the_run_creates_is_drift
 t_a_ref_the_run_deletes_is_drift
