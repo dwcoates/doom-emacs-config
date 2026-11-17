@@ -25,7 +25,8 @@
 #           work is busy, and trips time limits measured at full speed; the
 #           utility CPU clamp tried that day killed short units. The CPU
 #           governor alone moderates the tests (testrun's cores: the tests
-#           average 35% of the host and never push it above 50%), and their
+#           average 35% of the host and never push it above 50%, or 55%
+#           and 70% on AC power in High Power Mode), and their
 #           writes land on the run's RAM disk, not the SSD the live store
 #           uses (the disk throttle of 2026-10-06 predates it). `nice`
 #           demotes nothing on macOS (measured 2026-11-13 with `ps -M`: a

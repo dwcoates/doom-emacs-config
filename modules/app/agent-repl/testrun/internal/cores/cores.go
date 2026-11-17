@@ -1,8 +1,9 @@
 // Package cores is the host's test-CPU budget: every test run on the host,
 // however many overlap, together holds at most the pool of core seats, and
 // the CPU governor (governor.go) admits each unit only while the tests stay
-// within their target, CapPercent of the host, and the whole host within its
-// ceiling, CeilingPercent (owner rulings 2026-10-20, 2026-10-23, 2026-10-26
+// within their target, a share of the host, and the whole host within its
+// ceiling, a larger one, both following the host's power (Limits)
+// (owner rulings 2026-10-20, 2026-10-23, 2026-10-26
 // and 2026-11-13: overlapping runs drove the whole host past 100%, a fixed
 // share of the cores still let the host pass 90% while the rest of it was
 // busy, and a cap on the whole host let the owner's other work eat the
@@ -38,13 +39,16 @@ const DefaultDir = "/tmp/agent-repl-test-cores"
 // refuses that run instead.
 const NestedEnv = "AGENT_REPL_TEST_CORE_SEATS_HELD"
 
-// Budget is the host's pool of core seats: CapPercent of numCPU rounded
-// down, all a run may hold on an otherwise idle host. A host too small to
-// budget a single core is refused, never adjusted.
+// Budget is the host's pool of core seats: the highest target the tests may
+// average (PoweredLimits) of numCPU rounded down, all a run may hold on an
+// otherwise idle host. The pool is sized once for every run sharing it, so
+// it is sized for the highest target, and the governor holds back the seats
+// the limits in force leave. A host too small to budget a single core is
+// refused, never adjusted.
 func Budget(numCPU int) (int, error) {
-	n := numCPU * CapPercent / 100
+	n := numCPU * PoweredLimits.Target / 100
 	if n < 1 {
-		return 0, fmt.Errorf("this host has %d cores; tests may hold %d%% of them, which is not one whole core", numCPU, CapPercent)
+		return 0, fmt.Errorf("this host has %d cores; tests may hold %d%% of them, which is not one whole core", numCPU, PoweredLimits.Target)
 	}
 	return n, nil
 }

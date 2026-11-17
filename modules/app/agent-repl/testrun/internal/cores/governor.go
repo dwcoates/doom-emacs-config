@@ -11,17 +11,27 @@ import (
 	"time"
 
 	"agentrepl/logging/hostcpu"
+	"agentrepl/logging/hostpower"
 	"agentrepl/testrun/internal/atomicfile"
 	"agentrepl/testrun/internal/seats"
 )
 
 // THE CPU GOVERNOR (owner ruling, 2026-11-13, replacing the 2026-10-26 and
-// 2026-10-30 rulings that capped the whole host at CapPercent): every test on
-// the host together should average CapPercent of the host's cores (5.6 of
-// 16), its TARGET, and the tests must never bring the host's total CPU above
-// CeilingPercent (8 of 16), its CEILING. The cap is the tests' share: the
-// owner's other work no longer eats it, it only lowers what the ceiling
-// leaves.
+// 2026-10-30 rulings that capped the whole host at one share): every test on
+// the host together should average the limits' Target of the host's cores
+// (35%, 5.6 of 16), its TARGET, and the tests must never bring the host's
+// total CPU above the limits' Ceiling (50%, 8 of 16), its CEILING. The target
+// is the tests' share: the owner's other work no longer eats it, it only
+// lowers what the ceiling leaves.
+//
+// THE LIMITS FOLLOW THE HOST'S POWER (owner ruling, 2026-11-17). On AC power
+// in High Power Mode the tests may average 55% and the host reach 70%
+// (PoweredLimits); on battery, or in any other energy mode, the limits are
+// 35% and 50% (BaseLimits). A closed lid under persistent Wi-Fi keeps High
+// Power Mode on AC power, so it keeps the higher limits, and unplugging
+// returns the base ones whether the lid is open or closed. The governor reads
+// the power at every read, so a change governs the next unit admitted; a unit
+// already running runs to its end.
 //
 // IT TELLS THE TESTS' CPU FROM THE REST OF THE HOST'S. Every read measures
 // the host's busy cores (hostcpu) and the cores every test process used
@@ -77,15 +87,84 @@ import (
 // widest unit at DefaultCoresPerSlot a slot; and a governor that cannot read
 // the host, the tests or the ledger hands out nothing.
 
+// Limits are the tests' target and the host's ceiling, each a percent of the
+// host's cores.
+type Limits struct {
+	// Target is the share of the host's cores every test on the host
+	// together should average.
+	Target int
+	// Ceiling is the share of the host's cores the whole host may not pass
+	// while tests add to it.
+	Ceiling int
+}
+
+var (
+	// BaseLimits are the limits on battery, or in any energy mode but High
+	// Power Mode (owner rulings 2026-10-30, which set the target at 35, and
+	// 2026-11-13, which made it the tests' own share under a 50 ceiling).
+	BaseLimits = Limits{Target: 35, Ceiling: 50}
+	// PoweredLimits are the limits on AC power in High Power Mode (owner
+	// ruling, 2026-11-17), the ceiling 15 points above the target as in
+	// BaseLimits.
+	PoweredLimits = Limits{Target: 55, Ceiling: 70}
+)
+
+// TargetCores is the tests' target on a host of numCPU cores.
+func (l Limits) TargetCores(numCPU int) float64 { return float64(numCPU) * float64(l.Target) / 100 }
+
+// CeilingCores is the host's ceiling on a host of numCPU cores.
+func (l Limits) CeilingCores(numCPU int) float64 {
+	return float64(numCPU) * float64(l.Ceiling) / 100
+}
+
+// HostPower is the power the host runs on, as the governor reads it.
+type HostPower struct {
+	// Source is AC power or the battery.
+	Source hostpower.Power
+	// EnergyMode is `pmset`'s powermode verbatim; empty when the host has
+	// none.
+	EnergyMode string
+}
+
+// Limits answers the limits the host's power allows.
+func (p HostPower) Limits() Limits {
+	if p.Source == hostpower.PowerAC && p.EnergyMode == hostpower.EnergyModeHighPower {
+		return PoweredLimits
+	}
+	return BaseLimits
+}
+
+// String names the power for the log.
+func (p HostPower) String() string {
+	mode := p.EnergyMode
+	switch mode {
+	case hostpower.EnergyModeHighPower:
+		mode = "High Power Mode"
+	case hostpower.EnergyModeLowPower:
+		mode = "Low Power Mode"
+	case "":
+		mode = "no energy mode"
+	default:
+		mode = "energy mode " + mode
+	}
+	return fmt.Sprintf("%s power in %s", p.Source, mode)
+}
+
+// ReadHostPower reads the source SOURCE says the host runs on and the
+// energy mode ENERGYMODE reads.
+func ReadHostPower(source hostpower.PowerSource, energyMode func() (string, error)) (HostPower, error) {
+	power, err := source.Power()
+	if err != nil {
+		return HostPower{}, err
+	}
+	mode, err := energyMode()
+	if err != nil {
+		return HostPower{}, err
+	}
+	return HostPower{Source: power, EnergyMode: mode}, nil
+}
+
 const (
-	// CapPercent is the tests' TARGET: the share of the host's cores every
-	// test on the host together should average (owner rulings 2026-10-30,
-	// which set 35, and 2026-11-13, which made it the tests' own share).
-	CapPercent = 35
-	// CeilingPercent is the host's CEILING: the share of the host's cores the
-	// whole host may not pass while tests add to it (owner ruling,
-	// 2026-11-13).
-	CeilingPercent = 50
 	// FirstUnitSeats is the widest unit's width (roster's Slots, asserted by
 	// roster_test.go): the seats the governor lets go for a waiter whose
 	// width it does not know.
@@ -114,12 +193,6 @@ const (
 	// maxRank is the worst rank a run can have: niceness 20, macOS's floor.
 	maxRank = 20
 )
-
-// TargetCores is the tests' target on a host of numCPU cores.
-func TargetCores(numCPU int) float64 { return float64(numCPU) * CapPercent / 100 }
-
-// CeilingCores is the host's ceiling on a host of numCPU cores.
-func CeilingCores(numCPU int) float64 { return float64(numCPU) * CeilingPercent / 100 }
 
 // ExpectedCores is what a unit of width is costed: what its own history
 // measured, or DefaultCoresPerSlot a slot when it has none.
@@ -151,15 +224,15 @@ func (l Load) Tests() float64 { return l.TestsCores + l.RampCores }
 func (l Load) Other() float64 { return max(0, l.HostCores-l.TestsCores) }
 
 // Admits answers whether a unit expected to use cores may start on a host of
-// numCPU cores under l: within the tests' target and the host's ceiling, or,
+// numCPU cores under l: within limits' target and ceiling, or,
 // while no unit runs, whenever the rest of the host is under the ceiling.
-func Admits(numCPU int, l Load, cores float64) bool {
-	ceiling := CeilingCores(numCPU)
+func Admits(numCPU int, limits Limits, l Load, cores float64) bool {
+	ceiling := limits.CeilingCores(numCPU)
 	if !l.Running {
 		return l.Other() < ceiling
 	}
 	tests := l.Tests() + cores
-	return tests <= TargetCores(numCPU) && l.Other()+tests <= ceiling
+	return tests <= limits.TargetCores(numCPU) && l.Other()+tests <= ceiling
 }
 
 // Request is the unit the governor decides on next.
@@ -197,7 +270,7 @@ type CPUState struct {
 func ReadState(dir string) (CPUState, error) {
 	data, err := os.ReadFile(filepath.Join(dir, StateFile))
 	if errors.Is(err, os.ErrNotExist) {
-		return CPUState{CapPercent: CapPercent, CeilingPercent: CeilingPercent}, nil
+		return CPUState{CapPercent: BaseLimits.Target, CeilingPercent: BaseLimits.Ceiling}, nil
 	}
 	if err != nil {
 		return CPUState{}, fmt.Errorf("read the CPU governor's state: %w", err)
@@ -236,6 +309,9 @@ type Governor struct {
 	Read func() (hostcpu.Times, error)
 	// Tests reads the CPU seconds the tests' processes used (TestsCPU.Read).
 	Tests func() (float64, error)
+	// Power reads the power the host runs on (ReadHostPower), which sets
+	// the limits.
+	Power func() (HostPower, error)
 	// Now is the clock a ledger record's start is compared with.
 	Now func() time.Time
 	// Ticks paces the reads, one per Tick.
@@ -254,6 +330,8 @@ type Decision struct {
 	Measured bool
 	// Load is the load the decision counted.
 	Load Load
+	// Limits are the limits the decision held the load to.
+	Limits Limits
 	// TestSeats is how many seats tests held.
 	TestSeats int
 	// Next is the unit decided on; Waiting is false when no unit waits.
@@ -269,6 +347,10 @@ type Decision struct {
 
 // governing is one governor's hold on the pool.
 type governing struct {
+	// power is the host's power last read; havePower is false until it
+	// is read, and while a read fails.
+	power     HostPower
+	havePower bool
 	prevHost  hostcpu.Times
 	prevTests float64
 	havePrev  bool
@@ -332,7 +414,7 @@ func (g *Governor) Run(ctx context.Context) {
 		return
 	}
 	defer held.f.Close()
-	g.Log.Infof("CPU governor: this run governs every test on the host, holding the tests to an average of %d%% and the host to %d%% of its %d cores", CapPercent, CeilingPercent, g.NumCPU)
+	g.Log.Infof("CPU governor: this run governs every test on the host's %d cores, holding the tests to an average of %d%% and the host to %d%% on AC power in High Power Mode, and to %d%% and %d%% otherwise", g.NumCPU, PoweredLimits.Target, PoweredLimits.Ceiling, BaseLimits.Target, BaseLimits.Ceiling)
 	wake, stopWake, err := listenWake(g.Pool.Dir)
 	if err != nil {
 		// Units are still decided on at every read; each waits up to a Tick
@@ -367,8 +449,26 @@ func (g *Governor) Run(ctx context.Context) {
 
 // step reads the host and the tests once and decides on what it read.
 func (g *Governor) step(s *governing) {
+	g.readPower(s)
 	g.read(s)
 	g.decide(s, true)
+}
+
+// readPower reads the power the host runs on, and says when the limits it
+// allows change.
+func (g *Governor) readPower(s *governing) {
+	power, err := g.Power()
+	if err != nil {
+		s.havePower = false
+		g.failed(s, "power", "cannot read the host's power, so no test unit starts until it can", err)
+		return
+	}
+	g.recovered(s, "power")
+	if !s.havePower || power.Limits() != s.power.Limits() {
+		l := power.Limits()
+		g.Log.Infof("CPU governor: the host runs on %s, so the tests average at most %d%% (%.1f cores) and the host reaches at most %d%% (%.1f cores)", power, l.Target, l.TargetCores(g.NumCPU), l.Ceiling, l.CeilingCores(g.NumCPU))
+	}
+	s.power, s.havePower = power, true
 }
 
 // read takes one read of the host's and the tests' CPU. A failed read
@@ -410,7 +510,7 @@ func (g *Governor) read(s *governing) {
 // decide decides on the next unit and acts on it. A decision at a read also
 // remembers how many held seats the ledger did not account for.
 func (g *Governor) decide(s *governing, atRead bool) {
-	d := Decision{Measured: s.havePrev && len(s.host) > 0}
+	d := Decision{Measured: s.havePower && s.havePrev && len(s.host) > 0, Limits: s.power.Limits()}
 	tests, seatsOK := g.testSeats(s)
 	d.TestSeats = tests
 	records, ledgerOK := g.ledger(s)
@@ -420,7 +520,7 @@ func (g *Governor) decide(s *governing, atRead bool) {
 		d.Load = g.load(s, records, tests, atRead)
 	}
 	if d.Measured && seatsOK && ledgerOK && lanesOK && waiting {
-		d.Admit = Admits(g.NumCPU, d.Load, next.Cores)
+		d.Admit = Admits(g.NumCPU, d.Limits, d.Load, next.Cores)
 	}
 	if d.Admit {
 		g.openGate(s)
@@ -634,20 +734,20 @@ func (g *Governor) state(s *governing, d Decision, readable bool) {
 	var said string
 	switch {
 	case !d.Measured || !readable:
-		said = "CPU governor: waiting for CPU until the host's and the tests' load is read; no test unit starts"
+		said = "CPU governor: waiting for CPU until the host's power and the host's and the tests' load are read; no test unit starts"
 	case waiting:
 		said = fmt.Sprintf("CPU governor: waiting for CPU; the next unit %s costs %.1f cores, and the tests use %.1f of their %.1f (%d%%) while the host is %.1f cores busy against its %.1f (%d%%) ceiling, so no test unit starts",
-			unitName(d.Next), d.Next.Cores, d.Load.Tests(), TargetCores(g.NumCPU), CapPercent, d.Load.HostCores, CeilingCores(g.NumCPU), CeilingPercent)
+			unitName(d.Next), d.Next.Cores, d.Load.Tests(), d.Limits.TargetCores(g.NumCPU), d.Limits.Target, d.Load.HostCores, d.Limits.CeilingCores(g.NumCPU), d.Limits.Ceiling)
 	default:
 		said = fmt.Sprintf("CPU governor: CPU available; the tests use %.1f of their %.1f cores (%d%%) and the host is %.1f cores busy against its %.1f (%d%%) ceiling",
-			d.Load.Tests(), TargetCores(g.NumCPU), CapPercent, d.Load.HostCores, CeilingCores(g.NumCPU), CeilingPercent)
+			d.Load.Tests(), d.Limits.TargetCores(g.NumCPU), d.Limits.Target, d.Load.HostCores, d.Limits.CeilingCores(g.NumCPU), d.Limits.Ceiling)
 	}
 	if s.stated && waiting == s.waiting {
 		return
 	}
 	s.stated, s.waiting = true, waiting
 	g.Log.Infof("%s", said)
-	st := CPUState{WaitingForCPU: waiting, BusyPercent: 100 * d.Load.HostCores / n, TestsPercent: 100 * d.Load.Tests() / n, CapPercent: CapPercent, CeilingPercent: CeilingPercent}
+	st := CPUState{WaitingForCPU: waiting, BusyPercent: 100 * d.Load.HostCores / n, TestsPercent: 100 * d.Load.Tests() / n, CapPercent: d.Limits.Target, CeilingPercent: d.Limits.Ceiling}
 	if err := writeState(g.Pool.Dir, st); err != nil {
 		g.failed(s, "state", "cannot state the host's CPU for waiting units", err)
 		return
