@@ -394,10 +394,18 @@ func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, bash *storev1.S
 	if err != nil {
 		return err
 	}
+	// THE RUN'S OWNER IS THE BOOK OF ITS CALL'S UNIT ROW, read here as the
+	// announcement reads it. A subagent's backgrounded shell may be announced
+	// only when it ends, while its frames land as it runs: a row these frames
+	// open must already name the book that holds the call, or no session's
+	// lineage reaches it for as long as the run lives (2026-11-17,
+	// land-standup-series). When the unit row lands after, its claim
+	// (claimDetachedWorkForUnitBook) files the run instead.
 	if err := d.upsertDetachedWork(ctx, tx, detachedRow{
 		workID:     workID,
 		kind:       detachedKindBash,
 		originUnit: origin,
+		ownerUnit:  unitRowKey(runID),
 		now:        now,
 	}); err != nil {
 		return err
