@@ -342,6 +342,15 @@ func (c *client) call(ctx context.Context, op, method, path string, args []strin
 	if !f.ResetsAt.IsZero() {
 		fields["resets_at"] = f.ResetsAt.Format(time.RFC3339)
 	}
+	if resp.Status >= 500 {
+		// A SERVER ERROR IS GITHUB'S OWN OUTAGE, NOT A DEFECT HERE. The
+		// failure is returned whole, and its caller records what it cost (a
+		// poller records the subscription's failed read and reads again on
+		// its next poll). MEASURED, deploy 2026-11-17T00:10:46Z: one 502 on
+		// an issue comments read was recorded at ERROR.
+		c.cfg.Log.Info(op, "GitHub answered with a server error, an outage of its own; the caller records the failed call", fields)
+		return Response{}, f
+	}
 	c.cfg.Log.Error(op, "GitHub refused the call", fields)
 	return Response{}, f
 }

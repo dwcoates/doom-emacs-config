@@ -126,21 +126,22 @@ func TestACallThatFailsIsTypedAndRecorded(t *testing.T) {
 		stderr  string
 		want    Failure
 		message string
+		level   string
 	}{
 		{name: "a 401 is unauthorized", out: answer("401 Unauthorized", nil, `{"message":"Bad credentials"}`),
-			want: Failure{Kind: KindUnauthorized, Status: 401, Message: "Bad credentials"}, message: "GitHub refused the call"},
+			want: Failure{Kind: KindUnauthorized, Status: 401, Message: "Bad credentials"}, message: "GitHub refused the call", level: "error"},
 		{name: "a 404 is not found", out: answer("404 Not Found", nil, `{"message":"Not Found"}`),
-			want: Failure{Kind: KindNotFound, Status: 404, Message: "Not Found"}, message: "GitHub refused the call"},
+			want: Failure{Kind: KindNotFound, Status: 404, Message: "Not Found"}, message: "GitHub refused the call", level: "error"},
 		{name: "a 403 with the limit spent is rate limited until its reset", out: answer("403 Forbidden", []string{"X-RateLimit-Remaining: 0", "X-RateLimit-Reset: 1800000000"}, `{"message":"API rate limit exceeded"}`),
-			want: Failure{Kind: KindRateLimited, Status: 403, Message: "API rate limit exceeded", ResetsAt: reset}, message: "GitHub refused the call"},
+			want: Failure{Kind: KindRateLimited, Status: 403, Message: "API rate limit exceeded", ResetsAt: reset}, message: "GitHub refused the call", level: "error"},
 		{name: "a 403 with limit left is a refusal", out: answer("403 Forbidden", []string{"X-RateLimit-Remaining: 12"}, `{"message":"Resource not accessible"}`),
-			want: Failure{Kind: KindRefused, Status: 403, Message: "Resource not accessible"}, message: "GitHub refused the call"},
+			want: Failure{Kind: KindRefused, Status: 403, Message: "Resource not accessible"}, message: "GitHub refused the call", level: "error"},
 		{name: "a 422 is a refusal", out: answer("422 Unprocessable Entity", nil, `{"message":"Validation Failed"}`),
-			want: Failure{Kind: KindRefused, Status: 422, Message: "Validation Failed"}, message: "GitHub refused the call"},
+			want: Failure{Kind: KindRefused, Status: 422, Message: "Validation Failed"}, message: "GitHub refused the call", level: "error"},
 		{name: "a 502 is unreachable", out: answer("502 Bad Gateway", nil, "upstream"),
-			want: Failure{Kind: KindUnreachable, Status: 502, Message: "upstream"}, message: "GitHub refused the call"},
+			want: Failure{Kind: KindUnreachable, Status: 502, Message: "upstream"}, message: "GitHub answered with a server error, an outage of its own; the caller records the failed call", level: "info"},
 		{name: "no status line is unreachable with what gh said", stderr: "error connecting to api.github.com\n",
-			want: Failure{Kind: KindUnreachable, Message: "error connecting to api.github.com"}, message: "GitHub could not be reached"},
+			want: Failure{Kind: KindUnreachable, Message: "error connecting to api.github.com"}, message: "GitHub could not be reached", level: "error"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -157,9 +158,9 @@ func TestACallThatFailsIsTypedAndRecorded(t *testing.T) {
 			if !errors.As(err, &f) || !reflect.DeepEqual(*f, tt.want) {
 				t.Fatalf("Get = %v, want %+v", err, tt.want)
 			}
-			record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.ghclient.get", Message: tt.message})
+			record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: tt.level, Operation: "daemon.ghclient.get", Message: tt.message})
 			if !ok || record.Context["path"] != "repos/o/r/pulls/1" || record.Context["kind"] != string(tt.want.Kind) {
-				t.Fatalf("no error record naming the path and kind: %+v", log.Records())
+				t.Fatalf("no %s record naming the path and kind: %+v", tt.level, log.Records())
 			}
 		})
 	}
