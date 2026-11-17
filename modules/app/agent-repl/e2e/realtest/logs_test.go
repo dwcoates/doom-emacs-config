@@ -5,13 +5,16 @@ package realtest
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
+
+	"agentrepl/logging"
 )
 
-func TestEnumerateNamesTheFiveCanonicalWorkspaceSinks(t *testing.T) {
+func TestEnumerateNamesEveryCanonicalWorkspaceSinkAndItsWarningsTwin(t *testing.T) {
 	// Arrange: the logging contract's persistence layout is five links per
-	// workspace, and a harvester that read four of them would be silently
-	// blind to one whole runtime's records.
+	// workspace, each with its warnings twin, and a harvester that read nine
+	// of them would be silently blind to one whole runtime's records.
 	dir := t.TempDir()
 	env := Env{Workspaces: []Workspace{{ID: "ws1", Dir: dir, Name: "one"}}}
 
@@ -22,7 +25,10 @@ func TestEnumerateNamesTheFiveCanonicalWorkspaceSinks(t *testing.T) {
 	}
 
 	// Assert.
-	for _, sink := range []string{"emacs.log", "daemon.log", "shim.log", "webapp.log", "sidecar.log"} {
+	for _, sink := range []string{
+		"emacs.log", "daemon.log", "shim.log", "webapp.log", "sidecar.log",
+		"emacs.warn.log", "daemon.warn.log", "shim.warn.log", "webapp.warn.log", "sidecar.warn.log",
+	} {
 		want := filepath.Join(dir, ".claude", "emacs", sink)
 		found := false
 		for _, src := range sources {
@@ -153,14 +159,16 @@ func TestEnumerateNamesTheModuleLogAndItsPreviousSibling(t *testing.T) {
 		t.Fatalf("enumerate: %v", err)
 	}
 
-	// Assert: both, even though neither exists — a source snapshotted as
+	// Assert: all three, even though none exists — a source snapshotted as
 	// absent and read from zero is how a file the run itself created gets
 	// harvested.
-	if len(sources) != 2 {
-		t.Fatalf("enumerated %d source(s), want the module log and its .prev sibling: %+v", len(sources), sources)
+	var paths []string
+	for _, src := range sources {
+		paths = append(paths, src.Path)
 	}
-	if sources[0].Path != moduleLog || sources[1].Path != moduleLog+".prev" {
-		t.Errorf("enumerated %q and %q", sources[0].Path, sources[1].Path)
+	warnings := logging.WarningsPath(moduleLog)
+	if !slices.Equal(paths, []string{moduleLog, moduleLog + ".prev", warnings}) {
+		t.Errorf("enumerated %q, want the module log, its .prev sibling and its warnings file", paths)
 	}
 }
 
@@ -180,5 +188,39 @@ func TestRealEnvResolvesTheModuleLogToTheDurableCentralSink(t *testing.T) {
 	}
 	if env.CacheLogDir != "/Users/someone/.cache/agent-repl/log" {
 		t.Errorf("the service log directory resolved to %q", env.CacheLogDir)
+	}
+}
+
+func TestEnumerateNamesTheGlobalWarningsFiles(t *testing.T) {
+	// Arrange: every runtime writes its warn and error records only to its
+	// log's warnings file, so a harvest blind to those reads no warning.
+	stateDir, cacheDir := t.TempDir(), t.TempDir()
+	logs := filepath.Join(stateDir, "logs")
+	if err := os.MkdirAll(logs, 0o755); err != nil {
+		t.Fatalf("create %s: %v", logs, err)
+	}
+	files := []string{
+		filepath.Join(logs, "daemon.run.warn.log"),
+		filepath.Join(logs, "daemon.run.warn.log.1"),
+		filepath.Join(cacheDir, "shim-store.warn.log"),
+		filepath.Join(cacheDir, "shim-claude-sidecar.warn.log"),
+	}
+	for _, file := range files {
+		if err := os.WriteFile(file, nil, 0o644); err != nil {
+			t.Fatalf("write %s: %v", file, err)
+		}
+	}
+
+	// Act.
+	sources, err := EnumerateSources(Env{StateDir: stateDir, CacheLogDir: cacheDir})
+	if err != nil {
+		t.Fatalf("enumerate: %v", err)
+	}
+
+	// Assert.
+	for _, file := range files {
+		if !slices.ContainsFunc(sources, func(src Source) bool { return src.Path == file && src.Kind == KindJSONL }) {
+			t.Errorf("the enumeration does not name %s as records: %+v", file, sources)
+		}
 	}
 }

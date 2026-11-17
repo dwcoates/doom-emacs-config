@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+
+	"agentrepl/logging"
 )
 
 // WHERE THE LOGS ARE is settled by modules/app/agent-repl/logging-contract.md,
@@ -93,7 +95,12 @@ type Workspace struct {
 // own order. Emacs owns emacs.log; the daemon owns daemon.log and persists
 // forwarded browser and sidecar records into webapp.log and sidecar.log; the
 // shim writes shim.log directly through the descriptor the daemon passes it.
-var workspaceSinks = []string{"emacs.log", "daemon.log", "shim.log", "webapp.log", "sidecar.log"}
+// Each has its warnings twin, X.warn.log, where its runtime writes every warn
+// and error record and nothing else (proto/vocab/log-warnings-sink.json).
+var workspaceSinks = []string{
+	"emacs.log", "daemon.log", "shim.log", "webapp.log", "sidecar.log",
+	"emacs.warn.log", "daemon.warn.log", "shim.warn.log", "webapp.warn.log", "sidecar.warn.log",
+}
 
 // Env is every root the harvester reads from, stated explicitly rather than
 // resolved from the ambient environment — which is what lets a unit test build
@@ -130,14 +137,15 @@ func RealEnv(home string, workspaces []Workspace) Env {
 	}
 }
 
-// daemonRunLogRe matches the daemon's global sink and its rotation siblings.
-var daemonRunLogRe = regexp.MustCompile(`^daemon\.run\.log(\.[0-9]+)?$`)
+// daemonRunLogRe matches the daemon's global sink, its warnings file, and
+// their rotation siblings.
+var daemonRunLogRe = regexp.MustCompile(`^daemon\.run(\.warn)?\.log(\.[0-9]+)?$`)
 
 // cacheServiceLogRe matches the two launchd services' global sinks and their
 // rotation siblings. `.out.log` is excluded: it is empty in practice and, when
 // it is not, it is stderr-shaped, which `.err.log` already covers as its own
 // kind.
-var cacheServiceLogRe = regexp.MustCompile(`^(shim-store|shim-claude-sidecar)\.log(\.[0-9]+)?$`)
+var cacheServiceLogRe = regexp.MustCompile(`^(shim-store|shim-claude-sidecar)(\.warn)?\.log(\.[0-9]+)?$`)
 
 // cacheServiceErrRe matches the two services' stderr files.
 var cacheServiceErrRe = regexp.MustCompile(`^(shim-store|shim-claude-sidecar)\.err\.log$`)
@@ -156,9 +164,11 @@ func EnumerateSources(env Env) ([]Source, error) {
 	var sources []Source
 
 	if env.ModuleLog != "" {
+		warnings := logging.WarningsPath(env.ModuleLog)
 		sources = append(sources,
 			Source{Name: "emacs.global", Path: env.ModuleLog, Kind: KindJSONL},
 			Source{Name: "emacs.global", Path: env.ModuleLog + ".prev", Kind: KindJSONL},
+			Source{Name: "emacs.global", Path: warnings, Kind: KindJSONL},
 		)
 	}
 

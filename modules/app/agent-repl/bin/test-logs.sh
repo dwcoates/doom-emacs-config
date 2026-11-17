@@ -55,12 +55,18 @@ cat >"$targets/alpha-daemon.log.1" <<EOF
 {"timestamp":"2010-01-01T00:00:00.000000Z","runtime":"daemon","pid":10,"level":"debug","verbosity":"normal","operation":"daemon.old","message":"outside duration","context":{},"workspace_dir":"$workspace_a","workspace_id":"ws-a"}
 {"timestamp":"2026-09-10T10:00:00.000000Z","runtime":"daemon","pid":10,"level":"debug","verbosity":"normal","operation":"daemon.rotated","message":"oldest selected record","context":{"generation":1},"workspace_dir":"$workspace_a","workspace_id":"ws-a"}
 EOF
+# EVERY WARN AND ERROR RECORD LIVES IN ITS LOG'S WARNINGS FILE, as every
+# runtime writes it (proto/vocab/log-warnings-sink.json): a log and its
+# warnings file are one sink to the reader.
 cat >"$targets/alpha-daemon.log" <<EOF
 {"timestamp":"2026-09-10T10:03:00.000000Z","runtime":"daemon","pid":10,"level":"info","verbosity":"normal","operation":"daemon.third","message":"third record","context":{"order":3},"workspace_dir":"$workspace_a","workspace_id":"ws-a"}
+EOF
+cat >"$targets/alpha-daemon.warn.log" <<EOF
 {"timestamp":"2026-09-10T10:01:00.000000Z","runtime":"daemon","pid":10,"level":"warn","verbosity":"normal","operation":"daemon.warning","message":"repeated warning","context":{"order":1},"workspace_dir":"$workspace_a","workspace_id":"ws-a"}
 {"timestamp":"2026-09-10T10:01:30.000000Z","runtime":"daemon","pid":10,"level":"warn","verbosity":"normal","operation":"daemon.warning","message":"repeated warning","context":{"order":2},"workspace_dir":"$workspace_a","workspace_id":"ws-a"}
 EOF
-cat >"$targets/alpha-shim.log" <<EOF
+: >"$targets/alpha-shim.log"
+cat >"$targets/alpha-shim.warn.log" <<EOF
 {"timestamp":"2026-09-10T10:02:00.000000Z","runtime":"shim","pid":11,"level":"error","verbosity":"normal","operation":"shim.failure","message":"shim failed","context":{"cause":"fixture"},"workspace_dir":"$workspace_a","workspace_id":"ws-a"}
 EOF
 cat >"$targets/alpha-webapp.log" <<EOF
@@ -68,14 +74,18 @@ cat >"$targets/alpha-webapp.log" <<EOF
 EOF
 ln -s "$targets/alpha-daemon.log" "$workspace_a/.claude/emacs/daemon.log"
 ln -s "$targets/alpha-shim.log" "$workspace_a/.claude/emacs/shim.log"
+ln -s "$targets/alpha-daemon.warn.log" "$workspace_a/.claude/emacs/daemon.warn.log"
+ln -s "$targets/alpha-shim.warn.log" "$workspace_a/.claude/emacs/shim.warn.log"
 ln -s "$targets/alpha-webapp.log" "$workspace_a/.claude/emacs/webapp.log"
 make_empty_workspace_sink "$workspace_a" alpha emacs
 make_empty_workspace_sink "$workspace_a" alpha sidecar
 
-cat >"$targets/beta-daemon.log" <<EOF
+: >"$targets/beta-daemon.log"
+cat >"$targets/beta-daemon.warn.log" <<EOF
 {"timestamp":"2026-09-10T10:04:00.000000Z","runtime":"daemon","pid":20,"level":"warn","verbosity":"normal","operation":"daemon.beta","message":"beta warning","context":{},"workspace_dir":"$workspace_b","workspace_id":"ws-b"}
 EOF
 ln -s "$targets/beta-daemon.log" "$workspace_b/.claude/emacs/daemon.log"
+ln -s "$targets/beta-daemon.warn.log" "$workspace_b/.claude/emacs/daemon.warn.log"
 make_empty_workspace_sink "$workspace_b" beta emacs
 make_empty_workspace_sink "$workspace_b" beta shim
 make_empty_workspace_sink "$workspace_b" beta webapp
@@ -84,7 +94,8 @@ make_empty_workspace_sink "$workspace_b" beta sidecar
 cat >"$state/logs/daemon.run.log" <<'EOF'
 {"timestamp":"2026-09-10T10:00:30.000000Z","runtime":"daemon","pid":30,"level":"info","verbosity":"normal","operation":"daemon.boot","message":"daemon central","context":{}}
 EOF
-cat >"$cache/agent-repl/log/shim-store.log" <<'EOF'
+: >"$cache/agent-repl/log/shim-store.log"
+cat >"$cache/agent-repl/log/shim-store.warn.log" <<'EOF'
 {"timestamp":"2026-09-10T10:05:00.000000Z","runtime":"store","pid":40,"level":"error","verbosity":"normal","operation":"store.failure","message":"store failed","context":{"cause":"fixture"}}
 EOF
 : >"$cache/agent-repl/log/shim-claude-sidecar.log"
@@ -235,7 +246,8 @@ test_all_beyond_the_argument_limit() {
         printf 'ws-many-%s\t%s\tmany-%s\n' "$i" "$dir" "$i" >>"$rows_many"
     done
     last="$many/workspace-with-a-long-enough-directory-name-to-fill-the-argument-list-2500"
-    printf '{"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"daemon","pid":60,"level":"warn","verbosity":"normal","operation":"daemon.many","message":"the last of many","context":{},"workspace_dir":"%s","workspace_id":"ws-many-2500"}\n' "$last" >"$targets/many-2500-daemon.log"
+    printf '{"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"daemon","pid":60,"level":"warn","verbosity":"normal","operation":"daemon.many","message":"the last of many","context":{},"workspace_dir":"%s","workspace_id":"ws-many-2500"}\n' "$last" >"$targets/many-2500-daemon.warn.log"
+    ln -s "$targets/many-2500-daemon.warn.log" "$last/.claude/emacs/daemon.warn.log"
     out="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_many" run_logs --all --level warn --json 2>/dev/null)" || true
     if grep_in "$out" -q '"operation":"daemon.many"'; then
         pass "--all reads past the kernel's argument limit"
@@ -416,7 +428,9 @@ test_harvest_incomplete_workspace_attribution() {
     cat >"$target" <<EOF
 {"timestamp":"2026-09-10T10:06:00.000000Z","runtime":"daemon","pid":70,"level":"warn","verbosity":"normal","operation":"daemon.incomplete","message":"missing workspace ID","context":{},"workspace_dir":"$workspace"}
 EOF
-    ln -s "$target" "$workspace/.claude/emacs/daemon.log"
+    : >"${target%.log}.main.log"
+    ln -s "${target%.log}.main.log" "$workspace/.claude/emacs/daemon.log"
+    ln -s "$target" "$workspace/.claude/emacs/daemon.warn.log"
     cp "$rows" "$incomplete_rows"
     printf 'ws-incomplete\t%s\tincomplete\n' "$workspace" >>"$incomplete_rows"
     set +e
@@ -509,45 +523,54 @@ run_sink_finding_case() {
     local workspace case_rows canonical target out err
     local runtime current_target rc finding_file continuation_ok=1 attribution_ok=1 failure_ok=1
     local continuation_operation="fixture.$label.readable"
+    # A HARVEST READS ONLY WARNINGS FILES, so the link it finds broken is the
+    # sink's warnings link; every other mode reads the sink's own link too.
+    local broken_suffix=".log"
+    [ "$mode" != harvest ] || broken_suffix=".warn.log"
     workspace="$TMP/workspaces/$label"
     case_rows="$TMP/$label-workspaces.tsv"
-    target="$targets/$label-$broken_runtime.log"
+    target="$targets/$label-$broken_runtime$broken_suffix"
     out="$TMP/$label.out"
     err="$TMP/$label.err"
 
     # Arrange
     mkdir -p "$workspace/.claude/emacs"
     workspace="$(cd "$workspace" && pwd -P)"
-    canonical="$workspace/.claude/emacs/$broken_runtime.log"
+    canonical="$workspace/.claude/emacs/$broken_runtime$broken_suffix"
     for runtime in emacs daemon shim webapp sidecar; do
-        current_target="$targets/$label-$runtime.log"
+        current_target="$targets/$label-$runtime$broken_suffix"
+        # Every runtime's warning lives in its warnings file, beside its log.
+        if [ "$runtime" != "$broken_runtime" ] || { [ "$mode" = harvest ] && [ "$shape" != absent ]; }; then
+            : >"$targets/$label-$runtime.log"
+            ln -s "$targets/$label-$runtime.log" "$workspace/.claude/emacs/$runtime.log"
+        fi
         if [ "$runtime" = "$broken_runtime" ]; then
             case "$shape" in
                 dangling)
-                    ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime.log"
+                    ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime$broken_suffix"
                     ;;
                 aged)
                     # A link older than the three-day retention whose target the
                     # retention pass removed.
-                    ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime.log"
-                    touch -h -t 202601010000 "$workspace/.claude/emacs/$runtime.log"
+                    ln -s "$current_target.missing" "$workspace/.claude/emacs/$runtime$broken_suffix"
+                    touch -h -t 202601010000 "$workspace/.claude/emacs/$runtime$broken_suffix"
                     ;;
                 unreadable)
                     : >"$current_target"
                     chmod 000 "$current_target"
-                    ln -s "$current_target" "$workspace/.claude/emacs/$runtime.log"
+                    ln -s "$current_target" "$workspace/.claude/emacs/$runtime$broken_suffix"
                     ;;
                 directory)
-                    mkdir "$workspace/.claude/emacs/$runtime.log"
+                    mkdir "$workspace/.claude/emacs/$runtime$broken_suffix"
                     ;;
                 absent) ;;
                 *) fail "unknown sink fixture shape: $shape"; return ;;
             esac
         else
-            cat >"$current_target" <<EOF
+            cat >"$targets/$label-$runtime.warn.log" <<EOF
 {"timestamp":"2026-09-10T10:07:00.000000Z","runtime":"$runtime","pid":80,"level":"warn","verbosity":"normal","operation":"$continuation_operation","message":"readable companion","context":{},"workspace_dir":"$workspace","workspace_id":"ws-$label"}
 EOF
-            ln -s "$current_target" "$workspace/.claude/emacs/$runtime.log"
+            ln -s "$targets/$label-$runtime.warn.log" "$workspace/.claude/emacs/$runtime.warn.log"
         fi
     done
     printf 'ws-%s\t%s\t%s\n' "$label" "$workspace" "$label" >"$case_rows"
@@ -1030,6 +1053,97 @@ test_reader_refuses_a_malformed_arguments_file() {
     fi
 }
 
+# A READ OF WARNINGS OPENS ONLY WARNINGS FILES. A warn-level record the main
+# log holds (as no runtime writes one now) is passed over at --level warn and
+# read below it, which is how the test knows the log was never opened.
+test_a_warn_level_read_opens_only_warnings_files() {
+    local workspace="$TMP/workspaces/only-warnings" rows_only out_warn out_all
+    mkdir -p "$workspace/.claude/emacs"
+    cat >"$targets/only-warnings-daemon.log" <<EOF
+{"timestamp":"2026-09-10T10:08:00.000000Z","runtime":"daemon","pid":95,"level":"warn","verbosity":"normal","operation":"daemon.in.the.log","message":"held by the log","context":{},"workspace_dir":"$workspace","workspace_id":"ws-only"}
+EOF
+    cat >"$targets/only-warnings-daemon.warn.log" <<EOF
+{"timestamp":"2026-09-10T10:08:30.000000Z","runtime":"daemon","pid":95,"level":"warn","verbosity":"normal","operation":"daemon.in.the.warnings","message":"held by the warnings file","context":{},"workspace_dir":"$workspace","workspace_id":"ws-only"}
+EOF
+    ln -s "$targets/only-warnings-daemon.log" "$workspace/.claude/emacs/daemon.log"
+    ln -s "$targets/only-warnings-daemon.warn.log" "$workspace/.claude/emacs/daemon.warn.log"
+    rows_only="$TMP/only-warnings-workspaces.tsv"
+    printf 'ws-only\t%s\tonly\n' "$workspace" >"$rows_only"
+    out_warn="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_only" run_logs --workspace only --runtime daemon --level warn --json 2>/dev/null)"
+    out_all="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_only" run_logs --workspace only --runtime daemon --json 2>/dev/null)"
+    if grep_in "$out_warn" -q '"operation":"daemon.in.the.warnings"' &&
+        ! grep_in "$out_warn" -q '"operation":"daemon.in.the.log"' &&
+        grep_in "$out_all" -q '"operation":"daemon.in.the.log"' &&
+        grep_in "$out_all" -q '"operation":"daemon.in.the.warnings"'; then
+        pass "a warn-level read opens only warnings files, and a lower one opens both"
+    else
+        fail "a warn-level read opens only warnings files, and a lower one opens both"
+    fi
+}
+
+test_a_read_merges_a_log_and_its_warnings_file_in_time_order() {
+    local out
+    out="$(run_logs --workspace ws-a --runtime daemon --timeline 2>/dev/null)"
+    if [ "$(grep_in "$out" -o 'daemon\.[a-z]*' | paste -sd, -)" = "daemon.old,daemon.rotated,daemon.warning,daemon.warning,daemon.third" ]; then
+        pass "a read merges a log and its warnings file in time order"
+    else
+        fail "a read merges a log and its warnings file in time order"
+        printf '%s\n' "$out" >&2
+    fi
+}
+
+test_a_runtime_that_never_warned_reads_as_an_empty_sink() {
+    local out err rc
+    out="$TMP/never-warned.out"
+    err="$TMP/never-warned.err"
+    set +e
+    run_logs --workspace ws-b --runtime emacs --level warn --json >"$out" 2>"$err"
+    rc=$?
+    set -e
+    if [ "$rc" -eq 0 ] && [ ! -s "$out" ] && ! grep -Eq "sink (absent|unreadable)" "$err"; then
+        pass "a runtime whose log exists but that never warned reads as an empty sink"
+    else
+        fail "a runtime whose log exists but that never warned reads as an empty sink"
+        sed -n '1,20p' "$err" >&2
+    fi
+}
+
+test_an_absent_central_warnings_file_is_no_finding() {
+    local err
+    err="$TMP/central-no-warnings.err"
+    run_logs --central --runtime zettel --level warn >/dev/null 2>"$err"
+    if ! grep -q 'zettel.warn.log' "$err"; then
+        pass "an absent central warnings file is no finding"
+    else
+        fail "an absent central warnings file is no finding"
+        sed -n '1,20p' "$err" >&2
+    fi
+}
+
+# A gone workspace's warnings targets are read by its ID like its log's, each
+# by its own sink and never as the other's.
+test_a_gone_workspaces_warnings_targets_are_read_by_its_id() {
+    local gone="$TMP/workspaces/gone-warned-dir" rows_gone out_warn out_all
+    cat >"$state/logs/agent-repl-ws-gone-warned-daemon-4444444444.log" <<EOF
+{"timestamp":"2026-09-10T12:04:00.000000Z","runtime":"daemon","pid":96,"level":"info","verbosity":"normal","operation":"daemon.gone.info","message":"an info record","context":{},"workspace_dir":"$gone","workspace_id":"ws-gone-warned"}
+EOF
+    cat >"$state/logs/agent-repl-ws-gone-warned-daemon-4444444444.warn.log" <<EOF
+{"timestamp":"2026-09-10T12:04:30.000000Z","runtime":"daemon","pid":96,"level":"warn","verbosity":"normal","operation":"daemon.gone.warning","message":"a warning","context":{},"workspace_dir":"$gone","workspace_id":"ws-gone-warned"}
+EOF
+    rows_gone="$TMP/gone-warned-workspaces.tsv"
+    printf 'ws-gone-warned\t%s\tgone-warned\n' "$gone" >"$rows_gone"
+    out_warn="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_gone" run_logs --workspace gone-warned --runtime daemon --level warn --json 2>/dev/null)" || true
+    out_all="$(AGENT_REPL_LOGS_TEST_ROWS_OVERRIDE="$rows_gone" run_logs --workspace gone-warned --runtime daemon --json 2>/dev/null)" || true
+    if grep_in "$out_warn" -q '"operation":"daemon.gone.warning"' &&
+        ! grep_in "$out_warn" -q '"operation":"daemon.gone.info"' &&
+        [ "$(grep_in "$out_all" -c '"operation":"daemon.gone.warning"')" -eq 1 ] &&
+        grep_in "$out_all" -q '"operation":"daemon.gone.info"'; then
+        pass "a gone workspace's warnings targets are read by its ID, each by its own sink"
+    else
+        fail "a gone workspace's warnings targets are read by its ID, each by its own sink"
+    fi
+}
+
 test_workspace_directory_and_default_format
 test_workspace_id
 test_workspace_name
@@ -1082,5 +1196,10 @@ test_messages_source_fields_and_level
 test_follow
 test_central_reads_the_zettel_log
 test_central_reads_the_test_service_log
+test_a_warn_level_read_opens_only_warnings_files
+test_a_read_merges_a_log_and_its_warnings_file_in_time_order
+test_a_runtime_that_never_warned_reads_as_an_empty_sink
+test_an_absent_central_warnings_file_is_no_finding
+test_a_gone_workspaces_warnings_targets_are_read_by_its_id
 
 harness_finish

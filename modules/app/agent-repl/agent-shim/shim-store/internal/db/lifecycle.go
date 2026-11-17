@@ -334,7 +334,13 @@ func spawningUnitKey(work *conversationv1.AgentDetachedWork, originUnit sql.Null
 	if _, detached := work.GetOrigin().(*conversationv1.AgentDetachedWork_Detached); !detached || !originUnit.Valid || originUnit.String == "" {
 		return sql.NullString{}
 	}
-	return sql.NullString{String: activityUpsertKeyPrefix + originUnit.String, Valid: true}
+	return unitRowKey(originUnit.String)
+}
+
+// unitRowKey is the upsert key of the unit ACTIVITYID's own row, whose book is
+// the owner of every detached run that left it.
+func unitRowKey(activityID string) sql.NullString {
+	return sql.NullString{String: activityUpsertKeyPrefix + activityID, Valid: true}
 }
 
 // claimDetachedWorkForUnitBook makes the agent whose book holds a unit's own
@@ -388,10 +394,18 @@ func (d *DB) applyBashLifecycle(ctx context.Context, tx *sql.Tx, bash *storev1.S
 	if err != nil {
 		return err
 	}
+	// THE RUN'S OWNER IS THE BOOK OF ITS CALL'S UNIT ROW, read here as the
+	// announcement reads it. A subagent's backgrounded shell may be announced
+	// only when it ends, while its frames land as it runs: a row these frames
+	// open must already name the book that holds the call, or no session's
+	// lineage reaches it for as long as the run lives (2026-11-17,
+	// land-standup-series). When the unit row lands after, its claim
+	// (claimDetachedWorkForUnitBook) files the run instead.
 	if err := d.upsertDetachedWork(ctx, tx, detachedRow{
 		workID:     workID,
 		kind:       detachedKindBash,
 		originUnit: origin,
+		ownerUnit:  unitRowKey(runID),
 		now:        now,
 	}); err != nil {
 		return err

@@ -467,7 +467,9 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 	if strings.TrimSpace(stateDir) == "" {
 		return nil, nil, bootstrapError{fmt.Errorf("agent-repl state directory is empty; daemon.addr cannot be resolved")}
 	}
-	file, err := sharedlogging.OpenRotating(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
+	// WARN AND ERROR RECORDS GO TO THEIR OWN FILE (agentrepl/logging
+	// warnings.go), each file rotated and aged on its own.
+	file, err := sharedlogging.OpenRotatingPair(logPath, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, bootstrapError{fmt.Errorf("opening log %q: %w", logPath, err)}
 	}
@@ -476,9 +478,11 @@ func openLoggerTo(terminal io.Writer, storeSocket, stateDir, logPath string) (*l
 		With(logging.Context{Component: "sidecar", StoreSocket: storeSocket})
 	logf.NoteLevelSelection(selection)
 	forwarder.SetRefReplacedObserver(refReplacedObserver(logf))
-	stopExpiring := sharedlogging.StartExpiring(file, reportLogExpiry(logf, logPath))
+	stopExpiringLog := sharedlogging.StartExpiring(file.Log, reportLogExpiry(logf, logPath))
+	stopExpiringWarnings := sharedlogging.StartExpiring(file.Warnings, reportLogExpiry(logf, sharedlogging.WarningsPath(logPath)))
 	return logf, func() {
-		stopExpiring()
+		stopExpiringLog()
+		stopExpiringWarnings()
 		// BOUNDED, BECAUSE LAUNCHD IS WAITING. The drain dials the daemon once
 		// per queued record; with the daemon gone and a boot's backlog queued,
 		// an unbounded wait held one stop past three minutes.

@@ -40,7 +40,9 @@
 #                         tag NAME REV, tag -d NAME, update-ref REF REV,
 #                         update-ref -d REF; each is one ref transaction that
 #                         runs the reference-transaction hook as git does
-#                         (prepared, where nonzero aborts; then committed)
+#                         (prepared, where nonzero aborts; then committed),
+#                         and so is commit -m, which moves HEAD and the
+#                         checked-out branch together
 #                         tag --points-at REV, rev-parse --verify --quiet REF
 #                         (the checked-out branch as refs/heads/NAME, or any
 #                         named ref)

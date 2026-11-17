@@ -24,9 +24,21 @@ import (
 // imports dlog, so a test import of wsm would be a cycle.
 const mintedIDWidth = 16
 
-// readRecords parses a JSONL file into records. A path that does not exist is
-// no records, which is what "nothing was written here" looks like.
+// readRecords parses a log into records: the JSONL file and, for a log that is
+// not itself a warnings file, its warnings file, where every warn and error
+// record lands (proto/vocab/log-warnings-sink.json). A path that does not
+// exist is no records, which is what "nothing was written here" looks like.
 func readRecords(t *testing.T, path string) []map[string]any {
+	t.Helper()
+	records := readFileRecords(t, path)
+	if !strings.HasSuffix(path, logging.WarningsPath("")) {
+		records = append(records, readFileRecords(t, logging.WarningsPath(path))...)
+	}
+	return records
+}
+
+// readFileRecords parses one JSONL file into records; an absent file is none.
+func readFileRecords(t *testing.T, path string) []map[string]any {
 	t.Helper()
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -2263,10 +2275,16 @@ func TestSurfacesOffATerminalMirrorErrorsAndPersistEverything(t *testing.T) {
 	}
 
 	// Assert
+	// The run log and its warnings file, where the error record lands.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read the run log: %v", err)
 	}
+	warnings, err := os.ReadFile(logging.WarningsPath(path))
+	if err != nil {
+		t.Fatalf("read the run log's warnings file: %v", err)
+	}
+	data = append(data, warnings...)
 	persisted := strings.Contains(string(data), "daemon.test.quiet") && strings.Contains(string(data), "daemon.test.loud")
 	mirrored := terminal.String()
 	if !persisted || !strings.Contains(mirrored, "daemon.test.loud") || strings.Contains(mirrored, "daemon.test.quiet") {
@@ -2328,8 +2346,10 @@ func TestOpenSinksSnapshotsEveryOpenSink(t *testing.T) {
 	for _, e := range entries {
 		got[e.ws.dir+"|"+e.name] = e.sk == e.ws.sinks[e.name]
 	}
+	// Each sink opens with its warnings twin (openPairLocked).
 	want := map[string]bool{
 		sinkKey(t, first) + "|daemon": true, sinkKey(t, first) + "|webapp": true, sinkKey(t, second) + "|daemon": true,
+		sinkKey(t, first) + "|daemon.warn": true, sinkKey(t, first) + "|webapp.warn": true, sinkKey(t, second) + "|daemon.warn": true,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("openSinks = %v, want %v", got, want)
@@ -2344,5 +2364,172 @@ func TestEveryPeriodicSinkPassSnapshotsThroughOpenSinks(t *testing.T) {
 	// Assert: the scan and the retention pass, and the helper's own loop alone.
 	if viaHelper != 2 || byHand != 1 {
 		t.Fatalf("range s.openSinks() appears %d times and a hand-rolled sink loop %d times; want 2 and 1 (the helper's own)", viaHelper, byHand)
+	}
+}
+
+func TestGlobalWarningLandsOnlyInTheRunLogsWarningsFile(t *testing.T) {
+	// Arrange.
+	s, runLogPath := testSurfaces(t)
+
+	// Act.
+	s.Global().Warn("daemon.test.warning", "a warning", nil)
+
+	// Assert.
+	if hasOperation(readFileRecords(t, runLogPath), "daemon.test.warning") {
+		t.Fatalf("the warning reached the run log")
+	}
+	if !hasOperation(readRecords(t, logging.WarningsPath(runLogPath)), "daemon.test.warning") {
+		t.Fatalf("the run log's warnings file does not carry the warning")
+	}
+}
+
+func TestWorkspaceRecordLandsInTheSinkItsLevelPicks(t *testing.T) {
+	tests := []struct {
+		level string
+		sink  string
+		other string
+	}{
+		{level: LevelInfo, sink: "daemon", other: "daemon.warn"},
+		{level: LevelWarn, sink: "daemon.warn", other: "daemon"},
+		{level: LevelError, sink: "daemon.warn", other: "daemon"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.level, func(t *testing.T) {
+			// Arrange.
+			s, _ := testSurfaces(t)
+			dir := t.TempDir()
+			log, err := s.Workspace(dir)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+
+			// Act.
+			map[string]func(string, string, Context){
+				LevelInfo: log.Info, LevelWarn: log.Warn, LevelError: log.Error,
+			}[tt.level]("daemon.test.record", "a record", nil)
+
+			// Assert.
+			if !hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", tt.sink+".log")), "daemon.test.record") {
+				t.Fatalf("%s.log does not carry the %s record", tt.sink, tt.level)
+			}
+			if hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", tt.other+".log")), "daemon.test.record") {
+				t.Fatalf("%s.log carries the %s record too", tt.other, tt.level)
+			}
+		})
+	}
+}
+
+func TestClientLogLandsAWarningInTheClientsWarningsSink(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	err := s.ClientLog(dir, ClientRecord{ClientKind: RuntimeWebapp, Level: LevelWarn, Operation: "webapp.test.warning", Message: "forwarded"})
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("ClientLog: %v", err)
+	}
+	if !hasOperation(workspaceRecords(t, dir, "webapp.warn"), "webapp.test.warning") {
+		t.Fatalf("webapp.warn.log does not carry the forwarded warning")
+	}
+	if hasOperation(readFileRecords(t, filepath.Join(dir, ".claude", "emacs", "webapp.log")), "webapp.test.warning") {
+		t.Fatalf("webapp.log carries the forwarded warning too")
+	}
+}
+
+func TestShimSinkBorrowsTheShimsWarningsFileBesideItsLog(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	borrow, err := s.ShimSink(dir)
+	if err != nil {
+		t.Fatalf("ShimSink: %v", err)
+	}
+	if _, err := borrow.WarningsFile().Write([]byte("warned\n")); err != nil {
+		t.Fatalf("write the warnings file: %v", err)
+	}
+
+	// Assert.
+	if borrow.WarningsFile() == nil || borrow.WarningsFile() == borrow.File() {
+		t.Fatalf("WarningsFile() = %v, want its own open file beside File()", borrow.WarningsFile())
+	}
+	got, err := os.ReadFile(filepath.Join(dir, ".claude", "emacs", "shim.warn.log"))
+	if err != nil || string(got) != "warned\n" {
+		t.Fatalf("shim.warn.log = %q, %v; want what was written through WarningsFile", got, err)
+	}
+}
+
+func TestAWarningsTwinsTargetIsItsSinksTargetByTheWarningsPathRule(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Act.
+	log.Warn("daemon.test.warning", "a warning", nil)
+
+	// Assert.
+	links := filepath.Join(dir, ".claude", "emacs")
+	main, err := os.Readlink(filepath.Join(links, "daemon.log"))
+	if err != nil {
+		t.Fatalf("read daemon.log's link: %v", err)
+	}
+	twin, err := os.Readlink(filepath.Join(links, "daemon.warn.log"))
+	if err != nil {
+		t.Fatalf("read daemon.warn.log's link: %v", err)
+	}
+	if twin != logging.WarningsPath(main) {
+		t.Fatalf("daemon.warn.log names %q, want %q beside daemon.log's %q", twin, logging.WarningsPath(main), main)
+	}
+}
+
+func TestASinkOpensWithItsWarningsTwin(t *testing.T) {
+	// Arrange.
+	s, _ := testSurfaces(t)
+	dir := t.TempDir()
+
+	// Act.
+	if _, err := s.Workspace(dir); err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+
+	// Assert.
+	if _, err := os.Lstat(filepath.Join(dir, ".claude", "emacs", "daemon.warn.log")); err != nil {
+		t.Fatalf("daemon.warn.log after the sink opened: %v, want its link made with the sink's", err)
+	}
+}
+
+func TestAWarningAfterTheWorkspaceDirectoryWentStaysTheWorkspaces(t *testing.T) {
+	// Arrange: the sink opened while the directory stood, then the directory went.
+	s, runLogPath := testSurfaces(t)
+	dir := t.TempDir()
+	log, err := s.Workspace(dir)
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	twinTarget, err := os.Readlink(filepath.Join(dir, ".claude", "emacs", "daemon.warn.log"))
+	if err != nil {
+		t.Fatalf("read daemon.warn.log's link: %v", err)
+	}
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatalf("remove the workspace directory: %v", err)
+	}
+
+	// Act.
+	log.Warn("daemon.test.after_removal", "a warning after the removal", nil)
+
+	// Assert.
+	if !hasOperation(readRecords(t, twinTarget), "daemon.test.after_removal") {
+		t.Fatalf("the workspace's warnings target does not carry the warning")
+	}
+	if hasOperation(readRecords(t, logging.WarningsPath(runLogPath)), "daemon.test.after_removal") {
+		t.Fatalf("the warning fell back to the central sink")
 	}
 }

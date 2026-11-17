@@ -53,6 +53,9 @@ type Spec struct {
 	// LogSink is the already-open shim log sink passed as fd 3. It is NEVER a
 	// pipe to the daemon's stderr.
 	LogSink *os.File
+	// LogWarningsSink is the already-open warnings twin of LogSink, passed
+	// as fd 6: where the shim writes its warn and error records.
+	LogWarningsSink *os.File
 	// ForbidVendor sets AGENT_REPL_FORBID_VENDOR_CALLS=1 (tests). It also
 	// forces the spawn into fake mode, because a child told the vendor is
 	// forbidden must not be asked to reach it.

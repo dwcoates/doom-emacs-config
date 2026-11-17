@@ -32,6 +32,7 @@ import type { MountedApp } from "../integration/harness";
 import { log } from "../../src/log";
 import { BOOT_BUDGET_MS, TURN_TEST_MS, awaitDrawn, bootLayer, rows, submit, textOf } from "./drive";
 import { realDaemon, workspaceLogPath } from "./real-daemon";
+import { warningsSink } from "../../../agent-shim/logging/ts/warnings.js";
 
 /**
  * The operation the planted record carries.
@@ -72,11 +73,20 @@ interface DaemonLogRecord {
 let app: MountedApp;
 let planted: DaemonLogRecord;
 
-/** Every record the workspace's `webapp.log` holds; a missing file is none. */
+/**
+ * Every record the workspace's `webapp.log` and its warnings file hold: the
+ * daemon writes every warn and error record only to the warnings file
+ * (proto/vocab/log-warnings-sink.json).
+ */
 function webappLog(): DaemonLogRecord[] {
+  return [...sinkRecords("webapp"), ...sinkRecords(warningsSink("webapp"))];
+}
+
+/** Every record the workspace's sink NAME holds; a missing file is none. */
+function sinkRecords(name: string): DaemonLogRecord[] {
   let text: string;
   try {
-    text = readFileSync(workspaceLogPath(realDaemon().workspaceDir, "webapp"), "utf8");
+    text = readFileSync(workspaceLogPath(realDaemon().workspaceDir, name), "utf8");
   } catch (err) {
     // ONLY "the daemon has not written this sink yet" reads as no records. Any
     // other failure (a permission fault, a directory where the file should be)

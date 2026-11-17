@@ -10,8 +10,10 @@ import "os"
 // cannot take the sink down, and the attempt is recorded so the misuse is
 // visible rather than silently tolerated.
 type borrowed struct {
-	f   *os.File
-	log Logger
+	f *os.File
+	// warnings is the sink's warnings twin's own open file.
+	warnings *os.File
+	log      Logger
 	// name identifies the sink in the warning.
 	name string
 }
@@ -19,6 +21,9 @@ type borrowed struct {
 // File is the sink's own open file, suitable for a child's fd 3. The handle is
 // the surfaces': the borrower must not wrap or close it (see Borrowed).
 func (b *borrowed) File() *os.File { return b.f }
+
+// WarningsFile is the warnings twin's own open file, borrowed as File is.
+func (b *borrowed) WarningsFile() *os.File { return b.warnings }
 
 // Close is a no-op. The surfaces own the sink's lifetime; only Evict or
 // Surfaces.Close release it.

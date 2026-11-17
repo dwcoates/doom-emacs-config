@@ -768,7 +768,7 @@ are the caller's own variables, so they hold the captures afterwards."
      (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,current-ws))
                ((symbol-function 'agent-repl--buffer-owner) (lambda (_buffer) nil))
                ((symbol-function 'agent-repl--do-log-to-file)
-                (lambda (text &optional _ws) (push text ,records)))
+                (lambda (text &rest _args) (push text ,records)))
                ((symbol-function 'agent-repl--note-unroutable-log-workspace)
                 (lambda (ws) (push ws ,unroutable))))
        (setq ,records nil

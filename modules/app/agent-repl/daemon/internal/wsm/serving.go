@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"agent-repld/internal/dlog"
 )
@@ -105,20 +107,66 @@ func (s *store) ClaimUnownedServing(ctx context.Context, id WorkspaceID, daemon 
 
 // Serving reports which daemon instance serves a workspace, nil when none does.
 func (s *store) Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error) {
-	var out *InstanceID
-	err := s.read(ctx, "daemon.wsm.serving", dlog.Context{"workspace": string(id)}, func(ctx context.Context) error {
-		var instance sql.NullString
-		err := scanWorkspaceRow(ctx, s.q(ctx), id, "serving_instance", &instance)
+	fields := dlog.Context{"workspace": string(id)}
+	owners, err := s.servingOf(ctx, "daemon.wsm.serving", fields, []WorkspaceID{id})
+	if err != nil {
+		return nil, err
+	}
+	owner, held := owners[id]
+	if !held {
+		err := fmt.Errorf("wsm: workspace %s: %w", id, ErrNotFound)
+		s.log.Debug("daemon.wsm.serving", "the read found no such record", withError(fields, err))
+		return nil, err
+	}
+	return owner, nil
+}
+
+// ServingOf reports which daemon instance serves each of IDS, nil for one no
+// daemon serves, in ONE read of the state database's one connection: what a
+// watch over many workspaces asks on every commit, where a read per workspace
+// queued every other operation of the daemon behind it (2026-11-17).
+// A workspace the record does not hold is absent from the answer: each
+// caller judges its own, so one gone workspace refuses no other's read.
+func (s *store) ServingOf(ctx context.Context, ids []WorkspaceID) (map[WorkspaceID]*InstanceID, error) {
+	return s.servingOf(ctx, "daemon.wsm.serving_of", dlog.Context{"workspaces": len(ids)}, ids)
+}
+
+// servingOf is Serving and ServingOf's one read: the rows the record holds of
+// IDS.
+func (s *store) servingOf(ctx context.Context, op string, fields dlog.Context, ids []WorkspaceID) (map[WorkspaceID]*InstanceID, error) {
+	out := make(map[WorkspaceID]*InstanceID, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	err := s.read(ctx, op, fields, func(ctx context.Context) error {
+		args := make([]any, len(ids))
+		for i, id := range ids {
+			args[i] = id
+		}
+		rows, err := s.q(ctx).QueryContext(ctx,
+			`SELECT id, serving_instance FROM workspaces WHERE id IN (?`+strings.Repeat(",?", len(ids)-1)+`)`, args...)
 		if err != nil {
 			return err
 		}
-		if instance.Valid && instance.String != "" {
-			owner := InstanceID(instance.String)
-			out = &owner
+		defer rows.Close()
+		for rows.Next() {
+			var id WorkspaceID
+			var instance sql.NullString
+			if err := rows.Scan(&id, &instance); err != nil {
+				return err
+			}
+			out[id] = nil
+			if instance.Valid && instance.String != "" {
+				owner := InstanceID(instance.String)
+				out[id] = &owner
+			}
 		}
-		return nil
+		return rows.Err()
 	})
-	return out, err
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ReleaseServing gives up serving ownership, REFUSING when this instance does

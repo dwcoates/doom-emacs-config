@@ -2,6 +2,7 @@ package harness
 
 import (
 	"agent-repld/internal/kernelevent"
+	"agentrepl/logging"
 	"context"
 	"errors"
 	"fmt"
@@ -187,7 +188,7 @@ func (d *Daemon) watchRecords(t testing.TB, parent context.Context) context.Cont
 		read := map[string]int{}
 		for {
 			targets, _ := filepath.Glob(filepath.Join(logs, "agent-repl-*-daemon-*.log"))
-			changes, stopFollowing := kernelevent.Follow(watched, append([]string{filepath.Dir(logs), logs, d.RunLogPath()}, targets...)...)
+			changes, stopFollowing := kernelevent.Follow(watched, append([]string{filepath.Dir(logs), logs, d.RunLogPath(), logging.WarningsPath(d.RunLogPath())}, targets...)...)
 			cause, err := d.recordFault(read)
 			if err != nil {
 				cause = fmt.Errorf("harness: read the daemon's logs for faults: %w", err)
@@ -232,8 +233,11 @@ func (d *Daemon) recordFault(read map[string]int) (error, error) {
 		return nil, err
 	}
 	pid := d.PID()
-	for _, path := range append([]string{d.RunLogPath()}, targets...) {
-		records, err := readLogRecords(d.t, path)
+	// EACH FILE ALONE, the run log's warnings file and every target's (which
+	// the glob names) included: READ counts each file's own records, which a
+	// merged read could reorder beneath it.
+	for _, path := range append([]string{d.RunLogPath(), logging.WarningsPath(d.RunLogPath())}, targets...) {
+		records, err := readFileRecords(d.t, path)
 		if err != nil {
 			return nil, err
 		}

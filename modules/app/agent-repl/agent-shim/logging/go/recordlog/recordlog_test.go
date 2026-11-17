@@ -214,3 +214,36 @@ func TestOpenRefusesALevelItCannotRead(t *testing.T) {
 		t.Fatal("Open accepted a level it cannot read")
 	}
 }
+
+func TestOpenWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "log", "tests.log")
+	log, closeFile, err := Open("tests", path, &bytes.Buffer{}, func(string) string { return "" }, fixedClock)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Act
+	log.Warn("tests.warning", "a warning", nil)
+	log.Error("tests.error", "an error", nil)
+	log.Info("tests.info", "an info record", nil)
+	if err := closeFile(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	warnings, err := os.ReadFile(sharedlogging.WarningsPath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(body), "tests.warning") || strings.Contains(string(body), "tests.error") || !strings.Contains(string(body), "tests.info") {
+		t.Fatalf("log = %q, want only the info record", body)
+	}
+	if !strings.Contains(string(warnings), "tests.warning") || !strings.Contains(string(warnings), "tests.error") || strings.Contains(string(warnings), "tests.info") {
+		t.Fatalf("warnings = %q, want the warning and the error alone", warnings)
+	}
+}

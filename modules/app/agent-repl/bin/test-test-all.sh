@@ -202,7 +202,7 @@ test_integration_real_drift_during_record_run_is_still_caught() {
     STUB_MOVE_HEAD=1 run_test_all_real_net "$tree" --record
     if [ "$RUN_RC" -eq 2 ] \
         && [[ "$RUN_OUT" == *"DRIFT DETECTED"* ]] \
-        && [[ "$RUN_OUT" == *"HEAD changed"* ]] \
+        && [[ "$RUN_OUT" == *"refs this run's own git moved"* ]] \
         && [ -n "$(grep '^refs/tags/agent-repl-test-checkpoint-' "$REFS" 2>/dev/null || true)" ] \
         && [ "$(cat "$tree/repo/modules/app/agent-repl/test_time.csv")" = "$CSVHeader" ]; then
         pass "a HEAD moved by something other than the record write is still caught, and nothing is recorded"
@@ -235,8 +235,8 @@ test_integration_moved_commit_during_record_run_records_nothing() {
     tree="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
     make_real_net_tree "$tree"
     # The commit moves mid-run (simulated by the stub testrun moving the fake
-    # git HEAD): the net's own pre/post HEAD comparison catches it, exactly
-    # as it would catch any other HEAD movement, and finish-record never runs.
+    # git HEAD): the net's ref journal attributes the move to the run's own
+    # git and catches it, and finish-record never runs.
     STUB_MOVE_HEAD=1 run_test_all_real_net "$tree" --record
     if [ "$RUN_RC" -eq 2 ] \
         && ! grep -q '^testrun finish-record ' "$STUB_LOG" \

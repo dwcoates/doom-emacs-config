@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	sharedlogging "agentrepl/logging"
 	zettelv1 "agentrepl/proto/zettel/v1"
 	"agentrepl/proto/zettel/v1/zettelv1connect"
 	"agentrepl/testrun/testenv"
@@ -111,9 +112,11 @@ func start(t *testing.T, db string) *process {
 	}
 }
 
+// logText is the process's whole log: the log file and its warnings file.
 func (p *process) logText() string {
 	b, _ := os.ReadFile(p.log)
-	return string(b)
+	w, _ := os.ReadFile(sharedlogging.WarningsPath(p.log))
+	return string(b) + string(w)
 }
 
 func (p *process) client() zettelv1connect.ZettelClient {
@@ -201,7 +204,9 @@ func TestRefusesASecondInstanceOnALiveSocket(t *testing.T) {
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		t.Fatalf("second instance err = %v, want exit 1", err)
 	}
-	f, _ := os.Open(logPath)
+	// The refusal is an error record, so it lands in the log's warnings file
+	// (proto/vocab/log-warnings-sink.json).
+	f, _ := os.Open(sharedlogging.WarningsPath(logPath))
 	defer f.Close()
 	found := false
 	for s := bufio.NewScanner(f); s.Scan(); {

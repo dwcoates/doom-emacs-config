@@ -2301,6 +2301,11 @@ record reaches that workspace's sink. See `logging-contract.md` and
 
 ## Logs
 
+Every runtime writes its warn and error records only to a warnings file beside
+its log (`X.log`'s is `X.warn.log`, a workspace link `N.log`'s is `N.warn.log`),
+so `bin/logs.sh --level warn` opens those alone; logging-contract.md
+"Warnings files" holds the rule.
+
 `bin/logs.sh` is the one reader for persisted agent-repl records. It resolves a
 workspace by daemon ID, absolute directory, or daemon display name; reads the
 current file plus rotation generations `.1` (newest) through `.5` (oldest);

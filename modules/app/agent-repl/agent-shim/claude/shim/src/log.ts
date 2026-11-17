@@ -12,6 +12,7 @@ import {
   UNTIL_ENV,
   type LevelSelection,
 } from "../../../logging/ts/level-window.js";
+import { isWarningsLevel } from "../../../logging/ts/warnings.js";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 export type LogFields = Record<string, unknown>;
@@ -29,6 +30,12 @@ export interface ShimLogger {
 export interface ShimLogConfiguration {
   /** Already-open descriptor inherited from the daemon; this module never opens paths. */
   fd: number;
+  /**
+   * The already-open warnings twin of `fd`, inherited from the daemon: where
+   * every warn and error record goes, and only those
+   * (proto/vocab/log-warnings-sink.json).
+   */
+  warningsFd: number;
   /** Authoritative, already-canonical workspace path supplied by the daemon. */
   cwd: string;
   /**
@@ -50,6 +57,8 @@ export interface ShimLogConfiguration {
 
 interface RuntimeContext {
   fd: number;
+  /** The warnings file's descriptor (ShimLogConfiguration.warningsFd). */
+  warningsFd: number;
   workspace_dir: string;
   workspace_id: string;
   /**
@@ -141,6 +150,9 @@ function configuredLogLevel(nowMs: number): LevelSelection {
 /** Configure the durable inherited sink exactly once for one shim process. */
 export function configureLog(config: ShimLogConfiguration): void {
   if (!Number.isInteger(config.fd) || config.fd < 0) throw new Error("shim log fd must be a non-negative integer");
+  if (!Number.isInteger(config.warningsFd) || config.warningsFd < 0 || config.warningsFd === config.fd) {
+    throw new Error("shim warnings fd must be a non-negative integer other than the log fd");
+  }
   if (typeof config.cwd !== "string" || config.cwd.length === 0) throw new Error("shim log cwd is required");
   if (typeof config.agentReplSessionId !== "string" || config.agentReplSessionId.length === 0) {
     throw new Error("shim agent-repl session id is required");
@@ -157,6 +169,7 @@ export function configureLog(config: ShimLogConfiguration): void {
   // Do not realpath this value: the daemon supplied the canonical cwd and owns symlink resolution.
   runtimeContext = {
     fd: config.fd,
+    warningsFd: config.warningsFd,
     workspace_dir: config.cwd,
     workspace_id: config.workspaceId,
     shim_workspace_hash: createHash("md5").update(config.cwd).digest("hex").slice(0, 8),
@@ -216,7 +229,7 @@ function retireStderrMirror(cause: Error): void {
     cause: cause.message,
   }, "stderr mirror RETIRED — the daemon that owned this pipe is gone; this shim keeps running and keeps logging durably, because a shim outlives its daemon by design");
   try {
-    writeDurable(runtime, Buffer.from(`${JSON.stringify(record)}\n`, "utf8"));
+    writeDurable(runtime, "info", Buffer.from(`${JSON.stringify(record)}\n`, "utf8"));
   } catch (err) {
     poisonSink(runtime, err instanceof Error ? err : new Error(String(err)));
   }
@@ -441,7 +454,7 @@ function emit(level: LogLevel, verbosity: ShimLogRecord["verbosity"], fields: Lo
   if (runtime.poisoned !== undefined) return;
   const durableStarted = performance.now();
   try {
-    writeDurable(runtime, bytes);
+    writeDurable(runtime, level, bytes);
   } catch (err) {
     poisonSink(runtime, err instanceof Error ? err : new Error(String(err)));
     return;
@@ -463,11 +476,16 @@ function emit(level: LogLevel, verbosity: ShimLogRecord["verbosity"], fields: Lo
   }
 }
 
-/** Write one record to the durable inherited sink, short writes included. */
-function writeDurable(runtime: RuntimeContext, bytes: Buffer): void {
+/**
+ * Write one record at LEVEL to the durable inherited sink its level picks --
+ * the warnings file for a warn or error record, the log for every other --
+ * short writes included.
+ */
+function writeDurable(runtime: RuntimeContext, level: LogLevel, bytes: Buffer): void {
+  const fd = isWarningsLevel(level) ? runtime.warningsFd : runtime.fd;
   let offset = 0;
   while (offset < bytes.length) {
-    const written = runtime.write(runtime.fd, bytes, offset, bytes.length - offset);
+    const written = runtime.write(fd, bytes, offset, bytes.length - offset);
     if (!Number.isInteger(written) || written <= 0) throw new Error(`shim log sink made no progress after ${offset} bytes`);
     if (written > bytes.length - offset) throw new Error(`shim log sink reported invalid write length ${written}`);
     offset += written;

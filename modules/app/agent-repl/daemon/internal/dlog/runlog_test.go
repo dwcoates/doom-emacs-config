@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"agentrepl/logging"
 )
 
 func TestOpenRunLogAppendsAcrossRestart(t *testing.T) {
@@ -21,7 +23,7 @@ func TestOpenRunLogAppendsAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openRunLog: %v", err)
 	}
-	if err := run.write([]byte("current run\n")); err != nil {
+	if err := run.write(LevelInfo, []byte("current run\n")); err != nil {
 		t.Fatalf("write current run: %v", err)
 	}
 	if err := run.close(); err != nil {
@@ -66,12 +68,12 @@ func TestRunLogRotatesOnlyAtTheSizeCap(t *testing.T) {
 		t.Fatalf("openRunLogSized: %v", err)
 	}
 	t.Cleanup(func() { _ = run.close() })
-	if err := run.write([]byte("12345678\n")); err != nil {
+	if err := run.write(LevelInfo, []byte("12345678\n")); err != nil {
 		t.Fatalf("write first: %v", err)
 	}
 
 	// Act.
-	if err := run.write([]byte("abcdefgh\n")); err != nil {
+	if err := run.write(LevelInfo, []byte("abcdefgh\n")); err != nil {
 		t.Fatalf("write second: %v", err)
 	}
 
@@ -96,15 +98,16 @@ func TestRunLogRetainsExactlyNGenerations(t *testing.T) {
 
 	// Act.
 	for _, line := range []string{"aaa\n", "bbb\n", "ccc\n", "ddd\n"} {
-		if err := run.write([]byte(line)); err != nil {
+		if err := run.write(LevelInfo, []byte(line)); err != nil {
 			t.Fatalf("write %q: %v", line, err)
 		}
 	}
 
 	// Assert.
-	entries, err := os.ReadDir(dir)
+	// The run log's own family, its warnings file aside.
+	entries, err := filepath.Glob(path + "*")
 	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
+		t.Fatalf("Glob: %v", err)
 	}
 	if len(entries) != 3 {
 		t.Fatalf("files = %d, want current plus two generations", len(entries))
@@ -123,7 +126,7 @@ func TestRunLogRefusesRecordsOnceClosed(t *testing.T) {
 	}
 
 	// Act.
-	err = run.write([]byte("late\n"))
+	err = run.write(LevelInfo, []byte("late\n"))
 
 	// Assert.
 	if err == nil {
@@ -138,4 +141,42 @@ func readText(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(data)
+}
+
+func TestRunLogWritesEachLevelToItsOwnFile(t *testing.T) {
+	tests := []struct {
+		level        string
+		wantWarnings bool
+	}{{LevelDebug, false}, {LevelInfo, false}, {LevelWarn, true}, {LevelError, true}}
+	for _, tt := range tests {
+		t.Run(tt.level, func(t *testing.T) {
+			// Arrange.
+			path := filepath.Join(t.TempDir(), "logs", "daemon.run.log")
+			run, err := openRunLog(path, RunLogBackups)
+			if err != nil {
+				t.Fatalf("openRunLog: %v", err)
+			}
+			line := "a " + tt.level + " record\n"
+
+			// Act.
+			if err := run.write(tt.level, []byte(line)); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			if err := run.close(); err != nil {
+				t.Fatalf("close: %v", err)
+			}
+
+			// Assert.
+			want, other := path, logging.WarningsPath(path)
+			if tt.wantWarnings {
+				want, other = other, want
+			}
+			if got, err := os.ReadFile(want); err != nil || string(got) != line {
+				t.Fatalf("%s = %q, %v; want the record", want, got, err)
+			}
+			if got, err := os.ReadFile(other); err != nil || len(got) != 0 {
+				t.Fatalf("%s = %q, %v; want it empty", other, got, err)
+			}
+		})
+	}
 }

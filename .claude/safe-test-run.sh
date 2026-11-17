@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 # safe-test-run.sh — run the agent-repl ERT suite with a git-state safety net.
 #
-# Captures this checkout's HEAD, branch and working-tree status before
-# invoking the suite, drops a timestamped checkpoint tag at HEAD, then
-# re-captures the same state after the suite finishes.  Every ref the run's
-# OWN git processes move, anywhere in the repository, is drift too: the
-# reference-transaction hook journals them (see "Ref drift" below).  On any
-# drift the checkpoint tag is LEFT IN PLACE and the user is told exactly how
-# to roll back; on a clean run the tag is auto-removed.
+# Drops a timestamped checkpoint tag at HEAD before invoking the suite.
+# Every ref the run's OWN git processes move, anywhere in the repository,
+# HEAD included, is drift: the reference-transaction hook journals them (see
+# "Ref drift" below).  On any drift the checkpoint tag is LEFT IN PLACE and
+# the user is told exactly how to roll back; on a clean run the tag is
+# auto-removed.
 #
 # Why this exists: the agent-repl runtime guards catch unmocked-WRAPPER
 # call paths, but a raw `(shell-command-to-string "git ...")` in
@@ -16,6 +15,15 @@
 # This wrapper does not change that primary obligation; it just makes
 # the consequence of a missed audit revertible by a single command
 # instead of by manual archeology.
+#
+# NOTHING HERE COMPARES THE CHECKOUT BEFORE AND AFTER THE RUN.  A snapshot
+# of HEAD, the branch or `git status` cannot say WHO changed them, and the
+# workspace's own agent edits and commits while its tests run: every drift
+# such a comparison ever reported was that, or another false alarm, and
+# never a test (owner ruling 2026-11-17).  A test that runs real git is
+# fixed to use mocked git instead, wherever it is found (the
+# agent-repl-tests skill); what a run's own git does to refs is journaled
+# and attributed exactly.
 #
 # Usage:
 #   .claude/safe-test-run.sh [SELECTOR]
@@ -140,13 +148,11 @@ prove_journal
 # ---- Capture pre-test state ------------------------------------------------
 
 PRE_HEAD="$(git rev-parse HEAD)"
-PRE_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-PRE_STATUS="$(git status --porcelain)"
 
 git tag "$CHECKPOINT_TAG" "$PRE_HEAD"
 
 echo "[safe-test-run] Checkpoint tag: $CHECKPOINT_TAG @ $PRE_HEAD"
-echo "[safe-test-run] Pre-state: branch=$PRE_BRANCH, ref journal=$RUN_DIR/journal"
+echo "[safe-test-run] Ref journal: $RUN_DIR/journal"
 echo ""
 
 # ---- Run the suite ---------------------------------------------------------
@@ -176,26 +182,12 @@ echo "[safe-test-run] ${EMACS_INVOKE[0]} exited with code $TEST_RC"
 
 # ---- Capture post-test state ----------------------------------------------
 
-POST_HEAD="$(git rev-parse HEAD)"
-POST_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 RUN_REF_MOVES="$(run_ref_moves)"
-POST_STATUS="$(git status --porcelain | grep -v "scheduled_tasks.lock" || true)"
-PRE_STATUS_FILTERED="$(printf '%s' "$PRE_STATUS" | grep -v "scheduled_tasks.lock" || true)"
 
 # ---- Detect drift ----------------------------------------------------------
 
 DRIFT=0
 DRIFT_REPORT=""
-
-if [ "$PRE_HEAD" != "$POST_HEAD" ]; then
-  DRIFT=1
-  DRIFT_REPORT="${DRIFT_REPORT}  - HEAD changed: $PRE_HEAD -> $POST_HEAD\n"
-fi
-
-if [ "$PRE_BRANCH" != "$POST_BRANCH" ]; then
-  DRIFT=1
-  DRIFT_REPORT="${DRIFT_REPORT}  - Active branch changed: $PRE_BRANCH -> $POST_BRANCH\n"
-fi
 
 if [ -n "$RUN_REF_MOVES" ]; then
   DRIFT=1
@@ -204,17 +196,6 @@ if [ -n "$RUN_REF_MOVES" ]; then
   # Each ref back to the value it held before the run's first move of it.
   RESTORE="$(awk '$3 != "HEAD" && !seen[$3]++ {
       if ($1 ~ /^0+$/) print "git update-ref -d " $3; else print "git update-ref " $3 " " $1 }' <<< "$RUN_REF_MOVES")"
-fi
-
-if [ "$PRE_STATUS_FILTERED" != "$POST_STATUS" ]; then
-  DRIFT=1
-  DRIFT_REPORT="${DRIFT_REPORT}  - Working tree status changed; each status line only one side holds (- before the run, + after it):\n"
-  # Each path whose status line differs, so the report says what moved
-  # without a second look at a tree that may have moved again since.
-  while IFS= read -r line; do
-    [ -n "$line" ] && DRIFT_REPORT="${DRIFT_REPORT}        $line\n"
-  done < <(diff <(printf '%s\n' "$PRE_STATUS_FILTERED" | sort) <(printf '%s\n' "$POST_STATUS" | sort) \
-    | sed -n 's/^< /- /p; s/^> /+ /p')
 fi
 
 # ---- Report + cleanup ------------------------------------------------------

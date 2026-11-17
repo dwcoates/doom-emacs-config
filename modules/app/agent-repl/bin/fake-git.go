@@ -562,7 +562,25 @@ func sortedKeys(m map[string]string) []string {
 
 // transact moves REF from OLD to NEW (zeroOID deletes it) as one transaction.
 func (r *repo) transact(ref, old, new string) error {
-	tx := fmt.Sprintf("%s %s %s\n", old, new, ref)
+	return r.refTransaction(fmt.Sprintf("%s %s %s\n", old, new, ref), func() error {
+		refs, err := r.readRefs()
+		if err != nil {
+			return err
+		}
+		if new == zeroOID {
+			delete(refs, ref)
+		} else {
+			refs[ref] = new
+		}
+		return writeStore(r.g+"/refs", refs)
+	})
+}
+
+// refTransaction applies one ref transaction TX (its "<old> <new> <ref>"
+// lines) as git does: the reference-transaction hook's `prepared` phase,
+// where a nonzero exit aborts and APPLY never runs, then APPLY, then the
+// `committed` phase.
+func (r *repo) refTransaction(tx string, apply func() error) error {
 	code, err := r.runRefHook("prepared", tx)
 	if err != nil {
 		return err
@@ -573,16 +591,7 @@ func (r *repo) transact(ref, old, new string) error {
 		}
 		return die(1, "ref updates aborted by hook")
 	}
-	refs, err := r.readRefs()
-	if err != nil {
-		return err
-	}
-	if new == zeroOID {
-		delete(refs, ref)
-	} else {
-		refs[ref] = new
-	}
-	if err := writeStore(r.g+"/refs", refs); err != nil {
+	if err := apply(); err != nil {
 		return err
 	}
 	_, err = r.runRefHook("committed", tx)
@@ -1220,11 +1229,23 @@ func (r *repo) commitIndex(msg string) error {
 			return err
 		}
 	}
-	if err := os.WriteFile(r.g+"/HEAD", []byte(sha+"\n"), 0o644); err != nil {
-		return err
+	// A COMMIT MOVES HEAD AND ITS CHECKED-OUT BRANCH AS ONE REF
+	// TRANSACTION, which runs the reference-transaction hook as git's does.
+	old := r.headSHA
+	if old == "" {
+		old = zeroOID
 	}
-	r.loadHead()
-	return nil
+	tx := fmt.Sprintf("%s %s HEAD\n", old, sha)
+	if branch, err := firstLineRaw(r.g + "/branch"); err == nil && branch != "" {
+		tx += fmt.Sprintf("%s %s refs/heads/%s\n", old, sha, branch)
+	}
+	return r.refTransaction(tx, func() error {
+		if err := os.WriteFile(r.g+"/HEAD", []byte(sha+"\n"), 0o644); err != nil {
+			return err
+		}
+		r.loadHead()
+		return nil
+	})
 }
 
 func (r *repo) revert() error {

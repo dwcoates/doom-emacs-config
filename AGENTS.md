@@ -210,9 +210,11 @@ The ERT safety wrapper remains available for a focused selector:
 .claude/safe-test-run.sh "^foo"
 ```
 
-The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then diffs
-this checkout's pre/post git state (HEAD, its branch, working-tree status) and
-reads the refs the run's OWN git processes moved anywhere in the repository.
+The wrapper drops a checkpoint tag at `HEAD` before invoking ert, then reads
+the refs the run's OWN git processes moved anywhere in the repository, `HEAD`
+included. It never compares the checkout before and after the run: a snapshot
+cannot say who changed it, and the workspace's agent edits while its tests run
+(the agent-repl-tests skill holds what replaces it).
 Those come from `.githooks/reference-transaction`, which journals a ref for a
 registered run only when the moving git carries the run's
 `AGENT_REPL_SAFE_TEST_RUN` marker or descends from the wrapper. Another
@@ -241,15 +243,11 @@ branch and commit remain unchanged throughout the run. Commit the resulting
 queue.
 
 A record's own suite run is wrapped by `.claude/safe-test-run.sh`'s
-git-state net like every other `test-all.sh` run (see above). Appending the
-run's timing row to the tracked `test_time.csv` is therefore never done from
-inside that net: `testrun run --record` only STAGES the row (to a path
-outside the checkout), and `test-all.sh` commits it via a separate
-`testrun finish-record` call made only after the net has already returned
-clean. Without that split, `--record`'s own declared write would show up as
-drift the run itself caused, on every run, forever. A failing suite or any
-other drift still skips `finish-record` and records nothing, exactly as
-before.
+git-state net like every other `test-all.sh` run (see above). `testrun run
+--record` only STAGES the run's timing row (to a path outside the checkout),
+and `test-all.sh` appends it to `test_time.csv` via a separate `testrun
+finish-record` call made only after the net has returned clean, so a failing
+suite or any ref drift records nothing.
 
 Each row's `measure` column names what its `duration_seconds` means. The
 `unit-wall-sum` measure is the one `--record` writes. The

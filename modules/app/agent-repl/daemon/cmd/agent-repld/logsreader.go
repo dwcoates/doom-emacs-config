@@ -11,13 +11,19 @@ import (
 )
 
 // logsReadBound bounds one read of every system's warnings and errors over a
-// deploy's window: bin/logs.sh --all over the current files and their
-// rotations. Measured 2026-11-15 16:55 over 8.5 GB of logs (446 files written
-// in the window, 132 orphan generations), with the reader passing over
-// records and generations from before the window: 5s and 7s for a 20-minute
-// window. 18s is about two and a half times the worse. (Before that skip the
-// same read took 50-70s and refused 0.444.1's intake brief.)
-const logsReadBound = 18 * time.Second
+// deploy's window: bin/logs.sh --all --level warn, which opens only each
+// sink's warnings file (proto/vocab/log-warnings-sink.json). Measured
+// 2026-11-17 over 1,404 log files (10 GB) for a 20-minute window: 0.86s cold,
+// 0.52s warm, before any warnings file existed, so the read was the reader's
+// discovery of every sink. 3s is three and a half times the worse, headroom
+// for the warnings files the window adds. (Before the warnings files the same
+// read filtered every record ever written: 7s measured on 2026-11-15, and it
+// outlived an 18s bound on 2026-11-17, holding the merge queue.)
+const logsReadBound = 3 * time.Second
+
+// logsReadMeasured is the measurement logsReadBound was sized from, named in
+// the failure a read past the bound records.
+const logsReadMeasured = 860 * time.Millisecond
 
 // lineRunner runs a script and answers its output (scriptrunner.Runner).
 type lineRunner interface {
@@ -38,7 +44,7 @@ func logsReader(runner lineRunner, moduleRoot string) merge.LogReader {
 			return nil, fmt.Errorf("agent-repld: run %s: %w", script, err)
 		}
 		if run.TimedOut {
-			return nil, fmt.Errorf("agent-repld: %s outlived its bound of %s (measured at 7s)", script, logsReadBound)
+			return nil, fmt.Errorf("agent-repld: %s outlived its bound of %s (measured at %s)", script, logsReadBound, logsReadMeasured)
 		}
 		if run.ExitCode != 0 {
 			return nil, fmt.Errorf("agent-repld: %s exited %d: %s", script, run.ExitCode, run.Output)

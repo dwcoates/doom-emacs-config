@@ -724,7 +724,17 @@ kept, so the released-target-first ordering above survives deduplication."
           (push path kept))))))
 
 (defun agent-repl-itest--log-records-in (path)
-  "Return the JSONL records in PATH, oldest first.
+  "Return the JSONL records of the log at PATH and its warnings file, oldest first.
+Production writes every warn and error record only to the warnings file
+\(`agent-repl--log-warnings-path'), so the two are one log, merged by
+timestamp."
+  (sort (append (agent-repl-itest--log-file-records path)
+                (agent-repl-itest--log-file-records (agent-repl--log-warnings-path path)))
+        (lambda (a b) (string< (or (alist-get 'timestamp a) "")
+                               (or (alist-get 'timestamp b) "")))))
+
+(defun agent-repl-itest--log-file-records (path)
+  "Return the JSONL records in the one file PATH, oldest first.
 A malformed line is skipped rather than aborting the read, because a
 truncated final line is a normal consequence of reading a sink that is
 still being appended to."

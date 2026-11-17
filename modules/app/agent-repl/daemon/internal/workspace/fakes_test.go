@@ -3557,6 +3557,9 @@ func (b *fakeBorrowed) File() *os.File {
 	return b.file
 }
 
+// WarningsFile is the same null device: the double keeps no records.
+func (b *fakeBorrowed) WarningsFile() *os.File { return b.File() }
+
 func (b *fakeBorrowed) Close() error { return nil }
 
 func (s *fakeSurfaces) ClientLog(string, dlog.ClientRecord) error { return errFake }

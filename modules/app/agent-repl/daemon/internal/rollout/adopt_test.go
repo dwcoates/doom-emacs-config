@@ -573,6 +573,14 @@ func (servingBlindDB) Serving(context.Context, wsm.WorkspaceID) (*wsm.InstanceID
 	return nil, nil
 }
 
+func (servingBlindDB) ServingOf(_ context.Context, workspaces []wsm.WorkspaceID) (map[wsm.WorkspaceID]*wsm.InstanceID, error) {
+	out := make(map[wsm.WorkspaceID]*wsm.InstanceID, len(workspaces))
+	for _, ws := range workspaces {
+		out[ws] = nil
+	}
+	return out, nil
+}
+
 func TestAnAdoptionTheIncumbentTookBackDialsNothing(t *testing.T) {
 	// Arrange: the incumbent took the workspace back after the adoption saw
 	// it released.

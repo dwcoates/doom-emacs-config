@@ -383,6 +383,12 @@ func shellUnitIn(book string) *storev1.StoreEntry {
 	return pageEntry("w-unit-"+book, activityUpsertKeyPrefix+"act-shell", book, frameItem(activityFrame(book, "act-shell", bashStart())))
 }
 
+// shellRunFrame is the shell run's own frame, which knows only the run
+// identity and lands in no book: the sidecar's read of the run's spool.
+func shellRunFrame() *storev1.StoreEntry {
+	return bashEntry("w-run", "bash:act-shell:tail", "act-shell", bashStart())
+}
+
 func TestADetachedRunIsOwnedByTheBookThatHoldsItsCallsRow(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -413,6 +419,16 @@ func TestADetachedRunIsOwnedByTheBookThatHoldsItsCallsRow(t *testing.T) {
 		{
 			name:   "a unit row landing after the announcement claims the run for its book",
 			writes: []*storev1.StoreEntry{subagentShellAnnouncedByMain(""), shellUnitIn("sub-1")},
+			want:   "sub-1",
+		},
+		{
+			name:   "a run frame landing after the call's unit row files the run under that row's book",
+			writes: []*storev1.StoreEntry{shellUnitIn("sub-1"), shellRunFrame()},
+			want:   "sub-1",
+		},
+		{
+			name:   "a unit row landing after the run frame claims the run for its book",
+			writes: []*storev1.StoreEntry{shellRunFrame(), shellUnitIn("sub-1")},
 			want:   "sub-1",
 		},
 	}
@@ -484,5 +500,28 @@ func TestAUnitRowWhoseClaimFailsIsRefusedAndLogged(t *testing.T) {
 	}
 	if got := scalar[int](t, d, `SELECT COUNT(*) FROM entry WHERE upsert_key = ?`, activityUpsertKeyPrefix+"act-shell"); got != 0 {
 		t.Fatalf("unit rows = %d, want the refused batch to store nothing", got)
+	}
+}
+
+func TestUnitRowKeyIsTheActivityRowsUpsertKey(t *testing.T) {
+	// Act
+	got := unitRowKey("act-shell")
+
+	// Assert
+	if !got.Valid || got.String != activityUpsertKeyPrefix+"act-shell" {
+		t.Fatalf("unitRowKey = %+v, want the valid key %q", got, activityUpsertKeyPrefix+"act-shell")
+	}
+}
+
+func TestAnAnnouncementAndARunFrameNameTheSameUnitRow(t *testing.T) {
+	// Arrange: the two writers of a run's owner read the same unit row.
+	work := detachedWork("act-shell", "act-shell", causeRequestedArm())
+
+	// Act
+	fromAnnouncement := spawningUnitKey(work, sql.NullString{String: "act-shell", Valid: true})
+
+	// Assert
+	if fromAnnouncement != unitRowKey("act-shell") {
+		t.Fatalf("announcement's unit key = %+v, want the run frame's %+v", fromAnnouncement, unitRowKey("act-shell"))
 	}
 }

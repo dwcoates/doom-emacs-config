@@ -940,3 +940,43 @@ func TestSinkExpireRefusesToRollUnderADisplacedLink(t *testing.T) {
 		t.Errorf("the target holds %q, want it untouched", got)
 	}
 }
+
+func TestSinkForNamesTheWarningsTwinOfAWarnOrErrorRecord(t *testing.T) {
+	tests := []struct {
+		name, level, want string
+	}{
+		{"daemon", LevelDebug, "daemon"},
+		{"daemon", LevelInfo, "daemon"},
+		{"daemon", LevelWarn, "daemon.warn"},
+		{"webapp", LevelError, "webapp.warn"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name+"/"+tt.level, func(t *testing.T) {
+			// Act
+			got := sinkFor(tt.name, tt.level)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("sinkFor(%q, %q) = %q, want %q", tt.name, tt.level, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestIsShimSinkNamesTheShimsLogAndItsWarningsTwin(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{{"shim", true}, {"shim.warn", true}, {"daemon", false}, {"daemon.warn", false}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := isShimSink(tt.name)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("isShimSink(%q) = %v, want %v", tt.name, got, tt.want)
+			}
+		})
+	}
+}

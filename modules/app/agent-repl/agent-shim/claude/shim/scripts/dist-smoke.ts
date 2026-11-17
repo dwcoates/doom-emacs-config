@@ -36,6 +36,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createClient, Code, ConnectError } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-node";
 import { create } from "@bufbuild/protobuf";
+import { warningsPath } from "../../../logging/ts/warnings.js";
 import { closeSync, mkdirSync, mkdtempSync, openSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -83,9 +84,10 @@ function spawnShim(tag: string): Spawned {
   mkdirSync(workspace, { recursive: true });
 
   const logFd = openSync(logPath, "a");
+  const warningsFd = openSync(warningsPath(logPath), "a");
   const child = spawn(
     process.execPath,
-    [bundle, "--listen", listen, "--store-socket", storeSocket, "--log-fd", "3", "--fake"],
+    [bundle, "--listen", listen, "--store-socket", storeSocket, "--log-fd", "3", "--warnings-fd", "6", "--fake"],
     {
       cwd: workspace,
       // fd 3 is the durable sink the shim writes its record to, inherited exactly
@@ -94,7 +96,8 @@ function spawnShim(tag: string): Spawned {
       // well as writing it durably, and inheriting it buries the smoke's own
       // output. The durable copy on fd 3 is the one this script reads, and it is
       // printed in full when a check fails.
-      stdio: ["ignore", "inherit", "ignore", logFd],
+      // fd 6 is the log's warnings file, where the warn and error records go.
+      stdio: ["ignore", "inherit", "ignore", logFd, "ignore", "ignore", warningsFd],
       env: {
         ...process.env,
         CLAUDE_CONFIG_DIR: path.join(scratch, "account"),
@@ -107,6 +110,7 @@ function spawnShim(tag: string): Spawned {
     },
   );
   closeSync(logFd);
+  closeSync(warningsFd);
   const exited = new Promise<Exit>((resolve) =>
     child.on("exit", (code, signal) => resolve({ code, signal })),
   );
@@ -167,13 +171,15 @@ interface Record_ {
   readonly context?: Readonly<globalThis.Record<string, unknown>>;
 }
 
-/** The shim's durable record, parsed. */
+/** The shim's durable record, parsed: its log's records, then its warnings file's. */
 function readRecord(logPath: string): Record_[] {
-  return readFileSync(logPath, "utf8")
-    .trim()
-    .split("\n")
-    .filter(Boolean)
-    .map((line) => JSON.parse(line) as Record_);
+  return [logPath, warningsPath(logPath)].flatMap((file) =>
+    readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => JSON.parse(line) as Record_),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -256,7 +262,7 @@ check(
   true,
 );
 if (failures.length > 0) {
-  console.error(`\nstep 1's durable record (fd 3):\n${readFileSync(withStore.logPath, "utf8")}`);
+  console.error(`\nstep 1's durable record (fd 3, then fd 6):\n${readFileSync(withStore.logPath, "utf8")}${readFileSync(warningsPath(withStore.logPath), "utf8")}`);
 }
 
 await store.close();
@@ -292,7 +298,7 @@ check(
 );
 
 if (failures.length > 0) {
-  console.error(`\nstep 2's durable record (fd 3):\n${readFileSync(noStore.logPath, "utf8")}`);
+  console.error(`\nstep 2's durable record (fd 3, then fd 6):\n${readFileSync(noStore.logPath, "utf8")}${readFileSync(warningsPath(noStore.logPath), "utf8")}`);
   console.error(`dist smoke FAILED: ${failures.join("; ")}`);
   process.exit(1);
 }

@@ -1146,6 +1146,10 @@ type DB interface {
 	// Serving reports which daemon instance serves a workspace, nil when none
 	// does.
 	Serving(ctx context.Context, id WorkspaceID) (*InstanceID, error)
+	// ServingOf reports which daemon instance serves each workspace named,
+	// nil for one none serves, in one read; one the record does not hold is
+	// absent from the answer.
+	ServingOf(ctx context.Context, ids []WorkspaceID) (map[WorkspaceID]*InstanceID, error)
 	// ReleaseServing gives up serving ownership, refusing when this instance
 	// does not hold it.
 	ReleaseServing(ctx context.Context, id WorkspaceID, daemon InstanceID) error

@@ -6,9 +6,11 @@ import (
 )
 
 // destination is one durable sink a logger writes to: a workspace sink or the
-// run log. Both are authoritative and synchronous.
+// run log. Both are authoritative and synchronous. LEVEL is the record's, and
+// picks the file it lands in: a warn or error record goes only to the
+// warnings file (sinkFor).
 type destination interface {
-	write(line []byte) error
+	write(level string, line []byte) error
 }
 
 // logger is the Logger implementation. It holds the destination its records
@@ -89,7 +91,7 @@ func (l *logger) tee(level, operation, message string) {
 // write never waits on the mirror.
 func (l *logger) deliver(rec record) {
 	line := rec.marshal()
-	if err := l.dest.write(line); err != nil {
+	if err := l.dest.write(rec.Level, line); err != nil {
 		l.s.emergency(l.runtime, err, line)
 	}
 	if status := l.s.mirror.enqueue(rec.Level, line); !status.ok() {
@@ -113,7 +115,7 @@ func (l *logger) reportMirror(status mirrorStatus) {
 		"the terminal mirror dropped records or failed to write; durable records are unaffected",
 		merge(l.base, ctx), l.s.pid)
 	line := rec.marshal()
-	if err := l.dest.write(line); err != nil {
+	if err := l.dest.write(rec.Level, line); err != nil {
 		l.s.emergency(l.runtime, err, line)
 	}
 }

@@ -326,7 +326,9 @@ func (c *client) call(ctx context.Context, op, method, path string, args []strin
 			detail = runErr.Error()
 		}
 		f := &Failure{Kind: KindUnreachable, Method: method, Path: path, Message: detail}
-		c.cfg.Log.Error(op, "GitHub could not be reached", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "stderr": detail}))
+		// warn: losing the network is an expected outage the caller records
+		// as a failed call, never a defect of the daemon's own.
+		c.cfg.Log.Warn(op, "GitHub could not be reached", dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "stderr": detail}))
 		return Response{}, f
 	}
 	fields["status"] = resp.Status

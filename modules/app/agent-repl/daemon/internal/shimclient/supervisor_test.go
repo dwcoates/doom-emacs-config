@@ -41,6 +41,7 @@ func TestSpawnArgvIsTheContractVerbatim(t *testing.T) {
 		"--log-fd", "3",
 		"--spawn-gate-fd", "4",
 		"--ready-fd", "5",
+		"--warnings-fd", "6",
 		"--fake",
 	}
 	if !reflect.DeepEqual(record.Argv, want) {
@@ -180,6 +181,23 @@ func TestSpawnPassesTheLogSinkAsFD3(t *testing.T) {
 	record := sink.record(t)
 	if record.PID == 0 {
 		t.Fatal("record from fd 3 has no pid")
+	}
+}
+
+// TestSpawnPassesTheWarningsSinkAsFD6 asserts fd 6 is the already-open
+// warnings sink: the child's own write landed in the parent's file.
+func TestSpawnPassesTheWarningsSinkAsFD6(t *testing.T) {
+	// Arrange.
+	dir := shortDir(t)
+	f, uds := startFakeShim(t, dir)
+	spec, sink := newTestSpec(t, dir, uds, helperIdle)
+
+	// Act.
+	_ = spawnReady(t, f, spec)
+
+	// Assert: readHelperRecord fails when fd 6 was not the sink.
+	if record := sink.warningsRecord(t); record.PID == 0 {
+		t.Fatal("record from fd 6 has no pid")
 	}
 }
 
@@ -467,6 +485,7 @@ func TestSpawnValidatesSpec(t *testing.T) {
 		{name: "node bin", mut: func(s *Spec) { s.NodeBin = "" }, field: "NodeBin"},
 		{name: "main js", mut: func(s *Spec) { s.MainJS = "" }, field: "MainJS"},
 		{name: "log sink", mut: func(s *Spec) { s.LogSink = nil }, field: "LogSink"},
+		{name: "log warnings sink", mut: func(s *Spec) { s.LogWarningsSink = nil }, field: "LogWarningsSink"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -1,0 +1,36 @@
+{
+  "_comment": [
+    "THE cross-language warnings-sink contract. Every agent-repl runtime writes",
+    "its warn and error records ONLY to a warnings file beside its log, and its",
+    "debug and info records only to the log itself, so a reader that wants",
+    "warnings and errors (bin/logs.sh --level warn, the deploy intake, the",
+    "harvest) opens the small warnings files alone instead of filtering every",
+    "record ever written (2026-11-17: 10 GB of logs outlived the intake's",
+    "18s bound). Go (agent-shim/logging/go/warnings.go), TypeScript",
+    "(agent-shim/logging/ts/warnings.ts) and elisp (core.el) each assert",
+    "their routing and naming against this file.",
+    "",
+    "warnings_levels are the levels routed to the warnings file; every other",
+    "level goes to the log. A path's warnings file is named by inserting",
+    "'.warn' before a final '.log' extension, or appending '.warn.log' when the",
+    "path has none, so every reader finds any log file's warnings beside it",
+    "by that one rule. A per-workspace sink named N (a canonical link N.log",
+    "naming a target T) has its warnings twin named N.warn (a canonical link",
+    "N.warn.log naming T's warnings file)."
+  ],
+  "warnings_levels": ["warn", "error"],
+  "log_levels": ["debug", "info"],
+  "paths": [
+    {"path": "/state/logs/daemon.run.log", "warnings": "/state/logs/daemon.run.warn.log"},
+    {"path": "/cache/agent-repl/log/shim-store.log", "warnings": "/cache/agent-repl/log/shim-store.warn.log"},
+    {"path": "/state/logs/emacs.central.log", "warnings": "/state/logs/emacs.central.warn.log"},
+    {"path": "/tmp/custom-emacs-log", "warnings": "/tmp/custom-emacs-log.warn.log"}
+  ],
+  "sinks": [
+    {"name": "daemon", "warnings": "daemon.warn"},
+    {"name": "shim", "warnings": "shim.warn"},
+    {"name": "webapp", "warnings": "webapp.warn"},
+    {"name": "sidecar", "warnings": "sidecar.warn"},
+    {"name": "emacs", "warnings": "emacs.warn"}
+  ]
+}

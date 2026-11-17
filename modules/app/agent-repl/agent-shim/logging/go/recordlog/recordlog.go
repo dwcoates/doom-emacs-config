@@ -129,7 +129,8 @@ func Open(runtime, path string, terminal io.Writer, getenv func(string) string, 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, nil, err
 	}
-	file, err := sharedlogging.OpenRotating(path, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
+	// WARN AND ERROR RECORDS GO TO THEIR OWN FILE (warnings.go).
+	file, err := sharedlogging.OpenRotatingPair(path, sharedlogging.DefaultCapBytes, sharedlogging.DefaultBackups)
 	if err != nil {
 		return nil, nil, err
 	}

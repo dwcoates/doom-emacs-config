@@ -173,6 +173,10 @@ type Borrowed interface {
 	// second owner's finalizer would close the sink's fd out from under
 	// everybody (and the freed fd number is then handed to unrelated opens).
 	File() *os.File
+	// WarningsFile is the sink's warnings twin's own open file, where the
+	// borrower writes its warn and error records (agentrepl/logging
+	// warnings.go); borrowed under the same terms as File.
+	WarningsFile() *os.File
 	// Close is a no-op; the surfaces own the sink's lifetime.
 	Close() error
 }

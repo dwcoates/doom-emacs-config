@@ -325,3 +325,58 @@ func TestClaimServingRecordsTakingAnotherInstancesRow(t *testing.T) {
 		})
 	}
 }
+
+func TestServingOfAnswersEachWorkspacesOwnerInOneRead(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	served := testWorkspace(t, s)
+	unserved := testWorkspace(t, s)
+	instance := NewInstanceID()
+	if err := s.ClaimServing(context.Background(), served.ID, instance); err != nil {
+		t.Fatalf("ClaimServing: %v", err)
+	}
+
+	// Act
+	got, err := s.ServingOf(context.Background(), []WorkspaceID{served.ID, unserved.ID})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ServingOf: %v", err)
+	}
+	if owner := got[served.ID]; owner == nil || *owner != instance {
+		t.Fatalf("served owner = %v, want %q", owner, instance)
+	}
+	if owner, held := got[unserved.ID]; !held || owner != nil {
+		t.Fatalf("unserved = %v (held %v), want present with no owner", owner, held)
+	}
+}
+
+func TestServingOfLeavesAnUnknownWorkspaceOutOfItsAnswer(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+
+	// Act
+	got, err := s.ServingOf(context.Background(), []WorkspaceID{ws.ID, "absent"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("ServingOf = %v, want no refusal for one unknown workspace", err)
+	}
+	if _, held := got["absent"]; held || len(got) != 1 {
+		t.Fatalf("answer = %v, want only the known workspace", got)
+	}
+}
+
+func TestServingOfAnswersNothingForNoWorkspace(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+
+	// Act
+	got, err := s.ServingOf(context.Background(), nil)
+
+	// Assert
+	if err != nil || len(got) != 0 {
+		t.Fatalf("ServingOf(nil) = %v, %v; want an empty answer", got, err)
+	}
+}

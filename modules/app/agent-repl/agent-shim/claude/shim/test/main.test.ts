@@ -77,6 +77,7 @@ function servingArgs(overrides: Partial<CliArgs> = {}): CliArgs {
     listen: "/tmp/0100059cb65649bc.sock",
     storeSocket: "/tmp/store.sock",
     logFd: 3,
+    warningsFd: 6,
     fake: false,
     version: false,
     ...overrides,
@@ -93,6 +94,8 @@ describe("parseArgs", () => {
       "/tmp/store.sock",
       "--log-fd",
       "3",
+      "--warnings-fd",
+      "6",
       "--fake",
     ]);
 
@@ -101,6 +104,7 @@ describe("parseArgs", () => {
       listen: "/tmp/0100059cb65649bc.sock",
       storeSocket: "/tmp/store.sock",
       logFd: 3,
+      warningsFd: 6,
       fake: true,
       version: false,
     });
@@ -129,7 +133,7 @@ describe("parseArgs", () => {
 
   it("names the whole spawn contract when it refuses one", () => {
     // Arrange, Act, Assert.
-    expect(() => parseArgs(["--nonsense"])).toThrow(/--listen <uds> --store-socket <uds> --log-fd 3/);
+    expect(() => parseArgs(["--nonsense"])).toThrow(/--listen <uds> --store-socket <uds> --log-fd 3 --warnings-fd 6/);
   });
 
   it.each([
@@ -162,6 +166,14 @@ describe("parseArgs", () => {
   it("refuses any other descriptor, which could point the record at a dying pipe", () => {
     // Arrange, Act, Assert.
     expect(() => parseArgs(["--log-fd", "2"])).toThrow(/the durable sink is inherited fd 3/);
+  });
+
+  it("accepts fd 6 for the warnings sink", () => {
+    expect(parseArgs(["--warnings-fd", "6"]).warningsFd).toBe(6);
+  });
+
+  it("refuses a warnings sink on any other descriptor", () => {
+    expect(() => parseArgs(["--warnings-fd", "3"])).toThrow(/the warnings sink is inherited fd 6/);
   });
 
   it("accepts the spawn gate on fd 4", () => {
@@ -201,6 +213,14 @@ describe("requireServingArgs", () => {
 
     // Act, Assert.
     expect(() => requireServingArgs(args)).toThrow(/--listen <uds> is required/);
+  });
+
+  it("refuses a shim with no warnings sink", () => {
+    // Arrange.
+    const args = parseArgs(["--listen", "/tmp/0100059cb65649bc.sock", "--log-fd", "3"]);
+
+    // Act, Assert.
+    expect(() => requireServingArgs(args)).toThrow(/--warnings-fd 6 is required/);
   });
 
   it("refuses a shim with no durable log sink", () => {
@@ -1196,7 +1216,7 @@ describe("main", () => {
   }
 
   /** The serving arguments, as the daemon spells them on the command line. */
-  const SERVING = ["--listen", "/tmp/0100059cb65649bc.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3"];
+  const SERVING = ["--listen", "/tmp/0100059cb65649bc.sock", "--store-socket", "/tmp/store.sock", "--log-fd", "3", "--warnings-fd", "6"];
 
   it("answers --version and returns without binding anything", async () => {
     // Arrange.
