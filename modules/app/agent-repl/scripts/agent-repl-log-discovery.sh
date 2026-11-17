@@ -230,6 +230,15 @@ runtime_path() {
   esac
 }
 
+# warnings_path names the warnings file of the log at $1: ".warn" before a
+# final ".log", or ".warn.log" appended (proto/vocab/log-warnings-sink.json).
+warnings_path() {
+  case "$1" in
+    *.log) printf '%s.warn.log' "${1%.log}" ;;
+    *) printf '%s.warn.log' "$1" ;;
+  esac
+}
+
 resolve_workspace_target() {
   local canonical="$1"
   python3 - "$canonical" <<'PY'
@@ -257,12 +266,24 @@ for runtime in "${runtimes[@]}"; do
       target="$(resolve_workspace_target "$canonical")" || fail "cannot resolve canonical symlink: $canonical"
       printf 'workspace runtime=%s canonical=%s target=%s\n' "$runtime" "$canonical" "$target" >&"$location_fd"
       paths+=("$canonical")
+      # Its warn and error records live only in its warnings file
+      # (proto/vocab/log-warnings-sink.json), linked beside it.
+      warnings="$(warnings_path "$canonical")"
+      if [ -L "$warnings" ]; then
+        printf 'workspace runtime=%s canonical=%s\n' "$runtime" "$warnings" >&"$location_fd"
+        paths+=("$warnings")
+      fi
     else
       printf 'workspace runtime=%s canonical=%s status=absent\n' "$runtime" "$canonical" >&"$location_fd"
     fi
   elif [ -f "$canonical" ]; then
     printf 'global runtime=%s path=%s\n' "$runtime" "$canonical" >&"$location_fd"
     paths+=("$canonical")
+    warnings="$(warnings_path "$canonical")"
+    if [ -f "$warnings" ]; then
+      printf 'global runtime=%s path=%s\n' "$runtime" "$warnings" >&"$location_fd"
+      paths+=("$warnings")
+    fi
   else
     printf 'global runtime=%s path=%s status=absent\n' "$runtime" "$canonical" >&"$location_fd"
   fi
