@@ -1015,6 +1015,9 @@ func TestARemoteTheNetworkCannotReachIsRecordedAtInfo(t *testing.T) {
 		{name: "an https host that does not resolve", stderr: "fatal: unable to access 'https://github.com/x/y/': Could not resolve host: github.com\n", wantLevel: "info"},
 		{name: "an ssh connection the network reset", stderr: "Connection reset by 140.82.112.3 port 22\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
 		{name: "an ssh connection that timed out", stderr: "ssh: connect to host github.com port 22: Operation timed out\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
+		{name: "an ssh connection the remote's side closed", stderr: "Connection closed by 140.82.112.4 port 22\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
+		{name: "an ssh session the remote host closed", stderr: "Connection to github.com closed by remote host.\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
+		{name: "an ssh connect that failed with no errno text", stderr: "ssh: connect to host github.com port 22: Undefined error: 0\r\nfatal: Could not read from remote repository.\n", wantLevel: "info"},
 		{name: "a remote that refused", stderr: "ERROR: Repository not found.\nfatal: Could not read from remote repository.\n", wantLevel: "error"},
 	}
 	for _, tt := range tests {

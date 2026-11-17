@@ -313,6 +313,18 @@ var unreachableRemote = []string{
 	"Connection reset by",
 	"Connection timed out",
 	"Operation timed out",
+	// ssh's own words for a connection the remote's side dropped before
+	// git's exchange finished (2026-11-17 14:01: `Connection closed by
+	// 140.82.112.4 port 22` during a fetch, `Connection to github.com closed
+	// by remote host.` during ls-remote, both as the network went).
+	"Connection closed by",
+	"closed by remote host",
+	// A TCP CONNECT THAT FAILED, whatever errno text follows it: ssh prints
+	// this prefix only when it never reached the host, so the remote did not
+	// answer at all (2026-11-17 13:06 and 14:30, 321 records on a network
+	// that could not reach port 22: `ssh: connect to host github.com port 22:
+	// Undefined error: 0`).
+	"ssh: connect to host ",
 }
 
 // remoteUnreachable reports whether STDERR says the remote could not be
