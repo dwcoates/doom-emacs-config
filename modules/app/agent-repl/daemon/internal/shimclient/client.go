@@ -130,6 +130,9 @@ type client struct {
 	// procgroup.AwaitGone. A test injects their failures (killAdopted).
 	signalGroupOf func(pgid int, sig syscall.Signal) error
 	awaitGroup    func(ctx context.Context, pgid int) error
+	// groupMembers lists the live members of an adopted shim's process group
+	// for the escalation's record; nil is procgroup.LiveMembers.
+	groupMembers func(pgid int) ([]procgroup.Member, error)
 
 	// lockProbe answers whether the workspace's kernel lock reads FREE. It is
 	// injected because sessionlock is shimclient's PEER, not its dependency;
@@ -659,9 +662,7 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 		// only thing that will ever say the workspace lock is still held.
 		return fmt.Errorf("shimclient: adopted shim %d for %q did not go down within %s of SIGKILL", pid, c.ws, grace)
 	}
-	c.log.Warn("daemon.shimclient.kill", "the adopted shim ignored SIGTERM; escalating", dlog.Context{
-		"workspace_id": string(c.ws), "pid": pid, "pgid": pgid, "grace_ms": grace.Milliseconds(),
-	})
+	c.recordEscalation(pid, pgid, grace)
 	if err := c.signalAdoptedGroup(syscall.SIGKILL, pgid); err != nil {
 		return err
 	}
@@ -675,6 +676,43 @@ func (c *client) killAdopted(ctx context.Context, attr KillAttribution, grace ti
 	}
 	c.publishAdoptedKill(pid, syscall.SIGKILL)
 	return nil
+}
+
+// recordEscalation records why an adopted shim's group still stood when
+// SIGTERM's grace ran out, naming every live member, so the record alone
+// says which process stayed.
+//
+// A GROUP WHOSE LEADER IS GONE IS NO SHIM THAT IGNORED SIGTERM. A shim that
+// answered KillSession exits at once, and what outlives it in its group is
+// what its vendor left there (a tool's background process, a server it
+// started), which the stop exists to end: that is recorded at INFO. Only a
+// leader still standing declined the signal, at WARN (2026-11-17: ship-gns's
+// shim logged its own exit at 00:16:49.203, and the WARN at 00:16:50.454
+// named no member).
+func (c *client) recordEscalation(pid, pgid int, grace time.Duration) {
+	fields := dlog.Context{"workspace_id": string(c.ws), "pid": pid, "pgid": pgid, "grace_ms": grace.Milliseconds()}
+	list := c.groupMembers
+	if list == nil {
+		list = procgroup.LiveMembers
+	}
+	members, err := list(pgid)
+	if err != nil {
+		fields["cause"] = err.Error()
+		c.log.Error("daemon.shimclient.kill", "could not list the adopted shim's process group still standing after SIGTERM; escalating", fields)
+		return
+	}
+	named := make([]string, 0, len(members))
+	leader := false
+	for _, m := range members {
+		named = append(named, fmt.Sprintf("%d %s (%s)", m.Pid, m.Comm, m.State))
+		leader = leader || m.Pid == pid
+	}
+	fields["members"] = named
+	if leader {
+		c.log.Warn("daemon.shimclient.kill", "the adopted shim ignored SIGTERM; escalating", fields)
+		return
+	}
+	c.log.Info("daemon.shimclient.kill", "the adopted shim exited, and processes it left in its group outlived SIGTERM's grace; they are killed", fields)
 }
 
 // adoptedAlreadyGone is the one answer to an adopted kill that finds the shim
