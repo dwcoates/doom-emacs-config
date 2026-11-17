@@ -7,6 +7,7 @@ import {
   ancestorMatching,
   childrenMatching,
   computedPx,
+  decorativeElement,
   nodeLabel,
   pageIntersectionObserver,
   pageMutationObserver,
@@ -357,6 +358,39 @@ describe("SVG_NS", () => {
     const spelled = [...codeUnder(src)].filter(([, code]) => code.includes("www.w3.org/2000/svg")).map(([path]) => path);
     // Assert
     expect(spelled).toEqual(["dom.ts"]);
+  });
+});
+
+describe("decorativeElement", () => {
+  /** A hand-rolled decorative element: a classed span or div set aria-hidden by hand. */
+  const HAND_ROLLED = /const (\w+) = document\.createElement\("(?:span|div)"\);\s*\1\.className = [^;]+;(?:\s*\1\.setAttribute\([^;]+\);)*?\s*\1\.setAttribute\("aria-hidden", "true"\)/;
+
+  it.each(["span", "div"] as const)("makes a %s of its tag", (tag) => {
+    expect(decorativeElement(tag, "x").tagName).toBe(tag.toUpperCase());
+  });
+
+  it("wears the class it is given", () => {
+    expect(decorativeElement("span", "a b").className).toBe("a b");
+  });
+
+  it("hides itself from a screen reader", () => {
+    expect(decorativeElement("div", "x").getAttribute("aria-hidden")).toBe("true");
+  });
+
+  it("is the one maker: no source hand-rolls a classed element it hides", () => {
+    // Arrange — every source under src/, comments stripped.
+    const src = join(process.cwd(), "src");
+    // Act
+    const code = [...codeUnder(src)];
+    const rolled = code.filter(([, text]) => HAND_ROLLED.test(text)).map(([path]) => path);
+    const callers = code.filter(([, text]) => /\bdecorativeElement\(/.test(text)).map(([path]) => path);
+    // Assert: none rolls its own, and the sidebar's rules are among its callers.
+    expect([rolled, ["sidebar/merge-queue-view.ts", "sidebar/roster.ts"].every((path) => callers.includes(path))]).toEqual([[], true]);
+  });
+
+  it("recognizes a hand-rolled copy", () => {
+    const copy = 'const g = document.createElement("span");\n  g.className = "x";\n  g.setAttribute("data-glyph", n);\n  g.setAttribute("aria-hidden", "true");';
+    expect(HAND_ROLLED.test(copy)).toBe(true);
   });
 });
 

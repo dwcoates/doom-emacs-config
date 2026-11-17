@@ -32,7 +32,7 @@
  * it has waited (`drawFeedMergeTestsRunSeatWait`), so the tab is never empty.
  */
 import { log } from "../../log.js";
-import { childrenMatching, placeChildren, placeOptional, repaintMark } from "../../dom.js";
+import { childrenMatching, decorativeElement, placeChildren, placeOptional, repaintMark } from "../../dom.js";
 import { requireCase, requireMessage } from "../../rpc/strict.js";
 import { paintSpanClass } from "../cards/paint.js";
 import { armName } from "../renderers.js";
@@ -264,9 +264,7 @@ export function drawFeedMergeTestSuite(suite: FeedMergeTestSuite): HTMLElement {
   head.className = "merge-suite-head";
   el.append(head);
 
-  const glyph = document.createElement("span");
-  glyph.className = "merge-suite-glyph";
-  glyph.setAttribute("aria-hidden", "true");
+  const glyph = decorativeElement("span", "merge-suite-glyph");
   head.append(glyph);
 
   const name = document.createElement("span");

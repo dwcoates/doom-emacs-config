@@ -29,6 +29,7 @@
  * each loop where the clock says it is.
  */
 import { REVIVING_CLASS } from "./reviving.js";
+import { decorativeElement } from "../dom.js";
 
 /** The class of the box holding a name's animated copies. */
 export const NAME_INK_CLASS = "name-ink";
@@ -46,9 +47,7 @@ export const NAME_INK_MOTIONS: readonly string[] = ["breathes", REVIVING_CLASS];
  */
 export function drawNameInk(label: HTMLElement, name: string): void {
   if (!NAME_INK_MOTIONS.some((motion) => label.classList.contains(motion))) return;
-  const ink = document.createElement("span");
-  ink.className = NAME_INK_CLASS;
-  ink.setAttribute("aria-hidden", "true");
+  const ink = decorativeElement("span", NAME_INK_CLASS);
   ink.setAttribute(NAME_INK_TEXT_ATTRIBUTE, name);
   label.appendChild(ink);
 }

@@ -58,7 +58,7 @@ import {
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { clone, equals } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
-import { queryAll } from "../dom.js";
+import { decorativeElement, queryAll } from "../dom.js";
 import { disposeKeyedRows, drawKeyedEntries, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
 import { repoEntries, repoSectionRegions, sectionOpenRows, sectionSubsections, unsectionedRows, type PathedOpenRow } from "./entries.js";
 import { log } from "../log.js";
@@ -933,10 +933,7 @@ export const QUEUE_STATUS_TAIL_RULE_CLASS = "sb-mq-status-tail";
 
 /** The short rule a queue group's header draws after its deploy check status. */
 function drawQueueStatusTailRule(): HTMLElement {
-  const rule = document.createElement("span");
-  rule.className = QUEUE_STATUS_TAIL_RULE_CLASS;
-  rule.setAttribute("aria-hidden", "true");
-  return rule;
+  return decorativeElement("span", QUEUE_STATUS_TAIL_RULE_CLASS);
 }
 
 /** A Merge Queue heading's "(N)": the merges queued, drawn as the Open section's count is. */

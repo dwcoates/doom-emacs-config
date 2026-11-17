@@ -62,6 +62,7 @@ import { selectWorkspace, tickElapsed } from "./row.js";
 import { sendHeld } from "./arrange.js";
 import { fireVerb } from "./verbs.js";
 import { markColdGatedName, type ColdGated } from "./cold-gate-name.js";
+import { decorativeElement } from "../dom.js";
 
 /**
  * The attribute a queue group carries while its queue is paused: `pause`, or
@@ -450,9 +451,7 @@ export function drawRosterMergeQueueStage(u: RosterMergeQueueStage, path: string
   const el = document.createElement("span");
   el.className = "sb-mq-stage";
   el.setAttribute("data-state", state.case);
-  const glyph = document.createElement("span");
-  glyph.className = "sb-mq-stage-glyph";
-  glyph.setAttribute("aria-hidden", "true");
+  const glyph = decorativeElement("span", "sb-mq-stage-glyph");
   switch (state.case) {
     case "live":
       glyph.textContent = STATE_GLYPHS.live;
@@ -734,10 +733,7 @@ export const MERGE_QUEUE_OFF_QUEUE_RULE_CLASS = "sb-mq-off-queue-rule";
 
 /** The thin rule drawn above a queue's merges off it. It draws nothing but itself. */
 function drawOffQueueRule(): HTMLElement {
-  const rule = document.createElement("div");
-  rule.className = MERGE_QUEUE_OFF_QUEUE_RULE_CLASS;
-  rule.setAttribute("aria-hidden", "true");
-  return rule;
+  return decorativeElement("div", MERGE_QUEUE_OFF_QUEUE_RULE_CLASS);
 }
 
 /** The requeue control's hover while its merge's workspace stands at its cold gate. */

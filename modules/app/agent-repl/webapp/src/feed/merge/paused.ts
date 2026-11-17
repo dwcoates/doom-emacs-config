@@ -6,6 +6,7 @@
  * banner (queue.ts) are both this mark, told apart by their class, so the
  * glyph and its accessibility cannot drift between the two.
  */
+import { decorativeElement } from "../../dom.js";
 
 /** The class every paused mark carries, whichever place draws it. */
 export const PAUSED_MARK_CLASS = "merge-paused-mark";
@@ -14,9 +15,7 @@ export const PAUSED_MARK_CLASS = "merge-paused-mark";
 export function drawPausedMark(className: string, word: string): HTMLElement {
   const el = document.createElement("span");
   el.className = `${PAUSED_MARK_CLASS} ${className}`;
-  const glyph = document.createElement("span");
-  glyph.className = "merge-paused-glyph";
-  glyph.setAttribute("aria-hidden", "true");
+  const glyph = decorativeElement("span", "merge-paused-glyph");
   const text = document.createElement("span");
   text.className = "merge-paused-word";
   text.textContent = word;

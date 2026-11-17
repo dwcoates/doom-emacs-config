@@ -32,6 +32,7 @@ import { log } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { RowContext } from "./context.js";
 import { foldTitle } from "../title-fold.js";
+import { decorativeElement } from "../../dom.js";
 
 /**
  * The hook card.
@@ -140,9 +141,7 @@ export function drawFeedHookGatedCall(
   link.className = "hook-gated";
   armButtonRole(link);
   link.setAttribute("data-gated-row", row.value);
-  const caret = document.createElement("span");
-  caret.className = "hook-gated-caret";
-  caret.setAttribute("aria-hidden", "true");
+  const caret = decorativeElement("span", "hook-gated-caret");
   caret.textContent = "▸";
   link.appendChild(caret);
   link.appendChild(document.createTextNode(" gated:"));

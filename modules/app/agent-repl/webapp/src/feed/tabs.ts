@@ -22,6 +22,7 @@
 import { createControl, type Control } from "../control.js";
 import { setInlineMarkdown } from "../markdown.js";
 import { replaceTicking } from "./ticking.js";
+import { decorativeElement } from "../dom.js";
 
 /** The class every feed tab strip wears. */
 export const FEED_TAB_STRIP_CLASS = "feed-tab-strip";
@@ -90,9 +91,7 @@ export function drawFeedTab(spec: FeedTabSpec): Control {
   tab.setAttribute("aria-selected", spec.active ? "true" : "false");
   tab.classList.toggle("is-active", spec.active);
 
-  const icon = document.createElement("span");
-  icon.className = "feed-group-tab-icon";
-  icon.setAttribute("aria-hidden", "true");
+  const icon = decorativeElement("span", "feed-group-tab-icon");
   icon.textContent = spec.icon;
 
   const index = document.createElement("span");
