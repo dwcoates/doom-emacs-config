@@ -36,6 +36,9 @@ const (
 	ArmVersionAlreadyRecorded = "version_already_recorded"
 	// ArmWorkspaceClosed refuses a requeue of a closed workspace's merge.
 	ArmWorkspaceClosed = "workspace_closed"
+	// ArmColdGated refuses a requeue of a merge whose workspace is parked at
+	// its cold gate: the gate would take it off its queue again at once.
+	ArmColdGated = "cold_gated"
 	// ArmNameOffQueue refuses an async request whose name a merge off its
 	// queue holds: that merge is requeued, never asked for again.
 	ArmNameOffQueue = "async_merge_name_off_queue"
@@ -199,7 +202,8 @@ type Requeued struct {
 // workspace), branch and request, at the placement asked for. It refuses,
 // changing nothing, a merge that holds no request (unknown_merge), stands in
 // line (still_queued), landed (already_landed), belongs to a closed workspace
-// (workspace_closed), lands a branch that is gone (branch_gone), or whose
+// (workspace_closed), belongs to a workspace parked at its cold gate
+// (cold_gated), lands a branch that is gone (branch_gone), or whose
 // version increment is missing or misplaced.
 func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, error) {
 	const op = "daemon.merge.requeue"
@@ -228,6 +232,14 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	}
 	branch := requestBranch(record, rec.Source)
 	fields["branch"] = branch
+	// A WORKSPACE PARKED AT ITS COLD GATE IS REFUSED (2026-11-17): the gate
+	// takes its merge off the queue the moment the merge is in line again,
+	// so a requeue would only be evicted at once, with nothing said.
+	if o.deps.AtColdGate(ws) {
+		refusal := refuse(ArmColdGated, ws, "the merge's workspace is parked at its cold gate; the user must answer the gate before its merge can be put back in line")
+		logRefusal(log, op, "refused a requeue of a workspace parked at its cold gate", withField(fields, "reason", refusal.Reason), refusal)
+		return Requeued{}, refusal
+	}
 	exists, err := o.deps.Git.BranchExists(ctx, record.Dir, branch)
 	if err != nil {
 		log.Error(op, "could not read whether the requeued merge's branch exists", withField(fields, "error", err.Error()))

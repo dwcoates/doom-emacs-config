@@ -3421,6 +3421,9 @@ type harness struct {
 	captures int
 	// freeness answers the admission's freeness wait; free by default.
 	freeness *fakeFreeness
+	// coldGated marks the workspaces AtColdGate answers parked at their
+	// cold gates; none by default.
+	coldGated map[ids.WorkspaceID]bool
 	// detached is the detached-merge service: the fork and the handbacks.
 	detached *fakeDetached
 	// names is the async merge name check.
@@ -3950,6 +3953,11 @@ func (h *harness) deps() Deps {
 			return *h.displaced, true, nil
 		},
 		Freeness:          h.freeness,
+		AtColdGate: func(ws ids.WorkspaceID) bool {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			return h.coldGated[ws]
+		},
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,
 		TurnInFlight: func(ids.WorkspaceID) (ids.TurnID, bool) {

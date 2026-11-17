@@ -473,6 +473,7 @@ func (d Deps) validate() error {
 	check(d.HoldStarts != nil, "HoldStarts")
 	check(d.CaptureDisplaced != nil, "CaptureDisplaced")
 	check(d.Freeness != nil, "Freeness")
+	check(d.AtColdGate != nil, "AtColdGate")
 	check(d.TurnInFlight != nil, "TurnInFlight")
 	check(d.Rollout != nil, "Rollout")
 	check(d.Standing != nil, "Standing")

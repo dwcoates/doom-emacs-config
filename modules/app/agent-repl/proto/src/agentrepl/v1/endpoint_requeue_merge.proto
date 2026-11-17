@@ -108,6 +108,11 @@ message RequeueMergeError {
     // `model` is not in the catalog the session's login last served, or the
     // login has served none.
     RequeueMergeNotInCatalog not_in_catalog = 12;
+    // The merge's workspace is parked at its cold gate. The gate takes a
+    // parked workspace's merge off its queue the moment it is raised, so a
+    // requeue would be evicted again at once; the user answers the gate
+    // first. The request stays off its queue.
+    RequeueMergeColdGated cold_gated = 13;
   }
 }
 message RequeueMergeUnknownWorkspace {}
@@ -133,3 +138,6 @@ message RequeueMergeWorkspaceClosed {}
 // The model is not in the login's catalog. No fields: the catalog is the
 // model selector's to show.
 message RequeueMergeNotInCatalog {}
+// The workspace is parked at its cold gate. No fields: the gate is the
+// workspace's feed's to show.
+message RequeueMergeColdGated {}

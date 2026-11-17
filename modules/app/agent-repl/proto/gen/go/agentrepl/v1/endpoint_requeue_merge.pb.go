@@ -289,6 +289,7 @@ type RequeueMergeError struct {
 	//	*RequeueMergeError_PlacementBehindNotInLine
 	//	*RequeueMergeError_WorkspaceClosed
 	//	*RequeueMergeError_NotInCatalog
+	//	*RequeueMergeError_ColdGated
 	Cause         isRequeueMergeError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -439,6 +440,15 @@ func (x *RequeueMergeError) GetNotInCatalog() *RequeueMergeNotInCatalog {
 	return nil
 }
 
+func (x *RequeueMergeError) GetColdGated() *RequeueMergeColdGated {
+	if x != nil {
+		if x, ok := x.Cause.(*RequeueMergeError_ColdGated); ok {
+			return x.ColdGated
+		}
+	}
+	return nil
+}
+
 type isRequeueMergeError_Cause interface {
 	isRequeueMergeError_Cause()
 }
@@ -511,6 +521,14 @@ type RequeueMergeError_NotInCatalog struct {
 	NotInCatalog *RequeueMergeNotInCatalog `protobuf:"bytes,12,opt,name=not_in_catalog,json=notInCatalog,proto3,oneof"`
 }
 
+type RequeueMergeError_ColdGated struct {
+	// The merge's workspace is parked at its cold gate. The gate takes a
+	// parked workspace's merge off its queue the moment it is raised, so a
+	// requeue would be evicted again at once; the user answers the gate
+	// first. The request stays off its queue.
+	ColdGated *RequeueMergeColdGated `protobuf:"bytes,13,opt,name=cold_gated,json=coldGated,proto3,oneof"`
+}
+
 func (*RequeueMergeError_UnknownWorkspace) isRequeueMergeError_Cause() {}
 
 func (*RequeueMergeError_WorkspaceRefMismatch) isRequeueMergeError_Cause() {}
@@ -534,6 +552,8 @@ func (*RequeueMergeError_PlacementBehindNotInLine) isRequeueMergeError_Cause() {
 func (*RequeueMergeError_WorkspaceClosed) isRequeueMergeError_Cause() {}
 
 func (*RequeueMergeError_NotInCatalog) isRequeueMergeError_Cause() {}
+
+func (*RequeueMergeError_ColdGated) isRequeueMergeError_Cause() {}
 
 type RequeueMergeUnknownWorkspace struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -885,6 +905,44 @@ func (*RequeueMergeNotInCatalog) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{12}
 }
 
+// The workspace is parked at its cold gate. No fields: the gate is the
+// workspace's feed's to show.
+type RequeueMergeColdGated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RequeueMergeColdGated) Reset() {
+	*x = RequeueMergeColdGated{}
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RequeueMergeColdGated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RequeueMergeColdGated) ProtoMessage() {}
+
+func (x *RequeueMergeColdGated) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RequeueMergeColdGated.ProtoReflect.Descriptor instead.
+func (*RequeueMergeColdGated) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP(), []int{13}
+}
+
 var File_agentrepl_v1_endpoint_requeue_merge_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
@@ -905,7 +963,7 @@ const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
 	"\x06result\"C\n" +
 	"\x13RequeueMergeSuccess\x12\x1f\n" +
 	"\bposition\x18\x01 \x01(\rH\x00R\bposition\x88\x01\x01B\v\n" +
-	"\t_position\"\x91\t\n" +
+	"\t_position\"\xd7\t\n" +
 	"\x11RequeueMergeError\x12Y\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v2*.agentrepl.v1.RequeueMergeUnknownWorkspaceH\x00R\x10unknownWorkspace\x12f\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v2..agentrepl.v1.RequeueMergeWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12M\n" +
@@ -920,7 +978,9 @@ const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
 	"\x1cplacement_behind_not_in_line\x18\n" +
 	" \x01(\v20.agentrepl.v1.MergeQueuePlacementBehindNotInLineH\x00R\x18placementBehindNotInLine\x12V\n" +
 	"\x10workspace_closed\x18\v \x01(\v2).agentrepl.v1.RequeueMergeWorkspaceClosedH\x00R\x0fworkspaceClosed\x12N\n" +
-	"\x0enot_in_catalog\x18\f \x01(\v2&.agentrepl.v1.RequeueMergeNotInCatalogH\x00R\fnotInCatalogB\a\n" +
+	"\x0enot_in_catalog\x18\f \x01(\v2&.agentrepl.v1.RequeueMergeNotInCatalogH\x00R\fnotInCatalog\x12D\n" +
+	"\n" +
+	"cold_gated\x18\r \x01(\v2#.agentrepl.v1.RequeueMergeColdGatedH\x00R\tcoldGatedB\a\n" +
 	"\x05cause\"\x1e\n" +
 	"\x1cRequeueMergeUnknownWorkspace\"E\n" +
 	" RequeueMergeWorkspaceRefMismatch\x12!\n" +
@@ -932,7 +992,8 @@ const file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc = "" +
 	"\x19RequeueMergeAlreadyLanded\"$\n" +
 	"\"RequeueMergeVersionAlreadyRecorded\"\x1d\n" +
 	"\x1bRequeueMergeWorkspaceClosed\"\x1a\n" +
-	"\x18RequeueMergeNotInCatalogB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x18RequeueMergeNotInCatalog\"\x17\n" +
+	"\x15RequeueMergeColdGatedB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescOnce sync.Once
@@ -946,7 +1007,7 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_requeue_merge_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_agentrepl_v1_endpoint_requeue_merge_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_requeue_merge_proto_goTypes = []any{
 	(*RequeueMergeRequest)(nil),                      // 0: agentrepl.v1.RequeueMergeRequest
 	(*RequeueMergeResponse)(nil),                     // 1: agentrepl.v1.RequeueMergeResponse
@@ -961,21 +1022,22 @@ var file_agentrepl_v1_endpoint_requeue_merge_proto_goTypes = []any{
 	(*RequeueMergeVersionAlreadyRecorded)(nil),       // 10: agentrepl.v1.RequeueMergeVersionAlreadyRecorded
 	(*RequeueMergeWorkspaceClosed)(nil),              // 11: agentrepl.v1.RequeueMergeWorkspaceClosed
 	(*RequeueMergeNotInCatalog)(nil),                 // 12: agentrepl.v1.RequeueMergeNotInCatalog
-	(*v1.WorkspaceRef)(nil),                          // 13: workspace.v1.WorkspaceRef
-	(*MergeQueuePlacement)(nil),                      // 14: agentrepl.v1.MergeQueuePlacement
-	(*MergeWorkspaceVersionIncrement)(nil),           // 15: agentrepl.v1.MergeWorkspaceVersionIncrement
-	(*WorkspaceRequester)(nil),                       // 16: agentrepl.v1.WorkspaceRequester
-	(*v11.AgentModel)(nil),                           // 17: conversation.v1.AgentModel
-	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 18: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 19: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
-	(*MergeQueuePlacementBehindNotInLine)(nil),       // 20: agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	(*RequeueMergeColdGated)(nil),                    // 13: agentrepl.v1.RequeueMergeColdGated
+	(*v1.WorkspaceRef)(nil),                          // 14: workspace.v1.WorkspaceRef
+	(*MergeQueuePlacement)(nil),                      // 15: agentrepl.v1.MergeQueuePlacement
+	(*MergeWorkspaceVersionIncrement)(nil),           // 16: agentrepl.v1.MergeWorkspaceVersionIncrement
+	(*WorkspaceRequester)(nil),                       // 17: agentrepl.v1.WorkspaceRequester
+	(*v11.AgentModel)(nil),                           // 18: conversation.v1.AgentModel
+	(*MergeWorkspaceVersionIncrementRequired)(nil),   // 19: agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	(*MergeWorkspaceVersionIncrementUnexpected)(nil), // 20: agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	(*MergeQueuePlacementBehindNotInLine)(nil),       // 21: agentrepl.v1.MergeQueuePlacementBehindNotInLine
 }
 var file_agentrepl_v1_endpoint_requeue_merge_proto_depIdxs = []int32{
-	13, // 0: agentrepl.v1.RequeueMergeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
-	14, // 1: agentrepl.v1.RequeueMergeRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
-	15, // 2: agentrepl.v1.RequeueMergeRequest.version:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
-	16, // 3: agentrepl.v1.RequeueMergeRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
-	17, // 4: agentrepl.v1.RequeueMergeRequest.model:type_name -> conversation.v1.AgentModel
+	14, // 0: agentrepl.v1.RequeueMergeRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	15, // 1: agentrepl.v1.RequeueMergeRequest.placement:type_name -> agentrepl.v1.MergeQueuePlacement
+	16, // 2: agentrepl.v1.RequeueMergeRequest.version:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrement
+	17, // 3: agentrepl.v1.RequeueMergeRequest.requester:type_name -> agentrepl.v1.WorkspaceRequester
+	18, // 4: agentrepl.v1.RequeueMergeRequest.model:type_name -> conversation.v1.AgentModel
 	2,  // 5: agentrepl.v1.RequeueMergeResponse.success:type_name -> agentrepl.v1.RequeueMergeSuccess
 	3,  // 6: agentrepl.v1.RequeueMergeResponse.error:type_name -> agentrepl.v1.RequeueMergeError
 	4,  // 7: agentrepl.v1.RequeueMergeError.unknown_workspace:type_name -> agentrepl.v1.RequeueMergeUnknownWorkspace
@@ -984,17 +1046,18 @@ var file_agentrepl_v1_endpoint_requeue_merge_proto_depIdxs = []int32{
 	7,  // 10: agentrepl.v1.RequeueMergeError.still_queued:type_name -> agentrepl.v1.RequeueMergeStillQueued
 	8,  // 11: agentrepl.v1.RequeueMergeError.branch_gone:type_name -> agentrepl.v1.RequeueMergeBranchGone
 	9,  // 12: agentrepl.v1.RequeueMergeError.already_landed:type_name -> agentrepl.v1.RequeueMergeAlreadyLanded
-	18, // 13: agentrepl.v1.RequeueMergeError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
-	19, // 14: agentrepl.v1.RequeueMergeError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
+	19, // 13: agentrepl.v1.RequeueMergeError.version_increment_required:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementRequired
+	20, // 14: agentrepl.v1.RequeueMergeError.version_increment_unexpected:type_name -> agentrepl.v1.MergeWorkspaceVersionIncrementUnexpected
 	10, // 15: agentrepl.v1.RequeueMergeError.version_already_recorded:type_name -> agentrepl.v1.RequeueMergeVersionAlreadyRecorded
-	20, // 16: agentrepl.v1.RequeueMergeError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
+	21, // 16: agentrepl.v1.RequeueMergeError.placement_behind_not_in_line:type_name -> agentrepl.v1.MergeQueuePlacementBehindNotInLine
 	11, // 17: agentrepl.v1.RequeueMergeError.workspace_closed:type_name -> agentrepl.v1.RequeueMergeWorkspaceClosed
 	12, // 18: agentrepl.v1.RequeueMergeError.not_in_catalog:type_name -> agentrepl.v1.RequeueMergeNotInCatalog
-	19, // [19:19] is the sub-list for method output_type
-	19, // [19:19] is the sub-list for method input_type
-	19, // [19:19] is the sub-list for extension type_name
-	19, // [19:19] is the sub-list for extension extendee
-	0,  // [0:19] is the sub-list for field type_name
+	13, // 19: agentrepl.v1.RequeueMergeError.cold_gated:type_name -> agentrepl.v1.RequeueMergeColdGated
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_requeue_merge_proto_init() }
@@ -1023,6 +1086,7 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_init() {
 		(*RequeueMergeError_PlacementBehindNotInLine)(nil),
 		(*RequeueMergeError_WorkspaceClosed)(nil),
 		(*RequeueMergeError_NotInCatalog)(nil),
+		(*RequeueMergeError_ColdGated)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
@@ -1030,7 +1094,7 @@ func file_agentrepl_v1_endpoint_requeue_merge_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc), len(file_agentrepl_v1_endpoint_requeue_merge_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
