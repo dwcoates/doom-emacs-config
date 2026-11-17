@@ -530,7 +530,7 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
   (should (equal (agent-repl-prompt-entries-opening "3.1.2") "3.1.2 - ")))
 
 (ert-deftest agent-repl-test-prompt-entries-every-opened-entry-is-opened-by-the-one-helper ()
-  "`o'/`O' and a branch click open entries through `agent-repl-prompt-entries-opening'."
+  "`M-j'/`M-k' and a branch click open entries through `agent-repl-prompt-entries-opening'."
   (dolist (case '(("prompt-entries.el" "agent-repl-prompt-entries--open-on")
                   ("input.el" "agent-repl-input-compose-entry")))
     ;; Arrange
@@ -556,8 +556,8 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
     (buffer-substring (point) (progn (forward-sexp) (point)))))
 
 (ert-deftest agent-repl-test-prompt-entries-every-line-beside-an-entry-opens-through-open-on ()
-  "`o'/`O' and `M-j'/`M-k' open their line through `agent-repl-prompt-entries--open-on', never by hand."
-  (dolist (name '("agent-repl-prompt-entries--open" "agent-repl-prompt-entries--open-sibling"))
+  "`M-j'/`M-k' open their line through `agent-repl-prompt-entries--open-on', never by hand."
+  (dolist (name '("agent-repl-prompt-entries--open-sibling"))
     ;; Arrange
     (let ((source (agent-repl-test-prompt-entries--defun-source name)))
       ;; Act / Assert
@@ -566,121 +566,37 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                            (string-match-p "(evil-open-\\(below\\|above\\) " source))
                      (list name t nil))))))
 
-(ert-deftest agent-repl-test-prompt-entries-o-on-an-entry-opens-the-next-nodes-entry ()
-  "`o' on an entry line opens a line below filled with the next node's label."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.2"))))
-    ;; Arrange
-    (goto-char 3)
-    ;; Act
-    (agent-repl-prompt-entries-open-below)
-    ;; Assert
-    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction) (plist-get (car asked) :label))
-                   '("1.2 - " (:arm :next) "1.1")))))
-
-(ert-deftest agent-repl-test-prompt-entries-O-on-an-entry-opens-the-previous-nodes-entry ()
-  "`O' on an entry line opens a line above filled with the previous node's label."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "2"))))
-    ;; Arrange
-    (goto-char 23)
-    ;; Act
-    (agent-repl-prompt-entries-open-above)
-    ;; Assert
-    (should (equal (list (agent-repl-test-prompt-entries--line) (plist-get (car asked) :direction))
-                   '("2 - " (:arm :previous))))))
-
-(ert-deftest agent-repl-test-prompt-entries-o-onto-an-entry-below-goes-to-it ()
-  "`o' whose next node already has an entry below goes to that line's end in insert mode."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "2.1"))))
-    ;; Arrange
-    (goto-char 3)
-    (let ((before (buffer-string)))
-      ;; Act
-      (agent-repl-prompt-entries-open-below)
-      ;; Assert
-      (should (equal (list (buffer-string) (point) (agent-repl-test-prompt-entries--line) inserting)
-                     (list before 29 "2.1 - no" t)))
-      (should (cl-some (lambda (m) (string-match-p "open-existing ws=ws-1 label=1.1 neighbor=2.1 at=21" m)) logs)))))
-
-(ert-deftest agent-repl-test-prompt-entries-O-onto-an-entry-above-goes-to-it ()
-  "`O' whose previous node already has an entry above goes to that line's end in insert mode."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.1"))))
-    ;; Arrange
-    (goto-char 23)
-    (let ((before (buffer-string)))
-      ;; Act
-      (agent-repl-prompt-entries-open-above)
-      ;; Assert
-      (should (equal (list (buffer-string) (point) inserting) (list before 10 t))))))
-
-(ert-deftest agent-repl-test-prompt-entries-o-onto-an-entry-only-above-opens-a-line ()
-  "`o' whose next node's entry stands only above still opens a new line below."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "1.1"))))
-    ;; Arrange
-    (goto-char 23)
-    ;; Act
-    (agent-repl-prompt-entries-open-below)
-    ;; Assert
-    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) inserting)
-                   '("1.1 - " 4 nil)))))
-
-(ert-deftest agent-repl-test-prompt-entries-O-onto-an-entry-only-below-opens-a-line ()
-  "`O' whose previous node's entry stands only below still opens a new line above."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :found :value (:label "2.1"))))
-    ;; Arrange
-    (goto-char 3)
-    ;; Act
-    (agent-repl-prompt-entries-open-above)
-    ;; Assert
-    (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) inserting)
-                   '("2.1 - " 1 nil)))))
-
-(ert-deftest agent-repl-test-prompt-entries-o-with-no-neighbor-opens-an-empty-line ()
-  "An entry with no neighbor that way opens the line empty."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :none :value nil)))
-    (goto-char 3)
-    (agent-repl-prompt-entries-open-below)
-    (should (equal (agent-repl-test-prompt-entries--line) ""))))
-
-(ert-deftest agent-repl-test-prompt-entries-o-off-an-entry-asks-nothing ()
-  "`o' on a line that is no entry opens it empty and asks the daemon nothing."
-  (agent-repl-test-prompt-entries--opening '(:arm :success :value (:neighbor (:arm :none :value nil)))
-    (goto-char 15)
-    (agent-repl-prompt-entries-open-below)
-    (should (equal (list (agent-repl-test-prompt-entries--line) asked) '("" nil)))))
-
-(ert-deftest agent-repl-test-prompt-entries-a-refused-neighbor-opens-an-empty-line ()
-  "A refusal opens the line empty and is recorded at info."
+(ert-deftest agent-repl-test-prompt-entries-a-refused-neighbor-leaves-the-entry ()
+  "A refusal leaves the entry as it was and is recorded at info."
   (agent-repl-test-prompt-entries--opening '(:arm :error :value (:cause (:arm :not-yet-adopted :value nil)))
     (goto-char 3)
-    (agent-repl-prompt-entries-open-below)
-    (should (equal (agent-repl-test-prompt-entries--line) ""))
+    (agent-repl-prompt-entries-step-on)
+    (should (equal (agent-repl-test-prompt-entries--line) "1.1 - yes"))
     (should (cl-some (lambda (m) (string-match-p "neighbor-refused ws=ws-1 label=1.1" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-an-unanswered-neighbor-is-warned ()
-  "A daemon that never answers opens the line empty and is logged at WARN."
+  "A daemon that never answers leaves the entry as it was and is logged at WARN."
   (agent-repl-test-prompt-entries--opening '(:signal agent-repl-connect-error "timed out")
     (goto-char 3)
-    (agent-repl-prompt-entries-open-below)
-    (should (equal (agent-repl-test-prompt-entries--line) ""))
+    (agent-repl-prompt-entries-step-on)
+    (should (equal (agent-repl-test-prompt-entries--line) "1.1 - yes"))
     (should (cl-some (lambda (m) (string-match-p "neighbor-failure ws=ws-1 label=1.1" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-a-neighbor-answered-by-an-unknown-arm-is-an-error ()
   "An answer arm the composer does not know is recorded at ERROR."
   (agent-repl-test-prompt-entries--opening '(:arm :mystery)
     (goto-char 3)
-    (agent-repl-prompt-entries-open-below)
+    (agent-repl-prompt-entries-step-on)
     (should (cl-some (lambda (m) (string-match-p "neighbor-unknown-arm ws=ws-1 arm=:mystery" m)) logs))))
 
 (ert-deftest agent-repl-test-prompt-entries-entry-keys-are-bound ()
-  "`o'/`O' bind in command mode, `C-i'/`C-o' in command and insert mode, `M-j'/`M-k' in insert mode."
+  "`o'/`O' stay unbound, `C-i'/`C-o' bind in command and insert mode, `M-j'/`M-k'/`C-SPC'/`C-S-SPC' in insert mode."
   (let (bound)
     (cl-letf (((symbol-function 'evil-define-key*)
                (lambda (state map &rest bindings) (push (list state (eq map agent-repl-input-mode-map) bindings) bound))))
       (agent-repl-prompt-entries-bind-keys))
     (should (equal (nreverse bound)
-                   (list (list 'normal t (list "o" #'agent-repl-prompt-entries-open-below
-                                               "O" #'agent-repl-prompt-entries-open-above))
-                         (list '(normal insert) t (list [C-i] (agent-repl-prompt-entries--on-entry-binding
+                   (list (list '(normal insert) t (list [C-i] (agent-repl-prompt-entries--on-entry-binding
                                                                     #'agent-repl-prompt-entries-step-on)))
                          (list '(normal insert) t (list (kbd "C-o") (agent-repl-prompt-entries--on-entry-binding
                                                               #'agent-repl-prompt-entries-step-back)))
@@ -690,6 +606,8 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
                                                           #'agent-repl-prompt-entries-open-sibling-below)))
                          (list 'insert t (list (kbd "C-SPC") (agent-repl-prompt-entries--on-entry-binding
                                                             #'agent-repl-prompt-entries-advance-or-open-sibling)))
+                         (list 'insert t (list (kbd "C-S-SPC") (agent-repl-prompt-entries--on-entry-binding
+                                                              #'agent-repl-prompt-entries-open-sibling-above)))
                          (list 'insert t (list (kbd "S-RET") (agent-repl-prompt-entries--on-entry-binding
                                                             #'agent-repl-prompt-entries-newline))))))))
 
@@ -819,7 +737,7 @@ is recorded on `flashed'."
                    '("1.2 - yes" (:arm :following) "1.1")))))
 
 (ert-deftest agent-repl-test-prompt-entries-C-o-relabels-the-entry-to-the-previous-node ()
-  "`C-o' on an entry relabels it to the node `O' would answer, its words kept."
+  "`C-o' on an entry relabels it to the node `C-o' steps back to, its words kept."
   (agent-repl-test-prompt-entries--stepping (agent-repl-test-prompt-entries--found "1")
     ;; Arrange
     (goto-char 10)
@@ -1082,6 +1000,18 @@ is recorded on `flashed'."
     ;; Assert
     (should (equal (list (agent-repl-test-prompt-entries--line) flashed)
                    '("1.1 -    " (("ws-1" "1.1 is the last sibling to answer")))))))
+
+(ert-deftest agent-repl-test-prompt-entries-C-S-SPC-opens-the-sibling-above ()
+  "`C-S-SPC' on `2.2 - no' opens `2.1 - ' above, as `M-j' does."
+  (agent-repl-test-prompt-entries--siblings "2.2"
+    ;; Arrange
+    (goto-char 25)
+    (let ((command (nth 2 (alist-get (kbd "C-S-SPC") agent-repl-prompt-entries--insert-entry-keys nil nil #'equal))))
+      ;; Act
+      (funcall command)
+      ;; Assert
+      (should (equal (list (agent-repl-test-prompt-entries--line) (line-number-at-pos) asked)
+                     '("2.1 - " 3 nil))))))
 
 (ert-deftest agent-repl-test-prompt-entries-C-SPC-on-a-filled-entry-opens-the-sibling-below ()
   "`C-SPC' on `1.1 - yes' opens `1.2 - ' below, as `M-k' does."
