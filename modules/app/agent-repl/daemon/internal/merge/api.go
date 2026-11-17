@@ -839,6 +839,12 @@ type DeployCheckWorkspaces interface {
 	// Resume shows a standing-by workspace again, for the brief sending it
 	// back to work.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error
+	// Refresh brings the standing fixer's worktree to its parent's tip
+	// before a new brief.
+	Refresh(ctx context.Context, ws ids.WorkspaceID) error
+	// Compact compacts a standing deploy check's conversation by Haiku now,
+	// answering whether it had one to compact.
+	Compact(ctx context.Context, ws ids.WorkspaceID) (bool, error)
 }
 
 // Meter records the merge queue's metrics. Each call is an atomic add and

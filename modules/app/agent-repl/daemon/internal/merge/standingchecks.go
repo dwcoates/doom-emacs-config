@@ -7,28 +7,30 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/wsm"
 )
 
-// THE STANDING DEPLOY CHECKS (owner ruling, 2026-11-17). A repository whose
-// queue checks its deploys keeps ONE intake, ONE remediation and ONE
-// escalation workspace across every deploy, never one per check: each role's
+// THE STANDING DEPLOY CHECKS (owner rulings, 2026-11-17). A repository whose
+// queue checks its deploys keeps TWO workspaces across every deploy, never
+// one per check: a hidden INTAKE, and a FIXER, in sight in its repository's
+// section, which takes both a dispatch (fix and finish on its own) and an
+// escalation (propose a plan, and finish once the user agrees). Each
 // conversation carries what the earlier checks found, tried and settled, and
-// is never cleared, only compacted (compactStanding). The daemon prompts the
-// standing workspace for each check; it makes one only for a role the queue
-// has none in, and reopens one that was closed (a remediation's fix deploys
-// and closes it; the user may close any).
+// is never cleared, only compacted (compactStanding). Both stay open and
+// warm (wsm.Workspace.StandingDeployCheck). The daemon makes one only for a
+// role the queue has none in, and reopens one the user closed.
 
-// standingNames is each role's workspace name. A repository holds each name
-// once; a closed standing workspace keeps it, and is reopened.
-var standingNames = map[DeployCheckRole]string{
-	DeployCheckIntake:      "deploy-intake",
-	DeployCheckRemediation: "deploy-remediation",
-	DeployCheckEscalation:  "deploy-escalation",
+// standingNames is each standing role's workspace name. A repository holds
+// each name once; a closed standing workspace keeps it, and is reopened.
+var standingNames = map[wsm.DeployCheckRoleName]string{
+	wsm.StandingIntake: "deploy-intake",
+	wsm.StandingFixer:  "deploy-fixer",
 }
 
-// standingRole is ROLE as the store spells it. A role outside the three is a
-// caller's defect and panics.
+// standingRole is ROLE as the store spells it: the fixer plays both the
+// remediation and the escalation. A role outside the three is a caller's
+// defect and panics.
 func standingRole(role DeployCheckRole) wsm.DeployCheckRoleName {
 	switch role {
 	case DeployCheckIntake:
@@ -46,9 +48,8 @@ type standing struct {
 	ws ids.WorkspaceID
 	// briefed is whether it was prompted in its role before.
 	briefed bool
-	// made is whether this check made it: a made intake's or
-	// remediation's effort is set once the check records its role (intakeOf,
-	// dispatch).
+	// made is whether this check made it: a made intake's effort is set
+	// once the check records its role (intakeOf).
 	made bool
 }
 
@@ -89,54 +90,63 @@ func (o *orchestrator) standingWorkspace(ctx context.Context, q checkedQueue, ro
 	return standing{ws: made, made: true}, nil
 }
 
-// makeStanding makes queue Q's standing workspace in ROLE and records it,
-// with its effort set: an escalation's finish lands directly, recorded
-// before anything prompts it (RecordDeployEscalation). An intake's and a
-// remediation's effort is left to their caller: setting it starts the
-// workspace's shim, whose landing reads the role the check records after
-// this (intakeOf, dispatch).
+// makeStanding makes queue Q's standing workspace in ROLE and records it.
+// The fixer is made in sight and in remote control (CreateDeployEscalation),
+// and recorded as landing directly before anything prompts it
+// (RecordDeployEscalation), so its finish is the daemon's to land whichever
+// brief it works. Every effort is its caller's: the intake's once the check
+// records it (intakeOf), the fixer's at each brief, by its kind.
 func (o *orchestrator) makeStanding(ctx context.Context, q checkedQueue, role DeployCheckRole, fields dlog.Context) (ids.WorkspaceID, error) {
-	name := standingNames[role]
+	stored := standingRole(role)
+	name := standingNames[stored]
 	fields = withField(fields, "name", name)
 	var (
 		made wsm.Workspace
 		err  error
 	)
-	switch role {
-	case DeployCheckIntake:
+	if stored == wsm.StandingIntake {
 		made, err = o.deps.DeployChecks.CreateDeployIntake(ctx, q.repository.Dir, name)
-	case DeployCheckRemediation:
-		made, err = o.deps.DeployChecks.CreateDeployRemediation(ctx, q.repository.Dir, name)
-	case DeployCheckEscalation:
+	} else {
 		made, err = o.deps.DeployChecks.CreateDeployEscalation(ctx, q.repository.Dir, name)
-	default:
-		panic(fmt.Sprintf("merge: no standing workspace for %v", role))
 	}
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the standing deploy check workspace could not be made", withField(fields, "error", err.Error()))
-		return "", fmt.Errorf("merge: make the standing %s workspace %s: %w", role, name, err)
+		return "", fmt.Errorf("merge: make the standing %s workspace %s: %w", stored, name, err)
 	}
 	fields = withField(fields, "workspace", string(made.ID))
-	if err := o.deps.DB.RecordStandingDeployCheck(ctx, q.key, standingRole(role), made.ID); err != nil {
+	if err := o.deps.DB.RecordStandingDeployCheck(ctx, q.key, stored, made.ID); err != nil {
 		o.deps.Log.Global().Error(opMediation, "the standing deploy check workspace was made but could not be recorded", withField(fields, "error", err.Error()))
-		return "", fmt.Errorf("merge: record the standing %s workspace %s: %w", role, made.ID, err)
+		return "", fmt.Errorf("merge: record the standing %s workspace %s: %w", stored, made.ID, err)
 	}
-	if role == DeployCheckEscalation {
+	if stored == wsm.StandingFixer {
 		if err := o.deps.DB.RecordDeployEscalation(ctx, made.ID, q.key, o.deps.Now()); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the standing escalation could not be recorded as landing directly", withField(fields, "error", err.Error()))
-			return "", fmt.Errorf("merge: record the standing escalation %s: %w", made.ID, err)
+			o.deps.Log.Global().Error(opMediation, "the standing fixer could not be recorded as landing directly", withField(fields, "error", err.Error()))
+			return "", fmt.Errorf("merge: record the standing fixer %s: %w", made.ID, err)
 		}
-	}
-	if role != DeployCheckEscalation {
-		o.deps.Log.Global().Info(opMediation, "made the queue's standing deploy check workspace; its effort is set once the check records its role", fields)
-		return made.ID, nil
-	}
-	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, made.ID, role); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the standing deploy check workspace's effort could not be set", withField(fields, "error", err.Error()))
-		return "", fmt.Errorf("merge: set the standing %s workspace %s's effort: %w", role, made.ID, err)
 	}
 	o.deps.Log.Global().Info(opMediation, "made the queue's standing deploy check workspace", fields)
 	return made.ID, nil
+}
+
+// standingFixer answers queue Q's standing fixer for a brief of ROLE (a
+// remediation's or an escalation's), ready to be briefed: its worktree at
+// the main branch's tip (Refresh), and its effort the brief's (owner
+// ruling, 2026-11-17: one workspace, two briefs).
+func (o *orchestrator) standingFixer(ctx context.Context, q checkedQueue, role DeployCheckRole, fields dlog.Context) (standing, error) {
+	fixer, err := o.standingWorkspace(ctx, q, role, fields)
+	if err != nil {
+		return standing{}, err
+	}
+	fields = withField(withField(fields, "fixer", string(fixer.ws)), "role", role.String())
+	if err := o.deps.DeployChecks.Refresh(ctx, fixer.ws); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the standing fixer's worktree could not be brought to the main branch's tip; it is not briefed", withField(fields, "error", err.Error()))
+		return standing{}, fmt.Errorf("merge: refresh the standing fixer %s: %w", fixer.ws, err)
+	}
+	if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, fixer.ws, role); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the standing fixer's effort could not be set for its brief; it is not briefed", withField(fields, "error", err.Error()))
+		return standing{}, fmt.Errorf("merge: set the standing fixer %s's effort: %w", fixer.ws, err)
+	}
+	return fixer, nil
 }
 
 // markBriefed records queue Q's standing workspace in ROLE briefed in its
@@ -171,13 +181,15 @@ func (o *orchestrator) noteQuietCheck(ctx context.Context, q wsm.RepoKey, fields
 	}
 }
 
-// compactStanding owes each of queue Q's standing workspaces a compaction of
-// its conversation by the cold gate's summarizer (Haiku) at its next session
-// start: a conversation is never cleared, only compacted, once a quiet run
-// follows work. The intake and the remediation stand down between checks,
-// so their next brief starts them; a session still up compacts when it next
-// starts.
+// compactStanding compacts each of queue Q's standing workspaces by Haiku
+// NOW (owner ruling, 2026-11-17): a conversation is never cleared, only
+// compacted, once a quiet run follows work, and never left for a later
+// check to wait on. Both are idle by construction: the intake's session ended
+// at its decision, and the fixer works only while a check holds the queue,
+// which a quiet run means none does. The compactions run off the decision's
+// path, under the mediation's lifetime, since each takes a summarizer's run.
 func (o *orchestrator) compactStanding(ctx context.Context, q wsm.RepoKey, fields dlog.Context) {
+	var targets []ids.WorkspaceID
 	for _, role := range wsm.StandingDeployCheckRoles {
 		roleFields := withField(fields, "role", string(role))
 		recorded, found, err := o.deps.DB.StandingDeployCheckOf(ctx, q, role)
@@ -185,17 +197,35 @@ func (o *orchestrator) compactStanding(ctx context.Context, q wsm.RepoKey, field
 			o.deps.Log.Global().Error(opMediation, "could not read a standing workspace to compact; it is not compacted", withField(roleFields, "error", err.Error()))
 			continue
 		}
-		if !found {
-			continue
+		if found {
+			targets = append(targets, recorded.Workspace)
 		}
-		roleFields = withField(roleFields, "workspace", string(recorded.Workspace))
-		owed, err := o.deps.DB.OweCompaction(ctx, recorded.Workspace)
-		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not owe a standing workspace its compaction; it is not compacted", withField(roleFields, "error", err.Error()))
-			continue
-		}
-		o.deps.Log.Global().Info(opMediation, "the quiet run after the checks' work owes the standing workspace a compaction at its next start", withField(roleFields, "owed", owed))
 	}
+	compact := func(ctx context.Context) {
+		for _, ws := range targets {
+			wsFields := withField(fields, "workspace", string(ws))
+			compacted, err := o.deps.DeployChecks.Compact(ctx, ws)
+			if err != nil {
+				o.deps.Log.Global().Error(opMediation, "the quiet run after the checks' work could not compact a standing workspace", withField(wsFields, "error", err.Error()))
+				continue
+			}
+			o.deps.Log.Global().Info(opMediation, "the quiet run after the checks' work compacted the standing workspace", withField(wsFields, "compacted", compacted))
+		}
+	}
+	life, leave, entered := o.enterMediation()
+	if !entered {
+		o.deps.Log.Global().Info(opMediation, mediationNotRun, fields)
+		return
+	}
+	if !o.async {
+		defer leave()
+		compact(life)
+		return
+	}
+	inflight.Go(func() {
+		defer leave()
+		compact(life)
+	})
 }
 
 // adoptStanding makes the workspace check M has at work in each role queue Q
@@ -211,7 +241,7 @@ func (o *orchestrator) adoptStanding(ctx context.Context, q checkedQueue, m *wsm
 	for _, at := range []struct {
 		role wsm.DeployCheckRoleName
 		ws   ids.WorkspaceID
-	}{{wsm.StandingIntake, m.Intake}, {wsm.StandingFixer, m.Remediation}, {wsm.StandingFixer, m.Escalation}} {
+	}{{wsm.StandingIntake, m.Intake}, {wsm.StandingFixer, m.Escalation}, {wsm.StandingFixer, m.Remediation}} {
 		if at.ws == "" {
 			continue
 		}
@@ -231,6 +261,19 @@ func (o *orchestrator) adoptStanding(ctx context.Context, q checkedQueue, m *wsm
 		if err := o.deps.DB.MarkStandingBriefed(ctx, q.key, at.role); err != nil {
 			o.deps.Log.Global().Error(opMediation, "adopted the check's workspace as the standing one but could not record it briefed", withField(fields, "error", err.Error()))
 			continue
+		}
+		// AN ADOPTED FIXER LANDS DIRECTLY WHICHEVER BRIEF IT WORKS, as a made
+		// one does (makeStanding): a remediation adopted is recorded so.
+		if at.role == wsm.StandingFixer {
+			if _, escalation, err := o.deps.DB.DeployEscalationOf(ctx, at.ws); err != nil || !escalation {
+				if err == nil {
+					err = o.deps.DB.RecordDeployEscalation(ctx, at.ws, q.key, o.deps.Now())
+				}
+				if err != nil {
+					o.deps.Log.Global().Error(opMediation, "adopted the standing fixer but could not record it as landing directly", withField(fields, "error", err.Error()))
+					continue
+				}
+			}
 		}
 		o.deps.Log.Global().Info(opMediation, "adopted the check's workspace as the queue's standing one", fields)
 	}

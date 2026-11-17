@@ -627,14 +627,21 @@ func (o *orchestrator) remediationDeployed(ctx context.Context, repo wsm.RepoKey
 
 // closeRemediation closes F's workspace as a landed merge closes its own: it
 // is stamped merged and closed, its session stopped, its worktree removed and
-// its landed branch retired. A later dispatch restores it from its branch
-// (workspace Open), cut again at the main branch's tip.
+// its landed branch retired. The repository's standing fixer is the one
+// workspace it leaves open, for the next brief.
 func (o *orchestrator) closeRemediation(ctx context.Context, f wsm.RemediationFinish, fields dlog.Context) error {
 	record, err := o.deps.DB.Workspace(ctx, f.Workspace)
 	if err != nil {
 		return err
 	}
 	if record.Closed {
+		return nil
+	}
+	// THE STANDING FIXER STAYS OPEN (owner ruling, 2026-11-17): warm, in
+	// its repository's section, with its conversation and its worktree, for
+	// the next brief, which brings its worktree to the main branch's tip.
+	if record.StandingDeployCheck {
+		o.deps.Log.Global().Info(opRemediationFinish, "the landed fix deployed; the standing fixer stays open for the next brief", fields)
 		return nil
 	}
 	if err := o.deps.DB.SetMergedAt(ctx, f.Workspace, o.deps.Now(), nil); err != nil {

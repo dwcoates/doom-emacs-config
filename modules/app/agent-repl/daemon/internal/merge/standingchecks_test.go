@@ -73,8 +73,8 @@ func TestStandingWorkspaceMakesOneForARoleWithNone(t *testing.T) {
 		wantEfforts []string
 	}{
 		{name: "an intake, its effort left for its check", role: DeployCheckIntake, wantName: "deploy-intake"},
-		{name: "a remediation, its effort left for its dispatch", role: DeployCheckRemediation, wantName: "deploy-remediation"},
-		{name: "an escalation, recorded landing directly and its effort set", role: DeployCheckEscalation, wantName: "deploy-escalation", wantEfforts: []string{"escalation:ws-escalate:recorded=false"}},
+		{name: "the fixer for a remediation, its effort left for its brief", role: DeployCheckRemediation, wantName: "deploy-fixer"},
+		{name: "the fixer for an escalation, its effort left for its brief", role: DeployCheckEscalation, wantName: "deploy-fixer"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -109,7 +109,7 @@ func TestStandingWorkspaceMakesANewOneWhenTheRecordedOneIsGone(t *testing.T) {
 	got, err := h.o.standingWorkspace(context.Background(), queueOf(t, h), DeployCheckRemediation, dlog.Context{})
 
 	// Assert
-	if err != nil || got.ws != "ws-remedy" || !got.made {
+	if err != nil || got.ws != "ws-fixer" || !got.made {
 		t.Fatalf("standingWorkspace = (%+v, %v), want a new one made", got, err)
 	}
 }
@@ -178,7 +178,7 @@ func TestAQuietRunAfterWorkCompactsEveryStandingWorkspace(t *testing.T) {
 		quiet int
 		want  []ids.WorkspaceID
 	}{
-		{name: "three quiet checks after work compact each standing workspace", work: true, quiet: 3, want: []ids.WorkspaceID{"ws-intake", "ws-remedy", "ws-escalate"}},
+		{name: "three quiet checks after work compact each standing workspace", work: true, quiet: 3, want: []ids.WorkspaceID{"ws-intake", "ws-fixer"}},
 		{name: "two quiet checks after work compact nothing yet", work: true, quiet: 2},
 		{name: "quiet checks with no work before compact nothing", quiet: 3},
 	}
@@ -190,7 +190,7 @@ func TestAQuietRunAfterWorkCompactsEveryStandingWorkspace(t *testing.T) {
 			for _, s := range []struct {
 				role wsm.DeployCheckRoleName
 				ws   ids.WorkspaceID
-			}{{wsm.StandingIntake, "ws-intake"}, {wsm.StandingFixer, "ws-remedy"}, {wsm.StandingFixer, "ws-escalate"}} {
+			}{{wsm.StandingIntake, "ws-intake"}, {wsm.StandingFixer, "ws-fixer"}} {
 				standingIn(t, h, s.role, s.ws, false)
 			}
 			if tt.work {
@@ -203,8 +203,8 @@ func TestAQuietRunAfterWorkCompactsEveryStandingWorkspace(t *testing.T) {
 			approvedChecks(t, h, tt.quiet)
 
 			// Assert
-			if !slices.Equal(h.db.owedCompactions, tt.want) {
-				t.Fatalf("owed compactions %v, want %v", h.db.owedCompactions, tt.want)
+			if !slices.Equal(h.checks.compacted, tt.want) {
+				t.Fatalf("compacted %v, want %v", h.checks.compacted, tt.want)
 			}
 		})
 	}
@@ -235,8 +235,8 @@ func TestADispatchArmsTheCompaction(t *testing.T) {
 	}
 
 	// Assert: the standing remediation the dispatch made is owed its compaction.
-	if !slices.Contains(h.db.owedCompactions, "ws-remedy") {
-		t.Fatalf("owed compactions %v, want the standing remediation's", h.db.owedCompactions)
+	if !slices.Contains(h.checks.compacted, "ws-fixer") {
+		t.Fatalf("compacted %v, want the standing fixer's", h.checks.compacted)
 	}
 }
 
@@ -279,7 +279,7 @@ func TestReleaseEscalation(t *testing.T) {
 				Message: "the user released the escalation's hold; its check is released and the queue advances"}); !ok {
 				t.Fatalf("records = %v, want the release recorded", h.logs.Records())
 			}
-			if h.checks.closed != nil && slices.Contains(h.checks.closed, "ws-escalate") {
+			if h.checks.closed != nil && slices.Contains(h.checks.closed, "ws-fixer") {
 				t.Fatal("the release closed the escalation workspace; it stays open")
 			}
 		})
@@ -311,9 +311,6 @@ func TestTheChecksWorkspacesAreAdoptedAsTheStandingOnes(t *testing.T) {
 		if err != nil || !found || got != (wsm.StandingDeployCheck{Workspace: want.ws, Briefed: true}) {
 			t.Fatalf("standing %s = (%+v, %v, %v), want %s adopted, briefed", want.role, got, found, err, want.ws)
 		}
-	}
-	if _, found, _ := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingFixer); found {
-		t.Fatal("a remediation was adopted though the check has none")
 	}
 }
 
@@ -364,8 +361,8 @@ func TestEarlierEscalationsAreRetiredOnceTheStandingOneExists(t *testing.T) {
 			oneOffEscalation(t, h, "ws-a", false)
 			oneOffEscalation(t, h, "ws-closed", true)
 			if tt.standing {
-				standingIn(t, h, wsm.StandingFixer, "ws-escalate", false)
-				oneOffEscalation(t, h, "ws-escalate", false)
+				standingIn(t, h, wsm.StandingFixer, "ws-fixer", false)
+				oneOffEscalation(t, h, "ws-fixer", false)
 			}
 			m := &wsm.Mediation{Escalation: tt.held}
 
@@ -385,7 +382,7 @@ func TestAnEarlierEscalationThatCannotBeRetiredIsRecorded(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	oneOffEscalation(t, h, "ws-a", false)
-	standingIn(t, h, wsm.StandingFixer, "ws-escalate", false)
+	standingIn(t, h, wsm.StandingFixer, "ws-fixer", false)
 	h.checks.closeErr = errors.New("database is locked")
 
 	// Act
@@ -394,5 +391,49 @@ func TestAnEarlierEscalationThatCannotBeRetiredIsRecorded(t *testing.T) {
 	// Assert
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "an earlier escalation could not be retired"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
+	}
+}
+
+func TestAnAdoptedRemediationLandsDirectlyAsTheFixer(t *testing.T) {
+	// Arrange: a check dispatched to a remediation made before the fixer.
+	h := checked(t)
+	owe(t, h)
+	withIntake(t, h, deployStarted)
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-old-remedy"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	h.o.adoptStanding(context.Background(), queueOf(t, h), owedCheck(t, h))
+
+	// Assert
+	got, found, err := h.db.StandingDeployCheckOf(context.Background(), mediationKey(h), wsm.StandingFixer)
+	repo, lands, landErr := h.db.DeployEscalationOf(context.Background(), "ws-old-remedy")
+	if err != nil || !found || got.Workspace != "ws-old-remedy" || landErr != nil || !lands || repo != mediationKey(h) {
+		t.Fatalf("fixer (%+v, %v, %v), lands directly (%v, %v); want the remediation adopted, landing directly", got, found, err, lands, landErr)
+	}
+}
+
+func TestTheStandingFixerStaysOpenAfterItsFixDeploys(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.db.mu.Lock()
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, StandingDeployCheck: true}
+	h.db.mu.Unlock()
+
+	// Act
+	err := h.o.closeRemediation(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h)}, dlog.Context{})
+
+	// Assert
+	h.db.mu.Lock()
+	record := h.db.workspaces["ws-fixer"]
+	h.db.mu.Unlock()
+	if err != nil || record.Closed {
+		t.Fatalf("closeRemediation = %v, closed %v; want the fixer left open", err, record.Closed)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opRemediationFinish,
+		Message: "the landed fix deployed; the standing fixer stays open for the next brief"}); !ok {
+		t.Fatalf("records = %v, want the fixer kept open recorded", h.logs.Records())
 	}
 }

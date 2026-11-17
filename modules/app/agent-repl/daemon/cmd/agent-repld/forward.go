@@ -239,6 +239,18 @@ func (f *verbsForwarder) answerColdGate(ctx context.Context, ws ids.WorkspaceID,
 	return verbs.AnswerColdGate(ctx, ws, answer)
 }
 
+// answerDeployCheckColdGate answers a gate raised on a standing deploy check
+// with compact-and-resume, for the fleet's gate hook. A failure is the
+// verb's to record; one asked before the verbs are bound is answered as an
+// error.
+func (f *verbsForwarder) answerDeployCheckColdGate(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := f.bound("a cold gate was raised on a standing deploy check")
+	if err != nil {
+		return err
+	}
+	return verbs.AnswerDeployCheckColdGate(ctx, ws)
+}
+
 // OnSignedIn is a completed sign-in's retry of a start the vendor rejected for
 // the credential, for the sign-in fan-out, built BEFORE the verbs that own
 // it. A sign-in completes only through a login flow the server serves, so one
@@ -405,6 +417,22 @@ func (d deployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
 		return err
 	}
 	return verbs.StandByDeployCheck(ctx, ws)
+}
+
+func (d deployChecks) Refresh(ctx context.Context, ws ids.WorkspaceID) error {
+	verbs, err := d.f.bound("the merge queue refreshed the standing fixer's worktree")
+	if err != nil {
+		return err
+	}
+	return verbs.RefreshDeployCheck(ctx, ws)
+}
+
+func (d deployChecks) Compact(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
+	verbs, err := d.f.bound("the merge queue compacted a standing deploy check")
+	if err != nil {
+		return false, err
+	}
+	return verbs.CompactDeployCheck(ctx, ws)
 }
 
 func (d deployChecks) Resume(ctx context.Context, ws ids.WorkspaceID) error {

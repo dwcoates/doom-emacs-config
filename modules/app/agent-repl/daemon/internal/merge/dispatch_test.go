@@ -24,7 +24,7 @@ func dispatched(h *harness, d Decision) error {
 	return h.o.DecideMediation(context.Background(), "ws-intake", d)
 }
 
-// withRemediation records "ws-remedy" as the queue's standing remediation,
+// withRemediation records "ws-fixer" as the queue's standing remediation,
 // briefed and closed by its landed fix: a fix dispatched to it for the check
 // owed at deployStarted, whose deploy began a minute later and is told to
 // the standing intake.
@@ -32,15 +32,15 @@ func withRemediation(t *testing.T, h *harness) {
 	t.Helper()
 	ctx := context.Background()
 	h.db.mu.Lock()
-	h.db.workspaces["ws-remedy"] = wsm.Workspace{ID: "ws-remedy", Name: "deploy-remediation", Repo: theRepository, Closed: true}
+	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-fixer", Repo: theRepository, Closed: true}
 	h.db.mu.Unlock()
-	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), wsm.StandingFixer, "ws-remedy"); err != nil {
+	if err := h.db.RecordStandingDeployCheck(ctx, mediationKey(h), wsm.StandingFixer, "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.db.MarkStandingBriefed(ctx, mediationKey(h), wsm.StandingFixer); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
 	fixDeploysAt(t, h, deployStarted.Add(time.Minute))
@@ -58,14 +58,14 @@ func TestTheFirstDispatchMakesTheStandingRemediationAndBriefsItTheProblems(t *te
 
 	// Assert
 	m := owedCheck(t, h)
-	if err != nil || m == nil || !m.Dispatched || m.Remediation != "ws-remedy" || m.LastDispatchedAt == nil {
+	if err != nil || m == nil || !m.Dispatched || m.Remediation != "ws-fixer" || m.LastDispatchedAt == nil {
 		t.Fatalf("dispatch = %v, check %+v; want it dispatched to the made remediation", err, m)
 	}
-	if !slices.Equal(h.checks.made, []string{"deploy-remediation"}) || h.briefNames[len(h.briefNames)-1] != BriefDeployRemediation {
+	if !slices.Equal(h.checks.made, []string{"deploy-fixer"}) || h.briefNames[len(h.briefNames)-1] != BriefDeployRemediation {
 		t.Fatalf("made %v, want one remediation workspace", h.checks.made)
 	}
 	subs := h.queue.submissions
-	if len(subs) != 1 || subs[0].WS != "ws-remedy" || subs[0].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
+	if len(subs) != 1 || subs[0].WS != "ws-fixer" || subs[0].Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION {
 		t.Fatalf("submitted %+v, want the remediation briefed once", subs)
 	}
 	values := h.briefValues[len(h.briefValues)-1]
@@ -88,7 +88,7 @@ func TestALaterDispatchReopensTheStandingRemediationAndBriefsOnlyTheNews(t *test
 	err := dispatched(h, Decision{})
 
 	// Assert
-	if err != nil || !slices.Equal(h.checks.reopened, []ids.WorkspaceID{"ws-remedy"}) || len(h.checks.made) != 0 {
+	if err != nil || !slices.Equal(h.checks.reopened, []ids.WorkspaceID{"ws-fixer"}) || len(h.checks.made) != 0 {
 		t.Fatalf("dispatch = %v, reopened %v, made %v; want the standing remediation reopened", err, h.checks.reopened, h.checks.made)
 	}
 	if len(h.queue.submissions) != 1 || h.briefNames[len(h.briefNames)-1] != BriefDeployRemediationRestored {
@@ -99,14 +99,14 @@ func TestALaterDispatchReopensTheStandingRemediationAndBriefsOnlyTheNews(t *test
 	}
 }
 
-func TestTheStandingRemediationIsShownAgain(t *testing.T) {
+func TestTheStandingFixerIsRefreshedBeforeItsBrief(t *testing.T) {
 	tests := []struct {
-		name      string
-		resumeErr error
-		wantErr   bool
+		name       string
+		refreshErr error
+		wantErr    bool
 	}{
-		{name: "the standing remediation is shown"},
-		{name: "one that cannot be shown holds the queue for the intake", resumeErr: errors.New("database is locked"), wantErr: true},
+		{name: "the fixer's worktree is brought to the main branch's tip"},
+		{name: "one that cannot be refreshed holds the queue for the intake", refreshErr: errors.New("git gone"), wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,30 +115,24 @@ func TestTheStandingRemediationIsShownAgain(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			withRemediation(t, h)
-			h.checks.resumeErr = tt.resumeErr
+			h.checks.refreshErr = tt.refreshErr
 
 			// Act
 			err := dispatched(h, Decision{})
 
 			// Assert
-			if !slices.Equal(h.checks.resumed, []ids.WorkspaceID{"ws-remedy"}) {
-				t.Fatalf("resumed %v, want the standing remediation shown", h.checks.resumed)
-			}
-			if (err != nil) != tt.wantErr {
-				t.Fatalf("dispatch = %v, want an error %v", err, tt.wantErr)
+			if !slices.Equal(h.checks.refreshed, []ids.WorkspaceID{"ws-fixer"}) || (err != nil) != tt.wantErr {
+				t.Fatalf("dispatch = %v, refreshed %v; want the standing fixer refreshed, an error %v", err, h.checks.refreshed, tt.wantErr)
 			}
 			if !tt.wantErr {
 				return
 			}
-			if m := owedCheck(t, h); m == nil || m.Dispatched {
-				t.Fatalf("check %+v, want it still owed with nothing dispatched", m)
-			}
-			if len(h.queue.submissions) != 0 {
-				t.Fatalf("submitted %v, want the hidden remediation unbriefed", h.queue.submissions)
+			if m := owedCheck(t, h); m == nil || m.Dispatched || len(h.queue.submissions) != 0 {
+				t.Fatalf("check %+v, submitted %d; want it still owed, nothing dispatched or briefed", m, len(h.queue.submissions))
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-				Message: "the standing remediation workspace could not be shown; the queue stays held for the intake"}); !ok {
-				t.Fatalf("records = %v, want the failed show at ERROR", h.logs.Records())
+				Message: "the standing fixer's worktree could not be brought to the main branch's tip; it is not briefed"}); !ok {
+				t.Fatalf("records = %v, want the failed refresh at ERROR", h.logs.Records())
 			}
 		})
 	}
@@ -155,7 +149,7 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 			arrange: func(t *testing.T, h *harness) {
 				for i := 1; i <= theBound; i++ {
 					at := deployStarted.Add(time.Duration(i-1) * time.Minute)
-					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, "ws-remedy"); err != nil {
+					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, "ws-fixer"); err != nil {
 						t.Fatal(err)
 					}
 					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
@@ -272,14 +266,13 @@ func TestRenderProblemsNumbersEachWithItsEvidence(t *testing.T) {
 	}
 }
 
-func TestAMadeRemediationsEffortIsSetOnceItsDispatchIsRecorded(t *testing.T) {
+func TestTheFixersEffortIsSetForEachDispatch(t *testing.T) {
 	tests := []struct {
-		name        string
-		standing    bool
-		wantEfforts []string
+		name     string
+		standing bool
 	}{
-		{name: "a made remediation", wantEfforts: []string{"remediation:ws-remedy:recorded=true"}},
-		{name: "the standing remediation keeps the effort it ran at", standing: true},
+		{name: "a made fixer"},
+		{name: "the standing fixer"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -295,8 +288,8 @@ func TestAMadeRemediationsEffortIsSetOnceItsDispatchIsRecorded(t *testing.T) {
 			err := dispatched(h, Decision{})
 
 			// Assert
-			if err != nil || !slices.Equal(h.checks.efforts, tt.wantEfforts) {
-				t.Fatalf("dispatch = %v, efforts %v; want %v", err, h.checks.efforts, tt.wantEfforts)
+			if err != nil || !slices.Equal(h.checks.efforts, []string{"remediation:ws-fixer:recorded=false"}) {
+				t.Fatalf("dispatch = %v, efforts %v; want the remediation's effort set for the brief", err, h.checks.efforts)
 			}
 		})
 	}
@@ -317,7 +310,7 @@ func TestARemediationWhoseEffortCannotBeSetIsNotBriefed(t *testing.T) {
 		t.Fatalf("dispatch = %v, submitted %d; want the failure and no brief", err, len(h.queue.submissions))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
-		Message: "the remediation's effort could not be set; the dispatch stands with its workspace unprompted"}); !ok {
+		Message: "the standing fixer's effort could not be set for its brief; it is not briefed"}); !ok {
 		t.Fatalf("records = %v, want the failure at ERROR", h.logs.Records())
 	}
 }

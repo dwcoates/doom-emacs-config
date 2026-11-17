@@ -106,8 +106,6 @@ type fakeDB struct {
 	// mediationErr fails a check's read, dispatchErr a dispatch's record,
 	// and finishErr a remediation finish's record.
 	checks wsm.DB
-	// owedCompactions is every workspace owed a compaction, in order.
-	owedCompactions []ids.WorkspaceID
 	// escalationRecordErr fails RecordDeployEscalation.
 	escalationRecordErr  error
 	mediationErr         error
@@ -412,12 +410,6 @@ func (f *fakeDB) NoteQuietDeployCheck(ctx context.Context, repo wsm.RepoKey) (bo
 	return f.checks.NoteQuietDeployCheck(ctx, repo)
 }
 
-func (f *fakeDB) OweCompaction(ctx context.Context, ws ids.WorkspaceID) (bool, error) {
-	f.mu.Lock()
-	f.owedCompactions = append(f.owedCompactions, ws)
-	f.mu.Unlock()
-	return true, nil
-}
 
 func (f *fakeDB) RecordMediationIntake(ctx context.Context, repo wsm.RepoKey, owed time.Time, ws ids.WorkspaceID) (bool, error) {
 	return f.checks.RecordMediationIntake(ctx, repo, owed, ws)
@@ -4648,6 +4640,10 @@ type fakeDeployChecks struct {
 	standByErr       error
 	// resumeErr fails every Resume.
 	resumeErr error
+	// refreshed and compacted record each fixer refresh and each compaction;
+	// refreshErr and compactErr fail them.
+	refreshed, compacted   []ids.WorkspaceID
+	refreshErr, compactErr error
 	// onStopNow runs inside each stop, as ending the stopped session does.
 	onStopNow func()
 	// createCtxErrs records each check workspace's creation context error.
@@ -4692,7 +4688,7 @@ func (f *fakeDeployChecks) CreateDeployIntake(_ context.Context, _, name string)
 }
 
 func (f *fakeDeployChecks) CreateDeployRemediation(_ context.Context, _, name string) (wsm.Workspace, error) {
-	return f.make("ws-remedy", name)
+	return f.make("ws-fixer", name)
 }
 
 func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name string) (wsm.Workspace, error) {
@@ -4703,7 +4699,7 @@ func (f *fakeDeployChecks) CreateDeployEscalation(ctx context.Context, _, name s
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return f.make("ws-escalate", name)
+	return f.make("ws-fixer", name)
 }
 
 func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
@@ -4722,6 +4718,20 @@ func (f *fakeDeployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) erro
 	f.stoodBy = append(f.stoodBy, ws)
 	f.standByCtxErrs = append(f.standByCtxErrs, ctx.Err())
 	return f.standByErr
+}
+
+func (f *fakeDeployChecks) Refresh(_ context.Context, ws ids.WorkspaceID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshed = append(f.refreshed, ws)
+	return f.refreshErr
+}
+
+func (f *fakeDeployChecks) Compact(_ context.Context, ws ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.compacted = append(f.compacted, ws)
+	return f.compactErr == nil, f.compactErr
 }
 
 func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {

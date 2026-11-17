@@ -14,12 +14,12 @@ import (
 )
 
 // THE DISPATCH (owner rulings, 2026-11-14 and 2026-11-17). The intake hands
-// the problems a deploy caused to the repository's STANDING remediation
-// workspace (standingWorkspace), visible: the same one takes every dispatch,
-// so it knows every fix it made and what it ruled out. Its fix's deploy
-// closes it and the next dispatch reopens it, its worktree cut again at the
-// main branch's tip. The chain's bound on remediations in a row is enforced
-// here, so an intake that miscounts cannot exceed it.
+// the problems a deploy caused to the repository's STANDING FIXER
+// (standingFixer), in sight: the same workspace takes every dispatch and
+// every escalation, so it knows every fix it made and what it ruled out. It
+// stays open after its fix deploys; each brief first brings its worktree to
+// the main branch's tip. The chain's bound on remediations in a row is
+// enforced here, so an intake that miscounts cannot exceed it.
 
 // The briefs a remediation workspace is prompted with.
 const (
@@ -43,7 +43,7 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 		err.Fields = map[string]any{"remediations_before_escalation": uint32(q.bound)}
 		return err
 	}
-	remediation, err := o.standingRemediation(ctx, q, fields)
+	remediation, err := o.standingFixer(ctx, q, DeployCheckRemediation, fields)
 	if err != nil {
 		return err
 	}
@@ -61,14 +61,6 @@ func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Media
 	}
 	o.observeDispatch(m, at)
 	o.noteCheckWork(ctx, q.key, fields)
-	// A MADE REMEDIATION'S EFFORT IS SET ONCE ITS DISPATCH IS RECORDED: it
-	// starts the workspace's shim, whose landing reads the role.
-	if remediation.made {
-		if err := o.deps.DeployChecks.SetDeployCheckEffort(ctx, remedy, DeployCheckRemediation); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the remediation's effort could not be set; the dispatch stands with its workspace unprompted", withField(fields, "error", err.Error()))
-			return err
-		}
-	}
 	if err := o.briefRemediation(ctx, q.repository.Dir, remedy, remediation.briefed, m, d, fields); err != nil {
 		return err
 	}
@@ -92,22 +84,6 @@ func (o *orchestrator) observeDispatch(m wsm.Mediation, at time.Time) {
 	if m.LastDispatchedAt != nil {
 		o.deps.Meter.ObserveRemediation(RemediationRedispatched, at.Sub(*m.LastDispatchedAt))
 	}
-}
-
-// standingRemediation answers the queue's standing remediation workspace,
-// shown: its last finish stood it by hidden, and a reopen leaves it so
-// (2026-11-16: a restored remediation worked hidden after its fix's deploy
-// failed).
-func (o *orchestrator) standingRemediation(ctx context.Context, q checkedQueue, fields dlog.Context) (standing, error) {
-	remediation, err := o.standingWorkspace(ctx, q, DeployCheckRemediation, fields)
-	if err != nil {
-		return standing{}, err
-	}
-	if err := o.deps.DeployChecks.Resume(ctx, remediation.ws); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the standing remediation workspace could not be shown; the queue stays held for the intake", withField(withField(fields, "remediation", string(remediation.ws)), "error", err.Error()))
-		return standing{}, fmt.Errorf("merge: show the standing remediation workspace %s: %w", remediation.ws, err)
-	}
-	return remediation, nil
 }
 
 // briefRemediation prompts the standing remediation workspace WS, of the

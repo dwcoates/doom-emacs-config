@@ -61,6 +61,10 @@ var errFake = errors.New("workspace test: arranged failure")
 // outside that set nil-panics, which is the loud failure the test wants.
 type fakeDB struct {
 	wsm.DB
+	// compactable is each workspace with a conversation to compact
+	// (OweCompaction), and oweCompactionErr fails every one.
+	compactable      map[ids.WorkspaceID]bool
+	oweCompactionErr error
 
 	// holds are the held prompts HeldPromptByTurn answers, by turn;
 	// holdErr fails the read.
@@ -1576,6 +1580,25 @@ func (d *fakeDB) BindSession(ctx context.Context, s wsm.Session, owed *wsm.OwedS
 		d.owedWork[s.Workspace] = *owed
 	}
 	return d.PutSession(ctx, s)
+}
+
+// OweCompaction owes a workspace with a recorded session a compaction, as
+// the store does: one owing start work already keeps it.
+func (d *fakeDB) OweCompaction(_ context.Context, id ids.WorkspaceID) (bool, error) {
+	if d.oweCompactionErr != nil {
+		return false, d.oweCompactionErr
+	}
+	if _, found := d.owedWork[id]; found {
+		return false, nil
+	}
+	if !d.compactable[id] {
+		return false, nil
+	}
+	if d.owedWork == nil {
+		d.owedWork = map[ids.WorkspaceID]wsm.OwedStartWork{}
+	}
+	d.owedWork[id] = wsm.OwedStartWork{Compact: true}
+	return true, nil
 }
 
 // OwedStartWork answers the work the binding recorded as owed.

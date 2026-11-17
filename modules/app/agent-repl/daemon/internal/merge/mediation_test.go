@@ -159,7 +159,7 @@ func intakeTellings(h *harness) []promptqueue.Submission {
 func checkWorkspacesMade(h *harness) []string {
 	var out []string
 	for _, name := range h.checks.made {
-		if name != "deploy-escalation" {
+		if name != "deploy-fixer" {
 			out = append(out, name)
 		}
 	}
@@ -255,8 +255,8 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert: one intake made, told of each deploy, its session ended by each decision.
-	made := checkWorkspacesMade(h)
-	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{"deploy-intake", "deploy-remediation"}) {
+	made := h.checks.made
+	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{"deploy-intake", "deploy-fixer"}) {
 		t.Fatalf("intake told %d times, made %v; want the one standing intake told of each deploy", len(intakeTellings(h)), made)
 	}
 	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake", "ws-intake"}) || len(h.checks.closed) != 0 {
@@ -311,7 +311,7 @@ func TestATurnThatDecidesNothingTwiceEscalatesAndHoldsTheQueue(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if heldEscalation(t, h) != "ws-escalate" {
+	if heldEscalation(t, h) != "ws-fixer" {
 		t.Fatalf("check %+v, want the undecided check held by an escalation", owedCheck(t, h))
 	}
 	if !h.bannerRaised(desktopnotify.KindDeployMediated) {
@@ -351,7 +351,7 @@ func TestATurnThatEscalatedKeepsTheQueueHeldAndResumesNothing(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if heldEscalation(t, h) != "ws-escalate" || len(resumingBriefs(h)) != 0 {
+	if heldEscalation(t, h) != "ws-fixer" || len(resumingBriefs(h)) != 0 {
 		t.Fatalf("check %+v, resumed %d times; want it held by its escalation and the intake never resumed", owedCheck(t, h), len(resumingBriefs(h)))
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
@@ -371,7 +371,7 @@ func TestATurnThatDispatchedKeepsTheQueueHeld(t *testing.T) {
 
 	// Assert
 	m := owedCheck(t, h)
-	if m == nil || !m.Dispatched || m.Remediation != "ws-remedy" {
+	if m == nil || !m.Dispatched || m.Remediation != "ws-fixer" {
 		t.Fatalf("check %+v, want it dispatched to the remediation and still owed", m)
 	}
 	if h.bannerRaised(desktopnotify.KindDeployMediated) || len(h.checks.closed) != 0 {
@@ -385,7 +385,7 @@ func TestADispatchedCheckHasNoRound(t *testing.T) {
 	owe(t, h)
 	withIntake(t, h, deployStarted)
 	told(t, h, deployStarted, "turn-told")
-	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+	if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -504,7 +504,7 @@ func TestDecideMediation(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			if tt.dispatched {
-				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -531,7 +531,7 @@ func TestDecideMediation(t *testing.T) {
 			if err != nil || (owedCheck(t, h) != nil) != tt.wantHeld || h.bannerRaised(desktopnotify.KindDeployMediated) != tt.wantBanner {
 				t.Fatalf("DecideMediation = %v, owed %+v, banner %v; want held %v, banner %v", err, owedCheck(t, h), h.bannerRaised(desktopnotify.KindDeployMediated), tt.wantHeld, tt.wantBanner)
 			}
-			if tt.wantHeld && heldEscalation(t, h) != "ws-escalate" {
+			if tt.wantHeld && heldEscalation(t, h) != "ws-fixer" {
 				t.Fatalf("check %+v, want it held by the escalation", owedCheck(t, h))
 			}
 			if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-intake"}) {
@@ -580,10 +580,10 @@ func TestTheRosterDrawsWhereTheCheckStands(t *testing.T) {
 			owe(t, h)
 			withIntake(t, h, deployStarted)
 			told(t, h, deployStarted, "turn-1")
-			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-remedy"); err != nil {
+			if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), deployStarted, deployStarted, "ws-fixer"); err != nil {
 				t.Fatal(err)
 			}
-		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-remedy"}},
+		}, want: &sidebar.QueueMediation{Repo: theRepository, Stage: sidebar.MediationFixing, Intake: "ws-intake", Remediation: "ws-fixer"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -730,7 +730,7 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	h := checked(t)
 	owe(t, h)
 	withIntake(t, h, deployStarted)
-	if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-remedy", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
+	if _, err := h.db.BeginRemediationFinish(context.Background(), wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -805,7 +805,7 @@ func TestEveryCheckEndIsTimedOnceByHowItEnded(t *testing.T) {
 		{name: "an escalation holds the check, so it ends untimed", inTurn: decide(Decision{Kind: MediationEscalate, Summary: "yours"}),
 			want: []string{toldSpan}},
 		{name: "an escalation the user closes", inTurn: decide(Decision{Kind: MediationEscalate, Summary: "yours"}),
-			after: func(t *testing.T, h *harness) { h.o.OnWorkspaceClosed(context.Background(), "ws-escalate") },
+			after: func(t *testing.T, h *harness) { h.o.OnWorkspaceClosed(context.Background(), "ws-fixer") },
 			want:  []string{toldSpan, assessed(MediationEscalated), total(MediationEscalated)}},
 		{name: "a dispatch whose fix deploys", inTurn: decide(Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}),
 			after: func(t *testing.T, h *harness) { fixDeploysAt(t, h, deployStarted.Add(time.Minute)) },
@@ -1028,7 +1028,7 @@ func TestAnUndecidedIntakeIsResumedOnceBeforeTheQueueIsLetThrough(t *testing.T) 
 			if released := owedCheck(t, h) == nil; released != tt.wantReleased {
 				t.Fatalf("released %v, want %v", released, tt.wantReleased)
 			}
-			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-escalation" })
+			escalated := slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-fixer" })
 			if escalated != tt.wantEscalate {
 				t.Fatalf("made %v, want an escalation %v", h.checks.made, tt.wantEscalate)
 			}
@@ -1081,7 +1081,7 @@ func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
 			if owedCheck(t, h) == nil {
 				t.Fatal("the check was released, want the queue held")
 			}
-			if slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-escalation" }) {
+			if slices.ContainsFunc(h.checks.made, func(n string) bool { return n == "deploy-fixer" }) {
 				t.Fatalf("made %v, want no escalation", h.checks.made)
 			}
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: tt.message}); !ok {

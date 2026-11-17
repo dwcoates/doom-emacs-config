@@ -20,7 +20,8 @@ import (
 //
 //   - deploy_check_standing: each queue's workspace in each role, and whether
 //     it was briefed yet (its first brief states the role in full, every
-//     later one only the new check).
+//     later one only the new check), indexed by workspace for every
+//     workspace read's StandingDeployCheck column.
 //   - merge_queue_repos.deploy_quiet_checks: the checks in a row that ended
 //     with no dispatch and no escalation.
 //   - merge_queue_repos.deploy_compaction_armed: whether a dispatch or an
@@ -37,6 +38,7 @@ CREATE TABLE deploy_check_standing (
   briefed      INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (repo_key, role)
 );
+CREATE INDEX deploy_check_standing_by_workspace ON deploy_check_standing(workspace_id);
 ALTER TABLE merge_queue_repos ADD COLUMN deploy_quiet_checks INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE merge_queue_repos ADD COLUMN deploy_compaction_armed INTEGER NOT NULL DEFAULT 0;
 `

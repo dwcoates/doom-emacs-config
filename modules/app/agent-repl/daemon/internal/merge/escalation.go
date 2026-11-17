@@ -16,7 +16,7 @@ import (
 // THE ESCALATION (owner rulings, 2026-11-15 and 2026-11-17). The intake
 // never talks to the user. Every escalation of a check -- the intake's own,
 // and the daemon's for it (a turn that decided nothing, a remediation given
-// up or closed) -- goes to the repository's STANDING escalation workspace
+// up or closed) -- goes to the repository's STANDING FIXER
 // (standingWorkspace), visible, in remote control, whose prompt is the
 // summary and the findings with their evidence, and posts a desktop
 // notification whose click opens that workspace. The same workspace takes
@@ -226,14 +226,11 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
 		return "", err
 	}
-	escalation, err := o.standingWorkspace(ctx, q, DeployCheckEscalation, fields)
+	escalation, err := o.standingFixer(ctx, q, DeployCheckEscalation, fields)
 	if err != nil {
-		return failed("the standing escalation workspace could not be found or made; the user is not told of the escalated deploy", err)
+		return failed("the standing fixer could not be readied for the escalation; the user is not told of the escalated deploy", err)
 	}
 	fields["workspace"] = string(escalation.ws)
-	if err := o.deps.DeployChecks.Resume(ctx, escalation.ws); err != nil {
-		return failed("the standing escalation workspace could not be shown; it is not briefed and the user is not told", err)
-	}
 	brief, err := o.deps.Briefs(BriefDeployEscalation, map[string]string{
 		"repo_dir":       repoDir,
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
@@ -251,7 +248,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		o.markBriefed(ctx, q, DeployCheckEscalation, fields)
 	}
 	o.deps.Banners.Mediated(escalation.ws, summary)
-	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the standing escalation workspace", withField(fields, "problems", len(problems)))
+	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the standing fixer", withField(fields, "problems", len(problems)))
 	return escalation.ws, nil
 }
 
