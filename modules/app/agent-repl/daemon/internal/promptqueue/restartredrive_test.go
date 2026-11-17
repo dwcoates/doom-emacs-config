@@ -427,3 +427,158 @@ func TestAnOwedRetryWhoseDebtCannotBeRecordedIsLoggedAtError(t *testing.T) {
 		t.Fatalf("owed = %d, want no debt left by the failed write", got)
 	}
 }
+
+// standCall plants a StartTurn standing for TURN on the queue, as a delivery
+// in its shim call has, and answers the channel that settles it.
+func standCall(h *harness, turn ids.TurnID) chan struct{} {
+	settled := make(chan struct{})
+	h.q.mu.Lock()
+	h.q.stateLocked(theWorkspace).call = &shimCall{what: "start_turn", turn: turn, opensTurn: true, settled: settled}
+	h.q.mu.Unlock()
+	return settled
+}
+
+// settleCall closes SETTLED, as the call's return does. The planted call is
+// left standing, so a reader that looks for it finds it whenever it looks.
+func settleCall(settled chan struct{}) {
+	close(settled)
+}
+
+// holdForReconnectAs puts TURN's prompt under the reconnect hold, as a
+// delivery the shim died under leaves it.
+func holdForReconnectAs(t *testing.T, h *harness, turn ids.TurnID) {
+	t.Helper()
+	kind := wsm.HoldReconnect
+	if err := h.db.PutHeldPrompt(context.Background(), wsm.HeldPrompt{Turn: turn, Workspace: theWorkspace, Hold: &kind}); err != nil {
+		t.Fatalf("PutHeldPrompt: %v", err)
+	}
+}
+
+func TestRedeliversCutTurn(t *testing.T) {
+	tests := []struct {
+		name string
+		call ids.TurnID
+		held bool
+		want bool
+	}{
+		{name: "a turn whose own StartTurn stands and whose prompt is held is redelivered", call: "cut-turn", held: true, want: true},
+		{name: "a turn whose own StartTurn stands but whose prompt is not held is not", call: "cut-turn", held: false, want: false},
+		{name: "a turn whose StartTurn does not stand is not", call: "", held: true, want: false},
+		{name: "a turn another turn's StartTurn stands beside is not", call: "other-turn", held: true, want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			if tc.held {
+				holdForReconnectAs(t, h, "cut-turn")
+			}
+			var settled chan struct{}
+			if tc.call != "" {
+				settled = standCall(h, tc.call)
+			}
+			got := make(chan bool, 1)
+
+			// Act
+			go func() {
+				redelivered, err := h.q.redeliversCutTurn(context.Background(), theWorkspace, "cut-turn")
+				if err != nil {
+					t.Errorf("redeliversCutTurn: %v", err)
+				}
+				got <- redelivered
+			}()
+			if settled != nil {
+				settleCall(settled)
+			}
+
+			// Assert
+			if g := <-got; g != tc.want {
+				t.Fatalf("redeliversCutTurn = %v, want %v", g, tc.want)
+			}
+		})
+	}
+}
+
+func TestRedeliversCutTurnFailsWhenItsCallOutlivesTheContext(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	standCall(h, "cut-turn")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// Act
+	_, err := h.q.redeliversCutTurn(ctx, theWorkspace, "cut-turn")
+
+	// Assert
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("redeliversCutTurn = %v, want the context's cancellation", err)
+	}
+}
+
+// A SHIM THAT DIES UNDER THE TURN'S OWN StartTurn cut a turn it never
+// accepted: its prompt is held and delivered again as itself, so the revived
+// session is owed no "continue" prompt as well.
+func TestOnTurnEndedForADeathUnderTheTurnsOwnStartTurnOwesNoResumption(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "cut-turn", "the prompt")
+	holdForReconnectAs(t, h, "cut-turn")
+	// The call stands as the death's close arrives, and has already settled:
+	// the wait for it returns at once.
+	settled := make(chan struct{})
+	close(settled)
+	h.q.mu.Lock()
+	h.q.stateLocked(theWorkspace).call = &shimCall{what: "start_turn", turn: "cut-turn", opensTurn: true, settled: settled}
+	h.q.mu.Unlock()
+	h.watcher.idle()
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "cut-turn", wsm.CloseAgentDied)
+
+	// Assert
+	if got := h.db.owed[theWorkspace]["cut-turn"]; got {
+		t.Fatal("the cut turn was owed a resumption beside its held prompt")
+	}
+	if got := h.db.closedTurns["cut-turn"]; got != wsm.CloseKilled {
+		t.Fatalf("durable close = %s, want %s", got, wsm.CloseKilled)
+	}
+	for _, r := range h.log.Records() {
+		if r.Level == "info" && r.Operation == opResume && strings.Contains(r.Message, "held and delivered again as itself") {
+			return
+		}
+	}
+	t.Fatalf("the decision was not recorded: %v", h.log.Records())
+}
+
+func TestOnTurnEndedForADeathWhoseHoldCannotBeReadKeepsTheFailure(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "cut-turn", "the prompt")
+	settled := make(chan struct{})
+	close(settled)
+	h.q.mu.Lock()
+	h.q.stateLocked(theWorkspace).call = &shimCall{what: "start_turn", turn: "cut-turn", opensTurn: true, settled: settled}
+	h.q.mu.Unlock()
+	h.db.mu.Lock()
+	h.db.byTurnErr = errors.New("the store is gone")
+	h.db.mu.Unlock()
+	h.watcher.idle()
+
+	// Act
+	h.q.OnTurnEnded(theWorkspace, "cut-turn", wsm.CloseAgentDied)
+
+	// Assert
+	if got := h.db.owed[theWorkspace]["cut-turn"]; got {
+		t.Fatal("a turn whose hold could not be read was owed a resumption")
+	}
+	if got := h.db.closedTurns["cut-turn"]; got != wsm.CloseAgentDied {
+		t.Fatalf("durable close = %s, want its failure %s", got, wsm.CloseAgentDied)
+	}
+	for _, r := range h.log.Records() {
+		if r.Level == "error" && r.Operation == opResume && r.Context["cause"] != nil &&
+			strings.Contains(r.Context["cause"].(string), "the store is gone") {
+			return
+		}
+	}
+	t.Fatalf("the unreadable hold was not recorded at error with its cause: %v", h.log.Records())
+}
