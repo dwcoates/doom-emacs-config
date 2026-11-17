@@ -216,3 +216,53 @@ func TestOnKeepaliveFailedQueuesTheFailedAnswer(t *testing.T) {
 		t.Fatalf("queued = %+v, want the failed answer", queued)
 	}
 }
+
+func TestSettleAnswerEndsTheWaitAndStandsTheSessionDownAtTheBeat(t *testing.T) {
+	// Arrange.
+	h := awaiting(t)
+
+	// Act.
+	h.keeper.settleAnswer(theWorkspace, now)
+
+	// Assert.
+	if len(h.keeper.answering) != 0 || len(h.keeper.answerBy) != 0 {
+		t.Fatalf("answers awaited = %v, bounds %v, want none", h.keeper.answering, h.keeper.answerBy)
+	}
+	if len(h.cycled) != 1 || h.cycled[0].ws != theWorkspace || !h.cycled[0].beat.Equal(now) {
+		t.Fatalf("cycle stand-downs = %+v, want one at the beat", h.cycled)
+	}
+}
+
+func TestEveryKeepaliveOutcomeSettlesItsWaitTheSameWay(t *testing.T) {
+	tests := []struct {
+		name   string
+		settle func(h *harness)
+	}{
+		{name: "answered by its lapse", settle: func(h *harness) {
+			h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeLapse, lapse: restated(now.Add(time.Hour))})
+		}},
+		{name: "answered by its failure", settle: func(h *harness) {
+			h.keeper.apply(context.Background(), edge{ws: theWorkspace, kind: edgeKeepaliveFailed, failed: failedKeepalive()})
+		}},
+		{name: "unanswered past its bound", settle: func(h *harness) {
+			h.clock.Set(now.Add(AnswerBound))
+			h.keeper.answersDue()
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := awaiting(t)
+
+			// Act.
+			tt.settle(h)
+
+			// Assert.
+			if len(h.keeper.answering) != 0 || len(h.keeper.answerBy) != 0 ||
+				len(h.cycled) != 1 || !h.cycled[0].beat.Equal(now) {
+				t.Fatalf("awaited %v, bounds %v, stand-downs %+v; want the wait ended and one stand-down at the beat",
+					h.keeper.answering, h.keeper.answerBy, h.cycled)
+			}
+		})
+	}
+}

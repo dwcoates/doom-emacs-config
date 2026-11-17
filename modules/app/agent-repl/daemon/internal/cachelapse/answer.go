@@ -55,10 +55,8 @@ func (k *Keeper) answered(ws ids.WorkspaceID, stated *conversationv1.SessionCach
 		log.Debug(opDrive, "a lapse restated from the anchor before the keep-alive; its answer is still awaited", fields)
 		return
 	}
-	delete(k.answering, ws)
-	delete(k.answerBy, ws)
 	log.Info(opDrive, "the vendor answered the keep-alive and the cache is re-anchored; its session is stood down until the next one", fields)
-	k.deps.CycleDown(ws, sent)
+	k.settleAnswer(ws, sent)
 }
 
 // answeredFailed stands WS's session down when FAILED, a keep-alive whose
@@ -80,12 +78,10 @@ func (k *Keeper) answeredFailed(ws ids.WorkspaceID, failed *conversationv1.Sessi
 		})
 		return
 	}
-	delete(k.answering, ws)
-	delete(k.answerBy, ws)
 	k.deps.Log.Global().Info(opDrive, "the keep-alive's request failed; its session is stood down, and the cache lapses at its old anchor", dlog.Context{
 		"workspace": string(ws), "sent": sent, "detail": failed.GetDetail(),
 	})
-	k.deps.CycleDown(ws, sent)
+	k.settleAnswer(ws, sent)
 }
 
 // answersDue stands down every session whose keep-alive went unanswered past
@@ -97,12 +93,19 @@ func (k *Keeper) answersDue() {
 			continue
 		}
 		sent := k.answering[ws]
-		delete(k.answering, ws)
-		delete(k.answerBy, ws)
 		// warn: a keep-alive the vendor never answered leaves the cache to
 		// lapse at its old anchor, and the next restore may meet a cold gate.
 		k.deps.Log.Global().Warn(opDrive, "the keep-alive went unanswered past its bound; its session is stood down, and the cache lapses at its old anchor",
 			dlog.Context{"workspace": string(ws), "sent": sent, "bound": AnswerBound.String()})
-		k.deps.CycleDown(ws, sent)
+		k.settleAnswer(ws, sent)
 	}
+}
+
+// settleAnswer ends WS's wait on the keep-alive sent at SENT, however it
+// ended (answered, failed, or unanswered past its bound), and stands its
+// session down until the next one: the one settlement every outcome shares.
+func (k *Keeper) settleAnswer(ws ids.WorkspaceID, sent time.Time) {
+	delete(k.answering, ws)
+	delete(k.answerBy, ws)
+	k.deps.CycleDown(ws, sent)
 }
