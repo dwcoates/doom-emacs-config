@@ -380,10 +380,11 @@ if [ -n "$QUERY" ]; then
     # What is read is each thread's BASE priority and the ceiling its QoS
     # clamp sets (libproc's PROC_PIDTHREADINFO pth_priority and
     # pth_maxpriority), never `ps -o pri`: that is the scheduler's current
-    # priority, which decays with CPU use and read 20 under a full run's
-    # load. Neither of these moves with load; a utility clamp pins both at
-    # 20 (measured 2026-11-17: `taskpolicy -c utility` reads base 20, max 20;
-    # `nice -n 19` alone reads base 31, max 63).
+    # priority, which decays with CPU use, so a 20 there cannot tell a clamp
+    # from a busy process. Neither of these moves with load; a utility clamp
+    # pins both at 20 (measured 2026-11-17: `taskpolicy -c utility` reads
+    # base 20, max 20; `nice -n 19` alone reads base 31, max 63; the merge
+    # gate's launchd test service, then ProcessType Standard, read 20, 20).
     if [ "$HOST_OS" = Darwin ]; then
         out="$(python3 - "$$" 2>&1 <<'PY'
 import ctypes, struct, sys
