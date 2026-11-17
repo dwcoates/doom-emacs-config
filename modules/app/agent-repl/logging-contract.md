@@ -127,6 +127,31 @@ Other modes summarize sink findings on stderr.
 diagnostic for callers that need its session, process, span, or gap queries;
 it is not the canonical whole-system reader.
 
+## Warnings files
+
+EVERY RUNTIME WRITES ITS WARN AND ERROR RECORDS ONLY TO A WARNINGS FILE beside
+its log, and its debug and info records only to the log, so a reader of
+warnings and errors opens the small warnings files alone. Reading them out of
+every record ever written made the deploy intake's read of a 20-minute window
+outlive its 18s bound over 10 GB of logs (2026-11-17).
+
+- A log at `X.log` has its warnings file at `X.warn.log`; a path with no
+  `.log` extension has `.warn.log` appended. Each is rotated and aged on its
+  own, exactly as a log is.
+- A per-workspace sink `N` (canonical link `N.log` naming target `T`) has its
+  warnings twin `N.warn` (canonical link `N.warn.log` naming `T`'s warnings
+  file), created on the first warn or error record.
+- The shim inherits its warnings file as fd 6 (`--warnings-fd 6`) beside its
+  log on fd 3.
+- `proto/vocab/log-warnings-sink.json` is the contract the Go
+  (`agent-shim/logging/go/warnings.go`), TypeScript
+  (`agent-shim/logging/ts/warnings.ts`) and elisp (`core.el`) writers each
+  assert.
+- `bin/logs.sh` at `--level warn` or above, and `--harvest`, open only the
+  warnings files; below warn they read each log and its warnings file as one
+  stream. A warnings file that is absent beside a log is the empty sink of a
+  runtime that never warned, never a finding.
+
 ## Retention
 
 Every log file agent-repl writes is removed once its LAST WRITE is three days
