@@ -123,14 +123,13 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 		if errors.Is(err, wsm.ErrNotFound) {
 			k.forget(ws)
 			delete(k.noBeat, ws)
-			delete(k.owedFrom, ws)
 			return beatPlan{}, false
 		}
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading the workspace to time its keep-alive", "could not read the workspace; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
 	}
 	none := func(why string) (beatPlan, bool) {
-		k.owesNone(log, ws, why)
+		k.owesNone(ctx, log, record, why)
 		return beatPlan{}, false
 	}
 	// A WORKSPACE WHOSE DIRECTORY IS GONE OWES NO KEEP-ALIVE: no session can
@@ -220,14 +219,21 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(plan.due) {
 		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
-	k.owesAgain(log, ws)
+	k.owesAgain(ctx, log, record)
 	return plan, true
 }
 
-// owesNone records that WS owes no keep-alive for WHY: at INFO when the
-// decision changed since the last one, at DEBUG when it stands as it was.
-func (k *Keeper) owesNone(log dlog.Logger, ws ids.WorkspaceID, why string) {
+// owesNone records that RECORD's workspace owes no keep-alive for WHY: at
+// INFO when the decision changed since the last one, at DEBUG when it stands
+// as it was. The decision goes on the row when the row does not already
+// carry it (wsm.SetKeepaliveOwing), so a beat due while it stands is no miss
+// to any daemon (missed).
+func (k *Keeper) owesNone(ctx context.Context, log dlog.Logger, record wsm.Workspace, why string) {
+	ws := record.ID
 	fields := dlog.Context{"why": why}
+	if record.KeepaliveOwedNoneAt == nil {
+		k.recordOwing(ctx, log, ws, false, fields)
+	}
 	if was, ok := k.noBeat[ws]; ok && was == why {
 		log.Debug(opDrive, "the workspace owes no keep-alive", fields)
 		return
@@ -236,16 +242,35 @@ func (k *Keeper) owesNone(log dlog.Logger, ws ids.WorkspaceID, why string) {
 	log.Info(opDrive, "the workspace owes no keep-alive", fields)
 }
 
-// owesAgain records at INFO that WS owes keep-alives again after a decision
-// that it owed none; a workspace that owed them all along is no change.
-func (k *Keeper) owesAgain(log dlog.Logger, ws ids.WorkspaceID) {
-	was, ok := k.noBeat[ws]
-	if !ok {
+// owesAgain records at INFO that RECORD's workspace owes keep-alives again
+// after a decision that it owed none, this daemon's or a predecessor's on the
+// row; a workspace that owed them all along is no change.
+func (k *Keeper) owesAgain(ctx context.Context, log dlog.Logger, record wsm.Workspace) {
+	ws := record.ID
+	was, inMemory := k.noBeat[ws]
+	delete(k.noBeat, ws)
+	if record.KeepaliveOwedNoneAt == nil && !inMemory {
 		return
 	}
-	delete(k.noBeat, ws)
-	k.owedFrom[ws] = k.deps.Clock.Now()
-	log.Info(opDrive, "the workspace owes keep-alives again", dlog.Context{"owed_none_because": was})
+	fields := dlog.Context{}
+	if inMemory {
+		fields["owed_none_because"] = was
+	}
+	if record.KeepaliveOwedNoneAt != nil {
+		fields["owed_none_since"] = *record.KeepaliveOwedNoneAt
+		k.recordOwing(ctx, log, ws, true, fields)
+	}
+	log.Info(opDrive, "the workspace owes keep-alives again", fields)
+}
+
+// recordOwing writes whether WS owes keep-alives (OWING) to its row, at the
+// clock's now. A write that fails is recorded at ERROR: a lapse judged
+// against the row may then call a beat that was never owed a miss.
+func (k *Keeper) recordOwing(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, owing bool, fields dlog.Context) {
+	if err := k.deps.DB.SetKeepaliveOwing(ctx, ws, owing, k.deps.Clock.Now()); err != nil && !leaving(ctx, log, opDrive, "recording whether the workspace owes keep-alives", err) {
+		log.Error(opDrive, "could not record whether the workspace owes keep-alives; a lapse judged against the row may misjudge a miss",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"owing": owing}), err))
+	}
 }
 
 // beatsDue sends every keep-alive that has come due.

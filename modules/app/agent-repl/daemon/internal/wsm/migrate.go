@@ -310,6 +310,7 @@ var migrations = []migration{
 	{To: 159, Name: "mediation_resumed", Kind: MigrationAdditive, DDL: mediationResumedDDL},
 	{To: 160, Name: "mediation_escalation", Kind: MigrationAdditive, DDL: mediationEscalationDDL},
 	{To: 161, Name: "deploy_problem_fixes", Kind: MigrationAdditive, DDL: deployProblemFixesDDL},
+	{To: 162, Name: "keepalive_owing", Kind: MigrationAdditive, DDL: keepaliveOwingDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

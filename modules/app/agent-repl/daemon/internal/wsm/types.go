@@ -95,6 +95,14 @@ type Workspace struct {
 	// stopped part way is owed (owednuke.go); nil otherwise. The boot finishes
 	// it, and nothing restores the worktree of a workspace that owes one.
 	NukeOwedAt *time.Time
+	// KeepaliveOwedNoneAt is when the keeper decided the workspace owes no
+	// keep-alive, set while that decision stands (keepaliveowing.go); nil
+	// while it owes them.
+	KeepaliveOwedNoneAt *time.Time
+	// KeepaliveOwedFrom is when the workspace last began owing keep-alives
+	// again after owing none (keepaliveowing.go); nil when it never stopped.
+	// A beat due before it was never owed.
+	KeepaliveOwedFrom *time.Time
 	// KeepaliveRunBeats is how many keep-alives the daemon has sent the
 	// workspace, for either of its conversations, since its last turn closed
 	// (keepaliverun.go): 0 once a turn closes. Derived on read.
