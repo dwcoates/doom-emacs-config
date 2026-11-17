@@ -352,17 +352,14 @@ command sends it again; DONE ends the report."
 
 ;;;; ---- Opening a line beside an entry ----
 ;;
-;; `o' and `O' in command mode open a line below or above, as ever; on an
-;; entry line the new line is filled with the next node's label (below) or
-;; the previous one's (above), in the tree that entry targets, so the next
-;; entry answers the next node.  The daemon finds the node
-;; (FindEntryNeighbor), for the label of the line the key was pressed on.
-;; A neighbor whose entry the composer already holds that way is never
-;; opened twice: point goes to the end of that entry's line, in insert mode,
-;; as if the line had just been opened.
+;; The daemon finds a node's neighbor in the tree an entry targets
+;; (FindEntryNeighbor), for the label of the line a stepping key was pressed
+;; on.  A line opened beside an entry answering a sibling that the composer
+;; already holds that way is never opened twice: point goes to the end of
+;; that entry's line, in insert mode, as if the line had just been opened.
 
 (defconst agent-repl-prompt-entries--neighbor-timeout 1.0
-  "Seconds `o' and `O' wait for the daemon to name the neighbor label.")
+  "Seconds `C-i' and `C-o' wait for the daemon to name the neighbor label.")
 
 (defun agent-repl-prompt-entries--neighbor (label way)
   "The label of LABEL's node WAY from it in its target tree, or nil.
@@ -399,8 +396,8 @@ connection stands, the daemon refused, or it never answered."
 
 (defun agent-repl-prompt-entries-opening (label)
   "The words that open a blank entry answering LABEL: `LABEL - '.
-Every line Emacs opens on an entry is opened with them: `o' and `O' beside
-an entry, and a click on a response's branch in the webview
+Every line Emacs opens on an entry is opened with them: `M-j', `M-k',
+`C-SPC' and `C-S-SPC' beside an entry, and a click on a response's branch in the webview
 \(`agent-repl-input-compose-entry')."
   (concat label " - "))
 
@@ -419,19 +416,9 @@ Nil when there is none."
                             (if next (> (nth 1 entry) bol) (< (nth 1 entry) bol))))
                      (if next entries (reverse entries))))))
 
-(defun agent-repl-prompt-entries--open (next)
-  "Open a line below (NEXT) or above point's line, filled with a neighbor.
-On an entry line whose label has a neighbor that way, the new line opens
-on `LABEL - '; otherwise it opens empty, as `evil-open-below' does.  A
-neighbor already holding an entry that way is not opened again: point
-moves to the end of that entry's line, in insert mode."
-  (let ((label (agent-repl-prompt-entries--label-at-point)))
-    (agent-repl-prompt-entries--open-on
-     label (and label (agent-repl-prompt-entries--neighbor label (if next :next :previous))) next)))
-
 (defun agent-repl-prompt-entries--open-on (label neighbor next)
   "From LABEL's line, open a line below (NEXT) or above, answering NEIGHBOR.
-THE ONE OPENING of a line beside an entry, for `o', `O', `M-j' and `M-k':
+THE ONE OPENING of a line beside an entry, for the sibling-opening keys:
 the new line opens on `NEIGHBOR - ', or empty when NEIGHBOR is nil.  An
 entry already answering NEIGHBOR that way is not opened again: point moves
 to the end of that entry's line, in insert mode."
@@ -446,20 +433,6 @@ to the end of that entry's line, in insert mode."
       (if next (evil-open-below 1) (evil-open-above 1))
       (when neighbor (insert (agent-repl-prompt-entries-opening neighbor))))))
 
-(defun agent-repl-prompt-entries-open-below ()
-  "Open a line below point; on an entry line, fill it with the next label.
-The composer's `o' in command mode: the next node's label, in the tree the
-entry targets."
-  (interactive)
-  (agent-repl-prompt-entries--open t))
-
-(defun agent-repl-prompt-entries-open-above ()
-  "Open a line above point; on an entry line, fill it with the previous label.
-The composer's `O' in command mode: the previous node's label, in the tree
-the entry targets."
-  (interactive)
-  (agent-repl-prompt-entries--open nil))
-
 ;;;; ---- Opening an entry's sibling ----
 ;;
 ;; `M-j' and `M-k' on an entry line in insert mode open the entry's sibling:
@@ -469,8 +442,8 @@ the entry targets."
 ;; tree the entry targets holds it, so nothing is asked of the daemon.  A
 ;; first sibling has none above: the line stays as it was and the composer
 ;; says so.  An entry already answering the sibling that way is gone to
-;; rather than opened twice, as `o' and `O' do.  Off an entry line either key
-;; is what it always was.
+;; rather than opened twice.  Off an entry line either key is what it always
+;; was.
 
 (defun agent-repl-prompt-entries--sibling (label offset)
   "The label of LABEL's sibling OFFSET places along, or nil before the first.
@@ -586,7 +559,7 @@ last node keeps its label, and the composer says so."
   "Relabel point's entry to answer the node before its own, `C-i' undone.
 The composer's `C-o' on an entry line: `3.2 - ' becomes `3.1 - ', or
 `3 - ' when 3.2 is its parent's first child, its words kept, the node
-found in the tree the entry targets, as `O' finds it.  A root steps
+found in the tree the entry targets, as the neighbor lookup finds it.  A root steps
 back to the previous root (`3 - ' becomes `2 - ').  The first root keeps
 its label, and the composer says so."
   (interactive)
@@ -646,22 +619,20 @@ binding for it stands, so `TAB' keeps its own meaning.")
   `((,(kbd "M-j") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
     (,(kbd "M-k") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-below))
     (,(kbd "C-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-advance-or-open-sibling))
+    (,(kbd "C-S-SPC") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-open-sibling-above))
     (,(kbd "S-RET") . ,(agent-repl-prompt-entries--on-entry-binding #'agent-repl-prompt-entries-newline)))
   "The composer's entry-only keys in insert mode, as (KEY . BINDING).
 `M-j' opens the previous sibling above, `M-k' the next one below, and
 `C-SPC' advances an empty entry to its next sibling (else opens it below),
+`C-S-SPC' opens the previous sibling above, as `M-j' does,
 on an entry line, and `S-RET' clears an empty entry as it opens the next line,
 and all fall through elsewhere.")
 
 (defun agent-repl-prompt-entries-bind-keys ()
   "Bind the composer's entry-aware keys.
-`o' and `O' in command mode open a line on a neighbor's label; `C-i' and
-`C-o' in command and insert mode step an entry line's entry
-\(`agent-repl-prompt-entries--entry-keys'), and `M-j' and `M-k' in insert
-mode open its sibling (`agent-repl-prompt-entries--insert-entry-keys')."
-  (evil-define-key* 'normal agent-repl-input-mode-map
-    "o" #'agent-repl-prompt-entries-open-below
-    "O" #'agent-repl-prompt-entries-open-above)
+`C-i' and `C-o' in command and insert mode step an entry line's entry
+\(`agent-repl-prompt-entries--entry-keys'), and `M-j', `M-k', `C-SPC' and
+`C-S-SPC' in insert mode open its sibling (`agent-repl-prompt-entries--insert-entry-keys')."
   (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--entry-keys)
     (evil-define-key* '(normal insert) agent-repl-input-mode-map key binding))
   (pcase-dolist (`(,key . ,binding) agent-repl-prompt-entries--insert-entry-keys)
