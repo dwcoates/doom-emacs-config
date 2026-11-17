@@ -349,6 +349,8 @@ func TestMergeQueueStatusOfSaysHowTheQueueAdvances(t *testing.T) {
 			mediation: &merge.OwedMediation{Stage: merge.CheckAssessing, Intake: "ws-intake"}},
 		{name: "a fixed deploy names its remediation and intake", want: "fixing ws-remedy ws-intake: in a row 2",
 			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Intake: "ws-intake", Remediation: "ws-remedy", InARow: 2}},
+		{name: "a carried dispatch names its remediation and no intake", want: "fixing ws-remedy : in a row 2",
+			mediation: &merge.OwedMediation{Stage: merge.CheckFixing, Remediation: "ws-remedy", InARow: 2}},
 		{name: "an escalated deploy names its escalation", want: "escalated ws-escalate: in a row 1",
 			mediation: &merge.OwedMediation{Stage: merge.CheckEscalated, Escalation: "ws-escalate", InARow: 1}},
 		{name: "an escalation still being made names none", want: "escalated: in a row 0",
