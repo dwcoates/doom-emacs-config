@@ -46,6 +46,7 @@ describe("requeueMergeRefusal", () => {
     { arm: "placementBehindNotInLine", value: {}, want: "the merge it was placed behind is not in line" },
     { arm: "workspaceClosed", value: {}, want: "this merge's workspace is closed" },
     { arm: "notInCatalog", value: {}, want: "that model is not in this login's catalog" },
+    { arm: "coldGated", value: {}, want: "this merge's workspace is parked at its cold gate; answer the gate first" },
   ])("words $arm", ({ arm, value, want }) => {
     expect(requeueMergeRefusal({ case: arm, value })).toBe(want);
   });

@@ -31,6 +31,7 @@ export const REQUEUE_MERGE_SENTENCES = {
   placementBehindNotInLine: () => "the merge it was placed behind is not in line",
   workspaceClosed: () => "this merge's workspace is closed",
   notInCatalog: () => "that model is not in this login's catalog",
+  coldGated: () => "this merge's workspace is parked at its cold gate; answer the gate first",
 } satisfies SentenceTable;
 
 /** RequeueMerge's refusal, worded from REQUEUE_MERGE_SENTENCES. */
