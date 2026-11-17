@@ -19,20 +19,39 @@ import (
 // they left the roster with their merge queue entries.
 
 // SettleMissingDirectory settles the OPEN workspace ws, whose directory a stat
-// found gone with statErr, answering whether it was recreated. One that owes a
-// nuke is left as it is, for the nuke to finish. Every outcome
+// found gone with statErr, answering whether it was recreated. Its row is read
+// again first, and one closed meanwhile or owing a nuke is left as it is. Every outcome
 // is recorded under op, the step that asked: a recreation and the ruled
 // automatic close at INFO, a close that could not be written at ERROR. A
 // restore git could not perform is the restorer's own ERROR, and the row is
 // then closed like an unrestorable one, so the caller finishes and an
 // explicit open retries the restore and surfaces its failure. Only a failed
-// close is returned as an error.
+// read or close is returned as an error.
 func (v *verbs) SettleMissingDirectory(ctx context.Context, op string, ws wsm.Workspace, statErr error) (bool, error) {
 	log := v.deps.Log.Global()
 	fields := dlog.Context{
 		dlog.KeyWorkspaceID:  string(ws.ID),
 		dlog.KeyWorkspaceDir: ws.Dir,
 		"error":              statErr.Error(),
+	}
+	// THE ROW IS READ AGAIN, AFTER THE STAT THAT FOUND THE DIRECTORY GONE.
+	// The caller's row was read BEFORE that stat, and every teardown writes
+	// its row first (a landing stamps merged_at and closes it, a nuke stamps
+	// what it owes) and only then removes the tree. So a row read after the
+	// stat carries the teardown that removed the directory, and a stale one
+	// can never send a restore into a removal still holding the branch
+	// (deploy 2026-11-17T00:29:50: `worktree add` met the branch at the
+	// landing's `.removing` path, exit 128).
+	fresh, err := v.deps.DB.Workspace(ctx, ws.ID)
+	if err != nil {
+		fields["cause"] = err.Error()
+		log.Error(op, "could not read again the workspace whose directory is gone; it is left as it is", fields)
+		return false, fmt.Errorf("read the missing-directory workspace %q again: %w", ws.ID, err)
+	}
+	ws = fresh
+	if ws.Closed {
+		log.Info(op, "the workspace directory is gone and the workspace was closed meanwhile; it is left closed", fields)
+		return false, nil
 	}
 	// A WORKSPACE THAT OWES A NUKE IS LEFT FOR THE NUKE: its tree is gone
 	// because the nuke set it aside, and restoring it from the branch the
