@@ -376,6 +376,13 @@ func (v *fakeVerbs) AnswerColdGate(_ context.Context, _ ids.WorkspaceID, answer 
 	return nil
 }
 
+// PassColdGate records the workspace whose gate the handler handed it, and
+// answers passColdGateErr.
+func (v *fakeVerbs) PassColdGate(_ context.Context, ws ids.WorkspaceID) error {
+	v.passedColdGates = append(v.passedColdGates, ws)
+	return v.passColdGateErr
+}
+
 // fakeVerbs answers whatever the test wired, and records the calls made.
 type fakeVerbs struct {
 	// catalogChecked records every model RequireCatalogModel checked, and
@@ -396,6 +403,10 @@ type fakeVerbs struct {
 	// coldGateAnswers records every AnswerColdGate request the handler handed
 	// the verb, in order.
 	coldGateAnswers []*agentreplv1.AnswerColdGateRequest
+	// passedColdGates records every workspace PassColdGate was handed, in
+	// order; passColdGateErr is what it answers.
+	passedColdGates []ids.WorkspaceID
+	passColdGateErr error
 
 	// createSpecs records every Create spec, in order.
 	createSpecs []workspace.CreateSpec

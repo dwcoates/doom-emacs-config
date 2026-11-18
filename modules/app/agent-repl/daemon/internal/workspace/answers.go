@@ -300,6 +300,17 @@ func (v *verbs) AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *
 	return nil
 }
 
+// PassColdGate implements Verbs: another workspace's agent passes the cold
+// gate standing on WS. AN AGENT PASSES A GATE ONLY BY A HAIKU COMPACTION OF ALL
+// THE CONTEXT (owner ruling, 2026-11-18): the answer is `compact` by the
+// default summarizer, so paying and clearing stay the user's, and the
+// prompts held at the gate stay held for the user to send.
+func (v *verbs) PassColdGate(ctx context.Context, ws ids.WorkspaceID) error {
+	return v.AnswerColdGate(ctx, ws, &agentreplv1.AnswerColdGateRequest{
+		Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: defaultSummarizerAnswer()},
+	})
+}
+
 // reraiseRefusedColdGate stands a spent gate again when its answer is
 // refused before the re-open starts. The step that failed recorded its own
 // failure at ERROR; WHY names it for this record.

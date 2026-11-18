@@ -175,9 +175,10 @@ export type CompactWorkspaceError = Message<"agentrepl.v1.CompactWorkspaceError"
     case: "noSession";
   } | {
     /**
-     * The session is parked at its cold gate. Compacting there is a gate
-     * answer (AnswerColdGate's `compact` or `compact_and_resume`), which the
-     * user must ask for or approve; nothing was submitted.
+     * The session is parked at its cold gate. Compacting there is passing
+     * the gate, which an agent does through PassColdGate (a Haiku compaction
+     * of all the context) and the user through the gate card; nothing was
+     * submitted.
      *
      * @generated from field: agentrepl.v1.CompactWorkspaceColdGate cold_gate = 6;
      */

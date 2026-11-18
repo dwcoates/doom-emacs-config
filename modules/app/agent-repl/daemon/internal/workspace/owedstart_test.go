@@ -58,15 +58,17 @@ func TestDefaultSummarizerAnswerIsTheDefaultSummarizersCompaction(t *testing.T) 
 
 func TestEveryGateAnswerTheDaemonChoosesUsesTheDefaultSummarizerAnswer(t *testing.T) {
 	// Arrange.
-	body, err := os.ReadFile("deploychecks.go")
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, file := range []string{"deploychecks.go", "answers.go"} {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
 
-	// Assert: the gate answers the daemon makes on its own build their
-	// compaction through one helper, never by hand.
-	if !strings.Contains(string(body), "defaultSummarizerAnswer()") || strings.Contains(string(body), "&agentreplv1.AnswerColdGateCompact{") {
-		t.Fatal("deploychecks.go builds a gate's compaction by hand; it must use defaultSummarizerAnswer()")
+		// Assert: the gate answers the daemon makes on its own build their
+		// compaction through one helper, never by hand.
+		if !strings.Contains(string(body), "defaultSummarizerAnswer()") || strings.Contains(string(body), "&agentreplv1.AnswerColdGateCompact{") {
+			t.Fatalf("%s builds a gate's compaction by hand; it must use defaultSummarizerAnswer()", file)
+		}
 	}
 }
 

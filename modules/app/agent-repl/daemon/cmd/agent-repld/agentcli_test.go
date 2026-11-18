@@ -248,8 +248,8 @@ func (c *cliClient) NotifyWorkspace(_ context.Context, req *connect.Request[agen
 	return connect.NewResponse(&agentreplv1.NotifyWorkspaceResponse{}), c.record(req.Msg)
 }
 
-func (c *cliClient) AnswerColdGate(_ context.Context, req *connect.Request[agentreplv1.AnswerColdGateRequest]) (*connect.Response[agentreplv1.AnswerColdGateResponse], error) {
-	return connect.NewResponse(&agentreplv1.AnswerColdGateResponse{}), c.record(req.Msg)
+func (c *cliClient) PassColdGate(_ context.Context, req *connect.Request[agentreplv1.PassColdGateRequest]) (*connect.Response[agentreplv1.PassColdGateResponse], error) {
+	return connect.NewResponse(&agentreplv1.PassColdGateResponse{}), c.record(req.Msg)
 }
 
 func (c *cliClient) EvaluateInEditor(_ context.Context, req *connect.Request[agentreplv1.EvaluateInEditorRequest]) (*connect.Response[agentreplv1.EvaluateInEditorResponse], error) {
@@ -1503,39 +1503,58 @@ func TestSubscribeSpellsEveryStoreEventByItsStoreName(t *testing.T) {
 	}
 }
 
-func TestGateAnswersTheStandingGate(t *testing.T) {
-	gate := &frontendv1.FeedId{Value: "gate-1"}
-	standing := &agentreplv1.GetWorkspaceStatusResponse{Result: &agentreplv1.GetWorkspaceStatusResponse_Success{Success: &agentreplv1.GetWorkspaceStatusSuccess{
-		Status: &agentreplv1.WorkspaceStatus{Standing: &agentreplv1.WorkspaceStatusStanding{Standing: &agentreplv1.WorkspaceStatusStanding_Open{Open: &agentreplv1.WorkspaceStatusOpen{
-			Activity: &agentreplv1.WorkspaceStatusActivity{Activity: &agentreplv1.WorkspaceStatusActivity_ColdGate{ColdGate: &agentreplv1.WorkspaceStatusActivityColdGate{Gate: gate}}}}}}}}}}
+func TestPassGatePassesTheGateAsTheCallingWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "pass-gate", "peer")
+
+	// Assert
+	req := only[*agentreplv1.PassColdGateRequest](t, f)
+	if code != exitSuccess || req.GetWorkspace().GetId() != "ws-peer" || req.GetRequester().GetWorkspace().GetId() != "ws-caller" {
+		t.Fatalf("exit %d, pass %v; want ws-peer's gate passed by ws-caller", code, req)
+	}
+}
+
+func TestPassGateTakesNoAnswer(t *testing.T) {
 	tests := []struct {
-		name   string
-		status *agentreplv1.GetWorkspaceStatusResponse
-		args   []string
-		code   int
+		name string
+		args []string
 	}{
-		{name: "pay", status: standing, args: []string{"peer", "pay"}, code: exitSuccess},
-		{name: "compact with its options", status: standing, args: []string{"peer", "compact", "-model", "haiku", "-scope", "all"}, code: exitSuccess},
-		{name: "compact with no options", status: standing, args: []string{"peer", "compact"}, code: exitFailure},
-		{name: "no gate standing", args: []string{"peer", "clear"}, code: exitRefused},
+		{name: "pay", args: []string{"peer", "pay"}},
+		{name: "clear", args: []string{"peer", "clear"}},
+		{name: "compact", args: []string{"peer", "compact"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
 			f := newCLIFixture()
-			f.client.status = tt.status
 
 			// Act
-			code := f.run(workspaceNoun, append([]string{"gate"}, tt.args...)...)
+			code := f.run(workspaceNoun, append([]string{"pass-gate"}, tt.args...)...)
 
 			// Assert
-			if code != tt.code {
-				t.Fatalf("exit %d, stderr %q; want %d", code, f.errOut.String(), tt.code)
+			for _, req := range f.client.requests {
+				if _, passed := req.(*agentreplv1.PassColdGateRequest); passed {
+					t.Fatalf("requests %v; want no pass sent", f.client.requests)
+				}
 			}
-			if tt.code == exitSuccess && !proto.Equal(only[*agentreplv1.AnswerColdGateRequest](t, f).GetGate(), gate) {
-				t.Error("the answer does not name the standing gate")
+			if code != exitFailure {
+				t.Fatalf("exit %d; want the usage refused", code)
 			}
 		})
+	}
+}
+
+func TestTheAgentAPIOffersNoGateAnswerButThePass(t *testing.T) {
+	// Act
+	_, gate := cliNouns[workspaceNoun]["gate"]
+	_, pass := cliNouns[workspaceNoun]["pass-gate"]
+
+	// Assert
+	if gate || !pass {
+		t.Fatalf("workspace gate present %v, pass-gate present %v; want only pass-gate", gate, pass)
 	}
 }
 
@@ -2460,22 +2479,6 @@ func TestTheTargetedVerbsShareOneArgumentPreamble(t *testing.T) {
 	if handRolled != 0 || strings.Count(string(src), "c.targetArgs(fs, stateDir, args, ") != 2 {
 		t.Fatalf("usage refusals %d, targetArgs calls %d; want the one preamble shared by workspaceArg and queuedArg",
 			handRolled, strings.Count(string(src), "c.targetArgs(fs, stateDir, args, "))
-	}
-}
-
-func TestAGateWithNoColdGateNamesTheWorkspacesStanding(t *testing.T) {
-	// Arrange: the default status stands idle, with no gate.
-	f := newCLIFixture()
-	f.client.status = &agentreplv1.GetWorkspaceStatusResponse{Result: &agentreplv1.GetWorkspaceStatusResponse_Success{Success: &agentreplv1.GetWorkspaceStatusSuccess{
-		Status: &agentreplv1.WorkspaceStatus{Standing: &agentreplv1.WorkspaceStatusStanding{}}}}}
-
-	// Act
-	code := f.run(workspaceNoun, "gate", "peer", "pay")
-
-	// Assert
-	stderr := f.errOut.String()
-	if code != exitRefused || !strings.Contains(stderr, "no cold gate stands on the workspace; it stands {") || strings.Contains(stderr, "&{") {
-		t.Fatalf("exit %d, stderr %q; want the refusal naming the standing as JSON, never a Go struct", code, stderr)
 	}
 }
 

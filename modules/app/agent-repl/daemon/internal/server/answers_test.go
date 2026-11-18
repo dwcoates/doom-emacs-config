@@ -12,7 +12,9 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
@@ -561,6 +563,103 @@ func TestInterruptAnswersNotDetachedWorkAsTheTypedArm(t *testing.T) {
 			}
 			if resp.Msg.GetError().GetNotDetachedWork() == nil {
 				t.Fatalf("Interrupt = %v, want InterruptError.not_detached_work", resp.Msg)
+			}
+		})
+	}
+}
+
+// passColdGateRequest is a pass of the test workspace's gate by workspace
+// "w-parent".
+func passColdGateRequest() *agentreplv1.PassColdGateRequest {
+	return &agentreplv1.PassColdGateRequest{
+		Workspace: ref(),
+		Requester: &agentreplv1.WorkspaceRequesterWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: "w-parent", Dir: "/tmp/w-parent"}},
+	}
+}
+
+// TestPassColdGateHandsTheVerbTheGatedWorkspace pins that a pass reaches the
+// verb for the gated workspace, and that its record names who passed it.
+func TestPassColdGateHandsTheVerbTheGatedWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+
+	// Act.
+	resp, err := h.Client.PassColdGate(context.Background(), connect.NewRequest(passColdGateRequest()))
+
+	// Assert.
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("PassColdGate = %v, %v; want success", resp, err)
+	}
+	if got := h.Verbs.passedColdGates; len(got) != 1 || got[0] != testWorkspaceID {
+		t.Fatalf("verb passes = %v, want exactly %q", got, testWorkspaceID)
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.pass_cold_gate"})
+	if !ok || record.Context["requester"] != "w-parent" {
+		t.Fatalf("records = %+v, want the pass recorded with its requester", log.Records())
+	}
+}
+
+// TestPassColdGateRequiresTheRequestingWorkspace pins that only a workspace
+// passes a gate: a request naming none is malformed.
+func TestPassColdGateRequiresTheRequestingWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		requester *agentreplv1.WorkspaceRequesterWorkspace
+	}{
+		{name: "no requester"},
+		{name: "a requester naming no workspace", requester: &agentreplv1.WorkspaceRequesterWorkspace{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			req := passColdGateRequest()
+			req.Requester = tt.requester
+
+			// Act.
+			_, err := h.Client.PassColdGate(context.Background(), connect.NewRequest(req))
+
+			// Assert.
+			if code := connectCode(t, err); code != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", code)
+			}
+			if len(h.Verbs.passedColdGates) != 0 {
+				t.Fatalf("verb passes = %v, want none", h.Verbs.passedColdGates)
+			}
+		})
+	}
+}
+
+// TestPassColdGateAnswersTheVerbsRefusalAsItsArm pins that the verb's
+// refusals reach the caller as PassColdGateError's own arms.
+func TestPassColdGateAnswersTheVerbsRefusalAsItsArm(t *testing.T) {
+	tests := []struct {
+		name string
+		arm  string
+		got  func(*agentreplv1.PassColdGateError) bool
+	}{
+		{name: "no gate stands", arm: workspace.ArmNoColdGate,
+			got: func(e *agentreplv1.PassColdGateError) bool { return e.GetNoColdGate() != nil }},
+		{name: "the gate served no Haiku compaction", arm: workspace.ArmUnservedRemediation,
+			got: func(e *agentreplv1.PassColdGateError) bool { return e.GetUnservedRemediation() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Verbs.passColdGateErr = &workspace.Refusal{Arm: tt.arm, Reason: tt.name}
+
+			// Act.
+			resp, err := h.Client.PassColdGate(context.Background(), connect.NewRequest(passColdGateRequest()))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("PassColdGate: %v", err)
+			}
+			if !tt.got(resp.Msg.GetError()) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.arm)
 			}
 		})
 	}
