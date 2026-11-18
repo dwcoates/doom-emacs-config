@@ -236,6 +236,19 @@ func TestWorkspaceLinksRefusals(t *testing.T) {
 	}
 }
 
+// assertRefusalRecordedAtDebug fails T unless RECORDS hold a DEBUG record of
+// OP and no ERROR record of it naming WORKSPACE: a links refusal is the store
+// answering what was asked, never a failed write (isLinkRefusal).
+func assertRefusalRecordedAtDebug(t *testing.T, records []dlog.Record, op, workspace string) {
+	t.Helper()
+	if _, ok := dlog.FindRecord(records, dlog.RecordQuery{Level: dlog.LevelDebug, Operation: op}); !ok {
+		t.Errorf("no DEBUG record of %s: %v", op, records)
+	}
+	if hasErrorRecord(records, op, workspace) {
+		t.Errorf("the refusal of %s was recorded as an ERROR: %v", op, records)
+	}
+}
+
 // hasErrorRecord reports whether an error record of OP names WORKSPACE.
 func hasErrorRecord(records []dlog.Record, op, workspace string) bool {
 	for _, r := range dlog.FilterRecords(records, dlog.RecordQuery{Level: "error", Operation: op}) {
@@ -427,12 +440,7 @@ func TestWorkspaceLinksGNSSubpages(t *testing.T) {
 			if !slices.Equal(read, standing) {
 				t.Errorf("links = %+v, want the standing %+v untouched", read, standing)
 			}
-			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.wsm.set_workspace_link"}); !ok {
-				t.Errorf("no DEBUG record of the refused set: %v", log.Records())
-			}
-			if hasErrorRecord(log.Records(), "daemon.wsm.set_workspace_link", string(ws.ID)) {
-				t.Errorf("the refusal was recorded as an ERROR: %v", log.Records())
-			}
+			assertRefusalRecordedAtDebug(t, log.Records(), "daemon.wsm.set_workspace_link", string(ws.ID))
 		})
 	}
 }
@@ -550,12 +558,7 @@ func TestWorkspaceLinksRefuseAShowLeavingAnOwnedLinkOut(t *testing.T) {
 			if !slices.Equal(read, standing) {
 				t.Errorf("links = %+v, want the standing %+v untouched", read, standing)
 			}
-			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.wsm.show_workspace_links"}); !ok {
-				t.Errorf("no DEBUG record of the refused show: %v", log.Records())
-			}
-			if hasErrorRecord(log.Records(), "daemon.wsm.show_workspace_links", string(ws.ID)) {
-				t.Errorf("the refusal was recorded as an ERROR: %v", log.Records())
-			}
+			assertRefusalRecordedAtDebug(t, log.Records(), "daemon.wsm.show_workspace_links", string(ws.ID))
 		})
 	}
 }
@@ -598,12 +601,7 @@ func TestWorkspaceLinksRefusalsAreRecordedAtDebug(t *testing.T) {
 			if !isLinkRefusal(err) {
 				t.Fatalf("err = %v, want a links refusal", err)
 			}
-			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: tt.op}); !ok {
-				t.Errorf("no DEBUG record of %s: %v", tt.op, log.Records())
-			}
-			if hasErrorRecord(log.Records(), tt.op, string(ws.ID)) {
-				t.Errorf("the refusal was recorded as an ERROR: %v", log.Records())
-			}
+			assertRefusalRecordedAtDebug(t, log.Records(), tt.op, string(ws.ID))
 		})
 	}
 }
