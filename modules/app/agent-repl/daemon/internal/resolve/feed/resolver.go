@@ -1604,20 +1604,9 @@ func (r *resolver) UpsertAtTurnAddress(ws ids.WorkspaceID, turn ids.TurnID, key 
 	s := r.state(ws)
 	at := r.outputPlacement(s, &turn)
 	row.Id = r.rowID(ws, at.feed, key)
-	// THE MIRROR IS DRAWN PINNED, and the turn's own entry settles it
-	// (prompt.go, pinSettle). Drawn before its entry exists, a placed mirror
-	// took a follower key no other daemon could mint: a successor that drew
-	// the same prompt from its entry keyed it by the entry's place, and a
-	// reader holding both saw one row offered at two places (2026-11-18,
-	// merge-queue-stall-triage). Settled by its entry, it ends on the key
-	// every daemon mints for that entry. A mirror already drawn keeps its rank.
-	f := r.feed(s, at.feed)
-	if _, drawn := f.rank[row.GetId().GetValue()]; !drawn {
-		at.pin = pinDraw
-	}
 	r.logger(ws).Debug("daemon.feed.synthesized_at_turn_address",
 		"a daemon-synthesized row was upserted at its turn's address",
-		dlog.Context{"feed": r.feedKey(ws, at.feed), "row": row.GetId().GetValue(), "turn": string(turn), "pinned": at.pin == pinDraw})
+		dlog.Context{"feed": r.feedKey(ws, at.feed), "row": row.GetId().GetValue(), "turn": string(turn)})
 	r.upsert(s, at, row, true)
 }
 
