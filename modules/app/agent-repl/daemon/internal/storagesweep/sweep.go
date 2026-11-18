@@ -285,6 +285,7 @@ func (s *Sweeper) Run(ctx context.Context) error {
 		"build_cache_every": s.deps.BuildCacheEvery.String(),
 	})
 	trims := make(chan struct{})
+	// inflight: joined: the function that starts it waits for it.
 	go func() {
 		defer close(trims)
 		s.runBuildCacheTrims(ctx)
