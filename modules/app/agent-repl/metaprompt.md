@@ -347,9 +347,13 @@
     - The workspace shows it with `-show` in the same turn it is stored, whenever storing it left it unshown.
     - So the owner can always reach every open pull request the workspace asked them to review or merge from the topbar.
 - The menu shows at most five links, so once it is full the workspace chooses which five it shows.
+  - Owned links come before references.
+    - The daemon shows a newly stored owned link in place of the oldest shown reference.
+    - It refuses a show that leaves an owned link unshown while it shows a reference, unless the owned links alone are more than five.
   - First come the open pull requests the workspace's agents made, newest first.
-  - Then the links the workspace was created to act on.
-  - A merged or closed pull request, and any other reference, gives up its place to these first.
+  - Then the workspace's other owned links.
+  - Then the links the workspace was created to act on, before any other reference.
+  - When the owned links alone are more than five, a merged or closed pull request gives up its place to the links the workspace was created to act on.
   - Among the rest, it ranks them by relevance to the project, as seen by the developer working with the agent.
   - It ranks them by the same lens for the stakeholders the developer reports the work to.
   - The workspace checks the menu again whenever one of its pull requests merges or closes, and whenever it stores a new one.

@@ -436,3 +436,126 @@ func TestWorkspaceLinksGNSSubpages(t *testing.T) {
 		})
 	}
 }
+
+// ownedLinkURL is the i'th sample url of an owned link.
+func ownedLinkURL(i int) string { return fmt.Sprintf("https://example.com/owned/%d", i) }
+
+func TestWorkspaceLinksOwnedLinksComeFirstInTheMenu(t *testing.T) {
+	// fiveReferences fills the menu with references, linkURL(1) the oldest.
+	fiveReferences := []linkStep{setLink(linkURL(1), "one a"), setLink(linkURL(2), "two a"), setLink(linkURL(3), "three a"),
+		setLink(linkURL(4), "four a"), setLink(linkURL(5), "five a")}
+	fiveOwned := []linkStep{setOwnedLink(ownedLinkURL(1), "owned one"), setOwnedLink(ownedLinkURL(2), "owned two"), setOwnedLink(ownedLinkURL(3), "owned three"),
+		setOwnedLink(ownedLinkURL(4), "owned four"), setOwnedLink(ownedLinkURL(5), "owned five")}
+	tests := []struct {
+		name  string
+		steps []linkStep
+		// shown is the urls the menu shows afterwards, in any order.
+		shown []string
+	}{
+		{name: "a new owned link takes the oldest shown reference's place",
+			steps: append(slices.Clone(fiveReferences), setOwnedLink(ownedLinkURL(1), "owned one")),
+			shown: []string{ownedLinkURL(1), linkURL(2), linkURL(3), linkURL(4), linkURL(5)}},
+		{name: "a second owned link takes the next oldest reference's place",
+			steps: append(slices.Clone(fiveReferences), setOwnedLink(ownedLinkURL(1), "owned one"), setOwnedLink(ownedLinkURL(2), "owned two")),
+			shown: []string{ownedLinkURL(1), ownedLinkURL(2), linkURL(3), linkURL(4), linkURL(5)}},
+		{name: "the oldest reference is the one least recently set, not stored",
+			steps: append(slices.Clone(fiveReferences), setLink(linkURL(1), "one b"), setOwnedLink(ownedLinkURL(1), "owned one")),
+			shown: []string{ownedLinkURL(1), linkURL(1), linkURL(3), linkURL(4), linkURL(5)}},
+		{name: "a new owned link is stored unshown when the menu shows only owned links",
+			steps: append(slices.Clone(fiveOwned), setOwnedLink(ownedLinkURL(6), "owned six")),
+			shown: []string{ownedLinkURL(1), ownedLinkURL(2), ownedLinkURL(3), ownedLinkURL(4), ownedLinkURL(5)}},
+		{name: "a new reference is stored unshown when the menu is full",
+			steps: append(slices.Clone(fiveReferences), setLink(linkURL(6), "six a")),
+			shown: []string{linkURL(1), linkURL(2), linkURL(3), linkURL(4), linkURL(5)}},
+		{name: "a relabel making an unshown reference owned takes a reference's place",
+			steps: append(slices.Clone(fiveReferences), setLink(linkURL(6), "six a"), setOwnedLink(linkURL(6), "six b")),
+			shown: []string{linkURL(6), linkURL(2), linkURL(3), linkURL(4), linkURL(5)}},
+		{name: "a relabel making a shown reference owned keeps it shown",
+			steps: append(slices.Clone(fiveReferences), setOwnedLink(linkURL(3), "three b")),
+			shown: []string{linkURL(1), linkURL(2), linkURL(3), linkURL(4), linkURL(5)}},
+		{name: "a relabel making a shown owned link a reference keeps it shown",
+			steps: append(slices.Clone(fiveOwned), setLink(ownedLinkURL(1), "owned one b")),
+			shown: []string{ownedLinkURL(1), ownedLinkURL(2), ownedLinkURL(3), ownedLinkURL(4), ownedLinkURL(5)}},
+		{name: "an owned link left out by a show is shown again by its relabel in a reference's place",
+			steps: append(slices.Clone(fiveReferences[:4]), setOwnedLink(ownedLinkURL(7), "owned seven"), setOwnedLink(ownedLinkURL(8), "owned eight"),
+				setOwnedLink(ownedLinkURL(1), "owned one"), setOwnedLink(ownedLinkURL(2), "owned two"), setOwnedLink(ownedLinkURL(3), "owned three"),
+				setOwnedLink(ownedLinkURL(4), "owned four"), linkStep{show: []string{ownedLinkURL(1), ownedLinkURL(2), ownedLinkURL(3), ownedLinkURL(4), ownedLinkURL(7)}},
+				setOwnedLink(ownedLinkURL(8), "owned eight b")),
+			shown: []string{ownedLinkURL(1), ownedLinkURL(2), ownedLinkURL(3), ownedLinkURL(4), ownedLinkURL(7)}},
+		{name: "a show of every owned link and references after them stands",
+			steps: append(slices.Clone(fiveReferences), setOwnedLink(ownedLinkURL(1), "owned one"), linkStep{show: []string{ownedLinkURL(1), linkURL(1), linkURL(2)}}),
+			shown: []string{ownedLinkURL(1), linkURL(1), linkURL(2)}},
+		{name: "a show of owned links alone, leaving some out, stands",
+			steps: append(slices.Clone(fiveOwned[:3]), linkStep{show: []string{ownedLinkURL(1)}}),
+			shown: []string{ownedLinkURL(1)}},
+		{name: "a show choosing a reference over an owned link stands once the owned links alone exceed the menu",
+			steps: append(slices.Clone(fiveOwned), setOwnedLink(ownedLinkURL(6), "owned six"), setLink(linkURL(1), "one a"),
+				linkStep{show: []string{linkURL(1), ownedLinkURL(2), ownedLinkURL(3), ownedLinkURL(4), ownedLinkURL(5)}}),
+			shown: []string{linkURL(1), ownedLinkURL(2), ownedLinkURL(3), ownedLinkURL(4), ownedLinkURL(5)}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			got := applyLinkSteps(t, s, ws.ID, tt.steps)
+
+			// Assert
+			var shown []string
+			for _, link := range got {
+				if link.Shown {
+					shown = append(shown, link.URL)
+				}
+			}
+			slices.Sort(shown)
+			want := slices.Sorted(slices.Values(tt.shown))
+			if !slices.Equal(shown, want) {
+				t.Fatalf("shown = %v, want %v", shown, want)
+			}
+		})
+	}
+}
+
+func TestWorkspaceLinksRefuseAShowLeavingAnOwnedLinkOut(t *testing.T) {
+	tests := []struct {
+		name string
+		show []string
+		// wantOwned and wantReference are what the refusal names.
+		wantOwned, wantReference string
+	}{
+		{name: "a reference shown in an owned link's place", show: []string{linkURL(1), ownedLinkURL(1)},
+			wantOwned: ownedLinkURL(2), wantReference: linkURL(1)},
+		{name: "the most recently set owned link left out is named", show: []string{linkURL(2), linkURL(1)},
+			wantOwned: ownedLinkURL(2), wantReference: linkURL(2)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			standing := applyLinkSteps(t, s, ws.ID, []linkStep{setLink(linkURL(1), "one a"), setLink(linkURL(2), "two a"),
+				setOwnedLink(ownedLinkURL(1), "owned one"), setOwnedLink(ownedLinkURL(2), "owned two")})
+
+			// Act
+			_, err := s.ShowWorkspaceLinks(context.Background(), ws.ID, tt.show)
+
+			// Assert
+			var unshown *OwnedLinkUnshownError
+			if !errors.As(err, &unshown) || unshown.OwnedURL != tt.wantOwned || unshown.ReferenceURL != tt.wantReference {
+				t.Fatalf("err = %v, want an owned-link-unshown refusal naming %q and %q", err, tt.wantOwned, tt.wantReference)
+			}
+			read, _ := s.WorkspaceLinks(context.Background(), ws.ID)
+			if !slices.Equal(read, standing) {
+				t.Errorf("links = %+v, want the standing %+v untouched", read, standing)
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.wsm.show_workspace_links"}); !ok {
+				t.Errorf("no DEBUG record of the refused show: %v", log.Records())
+			}
+			if hasErrorRecord(log.Records(), "daemon.wsm.show_workspace_links", string(ws.ID)) {
+				t.Errorf("the refusal was recorded as an ERROR: %v", log.Records())
+			}
+		})
+	}
+}

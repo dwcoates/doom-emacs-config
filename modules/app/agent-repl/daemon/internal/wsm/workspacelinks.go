@@ -116,12 +116,27 @@ func (e *SubpageOfOwnedLinkError) Error() string {
 	return fmt.Sprintf("wsm: %q is a GNS subpage of the owned link %q", e.URL, e.OwnedPageURL)
 }
 
+// OwnedLinkUnshownError is a show that would leave an owned link unshown
+// while it shows a reference, when the owned links alone fit the menu. It is
+// the store answering what was asked, never a failure.
+type OwnedLinkUnshownError struct {
+	// OwnedURL is the owned link the show leaves out.
+	OwnedURL string
+	// ReferenceURL is a reference the show names in its place.
+	ReferenceURL string
+}
+
+func (e *OwnedLinkUnshownError) Error() string {
+	return fmt.Sprintf("wsm: a show leaves the owned link %q unshown while it shows the reference %q", e.OwnedURL, e.ReferenceURL)
+}
+
 // isLinkRefusal reports whether ERR is a links write refusing what was asked
 // (the verb turns each into the rpc's arm), never the store failing.
 func isLinkRefusal(err error) bool {
 	var unknown *UnknownLinkError
 	var subpage *SubpageOfOwnedLinkError
-	return errors.As(err, &unknown) || errors.As(err, &subpage)
+	var ownedUnshown *OwnedLinkUnshownError
+	return errors.As(err, &unknown) || errors.As(err, &subpage) || errors.As(err, &ownedUnshown)
 }
 
 // errTooManyShown is a show naming more links than ShownLinkLimit. The verb
@@ -143,8 +158,12 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 // SetWorkspaceLink stores SET's url under its label and ownership, or
 // relabels it when ID already holds it, making it the most recently set
 // either way. An owned GNS page that is a subpage of another GNS page ID
-// owns is a *SubpageOfOwnedLinkError, and nothing changes. A new link is shown while fewer than ShownLinkLimit are; a
-// relabeled one keeps its placement. In the same transaction an owned pull
+// owns is a *SubpageOfOwnedLinkError, and nothing changes. OWNED LINKS COME
+// FIRST in the menu: a new link is shown while fewer than ShownLinkLimit
+// are, and once the menu is full an owned set the menu leaves out (a new
+// link, or a relabel of an unshown one) is shown in place of the oldest
+// shown reference, if any is shown. A shown link, and a reference relabeled,
+// keep their placement. In the same transaction an owned pull
 // request takes SET.Subscribe when ID holds no subscription to it, and a link
 // no longer owned ends the subscription its ownership took. It answers every
 // link ID now holds, read in the same transaction.
@@ -177,10 +196,13 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 				return err
 			}
 		}
-		var next, shown int64
+		var next int64
 		if err := tx.QueryRowContext(ctx,
-			`SELECT COALESCE(MAX(set_seq), 0) + 1, COALESCE(SUM(shown), 0) FROM workspace_links WHERE workspace_id = ?`,
-			id).Scan(&next, &shown); err != nil {
+			`SELECT COALESCE(MAX(set_seq), 0) + 1 FROM workspace_links WHERE workspace_id = ?`, id).Scan(&next); err != nil {
+			return err
+		}
+		shown, err := placeLinkInTx(ctx, tx, id, set)
+		if err != nil {
 			return err
 		}
 		var announces any
@@ -200,14 +222,13 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO workspace_links (workspace_id, url, label, set_seq, shown, owned, pr_owner, pr_repo, pr_number, announces) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq, owned = excluded.owned, announces = excluded.announces`,
-			id, url, label, next, shown < ShownLinkLimit, set.Owned, owner, repo, number, announces); err != nil {
+			 ON CONFLICT(workspace_id, url) DO UPDATE SET label = excluded.label, set_seq = excluded.set_seq, shown = excluded.shown, owned = excluded.owned, announces = excluded.announces`,
+			id, url, label, next, shown, set.Owned, owner, repo, number, announces); err != nil {
 			return err
 		}
 		if err := s.followLinkInTx(ctx, tx, id, set); err != nil {
 			return err
 		}
-		var err error
 		out, err = linksOf(ctx, tx, id)
 		return err
 	})
@@ -247,7 +268,10 @@ func (s *store) RemoveWorkspaceLink(ctx context.Context, id WorkspaceID, url str
 // ShowWorkspaceLinks makes URLS exactly the links ID's menu shows, every
 // other one unshown, answering every link ID holds. Every url must be one ID
 // holds (an *UnknownLinkError names the first that is not, and nothing
-// changes), and there are one to ShownLinkLimit of them, without repeats.
+// changes), and there are one to ShownLinkLimit of them, without repeats. A
+// show that leaves an owned link unshown while it shows a reference is an
+// *OwnedLinkUnshownError, and nothing changes, unless ID's owned links alone
+// are more than ShownLinkLimit.
 func (s *store) ShowWorkspaceLinks(ctx context.Context, id WorkspaceID, urls []string) ([]WorkspaceLink, error) {
 	const op = "daemon.wsm.show_workspace_links"
 	fields := dlog.Context{"workspace": string(id), "urls": urls}
@@ -277,6 +301,9 @@ func (s *store) ShowWorkspaceLinks(ctx context.Context, id WorkspaceID, urls []s
 				return &UnknownLinkError{URL: url}
 			}
 		}
+		if err := refuseOwnedLinkUnshownInTx(ctx, tx, id, urls); err != nil {
+			return err
+		}
 		var err error
 		out, err = linksOf(ctx, tx, id)
 		return err
@@ -297,6 +324,71 @@ func (s *store) ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM workspace_links WHERE workspace_id = ?`, id)
 		return err
 	})
+}
+
+// placeLinkInTx answers whether SET's link is shown once stored, unshowing
+// the reference it takes the place of: a shown link stays shown; a new link,
+// or an owned one the menu leaves out, is shown while the menu has room; once
+// it is full, an owned one is shown in place of the oldest shown reference,
+// and is otherwise left out; a reference relabeled keeps its placement.
+func placeLinkInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, set LinkSet) (bool, error) {
+	var held sql.NullBool
+	if err := tx.QueryRowContext(ctx, `SELECT shown FROM workspace_links WHERE workspace_id = ? AND url = ?`, id, set.URL).Scan(&held); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, err
+	}
+	if held.Valid && (held.Bool || !set.Owned) {
+		return held.Bool, nil
+	}
+	var shown int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_links WHERE workspace_id = ? AND shown = 1`, id).Scan(&shown); err != nil {
+		return false, err
+	}
+	if shown < ShownLinkLimit {
+		return true, nil
+	}
+	if !set.Owned {
+		return false, nil
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE workspace_links SET shown = 0 WHERE workspace_id = ? AND url = (
+		SELECT url FROM workspace_links WHERE workspace_id = ? AND shown = 1 AND owned = 0 ORDER BY set_seq LIMIT 1)`, id, id)
+	if err != nil {
+		return false, err
+	}
+	return touchedRow(res)
+}
+
+// refuseOwnedLinkUnshownInTx answers an *OwnedLinkUnshownError when the show
+// of URLS just written leaves an owned link of ID's unshown while it shows a
+// reference, unless ID's owned links alone are more than ShownLinkLimit, in
+// which case any choice among them stands. It names the most recently set
+// owned link left out and the first reference URLS names.
+func refuseOwnedLinkUnshownInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, urls []string) error {
+	links, err := linksOf(ctx, tx, id)
+	if err != nil {
+		return err
+	}
+	owned, unshownOwned := 0, ""
+	references := make(map[string]bool)
+	for _, link := range links {
+		switch {
+		case link.Owned:
+			owned++
+			if !link.Shown && unshownOwned == "" {
+				unshownOwned = link.URL
+			}
+		case link.Shown:
+			references[link.URL] = true
+		}
+	}
+	if owned > ShownLinkLimit || unshownOwned == "" {
+		return nil
+	}
+	for _, url := range urls {
+		if references[url] {
+			return &OwnedLinkUnshownError{OwnedURL: unshownOwned, ReferenceURL: url}
+		}
+	}
+	return nil
 }
 
 // refuseSubpageOfOwnedInTx answers a *SubpageOfOwnedLinkError when URL is a

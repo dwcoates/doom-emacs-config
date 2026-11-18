@@ -392,15 +392,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("A GNS subpage the work adds under a page the workspace does not own is stored owned");
   });
 
-  it("requires every open pull request an agent makes to be shown in the menu, ahead of merged ones and references", () => {
+  it("requires every open pull request an agent makes to be shown in the menu, and owned links ahead of references", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home);
     // Assert
     expect(text).toContain("Canonical means that while the pull request is open, it is one of the menu's shown links.");
+    expect(text).toContain("Owned links come before references.");
     expect(text).toContain("First come the open pull requests the workspace's agents made, newest first.");
-    expect(text).toContain("A merged or closed pull request, and any other reference, gives up its place to these first.");
+    expect(text).toContain("Then the workspace's other owned links.");
+    expect(text).toContain("unless the owned links alone are more than five");
+    expect(text).not.toContain("A merged or closed pull request, and any other reference, gives up its place to these first.");
   });
 
   it("requires a pull request outside the workspace's repository to be cited as repo-name#number on every mention", () => {

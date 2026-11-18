@@ -54,3 +54,42 @@ Designed autonomously (the default mode); every assumption is stated below.
   - Storing a parent page owned after its subpages were stored owned is
     allowed. The subpages' links stay, since nothing removes links on the
     agent's behalf.
+
+### `agentrepl.v1.ChangeWorkspaceLinksError.owned_link_unshown` (arm 12), and owned-first placement
+
+- WHAT: a new refusal arm, `agentrepl.v1.ChangeWorkspaceLinksOwnedLinkUnshown`,
+  carrying the `owned_url` a show left out (the most recently set of them)
+  and the first `reference_url` it named. The placement comments on
+  `agentrepl.v1.ChangeWorkspaceLinksSet`, `agentrepl.v1.ChangeWorkspaceLinksShow`,
+  `agentrepl.v1.WorkspaceLinksMenuFull` and `workspace_links.proto`'s header
+  now describe owned-first placement. No message shape changed besides the arm.
+- WHY: the owner's rule is that the menu prefers owned links. Once the menu is
+  full, a newly set owned link is shown in place of the oldest shown
+  reference. A show never leaves an owned link unshown while a reference is
+  shown, unless the owned links alone exceed the cap.
+- Placement on a set (`daemon/internal/wsm/workspacelinks.go` `placeLinkInTx`):
+  - A shown link stays shown, and a relabeled reference keeps its placement.
+    So demoting a shown owned link to a reference leaves it shown.
+  - A new link, or an owned set of an unshown link, is shown while the menu
+    has room.
+  - Once the menu is full, such an owned set unshows the oldest shown
+    reference (lowest `set_seq`, so the least recently SET, not the least
+    recently stored) and is shown in its place. It is left out only when the
+    menu shows no reference.
+  - The relabel case is included so the invariant can't be bypassed by storing
+    a link as a reference first and then re-owning it.
+- The show refusal (`refuseOwnedLinkUnshownInTx`) runs after the show's own
+  writes, in the same transaction, so its rollback leaves nothing changed. The
+  `unknown_link` check runs first and wins over it.
+- Why the daemon refuses a show rather than rewriting it: silently replacing a
+  named reference with an unshown owned link would make the menu disagree with
+  what the agent asked for. The arm names both links, so the agent can make
+  the swap itself.
+- Consequences:
+  - A merged or closed pull request (owned) now outranks a link the workspace
+    was created to act on (a reference) until the owned links alone exceed
+    five. The metaprompt's ranking text says so.
+  - Removing a link frees a slot but does not promote an unshown link. That is
+    unchanged.
+  - The workspace package's fake store (`daemon/internal/workspace/fakes_test.go`)
+    does not model owned-first placement. The store's own tests cover it.

@@ -50,8 +50,12 @@ message ChangeWorkspaceLinksRequest {
 }
 
 // Store a link, or relabel one already stored. Either way the link becomes the
-// most recently set. A new link is shown while the menu has room and stored
-// unshown once it is full; a relabeled link keeps its placement.
+// most recently set. OWNED LINKS COME FIRST: a new link is shown while the menu
+// has room; once it is full, an owned link the menu would leave out (a new one,
+// or a relabel of an unshown one) is shown in place of the OLDEST shown
+// reference, and is stored unshown only when the menu shows no reference. A new
+// reference is stored unshown once the menu is full. A shown link, and a
+// relabeled reference, keep their placement.
 message ChangeWorkspaceLinksSet {
   // The link, an absolute http or https url with no whitespace, stored and
   // later opened verbatim. A url the external browser would refuse to open is
@@ -83,7 +87,10 @@ message ChangeWorkspaceLinksRemove {
 
 // Name exactly the links the menu shows; every other stored link becomes
 // unshown. Every url must be one the workspace holds (`unknown_link`
-// otherwise), and there may be at most five (`too_many_shown` otherwise). An
+// otherwise), and there may be at most five (`too_many_shown` otherwise). A
+// show may leave an owned link unshown while it shows a reference only when
+// the workspace's owned links alone are more than five (`owned_link_unshown`
+// otherwise), so the owned links fill the menu before any reference does. An
 // empty list, or one naming a url twice, is a malformed request (Connect
 // InvalidArgument).
 message ChangeWorkspaceLinksShow {
@@ -144,6 +151,9 @@ message ChangeWorkspaceLinksError {
     // workspace already owns as a link. The owned page's link already
     // reaches the subpage, so a separate link for it is never stored.
     ChangeWorkspaceLinksSubpageOfOwnedLink subpage_of_owned_link = 11;
+    // A show left an owned link unshown while it showed a reference, and the
+    // workspace's owned links alone fit the menu.
+    ChangeWorkspaceLinksOwnedLinkUnshown owned_link_unshown = 12;
   }
 }
 
@@ -239,4 +249,16 @@ message ChangeWorkspaceLinksSubpageOfOwnedLink {
   // The url of the owned link whose GNS page contains it, exactly as that
   // link was stored.
   string owned_page_url = 2;
+}
+
+// A show named a reference while it left an owned link out, and the owned
+// links alone fit the menu. Nothing changed: the agent shows the owned link
+// in the reference's place, or every owned link and references after them.
+message ChangeWorkspaceLinksOwnedLinkUnshown {
+  // The owned link the show left out, the most recently set of them, exactly
+  // as it was stored.
+  string owned_url = 1;
+  // A reference the show named, the first of them in the show's order,
+  // exactly as it was stored.
+  string reference_url = 2;
 }
