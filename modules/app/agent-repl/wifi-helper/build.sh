@@ -35,7 +35,8 @@ source_hash "$here" >"$work/AgentReplWifi.app/Contents/Resources/source-sha256"
 # codesign refuses an untrusted identity by name.
 # The identity's name is the manifest's (requirements.json, wifi-helper-signing).
 signing_name="$(jq -er '.requirements[] | select(.id == "wifi-helper-signing") | .name' "$here/../requirements.json")"
-identity="$(security find-identity -p codesigning | awk -v n="\"$signing_name\"" 'index($0, n) {print $2; exit}')"
+identities="$(security find-identity -p codesigning)"
+identity="$(awk -v n="\"$signing_name\"" 'index($0, n) {print $2; exit}' <<<"$identities")"
 if [ -z "$identity" ]; then
   echo "wifi-helper/build.sh: the login keychain holds no code-signing identity \"$signing_name\"; run bin/requirements.sh install" >&2
   exit 1

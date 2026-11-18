@@ -592,10 +592,11 @@ check_location_permission() {
 # made with it still names its certificate, which is what keeps a rebuilt
 # app's Location Services permission (wifi-helper/build.sh).
 check_signing_identity() {
-  local e="$1" name
+  local e="$1" name listed
   name="$(field "$e" .name)"
   FIX="install makes it: a self-signed code-signing certificate named \"$name\" in the login keychain"
-  if security find-identity -p codesigning </dev/null 2>/dev/null | grep -qF "\"$name\""; then
+  listed="$(security find-identity -p codesigning </dev/null 2>/dev/null || true)"
+  if grep -qF "\"$name\"" <<<"$listed"; then
     STATUS=ok; DETAIL="the login keychain signs code as \"$name\""
   else
     STATUS=missing; DETAIL="the login keychain holds no code-signing identity named \"$name\""
