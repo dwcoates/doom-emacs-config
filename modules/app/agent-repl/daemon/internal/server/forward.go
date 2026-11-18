@@ -96,3 +96,16 @@ func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target st
 	}
 	return in.Err()
 }
+
+// clientAddress is the address a client is told to reach the daemon at
+// PRIVATE on: the shared address when the daemons share one, PRIVATE
+// otherwise. A forward always goes to PRIVATE (forwardTarget).
+func (s *server) clientAddress(private string) string {
+	if private == "" {
+		return ""
+	}
+	if shared := s.deps.SharedAddress(); shared != "" {
+		return shared
+	}
+	return private
+}

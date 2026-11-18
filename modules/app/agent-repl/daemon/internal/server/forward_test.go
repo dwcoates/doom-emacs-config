@@ -149,3 +149,59 @@ func TestACallWhoseStandingCannotBeReadIsAFailureNotAForward(t *testing.T) {
 		t.Fatalf("GetWorkspaceStatus = %v, want the standing's failure", err)
 	}
 }
+
+func TestNewRefusesNoForwardingClientOrSharedAddressSource(t *testing.T) {
+	cases := []struct {
+		name    string
+		without func(*Deps)
+		want    string
+	}{
+		{name: "no forwarding client", without: func(d *Deps) { d.Forward = nil }, want: "the forwarding client"},
+		{name: "no shared address source", without: func(d *Deps) { d.SharedAddress = nil }, want: "a shared address source"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			deps := h.withoutDep(tc.without)
+
+			// Act
+			_, err := New(deps)
+
+			// Assert
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("New = %v, want the refusal naming %s", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestARefusalNamesTheSharedAddressNeverAPrivateOne(t *testing.T) {
+	cases := []struct {
+		name     string
+		standing workspace.Standing
+	}{
+		{name: "transferring_away", standing: workspace.StandingTransferringAway},
+		{name: "not_yet_adopted", standing: workspace.StandingNotYetAdopted},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a forwarded call reaches a daemon that does not serve it.
+			h := newHarness(t)
+			h.SharedAddress = "127.0.0.1:41000"
+			h.Ownership.standing = tc.standing
+
+			// Act
+			s := h.Server.(*server)
+			got := s.fill(refusal{Arm: map[workspace.Standing]string{
+				workspace.StandingTransferringAway: workspace.ArmTransferringAway,
+				workspace.StandingNotYetAdopted:    workspace.ArmNotYetAdopted,
+			}[tc.standing]})
+
+			// Assert
+			if got.Fields["address"] != "127.0.0.1:41000" {
+				t.Fatalf("the refusal named %v, want the shared address", got.Fields["address"])
+			}
+		})
+	}
+}

@@ -146,6 +146,11 @@ type Deps struct {
 	// the workspace there until the adoption re-homes it. It answers the empty
 	// string when no other daemon serves it, and the arm then names none.
 	IncumbentAddress func() string
+	// SharedAddress answers the shared address the daemons advertise through
+	// their socket holder, "" when they share none. Every address a refusal
+	// tells a client is it when set (clientAddress): a client never learns a
+	// daemon's private address, which closes with its daemon. Required.
+	SharedAddress func() string
 	// Forward is the client a call for a workspace another daemon serves is
 	// forwarded on (forward.go): h2c to that daemon's private address.
 	// Required.
@@ -582,6 +587,10 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a successor address source")
 	case deps.IncumbentAddress == nil:
 		return nil, missing("an incumbent address source")
+	case deps.SharedAddress == nil:
+		return nil, missing("a shared address source")
+	case deps.Forward == nil:
+		return nil, missing("the forwarding client")
 	case deps.Creates == nil:
 		return nil, missing("the create gate")
 	case deps.Feed == nil:

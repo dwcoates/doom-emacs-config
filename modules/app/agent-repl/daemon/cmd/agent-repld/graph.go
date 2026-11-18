@@ -1939,6 +1939,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			SuccessorAddress: rolloutController.SuccessorAddress,
 			IncumbentAddress: rolloutController.IncumbentAddress,
 			Forward:          h2cclient.Client(),
+			SharedAddress:    p.Shared.address,
 			Creates:          creates,
 			Feed:             feedResolver,
 			Images:           imageSources,

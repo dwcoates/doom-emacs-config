@@ -2197,6 +2197,9 @@ type harness struct {
 	// answers: the daemon serving what a joining daemon has not adopted, or
 	// empty when none does.
 	IncumbentAddress string
+	// SharedAddress is what the surface's SharedAddress dependency answers:
+	// "" unless a test shares the daemons' address through a holder.
+	SharedAddress string
 	// Deps is the COMPLETE dependency set the surface was built from, so a
 	// test of one missing dependency strips exactly that one (withoutDep).
 	Deps   Deps
@@ -2452,6 +2455,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
 		IncumbentAddress:  func() string { return h.IncumbentAddress },
 		Forward:           h2cclient.Client(),
+		SharedAddress:     func() string { return h.SharedAddress },
 		Creates:           h.Creates,
 		Feed:              h.Feed,
 		Images:            h.Images,
