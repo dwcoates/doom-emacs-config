@@ -570,6 +570,37 @@ describe("queryAll", () => {
     expect((thrown as DOMException).name).toBe("SyntaxError");
   });
 
+  it("throws for a malformed selector every time it is asked, never counting it valid", () => {
+    // Arrange
+    const empty = document.createElement("div");
+    expect(() => queryAll(empty, "]]")).toThrow();
+
+    // Act / Assert
+    expect(() => queryAll(empty, "]]")).toThrow();
+  });
+
+  it("validates a selector once, building no fragment on a later call", () => {
+    // Arrange
+    const selector = ".validated-once";
+    queryAll(document.createElement("div"), selector);
+    let built = 0;
+    const real = document.createDocumentFragment.bind(document);
+    document.createDocumentFragment = () => {
+      built += 1;
+      return real();
+    };
+
+    // Act
+    try {
+      queryAll(document.createElement("div"), selector);
+    } finally {
+      delete (document as { createDocumentFragment?: unknown }).createDocumentFragment;
+    }
+
+    // Assert
+    expect(built).toBe(0);
+  });
+
   it("refuses a :scope selector, which matches() would read as the tested element", () => {
     const { root } = queryTree();
     expect(() => queryAll(root, ":scope > .row")).toThrow(/":scope" selectors are refused/);

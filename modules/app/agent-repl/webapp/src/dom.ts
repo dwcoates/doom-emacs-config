@@ -185,13 +185,30 @@ export function nodeLabel(node: Node): string {
  * not ROOT, so a scoped selector would silently match nothing here; a caller
  * after ROOT's own children asks `childrenMatching`.
  */
+/**
+ * Every selector `queryAll` has found well formed. Each call site's selector
+ * is built from the page's constants, so the set is as small as the sources
+ * that build them, and validating each once spares every later call a
+ * throwaway fragment (a footer redraw queries dozens of times).
+ */
+const validSelectors = new Set<string>();
+
+/**
+ * Throw the SyntaxError `querySelectorAll` would for a malformed SELECTOR,
+ * even under a root with nothing to test; `querySelector` on an empty
+ * fragment caches nothing.
+ */
+function requireValidSelector(doc: Document, selector: string): void {
+  if (validSelectors.has(selector)) return;
+  doc.createDocumentFragment().querySelector(selector);
+  validSelectors.add(selector);
+}
+
 export function queryAll<E extends Element = Element>(root: ParentNode, selector: string): E[] {
   refuseScope("queryAll", selector);
   const doc = root instanceof Document ? root : root.ownerDocument;
   if (doc === null) throw new Error(`queryAll: a ${root.nodeName} root belongs to no document`);
-  // A malformed selector throws the SyntaxError `querySelectorAll` would,
-  // even under a ROOT with nothing to test; `querySelector` caches nothing.
-  doc.createDocumentFragment().querySelector(selector);
+  requireValidSelector(doc, selector);
   const found: E[] = [];
   const walker = doc.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
