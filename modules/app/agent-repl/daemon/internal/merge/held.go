@@ -38,6 +38,6 @@ func (o *orchestrator) holdRound(ctx context.Context, repo wsm.RepoKey, ws ids.W
 		o.log(ctx, ws).Error(opHold, "could not record whether the merge's live round is held; its views draw the last hold recorded", withField(fields, "error", err.Error()))
 		return
 	}
-	o.log(ctx, ws).Debug(opHold, "recorded whether the merge's live round is held", withField(fields, "live_round", marked))
+	o.log(ctx, ws).Info(opHold, "recorded whether the merge's live round is held", withField(fields, "live_round", marked))
 	o.publishRosterQueue(context.WithoutCancel(ctx), repo)
 }
