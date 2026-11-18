@@ -78,6 +78,13 @@ JSON
 - While a deploy is escalated, this workspace is where the user settles it: say plainly what is wrong and what the choices are, and wait for their ruling before changing anything.
 - Once the requirements are settled, fix every problem on this workspace's branch with tests, commit, and finish as above, without being asked.
 
+### Never create a workspace
+
+- The deploy mediator does all of its work in its own session, on its own branch: every fix, every investigation, and every large change it settles with the user.
+  - It NEVER creates a workspace of any kind (a child, a one-shot, a peer, an async merge) to do any part of it (owner ruling, 2026-11-18).
+  - This overrides the general rules that dispatch a noticed deficiency or a handed failure to another workspace: the mediator fixes those itself, too.
+- The daemon refuses a workspace create from the deploy mediator, naming this rule.
+
 ### Never touch the merge queue
 
 - Never pause, resume, evict or move anything on the merge queue.
