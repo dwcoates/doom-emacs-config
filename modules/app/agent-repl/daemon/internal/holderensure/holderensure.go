@@ -24,6 +24,7 @@ import (
 
 	"agent-repld/internal/dirpath"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/reqmanifest"
 )
 
 // op is the operation every record of the ensure is filed under.
@@ -54,7 +55,6 @@ type Holder struct {
 
 // manifest is the slice of a requirements manifest the holders are read from.
 type manifest struct {
-	Includes     []string `json:"includes"`
 	Requirements []struct {
 		ID        string   `json:"id"`
 		Kind      string   `json:"kind"`
@@ -70,12 +70,17 @@ type manifest struct {
 // ROOT declare for this platform: the root manifest and each one it includes,
 // as bin/requirements.sh loads them. HOME expands a leading ~.
 func Declared(root, home string) ([]Holder, error) {
-	rootManifest, err := read(filepath.Join(root, "requirements.json"))
+	rootPath := filepath.Join(root, "requirements.json")
+	rootManifest, err := read(rootPath)
+	if err != nil {
+		return nil, err
+	}
+	includes, err := reqmanifest.Includes(rootPath)
 	if err != nil {
 		return nil, err
 	}
 	files := []manifest{rootManifest}
-	for _, rel := range rootManifest.Includes {
+	for _, rel := range includes {
 		m, err := read(filepath.Join(root, rel))
 		if err != nil {
 			return nil, err

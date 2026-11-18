@@ -61,7 +61,7 @@
 package harness
 
 import (
-	"encoding/json"
+	"agent-repld/internal/reqmanifest"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -301,7 +301,7 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 	// EVERY MANIFEST THE ROOT INCLUDES IS LINKED TOO: a daemon reads the
 	// socket holders they declare at boot (holderensure.Declared), as it reads
 	// them from a real checkout.
-	includes, err := manifestIncludes(manifest)
+	includes, err := reqmanifest.Includes(manifest)
 	if err != nil {
 		return "", err
 	}
@@ -315,22 +315,6 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 		}
 	}
 	return dir, nil
-}
-
-// manifestIncludes answers the manifests the root requirements manifest at
-// PATH includes, relative to the module root.
-func manifestIncludes(path string) ([]string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("read the requirements manifest %s: %w", path, err)
-	}
-	var m struct {
-		Includes []string `json:"includes"`
-	}
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, fmt.Errorf("parse the requirements manifest %s: %w", path, err)
-	}
-	return m.Includes, nil
 }
 
 // PinnedCheckout is the harness-owned checkout root, or a fatal failure if
