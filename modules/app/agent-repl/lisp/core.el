@@ -2008,8 +2008,10 @@ newer durable one can tell from the log which is which."
     (dolist (entry (nreverse pending))
       (let ((ws (plist-get entry :ws)))
         ;; The sink was installed for this workspace a moment ago, so it is
-        ;; routable; a name that stopped being routable in between still gets
-        ;; its decision recorded, centrally and at WARN, rather than dropped.
+        ;; routable; one that ended in between (a short-lived workspace, such
+        ;; as a question intake, can end inside the idle timer's latency)
+        ;; still gets its decision recorded, centrally and at INFO, naming the
+        ;; workspace: a workspace ending is no fault.
         (if (agent-repl--ws-log-routable-p ws)
             (agent-repl--info
              ws
@@ -2018,9 +2020,9 @@ newer durable one can tell from the log which is which."
              (plist-get entry :target)
              (plist-get entry :origin)
              (plist-get entry :id-scheme))
-          (agent-repl--warn
-           '(:agent-repl-central "the sink-open decision outlived its workspace's routability")
-           "elisp.core.sink-opened-unattributed: workspace=%S sink=%s target=%s target_origin=%s id_scheme=%s"
+          (agent-repl--info
+           '(:agent-repl-central "the sink-open decision outlived its workspace, which ended before it was recorded")
+           "elisp.core.sink-opened-after-workspace-ended: workspace=%S sink=%s target=%s target_origin=%s id_scheme=%s"
            ws "emacs.log"
            (plist-get entry :target)
            (plist-get entry :origin)

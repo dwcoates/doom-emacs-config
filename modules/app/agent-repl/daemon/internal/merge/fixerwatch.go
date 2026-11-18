@@ -53,13 +53,20 @@ func (o *orchestrator) watchFixer(ctx context.Context, q checkedQueue, m wsm.Med
 		panic(fmt.Sprintf("merge: the check of %s owed at %v is dispatched with no fix turn recorded", q.key, m.OwedAt))
 	}
 	fields = withField(withField(fields, "mediator", string(mediator.Workspace)), "turn", string(turn.ID))
-	place, _, err := o.bringTurnOn(ctx, mediator.Workspace, fields, turn.ID, turn.Brief, conversationv1.PromptOrigin(turn.Origin))
+	place, closed, err := o.bringTurnOn(ctx, mediator.Workspace, fields, turn.ID, turn.Brief, conversationv1.PromptOrigin(turn.Origin))
 	if err != nil {
 		o.mediationFailed(ctx, fields, "could not tell where the mediator's fix turn stands; the queue stays held for it until the next round", err)
 		return
 	}
 	if place == turnUnderWay {
 		o.deps.Log.Global().Info(opMediation, "the mediator's fix turn is under way; its end runs the check's next round", fields)
+		return
+	}
+	// A FIX TURN THE USER INTERRUPTED IS THE USER'S (owner ruling,
+	// 2026-11-18): nothing is escalated into the session they took over; the
+	// queue stays held for the fix they drive the mediator to.
+	if closed == wsm.CloseKilled {
+		o.deps.Log.Global().Info(opMediation, "the user interrupted the mediator's fix turn; the fix is left to the user's turns with the mediator, and nothing is escalated", fields)
 		return
 	}
 	if err := o.escalateForMediator(ctx, q.key, fixerStoppedSummary, fields); err != nil {

@@ -1375,3 +1375,29 @@ func TestAPageAttachingIsRecordedAtInfo(t *testing.T) {
 		t.Fatalf("records = %+v, want the page's attach at INFO", log.Records())
 	}
 }
+
+func TestAHandedAwayRefusalFailsTheSubscriptionNamingTheSuccessor(t *testing.T) {
+	// Arrange.
+	coded := transportClosed(nil, "WatchFooter", "transferring_away", "handed away", false, "/sock/successor.sock")
+
+	// Act.
+	failed := failedAs(coded)
+
+	// Assert.
+	if got := failed.GetHandedAway().GetAddress(); got != "/sock/successor.sock" {
+		t.Fatalf("handed_away = %+v, want the successor named", failed.GetHandedAway())
+	}
+}
+
+func TestAnyOtherRefusalFailsTheSubscriptionHandedNowhere(t *testing.T) {
+	// Arrange.
+	coded := transportClosed(nil, "WatchFooter", "not_yet_adopted", "not adopted yet", false, "/sock/other.sock")
+
+	// Act.
+	failed := failedAs(coded)
+
+	// Assert.
+	if failed.HandedAway != nil {
+		t.Fatalf("handed_away = %+v, want unset", failed.GetHandedAway())
+	}
+}

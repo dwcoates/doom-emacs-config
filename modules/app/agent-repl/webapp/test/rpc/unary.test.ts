@@ -10,6 +10,7 @@ import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace
 import { ForwardingLogger, setLogger } from "../../src/log.js";
 import { createAgentReplClient } from "../../src/rpc/client.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { SUCCESSOR_HEADER, registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import {
   clearClientFailures,
   reportClientFailure,
@@ -310,5 +311,53 @@ describe("callUnary and the client's link verdict", () => {
 
     // Assert
     expect(lines.filter(([, line]) => line.includes("rpc.unary-quiesced")).map(([level]) => level)).toEqual(["info"]);
+  });
+});
+
+describe("callUnary when the workspace was handed to a successor", () => {
+  const handedAway = (): ConnectError =>
+    new ConnectError("transferring_away", Code.FailedPrecondition, { [SUCCESSOR_HEADER]: "/sock/successor.sock" });
+
+  it("raises the move notice naming the successor", async () => {
+    // Arrange
+    const seen: string[] = [];
+    const uninstall = registerWorkspaceMoved((address) => seen.push(address));
+    const ctx = ctxThrowing(handedAway());
+
+    // Act
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+    uninstall();
+
+    // Assert
+    expect(seen).toEqual(["/sock/successor.sock"]);
+  });
+
+  it("records the refusal at info, never as a transport failure", async () => {
+    // Arrange
+    const lines = captureLog();
+    const uninstall = registerWorkspaceMoved(() => undefined);
+    const ctx = ctxThrowing(handedAway());
+
+    // Act
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+    uninstall();
+
+    // Assert
+    const ofCall = lines.filter(([, line]) => line.includes("rpc.unary-handed-away") || line.includes("rpc.unary-transport-failure"));
+    expect(ofCall.map(([level]) => level)).toEqual(["info"]);
+  });
+
+  it("files no client failure for the footer", async () => {
+    // Arrange
+    clearClientFailures();
+    const uninstall = registerWorkspaceMoved(() => undefined);
+    const ctx = ctxThrowing(handedAway());
+
+    // Act
+    await expect(call(ctx)).rejects.toBeInstanceOf(ConnectError);
+    uninstall();
+
+    // Assert
+    expect(standingClientFailure()).toBeNull();
   });
 });

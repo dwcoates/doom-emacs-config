@@ -124,6 +124,48 @@ func TestTheTimeoutSentenceRestatesTheLimitItExceeded(t *testing.T) {
 	}
 }
 
+// TestASentenceQuotedInACommandsOutputIsNoLaunch pins that only the result's
+// own sentence states a launch: a command that printed another session's log
+// or transcript quotes that session's sentences, and reading them claimed that
+// session's tasks for this call.
+func TestASentenceQuotedInACommandsOutputIsNoLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text string
+	}{
+		{name: "a background sentence after the command's own output", text: "grep hit:\n" + backgroundSentenceText},
+		{name: "a timeout sentence after the command's own output", text: "log line\n" + timeoutSentenceText},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			block := map[string]any{"content": tc.text}
+
+			// Act.
+			launch, ok := backgroundLaunchFromProse(block)
+
+			// Assert.
+			if ok {
+				t.Fatalf("launch = %v, want none: the sentence is quoted, not the result's own", launch)
+			}
+		})
+	}
+}
+
+// TestAResultThatBeginsWithTheSentenceAfterBlankSpaceIsALaunch pins that the
+// anchor allows the blank space a result may open with.
+func TestAResultThatBeginsWithTheSentenceAfterBlankSpaceIsALaunch(t *testing.T) {
+	// Arrange.
+	block := map[string]any{"content": "\n  " + backgroundSentenceText}
+
+	// Act.
+	launch, ok := backgroundLaunchFromProse(block)
+
+	// Assert.
+	if !ok || launch["backgroundTaskId"] != "bmo77o6cu" {
+		t.Fatalf("launch = %v (ok %t), want bmo77o6cu", launch, ok)
+	}
+}
+
 // TestAShellLaunchIsReportedFromItsSentenceWhenTheStructuredResultIsAbsent
 // pins the file-plane half of a subagent's background shell: a subagent's
 // transcript can omit `toolUseResult` outright, and the sentence is then the

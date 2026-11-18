@@ -82,7 +82,13 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 //
 // The shim's stream plane reads the same sentence for the output path
 // (outputPathFromProse); this is its file-plane twin for the task id.
-var backgroundSentence = regexp.MustCompile(`Command running in background with ID: ([A-Za-z0-9_-]+)\.`)
+//
+// THE SENTENCE IS THE RESULT, SO IT IS READ ONLY WHERE THE RESULT BEGINS. A
+// command's own output can quote it: an investigation that printed another
+// session's log or transcript carried that session's launch sentences, and
+// each was read as this call launching that session's task, so the task's owner
+// resolution was refused as claimed twice (2026-11-18, task bzf4vwz2q).
+var backgroundSentence = regexp.MustCompile(`\A\s*Command running in background with ID: ([A-Za-z0-9_-]+)\.`)
 
 // timeoutSentence is the vendor's account of a FOREGROUND shell its own
 // timeout moved to the background:
@@ -94,7 +100,9 @@ var backgroundSentence = regexp.MustCompile(`Command running in background with 
 // sentence is the only statement of the move (2026-09-28). The shim's claim in
 // the store (claims.go) covers every run the shim saw; this covers the runs it
 // did not.
-var timeoutSentence = regexp.MustCompile(`within its (\d+)s timeout and was moved to the background \(ID: ([A-Za-z0-9_-]+)\)`)
+//
+// It is read only where the result begins, as backgroundSentence is.
+var timeoutSentence = regexp.MustCompile(`\A\s*Command did not complete within its (\d+)s timeout and was moved to the background \(ID: ([A-Za-z0-9_-]+)\)`)
 
 // backgroundLaunchFromProse restates a shell result's backgrounding SENTENCE as
 // the structured launch the vendor writes beside it everywhere else, answering

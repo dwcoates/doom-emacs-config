@@ -211,6 +211,18 @@ message PageSubscriptionFailed {
   string code = 1;
   // The error's message, verbatim.
   string message = 2;
+  // SET WHEN THE DEDICATED RPC REFUSED BECAUSE THE WORKSPACE WAS HANDED TO A
+  // SUCCESSOR DAEMON (its `transferring_away` refusal), naming that daemon. A
+  // handover is planned, not a fault: the page raises its move notice and
+  // files no failure. UNSET for every other refusal.
+  optional PageSubscriptionHandedAway handed_away = 3;
+}
+
+// The successor daemon a handed-away workspace now belongs to.
+message PageSubscriptionHandedAway {
+  // The successor's address, as the refusal named it: what the page's move
+  // notice points at. Opaque to the page.
+  string address = 1;
 }
 
 // Starts one subscription on an already-attached page.
