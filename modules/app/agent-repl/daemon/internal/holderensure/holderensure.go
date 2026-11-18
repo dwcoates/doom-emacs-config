@@ -218,3 +218,30 @@ func (e *Ensurer) EnsureID(ctx context.Context, id string) error {
 	}
 	return e.Ensure(ctx, control)
 }
+
+// ServingID reports whether a holder serves the declared holder ID's control
+// socket, by its probe alone: nothing is installed. A control socket nothing
+// serves is false; any other probe failure is the holder's, recorded and
+// answered.
+func (e *Ensurer) ServingID(ctx context.Context, id string) (bool, error) {
+	control, err := ControlOf(e.Holders, id)
+	if err != nil {
+		e.Log.Error(op, "the holder to probe is one no requirement declares", dlog.Context{"holder": id, "error": err.Error()})
+		return false, err
+	}
+	fields := dlog.Context{"holder": id, "control": control}
+	took, err := sockethold.ProbeTimed(e.Probe, control)
+	fields["probe_ms"] = took.Milliseconds()
+	switch {
+	case err == nil:
+		e.Log.Debug(op, "a holder serves the control socket", fields)
+		return true, nil
+	case errors.Is(err, sockethold.ErrNoHolder):
+		e.Log.Info(op, "no holder serves the control socket", fields)
+		return false, nil
+	default:
+		fields["error"] = err.Error()
+		e.Log.Error(op, "the holder's control socket did not answer its probe; it is the holder's failure", fields)
+		return false, fmt.Errorf("holderensure: probe %s: %w", control, err)
+	}
+}

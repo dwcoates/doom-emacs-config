@@ -200,20 +200,21 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 	// The store takes its sockets from the holder that holds its socket, if
 	// one is declared (holderensure.HolderOfSocket).
 	storeHolder, _ := holderensure.HolderOfSocket(holders, p.Store)
+	ensurer := &holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe, Install: requirements.EnsureHolder, Log: log}
 	restarter := &deploy.Restarter{
-		Services:    services,
-		StoreSocket: p.Store,
-		StoreLog:    where.storeLog,
-		Windows:     deploy.DefaultServiceWindows,
-		Clock:       rollout.SystemClock{},
-		Log:         log,
-		CacheBin:    where.cacheBin,
-		ReportDir:   where.reportDir,
-		Restarts:    p.Restarts,
-		Define:      requirements.Define,
-		EnsureHolder: (&holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe,
-			Install: requirements.EnsureHolder, Log: log}).EnsureID,
-		StoreHolder: storeHolder,
+		Services:      services,
+		StoreSocket:   p.Store,
+		StoreLog:      where.storeLog,
+		Windows:       deploy.DefaultServiceWindows,
+		Clock:         rollout.SystemClock{},
+		Log:           log,
+		CacheBin:      where.cacheBin,
+		ReportDir:     where.reportDir,
+		Restarts:      p.Restarts,
+		Define:        requirements.Define,
+		EnsureHolder:  ensurer.EnsureID,
+		HolderServing: ensurer.ServingID,
+		StoreHolder:   storeHolder,
 	}
 	deployer, err := deploy.New(deploy.Deps{
 		Restarts:   p.Restarts,
