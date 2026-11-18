@@ -26,6 +26,8 @@ TMP="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 # shellcheck source=lib-harness-report.sh
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-report.sh"
+# shellcheck source=lib-harness-stub.sh
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)/lib-harness-stub.sh"
 
 
 # ---------------------------------------------------------------------------
@@ -72,11 +74,6 @@ case "$1" in
 esac'
 }
 
-# write_stub NAME BODY: a stub on PATH that records its argv, then runs BODY.
-write_stub() {
-  printf '#!/bin/bash\nprintf "%%s %%s\\n" "%s" "$*" >>"$STUB_DIR/../transcript"\n%s\n' "$1" "$2" >"$CASE/stubs/$1"
-  chmod +x "$CASE/stubs/$1"
-}
 
 # tool NAME OUTPUT [EXIT]: a stub program that prints OUTPUT and exits EXIT.
 tool() {
@@ -107,7 +104,6 @@ run() {
 }
 
 has() { grep -qF -- "$1" <<<"$OUT"; }
-ran() { grep -qF -- "$1" "$CASE/transcript"; }
 
 PROGRAM='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["darwin"], "command": "tool", "install": {"brew": "tool"}}'
 VERSIONED='{"id": "tool", "kind": "program", "why": "the case needs it", "profile": "run", "platforms": ["darwin"], "command": "tool", "version": {"args": ["--version"], "min": "3.0"}, "install": {"brew": "tool"}}'
@@ -465,6 +461,18 @@ test_a_linux_entry_without_this_managers_package_says_to_add_it() {
   if [ "$RC" -eq 1 ] && has "Fix: no dnf package is declared for it; add install.dnf to its manifest entry" && ! ran "sudo"; then
     pass "a linux entry with no package for the machine's manager installs nothing and says to add one"
   else fail "no package" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_go_installed_program_is_found_in_the_user_bin_dir() {
+  new_case
+  manifest '[{"id": "tool", "kind": "program", "why": "w", "profile": "run", "platforms": ["linux"], "command": "tool", "install": {"go_install": "example.com/tool@v1"}}]'
+  fake_linux_package_managers
+  # go installs into GOBIN, as the real one does, and nowhere when it is unset.
+  write_stub go '[ -n "${GOBIN:-}" ] || exit 0; printf "#!/bin/sh\n" >"$GOBIN/tool"; chmod +x "$GOBIN/tool"'
+  PLATFORM=linux run install
+  if [ "$RC" -eq 0 ] && [ -x "$CASE/home/.local/bin/tool" ]; then
+    pass "a go-installed program lands in the user's bin dir and reads installed"
+  else fail "go install bin dir" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
 test_a_linux_entry_go_installs_without_a_package() {
