@@ -482,12 +482,12 @@ func vacateLandedDir(ctx context.Context, tx *sql.Tx, landed Workspace) error {
 	if landed.MergedAt == nil {
 		return fmt.Errorf("wsm: vacate %s: workspace %s has not landed", landed.Dir, landed.ID)
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET dir = ? WHERE id = ? AND dir = ? AND merged_at IS NOT NULL`,
-		VacatedDir(landed.Dir, landed.ID), landed.ID, landed.Dir)
-	if err != nil {
+	// THE ROW WAS READ IN THIS SAME TRANSACTION, so its landing and its
+	// directory still stand as read when it moves.
+	if err := updateWorkspaceColumns(ctx, tx, landed.ID, workspaceColumn{name: "dir", value: VacatedDir(landed.Dir, landed.ID)}); err != nil {
 		return fmt.Errorf("wsm: vacate %s: %w", landed.Dir, err)
 	}
-	return requireOneRow(res, fmt.Sprintf("wsm: vacate %s: landed workspace %s", landed.Dir, landed.ID))
+	return nil
 }
 
 // RefuseTemporary is refuseTemporary for a verb that asks before it registers.
