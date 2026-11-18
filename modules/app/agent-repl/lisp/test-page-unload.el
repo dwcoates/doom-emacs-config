@@ -1233,7 +1233,45 @@ naming a dead buffer, and every switch back found its panels closed."
     (agent-repl-page-unload-note-shown "beta")
     ;; Assert
     (should (equal (mapcar (lambda (s) (list (nth 0 s) (nth 2 s))) agent-repl-test-pu--scheduled)
-                   '((15 "alpha"))))))
+                   (list (list 15 (agent-repl--ws-get "alpha" :page-leave-token)))))))
+
+(ert-deftest agent-repl-test-pu-a-leave-names-its-workspace-by-a-token-not-a-name ()
+  "The leave's timer carries a token the workspace's plist holds, never its name."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "alpha")
+    ;; Act
+    (agent-repl-page-unload-note-shown "beta")
+    ;; Assert
+    (let ((arg (nth 2 (car agent-repl-test-pu--scheduled))))
+      (should-not (stringp arg))
+      (should (eq arg (agent-repl--ws-get "alpha" :page-leave-token))))))
+
+(ert-deftest agent-repl-test-pu-a-leave-judges-a-workspace-renamed-in-its-grace-under-its-new-name ()
+  "A rename in the grace moves the token, so the judgement finds the new name and no ghost entry is made."
+  ;; Arrange: alpha is left, then renamed to gamma, its plist moving whole.
+  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (puthash "gamma" (gethash "alpha" agent-repl--workspaces) agent-repl--workspaces)
+    (remhash "alpha" agent-repl--workspaces)
+    ;; Act
+    (agent-repl-test-pu--grace-ends)
+    ;; Assert
+    (should-not (gethash "alpha" agent-repl--workspaces))
+    (should-not (agent-repl--ws-get "gamma" :page-leave-token))))
+
+(ert-deftest agent-repl-test-pu-a-leave-whose-workspace-closed-in-its-grace-judges-nothing ()
+  "A workspace gone before its grace ends holds the token no more: nothing is judged or made."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (agent-repl-page-unload-note-shown "alpha")
+    (agent-repl-page-unload-note-shown "beta")
+    (remhash "alpha" agent-repl--workspaces)
+    ;; Act
+    (agent-repl-test-pu--grace-ends)
+    ;; Assert
+    (should-not (gethash "alpha" agent-repl--workspaces))))
 
 (ert-deftest agent-repl-test-pu-a-visit-is-unloaded-once-the-grace-ends ()
   "A page loaded only for a visit goes when the grace after the switch away ends."

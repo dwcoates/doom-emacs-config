@@ -108,11 +108,36 @@ func (s *server) beginRequest(
 	}, nil
 }
 
+// requestWorkspaceID answers the workspace a request acts on: its own
+// `workspace`, or, for a request with none, the `workspace` of the oneof arm
+// it chose. AN ACTION ARM NAMES ITS TARGET (UpdateMergeQueue's evict names the
+// workspace it evicts), and read only at the top the call was never forwarded
+// to the daemon serving that workspace: an old daemon refused it as handed
+// away when its successor should have answered (merge gate 2026-11-18).
 func requestWorkspaceID(msg proto.Message) string {
 	if msg == nil {
 		return ""
 	}
 	ref := msg.ProtoReflect()
+	if id := workspaceFieldID(ref); id != "" {
+		return id
+	}
+	oneofs := ref.Descriptor().Oneofs()
+	for i := 0; i < oneofs.Len(); i++ {
+		arm := ref.WhichOneof(oneofs.Get(i))
+		if arm == nil || arm.Kind() != protoreflect.MessageKind {
+			continue
+		}
+		if id := workspaceFieldID(ref.Get(arm).Message()); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// workspaceFieldID answers the id of REF's own `workspace` field, empty when
+// it has none set.
+func workspaceFieldID(ref protoreflect.Message) string {
 	field := ref.Descriptor().Fields().ByName(protoreflect.Name("workspace"))
 	if field == nil || field.Kind() != protoreflect.MessageKind || !ref.Has(field) {
 		return ""

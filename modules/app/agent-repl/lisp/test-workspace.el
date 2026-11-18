@@ -72,6 +72,26 @@
   (agent-repl-test--with-clean-state
     (should-error (agent-repl--ws-plist "missing") :type 'user-error)))
 
+;;;; ---- Tests: ws-holding ------------------------------------------------
+
+(ert-deftest agent-repl-test-ws-holding-finds-the-workspace-whose-key-holds-the-token ()
+  "The live workspace holding TOKEN under KEY is found, by identity."
+  (agent-repl-test--with-clean-state
+    (let ((token (list 'x)))
+      (agent-repl--ws-put "a" :project-dir "/tmp/a/")
+      (agent-repl--ws-put "b" :project-dir "/tmp/b/")
+      (agent-repl--ws-put "b" :tok token)
+      (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("a" "b"))))
+        (should (equal (agent-repl--ws-holding :tok token) "b"))))))
+
+(ert-deftest agent-repl-test-ws-holding-answers-nil-when-no-workspace-holds-the-token ()
+  "An equal but distinct token is not the one held, and nil is answered."
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "a" :project-dir "/tmp/a/")
+    (agent-repl--ws-put "a" :tok (list 'x))
+    (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("a"))))
+      (should-not (agent-repl--ws-holding :tok (list 'x))))))
+
 ;;;; ---- Tests: ws-rename-state -------------------------------------------
 
 (ert-deftest agent-repl-test-ws-rename-state-moves-complete-live-state ()

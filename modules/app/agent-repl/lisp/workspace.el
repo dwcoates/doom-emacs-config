@@ -520,6 +520,18 @@ ws-dir-hash hashing) keep working on a persp that outlives its agent-repl
 session — the failure mode that previously surfaced as
 `no :project-dir for workspace X' errors after a kill.")
 
+(defun agent-repl--ws-holding (key token)
+  "The live workspace whose KEY holds TOKEN (by `eq'), or nil when none does.
+A TIMER NAMES ITS WORKSPACE BY A TOKEN IN THE WORKSPACE'S OWN PLIST, never
+by name: a rename moves the plist to the new name (`agent-repl--ws-rename-
+state'), so a callback that captured the old name wrote a ghost entry under
+it when it fired, and every later walk of the live names met a workspace
+with no directory (2026-11-18, `ceac-resource-usage-skill').  The token moves
+with the plist, so the callback finds the workspace under whatever name it
+has now."
+  (seq-find (lambda (ws) (eq (agent-repl--ws-get ws key) token))
+            (agent-repl--live-ws-names)))
+
 (defun agent-repl--ws-live-p (ws)
   "Return non-nil iff WS is a live (non-tombstoned) registered workspace.
 A workspace is live when it has a hash entry AND no `:killed-at'

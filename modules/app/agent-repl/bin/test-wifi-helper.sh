@@ -39,6 +39,38 @@ run_tests() {
   [ "$rc" -eq $((failed > 0)) ] || fail "the $source tests' exit matches their cases" "exit $rc with $failed failing"
 }
 
+# A BUILD OF UNCHANGED SOURCES REUSES THE INSTALLED APP (build.sh --reuse):
+# signing uses the local identity's key, which can prompt for the keychain's
+# password, so only a change of sources may sign. The stubs fail any compile
+# or signing, so a case that reaches them fails.
+reuse_case() {
+  local hash="$1"
+  rm -rf "$TMP/reuse" "$TMP/out.app" "$TMP/stubs"
+  mkdir -p "$TMP/reuse/Contents/Resources" "$TMP/stubs"
+  printf '%s\n' "$hash" >"$TMP/reuse/Contents/Resources/source-sha256"
+  printf 'kept\n' >"$TMP/reuse/Contents/Resources/marker"
+  for tool in swiftc codesign; do
+    printf '#!/bin/sh\necho "%s ran" >&2\nexit 1\n' "$tool" >"$TMP/stubs/$tool"
+    chmod +x "$TMP/stubs/$tool"
+  done
+  PATH="$TMP/stubs:$PATH" bash "$HELPER_DIR/build.sh" "$TMP/out.app" --reuse "$TMP/reuse" 2>&1
+}
+
+current="$(bash "$HELPER_DIR/build.sh" --source-hash)"
+if out="$(reuse_case "$current")" && [ "$(cat "$TMP/out.app/Contents/Resources/marker" 2>/dev/null)" = kept ] \
+  && [[ $out == *"nothing was signed"* ]] && [[ $out != *"ran"* ]]; then
+  pass "a build of unchanged sources copies the installed app and signs nothing"
+else
+  fail "a build of unchanged sources copies the installed app and signs nothing" "$out"
+fi
+if out="$(reuse_case "stale")"; then
+  fail "a build of changed sources compiles anew rather than reusing the installed app" "$out"
+elif [[ $out == *"swiftc ran"* ]]; then
+  pass "a build of changed sources compiles anew rather than reusing the installed app"
+else
+  fail "a build of changed sources compiles anew rather than reusing the installed app" "$out"
+fi
+
 run_tests standing CoreLocation
 run_tests seats Foundation
 harness_finish

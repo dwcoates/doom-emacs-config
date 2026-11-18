@@ -254,6 +254,15 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("The one exception is an issue whose nature makes the deployed build necessary to the fix");
   });
 
+  it("has the deploy mediator implement agreed fixes whole and finish without asking again", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-18.
+    expect(text).toContain("Once a set of fixes is agreed and specified, the deploy mediator implements every one of them without stopping to ask, and finishes the moment they are done");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();
@@ -357,6 +366,13 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("The TLDR branch holds no more than 3-5 nodes in total");
     expect(text).toContain("it ALWAYS sits immediately before the summary branch.");
     expect(text).not.toContain("it is ALWAYS the LAST root branch of the tree.");
+  });
+
+  it("keeps a reply as plain prose only when it fits in a few short sentences", () => {
+    // Arrange
+    const text = readMetaprompt(homeOnThisRepository()) ?? "";
+    // Assert — owner ruling 2026-11-18: twenty lines of prose is a tree.
+    expect(text).toContain("A response that fits in three to five SHORT sentences, or two to three lines of text, is a brief, normal reply.");
   });
 
   it("requires a shell command to be one runnable block fenced as bash", () => {

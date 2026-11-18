@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 // TestRequestBoundaryRecordsAnEndedReadAtInfo: a caller that leaves while the
@@ -58,4 +59,45 @@ func TestRequestBoundaryAfterCloseReadsNoRegistry(t *testing.T) {
 // clientLogRequestMessage is a ClientLog request naming the harness workspace.
 func clientLogRequestMessage() *agentreplv1.ClientLogRequest {
 	return &agentreplv1.ClientLogRequest{Source: &agentreplv1.ClientLogRequest_Workspace{Workspace: ref()}}
+}
+
+func TestRequestWorkspaceIDReadsTheRequestsOwnWorkspace(t *testing.T) {
+	// Arrange
+	req := &agentreplv1.SubmitPromptRequest{Workspace: &workspacev1.WorkspaceRef{Id: "ws-own"}}
+
+	// Act
+	got := requestWorkspaceID(req)
+
+	// Assert
+	if got != "ws-own" {
+		t.Fatalf("workspace = %q, want ws-own", got)
+	}
+}
+
+func TestRequestWorkspaceIDReadsTheChosenArmsWorkspace(t *testing.T) {
+	// Arrange: an eviction names its workspace inside its action arm.
+	req := &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Evict{
+		Evict: &agentreplv1.UpdateMergeQueueEvict{Workspace: &workspacev1.WorkspaceRef{Id: "ws-evicted"}},
+	}}
+
+	// Act
+	got := requestWorkspaceID(req)
+
+	// Assert
+	if got != "ws-evicted" {
+		t.Fatalf("workspace = %q, want ws-evicted", got)
+	}
+}
+
+func TestRequestWorkspaceIDAnswersNothingForARequestNamingNoWorkspace(t *testing.T) {
+	// Arrange
+	req := &agentreplv1.UpdateMergeQueueRequest{}
+
+	// Act
+	got := requestWorkspaceID(req)
+
+	// Assert
+	if got != "" {
+		t.Fatalf("workspace = %q, want none", got)
+	}
 }

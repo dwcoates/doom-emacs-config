@@ -57,12 +57,15 @@ type ScriptBuilder struct {
 	// <staging>` in place of every step: a harness's stand-in for the whole
 	// build, so no test ever regenerates protobufs or runs a real build.
 	Override string
-	// WifiHelper builds agent-repl's Wi-Fi helper app (wifi-helper/build.sh)
-	// into staging, on the platform that has one (Live.WifiApp).
-	WifiHelper bool
-	Runner     Runner
-	Clock      Clock
-	Log        dlog.Logger
+	// WifiInstalled is the installed Wi-Fi helper app (Live.WifiApp), on the
+	// platform that has one; empty on one that has none. The build stages the
+	// helper (wifi-helper/build.sh) and hands it this app to reuse: an app
+	// built from the same sources is copied rather than rebuilt, so codesign
+	// (and the signing key it unlocks) runs only when the sources changed.
+	WifiInstalled string
+	Runner        Runner
+	Clock         Clock
+	Log           dlog.Logger
 }
 
 // buildStep is one command of a build.
@@ -117,13 +120,13 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 			argv: []string{"bash", filepath.Join(b.ModuleRoot, "bin", "build-frontend.sh"), "--out", staging, target},
 		})
 	}
-	if b.WifiHelper {
+	if b.WifiInstalled != "" {
 		// THE HELPER'S OWN BUILD, not a build-frontend target: build.sh is the
 		// one build of the app, which the installer runs too
 		// (bin/requirements.sh, install_app_build).
 		steps = append(steps, buildStep{
 			name: "wifi",
-			argv: []string{"bash", filepath.Join(b.ModuleRoot, "wifi-helper", "build.sh"), Staged{Dir: staging}.WifiApp()},
+			argv: []string{"bash", filepath.Join(b.ModuleRoot, "wifi-helper", "build.sh"), Staged{Dir: staging}.WifiApp(), "--reuse", b.WifiInstalled},
 		})
 	}
 	return steps

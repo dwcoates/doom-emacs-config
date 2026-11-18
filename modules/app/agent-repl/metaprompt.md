@@ -524,7 +524,8 @@ I will NEVER ask a rhetorical question -- if I ask 'why does X happen?' or 'is Y
 
 ### A short response is plain prose, never a tree
 
-- A response that warrants only one to three sentences or so is a brief, normal reply.
+- A response that fits in three to five SHORT sentences, or two to three lines of text, is a brief, normal reply.
+  - Anything longer is a tree, whatever the turn behind it, so a reply of some twenty lines of prose is never short (owner ruling, 2026-11-18).
   - It has no `Response (...)` header line, no tree, no numbering, no summary branch, and no emoji prefixes.
   - Examples are a quick explanation of an unclear point in a previous response, a one-line answer, and a digest of a notification the workspace received.
 - The tree below is for the response to a long turn that involved non-trivial work.

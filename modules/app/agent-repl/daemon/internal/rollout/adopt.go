@@ -1269,6 +1269,15 @@ func (c *controller) advertise(ctx context.Context, fields dlog.Context) {
 // `close of closed channel`, merge gate 2026-10-17,
 // TestADeployThatFindsTheDaemonStaleHandsOverAFreeWorkspace).
 func (c *controller) becomeIncumbent(fields dlog.Context) {
+	// THE HANDED WORKSPACES ARE ARMED BEFORE JOINING MODE ENDS. Standing
+	// answers owned for any workspace not marked joining once joining mode is
+	// off, and the manifest's own watcher (awaitManifest) arms on its own
+	// schedule, so a handed workspace read as owned in between and a call the
+	// outgoing daemon forwarded was served before its adoption (merge gate
+	// 2026-11-18, 6ms apart). The outgoing daemon writes the manifest before
+	// it yields, so it is here to arm from; arming is additive, so the
+	// watcher's later arm adds nothing.
+	c.armFromManifestBeforeTakeover(fields)
 	c.mu.Lock()
 	was := c.joiningMode
 	c.joiningMode = false
@@ -1854,4 +1863,22 @@ func (c *controller) stopRosterMirror(reason string) {
 	if mirror != nil {
 		mirror.Stop(reason)
 	}
+}
+
+// armFromManifestBeforeTakeover arms every workspace the intent manifest names,
+// for becomeIncumbent. No manifest arms nothing; an unreadable one is an
+// error, recorded here, and its watcher records its own refusal.
+func (c *controller) armFromManifestBeforeTakeover(fields dlog.Context) {
+	m, found, err := ReadManifest(c.deps.IntentManifest)
+	if err != nil {
+		c.log.Error(opAdopt, "the intent manifest could not be read at the takeover; its workspaces are armed only when its watcher reads it",
+			dlog.WithCause(dlog.Merge(fields, dlog.Context{"path": c.deps.IntentManifest}), err))
+		return
+	}
+	if !found {
+		return
+	}
+	armed := c.armSessions(m.Daemon, m.WrittenAt, m.Sessions)
+	c.log.Info(opAdopt, "armed the manifest's workspaces before ending joining mode, so none reads as owned before its adoption",
+		dlog.Merge(fields, dlog.Context{"armed": armed, "outgoing_daemon": string(m.Daemon)}))
 }

@@ -20,6 +20,26 @@ if [ "${1:-}" = --source-hash ]; then
   exit 0
 fi
 out="${1:-$HOME/.cache/agent-repl/AgentReplWifi.app}"
+# --reuse APP: an app already built from these same sources (the deploy hands
+# the installed one) is copied to OUT as it stands, signature and all. A build
+# signs with the local identity's private key, and each use of that key can ask
+# for the login keychain's password, so signing runs only when the sources
+# changed (2026-11-18: every deploy prompted).
+reuse=""
+if [ "${2:-}" = --reuse ]; then
+  reuse="${3:?wifi-helper/build.sh: --reuse needs the app to reuse}"
+fi
+if [ -n "$reuse" ] && [ -f "$reuse/Contents/Resources/source-sha256" ] \
+  && [ "$(cat "$reuse/Contents/Resources/source-sha256")" = "$(source_hash "$here")" ]; then
+  mkdir -p "$(dirname "$out")"
+  rm -rf "$out.new"
+  ditto "$reuse" "$out.new"
+  rm -rf "$out"
+  mv "$out.new" "$out"
+  echo "wifi-helper/build.sh: reused $reuse, built from the same sources; nothing was signed" >&2
+  echo "$out"
+  exit 0
+fi
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/AgentReplWifi.app/Contents/MacOS"

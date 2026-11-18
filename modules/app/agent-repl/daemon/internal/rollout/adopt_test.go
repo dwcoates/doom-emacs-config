@@ -2887,3 +2887,57 @@ func TestATakeoverWhoseEldersCannotBeReadRunsAsIfNoneRan(t *testing.T) {
 		t.Fatal("the unreadable elders were not recorded at ERROR")
 	}
 }
+
+func TestTheTakeoverArmsTheManifestsWorkspaces(t *testing.T) {
+	// Arrange: a manifest names a handed workspace its watch has not read.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	writeHandoverManifest(t, h, ws, Participants{Host: true})
+
+	// Act
+	h.c.armFromManifestBeforeTakeover(nil)
+
+	// Assert: the workspace is joining, so standing waits for its adoption.
+	h.c.mu.Lock()
+	joining := h.c.joining[ws]
+	h.c.unlock()
+	if !joining {
+		t.Fatal("the handed workspace is not joining, want it armed")
+	}
+	if !recordWith(h.log, opAdopt, "armed the manifest's workspaces before ending joining mode, so none reads as owned before its adoption") {
+		t.Fatalf("records = %+v, want the arming recorded", h.log.Records())
+	}
+}
+
+func TestATakeoverWithNoManifestArmsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.c.armFromManifestBeforeTakeover(nil)
+
+	// Assert
+	if got := h.c.rendezvousSize(); got != 0 {
+		t.Fatalf("rendezvous = %d, want nothing armed", got)
+	}
+}
+
+func TestAnUnreadableManifestAtTheTakeoverIsRecordedAtError(t *testing.T) {
+	// Arrange: the manifest's path is a directory, so it cannot be read.
+	h := newHarness(t)
+	h.c.deps.IntentManifest = t.TempDir()
+
+	// Act
+	h.c.armFromManifestBeforeTakeover(nil)
+
+	// Assert
+	if !recordWith(h.log, opAdopt, "the intent manifest could not be read at the takeover; its workspaces are armed only when its watcher reads it") {
+		t.Fatalf("records = %+v, want the unreadable manifest at ERROR", h.log.Records())
+	}
+}
+
+// recordWith reports whether LOG holds a record of OPERATION with MESSAGE.
+func recordWith(log interface{ Records() []dlog.Record }, operation, message string) bool {
+	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: operation, Message: message})
+	return ok
+}

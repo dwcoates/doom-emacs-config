@@ -176,13 +176,13 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 	}
 	deployDir := filepath.Join(p.StateDir, "deploy")
 	builder := &deploy.ScriptBuilder{
-		ModuleRoot: p.Checkout,
-		LogDir:     filepath.Join(deployDir, "logs"),
-		Override:   p.Getenv(envDeployBuilder),
-		WifiHelper: where.wifiApp != "",
-		Runner:     p.Runner,
-		Clock:      rollout.SystemClock{},
-		Log:        log,
+		ModuleRoot:    p.Checkout,
+		LogDir:        filepath.Join(deployDir, "logs"),
+		Override:      p.Getenv(envDeployBuilder),
+		WifiInstalled: where.wifiApp,
+		Runner:        p.Runner,
+		Clock:         rollout.SystemClock{},
+		Log:           log,
 	}
 	services, err := serviceManagerFor(runtime.GOOS, where, p)
 	if err != nil {
