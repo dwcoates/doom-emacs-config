@@ -295,16 +295,20 @@ func (c *client) Stream(ctx context.Context, pipe string, after int64, threadTS 
 	call := "gns " + strings.Join(args, " ")
 	cmd := childproc.CommandContext(ctx, childproc.Stable, c.cfg.Binary, args...)
 	cmd.Env = append(os.Environ(), "NO_COLOR=1")
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	// ITS ERRORS ARE READ ONLY AFTER WAIT, so they go to a file Wait never
+	// waits on (childproc.CaptureStderr).
+	capture, err := childproc.CaptureStderr(cmd)
+	if err != nil {
+		return after, c.failed(call, "could not capture its errors: "+err.Error())
+	}
 	// A STREAM IS READ AS IT COMES, so its stdout is a pipe read to its end:
 	// the scan below stops only at EOF, which the child's exit or kill gives.
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return after, c.failed(call, "could not open its output: "+err.Error())
+		return after, c.failed(call, errors.Join(errors.New("could not open its output: "+err.Error()), capture.Close()).Error())
 	}
 	if err := cmd.Start(); err != nil {
-		return after, c.failed(call, "could not start: "+err.Error())
+		return after, c.failed(call, errors.Join(errors.New("could not start: "+err.Error()), capture.Close()).Error())
 	}
 	last := after
 	scanErr := scanEntries(stdout, func(e pipeEntry) {
@@ -316,6 +320,10 @@ func (c *client) Stream(ctx context.Context, pipe string, after int64, threadTS 
 		}
 	})
 	waitErr := cmd.Wait()
+	stderr, captureErr := capture.Finish()
+	if captureErr != nil {
+		return last, c.failed(call, "could not read its errors: "+captureErr.Error())
+	}
 	if ctx.Err() != nil {
 		// The caller ended the window: the stream's normal end.
 		return last, nil
@@ -324,7 +332,7 @@ func (c *client) Stream(ctx context.Context, pipe string, after int64, threadTS 
 		return last, c.failed(call, "could not read its output: "+scanErr.Error())
 	}
 	if waitErr != nil {
-		detail := strings.TrimSpace(stderr.String())
+		detail := strings.TrimSpace(stderr)
 		if detail == "" {
 			detail = waitErr.Error()
 		}
