@@ -1301,7 +1301,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			sidebarResolver.SetStateUnreported(ws, unreported)
 		},
 		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
-		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
+		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics, p.Shared) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
 		YieldBootClaim:  p.Claim.Yield,
 		NewestDaemon: func() (string, error) {

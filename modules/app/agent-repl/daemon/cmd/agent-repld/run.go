@@ -51,6 +51,9 @@ type process struct {
 	// Claim is the bound loopback listener and the advertisement it may
 	// publish.
 	Claim daemonaddr.Claim
+	// Shared takes the shared listener from the daemon's socket holder at
+	// the takeover's publication (sharedTake).
+	Shared *sharedTake
 	// Metrics is the always-on metrics surface, nil when it is off. Its
 	// target is advertised exactly when daemon.addr is published.
 	Metrics *runtimemetrics.Surface
@@ -326,6 +329,16 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	defer teardown.step("claim_close", func() { claim.Close() })
 	bootTimer.Reached(restarttiming.BootClaim)
+	// THE PRIVATE ADDRESS IS RECORDED BESIDE THE LIFE LOCK, so a daemon that
+	// accepts a call for a workspace this one serves can forward it here
+	// (docs/investigations/2026-11-18-stable-sockets-design.md, D1).
+	if err := life.RecordAddress(claim.Address()); err != nil {
+		log.Error("daemon.cmd.life", "this daemon's private address could not be recorded", dlog.Context{
+			"instance": string(instance), "address": claim.Address(), "error": err.Error()})
+		return fmt.Errorf("agent-repld: record the private address: %w", err)
+	}
+	accept := server.NewSharedAccept(claim.Listener())
+	shared := &sharedTake{holder: opts.holder, accept: accept, claim: claim, log: log}
 	// THE WAIT IS SAID. A held claim is an outgoing daemon still exiting, and
 	// a replacement waiting it out was a silent gap in the run log.
 	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{
@@ -363,7 +376,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 				"addr_path":     layout.DaemonAddr(),
 			})
 		}
-		if err := publishOwnership(claim, metricsSurface); err != nil {
+		if err := publishOwnership(claim, metricsSurface, shared); err != nil {
 			log.Error("daemon.cmd.claim", "the daemon's advertisement could not be published", dlog.Context{
 				"address":      claim.Address(),
 				"metrics_root": opts.metricsRoot,
@@ -510,6 +523,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		Surfaces:   surfaces,
 		DB:         db,
 		Claim:      claim,
+		Shared:     shared,
 		Metrics:    metricsSurface,
 		Reconnects: reconnects,
 		Instance:   instance,
@@ -727,8 +741,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 			})
 		}
 	}
-	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), serveExit{
-		OnShuttingDown: beginShutdown(claim, withdrawal, log),
+	serveErr := h.Serve(serving, server.RetryAccept(accept, log), server.H2C(srv, log), serveExit{
+		OnShuttingDown: beginShutdown(claim, accept, withdrawal, log),
 		AwaitCreates:   built.AwaitCreates,
 		EndStreams:     endStreams,
 		Mark:           teardown.mark,
@@ -1182,7 +1196,10 @@ func expectBootReconnects(ctx context.Context, db interface {
 	return nil
 }
 
-func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface) error {
+func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface, shared *sharedTake) error {
+	if err := shared.take(); err != nil {
+		return err
+	}
 	if err := claim.Publish(); err != nil {
 		return fmt.Errorf("publish daemon.addr: %w", err)
 	}
@@ -1212,8 +1229,18 @@ type departer interface {
 // and the serving lock still held, and refuse to replace a daemon on its way
 // out. A failed departure is ERROR and the withdrawal still runs: the worst it
 // leaves is a booting daemon that refuses where it would have waited.
-func beginShutdown(claim departer, withdrawal *addrWithdrawal, log dlog.Logger) func() {
+func beginShutdown(claim departer, accept sharedStopper, withdrawal *addrWithdrawal, log dlog.Logger) func() {
 	return func() {
+		// THE SHARED LISTENER STOPS FIRST, before anything the next daemon
+		// waits on is released: from here on a connect to the shared address
+		// queues for the daemon that takes the boot claim next, and none
+		// reaches this one (docs/investigations/
+		// 2026-11-18-stable-sockets-design.md, D2).
+		if err := accept.StopShared(); err != nil {
+			log.Error("daemon.cmd.exit", "the shared listener could not be stopped at the start of shutdown", dlog.Context{
+				"error": err.Error(),
+			})
+		}
 		if err := claim.Depart(); err != nil {
 			log.Error("daemon.cmd.exit", "the serving lock could not be released at the start of shutdown", dlog.Context{
 				"error": err.Error(),

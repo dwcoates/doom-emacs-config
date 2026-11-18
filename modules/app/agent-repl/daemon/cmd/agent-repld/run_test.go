@@ -1466,6 +1466,17 @@ func (o *orderingClaim) Withdraw() (bool, error) {
 
 func (o *orderingClaim) Address() string { return "127.0.0.1:0" }
 
+// orderingStopper records the shared listener's stop into the claim's steps.
+type orderingStopper struct {
+	claim *orderingClaim
+	err   error
+}
+
+func (s *orderingStopper) StopShared() error {
+	s.claim.steps = append(s.claim.steps, "stop-shared")
+	return s.err
+}
+
 // TestBeginShutdownDepartsBeforeItWithdraws pins the load-bearing order: a
 // daemon spawned because daemon.addr went away must find this one departed,
 // or it refuses to replace a daemon on its way out. (That the whole step runs
@@ -1477,10 +1488,10 @@ func TestBeginShutdownDepartsBeforeItWithdraws(t *testing.T) {
 	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
 
 	// Act.
-	beginShutdown(claim, withdrawal, &spyLogger{})()
+	beginShutdown(claim, &orderingStopper{claim: claim}, withdrawal, &spyLogger{})()
 
-	// Assert.
-	if got, want := strings.Join(claim.steps, ","), "depart,withdraw"; got != want {
+	// Assert: the shared listener stops before the serving lock is released.
+	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
 	}
 }
@@ -1492,14 +1503,14 @@ func TestBeginShutdownReportsAFailedDepartureAndStillWithdraws(t *testing.T) {
 	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
 
 	// Act.
-	beginShutdown(claim, withdrawal, log)()
+	beginShutdown(claim, &orderingStopper{claim: claim}, withdrawal, log)()
 
 	// Assert.
 	msg, ok := log.message(dlog.LevelError)
 	if !ok || !strings.Contains(msg, "serving lock") {
 		t.Fatalf("records = %+v, want an ERROR naming the serving lock", log.records)
 	}
-	if got, want := strings.Join(claim.steps, ","), "depart,withdraw"; got != want {
+	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
 	}
 }
@@ -1990,5 +2001,24 @@ func TestConnStatesRecordsOnlyAConnectionThatClosedWithNoRequest(t *testing.T) {
 				t.Fatalf("still tracked %v / %v, want the closed connection forgotten", conns.byConn, conns.born)
 			}
 		})
+	}
+}
+
+func TestBeginShutdownReportsAFailedSharedStopAndStillDeparts(t *testing.T) {
+	// Arrange.
+	claim := &orderingClaim{}
+	log := &spyLogger{}
+	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
+
+	// Act.
+	beginShutdown(claim, &orderingStopper{claim: claim, err: errors.New("close: bad file descriptor")}, withdrawal, log)()
+
+	// Assert.
+	msg, ok := log.message(dlog.LevelError)
+	if !ok || !strings.Contains(msg, "shared listener") {
+		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.records)
+	}
+	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
+		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
 	}
 }

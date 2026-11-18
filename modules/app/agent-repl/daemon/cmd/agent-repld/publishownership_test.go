@@ -64,7 +64,7 @@ func TestPublishOwnership(t *testing.T) {
 			}
 
 			// Act
-			err := publishOwnership(claim, surface)
+			err := publishOwnership(claim, surface, nil)
 
 			// Assert
 			if tt.wantErr == "" && err != nil {
