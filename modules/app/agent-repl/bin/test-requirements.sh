@@ -1428,6 +1428,44 @@ test_the_holders_launchd_and_systemd_definitions_run_one_argv() {
   else fail "holder argv differs per platform" "launchd: $plist_argv" "systemd: $unit_argv"; fi
 }
 
+# ensure-holder is install's holder step for one entry: the daemon's, when a
+# probe finds no holder serving the entry's control socket.
+test_ensure_holder_installs_and_loads_the_holder_it_names() {
+  holder_case
+  run ensure-holder holder
+  if [ "$RC" -eq 0 ] && ran "build sockethold" && ran "launchctl bootstrap gui/$(id -u)" \
+     && [ -d "$CASE/home/.cache/agent-repl/sock" ] && has "ensure-holder: com.example.hold is loaded" \
+     && diff <(holder_plist_of_case) "$THIS_DIR/testdata/socket-holder.plist" >/dev/null; then
+    pass "ensure-holder renders the holder's plist as install does, and loads it"
+  else fail "ensure-holder" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_holder_never_reloads_a_matching_holder() {
+  holder_case
+  run ensure-holder holder
+  : >"$CASE/transcript"
+  run ensure-holder holder
+  if [ "$RC" -eq 0 ] && ! ran "launchctl bootout"; then
+    pass "ensure-holder leaves a holder whose plist matches loaded as it is, so its sockets never close"
+  else fail "ensure-holder reloaded" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_holder_refuses_an_unknown_id() {
+  holder_case
+  run ensure-holder nothing
+  if [ "$RC" -eq 1 ] && has "ensure-holder: no socket_holder entry on darwin has the id nothing" && ! ran "launchctl"; then
+    pass "ensure-holder refuses an id no socket_holder entry carries and loads nothing"
+  else fail "ensure-holder unknown id" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_holder_needs_an_id() {
+  holder_case
+  run ensure-holder
+  if [ "$RC" -eq 2 ] && has "ensure-holder needs a socket holder's id"; then
+    pass "ensure-holder with no id is a usage error"
+  else fail "ensure-holder no id" "rc=$RC" "$OUT"; fi
+}
+
 # define-service writes the definition install renders, from the same entry,
 # and neither builds nor loads: the daemon's deploy starts the service itself.
 test_define_service_writes_the_rendered_plist_without_building_or_loading() {

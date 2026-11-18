@@ -10,6 +10,7 @@
 #   requirements.sh list      [--profile run|dev|all]
 #   requirements.sh purge-legacy-hooks
 #   requirements.sh define-service LABEL
+#   requirements.sh ensure-holder ID
 #
 # THE MANIFESTS ARE THE ONE RECORD. `requirements.json` at the module root
 # names agent-repl's own requirements and `includes` each system's manifest
@@ -133,7 +134,7 @@ say() { printf '[requirements] %s\n' "$*"; }
 err() { printf '[requirements] ERROR: %s\n' "$*" >&2; }
 
 usage() {
-  sed -n '5,12p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+  sed -n '5,13p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 die_usage() {
@@ -1077,7 +1078,8 @@ install_socket_holder() {
     err "install: $(field "$e" .id): not installed from the linked worktree $MODULE_DIR; the holders every workspace shares are installed from the main checkout ($(module_main_worktree)) only"
     return 1
   fi
-  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log"
+  # launchd and systemd create the held sockets, never the directory they sit in.
+  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log" "$CACHE_ROOT/sock"
   "$BUILD_FRONTEND" sockethold
   while IFS=$'\t' read -r path name; do
     mkdir -p "$(dirname "$path")"
@@ -1514,6 +1516,30 @@ cmd_define_service() {
   say "define-service: wrote $(service_definition "$e")"
 }
 
+# cmd_ensure_holder ID: install the socket holder entry ID, the daemon's step
+# when a probe of the holder's control socket finds no holder serving it (a
+# holder added since this machine's install). It is install_socket_holder, so
+# a holder whose definitions match its rendering is never reloaded.
+cmd_ensure_holder() {
+  local id="$1" e
+  e="$(printf '%s\n' "$ENTRIES" | jq -c --arg id "$id" --arg p "$(platform)" '
+    select(.kind == "socket_holder" and .id == $id)
+    | select((.platforms == null) or (.platforms | index($p)))')"
+  if [ -z "$e" ]; then
+    err "ensure-holder: no socket_holder entry on $(platform) has the id $id"; return 1
+  fi
+  # A HOLDER ALREADY UP TO DATE AND LOADED IS LEFT ALONE: a reload is the one
+  # moment its sockets close, and its probe failing is then the holder's own
+  # failure, which the caller's take reports.
+  check_socket_holder "$e"
+  if [ "$STATUS" = ok ]; then
+    say "ensure-holder: $(field "$e" .label) is already loaded; nothing was reloaded"
+    return 0
+  fi
+  install_socket_holder "$e" || return 1
+  say "ensure-holder: $(field "$e" .label) is loaded"
+}
+
 install_service() {
   local e="$1" label dest
   label="$(field "$e" .label)"
@@ -1851,6 +1877,11 @@ main() {
     label="$1"
     shift
   fi
+  if [ "$verb" = ensure-holder ]; then
+    [ "$#" -ge 1 ] || die_usage "ensure-holder needs a socket holder's id"
+    label="$1"
+    shift
+  fi
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --profile)
@@ -1863,7 +1894,7 @@ main() {
     esac
   done
   case "$verb" in
-    check|install|uninstall|list|define-service) resolve_package_manager ;;
+    check|install|uninstall|list|define-service|ensure-holder) resolve_package_manager ;;
   esac
   case "$verb" in
     check) load_manifests; cmd_check ;;
@@ -1871,6 +1902,7 @@ main() {
     uninstall) load_manifests; cmd_uninstall ;;
     list) load_manifests; cmd_list ;;
     define-service) load_manifests; cmd_define_service "$label" ;;
+    ensure-holder) load_manifests; cmd_ensure_holder "$label" ;;
     purge-legacy-hooks) command -v jq >/dev/null 2>&1 || { err "purge-hooks: jq is not installed; settings.json is never edited without it"; exit 2; }; purge_legacy_hook_entries ;;
     help|-h|--help) usage ;;
     *) die_usage "unknown verb: $verb" ;;
