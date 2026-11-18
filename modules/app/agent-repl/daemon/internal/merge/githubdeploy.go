@@ -113,14 +113,18 @@ func githubQueue(standing map[ids.WorkspaceID]GithubDeployment) []sidebar.Github
 
 // surfaceFacts is THE ONE COMPOSITION of what the surfaces draw for WS: the
 // merge the orchestrator runs for it, while one is in line or running;
-// otherwise its GitHub standing, which is newer than any merge that already
-// failed or landed; otherwise the orchestrator's last facts, or no merge.
+// otherwise the deploy mediator's direct finish under way; otherwise its
+// GitHub standing, which is newer than any merge that already failed or
+// landed; otherwise the orchestrator's last facts, or no merge.
 func (o *orchestrator) surfaceFacts(ws ids.WorkspaceID) MergeFacts {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	facts, ok := o.facts[ws]
 	if ok && (facts.State == StateQueued || facts.State == StateMerging) {
 		return facts
+	}
+	if f, finishing := o.finishing[ws]; finishing {
+		return MergeFacts{State: StateMerging, Step: f.step}
 	}
 	if d, standing := o.github[ws]; standing {
 		return githubFacts(d)

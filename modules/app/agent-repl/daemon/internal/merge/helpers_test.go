@@ -113,6 +113,8 @@ type fakeDB struct {
 	mediationErr         error
 	dispatchErr          error
 	remediationFinishErr error
+	// remediationFinishesErr fails RemediationFinishes.
+	remediationFinishesErr error
 	// contextUsage is each workspace's last context reading.
 	contextUsage map[ids.WorkspaceID]wsm.ContextUsageRecord
 	// listWorkspacesErr fails ListWorkspaces.
@@ -504,6 +506,12 @@ func (f *fakeDB) RemediationFinishOf(ctx context.Context, ws ids.WorkspaceID) (*
 }
 
 func (f *fakeDB) RemediationFinishes(ctx context.Context) ([]wsm.RemediationFinish, error) {
+	f.mu.Lock()
+	err := f.remediationFinishesErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return f.checks.RemediationFinishes(ctx)
 }
 
@@ -4725,6 +4733,9 @@ type fakeDeployChecks struct {
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
 	effortErr error
+	// onEffort, when set, runs as the effort is set, before effortErr is
+	// answered: a test cuts the caller's context there.
+	onEffort func()
 }
 
 func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.WorkspaceID) error {
@@ -4735,6 +4746,9 @@ func (f *fakeDeployChecks) SetDeployMediatorEffort(ctx context.Context, ws ids.W
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.efforts = append(f.efforts, fmt.Sprintf("mediator:%s:standing=%v", ws, standing))
+	if f.onEffort != nil {
+		f.onEffort()
+	}
 	return f.effortErr
 }
 

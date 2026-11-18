@@ -127,6 +127,12 @@ const (
 	// owned pull request stands in its GitHub merge queue, and GitHub lands it
 	// (merge.GithubDeployment). GithubPlace and GithubTotal carry its place.
 	StepGithubMergeQueue MergeStep = "github_merge_queue"
+	// StepTestingFix and StepDeployingFix are no queue's merge: the
+	// repository's deploy mediator finished its fix, which runs its gate and
+	// lands directly, then deploys, while the mediator stands by with its
+	// session ended (merge.remediationfinish.go).
+	StepTestingFix   MergeStep = "testing_fix"
+	StepDeployingFix MergeStep = "deploying_fix"
 )
 
 // Words is the step in the footer's plain words, as a person reads it: the
@@ -145,6 +151,10 @@ func (s MergeStep) Words() string {
 		return "waiting for the deploys ahead"
 	case StepGithubMergeQueue:
 		return "in the GitHub merge queue"
+	case StepTestingFix:
+		return "testing fix"
+	case StepDeployingFix:
+		return "deploying fix"
 	}
 	return string(s)
 }

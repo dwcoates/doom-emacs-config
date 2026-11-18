@@ -494,3 +494,33 @@ func TestShowMediatorAnswersAMediatorThatCannotBeShown(t *testing.T) {
 		t.Fatalf("refreshed %v, efforts %v; want nothing else readied", h.checks.refreshed, h.checks.efforts)
 	}
 }
+
+func TestAnEscalationTheDaemonsExitCutIsRecordedAtInfo(t *testing.T) {
+	// Arrange: the daemon's exit cuts the mediation's lifetime while the
+	// mediator is readied for the escalation.
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.checks.onEffort = cancel
+	h.checks.effortErr = context.Canceled
+	m := owedCheck(t, h)
+
+	// Act
+	h.o.holdEscalated(ctx, queueOf(t, h), *m, "yours", nil, wsm.CheckWindow{}, false, dlog.Context{})
+
+	// Assert: held for the next pass, and no ERROR for the cut.
+	if heldEscalation(t, h) != "" {
+		t.Fatal("want the check held, escalated and untold")
+	}
+	for _, r := range h.logs.Records() {
+		if r.Level == "error" && r.Operation == opMediation {
+			t.Fatalf("ERROR record %+v, want the cut recorded at INFO", r)
+		}
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "the escalated check was not told to the mediator; the queue stays held, and the next pass tells it again"}); !ok {
+		t.Fatalf("records = %v, want the held check recorded at INFO", h.logs.Records())
+	}
+}

@@ -114,6 +114,10 @@ type orchestrator struct {
 	// request nearest to merging (githubdeploy.go): the GitHub share of what
 	// the surfaces draw, never a merge this orchestrator runs.
 	github map[ids.WorkspaceID]GithubDeployment
+	// finishing is the step each deploy mediator whose direct finish is under
+	// way stands at (remediationsurface.go): the finish's share of what the
+	// surfaces draw, so a mediator standing by is drawn at work, never dead.
+	finishing map[ids.WorkspaceID]finishSurface
 	// running is the run HOLDING each repository's slot: the HEAD, the one
 	// merge that may move the target. A second admission for one repository
 	// is impossible in this process as well as across processes (the
@@ -357,6 +361,7 @@ func newOrchestrator(deps Deps) (*orchestrator, error) {
 		lockDir:            filepath.Join(deps.StateDir, "merge-locks"),
 		facts:              map[ids.WorkspaceID]MergeFacts{},
 		github:             map[ids.WorkspaceID]GithubDeployment{},
+		finishing:          map[ids.WorkspaceID]finishSurface{},
 		running:            map[wsm.RepoKey]*run{},
 		chains:             map[wsm.RepoKey][]*run{},
 		chainSignals:       map[wsm.RepoKey]chan struct{}{},

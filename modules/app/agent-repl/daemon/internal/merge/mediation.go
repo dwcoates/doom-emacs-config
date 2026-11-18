@@ -424,6 +424,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			continue
 		}
 		o.settleMediatorSight(ctx, q, m)
+		o.surfaceFinish(ctx, q.key)
 		if m == nil {
 			continue
 		}
@@ -1075,6 +1076,7 @@ func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm
 // republishMediation tells the roster and the queue's subscribers a change
 // of REPO's check; a republication that fails is recorded.
 func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey) {
+	o.surfaceFinish(ctx, repo)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not republish the queue whose check changed", dlog.Context{"repo": string(repo), "error": err.Error()})
 	}
@@ -1243,7 +1245,9 @@ func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.
 // (intakeRound).
 func (o *orchestrator) tellEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said bool, fields dlog.Context) {
 	if _, err := o.escalate(ctx, q, m, summary, problems, window, said, fields); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the escalated check could not be told to the mediator; the queue stays held, and the next pass tells it again", fields)
+		// ESCALATE RECORDED WHY, at ERROR or, for a cut, at INFO: this
+		// records only that the check waits for the next pass.
+		o.deps.Log.Global().Info(opMediation, "the escalated check was not told to the mediator; the queue stays held, and the next pass tells it again", fields)
 		return
 	}
 	o.takeOnProblems(ctx, q.key, problems, escalatedKeys(window), "taken on with the escalation", fields)

@@ -31,6 +31,8 @@ describe("statusCellWord", () => {
     ["merging", "conflictResolution", "conflict resolution"],
     ["merging", "preDeploy", "pre-deploy"],
     ["merging", "postDeploy", "post-deploy"],
+    ["merging", "testingFix", "testing fix"],
+    ["merging", "deployingFix", "deploying fix"],
     ["mergeFailed", "conflicts", "merge conflicts"],
     ["mergeFailed", "tests", "tests failed"],
     ["mergeFailed", "hook", "hook failed"],

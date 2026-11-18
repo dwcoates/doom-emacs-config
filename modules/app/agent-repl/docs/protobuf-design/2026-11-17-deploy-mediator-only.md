@@ -36,3 +36,18 @@ then the roster's comments.
   target, resolved by the daemon (figma→idl, one element per label state).
 - WHY: the targets were documented as the intake, the remediation and the
   escalation workspace, which no longer exist.
+
+### frontend.v1 footer: the mediator's finish is a merging step
+
+- WHAT: `FooterStatusMerging` gains `testing_fix` (tag 30) and `deploying_fix`
+  (tag 31), empty arms drawn "testing fix" and "deploying fix".
+- WHY: a mediator whose finish gates, lands or deploys stands by with its
+  session ended, and the footer drew that planned stand-by as the
+  `agent_repl_fault · dead` fault (owner ruling, 2026-11-17: "testing fix"
+  and "deploying fix").
+- CONSEQUENCES: the merge orchestrator surfaces the finish as merge facts
+  (`state: merging`, one of the two steps) on the footer and the roster,
+  derived from the store's finish record at every step change; the roster
+  draws it as its `merging` arm (purple), the merging rung outranking the
+  fault rung. A finish sent back to fixing, deployed or ended surfaces no
+  merge, and the session's own arms stand again.

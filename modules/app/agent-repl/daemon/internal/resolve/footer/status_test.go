@@ -1052,6 +1052,34 @@ func TestADeadLinkThatOnceConnectedIsDead(t *testing.T) {
 	}
 }
 
+func TestAMediatorStandingByWhileItsFixRunsIsDrawnAtItsStepNotDead(t *testing.T) {
+	tests := []struct {
+		name string
+		step MergeStep
+		want func(*frontendv1.FooterStatusMerging) bool
+	}{
+		{name: "testing fix", step: StepTestingFix, want: func(m *frontendv1.FooterStatusMerging) bool { return m.GetTestingFix() != nil }},
+		{name: "deploying fix", step: StepDeployingFix, want: func(m *frontendv1.FooterStatusMerging) bool { return m.GetDeployingFix() != nil }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the mediator's session ended when it stood by.
+			h := newHarness(t)
+			connected(h)
+			h.r.OnLink(testWS, shimclient.LinkDead)
+
+			// Act
+			h.r.SetMerge(testWS, MergeFacts{State: "merging", Step: tt.step})
+
+			// Assert
+			status := h.view(t).GetStrip().GetStatus()
+			if !tt.want(status.GetMerging()) || status.GetAgentReplFault() != nil {
+				t.Fatalf("status = %+v, want the fix's step drawn over the ended session", status)
+			}
+		})
+	}
+}
+
 // A serving link with an open degraded window is USABLE (owner ruling,
 // 2026-09-28): the degraded arm, never disconnected.
 func TestAnOpenDegradedWindowDrawsAServingLinkAsDegraded(t *testing.T) {
@@ -1871,6 +1899,10 @@ func TestEachMergeStepDrawsItsOwnSubstatus(t *testing.T) {
 			func(m *frontendv1.FooterStatusMerging) bool {
 				return m.GetGithubMergeQueue().GetPlace() == 3 && m.GetGithubMergeQueue().GetTotal() == 5
 			}},
+		{"a deploy mediator's fix under test", MergeFacts{State: "merging", Step: StepTestingFix},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetTestingFix() != nil }},
+		{"a deploy mediator's fix deploying", MergeFacts{State: "merging", Step: StepDeployingFix},
+			func(m *frontendv1.FooterStatusMerging) bool { return m.GetDeployingFix() != nil }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2100,6 +2132,8 @@ func TestMergeStepWordsAreThePlainWordsOfEachStep(t *testing.T) {
 		{StepPostDeploy, "post-deploy"},
 		{StepAwaitingTurn, "waiting for the deploys ahead"},
 		{StepGithubMergeQueue, "in the GitHub merge queue"},
+		{StepTestingFix, "testing fix"},
+		{StepDeployingFix, "deploying fix"},
 	}
 	for _, tt := range tests {
 		t.Run(string(tt.step), func(t *testing.T) {

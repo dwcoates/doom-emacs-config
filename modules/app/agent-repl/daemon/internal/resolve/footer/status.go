@@ -532,6 +532,10 @@ func (r *resolver) merging(s *wsState, log dlog.Logger) *frontendv1.FooterStatus
 	case StepGithubMergeQueue:
 		arm.Substatus = &frontendv1.FooterStatusMerging_GithubMergeQueue{GithubMergeQueue: &frontendv1.FooterSubStatusMergingGithubMergeQueue{
 			Place: uint32(m.GithubPlace), Total: uint32(m.GithubTotal)}}
+	case StepTestingFix:
+		arm.Substatus = &frontendv1.FooterStatusMerging_TestingFix{TestingFix: &frontendv1.FooterSubStatusMergingTestingFix{}}
+	case StepDeployingFix:
+		arm.Substatus = &frontendv1.FooterStatusMerging_DeployingFix{DeployingFix: &frontendv1.FooterSubStatusMergingDeployingFix{}}
 	default:
 		log.Error("daemon.footer.merge_step", "a merge in flight names no step the footer draws; it is drawn with no substatus",
 			dlog.Context{
