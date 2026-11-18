@@ -36,3 +36,15 @@ Owner rulings of 2026-11-18. The deploy mediator builds this in its own session.
 2. The store: listener from its holder; singleton by a flock on its database.
 3. The daemon: shared listener from the holder under the boot claim; the private listener per instance; forwarding by serving row; the accept loop dropped before the claim is released.
 4. Emacs and the other clients: the one address; the per-daemon resolution removed.
+
+## The holder's definition never changes
+
+- A holder is its own requirement kind, `socket_holder`, rendered by its own template (never `rendered_service`, whose shared settings change for every service: the 2026-11-17 ProcessType change re-rendered every plist and restarted the store). Its rendering is pinned by a golden test, so it changes only on purpose.
+- On macOS the plist declares the sockets in `Sockets` (the control socket and each held one); launchd creates them at load and keeps them while the job is loaded, so not even a crash of the holder closes one. On Linux a `.socket` unit names each with `FileDescriptorName`, and the holder's service takes them through `LISTEN_FDS`.
+- The daemon's TCP port is chosen once, at the first install, and kept in the cache (`sockethold/daemon.port`), so every rendering names the same port.
+- A holder's binary rebuilt by a deploy is never restarted into: the running holder keeps serving, and the new binary runs from its next start. Its control protocol is therefore kept stable (sockethold's one-line request, one status byte).
+
+## Progress
+
+- Done: the sockethold library (agentrepl/logging/sockethold), activation (sockethold/activate), the holder program (agent-shim/sockethold), its roster suite.
+- Next: the `socket_holder` requirement kind and its renderer and golden test; the store's holder entry; the store taking its listeners and its database flock; then the daemon.
