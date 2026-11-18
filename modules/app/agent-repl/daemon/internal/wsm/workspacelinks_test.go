@@ -559,3 +559,51 @@ func TestWorkspaceLinksRefuseAShowLeavingAnOwnedLinkOut(t *testing.T) {
 		})
 	}
 }
+
+// TestWorkspaceLinksRefusalsAreRecordedAtDebug pins every refusal a links
+// write answers (isLinkRefusal) to a DEBUG record, never an ERROR: each is
+// the store answering what was asked, which the verb records as the rpc's
+// refusal.
+func TestWorkspaceLinksRefusalsAreRecordedAtDebug(t *testing.T) {
+	tests := []struct {
+		name string
+		op   string
+		act  func(t *testing.T, s *store, ws WorkspaceID) error
+	}{
+		{name: "an unknown link", op: "daemon.wsm.remove_workspace_link", act: func(t *testing.T, s *store, ws WorkspaceID) error {
+			_, err := s.RemoveWorkspaceLink(context.Background(), ws, linkURL(9))
+			return err
+		}},
+		{name: "an announcement of an unheld link", op: "daemon.wsm.set_workspace_link", act: func(t *testing.T, s *store, ws WorkspaceID) error {
+			_, err := s.SetWorkspaceLink(context.Background(), ws, LinkSet{URL: linkURL(2), Label: "the post", Owned: true, Announces: linkURL(9)})
+			return err
+		}},
+		{name: "a pull request another workspace owns", op: "daemon.wsm.set_workspace_link", act: func(t *testing.T, s *store, ws WorkspaceID) error {
+			other := testWorkspaceNamed(t, s, "other")
+			mustSetLink(t, s, other.ID, ownedSet(other.ID, ownedURL, prKey))
+			_, err := s.SetWorkspaceLink(context.Background(), ws, ownedSet(ws, ownedURL, prKey))
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+
+			// Act
+			err := tt.act(t, s, ws.ID)
+
+			// Assert
+			if !isLinkRefusal(err) {
+				t.Fatalf("err = %v, want a links refusal", err)
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: tt.op}); !ok {
+				t.Errorf("no DEBUG record of %s: %v", tt.op, log.Records())
+			}
+			if hasErrorRecord(log.Records(), tt.op, string(ws.ID)) {
+				t.Errorf("the refusal was recorded as an ERROR: %v", log.Records())
+			}
+		})
+	}
+}

@@ -134,9 +134,12 @@ func (e *OwnedLinkUnshownError) Error() string {
 // (the verb turns each into the rpc's arm), never the store failing.
 func isLinkRefusal(err error) bool {
 	var unknown *UnknownLinkError
+	var unannounced *UnknownAnnouncedLinkError
+	var ownedElsewhere *PullRequestOwnedElsewhereError
 	var subpage *SubpageOfOwnedLinkError
 	var ownedUnshown *OwnedLinkUnshownError
-	return errors.As(err, &unknown) || errors.As(err, &subpage) || errors.As(err, &ownedUnshown)
+	return errors.As(err, &unknown) || errors.As(err, &unannounced) || errors.As(err, &ownedElsewhere) ||
+		errors.As(err, &subpage) || errors.As(err, &ownedUnshown)
 }
 
 // errTooManyShown is a show naming more links than ShownLinkLimit. The verb

@@ -673,9 +673,11 @@ func (s *store) writeTx(ctx context.Context, op string, fields dlog.Context, fn 
 		// ordinary schedule, and every caller states what it means at its own
 		// level. Resurrecting a retired hold is a different refusal and stays
 		// an ERROR below.
-		// A REFUSED LINKS CHANGE (a link the workspace does not hold, a GNS
-		// subpage of a page it owns) is the store answering what was asked;
-		// the verb turns it into the rpc's arm.
+		// A REFUSED LINKS CHANGE (isLinkRefusal: a link the workspace does not
+		// hold, an announcement of one, a pull request another workspace owns,
+		// a GNS subpage of a page it owns, a show leaving an owned link out) is
+		// the store answering what was asked; the verb turns it into the rpc's
+		// arm and records it at its own level.
 		if isLinkRefusal(err) {
 			s.log.Debug(op, "the links change was refused; nothing was written", withError(fields, err))
 			return err
