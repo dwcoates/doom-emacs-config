@@ -39,6 +39,29 @@
       }
     },
     {
+      "id": "socket-holder-store",
+      "kind": "socket_holder",
+      "why": "keeps the store's sockets open across every restart of the store, so a client's connect queues instead of failing while no store accepts (docs/investigations/2026-11-18-stable-sockets-design.md)",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "label": "com.agentrepl.sockethold.store",
+      "control": "~/.cache/agent-repl/sock/store-holder.sock",
+      "sockets": [
+        {
+          "name": "store",
+          "unix": "~/.cache/agent-repl/sock/store.sock"
+        },
+        {
+          "name": "store-read",
+          "unix": "~/.cache/agent-repl/sock/store-read.sock"
+        }
+      ],
+      "log": "sockethold-store.log"
+    },
+    {
       "id": "service-shim-store",
       "kind": "service",
       "why": "the event store every shim and the daemon write through, kept running by the platform's service manager",
@@ -51,6 +74,8 @@
       "args": [
         "--socket",
         "~/.cache/agent-repl/sock/store.sock",
+        "--holder",
+        "~/.cache/agent-repl/sock/store-holder.sock",
         "--db",
         "~/.cache/agent-repl/store/events.db",
         "--metrics-root",
