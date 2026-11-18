@@ -2695,3 +2695,53 @@ func TestAcceptHandedRefusesWhileThisDaemonHandsOverItself(t *testing.T) {
 		t.Fatalf("AcceptHanded = %v, want ErrNotNewest", err)
 	}
 }
+
+func TestAHandoverWithASharedAddressTellsClientsOnlyTheSharedAddress(t *testing.T) {
+	// Arrange: the daemons share one address through their socket holder.
+	h := newHarness(t)
+	h.sharedAddress = "127.0.0.1:41000"
+	h.workspace(t)
+
+	// Act
+	if err := runHandover(t, h, 1); err != nil {
+		t.Fatalf("Handover: %v", err)
+	}
+
+	// Assert: the announcement and every transfer push name the shared
+	// address, and the forwarding target is still the successor's own.
+	sent := h.announcer.Sent()
+	if len(sent) != 1 || sent[0].GetAddress() != "127.0.0.1:41000" {
+		t.Fatalf("announcements = %v, want the shared address", sent)
+	}
+	pushed := 0
+	for _, call := range h.pusher.Calls() {
+		if call.Kind != "transferred" {
+			continue
+		}
+		pushed++
+		if call.Address != "127.0.0.1:41000" {
+			t.Fatalf("a transfer push named %q, want the shared address", call.Address)
+		}
+	}
+	if pushed == 0 {
+		t.Fatal("no transfer was pushed")
+	}
+	if got := h.c.SuccessorAddress(); got != "127.0.0.1:7788" {
+		t.Fatalf("the forwarding target = %q, want the successor's own address", got)
+	}
+}
+
+func TestNewRefusesWithoutTheSharedAddress(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	deps := h.c.deps
+	deps.SharedAddress = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "shared address") {
+		t.Fatalf("New = %v, want the missing shared address refused", err)
+	}
+}

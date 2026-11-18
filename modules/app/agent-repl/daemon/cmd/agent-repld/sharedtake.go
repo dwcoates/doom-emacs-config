@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"agentrepl/logging/sockethold"
@@ -39,6 +40,8 @@ type sharedTake struct {
 	log    dlog.Logger
 	once   sync.Once
 	err    error
+	// taken is the shared address once the take succeeded.
+	taken atomic.Value
 	// takeFn is sockethold.Take; a seam for the tests.
 	takeFn func(ctx context.Context, control, name string) (net.Listener, error)
 }
@@ -66,6 +69,7 @@ func (s *sharedTake) take() error {
 		}
 		s.accept.AddShared(ln)
 		s.claim.Advertise(ln.Addr().String())
+		s.taken.Store(ln.Addr().String())
 		s.log.Info("daemon.cmd.holder", "took the shared listener from the daemon's socket holder", dlog.Context{
 			"holder": s.holder, "address": ln.Addr().String(), "took_ms": took.Milliseconds()})
 	})
@@ -73,3 +77,16 @@ func (s *sharedTake) take() error {
 }
 
 var _ interface{ Advertise(string) } = daemonaddr.Claim(nil)
+
+// address answers the shared address this daemon advertises, "" before its
+// take or with no holder: what rollout tells clients (Deps.SharedAddress).
+// A successor that has not taken over yet answers "" and announces nothing.
+func (s *sharedTake) address() string {
+	if s == nil {
+		return ""
+	}
+	if v, ok := s.taken.Load().(string); ok {
+		return v
+	}
+	return ""
+}

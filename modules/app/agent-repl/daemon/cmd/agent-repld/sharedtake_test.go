@@ -31,7 +31,10 @@ func TestSharedTakeWithNoHolderDoesNothing(t *testing.T) {
 	// Arrange
 	claim := &advertisingClaim{}
 	s := &sharedTake{accept: newPrivateAccept(t), claim: claim, log: &spyLogger{},
-		takeFn: func(context.Context, string, string) (net.Listener, error) { t.Fatal("took with no holder"); return nil, nil }}
+		takeFn: func(context.Context, string, string) (net.Listener, error) {
+			t.Fatal("took with no holder")
+			return nil, nil
+		}}
 
 	// Act
 	err := s.take()
@@ -88,7 +91,9 @@ func TestSharedTakeFailsWhenTheHolderCannotGrant(t *testing.T) {
 	claim := &advertisingClaim{}
 	log := &spyLogger{}
 	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: log,
-		takeFn: func(context.Context, string, string) (net.Listener, error) { return nil, errors.New("connection refused") }}
+		takeFn: func(context.Context, string, string) (net.Listener, error) {
+			return nil, errors.New("connection refused")
+		}}
 
 	// Act
 	err := s.take()
@@ -99,5 +104,28 @@ func TestSharedTakeFailsWhenTheHolderCannotGrant(t *testing.T) {
 	}
 	if msg, ok := log.message(dlog.LevelError); !ok || !strings.Contains(msg, "shared listener") {
 		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.records)
+	}
+}
+
+func TestSharedTakeAnswersItsAddressOnlyOnceTaken(t *testing.T) {
+	// Arrange
+	shared, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: &advertisingClaim{}, log: &spyLogger{},
+		takeFn: func(context.Context, string, string) (net.Listener, error) { return shared, nil }}
+
+	// Act
+	before := s.address()
+	takeErr := s.take()
+	after := s.address()
+
+	// Assert
+	if before != "" || takeErr != nil || after != shared.Addr().String() {
+		t.Fatalf("address before %q, after %q (%v); want none, then the shared address", before, after, takeErr)
+	}
+	if (*sharedTake)(nil).address() != "" {
+		t.Fatal("no take answers no address")
 	}
 }

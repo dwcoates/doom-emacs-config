@@ -1267,6 +1267,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SelfExe:                 selfExe,
 		SelfAddress:             p.Claim.Address(),
 		IncumbentAddress:        p.Opts.joining,
+		SharedAddress:           p.Shared.address,
 		Instance:                p.Instance,
 		StateDir:                p.Layout.Dir(),
 		IntentManifest:          p.Layout.IntentManifest(),

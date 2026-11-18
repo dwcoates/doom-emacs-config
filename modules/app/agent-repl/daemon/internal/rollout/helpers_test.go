@@ -1182,6 +1182,9 @@ func (r *fakeRegistry) Pending(ws ids.WorkspaceID) bool {
 
 // harness is one controller under test with every fake reachable.
 type harness struct {
+	// sharedAddress is what Deps.SharedAddress answers: "" unless a test
+	// shares the daemons' address through a holder.
+	sharedAddress string
 	// creates is the create gate a handover closes.
 	creates *creategate.Gate
 	// rosterDials receives every incumbent roster stream a joining
@@ -1359,6 +1362,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 	h.rosterDials = make(chan *rostermirrortest.Stream, 4)
 	h.incumbentArms = make(chan map[ids.WorkspaceID]string, 64)
 	deps := Deps{
+		SharedAddress: func() string { return h.sharedAddress },
 		DialIncumbentRoster: func(ctx context.Context, _ string) (rostermirror.Stream, error) {
 			stream := rostermirrortest.New(ctx)
 			h.rosterDials <- stream
