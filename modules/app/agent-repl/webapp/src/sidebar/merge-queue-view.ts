@@ -528,6 +528,9 @@ export function drawRosterMergeQueueRepair(u: QueueRepair, sc: SidebarContext): 
 /** The class the deploy check's label beside the repository's name wears. */
 export const MERGE_QUEUE_MEDIATION_CLASS = "sb-mq-mediation";
 
+/** The class that draws the escalated deploy check's label red. */
+export const MERGE_QUEUE_NEEDS_YOU_CLASS = "sb-mq-needs-you";
+
 /**
  * The deploy check the queue waits on, as a purple label beside the
  * repository's name in its group header (owner rulings, 2026-11-14 and
@@ -558,9 +561,14 @@ export function drawQueueMediationLabel(u: RosterMergeQueueMediation, sc: Sideba
     case "testing":
       return mediationLabel(sc, "testing zettel fixes", "a remediation's fix is running its full gate, then lands; the queue waits for it",
         requireMessage(standing.value.target, `${path}.standing.testing.target`), `${path}.standing.testing.target`);
-    case "escalated":
-      return mediationLabel(sc, "zettel needs you", "a deploy check was escalated to you; the queue waits until its fix lands or you release it",
+    case "escalated": {
+      const label = mediationLabel(sc, "zettel needs you", "a deploy check was escalated to you; the queue waits until its fix lands or you release it",
         standing.value.target, `${path}.standing.escalated.target`);
+      // RED, for the one standing that waits on the user (owner request,
+      // 2026-11-18): every other standing is the queue's own work.
+      label.classList.add(MERGE_QUEUE_NEEDS_YOU_CLASS);
+      return label;
+    }
     default: {
       const other: { case: string } = standing;
       return unreachableArm(`${path}.standing`, other.case);
