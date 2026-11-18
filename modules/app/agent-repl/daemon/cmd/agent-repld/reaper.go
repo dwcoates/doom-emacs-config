@@ -24,6 +24,11 @@ const envWorktreeReapIdle = "AGENT_REPL_WORKTREE_REAP_IDLE"
 // worktreereap.DefaultExpireAfter.
 const envWorktreeReapExpire = "AGENT_REPL_WORKTREE_REAP_EXPIRE"
 
+// envWorktreeReapClosedExpire is how long a CLOSED workspace's worktree may go
+// untouched before it is preserved and removed. It is an OPERATOR knob, a Go
+// duration; unset is worktreereap.DefaultClosedExpireAfter.
+const envWorktreeReapClosedExpire = "AGENT_REPL_WORKTREE_REAP_CLOSED_EXPIRE"
+
 // envWorktreeReapStartDelay and envWorktreeReapEvery compress the reaper's
 // schedule for tests. A suite that must observe a sweep cannot wait five
 // minutes for the first one, nor a day for the next.
@@ -54,6 +59,11 @@ func resolveWorktreeReapExpire(value string) (time.Duration, error) {
 	return resolveDurationKnob(envWorktreeReapExpire, value, worktreereap.DefaultExpireAfter)
 }
 
+// resolveWorktreeReapClosedExpire reads the closed-workspace expiry's override.
+func resolveWorktreeReapClosedExpire(value string) (time.Duration, error) {
+	return resolveDurationKnob(envWorktreeReapClosedExpire, value, worktreereap.DefaultClosedExpireAfter)
+}
+
 // resolveWorktreeReapStartDelay reads the start delay's override.
 func resolveWorktreeReapStartDelay(value string) (time.Duration, error) {
 	return resolveDurationKnob(envWorktreeReapStartDelay, value, worktreereap.DefaultStartDelay)
@@ -64,17 +74,20 @@ func resolveWorktreeReapEvery(value string) (time.Duration, error) {
 	return resolveDurationKnob(envWorktreeReapEvery, value, worktreereap.DefaultEvery)
 }
 
-// buildWorktreeReaper builds the landed-worktree reaper from its four knobs.
+// buildWorktreeReaper builds the landed-worktree reaper from its five knobs.
 // A refused knob is a BOOT FATAL, recorded here.
 func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, live func() []ids.WorkspaceID, runDir string, log dlog.Logger) (*worktreereap.Reaper, error) {
 	var (
-		idle, expire, start, every time.Duration
-		err                        error
+		idle, expire, closedExpire, start, every time.Duration
+		err                                      error
 	)
 	if idle, err = resolveWorktreeReapIdle(os.Getenv(envWorktreeReapIdle)); err != nil {
 		return nil, refusedWindow(log, err)
 	}
 	if expire, err = resolveWorktreeReapExpire(os.Getenv(envWorktreeReapExpire)); err != nil {
+		return nil, refusedWindow(log, err)
+	}
+	if closedExpire, err = resolveWorktreeReapClosedExpire(os.Getenv(envWorktreeReapClosedExpire)); err != nil {
 		return nil, refusedWindow(log, err)
 	}
 	if start, err = resolveWorktreeReapStartDelay(os.Getenv(envWorktreeReapStartDelay)); err != nil {
@@ -84,15 +97,16 @@ func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, l
 		return nil, refusedWindow(log, err)
 	}
 	reaper, err := worktreereap.New(worktreereap.Deps{
-		Git:          git,
-		Registry:     registry,
-		LiveSessions: live,
-		Clock:        clock.System{},
-		LockPath:     worktreeLockPath(runDir),
-		IdleAfter:    idle,
-		ExpireAfter:  expire,
-		StartDelay:   start,
-		Every:        every,
+		Git:               git,
+		Registry:          registry,
+		LiveSessions:      live,
+		Clock:             clock.System{},
+		LockPath:          worktreeLockPath(runDir),
+		IdleAfter:         idle,
+		ExpireAfter:       expire,
+		ClosedExpireAfter: closedExpire,
+		StartDelay:        start,
+		Every:             every,
 		// The leftovers lie where WorktreeDir makes worktrees.
 		WorktreeParent: workspace.WorktreeParent,
 		Log:            log,
@@ -101,7 +115,8 @@ func buildWorktreeReaper(git worktreereap.Git, registry worktreereap.Registry, l
 		return nil, fmt.Errorf("agent-repld: build the landed-worktree reaper: %w", err)
 	}
 	log.Debug(graphOperation, "the landed-worktree reaper is built", dlog.Context{
-		"idle_after": idle.String(), "expire_after": expire.String(), "start_delay": start.String(), "every": every.String(),
+		"idle_after": idle.String(), "expire_after": expire.String(), "closed_expire_after": closedExpire.String(),
+		"start_delay": start.String(), "every": every.String(),
 	})
 	return reaper, nil
 }

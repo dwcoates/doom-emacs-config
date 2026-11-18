@@ -2878,7 +2878,9 @@ again. One background loop (`storage_sweep` in `graph.go`): the first sweep
 `10m` after start, then one every `24h`, under `internal/sweepguard` with
 `<lock dir>/storage-sweep.lock`. `agent-repld runtime prune-storage
 [-preview]` (`agentrepl.v1.PruneStorage`) runs one now; `-preview` judges
-exactly as a sweep does and deletes nothing.
+exactly as a sweep does and deletes nothing. Beside it, on its own goroutine
+and under the same guard, the Go build cache is trimmed alone as the daemon
+starts and then every `1h` (below).
 
 **Shim state** (`<state root>/shim/<key>`, `sessionlock.WorkspaceKey` of the
 workspace directory, the shim's identity and transcript backups). The
@@ -2892,7 +2894,7 @@ deadline any row allows and no more than the least any allows:
 
 - closed by its own merge (`Closure.By == merge`): the whole directory, 3
   days after the close (`landed`);
-- closed any other way: only `backups/`, 30 days after the close, so a
+- closed any other way: only `backups/`, 5 days after the close, so a
   reopened workspace resumes as itself (`closed_backups`);
 - closed with no close record: as the line above, counted from the
   directory's newest write.
@@ -2903,11 +2905,65 @@ no shim state that sweep (ERROR).
 **Aged caches.** `~/.cache/agent-repl/profiles` (`AGENT_REPL_PROFILE_ROOT`,
 keeping `active`, `armed` and the session `active` names) and
 `~/.cache/agent-repl/test-passes` (`AGENT_REPL_TEST_PASSES`): an entry whose
-own modification time is over 30 days old is deleted (`aged`).
+own modification time is over 5 days old is deleted (`aged`).
 
-Worktrees are the reaper's (below) and logs their writers' own retention's;
-the sweep touches neither. Every deletion is INFO with its path, reason and
-bytes; every failure is ERROR and the sweep goes on.
+**Logs of untouched workspaces** (`logs.go`). The writers' retention removes
+a log file 3 days after its LAST WRITE, and the daemon keeps writing a few
+records an hour into the log of a workspace nobody uses, so that rule never
+reaches such a file. The sweep reads the workspace's own record instead: a
+workspace whose newest stamp (`wsm.Workspace.LastTouched`: created, last
+activity, last selection, merge, close) is over 5 days old loses every
+daemon-written log file it has under `<state root>/logs`
+(`agent-repl-<id>-(daemon|shim|webapp|sidecar)-*.log` and their generations),
+open or closed (`untouched_logs`). The removal is `dlog.Surfaces.DiscardWorkspace`:
+under the mutex every sink open holds it releases the daemon's own
+descriptors, removes each family nobody else holds
+(`logging.RemoveFamilies`, the exclusive-flock proof `PruneDirectory` uses;
+a family a shim still holds is kept, `held_logs`), and removes each canonical
+link `<workspace>/.claude/emacs/<runtime>.log` that named a removed file, so
+the log reader sees a runtime that never wrote, never a lost log
+(`bin/logs-reader.go` `linkAgedOut`). The workspace's next record opens a
+fresh target and link. Emacs's own per-workspace files
+(`agent-repl-<id>-emacs-*.log`) are NOT touched: Emacs opens them per write
+and holds no lock, so nothing can prove them unheld, and Emacs ages them
+itself. A log of a workspace the registry does not know is left to the
+writers' retention.
+
+**The Go build cache** (`buildcache.go`, owner ruling 2026-11-12). The go
+command trims its cache only of entries unused for five days, and this host's
+grows about 17 GB an hour (measured 2026-11-12: 219 GB, 171 GB of it used
+inside 48 hours). Every entry file (`<hash>-a`, `<hash>-d`) under the cache's
+two-hex-digit subdirectories whose modification time is over 2 business days
+old is deleted, one file at a time (`unused_build_cache`); the modification
+time is the entry's last use, which the go command moves forward as it reads
+an entry. A business day is a weekday in the host's zone (`time.Local`), and
+the cutoff keeps the hour of the day: on a Monday it is the Thursday before
+at the same hour, and on a Saturday or a Sunday that same Thursday; holidays
+are not counted (`businessDaysBefore`). The cache is the one `go env GOCACHE`
+names, resolved at boot without running the go command (`goBuildCacheDir` in
+`cmd/agent-repld/storagesweep.go`: the `GOCACHE` variable, else the go
+command's environment file, else `<user cache dir>/go-build`; `off` is a host
+with no cache). NEVER `go clean -cache` and never the directory itself:
+everything in it but those entry files stays. The whole sweep trims it, and
+so does the trim's own schedule (`Sweeper.TrimBuildCache`: at the daemon's
+start, then every `1h`), because a daily trim alone lets a day of entries past
+the window pile up; a trim that finds a sweep running leaves the cache to it.
+In the whole sweep the cache's size bound (`bounded.go`: past 64 GiB, least
+recently used entries first, `over_bound`) runs AFTER this age rule, so it
+measures and trims only what the age rule left; both read the one cache
+`goBuildCacheDir` resolved.
+Each trim is one INFO record (`daemon.storagesweep.build_cache`) with its
+cutoff, entry count, bytes and kept count; a subdirectory's failures are one
+ERROR record with their count and the first one's path and cause, and an
+entry already gone (the go command trims too) is no failure. The walk goes
+through `storagesweep.BuildCacheFS`, which the unit suite scripts, so no test
+touches a real cache.
+
+Worktrees are the reaper's (below), and every other log is its writer's own
+retention's; the sweep touches neither. Every deletion is INFO with its path
+(or, for logs, its workspace, file count and links; for the build cache, one
+record a trim), reason and bytes; every
+failure is ERROR and the sweep goes on.
 
 ## The landed-worktree reaper (`internal/worktreereap`)
 
@@ -2916,15 +2972,30 @@ for themselves, and a branch can land by a squash or a cherry-pick the queue
 never saw, so the daemon sweeps for them itself. The decision is PROGRAMMATIC;
 nothing about it is agentic.
 
-**Schedule.** One background loop (`worktree_reaper` in `graph.go`): the first
-sweep `5m` after start, then one every `24h`, so a daemon that restarts daily
-still sweeps daily. Time comes from an injected `Clock`; the unit suite fires
+**Schedule.** One background loop (`worktree_reaper` in `graph.go`): the
+closed workspaces' worktrees are swept AT ONCE when the daemon starts (below),
+then the first full sweep runs `5m` after start and one every `24h`, so a
+daemon that restarts daily still sweeps daily. Time comes from an injected `Clock`; the unit suite fires
 the schedule by hand and never sleeps. **One sweep at a time**: in process a
 `TryLock` refuses a second (`ErrSweepRunning`), and across processes the sweep
 holds `<lock dir>/worktree-reap.lock` (`internal/recordlock`) for its whole run,
 so an incumbent and its handover successor never sweep together; the loser
 records INFO and sweeps nothing. Both locks are `internal/sweepguard`'s, which
 every background sweep runs under.
+
+**The start's sweep** (`Options.ClosedOnly`, owner ruling 2026-11-11). Every
+daemon start expires the closed workspaces' worktrees, on the reaper's own
+background goroutine, so startup never waits for it. It is its OWN sweep and
+not the first full sweep moved earlier: a daemon replaced before `5m` never
+reaches its first full sweep (on 2026-11-10, a day of back-to-back deploys,
+none did), while a full sweep at every start would run `git status` and a
+merge-tree in every idle worktree of every repository every few minutes. The
+closed-only sweep reads the registry first, skips a repository that has no
+closed workspace idle past the idle threshold before asking git anything, and
+otherwise judges only the worktrees closed workspaces name, by the same
+gates and rules as a full sweep; it skips the leftovers and the landed
+branches. It runs under the same guard and kernel lock, and its records read
+"the closed-workspace sweep finished", never "the sweep finished".
 
 **Which repositories.** Every row of `wsm.ListRepositories` -- the
 repositories the daemon registered for its workspaces. The "default branch"
@@ -2957,9 +3028,11 @@ needs git >= 2.38.
    files' mtimes (`<git dir>/worktrees/<name>/{HEAD,index,logs/HEAD}`, from
    `rev-parse --absolute-git-dir`; HEAD is required, the other two may be
    absent), the HEAD commit's COMMITTER time, and -- for a registered
-   workspace -- the record's `created_at`, `last_activity_at`,
-   `last_selected_at` and `merged_at`, must be older than the threshold
-   (`AGENT_REPL_WORKTREE_REAP_IDLE`, default `24h`). The admin files move on
+   workspace -- the record's stamps (`wsm.Workspace.Stamps`: `created_at`,
+   `last_activity_at`, `last_selected_at`, `merged_at` and the close), must
+   be older than the threshold (`AGENT_REPL_WORKTREE_REAP_IDLE`, default
+   `24h`). A record touched inside the threshold keeps its tree before git is
+   asked anything about it. The admin files move on
    every checkout, add, commit, reset and rebase step; the committer time
    covers a commit written elsewhere; the record covers the daemon's own
    knowledge that somebody was there. The merge stamp is also what keeps a
@@ -2981,13 +3054,24 @@ needs git >= 2.38.
    weekend or a holiday nobody worked restarts every clock, and a repository
    idle for a day RIGHT NOW expires nothing. The repository's activity is
    every reflog entry under its common dir (`logs/**` and every
-   `worktrees/*/logs/HEAD`) plus its registered workspaces' `created_at`,
-   `last_activity_at`, `last_selected_at` and `merged_at`, read once per
+   `worktrees/*/logs/HEAD`) plus its registered workspaces' stamps, read once per
    repository BEFORE the prune and every probe. A malformed reflog line, or
    a reftable repository (whose logs this reader does not parse), is an
    ERROR and the repository is not swept. The gates 1-5 run first, so an
    open workspace's checkout, a live session's, a locked tree and a tree
    touched in the last day never expire.
+
+9. **the closed-workspace rule** (owner ruling 2026-11-11): a tree kept by 6
+   or 7 that a CLOSED workspace names is EXPIRED once nobody has touched it
+   for `AGENT_REPL_WORKTREE_REAP_CLOSED_EXPIRE` (default 3 days, by the idle
+   gate's own reading, which counts the close), whatever the repository's
+   activity. Nobody works in a closed workspace without reopening it, and
+   `workspace.Open` restores a missing worktree from its kept branch and
+   records where the expiry preserved its content. A closed workspace's
+   LANDED tree still goes by the landed rule, branch and all. The worktree
+   is found from the registry row that names its directory, in every
+   registered repository; an open workspace's and a repository's main
+   worktree are kept by gates 1 and 3.
 
 **Removal.** `gitclient.RemoveCleanWorktree` -- the same door
 `RemoveWorktree` is (the log sinks are detached first, the prune runs, the
@@ -3003,8 +3087,15 @@ the workspaces it merges.
 **Expiry.** NOTHING IS LOST: the tree is first preserved by
 `gitclient.PreserveWorktree` -- HEAD, staged and unstaged changes and
 untracked files (ignored files excepted) staged through a PRIVATE index into
-one commit on top of HEAD -- at the create-only ref
-`refs/agent-repl/reaped/<worktree id>/<UTC instant>`. Only then is the tree
+one commit on top of HEAD -- at a create-only ref:
+`refs/agent-repl/expired/<workspace id>/<UTC instant>` for a tree a workspace
+names (the id outlives the worktree, so the open that restores the worktree
+from its kept branch lists them with `worktreereap.PreservedRefs` and names
+them at INFO under `daemon.workspace.open`, reapplying none; an open with no
+branch left to restore from is refused, `OpenWorkspaceWorktreeUnrestorable`), `refs/agent-repl/reaped/<worktree id>/<UTC
+instant>` for a tree no workspace names. The expiry's INFO record carries the
+workspace's id and name, the worktree, its branch, the rule
+(`expiry_rule`) and the ref. Only then is the tree
 removed: a tree judged clean through `RemoveCleanWorktree` (so one dirtied
 since is refused and kept), a tree judged dirty through `RemoveWorktree`
 (`--force`; its changes are in the preservation). Its BRANCH IS KEPT, since

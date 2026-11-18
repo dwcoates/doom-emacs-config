@@ -3,10 +3,13 @@
 //
 // The sweep deletes agent-repl's own stored data once nothing will read it
 // again (daemon/internal/storagesweep): each workspace's shim state directory
-// (<state root>/shim/<key>), judged by the workspace's close record, and the
+// (<state root>/shim/<key>), judged by the workspace's close record, the
 // dated entries of the host's cache directories no record points at
-// (profiling sessions, the test runner's reuse records), judged by age. It
-// also runs on its own once a day; this asks for one now.
+// (profiling sessions, the test runner's reuse records), judged by age, the
+// daemon-written logs of each workspace nobody touched for five days, and the
+// Go build cache's entries nothing used for two business days. It also runs
+// on its own once a day, and trims the build cache alone once an hour; this
+// asks for a whole sweep now.
 //
 // A DRY RUN JUDGES EXACTLY AS A SWEEP DOES and deletes nothing, so what it
 // answers is what a sweep at that instant would delete.
@@ -62,12 +65,17 @@ message PruneStorageMeasured {
 
 // One deleted entry.
 message PruneStorageRemoval {
-  // The absolute path deleted: a directory with everything under it, or a file.
+  // The absolute path deleted: a directory with everything under it, or a
+  // file. Under UNUSED_BUILD_CACHE it is a cache subdirectory that STAYS, and
+  // `entries` counts the entry files deleted from it.
   string path = 1;
   // The rule that deleted it. Never UNSPECIFIED.
   PruneStorageReason reason = 2;
   // What it held, in bytes.
   uint64 bytes = 3;
+  // How many entry files under `path` were deleted, when `path` itself stays
+  // (UNUSED_BUILD_CACHE); zero when `path` is what was deleted.
+  uint32 entries = 4;
 }
 
 // Why an entry was deleted.
@@ -79,16 +87,23 @@ enum PruneStorageReason {
   // A shim state directory whose every workspace closed by its own merge
   // more than three days ago: the whole directory.
   PRUNE_STORAGE_REASON_LANDED = 2;
-  // A shim state directory whose every workspace closed more than thirty
+  // A shim state directory whose every workspace closed more than five
   // days ago, one by something other than its merge: only its transcript
   // backups, so a reopened workspace keeps its identity.
   PRUNE_STORAGE_REASON_CLOSED_BACKUPS = 3;
-  // A cache directory's entry older than thirty days.
+  // A cache directory's entry older than five days.
   PRUNE_STORAGE_REASON_AGED = 4;
   // A size-bounded cache's least recently used entries, deleted until it is
   // back under its bound: one removal for the whole cache, naming its
   // directory and what was freed.
   PRUNE_STORAGE_REASON_OVER_BOUND = 5;
+  // A daemon-written log file of a workspace nobody touched for five days,
+  // that no writer holds.
+  PRUNE_STORAGE_REASON_UNTOUCHED_LOGS = 6;
+  // Entry files of the Go build cache (`go env GOCACHE`) nothing used for two
+  // business days, counted in the host's zone: one removal per cache
+  // subdirectory, which stays.
+  PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE = 7;
 }
 
 // How many entries were left alone for one reason.
@@ -114,6 +129,12 @@ enum PruneStorageKeepReason {
   // A cache entry its directory keeps whatever its age (the open profiling
   // session).
   PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY = 6;
+  // A workspace with log files that somebody touched inside five days.
+  PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED = 7;
+  // A log file of an untouched workspace that a writer still holds.
+  PRUNE_STORAGE_KEEP_REASON_HELD_LOGS = 8;
+  // A Go build cache entry file something used inside two business days.
+  PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE = 9;
 }
 
 message PruneStorageError {

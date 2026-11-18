@@ -332,14 +332,34 @@ func updateIndex(wt *Worktree, subject []string) Result {
 	return Result{}
 }
 
-// forEachRef answers the one for-each-ref the daemon asks: a branch's upstream
-// (gitclient.Upstream), printed as `refname NUL remote NUL upstream NUL
-// remote ref`. No fake branch tracks a remote, so an existing branch answers
-// every upstream field
-// empty and a missing one answers no line, exactly as real git does.
+// forEachRef answers the two for-each-refs the daemon asks.
+//
+// A branch's upstream (gitclient.Upstream), printed as `refname NUL remote
+// NUL upstream NUL remote ref`: no fake branch tracks a remote, so an
+// existing branch answers every upstream field empty and a missing one
+// answers no line, exactly as real git does.
+//
+// Every ref under a prefix (gitclient.ListRefs, `--format=%(refname)
+// --sort=refname <prefix>`): the full name of each ref `update-ref` or a
+// one-branch fetch wrote under it, one a line and sorted, and nothing when
+// none is, exactly as real git does.
 func forEachRef(repo *Repo, subject []string) Result {
+	if len(subject) == 4 && subject[1] == "--format=%(refname)" && subject[2] == "--sort=refname" && !strings.HasPrefix(subject[3], "refs/heads/") {
+		var names []string
+		for name := range repo.Refs {
+			if strings.HasPrefix(name, subject[3]) {
+				names = append(names, name)
+			}
+		}
+		sort.Strings(names)
+		var b strings.Builder
+		for _, name := range names {
+			b.WriteString(name + "\n")
+		}
+		return Result{Stdout: b.String()}
+	}
 	if len(subject) != 3 || !strings.HasPrefix(subject[1], "--format=") || !strings.HasPrefix(subject[2], "refs/heads/") {
-		return Result{Stderr: "fatal: fakegit: only `for-each-ref --format=<f> refs/heads/<branch>` is modeled\n", Exit: 128}
+		return Result{Stderr: "fatal: fakegit: only `for-each-ref --format=<f> refs/heads/<branch>` and `for-each-ref --format=%(refname) --sort=refname <prefix>` are modeled\n", Exit: 128}
 	}
 	if !repo.HasBranch(strings.TrimPrefix(subject[2], "refs/heads/")) {
 		return Result{}

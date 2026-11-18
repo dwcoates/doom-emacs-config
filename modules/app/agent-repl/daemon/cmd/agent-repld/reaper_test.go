@@ -41,6 +41,7 @@ func TestTheReaperWindowsDefaultToTheProductionOnes(t *testing.T) {
 	}{
 		{"idle threshold", resolveWorktreeReapIdle, worktreereap.DefaultIdleAfter},
 		{"expiry", resolveWorktreeReapExpire, worktreereap.DefaultExpireAfter},
+		{"closed expiry", resolveWorktreeReapClosedExpire, worktreereap.DefaultClosedExpireAfter},
 		{"start delay", resolveWorktreeReapStartDelay, worktreereap.DefaultStartDelay},
 		{"cadence", resolveWorktreeReapEvery, worktreereap.DefaultEvery},
 	}
@@ -75,6 +76,39 @@ func TestTheReaperExpiryComesFromTheEnvironment(t *testing.T) {
 	if err != nil || got != 240*time.Hour {
 		t.Fatalf("resolveWorktreeReapExpire(240h) = (%v, %v), want 240h", got, err)
 	}
+}
+
+func TestTheReaperClosedExpiryComesFromTheEnvironment(t *testing.T) {
+	// Arrange, Act.
+	got, err := resolveWorktreeReapClosedExpire("48h")
+
+	// Assert.
+	if err != nil || got != 48*time.Hour {
+		t.Fatalf("resolveWorktreeReapClosedExpire(48h) = (%v, %v), want 48h", got, err)
+	}
+}
+
+func TestAMalformedReaperClosedExpiryIsABootFatalRecordedAtError(t *testing.T) {
+	// Arrange.
+	t.Setenv(envWorktreeReapIdle, "")
+	t.Setenv(envWorktreeReapExpire, "")
+	t.Setenv(envWorktreeReapClosedExpire, "soon")
+	t.Setenv(envWorktreeReapStartDelay, "")
+	t.Setenv(envWorktreeReapEvery, "")
+
+	// Act.
+	_, log, err := buildTestReaper(t)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), envWorktreeReapClosedExpire) {
+		t.Fatalf("buildWorktreeReaper = %v, want the closed expiry refused by name", err)
+	}
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Operation == graphOperation && strings.Contains(r.Context["cause"].(string), envWorktreeReapClosedExpire) {
+			return
+		}
+	}
+	t.Fatalf("records = %v, want the refusal at ERROR", log.Records())
 }
 
 func TestAMalformedReaperExpiryIsABootFatalRecordedAtError(t *testing.T) {

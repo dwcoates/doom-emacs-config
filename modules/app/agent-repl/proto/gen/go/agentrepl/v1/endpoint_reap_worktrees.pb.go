@@ -6,8 +6,10 @@
 // The reaper (daemon/internal/worktreereap) removes every linked worktree
 // whose changes have landed on its repository's default branch once it has
 // been idle a day, and deletes its branch; it preserves under
-// refs/agent-repl/reaped/ and removes a worktree that never landed once it
-// has existed a week of unbroken repository activity; it prunes stale
+// refs/agent-repl/expired/<workspace> (refs/agent-repl/reaped/ for a tree no
+// workspace names) and removes a worktree that never landed once it has
+// existed a week of unbroken repository activity, or once its workspace is
+// closed and nobody has touched it for three days; it prunes stale
 // worktree registrations; and it removes the LEFTOVERS beside the worktrees,
 // directories git no longer lists that hold nothing but `.claude/emacs/*.log`
 // links. It runs on its own once a day; this asks for one now.
@@ -46,8 +48,9 @@ const (
 	// A worktree whose changes have landed on the default branch; its branch
 	// was deleted with it.
 	ReapWorktreesReason_REAP_WORKTREES_REASON_LANDED ReapWorktreesReason = 1
-	// A worktree that never landed and existed past the expiry window; its
-	// content was preserved under refs/agent-repl/reaped/ and its branch kept.
+	// A worktree that never landed and existed past the expiry window, or one
+	// of a closed workspace nobody touched for three days; its content was
+	// preserved under a durable ref and its branch kept.
 	ReapWorktreesReason_REAP_WORKTREES_REASON_EXPIRED ReapWorktreesReason = 2
 	// A closed workspace's worktree that never landed, taken by a forced sweep
 	// before the expiry window ran out; preserved and branch kept, as EXPIRED.

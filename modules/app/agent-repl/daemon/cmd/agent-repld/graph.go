@@ -1723,9 +1723,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, err
 	}
 
-	// THE STORAGE SWEEP deletes the shim state and cache entries nothing
+	// THE STORAGE SWEEP deletes the shim state, cache entries and logs nothing
 	// will read again; it reads the registry and is background work too.
-	storageSweep, err := buildStorageSweep(p.DB, p.Layout, paths.RunDir, os.Getenv, log)
+	storageSweep, err := buildStorageSweep(p.DB, p.Surfaces, p.Layout, paths.RunDir, os.Getenv, log)
 	if err != nil {
 		return nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -421,6 +422,56 @@ func TestEveryExitCodeProbeSharesYesNo(t *testing.T) {
 				t.Fatalf("want one ERROR %s record %q, got %+v", tc.operation, tc.message, errs)
 			}
 		})
+	}
+}
+
+// --- ListRefs -----------------------------------------------------------
+
+func TestListRefs(t *testing.T) {
+	cases := []struct {
+		name string
+		out  string
+		want []string
+	}{
+		{name: "every ref under the prefix, one a line", out: "refs/agent-repl/expired/ws/a\nrefs/agent-repl/expired/ws/b\n",
+			want: []string{"refs/agent-repl/expired/ws/a", "refs/agent-repl/expired/ws/b"}},
+		{name: "no ref under the prefix is an empty answer", out: "", want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			git, _ := newTestClient(t)
+			fake := newFakeGit(t, ok(tc.out, "for-each-ref"))
+
+			// Act.
+			got, err := git.ListRefs(context.Background(), "/repo", "refs/agent-repl/expired/ws/")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("ListRefs: %v", err)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("ListRefs = %v, want %v", got, tc.want)
+			}
+			fake.assertSubject(0, "for-each-ref", "--format=%(refname)", "--sort=refname", "refs/agent-repl/expired/ws/")
+		})
+	}
+}
+
+func TestListRefsSurfacesAGitFailure(t *testing.T) {
+	// Arrange.
+	git, surfaces := newTestClient(t)
+	newFakeGit(t, fails(128, "fatal: not a git repository", "for-each-ref"))
+
+	// Act.
+	_, err := git.ListRefs(context.Background(), "/repo", "refs/agent-repl/expired/ws/")
+
+	// Assert.
+	if err == nil {
+		t.Fatal("ListRefs = nil error, want git's failure")
+	}
+	if _, found := recordFor(surfaces.records(), "error", "daemon.gitclient.list_refs"); !found {
+		t.Fatal("the failed listing was not recorded at ERROR under its own operation")
 	}
 }
 

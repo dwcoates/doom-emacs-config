@@ -1863,6 +1863,11 @@ type fakeGit struct {
 	unregisterErr error
 	restored      []restoredWorktree
 	restoreErr    error
+	// refsUnder answers ListRefs per prefix; listRefsErr fails it, and
+	// listedRefs is every prefix it was asked about.
+	refsUnder   map[string][]string
+	listRefsErr error
+	listedRefs  []string
 
 	// heads is what ResolveRef answers for HEAD in a directory; a directory
 	// absent from it answers the default "sha-of-HEAD".
@@ -2095,6 +2100,14 @@ func (g *fakeGit) RestoreWorktree(_ context.Context, repoDir, worktreeDir, branc
 	}
 	g.restored = append(g.restored, restoredWorktree{repoDir, worktreeDir, branch})
 	return os.MkdirAll(filepath.Join(worktreeDir, ".git"), 0o755)
+}
+
+func (g *fakeGit) ListRefs(_ context.Context, _, prefix string) ([]string, error) {
+	g.listedRefs = append(g.listedRefs, prefix)
+	if g.listRefsErr != nil {
+		return nil, g.listRefsErr
+	}
+	return g.refsUnder[prefix], nil
 }
 
 func (g *fakeGit) Nuke(_ context.Context, repoDir, worktreeDir, branch string) error {
@@ -3649,6 +3662,9 @@ func (s *fakeSurfaces) BindRecordTee(dlog.RecordTee) {}
 
 func (s *fakeSurfaces) BindRecordCounter(dlog.RecordCounter)      {}
 func (s *fakeSurfaces) RetainDirectory(string, func(string) bool) {}
+func (s *fakeSurfaces) DiscardWorkspace(string, string, bool) (dlog.DiscardReport, error) {
+	return dlog.DiscardReport{}, nil
+}
 
 func (s *fakeSurfaces) DetachDir(string) error { return nil }
 

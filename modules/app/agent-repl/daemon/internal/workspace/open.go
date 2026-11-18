@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/worktreereap"
 	"agent-repld/internal/wsm"
 )
 
@@ -396,6 +397,7 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 	log.Info(opOpen, "the workspace's directory was gone; "+restored, dlog.Context{
 		"dir": record.Dir, "branch": record.Branch, "parent_branch": record.ParentBranch, "repository": repoDir,
 	})
+	v.reportPreserved(ctx, log, record, repoDir)
 	// THE VIEWS BOOT PASSED OVER ARE BOUND NOW. Boot binds the resolvers and
 	// publishes the topbar's naming only for a workspace whose directory
 	// exists (BindViews, PublishRegistry), so a restored one has neither, and
@@ -411,6 +413,36 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		return nil, fmt.Errorf("open %q: publish the restored workspace's naming: %w", record.ID, err)
 	}
 	return log, nil
+}
+
+// reportPreserved says where the work of a restored workspace's expired
+// worktree is. The reaper removes a closed workspace's worktree after its
+// idle window and keeps the branch, so the restore above brings back only
+// what was committed; whatever else the tree held is in the preservation
+// commits under the workspace's own ref prefix (worktreereap.PreservedRefs),
+// which this names at INFO. Nothing is reapplied: the commits stay until
+// somebody reads them.
+//
+// A LISTING GIT COULD NOT ANSWER IS AN ERROR RECORD AND NOT A FAILED OPEN:
+// the worktree is restored and usable, and the refs are still there to list.
+func (v *verbs) reportPreserved(ctx context.Context, log dlog.Logger, record wsm.Workspace, repoDir string) {
+	prefix := worktreereap.PreservedRefs(record.ID)
+	refs, err := v.deps.Git.ListRefs(ctx, repoDir, prefix)
+	if err != nil {
+		log.Error(opOpen, "could not list what the restored workspace's expired worktree preserved", dlog.Context{
+			"dir": record.Dir, "branch": record.Branch, "repository": repoDir, "ref_prefix": prefix, "cause": err.Error(),
+		})
+		return
+	}
+	if len(refs) == 0 {
+		log.Debug(opOpen, "the restored workspace has no expired worktree's preservation", dlog.Context{
+			"repository": repoDir, "ref_prefix": prefix})
+		return
+	}
+	log.Info(opOpen, "the restored workspace's expired worktree was preserved; its uncommitted work is in these commits, and none of it was reapplied", dlog.Context{
+		"dir": record.Dir, "branch": record.Branch, "repository": repoDir, "preserved_refs": refs,
+		"newest_preserved_ref": refs[len(refs)-1],
+	})
 }
 
 // advanceMerged fast-forwards a merged workspace being reopened to its parent

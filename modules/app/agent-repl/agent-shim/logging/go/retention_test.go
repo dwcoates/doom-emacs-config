@@ -369,6 +369,104 @@ func TestPruneDirectoryRefusals(t *testing.T) {
 	}
 }
 
+func TestRemoveFamilies(t *testing.T) {
+	owned := func(base string) bool { return filepath.Ext(base) == ".log" }
+	type file struct {
+		name string
+		body string
+		at   time.Time
+	}
+	cases := []struct {
+		name string
+		// files are created before act, each aged to its instant.
+		files []file
+		// hold opens a RotatingFile on this base before act.
+		hold        string
+		judgeOnly   bool
+		wantRemoved []string
+		wantHeld    []string
+		// wantPresent are the files still on disk after act.
+		wantPresent []string
+	}{
+		{
+			name:        "an unheld family goes whole whatever its age",
+			files:       []file{{"a.log", "fresh\n", fresh}, {"a.log.1", "old\n", expired}},
+			wantRemoved: []string{"a.log", "a.log.1"},
+		},
+		{
+			name:        "a held family is skipped whole",
+			files:       []file{{"a.log", "x\n", fresh}, {"a.log.1", "x\n", fresh}},
+			hold:        "a.log",
+			wantHeld:    []string{"a.log"},
+			wantPresent: []string{"a.log", "a.log.1"},
+		},
+		{
+			name:        "a family owned answers false about is never touched",
+			files:       []file{{"a.txt", "x\n", fresh}},
+			wantPresent: []string{"a.txt"},
+		},
+		{
+			name:        "judging only reports the family and removes nothing",
+			files:       []file{{"a.log", "x\n", fresh}, {"a.log.1", "x\n", fresh}},
+			judgeOnly:   true,
+			wantRemoved: []string{"a.log", "a.log.1"},
+			wantPresent: []string{"a.log", "a.log.1"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			dir := t.TempDir()
+			sizes := map[string]int64{}
+			for _, f := range tc.files {
+				writeAged(t, filepath.Join(dir, f.name), f.body, f.at)
+				sizes[filepath.Join(dir, f.name)] = int64(len(f.body))
+			}
+			if tc.hold != "" {
+				openForTest(t, filepath.Join(dir, tc.hold), 1<<20, 5)
+			}
+
+			// Act.
+			report, err := RemoveFamilies(dir, owned, tc.judgeOnly)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RemoveFamilies: %v", err)
+			}
+			if got := baseNames(report.Removed); !reflect.DeepEqual(got, sorted(tc.wantRemoved)) {
+				t.Errorf("Removed = %v, want %v", got, tc.wantRemoved)
+			}
+			if got := baseNames(report.Held); !reflect.DeepEqual(got, sorted(tc.wantHeld)) {
+				t.Errorf("Held = %v, want %v", got, tc.wantHeld)
+			}
+			for _, path := range report.Removed {
+				if report.Sizes[path] != sizes[path] {
+					t.Errorf("Sizes[%s] = %d, want %d", path, report.Sizes[path], sizes[path])
+				}
+			}
+			var present []string
+			for _, f := range tc.files {
+				if _, err := os.Lstat(filepath.Join(dir, f.name)); err == nil {
+					present = append(present, f.name)
+				}
+			}
+			if !reflect.DeepEqual(sorted(present), sorted(tc.wantPresent)) {
+				t.Errorf("still present = %v, want %v", present, tc.wantPresent)
+			}
+		})
+	}
+}
+
+func TestRemoveFamiliesRefusesAMissingDirectory(t *testing.T) {
+	// Act.
+	_, err := RemoveFamilies(filepath.Join(t.TempDir(), "absent"), func(string) bool { return true }, false)
+
+	// Assert.
+	if err == nil {
+		t.Fatal("RemoveFamilies succeeded, want a missing directory refused")
+	}
+}
+
 func TestAWriterOpeningAPrunedPathWritesTheFileThePathNames(t *testing.T) {
 	// Arrange: an expired family nobody holds is pruned away.
 	dir := t.TempDir()

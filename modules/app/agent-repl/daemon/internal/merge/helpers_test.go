@@ -1946,6 +1946,18 @@ func (g *fakeGit) DefaultBranch(context.Context, string) (string, error) {
 	return g.defaultBranch, nil
 }
 
+func (g *fakeGit) ListRefs(_ context.Context, _, prefix string) ([]string, error) {
+	g.record("list_refs")
+	var refs []string
+	for ref := range g.refs {
+		if strings.HasPrefix(ref, prefix) {
+			refs = append(refs, ref)
+		}
+	}
+	sort.Strings(refs)
+	return refs, nil
+}
+
 func (g *fakeGit) BranchExists(_ context.Context, _, branch string) (bool, error) {
 	g.record("branch_exists")
 	_, ok := g.refs["refs/heads/"+branch]

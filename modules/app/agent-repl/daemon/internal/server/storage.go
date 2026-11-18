@@ -52,7 +52,7 @@ func pruneStorageError(e *agentreplv1.PruneStorageError) *agentreplv1.PruneStora
 func pruneStorageSuccess(r storagesweep.Report) *agentreplv1.PruneStorageSuccess {
 	out := &agentreplv1.PruneStorageSuccess{DryRun: r.DryRun, Bytes: uint64(r.Bytes()), Failures: uint32(r.Failures)}
 	for _, rm := range r.Removed {
-		out.Removed = append(out.Removed, &agentreplv1.PruneStorageRemoval{Path: rm.Path, Reason: pruneStorageReason(rm.Reason), Bytes: uint64(rm.Bytes)})
+		out.Removed = append(out.Removed, &agentreplv1.PruneStorageRemoval{Path: rm.Path, Reason: pruneStorageReason(rm.Reason), Bytes: uint64(rm.Bytes), Entries: uint32(rm.Entries)})
 	}
 	for reason, n := range r.Kept {
 		out.Kept = append(out.Kept, &agentreplv1.PruneStorageKept{Reason: pruneStorageKeepReason(reason), Count: uint32(n)})
@@ -77,6 +77,10 @@ func pruneStorageReason(r storagesweep.Reason) agentreplv1.PruneStorageReason {
 		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_AGED
 	case storagesweep.ReasonOverBound:
 		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_OVER_BOUND
+	case storagesweep.ReasonUntouchedLogs:
+		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_UNTOUCHED_LOGS
+	case storagesweep.ReasonUnusedBuildCache:
+		return agentreplv1.PruneStorageReason_PRUNE_STORAGE_REASON_UNUSED_BUILD_CACHE
 	}
 	panic("server: a storage sweep deleted for a reason the contract does not draw: " + string(r))
 }
@@ -96,6 +100,12 @@ func pruneStorageKeepReason(r storagesweep.KeepReason) agentreplv1.PruneStorageK
 		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_YOUNG
 	case storagesweep.KeepKeptByDirectory:
 		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_KEPT_BY_DIRECTORY
+	case storagesweep.KeepRecentlyTouched:
+		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_RECENTLY_TOUCHED
+	case storagesweep.KeepHeldLogs:
+		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_HELD_LOGS
+	case storagesweep.KeepRecentlyUsedBuildCache:
+		return agentreplv1.PruneStorageKeepReason_PRUNE_STORAGE_KEEP_REASON_RECENTLY_USED_BUILD_CACHE
 	}
 	panic("server: a storage sweep kept an entry for a reason the contract does not draw: " + string(r))
 }

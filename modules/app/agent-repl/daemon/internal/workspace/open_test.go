@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/sessionwatcher"
+	"agent-repld/internal/worktreereap"
 	"agent-repld/internal/wsm"
 )
 
@@ -382,6 +384,97 @@ func TestOpenRecordsTheRestoreAtInfoWithItsDirectoryAndBranch(t *testing.T) {
 		}
 	}
 	t.Fatalf("no INFO record of the restore; records = %+v", f.log.logger.Records())
+}
+
+func TestOpenNamesWhatTheExpiredWorktreePreserved(t *testing.T) {
+	// Arrange: the reaper expired the worktree twice over the workspace's life.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	prefix := worktreereap.PreservedRefs(ws.ID)
+	refs := []string{prefix + "20261101T000000Z", prefix + "20261110T000000Z"}
+	f.git.refsUnder = map[string][]string{prefix: refs}
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	found := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opOpen, Message: "the restored workspace's expired worktree was preserved; its uncommitted work is in these commits, and none of it was reapplied"})
+	if len(found) != 1 {
+		t.Fatalf("want one INFO record naming the preservation, got %+v", f.log.logger.Records())
+	}
+	got, _ := found[0].Context["preserved_refs"].([]string)
+	if !slices.Equal(got, refs) || found[0].Context["newest_preserved_ref"] != refs[1] {
+		t.Fatalf("preservation record context = %v, want refs %v and newest %q", found[0].Context, refs, refs[1])
+	}
+	if found[0].Context["branch"] != ws.Branch || found[0].Context["dir"] != ws.Dir {
+		t.Fatalf("preservation record context = %v, want dir %q and branch %q", found[0].Context, ws.Dir, ws.Branch)
+	}
+}
+
+func TestOpenOfARestoredWorkspaceWithNoPreservationSaysSoAtDebug(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if want := []string{worktreereap.PreservedRefs(ws.ID)}; !slices.Equal(f.git.listedRefs, want) {
+		t.Fatalf("listed ref prefixes = %v, want %v", f.git.listedRefs, want)
+	}
+	if found := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opOpen, Message: "the restored workspace's expired worktree was preserved; its uncommitted work is in these commits, and none of it was reapplied"}); len(found) != 0 {
+		t.Fatalf("a workspace with no preservation was told of one: %+v", found)
+	}
+	if found := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "debug", Operation: opOpen, Message: "the restored workspace has no expired worktree's preservation"}); len(found) != 1 {
+		t.Fatalf("want one DEBUG record that nothing was preserved, got %+v", f.log.logger.Records())
+	}
+}
+
+func TestOpenRecordsAnUnlistablePreservationAtErrorAndStillOpens(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	ws := goneWorkspace(t, f)
+	withBranch(f, ws)
+	f.git.listRefsErr = errors.New("fatal: bad ref store")
+
+	// Act.
+	err := f.verbs.Open(context.Background(), "w1", nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Open = %v; the worktree was restored, so the open stands", err)
+	}
+	found := dlog.FilterRecords(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opOpen, Message: "could not list what the restored workspace's expired worktree preserved"})
+	if len(found) != 1 {
+		t.Fatalf("want one ERROR record of the failed listing, got %+v", f.log.logger.Records())
+	}
+	c := found[0].Context
+	if c["ref_prefix"] != worktreereap.PreservedRefs(ws.ID) || c["cause"] != "fatal: bad ref store" || c["branch"] != ws.Branch {
+		t.Fatalf("failed listing context = %v", c)
+	}
+}
+
+func TestOpenOfAnExistingWorktreeListsNoPreservation(t *testing.T) {
+	// Arrange: the directory is there, so nothing was restored.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+
+	// Act.
+	if err := f.verbs.Open(context.Background(), "w1", nil); err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	// Assert.
+	if len(f.git.listedRefs) != 0 {
+		t.Fatalf("listed ref prefixes = %v, want none for a worktree that was never gone", f.git.listedRefs)
+	}
 }
 
 func TestOpenReportsTheRestoreStageAfterTheCheck(t *testing.T) {

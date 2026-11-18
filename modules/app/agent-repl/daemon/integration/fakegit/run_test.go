@@ -2319,6 +2319,37 @@ func TestForEachRefAnswersABranchWithNoUpstream(t *testing.T) {
 	}
 }
 
+func TestForEachRefListsEveryRefUnderAPrefix(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix string
+		want   string
+	}{
+		{name: "the refs under the prefix, sorted", prefix: "refs/agent-repl/expired/ws1/",
+			want: "refs/agent-repl/expired/ws1/20261101T000000Z\nrefs/agent-repl/expired/ws1/20261110T000000Z\n"},
+		{name: "a prefix no ref is under answers no line", prefix: "refs/agent-repl/expired/ws3/", want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: two workspaces' preservations, written out of order.
+			s, repo, dir := world(t)
+			repo.Refs = map[string]string{
+				"refs/agent-repl/expired/ws1/20261110T000000Z": "c2",
+				"refs/agent-repl/expired/ws1/20261101T000000Z": "c1",
+				"refs/agent-repl/expired/ws2/20261105T000000Z": "c3",
+			}
+
+			// Act.
+			got := Run(s, "/", []string{"-C", dir, "for-each-ref", "--format=%(refname)", "--sort=refname", tc.prefix})
+
+			// Assert.
+			if got.Exit != 0 || got.Stdout != tc.want {
+				t.Fatalf("for-each-ref = %+v, want exit 0 and %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestForEachRefRefusesAnUnmodeledQuery(t *testing.T) {
 	// Arrange.
 	s, _, dir := world(t)

@@ -125,3 +125,32 @@ func TestTheScheduleEndsWithItsContext(t *testing.T) {
 		t.Fatalf("Run = %v, want context.Canceled", run.err)
 	}
 }
+
+func TestTheStartSweepsClosedWorkspacesTreesBeforeTheFirstWait(t *testing.T) {
+	// Arrange: a closed workspace's expired tree, and a landed tree only a
+	// full sweep takes.
+	w, closed, landed := closedOnlyWorld(t)
+
+	// Act.
+	startRun(t, w.reaper())
+	<-w.clock.Asked // the first wait is asked for once the start's sweep is over
+
+	// Assert.
+	if !w.git.saw("remove "+closed) || w.git.saw("remove "+landed) {
+		t.Fatalf("git calls = %v, want the closed workspace's tree taken at the start and the landed tree left for the first full sweep", w.git.called())
+	}
+}
+
+func TestAStartSweepThatFailsDoesNotEndTheSchedule(t *testing.T) {
+	// Arrange: the registry cannot be read at the start.
+	w := newWorld(t)
+	w.registry.reposErr = errors.New("the registry is locked")
+
+	// Act.
+	startRun(t, w.reaper())
+
+	// Assert: the schedule goes on to its first wait.
+	if got := <-w.clock.Asked; got != DefaultStartDelay {
+		t.Fatalf("the first wait = %v, want the start delay %v", got, DefaultStartDelay)
+	}
+}
