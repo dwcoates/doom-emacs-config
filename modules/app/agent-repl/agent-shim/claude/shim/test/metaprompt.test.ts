@@ -367,15 +367,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("may close itself, after telling its parent");
   });
 
-  it("requires a workspace to store its task's link and every pull request it creates, unasked", () => {
+  it("requires a workspace to store its task's link and every resource its work creates, unasked", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readMetaprompt(home);
     // Assert
     expect(text).toContain("A link the workspace was created to investigate or act on");
-    expect(text).toContain("Every pull request an agent makes MUST be stored as the workspace's owned and canonical link");
-    expect(text).toContain("It is stored owned the moment its URL is known.");
+    expect(text).toContain("Every resource the workspace's work creates MUST be stored as one of its owned links");
+    expect(text).toContain("Examples are a pull request, a GNS page, a doc, a ticket, or a Slack post.");
+    expect(text).toContain("It is stored owned the moment its URL is known, before any other work.");
+    expect(text).toContain("Every pull request an agent makes is also the workspace's canonical link.");
+    expect(text).not.toContain("Every pull request an agent makes MUST be stored as the workspace's owned and canonical link");
     expect(text).toContain("without asking me any questions or for permission");
   });
 

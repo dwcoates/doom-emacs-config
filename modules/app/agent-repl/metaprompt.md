@@ -334,11 +334,13 @@
   - The daemon follows an owned pull request, telling the workspace about every comment, review and finished check on it until it merges or closes.
 - A link the workspace was created to investigate or act on MUST be stored before any other work on it begins.
   - Examples are a Slack thread, a Jira ticket, an issue, or a pull request to review.
-- Every pull request an agent makes MUST be stored as the workspace's owned and canonical link, through `agent-repld workspace link`.
-  - It is stored owned the moment its URL is known.
-    - The URL comes from the creating command's output or from `gh pr view --json url`, never a guessed one.
-  - This holds whoever opened it: the workspace's own agent, a skill such as `create-or-update-pr`, or a subagent working for the workspace.
+- Every resource the workspace's work creates MUST be stored as one of its owned links, through `agent-repld workspace link`.
+  - Examples are a pull request, a GNS page, a doc, a ticket, or a Slack post.
+  - It is stored owned the moment its URL is known, before any other work.
+    - The URL comes from the creating command's output, or for a pull request from `gh pr view --json url`, never a guessed one.
+  - This holds whoever made it: the workspace's own agent, a skill such as `create-or-update-pr`, or a subagent working for the workspace.
   - It holds in every repository, not only agent-repl's own.
+- Every pull request an agent makes is also the workspace's canonical link.
   - Canonical means that while the pull request is open, it is one of the menu's shown links.
     - The workspace shows it with `-show` in the same turn it is stored, whenever storing it left it unshown.
     - So the owner can always reach every open pull request the workspace asked them to review or merge from the topbar.
