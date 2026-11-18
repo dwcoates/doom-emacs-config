@@ -71,7 +71,38 @@ func (s Summarizer) Summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		log.Info(opSummary, "the turn named no final answer; nothing to summarize", nil)
 		return NoAnswerLine
 	}
-	summary, cause := s.summarize(ctx, ws, answer, log)
+	return s.sentence(ctx, ws, turnSummary, runecap.Head(answer, MaxAnswerRunes), log)
+}
+
+// sentenceCall is one kind of one-sentence Haiku call a banner's body is
+// asked of: every kind shares Summarizer.sentence's steps and records, and
+// differs only in the brief it is composed from and the words it is
+// recorded in.
+type sentenceCall struct {
+	// brief is the brief's name, and placeholder the one the input is
+	// spliced into.
+	brief, placeholder string
+	// site is the vendor-guard site the call asks under.
+	site string
+	// what names the call in its records ("turn-summary").
+	what string
+	// unmade is what a workspace with no account leaves unsummarized ("the
+	// turn was not summarized").
+	unmade string
+	// made is the record of a summary made.
+	made string
+}
+
+// turnSummary is the completed-turn banner's call.
+var turnSummary = sentenceCall{
+	brief: BriefSummary, placeholder: "answer", site: SummarySite, what: "turn-summary",
+	unmade: "the turn was not summarized", made: "summarized the turn's final answer",
+}
+
+// sentence makes CALL over INPUT, answering the banner body: the summary, or
+// "Summary unavailable: " and the cause of its failure (already recorded).
+func (s Summarizer) sentence(ctx context.Context, ws ids.WorkspaceID, call sentenceCall, input string, log dlog.Logger) string {
+	summary, cause := s.summarize(ctx, ws, call, input, log)
 	if cause != "" {
 		return "Summary unavailable: " + cause
 	}
@@ -80,18 +111,18 @@ func (s Summarizer) Summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 
 // summarize makes the model call, answering the summary or the cause of its
 // failure (already recorded).
-func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer string, log dlog.Logger) (string, string) {
-	brief, err := prompts.Load(s.PromptsDir, BriefSummary)
+func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, call sentenceCall, input string, log dlog.Logger) (string, string) {
+	brief, err := prompts.Load(s.PromptsDir, call.brief)
 	if err != nil {
-		log.Error(opSummary, "the turn-summary brief could not be read", dlog.Context{
-			"brief": BriefSummary, "cause": err.Error(),
+		log.Error(opSummary, "the "+call.what+" brief could not be read", dlog.Context{
+			"brief": call.brief, "cause": err.Error(),
 		})
 		return "", "the summary brief could not be read"
 	}
-	question, err := brief.Splice(map[string]string{"answer": runecap.Head(answer, MaxAnswerRunes)})
+	question, err := brief.Splice(map[string]string{call.placeholder: input})
 	if err != nil {
-		log.Error(opSummary, "the turn-summary brief could not be spliced", dlog.Context{
-			"brief": BriefSummary, "cause": err.Error(),
+		log.Error(opSummary, "the "+call.what+" brief could not be spliced", dlog.Context{
+			"brief": call.brief, "cause": err.Error(),
 		})
 		return "", "the summary brief could not be spliced"
 	}
@@ -106,7 +137,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		return "", StoodDownCause
 	}
 	if err != nil {
-		log.Error(opSummary, "no account root for this workspace; the turn was not summarized", dlog.Context{"cause": err.Error()})
+		log.Error(opSummary, "no account root for this workspace; "+call.unmade, dlog.Context{"cause": err.Error()})
 		return "", "no account for this workspace"
 	}
 	timeout := s.Timeout
@@ -114,7 +145,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		timeout = DefaultSummaryTimeout
 	}
 	resp, err := s.Headless.Run(ctx, headless.Request{
-		Site:      SummarySite,
+		Site:      call.site,
 		Model:     SummaryModel,
 		Format:    headless.FormatText,
 		Kind:      headless.KindInference,
@@ -125,24 +156,24 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 	if standdown.CutShort(ctx, err) {
 		// ctx is the notifier's lifetime: the daemon stood down mid-call and
 		// killed the child, which is the stand-down working, not a failure.
-		log.Info(opSummary, "the daemon stood down during the turn-summary call", dlog.Context{
+		log.Info(opSummary, "the daemon stood down during the "+call.what+" call", dlog.Context{
 			"model": SummaryModel, "cause": ctx.Err().Error(), "detail": err.Error(),
 		})
 		return "", StoodDownCause
 	}
 	if err != nil {
 		cause := headless.CauseOf(err)
-		log.Error(opSummary, "the turn-summary model call failed", dlog.Context{
+		log.Error(opSummary, "the "+call.what+" model call failed", dlog.Context{
 			"model": SummaryModel, "cause": cause, "detail": err.Error(),
 		})
 		return "", cause
 	}
 	summary := textline.FirstNonBlank(resp.Text)
 	if summary == "" {
-		log.Error(opSummary, "the turn-summary model call answered empty", dlog.Context{"model": SummaryModel})
+		log.Error(opSummary, "the "+call.what+" model call answered empty", dlog.Context{"model": SummaryModel})
 		return "", "the model answered empty"
 	}
-	log.Info(opSummary, "summarized the turn's final answer", dlog.Context{
+	log.Info(opSummary, call.made, dlog.Context{
 		"model": SummaryModel, "duration_ms": resp.Duration.Milliseconds(),
 	})
 	return summary, ""

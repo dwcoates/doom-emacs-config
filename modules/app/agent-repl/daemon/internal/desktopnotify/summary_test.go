@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -305,5 +306,70 @@ func TestTheShippedBriefAsksForOneDeclarativeSentence(t *testing.T) {
 		if !strings.Contains(h.req.Prompt, want) {
 			t.Fatalf("the shipped brief's prompt lacks %q", want)
 		}
+	}
+}
+
+// TestSentenceRecordsInItsCallsOwnWords pins the shared one-sentence call:
+// every record and every request field it makes is its sentenceCall's, so a
+// second kind of call reads in its own words and asks under its own site.
+func TestSentenceRecordsInItsCallsOwnWords(t *testing.T) {
+	// Arrange
+	call := sentenceCall{brief: BriefSummary, placeholder: "answer", site: "probe_site", what: "probe-summary",
+		unmade: "the probe was not summarized", made: "summarized the probe"}
+	tests := []struct {
+		name  string
+		h     *fakeHeadless
+		dirs  fakeConfigDirs
+		want  string
+		level string
+		rec   string
+	}{
+		{name: "made", h: &fakeHeadless{text: "Probe done."}, dirs: fakeConfigDirs{dir: "/acct", ok: true},
+			want: "Probe done.", level: "info", rec: "summarized the probe"},
+		{name: "failed", h: &fakeHeadless{err: &headless.Error{Cause: headless.CauseTimeout, Detail: "x"}}, dirs: fakeConfigDirs{dir: "/acct", ok: true},
+			want: "Summary unavailable: timeout", level: "error", rec: "the probe-summary model call failed"},
+		{name: "empty", h: &fakeHeadless{text: " \n"}, dirs: fakeConfigDirs{dir: "/acct", ok: true},
+			want: "Summary unavailable: the model answered empty", level: "error", rec: "the probe-summary model call answered empty"},
+		{name: "no account", h: &fakeHeadless{}, dirs: fakeConfigDirs{ok: false},
+			want: "Summary unavailable: no account for this workspace", level: "error", rec: "no account root for this workspace; the probe was not summarized"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, log := newSummarizer(t, tt.h, tt.dirs, briefDir(t, validBrief))
+
+			// Act
+			got := s.sentence(context.Background(), "ws1", call, "INPUT", log)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("sentence = %q, want %q", got, tt.want)
+			}
+			if _, ok := hasRecord(log, tt.level, tt.rec); !ok {
+				t.Fatalf("no %s record %q", tt.level, tt.rec)
+			}
+			if tt.h.req != nil && (tt.h.req.Site != "probe_site" || !strings.Contains(tt.h.req.Prompt, "INPUT")) {
+				t.Fatalf("request = %+v, want the call's site and the spliced input", *tt.h.req)
+			}
+		})
+	}
+}
+
+// TestEveryBannerSummaryGoesThroughTheSharedSentenceCall pins that each
+// banner summary is a sentenceCall over the one shared call, never a
+// hand-rolled model call: the turn summary asks exactly what sentence asks
+// for turnSummary.
+func TestEveryBannerSummaryGoesThroughTheSharedSentenceCall(t *testing.T) {
+	// Arrange
+	viaSummarize, viaSentence := &fakeHeadless{text: "ok"}, &fakeHeadless{text: "ok"}
+	a, _ := newSummarizer(t, viaSummarize, fakeConfigDirs{dir: "/acct", ok: true}, briefDir(t, validBrief))
+	b, log := newSummarizer(t, viaSentence, fakeConfigDirs{dir: "/acct", ok: true}, briefDir(t, validBrief))
+
+	// Act
+	a.Summarize(context.Background(), "ws1", "answer")
+	b.sentence(context.Background(), "ws1", turnSummary, "answer", log)
+
+	// Assert
+	if !reflect.DeepEqual(*viaSummarize.req, *viaSentence.req) {
+		t.Fatalf("Summarize asked %+v, the shared call %+v", *viaSummarize.req, *viaSentence.req)
 	}
 }
