@@ -15,9 +15,11 @@ import {
   createArrangeHold,
   sendArrangement,
   sendHeld,
+  successRevision,
 } from "../../src/sidebar/arrange.js";
 import { log } from "../../src/log.js";
 import { appContext, sidebarContext } from "./harness.js";
+import { codeOf } from "../source-text.js";
 
 /** A roster carrying nothing but REVISION. */
 function at(revision: number): WorkspaceRoster {
@@ -175,5 +177,32 @@ describe("sending a held verb", () => {
       .filter((file) => file.endsWith(".ts"))
       .flatMap((file) => (readFileSync(path.join(dir, file), "utf8").match(/hold\.await\(\)/g) ?? []).map(() => file));
     expect(awaiting).toEqual(["arrange.ts"]);
+  });
+});
+
+describe("successRevision", () => {
+  it("answers the roster revision a success names", () => {
+    expect(successRevision(create(ArrangeSidebarResponseSchema, { result: { case: "success", value: { rosterRevision: 7n } } }))).toBe(7n);
+  });
+
+  it("answers null for a refusal", () => {
+    expect(
+      successRevision(create(ArrangeSidebarResponseSchema, { result: { case: "error", value: { cause: { case: "blankName", value: {} } } } })),
+    ).toBeNull();
+  });
+
+  it("answers null for a response naming no outcome", () => {
+    expect(successRevision(create(ArrangeSidebarResponseSchema, {}))).toBeNull();
+  });
+
+  it.each(["arrange.ts", "rename.ts", "nest.ts"])("is how %s reads its held verb's revision", (file) => {
+    // Arrange
+    const source = codeOf(readFileSync(path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "src", "sidebar", file), "utf8"));
+
+    // Act
+    const reads = [source.includes("revision: successRevision"), source.includes(".rosterRevision : null")];
+
+    // Assert
+    expect(reads).toEqual([true, file === "arrange.ts"]);
   });
 });

@@ -25,7 +25,7 @@ import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_
 import { log } from "../log.js";
 import { parentNotOpenSentence } from "../rpc/family-refusal.js";
 import { unreachableArm } from "../rpc/strict.js";
-import { sendHeld } from "./arrange.js";
+import { sendHeld, successRevision } from "./arrange.js";
 import type { SidebarContext } from "./context.js";
 import type { CauseOf } from "./verbs.js";
 
@@ -78,13 +78,12 @@ export async function sendNest(
 ): Promise<boolean> {
   const context = { workspace: workspace.id, parent: parent.id };
   log.info("nesting a workspace under the one it was dropped onto", { operation: "sidebar.nest.send", context });
-  return sendHeld(sc, control, {
+  return sendHeld<SetWorkspaceParentResponse>(sc, control, {
     rpc: "SetWorkspaceParent",
     call: (client) => client.setWorkspaceParent(buildNestRequest(workspace, parent)),
     schema: SetWorkspaceParentResponseSchema,
     refusalText: (cause) => setWorkspaceParentRefusal(cause as CauseOf<SetWorkspaceParentError>),
-    revision: (response: SetWorkspaceParentResponse) =>
-      response.result.case === "success" ? response.result.value.rosterRevision : null,
+    revision: successRevision,
     context,
   });
 }
