@@ -15,7 +15,7 @@ import (
 // (Subsection.CreatedBy), and the write that leaves it with no open workspace
 // deletes it, its closed families returning to no subsection as a user's
 // delete returns them. A subsection the user created carries no creator and
-// survives empty.
+// survives empty, unless the user's own close empties it (usercloses.go).
 //
 // THE REMOVAL RIDES EVERY WRITE (writeTx), not the writes someone remembered
 // could empty a subsection: a close, a merge, a placement, a retarget and a

@@ -925,6 +925,8 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - Clicking anywhere outside the box closes it, a click into Emacs included.
   - Double-click a subsection's name to rename it, and click its "×" to remove it.
     - Its workspaces return to the repository where the subsection stood.
+  - Closing, killing or nuking the last open workspace in a subsection removes the subsection too.
+    - A subsection emptied any other way, such as by dragging its last workspace out, stays until you remove it.
   - A subsection's workspaces are indented under its header.
 - **Drag a workspace's row to move it.**
   - Drop it among the repository's own rows, just above a subsection included, or into any of its subsections, an empty one included.

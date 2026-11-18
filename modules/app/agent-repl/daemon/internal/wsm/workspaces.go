@@ -803,6 +803,9 @@ type closeEffects struct {
 	// offQueue reports that the close ended the workspace's merge request
 	// standing off its queue (offqueue.go).
 	offQueue bool
+	// removedSubsection is the subsection the user's close left with no open
+	// workspace and so removed (usercloses.go), nil for none.
+	removedSubsection *Subsection
 }
 
 // markClosedInTx is THE ONE CLOSE WRITE, run inside the caller's transaction,
@@ -853,6 +856,14 @@ func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Clo
 	if effects.offQueue, err = dropOffQueueInTx(ctx, tx, id); err != nil {
 		return closeEffects{}, err
 	}
+	// THE USER'S CLOSE OF A SUBSECTION'S LAST OPEN WORKSPACE removes the
+	// subsection (usercloses.go). Only the close that ends the row's open
+	// life counts: a row already closed was not emptied by this one.
+	if !closed && closure.By == CloseByUser {
+		if effects.removedSubsection, err = removeSubsectionUserCloseEmptied(ctx, tx, id); err != nil {
+			return closeEffects{}, err
+		}
+	}
 	return effects, nil
 }
 
@@ -873,6 +884,13 @@ func (s *store) logCloseEffects(op string, id WorkspaceID, effects closeEffects)
 	if effects.offQueue {
 		s.log.Info(op, "the close ended the workspace's merge request standing off its queue",
 			dlog.Context{"workspace": string(id)})
+	}
+	if sub := effects.removedSubsection; sub != nil {
+		fields := dlog.Context{"workspace": string(id), "subsection": string(sub.ID), "name": sub.Name, "repo_id": string(sub.Repo), "write": op}
+		if sub.CreatedBy != nil {
+			fields["created_by"] = string(*sub.CreatedBy)
+		}
+		s.log.Info(opRemoveUserClosedSubsection, "removed the subsection the user's close left with no open workspace", fields)
 	}
 }
 
