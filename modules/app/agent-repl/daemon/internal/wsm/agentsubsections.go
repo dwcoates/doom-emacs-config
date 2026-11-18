@@ -41,12 +41,15 @@ const opPruneAgentSubsection = "daemon.wsm.prune_agent_subsection"
 // Nothing is written.
 var ErrNoOpenConstituent = errors.New("wsm: an agent-created subsection would have no open workspace")
 
+// emptySubsectionsQuery selects every subsection no open workspace sits in,
+// a child counting where its root sits (rootSubsectionColumn), whoever
+// created it. Its WHERE clause takes further `AND` conditions.
+const emptySubsectionsQuery = `SELECT ` + subsectionColumns + ` FROM subsections
+WHERE NOT EXISTS (SELECT 1 FROM workspaces WHERE NOT workspaces.closed AND ` + rootSubsectionColumn + ` = subsections.id)`
+
 // emptyAgentSubsectionsQuery selects every agent-created subsection no open
-// workspace sits in, a child counting where its root sits
-// (rootSubsectionColumn).
-const emptyAgentSubsectionsQuery = `SELECT ` + subsectionColumns + ` FROM subsections
-WHERE created_by IS NOT NULL
-  AND NOT EXISTS (SELECT 1 FROM workspaces WHERE NOT workspaces.closed AND ` + rootSubsectionColumn + ` = subsections.id)`
+// workspace sits in.
+const emptyAgentSubsectionsQuery = emptySubsectionsQuery + ` AND created_by IS NOT NULL`
 
 // CreateAgentSubsection records a subsection named NAME (trimmed), created by
 // workspace CREATOR's agent, after the members' repository's other
