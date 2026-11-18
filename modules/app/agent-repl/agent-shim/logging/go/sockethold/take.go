@@ -29,3 +29,17 @@ func TakeTimed(take TakeFunc, control, name string) (net.Listener, time.Duration
 	ln, err := take(ctx, control, name)
 	return ln, time.Since(began), err
 }
+
+// ProbeFunc is Probe's shape: a caller's seam takes a stand-in of it.
+type ProbeFunc func(ctx context.Context, control string) error
+
+// ProbeTimed runs PROBE (Probe, or a test's stand-in) of CONTROL within
+// TakeBound, the same holder start and exchange a take waits on, and answers
+// how long it took, for the caller to record through its own log.
+func ProbeTimed(probe ProbeFunc, control string) (time.Duration, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), TakeBound)
+	defer cancel()
+	began := time.Now()
+	err := probe(ctx, control)
+	return time.Since(began), err
+}

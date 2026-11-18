@@ -97,11 +97,16 @@ func run(ctx context.Context, control string, hold []string, activateSockets fun
 	}
 	log.Info("sockethold.run", "holding the sockets and serving their control socket", recordlog.Context{"control": control, "hold": strings.Join(hold, ",")})
 	err = sockethold.Serve(ctx, unix, byName, func(g sockethold.Grant) {
-		if g.Err != nil {
+		switch {
+		case g.Probe && g.Err != nil:
+			log.Error("sockethold.probe", "a probe could not be answered", recordlog.Context{"cause": g.Err.Error()})
+		case g.Probe:
+			log.Info("sockethold.probe", "answered a probe: the holder is serving", nil)
+		case g.Err != nil:
 			log.Error("sockethold.grant", "a request for a held socket was not granted", recordlog.Context{"socket": g.Name, "cause": g.Err.Error()})
-			return
+		default:
+			log.Info("sockethold.grant", "handed a server its held socket", recordlog.Context{"socket": g.Name})
 		}
-		log.Info("sockethold.grant", "handed a server its held socket", recordlog.Context{"socket": g.Name})
 	})
 	if err != nil {
 		return fail("serving the control socket failed", err)

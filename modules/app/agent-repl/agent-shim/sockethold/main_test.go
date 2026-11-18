@@ -94,6 +94,11 @@ func TestRunHandsAServerItsHeldSocket(t *testing.T) {
 		defer cc()
 		return sockethold.Take(c, control, "nope")
 	}()
+	probeErr := func() error {
+		c, cc := context.WithTimeout(context.Background(), exchangeBound)
+		defer cc()
+		return sockethold.Probe(c, control)
+	}()
 	cancel()
 	runErr := <-done
 
@@ -105,6 +110,9 @@ func TestRunHandsAServerItsHeldSocket(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("run = %v, want a clean exit on its signal", runErr)
 	}
+	if probeErr != nil {
+		t.Fatalf("Probe = %v, want the holder's answer", probeErr)
+	}
 	if !errors.Is(refused, sockethold.ErrRefused) {
 		t.Fatalf("Take of an unheld socket = %v, want ErrRefused", refused)
 	}
@@ -112,6 +120,7 @@ func TestRunHandsAServerItsHeldSocket(t *testing.T) {
 	for _, want := range [][3]string{
 		{"info", "sockethold.grant", "handed a server its held socket"},
 		{"error", "sockethold.grant", "a request for a held socket was not granted"},
+		{"info", "sockethold.probe", "answered a probe: the holder is serving"},
 		{"info", "sockethold.run", "the holder is exiting on its service manager's signal"},
 	} {
 		if !hasRecord(recs, want[0], want[1], want[2]) {

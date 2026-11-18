@@ -12,7 +12,8 @@
 // The holder serves a control socket. A client writes the NAME of the socket
 // it wants, one line, and reads one status byte: StatusOK with the socket's
 // fd attached (SCM_RIGHTS), or StatusRefused followed by the reason, one
-// line. One request per connection.
+// line. One request per connection. An EMPTY line is a probe (Probe): the
+// holder answers StatusOK with no fd, which proves it is loaded and serving.
 package sockethold
 
 import (
@@ -45,18 +46,11 @@ func Take(ctx context.Context, control, name string) (net.Listener, error) {
 	if strings.ContainsAny(name, "\n\x00") || name == "" {
 		return nil, fmt.Errorf("sockethold: socket name %q is empty or holds a line break", name)
 	}
-	var d net.Dialer
-	conn, err := d.DialContext(ctx, "unix", control)
+	uc, err := dial(ctx, control)
 	if err != nil {
-		return nil, fmt.Errorf("sockethold: dial the holder's control socket %s: %w", control, err)
+		return nil, err
 	}
-	defer conn.Close()
-	uc := conn.(*net.UnixConn)
-	if deadline, ok := ctx.Deadline(); ok {
-		if err := uc.SetDeadline(deadline); err != nil {
-			return nil, fmt.Errorf("sockethold: bound the exchange with %s: %w", control, err)
-		}
-	}
+	defer uc.Close()
 	if _, err := uc.Write([]byte(name + "\n")); err != nil {
 		return nil, fmt.Errorf("sockethold: ask %s for %q: %w", control, name, err)
 	}
@@ -93,10 +87,62 @@ func Take(ctx context.Context, control, name string) (net.Listener, error) {
 	return ln, nil
 }
 
+// ErrNoHolder marks a control socket no holder serves: no socket file at
+// its path, or one nothing listens on. That is a holder whose job is not
+// loaded, which its installer brings up; any other failure is the holder's.
+var ErrNoHolder = errors.New("sockethold: no holder serves the control socket")
+
+// dial connects to the holder serving CONTROL, the exchange bounded by
+// CTX's deadline. A control socket nothing serves answers ErrNoHolder.
+func dial(ctx context.Context, control string) (*net.UnixConn, error) {
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "unix", control)
+	if err != nil {
+		if errors.Is(err, syscall.ENOENT) || errors.Is(err, syscall.ECONNREFUSED) {
+			return nil, fmt.Errorf("%w: dial %s: %w", ErrNoHolder, control, err)
+		}
+		return nil, fmt.Errorf("sockethold: dial the holder's control socket %s: %w", control, err)
+	}
+	uc := conn.(*net.UnixConn)
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := uc.SetDeadline(deadline); err != nil {
+			uc.Close()
+			return nil, fmt.Errorf("sockethold: bound the exchange with %s: %w", control, err)
+		}
+	}
+	return uc, nil
+}
+
+// Probe proves a holder serves CONTROL: one empty request, answered StatusOK
+// with no fd. It takes nothing, so any program may ask whether a holder it
+// does not serve from is up. CTX bounds the whole exchange. A control socket
+// nothing serves answers ErrNoHolder.
+func Probe(ctx context.Context, control string) error {
+	uc, err := dial(ctx, control)
+	if err != nil {
+		return err
+	}
+	defer uc.Close()
+	if _, err := uc.Write([]byte("\n")); err != nil {
+		return fmt.Errorf("sockethold: probe %s: %w", control, err)
+	}
+	buf := make([]byte, 1)
+	n, err := uc.Read(buf)
+	if err != nil {
+		return fmt.Errorf("sockethold: read %s's answer to a probe: %w", control, err)
+	}
+	if n != 1 || buf[0] != StatusOK {
+		return fmt.Errorf("sockethold: %s answered a probe with %q", control, buf[:n])
+	}
+	return nil
+}
+
 // Grant is one answered request, for the holder's record.
 type Grant struct {
-	// Name is the socket asked for.
+	// Name is the socket asked for, "" for a probe.
 	Name string
+	// Probe reports a probe (Probe), which asks for no socket.
+	Probe bool
 	// Err is why the request was not granted; nil when it was.
 	Err error
 }
@@ -131,6 +177,12 @@ func answer(conn *net.UnixConn, sockets map[string]*os.File) Grant {
 		return Grant{Err: fmt.Errorf("read the request: %w", err)}
 	}
 	name := strings.TrimSuffix(line, "\n")
+	if name == "" {
+		if _, err := conn.Write([]byte{StatusOK}); err != nil {
+			return Grant{Probe: true, Err: fmt.Errorf("answer the probe: %w", err)}
+		}
+		return Grant{Probe: true}
+	}
 	file, ok := sockets[name]
 	if !ok {
 		reason := fmt.Sprintf("this holder holds no socket named %q", name)

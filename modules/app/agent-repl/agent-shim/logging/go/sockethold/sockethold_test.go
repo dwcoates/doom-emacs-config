@@ -175,3 +175,70 @@ func TestTakeFailsWhenNoHolderServes(t *testing.T) {
 		t.Fatal("Take = nil, want the dial failure")
 	}
 }
+
+func TestAProbeOfAServingHolderIsAnsweredAndTakesNothing(t *testing.T) {
+	// Arrange
+	h := startHolder(t)
+	ctx, cancel := context.WithTimeout(context.Background(), takeBound)
+	defer cancel()
+
+	// Act
+	err := Probe(ctx, h.control)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Probe = %v, want the holder's answer", err)
+	}
+	if g := <-h.grants; !g.Probe || g.Name != "" || g.Err != nil {
+		t.Fatalf("grant = %+v, want a probe recorded and no socket handed out", g)
+	}
+}
+
+func TestNoHolderIsToldApartFromAFailingOne(t *testing.T) {
+	tests := []struct {
+		name    string
+		control func(t *testing.T) string
+		want    bool
+	}{
+		{name: "no socket file is no holder", control: func(*testing.T) string { return "/tmp/sockethold-no-holder.sock" }, want: true},
+		{name: "a socket nothing listens on is no holder", control: func(t *testing.T) string {
+			dir, err := os.MkdirTemp("/tmp", "shp")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { os.RemoveAll(dir) })
+			path := filepath.Join(dir, "c.sock")
+			ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ln.SetUnlinkOnClose(false)
+			ln.Close()
+			return path
+		}, want: true},
+		{name: "a path that is no socket is a failing holder, never a missing one", control: func(t *testing.T) string {
+			path := filepath.Join(t.TempDir(), "plain")
+			if err := os.WriteFile(path, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			return path
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			control := tt.control(t)
+			ctx, cancel := context.WithTimeout(context.Background(), takeBound)
+			defer cancel()
+
+			// Act
+			probeErr := Probe(ctx, control)
+			_, takeErr := Take(ctx, control, "data")
+
+			// Assert
+			if probeErr == nil || errors.Is(probeErr, ErrNoHolder) != tt.want || errors.Is(takeErr, ErrNoHolder) != tt.want {
+				t.Fatalf("Probe = %v, Take = %v; want ErrNoHolder %v from both", probeErr, takeErr, tt.want)
+			}
+		})
+	}
+}
