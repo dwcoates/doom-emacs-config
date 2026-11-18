@@ -48,9 +48,9 @@ const markOf = (drawn: HTMLElement): HTMLElement => drawn.querySelector(":scope 
 
 describe("drawRosterChildrenFold", () => {
   it.each([
-    { name: "collapsed", fold: COLLAPSED, want: { collapsed: true, holdsCurrent: false } },
-    { name: "collapsible", fold: COLLAPSIBLE, want: { collapsed: false, holdsCurrent: false } },
-    { name: "holding the current workspace", fold: HOLDS_CURRENT, want: { collapsed: false, holdsCurrent: true } },
+    { name: "collapsed", fold: COLLAPSED, want: { collapsed: true } },
+    { name: "collapsible", fold: COLLAPSIBLE, want: { collapsed: false } },
+    { name: "holding the current workspace", fold: HOLDS_CURRENT, want: { collapsed: false } },
   ])("reads $name", ({ fold, want }) => {
     // Act
     const drawn = drawRosterChildrenFold(create(RosterOpenRowChildrenFoldSchema, fold), "R.childrenFold");
@@ -154,7 +154,7 @@ describe("a row's children fold", () => {
     expect(selected).toEqual([]);
   });
 
-  it("asks no collapse while a child is the current workspace, and flashes it", async () => {
+  it("asks the collapse while a child is the current workspace, and flashes nothing", async () => {
     // Arrange
     const { asked, sc } = recording();
     const drawn = drawRosterFamily(parentWith(HOLDS_CURRENT, true), sc, "R");
@@ -165,9 +165,8 @@ describe("a row's children fold", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Assert
-    expect(drawn.hasAttribute(HOLDS_CURRENT_ATTRIBUTE)).toBe(true);
-    expect(asked).toEqual([]);
-    expect(drawn.classList.contains("folded")).toBe(false);
-    expect(drawn.querySelector(".ws.current")?.classList.contains(CURRENT_FLASH_CLASS)).toBe(true);
+    expect(drawn.hasAttribute(HOLDS_CURRENT_ATTRIBUTE)).toBe(false);
+    expect(asked).toHaveLength(1);
+    expect(drawn.querySelector(".ws.current")?.classList.contains(CURRENT_FLASH_CLASS)).toBe(false);
   });
 });
