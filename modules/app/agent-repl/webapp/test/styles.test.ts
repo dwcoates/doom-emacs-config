@@ -6403,6 +6403,29 @@ describe("the repository's subsections and the drag", () => {
     expect([/position:\s*fixed/.test(ghost), /pointer-events:\s*none/.test(ghost)]).toEqual([true, true]);
   });
 
+  it("tucks the drag's copy in one row-indent step over a subsection that shows no rows", () => {
+    expect(declarationsOf(".drag-ghost.drag-ghost-into")).toMatch(/transform:\s*translateX\(0\.9rem\) scale\(0\.94\)/);
+  });
+
+  it("slides the drag's copy into its tucked pose only when motion is welcome", () => {
+    const welcome = mediaBlocksOf("prefers-reduced-motion: no-preference").map((block) => block.body).join("\n");
+    const sliding = (css: string): string[] =>
+      rulesOf(css)
+        .filter((rule) => rule.selectors.includes(".drag-ghost") && /transition/.test(rule.declarations))
+        .map((rule) => rule.declarations.trim());
+    // Every rule that slides the copy is one the welcome blocks hold.
+    expect([sliding(welcome).some((d) => /transition:\s*transform 160ms ease-out/.test(d)), sliding(stylesheet)]).toEqual([true, sliding(welcome)]);
+  });
+
+  it("glows a subsection's header once, inward, as a row is drawn going inside it", () => {
+    const welcome = mediaBlocksOf("prefers-reduced-motion: no-preference").map((block) => block.body).join("\n");
+    const head = rulesOf(welcome).find((rule) => rule.selectors.includes("#ws-sidebar .sb-subsection.drop-into > .sb-subsection-head"));
+    expect([head?.declarations.match(/animation:\s*([^;]+);/)?.[1]?.trim(), /inset/.test(keyframesOf("sb-drop-into"))]).toEqual([
+      "sb-drop-into 450ms ease-out 1",
+      true,
+    ]);
+  });
+
   it("dims the dragged item's slot", () => {
     expect(declarationsOf(".drag-slot")).toMatch(/opacity:\s*0\.35/);
   });
