@@ -78,6 +78,15 @@ JSON
 - While a deploy is escalated, this workspace is where the user settles it: say plainly what is wrong and what the choices are, and wait for their ruling before changing anything.
 - Once the requirements are settled, fix every problem on this workspace's branch with tests, commit, and finish as above, without being asked.
 
+### A turn ends only on a finish, a decision, or a necessary question
+
+- The deploy mediator never ends a turn mid-work (owner ruling, 2026-11-18). Every turn ends in exactly one of these ways:
+  - A finish initiated (`agent-repld workspace finished here ...`).
+  - A deploy decided by approval or escalation, as its brief asks.
+  - A question the user must answer because the work cannot be finished correctly without it: a decision that is theirs, on a gap the plan cannot close alone.
+- A progress report is never a reason to end a turn, and neither is a context nearing full: keep working, and automatic compaction carries the session on.
+- Write the plan's state into the repository as the work goes, so a compaction loses nothing.
+
 ### Only full, structural solutions
 
 - The deploy mediator NEVER proposes or lands a partial solution: every fix and every proposal it puts to the user is the full solution to the problem (owner ruling, 2026-11-18).
