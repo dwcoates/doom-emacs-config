@@ -38,13 +38,40 @@ func (r *resolver) enduringUsage(s *wsState) *frontendv1.FooterActivityEnduringU
 	rate := &s.usage.rate
 	weekly := r.weeklyAllowance(rate, nowS)
 	overage := r.allowance(&rate.overage, nowS)
-	if weekly == nil && overage == nil {
+	spend := monthlySpend(rate.monthlySpend)
+	if weekly == nil && overage == nil && spend == nil {
 		return nil
 	}
 	return &frontendv1.FooterActivityEnduringUsage{
-		Weekly:  weekly,
-		Overage: overage,
+		Weekly:       weekly,
+		Overage:      overage,
+		MonthlySpend: spend,
 	}
+}
+
+// monthlySpend projects the account's spend onto the drawn element, or nil
+// when no spend is on hand. A capped spend carries spent / limit, so the
+// client paints the gradient without dividing money; a zero limit is drawn
+// full rather than divided by.
+func monthlySpend(m *wsm.MonthlySpendFigures) *frontendv1.FooterMonthlySpend {
+	if m == nil {
+		return nil
+	}
+	money := func(amount int64) *frontendv1.FooterMoney {
+		return &frontendv1.FooterMoney{AmountMinor: amount, Currency: m.Currency}
+	}
+	spend := &frontendv1.FooterMonthlySpend{Spent: money(m.SpentMinor)}
+	if m.LimitMinor == nil {
+		spend.Limit = &frontendv1.FooterMonthlySpend_Uncapped{Uncapped: &frontendv1.FooterMonthlySpendUncapped{}}
+		return spend
+	}
+	utilization := 1.0
+	if *m.LimitMinor > 0 {
+		utilization = float64(m.SpentMinor) / float64(*m.LimitMinor)
+	}
+	spend.Limit = &frontendv1.FooterMonthlySpend_Capped{Capped: &frontendv1.FooterMonthlySpendCapped{
+		Limit: money(*m.LimitMinor), Utilization: utilization}}
+	return spend
 }
 
 // weeklyAllowance projects the seven-day windows onto the weekly element: the

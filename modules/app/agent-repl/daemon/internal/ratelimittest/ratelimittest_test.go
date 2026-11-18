@@ -196,9 +196,52 @@ func TestPlanUsageFilesEachWindowUnderItsOwnField(t *testing.T) {
 
 // A PLAN-USAGE READ HAS ONE SPELLING in the daemon's tests, as an event does:
 // a test file that builds one by hand fails here.
+func TestTheSpendBuildersCarryTheirAmountsAndLimit(t *testing.T) {
+	capLimit := int64(1_200_000)
+	tests := []struct {
+		name      string
+		spend     *conversationv1.SessionPlanUsageMonthlySpend
+		wantSpent int64
+		wantLimit *int64
+	}{
+		{"capped", CappedSpend(199_396, 1_200_000), 199_396, &capLimit},
+		{"uncapped", UncappedSpend(500), 500, nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			spent, capped, uncapped := tc.spend.GetSpent(), tc.spend.GetCapped(), tc.spend.GetUncapped()
+
+			// Assert
+			if spent.GetAmountMinor() != tc.wantSpent || spent.GetCurrency() != "USD" {
+				t.Fatalf("spent = %+v, want %d USD", spent, tc.wantSpent)
+			}
+			switch {
+			case tc.wantLimit == nil && (capped != nil || uncapped == nil):
+				t.Fatalf("limit = %+v, want uncapped", tc.spend.GetLimit())
+			case tc.wantLimit != nil && (capped.GetLimit().GetAmountMinor() != *tc.wantLimit || capped.GetLimit().GetCurrency() != "USD"):
+				t.Fatalf("limit = %+v, want capped at %d USD", tc.spend.GetLimit(), *tc.wantLimit)
+			}
+		})
+	}
+}
+
+func TestWithMonthlySpendSetsTheReadsSpend(t *testing.T) {
+	// Arrange
+	spend := UncappedSpend(500)
+
+	// Act
+	got := WithMonthlySpend(PlanUsage(nil, nil, nil), spend).GetPlanUsage()
+
+	// Assert
+	if got.GetMonthlySpend() != spend {
+		t.Fatalf("monthly spend = %+v, want the one handed in", got.GetMonthlySpend())
+	}
+}
+
 func TestNoTestHandRollsAPlanUsageRead(t *testing.T) {
 	// Act
-	offenders := offendingTestFiles(t, "SessionUpdate_PlanUsage{", "SessionPlanUsageWindow{")
+	offenders := offendingTestFiles(t, "SessionUpdate_PlanUsage{", "SessionPlanUsageWindow{", "SessionPlanUsageMonthlySpend{")
 
 	// Assert
 	if len(offenders) != 0 {

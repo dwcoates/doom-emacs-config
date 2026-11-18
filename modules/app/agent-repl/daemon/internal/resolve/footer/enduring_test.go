@@ -745,3 +745,115 @@ func TestAContextReportNeverClaimsTheEnduringLine(t *testing.T) {
 		})
 	}
 }
+
+// planSpend is a plan-usage read stating SPEND and no weekly window.
+func planSpend(spend *conversationv1.SessionPlanUsageMonthlySpend) *conversationv1.SessionUpdate {
+	return ratelimittest.WithMonthlySpend(ratelimittest.PlanUsage(nil, nil, nil), spend)
+}
+
+func TestAPlanUsageReadDrawsTheMonthlySpend(t *testing.T) {
+	tests := []struct {
+		name            string
+		spend           *conversationv1.SessionPlanUsageMonthlySpend
+		wantLimit       int64
+		wantUtilization float64
+		wantUncapped    bool
+	}{
+		{name: "capped", spend: ratelimittest.CappedSpend(300_000, 1_200_000), wantLimit: 1_200_000, wantUtilization: 0.25},
+		{name: "capped at zero", spend: ratelimittest.CappedSpend(0, 0), wantLimit: 0, wantUtilization: 1},
+		{name: "past its limit", spend: ratelimittest.CappedSpend(1_500_000, 1_200_000), wantLimit: 1_200_000, wantUtilization: 1.25},
+		{name: "uncapped", spend: ratelimittest.UncappedSpend(300_000), wantUncapped: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+
+			// Act
+			h.r.OnSessionUpdate(testWS, planSpend(tc.spend))
+
+			// Assert
+			got := enduringUsageOf(h).GetMonthlySpend()
+			if got.GetSpent().GetAmountMinor() != tc.spend.GetSpent().GetAmountMinor() || got.GetSpent().GetCurrency() != "USD" {
+				t.Fatalf("spent = %+v, want the read's %+v", got.GetSpent(), tc.spend.GetSpent())
+			}
+			if tc.wantUncapped {
+				if got.GetUncapped() == nil {
+					t.Fatalf("limit = %+v, want uncapped", got.GetLimit())
+				}
+				return
+			}
+			capped := got.GetCapped()
+			if capped.GetLimit().GetAmountMinor() != tc.wantLimit || capped.GetLimit().GetCurrency() != "USD" ||
+				capped.GetUtilization() != tc.wantUtilization {
+				t.Fatalf("capped = %+v, want %d USD at %v", capped, tc.wantLimit, tc.wantUtilization)
+			}
+		})
+	}
+}
+
+func TestAMonthlySpendAloneDrawsTheUsageLine(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, planSpend(ratelimittest.CappedSpend(199_396, 1_200_000)))
+
+	// Assert
+	got := enduringOf(t, h).GetUsage()
+	if got == nil || got.GetWeekly() != nil || got.GetMonthlySpend() == nil {
+		t.Fatalf("enduring usage = %+v, want the spend alone", got)
+	}
+}
+
+func TestAMonthlySpendDrawsBesideTheWeeklyWindow(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.WithMonthlySpend(
+		ratelimittest.PlanUsage(planWeek(40), nil, nil), ratelimittest.UncappedSpend(500)))
+
+	// Assert
+	got := enduringUsageOf(h)
+	if got.GetWeekly().GetOverall().GetUtilization() != 0.4 || got.GetMonthlySpend().GetSpent().GetAmountMinor() != 500 {
+		t.Fatalf("usage = %+v, want the weekly 40%% beside the spend", got)
+	}
+}
+
+func TestAPlanUsageReadStatingNoSpendRetiresIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	h.r.OnSessionUpdate(testWS, planSpend(ratelimittest.CappedSpend(199_396, 1_200_000)))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, ratelimittest.PlanUsage(nil, nil, nil))
+
+	// Assert
+	if got := enduringOf(t, h); got.GetUnobserved() == nil {
+		t.Fatalf("enduring = %+v, want unobserved: the read retired the spend", got)
+	}
+}
+
+func TestAPlanUsageReadsSpendIsRecorded(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+
+	// Act
+	h.r.OnSessionUpdate(testWS, planSpend(ratelimittest.CappedSpend(199_396, 1_200_000)))
+
+	// Assert
+	for _, rec := range recordsOf(h.log.Records(), "daemon.footer.account_usage_figure") {
+		if rec.Level == dlog.LevelInfo && rec.Message == "a plan-usage read stated the monthly spend" &&
+			rec.Context["spent_minor"] == int64(199_396) && rec.Context["limit_minor"] == int64(1_200_000) &&
+			rec.Context["currency"] == "USD" {
+			return
+		}
+	}
+	t.Fatalf("no INFO record of the read's spend in %+v", h.log.Records())
+}

@@ -1389,12 +1389,13 @@ func (r *resolver) observeRateLimitStatus(s *wsState, status *conversationv1.Ses
 }
 
 // observePlanUsage takes one plan-usage read and files each of its weekly
-// windows under its own allowance. THE READ IS THE WHOLE TRUTH about the three
-// windows it carries (conversation.v1.SessionPlanUsage), so a window it leaves
-// unset is retired: the vendor no longer meters it, or could not figure it,
-// and a figure nobody reported is never drawn. It carries no verdict, so each
-// window's verdict stays the rate-limit event's. The overage window is not
-// one it carries and is left as it stands.
+// windows under its own allowance, and its monthly spend. THE READ IS THE
+// WHOLE TRUTH about the three windows and the spend it carries
+// (conversation.v1.SessionPlanUsage), so a figure it leaves unset is retired:
+// the vendor no longer meters it, or could not figure it, and a figure nobody
+// reported is never drawn. It carries no verdict, so each window's verdict
+// stays the rate-limit event's. The overage window is not one it carries and
+// is left as it stands.
 func (r *resolver) observePlanUsage(s *wsState, usage *conversationv1.SessionPlanUsage) {
 	if usage == nil {
 		return
@@ -1427,7 +1428,29 @@ func (r *resolver) observePlanUsage(s *wsState, usage *conversationv1.SessionPla
 		r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
 			"a plan-usage read figured the window", fields)
 	}
+	r.observeMonthlySpend(s, usage.GetMonthlySpend())
 	account.touch(r.opts.clock.Now())
+}
+
+// observeMonthlySpend files a plan-usage read's monthly spend, or retires the
+// standing one when the read stated none.
+func (r *resolver) observeMonthlySpend(s *wsState, spend *conversationv1.SessionPlanUsageMonthlySpend) {
+	rate := &s.usage.rate
+	fields := dlog.Context{"source": "plan_usage", "previous_figured": rate.monthlySpend != nil}
+	if spend == nil {
+		rate.monthlySpend = nil
+		r.logOf(s.id, s).Debug("daemon.footer.account_usage_figure",
+			"the plan-usage read stated no monthly spend; the spend is retired", fields)
+		return
+	}
+	rate.monthlySpend = monthlySpendFigures(spend)
+	fields["spent_minor"] = rate.monthlySpend.SpentMinor
+	fields["currency"] = rate.monthlySpend.Currency
+	if rate.monthlySpend.LimitMinor != nil {
+		fields["limit_minor"] = *rate.monthlySpend.LimitMinor
+	}
+	r.logOf(s.id, s).Info("daemon.footer.account_usage_figure",
+		"a plan-usage read stated the monthly spend", fields)
 }
 
 // OnQuestion moves the footer to waiting.

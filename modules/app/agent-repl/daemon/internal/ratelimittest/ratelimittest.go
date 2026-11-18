@@ -8,8 +8,9 @@
 // allowances). So every fixture names its window through these builders
 // rather than spelling the oneof by hand, and a test file that hand-rolls a
 // window is refused (TestNoTestHandRollsARateLimitWindow). The account's
-// plan-usage read, which figures the same weekly windows, is built here too
-// (PlanUsage, TestNoTestHandRollsAPlanUsageRead).
+// plan-usage read, which figures the same weekly windows and the monthly
+// spend, is built here too (PlanUsage, WithMonthlySpend,
+// TestNoTestHandRollsAPlanUsageRead).
 package ratelimittest
 
 import (
@@ -103,4 +104,34 @@ func PlanUsage(sevenDay, opus, sonnet *conversationv1.SessionPlanUsageWindow) *c
 		SevenDayOpus:   opus,
 		SevenDaySonnet: sonnet,
 	}}}
+}
+
+// CappedSpend is a monthly spend of SPENT against LIMIT, both in USD cents.
+func CappedSpend(spent, limit int64) *conversationv1.SessionPlanUsageMonthlySpend {
+	return &conversationv1.SessionPlanUsageMonthlySpend{
+		Spent: usd(spent),
+		Limit: &conversationv1.SessionPlanUsageMonthlySpend_Capped{
+			Capped: &conversationv1.SessionPlanUsageMonthlySpendCapped{Limit: usd(limit)}},
+	}
+}
+
+// UncappedSpend is a monthly spend of SPENT USD cents with no monthly limit.
+func UncappedSpend(spent int64) *conversationv1.SessionPlanUsageMonthlySpend {
+	return &conversationv1.SessionPlanUsageMonthlySpend{
+		Spent: usd(spent),
+		Limit: &conversationv1.SessionPlanUsageMonthlySpend_Uncapped{
+			Uncapped: &conversationv1.SessionPlanUsageMonthlySpendUncapped{}},
+	}
+}
+
+// usd is an amount of USD cents.
+func usd(cents int64) *conversationv1.SessionMoney {
+	return &conversationv1.SessionMoney{AmountMinor: cents, Currency: "USD"}
+}
+
+// WithMonthlySpend sets the plan-usage read UPDATE's monthly spend and
+// returns it. UPDATE is a PlanUsage read.
+func WithMonthlySpend(update *conversationv1.SessionUpdate, spend *conversationv1.SessionPlanUsageMonthlySpend) *conversationv1.SessionUpdate {
+	update.GetPlanUsage().MonthlySpend = spend
+	return update
 }
