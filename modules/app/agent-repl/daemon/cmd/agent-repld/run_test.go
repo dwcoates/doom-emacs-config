@@ -275,7 +275,7 @@ func TestTheUnsyncedFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
 	t.Setenv(dlog.LevelEnvironment, "info")
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, newTestHooks().hooks)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, newTestHooks().hooks)
 
 	// Assert.
 	if got == nil || !strings.Contains(got.Error(), wsm.EnvTestUnsyncedWrites) {
@@ -321,7 +321,7 @@ func TestTheInMemoryFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
 	t.Setenv(dlog.LevelEnvironment, "info")
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, newTestHooks().hooks)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, newTestHooks().hooks)
 
 	// Assert.
 	if got == nil || !strings.Contains(got.Error(), wsm.EnvTestStateInMemory) {
@@ -676,7 +676,7 @@ func TestABootErrorBeforeServingWithdrawsViaTheDefer(t *testing.T) {
 	th.hooks.Graph = func(context.Context, process) (*graph, error) { return nil, bootErr }
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, th.hooks)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, th.hooks)
 
 	// Assert.
 	if !errors.Is(got, bootErr) {
@@ -1642,7 +1642,7 @@ func TestASecondDaemonBesideAServingIncumbentRefusesAtOnceAndSaysWhy(t *testing.
 	h.ClaimWait = daemonaddr.ClaimWaitBound
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, h)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, h)
 
 	// Assert.
 	if !errors.Is(got, daemonaddr.ErrClaimed) {
@@ -1690,7 +1690,7 @@ func TestTheBootTimesTheClaimFromTheProcessStart(t *testing.T) {
 			th := newTestHooks()
 
 			// Act
-			_ = run(context.Background(), options{stateDir: root, joining: tc.joining}, th.hooks)
+			_ = run(context.Background(), options{stateDir: root, joining: tc.joining, holder: testHolder(t)}, th.hooks)
 
 			// Assert
 			got := th.restarts.Observations()
@@ -1975,7 +1975,7 @@ func (l *exitListener) exit() {
 
 // TestACallReachingAnOpenConnectionAfterTheExitsWaitsIsAnswered reproduces
 // the merge-gate failure of
-// `TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway`: a call
+// `TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor`: a call
 // that reached the daemon on an h2c connection the client already held,
 // after the exit's waits had ended, was admitted and then cut by the process
 // exit, so the caller read `unexpected EOF` instead of its answer. The call

@@ -148,6 +148,30 @@ func TestSharedTakeFailsWhenTheHolderCannotGrant(t *testing.T) {
 	}
 }
 
+func TestAnAcquiredSharedListenerNamesItsAddressAndIsServedOnlyOnceTaken(t *testing.T) {
+	// Arrange
+	shared, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := &advertisingClaim{}
+	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: &spyLogger{}, ensure: holderServes,
+		takeFn: func(context.Context, string, string) (net.Listener, error) { return shared, nil }}
+
+	// Act
+	acquireErr := s.acquire()
+	acquired, advertisedBefore := s.address(), len(claim.advertised)
+	takeErr := s.take()
+
+	// Assert
+	if acquireErr != nil || acquired != shared.Addr().String() || advertisedBefore != 0 {
+		t.Fatalf("acquire = %v, address %q, advertised %d; want the shared address known and nothing advertised before the take", acquireErr, acquired, advertisedBefore)
+	}
+	if takeErr != nil || len(claim.advertised) != 1 {
+		t.Fatalf("take = %v, advertised %v; want the shared address advertised once taken", takeErr, claim.advertised)
+	}
+}
+
 func TestSharedTakeAnswersItsAddressOnlyOnceTaken(t *testing.T) {
 	// Arrange
 	shared, err := net.Listen("tcp", "127.0.0.1:0")

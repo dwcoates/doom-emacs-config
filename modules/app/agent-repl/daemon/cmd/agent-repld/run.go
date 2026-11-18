@@ -215,29 +215,6 @@ func run(ctx context.Context, opts options, h hooks) error {
 	teardown := newTeardownClock(log)
 	defer teardown.report()
 
-	// A DAEMON SERVES ONLY THE SHARED ADDRESS ITS SOCKET HOLDER KEEPS: the
-	// address that outlives every daemon is the one every client reaches, and
-	// a daemon advertising its own listener would hand clients an address that
-	// closes with it (docs/investigations/2026-11-18-stable-sockets-design.md).
-	//
-	// THE HOLDER IS THE ONE ITS REQUIREMENT DECLARES unless --holder names
-	// another (a test's own), so a successor spawned from an incumbent's argv
-	// that predates the flag still reaches it.
-	holders, installHolder, err := h.Holders(log)
-	if err != nil {
-		log.Error("daemon.cmd.holder", "the socket holders the requirements declare could not be read", dlog.Context{
-			"state_root": layout.Dir(), "error": err.Error()})
-		return err
-	}
-	holder := opts.holder
-	if holder == "" {
-		if holder, err = holderensure.ControlOf(holders, holderensure.DaemonHolder); err != nil {
-			log.Error("daemon.cmd.holder", "the daemon was given no socket holder, and no requirement declares its holder", dlog.Context{
-				"state_root": layout.Dir(), "error": err.Error()})
-			return fmt.Errorf("agent-repld: no socket holder: the daemon serves only the shared address its socket holder keeps: %w", err)
-		}
-	}
-
 	// SIGQUIT IS TAKEN OVER BEFORE ANYTHING CAN WEDGE. Emacs launches the
 	// daemon with its stderr discarded, so the runtime's own SIGQUIT dump goes
 	// nowhere: pid 31984 spent ten hours listening and accepting nothing, and
@@ -394,9 +371,35 @@ func run(ctx context.Context, opts options, h hooks) error {
 			"instance": string(instance), "address": claim.Address(), "error": err.Error()})
 		return fmt.Errorf("agent-repld: record the private address: %w", err)
 	}
+	// A DAEMON SERVES ONLY THE SHARED ADDRESS ITS SOCKET HOLDER KEEPS: the
+	// address that outlives every daemon is the one every client reaches, and
+	// a daemon advertising its own listener would hand clients an address that
+	// closes with it (docs/investigations/2026-11-18-stable-sockets-design.md).
+	//
+	// THE HOLDER IS THE ONE ITS REQUIREMENT DECLARES unless --holder names
+	// another (a test's own), so a successor spawned from an incumbent's argv
+	// that predates the flag still reaches it.
+	holders, installHolder, err := h.Holders(log)
+	if err != nil {
+		log.Error("daemon.cmd.holder", "the socket holders the requirements declare could not be read", dlog.Context{
+			"state_root": layout.Dir(), "error": err.Error()})
+		return err
+	}
+	holder := opts.holder
+	if holder == "" {
+		if holder, err = holderensure.ControlOf(holders, holderensure.DaemonHolder); err != nil {
+			log.Error("daemon.cmd.holder", "the daemon was given no socket holder, and no requirement declares its holder", dlog.Context{
+				"state_root": layout.Dir(), "error": err.Error()})
+			return fmt.Errorf("agent-repld: no socket holder: the daemon serves only the shared address its socket holder keeps: %w", err)
+		}
+	}
+
 	accept := server.NewSharedAccept(claim.Listener())
 	shared := &sharedTake{holder: holder, accept: accept, claim: claim, log: log,
 		ensure: (&holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe, Install: installHolder, Log: log}).Ensure}
+	if err := shared.acquire(); err != nil {
+		return fmt.Errorf("agent-repld: %w", err)
+	}
 	// THE WAIT IS SAID. A held claim is an outgoing daemon still exiting, and
 	// a replacement waiting it out was a silent gap in the run log.
 	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{
@@ -1111,7 +1114,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		// admitted, answered by nobody the exit waited for, and cut by the
 		// process exit: an incumbent asked something in its last milliseconds
 		// after a handover read `unexpected EOF` instead of its typed
-		// `transferring_away` (`TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway`).
+		// `transferring_away` (`TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor`).
 		// The listener is closed now, so no connection arrives; every h2
 		// connection is sent its GOAWAY, after which a new stream is never
 		// admitted and its client opens it anew; and the streams admitted

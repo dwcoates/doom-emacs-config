@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"sync"
 	"sync/atomic"
 
@@ -31,7 +32,10 @@ type sharedTake struct {
 	claim  interface{ Advertise(string) }
 	log    dlog.Logger
 	once   sync.Once
-	err    error
+	// acquired guards acquire; acquireErr is its answer, ln its listener.
+	acquired   sync.Once
+	acquireErr error
+	ln         net.Listener
 	// taken is the shared address once the take succeeded.
 	taken atomic.Value
 	// takeFn is sockethold.Take; a seam for the tests.
@@ -42,12 +46,13 @@ type sharedTake struct {
 	ensure func(ctx context.Context, control string) error
 }
 
-// take runs once, at the first publication of this daemon's ownership.
-func (s *sharedTake) take() error {
-	if s == nil {
-		return nil
-	}
-	s.once.Do(func() {
+// acquire runs once, at boot: it ensures the holder and takes the shared
+// listener from it, so this daemon knows the shared address from the start
+// (what it tells clients, even while a successor that does not yet accept on
+// it), and accepts nothing on it yet. THE ACCEPT RIGHT IS THE BOOT CLAIM:
+// take adds the listener to the accept loop only under it.
+func (s *sharedTake) acquire() error {
+	s.acquired.Do(func() {
 		takeFn := s.takeFn
 		if takeFn == nil {
 			takeFn = sockethold.Take
@@ -55,30 +60,46 @@ func (s *sharedTake) take() error {
 		// THE PROBE IS THE WHOLE COST on a machine that has its holder; only a
 		// machine that predates it pays the install, once.
 		if err := s.ensure(context.Background(), s.holder); err != nil {
-			s.err = fmt.Errorf("ensure the daemon's socket holder at %s: %w", s.holder, err)
+			s.acquireErr = fmt.Errorf("ensure the daemon's socket holder at %s: %w", s.holder, err)
 			return
 		}
 		ln, took, err := sockethold.TakeTimed(takeFn, s.holder, holderDaemonSocket)
 		if err != nil {
 			s.log.Error("daemon.cmd.holder", "the shared listener could not be taken from the daemon's socket holder", dlog.Context{
 				"holder": s.holder, "bound_ms": sockethold.TakeBound.Milliseconds(), "measured_ms": sockethold.TakeMeasured.Milliseconds(), "took_ms": took.Milliseconds(), "error": err.Error()})
-			s.err = fmt.Errorf("take the shared listener from %s: %w", s.holder, err)
+			s.acquireErr = fmt.Errorf("take the shared listener from %s: %w", s.holder, err)
 			return
 		}
-		s.accept.AddShared(ln)
-		s.claim.Advertise(ln.Addr().String())
+		s.ln = ln
 		s.taken.Store(ln.Addr().String())
 		s.log.Info("daemon.cmd.holder", "took the shared listener from the daemon's socket holder", dlog.Context{
 			"holder": s.holder, "address": ln.Addr().String(), "took_ms": took.Milliseconds()})
 	})
-	return s.err
+	return s.acquireErr
+}
+
+// take runs once, at the first publication of this daemon's ownership, under
+// the boot claim: it acquires the listener if the boot has not, then accepts
+// on it and advertises its address.
+func (s *sharedTake) take() error {
+	if s == nil {
+		return nil
+	}
+	if err := s.acquire(); err != nil {
+		return err
+	}
+	s.once.Do(func() {
+		s.accept.AddShared(s.ln)
+		s.claim.Advertise(s.ln.Addr().String())
+	})
+	return nil
 }
 
 var _ interface{ Advertise(string) } = daemonaddr.Claim(nil)
 
-// address answers the shared address this daemon advertises, "" before its
-// take or with no holder: what rollout tells clients (Deps.SharedAddress).
-// A successor that has not taken over yet answers "" and announces nothing.
+// address answers the shared address, "" before the boot acquired it: what
+// rollout and the server tell clients (Deps.SharedAddress), a successor that
+// does not yet accept on it included.
 func (s *sharedTake) address() string {
 	if s == nil {
 		return ""
