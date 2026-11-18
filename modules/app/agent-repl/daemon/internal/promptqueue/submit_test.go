@@ -830,6 +830,7 @@ func TestWhichPromptsWaitOutAColdGate(t *testing.T) {
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK, true},
+		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED, true},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_AGENT_SENT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_COMPACT, false},
 		{conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, false},

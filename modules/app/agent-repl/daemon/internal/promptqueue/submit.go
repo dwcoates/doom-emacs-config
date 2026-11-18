@@ -355,7 +355,13 @@ func waitsOutColdGate(origin conversationv1.PromptOrigin) bool {
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE,
 		conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT,
-		conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK:
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK,
+		// A NEW WORKSPACE'S INITIAL PROMPT waits at its cold gate (a fork of a
+		// conversation whose prompt cache is cold): refused, it undid the
+		// create the user asked for, removing the worktree under the editor's
+		// open row (2026-11-18). Held, the workspace stands, and the user's
+		// answer to the gate settles the prompt (owner ruling, 2026-11-18).
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED:
 		return true
 	}
 	return false

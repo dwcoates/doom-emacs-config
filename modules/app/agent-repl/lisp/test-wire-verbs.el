@@ -6939,3 +6939,21 @@ and why."
   (agent-repl-test-wire-verbs--with-common
     (should-error (agent-repl-wire-decode-get-workspace-status-response
                    '((success (status (standing (closed)) (notAField . 1))))))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-success-without-a-gate-holds-nothing ()
+  "A create whose prompt was not held at a cold gate decodes no hold."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-wire-decode-create-workspace-success
+                               (agent-repl-test-wire-verbs--parse
+                                "{\"workspace\":{\"id\":\"w\",\"dir\":\"/d\"}}"))
+                              :held-at-cold-gate)
+                   nil))))
+
+(ert-deftest agent-repl-test-wire-verbs-create-success-held-at-the-cold-gate ()
+  "A create whose prompt waits at its cold gate decodes the gate's context size."
+  (agent-repl-test-wire-verbs--with-common
+    (should (equal (plist-get (agent-repl-wire-decode-create-workspace-success
+                               (agent-repl-test-wire-verbs--parse
+                                "{\"workspace\":{\"id\":\"w\",\"dir\":\"/d\"},\"heldAtColdGate\":{\"contextTokens\":\"194149\"}}"))
+                              :held-at-cold-gate)
+                   '(:context-tokens 194149)))))

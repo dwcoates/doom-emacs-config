@@ -1943,6 +1943,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			ServingElsewhere: func(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
 				return servingElsewhere(ctx, p.DB, p.Layout.DaemonAddr(), p.Instance, ws)
 			},
+			ColdGateOf: fleet.StandingColdGate,
 			Creates: creates,
 			Feed:    feedResolver,
 			Images:  imageSources,

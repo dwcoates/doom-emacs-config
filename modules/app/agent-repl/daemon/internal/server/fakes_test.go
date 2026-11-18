@@ -2203,6 +2203,8 @@ type harness struct {
 	// ServingElsewhere is the private address of another daemon whose
 	// serving row holds the workspace, "" when none does.
 	ServingElsewhere string
+	// ColdGates are the standing cold gates ColdGateOf answers, by workspace.
+	ColdGates map[ids.WorkspaceID]*conversationv1.SessionCold
 	// Deps is the COMPLETE dependency set the surface was built from, so a
 	// test of one missing dependency strips exactly that one (withoutDep).
 	Deps   Deps
@@ -2461,6 +2463,10 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		SharedAddress:    func() string { return h.SharedAddress },
 		ServingElsewhere: func(context.Context, ids.WorkspaceID) (string, bool, error) {
 			return h.ServingElsewhere, h.ServingElsewhere != "", nil
+		},
+		ColdGateOf: func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
+			cold, ok := h.ColdGates[ws]
+			return cold, ok
 		},
 		Creates:           h.Creates,
 		Feed:              h.Feed,
