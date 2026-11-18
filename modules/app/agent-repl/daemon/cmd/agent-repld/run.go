@@ -916,7 +916,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 	if !ok {
 		return fmt.Errorf("agent-repld: the serving handler carries no in-flight request gate; an orderly exit would cut every call it is still answering")
 	}
-	conns := &connStates{byConn: map[net.Conn]http.ConnState{}}
+	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: exit.Log}
 	srv := &http.Server{Handler: h, ConnState: conns.track}
 	// A CONNECTION THAT HAS DELIVERED NO REQUEST OWES NOTHING, and
 	// `Server.Shutdown` waits for it anyway: it polls, on an interval that
@@ -1060,6 +1060,10 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 type connStates struct {
 	mu     sync.Mutex
 	byConn map[net.Conn]http.ConnState
+	// born is when each connection still in StateNew was accepted.
+	born map[net.Conn]time.Time
+	// log records a connection that closed without delivering a request.
+	log dlog.Logger
 	// closeFailures are the errors closing a requestless connection met,
 	// reported through summary rather than dropped.
 	closeFailures []string
@@ -1068,12 +1072,35 @@ type connStates struct {
 func (c *connStates) track(conn net.Conn, state http.ConnState) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	was, known := c.byConn[conn]
 	switch state {
 	case http.StateClosed, http.StateHijacked:
+		if known && was == http.StateNew && state == http.StateClosed {
+			c.recordRequestless(conn)
+		}
 		delete(c.byConn, conn)
+		delete(c.born, conn)
 	default:
+		if state == http.StateNew {
+			c.born[conn] = time.Now()
+		}
 		c.byConn[conn] = state
 	}
+}
+
+// recordRequestless records, at INFO, an accepted connection that closed
+// before it delivered a request.
+//
+// A CALL LOST BEFORE ANY HANDLER IS SEEN HERE OR NOWHERE (2026-11-18: unary
+// calls timed out across two handovers with no handler record of them). A
+// client that dialed and wrote its call, then closed on its own timeout,
+// shows as such a connection about that timeout old; with no such record,
+// the call's bytes never reached this daemon's listener.
+func (c *connStates) recordRequestless(conn net.Conn) {
+	c.log.Info("daemon.server.conn_requestless", "an accepted connection closed before it delivered a request", dlog.Context{
+		"remote": conn.RemoteAddr().String(),
+		"age_ms": time.Since(c.born[conn]).Milliseconds(),
+	})
 }
 
 // closeRequestless closes every connection that has not delivered a request.
