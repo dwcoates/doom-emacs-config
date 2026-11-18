@@ -61,6 +61,8 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 			log.Debug("daemon.feed.folded_prompt",
 				"a prompt folded into a running turn was drawn under that turn",
 				dlog.Context{"turn": turn.GetValue(), "folded_into": joined.GetValue(), "blocks": len(blocks)})
+			// THE ENTRY SETTLES ITS PINNED MIRROR (UpsertAtTurnAddress).
+			at.pin = pinSettle
 			r.upsert(s, at, row, true)
 			return
 		}
@@ -155,6 +157,9 @@ func (r *resolver) drawAgentPrompt(s *wsState, agent *conversationv1.AgentId, pr
 		log.Debug("daemon.feed.user_prompt",
 			"a delivered prompt was drawn as a user-prompt row",
 			dlog.Context{"turn": turn.GetValue(), "origin": prompt.GetOrigin().String(), "blocks": len(blocks)})
+		// THE ENTRY SETTLES ITS PINNED MIRROR (UpsertAtTurnAddress), onto the
+		// key every daemon mints for this entry.
+		at.pin = pinSettle
 		r.upsert(s, at, row, true)
 		return
 	}

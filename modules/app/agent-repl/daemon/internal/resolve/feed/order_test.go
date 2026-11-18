@@ -697,3 +697,65 @@ func TestARepublicationWithNoTailOpenIsRecordedWithItsSequenceAndWhatChanged(t *
 	}
 	t.Fatal("a republication with no tail open left no record")
 }
+
+// mirrorPrompt draws TURN's acceptance mirror, as the prompt queue does.
+func (h *harness) mirrorPrompt(turn string) string {
+	h.t.Helper()
+	row := &frontendv1.FeedRow{
+		Turn: &conversationv1.TurnId{Value: turn},
+		Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+			Author: &frontendv1.FeedUserPromptAuthor{Label: "You"},
+		}},
+	}
+	h.resolver.UpsertAtTurnAddress(testWorkspace, ids.TurnID(turn), feedid.RowKey{Kind: feedid.KindPrompt, ID: turn}, row)
+	return row.GetId().GetValue()
+}
+
+func TestAnAcceptedPromptsMirrorIsDrawnPinned(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	id := h.mirrorPrompt("turn-1")
+
+	// Assert.
+	if key := h.orderOf(rootFeed(), id); !isPinKey(key) {
+		t.Fatalf("mirror key = %q, want a pin key", key)
+	}
+}
+
+func TestAMirroredPromptSettlesOnTheKeyItsEntryMintsForEveryDaemon(t *testing.T) {
+	// Arrange: one daemon mirrored the prompt before its entry; another
+	// draws only the entry.
+	mirrored := newHarness(t)
+	id := mirrored.mirrorPrompt("turn-1")
+	fresh := newHarness(t)
+
+	// Act.
+	mirrored.deliverPromptAt("turn-1", "hi", 5_000)
+	fresh.deliverPromptAt("turn-1", "hi", 5_000)
+
+	// Assert.
+	if got, want := mirrored.orderOf(rootFeed(), id), fresh.orderOf(rootFeed(), id); got != want {
+		t.Fatalf("mirrored key = %q, fresh key = %q, want one key", got, want)
+	}
+}
+
+func TestAMirrorDrawnAgainKeepsItsRank(t *testing.T) {
+	// Arrange: the prompt's entry settled its mirror.
+	h := newHarness(t)
+	id := h.mirrorPrompt("turn-1")
+	h.deliverPromptAt("turn-1", "hi", 5_000)
+	settled := h.orderOf(rootFeed(), id)
+
+	// Act: the queue restates its mirror.
+	h.mirrorPrompt("turn-1")
+
+	// Assert.
+	if got := h.orderOf(rootFeed(), id); got != settled {
+		t.Fatalf("key = %q, want the settled %q", got, settled)
+	}
+	if h.hasRecord("error", "daemon.feed.pin_refused") {
+		t.Fatalf("records = %+v, want no refused pin", h.log.Records())
+	}
+}
