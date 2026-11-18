@@ -34,6 +34,59 @@ func newPrivateAccept(t *testing.T) *server.SharedAccept {
 	return a
 }
 
+// holderServes is an ensure that finds the holder serving.
+func holderServes(context.Context, string) error { return nil }
+
+func TestSharedTakeEnsuresItsHolderBeforeItTakes(t *testing.T) {
+	tests := []struct {
+		name      string
+		ensureErr error
+		wantTakes int
+		wantErr   bool
+	}{
+		{name: "a holder the ensure finds serving is taken from", wantTakes: 1},
+		{name: "a holder the ensure cannot bring up is never taken from", ensureErr: errors.New("install failed"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			shared, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { shared.Close() })
+			var order []string
+			claim := &advertisingClaim{}
+			s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: &spyLogger{},
+				ensure: func(_ context.Context, control string) error {
+					order = append(order, "ensure "+control)
+					return tt.ensureErr
+				},
+				takeFn: func(context.Context, string, string) (net.Listener, error) {
+					order = append(order, "take")
+					return shared, nil
+				}}
+
+			// Act
+			err = s.take()
+
+			// Assert
+			takes := 0
+			for _, o := range order {
+				if o == "take" {
+					takes++
+				}
+			}
+			if (err != nil) != tt.wantErr || takes != tt.wantTakes || len(order) == 0 || order[0] != "ensure /h/daemon-holder.sock" {
+				t.Fatalf("take = %v, order %v; want the ensure first and %d takes", err, order, tt.wantTakes)
+			}
+			if tt.wantErr && len(claim.advertised) != 0 {
+				t.Fatalf("advertised %v, want nothing advertised", claim.advertised)
+			}
+		})
+	}
+}
+
 func TestSharedTakeAdvertisesAndAcceptsOnTheHoldersListenerOnce(t *testing.T) {
 	// Arrange
 	shared, err := net.Listen("tcp", "127.0.0.1:0")
@@ -44,7 +97,7 @@ func TestSharedTakeAdvertisesAndAcceptsOnTheHoldersListenerOnce(t *testing.T) {
 	accept := newPrivateAccept(t)
 	log := &spyLogger{}
 	takes := 0
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: accept, claim: claim, log: log,
+	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: accept, claim: claim, log: log, ensure: holderServes,
 		takeFn: func(_ context.Context, control, name string) (net.Listener, error) {
 			takes++
 			if control != "/h/daemon-holder.sock" || name != holderDaemonSocket {
@@ -79,7 +132,7 @@ func TestSharedTakeFailsWhenTheHolderCannotGrant(t *testing.T) {
 	// Arrange
 	claim := &advertisingClaim{}
 	log := &spyLogger{}
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: log,
+	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: claim, log: log, ensure: holderServes,
 		takeFn: func(context.Context, string, string) (net.Listener, error) {
 			return nil, errors.New("connection refused")
 		}}
@@ -102,7 +155,7 @@ func TestSharedTakeAnswersItsAddressOnlyOnceTaken(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: &advertisingClaim{}, log: &spyLogger{},
+	s := &sharedTake{holder: "/h/daemon-holder.sock", accept: newPrivateAccept(t), claim: &advertisingClaim{}, log: &spyLogger{}, ensure: holderServes,
 		takeFn: func(context.Context, string, string) (net.Listener, error) { return shared, nil }}
 
 	// Act

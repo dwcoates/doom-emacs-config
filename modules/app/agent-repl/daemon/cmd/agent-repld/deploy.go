@@ -192,7 +192,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		CacheBin:    where.cacheBin,
 		ReportDir:   where.reportDir,
 		Restarts:    p.Restarts,
-		Define:      deploy.ScriptDefiner{ModuleRoot: p.Checkout, Runner: p.Runner}.Define,
+		Define:      deploy.ScriptRequirements{ModuleRoot: p.Checkout, Runner: p.Runner}.Define,
 	}
 	deployer, err := deploy.New(deploy.Deps{
 		Restarts:   p.Restarts,

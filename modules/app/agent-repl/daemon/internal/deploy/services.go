@@ -145,7 +145,7 @@ type Restarter struct {
 	// Define writes label's definition from its requirements entry, where
 	// Services.Definition finds it: a service added since this machine's
 	// install has none, and a deploy that ships it must bring it up.
-	// REQUIRED; ScriptDefiner is the production one
+	// REQUIRED; ScriptRequirements.Define is the production one
 	// (bin/requirements.sh define-service).
 	Define func(ctx context.Context, label string) error
 }

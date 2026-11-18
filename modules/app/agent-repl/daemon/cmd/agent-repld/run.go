@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"agent-repld/internal/boot"
+	"agent-repld/internal/checkout"
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
@@ -24,11 +27,13 @@ import (
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/server"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/hostpower"
+	"agentrepl/logging/sockethold"
 )
 
 // process is what the boot spine resolved before any component was built. It is
@@ -105,6 +110,11 @@ type hooks struct {
 	// Restarts records the boot's phases; nil records them on the daemon's
 	// own metrics surface, which is what production does.
 	Restarts restarttiming.Recorder
+	// Holders answers the socket holders the checkout's requirements declare
+	// and the installer that brings one up (holderensure). REQUIRED.
+	// Production reads the checkout this binary was deployed from; a test
+	// declares none, so a test daemon never installs a holder.
+	Holders func(log dlog.Logger) (holders []holderensure.Holder, install func(ctx context.Context, id string) error, err error)
 }
 
 // productionHooks are the real seams.
@@ -117,7 +127,31 @@ func productionHooks() hooks {
 		ClaimWait: daemonaddr.ClaimWaitBound,
 		Started:   processStarted,
 		Now:       time.Now,
+		Holders:   declaredHolders,
 	}
+}
+
+// declaredHolders reads the socket holders the requirements of the checkout
+// this binary was deployed from declare, and answers its installer
+// (bin/requirements.sh ensure-holder, run in that checkout).
+func declaredHolders(log dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+	root, err := checkout.Root(mustExecutable())
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the checkout whose requirements declare the socket holders: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the home directory a holder's control socket expands against: %w", err)
+	}
+	holders, err := holderensure.Declared(root, home)
+	if err != nil {
+		return nil, nil, err
+	}
+	runner, err := scriptrunner.New(log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the runner the holder installer runs on: %w", err)
+	}
+	return holders, deploy.ScriptRequirements{ModuleRoot: root, Runner: runner}.EnsureHolder, nil
 }
 
 // run is the daemon's boot spine, in the settled order:
@@ -185,10 +219,23 @@ func run(ctx context.Context, opts options, h hooks) error {
 	// address that outlives every daemon is the one every client reaches, and
 	// a daemon advertising its own listener would hand clients an address that
 	// closes with it (docs/investigations/2026-11-18-stable-sockets-design.md).
-	if opts.holder == "" {
-		log.Error("daemon.cmd.holder", "the daemon was started with no socket holder; it serves only the shared address a holder keeps", dlog.Context{
-			"state_root": layout.Dir()})
-		return errors.New("agent-repld: --holder is required: the daemon serves only the shared address its socket holder keeps")
+	//
+	// THE HOLDER IS THE ONE ITS REQUIREMENT DECLARES unless --holder names
+	// another (a test's own), so a successor spawned from an incumbent's argv
+	// that predates the flag still reaches it.
+	holders, installHolder, err := h.Holders(log)
+	if err != nil {
+		log.Error("daemon.cmd.holder", "the socket holders the requirements declare could not be read", dlog.Context{
+			"state_root": layout.Dir(), "error": err.Error()})
+		return err
+	}
+	holder := opts.holder
+	if holder == "" {
+		if holder, err = holderensure.ControlOf(holders, holderensure.DaemonHolder); err != nil {
+			log.Error("daemon.cmd.holder", "the daemon was given no socket holder, and no requirement declares its holder", dlog.Context{
+				"state_root": layout.Dir(), "error": err.Error()})
+			return fmt.Errorf("agent-repld: no socket holder: the daemon serves only the shared address its socket holder keeps: %w", err)
+		}
 	}
 
 	// SIGQUIT IS TAKEN OVER BEFORE ANYTHING CAN WEDGE. Emacs launches the
@@ -348,7 +395,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 		return fmt.Errorf("agent-repld: record the private address: %w", err)
 	}
 	accept := server.NewSharedAccept(claim.Listener())
-	shared := &sharedTake{holder: opts.holder, accept: accept, claim: claim, log: log}
+	shared := &sharedTake{holder: holder, accept: accept, claim: claim, log: log,
+		ensure: (&holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe, Install: installHolder, Log: log}).Ensure}
 	// THE WAIT IS SAID. A held claim is an outgoing daemon still exiting, and
 	// a replacement waiting it out was a silent gap in the run log.
 	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{

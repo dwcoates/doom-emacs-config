@@ -36,6 +36,10 @@ type sharedTake struct {
 	taken atomic.Value
 	// takeFn is sockethold.Take; a seam for the tests.
 	takeFn sockethold.TakeFunc
+	// ensure proves a holder serves the control socket, bringing a declared
+	// one up when none does (holderensure.Ensurer.Ensure), before the take.
+	// REQUIRED.
+	ensure func(ctx context.Context, control string) error
 }
 
 // take runs once, at the first publication of this daemon's ownership.
@@ -47,6 +51,12 @@ func (s *sharedTake) take() error {
 		takeFn := s.takeFn
 		if takeFn == nil {
 			takeFn = sockethold.Take
+		}
+		// THE PROBE IS THE WHOLE COST on a machine that has its holder; only a
+		// machine that predates it pays the install, once.
+		if err := s.ensure(context.Background(), s.holder); err != nil {
+			s.err = fmt.Errorf("ensure the daemon's socket holder at %s: %w", s.holder, err)
+			return
 		}
 		ln, took, err := sockethold.TakeTimed(takeFn, s.holder, holderDaemonSocket)
 		if err != nil {

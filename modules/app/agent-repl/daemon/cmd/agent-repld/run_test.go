@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
@@ -81,6 +82,11 @@ func newTestHooks() *testHooks {
 		Started:  started,
 		Now:      func() time.Time { return started.Add(3 * time.Second) },
 		Restarts: th.restarts,
+		// A TEST DECLARES NO HOLDER, so its daemon never installs one: it
+		// takes from the test's own holder (testHolder).
+		Holders: func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+			return nil, func(context.Context, string) error { return errors.New("a test daemon installs no holder") }, nil
+		},
 		Graph: func(context.Context, process) (*graph, error) {
 			return nil, errServed
 		},
@@ -115,25 +121,62 @@ func testHolder(t *testing.T) string {
 	return holdtest.Start(t, map[string]*os.File{holderDaemonSocket: file}, nil)
 }
 
-func TestRunRefusesADaemonWithNoSocketHolder(t *testing.T) {
+func TestRunRefusesADaemonWithNoSocketHolderToTake(t *testing.T) {
+	tests := []struct {
+		name    string
+		adjust  func(*options)
+		message string
+	}{
+		{name: "no --holder and no declared holder is refused", adjust: func(o *options) { o.holder = "" },
+			message: "the daemon was given no socket holder, and no requirement declares its holder"},
+		{name: "a --holder no holder serves, that no requirement declares, is refused", adjust: func(o *options) { o.holder = "/tmp/agent-repl-no-holder.sock" },
+			message: "no holder serves the control socket, and no requirement declares a holder there, so none is installed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := shortRoot(t)
+
+			// Act
+			err := runIn(t, root, tt.adjust)
+
+			// Assert
+			if err == nil {
+				t.Fatal("run = nil, want the boot refused")
+			}
+			found := false
+			for _, r := range runLogRecords(t, root) {
+				if r.Level == "error" && r.Message == tt.message {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("the run log holds no ERROR %q", tt.message)
+			}
+		})
+	}
+}
+
+func TestRunWithNoHolderFlagTakesTheDeclaredHolder(t *testing.T) {
 	// Arrange
 	root := shortRoot(t)
+	control := testHolder(t)
+	th := newTestHooks()
+	th.hooks.Holders = func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+		return []holderensure.Holder{{ID: holderensure.DaemonHolder, Control: control}}, func(context.Context, string) error {
+			return errors.New("a serving holder is never installed")
+		}, nil
+	}
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
 
 	// Act
-	err := runIn(t, root, func(o *options) { o.holder = "" })
+	err := run(context.Background(), options{stateDir: root}, th.hooks)
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "--holder is required") {
-		t.Fatalf("run = %v, want the missing holder refused", err)
-	}
-	found := false
-	for _, r := range runLogRecords(t, root) {
-		if r.Operation == "daemon.cmd.holder" && r.Level == "error" {
-			found = true
-		}
-	}
-	if !found {
-		t.Fatal("the run log holds no ERROR daemon.cmd.holder record")
+	if !errors.Is(err, errServed) {
+		t.Fatalf("run = %v, want the spine to reach its serve hook on the declared holder", err)
 	}
 }
 
