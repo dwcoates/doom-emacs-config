@@ -16602,6 +16602,41 @@ describe("the applied effort the vendor states", () => {
     expect(details).toContain("getSettings failed: settings socket gone");
   });
 
+  it("states no fault for a read whose query the session's teardown closed", async () => {
+    // Arrange: the read is in flight when the session is killed.
+    const h = harness();
+    await started(h);
+    let release!: () => void;
+    let reached!: () => void;
+    const inFlight = new Promise<void>((resolve) => {
+      reached = resolve;
+    });
+    const query = h.queries[0].query;
+    query.getSettingsGate = () => {
+      reached();
+      return new Promise<void>((resolve) => {
+        release = resolve;
+      });
+    };
+    query.getSettingsRejects = new Error("Query closed before response received");
+    const mark = logSinkMark();
+    // Act
+    const read = h.engine.setSessionEffort(
+      create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.LOW }),
+    );
+    await inFlight;
+    await h.engine.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    release();
+    await read;
+    // Assert: no fault recorded, and the closed read stated at INFO.
+    const records = logRecordsSince(mark);
+    expect(records.filter((record) => JSON.stringify(record).includes("getSettings failed"))).toEqual([]);
+    expect(records.map((record) => [record.level, record.message])).toContainEqual([
+      "info",
+      "the vendor query closed while its effort was being read; nothing is stated",
+    ]);
+  });
+
   it("states a level the vocabulary cannot name as a fault, never a guess", async () => {
     // Arrange
     const h = harness({

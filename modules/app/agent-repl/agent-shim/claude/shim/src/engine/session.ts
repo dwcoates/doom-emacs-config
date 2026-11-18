@@ -3932,6 +3932,14 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       return level === undefined ? { kind: "none" } : { kind: "level", level };
     } catch (err) {
       const detail = err instanceof Error ? err.message : String(err);
+      // A READ WHOSE QUERY CLOSED UNDER IT IS NO FAULT: the session's own
+      // teardown or replacement ended the query the read was asking, so
+      // there is no level left to state (2026-11-18, a fault recorded as a
+      // finished session closed).
+      if (query !== active) {
+        LOGGER.info({ cause: detail }, "the vendor query closed while its effort was being read; nothing is stated");
+        return { kind: "failed", detail };
+      }
       pushes.fault(sessionFault({ kind: "vendorQueryFailed" }, EFFORT_COMPONENT, `getSettings failed: ${detail}`));
       return { kind: "failed", detail };
     }
