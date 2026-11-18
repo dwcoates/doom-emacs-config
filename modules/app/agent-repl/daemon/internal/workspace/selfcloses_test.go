@@ -291,10 +291,10 @@ func TestTheTurnEndReportsASelfCloseThatIsNowRefused(t *testing.T) {
 			if f.db.closedFlags["w1"] || f.db.workspaces["w1"].CloseWhenTurnEnds != nil {
 				t.Errorf("closed %v, mark %v; want open with the mark taken", f.db.closedFlags["w1"], f.db.workspaces["w1"].CloseWhenTurnEnds)
 			}
-			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelWarn, Operation: opClose,
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opClose,
 				Message: "the close the workspace asked for was refused when its turn ended; it stays open"})
 			if !ok || record.Context["cause"] == nil {
-				t.Errorf("no warning record with the cause: %+v", f.log.logger.Records())
+				t.Errorf("no info record with the cause: %+v", f.log.logger.Records())
 			}
 			if told := toldRequester(f, "w1"); !slices.Equal(told, []string{tt.wantNotice}) {
 				t.Errorf("notices = %q, want %q", told, tt.wantNotice)
