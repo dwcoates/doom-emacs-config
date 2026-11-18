@@ -2936,7 +2936,6 @@ func TestAnUnreadableManifestAtTheTakeoverIsRecordedAtError(t *testing.T) {
 	}
 }
 
-
 // recordWith reports whether LOG holds a record of OPERATION with MESSAGE.
 func recordWith(log interface{ Records() []dlog.Record }, operation, message string) bool {
 	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: operation, Message: message})
