@@ -211,6 +211,18 @@ func NoHomeRepositoryEnv() []string {
 	return []string{"AGENT_REPL_NO_HOME_REPOSITORY=1"}
 }
 
+// NoBuildCacheEnv has a test daemon resolve no Go build cache
+// (cmd/agent-repld goBuildCacheDir): its storage sweep trims the cache of
+// entries unused for two business days as it starts, and keeps the cache
+// under a size, so a daemon that inherited the developer's GOCACHE, or found
+// one through the go command's environment file, would walk and delete from
+// the host's real cache in every test. GOCACHE=off is a host with no cache,
+// and GOENV=off reads no environment file. A test of the trim states its own
+// cache through ExtraEnv, which StartDaemon appends after this.
+func NoBuildCacheEnv() []string {
+	return []string{"GOCACHE=off", "GOENV=off"}
+}
+
 // HostNeutralNamingEnv clears the host's workspace-name prefix for a test
 // daemon. The prefix is read from the daemon's own environment
 // (workspace.PrefixEnv, else workspace.LegacyPrefixEnv) and makes every
@@ -921,6 +933,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	env = append(env, BuildIdentityEnv(PinnedCheckout(t))...)
 	env = append(env, HostNeutralNamingEnv()...)
 	env = append(env, NoHomeRepositoryEnv()...)
+	env = append(env, NoBuildCacheEnv()...)
 	env = append(env, HostNeutralCheckoutEnv()...)
 	env = append(env, HostNeutralNewsDigestEnv()...)
 	env = append(env, HostNeutralSlackEnv()...)
