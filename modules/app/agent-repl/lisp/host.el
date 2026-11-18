@@ -82,6 +82,7 @@
 
 (declare-function agent-repl-link-primary "daemon-link" ())
 (declare-function agent-repl-link-live "daemon-link" ())
+(declare-function agent-repl-link-shared-address-p "daemon-link" ())
 (declare-function agent-repl-link-successor "daemon-link" ())
 (declare-function agent-repl-link-serving-conn "daemon-link" (address))
 (declare-function agent-repl-link-departing-p "daemon-link" (live &optional ended-planned-on))
@@ -2382,6 +2383,12 @@ recorded seven of them, one per busy-free workspace handed over)."
   (agent-repl-host--put ws :handover-page (plist-get value :reload-page))
   (let ((new (agent-repl-link-successor)))
     (cond
+     ((agent-repl-link-shared-address-p)
+      ;; ONE SHARED ADDRESS: the adopt goes out on the primary link at once,
+      ;; and the daemon that accepts it forwards it to the successor.  No
+      ;; successor link exists to wait on, whichever push came first.
+      (agent-repl--info ws "elisp.host.transferred ws=%s shared=t adopting=t" ws)
+      (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "transferred"))
      (new
       (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
                         ws (agent-repl-connect-connection-address new))

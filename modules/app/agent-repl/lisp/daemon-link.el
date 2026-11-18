@@ -209,6 +209,24 @@ nowhere else; until then Emacs holds a transport but no proven link.")
 Only the log line differs; it is kept so the record still distinguishes a
 cold connect from a recovery.")
 
+(defvar agent-repl-daemon-holder)
+
+(defvar agent-repl-link--shared-handover nil
+  "Non-nil from a stand-down announcement naming the primary\='s own address.
+The daemons share one address through their socket holder, so no second
+link is dialed while the incumbent serves: its calls for a transferred
+workspace are forwarded to the successor.  When the primary\='s stream
+ends, the same address is dialed as the successor, and the daemon that
+accepts it next is promoted (`agent-repl-link--shared-reconnect').")
+
+(defun agent-repl-link-shared-address-p ()
+  "Non-nil when the daemons share one address through a socket holder.
+Every handover is then on that one address, and a transferred workspace
+is re-attached on the primary link, which forwards it
+\=(docs/investigations/2026-11-18-stable-sockets-design.md)."
+  (and (stringp agent-repl-daemon-holder)
+       (not (string-empty-p agent-repl-daemon-holder))))
+
 (defvar agent-repl-link--pending-successor nil
   "A successor connection whose `WatchDaemon' is not ACCEPTED yet, or nil.
 `agent-repl-link-successor' does NOT answer it: host.el must never adopt
@@ -572,6 +590,7 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
           agent-repl-link--bounce-cause nil
           agent-repl-link--ending-conn nil
           agent-repl-link--primary-ended nil
+          agent-repl-link--shared-handover nil
           agent-repl-link-drain nil)
     (dolist (conn conns) (agent-repl-connect-close conn)))
   (agent-repl-link--refresh-indicator))
@@ -792,7 +811,22 @@ the stream\='s last frame was the planned ending
                         (agent-repl-connect-connection-address conn)
                         (agent-repl-connect-connection-address agent-repl-link--pending-successor)
                         outcome))
+     (agent-repl-link--shared-handover
+      (agent-repl-link--shared-reconnect conn outcome))
      (t (agent-repl-link--primary-ended-down conn outcome)))))
+
+(defun agent-repl-link--shared-reconnect (conn outcome)
+  "Dial CONN\='s shared address as the successor: the incumbent stood down.
+The connect waits in the socket holder\='s backlog until the daemon that
+takes the boot claim accepts it, and that acceptance completes the
+handover with OUTCOME as a promotion, which re-attaches every workspace
+still on CONN (`agent-repl-host-on-link-promote').  Nothing goes down."
+  (let ((address (agent-repl-connect-connection-address conn)))
+    (setq agent-repl-link--shared-handover nil
+          agent-repl-link--primary-ended outcome)
+    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.shared-handover-redial address=%S outcome=%S"
+                      address outcome)
+    (agent-repl-link--dial-successor conn address nil)))
 
 (defun agent-repl-link--primary-ended-down (conn outcome)
   "Take the link down because the primary CONN\='s stream ended with OUTCOME.
@@ -817,6 +851,7 @@ The down hooks run, CONN is closed, and the reconnect loop resolves the
 live daemon afresh.  The caller has already recorded why.  PLANNED
 non-nil says the daemon announced the ending first; the hooks read it as
 `agent-repl-link-down-planned'."
+  (setq agent-repl-link--shared-handover nil)
   (setq agent-repl-link--primary nil
         agent-repl-link--primary-stream nil
         agent-repl-link--ending-conn nil
@@ -939,6 +974,10 @@ loudly (audit-3 #8), as is any changed address a refusal names (audit-3
         (live (agent-repl-link-live)))
     (cond
      ((agent-repl-connect-connection-at-p live address)
+      ;; THE DAEMONS SHARE ONE ADDRESS when a stand-down names the primary\'s
+      ;; own: the incumbent forwards a transferred workspace\'s calls, and the
+      ;; primary\'s end dials this address afresh (`agent-repl-link--shared-reconnect').
+      (when announced (setq agent-repl-link--shared-handover t))
       (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-is-primary address=%S announced=%S"
                         address (and announced t)))
      ((and attached (not (agent-repl-connect-connection-alive-p attached)))

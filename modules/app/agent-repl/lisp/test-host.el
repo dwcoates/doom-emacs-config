@@ -358,6 +358,7 @@ unary rpc can produce, which the contract never collapses into one."
                ((symbol-function 'agent-repl-link-successor-pending-p)
                 (lambda () agent-repl-test-host--successor-pending))
                ((symbol-function 'agent-repl-link-primary) (lambda () nil))
+               ((symbol-function 'agent-repl-link-shared-address-p) (lambda () nil))
                ((symbol-function 'agent-repl-link-live)
                 (lambda () agent-repl-test-host--live))
                ((symbol-function 'agent-repl-link-ending-p)
@@ -3012,6 +3013,25 @@ neither the dedup nor the self-reference swallows the second one."
       ;; Assert
       (should (= 2 (seq-count (lambda (call) (equal (car call) "AdoptHostWorkspace"))
                               agent-repl-test-host--calls))))))
+
+(ert-deftest agent-repl-test-host-transferred-on-a-shared-address-adopts-on-the-primary ()
+  "On one shared address the adopt goes out on the primary link at once.
+The daemon that accepts it forwards it to the successor, so no successor
+link is waited on, whichever push came first."
+  (agent-repl-test-host--with-harness
+    ;; Arrange: no successor link stands, and the daemons share one address.
+    (let ((primary (agent-repl-connect-open "127.0.0.1:9001")))
+      (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () primary))
+                ((symbol-function 'agent-repl-link-shared-address-p) (lambda () t)))
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (let ((adopt (seq-find (lambda (call) (equal (car call) "AdoptHostWorkspace"))
+                               agent-repl-test-host--calls)))
+          (should adopt)
+          (should (eq (nth 1 adopt) primary)))
+        (should (agent-repl-test-host--logged-p :info "elisp.host.transferred ws=ws-1 shared=t"))))))
 
 (ert-deftest agent-repl-test-host-transferred-prefers-a-standing-successor-over-the-wait ()
   "An accepted successor is adopted onto AT ONCE; the wait is only for the pending case."

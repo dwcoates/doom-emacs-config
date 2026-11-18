@@ -97,6 +97,8 @@
          (agent-repl-link--bounce-cause nil)
          (agent-repl-link--ending-conn nil)
          (agent-repl-link--primary-ended nil)
+         (agent-repl-link--shared-handover nil)
+         (agent-repl-daemon-holder nil)
          (agent-repl-link-drain nil)
          (agent-repl-link--surfaced-faults (make-hash-table :test #'equal))
          (agent-repl-link-drain-segment nil)
@@ -878,6 +880,51 @@ gate is the point, so it is exercised here rather than bypassed."
         (agent-repl-test-link--close conn '(:error (:kind :transport)))
         ;; Assert
         (should (eq (agent-repl-link-primary) successor))))))
+
+(ert-deftest agent-repl-test-link-shared-handover-redials-its-own-address-and-promotes ()
+  "On one shared address, the incumbent's end dials it afresh and promotes.
+Nothing goes down: the daemon that accepts the address next is promoted."
+  (agent-repl-test-link--with-harness
+    ;; Arrange: the stand-down names the primary's own address.
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-down-functions (agent-repl-test-link--record-hook :down))
+      (add-hook 'agent-repl-link-promote-functions (agent-repl-test-link--record-hook :promote))
+      ;; Act: the incumbent ends, and the next daemon accepts the redial.
+      (agent-repl-test-link--close conn '(:ended))
+      (let ((redial agent-repl-link--pending-successor))
+        (should redial)
+        (should (equal (agent-repl-connect-connection-address redial) "127.0.0.1:9001"))
+        (agent-repl-test-link--accept redial)
+        ;; Assert
+        (should (eq (agent-repl-link-primary) redial))
+        (should (assq :promote agent-repl-test-link--hooks))
+        (should-not (assq :down agent-repl-test-link--hooks))
+        (should-not agent-repl-link--shared-handover)
+        (should (agent-repl-test-link--logged-p :info "elisp.link.shared-handover-redial"))))))
+
+(ert-deftest agent-repl-test-link-an-end-with-no-shared-handover-still-goes-down ()
+  "Without a stand-down naming the primary's address, an end is the link down."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (add-hook 'agent-repl-link-down-functions (agent-repl-test-link--record-hook :down))
+      ;; Act
+      (agent-repl-test-link--close conn '(:error (:kind :transport)))
+      ;; Assert
+      (should (assq :down agent-repl-test-link--hooks))
+      (should-not agent-repl-link--pending-successor))))
+
+(ert-deftest agent-repl-test-link-shared-address-follows-the-holder ()
+  "The daemons share one address exactly when a socket holder is configured."
+  (agent-repl-test-link--with-harness
+    (let ((agent-repl-daemon-holder "/c/daemon-holder.sock"))
+      (should (agent-repl-link-shared-address-p)))
+    (let ((agent-repl-daemon-holder ""))
+      (should-not (agent-repl-link-shared-address-p)))
+    (should-not (agent-repl-link-shared-address-p))))
 
 (ert-deftest agent-repl-test-link-promotion-runs-no-down-hook ()
   "Nothing was lost in a promotion: the workspaces were already adopted."
