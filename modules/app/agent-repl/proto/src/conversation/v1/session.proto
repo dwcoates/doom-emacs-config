@@ -829,9 +829,9 @@ message SessionRateLimitOverage {
 //     `vendor-plan-usage` component and states nothing.
 //
 // CONSUMER CONTRACT (the daemon's footer): the arm is the WHOLE TRUTH about
-// the three weekly windows it carries, so a window it leaves unset retires
-// that window's figure. The newest statement is drawn; it carries no verdict,
-// so a window's verdict stays the rate-limit event's.
+// the three weekly windows and the monthly spend it carries, so a figure it
+// leaves unset retires that figure. The newest statement is drawn; it carries
+// no verdict, so a window's verdict stays the rate-limit event's.
 message SessionPlanUsage {
   // The account-wide seven-day window. UNSET when the vendor stated none.
   optional SessionPlanUsageWindow seven_day = 1;
@@ -841,6 +841,56 @@ message SessionPlanUsage {
   // The seven-day window metered for the Sonnet model family. UNSET when the
   // vendor meters none.
   optional SessionPlanUsageWindow seven_day_sonnet = 3;
+  // The account's month-to-date spend (the vendor's `extra_usage`). It is the
+  // ONLY usage figure an account billed by its spend has (an Enterprise seat
+  // billed against a monthly limit reports every weekly window null), and a
+  // subscription with extra usage enabled reports it beside its weekly
+  // windows. UNSET when the vendor did not state extra usage enabled, or
+  // stated it with a null spend or no currency: a spend nobody reported is
+  // never drawn as zero.
+  optional SessionPlanUsageMonthlySpend monthly_spend = 4;
+}
+
+// The account's month-to-date spend, in the vendor's billing currency. The
+// vendor states no billing-period reset, so none is carried; the period is the
+// calendar month the vendor bills.
+message SessionPlanUsageMonthlySpend {
+  // What the account has spent this month (the vendor's `used_credits`).
+  SessionMoney spent = 1;
+  // Whether the spend runs against a monthly limit. The two are different
+  // lines ("$1,993.96 of $12,000 this month" against "$1,993.96 this month"),
+  // and the vendor states an enabled spend with a null limit for an uncapped
+  // account, so the limit's absence is an arm and never an unset field that
+  // could also mean "not reported".
+  oneof limit {
+    // The spend runs against a monthly limit the vendor stated.
+    SessionPlanUsageMonthlySpendCapped capped = 2;
+    // The vendor stated extra usage enabled with no monthly limit.
+    SessionPlanUsageMonthlySpendUncapped uncapped = 3;
+  }
+}
+
+// A spend against a monthly limit. The vendor's own utilization figure is not
+// carried: it is spent / limit, which a consumer resolves from the two
+// amounts, so no third figure can disagree with them.
+message SessionPlanUsageMonthlySpendCapped {
+  // The monthly limit (the vendor's `monthly_limit`), in the spend's currency.
+  SessionMoney limit = 1;
+}
+
+// A spend with no monthly limit: the vendor stated extra usage enabled and a
+// null `monthly_limit`.
+message SessionPlanUsageMonthlySpendUncapped {}
+
+// An amount of money as the vendor bills it: an integer count of the
+// currency's MINOR unit (cents for USD), so 1200000 USD is $12,000.00. The
+// minor unit's exponent is the currency's ISO 4217 one, which the code
+// determines, so it is not carried.
+message SessionMoney {
+  // The amount in the currency's minor unit, never a fractional major amount.
+  int64 amount_minor = 1;
+  // The ISO 4217 currency code, verbatim from the vendor ("USD").
+  string currency = 2;
 }
 
 // One window of the plan usage. SET only when the vendor stated both its
