@@ -1191,7 +1191,8 @@ can never disagree about which workspace came before.
 
   1. Names in `agent-repl--selection-history', in its order: this
      session's own visits, the one the frame stands in first, and only
-     those that lasted `agent-repl-visit-dwell-seconds' after it.
+     those that lasted `agent-repl-visit-dwell-seconds' or were prompted
+     in (`agent-repl--note-visit-prompted') after it.
   2. Then names the history does not hold, by the roster's durable
      last-selected instant (`agent-repl-roster-last-selected-ms'),
      newest first: what a fresh Emacs knows of earlier sessions.

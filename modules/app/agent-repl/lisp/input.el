@@ -74,6 +74,8 @@
 (require 'color)
 
 (declare-function agent-repl--ws-put "workspace" (ws key val))
+(declare-function agent-repl--note-visit-prompted "workspace" (ws))
+(defvar agent-repl--prompt-queue-drain-origin)
 (declare-function agent-repl-webhost-dismiss-digest "webhost" (ws))
 (declare-function agent-repl-webhost-show-editor-notice "webhost" (ws text))
 (declare-function agent-repl-prompt-entries-opening "prompt-entries" (label))
@@ -2537,6 +2539,12 @@ Returns the submission's idempotency key, or nil when nothing was sent."
                 nil)
             (when from-buffer
               (agent-repl--ws-put ws :composer-prompted-at (float-time)))
+            ;; A PROMPT THE USER SENDS MAKES THE SELECTION A VISIT AT ONCE
+            ;; (`agent-repl--note-visit-prompted').  A queue drain is the
+            ;; editor sending a prompt written earlier, not the user writing
+            ;; to the workspace now, so it records nothing.
+            (unless (eq origin agent-repl--prompt-queue-drain-origin)
+              (agent-repl--note-visit-prompted ws))
             (agent-repl--kickoff-prompt-summary ws raw)
             ;; `(null prompt)' is the one fact that says the words came out
             ;; of the composer.  A from-buffer submission clears the composer

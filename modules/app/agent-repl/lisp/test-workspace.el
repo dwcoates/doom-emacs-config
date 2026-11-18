@@ -2112,7 +2112,7 @@ transiently activated workspace while eager-open is in progress."
           (agent-repl--end-visit "c" "picker"))
         ;; Assert
         (should (equal records
-                       '(("c" . "elisp.workspace.visit-dropped ws=a dwell=2.5s min=5s reason=picker"))))))))
+                       '(("c" . "elisp.workspace.visit-dropped ws=a dwell=2.5s min=10s reason=picker"))))))))
 
 (ert-deftest agent-repl-test-end-visit-without-a-visit-changes-nothing ()
   "With no visit standing, ending one records nothing and logs nothing."
@@ -2127,6 +2127,135 @@ transiently activated workspace while eager-open is in progress."
       ;; Assert
       (should (equal agent-repl--workspace-history '("a")))
       (should-not records))))
+
+(ert-deftest agent-repl-test-visit-dwell-is-ten-seconds ()
+  "A selection must last ten seconds to be a visit unless the user prompts in it."
+  (should (= agent-repl-visit-dwell-seconds 10)))
+
+(ert-deftest agent-repl-test-note-visit-prompted-records-a-brief-visit-at-once ()
+  "A prompt sent one second into a visit puts its workspace first in the history now."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b" "a"))
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq agent-repl-test--clock 101.0)
+        ;; Act
+        (agent-repl--note-visit-prompted "a")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a" "b")))))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-keeps-the-visit-running ()
+  "The prompted visit keeps its start, so its dwell keeps counting."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq agent-repl-test--clock 101.0)
+        ;; Act
+        (agent-repl--note-visit-prompted "a")
+        ;; Assert
+        (should (equal agent-repl--current-visit '(:name "a" :began 100.0 :ahead nil)))))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-keeps-its-place-after-a-brief-end ()
+  "A prompted visit ended before the dwell keeps the place the prompt gave it."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b" "a"))
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq agent-repl-test--clock 101.0)
+        (agent-repl--note-visit-prompted "a")
+        (setq agent-repl-test--clock 102.0)
+        ;; Act
+        (agent-repl--end-visit "c" "activation")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a" "b")))))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-puts-created-workspaces-ahead ()
+  "Workspaces created during the prompted visit still lead it in the history."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("new" "b" "a"))
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead '("new"))))
+        (setq agent-repl-test--clock 101.0)
+        ;; Act
+        (agent-repl--note-visit-prompted "a")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("new" "a" "b")))))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-ignores-another-workspaces-visit ()
+  "A prompt to a workspace the frame is not on records nothing and logs nothing."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b"))
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
+            (records nil))
+        (setq agent-repl-test--clock 101.0)
+        (cl-letf (((symbol-function 'agent-repl--info) (lambda (&rest args) (push args records))))
+          ;; Act
+          (agent-repl--note-visit-prompted "b"))
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("b")))
+        (should-not records)))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-without-a-visit-changes-nothing ()
+  "With no visit standing, a prompt records nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("b"))
+          (agent-repl--recency-walk-landing nil)
+          (agent-repl--current-visit nil))
+      ;; Act
+      (agent-repl--note-visit-prompted "a")
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("b"))))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-logs-the-recorded-visit ()
+  "The prompted visit is logged with its dwell and reason=prompt in WS's sink."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
+            (records nil))
+        (setq agent-repl-test--clock 101.5)
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+          ;; Act
+          (agent-repl--note-visit-prompted "a"))
+        ;; Assert
+        (should (equal records
+                       '(("a" . "elisp.workspace.visit-recorded ws=a dwell=1.5s reason=prompt"))))))))
+
+(ert-deftest agent-repl-test-note-visit-prompted-ends-a-walk-standing-on-it ()
+  "A prompt on a walk's landing ends the walk, stamps it viewed, and records it first."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("a" "b" "c"))
+            (agent-repl--recency-walk-landing "b")
+            (agent-repl--current-visit (list :name "b" :began 100.0 :ahead nil))
+            (stamped nil))
+        (setq agent-repl-test--clock 101.0)
+        (cl-letf (((symbol-function 'agent-repl--stamp-workspace-viewed)
+                   (lambda (name) (push name stamped))))
+          ;; Act
+          (agent-repl--note-visit-prompted "b"))
+        ;; Assert
+        (should-not agent-repl--recency-walk-landing)
+        (should (equal stamped '("b")))
+        (should (equal agent-repl--workspace-history '("b" "a" "c")))
+        (should (equal (agent-repl--selection-history) '("b" "a" "c")))))))
 
 (ert-deftest agent-repl-test-move-visit-to-continues-the-same-workspaces-visit ()
   "Re-activating the workspace the visit names keeps its start, so its dwell keeps counting."

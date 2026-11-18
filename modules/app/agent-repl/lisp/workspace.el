@@ -172,13 +172,16 @@ take both through `agent-repl--selection-history'.  Read by
 `agent-repl--teardown-landing-target': closing the workspace the user
 stands on selects the one selected before it.")
 
-(defconst agent-repl-visit-dwell-seconds 5
+(defconst agent-repl-visit-dwell-seconds 10
   "How long a workspace must stay selected for the selection to be a visit.
 A SELECTION SHORTER THAN THIS IS PASSING THROUGH (owner request,
-2026-11-10): flicking past a workspace on the way to another, or glancing
-at it and going back, is not looking at it, so it does not move in the
-selection history `s-[' and `s-]' walk, nor in the order `SPC TAB TAB' and
-a close's landing read (`agent-repl--end-visit').")
+2026-11-10, raised from 5 to 10 seconds 2026-11-18): flicking past a
+workspace on the way to another, or glancing at it and going back, is not
+looking at it, so it does not move in the selection history `s-[' and
+`s-]' walk, nor in the order `SPC TAB TAB' and a close's landing read
+\(`agent-repl--end-visit').  A prompt sent to the workspace during the
+selection makes it a visit at once, however short
+\(`agent-repl--note-visit-prompted').")
 
 (defvar agent-repl--current-visit nil
   "The visit the frame stands in, not yet recorded in the history, or nil.
@@ -2738,6 +2741,29 @@ when no visit is running."
         (agent-repl--info log-ws
                           "elisp.workspace.visit-dropped ws=%s dwell=%.1fs min=%ds reason=%s"
                           name dwell agent-repl-visit-dwell-seconds reason)))))
+
+(defun agent-repl--note-visit-prompted (ws)
+  "Record the visit the frame stands in at once, because WS was prompted in it.
+A PROMPT SENT DURING A SELECTION MAKES IT A VISIT, HOWEVER SHORT (owner
+request, 2026-11-18): writing to a workspace is looking at it, so it takes
+its place in `agent-repl--workspace-history' now rather than waiting out
+`agent-repl-visit-dwell-seconds'.  The visit keeps running, so its dwell
+keeps counting and its end records it again in the same place.  A recency
+walk standing on WS ends here: the user stopped on it to write, so it is
+no longer a step (`agent-repl--recency-walk-landing') and is stamped
+viewed, as any walk's end stamps its landing.  No-op when the visit standing
+is not WS's, or none stands: a prompt to a workspace the frame is not on is
+not a view of it."
+  (let ((visit agent-repl--current-visit))
+    (when (equal (plist-get visit :name) ws)
+      (when (equal ws agent-repl--recency-walk-landing)
+        (setq agent-repl--recency-walk-landing nil)
+        (agent-repl--info ws "elisp.workspace.recency-walk-ended landing=%s reason=prompt" ws)
+        (agent-repl--stamp-workspace-viewed ws))
+      (setq agent-repl--workspace-history
+            (agent-repl--history-with-visit agent-repl--workspace-history visit))
+      (agent-repl--info ws "elisp.workspace.visit-recorded ws=%s dwell=%.1fs reason=prompt"
+                        ws (agent-repl--visit-dwell visit)))))
 
 (defun agent-repl--visit-renamed (visit old new)
   "Return VISIT with the workspace OLD renamed NEW wherever it names it."
