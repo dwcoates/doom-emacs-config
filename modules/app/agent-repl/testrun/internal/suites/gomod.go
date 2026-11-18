@@ -162,8 +162,8 @@ func (b GoBuild) pkgOf(l Layout, s roster.Suite, rel string) goPkg {
 	}
 }
 
-// addPackage adds p's units to u, each recorded as needing p's binary from b,
-// and the programs p's tests spawn.
+// addPackage adds p's units to u, each atomic one recorded as needing p's
+// binary from b, and the programs p's tests spawn.
 func (u *Units) addPackage(b *GoBuild, p goPkg, extra ...run.Spec) error {
 	check, split, err := p.units()
 	if err != nil {
@@ -179,7 +179,10 @@ func (u *Units) addPackage(b *GoBuild, p goPkg, extra ...run.Spec) error {
 		u.Atomic = append(u.Atomic, *check)
 	}
 	if split != nil {
-		b.need(split.Group, p.Rel)
+		// The split names its package itself (GoBuild.Builds).
+		if rel, ok := b.Builds(*split); !ok || rel != p.Rel {
+			panic(fmt.Sprintf("suites: %s's split %s is not one of build %s's", p.Rel, split.Group, b.ID))
+		}
 		u.Splits = append(u.Splits, *split)
 	}
 	return nil
