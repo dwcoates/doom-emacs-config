@@ -377,6 +377,17 @@ workspace's path, so every path must have an answer."
       (should (equal (cadr (member "--metrics-root" argv))
                      (expand-file-name "~/.cache/agent-repl/metrics"))))))
 
+(ert-deftest agent-repl-test-daemon-argv-passes-no-holder ()
+  "The argv names no `--holder': the daemon takes its declared holder itself."
+  ;; Arrange
+  (let ((agent-repl-daemon-command '("/bin/agent-repld"))
+        (agent-repl-daemon-default-config-dir "/a")
+        (agent-repl-daemon-multi-repo-config-dir "/b"))
+    ;; Act
+    (let ((argv (agent-repl-daemon--argv)))
+      ;; Assert
+      (should-not (member "--holder" argv)))))
+
 (ert-deftest agent-repl-test-daemon-argv-omits-a-nil-metrics-root ()
   "A nil metrics root passes no flag: the daemon runs with metrics off."
   ;; Arrange

@@ -542,6 +542,13 @@ func (r *rosterState) pausedMergeQueue(ws ids.WorkspaceID, ownMerge, async bool)
 	return "", false
 }
 
+// turnInFlight reports whether WS has an accepted turn in flight, false for
+// a workspace with no live half yet.
+func (r *rosterState) turnInFlight(ws ids.WorkspaceID) bool {
+	s, ok := r.workspaces[ws]
+	return ok && s.turn != nil
+}
+
 // workspace resolves a workspace's live half, minting it on first sight.
 func (r *rosterState) workspace(ws ids.WorkspaceID) *wsState {
 	s, ok := r.workspaces[ws]

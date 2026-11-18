@@ -152,9 +152,15 @@ func TestTheServiceManagersToolHonorsTheOperatorOverride(t *testing.T) {
 
 func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 	t.Helper()
+	// The checkout's requirements declare the holders the deploy brings up
+	// (holderensure.Declared); this one declares none.
+	checkout := t.TempDir()
+	if err := os.WriteFile(filepath.Join(checkout, "requirements.json"), []byte(`{"requirements": []}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	return deployerParams{
 		Surfaces:   dlog.NewTestSurfaces(),
-		Checkout:   t.TempDir(),
+		Checkout:   checkout,
 		StateDir:   t.TempDir(),
 		SelfExe:    selfExe,
 		Bundle:     buildid.NewShimBundle(filepath.Join(t.TempDir(), "main.js"), "fake-build"),
@@ -166,6 +172,60 @@ func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 		Getenv:     envOf(map[string]string{"AGENT_REPL_LOCK_DIR": t.TempDir()}),
 		Restarts:   &restarttimingtest.Recorder{},
 		Reconnects: restarttiming.NewReconnects(&restarttimingtest.Recorder{}, time.Now),
+	}
+}
+
+func TestADeployerIsNotBuiltWithoutItsCheckoutsRequirements(t *testing.T) {
+	// Arrange: the checkout declares no requirements at all.
+	exe := filepath.Join(t.TempDir(), "agent-repld")
+	if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	p := deployerParamsFor(t, exe)
+	p.Checkout = t.TempDir()
+
+	// Act
+	_, _, err := buildDeployer(context.Background(), p)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "the socket holders the deploy brings up") {
+		t.Fatalf("buildDeployer = %v, want the refusal naming the holders", err)
+	}
+}
+
+func TestTheDeployersStoreHolderIsTheOneHoldingTheStoresSocket(t *testing.T) {
+	tests := []struct {
+		name   string
+		socket string
+		want   string
+	}{
+		{name: "a declared holder holding the store's socket is the store's", socket: "/sock/store.sock", want: "store-holder"},
+		{name: "a store at a socket no holder holds has none", socket: "/sock/other.sock", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			exe := filepath.Join(t.TempDir(), "agent-repld")
+			if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			p := deployerParamsFor(t, exe)
+			p.Rollout, p.Progress, p.Faults = idleRollout{}, noProgress{}, &deployFaults{}
+			p.Reports = &detachedForwarder{}
+			p.Store = tt.socket
+			manifest := `{"requirements": [{"id": "store-holder", "kind": "socket_holder", "control": "/sock/c.sock", "sockets": [{"name": "store", "unix": "/sock/store.sock"}]}]}`
+			if err := os.WriteFile(filepath.Join(p.Checkout, "requirements.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			_, restarter, err := buildDeployer(context.Background(), p)
+
+			// Assert
+			if err != nil || restarter.StoreHolder != tt.want {
+				t.Fatalf("buildDeployer = %v, store holder %q; want %q", err, restarter.StoreHolder, tt.want)
+			}
+		})
 	}
 }
 

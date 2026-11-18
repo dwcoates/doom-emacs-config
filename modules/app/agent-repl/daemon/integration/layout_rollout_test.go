@@ -5,6 +5,7 @@ package integration
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/integration/harness"
+	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/wsm"
 )
@@ -198,7 +200,7 @@ func TestALayoutChangeRestartsTheDaemonAndItsReplacementServes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read daemon.addr: %v", err)
 	}
-	incumbent := harness.AddrLine(string(before))
+	incumbent := harness.AddrAdvertisement(string(before))
 
 	// Act
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemonNewLayout)
@@ -229,11 +231,15 @@ func TestALayoutChangeRestartsTheDaemonAndItsReplacementServes(t *testing.T) {
 	}
 }
 
-// awaitNewAdvertisement waits for daemon.addr to name an address other than
-// old, following the file's changes.
-func awaitNewAdvertisement(t *testing.T, d *harness.Daemon, old string) string {
+// awaitNewAdvertisement waits for daemon.addr to name an advertiser other
+// than OLD's, following the file's changes, and answers the replacement's own
+// private address: every daemon advertises the one shared address, so the
+// replacement is the advertiser that changed.
+func awaitNewAdvertisement(t *testing.T, d *harness.Daemon, old daemonaddr.Advertisement) string {
 	t.Helper()
-	return d.AwaitAddrMatching("a replacement for "+old, func(addr string) bool { return addr != "" && addr != old })
+	return d.AwaitAdvertisement(fmt.Sprintf("a replacement for pid %d", old.PID), func(ad daemonaddr.Advertisement) bool {
+		return ad.Address != "" && ad.PIDKnown && ad.PID != old.PID
+	}).Daemon()
 }
 
 // AN ADDITIVE LAYOUT CHANGE IS HANDED OVER (owner ruling, 2026-09-30): the

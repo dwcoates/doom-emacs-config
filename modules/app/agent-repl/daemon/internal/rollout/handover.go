@@ -13,6 +13,7 @@ import (
 
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/bringup"
+	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
 	"agent-repld/internal/ids"
@@ -303,8 +304,9 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	workspaces = unfoldedFirst(workspaces, folded)
 	c.fixServed(slot, address, workspaces, untransferable, fields)
 
+	announced := daemonaddr.ClientAddress(c.deps.SharedAddress(), address)
 	c.deps.Announcer.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{
-		Address: &address,
+		Address: &announced,
 		Cause: &agentreplv1.DaemonShutdownCause{
 			Kind: &agentreplv1.DaemonShutdownCause_SelfMergeRollout{
 				SelfMergeRollout: &agentreplv1.DaemonShutdownSelfMergeRollout{},
@@ -775,7 +777,7 @@ func (c *controller) transfer(ctx context.Context, ws wsm.Workspace, plan *hando
 
 	c.recordTransfer(ws.ID, successor)
 	reloadPage := plan.reloadsPage(ws.ID)
-	c.deps.Pusher.PushTransferred(ws.ID, successor, reloadPage)
+	c.deps.Pusher.PushTransferred(ws.ID, daemonaddr.ClientAddress(c.deps.SharedAddress(), successor), reloadPage)
 	c.log.Info(opTransfer, "pushed the transfer notice on the workspace's host and web streams",
 		dlog.Merge(fields, dlog.Context{"expected_host": move.participants.Host, "expected_web": move.participants.Web,
 			"reload_page": reloadPage, "page_at_announcement": plan.snapshot[ws.ID].Web, "folded": plan.folded[ws.ID]}))

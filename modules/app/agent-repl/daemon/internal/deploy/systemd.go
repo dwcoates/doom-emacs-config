@@ -72,6 +72,15 @@ func (s *SystemdUser) Restart(ctx context.Context, label string) error {
 	return mustTool(ctx, s.Runner, s.Dir, s.Binary, "restart", "--user", unitName(label))
 }
 
+// Reload implements ServiceManager: daemon-reload, which reads every
+// changed unit file, then restart.
+func (s *SystemdUser) Reload(ctx context.Context, label string) error {
+	if err := mustTool(ctx, s.Runner, s.Dir, s.Binary, "daemon-reload", "--user"); err != nil {
+		return err
+	}
+	return s.Restart(ctx, label)
+}
+
 // Stop implements ServiceManager: stop, after which Restart=always no longer
 // relaunches it. A unit the manager has not loaded answers ErrServiceNotLoaded;
 // a loaded unit that is already inactive stops without complaint.

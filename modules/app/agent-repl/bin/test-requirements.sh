@@ -1304,7 +1304,7 @@ test_install_builds_renders_and_loads_a_launchd_service() {
   run install
   local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist" h="$CASE/home"
   if [ "$RC" -eq 0 ] && ran "build svc" \
-     && ran "launchctl bootstrap gui/$(id -u) $plist" && ran "launchctl kickstart -k gui/$(id -u)/com.example.svc" \
+     && ran "launchctl bootstrap gui/$(id -u) $plist" && ! ran "launchctl kickstart" \
      && ! ran "launchctl bootout" && ! ran "systemctl" && has "ok          svc: com.example.svc running from $plist"; then
     pass "install builds the service, renders its plist, and loads it"
   else fail "service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
@@ -1336,6 +1336,134 @@ EOF
      && [ "$(grep -A1 '<key>ProcessType</key>' "$plist" | tr -d ' \n')" = "<key>ProcessType</key><string>Interactive</string>" ]; then
     pass "a rendered plist launches through /usr/bin/env at Interactive priority with ~/ expanded and XML escaped"
   else fail "rendered plist lacks:$bad" "$(cat "$plist")"; fi
+}
+
+# ---------------------------------------------------------------------------
+# socket_holder.
+# ---------------------------------------------------------------------------
+
+HOLDER_ENTRY='{"id": "holder", "kind": "socket_holder", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "label": "com.example.hold", "control": "~/.cache/agent-repl/sock/hold.sock", "sockets": [{"name": "store", "unix": "~/.cache/agent-repl/sock/s.sock"}, {"name": "daemon", "tcp": "127.0.0.1"}], "log": "hold.log"}'
+
+holder_case() {
+  new_case
+  manifest "[$HOLDER_ENTRY]"
+  write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/sockethold" && chmod +x "$HOME/.cache/agent-repl/bin/sockethold"'
+}
+
+# The holder's plist, with the case's home spelled HOME, as the golden holds it.
+holder_plist_of_case() { sed "s#$CASE/home#HOME#g" "$CASE/home/Library/LaunchAgents/com.example.hold.plist"; }
+
+test_install_renders_the_holders_plist_exactly_and_loads_it() {
+  holder_case
+  run install
+  if [ "$RC" -eq 0 ] && ran "build sockethold" && ran "launchctl bootstrap gui/$(id -u)" \
+     && has "ok          holder: com.example.hold holds its sockets" \
+     && diff <(holder_plist_of_case) "$THIS_DIR/testdata/socket-holder.plist" >/dev/null; then
+    pass "install renders the holder's plist byte for byte as pinned, and loads it"
+  else fail "holder install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")" "$(diff <(holder_plist_of_case) "$THIS_DIR/testdata/socket-holder.plist")"; fi
+}
+
+test_a_loaded_holder_matching_its_rendering_is_never_reloaded() {
+  holder_case
+  run install
+  : >"$CASE/transcript"
+  run install
+  if [ "$RC" -eq 0 ] && ! ran "launchctl bootout" && ! ran "launchctl bootstrap" && has "ok          holder:"; then
+    pass "install leaves a loaded holder whose plist matches its rendering alone, so its sockets never close"
+  else fail "holder reloaded" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_holder_whose_plist_differs_is_outdated_and_reloaded() {
+  holder_case
+  run install
+  printf '<!-- edited -->\n' >>"$CASE/home/Library/LaunchAgents/com.example.hold.plist"
+  : >"$CASE/transcript"
+  run install
+  if [ "$RC" -eq 0 ] && has "holder is outdated" && ran "launchctl bootout" && ran "launchctl bootstrap"; then
+    pass "a holder plist that differs from its rendering is outdated, and install reloads it"
+  else fail "holder outdated" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_the_holders_service_settings_never_follow_the_services() {
+  holder_case
+  run install
+  local plist="$CASE/home/Library/LaunchAgents/com.example.hold.plist"
+  if ! grep -qE "ProcessType|ThrottleInterval|ExitTimeOut|StandardOutPath" "$plist"; then
+    pass "the holder's plist carries none of the settings every service shares"
+  else fail "holder carries service settings" "$(cat "$plist")"; fi
+}
+
+test_a_held_socket_needs_exactly_one_address() {
+  new_case
+  manifest '[{"id": "holder", "kind": "socket_holder", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "control": "~/c.sock", "sockets": [{"name": "s", "unix": "~/s.sock", "tcp": "127.0.0.1"}], "log": "h.log"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'every held socket needs a "name" and exactly one of "unix" or "tcp"'; then
+    pass "a held socket naming both a unix path and a tcp host is refused"
+  else fail "held socket address" "rc=$RC" "$OUT"; fi
+}
+
+test_the_holders_systemd_units_name_each_socket() {
+  holder_case
+  PLATFORM=linux run install
+  local dir="$CASE/home/.config/systemd/user"
+  if [ "$RC" -eq 0 ] && grep -q "FileDescriptorName=store" "$dir/com.example.hold-store.socket" \
+     && grep -q "ListenStream=127.0.0.1:0" "$dir/com.example.hold-daemon.socket" \
+     && grep -q "Sockets=com.example.hold-control.socket com.example.hold-store.socket com.example.hold-daemon.socket" "$dir/com.example.hold.service" \
+     && ran "systemctl --user enable --now com.example.hold-control.socket"; then
+    pass "on Linux each held socket is its own named socket unit, and the holder's service takes them all"
+  else fail "holder systemd units" "rc=$RC" "$OUT" "$(ls "$dir" 2>&1)" "$(cat "$CASE/transcript")"; fi
+}
+
+# The launchd job and the systemd service run the one argv (HOLDER_JQ's
+# holder_argv), so a holder never runs differently per platform.
+test_the_holders_launchd_and_systemd_definitions_run_one_argv() {
+  holder_case
+  run install
+  local plist_argv unit_argv
+  plist_argv=$(sed -n '/<key>ProgramArguments<\/key>/,/<\/array>/s#^ *<string>\(.*\)</string>$#\1#p' "$CASE/home/Library/LaunchAgents/com.example.hold.plist" | paste -sd' ' -)
+  PLATFORM=linux run install
+  unit_argv=$(sed -n 's/^ExecStart=//p' "$CASE/home/.config/systemd/user/com.example.hold.service")
+  if [ -n "$plist_argv" ] && [ "$plist_argv" = "$unit_argv" ]; then
+    pass "the holder's launchd job and systemd service run the one argv"
+  else fail "holder argv differs per platform" "launchd: $plist_argv" "systemd: $unit_argv"; fi
+}
+
+# ensure-holder is install's holder step for one entry: the daemon's, when a
+# probe finds no holder serving the entry's control socket.
+test_ensure_holder_installs_and_loads_the_holder_it_names() {
+  holder_case
+  run ensure-holder holder
+  if [ "$RC" -eq 0 ] && ran "build sockethold" && ran "launchctl bootstrap gui/$(id -u)" \
+     && [ -d "$CASE/home/.cache/agent-repl/sock" ] && has "ensure-holder: com.example.hold is loaded" \
+     && diff <(holder_plist_of_case) "$THIS_DIR/testdata/socket-holder.plist" >/dev/null; then
+    pass "ensure-holder renders the holder's plist as install does, and loads it"
+  else fail "ensure-holder" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_holder_never_reloads_a_matching_holder() {
+  holder_case
+  run ensure-holder holder
+  : >"$CASE/transcript"
+  run ensure-holder holder
+  if [ "$RC" -eq 0 ] && ! ran "launchctl bootout"; then
+    pass "ensure-holder leaves a holder whose plist matches loaded as it is, so its sockets never close"
+  else fail "ensure-holder reloaded" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_holder_refuses_an_unknown_id() {
+  holder_case
+  run ensure-holder nothing
+  if [ "$RC" -eq 1 ] && has "ensure-holder: no socket_holder entry on darwin has the id nothing" && ! ran "launchctl"; then
+    pass "ensure-holder refuses an id no socket_holder entry carries and loads nothing"
+  else fail "ensure-holder unknown id" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_ensure_holder_needs_an_id() {
+  holder_case
+  run ensure-holder
+  if [ "$RC" -eq 2 ] && has "ensure-holder needs a socket holder's id"; then
+    pass "ensure-holder with no id is a usage error"
+  else fail "ensure-holder no id" "rc=$RC" "$OUT"; fi
 }
 
 # define-service writes the definition install renders, from the same entry,
@@ -1533,7 +1661,7 @@ test_a_changed_service_file_is_outdated_and_reinstalled() {
   : >"$CASE/transcript"
   run install
   if [ "$RC" -eq 0 ] && has "svcd is outdated" && has "lacks the module's copy of metrics/scrape.yml" \
-     && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" && ran "launchctl kickstart -k gui/$(id -u)/com.example.svcd"; then
+     && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" && ran "launchctl bootout gui/$(id -u)" && ran "launchctl bootstrap gui/$(id -u)"; then
     pass "a service file that differs from the module's is outdated, copied again and the service restarted"
   else fail "stale service file" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }

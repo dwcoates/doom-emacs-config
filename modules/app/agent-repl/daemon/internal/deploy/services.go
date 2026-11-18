@@ -1,6 +1,7 @@
 package deploy
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -69,8 +70,12 @@ type ServiceManager interface {
 	// Status reports whether the manager holds the label (keeps it running)
 	// and, when it does, the running pid (0 when held but not running).
 	Status(ctx context.Context, label string) (held bool, pid int, err error)
-	// Restart restarts a held service in place.
+	// Restart restarts a held service in place, on the definition the
+	// manager loaded.
 	Restart(ctx context.Context, label string) error
+	// Reload restarts a held service on its installed definition as it is
+	// now, for a definition that changed since the manager loaded it.
+	Reload(ctx context.Context, label string) error
 	// Stop takes the service out of the manager's keeping, so nothing
 	// relaunches it. A service the manager no longer holds may answer an
 	// error wrapping ErrServiceNotLoaded: it is already where Stop leads.
@@ -145,9 +150,19 @@ type Restarter struct {
 	// Define writes label's definition from its requirements entry, where
 	// Services.Definition finds it: a service added since this machine's
 	// install has none, and a deploy that ships it must bring it up.
-	// REQUIRED; ScriptDefiner is the production one
+	// REQUIRED; ScriptRequirements.Define is the production one
 	// (bin/requirements.sh define-service).
 	Define func(ctx context.Context, label string) error
+	// EnsureHolder proves the socket holder ID serves, installing it when
+	// none does (holderensure.Ensurer.EnsureID). The store takes its sockets
+	// from StoreHolder, so the holder is ensured before the store starts or
+	// restarts. REQUIRED.
+	EnsureHolder func(ctx context.Context, id string) error
+	// StoreHolder is the id of the socket holder that holds StoreSocket, the
+	// one the store takes its sockets from (holderensure.HolderOfSocket);
+	// empty when no declared holder holds that socket, and then the store
+	// binds its own and no holder is ensured for it.
+	StoreHolder string
 }
 
 // timed runs restart and records how long it took as service's restart.
@@ -177,11 +192,21 @@ func (r *Restarter) restartStore(ctx context.Context) error {
 		return fmt.Errorf("deploy: the store restart boots the sidecar out and needs %s to bring it back: %w "+
 			"(re-run .claude/install.sh)", definition, err)
 	}
+	// THE STORE'S HOLDER AND ITS DEFINITION ARE SETTLED BEFORE ANYTHING IS
+	// STOPPED: a store whose definition takes its sockets from a holder that
+	// is not up could not boot, and the sidecar would be left down with it.
+	if err := r.ensureStoreHolder(ctx, fields); err != nil {
+		return err
+	}
+	changed, err := r.redefine(ctx, StoreLabel, fields)
+	if err != nil {
+		return err
+	}
 	if err := r.stopSidecar(ctx, fields); err != nil {
 		return err
 	}
-	r.Log.Info(opServices, "restarting the store", fields)
-	if err := r.Services.Restart(ctx, StoreLabel); err != nil {
+	r.Log.Info(opServices, "restarting the store", dlog.Merge(fields, dlog.Context{"definition_changed": changed}))
+	if err := r.restartOn(ctx, StoreLabel, changed); err != nil {
 		r.failed("the store restart failed; the sidecar is down and was NOT started again", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", StoreLabel, err)
 	}
@@ -254,7 +279,11 @@ func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
 		r.Log.Info(opServices, s.Display+" was not loaded; it was started from the installed build, so it is not restarted", fields)
 		return nil
 	}
-	if err := r.Services.Restart(ctx, s.Label); err != nil {
+	changed, err := r.redefine(ctx, s.Label, fields)
+	if err != nil {
+		return err
+	}
+	if err := r.restartOn(ctx, s.Label, changed); err != nil {
 		r.failed("the "+s.Short+" restart failed", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", s.Label, err)
 	}
@@ -469,12 +498,70 @@ func (r *Restarter) ensureLoaded(ctx context.Context, label string, fields dlog.
 		r.Log.Error(opServices, "a service is not loaded and its definition cannot be read", dlog.WithCause(fields, err))
 		return false, fmt.Errorf("deploy: %s is not loaded and %s cannot be read: %w", label, definition, err)
 	}
+	if label == StoreLabel {
+		if err := r.ensureStoreHolder(ctx, fields); err != nil {
+			return false, err
+		}
+	}
 	r.Log.Info(opServices, "a service was not loaded; starting it", fields)
 	if err := r.Services.Start(ctx, label); err != nil {
 		r.failed("a service could not be started", fields, err)
 		return false, fmt.Errorf("deploy: start %s: %w", label, err)
 	}
 	return true, nil
+}
+
+// ensureStoreHolder proves the store's socket holder serves, installing it
+// when none does: the store's definition takes its sockets from it.
+func (r *Restarter) ensureStoreHolder(ctx context.Context, fields dlog.Context) error {
+	if r.StoreHolder == "" {
+		r.Log.Debug(opServices, "no declared holder holds the store's socket; the store binds its own", fields)
+		return nil
+	}
+	if err := r.EnsureHolder(ctx, r.StoreHolder); err != nil {
+		// The ensure recorded its own failure (holderensure).
+		return fmt.Errorf("deploy: the store's socket holder %s: %w", r.StoreHolder, err)
+	}
+	return nil
+}
+
+// redefine writes label's definition from its requirements entry as it
+// renders now (Define), and reports whether that changed the installed one.
+// EVERY RESTART RUNS THE DEFINITION ITS REQUIREMENTS RENDER: a requirement
+// changed since this machine's install (2026-11-18: the store's `--holder`)
+// reaches the service at its next restart, never only at the next install.
+// A held service whose definition is missing is a changed one.
+func (r *Restarter) redefine(ctx context.Context, label string, fields dlog.Context) (bool, error) {
+	definition := r.Services.Definition(label)
+	fields = dlog.Merge(fields, dlog.Context{"label": label, "definition": definition})
+	before, err := os.ReadFile(definition)
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		r.Log.Error(opServices, "a service's installed definition could not be read before it was rewritten; nothing was restarted", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("deploy: read %s: %w", definition, err)
+	}
+	if err := r.Define(ctx, label); err != nil {
+		r.failed("a service's definition could not be written from its requirements entry; nothing was restarted", fields, err)
+		return false, fmt.Errorf("deploy: write the definition of %s: %w", label, err)
+	}
+	after, err := os.ReadFile(definition)
+	if err != nil {
+		r.Log.Error(opServices, "a service's definition is unreadable after it was written; nothing was restarted", dlog.WithCause(fields, err))
+		return false, fmt.Errorf("deploy: %s was written but %s is unreadable: %w", label, definition, err)
+	}
+	changed := !bytes.Equal(before, after)
+	if changed {
+		r.Log.Info(opServices, "a service's definition changed since it was loaded; it is reloaded on it", fields)
+	}
+	return changed, nil
+}
+
+// restartOn restarts the held service label: reloaded on its definition when
+// that CHANGED, in place otherwise.
+func (r *Restarter) restartOn(ctx context.Context, label string, changed bool) error {
+	if changed {
+		return r.Services.Reload(ctx, label)
+	}
+	return r.Services.Restart(ctx, label)
 }
 
 // RestartSidecar restarts the sidecar alone. The store never moved, so its
@@ -485,7 +572,11 @@ func (r *Restarter) RestartSidecar(ctx context.Context) error {
 
 func (r *Restarter) restartSidecar(ctx context.Context) error {
 	fields := dlog.Context{"sidecar": SidecarLabel}
-	if err := r.Services.Restart(ctx, SidecarLabel); err != nil {
+	changed, err := r.redefine(ctx, SidecarLabel, fields)
+	if err != nil {
+		return err
+	}
+	if err := r.restartOn(ctx, SidecarLabel, changed); err != nil {
 		r.failed("the sidecar restart failed", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", SidecarLabel, err)
 	}

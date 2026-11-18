@@ -145,8 +145,12 @@ service_load() {
         if service_held "$1"; then
             service_step launchctl "$SERVICE_LAUNCHCTL" bootout "gui/$uid" "$definition" || return
         fi
-        service_step launchctl "$SERVICE_LAUNCHCTL" bootstrap "gui/$uid" "$definition" || return
-        service_step launchctl "$SERVICE_LAUNCHCTL" kickstart -k "gui/$uid/$1"
+        # THE BOOTSTRAP STARTS IT, and nothing follows: every service is
+        # RunAtLoad. A `kickstart -k` here killed the instance the bootstrap
+        # had just started, and launchd's ThrottleInterval held its respawn
+        # for 10s, so every reload was a 10s outage (2026-11-18: the store
+        # gone from 09:46:57 to 09:47:07; reproduced with a test job).
+        service_step launchctl "$SERVICE_LAUNCHCTL" bootstrap "gui/$uid" "$definition"
     else
         service_step systemctl "$SERVICE_SYSTEMCTL" --user daemon-reload || return
         service_step systemctl "$SERVICE_SYSTEMCTL" --user enable "$1.service" || return

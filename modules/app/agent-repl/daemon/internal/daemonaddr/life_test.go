@@ -179,3 +179,54 @@ func TestAliveAnswersWhetherTheInstanceRuns(t *testing.T) {
 		})
 	}
 }
+
+func TestAnInstanceRecordsItsPrivateAddressForItsLife(t *testing.T) {
+	// Arrange
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	life, err := HoldLife(path, "a")
+	if err != nil {
+		t.Fatalf("HoldLife: %v", err)
+	}
+
+	// Act
+	_, before := InstanceAddress(path, "a")
+	recordErr := life.RecordAddress("127.0.0.1:5000")
+	got, during := InstanceAddress(path, "a")
+	releaseErr := life.Release()
+	_, after := InstanceAddress(path, "a")
+
+	// Assert
+	if !errors.Is(before, ErrNoInstanceAddress) {
+		t.Fatalf("before recording: %v, want ErrNoInstanceAddress", before)
+	}
+	if recordErr != nil || during != nil || got != "127.0.0.1:5000" {
+		t.Fatalf("recorded %q (%v, %v), want 127.0.0.1:5000", got, recordErr, during)
+	}
+	if releaseErr != nil || !errors.Is(after, ErrNoInstanceAddress) {
+		t.Fatalf("after its release: %v (%v), want no address", after, releaseErr)
+	}
+}
+
+func TestLiveOthersRemovesADeadInstancesAddressWithItsLock(t *testing.T) {
+	// Arrange: an instance that ended without releasing its files.
+	path := filepath.Join(t.TempDir(), "daemon.addr")
+	if err := os.MkdirAll(filepath.Join(filepath.Dir(path), LifeDirName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{LifePath(path, "dead"), AddressPath(path, "dead")} {
+		if err := os.WriteFile(f, []byte("127.0.0.1:1\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Act
+	live, err := LiveOthers(path, "self")
+
+	// Assert
+	if err != nil || len(live) != 0 {
+		t.Fatalf("LiveOthers = %v, %v; want no live instance", live, err)
+	}
+	if _, err := InstanceAddress(path, "dead"); !errors.Is(err, ErrNoInstanceAddress) {
+		t.Fatalf("the dead instance's address = %v, want it removed", err)
+	}
+}

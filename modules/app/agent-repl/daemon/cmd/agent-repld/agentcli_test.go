@@ -2457,12 +2457,6 @@ func TestAGateWithNoColdGateNamesTheWorkspacesStanding(t *testing.T) {
 	}
 }
 
-func transferringAway(address string) *agentreplv1.CreateWorkspaceResponse {
-	return &agentreplv1.CreateWorkspaceResponse{Result: &agentreplv1.CreateWorkspaceResponse_Error{Error: &agentreplv1.CreateWorkspaceError{
-		Cause: &agentreplv1.CreateWorkspaceError_TransferringAway{TransferringAway: &agentreplv1.CreateWorkspaceTransferringAway{Address: address}},
-	}}}
-}
-
 // TestCreateWhoseCallFailsAnswersTheErrorWithNoAnswerRead pins the create's
 // error path: a call that failed carries no answer, so the handover check
 // must not read one (a nil response panicked here on 2026-10-30).

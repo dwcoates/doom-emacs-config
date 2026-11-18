@@ -150,13 +150,14 @@ var suiteRules = []suiteRule{
 	// The shim's integration files, and the sidecar's mocked vendor, spawn the
 	// real lock helper.
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/shim-lock/", Suites: []string{"lock", "shim", "sidecar", "e2e", repoScans}},
+	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/sockethold/", Suites: []string{"sockethold", "e2e", repoScans}},
 
 	// SHARED BY SEVERAL SYSTEMS: their consumers, plus the end-to-end suites.
 	// The logging module's Go half is replaced into the daemon, the store, the
 	// sidecar, the lock helper, the test runner, zettel and the test service; its TS half is imported by the shim and the
 	// webapp (whose build harness builds the webapp).
 	{Kind: matchSubtree, Path: moduleRoot + "agent-shim/logging/", Suites: []string{
-		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "zettel", "testservice", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e-kit", "e2e", repoScans}},
+		"logging", "logging-density", "daemon", "store", "sidecar", "lock", "sockethold", "zettel", "testservice", "shim", "webapp", "build-frontend-harness", testrunSuite, "e2e-kit", "e2e", repoScans}},
 	// The TLDR-tree grammars: their consumer, the daemon (which parses every
 	// drawn text with tldr through cgo, internal/prose, and holds its reading
 	// to tldr's golden answers), the end-to-end suites whose real daemon serves

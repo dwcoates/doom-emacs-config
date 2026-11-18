@@ -357,7 +357,11 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda () agent-repl-test-host--successor))
                ((symbol-function 'agent-repl-link-successor-pending-p)
                 (lambda () agent-repl-test-host--successor-pending))
-               ((symbol-function 'agent-repl-link-primary) (lambda () nil))
+               ;; ONE SHARED ADDRESS: the primary link reaches the daemon a
+               ;; handover adopts onto, which these tests stand up as
+               ;; `agent-repl-test-host--successor'.
+               ((symbol-function 'agent-repl-link-primary)
+                (lambda () (or agent-repl-test-host--successor agent-repl-test-host--live)))
                ((symbol-function 'agent-repl-link-live)
                 (lambda () agent-repl-test-host--live))
                ((symbol-function 'agent-repl-link-ending-p)
@@ -2833,185 +2837,24 @@ Dropped unannounced, its page stream's end is drawn as a broken link."
       ;; Assert
       (should (eq (agent-repl-host-conn "ws-1") successor)))))
 
-(ert-deftest agent-repl-test-host-transferred-before-the-announcement-is-not-an-error ()
-  "A notice that overtook its own announcement is an ordering, not a breach.
-The daemon announces the stand-down and THEN transfers each free
-workspace, and the two pushes ride different streams — so which one this
-Emacs decodes first is a coin toss.  Measured in the e2e sandbox: the two
-`WatchHostWorkspaceResponse\=' transfer pushes were decoded at
-16:43:37.321 and the `DaemonShutdownAnnounced\=' at .322."
+(ert-deftest agent-repl-test-host-transferred-on-a-shared-address-adopts-on-the-primary ()
+  "On one shared address the adopt goes out on the primary link at once.
+The daemon that accepts it forwards it to the successor, so no successor
+link is waited on, whichever push came first."
   (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should-not (agent-repl-test-host--logged-p
-                 :error "elisp.host.transferred-without-successor"))))
-
-(ert-deftest agent-repl-test-host-transferred-before-the-announcement-records-the-order ()
-  "The overtaking order is recorded at INFO: it is ordinary, never a warning."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p
-             :info "elisp.host.transferred-before-the-announcement"))
-    (should-not (agent-repl-test-host--logged-p
-                 :warn "elisp.host.transferred-before-the-announcement"))))
-
-(ert-deftest agent-repl-test-host-transferred-before-the-announcement-adopts-on-acceptance ()
-  "THE DEFECT: this adopt was dropped, so the workspace was never handed over.
-The outgoing daemon then sat out its whole adoption window and the
-successor was promoted only by the old stream dying underneath it, which
-is `TestEmacsHandoverTransfersAtFreeness\=' waiting out 21s for a
-promotion healthy runs make in about two."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act — daemon-link's acceptance seam, once the announcement lands
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (equal (car agent-repl-test-host--calls)
-                     (list "AdoptHostWorkspace" successor
-                           (list :workspace (agent-repl-test-host--ref))))))))
-
-(ert-deftest agent-repl-test-host-transferred-before-the-announcement-sends-no-adopt-yet ()
-  "Nothing is sent to a daemon this Emacs has not even dialed."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
-
-(ert-deftest agent-repl-test-host-transferred-before-the-announcement-keeps-the-stream ()
-  "A workspace whose old stream was dropped would be served by nobody."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should (null agent-repl-test-host--cancelled))))
-
-(ert-deftest agent-repl-test-host-transferred-while-the-successor-is-pending-is-not-an-error ()
-  "The announced successor is dialed but unaccepted; that is a wait, not a breach."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should-not (agent-repl-test-host--logged-p
-                 :error "elisp.host.transferred-without-successor"))))
-
-(ert-deftest agent-repl-test-host-transferred-while-the-successor-is-pending-records-the-wait ()
-  "\"Where did this transfer go\" is a real question and this line is its answer."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p
-             :info "elisp.host.transferred-awaiting-successor"))))
-
-(ert-deftest agent-repl-test-host-transferred-while-the-successor-is-pending-sends-no-adopt-yet ()
-  "An unaccepted daemon has not proven it is listening, so nothing is sent to it."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
-
-(ert-deftest agent-repl-test-host-transferred-while-the-successor-is-pending-keeps-the-old-stream ()
-  "Until the adopt lands the old daemon is still the only one serving the workspace."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    ;; Assert
-    (should (null agent-repl-test-host--cancelled))))
-
-(ert-deftest agent-repl-test-host-transferred-adopts-once-the-pending-successor-is-accepted ()
-  "The defect: this adopt was never sent, so the workspace was never handed over."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act — daemon-link's acceptance seam
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (equal (car agent-repl-test-host--calls)
-                     (list "AdoptHostWorkspace" successor
-                           (list :workspace (agent-repl-test-host--ref))))))))
-
-(ert-deftest agent-repl-test-host-transferred-adopts-only-once-on-acceptance ()
-  "The latch is self-removing; a second acceptance must not re-adopt."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (= 1 (seq-count (lambda (call) (equal (car call) "AdoptHostWorkspace"))
-                              agent-repl-test-host--calls))))))
-
-(ert-deftest agent-repl-test-host-transferred-latches-every-waiting-workspace ()
-  "A stand-down transfers EVERY free workspace, so every one must latch.
-Each latch is its own self-removing closure on the shared acceptance
-hook, and `add-hook' compares candidates against what already hangs
-there — so two workspaces waiting at once is the arrangement that proves
-neither the dedup nor the self-reference swallows the second one."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--subscribe
-     "ws-2" nil (agent-repl-test-host--ref "id-2" "/tmp/ws-2"))
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    (agent-repl-test-host--push "ws-2" (list :arm :transferred :value nil))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (= 2 (seq-count (lambda (call) (equal (car call) "AdoptHostWorkspace"))
-                              agent-repl-test-host--calls))))))
+    ;; Arrange: no successor link stands, and the daemons share one address.
+    (let ((primary (agent-repl-connect-open "127.0.0.1:9001")))
+      (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () primary))
+)
+        (agent-repl-test-host--subscribe "ws-1")
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
+        ;; Assert
+        (let ((adopt (seq-find (lambda (call) (equal (car call) "AdoptHostWorkspace"))
+                               agent-repl-test-host--calls)))
+          (should adopt)
+          (should (eq (nth 1 adopt) primary)))
+        (should (agent-repl-test-host--logged-p :info "elisp.host.transferred ws=ws-1 adopting=t"))))))
 
 (ert-deftest agent-repl-test-host-transferred-prefers-a-standing-successor-over-the-wait ()
   "An accepted successor is adopted onto AT ONCE; the wait is only for the pending case."
@@ -3252,21 +3095,6 @@ moved to the successor goes back to the daemon that serves it."
       ;; Assert
       (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls))))))
 
-(ert-deftest agent-repl-test-host-transfer-withdrawn-before-acceptance-adopts-nothing ()
-  "A notice withdrawn while the successor was pending wakes no adopt."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--push "ws-1" (list :arm :transferred :value nil))
-    (agent-repl-test-host--push "ws-1" (list :arm :transfer-withdrawn :value nil))
-    (setq agent-repl-test-host--calls nil)
-    ;; Act
-    (run-hook-with-args 'agent-repl-link-handover-functions nil
-                        (agent-repl-connect-open "127.0.0.1:9100"))
-    ;; Assert
-    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
-
 (ert-deftest agent-repl-test-host-transfer-withdrawn-with-no-adopt-is-logged-at-info ()
   "A withdrawal with nothing in flight is ordinary, so it is INFO."
   (agent-repl-test-host--with-harness
@@ -3278,27 +3106,26 @@ moved to the successor goes back to the daemon that serves it."
     (should (agent-repl-test-host--logged-p :info "elisp.host.transfer-withdrawn ws=ws-1 adopt=none"))))
 
 (defmacro agent-repl-test-host--with-adopt-failing-across-promotion (&rest body)
-  "Run BODY with every adopt failing after its successor is promoted to primary.
-The successor slot empties and the primary link becomes the successor's
-connection BEFORE the answer lands, which is the order a promotion makes."
+  "Run BODY with every adopt failing after the primary link is promoted.
+On one shared address the adopt goes out on the primary link, and the
+promotion replaces that link with the redial the next daemon accepted
+BEFORE the answer lands, which is the order a promotion makes."
   (declare (indent 0))
-  `(let ((primary nil)
-         (agent-repl--workspaces (make-hash-table :test #'equal)))
+  `(let* ((primary (agent-repl-connect-open "127.0.0.1:9001"))
+          (promoted (agent-repl-connect-open "127.0.0.1:9100"))
+          (agent-repl--workspaces (make-hash-table :test #'equal)))
      (puthash "ws-1" '(:project-dir "/tmp/ws-1") agent-repl--workspaces)
-     (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100")
-           agent-repl-test-host--adopt-answer
+     (setq agent-repl-test-host--adopt-answer
            (list :failure (list :kind :timeout :message "no answer")))
-     (agent-repl-test-host--subscribe "ws-1")
+     (agent-repl-test-host--subscribe "ws-1" primary)
      (cl-letf (((symbol-function 'agent-repl-link-primary) (lambda () primary))
                ((symbol-function 'agent-repl-rpc-adopt-host-workspace)
                 (lambda (_conn _request &rest keys)
-                  (setq primary agent-repl-test-host--successor
-                        agent-repl-test-host--successor nil)
+                  (setq primary promoted)
                   (agent-repl-test-host--answer agent-repl-test-host--adopt-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure)))))
        ,@body)))
-
 (ert-deftest agent-repl-test-host-adopt-failure-after-promotion-registers-on-the-promoted-daemon ()
   "An adopt in flight across the promotion registers the workspace on the promoted daemon."
   (agent-repl-test-host--with-harness
@@ -4068,68 +3895,6 @@ than being handed an arbitrary substitute."
     ;; Assert
     (should (null agent-repl-test-host--dialled))))
 
-(ert-deftest agent-repl-test-host-transferring-away-dials-when-no-successor-stands ()
-  "The refusal can be the FIRST news of a handover: Emacs dials the address."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-host-handle-refusal
-     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
-    ;; Assert
-    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9100")))))
-
-(ert-deftest agent-repl-test-host-transferring-away-redials-a-stale-successor ()
-  "A successor standing at a DIFFERENT address is stale; the refusal wins."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9999"))
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-host-handle-refusal
-     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
-    ;; Assert
-    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9100")))))
-
-(ert-deftest agent-repl-test-host-transferring-away-logs-the-redial ()
-  "The dial is on the record as `elisp.host.redial'."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-host-handle-refusal
-     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
-    ;; Assert
-    (should (agent-repl-test-host--logged-p :info "elisp.host.redial"))))
-
-(ert-deftest agent-repl-test-host-transferring-away-waits-for-an-unaccepted-dial ()
-  "Adopting onto a daemon that has not answered is what the gate forbids."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--dial-accepts nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-host-handle-refusal
-     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
-    ;; Assert
-    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
-
-(ert-deftest agent-repl-test-host-transferring-away-adopts-once-the-dial-is-accepted ()
-  "Acceptance itself wakes the adopt; nothing polls."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--dial-accepts nil)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-host-handle-refusal
-     "ws-1" '(:arm :transferring-away :value (:address "127.0.0.1:9100")))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act — daemon-link's acceptance seam
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (equal (car agent-repl-test-host--calls)
-                     (list "AdoptHostWorkspace" successor
-                           (list :workspace (agent-repl-test-host--ref))))))))
-
 (ert-deftest agent-repl-test-host-transferring-away-without-an-address-is-an-error ()
   "The address is the whole content of the arm; without it nothing can act."
   (agent-repl-test-host--with-harness
@@ -4254,6 +4019,7 @@ retry is scheduled: retrying flipped the webview between the daemons."
 (ert-deftest agent-repl-test-host-not-yet-adopted-is-info-not-an-error ()
   "The successor simply has not taken the workspace over yet."
   (agent-repl-test-host--with-harness
+    (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9001"))
     ;; Arrange
     (agent-repl-test-host--subscribe "ws-1")
     ;; Act
@@ -4275,42 +4041,6 @@ retry is scheduled: retrying flipped the webview between the daemons."
                      (list "AdoptHostWorkspace" successor
                            (list :workspace (agent-repl-test-host--ref))))))))
 
-(ert-deftest agent-repl-test-host-not-yet-adopted-waits-when-no-successor-stands ()
-  "Nothing is adopted onto a successor that has not been accepted."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
-    ;; Assert
-    (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))
-
-(ert-deftest agent-repl-test-host-not-yet-adopted-retries-on-acceptance ()
-  "Acceptance wakes the retry — one hook, no poll and no busy loop."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (agent-repl-test-host--logged-p :info "elisp.host.adopt-retry")))))
-
-(ert-deftest agent-repl-test-host-adopt-retry-hook-removes-itself ()
-  "The retry is ONE-SHOT: a later handover must not re-adopt out of nowhere."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-host-handle-refusal "ws-1" '(:arm :not-yet-adopted :value nil))
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      (setq agent-repl-test-host--calls nil)
-      ;; Act
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (null agent-repl-test-host--calls)))))
-
 (defconst agent-repl-test-host--served-elsewhere
   '(:arm :not-yet-adopted :value (:address "127.0.0.1:6666"))
   "A `not_yet_adopted' naming the daemon that serves the workspace meanwhile.")
@@ -4320,56 +4050,6 @@ retry is scheduled: retrying flipped the webview between the daemons."
   (declare (indent 0))
   `(let ((agent-repl-link--serving-conns (make-hash-table :test #'equal)))
      ,@body))
-
-(ert-deftest agent-repl-test-host-not-yet-adopted-naming-a-daemon-registers-the-workspace-there ()
-  "A refusal naming the serving daemon re-attaches the workspace to it."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-serving-conns
-      ;; Arrange
-      (agent-repl-test-host--subscribe "ws-1")
-      (let ((walked nil))
-        (cl-letf (((symbol-function 'agent-repl-host--reattach)
-                   (lambda (ws conn claim trigger &rest _)
-                     (push (list ws (agent-repl-connect-connection-address conn) claim trigger) walked))))
-          ;; Act
-          (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
-          ;; Assert
-          (should (equal walked '(("ws-1" "127.0.0.1:6666" :register "not-yet-adopted")))))))))
-
-(ert-deftest agent-repl-test-host-not-yet-adopted-naming-a-daemon-adopts-nothing ()
-  "A workspace viewed where it is served is not adopted onto the successor."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-serving-conns
-      ;; Arrange
-      (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
-      (agent-repl-test-host--subscribe "ws-1")
-      ;; Act
-      (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
-      ;; Assert
-      (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls))))))
-
-(ert-deftest agent-repl-test-host-not-yet-adopted-naming-a-daemon-is-recorded-at-info ()
-  "Viewing a workspace where it is served is recorded with the daemon."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-serving-conns
-      ;; Arrange
-      (agent-repl-test-host--subscribe "ws-1")
-      ;; Act
-      (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
-      ;; Assert
-      (should (agent-repl-test-host--logged-p :info "elisp.host.view-where-served")))))
-
-(ert-deftest agent-repl-test-host-not-yet-adopted-naming-the-daemon-already-serving-walks-nothing ()
-  "A workspace already standing on the named daemon is not walked again."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-serving-conns
-      ;; Arrange
-      (agent-repl-test-host--subscribe "ws-1" (agent-repl-connect-open "127.0.0.1:6666"))
-      (setq agent-repl-test-host--calls nil)
-      ;; Act
-      (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
-      ;; Assert
-      (should (null (assoc "RegisterWorkspace" agent-repl-test-host--calls))))))
 
 (ert-deftest agent-repl-test-host-a-refusal-naming-a-daemon-is-routed-at-once ()
   "A `not_yet_adopted' naming the serving daemon is not put off to a timer."
@@ -4423,6 +4103,7 @@ retry is scheduled: retrying flipped the webview between the daemons."
 (ert-deftest agent-repl-test-host-a-select-refused-by-the-daemon-already-serving-is-not-sent-again ()
   "A selection refused by the very daemon named is not sent again, or it loops."
   (agent-repl-test-host--with-harness
+    (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9001"))
     (agent-repl-test-host--with-serving-conns
       (let ((agent-repl-host--reselect-on-reattach "ws-1"))
         ;; Arrange
@@ -5013,34 +4694,6 @@ made, and a fresh Emacs drew every workspace severed."
     (should (agent-repl-test-host--logged-p :info "elisp.host.stream-refused-transferred ws=ws-1"))
     (should-not (agent-repl-test-host--logged-p :error "elisp.host.stream-lost"))))
 
-(ert-deftest agent-repl-test-host-stream-refused-transferred-adopts-once-the-successor-is-accepted ()
-  "With the successor's dial not yet accepted, the adopt waits on acceptance."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    (agent-repl-test-host--refuse-transferred "ws-1")
-    (let ((successor (agent-repl-connect-open "127.0.0.1:9100")))
-      ;; Act
-      (run-hook-with-args 'agent-repl-link-handover-functions nil successor)
-      ;; Assert
-      (should (equal (car agent-repl-test-host--calls)
-                     (list "AdoptHostWorkspace" successor
-                           (list :workspace (agent-repl-test-host--ref))))))))
-
-(ert-deftest agent-repl-test-host-stream-refused-transferred-leaves-the-workspace-detached-until-adopted ()
-  "Until a successor adopts it, the workspace is detached for the link's edges to walk."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor nil
-          agent-repl-test-host--successor-pending t)
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--refuse-transferred "ws-1")
-    ;; Assert
-    (should (plist-get (agent-repl-host--entry "ws-1") :detached))))
-
 (ert-deftest agent-repl-test-host-other-failed-precondition-close-is-still-lost ()
   "Only the two handover arms are a handover; another refusal stays a loss."
   (agent-repl-test-host--with-harness
@@ -5061,9 +4714,27 @@ made, and a fresh Emacs drew every workspace severed."
                               :message (concat "WatchHostWorkspace closed the stream: not_yet_adopted: "
                                                "workspace \"0123456789abcdef\" has not been adopted by this daemon yet")))))
 
+(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-adopts-on-the-primary ()
+  "A stream refused not-yet-adopted adopts on the primary link, which forwards it.
+On one shared address the daemon it reaches is the one adopting WS."
+  (agent-repl-test-host--with-harness
+    (agent-repl-test-host--with-dir
+      ;; Arrange
+      (let ((primary (agent-repl-connect-open "127.0.0.1:9001")))
+        (setq agent-repl-test-host--live primary)
+        (agent-repl-test-host--subscribe "ws-1" primary)
+        (setq agent-repl-test-host--calls nil)
+        ;; Act
+        (agent-repl-test-host--refuse-not-yet-adopted "ws-1")
+        ;; Assert
+        (let ((adopt (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))
+          (should adopt)
+          (should (eq (nth 1 adopt) primary)))))))
+
 (ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-is-not-a-loss ()
   "A not-yet-adopted refusal is recorded at INFO, never stream-lost."
   (agent-repl-test-host--with-harness
+    (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9001"))
     (agent-repl-test-host--with-dir
       ;; Arrange
       (agent-repl-test-host--subscribe "ws-1")
@@ -5088,22 +4759,6 @@ made, and a fresh Emacs drew every workspace severed."
                      (list "AdoptHostWorkspace" successor
                            (list :workspace (agent-repl-test-host--ref))))))))
 
-(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-registers-on-the-live-daemon ()
-  "With no successor, the refused workspace follows the live daemon and registers."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-dir
-      ;; Arrange
-      (let ((old (agent-repl-connect-open "127.0.0.1:61043"))
-            (live (agent-repl-connect-open "127.0.0.1:58175")))
-        (agent-repl-test-host--subscribe "ws-1" old)
-        (setq agent-repl-test-host--live live
-              agent-repl-test-host--calls nil)
-        ;; Act
-        (agent-repl-test-host--refuse-not-yet-adopted "ws-1")
-        ;; Assert
-        (should (equal (agent-repl-test-host--calls-to "RegisterWorkspace" live)
-                       (list (list "RegisterWorkspace" live '(:dir "/tmp/ws-1")))))))))
-
 ;; A REFUSED STREAM THAT NAMES ITS DAEMON (`agent-repl-connect-refusal-address')
 ;; is followed there, as a unary refusal's `address' is.
 
@@ -5114,40 +4769,10 @@ made, and a fresh Emacs drew every workspace severed."
                               :message (format "WatchHostWorkspace closed the stream: %s: elsewhere" arm)
                               :address address))))
 
-(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-naming-a-daemon-registers-there ()
-  "A stream refused not_yet_adopted naming the daemon that serves the workspace
-meanwhile views it there: the workspace registers on that daemon."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-serving-conns
-      (agent-repl-test-host--with-dir
-        ;; Arrange
-        (agent-repl-test-host--subscribe "ws-1")
-        (setq agent-repl-test-host--calls nil)
-        ;; Act
-        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
-        ;; Assert
-        (should (equal (mapcar (lambda (call)
-                                 (list (car call) (agent-repl-connect-connection-address (nth 1 call))))
-                               (cl-remove-if-not (lambda (call) (equal (car call) "RegisterWorkspace"))
-                                                 agent-repl-test-host--calls))
-                       '(("RegisterWorkspace" "127.0.0.1:6666"))))))))
-
-(ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-naming-a-daemon-adopts-nothing ()
-  "A workspace viewed where it is served is not adopted onto a standing successor."
-  (agent-repl-test-host--with-harness
-    (agent-repl-test-host--with-serving-conns
-      (agent-repl-test-host--with-dir
-        ;; Arrange
-        (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
-        (agent-repl-test-host--subscribe "ws-1")
-        ;; Act
-        (agent-repl-test-host--refuse-naming "ws-1" "not_yet_adopted" "127.0.0.1:6666")
-        ;; Assert
-        (should (null (assoc "AdoptHostWorkspace" agent-repl-test-host--calls)))))))
-
 (ert-deftest agent-repl-test-host-stream-refused-not-yet-adopted-records-the-serving-daemon ()
   "The refusal is recorded at INFO naming the daemon that serves the workspace."
   (agent-repl-test-host--with-harness
+    (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9001"))
     (agent-repl-test-host--with-serving-conns
       (agent-repl-test-host--with-dir
         ;; Arrange
@@ -5157,29 +4782,6 @@ meanwhile views it there: the workspace registers on that daemon."
         ;; Assert
         (should (agent-repl-test-host--logged-p
                  :info "elisp.host.stream-refused-not-yet-adopted ws=ws-1 serving=\"127.0.0.1:6666\""))))))
-
-(ert-deftest agent-repl-test-host-stream-refused-transferred-naming-a-successor-dials-it ()
-  "A stream refused transferring_away naming its successor dials that address,
-not the successor the link recorded."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (setq agent-repl-test-host--successor (agent-repl-connect-open "127.0.0.1:9100"))
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--refuse-naming "ws-1" "transferring_away" "127.0.0.1:9200")
-    ;; Assert
-    (should (equal agent-repl-test-host--dialled '("127.0.0.1:9200")))))
-
-(ert-deftest agent-repl-test-host-stream-refused-transferred-naming-a-successor-records-it ()
-  "The refusal is recorded at INFO naming the successor."
-  (agent-repl-test-host--with-harness
-    ;; Arrange
-    (agent-repl-test-host--subscribe "ws-1")
-    ;; Act
-    (agent-repl-test-host--refuse-naming "ws-1" "transferring_away" "127.0.0.1:9200")
-    ;; Assert
-    (should (agent-repl-test-host--logged-p
-             :info "elisp.host.stream-refused-transferred ws=ws-1 address=\"127.0.0.1:9200\""))))
 
 (ert-deftest agent-repl-test-host-stream-lost-registers-on-the-live-daemon ()
   "A lost stream re-registers the workspace on the daemon the link now names."
@@ -6290,21 +5892,6 @@ the workspace on the successor the refusal names."
     ;; Assert
     (should-not (seq-some (lambda (entry) (eq (car entry) :error)) agent-repl-test-host--logs))
     (should (agent-repl-test-host--logged-p :info "elisp.host.register-transferring-away"))))
-
-(ert-deftest agent-repl-test-host-register-walk-handed-away-to-an-unaccepted-successor-is-not-detached ()
-  "A successor not accepted yet adopts the workspace on its acceptance, so the
-register walk ends at INFO and arms no detached re-walk."
-  (agent-repl-test-host--registering-at-the-incumbent
-    ;; Arrange
-    (setq agent-repl-test-host--dial-accepts nil)
-    ;; Act
-    (agent-repl-host--reattach "ws-1" incumbent :register "not-yet-adopted")
-    ;; Assert
-    (should-not (plist-get (agent-repl-host--entry "ws-1") :detached))
-    (should (plist-get (agent-repl-host--entry "ws-1") :adopt-pending))
-    (should (agent-repl-test-host--logged-p
-             :info "elisp.host.not-yet-adopted-register-handed-over ws=ws-1"))
-    (should-not (seq-some (lambda (entry) (eq (car entry) :error)) agent-repl-test-host--logs))))
 
 (ert-deftest agent-repl-test-host-batched-walk-refused-transferring-away-adopts-on-the-successor ()
   "Each dir of a batch refused transferring_away walks on to the successor,

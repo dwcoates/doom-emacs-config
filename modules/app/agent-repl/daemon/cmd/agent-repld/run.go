@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"agent-repld/internal/boot"
+	"agent-repld/internal/checkout"
 	"agent-repld/internal/daemonaddr"
+	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/envc"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/kernelevent"
@@ -24,11 +27,13 @@ import (
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/server"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/tempdirs"
 	"agent-repld/internal/wsm"
 	"agentrepl/logging/hostpower"
+	"agentrepl/logging/sockethold"
 )
 
 // process is what the boot spine resolved before any component was built. It is
@@ -51,6 +56,9 @@ type process struct {
 	// Claim is the bound loopback listener and the advertisement it may
 	// publish.
 	Claim daemonaddr.Claim
+	// Shared takes the shared listener from the daemon's socket holder at
+	// the takeover's publication (sharedTake).
+	Shared *sharedTake
 	// Metrics is the always-on metrics surface, nil when it is off. Its
 	// target is advertised exactly when daemon.addr is published.
 	Metrics *runtimemetrics.Surface
@@ -102,6 +110,11 @@ type hooks struct {
 	// Restarts records the boot's phases; nil records them on the daemon's
 	// own metrics surface, which is what production does.
 	Restarts restarttiming.Recorder
+	// Holders answers the socket holders the checkout's requirements declare
+	// and the installer that brings one up (holderensure). REQUIRED.
+	// Production reads the checkout this binary was deployed from; a test
+	// declares none, so a test daemon never installs a holder.
+	Holders func(log dlog.Logger) (holders []holderensure.Holder, install func(ctx context.Context, id string) error, err error)
 }
 
 // productionHooks are the real seams.
@@ -114,7 +127,31 @@ func productionHooks() hooks {
 		ClaimWait: daemonaddr.ClaimWaitBound,
 		Started:   processStarted,
 		Now:       time.Now,
+		Holders:   declaredHolders,
 	}
+}
+
+// declaredHolders reads the socket holders the requirements of the checkout
+// this binary was deployed from declare, and answers its installer
+// (bin/requirements.sh ensure-holder, run in that checkout).
+func declaredHolders(log dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+	root, err := checkout.Root(mustExecutable())
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the checkout whose requirements declare the socket holders: %w", err)
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the home directory a holder's control socket expands against: %w", err)
+	}
+	holders, err := holderensure.Declared(root, home)
+	if err != nil {
+		return nil, nil, err
+	}
+	runner, err := scriptrunner.New(log)
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the runner the holder installer runs on: %w", err)
+	}
+	return holders, deploy.ScriptRequirements{ModuleRoot: root, Runner: runner}.EnsureHolder, nil
 }
 
 // run is the daemon's boot spine, in the settled order:
@@ -326,6 +363,43 @@ func run(ctx context.Context, opts options, h hooks) error {
 	}
 	defer teardown.step("claim_close", func() { claim.Close() })
 	bootTimer.Reached(restarttiming.BootClaim)
+	// THE PRIVATE ADDRESS IS RECORDED BESIDE THE LIFE LOCK, so a daemon that
+	// accepts a call for a workspace this one serves can forward it here
+	// (docs/investigations/2026-11-18-stable-sockets-design.md, D1).
+	if err := life.RecordAddress(claim.Address()); err != nil {
+		log.Error("daemon.cmd.life", "this daemon's private address could not be recorded", dlog.Context{
+			"instance": string(instance), "address": claim.Address(), "error": err.Error()})
+		return fmt.Errorf("agent-repld: record the private address: %w", err)
+	}
+	// A DAEMON SERVES ONLY THE SHARED ADDRESS ITS SOCKET HOLDER KEEPS: the
+	// address that outlives every daemon is the one every client reaches, and
+	// a daemon advertising its own listener would hand clients an address that
+	// closes with it (docs/investigations/2026-11-18-stable-sockets-design.md).
+	//
+	// THE HOLDER IS THE ONE ITS REQUIREMENT DECLARES unless --holder names
+	// another (a test's own), so a successor spawned from an incumbent's argv
+	// that predates the flag still reaches it.
+	holders, installHolder, err := h.Holders(log)
+	if err != nil {
+		log.Error("daemon.cmd.holder", "the socket holders the requirements declare could not be read", dlog.Context{
+			"state_root": layout.Dir(), "error": err.Error()})
+		return err
+	}
+	holder := opts.holder
+	if holder == "" {
+		if holder, err = holderensure.ControlOf(holders, holderensure.DaemonHolder); err != nil {
+			log.Error("daemon.cmd.holder", "the daemon was given no socket holder, and no requirement declares its holder", dlog.Context{
+				"state_root": layout.Dir(), "error": err.Error()})
+			return fmt.Errorf("agent-repld: no socket holder: the daemon serves only the shared address its socket holder keeps: %w", err)
+		}
+	}
+
+	accept := server.NewSharedAccept(claim.Listener())
+	shared := &sharedTake{holder: holder, accept: accept, claim: claim, log: log,
+		ensure: (&holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe, Install: installHolder, Log: log}).Ensure}
+	if err := shared.acquire(); err != nil {
+		return fmt.Errorf("agent-repld: %w", err)
+	}
 	// THE WAIT IS SAID. A held claim is an outgoing daemon still exiting, and
 	// a replacement waiting it out was a silent gap in the run log.
 	log.Info("daemon.cmd.claim", "took the boot claim", dlog.Context{
@@ -363,7 +437,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 				"addr_path":     layout.DaemonAddr(),
 			})
 		}
-		if err := publishOwnership(claim, metricsSurface); err != nil {
+		if err := publishOwnership(claim, metricsSurface, shared); err != nil {
 			log.Error("daemon.cmd.claim", "the daemon's advertisement could not be published", dlog.Context{
 				"address":      claim.Address(),
 				"metrics_root": opts.metricsRoot,
@@ -510,6 +584,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 		Surfaces:   surfaces,
 		DB:         db,
 		Claim:      claim,
+		Shared:     shared,
 		Metrics:    metricsSurface,
 		Reconnects: reconnects,
 		Instance:   instance,
@@ -727,8 +802,8 @@ func run(ctx context.Context, opts options, h hooks) error {
 			})
 		}
 	}
-	serveErr := h.Serve(serving, server.RetryAccept(claim.Listener(), log), server.H2C(srv, log), serveExit{
-		OnShuttingDown: beginShutdown(claim, withdrawal, log),
+	serveErr := h.Serve(serving, server.RetryAccept(accept, log), server.H2C(srv, log), serveExit{
+		OnShuttingDown: beginShutdown(claim, accept, withdrawal, log),
 		AwaitCreates:   built.AwaitCreates,
 		EndStreams:     endStreams,
 		Mark:           teardown.mark,
@@ -917,7 +992,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		return fmt.Errorf("agent-repld: the serving handler carries no in-flight request gate; an orderly exit would cut every call it is still answering")
 	}
 	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: exit.Log}
-	srv := &http.Server{Handler: h, ConnState: conns.track}
+	srv := &http.Server{Handler: closingHTTP1(h), ConnState: conns.track}
 	// A CONNECTION THAT HAS DELIVERED NO REQUEST OWES NOTHING, and
 	// `Server.Shutdown` waits for it anyway: it polls, on an interval that
 	// doubles to 500ms, until every connection it tracks is idle, and a
@@ -1039,7 +1114,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		// admitted, answered by nobody the exit waited for, and cut by the
 		// process exit: an incumbent asked something in its last milliseconds
 		// after a handover read `unexpected EOF` instead of its typed
-		// `transferring_away` (`TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway`).
+		// `transferring_away` (`TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor`).
 		// The listener is closed now, so no connection arrives; every h2
 		// connection is sent its GOAWAY, after which a new stream is never
 		// admitted and its client opens it anew; and the streams admitted
@@ -1137,6 +1212,26 @@ func (c *connStates) summary() string {
 	return out
 }
 
+// closingHTTP1 answers every HTTP/1.1 request with `Connection: close`, so an
+// HTTP/1.1 connection ends right after the response that says so and none is
+// ever left idle. ON THE SHARED ADDRESS A CONNECTION IS THE DAEMON'S THAT
+// ACCEPTED IT: an idle keep-alive connection a departing daemon closed raced
+// the request its client was sending on it (2026-11-18: a page reloaded onto
+// the shared address mid-handover read "fetch failed" for its adopt, sent on
+// a pooled connection the incumbent closed as it exited), and no client can
+// tell a close it raced from a refusal. A fresh loopback connection per call
+// is cheap; every stream is one long request anyway. HTTP/2 connections end
+// with their GOAWAY (serve), which tells the client which streams it may
+// send again.
+func closingHTTP1(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 1 {
+			w.Header().Set("Connection", "close")
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // shutdownGrace is how long in-flight requests have to finish before the
 // standing streams are closed underneath them.
 const shutdownGrace = 2 * time.Second
@@ -1182,7 +1277,10 @@ func expectBootReconnects(ctx context.Context, db interface {
 	return nil
 }
 
-func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface) error {
+func publishOwnership(claim interface{ Publish() error }, surface *runtimemetrics.Surface, shared *sharedTake) error {
+	if err := shared.take(); err != nil {
+		return err
+	}
 	if err := claim.Publish(); err != nil {
 		return fmt.Errorf("publish daemon.addr: %w", err)
 	}
@@ -1212,8 +1310,18 @@ type departer interface {
 // and the serving lock still held, and refuse to replace a daemon on its way
 // out. A failed departure is ERROR and the withdrawal still runs: the worst it
 // leaves is a booting daemon that refuses where it would have waited.
-func beginShutdown(claim departer, withdrawal *addrWithdrawal, log dlog.Logger) func() {
+func beginShutdown(claim departer, accept sharedStopper, withdrawal *addrWithdrawal, log dlog.Logger) func() {
 	return func() {
+		// THE SHARED LISTENER STOPS FIRST, before anything the next daemon
+		// waits on is released: from here on a connect to the shared address
+		// queues for the daemon that takes the boot claim next, and none
+		// reaches this one (docs/investigations/
+		// 2026-11-18-stable-sockets-design.md, D2).
+		if err := accept.StopShared(); err != nil {
+			log.Error("daemon.cmd.exit", "the shared listener could not be stopped at the start of shutdown", dlog.Context{
+				"error": err.Error(),
+			})
+		}
 		if err := claim.Depart(); err != nil {
 			log.Error("daemon.cmd.exit", "the serving lock could not be released at the start of shutdown", dlog.Context{
 				"error": err.Error(),

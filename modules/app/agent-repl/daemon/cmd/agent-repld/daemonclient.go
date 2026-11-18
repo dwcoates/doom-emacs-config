@@ -2,21 +2,14 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"net/http"
-	"os"
-	"sync"
 
 	"connectrpc.com/connect"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
 	"agent-repld/internal/h2cclient"
-	"agent-repld/internal/server"
 
 	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/stateroot"
@@ -26,127 +19,12 @@ import (
 // steps: find the address the daemon advertises in its state root, and dial it.
 
 // newDaemonClient is a client for the daemon at a loopback address: h2c on
-// the daemon's one origin.
+// the daemon's one origin. THE ADDRESS IS THE SHARED ONE every daemon serves
+// (docs/investigations/2026-11-18-stable-sockets-design.md): a call for a
+// workspace another daemon serves is forwarded there by the daemon that
+// accepted it, so the client never follows a handover itself.
 func newDaemonClient(address string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
-	return newRedirectingClient(h2cClient().Transport, address, os.Stderr, options...)
-}
-
-// newRedirectingClient is a client for the daemon at ADDRESS over BASE that
-// FOLLOWS A HANDOVER (2026-11-10): a unary call a daemon answers with its
-// `transferring_away` refusal, naming the successor it handed the workspace
-// to, is sent once more, unchanged, to that successor, and every later call
-// of the client goes there too. During a rolling deploy the advertised daemon
-// is the incumbent until every workspace has moved, while a workspace it has
-// already handed over is the successor's; without this, every verb a mid-turn
-// workspace ran was refused for the whole handover, so it could not store its
-// links, tell its parent or finish. A refusal is a call that did nothing, so
-// sending it again is safe; a successor that is itself handing over is
-// answered as refused, never chased further. NOTE tells the caller of the
-// resend.
-func newRedirectingClient(base http.RoundTripper, address string, note io.Writer, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
-	redirect := &successorRedirect{base: base, note: note}
-	options = append(options, connect.WithInterceptors(redirect.interceptor()))
-	return agentreplv1connect.NewAgentReplClient(&http.Client{Transport: redirect}, "http://"+address, options...)
-}
-
-// successorRedirect sends a client's calls to the successor a handover named,
-// once one has.
-type successorRedirect struct {
-	base http.RoundTripper
-	note io.Writer
-
-	mu   sync.Mutex
-	host string
-}
-
-// RoundTrip sends REQ to the successor when a handover named one, and where
-// it was addressed otherwise.
-func (r *successorRedirect) RoundTrip(req *http.Request) (*http.Response, error) {
-	r.mu.Lock()
-	host := r.host
-	r.mu.Unlock()
-	if host != "" {
-		req = req.Clone(req.Context())
-		req.URL.Host, req.Host = host, host
-	}
-	return r.base.RoundTrip(req)
-}
-
-// interceptor resends a unary call refused as transferring away to the
-// successor the refusal names, once per client.
-func (r *successorRedirect) interceptor() connect.UnaryInterceptorFunc {
-	return func(next connect.UnaryFunc) connect.UnaryFunc {
-		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			resp, err := next(ctx, req)
-			successor := successorOf(resp, err)
-			if successor == "" {
-				return resp, err
-			}
-			r.mu.Lock()
-			followed := r.host != ""
-			if !followed {
-				r.host = successor
-			}
-			r.mu.Unlock()
-			if followed {
-				return resp, err
-			}
-			fmt.Fprintf(r.note, "agent-repld: the daemon is handing over; sending the call to its successor at %s\n", successor)
-			return next(ctx, req)
-		}
-	}
-}
-
-// successorOf answers the successor a call's answer names as refused
-// transferring away, in either of its shapes: the typed arm of the answer, or
-// the error a verb with no such arm answers, whose metadata names it
-// (server.SuccessorHeader). "" when the call was no handover refusal.
-func successorOf(resp connect.AnyResponse, err error) string {
-	if err != nil {
-		var refused *connect.Error
-		if errors.As(err, &refused) {
-			return refused.Meta().Get(server.SuccessorHeader)
-		}
-		return ""
-	}
-	if resp == nil {
-		return ""
-	}
-	msg, ok := resp.Any().(proto.Message)
-	if !ok {
-		return ""
-	}
-	return transferredTo(msg.ProtoReflect(), 0)
-}
-
-// maxRefusalDepth bounds the search for a refusal in an answer: an answer's
-// error arm sits a level or two below its root.
-const maxRefusalDepth = 4
-
-// transferredTo answers the successor address of the `transferring_away`
-// refusal MSG carries, or "" when it carries none: every answer of the
-// contract names that refusal the same way, a `transferring_away` message
-// whose `address` is the successor.
-func transferredTo(msg protoreflect.Message, depth int) string {
-	if depth > maxRefusalDepth {
-		return ""
-	}
-	var found string
-	msg.Range(func(fd protoreflect.FieldDescriptor, v protoreflect.Value) bool {
-		if fd.Kind() != protoreflect.MessageKind || fd.IsList() || fd.IsMap() {
-			return true
-		}
-		sub := v.Message()
-		if fd.Name() == "transferring_away" {
-			if address := sub.Descriptor().Fields().ByName("address"); address != nil && address.Kind() == protoreflect.StringKind {
-				found = sub.Get(address).String()
-			}
-			return found == ""
-		}
-		found = transferredTo(sub, depth+1)
-		return found == ""
-	})
-	return found
+	return agentreplv1connect.NewAgentReplClient(h2cClient(), "http://"+address, options...)
 }
 
 // h2cClient is the transport every verb dials the daemon with: HTTP/2 in

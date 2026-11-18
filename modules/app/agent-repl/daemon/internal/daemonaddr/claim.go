@@ -26,7 +26,11 @@ type claim struct {
 	ln       net.Listener
 	addrPath string
 	address  string
-	pid      int
+	// advertised is the address daemon.addr names: the shared address the
+	// daemon's socket holder keeps, once Advertise named it, and this claim's
+	// own address otherwise.
+	advertised string
+	pid        int
 	// root is the state root's identity at bind, so Verify can tell a
 	// directory recreated at the same path from the one this claim lives in.
 	root os.FileInfo
@@ -77,6 +81,12 @@ func (c *claim) holdLocked(lock *bootLock) error {
 // on-disk format.
 const pidLinePrefix = "pid="
 
+// privateLinePrefix starts the line naming the advertising daemon's own
+// private address, written when daemon.addr names a shared one: a daemon
+// telling the newest daemon apart from itself or its successor reads it,
+// since the shared address names every daemon alike.
+const privateLinePrefix = "private="
+
 // Advertisement is the parsed content of a daemon.addr file: the loopback
 // address a daemon serves on, and the process id of the daemon that wrote it.
 //
@@ -95,6 +105,18 @@ type Advertisement struct {
 	PID int
 	// PIDKnown is false for a legacy bare-address file, which names no pid.
 	PIDKnown bool
+	// Private is the advertising daemon's own private address when Address
+	// is a shared one the daemons' socket holder keeps; empty otherwise.
+	Private string
+}
+
+// Daemon answers the advertising daemon's own address: Private when the
+// advertisement names a shared address, Address otherwise.
+func (a Advertisement) Daemon() string {
+	if a.Private != "" {
+		return a.Private
+	}
+	return a.Address
 }
 
 // ParseAdvertisement parses the daemon.addr payload. It never fails: a file
@@ -107,6 +129,10 @@ func ParseAdvertisement(raw string) Advertisement {
 		trimmed := strings.TrimSpace(line)
 		if i == 0 {
 			adv.Address = trimmed
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trimmed, privateLinePrefix); ok {
+			adv.Private = strings.TrimSpace(rest)
 			continue
 		}
 		if rest, ok := strings.CutPrefix(trimmed, pidLinePrefix); ok {
@@ -221,12 +247,31 @@ func (c *claim) Listener() net.Listener { return c.ln }
 // Address implements Claim.
 func (c *claim) Address() string { return c.address }
 
+// Advertise implements Claim.
+func (c *claim) Advertise(address string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.advertised = address
+}
+
+// advertisedLocked is the address daemon.addr names; c.mu is held.
+func (c *claim) advertisedLocked() string {
+	if c.advertised != "" {
+		return c.advertised
+	}
+	return c.address
+}
+
 // advertisement is the daemon.addr payload this claim publishes: the bare
 // address on the first line, this daemon's pid on the second. The first line
 // alone is what a legacy daemon wrote, so a legacy reader that takes only the
 // first line still reads a valid address.
 func (c *claim) advertisement() string {
-	return c.address + "\n" + pidLinePrefix + strconv.Itoa(c.pid) + "\n"
+	payload := c.advertisedLocked() + "\n" + pidLinePrefix + strconv.Itoa(c.pid) + "\n"
+	if c.advertised != "" && c.advertised != c.address {
+		payload += privateLinePrefix + c.address + "\n"
+	}
+	return payload
 }
 
 // Publish implements Claim. The write is atomic — a temporary file in the
@@ -304,7 +349,7 @@ func (c *claim) Withdraw() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("read %q before withdrawing it: %w", c.addrPath, err)
 	}
-	if ParseAdvertisement(string(raw)).Address != c.address {
+	if ParseAdvertisement(string(raw)).Address != c.advertisedLocked() {
 		return false, nil
 	}
 	if err := os.Remove(c.addrPath); err != nil && !os.IsNotExist(err) {
@@ -522,8 +567,8 @@ func (c *claim) Verify() error {
 	case err != nil:
 		return fmt.Errorf("read daemon.addr %q: %w", c.addrPath, err)
 	}
-	if named := ParseAdvertisement(string(raw)).Address; named != c.address {
-		return fmt.Errorf("%w: daemon.addr %q names %q, not this daemon's %q", ErrVanished, c.addrPath, named, c.address)
+	if named := ParseAdvertisement(string(raw)).Address; named != c.advertisedLocked() {
+		return fmt.Errorf("%w: daemon.addr %q names %q, not this daemon's %q", ErrVanished, c.addrPath, named, c.advertisedLocked())
 	}
 	return nil
 }

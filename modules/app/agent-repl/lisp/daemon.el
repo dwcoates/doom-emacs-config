@@ -1535,7 +1535,10 @@ without either, and the process exits 2 before it serves.")
   "The full spawn argv: `agent-repl-daemon-command\=' plus the account roots.
 Every path is expanded, because the daemon compares config roots against
 resolved workspace paths and a `~\=' the shell never saw would never match.
-`--metrics-root\=' follows when `agent-repl-daemon-metrics-root\=' is set."
+`--metrics-root\=' follows when `agent-repl-daemon-metrics-root\=' is set.
+No `--holder\=' is passed: the daemon takes the socket holder its own
+requirement declares (daemon/requirements.json), the one source of its
+control socket."
   (append agent-repl-daemon-command
           (mapcan (lambda (entry)
                     (list (car entry) (agent-repl-daemon--config-value (cdr entry))))

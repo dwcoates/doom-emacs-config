@@ -30,8 +30,13 @@ func TestASecondStoreOnTheSameSocketRecordsTheOccupancyRefusal(t *testing.T) {
 	// Arrange
 	incumbent := startStore(t, storeOptions{})
 
-	// Act
-	rival := secondStoreOnTheSameSocket(t, incumbent)
+	// Act: the rival has a database of its own, so the socket alone refuses it.
+	rival := startStore(t, storeOptions{
+		socketPath: incumbent.socket,
+		dbPath:     filepath.Join(t.TempDir(), "rival.db"),
+		logPath:    filepath.Join(t.TempDir(), "rival.log"),
+		noWait:     true,
+	})
 	if err := rival.awaitExit(); err == nil {
 		t.Fatalf("the second store exited cleanly; want a non-zero exit")
 	}
@@ -136,5 +141,27 @@ func TestARegularFileAtTheListenPathIsRefusedAndLeftIntact(t *testing.T) {
 	}
 	if string(got) != contents {
 		t.Errorf("the refused boot rewrote the file at the listen path as %q, want %q", got, contents)
+	}
+}
+
+func TestASecondStoreOverTheSameDatabaseIsRefusedByItsLock(t *testing.T) {
+	// Arrange
+	incumbent := startStore(t, storeOptions{})
+
+	// Act
+	rival := secondStoreOnTheSameSocket(t, incumbent)
+	if err := rival.awaitExit(); err == nil {
+		t.Fatalf("the second store exited cleanly; want a non-zero exit")
+	}
+
+	// Assert
+	found := false
+	for _, rec := range rival.logRecords() {
+		if rec.Operation == "store.lock" && rec.Level == "error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("the refused store wrote no store.lock error record\nstderr:\n%s", rival.stderrText())
 	}
 }

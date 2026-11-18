@@ -68,13 +68,14 @@ func main() {
 	pprofAddr := flag.String("pprof", envStr(pprofsurface.EnvAddr, ""), "OPT-IN Go profiling surface: a unix socket path, or an explicitly loopback host:port (127.0.0.1:6061). Empty = OFF, which is the default; there is no always-on listener. The resolved surface is named in the store.pprof.enabled record at startup")
 	metricsRoot := flag.String("metrics-root", "", "ALWAYS-ON metrics surface root: the store listens on an ephemeral loopback port and advertises it in targets/store.json under it. Empty = OFF; the launchd plist passes it")
 	watchBuffer := flag.Int("watch-buffer", server.DefaultWatchBuffer, "per-subscriber WatchAgentSession frame buffer; a subscriber that overflows it is ended and must re-open with known_through")
+	holderPath := flag.String("holder", "", "the socket holder's control socket: the store takes both its listeners from it instead of binding them, so its sockets outlive every restart. Empty = the store binds its own sockets (a test harness's private store)")
 	readSocketPath := flag.String("read-socket", "", "UDS path to serve storeread.v1.StoreRead, the read-only face, on; empty = beside --socket (store.sock → store-read.sock), which is where the daemon dials it")
 	flag.Parse()
 	if *readSocketPath == "" {
 		*readSocketPath = storesocket.ReadPath(*socketPath)
 	}
 
-	if err := run(*socketPath, *readSocketPath, *dbPath, *logPath, *pprofAddr, *metricsRoot, *watchBuffer); err != nil {
+	if err := run(*socketPath, *readSocketPath, *holderPath, *dbPath, *logPath, *pprofAddr, *metricsRoot, *watchBuffer); err != nil {
 		reportFatal(err, os.Stderr)
 		os.Exit(1)
 	}
@@ -103,7 +104,7 @@ func reportFatal(err error, stderr io.Writer) {
 // run wires up logging, the profiling surface, the database and the server,
 // then blocks until a termination signal or a fatal serve error. Factored out
 // of main so its wiring is exercised with temp paths in tests.
-func run(socketPath, readSocketPath, dbPath, logPath, pprofAddr, metricsRoot string, watchBuffer int) (err error) {
+func run(socketPath, readSocketPath, holderPath, dbPath, logPath, pprofAddr, metricsRoot string, watchBuffer int) (err error) {
 	log, closeLog, err := openLogger(socketPath, dbPath, logPath)
 	if err != nil {
 		return err
@@ -111,12 +112,12 @@ func run(socketPath, readSocketPath, dbPath, logPath, pprofAddr, metricsRoot str
 	defer closeLog()
 	defer logProcessExit(log, &err)
 	reportBuild(log, defaultBuildReportDeps())
-	return runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot, watchBuffer, log)
+	return runWithLogger(socketPath, readSocketPath, holderPath, dbPath, pprofAddr, metricsRoot, watchBuffer, log)
 }
 
 // runWithLogger owns errors that reach the process orchestration after logging
 // is available. db.Open and server.Listen retain their lower-layer ownership.
-func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot string, watchBuffer int, log *logging.Logger) (err error) {
+func runWithLogger(socketPath, readSocketPath, holderPath, dbPath, pprofAddr, metricsRoot string, watchBuffer int, log *logging.Logger) (err error) {
 	// OPENED BEFORE THE DATABASE, so a store wedged recreating its schema or
 	// on a cold-cache first read of a large database is still profilable.
 	pprofSurface, err := openPprofSurface(pprofAddr, log)
@@ -166,6 +167,15 @@ func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot st
 	sigc := make(chan os.Signal, 1)
 	signal.Notify(sigc, syscall.SIGINT, syscall.SIGTERM)
 	defer signal.Stop(sigc)
+
+	// ONE STORE PER DATABASE, held by the kernel before the database opens:
+	// with its sockets owned by a holder, a live socket path no longer tells
+	// one store from another, so the database's own lock does.
+	release, err := lockDatabase(dbPath, log)
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	database, err := db.Open(dbPath, log.With(logging.Fields{Component: "db"}))
 	if err != nil {
@@ -220,21 +230,13 @@ func runWithLogger(socketPath, readSocketPath, dbPath, pprofAddr, metricsRoot st
 		<-checkpointsDone
 	}()
 
-	ln, err := server.Listen(socketPath, log.With(logging.Fields{Component: "server"}))
-	if err != nil {
-		return err
-	}
 	// THE READ-ONLY FACE ON A SOCKET OF ITS OWN, from a server holding only
 	// the database's read-only face: a client there reaches no producer verb
 	// whatever it sends, which is how the daemon's relationship with the store
 	// stays read-only.
 	readLog := log.With(logging.Fields{Component: "read-server"})
-	readLn, err := server.Listen(readSocketPath, readLog)
+	ln, readLn, err := storeListeners(holderPath, socketPath, readSocketPath, log, readLog)
 	if err != nil {
-		if closeErr := ln.Close(); closeErr != nil {
-			log.Log(logging.Fields{Operation: "store.listen", Level: "error", Socket: socketPath}, "closing the producers' socket after the read-only socket failed to bind failed: %v", closeErr)
-			return errors.Join(err, closeErr)
-		}
 		return err
 	}
 	srv := server.New(database, log.With(logging.Fields{Component: "server"}), watchBuffer)

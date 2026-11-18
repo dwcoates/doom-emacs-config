@@ -146,6 +146,20 @@ type Deps struct {
 	// the workspace there until the adoption re-homes it. It answers the empty
 	// string when no other daemon serves it, and the arm then names none.
 	IncumbentAddress func() string
+	// ServingElsewhere answers the private address of the OTHER live daemon
+	// whose serving row holds the workspace, with ok true, or ok false when
+	// no other daemon holds it: this one does, or its row stands released for
+	// the adoption under way here (forwardTarget). Required.
+	ServingElsewhere func(ctx context.Context, ws ids.WorkspaceID) (address string, ok bool, err error)
+	// SharedAddress answers the shared address the daemons advertise through
+	// their socket holder, "" when they share none. Every address a refusal
+	// tells a client is it when set (daemonaddr.ClientAddress): a client never learns a
+	// daemon's private address, which closes with its daemon. Required.
+	SharedAddress func() string
+	// Forward is the client a call for a workspace another daemon serves is
+	// forwarded on (forward.go): h2c to that daemon's private address.
+	// Required.
+	Forward *http.Client
 	// Creates admits every create this surface is asked for, and refuses one
 	// while the daemon stands down (creategate).
 	Creates *creategate.Gate
@@ -578,6 +592,12 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a successor address source")
 	case deps.IncumbentAddress == nil:
 		return nil, missing("an incumbent address source")
+	case deps.SharedAddress == nil:
+		return nil, missing("a shared address source")
+	case deps.ServingElsewhere == nil:
+		return nil, missing("the serving-row lookup")
+	case deps.Forward == nil:
+		return nil, missing("the forwarding client")
 	case deps.Creates == nil:
 		return nil, missing("the create gate")
 	case deps.Feed == nil:

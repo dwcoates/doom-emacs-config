@@ -394,8 +394,10 @@ func TestASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 	second := harness.AwaitView(t, d.Ctx(), announcements, "the successor's shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
 	}).GetShutdownAnnounced().GetAddress()
-	if second == first {
-		t.Fatalf("the second handover announced %q, the successor's own address", second)
+	// EVERY HANDOVER ANNOUNCES THE ONE SHARED ADDRESS its socket holder keeps;
+	// the third daemon is proved by its own handover record below.
+	if second != first {
+		t.Fatalf("the second handover announced %q, want the shared address %q", second, first)
 	}
 	drainAwaitAddrFileChange(t, d, second)
 	successorPID := int(handover.Context["successor_pid"].(float64))

@@ -133,6 +133,9 @@ func (s *server) CreateWorkspace(
 	if done {
 		return answer(resp, cerr)
 	}
+	if refused, done := s.refuseDeployMediatorCreate(ctx, rpc, resp, req.Msg.GetRequester()); done {
+		return answer(resp, refused)
+	}
 	if req.Msg.Placement != nil && req.Msg.GetAsyncMerge() != nil {
 		return answer(resp, s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmPlacementOnMergeWorkspace,
 			Reason: "a merge workspace is drawn nowhere until revealed, so it is never placed", Info: true})))
@@ -283,6 +286,34 @@ func (s *server) refuseUnadmitted(rpc string, resp proto.Message, err error) *co
 
 // requesterID is the requesting workspace's id, nil when the user asked.
 // Whether it is registered is the create's to judge (unknown_requester).
+// deployMediatorCreateDetail is the requested_by_deploy_mediator refusal's
+// sentence, read by the mediator's own agent.
+const deployMediatorCreateDetail = "the deploy mediator never creates a workspace of any kind: it does all of its work, every fix and every investigation, in its own session on its own branch, then finishes as its rules say"
+
+// refuseDeployMediatorCreate refuses a create whose requester is its
+// repository's deploy mediator, of every form, before anything is named or
+// built (owner ruling, 2026-11-18). A requester the registry does not hold is
+// the create's own to refuse later (unknown_requester); a failed read is
+// answered as a failure.
+func (s *server) refuseDeployMediatorCreate(ctx context.Context, rpc string, resp *agentreplv1.CreateWorkspaceResponse, requester *agentreplv1.WorkspaceRequester) (*connect.Error, bool) {
+	id := requesterID(requester)
+	if id == nil {
+		return nil, false
+	}
+	record, ended, err := s.registryWorkspace(ctx, *id)
+	switch {
+	case ended, errors.Is(err, wsm.ErrNotFound):
+		return nil, false
+	case err != nil:
+		return failResolution(s.log, rpc, fmt.Errorf("read the requester %s's deploy-mediator standing: %w", *id, err)), true
+	case !record.DeployMediator:
+		return nil, false
+	}
+	return s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmRequestedByDeployMediator, Info: true,
+		Reason: deployMediatorCreateDetail,
+		Fields: map[string]any{"workspace": record.Ref()}})), true
+}
+
 func requesterID(r *agentreplv1.WorkspaceRequester) *ids.WorkspaceID {
 	asker := r.GetWorkspace()
 	if asker == nil {

@@ -41,6 +41,7 @@ import (
 	"agent-repld/internal/gather"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/handover"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
@@ -1266,6 +1267,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SelfExe:                 selfExe,
 		SelfAddress:             p.Claim.Address(),
 		IncumbentAddress:        p.Opts.joining,
+		SharedAddress:           p.Shared.address,
 		Instance:                p.Instance,
 		StateDir:                p.Layout.Dir(),
 		IntentManifest:          p.Layout.IntentManifest(),
@@ -1301,12 +1303,12 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			sidebarResolver.SetStateUnreported(ws, unreported)
 		},
 		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
-		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics) },
+		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics, p.Shared) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
-		YieldBootClaim:  p.Claim.Yield,
+		YieldBootClaim:  func() error { return yieldBootClaim(p.Claim, p.Shared) },
 		NewestDaemon: func() (string, error) {
 			ad, err := daemonaddr.ReadAdvertisement(p.Layout.DaemonAddr())
-			return ad.Address, err
+			return ad.Daemon(), err
 		},
 		AnnounceHanded: announceHanded,
 		LiveElders: func() ([]string, error) {
@@ -1936,15 +1938,20 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Ownership:        ownership,
 			SuccessorAddress: rolloutController.SuccessorAddress,
 			IncumbentAddress: rolloutController.IncumbentAddress,
-			Creates:          creates,
-			Feed:             feedResolver,
-			Images:           imageSources,
-			Footer:           footerResolver,
-			Topbar:           topbarResolver,
-			Sidebar:          sidebarResolver,
-			Memory:           memoryPopups,
-			Chat:             chatService,
-			Gathers:          gathers,
+			Forward:          h2cclient.Client(),
+			SharedAddress:    p.Shared.address,
+			ServingElsewhere: func(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
+				return servingElsewhere(ctx, p.DB, p.Layout.DaemonAddr(), p.Instance, ws)
+			},
+			Creates: creates,
+			Feed:    feedResolver,
+			Images:  imageSources,
+			Footer:  footerResolver,
+			Topbar:  topbarResolver,
+			Sidebar: sidebarResolver,
+			Memory:  memoryPopups,
+			Chat:    chatService,
+			Gathers: gathers,
 			Revisions: revision.New(revision.Deps{
 				Shims: fleet, Feed: feedResolver, Status: footerResolver, Owed: p.DB, Bound: revision.Bound, Now: time.Now,
 				PromptsDir: paths.PromptsDir, Life: ctx, Log: log,

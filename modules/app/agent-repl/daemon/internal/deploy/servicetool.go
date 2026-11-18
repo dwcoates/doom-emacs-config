@@ -50,18 +50,38 @@ func toolExited(binary string, args []string, code int, out string) error {
 	return fmt.Errorf("deploy: %s %s exited %d: %s", filepath.Base(binary), strings.Join(args, " "), code, strings.TrimSpace(out))
 }
 
-// ScriptDefiner writes a service's definition from its requirements entry by
-// running bin/requirements.sh define-service in ModuleRoot: the one renderer
+// ScriptRequirements runs bin/requirements.sh in ModuleRoot for what a deploy
+// brings up from its requirements entry: the one renderer and installer
 // install uses, so a deploy and an install can never write different
-// definitions. Restarter.Define is its Define.
-type ScriptDefiner struct {
+// definitions. Restarter.Define is its Define, and the holder ensure's
+// install (holderensure.Ensurer.Install) is its EnsureHolder.
+type ScriptRequirements struct {
 	// ModuleRoot is the checkout holding bin/requirements.sh.
 	ModuleRoot string
-	Runner     Runner
+	// Script runs in place of ModuleRoot's bin/requirements.sh when set: a
+	// harness's stand-in, so no test writes or loads a real definition.
+	Script string
+	Runner Runner
 }
 
-// Define writes label's definition; a non-zero exit is a failure in the
-// script's own words.
-func (d ScriptDefiner) Define(ctx context.Context, label string) error {
-	return mustTool(ctx, d.Runner, d.ModuleRoot, filepath.Join(d.ModuleRoot, "bin", "requirements.sh"), "define-service", label)
+// Define writes label's definition (define-service); a non-zero exit is a
+// failure in the script's own words.
+func (d ScriptRequirements) Define(ctx context.Context, label string) error {
+	return d.run(ctx, "define-service", label)
+}
+
+// EnsureHolder installs the socket holder id (ensure-holder), leaving a
+// loaded, current one alone; a non-zero exit is a failure in the script's
+// own words.
+func (d ScriptRequirements) EnsureHolder(ctx context.Context, id string) error {
+	return d.run(ctx, "ensure-holder", id)
+}
+
+// run runs `requirements.sh VERB ARG` in ModuleRoot.
+func (d ScriptRequirements) run(ctx context.Context, verb, arg string) error {
+	script := d.Script
+	if script == "" {
+		script = filepath.Join(d.ModuleRoot, "bin", "requirements.sh")
+	}
+	return mustTool(ctx, d.Runner, d.ModuleRoot, script, verb, arg)
 }

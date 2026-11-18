@@ -35,7 +35,7 @@ func TestSelectSuitesNarrowsByBlastRadius(t *testing.T) {
 		{
 			name:  "the shared logging module selects its consumers and the cross-system suite",
 			paths: []string{"modules/app/agent-repl/agent-shim/logging/go/log.go"},
-			want:  []string{"daemon", "sidecar", "store", "lock", "zettel", "testservice", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "repo-scans"},
+			want:  []string{"daemon", "sidecar", "store", "lock", "sockethold", "zettel", "testservice", "shim", "webapp", "build-frontend-harness", "testrun", "logging", "logging-density", "e2e-kit", "e2e", "repo-scans"},
 		},
 		{
 			name:  "an ordinary bin script selects the script harnesses",
@@ -266,6 +266,19 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	want := strings.Join(inRosterOrder(setOf([]string{"lock", "shim", "sidecar", "e2e", "repo-scans"})), ",")
 	if got.Full || strings.Join(got.Suites, ",") != want {
 		t.Fatalf("shim-lock selected %v (full=%v), want %s", got.Suites, got.Full, want)
+	}
+}
+
+// TestSelectSuitesMapsTheSocketHolderToItsSuite covers the socket holder: its
+// own suite, the end-to-end suites and the scans.
+func TestSelectSuitesMapsTheSocketHolderToItsSuite(t *testing.T) {
+	// Act.
+	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/sockethold/main.go"})
+
+	// Assert.
+	want := strings.Join(inRosterOrder(setOf([]string{"sockethold", "e2e", "repo-scans"})), ",")
+	if got.Full || strings.Join(got.Suites, ",") != want {
+		t.Fatalf("sockethold selected %v (full=%v), want %s", got.Suites, got.Full, want)
 	}
 }
 

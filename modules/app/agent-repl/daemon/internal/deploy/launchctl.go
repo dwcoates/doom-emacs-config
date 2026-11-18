@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -64,6 +65,16 @@ func (l *Launchctl) Status(ctx context.Context, label string) (bool, int, error)
 // Restart implements ServiceManager: kickstart -k.
 func (l *Launchctl) Restart(ctx context.Context, label string) error {
 	return l.must(ctx, "kickstart", "-k", l.domain()+"/"+label)
+}
+
+// Reload implements ServiceManager: bootout, then bootstrap from the plist
+// as it is now. A kickstart runs the plist launchd loaded, so a changed one
+// is read only by a bootstrap.
+func (l *Launchctl) Reload(ctx context.Context, label string) error {
+	if err := l.Stop(ctx, label); err != nil && !errors.Is(err, ErrServiceNotLoaded) {
+		return err
+	}
+	return l.Start(ctx, label)
 }
 
 // Stop implements ServiceManager: bootout, which takes the service out of the

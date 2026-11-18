@@ -107,33 +107,46 @@ func TestEveryServiceManagerReportsAFailedVerbTheSameWay(t *testing.T) {
 	}
 }
 
-func TestScriptDefinerRunsDefineServiceInTheModuleRoot(t *testing.T) {
-	const argv = "/m/bin/requirements.sh define-service com.agentrepl.tests"
+func TestScriptRequirementsRunsItsVerbInTheModuleRoot(t *testing.T) {
 	cases := []struct {
 		name    string
+		run     func(ScriptRequirements) error
+		argv    string
 		answer  runAnswer
 		wantErr string
 	}{
-		{name: "a zero exit writes the definition", answer: runAnswer{code: 0}},
-		{name: "a non-zero exit is a failure in the script's words", answer: runAnswer{out: "define-service: no service entry", code: 1},
+		{name: "a define's zero exit writes the definition", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
+			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
+		{name: "a define's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
+			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{out: "define-service: no service entry", code: 1},
 			wantErr: "requirements.sh define-service com.agentrepl.tests exited 1: define-service: no service entry"},
-		{name: "a script that could not run is a failure", answer: runAnswer{err: errors.New("exec: not found")},
+		{name: "a define that could not run is a failure", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
+			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{err: errors.New("exec: not found")},
 			wantErr: "exec: not found"},
+		{name: "a stand-in script runs in place of the checkout's", run: func(r ScriptRequirements) error {
+			r.Script = "/fake/requirements.sh"
+			return r.Define(context.Background(), TestsLabel)
+		}, argv: "/fake/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
+		{name: "a holder ensure's zero exit loads the holder", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },
+			argv: "/m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{code: 0}},
+		{name: "a holder ensure's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },
+			argv: "/m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{out: "install: bootstrap failed", code: 1},
+			wantErr: "requirements.sh ensure-holder socket-holder-store exited 1: install: bootstrap failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			runner := &scriptedRunner{answers: map[string]runAnswer{argv: tc.answer}}
+			runner := &scriptedRunner{answers: map[string]runAnswer{tc.argv: tc.answer}}
 
 			// Act
-			err := ScriptDefiner{ModuleRoot: "/m", Runner: runner}.Define(context.Background(), TestsLabel)
+			err := tc.run(ScriptRequirements{ModuleRoot: "/m", Runner: runner})
 
 			// Assert
 			if tc.wantErr == "" && err != nil || tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
-				t.Fatalf("Define = %v, want error containing %q", err, tc.wantErr)
+				t.Fatalf("err = %v, want error containing %q", err, tc.wantErr)
 			}
-			if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != argv || runner.dirs[0] != "/m" {
-				t.Fatalf("ran %v in %v, want %q in /m", runner.calls, runner.dirs, argv)
+			if len(runner.calls) != 1 || strings.Join(runner.calls[0], " ") != tc.argv || runner.dirs[0] != "/m" {
+				t.Fatalf("ran %v in %v, want %q in /m", runner.calls, runner.dirs, tc.argv)
 			}
 		})
 	}

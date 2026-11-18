@@ -3696,3 +3696,97 @@ func TestFinishWorkspaceWhoseRoleCannotBeReadFinishesNothing(t *testing.T) {
 		t.Fatalf("records = %+v, want the unreadable role at ERROR", log.Records())
 	}
 }
+
+// mediatorHarness is a harness whose workspace is repo-1's deploy mediator.
+func mediatorHarness(t *testing.T) *harness {
+	t.Helper()
+	h := newHarness(t)
+	ws := h.DB.workspaces[testWorkspaceID]
+	ws.Repo = "repo-1"
+	ws.DeployMediator = true
+	h.DB.workspaces[testWorkspaceID] = ws
+	return h
+}
+
+func TestCreateWorkspaceRefusesEveryFormTheDeployMediatorRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		req  func(h *harness) *agentreplv1.CreateWorkspaceRequest
+	}{
+		{name: "a standard create", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
+			req := standardCreate(registeredRepoRef(h), "")
+			req.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: string(testWorkspaceID)})
+			return req
+		}},
+		{name: "an async merge", req: func(h *harness) *agentreplv1.CreateWorkspaceRequest {
+			req := validAsyncMerge(nil)
+			req.Repository = registeredRepoRef(h)
+			return req
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := mediatorHarness(t)
+
+			// Act
+			resp, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(tt.req(h)))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("CreateWorkspace: %v", err)
+			}
+			refused := resp.Msg.GetError().GetRequestedByDeployMediator()
+			if refused == nil || refused.GetWorkspace().GetId() != string(testWorkspaceID) {
+				t.Fatalf("result = %v, want requested_by_deploy_mediator naming the mediator", resp.Msg.GetResult())
+			}
+			if !strings.Contains(refused.GetDetail(), "in its own session") {
+				t.Fatalf("detail = %q, want it to say the work belongs in the mediator's own session", refused.GetDetail())
+			}
+		})
+	}
+}
+
+func TestCreateWorkspaceDoesNotRefuseAnOrdinaryRequesterAsTheDeployMediator(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	req := standardCreate(registeredRepoRef(h), "")
+	req.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: string(testWorkspaceID)})
+
+	// Act
+	resp, _ := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if resp != nil && resp.Msg.GetError().GetRequestedByDeployMediator() != nil {
+		t.Fatalf("result = %v, want no deploy-mediator refusal for an ordinary workspace", resp.Msg.GetResult())
+	}
+}
+
+func TestCreateWorkspaceFailsWhenTheRequestersStandingCannotBeRead(t *testing.T) {
+	// Arrange
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	ws := h.DB.workspaces[testWorkspaceID]
+	ws.DeployMediator = true
+	h.DB.workspaces[testWorkspaceID] = ws
+	h.DB.workspaceErrs = map[ids.WorkspaceID]error{testWorkspaceID: errors.New("database is locked")}
+	req := standardCreate(registeredRepoRef(h), "")
+	req.Requester = workspaceRequester(&workspacev1.WorkspaceRef{Id: string(testWorkspaceID)})
+
+	// Act
+	_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("err = %v, want an internal failure for an unreadable requester", err)
+	}
+	logged := false
+	for _, rec := range log.at("ERROR") {
+		if strings.Contains(fmt.Sprint(rec.Context), "deploy-mediator standing") {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("ERROR records = %+v, want the failed standing read recorded", log.at("ERROR"))
+	}
+}

@@ -774,8 +774,6 @@ func workspaceCreate(c *cliCall, args []string) int {
 		req.Hidden = hidden
 	}
 	req.Placement = placed
-	// A DAEMON HANDING OVER names its successor, and the client sends the
-	// same create there once (newRedirectingClient), as it does every call.
 	resp, err := c.client.CreateWorkspace(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }

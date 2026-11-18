@@ -1434,3 +1434,52 @@ func TestAYieldedClaimIsStillWhole(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAdvertisedSharedAddressIsPublishedVerifiedAndWithdrawn(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	c := mustBind(t, addrPath)
+	c.Advertise("127.0.0.1:41000")
+
+	// Act.
+	publishErr := c.Publish()
+	raw, _ := os.ReadFile(addrPath)
+	verifyErr := c.Verify()
+	removed, withdrawErr := c.Withdraw()
+
+	// Assert: daemon.addr names the shared address, not this claim's own.
+	if publishErr != nil {
+		t.Fatalf("Publish: %v", publishErr)
+	}
+	if want := "127.0.0.1:41000\npid=" + strconv.Itoa(os.Getpid()) + "\nprivate=" + c.Address() + "\n"; string(raw) != want {
+		t.Fatalf("daemon.addr = %q, want %q", raw, want)
+	}
+	if verifyErr != nil {
+		t.Fatalf("Verify of the advertised address: %v", verifyErr)
+	}
+	if withdrawErr != nil || !removed {
+		t.Fatalf("Withdraw = %v, %v; want the advertisement removed", removed, withdrawErr)
+	}
+}
+
+func TestAnAdvertisementNamesItsDaemonByItsPrivateAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "a shared address names its daemon's private one", raw: "127.0.0.1:41000\npid=7\nprivate=127.0.0.1:5000\n", want: "127.0.0.1:5000"},
+		{name: "a daemon's own address names itself", raw: "127.0.0.1:5000\npid=7\n", want: "127.0.0.1:5000"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := ParseAdvertisement(tt.raw).Daemon()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Daemon() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

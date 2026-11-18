@@ -47,6 +47,12 @@ func serveUnary[Req, Resp any](
 		s.server.deps.RPCs.ObserveRPC(rpc, rpcOutcome(err), took)
 		recordAbandoned(s.server.log, ctx, rpc, requestID, phase, took)
 	}()
+	if target, ok, err := s.server.forwardTarget(ctx, rpc, req.Header(), requestMessage(req)); err != nil {
+		return nil, boundaryFailure(err)
+	} else if ok {
+		phase = "forward"
+		return forwardUnary[Req, Resp](ctx, s.server, rpc, target, req)
+	}
 	boundary, err := s.server.beginRequest(ctx, rpc, requestID, requestMessage(req))
 	if err != nil {
 		return nil, boundaryFailure(err)
@@ -106,6 +112,11 @@ func serveStream[Req, Resp any](
 	stream *connect.ServerStream[Resp],
 	handle func(context.Context, *connect.Request[Req], *connect.ServerStream[Resp]) error,
 ) (err error) {
+	if target, ok, err := s.server.forwardTarget(ctx, rpc, req.Header(), requestMessage(req)); err != nil {
+		return boundaryFailure(err)
+	} else if ok {
+		return forwardStream[Req, Resp](ctx, s.server, rpc, target, req, stream)
+	}
 	boundary, err := s.server.beginRequest(ctx, rpc, req.Header().Get(requestIDHeader), requestMessage(req))
 	if err != nil {
 		return boundaryFailure(err)

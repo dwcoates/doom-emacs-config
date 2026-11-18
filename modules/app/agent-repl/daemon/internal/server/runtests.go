@@ -19,6 +19,7 @@ import (
 	testrunv1 "agentrepl/proto/testrun/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
+	"agent-repld/internal/daemonaddr"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitlayout"
 	"agent-repld/internal/ids"
@@ -223,7 +224,7 @@ func (o runOutcome) String() string {
 func (s *server) answerRunCutByExit(log dlog.Logger, stream *connect.ServerStream[agentreplv1.RunTestsResponse], dir string, run uint32) error {
 	if successor := s.deps.SuccessorAddress(); successor != "" {
 		log.Info(opRunTests, "this daemon is exiting for a handover; it stopped a test run and hands it to its successor", dlog.Context{"dir": dir, "run": run, "successor": successor})
-		return sendRunTestsError(stream, run, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_TransferringAway{TransferringAway: &agentreplv1.RunTestsTransferringAway{Address: successor}}})
+		return sendRunTestsError(stream, run, &agentreplv1.RunTestsError{Cause: &agentreplv1.RunTestsError_TransferringAway{TransferringAway: &agentreplv1.RunTestsTransferringAway{Address: daemonaddr.ClientAddress(s.deps.SharedAddress(), successor)}}})
 	}
 	log.Info(opRunTests, "this daemon is stopping; it stopped a test run before its end", dlog.Context{"dir": dir, "run": run})
 	return sendRunnerFailed(stream, run, -1, "the daemon stopped before the run ended, and no successor serves; run it again once the daemon is back")

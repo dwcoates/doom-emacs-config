@@ -312,6 +312,13 @@ type Deps struct {
 	// It is what a not_yet_adopted refusal names while the incumbent still
 	// serves the workspace (Controller.IncumbentAddress).
 	IncumbentAddress string
+	// SharedAddress answers the shared address this daemon advertises when
+	// the daemons share one through their socket holder, "" when they do
+	// not (docs/investigations/2026-11-18-stable-sockets-design.md). Every
+	// address a CLIENT is told -- the stand-down announcement, a transfer's
+	// page reload -- is it when set: a client never learns a daemon's
+	// private address, which closes with its daemon. Required.
+	SharedAddress func() string
 	// DialIncumbentRoster opens the incumbent's WatchWorkspaceRoster stream
 	// (rostermirror.DialIncumbent), and IncumbentArms installs the status
 	// arms the mirror reads off it (sidebar.Resolver.SetIncumbentArms). A
@@ -840,6 +847,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Bounces == nil {
 		return nil, errors.New("rollout: the prompt queue's bounce registry is required; every bounce and every transfer is decided there")
+	}
+	if deps.SharedAddress == nil {
+		return nil, errors.New("rollout: the shared address is required; a client told a private address loses it when that daemon exits")
 	}
 	if deps.WriteDaemonAddr != nil && deps.AwaitBootClaim == nil {
 		return nil, errors.New("rollout: the boot-claim wait is required beside the daemon.addr writer; a successor takes over on it")

@@ -469,6 +469,11 @@ type Opts struct {
 	// REAL running shim-store, so shims spawned by this daemon persist and
 	// read real events.
 	StoreSocket string
+	// Holder is the socket holder whose shared address this daemon serves
+	// (--holder). Empty starts one for this daemon; a successor carries its
+	// predecessor's (SuccessorOpts), as production's holder outlives every
+	// daemon.
+	Holder *SocketHolder
 	// RealStore says the store at StoreSocket is a running shim-store, which
 	// serves its own read-only face beside the socket
 	// (storesocket.ReadPath), so the harness serves no fake one there. The
@@ -483,6 +488,8 @@ type Daemon struct {
 	StateDir string
 	// Addr is the loopback address it serves on, read from daemon.addr.
 	Addr string
+	// PrivateAddr is this daemon's own private address (PrivateClient).
+	PrivateAddr string
 	// ProfileDir holds the fake shim's per-workspace startup profiles.
 	ProfileDir string
 	// staleAddr is the predecessor's daemon.addr content a KeepStaleAddr start
@@ -529,6 +536,8 @@ type Daemon struct {
 	MultiRepoRoot string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
+	// Holder is the socket holder whose shared address this daemon serves.
+	Holder *SocketHolder
 	// TestsSocket is the socket of the real test service its merge gates run
 	// on, shared by every daemon over its state root (TestsSocketFor).
 	TestsSocket string
@@ -754,6 +763,10 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
+	d.Holder = opts.Holder
+	if d.Holder == nil {
+		d.Holder = StartSocketHolder(t)
+	}
 	if !opts.RealStore {
 		serveFakeStore(t, d.StoreSocket)
 	}
@@ -864,6 +877,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"--prompts-dir", d.PromptsDir,
 		"--default-config-dir", d.DefaultConfigDir,
 		"--multi-repo-config-dir", d.MultiRepoConfigDir,
+		"--holder", d.Holder.Control,
 	}
 	if !opts.NoFake {
 		args = append(args, "--fake")
@@ -908,6 +922,9 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"MULTI_REPO_ROOT="+multiRoot,
 		"AGENT_REPL_BROWSER_CMD="+d.Browser.Path,
 		"AGENT_REPL_DEPLOY_BUILDER="+d.Deploy.Path,
+		// A deploy's definitions and holders are the harness's stand-in's:
+		// nothing a test runs writes or loads a real one.
+		"AGENT_REPL_REQUIREMENTS_SCRIPT="+NewFakeRequirementsScript(t, fakeBin),
 		"AGENT_REPL_LAUNCHCTL="+d.Services.Path,
 		"AGENT_REPL_SYSTEMCTL="+d.Services.Path,
 		"AGENT_REPL_NOTIFIER_CMD="+d.Notifier.Path,
@@ -1040,6 +1057,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	}
 	if opts.Joining == "" {
 		d.Addr = d.AwaitAddrFile()
+		d.PrivateAddr = AddrAdvertisement(d.awaitFile(d.AddrFile())).Daemon()
 		d.dial(opts.JSONCodec)
 		d.awaitServing()
 	}
@@ -1156,25 +1174,35 @@ func AddrAdvertisement(raw string) daemonaddr.Advertisement {
 // AddrLine is the bare address a daemon.addr payload advertises, for tests
 // that only need the address the file names.
 // AwaitAddrMatching waits for daemon.addr to name an address match accepts and
-// answers it, checking at every change the kernel reports to the file: a
-// handover's successor rewriting it, an exit withdrawing it.
+// answers it (AwaitAdvertisement).
 func (d *Daemon) AwaitAddrMatching(what string, match func(addr string) bool) string {
+	d.t.Helper()
+	return d.AwaitAdvertisement(what, func(ad daemonaddr.Advertisement) bool { return match(ad.Address) }).Address
+}
+
+// AwaitAdvertisement waits for daemon.addr to hold an advertisement match
+// accepts and answers it, checking at every change the kernel reports to the
+// file: a handover's successor rewriting it, an exit withdrawing it. Every
+// daemon advertises the one shared address, so a replacement is told apart
+// by the advertiser it names (its pid, its private address), never the
+// address.
+func (d *Daemon) AwaitAdvertisement(what string, match func(daemonaddr.Advertisement) bool) daemonaddr.Advertisement {
 	d.t.Helper()
 	wait, cancelWait := d.waitCtx()
 	defer cancelWait()
-	var addr string
+	var ad daemonaddr.Advertisement
 	matches := func() bool {
 		body, err := os.ReadFile(d.AddrFile())
 		if err != nil {
 			return false
 		}
-		addr = AddrLine(string(body))
-		return match(addr)
+		ad = AddrAdvertisement(string(body))
+		return match(ad)
 	}
 	if !awaitChange(d.t, wait, matches, followFiles(d.AddrFile())) {
-		d.t.Fatalf("waiting for daemon.addr to name %s (it names %q): %v", what, addr, grantedclock.Explain(wait))
+		d.t.Fatalf("waiting for daemon.addr to name %s (it names %+v): %v", what, ad, grantedclock.Explain(wait))
 	}
-	return addr
+	return ad
 }
 
 func AddrLine(raw string) string {
@@ -1309,6 +1337,44 @@ func (d *Daemon) Client() agentreplv1connect.AgentReplClient {
 		d.t.Fatal("harness: the daemon has no client (joining mode, or an expected early exit)")
 	}
 	return d.client
+}
+
+// PrivateClient is a client dialed to this daemon's own private address,
+// never the shared one: every daemon serves the shared address its holder
+// keeps, so a test that asks THIS daemon, and no successor that took the
+// shared listener over, dials here.
+func (d *Daemon) PrivateClient() agentreplv1connect.AgentReplClient {
+	d.t.Helper()
+	if d.PrivateAddr == "" {
+		d.t.Fatal("harness: the daemon advertised no private address")
+	}
+	return agentreplv1connect.NewAgentReplClient(h2cclient.Client(), "http://"+d.PrivateAddr)
+}
+
+// OtherDaemonClient is a client dialed to the private address of the one
+// other daemon instance alive on this state root (a handover's successor),
+// for a test that asks the successor itself while the incumbent still holds
+// the shared address.
+func (d *Daemon) OtherDaemonClient() agentreplv1connect.AgentReplClient {
+	d.t.Helper()
+	paths, err := filepath.Glob(filepath.Join(filepath.Dir(d.AddrFile()), daemonaddr.LifeDirName, "*"+daemonaddr.AddressSuffix))
+	if err != nil {
+		d.t.Fatalf("harness: list the instances' addresses: %v", err)
+	}
+	var others []string
+	for _, p := range paths {
+		raw, err := os.ReadFile(p)
+		if err != nil {
+			continue // an instance that ended between the listing and the read
+		}
+		if addr := strings.TrimSpace(string(raw)); addr != d.PrivateAddr {
+			others = append(others, addr)
+		}
+	}
+	if len(others) != 1 {
+		d.t.Fatalf("harness: want exactly one other daemon instance's address, found %v", others)
+	}
+	return agentreplv1connect.NewAgentReplClient(h2cclient.Client(), "http://"+others[0])
 }
 
 // Dial builds a second, independent client connection, for the tests whose

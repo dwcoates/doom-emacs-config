@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
@@ -31,7 +32,9 @@ import (
 	"agent-repld/internal/server"
 	"agent-repld/internal/server/servertest"
 	"agent-repld/internal/wsm"
+
 	"agentrepl/logging"
+	"agentrepl/logging/sockethold/holdtest"
 
 	"agentrepl/logging/metrics"
 )
@@ -79,6 +82,11 @@ func newTestHooks() *testHooks {
 		Started:  started,
 		Now:      func() time.Time { return started.Add(3 * time.Second) },
 		Restarts: th.restarts,
+		// A TEST DECLARES NO HOLDER, so its daemon never installs one: it
+		// takes from the test's own holder (testHolder).
+		Holders: func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+			return nil, func(context.Context, string) error { return errors.New("a test daemon installs no holder") }, nil
+		},
 		Graph: func(context.Context, process) (*graph, error) {
 			return nil, errServed
 		},
@@ -97,11 +105,79 @@ func runIn(t *testing.T, root string, adjust ...func(*options)) error {
 	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
 	t.Setenv(dlog.LevelEnvironment, "info")
-	opts := options{stateDir: root}
+	opts := options{stateDir: root, holder: testHolder(t)}
 	for _, a := range adjust {
 		a(&opts)
 	}
 	return run(context.Background(), opts, newTestHooks().hooks)
+}
+
+// testHolder serves a shared loopback listener, named "daemon", on a control
+// socket for the test's life, as production's socket holder does, and
+// answers the control socket's path.
+func testHolder(t *testing.T) string {
+	t.Helper()
+	file, _ := holdtest.TCP(t)
+	return holdtest.Start(t, map[string]*os.File{holderDaemonSocket: file}, nil)
+}
+
+func TestRunRefusesADaemonWithNoSocketHolderToTake(t *testing.T) {
+	tests := []struct {
+		name    string
+		adjust  func(*options)
+		message string
+	}{
+		{name: "no --holder and no declared holder is refused", adjust: func(o *options) { o.holder = "" },
+			message: "the daemon was given no socket holder, and no requirement declares its holder"},
+		{name: "a --holder no holder serves, that no requirement declares, is refused", adjust: func(o *options) { o.holder = "/tmp/agent-repl-no-holder.sock" },
+			message: "no holder serves the control socket, and no requirement declares a holder there, so none is installed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			root := shortRoot(t)
+
+			// Act
+			err := runIn(t, root, tt.adjust)
+
+			// Assert
+			if err == nil {
+				t.Fatal("run = nil, want the boot refused")
+			}
+			found := false
+			for _, r := range runLogRecords(t, root) {
+				if r.Level == "error" && r.Message == tt.message {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("the run log holds no ERROR %q", tt.message)
+			}
+		})
+	}
+}
+
+func TestRunWithNoHolderFlagTakesTheDeclaredHolder(t *testing.T) {
+	// Arrange
+	root := shortRoot(t)
+	control := testHolder(t)
+	th := newTestHooks()
+	th.hooks.Holders = func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
+		return []holderensure.Holder{{ID: holderensure.DaemonHolder, Control: control}}, func(context.Context, string) error {
+			return errors.New("a serving holder is never installed")
+		}, nil
+	}
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	t.Setenv(dlog.LevelEnvironment, "info")
+
+	// Act
+	err := run(context.Background(), options{stateDir: root}, th.hooks)
+
+	// Assert
+	if !errors.Is(err, errServed) {
+		t.Fatalf("run = %v, want the spine to reach its serve hook on the declared holder", err)
+	}
 }
 
 func hasRunLogLevel(t *testing.T, raw []byte, operation, level string) bool {
@@ -199,7 +275,7 @@ func TestTheUnsyncedFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
 	t.Setenv(dlog.LevelEnvironment, "info")
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, newTestHooks().hooks)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, newTestHooks().hooks)
 
 	// Assert.
 	if got == nil || !strings.Contains(got.Error(), wsm.EnvTestUnsyncedWrites) {
@@ -245,7 +321,7 @@ func TestTheInMemoryFlagWithoutTheVendorGuardRefusesToBoot(t *testing.T) {
 	t.Setenv(dlog.LevelEnvironment, "info")
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, newTestHooks().hooks)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, newTestHooks().hooks)
 
 	// Assert.
 	if got == nil || !strings.Contains(got.Error(), wsm.EnvTestStateInMemory) {
@@ -600,7 +676,7 @@ func TestABootErrorBeforeServingWithdrawsViaTheDefer(t *testing.T) {
 	th.hooks.Graph = func(context.Context, process) (*graph, error) { return nil, bootErr }
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, th.hooks)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, th.hooks)
 
 	// Assert.
 	if !errors.Is(got, bootErr) {
@@ -1466,6 +1542,17 @@ func (o *orderingClaim) Withdraw() (bool, error) {
 
 func (o *orderingClaim) Address() string { return "127.0.0.1:0" }
 
+// orderingStopper records the shared listener's stop into the claim's steps.
+type orderingStopper struct {
+	claim *orderingClaim
+	err   error
+}
+
+func (s *orderingStopper) StopShared() error {
+	s.claim.steps = append(s.claim.steps, "stop-shared")
+	return s.err
+}
+
 // TestBeginShutdownDepartsBeforeItWithdraws pins the load-bearing order: a
 // daemon spawned because daemon.addr went away must find this one departed,
 // or it refuses to replace a daemon on its way out. (That the whole step runs
@@ -1477,10 +1564,10 @@ func TestBeginShutdownDepartsBeforeItWithdraws(t *testing.T) {
 	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
 
 	// Act.
-	beginShutdown(claim, withdrawal, &spyLogger{})()
+	beginShutdown(claim, &orderingStopper{claim: claim}, withdrawal, &spyLogger{})()
 
-	// Assert.
-	if got, want := strings.Join(claim.steps, ","), "depart,withdraw"; got != want {
+	// Assert: the shared listener stops before the serving lock is released.
+	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
 	}
 }
@@ -1492,14 +1579,14 @@ func TestBeginShutdownReportsAFailedDepartureAndStillWithdraws(t *testing.T) {
 	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
 
 	// Act.
-	beginShutdown(claim, withdrawal, log)()
+	beginShutdown(claim, &orderingStopper{claim: claim}, withdrawal, log)()
 
 	// Assert.
 	msg, ok := log.message(dlog.LevelError)
 	if !ok || !strings.Contains(msg, "serving lock") {
 		t.Fatalf("records = %+v, want an ERROR naming the serving lock", log.records)
 	}
-	if got, want := strings.Join(claim.steps, ","), "depart,withdraw"; got != want {
+	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
 	}
 }
@@ -1555,7 +1642,7 @@ func TestASecondDaemonBesideAServingIncumbentRefusesAtOnceAndSaysWhy(t *testing.
 	h.ClaimWait = daemonaddr.ClaimWaitBound
 
 	// Act.
-	got := run(context.Background(), options{stateDir: root}, h)
+	got := run(context.Background(), options{stateDir: root, holder: testHolder(t)}, h)
 
 	// Assert.
 	if !errors.Is(got, daemonaddr.ErrClaimed) {
@@ -1603,7 +1690,7 @@ func TestTheBootTimesTheClaimFromTheProcessStart(t *testing.T) {
 			th := newTestHooks()
 
 			// Act
-			_ = run(context.Background(), options{stateDir: root, joining: tc.joining}, th.hooks)
+			_ = run(context.Background(), options{stateDir: root, joining: tc.joining, holder: testHolder(t)}, th.hooks)
 
 			// Assert
 			got := th.restarts.Observations()
@@ -1888,7 +1975,7 @@ func (l *exitListener) exit() {
 
 // TestACallReachingAnOpenConnectionAfterTheExitsWaitsIsAnswered reproduces
 // the merge-gate failure of
-// `TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway`: a call
+// `TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor`: a call
 // that reached the daemon on an h2c connection the client already held,
 // after the exit's waits had ended, was admitted and then cut by the process
 // exit, so the caller read `unexpected EOF` instead of its answer. The call
@@ -1988,6 +2075,54 @@ func TestConnStatesRecordsOnlyAConnectionThatClosedWithNoRequest(t *testing.T) {
 			}
 			if len(conns.byConn) != 0 || len(conns.born) != 0 {
 				t.Fatalf("still tracked %v / %v, want the closed connection forgotten", conns.byConn, conns.born)
+			}
+		})
+	}
+}
+
+func TestBeginShutdownReportsAFailedSharedStopAndStillDeparts(t *testing.T) {
+	// Arrange.
+	claim := &orderingClaim{}
+	log := &spyLogger{}
+	withdrawal := &addrWithdrawal{claim: claim, log: &spyLogger{}}
+
+	// Act.
+	beginShutdown(claim, &orderingStopper{claim: claim, err: errors.New("close: bad file descriptor")}, withdrawal, log)()
+
+	// Assert.
+	msg, ok := log.message(dlog.LevelError)
+	if !ok || !strings.Contains(msg, "shared listener") {
+		t.Fatalf("records = %+v, want an ERROR naming the shared listener", log.records)
+	}
+	if got, want := strings.Join(claim.steps, ","), "stop-shared,depart,withdraw"; got != want {
+		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
+	}
+}
+
+func TestEveryHTTP1AnswerClosesItsConnection(t *testing.T) {
+	cases := []struct {
+		name       string
+		protoMajor int
+		wantClose  bool
+	}{
+		{name: "an HTTP/1.1 answer closes its connection", protoMajor: 1, wantClose: true},
+		{name: "an HTTP/2 answer leaves its connection to its GOAWAY", protoMajor: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			served := false
+			h := closingHTTP1(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { served = true }))
+			req := httptest.NewRequest(http.MethodPost, "/x", nil)
+			req.ProtoMajor = tc.protoMajor
+			rec := httptest.NewRecorder()
+
+			// Act
+			h.ServeHTTP(rec, req)
+
+			// Assert
+			if !served || (rec.Header().Get("Connection") == "close") != tc.wantClose {
+				t.Fatalf("served %v, Connection %q; want the handler run and close %v", served, rec.Header().Get("Connection"), tc.wantClose)
 			}
 		})
 	}

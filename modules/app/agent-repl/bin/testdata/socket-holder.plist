@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Rendered by bin/requirements.sh holder_plist from the holder entry; it never changes with the services. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.hold</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/env</string>
+        <string>HOME/.cache/agent-repl/bin/sockethold</string>
+        <string>--control</string>
+        <string>control</string>
+        <string>--hold</string>
+        <string>store</string>
+        <string>--hold</string>
+        <string>daemon</string>
+        <string>--log</string>
+        <string>HOME/.cache/agent-repl/log/hold.log</string>
+    </array>
+    <key>Sockets</key>
+    <dict>
+        <key>control</key>
+        <dict>
+            <key>SockPathName</key>
+            <string>HOME/.cache/agent-repl/sock/hold.sock</string>
+            <key>SockPathMode</key>
+            <integer>384</integer>
+        </dict>
+        <key>store</key>
+        <dict>
+            <key>SockPathName</key>
+            <string>HOME/.cache/agent-repl/sock/s.sock</string>
+            <key>SockPathMode</key>
+            <integer>384</integer>
+        </dict>
+        <key>daemon</key>
+        <dict>
+            <key>SockNodeName</key>
+            <string>127.0.0.1</string>
+            <key>SockServiceName</key>
+            <string>0</string>
+            <key>SockFamily</key>
+            <string>IPv4</string>
+        </dict>
+    </dict>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+</dict>
+</plist>

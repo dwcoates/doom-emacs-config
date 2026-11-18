@@ -789,7 +789,8 @@ cancelled only once the adopt succeeds."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
                                         (plist-get ref :id))
@@ -814,7 +815,8 @@ stream, re-subscribe on the new one."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
                                         (plist-get ref :id))
@@ -836,7 +838,8 @@ that — no verb announces it."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
                                         (plist-get ref :id))
@@ -848,66 +851,6 @@ that — no verb announces it."
                 (should (null (agent-repl-itest--subscribers
                                primary "host" (plist-get ref :id)))))
             (agent-repl-connect-close successor-conn)))))))
-
-(ert-deftest agent-repl-itest-host-transferred-while-the-successor-is-pending-adopts-on-acceptance ()
-  "THE REAL ORDERING: the transfer notice beats the successor\='s acceptance.
-The outgoing daemon announces the stand-down and transfers every FREE
-workspace about a millisecond later — before this Emacs has read the
-announcement, dialed the successor and had its `WatchDaemon' accepted.
-So `transferred' lands while `agent-repl-link-successor' still answers
-nil, and the adopt must be LATCHED onto daemon-link\='s acceptance seam
-rather than dropped as a missing-successor breach."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (let ((successor-conn (agent-repl-connect-open
-                               (agent-repl-itest-daemon-address successor)))
-              (agent-repl-link-handover-functions nil))
-          (unwind-protect
-              (cl-letf (((symbol-function 'agent-repl-link-successor) (lambda () nil))
-                        ((symbol-function 'agent-repl-link-successor-pending-p)
-                         (lambda () t)))
-                ;; Act: the push arrives inside the acceptance window.
-                (agent-repl-itest--push primary "host" '((transferred . ()))
-                                        (plist-get ref :id))
-                (agent-repl-itest--await-log
-                 primary "elisp.host.transferred-awaiting-successor" "info")
-                (should (null (agent-repl-itest--calls successor "AdoptHostWorkspace")))
-                ;; Act: the successor proves it is listening.
-                (run-hook-with-args 'agent-repl-link-handover-functions
-                                    nil successor-conn)
-                ;; Assert.
-                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-                (let ((body (car (agent-repl-itest--call-bodies
-                                  successor "AdoptHostWorkspace"))))
-                  (should (equal (agent-repl-itest--body-field body 'workspace 'id)
-                                 (plist-get ref :id)))))
-            (agent-repl-connect-close successor-conn)))))))
-
-(ert-deftest agent-repl-itest-host-transferred-before-the-announcement-waits ()
-  "`transferred' ahead of the announcement is a WAIT, and the stream is kept.
-The daemon announces the stand-down and THEN transfers each free
-workspace, and the two pushes ride different streams — so a transfer this
-Emacs decodes first is a notice that overtook its own announcement, never
-a missing one.  It waits on daemon-link's acceptance seam; dropping the
-stream would lose the only channel carrying this workspace's state, and
-calling it an error dropped the adopt with it."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-subscription primary ref
-      (cl-letf (((symbol-function 'agent-repl-link-successor) (lambda () nil))
-                ((symbol-function 'agent-repl-link-successor-pending-p) (lambda () nil)))
-        ;; Act.
-        (agent-repl-itest--push primary "host" '((transferred . ()))
-                                (plist-get ref :id))
-        ;; Assert.
-        (agent-repl-itest--await-log primary "elisp.host.transferred-before-the-announcement"
-                                     "info")
-        (should-not (agent-repl-itest--logged-p
-                     primary "elisp.host.transferred-without-successor" "error"))
-        (should (equal 1 (length (agent-repl-itest--subscribers
-                                  primary "host" (plist-get ref :id)))))))))
 
 (ert-deftest agent-repl-itest-host-transferred-adopts-before-cancelling-the-old-stream ()
   "Ordering is enforced BY OBSERVING THE IN-FLIGHT ADOPT, not by convention.
@@ -924,7 +867,8 @@ subscriber yet, then release it and assert the re-subscribe follows."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 (agent-repl-itest--gate successor "AdoptHostWorkspace")
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
@@ -964,7 +908,8 @@ decoder rather than this arm."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 (agent-repl-itest--script
                  successor "AdoptHostWorkspace"
                  '((error . ((unknownWorkspace . ())))))
@@ -993,7 +938,8 @@ successor's own recorded calls, never the old daemon's."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 ;; Act.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
                                         (plist-get ref :id))
@@ -1009,11 +955,10 @@ successor's own recorded calls, never the old daemon's."
 
 (ert-deftest agent-repl-itest-host-transferred-adopts-through-the-real-link ()
   "The handover runs end to end through `daemon-link.el', with NO stub anywhere.
-elisp.md: \"there is no daemon<->daemon channel — coordination is CLIENT
-RELAY ... and Emacs is the relay.\"  The three tests above all stub
-`agent-repl-link-successor'; here `shutdown_announced{address}' dual-attaches
-for real over a genuine `WatchDaemon' stream, and the transfer adopts onto
-the resulting real successor connection."
+On one shared address the stand-down names the primary\='s own address, so
+the real link dials no second daemon, and the transfer\='s adopt goes out
+on the real primary connection, which forwards it to the adopting daemon
+\=(docs/investigations/2026-11-18-stable-sockets-design.md)."
   ;; Arrange: connect the link for real, isolated from every OTHER global
   ;; link hook so only this scenario's own reactions run.
   (agent-repl-itest--with-fake-daemon primary
@@ -1029,34 +974,17 @@ the resulting real successor connection."
             (progn
               (agent-repl-link-connect)
               (agent-repl-itest--await-subscriber primary "daemon")
-              (agent-repl-itest--with-second-daemon primary successor
-                ;; Act: announce the successor for real, then release the
-                ;; workspace — no `agent-repl-link-successor' stub anywhere.
-                (agent-repl-itest--push
-                 primary "daemon"
-                 `((shutdownAnnounced
-                    . ((address . ,(agent-repl-itest-daemon-address successor))
-                       (cause . ((selfMergeRollout . ())))
-                       (expectedOutageMs . "1500")
-                       (mintedAtMs . ,(format "%d" (truncate (* 1000 (float-time)))))))))
-                (agent-repl-itest--wait-until
-                 (lambda () (agent-repl-link-successor)) nil
-                 "the real WatchDaemon dual-attach to open the successor connection")
-                (agent-repl-itest--push primary "host" '((transferred . ()))
-                                        (plist-get ref :id))
-                ;; Assert: the adopt landed on the successor.
-                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-                (should (equal (agent-repl-itest--body-field
-                                (car (agent-repl-itest--call-bodies successor "AdoptHostWorkspace"))
-                                'workspace 'id)
-                               (plist-get ref :id)))
-                (agent-repl-itest--wait-until
-                 (lambda () (null (agent-repl-itest--subscribers
-                                   primary "host" (plist-get ref :id))))
-                 nil "the old daemon to observe the cancel")
-                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))))
+              ;; Act: the stand-down names the shared address, then the
+              ;; workspace is released.
+              (agent-repl-itest-host--announce primary (agent-repl-itest-daemon-address primary))
+              (agent-repl-itest--push primary "host" '((transferred . ())) (plist-get ref :id))
+              ;; Assert: the adopt rides the real primary, and no second
+              ;; daemon was dialed.
+              (agent-repl-itest--await-call primary "AdoptHostWorkspace")
+              (should-not (agent-repl-link-successor))
+              (should-not (agent-repl-link-successor-pending-p))
+              (should (= 1 (length (agent-repl-itest--subscribers primary "daemon")))))
           (agent-repl-link-teardown))))))
-
 ;;;; ---- Scenario 15: validation ----
 
 (ert-deftest agent-repl-itest-host-push-without-naming-is-refused ()
@@ -1263,173 +1191,6 @@ targeted one."
        (ignore-errors (agent-repl-host-forget ws-b))
        (agent-repl-connect-close conn))))
 
-;; audit-2 #6
-(ert-deftest agent-repl-itest-host-select-transferring-away-redials-the-successor ()
-  "A `transferring_away{address}' refusal of SelectWorkspace self-heals.
-fanout §7 HANDOVER REDIAL; elisp.md \"ordering is enforced BY REFUSAL ...
-a lagging client self-heals from the refusal\".  NO announcement precedes
-this: the refusal is the first news of the handover, and the address it
-carries is the whole recovery — dial it, adopt onto it, move the
-workspace's connection there and drop the old stream."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (let ((address (agent-repl-itest-daemon-address successor)))
-          (agent-repl-itest--script
-           primary "SelectWorkspace"
-           `((error . ((transferringAway . ((address . ,address)))))))
-          ;; Act.
-          (agent-repl-host-select agent-repl-itest-host--ws)
-          ;; Assert: the redial, the adopt, the moved connection, the cancel.
-          (agent-repl-itest--await-log primary "elisp.host.redial" "info")
-          (agent-repl-itest--await-subscriber successor "daemon")
-          (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-          (agent-repl-itest--wait-until
-           (lambda ()
-             (equal address (agent-repl-connect-connection-address
-                             (agent-repl-host-conn agent-repl-itest-host--ws))))
-           nil "the workspace's connection to move to the successor")
-          (should (equal address (agent-repl-connect-connection-address
-                                  (agent-repl-host-conn agent-repl-itest-host--ws))))
-          (agent-repl-itest--wait-until
-           (lambda () (null (agent-repl-itest--subscribers
-                             primary "host" (plist-get ref :id))))
-           nil "the old host stream to be cancelled")
-          (should (null (agent-repl-itest--subscribers
-                         primary "host" (plist-get ref :id)))))))))
-
-;; audit-2 #7
-(ert-deftest agent-repl-itest-host-adopt-not-yet-adopted-is-retried ()
-  "`not_yet_adopted' from the successor's adopt is retried, not reported.
-fanout §7: \"`not_yet_adopted' → INFO, retry the adopt once the
-successor's WatchDaemon is accepted.\"  The successor refuses the first
-adopt because it has not taken the workspace over yet — nothing is wrong,
-so the arm is news rather than a failure and the walk runs again."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (agent-repl-itest--script successor "AdoptHostWorkspace"
-                                  '((error . ((notYetAdopted . ())))))
-        (agent-repl-itest-host--announce
-         primary (agent-repl-itest-daemon-address successor))
-        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
-                                      "the successor to be ACCEPTED")
-        ;; Act: the release lands while the successor still refuses.
-        (agent-repl-itest--push primary "host" '((transferred . ()))
-                                (plist-get ref :id))
-        (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-        (agent-repl-itest--await-log primary "elisp.host.not-yet-adopted" "info")
-        ;; The successor finishes taking the workspace over.  The success arm
-        ;; is scripted EXPLICITLY: an empty `{}' is a response with no oneof
-        ;; arm set, which the decoder refuses as a contract breach rather than
-        ;; reading as an acceptance.
-        (agent-repl-itest--script successor "AdoptHostWorkspace"
-                                  '((success . ())))
-        ;; Assert: a SECOND adopt lands, and the stream ends up there.
-        (agent-repl-itest--await-call successor "AdoptHostWorkspace" 2)
-        (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))))))
-
-;; audit-2 #7
-(ert-deftest agent-repl-itest-host-not-yet-adopted-defers-to-acceptance ()
-  "`not_yet_adopted' with NO successor standing adopts once one is ACCEPTED.
-`agent-repl-host--adopt-on-acceptance': \"NO BUSY LOOP AND NO POLL\" — one
-self-removing function on the handover hook, woken by the acceptance
-itself.  EXACTLY ONE adopt may land: a retry that re-armed itself would
-adopt again on every later handover."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        ;; Act: the refusal arrives while nothing is standing.
-        (agent-repl-host-handle-refusal agent-repl-itest-host--ws
-                                        '(:arm :not-yet-adopted :value nil))
-        (should (null (agent-repl-itest--calls successor "AdoptHostWorkspace")))
-        ;; The successor is announced and accepted only now.
-        (agent-repl-itest-host--announce
-         primary (agent-repl-itest-daemon-address successor))
-        ;; Assert: one adopt, after acceptance.
-        (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-        (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
-        (should (equal 1 (length (agent-repl-itest--calls
-                                  successor "AdoptHostWorkspace"))))))))
-
-;; audit-2 #8
-(ert-deftest agent-repl-itest-host-adoption-redials-the-webview-at-the-successor ()
-  "Adoption points the workspace's page at the SUCCESSOR's address.
-fanout §7: host.el \"updates the workspace's `:conn' to the successor
-FIRST and then calls `agent-repl-frontend-reload-webview', so the webview
-navigates to `http://<successor>/?workspace=<id>&dir=<dir>'\" — on the
-workspace's own `ws-<id>.localhost' host at the successor's port.  The page
-lives in the one host web view and is RE-POINTED there, never remounted, so
-the observable is the URL the host is asked to hold."
-  ;; Arrange: a mounted webview on the primary.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (let ((successor-conn (agent-repl-connect-open
-                               (agent-repl-itest-daemon-address successor)))
-              (navigated nil)
-              (host-moved nil)
-              (calls-moved nil))
-          (unwind-protect
-              (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn))
-                        ((symbol-function 'agent-repl--frontend-xwidget-available-p)
-                         (lambda () t))
-                        ((symbol-function 'agent-repl--frontend-getenv) (lambda (_name) nil))
-                        ((symbol-function 'agent-repl--frontend-webview-live-widget)
-                         (lambda (&rest _) 'fake-widget))
-                        ;; The host arms its load watcher on whatever the live
-                        ;; widget accessor answers, and the stub widget above is
-                        ;; a symbol rather than an xwidget.  The watcher is the
-                        ;; host's replay, not the redial under test.
-                        ((symbol-function 'agent-repl--webhost-watch-load) #'ignore)
-                        ;; A host navigation, which a handover never makes.
-                        ((symbol-function 'agent-repl--frontend-webview-navigate-widget)
-                         (agent-repl-itest-host--navigate-and-load (lambda (url) (push url host-moved))))
-                        ((symbol-function 'agent-repl--frontend-webview-execute-script-value)
-                         (lambda (_widget script _callback)
-                           (when-let ((url (agent-repl-itest-host--ensured-url script)))
-                             (push url navigated))
-                           (when-let ((origin (agent-repl-itest-host--set-daemon-origin script)))
-                             (push origin calls-moved))))
-                        ((symbol-function 'agent-repl--call-in-background-workspace)
-                         (lambda (_ws fn) (funcall fn))))
-                (agent-repl--ws-put agent-repl-itest-host--ws :frontend 'gui)
-                (agent-repl--frontend-precreate-webview agent-repl-itest-host--ws)
-                ;; THE HOST HOLDS THE PAGE: a slot off screen is made with none, and a
-                ;; workspace with no page has nothing to re-point.
-                (agent-repl-webhost-ensure-page agent-repl-itest-host--ws)
-                (setq navigated nil)
-                ;; Act.
-                (agent-repl-itest--push primary "host" '((transferred . ()))
-                                        (plist-get ref :id))
-                ;; Assert: exactly one navigation, at the successor.
-                (agent-repl-itest--wait-until (lambda () navigated) nil
-                                              "the webview redial")
-                (should (equal 1 (length navigated)))
-                ;; THE WEBHOST STAYS: a handover never reloads it, and the
-                ;; page's re-point leaves its own calls alone -- the link's
-                ;; handover edge moves those (webhost.el, test-webhost.el).
-                (should (null host-moved))
-                (should (null calls-moved))
-                (should (equal (car navigated)
-                               (format "http://ws-%s.localhost:%s/?workspace=%s&dir=%s&log_level=info"
-                                       (agent-repl--frontend-page-host-label (plist-get ref :id))
-                                       (car (last (split-string (agent-repl-itest-daemon-address successor) ":")))
-                                       (url-hexify-string (plist-get ref :id))
-                                       (url-hexify-string (plist-get ref :dir)))))
-                ;; AND THE REST OF THE WALK IS AWAITED INSIDE THE STUBS.
-                ;; The redial now happens BEFORE the adopt is issued (see
-                ;; host.el's rendezvous note), so the navigation this test
-                ;; waits for no longer implies the adopt has landed --
-                ;; leaving here on the navigation alone would unwind the
-                ;; external-boundary stubs while the walk is still running.
-                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id)))
-            (agent-repl-connect-close successor-conn)))))))
-
 ;; audit-2 #8
 (ert-deftest agent-repl-itest-host-conn-moves-before-the-webview-reload ()
   "`:conn' is the successor's ALREADY when the webview reload is called.
@@ -1447,6 +1208,7 @@ workspace.\"  The order is only observable from inside the reload."
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn))
                         ((symbol-function 'agent-repl-frontend-reload-webview)
                          (lambda (ws) (setq conn-at-reload (agent-repl-host-conn ws)))))
                 ;; Act.
@@ -1489,6 +1251,7 @@ navigated the page at it."
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn))
                         ((symbol-function 'agent-repl-frontend-reload-webview)
                          (lambda (_ws) (setq reloaded t))))
                 ;; Act.
@@ -1537,6 +1300,7 @@ from the daemon still serving them."
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn))
                         ((symbol-function 'agent-repl-frontend-reload-webview) #'ignore))
                 ;; Act: only A is released.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
@@ -1807,110 +1571,6 @@ nothing here leaks into another scenario."
 ;; guard test-integration-link.el's own finding #8 of this same audit pins
 ;; as PRODUCTION's deliberate behavior).
 
-;; audit-3 #18
-(ert-deftest agent-repl-itest-host-not-yet-adopted-retry-is-paced-by-the-defcustom ()
-  "The `not_yet_adopted' retry is scheduled at EXACTLY the defcustom's delay.
-R-RED-HOST \"paced by `agent-repl-host-handover-retry-delay'\" -- the
-existing retried test (audit-2 #7) only asserts `>= 2' adopts, so a
-synchronous tight loop would pass it.  `run-at-time' is intercepted so the
-retry NEVER races a real timer: the recorded delay must equal the
-defcustom, no second adopt may land before the interception is fired BY
-HAND, and exactly one more adopt must land once it is."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (agent-repl-itest--script successor "AdoptHostWorkspace"
-                                  '((error . ((notYetAdopted . ())))))
-        (agent-repl-itest-host--announce
-         primary (agent-repl-itest-daemon-address successor))
-        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
-                                      "the successor to be ACCEPTED")
-        (let ((scheduled nil)
-              (real-run-at-time (symbol-function 'run-at-time)))
-          (cl-letf (((symbol-function 'run-at-time)
-                     (lambda (delay repeat fn &rest args)
-                       (if (eq fn #'agent-repl-host-handle-refusal)
-                           (progn (push (cons delay args) scheduled) nil)
-                         (apply real-run-at-time delay repeat fn args)))))
-            ;; Act: the first refusal.
-            (agent-repl-itest--push primary "host" '((transferred . ()))
-                                    (plist-get ref :id))
-            (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-            ;; `elisp.host.not-yet-adopted' logs only from INSIDE
-            ;; `agent-repl-host-handle-refusal', which the interception below
-            ;; keeps from running at all until fired by hand -- awaiting it
-            ;; here would time out.  `adopt-handover-refusal' is what
-            ;; `agent-repl-host--on-refused' logs BEFORE scheduling the retry.
-            (agent-repl-itest--await-log primary "elisp.host.adopt-handover-refusal" "info")
-            ;; Assert: paced by exactly the defcustom, and not re-scheduled.
-            (agent-repl-itest--wait-until (lambda () scheduled) nil
-                                          "the retry to be scheduled")
-            (should (equal 1 (length scheduled)))
-            (should (equal (caar scheduled) agent-repl-host-handover-retry-delay))
-            (should (equal 1 (length (agent-repl-itest--calls
-                                      successor "AdoptHostWorkspace"))))
-            ;; The successor finishes taking the workspace over.
-            (agent-repl-itest--script successor "AdoptHostWorkspace" '((success . ())))
-            ;; Act: fire the schedule BY HAND -- no real timer, no race.
-            (apply #'agent-repl-host-handle-refusal (cdar scheduled))
-            ;; Assert: EXACTLY two adopts total.
-            (agent-repl-itest--await-log primary "elisp.host.not-yet-adopted" "info")
-            (agent-repl-itest--await-call successor "AdoptHostWorkspace" 2)
-            (should (equal 2 (length (agent-repl-itest--calls
-                                      successor "AdoptHostWorkspace"))))))))))
-
-;; audit-3 #19
-(ert-deftest agent-repl-itest-host-adopt-itself-transferring-away-redials ()
-  "`transferring_away{address}' answered on ADOPT ITSELF redials there too.
-`endpoint_adopt_host_workspace.proto' declares the same handover arm on
-every per-workspace rpc's error type, but only SelectWorkspace exercised
-it before this.  The FIRST successor's own adopt call is refused, naming a
-SECOND, different daemon -- and the redial walk that ordinarily answers a
-Select refusal answers this one exactly the same way."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (agent-repl-itest--with-second-daemon primary other
-          (let* ((successor-conn (agent-repl-connect-open
-                                  (agent-repl-itest-daemon-address successor)))
-                 (other-conn (agent-repl-connect-open
-                              (agent-repl-itest-daemon-address other)))
-                 (other-address (agent-repl-itest-daemon-address other))
-                 (dialed nil))
-            (unwind-protect
-                (cl-letf (((symbol-function 'agent-repl-link-successor)
-                           (lambda () successor-conn))
-                          ((symbol-function 'agent-repl-link-dial-successor)
-                           (lambda (address) (push address dialed) other-conn)))
-                  (agent-repl-itest--script
-                   successor "AdoptHostWorkspace"
-                   `((error . ((transferringAway . ((address . ,other-address)))))))
-                  (agent-repl-itest--gate other "AdoptHostWorkspace")
-                  (unwind-protect
-                      (progn
-                        ;; Act.
-                        (agent-repl-itest--push primary "host" '((transferred . ()))
-                                                (plist-get ref :id))
-                        ;; Assert: the refusal is INFO, the redial follows, and
-                        ;; it lands on the NAMED daemon while the old stream
-                        ;; stands -- caught mid-flight by the gate.
-                        (agent-repl-itest--await-log
-                         primary "elisp.host.adopt-handover-refusal" "info")
-                        (agent-repl-itest--await-log primary "elisp.host.redial" "info")
-                        (agent-repl-itest--await-call other "AdoptHostWorkspace")
-                        (should (equal dialed (list other-address)))
-                        (should (equal 1 (length (agent-repl-itest--subscribers
-                                                  primary "host" (plist-get ref :id)))))
-                        (should (equal 1 (length (agent-repl-itest--calls
-                                                  successor "AdoptHostWorkspace")))))
-                    (agent-repl-itest--release-gate other "AdoptHostWorkspace"))
-                  ;; Assert: released, the adopt lands, at the NAMED address.
-                  (agent-repl-itest--await-subscriber other "host" (plist-get ref :id)))
-              (agent-repl-connect-close successor-conn)
-              (agent-repl-connect-close other-conn))))))))
-
 ;; audit-3 #20
 (defconst agent-repl-itest-host--adopt-non-handover-refusal-arms
   '((workspaceRefMismatch ((registryDir . "/x")) ":workspace-ref-mismatch")
@@ -1935,7 +1595,8 @@ is useless without its `registry_dir'."
                                (agent-repl-itest-daemon-address successor))))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
+                         (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn)))
                 (dolist (case agent-repl-itest-host--adopt-non-handover-refusal-arms)
                   (cl-destructuring-bind (wire-key payload keyword-string) case
                     (let ((before (length (agent-repl-itest--log-entries
@@ -2011,6 +1672,10 @@ successor stream makes it, and the assertions read the walk\='s end."
                (agent-repl-host-adopt-timeout-seconds 0.3))
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
+                         (lambda () standing))
+                        ;; ONE SHARED ADDRESS: the adopt goes out on the
+                        ;; primary link, which reaches the adopting daemon.
+                        ((symbol-function 'agent-repl-link-primary)
                          (lambda () standing))
                         ((symbol-function 'agent-repl-frontend-reload-webview)
                          (lambda (ws) (push (agent-repl-host-conn ws) conn-at-reload))))
@@ -2493,33 +2158,6 @@ it until now."
       (agent-repl-itest--await-log daemon "elisp.rpc.push-invalid" "error")
       (should (agent-repl-itest--logged-p daemon "elisp.rpc.push-invalid" "error")))))
 
-;; audit-3 #31
-(ert-deftest agent-repl-itest-host-select-not-yet-adopted-retries-onto-the-standing-successor ()
-  "`not_yet_adopted' on SELECT is INFO, never `select-refused', and self-heals.
-`endpoint_select_workspace.proto' `SelectWorkspaceNotYetAdopted' -- the
-SAME retry the adopt path exercises (audit-2 #7), driven end to end
-through SelectWorkspace's own refusal for once, with a successor already
-standing to retry onto."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (agent-repl-itest-host--announce
-         primary (agent-repl-itest-daemon-address successor))
-        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
-                                      "the successor to be ACCEPTED")
-        (agent-repl-itest--script primary "SelectWorkspace"
-                                  '((error . ((notYetAdopted . ())))))
-        (agent-repl-itest--script successor "AdoptHostWorkspace" '((success . ())))
-        ;; Act.
-        (agent-repl-host-select agent-repl-itest-host--ws)
-        ;; Assert.
-        (agent-repl-itest--await-log primary "elisp.host.select-handover-refusal" "info")
-        (should-not (agent-repl-itest--logged-p primary "elisp.host.select-refused" "error"))
-        (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-        (should (equal 1 (length (agent-repl-itest--calls
-                                  successor "AdoptHostWorkspace"))))))))
-
 ;; audit-3 #32
 (ert-deftest agent-repl-itest-host-link-down-leaves-a-transferred-workspace-untouched ()
   "Link-down forgets ONLY the workspaces still owned by the dying connection.
@@ -2537,6 +2175,7 @@ touched."
           (unwind-protect
               (cl-letf (((symbol-function 'agent-repl-link-successor)
                          (lambda () successor-conn))
+                        ((symbol-function 'agent-repl-link-primary) (lambda () successor-conn))
                         ((symbol-function 'agent-repl-frontend-reload-webview) #'ignore))
                 ;; A transfers to the successor; B stays on the primary.
                 (agent-repl-itest--push primary "host" '((transferred . ()))
@@ -2580,90 +2219,6 @@ touched."
 ;; contract.  Pinning the audit's wording would pin a fiction; pinning the
 ;; guard's behavior documents the conflict where the next reader will find it.
 
-;; audit-3 #30
-(ert-deftest agent-repl-itest-host-redial-to-a-different-address-hits-the-link-guard ()
-  "A `transferring_away' naming an address OTHER than the standing successor.
-RULED (audit-3 #30): DAEMON-LINK'S GUARD WINS.  host.el asks
-`agent-repl-link-dial-successor' to redial, that lands in
-`agent-repl-link--attach-successor', and a `transferring_away' naming an
-address OTHER than the standing successor is logged ERROR
-\(`elisp.link.successor-address-changed\') and NOT dialed -- the same rule
-audit-3 #8 pins for the announced path, so one rule covers both.  The
-standing successor is kept and no adopt reaches the third daemon."
-  ;; Arrange: successor A is announced and ACCEPTED on the real link.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor-a
-        (agent-repl-itest-host--announce
-         primary (agent-repl-itest-daemon-address successor-a))
-        (agent-repl-itest--wait-until #'agent-repl-link-successor nil
-                                      "successor A to be ACCEPTED")
-        ;; A THIRD daemon, at an address the link has never been told about.
-        (let ((daemon-b (agent-repl-itest--start-daemon)))
-          (unwind-protect
-              (let ((address-b (agent-repl-itest-daemon-address daemon-b)))
-                (agent-repl-itest--script
-                 primary "SelectWorkspace"
-                 `((error . ((transferringAway . ((address . ,address-b)))))))
-                ;; Act.
-                (agent-repl-host-select agent-repl-itest-host--ws)
-                ;; Assert: host.el asked for the redial ...
-                (agent-repl-itest--await-log primary "elisp.host.redial" "info")
-                ;; ... and the link guard refused it, naming both addresses.
-                (agent-repl-itest--await-log
-                 primary "elisp.link.successor-address-changed" "error")
-                ;; The standing successor is STILL A.
-                (should (equal (agent-repl-itest-daemon-address successor-a)
-                               (agent-repl-connect-connection-address
-                                (agent-repl-link-successor))))
-                ;; And nothing was ever adopted onto B.
-                (should (null (agent-repl-itest--calls
-                               daemon-b "AdoptHostWorkspace")))
-                (should (null (agent-repl-itest--subscribers daemon-b "daemon"))))
-            (agent-repl-itest--stop-daemon daemon-b)))))))
-
-;; audit-3 #30
-(ert-deftest agent-repl-itest-host-redial-awaiting-acceptance-defers-the-adopt ()
-  "A redial that STANDS but is not yet accepted defers the adopt.
-host.el: \"Answers nil while the dial has not been ACCEPTED yet -- the
-caller must then wait for acceptance rather than adopt onto an unproven
-daemon.\"  The `elisp.host.awaiting-successor' branch is otherwise reached
-only through a hand-called `agent-repl-host-handle-refusal'; here the
-refusal comes off the real wire and the successor's own `WatchDaemon' is
-withheld, so the dial is genuinely pending.  This fails if Emacs ever
-adopts onto a daemon that has not proven it is listening."
-  ;; Arrange: the successor exists but will not accept its watch yet.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-host--with-link-and-subscription primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (agent-repl-itest--gate successor "WatchDaemon")
-        (unwind-protect
-            (let ((address (agent-repl-itest-daemon-address successor)))
-              (agent-repl-itest--script
-               primary "SelectWorkspace"
-               `((error . ((transferringAway . ((address . ,address)))))))
-              ;; Act.
-              (agent-repl-host-select agent-repl-itest-host--ws)
-              ;; Assert: the dial stands, unaccepted, and the adopt WAITS.
-              (agent-repl-itest--await-log primary "elisp.host.redial" "info")
-              (agent-repl-itest--await-log
-               primary "elisp.host.awaiting-successor" "info")
-              (should (null (agent-repl-link-successor)))
-              (should (null (agent-repl-itest--calls
-                             successor "AdoptHostWorkspace")))
-              ;; The workspace is still served by the daemon it has.
-              (should (equal (agent-repl-itest-daemon-address primary)
-                             (agent-repl-connect-connection-address
-                              (agent-repl-host-conn agent-repl-itest-host--ws))))
-              ;; Releasing the watch accepts the successor, which wakes the
-              ;; deferred adopt -- exactly once.
-              (agent-repl-itest--release-gate successor "WatchDaemon")
-              (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-              (agent-repl-itest--await-subscriber
-               successor "host" (plist-get ref :id)))
-          (ignore-errors
-            (agent-repl-itest--release-gate successor "WatchDaemon")))))))
-
 ;;;; ---- A refusal naming the daemon that already serves Emacs ----
 ;;
 ;; Regression, 2026-11-15: the outgoing daemon answered a per-workspace rpc
@@ -2674,7 +2229,8 @@ adopts onto a daemon that has not proven it is listening."
 
 (defmacro agent-repl-itest-host--with-refusal-naming-the-primary (primary &rest body)
   "Stand the link on PRIMARY, select through a refusal naming PRIMARY, then BODY.
-BODY runs once the link has answered the redial with the primary."
+BODY runs once the host has read the refusal; on one shared address it
+adopts on the primary link."
   (declare (indent 1) (debug (symbolp body)))
   `(agent-repl-itest-host--with-link-and-subscription ,primary ref
      (ignore ref)
@@ -2683,7 +2239,7 @@ BODY runs once the link has answered the redial with the primary."
       `((error . ((transferringAway
                    . ((address . ,(agent-repl-itest-daemon-address ,primary))))))))
      (agent-repl-host-select agent-repl-itest-host--ws)
-     (agent-repl-itest--await-log ,primary "elisp.link.successor-at-primary" "info")
+     (agent-repl-itest--await-log ,primary "elisp.host.transferring-away" "info")
      ,@body))
 
 (ert-deftest agent-repl-itest-host-refusal-naming-the-primary-dials-no-successor ()

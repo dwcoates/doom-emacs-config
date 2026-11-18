@@ -1525,12 +1525,9 @@ it.  STREAM nil means the caller did not name the stream."
       (agent-repl-host-release-restart-hold ws "stream-refused-not-yet-adopted")
       (agent-repl-host--put ws :stream nil)
       (agent-repl-host--put ws :detached t)
-      (unless (and address
-                   (agent-repl-host-view-where-served ws address "stream-refused-not-yet-adopted"))
-        (let ((new (agent-repl-link-successor)))
-          (if new
-              (agent-repl-host--reattach ws new :adopt "stream-refused-not-yet-adopted")
-            (agent-repl-host--follow-live-daemon ws "stream-refused-not-yet-adopted"))))))
+      ;; ONE SHARED ADDRESS: the daemon it reaches is adopting WS, and the
+      ;; adopt goes out on the primary link (agent-repl-host-handle-refusal).
+      (agent-repl-host-handle-refusal ws (list :arm :not-yet-adopted))))
    (t
     (agent-repl-host--put ws :ending-stream nil)
     (agent-repl--error ws "elisp.host.stream-lost ws=%s outcome=%S" ws outcome)
@@ -1941,7 +1938,7 @@ severed until a hand-triggered walk."
     (agent-repl--log ws "elisp.host.reattach-superseded ws=%s trigger=%s" ws trigger))
    ;; THE DAEMON HANDED WS TO ITS SUCCESSOR, and the refusal's walk is
    ;; waiting for that successor to be accepted (`:adopt-pending',
-   ;; `agent-repl-host--adopt-on-acceptance').  WS is not detached: the
+   ;; the adopt on the primary link).  WS is not detached: the
    ;; acceptance walks it, so this walk ends without arming another.  A
    ;; successor already accepted took a NEW walk at once, and the branch
    ;; above dropped this one as superseded.
@@ -2215,11 +2212,12 @@ walk."
 
 (defun agent-repl-host--adopt-retryable-p (new detail)
   "Answer t when an adopt onto NEW that failed with DETAIL is retried.
-Otherwise answer why it stops: `not-successor' when NEW is no longer the
-standing successor, `closed' when NEW\='s connection is closed, and
-`unreached' when the dial was refused, so no daemon listens at NEW."
+Otherwise answer why it stops: `not-primary' when NEW is no longer the
+primary link (every adopt goes out on the one shared address), `closed'
+when NEW\='s connection is closed, and `unreached' when the dial was
+refused, so no daemon listens at NEW."
   (cond
-   ((not (eq new (agent-repl-link-successor))) 'not-successor)
+   ((not (eq new (agent-repl-link-primary))) 'not-primary)
    ((not (agent-repl-connect-connection-alive-p new)) 'closed)
    ((agent-repl-connect-failure-unreached-p detail) 'unreached)
    (t t)))
@@ -2302,96 +2300,41 @@ is recorded."
                  (t
                   (funcall restore)
                   (agent-repl-host--release-held ws "failed")
-                  (cond
-                   ;; THE SUCCESSOR WAS PROMOTED WHILE THIS ADOPT WAS IN
-                   ;; FLIGHT.  The promotion walked only the workspaces
-                   ;; standing on the old daemon, and this one stood on NEW
-                   ;; for the call; restored onto the old daemon, whose
-                   ;; connection the promotion closes, it was stranded there
-                   ;; with no walk left (2026-10-25: six workspaces).  NEW
-                   ;; serves every workspace now, so it registers there.
-                   ((eq new (agent-repl-link-primary))
-                    (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil registering=t"
-                                       ws detail)
-                    (agent-repl-host--reattach ws new :register "adopt-after-promotion"))
-                   (t
-                    (agent-repl-host--put ws :reattach nil)
-                    (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil stopped=%s"
-                                       ws detail retry))))))))))))))
+                  (let ((primary (agent-repl-link-primary)))
+                    (cond
+                     ;; THE PRIMARY WAS PROMOTED WHILE THIS ADOPT WAS IN
+                     ;; FLIGHT: the shared address's redial reached the next
+                     ;; daemon, and NEW, the link the adopt went out on, is
+                     ;; the old one the promotion closes.  Restored onto it,
+                     ;; WS was stranded with no walk left (2026-10-25: six
+                     ;; workspaces).  The primary serves every workspace now,
+                     ;; so WS registers there.
+                     ((and primary (not (eq new primary)))
+                      (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil registering=t"
+                                         ws detail)
+                      (agent-repl-host--reattach ws primary :register "adopt-after-promotion"))
+                     (t
+                      (agent-repl-host--put ws :reattach nil)
+                      (agent-repl--error ws "elisp.host.adopt-failed ws=%s detail=%S retrying=nil stopped=%s"
+                                         ws detail retry)))))))))))))))
 
 (defun agent-repl-host--transferred (ws &optional value)
-  "Adopt WS onto the successor daemon after the old one released it.
+  "Adopt WS onto the daemon its old one handed it to, after the release.
 
 `HostWorkspaceTransferred' NAMES NO DAEMON.  VALUE carries only the
-outgoing daemon\='s page decision, `(:reload-page R)', which the adopt
-walk follows (`agent-repl-host--handover-reload-webview').  THE SUCCESSOR IS THE
-LINK RECORDED: `shutdown_announced{address}' is the single place an
-address for the joining daemon ever comes from, and daemon-link dialed
-and accepted it there — a per-workspace release cannot introduce a
-daemon the link has never heard of.
+outgoing daemon\='s page decision, `(:reload-page R)\=', which the adopt
+walk follows (`agent-repl-host--handover-reload-webview').
 
-`transferred' is a PUSH, never a terminal frame, so the old stream stays
-standing until the adopt lands and the shared walk cancels it.
+EVERY DAEMON SERVES ONE SHARED ADDRESS, the one its socket holder keeps
+\=(docs/investigations/2026-11-18-stable-sockets-design.md), so the adopt
+goes out on the primary link at once: the daemon that accepts it forwards
+it to the successor, and no second link is dialed or waited on.
 
-A SUCCESSOR THAT IS ONLY PENDING IS NOT A BREACH, AND WAS THE DEFECT.
-The outgoing daemon announces the stand-down and then transfers every
-FREE workspace immediately — measured at ~1 ms later, which is before
-this Emacs has even read the announcement off its own `WatchDaemon'
-stream, let alone dialed the successor and been ACCEPTED by it.  So the
-`transferred' push routinely arrives while `agent-repl-link-successor'
-still answers nil because the dial is in flight, and treating that nil as
-the missing-successor breach dropped the notice on the floor: no adopt
-was ever sent, the outgoing daemon sat out its whole adoption window and
-recorded the workspace\='s own fault, and the successor was promoted only
-by the old stream dying underneath it.  The window is WAITED IN instead,
-on daemon-link\='s own acceptance seam — the same one the
-`not_yet_adopted' refusal already uses — so the adopt goes out the
-instant the successor proves it is listening.
-
-WITH NEITHER A STANDING NOR A PENDING SUCCESSOR, THE ANNOUNCEMENT HAS
-NOT BEEN READ YET, AND THAT IS THE SECOND HALF OF THE SAME DEFECT.  The
-pending branch above closes the window between the dial going out and the
-successor accepting it; it does NOT close the window before the dial goes
-out at all, because `agent-repl-link-successor-pending-p' only becomes
-true inside the announcement handler.  The two pushes are in flight
-together and arrive on different streams, so which one this Emacs
-processes first is a coin toss on the transport.
-
-Measured, in the e2e sandbox: the outgoing daemon announced the stand-down
-at 16:43:37.310 and pushed the transfer notices at .314; Emacs decoded the
-two `WatchHostWorkspaceResponse' pushes at .321 and the
-`DaemonShutdownAnnounced' at .322.  On the earlier order this branch
-called the ordering a breach and dropped the notice, no adopt was ever
-sent, the outgoing daemon sat out its whole adoption window, and the
-successor was promoted only by the old stream dying underneath it -- which
-is `TestEmacsHandoverTransfersAtFreeness' waiting out 21s for a promotion
-that healthy runs make in about two.
-
-The daemon sends the announcement BEFORE the transfer, always
-(`rollout.handover': announce, snapshot the participants, write the
-manifest, then transfer each free workspace).  So a transfer with no
-successor yet is a notice that overtook its own announcement, not a
-missing one, and it WAITS on the same acceptance seam the pending branch
-uses.  A successor that genuinely never arrives simply never wakes it, and
-the workspace keeps the old stream throughout -- exactly as before.
-
-It is an INFO record: the order is seen in the log, and nothing is wrong,
-since the announcement is on its way.  It was once a WARNING, which the
-standing rule forbids for ordinary operation (a deploy on 2026-09-29
-recorded seven of them, one per busy-free workspace handed over)."
+`transferred\=' is a PUSH, never a terminal frame, so the old stream stays
+standing until the adopt lands and the shared walk cancels it."
   (agent-repl-host--put ws :handover-page (plist-get value :reload-page))
-  (let ((new (agent-repl-link-successor)))
-    (cond
-     (new
-      (agent-repl--info ws "elisp.host.transferred ws=%s address=%S adopting=t"
-                        ws (agent-repl-connect-connection-address new))
-      (agent-repl-host--reattach ws new :adopt "transferred"))
-     ((agent-repl-link-successor-pending-p)
-      (agent-repl--info ws "elisp.host.transferred-awaiting-successor ws=%s" ws)
-      (agent-repl-host--adopt-on-acceptance ws))
-     (t
-      (agent-repl--info ws "elisp.host.transferred-before-the-announcement ws=%s" ws)
-      (agent-repl-host--adopt-on-acceptance ws)))))
+  (agent-repl--info ws "elisp.host.transferred ws=%s adopting=t" ws)
+  (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "transferred"))
 
 (defun agent-repl-host--handover-reload-webview (ws)
   "Load WS\='s page at the daemon WS is being adopted onto, as decided.
@@ -2445,45 +2388,6 @@ handover.  Its `transferred' push says which (`:handover-page'):
 
 ;;;; ---- Handover refusals answered by a per-workspace rpc ----
 
-(defun agent-repl-host--redial-successor (ws address)
-  "Return the successor connection at ADDRESS for WS, dialing it if needed.
-A successor already standing at ADDRESS is returned as is, and so is the
-live primary when ADDRESS is its own: a refusal the outgoing daemon
-answered after the handover completed names the daemon that serves Emacs
-now, so WS is adopted there and nothing is dialed.  Otherwise the
-dial is made through `agent-repl-link-dial-successor', which is idempotent
-for the matching address; when a successor is standing at a DIFFERENT
-address DAEMON-LINK'S GUARD WINS (audit-3 #30 ruling) — it logs
-`elisp.link.successor-address-changed' at ERROR and dials nothing, so no
-adopt is sent to an address the link never attached.
-Answers nil while the dial has not been ACCEPTED yet — the caller must
-then wait for acceptance rather than adopt onto an unproven daemon."
-  (let ((standing (agent-repl-link-successor)))
-    (unless (agent-repl-connect-connection-at-p standing address)
-      (agent-repl--info ws "elisp.host.redial ws=%s address=%S standing=%S"
-                        ws address
-                        (and standing
-                             (agent-repl-connect-connection-address standing))))
-    (agent-repl-link-successor-at address)))
-
-(defun agent-repl-host--adopt-on-acceptance (ws)
-  "Adopt WS onto the successor as soon as its `WatchDaemon' is ACCEPTED.
-NO BUSY LOOP AND NO POLL: the handover hooks are daemon-link's acceptance
-seam, so this hangs ONE self-removing function there and is woken by the
-acceptance itself.  A successor that never arrives simply never wakes it.
-A transfer withdrawn before the acceptance clears `:adopt-pending', and
-the acceptance then adopts nothing (`agent-repl-host--transfer-withdrawn')."
-  (agent-repl-host--put ws :adopt-pending t)
-  (agent-repl-link-on-successor-accepted
-   (lambda (new)
-     (cond
-      ((plist-get (agent-repl-host--entry ws) :adopt-pending)
-       (agent-repl-host--put ws :adopt-pending nil)
-       (agent-repl--info ws "elisp.host.adopt-retry ws=%s" ws)
-       (agent-repl-host--reattach ws new :adopt "successor-accepted"))
-      (t
-       (agent-repl--info ws "elisp.host.adopt-retry-withdrawn ws=%s" ws))))))
-
 (defun agent-repl-host--transfer-withdrawn (ws)
   "Keep WS on the daemon that took it back: its transfer was withdrawn.
 
@@ -2531,16 +2435,16 @@ verb's refusal handler shares, so none hand-rolls the membership test."
 (defun agent-repl-host-handle-refusal (ws arm-plist)
   "React to a per-workspace rpc's handover refusal ARM-PLIST for WS.
 The daemon answers the VERB with the handover, so the refusal is news, not
-an error: `(:arm :transferring-away :value (:address A))' means this
-daemon has released WS to the daemon at A and is the same fact the
-`transferred' push carries — Emacs dials A when it is not already the
-standing successor (`elisp.host.redial'), then walks the one adopt path.
-`(:arm :not-yet-adopted :value nil)' means the NEW daemon has not taken WS
-over yet: nothing is wrong, so it is INFO, and the adopt is retried once
-the successor's `WatchDaemon' is accepted.  Any other arm is not a
-handover refusal and is a contract breach.
+an error.  EVERY DAEMON SERVES ONE SHARED ADDRESS (docs/investigations/
+2026-11-18-stable-sockets-design.md), so either arm means one thing: WS
+is being adopted by the daemon the shared address reaches, and the adopt
+goes out on the primary link, which forwards it there.
+`(:arm :transferring-away :value (:address A))' names the shared address;
+one naming none is a contract breach.  `(:arm :not-yet-adopted)' is the
+adopting daemon answering before its adoption landed.  Any other arm is
+not a handover refusal and is a contract breach.
 
-The RETRY's own answer comes back through the adopt path's arms, never
+The adopt\='s own answer comes back through the adopt path\='s arms, never
 through here, so a repeated refusal cannot recurse into a loop."
   (let ((arm (plist-get arm-plist :arm))
         (value (plist-get arm-plist :value)))
@@ -2554,29 +2458,10 @@ through here, so a repeated refusal cannot recurse into a loop."
              (agent-repl--error ws "elisp.host.transferring-away-without-address ws=%s address=%S"
                                 ws address)
            (agent-repl--info ws "elisp.host.transferring-away ws=%s address=%S" ws address)
-           (let ((new (agent-repl-host--redial-successor ws address)))
-             (if new
-                 (agent-repl-host--reattach ws new :adopt "transferring-away")
-               ;; The dial stands but is not accepted yet; adopting onto an
-               ;; unproven daemon is exactly what the acceptance gate forbids.
-               (agent-repl--info ws "elisp.host.awaiting-successor ws=%s address=%S"
-                                 ws address)
-               (agent-repl-host--adopt-on-acceptance ws))))))
+           (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "transferring-away"))))
       (:not-yet-adopted
-       (let ((address (agent-repl-host-serving-address arm-plist)))
-         (agent-repl--info ws "elisp.host.not-yet-adopted ws=%s serving=%S" ws address)
-         (cond
-          ;; THE REFUSAL NAMES WHERE WS IS SERVED: it is viewed there.
-          (address
-           (unless (agent-repl-host-view-where-served ws address "not-yet-adopted")
-             ;; WS ALREADY STANDS THERE, so the daemon that refused is the
-             ;; one named: nothing is sent again, or it would be refused
-             ;; again.  The incumbent's `transferred' push moves WS on.
-             (when (equal ws agent-repl-host--reselect-on-reattach)
-               (setq agent-repl-host--reselect-on-reattach nil))))
-          ((agent-repl-link-successor)
-           (agent-repl-host--reattach ws (agent-repl-link-successor) :adopt "not-yet-adopted"))
-          (t (agent-repl-host--adopt-on-acceptance ws)))))
+       (agent-repl--info ws "elisp.host.not-yet-adopted ws=%s" ws)
+       (agent-repl-host--reattach ws (agent-repl-link-primary) :adopt "not-yet-adopted"))
       (_
        (agent-repl--error ws "elisp.host.unknown-refusal-arm ws=%s arm=%S" ws arm)))))
 
