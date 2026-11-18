@@ -240,13 +240,13 @@ daemon runs with its metrics surface off."
 
 (defcustom agent-repl-daemon-holder
   (expand-file-name ".cache/agent-repl/sock/daemon-holder.sock" "~")
-  "The daemon\='s socket holder\='s control socket, or nil for none.
+  "The daemon\='s socket holder\='s control socket.  Required.
 Passed as `--holder\=': the daemon holding the boot claim takes its shared
 listener from that holder, which keeps it open across every daemon, and
 advertises it (docs/investigations/2026-11-18-stable-sockets-design.md).
-A successor the daemon spawns inherits the flag.  Nil or empty passes no
-flag, and the daemon advertises its own listener."
-  :type '(choice (const :tag "Off" nil) file)
+A successor the daemon spawns inherits the flag.  A daemon refuses to
+start without it, so an empty value refuses the spawn here, loudly."
+  :type 'file
   :group 'agent-repl)
 
 (defcustom agent-repl-daemon-multi-repo-config-dir
@@ -1555,7 +1555,9 @@ resolved workspace paths and a `~\=' the shell never saw would never match.
           (let ((metrics (agent-repl-daemon--config-value 'agent-repl-daemon-metrics-root)))
             (and metrics (list "--metrics-root" metrics)))
           (let ((holder (agent-repl-daemon--config-value 'agent-repl-daemon-holder)))
-            (and holder (list "--holder" holder)))))
+            (unless holder
+              (error "agent-repl: `agent-repl-daemon-holder' is empty: the daemon serves only the shared address its socket holder keeps"))
+            (list "--holder" holder))))
 
 (defconst agent-repl-daemon--detach-shell "/bin/sh"
   "The shell that detaches the daemon from this Emacs\='s lifetime.

@@ -98,7 +98,6 @@
          (agent-repl-link--ending-conn nil)
          (agent-repl-link--primary-ended nil)
          (agent-repl-link--shared-handover nil)
-         (agent-repl-daemon-holder nil)
          (agent-repl-link-drain nil)
          (agent-repl-link--surfaced-faults (make-hash-table :test #'equal))
          (agent-repl-link-drain-segment nil)
@@ -916,15 +915,6 @@ Nothing goes down: the daemon that accepts the address next is promoted."
       ;; Assert
       (should (assq :down agent-repl-test-link--hooks))
       (should-not agent-repl-link--pending-successor))))
-
-(ert-deftest agent-repl-test-link-shared-address-follows-the-holder ()
-  "The daemons share one address exactly when a socket holder is configured."
-  (agent-repl-test-link--with-harness
-    (let ((agent-repl-daemon-holder "/c/daemon-holder.sock"))
-      (should (agent-repl-link-shared-address-p)))
-    (let ((agent-repl-daemon-holder ""))
-      (should-not (agent-repl-link-shared-address-p)))
-    (should-not (agent-repl-link-shared-address-p))))
 
 (ert-deftest agent-repl-test-link-promotion-runs-no-down-hook ()
   "Nothing was lost in a promotion: the workspaces were already adopted."

@@ -209,8 +209,6 @@ nowhere else; until then Emacs holds a transport but no proven link.")
 Only the log line differs; it is kept so the record still distinguishes a
 cold connect from a recovery.")
 
-(defvar agent-repl-daemon-holder)
-
 (defvar agent-repl-link--shared-handover nil
   "Non-nil from a stand-down announcement naming the primary\='s own address.
 The daemons share one address through their socket holder, so no second
@@ -218,14 +216,6 @@ link is dialed while the incumbent serves: its calls for a transferred
 workspace are forwarded to the successor.  When the primary\='s stream
 ends, the same address is dialed as the successor, and the daemon that
 accepts it next is promoted (`agent-repl-link--shared-reconnect').")
-
-(defun agent-repl-link-shared-address-p ()
-  "Non-nil when the daemons share one address through a socket holder.
-Every handover is then on that one address, and a transferred workspace
-is re-attached on the primary link, which forwards it
-\=(docs/investigations/2026-11-18-stable-sockets-design.md)."
-  (and (stringp agent-repl-daemon-holder)
-       (not (string-empty-p agent-repl-daemon-holder))))
 
 (defvar agent-repl-link--pending-successor nil
   "A successor connection whose `WatchDaemon' is not ACCEPTED yet, or nil.

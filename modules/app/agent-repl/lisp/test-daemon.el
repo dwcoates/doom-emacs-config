@@ -390,17 +390,15 @@ workspace's path, so every path must have an answer."
       (should (equal (cadr (member "--holder" argv))
                      (expand-file-name "~/.cache/agent-repl/sock/daemon-holder.sock"))))))
 
-(ert-deftest agent-repl-test-daemon-argv-omits-a-nil-holder ()
-  "A nil holder passes no flag: the daemon advertises its own listener."
+(ert-deftest agent-repl-test-daemon-argv-refuses-an-empty-holder ()
+  "No holder configured refuses the spawn: the daemon would refuse to start."
   ;; Arrange
   (let ((agent-repl-daemon-command '("/bin/agent-repld"))
         (agent-repl-daemon-default-config-dir "/a")
         (agent-repl-daemon-multi-repo-config-dir "/b")
         (agent-repl-daemon-holder nil))
-    ;; Act
-    (let ((argv (agent-repl-daemon--argv)))
-      ;; Assert
-      (should-not (member "--holder" argv)))))
+    ;; Act and Assert
+    (should-error (agent-repl-daemon--argv))))
 
 (ert-deftest agent-repl-test-daemon-argv-omits-a-nil-metrics-root ()
   "A nil metrics root passes no flag: the daemon runs with metrics off."
