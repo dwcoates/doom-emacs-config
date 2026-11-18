@@ -366,15 +366,23 @@ func TestACreationPromptNamingTheThreadOfAWorkspaceWithNoneFailsTheCreate(t *tes
 	}
 }
 
-// TestTheDaemonNeverPostsToSlack pins that no production code of the daemon
-// sends to Slack: what a thread is told is its repository's hooks' to say.
-func TestTheDaemonNeverPostsToSlack(t *testing.T) {
+// TestTheDaemonPostsToSlackOnlyWhenAnAgentAsks pins how far the daemon
+// speaks in Slack. What a thread is told of a workspace's LIFECYCLE is its
+// repository's hooks' to say, never the daemon's. The daemon posts only the
+// message an agent hands it for a thread its workspace follows
+// (agentrepl.v1.PostToSlackThread), so:
+//   - every Slack command line is spelled in internal/gnsclient alone, the
+//     daemon's one way to Slack;
+//   - gnsclient's Post is called from slackwatch's post verb alone.
+func TestTheDaemonPostsToSlackOnlyWhenAnAgentAsks(t *testing.T) {
 	// Arrange
 	daemon, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		t.Fatal(err)
 	}
-	var posting []string
+	gnsclient := filepath.Join(daemon, "internal", "gnsclient")
+	postVerb := filepath.Join(daemon, "internal", "slackwatch", "verbs.go")
+	var spelling, posting []string
 
 	// Act
 	err = filepath.WalkDir(daemon, func(path string, d os.DirEntry, err error) error {
@@ -388,11 +396,17 @@ func TestTheDaemonNeverPostsToSlack(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		for _, verb := range []string{`"slack", "send"`, `"slack", "react"`, "slack send", "slack react"} {
-			if strings.Contains(string(raw), verb) && !strings.Contains(path, filepath.Join("internal", "lifecycleconfig")) {
-				posting = append(posting, path)
-				break
+		source := string(raw)
+		if filepath.Dir(path) != gnsclient && !strings.Contains(path, filepath.Join("internal", "lifecycleconfig")) {
+			for _, verb := range []string{`"slack", "send"`, `"slack", "react"`, "slack send", "slack react"} {
+				if strings.Contains(source, verb) {
+					spelling = append(spelling, path)
+					break
+				}
 			}
+		}
+		if path != postVerb && strings.Contains(source, "GNS.Post(") {
+			posting = append(posting, path)
 		}
 		return nil
 	})
@@ -401,7 +415,10 @@ func TestTheDaemonNeverPostsToSlack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(spelling) != 0 {
+		t.Errorf("a Slack command line is spelled in %v, want only in internal/gnsclient", spelling)
+	}
 	if len(posting) != 0 {
-		t.Fatalf("Slack is posted to from %v, want nowhere in the daemon", posting)
+		t.Errorf("Slack is posted to from %v, want only slackwatch's post verb", posting)
 	}
 }
