@@ -20,3 +20,19 @@ Owner rulings of 2026-11-18. The deploy mediator builds this in its own session.
 
 - Full, structural solutions only; no partial landing. This lands as one finish.
 - The deploy mediator creates no workspace; all of this is built in its own session.
+
+## Refinements from the several-daemons plan (docs/investigations/2026-11-16-several-daemons-plan.md)
+
+- Several generations live at once: the newest (canonical) daemon and elders serving their busy holdouts until each frees.
+- THE ACCEPT RIGHT IS THE BOOT CLAIM. Only the daemon holding the boot claim (an exclusive kernel lock, daemonaddr) accepts on the shared listener. A daemon takes the listener from the holder only while it holds the boot claim, and stops accepting and closes its copy before it releases the claim (Yield, or exit). Exclusivity is the kernel lock's, so two daemons can never accept at once.
+- FORWARDING FOLLOWS THE SERVING ROW. The accepting daemon reads the serving owner of the call's workspace; a call for a workspace another live instance serves is forwarded (reverse-proxied, streams included) to that instance's private listener. Before the yield that is incumbent to successor (workspaces already transferred); after it, newest to elder (holdouts). The target is alive by invariant (a serving row names a live instance: the successor is serving in joining mode, and an elder lives while it serves any workspace); a forward that finds the instance dead is an invariant violation, recorded at ERROR and failed loudly.
+- Each daemon keeps a private loopback listener for forwards, recorded per instance in the state root beside its life lock.
+- THE DAEMON'S SHARED ADDRESS IS TCP, because the webapp's pages reach the daemon over HTTP and cannot dial a unix socket. Its holder binds 127.0.0.1 once; daemon.addr advertises the holder's address for the holder's life.
+- Emacs addresses every call to the one address. The per-workspace daemon resolution (lisp/host.el agent-repl-host-conn, the link's successor promotion) collapses to the one link; a `transferred` push ends a stream that the client re-opens on the same address, which routes to the new owner. The per-daemon address machinery it replaces is removed.
+
+## Build order
+
+1. The holder program (one binary for both sockets), its launchd/systemd entries in requirements.json, and its tests.
+2. The store: listener from its holder; singleton by a flock on its database.
+3. The daemon: shared listener from the holder under the boot claim; the private listener per instance; forwarding by serving row; the accept loop dropped before the claim is released.
+4. Emacs and the other clients: the one address; the per-daemon resolution removed.
