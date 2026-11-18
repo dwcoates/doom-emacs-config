@@ -1430,7 +1430,7 @@ func TestCloseRequestlessClosesOnlyConnectionsWithNoRequest(t *testing.T) {
 	defer newPeer.Close()
 	defer idleSide.Close()
 	defer idlePeer.Close()
-	conns := &connStates{byConn: map[net.Conn]http.ConnState{}}
+	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: dlog.NewTestLogger()}
 	conns.track(newSide, http.StateNew)
 	conns.track(idleSide, http.StateIdle)
 
@@ -1954,5 +1954,41 @@ func TestACallReachingAnOpenConnectionAfterTheExitsWaitsIsAnswered(t *testing.T)
 	// Assert
 	if serveErr != nil || goAway.LastStream != 3 || answerErr != nil {
 		t.Fatalf("serve() = %v, GOAWAY = %+v, answer = %+v (%v); want an orderly exit whose GOAWAY admits the late call and which answers it before returning", serveErr, goAway, answer, answerErr)
+	}
+}
+
+func TestConnStatesRecordsOnlyAConnectionThatClosedWithNoRequest(t *testing.T) {
+	tests := []struct {
+		name   string
+		states []http.ConnState
+		want   bool
+	}{
+		{name: "closed with no request", states: []http.ConnState{http.StateNew, http.StateClosed}, want: true},
+		{name: "closed after a request", states: []http.ConnState{http.StateNew, http.StateActive, http.StateIdle, http.StateClosed}},
+		{name: "hijacked for h2c", states: []http.ConnState{http.StateNew, http.StateActive, http.StateHijacked}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			side, peer := net.Pipe()
+			defer side.Close()
+			defer peer.Close()
+			log := dlog.NewTestLogger()
+			conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: log}
+
+			// Act
+			for _, state := range tt.states {
+				conns.track(side, state)
+			}
+
+			// Assert
+			_, got := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.conn_requestless"})
+			if got != tt.want {
+				t.Fatalf("recorded = %v, want %v (records %v)", got, tt.want, log.Records())
+			}
+			if len(conns.byConn) != 0 || len(conns.born) != 0 {
+				t.Fatalf("still tracked %v / %v, want the closed connection forgotten", conns.byConn, conns.born)
+			}
+		})
 	}
 }
