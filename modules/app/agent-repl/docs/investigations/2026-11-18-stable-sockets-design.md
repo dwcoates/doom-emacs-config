@@ -47,4 +47,6 @@ Owner rulings of 2026-11-18. The deploy mediator builds this in its own session.
 ## Progress
 
 - Done: the sockethold library (agentrepl/logging/sockethold), activation (sockethold/activate), the holder program (agent-shim/sockethold), its roster suite.
-- Next: the `socket_holder` requirement kind and its renderer and golden test; the store's holder entry; the store taking its listeners and its database flock; then the daemon.
+- Done: the `socket_holder` requirement kind, its pinned renderer and tests; the build target; the store's holder entry; the store taking its listeners (`--holder`) and its database flock; lib-service's load no longer kickstarts after its bootstrap (that kickstart was the 10s outage at every reload).
+- Migration: the first install loads the store's holder (launchd takes over the socket paths) and then restarts the store onto it; the entries are ordered holder first.
+- Next: the daemon (its holder entry with the tcp socket; the shared listener taken under the boot claim; the per-instance private listener; forwarding by serving row; the accept loop dropped before the claim is released), then the clients (Emacs, webapp, CLI, sidecar) on the one address.
