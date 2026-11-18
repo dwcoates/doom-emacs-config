@@ -8,6 +8,8 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/dlog"
 )
 
 // requestLoggingServer owns the transport boundary around every generated RPC
@@ -38,13 +40,42 @@ func serveUnary[Req, Resp any](
 	handle func(context.Context, *connect.Request[Req]) (*connect.Response[Resp], error),
 ) (resp *connect.Response[Resp], err error) {
 	began := time.Now()
-	defer func() { s.server.deps.RPCs.ObserveRPC(rpc, rpcOutcome(err), time.Since(began)) }()
-	boundary, err := s.server.beginRequest(ctx, rpc, req.Header().Get(requestIDHeader), requestMessage(req))
+	requestID := req.Header().Get(requestIDHeader)
+	phase := "boundary"
+	defer func() {
+		took := time.Since(began)
+		s.server.deps.RPCs.ObserveRPC(rpc, rpcOutcome(err), took)
+		recordAbandoned(s.server.log, ctx, rpc, requestID, phase, took)
+	}()
+	boundary, err := s.server.beginRequest(ctx, rpc, requestID, requestMessage(req))
 	if err != nil {
 		return nil, boundaryFailure(err)
 	}
+	phase = "handler"
 	defer boundary.enter()(&err)
 	return handle(ctx, req)
+}
+
+// recordAbandoned records, at INFO, a unary rpc whose caller left before it
+// answered: the caller timed out or went away while the daemon still held the
+// request in its boundary (resolving the workspace) or its handler.
+//
+// A CLIENT TIMEOUT NAMES ITS REQUEST ON BOTH SIDES. Emacs logs a unary timeout
+// by its request id; this record carries the same id, the phase the request
+// was held in and how long it waited, so a burst of client timeouts reads as
+// requests the daemon held (and where), or, with no such record, as requests
+// that never reached a handler (2026-11-18, the handover's 30s of timeouts).
+func recordAbandoned(log dlog.Logger, ctx context.Context, rpc, requestID, phase string, took time.Duration) {
+	if ctx.Err() == nil {
+		return
+	}
+	log.Info("daemon.server.request_abandoned", "the rpc's caller left before the daemon answered", dlog.Context{
+		"rpc":        rpc,
+		"request_id": requestID,
+		"phase":      phase,
+		"waited_ms":  took.Milliseconds(),
+		"cause":      context.Cause(ctx).Error(),
+	})
 }
 
 // RPCRecorder times the unary rpcs the daemon answers
