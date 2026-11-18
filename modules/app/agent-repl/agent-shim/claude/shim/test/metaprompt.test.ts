@@ -359,6 +359,13 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("it is ALWAYS the LAST root branch of the tree.");
   });
 
+  it("keeps a reply as plain prose only when it fits in a few short sentences", () => {
+    // Arrange
+    const text = readMetaprompt(homeOnThisRepository()) ?? "";
+    // Assert — owner ruling 2026-11-18: twenty lines of prose is a tree.
+    expect(text).toContain("A response that fits in three to five SHORT sentences, or two to three lines of text, is a brief, normal reply.");
+  });
+
   it("requires a shell command to be one runnable block fenced as bash", () => {
     // Arrange
     const home = homeOnThisRepository();
