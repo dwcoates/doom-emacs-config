@@ -1655,14 +1655,15 @@ regression could hide in; nothing here is stubbed."
                   (should (equal (length entries) 1))
                   (should (equal (alist-get 'idempotency_key (car entries)) failed-key)))
                 (should (equal (with-current-buffer buf (buffer-string)) "run the tests"))
-                ;; Assert: the real handover walk adopted WS onto the
-                ;; successor -- `agent-repl-host-handle-refusal' ran for
-                ;; real and was never stubbed.
-                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+                ;; Assert: the real handover walk adopted WS on the primary
+                ;; link, whose daemon forwards it to the successor over the
+                ;; shared address -- `agent-repl-host-handle-refusal' ran
+                ;; for real and was never stubbed.
+                (agent-repl-itest--await-call primary "AdoptHostWorkspace")
                 (agent-repl-itest--wait-until
                  (lambda () (eq (agent-repl-host-conn agent-repl-itest-composer--ws)
-                                (agent-repl-link-successor)))
-                 nil "the workspace to be adopted onto the successor")
+                                (agent-repl-link-primary)))
+                 nil "the workspace to be adopted on the primary link")
                 ;; Assert: Emacs re-sent nothing itself -- the daemon that
                 ;; owns the workspace ingests the durable entry.
                 (should (null (agent-repl-itest--calls successor "SubmitPrompt"))))))

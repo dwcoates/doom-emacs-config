@@ -689,16 +689,18 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 		t.Fatalf("WatchWebWorkspace transferred.address = %q, want the announced %q", webTransfer.GetAddress(), addr)
 	}
 
-	// Assert: a per-workspace rpc on the OLD daemon now answers
-	// transferring_away naming the successor.
-	oldResp, err := d.Client().SubmitPrompt(d.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
+	// Assert: a per-workspace rpc on the OLD daemon is forwarded to the
+	// successor.
+	oldResp, err := d.PrivateClient().SubmitPrompt(d.Ctx(), connect.NewRequest(&agentreplv1.SubmitPromptRequest{
 		Workspace: f.ws, Said: said("hello"), IdempotencyKey: "k-old", Origin: conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT,
 	}))
 	if err != nil {
 		t.Fatalf("SubmitPrompt on the old daemon after transfer = error %v, want a typed transferring_away answer", err)
 	}
-	if away := oldResp.Msg.GetError().GetTransferringAway(); away == nil || away.GetAddress() != addr {
-		t.Fatalf("SubmitPrompt on the old daemon = %v, want error.transferring_away naming %q", oldResp.Msg, addr)
+	// THE OLD DAEMON FORWARDS the call to the successor, which answers it
+	// until a client adopts the workspace there, naming the shared address.
+	if pending := oldResp.Msg.GetError().GetNotYetAdopted(); pending == nil || pending.GetAddress() != addr {
+		t.Fatalf("SubmitPrompt on the old daemon = %v, want the successor's error.not_yet_adopted naming %q, forwarded", oldResp.Msg, addr)
 	}
 
 	// Assert: the same rpc on the NEW daemon, before adoption, answers
@@ -978,14 +980,14 @@ func TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuc
 	}
 }
 
-// TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway pins the
+// TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor pins the
 // incumbent's half of the owner's second 2026-09-27 ruling: a restart asked
 // once a move has sealed what it carries is not run here and not lost -- it is
 // answered transferring_away, naming the daemon the workspace moved to, which
 // is where it runs. (A restart that joins the move BEFORE the seal is carried
 // across and run by the successor after its adoption; that race is narrow, so
 // its unit tests in internal/rollout and internal/promptqueue pin it.)
-func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) {
+func TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor(t *testing.T) {
 	t.Parallel()
 	// Arrange: a busy workspace, moved mid-turn. THE SUCCESSOR'S ADOPTION IS
 	// HELD FOR THE PARTICIPANTS (adoptAwaitsParticipantsEnv): the restart is
@@ -1011,14 +1013,16 @@ func TestARestartAskedOfAMovedWorkspaceIsAnsweredTransferringAway(t *testing.T) 
 	}).GetTransferred()
 
 	// Act
-	resp, err := d.Client().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
+	resp, err := d.PrivateClient().RestartWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.RestartWorkspaceRequest{Workspace: f.ws}))
 
 	// Assert
 	if err != nil {
 		t.Fatalf("RestartWorkspace = error %v, want a typed answer", err)
 	}
-	if resp.Msg.GetError().GetTransferringAway() == nil {
-		t.Fatalf("RestartWorkspace on the incumbent = %v, want error.transferring_away", resp.Msg)
+	// THE INCUMBENT FORWARDS a moved workspace's call to the successor, which
+	// answers it until a client adopts the workspace there.
+	if resp.Msg.GetError().GetNotYetAdopted() == nil {
+		t.Fatalf("RestartWorkspace on the incumbent = %v, want the successor's error.not_yet_adopted, forwarded", resp.Msg)
 	}
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); the incumbent must not run a restart it has moved away", got)
@@ -1294,9 +1298,9 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 
 	// Act: fire the handover with no web stream ever opened.
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
-	announced := harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
+	harness.AwaitView(t, d.Ctx(), daemonStream, "shutdown_announced", func(r *agentreplv1.WatchDaemonResponse) bool {
 		return r.GetShutdownAnnounced() != nil
-	}).GetShutdownAnnounced()
+	})
 	// THE ANNOUNCEMENT PRECEDES THE MANIFEST. Handover spawns, announces,
 	// snapshots the participants and only THEN writes the intent manifest
 	// (internal/rollout/handover.go), and the successor arms its rendezvous
@@ -1316,7 +1320,9 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	d.AwaitRunLogRecordFromAnyProcess("the successor's rendezvous armed from the intent manifest", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.rollout.join" && strings.HasPrefix(r.Message, "armed the adopt rendezvous from ")
 	})
-	successor := drainDial(announced.GetAddress())
+	// The successor itself, at its private address: the incumbent still
+	// holds the shared one.
+	successor := d.OtherDaemonClient()
 
 	// Act: the never-open web client attempts to join anyway.
 	resp, err := successor.AdoptWebWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))

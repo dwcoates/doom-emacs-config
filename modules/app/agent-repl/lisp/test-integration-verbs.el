@@ -1185,33 +1185,6 @@ any bytes leave Emacs."
 
 ;;;; ---- CONN resolution across a handover (audit finding 82) ----
 
-(ert-deftest agent-repl-itest-verbs-verb-lands-on-the-successor-after-a-transfer ()
-  "After a workspace transfers, its verb lands on the SUCCESSOR, not the primary.
-Pins \"CONN via `agent-repl-host-conn' (falls back to
-`agent-repl-link-primary')\" (elisp-fanout.md §9): once `transferred'
-adopts the workspace onto the new daemon, `agent-repl-host-conn' must
-resolve there, or every later verb would keep hammering a daemon that
-already released the workspace."
-  ;; Arrange.
-  (agent-repl-itest--with-fake-daemon primary
-    (agent-repl-itest-verbs--with-workspace primary ref
-      (agent-repl-itest--with-second-daemon primary successor
-        (let ((successor-conn (agent-repl-connect-open
-                               (agent-repl-itest-daemon-address successor))))
-          (unwind-protect
-              (cl-letf (((symbol-function 'agent-repl-link-successor)
-                         (lambda () successor-conn)))
-                ;; Act: the transfer adopts the workspace onto the successor.
-                (agent-repl-itest--push primary "host" '((transferred . ()))
-                                        (plist-get ref :id))
-                (agent-repl-itest--await-call successor "AdoptHostWorkspace")
-                (agent-repl-itest--await-subscriber successor "host" (plist-get ref :id))
-                (agent-repl-verb-close agent-repl-itest-verbs--ws)
-                ;; Assert.
-                (agent-repl-itest--await-call successor "CloseWorkspace")
-                (should (null (agent-repl-itest--calls primary "CloseWorkspace"))))
-            (agent-repl-connect-close successor-conn)))))))
-
 ;;;; ---- agent-repl-frontend-daemon-stop wire shape (audit finding 83) ----
 
 (ert-deftest agent-repl-itest-verbs-frontend-daemon-stop-sends-update-shutdown-schedule-now-operator-emacs ()
@@ -1415,13 +1388,32 @@ puts dynamic values."
                    (alist-get 'arguments (alist-get 'context record)))
                  (agent-repl-itest--log-entries daemon operation level))))
 
+(ert-deftest agent-repl-itest-verbs-verb-lands-on-the-primary-after-a-transfer ()
+  "After a workspace transfers, its verb lands on the primary link.
+Every daemon serves one shared address (docs/investigations/
+2026-11-18-stable-sockets-design.md): `transferred' re-adopts the
+workspace on the primary link, whose daemon forwards each call to the
+daemon serving the workspace, so no verb ever dials a successor's own
+address."
+  ;; Arrange.
+  (agent-repl-itest--with-fake-daemon primary
+    (agent-repl-itest-verbs--with-link primary
+     (agent-repl-itest-verbs--with-workspace primary ref
+      ;; Act: the transfer re-adopts the workspace on the primary.
+      (agent-repl-itest--push primary "host" '((transferred . ()))
+                              (plist-get ref :id))
+      (agent-repl-itest--await-call primary "AdoptHostWorkspace")
+      (agent-repl-verb-close agent-repl-itest-verbs--ws)
+      ;; Assert.
+      (agent-repl-itest--await-call primary "CloseWorkspace")))))
+
 ;; audit-2 #24
 (ert-deftest agent-repl-itest-verbs-finish-transferring-away-routes-to-the-handover ()
   "`transferring_away' on a verb ack is HANDOVER NEWS, not a refusal to report.
 verbs.el `agent-repl-verbs--handover-arms' + fanout §7 HANDOVER REDIAL.
 Reporting it would be telling the user something went wrong during the
 one rollout that is supposed to be invisible — so it is INFO, nothing is
-drawn, and the workspace is adopted onto the successor instead."
+drawn, and the workspace is adopted on the primary link instead."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon primary
     (agent-repl-itest-verbs--with-link primary
@@ -1443,10 +1435,12 @@ drawn, and the workspace is adopted onto the successor instead."
             (should (null (agent-repl-itest--log-entries
                            primary "elisp.verbs.finish-refused" "warn")))
             (should-not (seq-some (lambda (m) (string-match-p "finish refused" m)) messages))
-            (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+            ;; The adopt goes out on the primary link: its daemon
+            ;; forwards it to the successor over the shared address.
+            (agent-repl-itest--await-call primary "AdoptHostWorkspace")
             (should (equal (agent-repl-itest--body-field
                             (car (agent-repl-itest--call-bodies
-                                  successor "AdoptHostWorkspace"))
+                                  primary "AdoptHostWorkspace"))
                             'workspace 'id)
                            (plist-get ref :id)))))))))
 
@@ -1478,10 +1472,12 @@ drawn here either."
             (should (null (agent-repl-itest--log-entries
                            primary "elisp.verbs.finish-refused" "warn")))
             (should-not (seq-some (lambda (m) (string-match-p "finish refused" m)) messages))
-            (agent-repl-itest--await-call successor "AdoptHostWorkspace")
+            ;; The adopt goes out on the primary link: its daemon
+            ;; forwards it to the successor over the shared address.
+            (agent-repl-itest--await-call primary "AdoptHostWorkspace")
             (should (equal (agent-repl-itest--body-field
                             (car (agent-repl-itest--call-bodies
-                                  successor "AdoptHostWorkspace"))
+                                  primary "AdoptHostWorkspace"))
                             'workspace 'id)
                            (plist-get ref :id)))))))))
 

@@ -458,7 +458,7 @@ var Suites = []Suite{
 			// system's tree is where it says (a file in each stands for its
 			// directory).
 			"stack": {"e2e/", "agent-shim/claude/shim/package.json", "agent-shim/shim-store/go.mod",
-				"agent-shim/claude/shim-sidecar/go.mod", "daemon/go.mod"},
+				"agent-shim/claude/shim-sidecar/go.mod", "daemon/go.mod", "requirements.json"},
 			// The scans read the e2e package's sources, and the scenario matrix
 			// the mocked vendor's scenarios, their goldens and the webapp
 			// layer's areas it summarizes.
@@ -718,7 +718,13 @@ var daemonUnitInputs = map[string][]string{
 	"internal/lifecycleconfig": {"daemon/", "/.agent-repl/", "bin/test-all.sh", "bin/deploy-landing.sh", "bin/push-release.sh", "bin/hooks/"},
 	// The harness's deploy configuration reads the briefs and the landing
 	// script, and its scans read the integration suite's own sources.
-	"integration/harness": {"prompts/", "bin/deploy-landing.sh", "daemon/integration/"},
+	// Its holder scan reads the command's tests too, and the pinned checkout
+	// copies the module's requirements manifest.
+	"integration/harness": {"prompts/", "bin/deploy-landing.sh", "daemon/integration/", "daemon/cmd/agent-repld/", "requirements.json"},
+	// The client-address scan reads the packages that tell a client one.
+	"internal/daemonaddr": {"daemon/internal/server/", "daemon/internal/rollout/"},
+	// The includes scan reads the holder ensure, which parses them.
+	"internal/reqmanifest": {"daemon/internal/holderensure/"},
 	// prose holds the daemon's parse to the old webapp parser's golden
 	// answers, and to the webapp's parsed-prose fixture.
 	"internal/prose": {"tree-sitter-tldr/tldr/test/golden/golden.json", "webapp/test/fixtures/"},

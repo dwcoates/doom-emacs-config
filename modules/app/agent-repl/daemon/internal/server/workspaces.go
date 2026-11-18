@@ -311,7 +311,7 @@ func (s *server) refuseDeployMediatorCreate(ctx context.Context, rpc string, res
 	}
 	return s.refuse(s.log, rpc, resp, s.fill(refusal{Arm: workspace.ArmRequestedByDeployMediator, Info: true,
 		Reason: deployMediatorCreateDetail,
-		Fields: map[string]any{"workspace": &workspacev1.WorkspaceRef{Id: string(record.ID), Dir: record.Dir}}})), true
+		Fields: map[string]any{"workspace": record.Ref()}})), true
 }
 
 func requesterID(r *agentreplv1.WorkspaceRequester) *ids.WorkspaceID {

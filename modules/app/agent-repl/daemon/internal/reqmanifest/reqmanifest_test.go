@@ -47,15 +47,13 @@ func TestIncludesAnswersTheRootManifestsIncludes(t *testing.T) {
 func ptr(s string) *string { return &s }
 
 // TestEveryReaderOfTheIncludesCallsIncludes pins the one parse of the root
-// manifest's includes: the holder ensure and the harness call Includes, and
-// neither declares an `includes` field of its own.
+// manifest's includes: the holder ensure calls Includes, and declares an `includes` field of its own.
 func TestEveryReaderOfTheIncludesCallsIncludes(t *testing.T) {
 	tests := []struct {
 		name string
 		dir  string
 	}{
 		{name: "the holder ensure", dir: "../holderensure"},
-		{name: "the integration harness", dir: "../../integration/harness"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

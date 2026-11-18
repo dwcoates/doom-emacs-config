@@ -268,8 +268,9 @@ func testASuccessorThatFinishedJoiningAcceptsADeploy(t *testing.T) {
 
 	// Assert: it hands over to a THIRD daemon, which then serves the workspace.
 	second := dpAwaitAnnounced(t, w, announcements).GetAddress()
-	if second == first {
-		t.Fatalf("the second handover announced %q, the successor's own address", second)
+	// Every handover announces the one shared address its socket holder keeps.
+	if second != first {
+		t.Fatalf("the second handover announced %q, want the shared address %q", second, first)
 	}
 	adAwaitAddrFileChange(t, w.Daemon, second)
 	if _, err := adDial(second).SelectWorkspace(w.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil {

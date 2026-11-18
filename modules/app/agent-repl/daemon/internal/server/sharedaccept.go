@@ -37,6 +37,7 @@ type acceptResult struct {
 func NewSharedAccept(private net.Listener) *SharedAccept {
 	l := &SharedAccept{private: private, conns: make(chan acceptResult), done: make(chan struct{})}
 	l.wg.Add(1)
+	// inflight: joined: Close waits for every pump.
 	go l.pump(private, false)
 	return l
 }
@@ -52,6 +53,7 @@ func (l *SharedAccept) AddShared(shared net.Listener) {
 	l.shared = shared
 	l.mu.Unlock()
 	l.wg.Add(1)
+	// inflight: joined: Close waits for every pump.
 	go l.pump(shared, true)
 }
 
