@@ -387,12 +387,18 @@ func (*SetWorkspaceParentResponse_Success) isSetWorkspaceParentResponse_Result()
 func (*SetWorkspaceParentResponse_Error) isSetWorkspaceParentResponse_Result() {}
 
 // Retargeted, and the notice is queued in the workspace's session. The new
-// nesting arrives on the roster stream. DELIBERATELY EMPTY: the request named
-// the target, so there is nothing new to say about it.
+// nesting arrives on the roster stream.
 type SetWorkspaceParentSuccess struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The revision of the roster the daemon resolved after the retarget
+	// (frontend.v1.WorkspaceRoster.revision): every roster at or above it nests
+	// the workspace as asked. A sidebar that dropped a row onto its new parent
+	// holds its drawing until a push at or above it arrives, as it does for
+	// ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no
+	// roster yet.
+	RosterRevision uint64 `protobuf:"varint,1,opt,name=roster_revision,json=rosterRevision,proto3" json:"roster_revision,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SetWorkspaceParentSuccess) Reset() {
@@ -423,6 +429,13 @@ func (x *SetWorkspaceParentSuccess) ProtoReflect() protoreflect.Message {
 // Deprecated: Use SetWorkspaceParentSuccess.ProtoReflect.Descriptor instead.
 func (*SetWorkspaceParentSuccess) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SetWorkspaceParentSuccess) GetRosterRevision() uint64 {
+	if x != nil {
+		return x.RosterRevision
+	}
+	return 0
 }
 
 // The daemon's refusals. Validation failures (an unset field or arm, a blank
@@ -1122,8 +1135,9 @@ const file_agentrepl_v1_endpoint_set_workspace_parent_proto_rawDesc = "" +
 	"\x1aSetWorkspaceParentResponse\x12C\n" +
 	"\asuccess\x18\x01 \x01(\v2'.agentrepl.v1.SetWorkspaceParentSuccessH\x00R\asuccess\x12=\n" +
 	"\x05error\x18\x02 \x01(\v2%.agentrepl.v1.SetWorkspaceParentErrorH\x00R\x05errorB\b\n" +
-	"\x06result\"\x1b\n" +
-	"\x19SetWorkspaceParentSuccess\"\xa9\b\n" +
+	"\x06result\"D\n" +
+	"\x19SetWorkspaceParentSuccess\x12'\n" +
+	"\x0froster_revision\x18\x01 \x01(\x04R\x0erosterRevision\"\xa9\b\n" +
 	"\x17SetWorkspaceParentError\x12_\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v20.agentrepl.v1.SetWorkspaceParentUnknownWorkspaceH\x00R\x10unknownWorkspace\x12l\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v24.agentrepl.v1.SetWorkspaceParentWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12_\n" +

@@ -1279,6 +1279,26 @@ func TestSetWorkspaceParentHandsTheTargetToTheRetarget(t *testing.T) {
 	}
 }
 
+// TestSetWorkspaceParentAnswersTheRosterRevisionThatCarriesTheNesting pins
+// the revision a sidebar that dropped a row onto its new parent holds its
+// drawing until.
+func TestSetWorkspaceParentAnswersTheRosterRevisionThatCarriesTheNesting(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	withParent(h)
+	h.Deps.Sidebar.(*fakeSidebar).revision = 42
+
+	// Act
+	resp, err := h.Client.SetWorkspaceParent(context.Background(), connect.NewRequest(&agentreplv1.SetWorkspaceParentRequest{
+		Workspace: ref(), Parent: childOf(&workspacev1.WorkspaceRef{Id: string(parentWorkspaceID), Dir: "/tmp/agent-repl-parent"}),
+	}))
+
+	// Assert
+	if err != nil || resp.Msg.GetSuccess().GetRosterRevision() != 42 {
+		t.Fatalf("SetWorkspaceParent = %v, %v; want success at the sidebar's revision 42", resp, err)
+	}
+}
+
 // TestSetWorkspaceParentRefusesBeforeRetargeting pins the refusals the
 // handler answers itself — the subject's and the parent ref's — each on its
 // own arm and none reaching the retarget.

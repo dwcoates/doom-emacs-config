@@ -1647,8 +1647,10 @@ func (s *server) SetWorkspaceParent(
 	if err := s.deps.Retarget.Retarget(ctx, subject.Record.ID, retarget); err != nil {
 		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
 	}
+	// THE VERB REPUBLISHED BEFORE ANSWERING (workspace.SetParent), so the
+	// roster resolved now nests the workspace as asked.
 	resp.Result = &agentreplv1.SetWorkspaceParentResponse_Success{
-		Success: &agentreplv1.SetWorkspaceParentSuccess{},
+		Success: &agentreplv1.SetWorkspaceParentSuccess{RosterRevision: s.deps.Sidebar.Revision()},
 	}
 	return connect.NewResponse(resp), nil
 }

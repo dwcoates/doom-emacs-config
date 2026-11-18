@@ -85,9 +85,16 @@ message SetWorkspaceParentResponse {
 }
 
 // Retargeted, and the notice is queued in the workspace's session. The new
-// nesting arrives on the roster stream. DELIBERATELY EMPTY: the request named
-// the target, so there is nothing new to say about it.
-message SetWorkspaceParentSuccess {}
+// nesting arrives on the roster stream.
+message SetWorkspaceParentSuccess {
+  // The revision of the roster the daemon resolved after the retarget
+  // (frontend.v1.WorkspaceRoster.revision): every roster at or above it nests
+  // the workspace as asked. A sidebar that dropped a row onto its new parent
+  // holds its drawing until a push at or above it arrives, as it does for
+  // ArrangeSidebarSuccess.roster_revision. 0 when the daemon has resolved no
+  // roster yet.
+  uint64 roster_revision = 1;
+}
 
 // The daemon's refusals. Validation failures (an unset field or arm, a blank
 // id) are Connect InvalidArgument, never an arm. Nothing is changed and no
