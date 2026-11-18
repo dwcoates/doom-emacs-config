@@ -520,7 +520,7 @@ A line of your prompt that opens on a label of a response's tree and a dash (`3.
   | `C-i` | normal and insert | Relabels the entry to the node before it: its previous sibling, else its parent. The words are kept. |
   | `M-j` | insert | Opens a line above answering the entry's previous sibling (`3.3 - ` opens `3.2 - `). |
   | `M-k` | insert | Opens a line below answering the entry's next sibling (`3.3 - ` opens `3.4 - `). |
-  | `C-SPC` | insert | On an empty entry, relabels it to its next sibling, else its parent's next sibling. On a filled one, opens the next sibling below, as `M-k` does. |
+  | `C-SPC` | insert | On an empty entry, relabels it to its next sibling, else its parent's next sibling. On a filled one, opens a line below on that same node, so a last sibling opens its parent's next sibling rather than a sibling the tree lacks. |
   | `S-RET` | insert | Opens a new line, first clearing the entry when nothing follows its label. |
 
   - Off an entry line, every one of these keys does what it always did.
