@@ -230,11 +230,11 @@ func (d *Deployer) restoreKept(in installer, k kept, fields dlog.Context) error 
 // standsAsKept reports whether the live path already holds exactly what was
 // kept: absent when nothing was, the same bytes when something was.
 func (k kept) standsAsKept() (bool, error) {
-	_, err := os.Lstat(k.live)
-	absent := errors.Is(err, fs.ErrNotExist)
-	if err != nil && !absent {
+	stands, err := pathStands(k.live)
+	if err != nil {
 		return false, fmt.Errorf("stat %s: %w", k.live, err)
 	}
+	absent := !stands
 	switch {
 	case k.backup == "":
 		return absent, nil

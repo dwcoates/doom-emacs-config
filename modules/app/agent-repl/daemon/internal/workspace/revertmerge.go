@@ -71,13 +71,13 @@ func (v *verbs) OpenToRevertMerge(ctx context.Context, ws ids.WorkspaceID, progr
 	if err := v.Open(ctx, ws, progress); err != nil {
 		return err
 	}
-	submission := deferredBrief(ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT)
-	disposition, err := v.queueBrief(ctx, log, opRevertMerge, "the reopened workspace's", "the merge-revert brief", submission)
+	turn, disposition, err := v.queueDeferredBrief(ctx, log, opRevertMerge, ws, brief, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
+		"the reopened workspace's", "the merge-revert brief")
 	if err != nil {
 		return fmt.Errorf("revert the merge of %q: %w", ws, err)
 	}
 	log.Info(opRevertMerge, "reopened the merged workspace and queued its merge-revert brief", dlog.Context{
-		"turn": string(submission.Turn), "landed_commit": landed,
+		"turn": string(turn), "landed_commit": landed,
 		"delivered": disposition.Delivered, "parked": disposition.Parked()})
 	return nil
 }

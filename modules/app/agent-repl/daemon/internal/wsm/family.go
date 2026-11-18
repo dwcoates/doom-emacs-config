@@ -40,11 +40,19 @@ import (
 // rule: an open workspace whose parent is not open takes its parent's place
 // (resolve/sidebar's openTree).
 
-// FamilyRef names one workspace in a family refusal: its id and its dir, as
-// the registry holds them.
+// FamilyRef names one workspace in a family refusal: its id, its dir and its
+// name, as the registry holds them.
 type FamilyRef struct {
 	ID  WorkspaceID
 	Dir string
+	// Name is the workspace's name, which every sentence a refusal is stated
+	// in names it by: an id identifies nothing to a reader.
+	Name string
+}
+
+// String names the workspace for a sentence: its name, then its id.
+func (r FamilyRef) String() string {
+	return fmt.Sprintf("%s (%s)", r.Name, r.ID)
 }
 
 // HasOpenChildrenError refuses a write that would take Parent out of the Open
@@ -63,11 +71,11 @@ type HasOpenChildrenError struct {
 
 // Error implements error.
 func (e *HasOpenChildrenError) Error() string {
-	ids := make([]string, 0, len(e.Children)+len(e.LandingInto))
+	names := make([]string, 0, len(e.Children)+len(e.LandingInto))
 	for _, ref := range append(slices.Clone(e.Children), e.LandingInto...) {
-		ids = append(ids, string(ref.ID))
+		names = append(names, ref.String())
 	}
-	return fmt.Sprintf("wsm: workspace %s still has open children or workspaces landing into it: %s", e.Parent.ID, strings.Join(ids, ", "))
+	return fmt.Sprintf("wsm: workspace %s still has open children or workspaces landing into it: %s", e.Parent, strings.Join(names, ", "))
 }
 
 // ParentState is why a parent is not open.
@@ -109,7 +117,7 @@ type ParentNotOpenError struct {
 
 // Error implements error.
 func (e *ParentNotOpenError) Error() string {
-	return fmt.Sprintf("wsm: parent %s is %s", e.Parent.ID, e.State)
+	return fmt.Sprintf("wsm: parent %s is %s", e.Parent, e.State)
 }
 
 // IsFamilyRefusal reports whether err is one of the family rules refusing a
@@ -129,11 +137,14 @@ const mergeHiddenSQL = `(w.merge_of IS NOT NULL AND w.merge_revealed = 0 AND w.m
 // aliased `w`: not closed, and not a hidden merge workspace.
 const openChildSQL = `w.closed = 0 AND NOT ` + mergeHiddenSQL
 
-// scanFamilyRef reads one family member's id and dir, the two columns every
-// family list selects in that order.
+// familyRefColumns is the columns every family list selects, over a
+// workspaces row aliased `w`, in the order scanFamilyRef reads them.
+const familyRefColumns = `w.id, w.dir, w.name`
+
+// scanFamilyRef reads one family member's familyRefColumns.
 func scanFamilyRef(row interface{ Scan(...any) error }) (FamilyRef, error) {
 	var ref FamilyRef
-	return ref, row.Scan(&ref.ID, &ref.Dir)
+	return ref, row.Scan(&ref.ID, &ref.Dir, &ref.Name)
 }
 
 // openDescendants answers every open descendant of ID (openChildSQL), at
@@ -145,7 +156,7 @@ func openDescendants(ctx context.Context, q querier, id WorkspaceID) ([]FamilyRe
 			UNION
 			SELECT c.id FROM workspaces c JOIN family f ON c.parent_id = f.id
 		)
-		SELECT w.id, w.dir FROM workspaces w JOIN family f ON w.id = f.id
+		SELECT `+familyRefColumns+` FROM workspaces w JOIN family f ON w.id = f.id
 		WHERE `+openChildSQL+` ORDER BY w.place`,
 		scanFamilyRef, id)
 }
@@ -157,7 +168,7 @@ func openDescendants(ctx context.Context, q querier, id WorkspaceID) ([]FamilyRe
 // checkout without landing into the workspace registered there
 // (landsIntoColumn reads the same way).
 func openLanders(ctx context.Context, q querier, id WorkspaceID, descendants []FamilyRef) ([]FamilyRef, error) {
-	landers, err := listRows(ctx, q, `SELECT w.id, w.dir FROM workspaces w
+	landers, err := listRows(ctx, q, `SELECT `+familyRefColumns+` FROM workspaces w
 		JOIN creation_jobs c ON c.workspace_id = w.id
 		JOIN workspaces target ON target.dir = c.target_dir
 		JOIN repositories r ON r.id = target.repo_id
@@ -177,7 +188,7 @@ func (s *store) OpenChildren(ctx context.Context, parent WorkspaceID) ([]FamilyR
 	var out []FamilyRef
 	err := s.read(ctx, "daemon.wsm.open_children", dlog.Context{"parent": string(parent)}, func(ctx context.Context) error {
 		var err error
-		out, err = listRows(ctx, s.q(ctx), `SELECT w.id, w.dir FROM workspaces w WHERE w.parent_id = ? AND w.id != w.parent_id AND `+openChildSQL+` ORDER BY w.place`,
+		out, err = listRows(ctx, s.q(ctx), `SELECT `+familyRefColumns+` FROM workspaces w WHERE w.parent_id = ? AND w.id != w.parent_id AND `+openChildSQL+` ORDER BY w.place`,
 			scanFamilyRef, parent)
 		return err
 	})
@@ -205,11 +216,11 @@ func refuseOpenChildren(ctx context.Context, q familyQuerier, id WorkspaceID) er
 	if len(children) == 0 && len(landers) == 0 {
 		return nil
 	}
-	var dir string
-	if err := scanWorkspaceRow(ctx, q, id, "dir", &dir); err != nil {
+	parent := FamilyRef{ID: id}
+	if err := scanWorkspaceRow(ctx, q, id, "dir, name", &parent.Dir, &parent.Name); err != nil {
 		return err
 	}
-	return &HasOpenChildrenError{Parent: FamilyRef{ID: id, Dir: dir}, Children: children, LandingInto: landers}
+	return &HasOpenChildrenError{Parent: parent, Children: children, LandingInto: landers}
 }
 
 // closingSQL is the SQL spelling of MergeSource.Closes over every merge in
@@ -243,18 +254,17 @@ func isClosing(ctx context.Context, q rowQuerier, id WorkspaceID) (bool, error) 
 // parent is ErrNotFound.
 func requireOpenParent(ctx context.Context, q rowQuerier, parent WorkspaceID) error {
 	var (
-		dir                    string
+		ref                    = FamilyRef{ID: parent}
 		closed, hidden, merged bool
 	)
-	err := q.QueryRowContext(ctx, `SELECT w.dir, w.closed, w.hidden, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
-		Scan(&dir, &closed, &hidden, &merged)
+	err := q.QueryRowContext(ctx, `SELECT w.dir, w.name, w.closed, w.hidden, `+mergeHiddenSQL+` FROM workspaces w WHERE w.id = ?`, parent).
+		Scan(&ref.Dir, &ref.Name, &closed, &hidden, &merged)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("wsm: parent %s: %w", parent, ErrNotFound)
 	}
 	if err != nil {
 		return err
 	}
-	ref := FamilyRef{ID: parent, Dir: dir}
 	switch {
 	case closed:
 		return &ParentNotOpenError{Parent: ref, State: ParentClosed}

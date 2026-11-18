@@ -327,6 +327,65 @@ func TestQueueBriefRecordsAndFailsWhatTheQueueDidNotTake(t *testing.T) {
 	}
 }
 
+func TestQueueDeferredBrief(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		wantErr bool
+	}{
+		{name: "the queue takes it"},
+		{name: "the queue fails it", arrange: func(f *fixture) { f.queue.submitErr = errors.New("the queue is gone") }, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			if tt.arrange != nil {
+				tt.arrange(f)
+			}
+
+			// Act
+			turn, _, err := f.mutable(t).queueDeferredBrief(context.Background(), f.log.logger, "daemon.workspace.test_brief", "w1", "BRIEF",
+				conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT, "the workspace's", "the brief")
+
+			// Assert: a brief the queue did not take is the error, recorded
+			// under the turn answered; one it took is the deferred brief.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("queueDeferredBrief error = %v, want error %v", err, tt.wantErr)
+			}
+			if tt.wantErr {
+				record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError,
+					Operation: "daemon.workspace.test_brief", Message: "the workspace's queue did not accept the brief"})
+				if !ok || record.Context["turn"] != string(turn) {
+					t.Fatalf("record = %+v (found %v), want the failure naming turn %s", record, ok, turn)
+				}
+				return
+			}
+			if len(f.queue.submissions) != 1 {
+				t.Fatalf("submissions = %d, want 1", len(f.queue.submissions))
+			}
+			got := f.queue.submissions[0]
+			if got.WS != "w1" || got.Turn != turn || got.Delivery != wsm.DeliveryDeferred ||
+				got.Origin != conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT || submittedText(got.Said) != "BRIEF" {
+				t.Errorf("submission = %+v under turn %s, want w1's deferred merge-revert BRIEF under it", got, turn)
+			}
+		})
+	}
+}
+
+// TestEveryDeferredBriefIsComposedByQueueDeferredBrief pins the brief sites
+// to queueDeferredBrief's shape: a site composing its own deferredBrief can
+// drift from the queueing every other site shares.
+func TestEveryDeferredBriefIsComposedByQueueDeferredBrief(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "deferredBrief(")
+
+	// Assert: the definition and queueDeferredBrief's call, both in verbs.go.
+	if !slices.Equal(sites, []string{"verbs.go", "verbs.go"}) {
+		t.Fatalf("deferredBrief sites = %v, want only its definition and queueDeferredBrief in verbs.go", sites)
+	}
+}
+
 // TestEveryDeferredBriefIsQueuedThroughQueueBrief pins that the brief sites
 // share queueBrief's shape: a file composing a deferred brief that hands it
 // to the queue itself would take a refused brief for a delivered one.

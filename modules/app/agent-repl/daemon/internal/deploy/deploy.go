@@ -23,6 +23,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -871,8 +872,21 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 		// is stopped: it holds the bundle's one Location Services client.
 		artifacts = append(artifacts, artifact{component: ComponentDaemon, name: "wifi-helper", fresh: fresh.wifi,
 			installed: func() (string, error) { return wifiSourceHash(live.WifiApp) }, install: func() error {
+				// A HELPER THAT STOOD NOWHERE REPLACED NOTHING, so no ask of a
+				// replaced build can be waiting and none is stopped: the
+				// first install of the helper spawns no pkill (2026-11-17,
+				// a merge gate's first deploy over no helper failed on the
+				// stop's bound while its host starved it of CPU).
+				replaced, err := pathStands(live.WifiApp)
+				if err != nil {
+					return fmt.Errorf("read whether a Wi-Fi helper stood before this install: %w", err)
+				}
 				if err := in.dir(s.WifiApp(), live.WifiApp); err != nil {
 					return err
+				}
+				if !replaced {
+					d.log.Info(opInstall, "no Wi-Fi helper stood before this install, so no ask of a replaced build can be waiting", dlog.Context{"app": live.WifiApp})
+					return nil
 				}
 				// THE STOP IS TIMED, so every install records what its bound
 				// (persistentwifi.StopAsks) is measured against.
@@ -1259,4 +1273,18 @@ func processAlive(pid int) bool {
 		return false
 	}
 	return syscall.Kill(pid, 0) == nil
+}
+
+// pathStands reports whether anything stands at PATH, and fails only a read
+// that could not tell.
+func pathStands(path string) (bool, error) {
+	_, err := os.Lstat(path)
+	switch {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, fs.ErrNotExist):
+		return false, nil
+	default:
+		return false, err
+	}
 }

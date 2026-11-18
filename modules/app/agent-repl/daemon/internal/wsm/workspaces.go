@@ -693,7 +693,7 @@ func touchedRow(res sql.Result) (bool, error) {
 // This is the one helper every close goes through.
 //
 // A GESTURE NEVER CLOSES A PARENT OVER ITS OPEN CHILDREN: a close by the user
-// or an agent (CloseCause.isGesture) of a workspace with an open descendant is
+// or an agent (CloseCause.IsGesture) of a workspace with an open descendant is
 // refused with HasOpenChildrenError, nothing written (family.go).
 //
 // THE FIRST CLOSE IS THE ONE RECORDED: a row already closed keeps its record
@@ -748,7 +748,7 @@ func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Clo
 	// A USER'S OR AN AGENT'S CLOSE OF A WORKSPACE WITH OPEN CHILDREN IS
 	// REFUSED (family.go). The daemon's own closes record what already
 	// happened, and a row already closed is no close at all.
-	if !closed && closure.By.isGesture() {
+	if !closed && closure.By.IsGesture() {
 		if err := refuseOpenChildren(ctx, tx, id); err != nil {
 			return closeEffects{}, err
 		}

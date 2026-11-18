@@ -210,11 +210,12 @@ func (v *verbs) deliverCreateFailure(ctx context.Context, log dlog.Logger, spec 
 	}
 	// DEFERRED: the report waits behind a turn the main worktree is running
 	// and wakes it when idle; it never interrupts work.
-	submission := deferredBrief(target.ID, request, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED)
-	if _, err := v.queueBrief(ctx, log, opCreateFailedReport, "the main-worktree workspace's", "the failed create's report", submission); err != nil {
+	turn, _, err := v.queueDeferredBrief(ctx, log, opCreateFailedReport, target.ID, request, conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED,
+		"the main-worktree workspace's", "the failed create's report")
+	if err != nil {
 		return
 	}
-	log.Info(opCreateFailedReport, "asked the repository's main-worktree workspace why a create failed", dlog.Context{"turn": string(submission.Turn)})
+	log.Info(opCreateFailedReport, "asked the repository's main-worktree workspace why a create failed", dlog.Context{"turn": string(turn)})
 }
 
 // describeCreateRequest words what a failed create asked for, one fact per

@@ -353,9 +353,13 @@ type fakeDB struct {
 	closures map[ids.WorkspaceID][]wsm.Closure
 	// setClosedErr makes the closed-flag write fail, which the map cannot.
 	setClosedErr error
-	priorities   map[ids.WorkspaceID]*wsm.Priority
-	attention    map[ids.WorkspaceID]bool
-	currentAt    time.Time
+	// noOpenChildrenErr is what RequireNoOpenChildren answers, and
+	// noOpenChildrenAsked every workspace it was asked about.
+	noOpenChildrenErr   error
+	noOpenChildrenAsked []ids.WorkspaceID
+	priorities          map[ids.WorkspaceID]*wsm.Priority
+	attention           map[ids.WorkspaceID]bool
+	currentAt           time.Time
 	// keptHistorySelects are the selections SetCurrentKeepingLastSelected
 	// recorded, in order.
 	keptHistorySelects []ids.WorkspaceID
@@ -4527,9 +4531,16 @@ func (f *fakeDB) OpenChildren(_ context.Context, parent ids.WorkspaceID) ([]wsm.
 	slices.SortFunc(children, func(a, b wsm.Workspace) int { return cmp.Compare(a.Place, b.Place) })
 	refs := make([]wsm.FamilyRef, len(children))
 	for i, child := range children {
-		refs[i] = wsm.FamilyRef{ID: child.ID, Dir: child.Dir}
+		refs[i] = child.FamilyRef()
 	}
 	return refs, nil
+}
+
+// RequireNoOpenChildren records the workspaces asked about and answers
+// noOpenChildrenErr: the family rule's refusal, or a read that failed.
+func (f *fakeDB) RequireNoOpenChildren(_ context.Context, ws ...ids.WorkspaceID) error {
+	f.noOpenChildrenAsked = append(f.noOpenChildrenAsked, ws...)
+	return f.noOpenChildrenErr
 }
 
 // QueueBypass answers WS's queue bypass standing: the one a test set in

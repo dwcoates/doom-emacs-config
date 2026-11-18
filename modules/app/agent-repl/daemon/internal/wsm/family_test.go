@@ -50,9 +50,9 @@ func requireHasOpenChildren(t *testing.T, err error, parent Workspace, children 
 	}
 	want := make([]FamilyRef, len(children))
 	for i, child := range children {
-		want[i] = FamilyRef{ID: child.ID, Dir: child.Dir}
+		want[i] = child.FamilyRef()
 	}
-	if refused.Parent != (FamilyRef{ID: parent.ID, Dir: parent.Dir}) || !slices.Equal(refused.Children, want) {
+	if refused.Parent != parent.FamilyRef() || !slices.Equal(refused.Children, want) {
 		t.Fatalf("refusal = %+v, want parent %s with children %v", refused, parent.ID, want)
 	}
 }
@@ -64,7 +64,7 @@ func requireParentNotOpen(t *testing.T, err error, parent Workspace, state Paren
 	if !errors.As(err, &refused) {
 		t.Fatalf("error = %v, want a ParentNotOpenError", err)
 	}
-	if refused.Parent != (FamilyRef{ID: parent.ID, Dir: parent.Dir}) || refused.State != state {
+	if refused.Parent != parent.FamilyRef() || refused.State != state {
 		t.Fatalf("refusal = %+v, want parent %s %s", refused, parent.ID, state)
 	}
 }
@@ -650,8 +650,8 @@ func TestAWorkspaceSomethingLandsIntoStaysOpen(t *testing.T) {
 		t.Fatalf("MarkClosed = %v, want a HasOpenChildrenError", err)
 	}
 	child, lander := f.byName["child"], f.byName["lander"]
-	if !reflect.DeepEqual(refused.Children, []FamilyRef{{ID: child.ID, Dir: child.Dir}}) ||
-		!reflect.DeepEqual(refused.LandingInto, []FamilyRef{{ID: lander.ID, Dir: lander.Dir}}) {
+	if !reflect.DeepEqual(refused.Children, []FamilyRef{child.FamilyRef()}) ||
+		!reflect.DeepEqual(refused.LandingInto, []FamilyRef{lander.FamilyRef()}) {
 		t.Fatalf("refusal = children %+v landing into %+v, want the child once and the lander", refused.Children, refused.LandingInto)
 	}
 }
@@ -697,7 +697,7 @@ func TestOpenChildrenAnswersTheOpenDirectChildrenInPlaceOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Workspace(%s): %v", name, err)
 		}
-		want = append(want, FamilyRef{ID: ws.ID, Dir: ws.Dir})
+		want = append(want, ws.FamilyRef())
 		if len(want) == 2 {
 			other, err := s.Workspace(context.Background(), want[0].ID)
 			if err != nil {
@@ -713,10 +713,10 @@ func TestOpenChildrenAnswersTheOpenDirectChildrenInPlaceOrder(t *testing.T) {
 	}
 }
 
-func TestScanFamilyRefReadsTheIDThenTheDir(t *testing.T) {
+func TestScanFamilyRefReadsTheIDThenTheDirThenTheName(t *testing.T) {
 	// Arrange
 	row := scanFunc(func(dest ...any) error {
-		*dest[0].(*WorkspaceID), *dest[1].(*string) = "ws-1", "/w/one"
+		*dest[0].(*WorkspaceID), *dest[1].(*string), *dest[2].(*string) = "ws-1", "/w/one", "one"
 		return nil
 	})
 
@@ -724,14 +724,14 @@ func TestScanFamilyRefReadsTheIDThenTheDir(t *testing.T) {
 	got, err := scanFamilyRef(row)
 
 	// Assert
-	if err != nil || got != (FamilyRef{ID: "ws-1", Dir: "/w/one"}) {
-		t.Fatalf("scanFamilyRef = (%+v, %v), want ws-1 at /w/one", got, err)
+	if err != nil || got != (FamilyRef{ID: "ws-1", Dir: "/w/one", Name: "one"}) {
+		t.Fatalf("scanFamilyRef = (%+v, %v), want one (ws-1) at /w/one", got, err)
 	}
 }
 
 func TestEveryFamilyListScansThroughScanFamilyRef(t *testing.T) {
 	// Act
-	handRolled := sourcescan.Count(t, "row.Scan(&ref.ID, &ref.Dir)")
+	handRolled := sourcescan.Count(t, "row.Scan(&ref.ID, &ref.Dir, &ref.Name)")
 
 	// Assert: the helper's own scan is the only one.
 	if handRolled != 1 {
@@ -743,3 +743,37 @@ func TestEveryFamilyListScansThroughScanFamilyRef(t *testing.T) {
 type scanFunc func(dest ...any) error
 
 func (f scanFunc) Scan(dest ...any) error { return f(dest...) }
+
+func TestFamilyRefusalsNameEachWorkspaceByItsName(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{
+			name: "open children and landers",
+			err: &HasOpenChildrenError{
+				Parent:      FamilyRef{ID: "ws-p", Dir: "/w/p", Name: "parent"},
+				Children:    []FamilyRef{{ID: "ws-a", Dir: "/w/a", Name: "alpha"}},
+				LandingInto: []FamilyRef{{ID: "ws-b", Dir: "/w/b", Name: "beta"}},
+			},
+			want: "wsm: workspace parent (ws-p) still has open children or workspaces landing into it: alpha (ws-a), beta (ws-b)",
+		},
+		{
+			name: "parent not open",
+			err:  &ParentNotOpenError{Parent: FamilyRef{ID: "ws-p", Dir: "/w/p", Name: "parent"}, State: ParentClosed},
+			want: "wsm: parent parent (ws-p) is closed",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.err.Error()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("Error() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

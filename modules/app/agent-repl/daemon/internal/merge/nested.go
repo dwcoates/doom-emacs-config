@@ -245,7 +245,7 @@ func (l rebaseLine) drawn() *frontendv1.FeedMergeRebaseLine {
 	p := l.Replaying
 	target := &frontendv1.FeedMergeRebaseTarget{Branch: p.TargetBranch, RepositoryDir: p.TargetDir}
 	if p.TargetWorkspace != nil {
-		target.Workspace = wsm.FamilyRef(*p.TargetWorkspace).Ref()
+		target.Workspace = wsm.FamilyRef{ID: p.TargetWorkspace.ID, Dir: p.TargetWorkspace.Dir}.Ref()
 	}
 	return &frontendv1.FeedMergeRebaseLine{Line: &frontendv1.FeedMergeRebaseLine_Replaying{Replaying: &frontendv1.FeedMergeRebaseReplaying{
 		Commits: uint32(p.Commits), Branch: p.Branch, Target: target, Tip: p.Tip, TipShortSha: short(p.Tip),

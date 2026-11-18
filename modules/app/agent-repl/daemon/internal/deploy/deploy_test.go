@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -2010,5 +2011,69 @@ func TestUnchangedIsEveryOutcomeUpToDate(t *testing.T) {
 				t.Fatalf("unchanged = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestADeployThatInstallsTheFirstWifiHelperStopsNoAsk(t *testing.T) {
+	// Arrange: no helper stands where the fresh one installs.
+	h := newHarness(t, withWifiHelper(t))
+	if err := os.RemoveAll(h.live.WifiApp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
+
+	// Assert: installed, with no ask of a replaced build to stop.
+	if got := h.wifiHash(t); got != theFresh.wifi {
+		t.Fatalf("live helper sources = %q, want the fresh %q", got, theFresh.wifi)
+	}
+	if h.wifiAsks.calls != 0 {
+		t.Fatalf("StopWifiAsks calls = %d, want none when no helper stood", h.wifiAsks.calls)
+	}
+	if !logged(h.log, "info", opInstall, "no Wi-Fi helper stood before this install, so no ask of a replaced build can be waiting") {
+		t.Fatalf("records = %+v, want the skipped stop recorded", records(h.log, opInstall))
+	}
+}
+
+func TestPathStands(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		path    string
+		want    bool
+		wantErr bool
+	}{
+		{name: "a file stands", path: file, want: true},
+		{name: "a directory stands", path: dir, want: true},
+		{name: "nothing stands", path: filepath.Join(dir, "absent")},
+		{name: "a path under a file cannot be read", path: filepath.Join(file, "child"), wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := pathStands(tt.path)
+
+			// Assert
+			if got != tt.want || (err != nil) != tt.wantErr {
+				t.Fatalf("pathStands(%s) = %v, %v; want %v, error %v", tt.path, got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestEveryLiveAbsenceIsReadThroughPathStands(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "os.Lstat(")
+
+	// Assert: pathStands' own read is the only one.
+	if !slices.Equal(sites, []string{"deploy.go"}) {
+		t.Fatalf("os.Lstat sites = %v, want only pathStands' in deploy.go", sites)
 	}
 }

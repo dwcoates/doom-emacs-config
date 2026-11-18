@@ -3,10 +3,12 @@ package workspace
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
 )
 
@@ -96,9 +98,6 @@ func TestTheTurnEndCarriesTheMarkedCloseOut(t *testing.T) {
 		wantClosed bool
 	}{
 		{name: "a quiet workspace closes", arrange: func(*fixture) {}, wantClosed: true},
-		{name: "a close something else now blocks is abandoned", arrange: func(f *fixture) {
-			f.db.held["w1"] = []wsm.HeldPrompt{{Turn: "held-1"}}
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -150,6 +149,8 @@ func TestCloseSelfFails(t *testing.T) {
 			f.db.onMarkSelfClose = func() { f.running.Turn = nil }
 			f.db.takeSelfCloseErr = errors.New("db gone")
 		}, message: "could not take the workspace's self-close mark"},
+		{name: "the open children cannot be read", arrange: func(f *fixture) { f.db.noOpenChildrenErr = errors.New("db gone") },
+			message: "could not read whether the workspace has open children"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -222,5 +223,130 @@ func TestSelfClosesRecordsACloseItCannotCarryOut(t *testing.T) {
 	if record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: opSelfClose,
 		Message: "could not carry out the close a workspace asked of itself at its turn's end"}); !ok || record.Context["workspace"] != "w1" {
 		t.Fatalf("no error record naming the workspace: %+v", log.Records())
+	}
+}
+
+func TestCloseSelfIsRefusedNowByAParentsOpenChildren(t *testing.T) {
+	// Arrange
+	f := selfClosing(t)
+	f.db.noOpenChildrenErr = errOpenChildren
+
+	// Act
+	later, err := f.verbs.CloseSelf(context.Background(), "w1")
+
+	// Assert: refused synchronously, as an immediate close is, with nothing
+	// marked and nothing closed.
+	requireFamilyAnswer(t, f, err, errOpenChildren, opClose)
+	if later {
+		t.Error("a refused self-close answered closes-when-the-turn-ends")
+	}
+	if f.db.workspaces["w1"].CloseWhenTurnEnds != nil || f.db.closedFlags["w1"] {
+		t.Errorf("mark %v, closed %v; want neither", f.db.workspaces["w1"].CloseWhenTurnEnds, f.db.closedFlags["w1"])
+	}
+}
+
+// selfCloseMarked is selfClosing with w1 marked to close and its turn ended,
+// the self-close-refused brief shipped.
+func selfCloseMarked(t *testing.T) *fixture {
+	t.Helper()
+	f := selfClosing(t)
+	f.briefs[BriefSelfCloseRefused] = prompts.Prompt{
+		Name: BriefSelfCloseRefused, Body: "refused: {{why}}", Placeholders: []string{"why"},
+	}
+	if _, err := f.verbs.CloseSelf(context.Background(), "w1"); err != nil {
+		t.Fatalf("CloseSelf: %v", err)
+	}
+	f.running.Turn = nil
+	return f
+}
+
+func TestTheTurnEndReportsASelfCloseThatIsNowRefused(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(f *fixture)
+		wantNotice string
+		wantFooter bool
+	}{
+		{name: "held prompts now block it", arrange: func(f *fixture) {
+			f.db.held["w1"] = []wsm.HeldPrompt{{Turn: "held-1"}}
+		}, wantNotice: "refused: 1 held prompts have not been delivered; release or drop them first", wantFooter: true},
+		{name: "a child opened during the turn", arrange: func(f *fixture) {
+			f.db.noOpenChildrenErr = errOpenChildren
+		}, wantNotice: "refused: " + errOpenChildren.Error()},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := selfCloseMarked(t)
+			tt.arrange(f)
+
+			// Act
+			err := f.verbs.CarryOutSelfClose(context.Background(), "w1")
+
+			// Assert: the refusal is the workspace's to hear, not a failure
+			// of the turn edge, and it stays open with the mark taken.
+			if err != nil {
+				t.Fatalf("CarryOutSelfClose: %v", err)
+			}
+			if f.db.closedFlags["w1"] || f.db.workspaces["w1"].CloseWhenTurnEnds != nil {
+				t.Errorf("closed %v, mark %v; want open with the mark taken", f.db.closedFlags["w1"], f.db.workspaces["w1"].CloseWhenTurnEnds)
+			}
+			record, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelWarn, Operation: opClose,
+				Message: "the close the workspace asked for was refused when its turn ended; it stays open"})
+			if !ok || record.Context["cause"] == nil {
+				t.Errorf("no warning record with the cause: %+v", f.log.logger.Records())
+			}
+			if told := toldRequester(f, "w1"); !slices.Equal(told, []string{tt.wantNotice}) {
+				t.Errorf("notices = %q, want %q", told, tt.wantNotice)
+			}
+			if _, standing := f.footer.closing["w1"]; standing != tt.wantFooter {
+				t.Errorf("footer close-blocked standing = %v, want %v", standing, tt.wantFooter)
+			}
+		})
+	}
+}
+
+func TestARefusedSelfCloseWhoseNoticeFailsIsRecorded(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fixture)
+		message string
+	}{
+		{name: "the brief is missing", arrange: func(f *fixture) { delete(f.briefs, BriefSelfCloseRefused) },
+			message: "could not read a daemon brief"},
+		{name: "the queue does not accept it", arrange: func(f *fixture) { f.queue.submitErr = errors.New("queue gone") },
+			message: "the workspace's queue did not accept the refused self-close's notice"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := selfCloseMarked(t)
+			f.db.noOpenChildrenErr = errOpenChildren
+			tt.arrange(f)
+
+			// Act
+			err := f.verbs.CarryOutSelfClose(context.Background(), "w1")
+
+			// Assert
+			if err != nil || f.db.closedFlags["w1"] {
+				t.Fatalf("CarryOutSelfClose = %v, closed %v; want nil and open", err, f.db.closedFlags["w1"])
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opClose, Message: tt.message}); !ok {
+				t.Errorf("no error record %q: %+v", tt.message, f.log.logger.Records())
+			}
+		})
+	}
+}
+
+func TestTheShippedSelfCloseRefusedBriefSplices(t *testing.T) {
+	// Arrange
+	brief := loadShippedBrief(t, BriefSelfCloseRefused)
+
+	// Act
+	_, err := brief.Splice(map[string]string{"why": "w"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("splice: %v", err)
 	}
 }

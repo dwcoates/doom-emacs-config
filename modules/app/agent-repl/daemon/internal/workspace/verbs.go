@@ -284,6 +284,17 @@ func deferredBrief(ws ids.WorkspaceID, text string, origin conversationv1.Prompt
 	return submission
 }
 
+// queueDeferredBrief queues TEXT, a daemon brief of ORIGIN, as a deferred
+// prompt to WS (deferredBrief) through queueBrief, answering the submission's
+// turn and the queue's disposition. It is the one way these verbs tell a
+// workspace something, so a brief can neither interrupt a running turn nor be
+// taken for delivered when the queue refused it.
+func (v *verbs) queueDeferredBrief(ctx context.Context, log dlog.Logger, op string, ws ids.WorkspaceID, text string, origin conversationv1.PromptOrigin, whose, what string) (ids.TurnID, promptqueue.Disposition, error) {
+	submission := deferredBrief(ws, text, origin)
+	disposition, err := v.queueBrief(ctx, log, op, whose, what, submission)
+	return submission.Turn, disposition, err
+}
+
 // queueBrief hands SUBMISSION, a daemon brief, to the prompt queue, and
 // fails a submission the queue did not accept or refused: each is recorded at
 // ERROR under OP, worded from WHOSE (the queue's workspace, possessive) and

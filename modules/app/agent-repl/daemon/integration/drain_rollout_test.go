@@ -1148,9 +1148,15 @@ func TestALateFactsRefusalIsOfferedAgainMidWork(t *testing.T) {
 			r.Message == "asked the bounce registry to transfer the workspace again" && r.Context["gate"] == "dispatch_quiet"
 	})
 	// Assert: the second offer's adoption lands on the successor mid-turn.
-	d.AwaitRunLogRecordFromAnyProcess("the successor adopting the workspace on its retry", func(r harness.LogRecord) bool {
-		return r.PID != d.PID() && r.Operation == "daemon.rollout.join" &&
-			r.Message == "adopted the workspace on a retry" && r.Context["workspace"] == f.ws.GetId()
+	// WHICH PATH ADOPTS IT IS THE SCHEDULE'S CHOICE: the successor's own
+	// retry (rollout.retryAdoption, after 100ms) or the incumbent's offer
+	// again (after 25ms), whichever claims it first. Both record the
+	// ownership as daemon.rollout.adopt's "adopted the workspace", which the
+	// refused first attempt never wrote (2026-11-17 gate: the offer again
+	// won, so the retry's own "on a retry" record was never written).
+	d.AwaitRunLogRecordFromAnyProcess("the successor adopting the workspace again", func(r harness.LogRecord) bool {
+		return r.PID != d.PID() && r.Operation == "daemon.rollout.adopt" &&
+			r.Message == "adopted the workspace" && r.Context["workspace"] == f.ws.GetId()
 	})
 	if got := f.shim.Count(harness.RPCKillTurn); got != 0 {
 		t.Fatalf("KillTurn was called %d time(s); offering the workspace again interrupts nothing", got)

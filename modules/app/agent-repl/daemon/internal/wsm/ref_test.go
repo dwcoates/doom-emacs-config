@@ -120,3 +120,16 @@ func TestTheHandRolledRefPatternMatchesTheShapeItForbids(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceFamilyRefCarriesTheIDTheDirAndTheName(t *testing.T) {
+	// Arrange
+	ws := Workspace{ID: "w-1", Dir: "/repos/one/w-1", Name: "one"}
+
+	// Act
+	got := ws.FamilyRef()
+
+	// Assert
+	if got != (FamilyRef{ID: "w-1", Dir: "/repos/one/w-1", Name: "one"}) {
+		t.Fatalf("FamilyRef() = %+v, want one (w-1) at /repos/one/w-1", got)
+	}
+}
