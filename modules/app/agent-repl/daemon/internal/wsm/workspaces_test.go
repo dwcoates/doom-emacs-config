@@ -2030,7 +2030,7 @@ func TestRegisterWorkspaceWithAMissingCreationJobWritesNothing(t *testing.T) {
 
 func TestRegisterWorkspaceWithACreationJobRefusesARegisteredDir(t *testing.T) {
 	// Arrange
-	s, _ := testStore(t)
+	s, log := testStore(t)
 	main := testWorkspaceNamed(t, s, "main")
 	held, _, err := s.RegisterWorkspace(context.Background(), t.TempDir(), RegisterFacts{Name: "held", Branch: "held", ParentBranch: "master", RepoDir: main.Dir})
 	if err != nil {
@@ -2050,6 +2050,79 @@ func TestRegisterWorkspaceWithACreationJobRefusesARegisteredDir(t *testing.T) {
 	}
 	if got, _, _ := s.CreationJob(context.Background(), job); got.Materialized {
 		t.Fatalf("job = %+v, want it left unmaterialized", got)
+	}
+	if got, err := s.WorkspaceByDir(context.Background(), held.Dir); err != nil || got.ID != held.ID {
+		t.Fatalf("WorkspaceByDir = (%+v, %v), want the unlanded %s still holding its directory", got, err, held.ID)
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.register_workspace", Message: "refused the write"})
+	cause, _ := record.Context["error"].(string)
+	if !ok || record.Context["dir"] != held.Dir || !strings.Contains(cause, string(held.ID)) {
+		t.Fatalf("records = %+v, want one ERROR refusal naming %s at %s", log.Records(), held.ID, held.Dir)
+	}
+}
+
+// TestRegisterWorkspaceWithACreationJobClaimsALandedDir covers a create at
+// the directory a LANDED workspace held (its name reused, or its holder
+// retired so the name could be): the create is registered there, and the
+// landed row moves off it to VacatedDir in the same write, its id intact,
+// recorded at INFO.
+func TestRegisterWorkspaceWithACreationJobClaimsALandedDir(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ctx := context.Background()
+	main := testWorkspaceNamed(t, s, "main")
+	landed, _, err := s.RegisterWorkspace(ctx, t.TempDir(), RegisterFacts{Name: "held", Branch: "held", ParentBranch: "master", RepoDir: main.Dir})
+	if err != nil {
+		t.Fatalf("RegisterWorkspace: %v", err)
+	}
+	if err := s.SetMergedAt(ctx, landed.ID, instant, nil); err != nil {
+		t.Fatalf("SetMergedAt: %v", err)
+	}
+	job := NewWorkspaceID()
+	if err := s.PutCreationJob(ctx, CreationJob{Workspace: job, CreatedAt: instant}); err != nil {
+		t.Fatalf("PutCreationJob: %v", err)
+	}
+
+	// Act
+	created, fresh, err := s.RegisterWorkspace(ctx, landed.Dir, createdFacts(main.Dir, job))
+
+	// Assert
+	if err != nil || !fresh || created.ID != job || created.Dir != landed.Dir {
+		t.Fatalf("RegisterWorkspace = (%+v, %v, %v), want %s registered fresh at %s", created, fresh, err, job, landed.Dir)
+	}
+	if got, err := s.WorkspaceByDir(ctx, landed.Dir); err != nil || got.ID != job {
+		t.Fatalf("WorkspaceByDir = (%+v, %v), want the create %s", got, err, job)
+	}
+	moved, err := s.Workspace(ctx, landed.ID)
+	if err != nil || moved.Dir != VacatedDir(landed.Dir, landed.ID) || moved.MergedAt == nil {
+		t.Fatalf("Workspace(%s) = (%+v, %v), want it kept, landed, at %s", landed.ID, moved, err, VacatedDir(landed.Dir, landed.ID))
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.wsm.register_workspace",
+		Message: "a create claimed a landed workspace's directory; the landed row moved off it"})
+	if !ok || record.Context["landed_workspace"] != string(landed.ID) || record.Context["workspace"] != string(job) {
+		t.Fatalf("records = %+v, want one INFO record naming %s and %s", log.Records(), landed.ID, job)
+	}
+}
+
+func TestVacatedDir(t *testing.T) {
+	tests := []struct {
+		name        string
+		dir         string
+		wantVacated bool
+	}{
+		{name: "a vacated directory is recognized", dir: VacatedDir("/wt/deploy-mediator", "186c556887fa4c56"), wantVacated: true},
+		{name: "an ordinary directory is not", dir: "/wt/deploy-mediator"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := IsVacatedDir(tt.dir)
+
+			// Assert
+			if got != tt.wantVacated {
+				t.Fatalf("IsVacatedDir(%q) = %v, want %v", tt.dir, got, tt.wantVacated)
+			}
+		})
 	}
 }
 

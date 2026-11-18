@@ -275,14 +275,26 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 	var (
 		out     Workspace
 		created bool
+		// vacated is the landed row this create moved off its directory.
+		vacated *Workspace
 	)
 	err = s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		vacated = nil
 		existing, err := scanWorkspace(tx.QueryRowContext(ctx, `SELECT `+workspaceColumns+` FROM workspaces WHERE dir = ?`, normalized))
 		switch {
+		case err == nil && facts.CreationJob != "" && existing.MergedAt != nil:
+			// A LANDED ROW HOLDS NO DIRECTORY: its worktree was removed when
+			// it landed, so a create reusing its name claims the directory
+			// derived from that name, and the landed row moves off it in
+			// this same transaction (vacateLandedDir).
+			if err := vacateLandedDir(ctx, tx, existing); err != nil {
+				return err
+			}
+			vacated = &existing
 		case err == nil && facts.CreationJob != "":
-			// A CREATE MATERIALIZED A FRESH WORKTREE HERE, so no row can
-			// already stand at its directory: git refuses `worktree add`
-			// into one that exists.
+			// A CREATE MATERIALIZED A FRESH WORKTREE HERE, so no row that
+			// has not landed can stand at its directory: git refuses
+			// `worktree add` into one that exists.
 			return fmt.Errorf("wsm: register %s: a create's directory is already registered as workspace %s", normalized, existing.ID)
 		case err == nil:
 			out, created = existing, false
@@ -434,7 +446,48 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 	if err != nil {
 		return Workspace{}, false, err
 	}
+	if vacated != nil {
+		s.log.Info(op, "a create claimed a landed workspace's directory; the landed row moved off it", dlog.Context{
+			"dir": normalized, "workspace": string(out.ID), "landed_workspace": string(vacated.ID),
+			"landed_name": vacated.Name, "vacated_dir": VacatedDir(normalized, vacated.ID)})
+	}
 	return out, created, nil
+}
+
+// vacatedDirMark joins a landed row's former directory to its id in the
+// directory it is moved to (VacatedDir). A colon never appears in a git
+// branch name, so no name a create is given derives a directory holding it.
+const vacatedDirMark = ":landed-"
+
+// VacatedDir answers the directory a LANDED workspace's row moves to when a
+// create claims the directory it held, DIR (RegisterWorkspace): unique to
+// the row, and never a directory any create derives (vacatedDirMark).
+func VacatedDir(dir string, id WorkspaceID) string {
+	return dir + vacatedDirMark + string(id)
+}
+
+// IsVacatedDir reports whether DIR is one VacatedDir answered: the row was
+// moved off its directory, which a later workspace now holds.
+func IsVacatedDir(dir string) bool {
+	return strings.Contains(dir, vacatedDirMark)
+}
+
+// vacateLandedDir moves LANDED, a row whose work landed and whose worktree
+// is gone, off its directory to VacatedDir, inside the create's own
+// transaction. A DIRECTORY BELONGS ONLY TO A WORKSPACE THAT CAN STILL OWN A
+// WORKTREE THERE: a landed row keeping it would refuse every create reusing
+// its name, since the directory is derived from the name. The row's history
+// (turns, feed, links) stays under its id.
+func vacateLandedDir(ctx context.Context, tx *sql.Tx, landed Workspace) error {
+	if landed.MergedAt == nil {
+		return fmt.Errorf("wsm: vacate %s: workspace %s has not landed", landed.Dir, landed.ID)
+	}
+	// THE ROW WAS READ IN THIS SAME TRANSACTION, so its landing and its
+	// directory still stand as read when it moves.
+	if err := updateWorkspaceColumns(ctx, tx, landed.ID, workspaceColumn{name: "dir", value: VacatedDir(landed.Dir, landed.ID)}); err != nil {
+		return fmt.Errorf("wsm: vacate %s: %w", landed.Dir, err)
+	}
+	return nil
 }
 
 // RefuseTemporary is refuseTemporary for a verb that asks before it registers.

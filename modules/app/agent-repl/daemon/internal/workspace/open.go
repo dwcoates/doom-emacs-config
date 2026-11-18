@@ -315,6 +315,12 @@ func (v *verbs) restoreWorktree(ctx context.Context, log dlog.Logger, record wsm
 		return nil, unrestorable(fmt.Sprintf(
 			"the workspace's directory %s is gone and no branch was recorded to restore it from", record.Dir))
 	}
+	// A LANDED WORKSPACE MOVED OFF ITS DIRECTORY (wsm.VacatedDir) is not
+	// restored: a later create took its name, its branch and its directory.
+	if wsm.IsVacatedDir(record.Dir) {
+		return nil, unrestorable(fmt.Sprintf(
+			"the workspace landed and a later workspace now holds its directory and name (it was moved to %s); create a new workspace to revise its work", record.Dir))
+	}
 	repositories, err := v.deps.DB.ListRepositories(ctx)
 	if err != nil {
 		log.Error(opOpen, "could not read the repositories to restore the workspace's worktree in", dlog.Context{
