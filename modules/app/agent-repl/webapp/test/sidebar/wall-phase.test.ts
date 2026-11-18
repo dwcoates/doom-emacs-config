@@ -2,9 +2,11 @@
 import { createPresence } from "../../src/presence.js";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
+  elementLoops,
   installWallPhase,
   seekToWallClock,
   wallPhaseMs,
+  WALL_PHASE_BASE_ATTRIBUTE,
   type PhasedAnimation,
 } from "../../src/sidebar/wall-phase.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
@@ -319,5 +321,133 @@ describe("keeping a rail on the wall clock", () => {
 
     // Assert
     expect(pulse.currentTime).toBeNull();
+  });
+});
+
+/** A computed style naming ANIMATION, as WebKit computes one. */
+function computed(animation: {
+  name: string;
+  duration: string;
+  iterations: string;
+  direction?: string;
+  delay?: string;
+}): CSSStyleDeclaration {
+  return {
+    animationName: animation.name,
+    animationDuration: animation.duration,
+    animationIterationCount: animation.iterations,
+    animationDirection: animation.direction ?? "normal",
+    animationDelay: animation.delay ?? "0s",
+  } as unknown as CSSStyleDeclaration;
+}
+
+describe("reading a rail element's loops off its computed style", () => {
+  it("seeks an endless loop by a negative delay of its phase", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const loops = elementLoops(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite" }), false);
+
+    // Act
+    seekToWallClock(loops, 2900);
+
+    // Assert
+    expect(el.style.animationDelay).toBe("-300ms");
+  });
+
+  it("reads no loop off an element running no animation", () => {
+    // Arrange / Act
+    const loops = elementLoops(document.createElement("span"), computed({ name: "none", duration: "0s", iterations: "1" }), false);
+
+    // Assert
+    expect(loops).toHaveLength(0);
+  });
+
+  it("reads no loop off an element running only a one-shot", () => {
+    // Arrange / Act
+    const loops = elementLoops(document.createElement("span"), computed({ name: "row-flash", duration: "200ms", iterations: "1" }), false);
+
+    // Assert
+    expect(loops).toHaveLength(0);
+  });
+
+  it("seeks each loop of a list and leaves a one-shot beside it at its own delay", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const loops = elementLoops(
+      el,
+      computed({ name: "ws-pulse, row-flash", duration: "1.3s, 200ms", iterations: "infinite, 1", delay: "0s, 50ms" }),
+      false,
+    );
+
+    // Act
+    seekToWallClock(loops, 2900);
+
+    // Assert
+    expect(el.style.animationDelay).toBe("-300ms, 50ms");
+  });
+
+  it("keeps the element's own delay, so a second seek does not compound the first", () => {
+    // Arrange: the element's own delay is 200ms.
+    const el = document.createElement("span");
+    seekToWallClock(elementLoops(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite", delay: "200ms" }), false), 2900);
+
+    // Act: the computed delay now reads the first seek's; the kept base decides.
+    seekToWallClock(elementLoops(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite", delay: "-500ms" }), false), 3000);
+
+    // Assert
+    expect(el.getAttribute(WALL_PHASE_BASE_ATTRIBUTE)).toBe("200");
+    expect(el.style.animationDelay).toBe("-400ms");
+  });
+
+  it("restarts the loop when asked, so a revealed element starts afresh", () => {
+    // Arrange
+    const el = document.createElement("span");
+    let names: string[] = [];
+    const style = el.style;
+    const original = Object.getOwnPropertyDescriptor(CSSStyleDeclaration.prototype, "animationName");
+    Object.defineProperty(style, "animationName", {
+      configurable: true,
+      set(value: string) {
+        names.push(value);
+        original?.set?.call(style, value);
+      },
+      get() {
+        return original?.get?.call(style) as string;
+      },
+    });
+
+    // Act
+    elementLoops(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite" }), true);
+
+    // Assert
+    expect(names).toEqual(["none"]);
+    expect(el.style.getPropertyValue("animation-name")).toBe("");
+    names = [];
+  });
+});
+
+describe("a reveal restarts the loops it seeks", () => {
+  it("asks its source to restart on the first frame after the page is shown, never on a draw", () => {
+    // Arrange
+    const restarts: boolean[] = [];
+    const doc = fakeDocument("hidden");
+    const frames = frameQueue();
+    const wallPhase = installWallPhase(document.createElement("nav"), {
+      animations: (_host, restart) => {
+        restarts.push(restart);
+        return [];
+      },
+      now: () => 0,
+      doc,
+      frame: frames.frame,
+    });
+
+    // Act
+    wallPhase.seek();
+    doc.show();
+    frames.run();
+
+    // Assert
+    expect(restarts).toEqual([false, true]);
   });
 });

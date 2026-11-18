@@ -16,11 +16,23 @@
  * reveal of a hidden page computes the same phase for the same instant, so
  * the dot on screen after a switch is exactly where the one before it was.
  *
- * THE PERIOD IS READ, NEVER RESTATED. The seek walks the rail's running Web
- * Animations (`Element.getAnimations`) and takes each one's duration from its
- * own timing, so a keyframe rule's duration lives only in `styles.css`; there
- * is no TypeScript copy to drift from it. One-shot animations and transitions
- * (finite iterations) are not loops and are left alone.
+ * THE PERIOD IS READ, NEVER RESTATED. The seek reads each looping element's
+ * computed animation (its name, duration, iteration count, direction and
+ * delay lists), so a keyframe rule's duration lives only in `styles.css`;
+ * there is no TypeScript copy to drift from it. One-shot animations and
+ * transitions (finite iterations) are not loops and are left alone.
+ *
+ * NO ANIMATION OBJECT IS EVER ASKED FOR. The seek moves a loop by giving its
+ * element a NEGATIVE `animation-delay` of the phase, never through
+ * `getAnimations()`: on the system WebKit, an animation script has asked for
+ * is never freed, nor the element it animated, and the rail is redrawn up to
+ * 140 times a minute, so the sidebar's web process held 14,237 dead
+ * animations and gained about 45 a minute (2026-11-18; see the webapp's
+ * AGENTS.md, Performance lessons). A fresh element starts its animation at
+ * its draw, so the delay lands it on the phase; a reveal restarts each loop
+ * (its `animation-name` dropped and restored), which makes it fresh again.
+ * Each element's own delay is kept beside it (`data-wall-phase-base`), so a
+ * second seek never compounds the first.
  *
  * WHEN IT SEEKS. After every draw, once the drawn rail is in the document
  * (`seek`), and on the first animation frame after the page becomes visible
@@ -37,11 +49,83 @@ export interface PhasedAnimation {
   readonly effect: { getTiming(): EffectTiming } | null;
 }
 
-/** Where a rail's running animations are read from. */
-export type AnimationSource = (host: Element) => Iterable<PhasedAnimation>;
+/**
+ * Where a rail's running animations are read from. RESTART says the page was
+ * just shown again, so each loop is restarted before it is sought.
+ */
+export type AnimationSource = (host: Element, restart: boolean) => Iterable<PhasedAnimation>;
 
-/** The page's own animations under HOST, which is what production reads. */
-export const PAGE_ANIMATIONS: AnimationSource = (host) => host.getAnimations({ subtree: true });
+/** The attribute an element's own animation delays are kept in, in ms. */
+export const WALL_PHASE_BASE_ATTRIBUTE = "data-wall-phase-base";
+
+/**
+ * The page's own looping animations under HOST, read off each element's
+ * computed style, which is what production reads (see the header).
+ */
+export const PAGE_ANIMATIONS: AnimationSource = (host, restart) => {
+  const out: PhasedAnimation[] = [];
+  const view = host.ownerDocument.defaultView;
+  if (view === null) return out;
+  for (const element of [host, ...host.querySelectorAll("*")]) {
+    if (!(element instanceof view.HTMLElement)) continue;
+    out.push(...elementLoops(element, view.getComputedStyle(element), restart));
+  }
+  return out;
+};
+
+/**
+ * ELEMENT's animations as PhasedAnimations whose seek writes its
+ * `animation-delay`, or none when it runs no endless loop. RESTART drops and
+ * restores its `animation-name` first, so each loop starts afresh.
+ */
+export function elementLoops(element: HTMLElement, computed: CSSStyleDeclaration, restart: boolean): PhasedAnimation[] {
+  const names = cssList(computed.animationName);
+  if (names.every((name) => name === "none" || name === "")) return [];
+  const durations = cssList(computed.animationDuration).map(cssTimeMs);
+  const iterations = cssList(computed.animationIterationCount).map((v) => (v === "infinite" ? Infinity : Number(v)));
+  const directions = cssList(computed.animationDirection) as PlaybackDirection[];
+  const kept = element.getAttribute(WALL_PHASE_BASE_ATTRIBUTE);
+  const bases = kept === null ? cssList(computed.animationDelay).map(cssTimeMs) : kept.split(",").map(Number);
+  if (kept === null) element.setAttribute(WALL_PHASE_BASE_ATTRIBUTE, bases.join(","));
+  const at = <T>(list: T[], i: number): T => list[i % list.length] as T;
+  if (!names.some((_, i) => at(iterations, i) === Infinity)) return [];
+  if (restart) {
+    element.style.animationName = "none";
+    void element.offsetWidth;
+    element.style.removeProperty("animation-name");
+  }
+  const delays = names.map((_, i) => at(bases, i));
+  return names.map((_, i) => {
+    const timing: EffectTiming = {
+      duration: at(durations, i),
+      iterations: at(iterations, i),
+      direction: at(directions, i),
+      delay: at(bases, i),
+    };
+    return {
+      effect: { getTiming: () => timing },
+      get currentTime(): CSSNumberish | null {
+        return null;
+      },
+      set currentTime(to: CSSNumberish | null) {
+        // A FRESH LOOP'S ACTIVE TIME AT ITS DRAW IS MINUS ITS DELAY, so the
+        // phase the seek asks for is a delay of base - to.
+        delays[i] = at(bases, i) - Number(to);
+        element.style.animationDelay = delays.map((ms) => `${ms}ms`).join(", ");
+      },
+    };
+  });
+}
+
+/** A computed comma-separated list. */
+function cssList(value: string): string[] {
+  return value.split(",").map((part) => part.trim());
+}
+
+/** A computed CSS time (`1.3s`, `200ms`) in milliseconds. */
+function cssTimeMs(value: string): number {
+  return value.endsWith("ms") ? Number(value.slice(0, -2)) : Number(value.replace(/s$/, "")) * 1000;
+}
 
 /** What the seek needs from its environment; every field defaults to the page. */
 export interface WallPhaseEnv {
@@ -132,17 +216,18 @@ export function installWallPhase(host: Element, env: WallPhaseEnv = {}): WallPha
   const presence = env.presence ?? owned ?? pagePresence();
 
   let disposed = false;
-  const seek = (): void => {
-    const sought = seekToWallClock(animations(host), now());
+  const seekWith = (restart: boolean): void => {
+    const sought = seekToWallClock(animations(host, restart), now());
     log.debug("seeked the rail's looping animations to the wall clock", {
       operation: "sidebar.wall-phase.seek",
-      context: { animations: sought },
+      context: { animations: sought, restart },
     });
   };
+  const seek = (): void => seekWith(false);
   const unsubscribe = presence.onChange((seen) => {
     if (!seen) return;
     frame(() => {
-      if (!disposed) seek();
+      if (!disposed) seekWith(true);
     });
   });
 
