@@ -37,7 +37,18 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
 		return "", err
 	}
-	escalation, err := o.readyMediator(ctx, q, true, fields)
+	// THE MEDIATOR THAT ESCALATED IN ITS OWN TURN IS ONLY SHOWN, never
+	// readied as for a brief: it is mid-turn, so its worktree holds its work
+	// and its effort is set, and setting the effort waits on the very turn
+	// that waits on this escalation (2026-11-18, a hang until the call was
+	// cancelled).
+	var escalation standing
+	var err error
+	if said {
+		escalation, err = o.showMediator(ctx, q, fields)
+	} else {
+		escalation, err = o.readyMediator(ctx, q, true, fields)
+	}
 	if err != nil {
 		return failed("the deploy mediator could not be readied for the escalation; the user is not told of the escalated deploy", err)
 	}
