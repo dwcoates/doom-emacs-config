@@ -1242,7 +1242,7 @@ test_install_builds_renders_and_loads_a_launchd_service() {
   else fail "service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
   # The rendering: env first, then the built program and its arguments with
   # every ~/ expanded and XML's own characters escaped; kept alive at
-  # Standard priority; its logs under the cache.
+  # Interactive priority; its logs under the cache.
   local want bad=""
   while IFS= read -r want; do
     grep -qF -- "$want" "$plist" || bad="$bad [$want]"
@@ -1257,13 +1257,16 @@ test_install_builds_renders_and_loads_a_launchd_service() {
     <key>KeepAlive</key>
     <integer>10</integer>
     <integer>20</integer>
-    <string>Standard</string>
+    <string>Interactive</string>
     <string>$h/.cache/agent-repl/log/svc.out.log</string>
     <string>$h/.cache/agent-repl/log/svc.err.log</string>
 EOF
+  # The one ProcessType is Interactive: Standard clamps a service and its
+  # test runs to utility's priority 20 (measured 2026-11-17).
   if [ -z "$bad" ] && ! grep -q "EnvironmentVariables" "$plist" \
-     && [ "$(grep -n '<string>' "$plist" | sed -n 2p | grep -c '/usr/bin/env')" -eq 1 ]; then
-    pass "a rendered plist launches through /usr/bin/env at Standard priority with ~/ expanded and XML escaped"
+     && [ "$(grep -n '<string>' "$plist" | sed -n 2p | grep -c '/usr/bin/env')" -eq 1 ] \
+     && [ "$(grep -A1 '<key>ProcessType</key>' "$plist" | tr -d ' \n')" = "<key>ProcessType</key><string>Interactive</string>" ]; then
+    pass "a rendered plist launches through /usr/bin/env at Interactive priority with ~/ expanded and XML escaped"
   else fail "rendered plist lacks:$bad" "$(cat "$plist")"; fi
 }
 

@@ -35,17 +35,20 @@ or unit is checked in, so the two can never disagree about a service.
   (`StandardOutput=append:`), because the daemon reads the store's error log
   to tell a slow boot from a wedged one.
 
-## Priority: Standard, never Background (macOS)
+## Priority: Interactive (macOS)
 
-Every rendered plist declares `ProcessType` `Standard`. The live editor waits
-on these services, so they must never rank below a test suite: launchd's
-`Background` is darwinbg (efficiency cores, throttled disk I/O), and suites run
-at `nice 19` with normal disk I/O, so a `Background` store lost every I/O
-contention to them. Measured 2026-10-12 on a copy of the store's database
-under ordinary suite load: a 200-row write took a median 72-79ms at Standard
-and 273-363ms under darwinbg, over the store's 250ms budget, and the live
-store logged thousands of slow-query warnings (checkpoints up to 99s) while
-suites ran. `bin/test-requirements.sh` holds the rendering to `Standard`.
+Every rendered plist declares `ProcessType` `Interactive`. The live editor
+waits on these services, and the test service's runs keep normal work's CPU
+priority (owner ruling 2026-11-13), so no service and no run it starts may be
+clamped. Measured 2026-11-17 on battery with a probe agent and a `nice 10`
+child of it (`ps -o pri`): `Standard` and no `ProcessType` both run the agent
+and its children at priority 20, utility's clamp; `Adaptive` at 4;
+`Interactive` at 31, the priority a shell's child of any niceness gets. Under
+`Standard` the test service's whole run tree sat at 20, and an integration
+test waited minutes for a CPU. `Background` is worse still: darwinbg
+(efficiency cores, throttled disk I/O), under which a 200-row store write took
+273-363ms against 72-79ms unclamped (2026-10-12). `bin/test-requirements.sh`
+holds the rendering to `Interactive`.
 
 ## Launched through /usr/bin/env
 
