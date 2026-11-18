@@ -63,12 +63,11 @@ func foldExtraMergeLedgers(ctx context.Context, tx *sql.Tx, log dlog.Logger) err
 		gone[f.from] = true
 	}
 	// AT MOST ONE ROUND OF A LEDGER STAYS LIVE: the latest (layout 155's rule).
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE merge_tab_intervals SET outcome = 'restarted', held_since = NULL,
-		  ended_at = (SELECT MIN(later.started_at) FROM merge_tab_intervals AS later
-		              WHERE later.lease_id = merge_tab_intervals.lease_id AND later.started_at > merge_tab_intervals.started_at)
-		WHERE ended_at IS NULL AND EXISTS (SELECT 1 FROM merge_tab_intervals AS later
-		  WHERE later.lease_id = merge_tab_intervals.lease_id AND later.started_at > merge_tab_intervals.started_at)`); err != nil {
+	if _, err := settleLiveRounds(ctx, tx, TabOutcomeRestarted,
+		sqlExpr{`(SELECT MIN(later.started_at) FROM merge_tab_intervals AS later
+		              WHERE later.lease_id = merge_tab_intervals.lease_id AND later.started_at > merge_tab_intervals.started_at)`, nil},
+		sqlExpr{`EXISTS (SELECT 1 FROM merge_tab_intervals AS later
+		  WHERE later.lease_id = merge_tab_intervals.lease_id AND later.started_at > merge_tab_intervals.started_at)`, nil}); err != nil {
 		return err
 	}
 	log.Info("daemon.wsm.migrate", "folded each queued merge's extra ledgers into its entry's", dlog.Context{"folded": len(folds)})
