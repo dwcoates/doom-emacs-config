@@ -1,7 +1,9 @@
 package pullrefs
 
 import (
+	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -19,9 +21,33 @@ func (r Ref) URL() string {
 
 // PullPathPattern is the unanchored pattern of a github.com pull request's
 // path, `/<owner>/<repo>/pull/<number>`, capturing the three in that order.
-// It is THE ONE spelling of that shape: prwatch.ParseURL anchors it to read
-// one url, Refs scans text for it.
+// It is THE ONE spelling of that shape: ParseURL anchors it to read one
+// url, Refs scans text for it.
 const PullPathPattern = `/([A-Za-z0-9][A-Za-z0-9-]*)/([A-Za-z0-9._-]+)/pull/([1-9][0-9]*)`
+
+// pullPath is a github.com pull request's path, optionally followed by a tab
+// (/files, /commits) or a fragment.
+var pullPath = regexp.MustCompile(`^` + PullPathPattern + `(?:/.*)?$`)
+
+// ParseURL answers the owner, repository and number of the pull request a
+// github.com url names, and false for any other url. It is THE ONE reading of
+// one url: prwatch keys a followed pull request by it, and the store backfills
+// a link's pull request with it.
+func ParseURL(raw string) (owner, repo string, number uint32, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || !strings.EqualFold(u.Host, "github.com") {
+		return "", "", 0, false
+	}
+	m := pullPath.FindStringSubmatch(u.Path)
+	if m == nil {
+		return "", "", 0, false
+	}
+	n, err := strconv.ParseUint(m[3], 10, 32)
+	if err != nil {
+		return "", "", 0, false
+	}
+	return m[1], m[2], uint32(n), true
+}
 
 // pullURL is a pull request's address on GitHub, wherever it is written:
 // owner, repository, number. A url that runs on into a word byte (more digits,

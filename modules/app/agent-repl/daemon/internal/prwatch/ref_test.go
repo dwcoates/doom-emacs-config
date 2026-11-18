@@ -7,7 +7,6 @@ import (
 
 	"agent-repld/internal/pullrefs"
 	"agent-repld/internal/wsm"
-	"strings"
 )
 
 func TestParseURLNamesAGitHubPullRequest(t *testing.T) {
@@ -125,10 +124,18 @@ func TestURLOfSpellsTheAddressAsPullrefsDoes(t *testing.T) {
 	}
 }
 
-func TestPullPathIsThePullrefsPattern(t *testing.T) {
-	// Assert: the path ParseURL reads is the shape pullrefs scans text for.
-	if !strings.Contains(pullPath.String(), pullrefs.PullPathPattern) {
-		t.Fatalf("pullPath = %q, want it built on pullrefs.PullPathPattern", pullPath.String())
+func TestParseURLIsPullrefsReading(t *testing.T) {
+	// Arrange
+	raw := "https://github.com/ChessCom/gns-server/pull/613/files"
+	owner, repo, number, _ := pullrefs.ParseURL(raw)
+
+	// Act
+	got, ok := ParseURL(raw)
+
+	// Assert: one reading of a url, so the watcher and the store never key a
+	// pull request two ways.
+	if want := (wsm.PullRequestKey{Owner: owner, Repo: repo, Number: number}); !ok || got != want {
+		t.Fatalf("ParseURL = %v, %v; want pullrefs' %v", got, ok, want)
 	}
 }
 
