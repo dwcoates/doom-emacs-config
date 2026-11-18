@@ -1161,6 +1161,85 @@ Binds `switched' to the requested target and `asked' to the names ranked."
     (should-not switched)
     (should (member "elisp.commands.last-started-none from=here candidates=1" logged))))
 
+;;;; ---- The repository-scoped last-started jump ----
+
+(defmacro agent-repl-test-commands--with-repositories (repos &rest body)
+  "Run BODY with `agent-repl-roster-repository-for-ws' answering REPOS.
+REPOS is an alist of workspace name to repository id; a name absent from
+it is in no section."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-roster-repository-for-ws)
+              (lambda (ws) (let ((id (cdr (assoc ws ,repos))))
+                             (and id (list :id id :dir (concat "/r/" id)))))))
+     ,@body))
+
+(ert-deftest agent-repl-test-commands-same-repository-names-keeps-the-repositorys-own ()
+  "Only the names sharing the workspace's repository id remain, in order."
+  (agent-repl-test-commands--with-repositories
+      '(("here" . "r1") ("a" . "r2") ("b" . "r1") ("c" . "r1"))
+    (should (equal (agent-repl--same-repository-names "here" '("c" "a" "b"))
+                   '("c" "b")))))
+
+(ert-deftest agent-repl-test-commands-same-repository-names-drops-a-sectionless-name ()
+  "A name no section holds shares no repository."
+  (agent-repl-test-commands--with-repositories '(("here" . "r1"))
+    (should-not (agent-repl--same-repository-names "here" '("ghost")))))
+
+(ert-deftest agent-repl-test-commands-same-repository-names-is-nil-off-every-repository ()
+  "A workspace with no repository shares one with nothing, not with the sectionless."
+  (agent-repl-test-commands--with-repositories '(("a" . "r1"))
+    (should-not (agent-repl--same-repository-names "placeholder" '("a" "ghost")))))
+
+(defmacro agent-repl-test-commands--with-repository-last-started (shown drawn repos &rest body)
+  "Run BODY standing on SHOWN with DRAWN tabs in REPOS, the real start ranking.
+`agent-repl-roster-last-turn-started-ms' answers each name's position in
+DRAWN, so a later tab started later.  Binds `switched' and `logged'."
+  (declare (indent 3))
+  `(let ((switched nil) (logged nil))
+     (agent-repl-test-commands--with-repositories ,repos
+       (cl-letf (((symbol-function 'agent-repl--ws-current-name) (lambda () ,shown))
+                 ((symbol-function 'agent-repl--ws-log-name) (lambda (ws) ws))
+                 ((symbol-function 'agent-repl--navigable-tab-names) (lambda () ,drawn))
+                 ((symbol-function 'agent-repl-roster-last-turn-started-ms)
+                  (lambda (ws) (cl-position ws ,drawn :test #'equal)))
+                 ((symbol-function 'agent-repl--info)
+                  (agent-repl-test--record-into logged))
+                 ((symbol-function 'agent-repl-host-request-switch)
+                  (lambda (ws trigger) (setq switched (cons ws trigger))))
+                 ((symbol-function 'message) (lambda (&rest _) nil)))
+         ,@body))))
+
+(ert-deftest agent-repl-test-commands-repository-last-started-skips-another-repository ()
+  "The newest start of ANOTHER repository loses to this repository's newest."
+  (agent-repl-test-commands--with-repository-last-started
+      "here" '("here" "mine" "theirs") '(("here" . "r1") ("mine" . "r1") ("theirs" . "r2"))
+    (agent-repl-switch-to-last-started-repository-workspace)
+    (should (equal switched '("mine" . last-started-in-repository)))))
+
+(ert-deftest agent-repl-test-commands-repository-last-started-never-ranks-the-shown-workspace ()
+  "The shown workspace, though newest, is no switch."
+  (agent-repl-test-commands--with-repository-last-started
+      "here" '("mine" "here") '(("here" . "r1") ("mine" . "r1"))
+    (agent-repl-switch-to-last-started-repository-workspace)
+    (should (equal switched '("mine" . last-started-in-repository)))))
+
+(ert-deftest agent-repl-test-commands-repository-last-started-logs-the-switch ()
+  "A jump records where it went from, where to, and the turn-start instant."
+  (agent-repl-test-commands--with-repository-last-started
+      "here" '("here" "mine") '(("here" . "r1") ("mine" . "r1"))
+    (agent-repl-switch-to-last-started-repository-workspace)
+    (should (member "elisp.commands.last-started-in-repository from=here target=mine instant-ms=1"
+                    logged))))
+
+(ert-deftest agent-repl-test-commands-repository-last-started-alone-is-a-logged-no-op ()
+  "No other workspace of this repository requests nothing and says so in the log."
+  (agent-repl-test-commands--with-repository-last-started
+      "here" '("here" "theirs") '(("here" . "r1") ("theirs" . "r2"))
+    (agent-repl-switch-to-last-started-repository-workspace)
+    (should-not switched)
+    (should (member "elisp.commands.last-started-in-repository-none from=here candidates=1"
+                    logged))))
+
 ;;;; ---- Navigation follows the DRAWN tab order ----
 
 ;; The bar is drawn from `agent-repl-roster-tab-order' (roster.el), so that

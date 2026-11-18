@@ -1543,6 +1543,32 @@ counts as surely as one it watched.  Bound to `M-0\='.  See
    #'agent-repl-roster-last-started-name #'agent-repl-roster-last-turn-started-ms
    "last-started" "No other workspace has started a turn"))
 
+(defun agent-repl--same-repository-names (ws names)
+  "Return the ones of NAMES in WS's repository, in NAMES' order.
+A workspace's repository is its roster section's key
+\(`agent-repl-roster-repository-for-ws'), compared by its daemon-minted id.
+Nil when WS names no repository: a placeholder or a workspace no section
+holds yet shares a repository with nothing."
+  (let ((id (plist-get (agent-repl-roster-repository-for-ws ws) :id)))
+    (and id
+         (seq-filter (lambda (name)
+                       (equal (plist-get (agent-repl-roster-repository-for-ws name) :id) id))
+                     names))))
+
+(defun agent-repl-switch-to-last-started-repository-workspace ()
+  "Switch to the workspace of THIS repository whose turn most recently STARTED.
+`agent-repl-switch-to-last-started-workspace' over only the workspaces
+sharing the shown one's repository (`agent-repl--same-repository-names').
+Bound to `M-s-0\='.  See `agent-repl--jump-to-ranked-workspace' for the
+candidates."
+  (interactive)
+  (let ((shown (agent-repl--ws-current-name)))
+    (agent-repl--jump-to-ranked-workspace
+     (lambda (names)
+       (agent-repl-roster-last-started-name (agent-repl--same-repository-names shown names)))
+     #'agent-repl-roster-last-turn-started-ms
+     "last-started-in-repository" "No other workspace in this repository has started a turn")))
+
 (defun agent-repl--drawn-tab-names ()
   "Return the workspace names the tab bar DRAWS, in the order it draws them.
 
