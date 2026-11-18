@@ -521,9 +521,16 @@ func endedFrame(id string, unsubscribed bool, err error) (*agentreplv1.PageSubsc
 func failedAs(err error) *agentreplv1.PageSubscriptionFailed {
 	var coded *connect.Error
 	if errors.As(err, &coded) {
-		return &agentreplv1.PageSubscriptionFailed{
+		failed := &agentreplv1.PageSubscriptionFailed{
 			Code: coded.Code().String(), Message: coded.Message(),
 		}
+		// A HANDOVER IS NOT A FAULT: the successor rides the error's metadata
+		// (SuccessorHeader), and the page draws a move from it rather than an
+		// outage.
+		if successor := coded.Meta().Get(SuccessorHeader); successor != "" {
+			failed.HandedAway = &agentreplv1.PageSubscriptionHandedAway{Address: successor}
+		}
+		return failed
 	}
 	return &agentreplv1.PageSubscriptionFailed{
 		Code: connect.CodeInternal.String(), Message: err.Error(),

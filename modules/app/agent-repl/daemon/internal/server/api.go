@@ -1255,6 +1255,13 @@ func transportClosed(log dlog.Logger, rpc, cause, reason string, notFound bool, 
 	if address != "" {
 		err.Meta().Set(RefusalAddressKey, address)
 	}
+	// A HANDED-AWAY STREAM NAMES ITS SUCCESSOR AS A REFUSED VERB DOES
+	// (SuccessorHeader), so a client follows the handover the same way for
+	// every rpc; read as a transport failure, every page filed the daemon
+	// unreachable at ERROR on every deploy (2026-11-18).
+	if address != "" && cause == workspace.ArmTransferringAway {
+		err.Meta().Set(SuccessorHeader, address)
+	}
 	return err
 }
 

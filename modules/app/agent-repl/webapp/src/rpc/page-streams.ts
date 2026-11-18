@@ -54,6 +54,7 @@ import { ConnectError } from "@connectrpc/connect";
 import { codeFromString } from "@connectrpc/connect/protocol-connect";
 import { createListeners } from "../listeners.js";
 import { log } from "../log.js";
+import { SUCCESSOR_HEADER } from "./moved.js";
 import {
   SubscribePageRequestSchema,
   SubscribePageResponseSchema,
@@ -396,14 +397,22 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
                 `subscription ${ended.subscription} failed with ${JSON.stringify(ended.how.value.code)}, which is not a Connect code`,
               );
             }
-            const failure = new ConnectError(ended.how.value.message, code);
-            log.error(`a page subscription failed: ${ended.how.value.message}`, {
-              operation: "rpc.page-subscription-failed",
+            // A HANDOVER RIDES AS THE SAME METADATA a dedicated stream's
+            // refusal carries, so the caller tells a move apart through the one
+            // reader (moved.ts successorOf) and files no failure for it.
+            const handedAway = ended.how.value.handedAway;
+            const metadata = new Headers();
+            if (handedAway !== undefined) metadata.set(SUCCESSOR_HEADER, handedAway.address);
+            const failure = new ConnectError(ended.how.value.message, code, metadata);
+            const record = handedAway === undefined ? log.error : log.info;
+            record(`a page subscription failed: ${ended.how.value.message}`, {
+              operation: handedAway === undefined ? "rpc.page-subscription-failed" : "rpc.page-subscription-handed-away",
               context: {
                 page,
                 subscription: ended.subscription,
                 code: ended.how.value.code,
                 cause: ended.how.value.message,
+                ...(handedAway === undefined ? {} : { address: handedAway.address }),
               },
             });
             queue.fail(failure);

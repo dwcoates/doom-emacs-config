@@ -14,6 +14,8 @@
  *
  * There is at most one page, so there is at most one handler.
  */
+import { ConnectError } from "@connectrpc/connect";
+
 import { log } from "../log.js";
 
 let moveHandler: ((address: string) => void) | null = null;
@@ -49,4 +51,22 @@ export function workspaceMoved(address: string): boolean {
   }
   moveHandler(address);
   return true;
+}
+
+/** The daemon's metadata naming the successor a `transferring_away` close was handed to. */
+export const SUCCESSOR_HEADER = "Agent-Repl-Successor";
+
+/**
+ * The successor's address an error names, or undefined for any other error.
+ * The daemon sets it on every `transferring_away` refusal answered as an
+ * error, a stream's close or a verb's alike (daemon internal/server
+ * SuccessorHeader), and a page subscription's failure carries it the same way
+ * (page-streams.ts). A handover is planned, never a fault: every layer that
+ * meets an error asks this one reader first, so a stream, a unary call and a
+ * page subscription all raise the move rather than file an outage.
+ */
+export function successorOf(err: unknown): string | undefined {
+  if (!(err instanceof ConnectError)) return undefined;
+  const address = err.metadata.get(SUCCESSOR_HEADER);
+  return address === null || address === "" ? undefined : address;
 }

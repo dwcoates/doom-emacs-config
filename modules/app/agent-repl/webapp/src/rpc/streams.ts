@@ -58,7 +58,7 @@ import { daemonUnreachable, frameUndecodable, frameUndrawable, outageAnnounced, 
 import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
 import { assertNoUnknownFields } from "./strict.js";
-import { workspaceMoved } from "./moved.js";
+import { successorOf, workspaceMoved } from "./moved.js";
 import type { AgentReplClient } from "./client.js";
 import { pageEnded } from "../page-teardown.js";
 import { errorCause } from "../error-cause.js";
@@ -469,20 +469,6 @@ export function watchStream<Res extends Message>(
  * HTTP. A producer that simply concluded gives neither, so the card reports
  * code 0 and says so in the reason rather than inventing evidence.
  */
-/** The daemon's metadata naming the successor a `transferring_away` close was handed to. */
-export const SUCCESSOR_HEADER = "Agent-Repl-Successor";
-
-/**
- * The successor's address a stream close names, or undefined for any other
- * end. The daemon sets it on every `transferring_away` refusal answered as an
- * error (daemon internal/server/refuse.go, SuccessorHeader).
- */
-export function successorOf(err: unknown): string | undefined {
-  if (!(err instanceof ConnectError)) return undefined;
-  const address = err.metadata.get(SUCCESSOR_HEADER);
-  return address === null || address === "" ? undefined : address;
-}
-
 function closeEvidence(end: StreamEnd): { closeCode: number; closeReason: string } {
   if (end.kind !== "transport_failure") {
     return { closeCode: 0, closeReason: "the stream concluded without an error" };

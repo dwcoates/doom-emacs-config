@@ -22,6 +22,7 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { log } from "../log.js";
+import { successorOf, workspaceMoved } from "./moved.js";
 import { outageAnnounced, type FailureSink } from "../failure/sink.js";
 import { clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView } from "./malformed.js";
@@ -83,6 +84,18 @@ export async function callUnary<Res extends Message>(
     // caller has one type to catch regardless of what the fetch threw.
     const connectError = ConnectError.from(err);
     const context = { rpc: name, code: connectError.code, cause: connectError.rawMessage };
+    // THE WORKSPACE WAS HANDED TO A SUCCESSOR (moved.ts successorOf): planned,
+    // so it is INFO and files nothing; the page raises its move notice, and
+    // the caller still renders its refusal.
+    const successor = successorOf(connectError);
+    if (successor !== undefined) {
+      log.info(`${name} was refused: the workspace was handed to ${successor}`, {
+        operation: "rpc.unary-handed-away",
+        context: { ...context, address: successor },
+      });
+      workspaceMoved(successor);
+      throw connectError;
+    }
     // INSIDE AN ANNOUNCED OUTAGE a call the departing daemon could not serve
     // is the announcement coming true (outageAnnounced): INFO, and the caller
     // still renders its refusal.

@@ -803,7 +803,12 @@ type PageSubscriptionFailed struct {
 	// rpc's stream would have carried, unchanged.
 	Code string `protobuf:"bytes,1,opt,name=code,proto3" json:"code,omitempty"`
 	// The error's message, verbatim.
-	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Message string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	// SET WHEN THE DEDICATED RPC REFUSED BECAUSE THE WORKSPACE WAS HANDED TO A
+	// SUCCESSOR DAEMON (its `transferring_away` refusal), naming that daemon. A
+	// handover is planned, not a fault: the page raises its move notice and
+	// files no failure. UNSET for every other refusal.
+	HandedAway    *PageSubscriptionHandedAway `protobuf:"bytes,3,opt,name=handed_away,json=handedAway,proto3,oneof" json:"handed_away,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -852,6 +857,60 @@ func (x *PageSubscriptionFailed) GetMessage() string {
 	return ""
 }
 
+func (x *PageSubscriptionFailed) GetHandedAway() *PageSubscriptionHandedAway {
+	if x != nil {
+		return x.HandedAway
+	}
+	return nil
+}
+
+// The successor daemon a handed-away workspace now belongs to.
+type PageSubscriptionHandedAway struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The successor's address, as the refusal named it: what the page's move
+	// notice points at. Opaque to the page.
+	Address       string `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PageSubscriptionHandedAway) Reset() {
+	*x = PageSubscriptionHandedAway{}
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PageSubscriptionHandedAway) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PageSubscriptionHandedAway) ProtoMessage() {}
+
+func (x *PageSubscriptionHandedAway) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PageSubscriptionHandedAway.ProtoReflect.Descriptor instead.
+func (*PageSubscriptionHandedAway) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *PageSubscriptionHandedAway) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
 // Starts one subscription on an already-attached page.
 //
 // A REFUSAL IS A CONNECT ERROR, exactly as a refused `Watch*` open is. This
@@ -887,7 +946,7 @@ type SubscribePageRequest struct {
 
 func (x *SubscribePageRequest) Reset() {
 	*x = SubscribePageRequest{}
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -899,7 +958,7 @@ func (x *SubscribePageRequest) String() string {
 func (*SubscribePageRequest) ProtoMessage() {}
 
 func (x *SubscribePageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -912,7 +971,7 @@ func (x *SubscribePageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribePageRequest.ProtoReflect.Descriptor instead.
 func (*SubscribePageRequest) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *SubscribePageRequest) GetPage() string {
@@ -1086,7 +1145,7 @@ type SubscribePageResponse struct {
 
 func (x *SubscribePageResponse) Reset() {
 	*x = SubscribePageResponse{}
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1098,7 +1157,7 @@ func (x *SubscribePageResponse) String() string {
 func (*SubscribePageResponse) ProtoMessage() {}
 
 func (x *SubscribePageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1111,7 +1170,7 @@ func (x *SubscribePageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribePageResponse.ProtoReflect.Descriptor instead.
 func (*SubscribePageResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{11}
 }
 
 // Ends one subscription without disturbing the page's other ones.
@@ -1125,7 +1184,7 @@ type UnsubscribePageRequest struct {
 
 func (x *UnsubscribePageRequest) Reset() {
 	*x = UnsubscribePageRequest{}
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1137,7 +1196,7 @@ func (x *UnsubscribePageRequest) String() string {
 func (*UnsubscribePageRequest) ProtoMessage() {}
 
 func (x *UnsubscribePageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1150,7 +1209,7 @@ func (x *UnsubscribePageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribePageRequest.ProtoReflect.Descriptor instead.
 func (*UnsubscribePageRequest) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *UnsubscribePageRequest) GetPage() string {
@@ -1178,7 +1237,7 @@ type UnsubscribePageResponse struct {
 
 func (x *UnsubscribePageResponse) Reset() {
 	*x = UnsubscribePageResponse{}
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1190,7 +1249,7 @@ func (x *UnsubscribePageResponse) String() string {
 func (*UnsubscribePageResponse) ProtoMessage() {}
 
 func (x *UnsubscribePageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1203,7 +1262,7 @@ func (x *UnsubscribePageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UnsubscribePageResponse.ProtoReflect.Descriptor instead.
 func (*UnsubscribePageResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP(), []int{13}
 }
 
 var File_agentrepl_v1_endpoint_watch_page_proto protoreflect.FileDescriptor
@@ -1248,10 +1307,15 @@ const file_agentrepl_v1_endpoint_watch_page_proto_rawDesc = "" +
 	"\x06failed\x18\x04 \x01(\v2$.agentrepl.v1.PageSubscriptionFailedH\x00R\x06failedB\x05\n" +
 	"\x03how\"\x1e\n" +
 	"\x1cPageSubscriptionUnsubscribed\"\x1d\n" +
-	"\x1bPageSubscriptionSourceEnded\"F\n" +
+	"\x1bPageSubscriptionSourceEnded\"\xa6\x01\n" +
 	"\x16PageSubscriptionFailed\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xca\x05\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12N\n" +
+	"\vhanded_away\x18\x03 \x01(\v2(.agentrepl.v1.PageSubscriptionHandedAwayH\x00R\n" +
+	"handedAway\x88\x01\x01B\x0e\n" +
+	"\f_handed_away\"6\n" +
+	"\x1aPageSubscriptionHandedAway\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xca\x05\n" +
 	"\x14SubscribePageRequest\x12\x12\n" +
 	"\x04page\x18\x01 \x01(\tR\x04page\x12\"\n" +
 	"\fsubscription\x18\x02 \x01(\tR\fsubscription\x12C\n" +
@@ -1284,7 +1348,7 @@ func file_agentrepl_v1_endpoint_watch_page_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_watch_page_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_watch_page_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_agentrepl_v1_endpoint_watch_page_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
 var file_agentrepl_v1_endpoint_watch_page_proto_goTypes = []any{
 	(*WatchPageRequest)(nil),               // 0: agentrepl.v1.WatchPageRequest
 	(*WebhostPage)(nil),                    // 1: agentrepl.v1.WebhostPage
@@ -1295,62 +1359,64 @@ var file_agentrepl_v1_endpoint_watch_page_proto_goTypes = []any{
 	(*PageSubscriptionUnsubscribed)(nil),   // 6: agentrepl.v1.PageSubscriptionUnsubscribed
 	(*PageSubscriptionSourceEnded)(nil),    // 7: agentrepl.v1.PageSubscriptionSourceEnded
 	(*PageSubscriptionFailed)(nil),         // 8: agentrepl.v1.PageSubscriptionFailed
-	(*SubscribePageRequest)(nil),           // 9: agentrepl.v1.SubscribePageRequest
-	(*SubscribePageResponse)(nil),          // 10: agentrepl.v1.SubscribePageResponse
-	(*UnsubscribePageRequest)(nil),         // 11: agentrepl.v1.UnsubscribePageRequest
-	(*UnsubscribePageResponse)(nil),        // 12: agentrepl.v1.UnsubscribePageResponse
-	(*DaemonStreamEnding)(nil),             // 13: agentrepl.v1.DaemonStreamEnding
-	(*WatchWorkspaceRosterResponse)(nil),   // 14: agentrepl.v1.WatchWorkspaceRosterResponse
-	(*WatchWebWorkspaceResponse)(nil),      // 15: agentrepl.v1.WatchWebWorkspaceResponse
-	(*WatchDaemonResponse)(nil),            // 16: agentrepl.v1.WatchDaemonResponse
-	(*WatchTopbarResponse)(nil),            // 17: agentrepl.v1.WatchTopbarResponse
-	(*WatchFooterResponse)(nil),            // 18: agentrepl.v1.WatchFooterResponse
-	(*WatchFeedResponse)(nil),              // 19: agentrepl.v1.WatchFeedResponse
-	(*LoginTerminalOutput)(nil),            // 20: agentrepl.v1.LoginTerminalOutput
-	(*WatchChatResponse)(nil),              // 21: agentrepl.v1.WatchChatResponse
-	(*WatchWorkspaceMentionsResponse)(nil), // 22: agentrepl.v1.WatchWorkspaceMentionsResponse
-	(*WatchWorkspaceRosterRequest)(nil),    // 23: agentrepl.v1.WatchWorkspaceRosterRequest
-	(*WatchWebWorkspaceRequest)(nil),       // 24: agentrepl.v1.WatchWebWorkspaceRequest
-	(*WatchDaemonRequest)(nil),             // 25: agentrepl.v1.WatchDaemonRequest
-	(*WatchTopbarRequest)(nil),             // 26: agentrepl.v1.WatchTopbarRequest
-	(*WatchFooterRequest)(nil),             // 27: agentrepl.v1.WatchFooterRequest
-	(*WatchFeedRequest)(nil),               // 28: agentrepl.v1.WatchFeedRequest
-	(*WatchLoginTerminalRequest)(nil),      // 29: agentrepl.v1.WatchLoginTerminalRequest
-	(*WatchChatRequest)(nil),               // 30: agentrepl.v1.WatchChatRequest
-	(*WatchWorkspaceMentionsRequest)(nil),  // 31: agentrepl.v1.WatchWorkspaceMentionsRequest
+	(*PageSubscriptionHandedAway)(nil),     // 9: agentrepl.v1.PageSubscriptionHandedAway
+	(*SubscribePageRequest)(nil),           // 10: agentrepl.v1.SubscribePageRequest
+	(*SubscribePageResponse)(nil),          // 11: agentrepl.v1.SubscribePageResponse
+	(*UnsubscribePageRequest)(nil),         // 12: agentrepl.v1.UnsubscribePageRequest
+	(*UnsubscribePageResponse)(nil),        // 13: agentrepl.v1.UnsubscribePageResponse
+	(*DaemonStreamEnding)(nil),             // 14: agentrepl.v1.DaemonStreamEnding
+	(*WatchWorkspaceRosterResponse)(nil),   // 15: agentrepl.v1.WatchWorkspaceRosterResponse
+	(*WatchWebWorkspaceResponse)(nil),      // 16: agentrepl.v1.WatchWebWorkspaceResponse
+	(*WatchDaemonResponse)(nil),            // 17: agentrepl.v1.WatchDaemonResponse
+	(*WatchTopbarResponse)(nil),            // 18: agentrepl.v1.WatchTopbarResponse
+	(*WatchFooterResponse)(nil),            // 19: agentrepl.v1.WatchFooterResponse
+	(*WatchFeedResponse)(nil),              // 20: agentrepl.v1.WatchFeedResponse
+	(*LoginTerminalOutput)(nil),            // 21: agentrepl.v1.LoginTerminalOutput
+	(*WatchChatResponse)(nil),              // 22: agentrepl.v1.WatchChatResponse
+	(*WatchWorkspaceMentionsResponse)(nil), // 23: agentrepl.v1.WatchWorkspaceMentionsResponse
+	(*WatchWorkspaceRosterRequest)(nil),    // 24: agentrepl.v1.WatchWorkspaceRosterRequest
+	(*WatchWebWorkspaceRequest)(nil),       // 25: agentrepl.v1.WatchWebWorkspaceRequest
+	(*WatchDaemonRequest)(nil),             // 26: agentrepl.v1.WatchDaemonRequest
+	(*WatchTopbarRequest)(nil),             // 27: agentrepl.v1.WatchTopbarRequest
+	(*WatchFooterRequest)(nil),             // 28: agentrepl.v1.WatchFooterRequest
+	(*WatchFeedRequest)(nil),               // 29: agentrepl.v1.WatchFeedRequest
+	(*WatchLoginTerminalRequest)(nil),      // 30: agentrepl.v1.WatchLoginTerminalRequest
+	(*WatchChatRequest)(nil),               // 31: agentrepl.v1.WatchChatRequest
+	(*WatchWorkspaceMentionsRequest)(nil),  // 32: agentrepl.v1.WatchWorkspaceMentionsRequest
 }
 var file_agentrepl_v1_endpoint_watch_page_proto_depIdxs = []int32{
 	1,  // 0: agentrepl.v1.WatchPageRequest.webhost:type_name -> agentrepl.v1.WebhostPage
 	3,  // 1: agentrepl.v1.WatchPageResponse.attached:type_name -> agentrepl.v1.PageAttached
 	4,  // 2: agentrepl.v1.WatchPageResponse.push:type_name -> agentrepl.v1.PageFrame
 	5,  // 3: agentrepl.v1.WatchPageResponse.ended:type_name -> agentrepl.v1.PageSubscriptionEnded
-	13, // 4: agentrepl.v1.WatchPageResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
-	14, // 5: agentrepl.v1.PageFrame.roster:type_name -> agentrepl.v1.WatchWorkspaceRosterResponse
-	15, // 6: agentrepl.v1.PageFrame.web_workspace:type_name -> agentrepl.v1.WatchWebWorkspaceResponse
-	16, // 7: agentrepl.v1.PageFrame.daemon:type_name -> agentrepl.v1.WatchDaemonResponse
-	17, // 8: agentrepl.v1.PageFrame.topbar:type_name -> agentrepl.v1.WatchTopbarResponse
-	18, // 9: agentrepl.v1.PageFrame.footer:type_name -> agentrepl.v1.WatchFooterResponse
-	19, // 10: agentrepl.v1.PageFrame.feed:type_name -> agentrepl.v1.WatchFeedResponse
-	20, // 11: agentrepl.v1.PageFrame.login_terminal:type_name -> agentrepl.v1.LoginTerminalOutput
-	21, // 12: agentrepl.v1.PageFrame.chat:type_name -> agentrepl.v1.WatchChatResponse
-	22, // 13: agentrepl.v1.PageFrame.workspace_mentions:type_name -> agentrepl.v1.WatchWorkspaceMentionsResponse
+	14, // 4: agentrepl.v1.WatchPageResponse.ending:type_name -> agentrepl.v1.DaemonStreamEnding
+	15, // 5: agentrepl.v1.PageFrame.roster:type_name -> agentrepl.v1.WatchWorkspaceRosterResponse
+	16, // 6: agentrepl.v1.PageFrame.web_workspace:type_name -> agentrepl.v1.WatchWebWorkspaceResponse
+	17, // 7: agentrepl.v1.PageFrame.daemon:type_name -> agentrepl.v1.WatchDaemonResponse
+	18, // 8: agentrepl.v1.PageFrame.topbar:type_name -> agentrepl.v1.WatchTopbarResponse
+	19, // 9: agentrepl.v1.PageFrame.footer:type_name -> agentrepl.v1.WatchFooterResponse
+	20, // 10: agentrepl.v1.PageFrame.feed:type_name -> agentrepl.v1.WatchFeedResponse
+	21, // 11: agentrepl.v1.PageFrame.login_terminal:type_name -> agentrepl.v1.LoginTerminalOutput
+	22, // 12: agentrepl.v1.PageFrame.chat:type_name -> agentrepl.v1.WatchChatResponse
+	23, // 13: agentrepl.v1.PageFrame.workspace_mentions:type_name -> agentrepl.v1.WatchWorkspaceMentionsResponse
 	6,  // 14: agentrepl.v1.PageSubscriptionEnded.unsubscribed:type_name -> agentrepl.v1.PageSubscriptionUnsubscribed
 	7,  // 15: agentrepl.v1.PageSubscriptionEnded.source_ended:type_name -> agentrepl.v1.PageSubscriptionSourceEnded
 	8,  // 16: agentrepl.v1.PageSubscriptionEnded.failed:type_name -> agentrepl.v1.PageSubscriptionFailed
-	23, // 17: agentrepl.v1.SubscribePageRequest.roster:type_name -> agentrepl.v1.WatchWorkspaceRosterRequest
-	24, // 18: agentrepl.v1.SubscribePageRequest.web_workspace:type_name -> agentrepl.v1.WatchWebWorkspaceRequest
-	25, // 19: agentrepl.v1.SubscribePageRequest.daemon:type_name -> agentrepl.v1.WatchDaemonRequest
-	26, // 20: agentrepl.v1.SubscribePageRequest.topbar:type_name -> agentrepl.v1.WatchTopbarRequest
-	27, // 21: agentrepl.v1.SubscribePageRequest.footer:type_name -> agentrepl.v1.WatchFooterRequest
-	28, // 22: agentrepl.v1.SubscribePageRequest.feed:type_name -> agentrepl.v1.WatchFeedRequest
-	29, // 23: agentrepl.v1.SubscribePageRequest.login_terminal:type_name -> agentrepl.v1.WatchLoginTerminalRequest
-	30, // 24: agentrepl.v1.SubscribePageRequest.chat:type_name -> agentrepl.v1.WatchChatRequest
-	31, // 25: agentrepl.v1.SubscribePageRequest.workspace_mentions:type_name -> agentrepl.v1.WatchWorkspaceMentionsRequest
-	26, // [26:26] is the sub-list for method output_type
-	26, // [26:26] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	9,  // 17: agentrepl.v1.PageSubscriptionFailed.handed_away:type_name -> agentrepl.v1.PageSubscriptionHandedAway
+	24, // 18: agentrepl.v1.SubscribePageRequest.roster:type_name -> agentrepl.v1.WatchWorkspaceRosterRequest
+	25, // 19: agentrepl.v1.SubscribePageRequest.web_workspace:type_name -> agentrepl.v1.WatchWebWorkspaceRequest
+	26, // 20: agentrepl.v1.SubscribePageRequest.daemon:type_name -> agentrepl.v1.WatchDaemonRequest
+	27, // 21: agentrepl.v1.SubscribePageRequest.topbar:type_name -> agentrepl.v1.WatchTopbarRequest
+	28, // 22: agentrepl.v1.SubscribePageRequest.footer:type_name -> agentrepl.v1.WatchFooterRequest
+	29, // 23: agentrepl.v1.SubscribePageRequest.feed:type_name -> agentrepl.v1.WatchFeedRequest
+	30, // 24: agentrepl.v1.SubscribePageRequest.login_terminal:type_name -> agentrepl.v1.WatchLoginTerminalRequest
+	31, // 25: agentrepl.v1.SubscribePageRequest.chat:type_name -> agentrepl.v1.WatchChatRequest
+	32, // 26: agentrepl.v1.SubscribePageRequest.workspace_mentions:type_name -> agentrepl.v1.WatchWorkspaceMentionsRequest
+	27, // [27:27] is the sub-list for method output_type
+	27, // [27:27] is the sub-list for method input_type
+	27, // [27:27] is the sub-list for extension type_name
+	27, // [27:27] is the sub-list for extension extendee
+	0,  // [0:27] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_watch_page_proto_init() }
@@ -1392,7 +1458,8 @@ func file_agentrepl_v1_endpoint_watch_page_proto_init() {
 		(*PageSubscriptionEnded_SourceEnded)(nil),
 		(*PageSubscriptionEnded_Failed)(nil),
 	}
-	file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[8].OneofWrappers = []any{}
+	file_agentrepl_v1_endpoint_watch_page_proto_msgTypes[10].OneofWrappers = []any{
 		(*SubscribePageRequest_Roster)(nil),
 		(*SubscribePageRequest_WebWorkspace)(nil),
 		(*SubscribePageRequest_Daemon)(nil),
@@ -1409,7 +1476,7 @@ func file_agentrepl_v1_endpoint_watch_page_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_watch_page_proto_rawDesc), len(file_agentrepl_v1_endpoint_watch_page_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   14,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

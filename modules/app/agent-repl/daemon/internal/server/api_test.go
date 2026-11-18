@@ -614,3 +614,27 @@ func TestPushTransferredCarriesWhetherThePageIsReloaded(t *testing.T) {
 		})
 	}
 }
+
+// TestAHandedAwayStreamNamesItsSuccessorAsARefusedVerbDoes pins the one
+// header every client reads a handover from.
+func TestAHandedAwayStreamNamesItsSuccessorAsARefusedVerbDoes(t *testing.T) {
+	// Arrange / Act.
+	cerr := transportClosed(nil, "WatchTopbar", "transferring_away", "handed away", false, "/sock/successor.sock")
+
+	// Assert.
+	if got := cerr.Meta().Get(SuccessorHeader); got != "/sock/successor.sock" {
+		t.Fatalf("successor header = %q, want the successor", got)
+	}
+}
+
+// TestANotYetAdoptedStreamNamesNoSuccessor pins that only a handover names
+// one: a daemon that has not adopted the workspace yet moved nothing.
+func TestANotYetAdoptedStreamNamesNoSuccessor(t *testing.T) {
+	// Arrange / Act.
+	cerr := transportClosed(nil, "WatchTopbar", "not_yet_adopted", "not adopted yet", false, "/sock/other.sock")
+
+	// Assert.
+	if got := cerr.Meta().Get(SuccessorHeader); got != "" {
+		t.Fatalf("successor header = %q, want none", got)
+	}
+}

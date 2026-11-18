@@ -9,6 +9,7 @@
  * received a live row. jsdom has no such cap, which is exactly why the count
  * has to be asserted rather than the symptom.
  */
+import { successorOf } from "../../src/rpc/moved.js";
 import { fakePageSeen } from "../page-seen-fake.js";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -788,6 +789,44 @@ describe("the page's one standing stream", () => {
     const err = ConnectError.from(await outcome);
     expect(err.code).toBe(Code.NotFound);
     expect(err.rawMessage).toBe("no such feed token");
+    ctx.quiesce();
+  });
+
+  it("raises a handed-away failure as an error naming its successor, as a dedicated stream's close does", async () => {
+    // Arrange.
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached());
+    await settle();
+
+    const controller = new AbortController();
+    const outcome = (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, controller.signal)) {
+        // Nothing to draw.
+      }
+      return null;
+    })().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Act.
+    daemon.send(
+      ended(daemon.subscribes[0].subscription, {
+        case: "failed",
+        value: {
+          code: "failed_precondition",
+          message: "WatchFooter closed the stream: transferring_away: handed away",
+          handedAway: { address: "/sock/successor.sock" },
+        },
+      }),
+    );
+    await settle();
+
+    // Assert.
+    expect(successorOf(await outcome)).toBe("/sock/successor.sock");
     ctx.quiesce();
   });
 

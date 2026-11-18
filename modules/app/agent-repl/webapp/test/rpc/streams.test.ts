@@ -22,7 +22,8 @@ import {
   reportClientFailure,
   standingClientFailure,
 } from "../../src/rpc/link.js";
-import { SUCCESSOR_HEADER, successorOf, watchStream, type StreamEnd } from "../../src/rpc/streams.js";
+import { SUCCESSOR_HEADER, successorOf } from "../../src/rpc/moved.js";
+import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
 import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import { createDaemonOrigin, type DaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { beginPage, endPage } from "../../src/page-teardown.js";
