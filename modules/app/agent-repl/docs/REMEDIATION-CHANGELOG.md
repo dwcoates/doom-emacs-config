@@ -1555,3 +1555,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): The daemon records each accepted connection that closed before delivering a request, to trace calls lost across handovers.
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): Merges whose orphaned rounds were left held read again, and a session closing mid effort read records no fault.
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): Each Wi-Fi scan records how long Location Services took to answer the helper, to size its bound under real load.
+- 2026-11-18 deploy-mediator (landed in queue bypass mode): The Wi-Fi helper is signed with one local certificate so rebuilds keep its Location Services permission, and the escalated 'zettel needs you' label is red.
