@@ -3,10 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"agentrepl/logging/sockethold"
 
@@ -19,13 +17,6 @@ import (
 // holderDaemonSocket is the name the daemon's holder holds the shared
 // listener under (requirements.json, socket-holder-daemon).
 const holderDaemonSocket = "daemon"
-
-// holderTakeBound bounds taking the shared listener from the holder: the
-// holder's start, when launchd is still spawning it (measured 10ms at worst
-// over five starts, the timer's resolution, at load average 3.9-4.4 on
-// 2026-11-18 11:25), and the exchange itself (under 1ms). Each take's time is
-// recorded at INFO, so the bound is re-sized from real takes.
-const holderTakeBound = 30 * time.Millisecond
 
 // sharedStopper is the slice of server.SharedAccept beginShutdown needs.
 type sharedStopper interface{ StopShared() error }
@@ -44,7 +35,7 @@ type sharedTake struct {
 	// taken is the shared address once the take succeeded.
 	taken atomic.Value
 	// takeFn is sockethold.Take; a seam for the tests.
-	takeFn func(ctx context.Context, control, name string) (net.Listener, error)
+	takeFn sockethold.TakeFunc
 }
 
 // take runs once, at the first publication of this daemon's ownership.
@@ -57,14 +48,10 @@ func (s *sharedTake) take() error {
 		if takeFn == nil {
 			takeFn = sockethold.Take
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), holderTakeBound)
-		defer cancel()
-		began := time.Now()
-		ln, err := takeFn(ctx, s.holder, holderDaemonSocket)
-		took := time.Since(began)
+		ln, took, err := sockethold.TakeTimed(takeFn, s.holder, holderDaemonSocket)
 		if err != nil {
 			s.log.Error("daemon.cmd.holder", "the shared listener could not be taken from the daemon's socket holder", dlog.Context{
-				"holder": s.holder, "bound_ms": holderTakeBound.Milliseconds(), "measured_ms": 10, "took_ms": took.Milliseconds(), "error": err.Error()})
+				"holder": s.holder, "bound_ms": sockethold.TakeBound.Milliseconds(), "measured_ms": sockethold.TakeMeasured.Milliseconds(), "took_ms": took.Milliseconds(), "error": err.Error()})
 			s.err = fmt.Errorf("take the shared listener from %s: %w", s.holder, err)
 			return
 		}

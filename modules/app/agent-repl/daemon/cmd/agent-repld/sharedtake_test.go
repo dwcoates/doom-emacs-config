@@ -3,7 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -196,5 +200,48 @@ func TestServingElsewhereFollowsTheServingRow(t *testing.T) {
 				t.Fatalf("servingElsewhere = (%q, %v, %v), want (%q, %v)", got, ok, err, tc.want, tc.wantOK)
 			}
 		})
+	}
+}
+
+// TestTheDaemonsHolderTakeIsSocketholdsTimedTake pins the one bounded, timed holder take: the daemon calls
+// sockethold.TakeTimed and keeps no take bound of its own.
+func TestTheDaemonsHolderTakeIsSocketholdsTimedTake(t *testing.T) {
+	// Arrange
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	calls, ownBound := 0, ""
+
+	// Act
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, e.Name(), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.ValueSpec:
+				for _, id := range n.Names {
+					if strings.Contains(id.Name, "TakeBound") || strings.Contains(id.Name, "takeBound") {
+						ownBound = fset.Position(id.Pos()).String()
+					}
+				}
+			case *ast.SelectorExpr:
+				if id, ok := n.X.(*ast.Ident); ok && id.Name == "sockethold" && n.Sel.Name == "TakeTimed" {
+					calls++
+				}
+			}
+			return true
+		})
+	}
+
+	// Assert
+	if ownBound != "" || calls != 1 {
+		t.Fatalf("own take bound at %q, %d sockethold.TakeTimed calls; want none of its own and exactly one call", ownBound, calls)
 	}
 }

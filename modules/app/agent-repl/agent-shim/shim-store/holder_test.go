@@ -3,9 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -161,5 +165,48 @@ func TestLockDatabaseAdmitsOneStorePerDatabase(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("records = %+v, want the refused second store at ERROR", storeRecords(t, sink))
+	}
+}
+
+// TestTheStoresHolderTakeIsSocketholdsTimedTake pins the one bounded, timed holder take: the store calls
+// sockethold.TakeTimed and keeps no take bound of its own.
+func TestTheStoresHolderTakeIsSocketholdsTimedTake(t *testing.T) {
+	// Arrange
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	calls, ownBound := 0, ""
+
+	// Act
+	for _, e := range entries {
+		if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, e.Name(), nil, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			switch n := n.(type) {
+			case *ast.ValueSpec:
+				for _, id := range n.Names {
+					if strings.Contains(id.Name, "TakeBound") || strings.Contains(id.Name, "takeBound") {
+						ownBound = fset.Position(id.Pos()).String()
+					}
+				}
+			case *ast.SelectorExpr:
+				if id, ok := n.X.(*ast.Ident); ok && id.Name == "sockethold" && n.Sel.Name == "TakeTimed" {
+					calls++
+				}
+			}
+			return true
+		})
+	}
+
+	// Assert
+	if ownBound != "" || calls != 1 {
+		t.Fatalf("own take bound at %q, %d sockethold.TakeTimed calls; want none of its own and exactly one call", ownBound, calls)
 	}
 }

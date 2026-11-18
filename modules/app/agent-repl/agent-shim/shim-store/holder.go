@@ -1,25 +1,16 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"net"
 	"os"
 	"syscall"
-	"time"
 
 	"agentrepl/logging/sockethold"
 	"agentrepl/shim-store/internal/logging"
 	"agentrepl/shim-store/internal/server"
 )
-
-// holderTakeBound bounds taking one listener from the socket holder: the
-// holder's start, when launchd is still spawning it (measured 10ms at worst
-// over five starts, the timer's resolution, at load average 3.9-4.4 on
-// 2026-11-18 11:25), and the exchange itself (under 1ms). Each Take's time is
-// recorded at INFO, so the bound is re-sized from real starts.
-const holderTakeBound = 30 * time.Millisecond
 
 // The names the store's holder holds its sockets under (requirements.json,
 // socket-holder-store).
@@ -64,16 +55,12 @@ func storeListeners(holder, socketPath, readSocketPath string, log, readLog *log
 }
 
 // takeFromHolder takes the listener NAME from the holder at HOLDER, bounded
-// by holderTakeBound, recording the take and its time.
+// by sockethold.TakeBound, recording the take and its time.
 func takeFromHolder(holder, name string, log *logging.Logger) (net.Listener, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), holderTakeBound)
-	defer cancel()
-	began := time.Now()
-	ln, err := sockethold.Take(ctx, holder, name)
-	took := time.Since(began)
+	ln, took, err := sockethold.TakeTimed(sockethold.Take, holder, name)
 	if err != nil {
 		log.Log(logging.Fields{Operation: "store.listen.holder", Level: "error", Socket: holder},
-			"the store could not take its %q listener from the socket holder within %s (measured 10ms) after %s: %v", name, holderTakeBound, took, err)
+			"the store could not take its %q listener from the socket holder within %s (measured %s) after %s: %v", name, sockethold.TakeBound, sockethold.TakeMeasured, took, err)
 		return nil, fmt.Errorf("shim-store: take the %q listener from the holder %s: %w", name, holder, err)
 	}
 	log.Log(logging.Fields{Operation: "store.listen.holder", Socket: holder}, "took the %q listener from the socket holder in %s", name, took)
