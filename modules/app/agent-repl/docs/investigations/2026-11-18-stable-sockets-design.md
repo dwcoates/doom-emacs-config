@@ -73,10 +73,13 @@ Today a call for a workspace this daemon does not serve is REFUSED with a typed 
      - The webapp's move notice stays: Emacs reloads the page at the primary's shared address once the adopt lands (`agent-repl-host--handover-reload-webview`), so the quiesced page is replaced, never redialed.
   5. e2e: `TestEmacsHandoverTransfersAtFreeness` and the rollout e2e run against a holder, so a handover is proved end to end on the shared address.
 
-## The transition onto the holders (open, 2026-11-18)
+## The transition onto the holders (owner ruling, 2026-11-18)
 
-- Nothing brings the holder jobs up on a machine that predates them: `bin/requirements.sh install` is the only path.
-- A successor inherits the incumbent's configuration argv (internal/rollout/spawn.go successorArgv), so the first deploy from a daemon without `--holder` spawns the new binary without it, which refuses to boot. The handover is abandoned and the incumbent keeps serving, so every deploy fails until a cold start passes `--holder`.
-- A cold start passing `--holder` with no holder job loaded refuses its daemon: no daemon at all until the install runs.
-- The store keeps its installed plist (the deploy writes a definition only when one is missing, internal/deploy/services.go ensureLoaded), so it keeps binding its own sockets until the install re-renders it with `--holder`.
-- Settling this is the owner's ruling: whether agent-repl brings a socket holder up itself (the deploy, and the daemon's boot, ensuring the holder requirement through the installer, as ensureLoaded already writes a missing service's definition), or the owner runs the install before the landing.
+- agent-repl brings a socket holder up itself, so no machine is left without one; the check is cheap, the install rare.
+  - The check is one probe of the holder's control socket (sockethold.Probe: an empty request answered StatusOK, within sockethold.TakeBound). A control socket nothing serves is sockethold.ErrNoHolder.
+  - Only then does the installer run, `bin/requirements.sh ensure-holder ID`, which leaves a loaded, current holder alone (daemon/internal/holderensure, bounded by InstallBound).
+  - agent-repl installs only the holders its requirements declare (holderensure.Declared reads the root manifest and its includes).
+- The daemon takes the holder its requirement declares (socket-holder-daemon) unless `--holder` names another, so a successor spawned from an incumbent's argv that predates the flag still reaches it. Emacs passes no `--holder`. The daemon ensures its holder before the take.
+- The store takes its sockets from the declared holder that holds its socket (holderensure.HolderOfSocket). The deploy ensures that holder before the store starts or restarts.
+- Every service restart runs the definition its requirements render now: the definition is rewritten (define-service), and a changed one is reloaded (launchd bootout and bootstrap; systemd daemon-reload and restart) instead of restarted in place. So the store moves onto its holder at its next restart, never only at the next install.
+- The first deploy after landing: the store restarts on its old plist, and the successor installs and takes the daemon's holder. The next deploy that restarts the store installs the store's holder and reloads the store onto it.
