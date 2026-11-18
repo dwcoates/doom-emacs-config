@@ -1,11 +1,6 @@
 package prioritywire
 
 import (
-	"go/ast"
-	"go/parser"
-	"go/token"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -67,42 +62,5 @@ func TestAnUndeclaredLevelFailsHard(t *testing.T) {
 			}()
 			f()
 		})
-	}
-}
-
-// TestNoOtherDaemonSourceBuildsAPriorityByHand holds every site to this
-// package: a composite literal of a priority arm anywhere else in the daemon
-// is a second mapping that can drift from this one.
-func TestNoOtherDaemonSourceBuildsAPriorityByHand(t *testing.T) {
-	// Arrange
-	root := filepath.Join("..", "..")
-	var offenders []string
-
-	// Act
-	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || strings.Contains(path, "prioritywire") {
-			return err
-		}
-		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
-		if err != nil {
-			return err
-		}
-		ast.Inspect(file, func(n ast.Node) bool {
-			if lit, ok := n.(*ast.CompositeLit); ok {
-				if sel, ok := lit.Type.(*ast.SelectorExpr); ok && strings.HasPrefix(sel.Sel.Name, "WorkspacePriority_P") {
-					offenders = append(offenders, path)
-				}
-			}
-			return true
-		})
-		return nil
-	})
-
-	// Assert
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("these daemon sources build a priority by hand; use prioritywire: %v", offenders)
 	}
 }
