@@ -83,6 +83,7 @@
 #   store   -> DIR/cache-bin/shim-store
 #   sidecar -> DIR/cache-bin/shim-claude-sidecar
 #   lock    -> DIR/cache-bin/shim-lock
+#   sockethold -> DIR/cache-bin/sockethold
 #   zettel  -> DIR/cache-bin/zettel
 #   tests   -> DIR/cache-bin/agent-repl-tests
 #              (each + .<name>.built-sha, .<name>.source-tree in DIR/cache-bin/)
@@ -130,7 +131,7 @@
 #
 # Usage:
 #   build-frontend.sh [--force] [--dry-run] [-v] [--out DIR]
-#                     [shim|webapp|daemon|store|sidecar|lock|zettel|tests|deps|gc ...]
+#                     [shim|webapp|daemon|store|sidecar|lock|sockethold|zettel|tests|deps|gc ...]
 #     --force            rebuild the selected artifacts unconditionally
 #     --out DIR          staging mode: build every selected target into the
 #                        layout above under the ABSOLUTE DIR, never in place
@@ -169,6 +170,7 @@ DAEMON_DIR="$ROOT/daemon"
 STORE_DIR="$ROOT/agent-shim/shim-store"
 SIDECAR_DIR="$ROOT/agent-shim/claude/shim-sidecar"
 LOCK_DIR="$ROOT/agent-shim/shim-lock"
+SOCKETHOLD_DIR="$ROOT/agent-shim/sockethold"
 ZETTEL_DIR="$ROOT/zettel"
 TESTS_DIR="$ROOT/testservice"
 SHARED_LOGGING_DIR="$ROOT/agent-shim/logging/go"
@@ -216,7 +218,7 @@ while [ $# -gt 0 ]; do
             OUT_DIR="$2"
             shift
             ;;
-        shim|webapp|daemon|store|sidecar|lock|zettel|tests|deps|gc) TARGETS+=("$1") ;;
+        shim|webapp|daemon|store|sidecar|lock|sockethold|zettel|tests|deps|gc) TARGETS+=("$1") ;;
         -h|--help)
             # The whole header comment, however long it grows.
             sed -n '2,/^set -euo pipefail/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
@@ -270,6 +272,7 @@ DAEMON_ARTIFACT="$DAEMON_BIN/agent-repld"
 STORE_ARTIFACT="$CACHE_BIN/shim-store"
 SIDECAR_ARTIFACT="$CACHE_BIN/shim-claude-sidecar"
 LOCK_ARTIFACT="$CACHE_BIN/shim-lock"
+SOCKETHOLD_ARTIFACT="$CACHE_BIN/sockethold"
 ZETTEL_ARTIFACT="$CACHE_BIN/zettel"
 TESTS_ARTIFACT="$CACHE_BIN/agent-repl-tests"
 
@@ -291,6 +294,7 @@ DAEMON_SHA_STAMP="$DAEMON_BIN/.built-sha"
 STORE_SHA_STAMP="$CACHE_BIN/.shim-store.built-sha"
 SIDECAR_SHA_STAMP="$CACHE_BIN/.shim-claude-sidecar.built-sha"
 LOCK_SHA_STAMP="$CACHE_BIN/.shim-lock.built-sha"
+SOCKETHOLD_SHA_STAMP="$CACHE_BIN/.sockethold.built-sha"
 ZETTEL_SHA_STAMP="$CACHE_BIN/.zettel.built-sha"
 TESTS_SHA_STAMP="$CACHE_BIN/.agent-repl-tests.built-sha"
 
@@ -305,6 +309,7 @@ DAEMON_TREE_STAMP="$DAEMON_BIN/.source-tree"
 STORE_TREE_STAMP="$CACHE_BIN/.shim-store.source-tree"
 SIDECAR_TREE_STAMP="$CACHE_BIN/.shim-claude-sidecar.source-tree"
 LOCK_TREE_STAMP="$CACHE_BIN/.shim-lock.source-tree"
+SOCKETHOLD_TREE_STAMP="$CACHE_BIN/.sockethold.source-tree"
 ZETTEL_TREE_STAMP="$CACHE_BIN/.zettel.source-tree"
 TESTS_TREE_STAMP="$CACHE_BIN/.agent-repl-tests.source-tree"
 
@@ -729,6 +734,7 @@ for target in "${TARGETS[@]}"; do
         store)  build_service shim-store "$STORE_DIR" "$STORE_ARTIFACT" "$STORE_SHA_STAMP" "$STORE_TREE_STAMP" ;;
         sidecar) build_service shim-claude-sidecar "$SIDECAR_DIR" "$SIDECAR_ARTIFACT" "$SIDECAR_SHA_STAMP" "$SIDECAR_TREE_STAMP" ;;
         lock)   build_service shim-lock "$LOCK_DIR" "$LOCK_ARTIFACT" "$LOCK_SHA_STAMP" "$LOCK_TREE_STAMP" ;;
+        sockethold) build_service sockethold "$SOCKETHOLD_DIR" "$SOCKETHOLD_ARTIFACT" "$SOCKETHOLD_SHA_STAMP" "$SOCKETHOLD_TREE_STAMP" ;;
         zettel) build_service zettel "$ZETTEL_DIR" "$ZETTEL_ARTIFACT" "$ZETTEL_SHA_STAMP" "$ZETTEL_TREE_STAMP" ;;
         tests)  build_service agent-repl-tests "$TESTS_DIR" "$TESTS_ARTIFACT" "$TESTS_SHA_STAMP" "$TESTS_TREE_STAMP" ;;
         gc)     EXPLICIT_GC=1 ;;
