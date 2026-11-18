@@ -117,9 +117,9 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 	}{
 		{name: "a mediator that cannot be shown", message: "the deploy mediator could not be shown for its brief; it is not briefed",
 			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent hidden") }},
-		{name: "an effort that cannot be set", message: "the deploy mediator's effort could not be set; it is not briefed",
+		{name: "an effort that cannot be set", byUs: true, message: "the deploy mediator's effort could not be set; it is not briefed",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
-		{name: "a worktree that cannot be refreshed", message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
+		{name: "a worktree that cannot be refreshed", byUs: true, message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
 			arrange: func(h *harness) { h.checks.refreshErr = errors.New("git gone") }},
 		{name: "a daemon's brief that cannot be composed", byUs: true, message: "the escalation's brief could not be composed; the mediator is not briefed and the user is not told",
 			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
