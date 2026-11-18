@@ -1601,7 +1601,7 @@ const reopenPace = 10 * time.Second
 // the pacing: each changes the generation or the link this checks.
 // Caller holds mu.
 func (w *watcher) armPacedReopenLocked() {
-	if w.closed || w.endingLocked() {
+	if w.closed || w.endingOrderedLocked() {
 		return
 	}
 	if _, reaped := w.client.Reaped(); reaped {
@@ -1616,7 +1616,7 @@ func (w *watcher) armPacedReopenLocked() {
 		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		if w.closed || w.gen != gen || !w.degraded || (w.link != shimclient.LinkRedialing && !w.storeDown) || w.endingLocked() {
+		if w.closed || w.gen != gen || !w.degraded || (w.link != shimclient.LinkRedialing && !w.storeDown) || w.endingOrderedLocked() {
 			return
 		}
 		if _, reaped := w.client.Reaped(); reaped {
@@ -1718,7 +1718,7 @@ func (w *watcher) decideOpenLocked(stream, key string, current *openTicket) (*op
 	// stood six stale shims down, and a WatchAgent open decided after each
 	// stand-down was refused with "incomplete envelope: unexpected EOF" and
 	// recorded as two ERRORs apiece.
-	if w.endingLocked() {
+	if w.endingOrderedLocked() {
 		w.log.Debug("daemon.sessionwatcher.open_skipped", "a session this daemon is ending opens no watch", dlog.Context{
 			"stream": stream, "key": key, "stand_down_asked": w.client.StandingDown(),
 		})
@@ -1975,13 +1975,16 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 // fleet re-open is what retries it. Forgetting the entry on a failure made a
 // watch that could not be opened into a statement that the shell had ENDED,
 // which only the shim may make (livework.go).
-func (w *watcher) openShellStreamLocked(s *shellWatch) {
+//
+// It answers whether it started an open, so a record can say which it did.
+func (w *watcher) openShellStreamLocked(s *shellWatch) bool {
 	t, ok := w.decideOpenLocked("shell", s.work.GetValue(), s.opening)
 	if !ok {
-		return
+		return false
 	}
 	s.opening = t
 	inflight.Go(func() { w.openShell(t, s) })
+	return true
 }
 
 // openShell makes one decided WatchBash open OFF mu and installs it.
@@ -2658,6 +2661,15 @@ func (w *watcher) stale(gen uint64) bool { return w.closed || gen != w.gen }
 // severs, still degrades the fleet and still raises its fault.
 func (w *watcher) endingLocked() bool {
 	return w.sessionEnded || w.client.StandingDown()
+}
+
+// endingOrderedLocked is endingLocked without a stand-down still awaiting the
+// shim's answer: what decides whether a watch opens. A shim may refuse the
+// stand-down and serve on, and a watch whose open was skipped in that window
+// was never opened again (2026-11-18, send-slack-link-formatting), so only a
+// settled stand-down skips an open.
+func (w *watcher) endingOrderedLocked() bool {
+	return w.sessionEnded || w.client.StandDownOrdered()
 }
 
 // openEndedByTeardownLocked classifies a failed watch open by the stand-down

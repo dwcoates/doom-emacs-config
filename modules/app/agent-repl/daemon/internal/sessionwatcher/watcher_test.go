@@ -3588,6 +3588,48 @@ func TestASessionThisDaemonIsEndingOpensNoWatch(t *testing.T) {
 	}
 }
 
+// TestAStandDownStillAwaitingItsAnswerSkipsNoOpen pins the open on a SETTLED
+// stand-down (2026-11-18, send-slack-link-formatting): while a KillSession
+// awaits the shim's answer, the shim may refuse and serve on, and an open
+// skipped then was never made, so a new subagent's watch never opened and its
+// shell was drawn in no feed. Only a settled stand-down skips an open.
+func TestAStandDownStillAwaitingItsAnswerSkipsNoOpen(t *testing.T) {
+	tests := []struct {
+		name   string
+		decide func(w *watcher)
+		opened func(t *testing.T, c *fakeClient)
+	}{
+		{
+			name:   "WatchAgent",
+			decide: func(w *watcher) { w.openAgentStreamLocked(&agentWatch{id: agentID("sub-1")}) },
+			opened: func(t *testing.T, c *fakeClient) { c.nextAgentOpen(t) },
+		},
+		{
+			name:   "WatchBash",
+			decide: func(w *watcher) { w.openShellStreamLocked(&shellWatch{work: workID("w-1")}) },
+			opened: func(t *testing.T, c *fakeClient) { c.nextBashOpen(t) },
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: a KillSession is in flight, its answer unread.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			h.client.mu.Lock()
+			h.client.standingDown, h.client.askedOnly = true, true
+			h.client.mu.Unlock()
+
+			// Act.
+			h.w.mu.Lock()
+			tt.decide(h.w)
+			h.w.mu.Unlock()
+
+			// Assert.
+			tt.opened(t, h.client)
+		})
+	}
+}
+
 // TestAnOpenInFlightWhenTheStandDownIsAskedEndsWithTheTeardown pins the other
 // half: an open decided BEFORE the stand-down was asked is still in flight
 // when the shim closes on its way out. Its failure is classified by the
@@ -4349,5 +4391,45 @@ func TestAStoreOutageKeepsTheLinkConnected(t *testing.T) {
 		if e.name() == "lifecycle.OnLinkChanged" && e.attached != nil && !*e.attached {
 			t.Fatal("a store outage drew the link detached")
 		}
+	}
+}
+
+// TestWorkFirstAnnouncedAtItsConclusionSaysWhetherItsShellWasOpened pins the
+// record's `record_read`: it said "opened" even when the open was skipped
+// (2026-11-18, send-slack-link-formatting), so a reader could not tell the
+// shell's output was never read.
+func TestWorkFirstAnnouncedAtItsConclusionSaysWhetherItsShellWasOpened(t *testing.T) {
+	tests := []struct {
+		name    string
+		ordered bool
+		want    string
+	}{
+		{name: "a shell whose watch opens says opened", want: "opened"},
+		{name: "a shell whose open a settled stand-down skipped says skipped", ordered: true, want: "skipped"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t, Session{Started: sessionStarted("")})
+			h.quiet()
+			if tt.ordered {
+				h.client.StandDown()
+			}
+			work := detachedWork("w-1", "u-1", bashKind())
+			work.Concluded = &conversationv1.DetachedWorkConcluded{}
+
+			// Act.
+			h.w.mu.Lock()
+			h.w.concludedFirstLocked(work, kindBash)
+			h.w.mu.Unlock()
+			h.client.settleOpens()
+
+			// Assert.
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.sessionwatcher.detached_work_concluded",
+				Message: "work first announced at its conclusion is recorded concluded and never enters the live set"})
+			if !ok || rec.Context["record_read"] != tt.want {
+				t.Fatalf("records = %+v, want record_read %q", h.log.Records(), tt.want)
+			}
+		})
 	}
 }

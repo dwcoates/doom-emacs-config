@@ -1773,8 +1773,10 @@ func (w *watcher) concludedFirstLocked(work *conversationv1.AgentDetachedWork, k
 		if _, watched := w.shells[handle]; !watched {
 			entry := &shellWatch{work: work.GetWork()}
 			w.shells[handle] = entry
-			w.openShellStreamLocked(entry)
-			read = "opened"
+			read = "skipped"
+			if w.openShellStreamLocked(entry) {
+				read = "opened"
+			}
 		} else {
 			read = "already_open"
 		}

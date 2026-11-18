@@ -258,9 +258,15 @@ type Client interface {
 	// exactly how a deliberate stand-down came to be recorded as a transport
 	// fault.
 	//
-	// The latch is one-way: a shim asked to end its session is never asked to
-	// un-end it, and a revival is a new process with a new client.
+	// The latch is one-way once ordered: a shim that ended its session is
+	// never asked to un-end it, and a revival is a new process with a new
+	// client. A KillSession the shim REFUSED leaves the latch as it was.
 	StandingDown() bool
+	// StandDownOrdered answers whether the stand-down is settled, not merely
+	// asked: StandingDown without a KillSession still awaiting its answer. A
+	// consumer that must not lose work to a refused stand-down (a watch's
+	// open) reads it.
+	StandDownOrdered() bool
 	// StandDown ARMS the latch for a teardown this daemon is ordering, and
 	// answers whether it was armed.
 	//
