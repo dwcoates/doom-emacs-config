@@ -153,7 +153,7 @@ type Deps struct {
 	ServingElsewhere func(ctx context.Context, ws ids.WorkspaceID) (address string, ok bool, err error)
 	// SharedAddress answers the shared address the daemons advertise through
 	// their socket holder, "" when they share none. Every address a refusal
-	// tells a client is it when set (clientAddress): a client never learns a
+	// tells a client is it when set (daemonaddr.ClientAddress): a client never learns a
 	// daemon's private address, which closes with its daemon. Required.
 	SharedAddress func() string
 	// Forward is the client a call for a workspace another daemon serves is
