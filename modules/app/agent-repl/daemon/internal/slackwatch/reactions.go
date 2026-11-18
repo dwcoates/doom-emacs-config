@@ -56,8 +56,12 @@ type IntakeRequest struct {
 	RepoID string
 	// Name is its name, unique per trigger.
 	Name string
-	// Prompt is its first prompt.
-	Prompt string
+	// Brief names the brief its first prompt is composed from
+	// (prompts/<Brief>.md), always BriefIntake, and Values fills it. The
+	// creator composes it (workspace.CreateIntake), so every intake's prompt
+	// is composed in one place.
+	Brief  string
+	Values map[string]string
 }
 
 // IntakeCreator creates a fired binding's intake workspace.
@@ -236,12 +240,12 @@ func (w *Watcher) fire(ctx context.Context, settings wsm.SlackReactionSettings, 
 	if !fresh {
 		return
 	}
-	prompt, err := w.intakePrompt(b, channel, ts, link)
+	values, err := w.intakeValues(b, channel, ts, link)
 	if err != nil {
-		w.deps.Log.Error(opReactions, "could not compose a fired binding's intake prompt; the trigger is recorded fired and creates nothing", dlog.WithCause(fields, err))
+		w.deps.Log.Error(opReactions, "could not compose a fired binding's intake directives; the trigger is recorded fired and creates nothing", dlog.WithCause(fields, err))
 		return
 	}
-	req := IntakeRequest{RepoID: settings.RepoID, Name: "slack-intake-" + b.Emoji + "-" + strings.ReplaceAll(ts, ".", "-"), Prompt: prompt}
+	req := IntakeRequest{RepoID: settings.RepoID, Name: "slack-intake-" + b.Emoji + "-" + strings.ReplaceAll(ts, ".", "-"), Brief: BriefIntake, Values: values}
 	if err := w.deps.Intakes.CreateSlackIntake(ctx, req); err != nil {
 		w.deps.Log.Error(opReactions, "could not create a fired binding's intake workspace; the trigger is recorded fired and creates nothing", dlog.WithCause(dlog.Merge(fields, dlog.Context{"intake": req.Name}), err))
 		return
@@ -272,14 +276,16 @@ func ForkCommand(b wsm.SlackReactionBinding, link string) string {
 	return cmd
 }
 
-// intakePrompt composes B's intake prompt for the message at TS in CHANNEL.
+// intakeValues composes the values BriefIntake is filled with for B's intake
+// of the message at TS in CHANNEL: its directives, composed here from the
+// binding's own briefs, and the fork command.
 // Each brief is handed exactly the values its placeholders name.
-func (w *Watcher) intakePrompt(b wsm.SlackReactionBinding, channel, ts, link string) (string, error) {
+func (w *Watcher) intakeValues(b wsm.SlackReactionBinding, channel, ts, link string) (map[string]string, error) {
 	subscribed := ""
 	if b.Thread == wsm.SlackReactionSubscribed {
 		var err error
 		if subscribed, err = w.deps.Briefs(BriefSubscribedStep, map[string]string{"link": link, "mode": string(b.Mode)}); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	pullBrief := BriefPullOffered
@@ -288,19 +294,19 @@ func (w *Watcher) intakePrompt(b wsm.SlackReactionBinding, channel, ts, link str
 	}
 	pulls, err := w.deps.Briefs(pullBrief, map[string]string{"link": link})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	oneShot := ""
 	if b.OneShot {
 		if oneShot, err = w.deps.Briefs(BriefOneShotDirective, map[string]string{"emoji": b.Emoji}); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
 	directives, err := w.deps.Briefs(BriefDirectives, map[string]string{"link": link, "channel": channel, "ts": ts, "emoji": b.Emoji,
 		"subscribed": subscribed, "pull_requests": pulls, "one_shot": oneShot})
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return w.deps.Briefs(BriefIntake, map[string]string{"link": link, "channel": channel, "ts": ts, "emoji": b.Emoji,
-		"fork_command": ForkCommand(b, link), "directives": directives})
+	return map[string]string{"link": link, "channel": channel, "ts": ts, "emoji": b.Emoji,
+		"fork_command": ForkCommand(b, link), "directives": directives}, nil
 }

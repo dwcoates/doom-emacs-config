@@ -2,6 +2,7 @@ package slackwatch
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strconv"
@@ -457,6 +458,9 @@ func TestFlushDueTellsOneDigestUnderItsDelivery(t *testing.T) {
 			if got.origin != Origin || got.delivery != tt.delivery || got.ws != r.ws.ID {
 				t.Fatalf("told %+v", got)
 			}
+			if observed := r.notices.ObservedNotices(); len(observed) != 1 || observed[0].Notice != BriefNotice {
+				t.Fatalf("measured %+v, want the one digest under %q", observed, BriefNotice)
+			}
 			for _, want := range []string{BriefNotice, "contract=" + BriefContractAutonomous, "mode=respond", "thread=" + threadURL, "- alice (ts 3.a): " + tt.texts[0], "- alice (ts 3.b): " + tt.texts[1]} {
 				if !strings.Contains(got.text, want) {
 					t.Fatalf("the digest %q lacks %q", got.text, want)
@@ -646,7 +650,7 @@ func TestAReactionAddedAfterTheBaselineFiresOnce(t *testing.T) {
 		t.Fatalf("fired %d intakes, want one", len(r.intakes.got))
 	}
 	got := r.intakes.got[0]
-	if got.RepoID != r.repo || got.Name != "slack-intake-agent-ack-1-2" || !strings.Contains(got.Prompt, "-originator emoji-ack") || r.w.polls.Fired != 0 {
+	if got.RepoID != r.repo || got.Name != "slack-intake-agent-ack-1-2" || !strings.Contains(r.intakeText(t, got), "-originator emoji-ack") || r.w.polls.Fired != 0 {
 		t.Fatalf("intake %+v, polls %+v", got, r.w.polls)
 	}
 }
@@ -666,7 +670,7 @@ func TestATypedShortcodeInTheWindowFires(t *testing.T) {
 	r.w.PollReactions(context.Background(), Lookback)
 
 	// Assert
-	if len(r.intakes.got) != 1 || !strings.Contains(r.intakes.got[0].Prompt, "https://x.slack.com/archives/C1/p1") {
+	if len(r.intakes.got) != 1 || !strings.Contains(r.intakeText(t, r.intakes.got[0]), "https://x.slack.com/archives/C1/p1") {
 		t.Fatalf("fired %+v; want only the message in the window", r.intakes.got)
 	}
 }
@@ -726,9 +730,11 @@ func TestEveryBriefComposesFromTheShippedPrompts(t *testing.T) {
 
 	// Act
 	r.w.FlushDue(context.Background(), r.prompts)
-	listen, err1 := r.w.intakePrompt(ackBinding, "C1", "1.2", "https://x.slack.com/archives/C1/p12")
-	subscribed, err2 := r.w.intakePrompt(wsm.SlackReactionBinding{Emoji: "p1-one-shot", Thread: wsm.SlackReactionSubscribed, Mode: wsm.SlackThreadModeRespond, OneShot: true, Priority: &p1},
+	listenValues, err1 := r.w.intakeValues(ackBinding, "C1", "1.2", "https://x.slack.com/archives/C1/p12")
+	subscribedValues, err2 := r.w.intakeValues(wsm.SlackReactionBinding{Emoji: "p1-one-shot", Thread: wsm.SlackReactionSubscribed, Mode: wsm.SlackThreadModeRespond, OneShot: true, Priority: &p1},
 		"C1", "1.2", "https://x.slack.com/archives/C1/p12")
+	listen := r.intakeText(t, IntakeRequest{Brief: BriefIntake, Values: listenValues})
+	subscribed := r.intakeText(t, IntakeRequest{Brief: BriefIntake, Values: subscribedValues})
 	_, err3 := r.w.deps.Briefs(BriefContractAutonomous, map[string]string{"thread": threadURL})
 
 	// Assert
@@ -754,5 +760,26 @@ func TestSubscribeAtCreationRecordsACreationSubscription(t *testing.T) {
 	}
 	if sub := r.sub(t); sub.Origin != wsm.SlackThreadOriginCreation || sub.Mode != wsm.SlackThreadModeRespond {
 		t.Fatalf("subscription = %+v, want a respond subscription taken at creation", sub)
+	}
+}
+
+// TestTheDigestSubmitsThroughTheComposer holds the digest to the notifiers'
+// one shape (briefprompt.TestEveryNotifierSubmitsThroughTheComposer): it
+// submits through briefprompt.Composer, and never calls the prompt handler
+// or mints a key itself. It reads its own package, which its unit may.
+func TestTheDigestSubmitsThroughTheComposer(t *testing.T) {
+	// Arrange
+	raw, err := os.ReadFile("digest.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := string(raw)
+
+	// Assert
+	if !strings.Contains(source, "briefprompt.Composer{") {
+		t.Error("digest.go does not submit through briefprompt.Composer")
+	}
+	if strings.Contains(source, "prompts.Submit(") || strings.Contains(source, ".MintKey(\"") {
+		t.Error("digest.go composes or submits a brief prompt by hand")
 	}
 }

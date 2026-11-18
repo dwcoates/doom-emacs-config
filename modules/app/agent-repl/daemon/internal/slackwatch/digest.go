@@ -143,7 +143,7 @@ func (w *Watcher) submit(ctx context.Context, prompts prompthandler.Submitter, s
 	if urgent {
 		delivery = wsm.DeliveryOrdinary
 	}
-	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey}.SubmitAs(ctx, prompts, sub.Subscriber, BriefNotice, map[string]string{
+	turn, err := briefprompt.Composer{Briefs: w.deps.Briefs, MintKey: w.deps.MintKey, Meter: w.deps.Notices}.SubmitAs(ctx, prompts, sub.Subscriber, BriefNotice, map[string]string{
 		"thread":   sub.URL,
 		"mode":     string(sub.Mode),
 		"contract": contract,

@@ -1747,7 +1747,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		MintKey:  prompthandler.MintKey,
 		NewNonce: slackNonce,
 		Serves:   rolloutController.ServesIntake,
-		Intakes:  slackIntakes{create: verbsRef.createVia, repositories: p.DB.ListRepositories},
+		Intakes:  slackIntakes{createIntake: verbsRef.createIntakeVia, repositories: p.DB.ListRepositories},
+		Notices:  p.Metrics,
 		Clock:    clock.System{},
 		Log:      log,
 	})

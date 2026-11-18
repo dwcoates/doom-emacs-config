@@ -12,6 +12,7 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt/briefprompttest"
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -159,6 +160,7 @@ type rig struct {
 	prompts *fakePrompts
 	holds   *fakeHolds
 	intakes *fakeIntakes
+	notices *briefprompttest.Meter
 	clock   *clocktest.Scripted
 	log     *dlog.TestLogger
 	ws      Workspace
@@ -181,11 +183,11 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{db: db, gns: &fakeGNS{username: "dodge", head: 40, name: "dodge"}, prompts: &fakePrompts{}, holds: &fakeHolds{}, intakes: &fakeIntakes{},
+	r := &rig{db: db, gns: &fakeGNS{username: "dodge", head: 40, name: "dodge"}, prompts: &fakePrompts{}, holds: &fakeHolds{}, intakes: &fakeIntakes{}, notices: &briefprompttest.Meter{},
 		clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: Workspace{ID: record.ID, Name: "follower"}, repo: string(record.Repo), serves: true}
 	r.w, err = New(Deps{Store: db, GNS: r.gns, Holds: r.holds, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		NewNonce: func() (string, error) { r.nonces++; return fmt.Sprintf("n%07d", r.nonces), nil },
-		Serves:   func() bool { return r.serves }, Intakes: r.intakes, Clock: r.clock, Log: r.log})
+		Serves:   func() bool { return r.serves }, Intakes: r.intakes, Notices: r.notices, Clock: r.clock, Log: r.log})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,3 +230,17 @@ func (r *rig) record(t *testing.T, level, op, message string) dlog.Record {
 }
 
 var errBoom = errors.New("boom")
+
+// intakeText composes REQ's first prompt as the creator would, through the
+// rig's briefs (workspace.CreateIntake).
+func (r *rig) intakeText(t *testing.T, req IntakeRequest) string {
+	t.Helper()
+	if req.Brief != BriefIntake {
+		t.Fatalf("intake brief = %q, want %q", req.Brief, BriefIntake)
+	}
+	text, err := r.w.deps.Briefs(req.Brief, req.Values)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return text
+}

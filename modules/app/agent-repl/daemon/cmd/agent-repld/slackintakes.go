@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"agent-repld/internal/ids"
-	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/slackwatch"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/wsm"
@@ -16,15 +15,16 @@ import (
 // slackIntakes creates a fired Slack binding's intake workspace through the
 // workspace verbs, bound after the watcher is built (slackwatch.IntakeCreator).
 type slackIntakes struct {
-	// create is the verbs' Create, late-bound.
-	create func(ctx context.Context, spec workspace.CreateSpec) (wsm.Workspace, error)
+	// createIntake is the verbs' CreateIntake, late-bound.
+	createIntake func(ctx context.Context, spec workspace.IntakeSpec) (wsm.Workspace, error)
 	// repositories reads the registry the request's repository is found in.
 	repositories func(ctx context.Context) ([]wsm.Repository, error)
 }
 
-// CreateSlackIntake creates REQ's intake: a hidden peer of its repository,
-// landing into the main branch, with a fresh context and REQ's prompt. The
-// intake forks itself into the workspace the binding names; it is no
+// CreateSlackIntake creates REQ's intake through the one intake helper
+// (workspace.CreateIntake): a hidden, fresh-context workspace of its
+// repository whose first prompt is REQ's brief, retired when its turn ends.
+// The intake forks itself into the workspace the binding names; it is no
 // emoji-ack workspace itself, since that kind belongs to the workspace that
 // does the work.
 func (s slackIntakes) CreateSlackIntake(ctx context.Context, req slackwatch.IntakeRequest) error {
@@ -36,24 +36,18 @@ func (s slackIntakes) CreateSlackIntake(ctx context.Context, req slackwatch.Inta
 	if !found {
 		return fmt.Errorf("the reaction settings' repository %s is not in the registry", req.RepoID)
 	}
-	_, err = s.create(ctx, workspace.CreateSpec{
-		Originator:    lifecycleconfig.OriginatorUserOrWorkspace,
-		RepoDir:       repository.Dir,
-		Landing:       &wsm.LandingChoice{},
-		InitialPrompt: req.Prompt,
-		Name:          req.Name,
-		Hidden:        true,
-	})
+	_, err = s.createIntake(ctx, workspace.IntakeSpec{RepoDir: repository.Dir, Name: req.Name, Brief: req.Brief, Values: req.Values})
 	return err
 }
 
-// createVia is the bound verbs' Create, refused before they exist.
-func (f *verbsForwarder) createVia(ctx context.Context, spec workspace.CreateSpec) (wsm.Workspace, error) {
+// createIntakeVia is the bound verbs' CreateIntake, refused before they
+// exist.
+func (f *verbsForwarder) createIntakeVia(ctx context.Context, spec workspace.IntakeSpec) (wsm.Workspace, error) {
 	verbs, err := f.bound("a Slack reaction's intake create")
 	if err != nil {
 		return wsm.Workspace{}, err
 	}
-	return verbs.Create(ctx, spec)
+	return verbs.CreateIntake(ctx, spec)
 }
 
 // slackNonce mints a Slack post's nonce: 16 random hex digits, so two

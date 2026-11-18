@@ -136,7 +136,9 @@ func TestStepOfAnErrorNoSubmissionAnsweredIsZero(t *testing.T) {
 
 // TestEveryNotifierSubmitsThroughTheComposer holds the notifiers to the one
 // shape: each submits its brief prompts through Composer, and none calls the
-// prompt handler itself, so a hand-rolled site fails here.
+// prompt handler itself, so a hand-rolled site fails here. Slack's digest is
+// held to the same shape by slackwatch's own TestTheDigestSubmitsThroughTheComposer,
+// since this unit may read only the files the test runner's roster grants it.
 func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
 	for _, file := range []string{
 		"../mergenotice/mergenotice.go",
@@ -145,7 +147,6 @@ func TestEveryNotifierSubmitsThroughTheComposer(t *testing.T) {
 		"../prwatch/poller.go",
 		"../mainsync/mainsync.go",
 		"../gather/gather.go",
-		"../slackwatch/digest.go",
 	} {
 		t.Run(filepath.Base(file), func(t *testing.T) {
 			// Arrange

@@ -27,10 +27,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
+	"agent-repld/internal/briefprompt"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gnsclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/intakegate"
 	"agent-repld/internal/merge"
 	"agent-repld/internal/prompthandler"
@@ -99,6 +101,8 @@ type Deps struct {
 	Serves func() bool
 	// Intakes creates a fired reaction's intake workspace (reactions.go).
 	Intakes IntakeCreator
+	// Notices measures every digest told (briefprompt.Composer.Meter).
+	Notices briefprompt.Meter
 	Clock   clock.Clock
 	// Log is the global logger: a thread is no one workspace's.
 	Log dlog.Logger
@@ -144,7 +148,7 @@ func (k subKey) fields() dlog.Context {
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	if deps.Store == nil || deps.GNS == nil || deps.Holds == nil || deps.Briefs == nil || deps.MintKey == nil || deps.NewNonce == nil ||
-		deps.Serves == nil || deps.Intakes == nil || deps.Clock == nil || deps.Log == nil {
+		deps.Serves == nil || deps.Intakes == nil || deps.Notices == nil || deps.Clock == nil || deps.Log == nil {
 		return nil, errors.New("slackwatch: every collaborator is required")
 	}
 	return &Watcher{deps: deps, gate: intakegate.NewFor(deps.Serves, deps.Log, opGate, "the Slack streams and polls"),
@@ -169,10 +173,11 @@ func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
 	}
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go func() {
+	// THE INITIATOR'S POLL LOOP STANDS for Run's life, and Run joins it.
+	inflight.Standing(func() {
 		defer wg.Done()
 		w.runReactions(ctx)
-	}()
+	})
 	for {
 		wait, ok := w.untilNextDue()
 		var timer <-chan time.Time
@@ -226,13 +231,15 @@ func (w *Watcher) startWorker(key subKey) {
 	}
 	ctx, cancel := context.WithCancel(w.life)
 	w.workers[key] = cancel
-	go func() {
+	// A THREAD'S STREAM STANDS until its subscription ends or Run's does;
+	// what each message it reads causes is counted where it is told.
+	inflight.Standing(func() {
 		w.work(ctx, key)
 		w.mu.Lock()
 		delete(w.workers, key)
 		w.mu.Unlock()
 		cancel()
-	}()
+	})
 }
 
 // stopWorker stops KEY's worker, if one runs.
