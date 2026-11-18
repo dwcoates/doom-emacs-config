@@ -24,9 +24,9 @@
  * box is `aria-hidden`, so a reader of the accessibility tree reads the name
  * once. `styles.css` owns every look; this only draws the box.
  *
- * The wall-clock seek (`wall-phase.ts`) reads the animations under the rail
- * with `getAnimations({ subtree: true })`, which includes these copies', so a
- * redraw continues each loop where the clock says it is.
+ * The wall-clock seek (`wall-phase.ts`) reads every element's `::before` and
+ * `::after` animations too, which are these copies', so a redraw continues
+ * each loop where the clock says it is.
  */
 import { REVIVING_CLASS } from "./reviving.js";
 

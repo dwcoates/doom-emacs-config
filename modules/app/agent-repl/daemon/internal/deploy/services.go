@@ -158,6 +158,10 @@ type Restarter struct {
 	// from StoreHolder, so the holder is ensured before the store starts or
 	// restarts. REQUIRED.
 	EnsureHolder func(ctx context.Context, id string) error
+	// HolderServing reports whether the socket holder ID serves, by its cheap
+	// probe (holderensure.Ensurer.ServingID), installing nothing. REQUIRED
+	// when StoreHolder is set.
+	HolderServing func(ctx context.Context, id string) (bool, error)
 	// StoreHolder is the id of the socket holder that holds StoreSocket, the
 	// one the store takes its sockets from (holderensure.HolderOfSocket);
 	// empty when no declared holder holds that socket, and then the store
@@ -177,10 +181,14 @@ func (r *Restarter) timed(service restarttiming.Service, restart func() error) e
 // restarts, the sidecar with it — in the recorded safe order. It is timed as
 // the store's restart, from the sidecar's stop to its bootstrap back.
 func (r *Restarter) RestartStore(ctx context.Context) error {
-	return r.timed(restarttiming.Store, func() error { return r.restartStore(ctx) })
+	return r.timed(restarttiming.Store, func() error { return r.restartStore(ctx, false) })
 }
 
-func (r *Restarter) restartStore(ctx context.Context) error {
+// restartStore restarts the store in the safe order. RELOAD reloads it on
+// its definition even when the rewrite left the file as it was: a store
+// moved onto its holder runs the definition on disk, never the one launchd
+// loaded before the holder existed.
+func (r *Restarter) restartStore(ctx context.Context, reload bool) error {
 	definition := r.Services.Definition(SidecarLabel)
 	fields := dlog.Context{"store": StoreLabel, "sidecar": SidecarLabel, "sidecar_definition": definition}
 
@@ -205,8 +213,8 @@ func (r *Restarter) restartStore(ctx context.Context) error {
 	if err := r.stopSidecar(ctx, fields); err != nil {
 		return err
 	}
-	r.Log.Info(opServices, "restarting the store", dlog.Merge(fields, dlog.Context{"definition_changed": changed}))
-	if err := r.restartOn(ctx, StoreLabel, changed); err != nil {
+	r.Log.Info(opServices, "restarting the store", dlog.Merge(fields, dlog.Context{"definition_changed": changed, "reload": reload}))
+	if err := r.restartOn(ctx, StoreLabel, changed || reload); err != nil {
 		r.failed("the store restart failed; the sidecar is down and was NOT started again", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", StoreLabel, err)
 	}
@@ -404,11 +412,19 @@ func (r *Restarter) EnsureStoreCurrent(ctx context.Context) (func(context.Contex
 	if err != nil {
 		return nil, err
 	}
-	if storeStale {
+	offHolder, err := r.storeOffItsHolder(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if storeStale || offHolder {
 		// A STORE RESTART RESTARTS THE SIDECAR TOO: its socket is out while the
 		// store restarts, and a fresh pair is the known-good state.
-		r.Log.Info(opServices, "the running store is not the installed build; restarting it, and the sidecar with it, before any shim starts", nil)
-		if err := r.RestartStore(ctx); err != nil {
+		if storeStale {
+			r.Log.Info(opServices, "the running store is not the installed build; restarting it, and the sidecar with it, before any shim starts", nil)
+		} else {
+			r.Log.Info(opServices, "the store's holder is not up, so the store binds its own sockets; moving it onto its holder, and restarting the sidecar with it, before any shim starts", dlog.Context{"holder": r.StoreHolder})
+		}
+		if err := r.timed(restarttiming.Store, func() error { return r.restartStore(ctx, offHolder) }); err != nil {
 			return nil, err
 		}
 		return func(context.Context) error {
@@ -417,6 +433,23 @@ func (r *Restarter) EnsureStoreCurrent(ctx context.Context) (func(context.Contex
 		}, nil
 	}
 	return func(ctx context.Context) error { return r.ensureSidecarCurrent(ctx, sidecarBootstrapped) }, nil
+}
+
+// storeOffItsHolder reports whether the store's declared holder is not
+// serving, so the store still binds its own sockets (a machine onto which the
+// holder came after its install): the cheap probe is the whole cost when it
+// serves (HolderServing). A store at a socket no holder declares is never off
+// one.
+func (r *Restarter) storeOffItsHolder(ctx context.Context) (bool, error) {
+	if r.StoreHolder == "" {
+		return false, nil
+	}
+	serving, err := r.HolderServing(ctx, r.StoreHolder)
+	if err != nil {
+		// The probe recorded its own failure (holderensure).
+		return false, fmt.Errorf("deploy: probe the store's socket holder %s: %w", r.StoreHolder, err)
+	}
+	return !serving, nil
 }
 
 // ensureSidecarCurrent is EnsureCurrent's second half: the sidecar's build

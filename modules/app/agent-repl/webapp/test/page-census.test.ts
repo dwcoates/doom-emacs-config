@@ -24,14 +24,17 @@ async function censusRecords(): Promise<Record<string, unknown>[]> {
     .map((record) => ({ level: record.level.case, ...(record.context ?? {}) }));
 }
 
-/** Stand DOC's live animations in as these names, as WebKit answers getAnimations. */
-function withAnimations(doc: Document, names: (string | undefined)[]): void {
-  doc.getAnimations = () => names.map((animationName) => ({ animationName }) as unknown as Animation);
+/** Put an element running each of NAMES in the page, as its computed style states it. */
+function withAnimations(doc: Document, names: string[]): void {
+  for (const name of names) {
+    const el = doc.createElement("span");
+    el.style.animationName = name;
+    doc.body.append(el);
+  }
 }
 
 beforeEach(() => {
   capture = captureLogRecords();
-  withAnimations(document, []);
   scheduledMs = [];
   fire = () => undefined;
   document.body.replaceChildren();
@@ -65,15 +68,26 @@ describe("installPageCensus", () => {
 });
 
 describe("animationCensus", () => {
-  it("counts the live animations by name, a script animation as script", () => {
+  it("counts the live animations by name", () => {
     // Arrange
-    withAnimations(document, ["pulse", "pulse", "pfooter-status-wave", undefined]);
+    withAnimations(document, ["pulse", "pulse", "pfooter-status-wave"]);
 
     // Act
     const census = animationCensus(document);
 
     // Assert
-    expect(census).toEqual({ animations: 4, animation_names: { pulse: 2, "pfooter-status-wave": 1, script: 1 } });
+    expect(census).toEqual({ animations: 3, animation_names: { pulse: 2, "pfooter-status-wave": 1 } });
+  });
+
+  it("counts each animation of an element's list", () => {
+    // Arrange
+    withAnimations(document, ["pulse, shimmer"]);
+
+    // Act
+    const census = animationCensus(document);
+
+    // Assert
+    expect(census).toEqual({ animations: 2, animation_names: { pulse: 1, shimmer: 1 } });
   });
 
   it("names only the most numerous names, though it counts every animation", () => {

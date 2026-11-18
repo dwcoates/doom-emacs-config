@@ -418,3 +418,65 @@ func TestNoFooterSourceSpellsALiveItemPrefix(t *testing.T) {
 		}
 	}
 }
+
+// A SUBAGENT THAT RESUMES ON ITS OWN keeps its handle for its second run: the
+// set drops it at the first run's end and lists it again for the second, and
+// the second run's frames must describe the row rather than be refused as
+// replays of the first.
+func TestASubagentNewToTheSetAfterItsRunEndedIsDescribedByItsNewRun(t *testing.T) {
+	// Arrange: the first run settled, and the set dropped it.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "work-1", "sonnet-medium"))
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+	h.r.OnLiveWorkChanged(testWS, liveSet(nil, nil, nil))
+
+	// Act: the set lists it again, and the second run's start arrives.
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentStartFrame("work-1", "general-purpose"))
+
+	// Assert.
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetLabel().GetText() == "subagent" {
+		t.Fatalf("rows = %+v, want one row the second run's start described", rows)
+	}
+}
+
+func TestARunAgainIsRecordedOnTheSetThatListedIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "work-1", "sonnet-medium"))
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+	h.r.OnLiveWorkChanged(testWS, liveSet(nil, nil, nil))
+
+	// Act.
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+
+	// Assert.
+	rec := lastRecord(t, h, "daemon.footer.live_work_taken")
+	if got, _ := rec.Context["ran_again"].([]string); len(got) != 1 || got[0] != "agent:work-1" {
+		t.Fatalf("ran_again = %v, want the subagent the set listed again", rec.Context["ran_again"])
+	}
+}
+
+func TestASubagentTheSetKeepsListingKeepsItsRetirement(t *testing.T) {
+	// Arrange: its terminal retired it while the set still lists it.
+	h := newHarness(t)
+	connected(h)
+	h.r.OnDetachedWork(testWS, mainAgent, detachedSubagentWork("work-1", "work-1", "sonnet-medium"))
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentSettled(false))
+
+	// Act: the set lists it again, and a replayed start arrives.
+	h.r.OnLiveWorkChanged(testWS, liveSet([]string{"work-1"}, nil, nil))
+	h.r.OnSubagent(testWS, workID("work-1"), subagentStartFrame("work-1", "general-purpose"))
+
+	// Assert: the replay describes nothing.
+	rows := h.view(t).GetExpanded().GetAgents().GetRows()
+	if len(rows) != 1 || rows[0].GetLabel().GetText() != "subagent" {
+		t.Fatalf("rows = %+v, want the minimal row the replay left undescribed", rows)
+	}
+}

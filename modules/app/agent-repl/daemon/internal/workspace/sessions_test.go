@@ -326,6 +326,9 @@ func (s *fakeSessionStream) Close() { s.once.Do(func() { close(s.closed) }) }
 // StandingDown answers the fake's stand-down latch.
 func (c *fakeClient) StandingDown() bool { return c.stoodDown }
 
+// StandDownOrdered answers the fake's stand-down latch, settled as it is.
+func (c *fakeClient) StandDownOrdered() bool { return c.stoodDown }
+
 // StandDown arms the fake's stand-down latch. It answers false for the
 // detached shape, exactly as the real client does.
 func (c *fakeClient) StandDown() bool {

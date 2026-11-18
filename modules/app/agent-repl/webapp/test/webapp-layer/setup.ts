@@ -5,7 +5,7 @@ import { installTreeLayout } from "../tree-layout.js";
 
 /**
  * jsdom performs no layout and runs no animations, so the observers and
- * `Element.getAnimations` the app reaches for are substituted
+ * pseudo-element styles the app reaches for are substituted
  * (jsdom-capabilities.ts). This project does not load `test/setup.ts`, so it
  * installs the same set itself.
  */

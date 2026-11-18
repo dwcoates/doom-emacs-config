@@ -257,12 +257,25 @@ func (s *server) CreateWorkspace(
 	if err != nil {
 		return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
 	}
-	s.log.Info("daemon.server.create_workspace", "created a workspace",
-		dlog.Context{"workspace": string(created.ID), "dir": created.Dir})
-	resp.Result = &agentreplv1.CreateWorkspaceResponse_Success{
-		Success: &agentreplv1.CreateWorkspaceSuccess{Workspace: created.Ref()},
-	}
+	resp.Result = &agentreplv1.CreateWorkspaceResponse_Success{Success: s.createdSuccess(created)}
 	return connect.NewResponse(resp), nil
+}
+
+// createdSuccess is the success of a create that made CREATED. A NEW
+// SESSION PARKED AT ITS COLD GATE (a fork of a conversation whose prompt
+// cache is cold) holds the initial prompt at the gate, and the success says
+// so, so the creator knows the user answers the gate before it runs (owner
+// ruling, 2026-11-18).
+func (s *server) createdSuccess(created wsm.Workspace) *agentreplv1.CreateWorkspaceSuccess {
+	success := &agentreplv1.CreateWorkspaceSuccess{Workspace: created.Ref()}
+	fields := dlog.Context{"workspace": string(created.ID), "dir": created.Dir}
+	if cold, ok := s.deps.ColdGateOf(created.ID); ok {
+		success.HeldAtColdGate = &agentreplv1.CreateWorkspaceHeldAtColdGate{ContextTokens: cold.GetContextTokens()}
+		fields["held_at_cold_gate"] = true
+		fields["context_tokens"] = cold.GetContextTokens()
+	}
+	s.log.Info("daemon.server.create_workspace", "created a workspace", fields)
+	return success
 }
 
 // refuseUnadmitted answers a create the gate did not admit: transferring_away

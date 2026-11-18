@@ -573,6 +573,19 @@ message CreateWorkspaceAccepted {
 // else arrives on the roster stream.
 message CreateWorkspaceSuccess {
   workspace.v1.WorkspaceRef workspace = 1;
+  // Set when the new workspace's session came up parked at its cold gate (a
+  // fork of a conversation whose prompt cache is cold): the workspace is
+  // created and its initial prompt is HELD at the gate, sent once the user
+  // answers it in the workspace (owner ruling, 2026-11-18). Unset when the
+  // initial prompt was delivered or held for any other reason.
+  CreateWorkspaceHeldAtColdGate held_at_cold_gate = 2;
+}
+
+// CreateWorkspaceHeldAtColdGate says the initial prompt waits at the new
+// workspace's cold gate.
+message CreateWorkspaceHeldAtColdGate {
+  // The new conversation's context size, in tokens, as the gate states it.
+  uint64 context_tokens = 1;
 }
 
 // Arms derived from the daemon's refusal sites (landing 4, 2026-08-29).

@@ -1188,15 +1188,12 @@ func (r *resolver) settleShellsLeftLive(s *wsState, live sessionwatcher.LiveWork
 // ONLY A SUBAGENT THE SET HELD. A bubble the feed drew but the watcher never
 // listed has not left anything.
 func (r *resolver) settleSubagentsLeftLive(s *wsState, live sessionwatcher.LiveWorkSet) {
-	now := make(map[string]struct{}, len(live.Agents)+len(live.Pending))
-	for _, agent := range live.Agents {
-		now[agent.GetValue()] = struct{}{}
-	}
 	// A PENDING HANDLE IS LIVE: the level named it before its announcement
 	// described it, and the head that announcement draws must not be judged
 	// stopped for want of a description.
-	for _, handle := range live.Pending {
-		now[handle.GetValue()] = struct{}{}
+	now := live.AgentMembers()
+	if s.levelMode {
+		r.reviveSubagentsRunAgain(s, live.AgentsNewSince(s.liveAgents))
 	}
 	for id := range s.liveAgents {
 		if _, still := now[id]; still {
@@ -1235,6 +1232,33 @@ func (r *resolver) settleSubagentsLeftLive(s *wsState, live sessionwatcher.LiveW
 	}
 	s.levelKnown = true
 	r.judgeHistoryBubbles(s)
+}
+
+// reviveSubagentsRunAgain draws live again every head among IDS, the
+// subagents new to the live set, that the feed drew as ended.
+//
+// A SUBAGENT NEW TO THE SET RUNS AGAIN (sessionwatcher's AgentsNewSince): one
+// that backgrounded a shell and ended its own turn is woken by that shell's
+// notification and runs a second time under the same handle, and its head,
+// settled at the first run's end, stood settled over a subagent at work while
+// the second run's rows went undrawn (2026-11-18). Only the set can revive a
+// head; no frame can, since a replayed start or a late beat is no new run.
+func (r *resolver) reviveSubagentsRunAgain(s *wsState, ids []string) {
+	for _, id := range ids {
+		unitID, state, drawn := s.subagentListedAs(id)
+		if !drawn || state.row == nil || state.bubble == nil || !headEnded(state.bubble) {
+			continue
+		}
+		was := "settled"
+		if state.bubble.GetSettling() != nil {
+			was = "settling"
+		}
+		state.bubble.State = &frontendv1.FeedSubagent_Live{Live: &frontendv1.FeedSubagentLive{}}
+		r.republishSubagent(s, unitID, state)
+		r.logger(s.id).Info("daemon.feed.detached_subagent_runs_again",
+			"a subagent whose head was drawn ended is new to the live set, so it runs again; its head is live",
+			dlog.Context{"listed_as": id, "unit": unitID, "row": state.row.GetValue(), "was": was})
+	}
 }
 
 // stopSubagentHead draws a live head whose subagent left the live set with no

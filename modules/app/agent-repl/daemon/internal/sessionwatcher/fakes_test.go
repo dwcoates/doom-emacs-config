@@ -183,6 +183,9 @@ type fakeClient struct {
 	// standingDown is the shim's stand-down latch, which the real client sets
 	// the moment a KillSession is asked of it.
 	standingDown bool
+	// askedOnly marks the latch raised by a KillSession still awaiting its
+	// answer, which a refusal can undo: StandDownOrdered reads it false.
+	askedOnly bool
 }
 
 // standDown latches the fake as having been asked to end its session, which is
@@ -199,6 +202,14 @@ func (c *fakeClient) StandingDown() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.standingDown
+}
+
+// StandDownOrdered answers the fake's settled stand-down: its latch, unless
+// a KillSession is only awaiting its answer (askedOnly).
+func (c *fakeClient) StandDownOrdered() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.standingDown && !c.askedOnly
 }
 
 // setReaped arranges the decoded exit a dead link's fault carries.

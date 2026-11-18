@@ -7,44 +7,44 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
   PAGE_UNSHOWN_ATTRIBUTE,
+  animatedElements,
+  insertedElements,
   pauseAnimationsWhileUnshown,
-  type FrozenAnimation,
+  type AnimatedElement,
   type UnshownAnimationsEnv,
 } from "../../src/host/unshown-animations.js";
+import { PSEUDO_DELAY } from "../../src/animation-delays.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
-import { frameQueue } from "../frame-queue.js";
 
-/** One animation, recording whether the pause stood each time its time was set. */
-class FakeAnimation implements FrozenAnimation {
-  readonly setUnderPause: boolean[] = [];
-  private time: CSSNumberish | null;
+/** One animated element, recording each move and whether the pause stood then. */
+class FakeAnimated implements AnimatedElement {
+  readonly element = document.createElement("div");
+  readonly moves: { by: number; underPause: boolean; flushedBefore: boolean }[] = [];
 
-  constructor(time: number | null) {
-    this.time = time;
-  }
+  constructor(private readonly page: { flushes: number }) {}
 
-  get currentTime(): CSSNumberish | null {
-    return this.time;
-  }
-
-  set currentTime(time: CSSNumberish | null) {
-    this.setUnderPause.push(document.documentElement.hasAttribute(PAGE_UNSHOWN_ATTRIBUTE));
-    this.time = time;
+  advance(byMs: number): void {
+    this.moves.push({
+      by: byMs,
+      underPause: document.documentElement.hasAttribute(PAGE_UNSHOWN_ATTRIBUTE),
+      flushedBefore: this.page.flushes > 0,
+    });
   }
 }
 
-/** A page whose clock, animations, mutations and frames the test drives. */
+/** A page whose clock, animated elements and insertions the test drives. */
 interface Page {
   presence: PresenceSource;
   clock: { ms: number };
-  animations: FakeAnimation[];
-  /** Report a batch of mutations, as the observer would. */
-  mutate(): void;
-  /** Run the frames asked for so far. */
-  runFrames(): void;
-  /** How many frames were asked for. */
-  framesAsked(): number;
+  animated: FakeAnimated[];
+  flushes: number;
+  /** A fresh animated element, not yet in the page. */
+  make(): FakeAnimated;
+  /** Report ELEMENTS inserted, as the observer would. */
+  insert(...elements: FakeAnimated[]): void;
+  /** Whether the page watches insertions now. */
+  watching(): boolean;
   stop: () => void;
 }
 
@@ -56,37 +56,43 @@ afterEach(() => {
   page = null;
 });
 
-/** Start the pause over a page shown or not, with ANIMATIONS in it. */
-function start(shown: boolean, animations: FakeAnimation[] = []): Page {
+/** Start the pause over a page shown or not, with COUNT animated elements in it. */
+function start(shown: boolean, count = 0): Page {
   const presence = createPresence(document, true);
   if (shown) presence.setShown(true);
-  const clock = { ms: 1000 };
-  let observer: (() => void) | null = null;
-  const frames = frameQueue();
+  let observer: ((inserted: Iterable<Element>) => void) | null = null;
+  const p: Page = {
+    presence,
+    clock: { ms: 1000 },
+    animated: [],
+    flushes: 0,
+    make: () => new FakeAnimated(p),
+    insert: (...elements) => {
+      p.animated.push(...elements);
+      observer?.(elements.map((e) => e.element));
+    },
+    watching: () => observer !== null,
+    stop: () => {},
+  };
+  for (let i = 0; i < count; i++) p.animated.push(p.make());
   const env: UnshownAnimationsEnv = {
     doc: document,
     presence,
-    now: () => clock.ms,
-    animations: () => [...animations],
+    now: () => p.clock.ms,
+    animated: () => [...p.animated],
+    flush: () => {
+      p.flushes += 1;
+    },
     observe: (fn) => {
       observer = fn;
       return () => {
         observer = null;
       };
     },
-    frame: frames.frame,
   };
-  const stop = pauseAnimationsWhileUnshown(env);
-  page = {
-    presence,
-    clock,
-    animations,
-    mutate: () => observer?.(),
-    runFrames: frames.run,
-    framesAsked: frames.asked,
-    stop,
-  };
-  return page;
+  p.stop = pauseAnimationsWhileUnshown(env);
+  page = p;
+  return p;
 }
 
 const paused = (): boolean => document.documentElement.hasAttribute(PAGE_UNSHOWN_ATTRIBUTE);
@@ -132,22 +138,20 @@ describe("pausing a page the webhost does not show", () => {
 
   it("ignores a change that leaves the page shown", () => {
     // Arrange
-    const running = new FakeAnimation(100);
-    start(true, [running]);
+    const p = start(true, 1);
 
     // Act
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Assert
-    expect([paused(), running.setUnderPause]).toEqual([false, []]);
+    expect([paused(), p.animated[0].moves]).toEqual([false, []]);
   });
 });
 
 describe("resuming a page the webhost shows again", () => {
-  it("moves an animation running at the hide on by how long the page was hidden", () => {
+  it("moves an element animated at the hide on by how long the page was hidden", () => {
     // Arrange
-    const running = new FakeAnimation(250);
-    const p = start(true, [running]);
+    const p = start(true, 1);
     p.presence.setShown(false);
     p.clock.ms += 700;
 
@@ -155,125 +159,62 @@ describe("resuming a page the webhost shows again", () => {
     p.presence.setShown(true);
 
     // Assert
-    expect(running.currentTime).toBe(950);
+    expect(p.animated[0].moves.map((m) => m.by)).toEqual([700]);
   });
 
-  it("moves an animation made while hidden on by how long since it was made", () => {
+  it("moves an element inserted while hidden on by how long since it was inserted", () => {
     // Arrange
     const p = start(false);
     p.clock.ms += 300;
-    const made = new FakeAnimation(0);
-    p.animations.push(made);
-    p.mutate();
-    p.clock.ms += 10;
-    p.runFrames();
-    p.clock.ms += 490;
-
-    // Act
-    p.presence.setShown(true);
-
-    // Assert
-    expect(made.currentTime).toBe(500);
-  });
-
-  it("dates an animation made just before the show, whose frame has not run", () => {
-    // Arrange
-    const p = start(false);
-    p.clock.ms += 300;
-    const made = new FakeAnimation(0);
-    p.animations.push(made);
-    p.mutate();
-    p.clock.ms += 40;
-
-    // Act
-    p.presence.setShown(true);
-
-    // Assert
-    expect(made.currentTime).toBe(40);
-  });
-
-  it("asks for one frame for a run of mutations", () => {
-    // Arrange
-    const p = start(false);
-
-    // Act
-    p.mutate();
-    p.mutate();
-    p.mutate();
-
-    // Assert
-    expect(p.framesAsked()).toBe(1);
-  });
-
-  it("asks for a fresh frame for mutations after a scan", () => {
-    // Arrange
-    const p = start(false);
-    p.mutate();
-    p.runFrames();
-
-    // Act
-    p.mutate();
-
-    // Assert
-    expect(p.framesAsked()).toBe(2);
-  });
-
-  it("keeps the first date of an animation seen by a later scan", () => {
-    // Arrange
-    const p = start(false);
-    const made = new FakeAnimation(0);
-    p.animations.push(made);
-    p.mutate();
-    p.runFrames();
-    p.clock.ms += 200;
-    p.mutate();
-    p.runFrames();
-    p.clock.ms += 100;
-
-    // Act
-    p.presence.setShown(true);
-
-    // Assert
-    expect(made.currentTime).toBe(300);
-  });
-
-  it("sets every time after the pause is lifted, so a one-shot past its end stays ended", () => {
-    // Arrange
-    const running = new FakeAnimation(10);
-    const p = start(true, [running]);
-    p.presence.setShown(false);
-    p.clock.ms += 100;
-
-    // Act
-    p.presence.setShown(true);
-
-    // Assert
-    expect(running.setUnderPause).toEqual([false]);
-  });
-
-  it("leaves an animation no mutation announced where it paused", () => {
-    // Arrange
-    const p = start(false);
-    const unannounced = new FakeAnimation(40);
-    p.animations.push(unannounced);
+    const made = p.make();
+    p.insert(made);
     p.clock.ms += 500;
 
     // Act
     p.presence.setShown(true);
 
     // Assert
-    expect(unannounced.setUnderPause).toEqual([]);
+    expect(made.moves.map((m) => m.by)).toEqual([500]);
   });
 
-  it("resumes again after a second hide, from that hide", () => {
+  it("dates an element inserted again by its latest insertion", () => {
     // Arrange
-    const running = new FakeAnimation(0);
-    const p = start(true, [running]);
+    const p = start(false);
+    const made = p.make();
+    p.insert(made);
+    p.clock.ms += 200;
+    p.insert(made);
+    p.animated.pop();
+    p.clock.ms += 100;
+
+    // Act
+    p.presence.setShown(true);
+
+    // Assert
+    expect(made.moves.map((m) => m.by)).toEqual([100]);
+  });
+
+  it("moves every element after the pause is lifted and flushed, so a one-shot past its end stays ended", () => {
+    // Arrange
+    const p = start(true, 1);
     p.presence.setShown(false);
+    p.clock.ms += 100;
+
+    // Act
+    p.presence.setShown(true);
+
+    // Assert
+    expect(p.animated[0].moves.map((m) => [m.underPause, m.flushedBefore])).toEqual([[false, true]]);
+  });
+
+  it("dates an element inserted during an earlier hide from the later hide", () => {
+    // Arrange
+    const p = start(false);
+    const made = p.make();
+    p.insert(made);
     p.clock.ms += 100;
     p.presence.setShown(true);
     p.clock.ms += 50;
-    running.currentTime = 150;
     p.presence.setShown(false);
     p.clock.ms += 400;
 
@@ -281,27 +222,26 @@ describe("resuming a page the webhost shows again", () => {
     p.presence.setShown(true);
 
     // Assert
-    expect(running.currentTime).toBe(550);
+    expect(made.moves.map((m) => m.by)).toEqual([100, 400]);
   });
 
-  it("stops watching mutations once shown", () => {
+  it("stops watching insertions once shown", () => {
     // Arrange
     const p = start(false);
-    p.presence.setShown(true);
 
     // Act
-    p.mutate();
+    p.presence.setShown(true);
 
     // Assert
-    expect(p.framesAsked()).toBe(0);
+    expect(p.watching()).toBe(false);
   });
 });
 
-describe("what the resume records", () => {
-  it("records the resume at info with how many animations, how long hidden and how long it took", async () => {
+describe("what the pause and the resume record", () => {
+  it("records the resume at info with how many elements, how long hidden and how long it took", async () => {
     // Arrange
     const capture = captureLogRecords();
-    const p = start(true, [new FakeAnimation(0), new FakeAnimation(5)]);
+    const p = start(true, 2);
     p.presence.setShown(false);
     p.clock.ms += 1234;
 
@@ -312,73 +252,23 @@ describe("what the resume records", () => {
     const record = await forwardedRecord(capture, "page.animations-resumed");
     expect({
       level: record.level.case,
-      animations: record.context?.["animations"],
-      unrecorded: record.context?.["unrecorded"],
+      animated: record.context?.["animated_elements"],
       hiddenMs: record.context?.["hidden_ms"],
       took: typeof record.context?.["took_ms"],
-    }).toEqual({ level: "info", animations: 2, unrecorded: 0, hiddenMs: 1234, took: "number" });
+    }).toEqual({ level: "info", animated: 2, hiddenMs: 1234, took: "number" });
   });
 
-  it("counts an animation no mutation announced", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    const p = start(false);
-    p.animations.push(new FakeAnimation(0));
-
-    // Act
-    p.presence.setShown(true);
-
-    // Assert
-    const record = await forwardedRecord(capture, "page.animations-resumed");
-    expect(record.context?.["unrecorded"]).toBe(1);
-  });
-
-  it("records the pause at debug with how many animations it holds", async () => {
+  it("records the pause at debug", async () => {
     // Arrange
     const capture = captureLogRecords("debug");
-    const p = start(true, [new FakeAnimation(0)]);
+    const p = start(true);
 
     // Act
     p.presence.setShown(false);
 
     // Assert
     const record = await forwardedRecord(capture, "page.animations-paused");
-    expect([record.level.case, record.context?.["animations"]]).toEqual(["debug", 1]);
-  });
-});
-
-describe("an animation holding no time", () => {
-  it("throws on the show rather than resuming the page at a guess", () => {
-    // Arrange
-    const p = start(false, [new FakeAnimation(null)]);
-
-    // Act / Assert
-    expect(() => p.presence.setShown(true)).toThrow(/holds no numeric time/);
-  });
-
-  it("records the failure at error with the held value", async () => {
-    // Arrange
-    const capture = captureLogRecords();
-    const p = start(false, [new FakeAnimation(null)]);
-
-    // Act
-    expect(() => p.presence.setShown(true)).toThrow();
-
-    // Assert
-    const record = await forwardedRecord(capture, "page.animations-resume-failed");
-    expect([record.level.case, record.context?.["held"]]).toEqual(["error", "null"]);
-  });
-
-  it("sets no animation's time when one cannot resume", () => {
-    // Arrange
-    const fine = new FakeAnimation(10);
-    const p = start(false, [fine, new FakeAnimation(null)]);
-
-    // Act
-    expect(() => p.presence.setShown(true)).toThrow();
-
-    // Assert
-    expect(fine.setUnderPause).toEqual([]);
+    expect(record.level.case).toBe("debug");
   });
 });
 
@@ -394,5 +284,76 @@ describe("stopping", () => {
 
     // Assert
     expect(paused()).toBe(false);
+  });
+});
+
+describe("reading the page's elements", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("names every element a batch inserted, with everything under it", () => {
+    // Arrange
+    const outer = document.createElement("div");
+    const inner = document.createElement("span");
+    outer.append(inner);
+    const records = [{ addedNodes: [outer, document.createTextNode("x")] }] as unknown as MutationRecord[];
+
+    // Act
+    const found = insertedElements(records);
+
+    // Assert
+    expect(found).toEqual([outer, inner]);
+  });
+
+  it("finds an element whose style runs an animation, and passes over one that runs none", () => {
+    // Arrange
+    const running = document.createElement("div");
+    running.style.animationName = "spin";
+    running.style.animationDelay = "0s";
+    const still = document.createElement("div");
+    document.body.append(running, still);
+
+    // Act
+    const found = animatedElements(document, window).map((a) => a.element);
+
+    // Assert
+    expect([found.includes(running), found.includes(still)]).toEqual([true, false]);
+  });
+
+  it("moves each of an element's animations' delays, repeating a shorter delay list as CSS does", () => {
+    // Arrange
+    const el = document.createElement("div");
+    el.style.animationName = "a, b";
+    el.style.animationDelay = "-200ms";
+    document.body.append(el);
+    const animated = animatedElements(document, window).find((a) => a.element === el)!;
+
+    // Act
+    animated.advance(300);
+
+    // Assert
+    expect(el.style.animationDelay).toBe("-500ms, -500ms");
+  });
+
+  it("moves a pseudo-element's delays through its element", () => {
+    // Arrange: a view whose ::after runs a loop, as WebKit computes one.
+    const el = document.createElement("div");
+    document.body.append(el);
+    const loop = { animationName: "shimmer", animationDuration: "1s", animationIterationCount: "infinite", animationDirection: "normal", animationDelay: "-100ms" };
+    const view = new Proxy(window, {
+      get: (target, key) =>
+        key === "getComputedStyle"
+          ? (element: Element, pseudo?: string | null) =>
+              element === el && pseudo === "::after" ? (loop as unknown as CSSStyleDeclaration) : target.getComputedStyle(element, pseudo)
+          : (Reflect.get(target, key) as unknown),
+    });
+    const animated = animatedElements(document, view).find((a) => a.element === el)!;
+
+    // Act
+    animated.advance(400);
+
+    // Assert
+    expect(el.style.getPropertyValue(PSEUDO_DELAY["::after"].property)).toBe("-500ms");
   });
 });

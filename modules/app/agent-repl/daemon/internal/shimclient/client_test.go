@@ -2111,6 +2111,60 @@ func TestKillSessionKeepsTheConnectionOfARefusedKill(t *testing.T) {
 	}
 }
 
+// TestTheStandDownLatchFollowsTheShimsAnswerToKillSession pins the latch on
+// the shim's answer (2026-11-18, send-slack-link-formatting): a KillSession
+// raises it while in flight, a shim that ended its session (or whose answer
+// was never read) settles it raised, and a shim that REFUSED leaves it as it
+// was, serving on with its watches opening.
+func TestTheStandDownLatchFollowsTheShimsAnswerToKillSession(t *testing.T) {
+	tests := []struct {
+		name          string
+		resp          *shimv1.KillSessionResponse
+		callErr       error
+		armedBefore   bool
+		wantStanding  bool
+		wantOrdered   bool
+		wantRefusalAt string
+	}{
+		{name: "a refused kill leaves the shim serving", resp: killRefused(), wantRefusalAt: "info"},
+		{name: "an ended session settles the stand-down", resp: killAnswered(), wantStanding: true, wantOrdered: true},
+		{name: "a kill whose answer was never read settles the stand-down", callErr: connect.NewError(connect.CodeDeadlineExceeded, errors.New("the call bound expired")), wantStanding: true, wantOrdered: true},
+		{name: "a refused kill keeps a stand-down armed before it", resp: killRefused(), armedBefore: true, wantStanding: true, wantOrdered: true, wantRefusalAt: "info"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			dir := shortDir(t)
+			f, uds := startFakeShim(t, dir)
+			f.killSessionResp, f.killSessionErr = tt.resp, tt.callErr
+			log := dlog.NewTestLogger()
+			c := newClient(log, ids.WorkspaceID("ws-1"), uds, defaultBackoff, nil, nil)
+			if tt.armedBefore {
+				c.StandDown()
+			}
+			var standingInFlight, orderedInFlight bool
+			f.duringKillSession = func() { standingInFlight, orderedInFlight = c.StandingDown(), c.StandDownOrdered() }
+
+			// Act.
+			_, _ = c.KillSession(context.Background(), &shimv1.KillSessionRequest{})
+
+			// Assert.
+			if !standingInFlight || orderedInFlight != tt.armedBefore {
+				t.Fatalf("in flight: StandingDown %v, StandDownOrdered %v; want true, %v", standingInFlight, orderedInFlight, tt.armedBefore)
+			}
+			if c.StandingDown() != tt.wantStanding || c.StandDownOrdered() != tt.wantOrdered {
+				t.Fatalf("answered: StandingDown %v, StandDownOrdered %v; want %v, %v", c.StandingDown(), c.StandDownOrdered(), tt.wantStanding, tt.wantOrdered)
+			}
+			if tt.wantRefusalAt != "" {
+				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: tt.wantRefusalAt, Operation: "daemon.shimclient.kill_session",
+					Message: "the shim refused the stand-down; it serves on, and its watches open again"}); !ok {
+					t.Fatalf("records = %+v, want the refusal recorded", log.Records())
+				}
+			}
+		})
+	}
+}
+
 // TestKillSessionRecordsAHangUpThatFailed covers a hang-up whose close fails:
 // the answer still goes to the caller, whose stop escalation ends the shim,
 // and the failure is recorded once at ERROR with the workspace and the cause.

@@ -250,6 +250,16 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 			*mergeHeld = true
 			fields["held_by"] = "merge"
 			c.log.Info(opRelaunch, "the workspace's suspended merge already holds its prompts; the restart takes no hold of its own", dlog.WithCause(fields, err))
+		} else if deferredBehindMerge(reason, force, err) {
+			// THE TAKE IS THE ARBITER. A merge admitted after the lease was
+			// read above took the workspace first (2026-11-18 13:46:37,
+			// puzzle-review-workers-push-branches: the read found no lease,
+			// the merge's admission took it, and this take failed at ERROR).
+			// The bounce is given back unperformed, as the read above gives
+			// it back, and the merge's release reruns it.
+			c.log.Info(opRelaunch, "a merge took the workspace before the restart hold; the unforced bounce waits for the merge to release it", dlog.WithCause(fields, err))
+			c.retirePrelaunch(ctx, fresh, reason, fields)
+			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
 		} else if err != nil {
 			c.log.Error(opRelaunch, "could not take the restart-pending hold", dlog.WithCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)
@@ -578,6 +588,14 @@ func killRefusal(failure *shimv1.KillSessionFailure) string {
 // because the workspace's MERGE holds its lease, which only a RestartWorkspace
 // may take as standing in for its own hold: the verb suspended the merge
 // first. Any other bounce over a merge's lease still fails on it.
+// deferredBehindMerge reports whether a restart hold the take refused, ERR,
+// was refused because a merge holds the workspace, for a bounce of REASON
+// that waits behind a merge and was not forced.
+func deferredBehindMerge(reason RelaunchReason, force bool, err error) bool {
+	var held *wsm.LeaseHeldError
+	return reason.waitsBehindAMerge() && !force && errors.As(err, &held) && held.Holder == wsm.HolderMerge
+}
+
 func mergeHoldsTheWorkspace(reason RelaunchReason, err error) bool {
 	var held *wsm.LeaseHeldError
 	return reason == ReasonRestartVerb && errors.As(err, &held) && held.Holder == wsm.HolderMerge

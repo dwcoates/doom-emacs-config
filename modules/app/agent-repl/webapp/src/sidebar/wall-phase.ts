@@ -16,11 +16,24 @@
  * reveal of a hidden page computes the same phase for the same instant, so
  * the dot on screen after a switch is exactly where the one before it was.
  *
- * THE PERIOD IS READ, NEVER RESTATED. The seek walks the rail's running Web
- * Animations (`Element.getAnimations`) and takes each one's duration from its
- * own timing, so a keyframe rule's duration lives only in `styles.css`; there
- * is no TypeScript copy to drift from it. One-shot animations and transitions
- * (finite iterations) are not loops and are left alone.
+ * THE PERIOD IS READ, NEVER RESTATED. The seek reads each looping element's
+ * computed animation (its name, duration, iteration count, direction and
+ * delay lists), so a keyframe rule's duration lives only in `styles.css`;
+ * there is no TypeScript copy to drift from it. One-shot animations and
+ * transitions (finite iterations) are not loops and are left alone.
+ *
+ * NO ANIMATION OBJECT IS EVER ASKED FOR. The seek moves a loop by giving it a
+ * NEGATIVE `animation-delay` of the phase (src/animation-delays.ts, which
+ * reaches a `::before` or `::after` loop too), never through
+ * `getAnimations()`: on the system WebKit, an animation script has asked for
+ * is never freed, nor the element it animated, and the rail is redrawn up to
+ * 140 times a minute, so the sidebar's web process held 14,237 dead
+ * animations and gained about 45 a minute (2026-11-18; see the webapp's
+ * AGENTS.md, Performance lessons). A fresh element starts its animation at
+ * its draw, so the delay lands it on the phase; a reveal restarts every loop
+ * in one style pass, which makes each fresh again. Each part's own delay is
+ * kept beside it (`WALL_PHASE_BASE_ATTRIBUTE`), so a second seek never
+ * compounds the first.
  *
  * WHEN IT SEEKS. After every draw, once the drawn rail is in the document
  * (`seek`), and on the first animation frame after the page becomes visible
@@ -30,6 +43,15 @@
 import { log } from "../log.js";
 import { createPresence, pagePresence, type Presence } from "../presence.js";
 import { nextFrame } from "../frame.js";
+import { queryAll } from "../dom.js";
+import {
+  animatedParts,
+  nth,
+  restartAnimations,
+  writeDelays,
+  type AnimationPart,
+  type PartAnimations,
+} from "../animation-delays.js";
 
 /** The slice of a Web Animation the seek reads and moves. */
 export interface PhasedAnimation {
@@ -37,11 +59,76 @@ export interface PhasedAnimation {
   readonly effect: { getTiming(): EffectTiming } | null;
 }
 
-/** Where a rail's running animations are read from. */
-export type AnimationSource = (host: Element) => Iterable<PhasedAnimation>;
+/**
+ * Where a rail's running animations are read from. RESTART says the page was
+ * just shown again, so each loop is restarted before it is sought.
+ */
+export type AnimationSource = (host: Element, restart: boolean) => Iterable<PhasedAnimation>;
 
-/** The page's own animations under HOST, which is what production reads. */
-export const PAGE_ANIMATIONS: AnimationSource = (host) => host.getAnimations({ subtree: true });
+/**
+ * The attribute each part's own animation delays are kept in, in ms: the
+ * element's own, and its `::before`'s and `::after`'s beside it.
+ */
+export const WALL_PHASE_BASE_ATTRIBUTE: Readonly<Record<AnimationPart, string>> = {
+  "": "data-wall-phase-base",
+  "::before": "data-wall-phase-base-before",
+  "::after": "data-wall-phase-base-after",
+};
+
+/**
+ * The page's own looping animations under HOST, on every element and its
+ * pseudo-elements, read off computed style, which is what production reads
+ * (see the header). RESTART makes every loop fresh first, in one style pass.
+ */
+export const PAGE_ANIMATIONS: AnimationSource = (host, restart) => {
+  const view = host.ownerDocument.defaultView;
+  if (view === null) return [];
+  const looping: PartAnimations[] = [];
+  for (const element of [host, ...queryAll(host, "*")]) {
+    for (const part of animatedParts(element, view)) if (part.iterations.some((n) => n === Infinity)) looping.push(part);
+  }
+  if (restart) {
+    // A layout read resolves every element's style; a computed-style read
+    // of HOST alone resolves only its own (WebKit, 2026-11-18).
+    restartAnimations(new Set(looping.map((part) => part.element)), () => void host.ownerDocument.documentElement.offsetWidth);
+  }
+  return looping.flatMap(partLoops);
+};
+
+/**
+ * One part's animations as PhasedAnimations whose seek writes its delays, or
+ * none when it runs no endless loop. Its own delays are kept on the element
+ * the first time, so a later seek never compounds an earlier one.
+ */
+export function partLoops(animations: PartAnimations): PhasedAnimation[] {
+  const { element, part, names, durations, iterations, directions } = animations;
+  if (!names.some((_, i) => nth(iterations, i) === Infinity)) return [];
+  const attribute = WALL_PHASE_BASE_ATTRIBUTE[part];
+  const kept = element.getAttribute(attribute);
+  const bases = kept === null ? animations.delays : kept.split(",").map(Number);
+  if (kept === null) element.setAttribute(attribute, bases.join(","));
+  const delays = names.map((_, i) => nth(bases, i));
+  return names.map((_, i) => {
+    const timing: EffectTiming = {
+      duration: nth(durations, i),
+      iterations: nth(iterations, i),
+      direction: nth(directions, i),
+      delay: nth(bases, i),
+    };
+    return {
+      effect: { getTiming: () => timing },
+      get currentTime(): CSSNumberish | null {
+        return null;
+      },
+      set currentTime(to: CSSNumberish | null) {
+        // A FRESH LOOP'S ACTIVE TIME AT ITS DRAW IS MINUS ITS DELAY, so the
+        // phase the seek asks for is a delay of base - to.
+        delays[i] = nth(bases, i) - Number(to);
+        writeDelays(element, part, delays);
+      },
+    };
+  });
+}
 
 /** What the seek needs from its environment; every field defaults to the page. */
 export interface WallPhaseEnv {
@@ -132,17 +219,18 @@ export function installWallPhase(host: Element, env: WallPhaseEnv = {}): WallPha
   const presence = env.presence ?? owned ?? pagePresence();
 
   let disposed = false;
-  const seek = (): void => {
-    const sought = seekToWallClock(animations(host), now());
+  const seekWith = (restart: boolean): void => {
+    const sought = seekToWallClock(animations(host, restart), now());
     log.debug("seeked the rail's looping animations to the wall clock", {
       operation: "sidebar.wall-phase.seek",
-      context: { animations: sought },
+      context: { animations: sought, restart },
     });
   };
+  const seek = (): void => seekWith(false);
   const unsubscribe = presence.onChange((seen) => {
     if (!seen) return;
     frame(() => {
-      if (!disposed) seek();
+      if (!disposed) seekWith(true);
     });
   });
 

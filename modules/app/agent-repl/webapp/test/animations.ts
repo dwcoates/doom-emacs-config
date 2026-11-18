@@ -1,26 +1,37 @@
 /**
- * `Element.getAnimations` FOR JSDOM — an environment substitution, because
- * jsdom lacks the capability rather than because the app has a seam here.
+ * A PSEUDO-ELEMENT'S COMPUTED STYLE FOR JSDOM — an environment substitution,
+ * because jsdom lacks the capability rather than because the app has a seam.
  *
- * jsdom runs no CSS animations at all, so the truthful answer to "what is
- * animating under this element" is always nothing. The rail reads it after
- * every draw (`src/sidebar/wall-phase.ts`); a suite that needs animations to
- * seek injects its own source through the mount's `wallPhase` deps.
+ * jsdom computes no pseudo-element styles: `getComputedStyle(el, "::before")`
+ * answers the ELEMENT's own, so an element running one animation would read
+ * as running it three times (src/animation-delays.ts reads every part). The
+ * truthful answer in a page with no stylesheet pseudo-element rules is a
+ * style declaring nothing, which runs no animation.
  */
 
 /**
- * Install the stub on `Element.prototype` unless the environment already has
- * one. Called before every file, because the worker's environment is shared
- * across files (`isolate: false`) but a node-environment file has no DOM at
- * all — there is nothing to install on, and a later jsdom file in the same
- * worker installs it then.
+ * The marker the substituted `getComputedStyle` itself wears. It is on the
+ * FUNCTION, not the window: a suite that installs a `getComputedStyle` of its
+ * own (tree-layout.ts) replaces the substitution, and the next file's install
+ * must see that and wrap whatever stands now.
  */
-export function installGetAnimations(): void {
-  if (typeof Element === "undefined") return;
-  if (typeof Element.prototype.getAnimations === "function") return;
-  Element.prototype.getAnimations = function none(): Animation[] {
-    return [];
-  };
+const PSEUDO_AWARE = Symbol.for("agent-repl.test.pseudo-aware-computed-style");
+
+/**
+ * Install the substitution on the window unless the `getComputedStyle` there
+ * now is already it. Called before every file, as the other substitutions
+ * are; a node-environment file has no window to install on.
+ */
+export function installPseudoElementStyle(): void {
+  if (typeof window === "undefined") return;
+  const current: unknown = Reflect.get(window, "getComputedStyle");
+  if (typeof current !== "function") throw new Error("jsdom: the window has no getComputedStyle to substitute");
+  if (Reflect.get(current, PSEUDO_AWARE) === true) return;
+  const elementOnly = (current as typeof window.getComputedStyle).bind(window);
+  const aware = (element: Element, pseudo?: string | null): CSSStyleDeclaration =>
+    pseudo === undefined || pseudo === null || pseudo === "" ? elementOnly(element) : document.createElement("div").style;
+  Reflect.set(aware, PSEUDO_AWARE, true);
+  window.getComputedStyle = aware;
 }
 
 /**

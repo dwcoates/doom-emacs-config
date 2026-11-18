@@ -158,6 +158,10 @@ type restarterHarness struct {
 	// holder it was asked for.
 	holderErr      error
 	ensuredHolders []string
+	// holderDown makes HolderServing find no holder serving; probeErr is
+	// what it answers.
+	holderDown bool
+	probeErr   error
 }
 
 // ensureHolder is the harness's EnsureHolder: it records "ensure-holder <id>"
@@ -255,7 +259,10 @@ func newRestarter(t *testing.T) *restarterHarness {
 		ProcessExit:  h.processExit,
 		Define:       h.define,
 		EnsureHolder: h.ensureHolder,
-		StoreHolder:  "store-holder",
+		HolderServing: func(context.Context, string) (bool, error) {
+			return !h.holderDown, h.probeErr
+		},
+		StoreHolder: "store-holder",
 	}
 	return h
 }
@@ -337,6 +344,40 @@ func TestAStoreAtASocketNoHolderHoldsEnsuresNoHolder(t *testing.T) {
 	want := []string{"define " + StoreLabel, "stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
 	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) || len(h.ensuredHolders) != 0 {
 		t.Fatalf("RestartStore = %v, acts %v, holders %v; want %v and no holder ensured", err, h.acts(), h.ensuredHolders, want)
+	}
+}
+
+func TestTheBootMovesAStoreOffItsHolderOntoIt(t *testing.T) {
+	tests := []struct {
+		name     string
+		down     bool
+		probeErr error
+		wantActs []string
+		wantErr  bool
+	}{
+		{name: "a store whose holder is not up is reloaded onto it", down: true,
+			wantActs: []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "reload " + StoreLabel, "start " + SidecarLabel}},
+		{name: "a store whose holder serves is left alone"},
+		{name: "a probe that fails stops the boot's step and restarts nothing", probeErr: errors.New("probe hung"),
+			wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the store and the sidecar run the installed build.
+			h := newRestarter(t)
+			h.running(t, StoreLabel, buildreport.ServiceStore, 10, "new store", "new store")
+			h.running(t, SidecarLabel, buildreport.ServiceSidecar, 20, "new sidecar", "new sidecar")
+			h.services.onRestart = func() { h.bindSocket(t) }
+			h.holderDown, h.probeErr = tt.down, tt.probeErr
+
+			// Act
+			_, err := h.r.EnsureStoreCurrent(context.Background())
+
+			// Assert
+			if (err != nil) != tt.wantErr || fmt.Sprint(h.acts()) != fmt.Sprint(tt.wantActs) {
+				t.Fatalf("EnsureStoreCurrent = %v, acts %v; want error %v, acts %v", err, h.acts(), tt.wantErr, tt.wantActs)
+			}
+		})
 	}
 }
 

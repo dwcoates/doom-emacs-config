@@ -20,6 +20,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/briefprompt"
@@ -151,6 +152,10 @@ type Deps struct {
 	// no other daemon holds it: this one does, or its row stands released for
 	// the adoption under way here (forwardTarget). Required.
 	ServingElsewhere func(ctx context.Context, ws ids.WorkspaceID) (address string, ok bool, err error)
+	// ColdGateOf answers the cold facts of WS's standing cold gate, false when
+	// none stands (workspace.Fleet.StandingColdGate): a create whose new
+	// session parked at its gate says so in its success. REQUIRED.
+	ColdGateOf func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool)
 	// SharedAddress answers the shared address the daemons advertise through
 	// their socket holder, "" when they share none. Every address a refusal
 	// tells a client is it when set (daemonaddr.ClientAddress): a client never learns a
@@ -596,6 +601,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a shared address source")
 	case deps.ServingElsewhere == nil:
 		return nil, missing("the serving-row lookup")
+	case deps.ColdGateOf == nil:
+		return nil, missing("the cold gate lookup")
 	case deps.Forward == nil:
 		return nil, missing("the forwarding client")
 	case deps.Creates == nil:

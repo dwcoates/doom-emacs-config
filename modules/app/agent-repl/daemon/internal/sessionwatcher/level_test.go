@@ -3,6 +3,7 @@ package sessionwatcher
 import (
 	"testing"
 
+	"agent-repld/internal/dlog"
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -209,4 +210,123 @@ func TestAQueryDeathMarksItsPublicationProcessEnded(t *testing.T) {
 	h.rec.untilEvent(t, "feed.OnLiveWorkChanged(process_ended)", func(e event) bool {
 		return e.sink == "feed" && e.method == "OnLiveWorkChanged" && e.live != nil && e.live.ProcessEnded && e.live.Empty()
 	})
+}
+
+func TestTheFirstLevelThatOmitsARetiredHandleReleasesIt(t *testing.T) {
+	// Arrange: the terminal lands first, and a stale level still names the item.
+	h := newHarness(t, Session{Started: levelStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("")))))
+	h.pushLevel(t, "w-1")
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("w-1", false)))))
+	h.pushLevel(t, "w-1")
+
+	// Act: the level drops it, then names it again for a new run.
+	h.pushLevel(t)
+	h.pushLevel(t, "w-1")
+
+	// Assert: the described item is live again, counted by its handle (its
+	// announcement named no agent).
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("w-1")}})
+}
+
+func TestALevelThatConcludesAnItemAlsoReleasesItsHandle(t *testing.T) {
+	// Arrange: the item leaves the level with no terminal.
+	h := newHarness(t, Session{Started: levelStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+	h.pushLevel(t, "w-1")
+	h.pushLevel(t)
+
+	// Act: the vendor runs it again.
+	h.pushLevel(t, "w-1")
+
+	// Assert.
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{Agents: []*conversationv1.AgentId{agentID("sub-1")}})
+}
+
+func TestARunReadmittedAfterItsReleaseOpensItsAgentWatchAgain(t *testing.T) {
+	// Arrange: the subagent ran once, and its watch was opened then.
+	h := newHarness(t, Session{Started: levelStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("sub-1")))))
+	h.pushLevel(t, "w-1")
+	h.client.nextAgentOpenFor(t, "sub-1")
+	h.pushLevel(t)
+
+	// Act.
+	h.pushLevel(t, "w-1")
+
+	// Assert: the second run's watch is opened.
+	h.client.nextAgentOpenFor(t, "sub-1")
+}
+
+func TestAReleaseIsRecordedOnTheLevelThatMadeIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: levelStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("")))))
+	h.pushLevel(t, "w-1")
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("w-1", false)))))
+
+	// Act.
+	h.pushLevel(t)
+
+	// Assert.
+	released, _ := h.lastLevelRecord(t)["released"].([]string)
+	if len(released) != 1 || released[0] != "w-1" {
+		t.Fatalf("released = %v, want [w-1]", h.lastLevelRecord(t)["released"])
+	}
+}
+
+func TestAStaleLevelNamingARetiredHandleIsRecordedAtInfo(t *testing.T) {
+	// Arrange.
+	h := newHarness(t, Session{Started: levelStarted("")})
+	h.quiet()
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", subagentWork("")))))
+	h.pushLevel(t, "w-1")
+	h.route(h.main, entryFrame(frameUpdate("main-1", activityUpdate(settledSubagentActivity("w-1", false)))))
+
+	// Act.
+	h.pushLevel(t, "w-1")
+
+	// Assert.
+	if !h.hasRecord("info", "daemon.sessionwatcher.level_names_retired") {
+		t.Fatalf("records = %+v, want the stale level's refusal at INFO", h.log.Records())
+	}
+}
+
+func TestAShellsRetirementOutlivesEveryLevel(t *testing.T) {
+	// Arrange: the shell ends, and a level (which never names shells) follows.
+	h := newHarness(t, Session{Started: levelStarted("", createdWork("w-1", bashWork()))})
+	h.client.nextBashOpen(t)
+	h.quiet()
+	entry := h.shellWatchFor("w-1")
+	h.routeNow(func(w *watcher) {
+		w.routeBashLocked(entry, &conversationv1.AgentBash{
+			Result: &conversationv1.AgentBash_Success{Success: &conversationv1.AgentBashSuccess{}},
+		})
+	})
+	h.pushLevel(t)
+
+	// Act: the end-of-run upsert re-serves the announcement.
+	h.route(h.main, entryFrame(frameDetached("main-1", createdWork("w-1", bashWork()))))
+
+	// Assert.
+	assertLiveWork(t, h.w.LiveWork(), LiveWorkSet{})
+}
+
+// lastLevelRecord answers the context of the latest level_applied record.
+func (h *harness) lastLevelRecord(t *testing.T) dlog.Context {
+	t.Helper()
+	var last dlog.Context
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.sessionwatcher.level_applied" {
+			last = r.Context
+		}
+	}
+	if last == nil {
+		t.Fatalf("no level_applied record in %+v", h.log.Records())
+	}
+	return last
 }

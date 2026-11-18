@@ -177,6 +177,15 @@ type client struct {
 	// SessionEnding (internal/workspace/fleet_rollout.go); this is the same
 	// courtesy for the SUPERVISOR's own stream, which nothing was telling.
 	standDown atomic.Bool
+	// killsInFlight counts this client's KillSession calls still unanswered.
+	// The latch reads raised while one is in flight, so a departure it causes
+	// is ordered; the call's own answer then decides. A shim that ended its
+	// session (or whose answer was never read) raises `standDown` for good. A
+	// shim that REFUSED leaves it as it was, so the shim keeps serving with
+	// its watches opening again (2026-11-18, send-slack-link-formatting: a
+	// refused skills bounce left the latch raised for 86s, no watch of a new
+	// subagent opened, and its shell was drawn in no feed).
+	killsInFlight atomic.Int32
 
 	// daemonStandDown reads the SUPERVISOR's own stand-down latch, and it is
 	// the second half of the same signal `standDown` above is the first half
@@ -313,6 +322,15 @@ func (c *client) StandingDown() bool {
 	return asked || daemon
 }
 
+// StandDownOrdered answers whether a stand-down of this shim is settled: a
+// Kill, an armed StandDown, a KillSession the shim accepted or whose answer
+// was never read, or the daemon's own stand-down. It is StandingDown without
+// a KillSession still awaiting its answer, which a refusal can undo: what
+// must not be lost to a refusal (a watch's open) reads this one.
+func (c *client) StandDownOrdered() bool {
+	return c.standDown.Load() || (c.daemonStandDown != nil && c.daemonStandDown())
+}
+
 // standDownLatches reports the two halves of the stand-down signal separately:
 // `asked` is this client's own record that a teardown was asked OF IT, and
 // `daemon` is the supervisor's daemon-wide latch. Every record that reports a
@@ -320,7 +338,7 @@ func (c *client) StandingDown() bool {
 // reached this client" are different facts and a reader that is given only the
 // first cannot tell an unnamed client's ordered departure from a crash.
 func (c *client) standDownLatches() (asked, daemon bool) {
-	return c.standDown.Load(), c.daemonStandDown != nil && c.daemonStandDown()
+	return c.standDown.Load() || c.killsInFlight.Load() > 0, c.daemonStandDown != nil && c.daemonStandDown()
 }
 
 // standDownFields states both latches on a record.
@@ -1715,11 +1733,17 @@ func (c *client) NetworkChanged(ctx context.Context, req *shimv1.NetworkChangedR
 // WAITS (rollout's awaitUnansweredStandDown), so without the hang-up that
 // shim would wait forever and the relaunch would defer behind it.
 func (c *client) KillSession(ctx context.Context, req *shimv1.KillSessionRequest) (*shimv1.KillSessionResponse, error) {
-	c.standDown.Store(true)
+	c.killsInFlight.Add(1)
 	resp, err := unary(ctx, c, "kill_session", req, validateKillSessionRequest, c.rpc.KillSession)
 	if err == nil && resp.GetSuccess() == nil {
+		// THE SHIM REFUSED: it serves on, so the latch is left as it was.
+		c.killsInFlight.Add(-1)
+		c.log.Info("daemon.shimclient.kill_session", "the shim refused the stand-down; it serves on, and its watches open again", dlog.Context{
+			"workspace_id": string(c.ws), "ordered": c.standDown.Load()})
 		return resp, nil
 	}
+	c.standDown.Store(true)
+	c.killsInFlight.Add(-1)
 	c.hangUpAfterKill(err == nil)
 	return resp, err
 }

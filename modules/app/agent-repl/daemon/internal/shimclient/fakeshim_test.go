@@ -52,6 +52,9 @@ type fakeShim struct {
 	// killSessionErr, when set, fails the KillSession call instead of
 	// answering it, over a connection that stays up.
 	killSessionErr error
+	// duringKillSession, when set, runs while the KillSession call is in
+	// flight, before it is answered: a test reads the client's latch there.
+	duringKillSession func()
 
 	// killHungUp receives, per KillSession, the channel closed when the
 	// client hangs up the connection that KillSession came in on.
@@ -342,8 +345,11 @@ func (f *fakeShim) KillSession(ctx context.Context, _ *connect.Request[shimv1.Ki
 	f.record("KillSession")
 	f.killHungUp <- hangup.Of(ctx)
 	f.mu.Lock()
-	resp, failure := f.killSessionResp, f.killSessionErr
+	resp, failure, during := f.killSessionResp, f.killSessionErr, f.duringKillSession
 	f.mu.Unlock()
+	if during != nil {
+		during()
+	}
 	if failure != nil {
 		return nil, failure
 	}

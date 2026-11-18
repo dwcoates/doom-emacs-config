@@ -233,3 +233,38 @@ func TestHolderOfSocketFindsTheHolderThatHoldsIt(t *testing.T) {
 		})
 	}
 }
+
+func TestServingIDProbesAndInstallsNothing(t *testing.T) {
+	tests := []struct {
+		name        string
+		id          string
+		probe       error
+		wantServing bool
+		wantErr     bool
+	}{
+		{name: "a holder that answers serves", id: "h", wantServing: true},
+		{name: "a control socket nothing serves is not served", id: "h", probe: fmt.Errorf("%w: dial", sockethold.ErrNoHolder)},
+		{name: "a holder that fails its probe is an error", id: "h", probe: errors.New("i/o timeout"), wantErr: true},
+		{name: "an undeclared holder is an error", id: "nothing", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			installed := false
+			e := &Ensurer{
+				Holders: []Holder{{ID: "h", Control: "/h.sock"}},
+				Probe:   func(context.Context, string) error { return tt.probe },
+				Install: func(context.Context, string) error { installed = true; return nil },
+				Log:     dlog.NewTestLogger(),
+			}
+
+			// Act
+			serving, err := e.ServingID(context.Background(), tt.id)
+
+			// Assert
+			if serving != tt.wantServing || (err != nil) != tt.wantErr || installed {
+				t.Fatalf("ServingID = (%v, %v), installed %v; want (%v, error %v) and nothing installed", serving, err, installed, tt.wantServing, tt.wantErr)
+			}
+		})
+	}
+}

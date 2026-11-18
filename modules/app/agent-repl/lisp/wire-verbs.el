@@ -564,14 +564,29 @@ unprioritized workspace, no ungated consent."
   (agent-repl-wire-decode-workspace-ref json))
 
 (defun agent-repl-wire-decode-create-workspace-success (json)
-  "Decode CreateWorkspaceSuccess from JSON into (:workspace REF).
+  "Decode CreateWorkspaceSuccess JSON as (:workspace REF :held-at-cold-gate H).
 `workspace' is non-optional: a success without the minted identity is a
-contract breach, not an empty success."
+contract breach, not an empty success.  H is (:context-tokens N) when the
+new session parked at its cold gate holds the initial prompt there, nil
+otherwise."
   (let ((message "CreateWorkspaceSuccess"))
-    (agent-repl-wire-verbs--check-keys message json '(workspace))
-    (list :workspace
-          (agent-repl-wire-decode-create-workspace-success-workspace
-           (agent-repl-wire-verbs--require message "workspace" (cdr (assq 'workspace json)))))))
+    (agent-repl-wire-verbs--check-keys message json '(workspace heldAtColdGate))
+    (let ((held (cdr (assq 'heldAtColdGate json))))
+      (list :workspace
+            (agent-repl-wire-decode-create-workspace-success-workspace
+             (agent-repl-wire-verbs--require message "workspace" (cdr (assq 'workspace json))))
+            :held-at-cold-gate
+            (and held (agent-repl-wire-decode-create-workspace-held-at-cold-gate held))))))
+
+(defun agent-repl-wire-decode-create-workspace-held-at-cold-gate (json)
+  "Decode CreateWorkspaceHeldAtColdGate from JSON into (:context-tokens N).
+A uint64 arrives as a JSON string; an absent one is zero."
+  (let ((message "CreateWorkspaceHeldAtColdGate"))
+    (agent-repl-wire-verbs--check-keys message json '(contextTokens))
+    (let ((tokens (cdr (assq 'contextTokens json))))
+      (list :context-tokens (cond ((null tokens) 0)
+                                  ((stringp tokens) (string-to-number tokens))
+                                  (t tokens))))))
 
 (defun agent-repl-wire-decode-create-workspace-ungated-without-consent (json)
   "Decode CreateWorkspaceUngatedWithoutConsent from JSON.  Empty: An ungated

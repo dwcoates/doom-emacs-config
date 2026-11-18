@@ -5,7 +5,7 @@ import { installJsdomCapabilities } from "./jsdom-capabilities.js";
 
 /**
  * jsdom performs no layout and runs no animations, so the observers and
- * `Element.getAnimations` the app reaches for are substituted, once per
+ * pseudo-element styles the app reaches for are substituted, once per
  * environment (jsdom-capabilities.ts). A missing CAPABILITY of the
  * environment rather than a seam in the app.
  */

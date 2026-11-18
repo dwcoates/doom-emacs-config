@@ -703,7 +703,7 @@ var daemonUnitInputs = map[string][]string{
 	"internal/resolve/footer":  {"proto/vocab/"},
 	"internal/resolve/sidebar": {"proto/vocab/"},
 	"internal/runtimemetrics":  {"proto/vocab/"},
-	"internal/sessionwatcher":  {"proto/vocab/"},
+	"internal/sessionwatcher":  {"proto/vocab/", "daemon/"},
 	"internal/vocab":           {"daemon/", "proto/vocab/"},
 	// The agent CLI's tests check every command a skill or a daemon brief
 	// names, and that each API skill links the front door.

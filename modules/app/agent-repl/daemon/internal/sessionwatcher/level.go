@@ -21,8 +21,10 @@ import (
 //   - a level naming an item admits it -- with its description when one has
 //     arrived, or PENDING by its handle until one does;
 //   - a level no longer naming an item concludes it (concludedLeftLevel);
-//   - a terminal still concludes an item, and a concluded handle is never
-//     re-admitted by a later level (retiredWork);
+//   - a terminal still concludes an item, and a concluded handle is kept out
+//     of the live set until a level stops naming it (heldByLevel): a level
+//     naming it before then was pushed before the shim saw its end, and one
+//     naming it after states a NEW run of the same handle;
 //   - a SHELL is not in the level: its end has one writer, the sidecar's
 //     terminal once the spool is read to its end, so a shell is admitted at its
 //     announcement and concluded by that terminal, in level mode as before it.
@@ -85,7 +87,7 @@ func (w *watcher) applyLevelLocked(handles []*conversationv1.DetachedWorkId, sou
 	var admitted, pended, left []string
 	for value := range next {
 		if _, retired := w.retiredWork[value]; retired {
-			w.log.Debug("daemon.sessionwatcher.level_names_retired", "the level names work this watcher already saw settle; it stays out of the live set", dlog.Context{
+			w.log.Info("daemon.sessionwatcher.level_names_retired", "the level names work this watcher saw settle and no level has dropped since; it was pushed before the shim saw the end, and the work stays out of the live set", dlog.Context{
 				"work_id": value, "source": source,
 			})
 			continue
@@ -127,12 +129,25 @@ func (w *watcher) applyLevelLocked(handles []*conversationv1.DetachedWorkId, sou
 			changed = true
 		}
 	}
+	// A RETIREMENT ENDS AT THE FIRST LEVEL THAT OMITS ITS HANDLE, this one
+	// included when it is the level that concluded the item: every later level
+	// naming the handle states a new run (watcher.heldByLevel).
+	var released []string
+	for value := range w.heldByLevel {
+		if _, still := next[value]; still {
+			continue
+		}
+		delete(w.heldByLevel, value)
+		delete(w.retiredWork, value)
+		released = append(released, value)
+	}
 	sort.Strings(admitted)
 	sort.Strings(pended)
 	sort.Strings(left)
+	sort.Strings(released)
 	w.log.Info("daemon.sessionwatcher.level_applied", "the ledger was held to the shim's live-work level", dlog.Context{
 		"source": source, "named": len(next), "admitted": admitted, "pending": pended, "left": left,
-		"live_after": len(w.live), "pending_after": len(w.pending),
+		"released": released, "live_after": len(w.live), "pending_after": len(w.pending),
 	})
 	return changed
 }

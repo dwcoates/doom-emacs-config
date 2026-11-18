@@ -637,9 +637,12 @@ type fakeFleet struct {
 	adopted map[ids.WorkspaceID]*fakeShim
 
 	prelaunchErr map[ids.WorkspaceID]error
-	adoptErr     map[ids.WorkspaceID]error
-	installErr   map[ids.WorkspaceID]error
-	resumeErr    map[ids.WorkspaceID]error
+	// onPrelaunch runs as a prelaunch begins, outside the fleet's lock: a
+	// test stands what races the relaunch there.
+	onPrelaunch func(ws ids.WorkspaceID)
+	adoptErr    map[ids.WorkspaceID]error
+	installErr  map[ids.WorkspaceID]error
+	resumeErr   map[ids.WorkspaceID]error
 	// resumeErrOnce is what the NEXT Resume of a workspace answers, once.
 	resumeErrOnce map[ids.WorkspaceID]error
 	resumeCold    map[ids.WorkspaceID]*conversationv1.SessionCold
@@ -809,6 +812,9 @@ func (f *fakeFleet) Client(ws ids.WorkspaceID) (shimclient.Client, bool) {
 
 func (f *fakeFleet) Prelaunch(_ context.Context, ws ids.WorkspaceID) (shimclient.Client, error) {
 	f.order.record("prelaunch")
+	if f.onPrelaunch != nil {
+		f.onPrelaunch(ws)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.prelaunchErr[ws]; err != nil {

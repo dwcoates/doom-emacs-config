@@ -481,6 +481,42 @@ func TestCreateWorkspaceStaysSynchronousWithoutAnOpId(t *testing.T) {
 	}
 }
 
+func TestACreatesSuccessSaysWhenItsPromptIsHeldAtTheColdGate(t *testing.T) {
+	cases := []struct {
+		name       string
+		cold       *conversationv1.SessionCold
+		wantHeld   bool
+		wantTokens uint64
+	}{
+		{name: "a session parked at its cold gate holds the prompt there", cold: &conversationv1.SessionCold{ContextTokens: 194149}, wantHeld: true, wantTokens: 194149},
+		{name: "a session at no gate names no hold"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			repoRef := registeredRepoRef(h)
+			h.Verbs.createRec = wsm.Workspace{ID: "ws-created", Dir: "/tmp/ws", Name: "minted"}
+			if tc.cold != nil {
+				h.ColdGates = map[ids.WorkspaceID]*conversationv1.SessionCold{"ws-created": tc.cold}
+			}
+
+			// Act.
+			resp, err := h.Client.CreateWorkspace(context.Background(),
+				connect.NewRequest(standardCreate(repoRef, "")))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("CreateWorkspace: %v", err)
+			}
+			held := resp.Msg.GetSuccess().GetHeldAtColdGate()
+			if resp.Msg.GetSuccess().GetWorkspace().GetId() != "ws-created" || (held != nil) != tc.wantHeld || held.GetContextTokens() != tc.wantTokens {
+				t.Fatalf("result = %v, want success held %v at %d tokens", resp.Msg.GetResult(), tc.wantHeld, tc.wantTokens)
+			}
+		})
+	}
+}
+
 // TestCreateWorkspaceRunsToCompletionUnderACancelledRequestContext is the
 // cancellation fix: the accepting request is cancelled WHILE the create is
 // mid-flight, and the create must still run to completion — a succeeded event,

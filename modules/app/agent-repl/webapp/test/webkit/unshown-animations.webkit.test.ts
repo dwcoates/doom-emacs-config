@@ -26,12 +26,17 @@ const KEYFRAMES = `
 @keyframes test-loop { from { opacity: 0 } to { opacity: 1 } }
 @keyframes test-once { from { opacity: 0 } to { opacity: 1 } }
 .test-loop { animation: test-loop 1000ms linear infinite; }
-.test-once { opacity: 0; animation: test-once 200ms linear 100ms forwards; }`;
+.test-once { opacity: 0; animation: test-once 200ms linear 100ms forwards; }
+.test-pseudo-loop::after { content: "x"; animation: test-loop 1000ms linear infinite; }`;
 
-/** One animation's state, read in the page. */
+/**
+ * One animation's state, read in the page. Its position is its current time
+ * less its delay: the pause moves an animation on by its delay, never by its
+ * current time.
+ */
 interface Read {
   playState: string;
-  currentTime: number;
+  position: number;
 }
 
 /** Start a fresh page under the real pause, shown; the presence rides on `window.presence`. */
@@ -85,11 +90,11 @@ async function setShown(page: Page, shown: boolean): Promise<void> {
 async function read(page: Page, id: string): Promise<Read & { now: number; opacity: string }> {
   return page.evaluate(async (elId) => {
     const el = document.getElementById(elId)!;
-    const animation = el.getAnimations()[0];
+    const animation = el.getAnimations({ subtree: true })[0];
     await animation.ready;
     return {
       playState: animation.playState,
-      currentTime: Number(animation.currentTime),
+      position: Number(animation.currentTime) - Number(animation.effect!.getTiming().delay),
       now: Number(document.timeline.currentTime),
       opacity: getComputedStyle(el).opacity,
     };
@@ -114,6 +119,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
   let madeResumed: { after: Read & { now: number }; expected: number };
   let oneShot: Read & { opacity: string };
   let footerWord: Read;
+  let pseudoResumed: { after: Read & { now: number }; expected: number };
 
   beforeAll(async () => {
     const css = `${await pageStylesheet()}\n${KEYFRAMES}`;
@@ -145,7 +151,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
     await wait(page, 400);
     await setShown(page, true);
     let after = await read(page, id);
-    runningResumed = { after, expected: before.currentTime + (after.now - before.now) };
+    runningResumed = { after, expected: before.position + (after.now - before.now) };
 
     // A loop made while hidden, shown again.
     await freshPage(page, css, script);
@@ -166,6 +172,17 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
     await setShown(page, true);
     oneShot = await read(page, id);
 
+    // A loop on a pseudo-element running at the hide, shown again.
+    await freshPage(page, css, script);
+    id = await add(page, "test-pseudo-loop");
+    await wait(page, 50);
+    const pseudoBefore = await read(page, id);
+    await setShown(page, false);
+    await wait(page, 400);
+    await setShown(page, true);
+    const pseudoAfter = await read(page, id);
+    pseudoResumed = { after: pseudoAfter, expected: pseudoBefore.position + (pseudoAfter.now - pseudoBefore.now) };
+
     // The footer's breathing word, under the real stylesheet's rule.
     await freshPage(page, css, script);
     id = await add(page, "pfooter-wave-letter");
@@ -178,7 +195,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
   });
 
   it("holds a running loop still while the page is not shown", () => {
-    expect([held.first.playState, held.second.currentTime]).toEqual(["paused", held.first.currentTime]);
+    expect([held.first.playState, held.second.position]).toEqual(["paused", held.first.position]);
   });
 
   it("holds a loop drawn with an inline animation shorthand still too", () => {
@@ -187,16 +204,21 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
 
   it("resumes a loop running at the hide where it would have been", () => {
     const { after, expected } = runningResumed;
-    expect([after.playState, near(after.currentTime, expected)]).toEqual(["running", true]);
+    expect([after.playState, near(after.position, expected)]).toEqual(["running", true]);
   });
 
   it("resumes a loop made while hidden where it would have been", () => {
     const { after, expected } = madeResumed;
-    expect([after.playState, near(after.currentTime, expected)]).toEqual(["running", true]);
+    expect([after.playState, near(after.position, expected)]).toEqual(["running", true]);
   });
 
   it("leaves a one-shot that would have ended while hidden ended, at its last frame", () => {
     expect([oneShot.playState, oneShot.opacity]).toEqual(["finished", "1"]);
+  });
+
+  it("resumes a pseudo-element's loop running at the hide where it would have been", () => {
+    const { after, expected } = pseudoResumed;
+    expect([after.playState, near(after.position, expected)]).toEqual(["running", true]);
   });
 
   it("pauses the footer's breathing word by the real stylesheet's rule", () => {

@@ -28,9 +28,12 @@ const (
 	// is a job for the fast model, and the banner should not wait on more.
 	SummaryModel = headless.ModelHaiku
 	// DefaultSummaryTimeout bounds one summary call: one sentence from Haiku
-	// over one answer. MEASURED 2026-10-14: 1.9-4.0s end to end, a
-	// MaxAnswerRunes answer included, so the bound is just over twice that.
-	DefaultSummaryTimeout = 10 * time.Second
+	// over one answer, most of it the `claude -p` command's own start.
+	// MEASURED 2026-11-18 from the owner's run log: 29 calls, the slowest
+	// 4.97s, 5.68s and 6.11s, and one killed at the earlier 10s bound (it was
+	// sized from 1.9-4.0s on 2026-10-14). Doubled to 20s at the owner's
+	// ruling, about three times the measured worst.
+	DefaultSummaryTimeout = 20 * time.Second
 	// MaxAnswerRunes caps the answer the call is handed, so one enormous
 	// answer cannot grow the call without bound. The head of an answer is
 	// where its conclusion is stated.

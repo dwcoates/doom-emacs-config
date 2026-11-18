@@ -1,10 +1,13 @@
 // @vitest-environment jsdom
 import { createPresence } from "../../src/presence.js";
 import { beforeEach, describe, expect, it } from "vitest";
+import { partAnimations, PSEUDO_DELAY, type AnimationPart, type PartAnimations } from "../../src/animation-delays.js";
 import {
   installWallPhase,
+  partLoops,
   seekToWallClock,
   wallPhaseMs,
+  WALL_PHASE_BASE_ATTRIBUTE,
   type PhasedAnimation,
 } from "../../src/sidebar/wall-phase.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
@@ -319,5 +322,127 @@ describe("keeping a rail on the wall clock", () => {
 
     // Assert
     expect(pulse.currentTime).toBeNull();
+  });
+});
+
+/** A computed style naming ANIMATION, as WebKit computes one. */
+function computed(animation: {
+  name: string;
+  duration: string;
+  iterations: string;
+  direction?: string;
+  delay?: string;
+}): CSSStyleDeclaration {
+  return {
+    animationName: animation.name,
+    animationDuration: animation.duration,
+    animationIterationCount: animation.iterations,
+    animationDirection: animation.direction ?? "normal",
+    animationDelay: animation.delay ?? "0s",
+  } as unknown as CSSStyleDeclaration;
+}
+
+/** The part PART of EL running the animations COMPUTED lists. */
+function part(el: HTMLElement, computedStyle: CSSStyleDeclaration, at: AnimationPart = ""): PartAnimations {
+  const read = partAnimations(el, at, computedStyle);
+  if (read === null) throw new Error("the test's computed style runs no animation");
+  return read;
+}
+
+describe("reading a rail element's loops off its computed style", () => {
+  it("seeks an endless loop by a negative delay of its phase", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const loops = partLoops(part(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite" })));
+
+    // Act
+    seekToWallClock(loops, 2900);
+
+    // Assert
+    expect(el.style.animationDelay).toBe("-300ms");
+  });
+
+  it("reads no loop off an element running only a one-shot", () => {
+    // Arrange / Act
+    const loops = partLoops(part(document.createElement("span"), computed({ name: "row-flash", duration: "200ms", iterations: "1" })));
+
+    // Assert
+    expect(loops).toHaveLength(0);
+  });
+
+  it("seeks each loop of a list and leaves a one-shot beside it at its own delay", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const loops = partLoops(
+      part(el, computed({ name: "ws-pulse, row-flash", duration: "1.3s, 200ms", iterations: "infinite, 1", delay: "0s, 50ms" })),
+    );
+
+    // Act
+    seekToWallClock(loops, 2900);
+
+    // Assert
+    expect(el.style.animationDelay).toBe("-300ms, 50ms");
+  });
+
+  it("keeps the element's own delay, so a second seek does not compound the first", () => {
+    // Arrange: the element's own delay is 200ms.
+    const el = document.createElement("span");
+    seekToWallClock(partLoops(part(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite", delay: "200ms" }))), 2900);
+
+    // Act: the computed delay now reads the first seek's; the kept base decides.
+    seekToWallClock(partLoops(part(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite", delay: "-500ms" }))), 3000);
+
+    // Assert
+    expect([el.getAttribute(WALL_PHASE_BASE_ATTRIBUTE[""]), el.style.animationDelay]).toEqual(["200", "-400ms"]);
+  });
+
+  it("seeks a pseudo-element's loop through its element's delay property", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const loops = partLoops(part(el, computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite" }), "::after"));
+
+    // Act
+    seekToWallClock(loops, 2900);
+
+    // Assert
+    expect([el.style.getPropertyValue(PSEUDO_DELAY["::after"].property), el.style.animationDelay]).toEqual(["-300ms", ""]);
+  });
+
+  it("keeps a pseudo-element's own delay apart from its element's", () => {
+    // Arrange
+    const el = document.createElement("span");
+    const loop = computed({ name: "ws-pulse", duration: "1.3s", iterations: "infinite", delay: "100ms" });
+
+    // Act
+    seekToWallClock(partLoops(part(el, loop, "::before")), 2900);
+
+    // Assert
+    expect([el.getAttribute(WALL_PHASE_BASE_ATTRIBUTE["::before"]), el.getAttribute(WALL_PHASE_BASE_ATTRIBUTE[""])]).toEqual(["100", null]);
+  });
+});
+
+describe("a reveal restarts the loops it seeks", () => {
+  it("asks its source to restart on the first frame after the page is shown, never on a draw", () => {
+    // Arrange
+    const restarts: boolean[] = [];
+    const doc = fakeDocument("hidden");
+    const frames = frameQueue();
+    const wallPhase = installWallPhase(document.createElement("nav"), {
+      animations: (_host, restart) => {
+        restarts.push(restart);
+        return [];
+      },
+      now: () => 0,
+      doc,
+      frame: frames.frame,
+    });
+
+    // Act
+    wallPhase.seek();
+    doc.show();
+    frames.run();
+
+    // Assert
+    expect(restarts).toEqual([false, true]);
   });
 });

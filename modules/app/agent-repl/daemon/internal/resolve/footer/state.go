@@ -694,9 +694,14 @@ type wsState struct {
 	// handle arrived on the caller's book and retired the row, and 80ms later
 	// the same handle's `AgentSubagent_Start` arrived on the run's own book
 	// and RE-OPENED it, so the ⚙ chip read 3 beside two settled placements and
-	// one live one, for the rest of the session. A handle is minted once and
-	// its terminal is final, so a start after a terminal is a second telling
-	// of a finished run rather than a new one.
+	// one live one, for the rest of the session. A start after a terminal is
+	// a second telling of the finished run rather than a new one.
+	//
+	// A NEW RUN OF THE SAME HANDLE IS TOLD BY THE SET, never by a frame. A
+	// subagent that resumes on its own keeps its handle; the watcher lists it
+	// again only for that new run, so a subagent new to the set has its
+	// retirement forgotten (releaseRunsAgain) and its new run's frames
+	// describe it.
 	retiredWork map[string]struct{}
 	// adoptedWork are the detached items the watcher took up by ADOPTION and
 	// the set has not listed yet, so the set change that lists them does not

@@ -288,17 +288,35 @@ type watcher struct {
 	seenClosings map[string]struct{}
 
 	// retiredWork is every detached-work HANDLE this watcher reaped at its
-	// terminal. A retired handle is never live again: the contract retires a
-	// handle at its run's end, by equality, and a later announcement for it is
-	// a RE-SERVING — the vendor's end-of-run notification upserts the
-	// announcement row to add the output path, and that upsert rides the live
-	// watch again. Re-admitting it put a finished run back in the live set,
-	// re-opened its watch and re-placed its whole sub-feed, and its settle then
-	// dropped it a millisecond later: the footer's "added agent" churn. The
-	// footer holds the same rule for the same reason (chips.go retiredWork).
+	// terminal. A retired handle stays out of the live set: a later
+	// announcement for it is a RE-SERVING -- the vendor's end-of-run
+	// notification upserts the announcement row to add the output path, and
+	// that upsert rides the live watch again. Re-admitting it put a finished run
+	// back in the live set, re-opened its watch and re-placed its whole
+	// sub-feed, and its settle then dropped it a millisecond later: the
+	// footer's "added agent" churn.
 	//
 	// UNBOUNDED BY DESIGN, as seenClosings is: one entry per detached run.
 	retiredWork map[string]struct{}
+
+	// heldByLevel is every retired handle the live-work level still has to
+	// DROP before the retirement ends (level mode, shells excepted).
+	//
+	// A RETIREMENT LASTS UNTIL THE LEVEL STOPS NAMING THE HANDLE. A terminal
+	// reaches the watcher on the work's own stream, which shares no ordering
+	// with the session stream's level, so a level pushed before the shim saw
+	// the end can still name the handle after its terminal: that level is
+	// stale, and the retirement keeps it out. Levels are ordered on their one
+	// stream, so once a level omits the handle every later level naming it
+	// states the vendor running it AGAIN: a subagent that resumes on its own
+	// (it backgrounded a shell, ended its turn, and the shell's notification
+	// woke it) keeps its handle for the new run, and refusing that run left its
+	// rows undrawn and its watch closed while it worked (2026-11-18). So the
+	// first level that omits a handle releases it (applyLevelLocked).
+	//
+	// A SHELL IS NEVER HELD HERE: the level never names a shell, its end has
+	// one writer, and its retirement is for good.
+	heldByLevel map[string]struct{}
 
 	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
 	// sessionOpening is the session watch's open in flight, as on agentWatch.
@@ -498,6 +516,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 		seenClosings: map[string]struct{}{},
 		retiredWork:  map[string]struct{}{},
+		heldByLevel:  map[string]struct{}{},
 		unseenAsks:   map[string]struct{}{},
 
 		openAtAttach: session.OpenAtAttach,
@@ -1601,7 +1620,7 @@ const reopenPace = 10 * time.Second
 // the pacing: each changes the generation or the link this checks.
 // Caller holds mu.
 func (w *watcher) armPacedReopenLocked() {
-	if w.closed || w.endingLocked() {
+	if w.closed || w.endingOrderedLocked() {
 		return
 	}
 	if _, reaped := w.client.Reaped(); reaped {
@@ -1616,7 +1635,7 @@ func (w *watcher) armPacedReopenLocked() {
 		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
-		if w.closed || w.gen != gen || !w.degraded || (w.link != shimclient.LinkRedialing && !w.storeDown) || w.endingLocked() {
+		if w.closed || w.gen != gen || !w.degraded || (w.link != shimclient.LinkRedialing && !w.storeDown) || w.endingOrderedLocked() {
 			return
 		}
 		if _, reaped := w.client.Reaped(); reaped {
@@ -1718,7 +1737,7 @@ func (w *watcher) decideOpenLocked(stream, key string, current *openTicket) (*op
 	// stood six stale shims down, and a WatchAgent open decided after each
 	// stand-down was refused with "incomplete envelope: unexpected EOF" and
 	// recorded as two ERRORs apiece.
-	if w.endingLocked() {
+	if w.endingOrderedLocked() {
 		w.log.Debug("daemon.sessionwatcher.open_skipped", "a session this daemon is ending opens no watch", dlog.Context{
 			"stream": stream, "key": key, "stand_down_asked": w.client.StandingDown(),
 		})
@@ -1975,13 +1994,16 @@ func (w *watcher) openAgent(t *openTicket, a *agentWatch, req *shimv1.WatchAgent
 // fleet re-open is what retries it. Forgetting the entry on a failure made a
 // watch that could not be opened into a statement that the shell had ENDED,
 // which only the shim may make (livework.go).
-func (w *watcher) openShellStreamLocked(s *shellWatch) {
+//
+// It answers whether it started an open, so a record can say which it did.
+func (w *watcher) openShellStreamLocked(s *shellWatch) bool {
 	t, ok := w.decideOpenLocked("shell", s.work.GetValue(), s.opening)
 	if !ok {
-		return
+		return false
 	}
 	s.opening = t
 	inflight.Go(func() { w.openShell(t, s) })
+	return true
 }
 
 // openShell makes one decided WatchBash open OFF mu and installs it.
@@ -2658,6 +2680,15 @@ func (w *watcher) stale(gen uint64) bool { return w.closed || gen != w.gen }
 // severs, still degrades the fleet and still raises its fault.
 func (w *watcher) endingLocked() bool {
 	return w.sessionEnded || w.client.StandingDown()
+}
+
+// endingOrderedLocked is endingLocked without a stand-down still awaiting the
+// shim's answer: what decides whether a watch opens. A shim may refuse the
+// stand-down and serve on, and a watch whose open was skipped in that window
+// was never opened again (2026-11-18, send-slack-link-formatting), so only a
+// settled stand-down skips an open.
+func (w *watcher) endingOrderedLocked() bool {
+	return w.sessionEnded || w.client.StandDownOrdered()
 }
 
 // openEndedByTeardownLocked classifies a failed watch open by the stand-down
