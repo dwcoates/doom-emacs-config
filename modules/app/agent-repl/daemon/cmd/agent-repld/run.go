@@ -992,7 +992,7 @@ func serve(ctx context.Context, l net.Listener, h http.Handler, exit serveExit) 
 		return fmt.Errorf("agent-repld: the serving handler carries no in-flight request gate; an orderly exit would cut every call it is still answering")
 	}
 	conns := &connStates{byConn: map[net.Conn]http.ConnState{}, born: map[net.Conn]time.Time{}, log: exit.Log}
-	srv := &http.Server{Handler: h, ConnState: conns.track}
+	srv := &http.Server{Handler: closingHTTP1(h), ConnState: conns.track}
 	// A CONNECTION THAT HAS DELIVERED NO REQUEST OWES NOTHING, and
 	// `Server.Shutdown` waits for it anyway: it polls, on an interval that
 	// doubles to 500ms, until every connection it tracks is idle, and a
@@ -1210,6 +1210,26 @@ func (c *connStates) summary() string {
 		out += fmt.Sprintf(" close_failed=%q", c.closeFailures)
 	}
 	return out
+}
+
+// closingHTTP1 answers every HTTP/1.1 request with `Connection: close`, so an
+// HTTP/1.1 connection ends right after the response that says so and none is
+// ever left idle. ON THE SHARED ADDRESS A CONNECTION IS THE DAEMON'S THAT
+// ACCEPTED IT: an idle keep-alive connection a departing daemon closed raced
+// the request its client was sending on it (2026-11-18: a page reloaded onto
+// the shared address mid-handover read "fetch failed" for its adopt, sent on
+// a pooled connection the incumbent closed as it exited), and no client can
+// tell a close it raced from a refusal. A fresh loopback connection per call
+// is cheap; every stream is one long request anyway. HTTP/2 connections end
+// with their GOAWAY (serve), which tells the client which streams it may
+// send again.
+func closingHTTP1(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.ProtoMajor == 1 {
+			w.Header().Set("Connection", "close")
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // shutdownGrace is how long in-flight requests have to finish before the

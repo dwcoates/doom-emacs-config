@@ -2098,3 +2098,32 @@ func TestBeginShutdownReportsAFailedSharedStopAndStillDeparts(t *testing.T) {
 		t.Fatalf("the shutdown's first steps = %s, want %s", got, want)
 	}
 }
+
+func TestEveryHTTP1AnswerClosesItsConnection(t *testing.T) {
+	cases := []struct {
+		name       string
+		protoMajor int
+		wantClose  bool
+	}{
+		{name: "an HTTP/1.1 answer closes its connection", protoMajor: 1, wantClose: true},
+		{name: "an HTTP/2 answer leaves its connection to its GOAWAY", protoMajor: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			served := false
+			h := closingHTTP1(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { served = true }))
+			req := httptest.NewRequest(http.MethodPost, "/x", nil)
+			req.ProtoMajor = tc.protoMajor
+			rec := httptest.NewRecorder()
+
+			// Act
+			h.ServeHTTP(rec, req)
+
+			// Assert
+			if !served || (rec.Header().Get("Connection") == "close") != tc.wantClose {
+				t.Fatalf("served %v, Connection %q; want the handler run and close %v", served, rec.Header().Get("Connection"), tc.wantClose)
+			}
+		})
+	}
+}
