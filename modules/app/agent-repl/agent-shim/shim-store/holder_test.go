@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -10,10 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 
-	"agentrepl/logging/sockethold"
+	"agentrepl/logging/sockethold/holdtest"
 	"agentrepl/shim-store/internal/logging"
 )
 
@@ -42,22 +40,7 @@ func testHolder(t *testing.T, names ...string) (string, map[string]string) {
 		ln.Close()
 		paths[name], files[name] = path, f
 	}
-	control := filepath.Join(dir, "c.sock")
-	controlLn, err := net.ListenUnix("unix", &net.UnixAddr{Name: control, Net: "unix"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() { defer wg.Done(); _ = sockethold.Serve(ctx, controlLn, files, func(sockethold.Grant) {}) }()
-	t.Cleanup(func() {
-		cancel()
-		wg.Wait()
-		for _, f := range files {
-			f.Close()
-		}
-	})
+	control := holdtest.Start(t, files, nil)
 	return control, paths
 }
 
@@ -208,5 +191,51 @@ func TestTheStoresHolderTakeIsSocketholdsTimedTake(t *testing.T) {
 	// Assert
 	if ownBound != "" || calls != 1 {
 		t.Fatalf("own take bound at %q, %d sockethold.TakeTimed calls; want none of its own and exactly one call", ownBound, calls)
+	}
+}
+
+// TestEveryStoreTestHolderIsHoldtests pins the one test holder: the store's tests stand a holder up only through
+// holdtest.Start, never by serving sockethold.Serve themselves.
+func TestEveryStoreTestHolderIsHoldtests(t *testing.T) {
+	tests := []struct {
+		name string
+		dir  string
+	}{
+		{name: "the store's tests", dir: "."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			entries, err := os.ReadDir(tt.dir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			fset := token.NewFileSet()
+			var served []string
+
+			// Act
+			for _, e := range entries {
+				if !strings.HasSuffix(e.Name(), ".go") {
+					continue
+				}
+				f, err := parser.ParseFile(fset, filepath.Join(tt.dir, e.Name()), nil, 0)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ast.Inspect(f, func(n ast.Node) bool {
+					if sel, ok := n.(*ast.SelectorExpr); ok {
+						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "sockethold" && sel.Sel.Name == "Serve" {
+							served = append(served, fset.Position(sel.Pos()).String())
+						}
+					}
+					return true
+				})
+			}
+
+			// Assert
+			if len(served) > 0 {
+				t.Fatalf("sockethold.Serve called directly at %v; stand a test holder up with holdtest.Start", served)
+			}
+		})
 	}
 }

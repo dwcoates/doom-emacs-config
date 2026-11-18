@@ -5,7 +5,6 @@ import (
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/tempdirs/tempdirstest"
-	"agentrepl/logging/sockethold"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -32,7 +31,9 @@ import (
 	"agent-repld/internal/server"
 	"agent-repld/internal/server/servertest"
 	"agent-repld/internal/wsm"
+
 	"agentrepl/logging"
+	"agentrepl/logging/sockethold/holdtest"
 
 	"agentrepl/logging/metrics"
 )
@@ -110,32 +111,8 @@ func runIn(t *testing.T, root string, adjust ...func(*options)) error {
 // answers the control socket's path.
 func testHolder(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp("/tmp", "rh")
-	if err != nil {
-		t.Fatal(err)
-	}
-	shared, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	file, err := shared.(*net.TCPListener).File()
-	if err != nil {
-		t.Fatal(err)
-	}
-	shared.Close()
-	control := filepath.Join(dir, "c.sock")
-	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: control, Net: "unix"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		_ = sockethold.Serve(ctx, ln, map[string]*os.File{holderDaemonSocket: file}, func(sockethold.Grant) {})
-	}()
-	t.Cleanup(func() { cancel(); <-done; file.Close(); os.RemoveAll(dir) })
-	return control
+	file, _ := holdtest.TCP(t)
+	return holdtest.Start(t, map[string]*os.File{holderDaemonSocket: file}, nil)
 }
 
 func TestRunRefusesADaemonWithNoSocketHolder(t *testing.T) {
