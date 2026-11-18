@@ -494,11 +494,20 @@ func (c *cliCall) requester(asUser bool) (*agentreplv1.WorkspaceRequester, bool)
 	if asUser {
 		return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}}}, true
 	}
+	asker, ok := c.callingRequester()
+	if !ok {
+		return nil, false
+	}
+	return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_Workspace{Workspace: asker}}, true
+}
+
+// callingRequester answers the calling workspace as the workspace that asks.
+func (c *cliCall) callingRequester() (*agentreplv1.WorkspaceRequesterWorkspace, bool) {
 	ref, ok := c.calling()
 	if !ok {
 		return nil, false
 	}
-	return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_Workspace{Workspace: &agentreplv1.WorkspaceRequesterWorkspace{Workspace: ref}}}, true
+	return &agentreplv1.WorkspaceRequesterWorkspace{Workspace: ref}, true
 }
 
 // repository answers the repository NAME names: `here` (the calling
@@ -2117,11 +2126,11 @@ func workspacePassGate(c *cliCall, args []string) int {
 	if len(rest) != 0 {
 		return c.usageFailed("the command takes no answer: a gate is passed only by a Haiku compaction of all its context")
 	}
-	caller, ok := c.calling()
+	asker, ok := c.callingRequester()
 	if !ok {
 		return exitFailure
 	}
-	req := &agentreplv1.PassColdGateRequest{Workspace: ref, Requester: &agentreplv1.WorkspaceRequesterWorkspace{Workspace: caller}}
+	req := &agentreplv1.PassColdGateRequest{Workspace: ref, Requester: asker}
 	resp, err := c.client.PassColdGate(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }

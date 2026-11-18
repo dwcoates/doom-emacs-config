@@ -1517,6 +1517,19 @@ func TestPassGatePassesTheGateAsTheCallingWorkspace(t *testing.T) {
 	}
 }
 
+func TestEveryWorkspaceRequesterIsBuiltByCallingRequester(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("agentcli.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert: the one place a calling workspace becomes a requester.
+	if got := strings.Count(string(src), "&agentreplv1.WorkspaceRequesterWorkspace{"); got != 1 {
+		t.Fatalf("agentcli.go builds %d WorkspaceRequesterWorkspace values; want only callingRequester's", got)
+	}
+}
+
 func TestPassGateTakesNoAnswer(t *testing.T) {
 	tests := []struct {
 		name string
