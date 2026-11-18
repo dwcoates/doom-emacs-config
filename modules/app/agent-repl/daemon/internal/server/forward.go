@@ -1,0 +1,98 @@
+package server
+
+import (
+	"context"
+	"fmt"
+	"net/http"
+
+	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
+
+	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
+	"agent-repld/internal/workspace"
+)
+
+// ForwardedHeader marks a call one daemon forwarded to the daemon serving its
+// workspace. A daemon never forwards a call that carries it again.
+const ForwardedHeader = "Agent-Repl-Forwarded"
+
+// FORWARDING REPLACES THE REDIRECT (docs/investigations/
+// 2026-11-18-stable-sockets-design.md, D3). Every client reaches the one
+// shared address, which only the daemon holding the boot claim accepts on; a
+// call for a workspace another live daemon serves is re-issued there, on its
+// private address, and its answer relayed. The target is the one the typed
+// redirects named: the successor a transferred workspace went to, or the
+// incumbent that still serves one this daemon has not adopted.
+
+// forwardTarget answers the private address of the daemon that serves the
+// call's workspace, when that is not this one. A call already forwarded is
+// served here whatever its standing: forwarding it again could only loop.
+func (s *server) forwardTarget(ctx context.Context, rpc string, header http.Header, msg proto.Message) (string, bool, error) {
+	if header.Get(ForwardedHeader) != "" {
+		return "", false, nil
+	}
+	id := requestWorkspaceID(msg)
+	if id == "" {
+		return "", false, nil
+	}
+	standing, err := s.deps.Ownership.Standing(ctx, ids.WorkspaceID(id))
+	if err != nil {
+		s.log.Error("daemon.server.forward", "could not resolve the call's serving standing to forward it", dlog.Context{"rpc": rpc, "workspace_id": id, "cause": err.Error()})
+		return "", false, err
+	}
+	switch standing {
+	case workspace.StandingTransferringAway:
+		if target := s.deps.SuccessorAddress(); target != "" {
+			return target, true, nil
+		}
+	case workspace.StandingNotYetAdopted:
+		if target := s.deps.IncumbentAddress(); target != "" {
+			return target, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+// forwardRequest copies REQ for TARGET: its message and headers, marked as
+// forwarded.
+func forwardRequest[Req any](req *connect.Request[Req]) *connect.Request[Req] {
+	out := connect.NewRequest(req.Msg)
+	for name, values := range req.Header() {
+		for _, v := range values {
+			out.Header().Add(name, v)
+		}
+	}
+	out.Header().Set(ForwardedHeader, "1")
+	return out
+}
+
+// forwardUnary re-issues the unary call REQ to the daemon at TARGET and
+// answers its response.
+func forwardUnary[Req, Resp any](ctx context.Context, s *server, rpc, target string, req *connect.Request[Req]) (*connect.Response[Resp], error) {
+	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+req.Spec().Procedure)
+	resp, err := client.CallUnary(ctx, forwardRequest(req))
+	if err != nil {
+		s.log.Info("daemon.server.forward", "the daemon a call was forwarded to answered it with an error", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
+		return nil, err
+	}
+	return resp, nil
+}
+
+// forwardStream re-issues the server-streaming call REQ to the daemon at
+// TARGET and relays every message it sends onto STREAM until it ends.
+func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target string, req *connect.Request[Req], stream *connect.ServerStream[Resp]) error {
+	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+req.Spec().Procedure)
+	in, err := client.CallServerStream(ctx, forwardRequest(req))
+	if err != nil {
+		s.log.Info("daemon.server.forward", "the daemon a stream was forwarded to refused it", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
+		return err
+	}
+	defer in.Close()
+	for in.Receive() {
+		if err := stream.Send(in.Msg()); err != nil {
+			return fmt.Errorf("relay %s from %s: %w", rpc, target, err)
+		}
+	}
+	return in.Err()
+}

@@ -1058,6 +1058,9 @@ func TestARefusedHandoverStreamNamesItsDaemonInTheEndFrame(t *testing.T) {
 	}
 	req.Header.Set("Content-Type", "application/connect+json")
 	req.Header.Set("Connect-Protocol-Version", "1")
+	// A FORWARDED CALL is the one a daemon that does not serve its workspace
+	// answers with this refusal; an unmarked one is forwarded (forward.go).
+	req.Header.Set(ForwardedHeader, "1")
 
 	// Act.
 	resp, err := h.HTTP.Client().Do(req)

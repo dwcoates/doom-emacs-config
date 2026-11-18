@@ -146,6 +146,10 @@ type Deps struct {
 	// the workspace there until the adoption re-homes it. It answers the empty
 	// string when no other daemon serves it, and the arm then names none.
 	IncumbentAddress func() string
+	// Forward is the client a call for a workspace another daemon serves is
+	// forwarded on (forward.go): h2c to that daemon's private address.
+	// Required.
+	Forward *http.Client
 	// Creates admits every create this surface is asked for, and refuses one
 	// while the daemon stands down (creategate).
 	Creates *creategate.Gate

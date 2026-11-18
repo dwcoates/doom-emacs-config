@@ -2199,10 +2199,15 @@ type harness struct {
 	IncumbentAddress string
 	// Deps is the COMPLETE dependency set the surface was built from, so a
 	// test of one missing dependency strips exactly that one (withoutDep).
-	Deps      Deps
-	Server    Server
-	HTTP      *httptest.Server
+	Deps   Deps
+	Server Server
+	HTTP   *httptest.Server
+	// Client marks every call as forwarded, so a call for a workspace this
+	// surface does not serve reaches its handler here, which is what nearly
+	// every test exercises. Unmarked is a plain client, whose calls the
+	// surface forwards to the daemon serving their workspace (forward.go).
 	Client    agentreplv1connect.AgentReplClient
+	Unmarked  agentreplv1connect.AgentReplClient
 	DB        *fakeDB
 	Ownership *fakeOwnership
 	Verbs     *fakeVerbs
@@ -2446,6 +2451,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Ownership:         h.Ownership,
 		SuccessorAddress:  func() string { return "127.0.0.1:9999" },
 		IncumbentAddress:  func() string { return h.IncumbentAddress },
+		Forward:           h2cclient.Client(),
 		Creates:           h.Creates,
 		Feed:              h.Feed,
 		Images:            h.Images,
@@ -2494,8 +2500,31 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		h.HTTP.Close()
 		_ = surface.Close()
 	})
-	h.Client = agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL)
+	h.Client = agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL, connect.WithInterceptors(markForwarded{}))
+	h.Unmarked = agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL)
 	return h
+}
+
+// markForwarded marks every call as forwarded (ForwardedHeader).
+type markForwarded struct{}
+
+func (markForwarded) WrapUnary(next connect.UnaryFunc) connect.UnaryFunc {
+	return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
+		req.Header().Set(ForwardedHeader, "1")
+		return next(ctx, req)
+	}
+}
+
+func (markForwarded) WrapStreamingClient(next connect.StreamingClientFunc) connect.StreamingClientFunc {
+	return func(ctx context.Context, spec connect.Spec) connect.StreamingClientConn {
+		conn := next(ctx, spec)
+		conn.RequestHeader().Set(ForwardedHeader, "1")
+		return conn
+	}
+}
+
+func (markForwarded) WrapStreamingHandler(next connect.StreamingHandlerFunc) connect.StreamingHandlerFunc {
+	return next
 }
 
 // h2cClient dials the surface over CLEARTEXT HTTP/2, which is the other half of

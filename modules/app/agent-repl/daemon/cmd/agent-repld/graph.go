@@ -41,6 +41,7 @@ import (
 	"agent-repld/internal/gather"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/gitclient"
+	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/handover"
 	"agent-repld/internal/headless"
 	"agent-repld/internal/health"
@@ -1936,6 +1937,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Ownership:        ownership,
 			SuccessorAddress: rolloutController.SuccessorAddress,
 			IncumbentAddress: rolloutController.IncumbentAddress,
+			Forward:          h2cclient.Client(),
 			Creates:          creates,
 			Feed:             feedResolver,
 			Images:           imageSources,
