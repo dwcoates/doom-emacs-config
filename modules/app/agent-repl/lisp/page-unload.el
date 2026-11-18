@@ -88,6 +88,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl-vocab-read "agent-repl-core" (file &rest keys))
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
+(declare-function agent-repl--ws-holding "agent-repl-workspace" (key token))
 (declare-function agent-repl--fatal "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--ws-get "agent-repl-workspace" (ws key))
 (declare-function agent-repl--ws-put "agent-repl-workspace" (ws key value))
@@ -306,15 +307,30 @@ Leaving again replaces the judgement the last leave scheduled."
   (agent-repl--ws-put ws :page-left-at (agent-repl-page-unload--now))
   (when-let ((pending (agent-repl--ws-get ws :page-leave-timer)))
     (cancel-timer pending))
-  (agent-repl--ws-put ws :page-leave-timer
-                      (funcall agent-repl-page-unload--schedule
-                               agent-repl-page-unload-leave-grace nil
-                               #'agent-repl-page-unload--left ws))
+  ;; THE TIMER NAMES ITS WORKSPACE BY A TOKEN, never by name, so a rename
+  ;; during the grace cannot send its judgement to the old name
+  ;; (`agent-repl--ws-holding').
+  (let ((token (list 'page-leave)))
+    (agent-repl--ws-put ws :page-leave-token token)
+    (agent-repl--ws-put ws :page-leave-timer
+                        (funcall agent-repl-page-unload--schedule
+                                 agent-repl-page-unload-leave-grace nil
+                                 #'agent-repl-page-unload--left-by-token token)))
   (agent-repl-page-unload--report ws))
+
+(defun agent-repl-page-unload--left-by-token (token)
+  "Judge the page of the workspace holding TOKEN, the grace after its leave.
+A workspace that closed in the grace holds it no more, and nothing is
+judged."
+  (if-let ((ws (agent-repl--ws-holding :page-leave-token token)))
+      (agent-repl-page-unload--left ws)
+    (agent-repl--info '(:agent-repl-central "a page leave outlived its workspace")
+                      "elisp.page-unload.leave-ended-with-workspace: the workspace closed before its leave's grace ended")))
 
 (defun agent-repl-page-unload--left (ws)
   "Judge WS's page, the grace after the user switched away from it."
   (agent-repl--ws-put ws :page-leave-timer nil)
+  (agent-repl--ws-put ws :page-leave-token nil)
   (agent-repl-page-unload--judge ws (agent-repl-page-unload--now))
   (agent-repl-page-unload--report ws))
 
