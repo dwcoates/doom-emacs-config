@@ -418,6 +418,36 @@ func TestAnEmptyAdvertisementIsNotStale(t *testing.T) {
 	}
 }
 
+// TestAYieldedClaimNeverWithdrawsTheAdvertisement pins the handover's end
+// after a yield: the boot claim is the successor's, so it may publish at any
+// instant, and only the claim's holder may remove daemon.addr. The file left
+// naming the incumbent is exactly what a read-then-remove raced on.
+func TestAYieldedClaimNeverWithdrawsTheAdvertisement(t *testing.T) {
+	// Arrange: the incumbent published and yielded; the file still names it.
+	addrPath := newAddrPath(t)
+	incumbent := mustBind(t, addrPath)
+	if err := incumbent.Publish(); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := incumbent.Yield(); err != nil {
+		t.Fatalf("Yield: %v", err)
+	}
+
+	// Act.
+	withdrawn, err := incumbent.Withdraw()
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Withdraw = %v, want success", err)
+	}
+	if withdrawn {
+		t.Fatal("a yielded claim removed daemon.addr, want it left for the boot claim's holder")
+	}
+	if got := readAddrFile(t, addrPath); got != incumbent.Address() {
+		t.Fatalf("daemon.addr = %q, want it untouched (%q)", got, incumbent.Address())
+	}
+}
+
 func TestCloseDoesNotWithdraw(t *testing.T) {
 	// Arrange: a handover closes the incumbent's listener while the
 	// successor's advertisement already stands.

@@ -279,6 +279,14 @@ func (c *claim) Publish() error {
 //
 // Removing an absent file is success: an orderly exit that never published
 // still withdraws.
+//
+// ONLY THE BOOT CLAIM'S HOLDER TOUCHES THE FILE. Every Publish holds the boot
+// claim, so while this claim holds it no other daemon can write daemon.addr
+// between the read below and the remove. A claim that yielded, closed, or
+// never took the claim does not hold it: a successor may publish at any
+// instant, and a read-then-remove there deleted the successor's fresh
+// advertisement when it landed between the two (2026-11-17), leaving the
+// successor to read its own state as vanished and stand down.
 func (c *claim) Withdraw() (bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -286,6 +294,9 @@ func (c *claim) Withdraw() (bool, error) {
 	// call on, whatever the file then says: an orderly exit is taking it down,
 	// or a successor has already replaced it.
 	c.published = false
+	if c.lock == nil {
+		return false, nil
+	}
 	raw, err := os.ReadFile(c.addrPath)
 	if os.IsNotExist(err) {
 		return false, nil

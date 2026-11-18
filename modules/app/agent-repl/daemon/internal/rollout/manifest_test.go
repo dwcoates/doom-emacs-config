@@ -60,7 +60,7 @@ func reconcileOnePID(t *testing.T, h *harness, intent Intent, lock sessionlock.S
 	h.lockStates[dir] = lock
 	h.mu.Unlock()
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Daemon: previousInstance, WrittenAt: instant,
 		Sessions: []ManifestSession{{
 			Workspace: ws, Dir: dir, ShimPID: pid, VendorSessionID: "vendor-1", Intent: intent,
 		}},
@@ -424,7 +424,7 @@ func TestAManifestSessionThisBootAdoptedIsPreserved(t *testing.T) {
 			h.lockStates[dir] = sessionlock.StateHeld
 			h.mu.Unlock()
 			if err := h.c.writeManifest(context.Background(), Manifest{
-				Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+				Daemon: previousInstance, WrittenAt: instant,
 				Sessions: []ManifestSession{{Workspace: ws, Dir: dir, ShimPID: 4242, Intent: IntentStandDown}},
 			}); err != nil {
 				t.Fatalf("writeManifest: %v", err)
@@ -730,7 +730,7 @@ func reconcileTwoReadOnly(t *testing.T, h *harness) (first, second ids.Workspace
 	h.lockStates[firstDir], h.lockStates[secondDir] = sessionlock.StateFree, sessionlock.StateFree
 	h.mu.Unlock()
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Daemon: previousInstance, WrittenAt: instant,
 		Sessions: []ManifestSession{
 			{Workspace: first, Dir: firstDir, ShimPID: 4242, VendorSessionID: "vendor-1", Intent: IntentPreserve},
 			{Workspace: second, Dir: secondDir, ShimPID: 4343, VendorSessionID: "vendor-2", Intent: IntentPreserve},
@@ -826,7 +826,7 @@ func reconcileGone(t *testing.T, h *harness, ws ids.WorkspaceID, dir string) *re
 	recorder := &recordingDB{DB: h.c.deps.DB}
 	h.c.deps.DB = recorder
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Daemon: previousInstance, WrittenAt: instant,
 		Sessions: []ManifestSession{{Workspace: ws, Dir: dir, ShimPID: 4242, Intent: IntentPreserve}},
 	}); err != nil {
 		t.Fatalf("writeManifest: %v", err)

@@ -322,14 +322,23 @@
   - A pull request the workspace did not open is a reference, even one its work amends, such as an already merged one.
   - An owned link may name the stored link it announces, such as a Slack post saying a pull request was created, which hooks read to find that post again.
   - The daemon follows an owned pull request, telling the workspace about every comment, review and finished check on it until it merges or closes.
-- Two kinds of link MUST always be stored, whatever else the menu holds.
-  - A link the workspace was created to investigate or act on, such as a Slack thread, a Jira ticket, an issue, or a pull request to review, is stored before any other work on it begins.
-  - Every pull request the workspace creates is stored the moment its URL is known, including one created by a skill or a subagent working for the workspace.
+- A link the workspace was created to investigate or act on MUST be stored before any other work on it begins.
+  - Examples are a Slack thread, a Jira ticket, an issue, or a pull request to review.
+- Every pull request an agent makes MUST be stored as the workspace's owned and canonical link, through `agent-repld workspace link`.
+  - It is stored owned the moment its URL is known.
     - The URL comes from the creating command's output or from `gh pr view --json url`, never a guessed one.
-  - These two kinds outrank every other link when the workspace chooses which five the menu shows.
+  - This holds whoever opened it: the workspace's own agent, a skill such as `create-or-update-pr`, or a subagent working for the workspace.
+  - It holds in every repository, not only agent-repl's own.
+  - Canonical means that while the pull request is open, it is one of the menu's shown links.
+    - The workspace shows it with `-show` in the same turn it is stored, whenever storing it left it unshown.
+    - So the owner can always reach every open pull request the workspace asked them to review or merge from the topbar.
 - The menu shows at most five links, so once it is full the workspace chooses which five it shows.
-  - It ranks them by relevance to the project, as seen by the developer working with the agent.
+  - First come the open pull requests the workspace's agents made, newest first.
+  - Then the links the workspace was created to act on.
+  - A merged or closed pull request, and any other reference, gives up its place to these first.
+  - Among the rest, it ranks them by relevance to the project, as seen by the developer working with the agent.
   - It ranks them by the same lens for the stakeholders the developer reports the work to.
+  - The workspace checks the menu again whenever one of its pull requests merges or closes, and whenever it stores a new one.
 - The workspace does all of this proactively and at once, without asking me any questions or for permission.
   - The verb, its flags, how to reply on a pull request, and how to read the standing links are `/agent-repl-workspaces`'.
 - When I refer to something that lives at a URL ("update the thread", "publish the app", "check the link") and the referent is unclear, the workspace reads its stored links first.
@@ -380,7 +389,7 @@
   - A workspace mid-turn is closed when that turn ends.
   - An owned pull request still open, closed unmerged, or no longer followed keeps the workspace open.
   - A repository's main workspace is never closed this way.
-- This holds only for a pull request stored as an owned link, so the workspace stores every pull request it opens as owned the moment its URL is known.
+- This holds only for a pull request stored as an owned link, as "Workspace links" requires of every pull request an agent makes.
 
 ## Tool rejections
 

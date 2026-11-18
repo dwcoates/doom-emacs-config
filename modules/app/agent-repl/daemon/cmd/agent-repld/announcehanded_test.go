@@ -26,8 +26,13 @@ type newestDaemon struct {
 	answer *agentreplv1.AcceptHandedWorkspaceResponse
 }
 
-func (d *newestDaemon) AcceptHandedWorkspace(_ context.Context, req *connect.Request[agentreplv1.AcceptHandedWorkspaceRequest]) (*connect.Response[agentreplv1.AcceptHandedWorkspaceResponse], error) {
+func (d *newestDaemon) AcceptHandedWorkspace(ctx context.Context, req *connect.Request[agentreplv1.AcceptHandedWorkspaceRequest]) (*connect.Response[agentreplv1.AcceptHandedWorkspaceResponse], error) {
 	d.got = append(d.got, req.Msg)
+	if d.answer == nil {
+		// A daemon that never answers: the call ends only on its caller's bound.
+		<-ctx.Done()
+		return nil, connect.NewError(connect.CodeDeadlineExceeded, ctx.Err())
+	}
 	return connect.NewResponse(d.answer), nil
 }
 
@@ -42,7 +47,7 @@ func serveNewestDaemon(t *testing.T, d *newestDaemon) string {
 	return server.Listener.Addr().String()
 }
 
-func TestAnnounceHandedTellsTheNewestDaemonOfTheMove(t *testing.T) {
+func TestSendHandedTellsTheNewestDaemonOfTheMove(t *testing.T) {
 	tests := []struct {
 		name    string
 		answer  *agentreplv1.AcceptHandedWorkspaceResponse
@@ -63,16 +68,34 @@ func TestAnnounceHandedTellsTheNewestDaemonOfTheMove(t *testing.T) {
 			d := &newestDaemon{answer: tt.answer}
 			address := serveNewestDaemon(t, d)
 
-			// Act
-			err := announceHanded(context.Background(), address, wsm.Workspace{ID: "ws-1", Dir: "/tmp/ws-1"}, "elder", rollout.Participants{Host: true})
+			// Act: unbounded, so the answer's reading is tested apart from
+			// the production bound, which a loaded test host can outlast.
+			err := sendHanded(context.Background(), address, wsm.Workspace{ID: "ws-1", Dir: "/tmp/ws-1"}, "elder", rollout.Participants{Host: true})
 
 			// Assert
 			if !tt.wantErr(err) {
-				t.Fatalf("announceHanded = %v", err)
+				t.Fatalf("sendHanded = %v", err)
 			}
 			if len(d.got) != 1 || d.got[0].GetWorkspace().GetId() != "ws-1" || d.got[0].GetOutgoingDaemon() != "elder" || !d.got[0].GetExpectedHost() || d.got[0].GetExpectedWeb() {
 				t.Fatalf("announcements = %v, want ws-1 from elder with its host expected", d.got)
 			}
 		})
+	}
+}
+
+func TestAnnounceHandedEndsAtItsBound(t *testing.T) {
+	// Arrange: a newest daemon that never answers.
+	d := &newestDaemon{}
+	address := serveNewestDaemon(t, d)
+
+	// Act
+	err := announceHanded(context.Background(), address, wsm.Workspace{ID: "ws-1", Dir: "/tmp/ws-1"}, "elder", rollout.Participants{Host: true})
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeDeadlineExceeded {
+		t.Fatalf("announceHanded = %v, want the call cut at acceptHandedBound", err)
+	}
+	if errors.Is(err, rollout.ErrNotNewest) {
+		t.Fatalf("announceHanded = %v, want a failure, not a not_newest refusal", err)
 	}
 }

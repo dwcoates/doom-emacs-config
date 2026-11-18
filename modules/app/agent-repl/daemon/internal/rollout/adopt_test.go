@@ -35,7 +35,7 @@ func writeHandoverManifest(t *testing.T, h *harness, ws ids.WorkspaceID, expecte
 		t.Fatalf("Workspace: %v", err)
 	}
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon:    ids.InstanceID("daemon-outgoing-previous"),
+		Daemon:    previousInstance,
 		Successor: "127.0.0.1:7788",
 		WrittenAt: instant,
 		Sessions: []ManifestSession{{
@@ -603,7 +603,7 @@ func TestAnAdoptionTheIncumbentTookBackDialsNothing(t *testing.T) {
 	// it released.
 	h := newHarness(t, func(d *Deps) { d.DB = servingBlindDB{DB: d.DB} })
 	ws, _ := h.workspace(t)
-	if err := h.db.ClaimServing(context.Background(), ws, ids.InstanceID("daemon-outgoing-previous")); err != nil {
+	if err := h.db.ClaimServing(context.Background(), ws, previousInstance); err != nil {
 		t.Fatalf("ClaimServing(incumbent): %v", err)
 	}
 
@@ -645,7 +645,7 @@ func TestDaemonAddrIsWrittenOnlyWhenEveryWorkspaceIsOwned(t *testing.T) {
 	second, _ := h.workspace(t)
 	firstRecord, _ := h.db.Workspace(context.Background(), first)
 	secondRecord, _ := h.db.Workspace(context.Background(), second)
-	const outgoing = ids.InstanceID("daemon-outgoing-previous")
+	const outgoing = previousInstance
 	if err := h.c.writeManifest(context.Background(), Manifest{
 		Daemon: outgoing, WrittenAt: instant,
 		Sessions: []ManifestSession{
@@ -839,7 +839,7 @@ func writeHeadlessManifest(t *testing.T, h *harness, workspaces ...ids.Workspace
 		})
 	}
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon:    ids.InstanceID("daemon-outgoing-previous"),
+		Daemon:    previousInstance,
 		Successor: "127.0.0.1:7788",
 		WrittenAt: instant,
 		Sessions:  sessions,
@@ -1393,11 +1393,28 @@ func TestAdvertiseDoesNotRetryAFailureThatIsNotAHeldClaim(t *testing.T) {
 // FIRST: SECOND is registered but was never handed over (a closed workspace).
 func joinedWithOneOfTwo(t *testing.T, h *harness) (first, second ids.WorkspaceID) {
 	t.Helper()
+	return joinedWithOneOfTwoServedBy(t, h, selfInstance)
+}
+
+// previousInstance is the outgoing daemon joinedWithOneOfTwo's manifest names.
+const previousInstance = ids.InstanceID("daemon-outgoing-previous")
+
+// joinedWithOneOfTwoServedBy is joinedWithOneOfTwo with FIRST's serving row
+// held by SERVER at the join. Held by previousInstance, the daemon's own
+// adoption of FIRST waits for that daemon's release, so FIRST stays not yet
+// adopted for as long as the outgoing daemon serves it.
+func joinedWithOneOfTwoServedBy(t *testing.T, h *harness, server ids.InstanceID) (first, second ids.WorkspaceID) {
+	t.Helper()
 	first, _ = h.workspace(t)
 	second, _ = h.workspace(t)
+	if server != selfInstance {
+		if err := h.db.ClaimServing(context.Background(), first, server); err != nil {
+			t.Fatalf("ClaimServing: %v", err)
+		}
+	}
 	firstRecord, _ := h.db.Workspace(context.Background(), first)
 	if err := h.c.writeManifest(context.Background(), Manifest{
-		Daemon: ids.InstanceID("daemon-outgoing-previous"), WrittenAt: instant,
+		Daemon: previousInstance, WrittenAt: instant,
 		Sessions: []ManifestSession{
 			{Workspace: first, Dir: firstRecord.Dir, Intent: IntentPreserve, ExpectedHost: true},
 		},
@@ -1629,7 +1646,7 @@ func TestALateCallerOfASatisfiedRendezvousDoesNotAdoptASecondTime(t *testing.T) 
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
 	arm(t, h, ws, Participants{Web: true})
-	const outgoing = ids.InstanceID("daemon-outgoing-previous")
+	const outgoing = previousInstance
 	if err := h.db.ClaimServing(context.Background(), ws, outgoing); err != nil {
 		t.Fatalf("ClaimServing(outgoing): %v", err)
 	}
@@ -2815,10 +2832,12 @@ func TestATakeoverWithAnElderRunningDefersWhatOnlyTheLastDaemonMayDo(t *testing.
 }
 
 func TestATakeoverWithAnElderRunningLeavesItsHoldoutsTheElders(t *testing.T) {
-	// Arrange: FIRST was handed here and not adopted; the elder still runs.
+	// Arrange: FIRST was handed here and not adopted; the elder still runs
+	// and still serves it, so this daemon's adoption of it waits for the
+	// elder's release.
 	release := make(chan struct{})
 	h := newHarness(t, withElder(release))
-	first, _ := joinedWithOneOfTwo(t, h)
+	first, _ := joinedWithOneOfTwoServedBy(t, h, previousInstance)
 
 	// Act
 	h.incumbentExits()
