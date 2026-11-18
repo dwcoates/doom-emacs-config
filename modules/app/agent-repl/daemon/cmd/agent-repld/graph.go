@@ -1308,7 +1308,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		YieldBootClaim:  p.Claim.Yield,
 		NewestDaemon: func() (string, error) {
 			ad, err := daemonaddr.ReadAdvertisement(p.Layout.DaemonAddr())
-			return ad.Address, err
+			return ad.Daemon(), err
 		},
 		AnnounceHanded: announceHanded,
 		LiveElders: func() ([]string, error) {

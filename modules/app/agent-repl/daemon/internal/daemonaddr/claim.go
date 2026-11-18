@@ -81,6 +81,12 @@ func (c *claim) holdLocked(lock *bootLock) error {
 // on-disk format.
 const pidLinePrefix = "pid="
 
+// privateLinePrefix starts the line naming the advertising daemon's own
+// private address, written when daemon.addr names a shared one: a daemon
+// telling the newest daemon apart from itself or its successor reads it,
+// since the shared address names every daemon alike.
+const privateLinePrefix = "private="
+
 // Advertisement is the parsed content of a daemon.addr file: the loopback
 // address a daemon serves on, and the process id of the daemon that wrote it.
 //
@@ -99,6 +105,18 @@ type Advertisement struct {
 	PID int
 	// PIDKnown is false for a legacy bare-address file, which names no pid.
 	PIDKnown bool
+	// Private is the advertising daemon's own private address when Address
+	// is a shared one the daemons' socket holder keeps; empty otherwise.
+	Private string
+}
+
+// Daemon answers the advertising daemon's own address: Private when the
+// advertisement names a shared address, Address otherwise.
+func (a Advertisement) Daemon() string {
+	if a.Private != "" {
+		return a.Private
+	}
+	return a.Address
 }
 
 // ParseAdvertisement parses the daemon.addr payload. It never fails: a file
@@ -111,6 +129,10 @@ func ParseAdvertisement(raw string) Advertisement {
 		trimmed := strings.TrimSpace(line)
 		if i == 0 {
 			adv.Address = trimmed
+			continue
+		}
+		if rest, ok := strings.CutPrefix(trimmed, privateLinePrefix); ok {
+			adv.Private = strings.TrimSpace(rest)
 			continue
 		}
 		if rest, ok := strings.CutPrefix(trimmed, pidLinePrefix); ok {
@@ -245,7 +267,11 @@ func (c *claim) advertisedLocked() string {
 // alone is what a legacy daemon wrote, so a legacy reader that takes only the
 // first line still reads a valid address.
 func (c *claim) advertisement() string {
-	return c.advertisedLocked() + "\n" + pidLinePrefix + strconv.Itoa(c.pid) + "\n"
+	payload := c.advertisedLocked() + "\n" + pidLinePrefix + strconv.Itoa(c.pid) + "\n"
+	if c.advertised != "" && c.advertised != c.address {
+		payload += privateLinePrefix + c.address + "\n"
+	}
+	return payload
 }
 
 // Publish implements Claim. The write is atomic — a temporary file in the
