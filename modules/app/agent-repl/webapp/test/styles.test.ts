@@ -19,6 +19,7 @@
  * (owner request, 2026-10-23: a drag highlighted every row between pickup and
  * drop; src/drag.ts). The class comes off at the drop.
  */
+import { FOLDED_CLASS } from "../src/sidebar/folded-class.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -49,7 +50,7 @@ import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/respons
 import { cascadedValue, cascadedValueIn, inDocument, inRail, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/band-fit.js";
-import { DEPLOYS_GROUP_CLASS, DEPLOYS_GROUP_FOLDED_CLASS } from "../src/sidebar/deploys-fold.js";
+import { DEPLOYS_GROUP_CLASS } from "../src/sidebar/deploys-fold.js";
 import { MERGED_GROUP_HEAD_CLASS } from "../src/sidebar/roster.js";
 import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
 import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
@@ -7051,7 +7052,7 @@ describe("a band header's hover box, folded or open", () => {
     for (const cls of [MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS]) {
       const section = document.createElement("div");
       section.className = `repo ${cls}`;
-      if (cls === band && folded) section.classList.add(DEPLOYS_GROUP_FOLDED_CLASS);
+      if (cls === band && folded) section.classList.add(FOLDED_CLASS);
       const head = document.createElement("div");
       head.className = "repo-head";
       const rows = document.createElement("div");

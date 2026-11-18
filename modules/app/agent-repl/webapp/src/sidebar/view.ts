@@ -27,6 +27,7 @@
  * mid-gesture is transient to the page that opened it, and never passes
  * through here.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import { log } from "../log.js";
 
 /**
@@ -61,7 +62,7 @@ export const FOLD_CONTROL_ATTRIBUTE = "data-section-fold";
  * sections, whose headers answer their own folds.
  */
 export function paintSectionFold(section: HTMLElement, folded: boolean): void {
-  section.classList.toggle("folded", folded);
+  section.classList.toggle(FOLDED_CLASS, folded);
   for (const control of [...section.children].filter((child): child is HTMLElement => child.hasAttribute(FOLD_CONTROL_ATTRIBUTE))) {
     paintFoldControl(control, folded);
   }

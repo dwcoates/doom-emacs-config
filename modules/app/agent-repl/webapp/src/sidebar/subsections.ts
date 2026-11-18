@@ -50,6 +50,7 @@
  * rail's layer (`ArrangeContext.layer`), not in a drawing a push replaces,
  * so a status change elsewhere cannot throw away what is being typed.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -454,7 +455,7 @@ function subsectionOf(list: HTMLElement): HTMLElement | null {
  */
 export function showsNoRows(sub: HTMLElement): boolean {
   if (!isSubsection(sub)) throw new Error("invariant: a row drag's target is a subsection");
-  return sub.classList.contains("folded") || sub.hasAttribute(EMPTY_SUBSECTION_ATTRIBUTE);
+  return sub.classList.contains(FOLDED_CLASS) || sub.hasAttribute(EMPTY_SUBSECTION_ATTRIBUTE);
 }
 
 /** A press on a repository section's header drags it among the repositories. */

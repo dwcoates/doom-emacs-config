@@ -5,10 +5,10 @@
  * the click lasting until its queue changes or the user is done with the
  * rail, and a repository's two groups folding apart.
  */
+import { FOLDED_CLASS } from "../../src/sidebar/folded-class.js";
 import { describe, expect, it } from "vitest";
 import {
   DEPLOYS_GROUP_CLASS,
-  DEPLOYS_GROUP_FOLDED_CLASS,
   DEPLOYS_LINE_ATTRIBUTE,
   DEPLOYS_REPOSITORY_ATTRIBUTE,
   DEPLOYS_SECTION_ATTRIBUTE,
@@ -67,7 +67,7 @@ describe("createDeploysFold", () => {
   ])("$name", ({ line }) => {
     const g = group("r1", line);
     createDeploysFold(rail(g), () => undefined).paint(g);
-    expect(g.classList.contains(DEPLOYS_GROUP_FOLDED_CLASS)).toBe(false);
+    expect(g.classList.contains(FOLDED_CLASS)).toBe(false);
   });
 
   it.each([
@@ -77,7 +77,7 @@ describe("createDeploysFold", () => {
     const g = group("r1");
     const folds = createDeploysFold(rail(g), () => undefined);
     for (let i = 0; i < toggles; i += 1) folds.toggle(g);
-    expect([folds.folded(g), g.classList.contains(DEPLOYS_GROUP_FOLDED_CLASS)]).toEqual([want, want]);
+    expect([folds.folded(g), g.classList.contains(FOLDED_CLASS)]).toEqual([want, want]);
   });
 
   it("keeps a choice for a group drawn again with the same line", () => {
@@ -115,7 +115,7 @@ describe("createDeploysFold", () => {
     const folds = createDeploysFold(rail(g), () => undefined);
     folds.toggle(g);
     if (reset) folds.reset("the focus left");
-    expect([folds.folded(g), g.classList.contains(DEPLOYS_GROUP_FOLDED_CLASS)]).toEqual([want, want]);
+    expect([folds.folded(g), g.classList.contains(FOLDED_CLASS)]).toEqual([want, want]);
   });
 
   it("tells its rail to refit on each change, and not on a reset with no choice standing", () => {

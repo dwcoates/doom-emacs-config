@@ -21,6 +21,7 @@
  * it differently. The field is validated and logged, and that is all.
  */
 import { drawRosterSectionHeight, drawSectionHeight, type RosterSectionHeight } from "./section-resize.js";
+import { FOLDED_CLASS } from "./folded-class.js";
 import {
   BAND_FLOOR,
   HIDDEN_SECTION_CLASS,
@@ -1281,7 +1282,7 @@ function foldedBox(foldKey: string, folded: boolean): HTMLElement {
   const section = document.createElement("div");
   section.className = "repo";
   section.setAttribute("data-section", foldKey);
-  if (folded) section.classList.add("folded");
+  if (folded) section.classList.add(FOLDED_CLASS);
   return section;
 }
 

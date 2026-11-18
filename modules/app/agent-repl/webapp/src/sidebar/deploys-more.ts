@@ -18,11 +18,11 @@
  * outlives every draw, so a push that redraws the Recently Merged section draws each
  * group with the pages it had.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { drawWalkControl, setWalkLoading } from "../feed/walk-control.js";
 import {
-  DEPLOYS_GROUP_FOLDED_CLASS,
   RECENTLY_MERGED_GROUP_SELECTOR,
   deploysGroupRepository,
 } from "./deploys-fold.js";
@@ -122,7 +122,7 @@ export function createDeploysMore(root: ParentNode, changed: () => void): Deploy
   const check = (): void => {
     for (const group of groups()) {
       const total = pagesOf(group).length;
-      if (group.classList.contains(DEPLOYS_GROUP_FOLDED_CLASS)) {
+      if (group.classList.contains(FOLDED_CLASS)) {
         while (shownOf(group) > 0) move(group, -1, "its group was folded");
         continue;
       }

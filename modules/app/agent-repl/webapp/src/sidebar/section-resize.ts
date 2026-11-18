@@ -19,6 +19,7 @@
  * mid-drag, puts back what the wire says. A double click on a rule fits the
  * sections beside it by their share again.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewSectionSizeSchema, UpdateSidebarViewRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { DRAGGING_CLASS } from "../drag.js";
@@ -90,7 +91,7 @@ export function drawSectionHeight(section: HTMLElement, foldKey: string, wire: n
 const SECTION_ORDER = [OPEN_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS] as const;
 
 /** Whether SECTION is drawn open in its pane. */
-const isOpen = (section: Element): boolean => !(section as HTMLElement).hidden && !section.classList.contains("folded");
+const isOpen = (section: Element): boolean => !(section as HTMLElement).hidden && !section.classList.contains(FOLDED_CLASS);
 
 /** One rule's drag: the open section above it and the band below it. */
 export interface ResizePair {

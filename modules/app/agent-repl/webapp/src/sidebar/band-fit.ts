@@ -103,6 +103,7 @@
  * moment they lay out (the rail observes its scroller, its panes and the
  * sections inside its rows regions).
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
 import { log } from "../log.js";
@@ -115,7 +116,7 @@ import {
   MERGE_QUEUE_REMEDIATING_CLASS,
   MERGE_QUEUE_WAITING_CLASS,
 } from "./merge-queue-view.js";
-import { DEPLOYS_FLOOR, DEPLOYS_GROUP_CLASS, DEPLOYS_GROUP_FOLDED_CLASS } from "./deploys-fold.js";
+import { DEPLOYS_FLOOR, DEPLOYS_GROUP_CLASS } from "./deploys-fold.js";
 import { mergedToday } from "./row.js";
 
 /** The classes the four sections are drawn with. */
@@ -179,7 +180,7 @@ const LINE_SELECTOR = [
   `.${MERGE_QUEUE_WAITING_CLASS}`,
   `.${MERGE_QUEUE_GITHUB_CLASS}`,
   `.${MERGE_QUEUE_OFF_QUEUE_CLASS}`,
-  `.${DEPLOYS_GROUP_CLASS}.${DEPLOYS_GROUP_FOLDED_CLASS} > .merged-group-head`,
+  `.${DEPLOYS_GROUP_CLASS}.${FOLDED_CLASS} > .merged-group-head`,
 ].join(", ");
 
 /**
@@ -501,7 +502,7 @@ interface Band {
 /** PANE's section of CLASS, or null when it is absent, not drawn, or folded. */
 function openBand(pane: HTMLElement, className: string, regionClass: string): Band | null {
   const section = pane.querySelector<HTMLElement>(`:scope > .${className}`);
-  if (section === null || section.hidden || section.classList.contains("folded")) return null;
+  if (section === null || section.hidden || section.classList.contains(FOLDED_CLASS)) return null;
   const region = section.querySelector<HTMLElement>(`:scope > .${regionClass}`);
   if (region === null) {
     log.error("a sidebar band cannot be fitted: it is drawn without its rows region", {

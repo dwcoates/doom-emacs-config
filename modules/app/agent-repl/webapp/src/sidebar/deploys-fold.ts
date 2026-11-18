@@ -23,6 +23,7 @@
  * with another page or kept across a restart. It outlives every draw, so a
  * push that redraws a section draws each group as it stands.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import { queryAll } from "../dom.js";
 import type { FocusLeft } from "../focus-left.js";
 import { log } from "../log.js";
@@ -38,9 +39,6 @@ export type DeploysGroupSection = "merge-queue" | "recently-merged";
 
 /** The selector a Recently Merged group answers to. */
 export const RECENTLY_MERGED_GROUP_SELECTOR = `.${DEPLOYS_GROUP_CLASS}[${DEPLOYS_SECTION_ATTRIBUTE}="recently-merged"]`;
-
-/** The class a folded group wears; the stylesheet hides its body under it. */
-export const DEPLOYS_GROUP_FOLDED_CLASS = "folded";
 
 /** The attribute a group names its repository on. */
 export const DEPLOYS_REPOSITORY_ATTRIBUTE = "data-repository";
@@ -127,7 +125,7 @@ export function createDeploysFold(root: ParentNode, changed: () => void): Deploy
     return choice.folded;
   };
   const paint = (group: HTMLElement): void => {
-    group.classList.toggle(DEPLOYS_GROUP_FOLDED_CLASS, folded(group));
+    group.classList.toggle(FOLDED_CLASS, folded(group));
   };
   const repaint = (): void => {
     for (const group of queryAll<HTMLElement>(root, `.${DEPLOYS_GROUP_CLASS}`)) paint(group);
