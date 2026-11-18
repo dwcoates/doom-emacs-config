@@ -117,9 +117,9 @@ func TestAnEscalationThatCannotReachTheUserIsRecorded(t *testing.T) {
 	}{
 		{name: "a mediator that cannot be shown", message: "the deploy mediator could not be shown for its brief; it is not briefed",
 			arrange: func(h *harness) { h.checks.resumeErr = errors.New("parent hidden") }},
-		{name: "an effort that cannot be set", message: "the deploy mediator's effort could not be set; it is not briefed",
+		{name: "an effort that cannot be set", byUs: true, message: "the deploy mediator's effort could not be set; it is not briefed",
 			arrange: func(h *harness) { h.checks.effortErr = errors.New("no catalog") }},
-		{name: "a worktree that cannot be refreshed", message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
+		{name: "a worktree that cannot be refreshed", byUs: true, message: "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed",
 			arrange: func(h *harness) { h.checks.refreshErr = errors.New("git gone") }},
 		{name: "a daemon's brief that cannot be composed", byUs: true, message: "the escalation's brief could not be composed; the mediator is not briefed and the user is not told",
 			arrange: func(h *harness) { delete(h.briefs, BriefDeployEscalation) }},
@@ -452,5 +452,45 @@ func TestTheMediatorIsNeverToldWhatItSaidItself(t *testing.T) {
 	}
 	if p := problemOf(t, h, aProblemKey); p.FixedAt != nil {
 		t.Fatalf("problem %+v, want it open", p)
+	}
+}
+
+func TestTheMediatorsOwnEscalationOnlyShowsIt(t *testing.T) {
+	// Arrange: the mediator is mid-turn, deciding its own check.
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	refreshed, efforts := len(h.checks.refreshed), len(h.checks.efforts)
+
+	// Act
+	err := decideTold(h, Decision{Kind: MediationEscalate, Summary: "pages regressed", Problems: aProblem})
+
+	// Assert: shown, but its worktree and effort are left as its turn has them.
+	if err != nil || !slices.Contains(h.checks.resumed, "ws-fixer") {
+		t.Fatalf("DecideMediation = %v, resumed %v; want the mediator shown", err, h.checks.resumed)
+	}
+	if len(h.checks.refreshed) != refreshed || len(h.checks.efforts) != efforts {
+		t.Fatalf("refreshed %v, efforts %v; want neither touched mid-turn", h.checks.refreshed, h.checks.efforts)
+	}
+}
+
+func TestShowMediatorAnswersAMediatorThatCannotBeShown(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.checks.resumeErr = errors.New("parent hidden")
+
+	// Act
+	_, err := h.o.showMediator(context.Background(), queueOf(t, h), dlog.Context{})
+
+	// Assert
+	if err == nil {
+		t.Fatal("showMediator = nil, want the failure answered")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the deploy mediator could not be shown for its brief; it is not briefed"}); !ok {
+		t.Fatalf("records = %v, want the show failure at ERROR", h.logs.Records())
+	}
+	if len(h.checks.refreshed) != 0 || len(h.checks.efforts) != 0 {
+		t.Fatalf("refreshed %v, efforts %v; want nothing else readied", h.checks.refreshed, h.checks.efforts)
 	}
 }

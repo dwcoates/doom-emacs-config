@@ -108,12 +108,35 @@ func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, show b
 		return standing{}, fmt.Errorf("merge: set the deploy mediator %s's effort: %w", mediator.ws, err)
 	}
 	if show {
-		if err := o.deps.DeployChecks.Resume(ctx, mediator.ws); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be shown for its brief; it is not briefed", withField(fields, "error", err.Error()))
-			return standing{}, fmt.Errorf("merge: show the deploy mediator %s: %w", mediator.ws, err)
+		if err := o.show(ctx, mediator, fields); err != nil {
+			return standing{}, err
 		}
 	}
 	return mediator, nil
+}
+
+// showMediator answers queue Q's mediator shown and nothing else readied:
+// the mediator that escalated in its own turn is mid-turn, so its worktree
+// holds its work and its effort is set (escalate).
+func (o *orchestrator) showMediator(ctx context.Context, q checkedQueue, fields dlog.Context) (standing, error) {
+	mediator, err := o.mediatorOf(ctx, q, fields)
+	if err != nil {
+		return standing{}, err
+	}
+	if err := o.show(ctx, mediator, withField(fields, "mediator", string(mediator.ws))); err != nil {
+		return standing{}, err
+	}
+	return mediator, nil
+}
+
+// show puts MEDIATOR in sight for its escalation, recording a failure at
+// ERROR.
+func (o *orchestrator) show(ctx context.Context, mediator standing, fields dlog.Context) error {
+	if err := o.deps.DeployChecks.Resume(ctx, mediator.ws); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be shown for its brief; it is not briefed", withField(fields, "error", err.Error()))
+		return fmt.Errorf("merge: show the deploy mediator %s: %w", mediator.ws, err)
+	}
+	return nil
 }
 
 // settleMediatorSight shows queue Q's mediator while check M has it at
