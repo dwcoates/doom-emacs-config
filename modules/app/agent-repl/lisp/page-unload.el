@@ -11,8 +11,12 @@
 ;; 2026-10-17, 2026-10-18 and 2026-10-26):
 ;;
 ;;   - WORKING (a turn running in front or behind, a permission or question
-;;     ask, a vendor retry): always held, and loaded in the background the
-;;     moment the workspace starts working;
+;;     ask, a vendor retry): held, and loaded in the background the moment
+;;     the workspace starts working, for the first
+;;     `agent-repl-page-unload-working-cap' (16) by when each started
+;;     working.  A working workspace past them is held only while shown, and
+;;     as working ones stop, the next in line is loaded (owner ruling,
+;;     2026-11-18);
 ;;   - FINISHED WITHIN THE HOLD: every other workspace whose last turn ended
 ;;     less than `agent-repl-page-unload-after' ago is held, IDLE, MERGING,
 ;;     FAULTED or TRANSITIONAL alike.  THE HOLD IS THE SIDEBAR'S FADE: the
@@ -134,6 +138,14 @@ back within it keeps the page; leaving again starts it afresh."
   :type 'integer
   :group 'agent-repl-page-unload)
 
+(defcustom agent-repl-page-unload-working-cap 16
+  "How many working workspaces keep their page while off screen.
+A working workspace past the first this many, by when each started
+working, is loaded only while shown; as working ones stop, the next in
+line takes its place and its page is loaded (owner ruling, 2026-11-18)."
+  :type 'integer
+  :group 'agent-repl-page-unload)
+
 (defcustom agent-repl-page-unload-interval 60
   "Seconds between the passes that unload the pages no status holds."
   :type 'integer
@@ -196,6 +208,33 @@ recorded at ERROR and signalled, never guessed at."
   "WS's bucket from its roster status, or nil before its first row."
   (agent-repl-page-unload-bucket (agent-repl-roster-status-for-ws ws)))
 
+(defun agent-repl-page-unload--stamp-working (now)
+  "Record at NOW when each live workspace started working, clearing the rest.
+The stamp orders the working workspaces for the cap
+\(`agent-repl-page-unload--within-working-cap-p'): the first stamped keep
+their pages."
+  (dolist (ws (agent-repl--live-ws-names))
+    (if (and (eq (agent-repl-page-unload--ws-bucket ws) 'working)
+             (not (agent-repl-page-unload--withheld-p ws)))
+        (unless (agent-repl--ws-get ws :page-working-since)
+          (agent-repl--ws-put ws :page-working-since now))
+      (agent-repl--ws-put ws :page-working-since nil))))
+
+(defun agent-repl-page-unload--within-working-cap-p (ws)
+  "Non-nil when working WS is among the first `agent-repl-page-unload-working-cap'.
+Working workspaces are ordered by when each started working, the earliest
+first, ties broken by name, so a workspace keeps its place while it works."
+  (agent-repl-page-unload--stamp-working (agent-repl-page-unload--now))
+  (let* ((working (seq-filter (lambda (w) (agent-repl--ws-get w :page-working-since))
+                              (agent-repl--live-ws-names)))
+         (ranked (sort working
+                       (lambda (a b)
+                         (let ((sa (agent-repl--ws-get a :page-working-since))
+                               (sb (agent-repl--ws-get b :page-working-since)))
+                           (if (= sa sb) (string< a b) (< sa sb)))))))
+    (< (or (cl-position ws ranked :test #'equal) most-positive-fixnum)
+       agent-repl-page-unload-working-cap)))
+
 (defun agent-repl-page-unload--on-screen-p (ws)
   "Non-nil when WS's page is the one shown or WS is the current workspace."
   (or (equal ws agent-repl-page-unload--shown)
@@ -237,7 +276,8 @@ pass loads a working page later on its own (`agent-repl-page-unload-pass')."
            (pcase (agent-repl-host-last-known-page ws)
              (:loaded t)
              (:not-loaded nil)
-             ('nil (eq (agent-repl-page-unload--ws-bucket ws) 'working))
+             ('nil (and (eq (agent-repl-page-unload--ws-bucket ws) 'working)
+                        (agent-repl-page-unload--within-working-cap-p ws)))
              (other (agent-repl--fatal ws "elisp.page-unload.last-known-page-unknown ws=%s page=%S"
                                        ws other))))))
 
@@ -373,7 +413,11 @@ working on its own, and either way it is held as working."
      ;; THE GRACE AFTER A SWITCH AWAY holds the page, whatever its status.
      ((agent-repl-page-unload--leave-ends ws now) nil)
      ((agent-repl-page-unload--withheld-p ws) 'hidden)
-     ((memq bucket '(nil working)) nil)
+     ((null bucket) nil)
+     ;; A WORKING PAGE PAST THE CAP is held only while shown (owner ruling,
+     ;; 2026-11-18).
+     ((eq bucket 'working)
+      (unless (agent-repl-page-unload--within-working-cap-p ws) 'over-working-cap))
      ;; A PAGE IS HELD THE HOLD AFTER ITS LAST TURN ENDED however it was
      ;; loaded, while its name fades in the sidebar.
      ((agent-repl-page-unload--hold-ends ws now) nil)
@@ -478,7 +522,8 @@ A workspace that starts working while its page is unloaded gets it back
 before anyone switches to it (owner ruling, 2026-10-29)."
   (when (and (agent-repl-page-unloaded-p ws)
              (not (agent-repl-page-unload--withheld-p ws))
-             (eq (agent-repl-page-unload--ws-bucket ws) 'working))
+             (eq (agent-repl-page-unload--ws-bucket ws) 'working)
+             (agent-repl-page-unload--within-working-cap-p ws))
     (agent-repl--ws-put ws :page-visit nil)
     (agent-repl-page-unload-note-mounted ws)
     (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=working" ws)
@@ -520,7 +565,9 @@ workspace memory hover
       (list :arm :loaded
             :value (list :release
                          (cond
-                          ((and (memq bucket '(nil working))
+                          ((and (or (null bucket)
+                                    (and (eq bucket 'working)
+                                         (agent-repl-page-unload--within-working-cap-p ws)))
                                 (not (agent-repl-page-unload--withheld-p ws)))
                            (list :arm :held :value nil))
                           ((agent-repl-page-unload--hold-ends ws (agent-repl-page-unload--now))

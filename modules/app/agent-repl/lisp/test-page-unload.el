@@ -1608,3 +1608,55 @@ naming a dead buffer, and every switch back found its panels closed."
 
 (provide 'test-page-unload)
 ;;; test-page-unload.el ends here
+
+;;;; ---- The working cap ----
+
+(ert-deftest agent-repl-test-pu-a-working-page-past-the-cap-is-unloaded-off-screen ()
+  "Only the first `agent-repl-page-unload-working-cap' working pages are held off screen."
+  ;; Arrange: three working workspaces, a cap of two; gamma started working last.
+  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
+    (let ((agent-repl-page-unload-working-cap 2))
+      (setq agent-repl-test-pu--status '(("alpha" . :thinking) ("beta" . :thinking))
+            agent-repl-test-pu--turn-ended '(("gamma" . 900000)))
+      (agent-repl-page-unload-pass)
+      (setq agent-repl-test-pu--now 1010
+            agent-repl-test-pu--status '(("alpha" . :thinking) ("beta" . :thinking) ("gamma" . :thinking)))
+      ;; Act
+      (agent-repl-page-unload-pass)
+      ;; Assert
+      (should (equal agent-repl-test-pu--dropped '("gamma")))
+      (should (agent-repl-test-pu--said-p "ws=gamma" "reason=over-working-cap")))))
+
+(ert-deftest agent-repl-test-pu-the-next-working-page-is-loaded-when-one-stops ()
+  "When a working workspace within the cap stops, the next in line has its page loaded."
+  ;; Arrange: gamma is past a cap of two and holds no page.
+  (agent-repl-test-pu--with '("alpha" "beta" "gamma")
+    (let ((agent-repl-page-unload-working-cap 2))
+      (setq agent-repl-test-pu--status '(("alpha" . :thinking) ("beta" . :thinking)))
+      (agent-repl-page-unload-pass)
+      (setq agent-repl-test-pu--now 1010
+            agent-repl-test-pu--pages '("alpha" "beta")
+            agent-repl-test-pu--status '(("alpha" . :thinking) ("beta" . :thinking) ("gamma" . :thinking)))
+      (agent-repl-page-unload-pass)
+      (setq agent-repl-test-pu--events nil
+            agent-repl-test-pu--status '(("beta" . :thinking) ("gamma" . :thinking)))
+      ;; Act
+      (agent-repl-page-unload-pass)
+      ;; Assert
+      (should (member '(ensure "gamma") agent-repl-test-pu--events)))))
+
+(ert-deftest agent-repl-test-pu-a-working-page-past-the-cap-is-kept-while-shown ()
+  "A working page past the cap is held while the host shows it."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha" "beta")
+    (let ((agent-repl-page-unload-working-cap 1))
+      (setq agent-repl-test-pu--status '(("alpha" . :thinking))
+            agent-repl-test-pu--turn-ended '(("beta" . 900000)))
+      (agent-repl-page-unload-pass)
+      (setq agent-repl-test-pu--now 1010
+            agent-repl-test-pu--status '(("alpha" . :thinking) ("beta" . :thinking)))
+      (agent-repl-page-unload-note-shown "beta")
+      ;; Act
+      (agent-repl-page-unload-pass)
+      ;; Assert
+      (should-not (member "beta" agent-repl-test-pu--dropped)))))
