@@ -49,6 +49,16 @@
   - e.g., to provoke CICD while iterating on Action workflows, or as part of PR creation process.
 - Adding to GH merge queue is allowed when appropriate.
 
+### Pull requests are never stacked on other pull requests unasked
+
+- A pull request targets the repository's default base branch, never another pull request's branch.
+  - A stacked pull request depends on its base landing first, so every change to the base must be rebased through the stack.
+  - Its diff and its checks read against an unmerged branch, so a reviewer cannot judge it on its own.
+- Stack a pull request onto another only when I ask for it.
+- Suggest stacking only when there is a very good reason for it, stated with the suggestion.
+  - A very good reason is a real dependency that cannot wait for its base to merge and cannot be split into independent changes.
+  - That a later change builds on code still in review is not, by itself, such a reason: wait for the base to merge, or make the change independent of it.
+
 ### Not allowed without my EXPLICIT, per-use permission
 
 - Operating on files outside the current project.

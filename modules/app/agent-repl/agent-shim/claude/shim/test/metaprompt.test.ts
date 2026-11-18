@@ -365,6 +365,18 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("even when an earlier mention already spelled out the repository");
   });
 
+  it("never stacks a pull request on another unless the user asks, and suggests it only for a very good reason", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("### Pull requests are never stacked on other pull requests unasked");
+    expect(text).toContain("A pull request targets the repository's default base branch, never another pull request's branch.");
+    expect(text).toContain("Stack a pull request onto another only when I ask for it.");
+    expect(text).toContain("Suggest stacking only when there is a very good reason for it, stated with the suggestion.");
+  });
+
   it("ends every response tree with a summary branch holding a 3-5 node TLDR branch, followed only by the questions branch", () => {
     // Arrange
     const home = homeOnThisRepository();
