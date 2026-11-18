@@ -168,7 +168,7 @@ func TestAFailedOverrideIsTheBuildStep(t *testing.T) {
 
 func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.T) {
 	tests := []struct {
-		name       string
+		name      string
 		installed string
 		want      string
 	}{

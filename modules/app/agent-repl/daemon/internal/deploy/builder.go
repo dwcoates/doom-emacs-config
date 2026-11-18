@@ -63,9 +63,9 @@ type ScriptBuilder struct {
 	// built from the same sources is copied rather than rebuilt, so codesign
 	// (and the signing key it unlocks) runs only when the sources changed.
 	WifiInstalled string
-	Runner     Runner
-	Clock      Clock
-	Log        dlog.Logger
+	Runner        Runner
+	Clock         Clock
+	Log           dlog.Logger
 }
 
 // buildStep is one command of a build.
