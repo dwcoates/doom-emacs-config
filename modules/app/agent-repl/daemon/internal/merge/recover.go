@@ -688,8 +688,19 @@ func (o *orchestrator) sweepOrphanedState(ctx context.Context) {
 		o.deps.Log.Global().Info(op, "released a merge lease no queue entry names any more; the workspace takes prompts again", fields)
 		o.deps.Queue.OnLeaseChanged(l.Workspace)
 	}
-	if swept.ProgressRecords+swept.RoundsClosed+len(swept.ReleasedLeases) > 0 {
+	// EACH ROUND SETTLED IS ITS OWN RECORD, with its ledger, its round and
+	// whether it was held: the hold goes as the round settles, and nothing
+	// else says which rounds the sweep ended (2026-11-17).
+	for _, r := range swept.ClosedRounds {
+		fields := dlog.Context{"workspace": string(r.Workspace), "lease": string(r.Lease), "round": r.Round, "kind": r.Kind, "held": r.HeldSince != nil}
+		if r.HeldSince != nil {
+			fields["held_since"] = r.HeldSince.UTC().Format(time.RFC3339Nano)
+		}
+		o.log(ctx, r.Workspace).Info(op, "settled a live merge round no queue entry names any more as abandoned, clearing its hold", fields)
+		o.deps.Log.Global().Info(op, "settled a live merge round no queue entry names any more as abandoned, clearing its hold", fields)
+	}
+	if swept.ProgressRecords+len(swept.ClosedRounds)+len(swept.ReleasedLeases) > 0 {
 		o.deps.Log.Global().Info(op, "swept the merge state no queue entry names any more", dlog.Context{
-			"progress_records": swept.ProgressRecords, "rounds_closed": swept.RoundsClosed, "leases_released": len(swept.ReleasedLeases)})
+			"progress_records": swept.ProgressRecords, "rounds_closed": len(swept.ClosedRounds), "leases_released": len(swept.ReleasedLeases)})
 	}
 }

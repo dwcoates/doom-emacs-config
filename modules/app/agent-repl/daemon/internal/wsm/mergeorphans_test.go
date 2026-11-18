@@ -81,7 +81,7 @@ func TestTheSweepClosesAnOpenRoundNoMergeOwnsAsAbandoned(t *testing.T) {
 	swept, err := s.SweepOrphanedMergeState(context.Background(), instant.Add(time.Hour))
 
 	// Assert
-	if err != nil || swept.RoundsClosed != 1 {
+	if err != nil || len(swept.ClosedRounds) != 1 {
 		t.Fatalf("SweepOrphanedMergeState = %+v, %v; want the orphaned round closed", swept, err)
 	}
 	if ended, outcome := roundEnded(t, s, ws.ID); !ended || outcome != "abandoned" {
@@ -102,7 +102,7 @@ func TestTheSweepLeavesTheOpenRoundOfAMergeWithProgressOpen(t *testing.T) {
 	swept, err := s.SweepOrphanedMergeState(context.Background(), instant.Add(time.Hour))
 
 	// Assert
-	if err != nil || swept.RoundsClosed != 0 {
+	if err != nil || len(swept.ClosedRounds) != 0 {
 		t.Fatalf("SweepOrphanedMergeState = %+v, %v; want a live merge's round left open", swept, err)
 	}
 	if ended, _ := roundEnded(t, s, ws.ID); ended {
@@ -170,25 +170,30 @@ func TestTheSweepKeepsALeaseThatIsNoMerges(t *testing.T) {
 	}
 }
 
-func TestTheSweepClearsTheHoldOfAHeldRoundItSettles(t *testing.T) {
-	// Arrange: a merge suspended at its round, then taken off its queue.
+func TestTheSweepSettlesAHeldOrphanedRoundAndClearsItsHold(t *testing.T) {
+	// Arrange: a merge suspended at its fixes round, then dropped from its
+	// queue with its progress (2026-11-17: sidebar-roster-streams).
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	lease := NewLeaseID()
-	openRound(t, s, ws.ID, lease)
-	held := instant.Add(time.Minute)
-	if marked, err := s.HoldMergeRound(context.Background(), lease, &held); err != nil || !marked {
-		t.Fatalf("HoldMergeRound = %v, %v; want the live round held", marked, err)
-	}
+	heldRoundOf(t, s, ws.ID, lease)
 
 	// Act
-	_, err := s.SweepOrphanedMergeState(context.Background(), instant.Add(time.Hour))
+	swept, err := s.SweepOrphanedMergeState(context.Background(), instant.Add(time.Hour))
 
-	// Assert: the abandoned round is not held, so its ledger still reads.
-	if err != nil {
-		t.Fatalf("SweepOrphanedMergeState: %v", err)
+	// Assert
+	if err != nil || len(swept.ClosedRounds) != 1 {
+		t.Fatalf("SweepOrphanedMergeState = %+v, %v; want the held round closed", swept, err)
 	}
-	if _, err := s.MergeLedger(context.Background(), ws.ID); err != nil {
-		t.Fatalf("MergeLedger after the sweep = %v, want the ledger read", err)
+	got := swept.ClosedRounds[0]
+	if got.Lease != lease || got.Workspace != ws.ID || got.Round != 3 || got.Kind != "fixes" || got.HeldSince == nil || !got.HeldSince.Equal(instant.Add(time.Minute)) {
+		t.Fatalf("closed round = %+v, want lease %s of %s, fixes round 3, held since the hold", got, lease, ws.ID)
+	}
+	ledgers, err := s.MergeLedger(context.Background(), ws.ID)
+	if err != nil {
+		t.Fatalf("MergeLedger after the sweep: %v", err)
+	}
+	if r := ledgers[0].Intervals[0]; r.EndedAt == nil || r.Outcome != "abandoned" || r.HeldSince != nil {
+		t.Fatalf("round = %+v, want it settled abandoned with no hold", r)
 	}
 }

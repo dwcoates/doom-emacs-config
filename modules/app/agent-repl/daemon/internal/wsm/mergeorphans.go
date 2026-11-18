@@ -13,10 +13,26 @@ import (
 type OrphanedMergeState struct {
 	// ProgressRecords is how many progress records were dropped.
 	ProgressRecords int
-	// RoundsClosed is how many open ledger rounds were closed as abandoned.
-	RoundsClosed int
+	// ClosedRounds are the live ledger rounds settled as abandoned, each as
+	// it stood before the sweep settled it.
+	ClosedRounds []AbandonedRound
 	// ReleasedLeases are the merge leases released, each as it stood.
 	ReleasedLeases []Lease
+}
+
+// AbandonedRound is one live ledger round the sweep settled as abandoned.
+type AbandonedRound struct {
+	// Lease is the ledger the round belongs to.
+	Lease LeaseID
+	// Workspace is the workspace whose merge ran under that ledger.
+	Workspace WorkspaceID
+	// Round and Kind name the round within its ledger.
+	Round int
+	Kind  string
+	// HeldSince is when the merge was suspended at the round, nil when it
+	// was not held. The sweep clears the hold as it settles the round: a
+	// settled round is never held (HoldMergeRound).
+	HeldSince *time.Time
 }
 
 // SweepOrphanedMergeState removes what a merge left behind once nothing of it
@@ -68,19 +84,19 @@ func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (Orph
 			return err
 		}
 		out.ProgressRecords = int(n)
-		res, err = tx.ExecContext(ctx, `UPDATE merge_tab_intervals SET ended_at = ?, outcome = 'abandoned', held_since = NULL
-			WHERE ended_at IS NULL
-			  AND lease_id NOT IN (SELECT ledger_id FROM merge_queue WHERE ledger_id IS NOT NULL AND ledger_id != '')
-			  AND lease_id NOT IN (SELECT lease_id FROM merge_progress)`, at.UnixNano())
+		// THE ROUNDS ARE READ BEFORE THEY ARE SETTLED, holds and all, so the
+		// sweep's record names each one (2026-11-17: sidebar-roster-streams'
+		// held fixes round was settled by no record at all).
+		out.ClosedRounds, err = listRows(ctx, tx, `SELECT i.lease_id, l.workspace_id, i.round, i.kind, i.held_since
+			FROM merge_tab_intervals AS i JOIN merge_ledger AS l ON l.lease_id = i.lease_id
+			WHERE i.ended_at IS NULL AND `+orphanedRound+` ORDER BY i.lease_id, i.round, i.kind`, scanAbandonedRound)
 		if err != nil {
 			return err
 		}
-		n, err = res.RowsAffected()
-		if err != nil {
-			return err
-		}
-		out.RoundsClosed = int(n)
-		return nil
+		// A SETTLED ROUND IS NEVER HELD: the hold goes in the same write.
+		_, err = tx.ExecContext(ctx, `UPDATE merge_tab_intervals AS i SET ended_at = ?, outcome = 'abandoned', held_since = NULL
+			WHERE i.ended_at IS NULL AND `+orphanedRound, at.UnixNano())
+		return err
 	})
 	if err != nil {
 		return OrphanedMergeState{}, err
@@ -89,4 +105,22 @@ func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (Orph
 		s.disown(l.ID)
 	}
 	return out, nil
+}
+
+// orphanedRound is the condition on a ledger round `i` that no queue entry
+// and no progress record names its lease.
+const orphanedRound = `i.lease_id NOT IN (SELECT ledger_id FROM merge_queue WHERE ledger_id IS NOT NULL AND ledger_id != '')
+			  AND i.lease_id NOT IN (SELECT lease_id FROM merge_progress)`
+
+// scanAbandonedRound reads one row of the sweep's round query.
+func scanAbandonedRound(rows interface{ Scan(...any) error }) (AbandonedRound, error) {
+	var (
+		r    AbandonedRound
+		held sql.NullInt64
+	)
+	if err := rows.Scan(&r.Lease, &r.Workspace, &r.Round, &r.Kind, &held); err != nil {
+		return AbandonedRound{}, err
+	}
+	r.HeldSince = optTime(held)
+	return r, nil
 }

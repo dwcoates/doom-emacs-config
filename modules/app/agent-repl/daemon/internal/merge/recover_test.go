@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -557,7 +558,7 @@ func TestRecoverSweepsTheMergeStateNoQueueEntryNames(t *testing.T) {
 func TestRecoverRecordsWhatTheSweepRemoved(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	h.db.swept = wsm.OrphanedMergeState{ProgressRecords: 1, RoundsClosed: 29}
+	h.db.swept = wsm.OrphanedMergeState{ProgressRecords: 1, ClosedRounds: []wsm.AbandonedRound{{Lease: "lease-1", Workspace: theWorkspace, Round: 1, Kind: "tests"}}}
 
 	// Act
 	if err := h.o.Recover(context.Background()); err != nil {
@@ -567,6 +568,53 @@ func TestRecoverRecordsWhatTheSweepRemoved(t *testing.T) {
 	// Assert
 	if !recordedAt(h, "info", "swept the merge state no queue entry names any more") {
 		t.Fatal("the sweep's removals were not recorded")
+	}
+}
+
+func TestRecoverRecordsEachRoundTheSweepSettledWithItsLedgerAndHold(t *testing.T) {
+	heldSince := time.Date(2026, 11, 17, 13, 53, 52, 0, time.UTC)
+	tests := []struct {
+		name  string
+		round wsm.AbandonedRound
+		want  map[string]string
+	}{
+		{
+			name:  "a held round names its hold",
+			round: wsm.AbandonedRound{Lease: "lease-held", Workspace: theWorkspace, Round: 3, Kind: "fixes", HeldSince: &heldSince},
+			want:  map[string]string{"workspace": string(theWorkspace), "lease": "lease-held", "round": "3", "kind": "fixes", "held": "true", "held_since": "2026-11-17T13:53:52Z"},
+		},
+		{
+			name:  "a running round says it was not held",
+			round: wsm.AbandonedRound{Lease: "lease-running", Workspace: theWorkspace, Round: 1, Kind: "tests"},
+			want:  map[string]string{"workspace": string(theWorkspace), "lease": "lease-running", "round": "1", "kind": "tests", "held": "false"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.db.swept = wsm.OrphanedMergeState{ClosedRounds: []wsm.AbandonedRound{tt.round}}
+
+			// Act
+			if err := h.o.Recover(context.Background()); err != nil {
+				t.Fatalf("Recover: %v", err)
+			}
+
+			// Assert
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.merge.recover",
+				Message: "settled a live merge round no queue entry names any more as abandoned, clearing its hold"})
+			if !ok {
+				t.Fatalf("records = %+v, want the settled round recorded at INFO", h.logs.Records())
+			}
+			for k, v := range tt.want {
+				if fmt.Sprint(rec.Context[k]) != v {
+					t.Fatalf("record context %v, want %s = %s", rec.Context, k, v)
+				}
+			}
+			if _, has := rec.Context["held_since"]; has != (tt.round.HeldSince != nil) {
+				t.Fatalf("record context %v, want held_since only for a held round", rec.Context)
+			}
+		})
 	}
 }
 
