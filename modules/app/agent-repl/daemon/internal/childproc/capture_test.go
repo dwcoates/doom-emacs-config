@@ -1,6 +1,7 @@
 package childproc
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -112,5 +113,51 @@ func TestWaitReturnsWhileADescendantHoldsTheOutput(t *testing.T) {
 	// Assert
 	if runErr != nil || finishErr != nil || stdout != "done" {
 		t.Fatalf("run %v, Finish = %q, %v; want %q and no errors", runErr, stdout, finishErr, "done")
+	}
+}
+
+func TestCaptureStderrAnswersTheErrorStreamBesideAPipedOutput(t *testing.T) {
+	// Arrange
+	cmd := Command(Stable, "/bin/sh", "-c", `printf out; printf err >&2`)
+	capture, err := CaptureStderr(cmd)
+	if err != nil {
+		t.Fatalf("CaptureStderr: %v", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("StdoutPipe beside CaptureStderr: %v", err)
+	}
+
+	// Act
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	out, readErr := io.ReadAll(stdout)
+	waitErr := cmd.Wait()
+	stderr, err := capture.Finish()
+
+	// Assert
+	if readErr != nil || waitErr != nil || err != nil || string(out) != "out" || stderr != "err" {
+		t.Fatalf("read %q (%v), wait %v, Finish = %q, %v; want %q, %q and no errors", out, readErr, waitErr, stderr, err, "out", "err")
+	}
+	if _, ok := cmd.Stderr.(*os.File); !ok {
+		t.Fatalf("cmd.Stderr is %T, want *os.File", cmd.Stderr)
+	}
+}
+
+func TestCaptureStderrRefusesWhenNoFileCanBeMade(t *testing.T) {
+	// Arrange
+	t.Setenv("TMPDIR", filepath.Join(t.TempDir(), "absent"))
+	cmd := Command(Stable, "true")
+
+	// Act
+	capture, err := CaptureStderr(cmd)
+
+	// Assert: the refusal names the stream, and cmd is left untouched.
+	if err == nil || capture != nil || !strings.Contains(err.Error(), "make the child's stderr file") {
+		t.Fatalf("CaptureStderr = %v, %v; want a refusal naming the stderr file", capture, err)
+	}
+	if cmd.Stderr != nil {
+		t.Fatalf("cmd.Stderr = %v; want it untouched", cmd.Stderr)
 	}
 }
