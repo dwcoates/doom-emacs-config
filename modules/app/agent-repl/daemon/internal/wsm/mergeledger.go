@@ -145,7 +145,9 @@ ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
 
 // unheldSettledRoundsDDL is the layout-170 repair: every settled round the
 // orphan sweep left held (SweepOrphanedMergeState) has its hold cleared, so
-// no stored round is both settled and held.
+// no stored round is both settled and held. It is a contract step: it only
+// rewrites a contradiction every build refuses to read, and it follows the
+// contract step 169, after which no additive step may run.
 const unheldSettledRoundsDDL = `
 UPDATE merge_tab_intervals SET held_since = NULL WHERE held_since IS NOT NULL AND ended_at IS NOT NULL;
 `
