@@ -43,6 +43,10 @@ type wifiScan struct {
 	Current string `json:"current"`
 	// Visible is every network the scan saw, strongest first.
 	Visible []visibleNetwork `json:"visible"`
+	// StandingMs is how long Location Services took to tell the helper its
+	// standing, nil when the helper never heard it: the measurement the
+	// helper's standing bound is sized from.
+	StandingMs *int64 `json:"standing_ms"`
 	// Error is why the scan itself failed, when it did.
 	Error string `json:"error"`
 }
@@ -141,8 +145,10 @@ func (c *Controller) scanWifi(ctx context.Context) (wifiScan, error) {
 	c.mu.Lock()
 	c.authorizeAsked = false
 	c.mu.Unlock()
-	c.log.Debug(opFailover, "scanned the visible Wi-Fi networks", dlog.Context{
-		"visible": len(scan.Visible), "joined_named": scan.Current != "", "took_ms": took.Milliseconds()})
+	// INFO, so every scan's standing time is kept: the helper's standing
+	// bound is sized from it under the host's real load (2026-11-18, the
+	// 40ms bound measured idle ran out during a deploy).
+	c.log.Info(opFailover, "scanned the visible Wi-Fi networks", scanContext(scan, took))
 	return scan, nil
 }
 
@@ -232,4 +238,14 @@ func (c *Controller) recordScanCauseLocked(err error) {
 	c.recordStandingCause(&c.scanCause, err.Error(), func(cause string) {
 		c.log.Error(opFailover, "the visible Wi-Fi networks could not be read; only the hotspot can be joined", dlog.Context{"cause": cause})
 	})
+}
+
+// scanContext is the record of one answered scan: what it saw, how long it
+// took, and how long the helper waited on its Location Services standing.
+func scanContext(scan wifiScan, took time.Duration) dlog.Context {
+	ctx := dlog.Context{"visible": len(scan.Visible), "joined_named": scan.Current != "", "took_ms": took.Milliseconds()}
+	if scan.StandingMs != nil {
+		ctx["standing_ms"] = *scan.StandingMs
+	}
+	return ctx
 }

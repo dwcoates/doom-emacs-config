@@ -38,7 +38,14 @@ struct Answer: Encodable {
     let current: String?
     let visible: [Visible]
     let error: String?
+    // standing_ms is how long CoreLocation took to tell the standing, from
+    // the manager's creation; nil when it was never heard. It measures
+    // standingBound under the host's real load.
+    var standing_ms: Int? = standingMs
 }
+
+// standingMs is the time the listener heard the standing in, once it has.
+var standingMs: Int?
 
 func write(_ answer: Answer, to path: String) {
     let encoder = JSONEncoder()
@@ -83,6 +90,7 @@ final class Listener: NSObject, CLLocationManagerDelegate {
     let out: String
     var requested = false
     var heard = false
+    let created = DispatchTime.now()
     init(verb: String, out: String) {
         self.verb = verb
         self.out = out
@@ -90,6 +98,9 @@ final class Listener: NSObject, CLLocationManagerDelegate {
         manager.delegate = self
     }
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        if !heard {
+            standingMs = Int((DispatchTime.now().uptimeNanoseconds - created.uptimeNanoseconds) / 1_000_000)
+        }
         heard = true
         let status = manager.authorizationStatus
         switch nextStep(verb: verb, status: status, requested: requested) {
