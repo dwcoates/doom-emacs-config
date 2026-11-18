@@ -1375,6 +1375,9 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 		if err := validateProblems("mediation.escalate.problems", m.GetEscalate().GetProblems()); err != nil {
 			return err
 		}
+		if err := validateProblems("mediation.approve.ignored", m.GetApprove().GetIgnored()); err != nil {
+			return err
+		}
 	}
 	return nil
 }

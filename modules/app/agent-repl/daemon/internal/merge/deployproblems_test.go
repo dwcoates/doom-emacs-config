@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -151,6 +152,54 @@ func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
 			}
 			if owedCheck(t, h) == nil || len(h.checks.stopped) != 0 {
 				t.Fatalf("stopped %v, want the check still owed and the mediator left at work", h.checks.stopped)
+			}
+		})
+	}
+}
+
+func TestAnApprovalPassesTheGroupsItNamesIgnorable(t *testing.T) {
+	other := wsm.WindowGroup{Operation: "daemon.persistentwifi.failover", Message: "no networks", Class: wsm.WindowNew}
+	ignoreSink := []DeployProblem{{Statement: "a one-off user-driven error", Evidence: []string{sinkRecord.Raw}}}
+	tests := []struct {
+		name     string
+		groups   []wsm.WindowGroup
+		wantArm  string
+		wantKept []string
+	}{
+		{name: "an approval naming every unowned group ignorable is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew)}},
+		{name: "an approval naming a recurred group ignorable is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowRecurred)}},
+		{name: "a group the approval does not name still refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew), other}, wantArm: ArmProblemsUnowned,
+			wantKept: []string{other.Operation + ": " + other.Message + " (new)"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			toldWith(t, h, tt.groups...)
+
+			// Act
+			err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean", Problems: ignoreSink})
+
+			// Assert
+			if tt.wantArm != "" {
+				var refused *RefusalError
+				if !errors.As(err, &refused) || refused.Arm != tt.wantArm || !slices.Equal(refused.Fields["groups"].([]string), tt.wantKept) {
+					t.Fatalf("DecideMediation = %v, want the %s refusal naming %v", err, tt.wantArm, tt.wantKept)
+				}
+				return
+			}
+			if err != nil || owedCheck(t, h) != nil {
+				t.Fatalf("DecideMediation = %v, want the approval to release the check", err)
+			}
+			problems, readErr := h.db.DeployProblems(context.Background(), mediationKey(h))
+			if readErr != nil || len(problems) != 0 {
+				t.Fatalf("problems (%+v, %v), want the ignored group never taken on", problems, readErr)
+			}
+			logged := h.recordsFor("info", opMediation, "the mediator approves past the groups it judged ignorable, naming each")
+			if len(logged) != 1 || fmt.Sprint(logged[0].Context["ignored"]) != fmt.Sprint([]string{"a one-off user-driven error"}) {
+				t.Fatalf("records %+v, want the ignored groups named once", logged)
 			}
 		})
 	}

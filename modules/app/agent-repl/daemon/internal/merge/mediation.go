@@ -925,7 +925,19 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	// AN APPROVAL LEAVES NO PROBLEM UNTAKEN (owner ruling, 2026-11-16): a
 	// warning or error the mediator never took on, old or new, is dispatched
 	// or escalated, never approved past, or it recurs with no one to end it.
-	if untaken := untakenGroups(window); d.Kind == MediationApprove && len(untaken) > 0 {
+	//
+	// A GROUP THE MEDIATOR JUDGED IGNORABLE IS NAMED, NEVER SILENTLY PASSED
+	// (owner ruling, 2026-11-18): an approval's problems are the groups it
+	// ignores, each quoting its records, such as a one-off user-driven error
+	// or a record of the metaprompt's probably-transient table. They do not
+	// count against this approval, and they are not taken on, so a group that
+	// keeps coming back is put to the mediator again by every later check.
+	ignored := problemKeys(d.Problems)
+	if d.Kind == MediationApprove && len(ignored) > 0 {
+		o.deps.Log.Global().Info(opMediation, "the mediator approves past the groups it judged ignorable, naming each",
+			withField(fields, "ignored", problemStatements(d.Problems)))
+	}
+	if untaken := untakenGroupsExcept(window, ignored); d.Kind == MediationApprove && len(untaken) > 0 {
 		refusal := &RefusalError{Arm: ArmProblemsUnowned, Workspace: ws,
 			Reason: fmt.Sprintf("the window holds %d groups you have not taken on; dispatch or escalate them", len(untaken)),
 			Fields: map[string]any{"groups": untaken}}
@@ -1129,15 +1141,28 @@ func recurringGroups(window wsm.CheckWindow) []string {
 	return out
 }
 
-// untakenGroups names every group of WINDOW the mediator has not taken on,
-// or that came back after its fix, as "OPERATION: MESSAGE (CLASS)", in its
-// order.
-func untakenGroups(window wsm.CheckWindow) []string {
+// untakenGroupsExcept names every group of WINDOW the mediator has not taken
+// on, or that came back after its fix, as "OPERATION: MESSAGE (CLASS)", in its
+// order, less every group IGNORED names.
+func untakenGroupsExcept(window wsm.CheckWindow, ignored []wsm.ProblemKey) []string {
+	skip := make(map[wsm.ProblemKey]bool, len(ignored))
+	for _, k := range ignored {
+		skip[k] = true
+	}
 	var out []string
 	for _, g := range window.Groups {
-		if g.Class != wsm.WindowOwned {
+		if g.Class != wsm.WindowOwned && !skip[wsm.ProblemKey{Operation: g.Operation, Message: g.Message}] {
 			out = append(out, fmt.Sprintf("%s: %s (%s)", g.Operation, g.Message, g.Class))
 		}
+	}
+	return out
+}
+
+// problemStatements is each of PROBLEMS's statement, for a record.
+func problemStatements(problems []DeployProblem) []string {
+	out := make([]string, 0, len(problems))
+	for _, p := range problems {
+		out = append(out, p.Statement)
 	}
 	return out
 }

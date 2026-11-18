@@ -2418,7 +2418,7 @@ func queueGiveUp(c *cliCall, args []string) int {
 func queueMediation(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	summary := fs.String("summary", "", "what it found, in a sentence or two (required)")
-	withProblems := fs.Bool("problems", false, "an escalation's findings follow on stdin as JSON, as a dispatch's do")
+	withProblems := fs.Bool("problems", false, "an escalation's findings, or the groups an approval ignores, follow on stdin as JSON, as a dispatch's problems do")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
@@ -2427,12 +2427,20 @@ func queueMediation(c *cliCall, args []string) int {
 		return c.usageFailed("name the decision: approve, escalate or dispatch")
 	}
 	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
-	if positionals[0] != "escalate" && *withProblems {
-		return c.usageFailed("-problems reads an escalation's findings; a dispatch always reads its problems")
+	if positionals[0] == "dispatch" && *withProblems {
+		return c.usageFailed("-problems reads an escalation's findings or an approval's ignored groups; a dispatch always reads its problems")
 	}
 	switch positionals[0] {
 	case "approve":
-		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}
+		approve := &agentreplv1.UpdateMergeQueueMediationApprove{}
+		if *withProblems {
+			ignored, err := readProblems(c.deps.stdin)
+			if err != nil {
+				return c.usageFailed("%v", err)
+			}
+			approve.Ignored = ignored
+		}
+		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: approve}
 	case "escalate":
 		escalate := &agentreplv1.UpdateMergeQueueMediationEscalate{}
 		if *withProblems {
