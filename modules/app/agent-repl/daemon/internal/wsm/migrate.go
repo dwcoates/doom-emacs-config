@@ -328,6 +328,7 @@ var migrations = []migration{
 	// IT IS ADDITIVE: three nullable columns the previous build never names.
 	{To: 172, Name: "sidebar_view_section_heights", Kind: MigrationAdditive, DDL: sectionHeightsDDL},
 	{To: 173, Name: "merge_queue_cold_gated", Kind: MigrationAdditive, DDL: mergeQueueColdGatedDDL},
+	{To: 174, Name: "settled_rounds_unheld", Kind: MigrationAdditive, DDL: settledRoundsUnheldDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

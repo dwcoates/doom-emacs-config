@@ -549,6 +549,7 @@ func TestTheUnheldSettledRoundsStepClearsOnlyASettledRoundsHold(t *testing.T) {
 	// Arrange: one settled round left held, and one live round held.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
+	dropSettledUnheldTriggers(t, s)
 	for _, stmt := range []string{
 		`INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES ('ledger-a', '` + string(ws.ID) + `', 1)`,
 		`INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome, held_since) VALUES ('ledger-a', 1, 'fixes', 100, 200, 'abandoned', 150), ('ledger-a', 1, 'tests', 300, NULL, '', 350)`,
@@ -573,5 +574,109 @@ func TestTheUnheldSettledRoundsStepClearsOnlyASettledRoundsHold(t *testing.T) {
 		if got != held {
 			t.Fatalf("%s held_since = %d, want %d", kind, got, held)
 		}
+	}
+}
+
+// heldRoundOf opens LEASE's ledger for WS with one live fixes round, held
+// since the instant.
+func heldRoundOf(t *testing.T, s *store, ws WorkspaceID, lease LeaseID) {
+	t.Helper()
+	ctx := context.Background()
+	if err := s.OpenMergeLedger(ctx, ws, lease); err != nil {
+		t.Fatalf("OpenMergeLedger: %v", err)
+	}
+	if err := s.RecordTabInterval(ctx, lease, TabInterval{Round: 3, Kind: "fixes", StartedAt: instant}); err != nil {
+		t.Fatalf("RecordTabInterval: %v", err)
+	}
+	at := instant.Add(time.Minute)
+	if marked, err := s.HoldMergeRound(ctx, lease, &at); err != nil || !marked {
+		t.Fatalf("HoldMergeRound = %v, %v; want the live round held", marked, err)
+	}
+}
+
+// dropSettledUnheldTriggers removes layout 170's triggers, so a test can
+// store the row a writer before them could leave.
+func dropSettledUnheldTriggers(t *testing.T, s *store) {
+	t.Helper()
+	for _, name := range []string{"merge_tab_intervals_settled_unheld_insert", "merge_tab_intervals_settled_unheld_update"} {
+		if _, err := s.db().Exec(`DROP TRIGGER ` + name); err != nil {
+			t.Fatalf("drop trigger %s: %v", name, err)
+		}
+	}
+}
+
+func TestTheStoreRefusesToLeaveARoundSettledAndHeld(t *testing.T) {
+	tests := []struct {
+		name string
+		stmt string
+	}{
+		{name: "settling a held round without clearing its hold", stmt: `UPDATE merge_tab_intervals SET ended_at = 1, outcome = 'abandoned' WHERE lease_id = ?`},
+		{name: "holding a settled round", stmt: `UPDATE merge_tab_intervals SET ended_at = 1, held_since = 2 WHERE lease_id = ?`},
+		{name: "inserting a round settled and held", stmt: `INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome, held_since) VALUES (?, 4, 'fixes', 1, 2, 'done', 3)`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			lease := NewLeaseID()
+			heldRoundOf(t, s, ws.ID, lease)
+
+			// Act
+			_, err := s.db().Exec(tt.stmt, lease)
+
+			// Assert
+			if err == nil {
+				t.Fatal("the statement stored a round settled and held, want it aborted")
+			}
+			if n := scalar[int](t, s, `SELECT COUNT(*) FROM merge_tab_intervals WHERE ended_at IS NOT NULL AND held_since IS NOT NULL`); n != 0 {
+				t.Fatalf("%d rounds stand settled and held, want none", n)
+			}
+		})
+	}
+}
+
+func TestTheLedgerReadStillRefusesARoundSettledAndHeld(t *testing.T) {
+	// Arrange: the row a writer before the triggers left.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	lease := NewLeaseID()
+	heldRoundOf(t, s, ws.ID, lease)
+	dropSettledUnheldTriggers(t, s)
+	if _, err := s.db().Exec(`UPDATE merge_tab_intervals SET ended_at = ?, outcome = 'abandoned' WHERE lease_id = ?`, nanos(instant.Add(time.Hour)), lease); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	_, err := s.MergeLedger(context.Background(), ws.ID)
+
+	// Assert
+	var decode *DecodeError
+	if !errors.As(err, &decode) || decode.Field != "held_since" || decode.Row != string(lease) {
+		t.Fatalf("MergeLedger = %v, want the settled and held round refused on held_since", err)
+	}
+}
+
+func TestTheMigrationRepairsAStoredSettledAndHeldRoundThenRefusesAnother(t *testing.T) {
+	// Arrange: a layout-169 file holding the row the orphan sweep left.
+	path := fixtureAt(t, 169)
+	lease := NewLeaseID()
+	execRaw(t, path, `INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES (?, ?, 0)`, lease, fixtureWorkspaceID)
+	execRaw(t, path, `INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome, held_since) VALUES (?, 3, 'fixes', 1, 3, 'abandoned', 2)`, lease)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-169 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	ledgers, err := handle.MergeLedger(context.Background(), fixtureWorkspaceID)
+	if err != nil || len(ledgers) != 1 || ledgers[0].Intervals[0].HeldSince != nil || ledgers[0].Intervals[0].EndedAt == nil {
+		t.Fatalf("MergeLedger = %+v, %v; want the round settled with no hold", ledgers, err)
+	}
+	if _, err := handle.(*store).db().Exec(`UPDATE merge_tab_intervals SET held_since = 4 WHERE lease_id = ?`, lease); err == nil {
+		t.Fatal("the migrated file took a hold on a settled round, want layout 174's trigger to refuse it")
 	}
 }
