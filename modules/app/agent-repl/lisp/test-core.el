@@ -7946,3 +7946,32 @@ A hand-rolled `let' of an ivy alist around a read would drift from it."
               (should-not (string-match-p "a warning" (agent-repl-test--read-file target)))
               (should (string-match-p "an ordinary record" (agent-repl-test--read-file target)))))
         (delete-directory project t)))))
+
+(defun agent-repl-test-core--flush-sink-opened (routable)
+  "Flush one pending sink-open record whose workspace is ROUTABLE or not.
+Answer every (LEVEL SCOPE FORMAT) the flush logged."
+  (let ((agent-repl--pending-sink-opened
+         (list (list :ws "ws-a" :target "/logs/a.log" :origin 'minted
+                     :id-scheme "daemon_minted_workspace_id")))
+        (logged nil))
+    (cl-letf (((symbol-function 'agent-repl--ws-log-routable-p) (lambda (_ws) routable))
+              ((symbol-function 'agent-repl--info)
+               (lambda (scope fmt &rest _) (push (list 'info scope fmt) logged)))
+              ((symbol-function 'agent-repl--warn)
+               (lambda (scope fmt &rest _) (push (list 'warn scope fmt) logged))))
+      (agent-repl--flush-sink-opened-records))
+    (nreverse logged)))
+
+(ert-deftest agent-repl-test-sink-opened-is-recorded-in-its-workspace ()
+  "A sink open whose workspace is still routable is recorded in that workspace."
+  (let ((logged (agent-repl-test-core--flush-sink-opened t)))
+    (should (equal (mapcar (lambda (l) (list (nth 0 l) (nth 1 l))) logged)
+                   '((info "ws-a"))))))
+
+(ert-deftest agent-repl-test-sink-opened-after-its-workspace-ended-is-central-info ()
+  "A sink open whose workspace ended before the record is central and INFO, never WARN."
+  (let ((logged (agent-repl-test-core--flush-sink-opened nil)))
+    (should (equal (length logged) 1))
+    (should (eq (nth 0 (car logged)) 'info))
+    (should (eq (car (nth 1 (car logged))) :agent-repl-central))
+    (should (string-prefix-p "elisp.core.sink-opened-after-workspace-ended:" (nth 2 (car logged))))))
