@@ -696,8 +696,17 @@ function armPainter(body: BubbleBody): Painter {
   };
   const drawsTree = (): boolean => body.querySelector(`.${TREE_CLASS}`) !== null;
   const needsWidth = (): boolean => slots().some((slot) => proseNeedsWidth(sourceOf(slot)));
-  const laidOut = (): boolean =>
-    body.isConnected && requireBubble(body).getClientRects().length > 0;
+  // LAID OUT MEANS THERE IS A WIDTH TO WRAP TO: the bubble has a box AND
+  // its containing block has width. A bubble drawn in a column that has none
+  // yet (a page shown at no width) has a box and nothing to measure, and
+  // measuring it was the unmeasurable violation (2026-11-18,
+  // eval-cache-torch-human); the containing block's observer paints it once
+  // the column has width.
+  const laidOut = (): boolean => {
+    if (!body.isConnected) return false;
+    const bubble = requireBubble(body);
+    return bubble.getClientRects().length > 0 && containingBlockOf(cappedBoxOf(bubble)).clientWidth > 0;
+  };
   const watch = (): void => {
     if (observer === null) onDiscard(body, () => observer?.disconnect());
     else observer.disconnect();

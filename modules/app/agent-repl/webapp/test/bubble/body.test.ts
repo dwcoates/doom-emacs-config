@@ -756,7 +756,7 @@ describe("a painted tree when the page lands a new feed text scale", () => {
 });
 
 describe("a slot holding a tree paints once the bubble is laid out", () => {
-  useTreeLayout();
+  const staged = useTreeLayout();
 
   it("paints plain prose at once, detached", () => {
     // Arrange / Act
@@ -799,6 +799,35 @@ describe("a slot holding a tree paints once the bubble is laid out", () => {
     const column = mount(bubble);
     // Act
     bubble.hidden = false;
+    fireResize(column);
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
+    // Assert
+    expect(slot.querySelector(".mp-tree")).not.toBeNull();
+  });
+
+  it("waits while the bubble's column has no width, and records no violation", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    staged.layout.containingPx = 0;
+    const { bubble, slot } = slotted(TREE);
+    // Act
+    mount(bubble);
+    // Assert
+    expect(slot.querySelector(".mp-tree")).toBeNull();
+    capture.logger.flush();
+    await Promise.resolve();
+    expect(capture.sent.filter((r) => r.operation === "bubble.body.tree-width-unmeasurable")).toEqual([]);
+  });
+
+  it("paints the tree once the column gains width", () => {
+    // Arrange
+    vi.useFakeTimers({ toFake: ["requestAnimationFrame"] });
+    staged.layout.containingPx = 0;
+    const { bubble, slot } = slotted(TREE);
+    const column = mount(bubble);
+    // Act
+    staged.layout.containingPx = 1000;
     fireResize(column);
     vi.runOnlyPendingTimers();
     vi.useRealTimers();
