@@ -22,11 +22,11 @@ func TestCommentsSomeoneElseWroteRaiseOneBannerEach(t *testing.T) {
 		want     []raisedComment
 	}{
 		{name: "a conversation comment", comments: []any{commentJSONOf(11, "alice", "please rename it", t0, t0, nil)},
-			want: []raisedComment{{author: "alice", markdown: "please rename it"}}},
+			want: []raisedComment{{author: "@alice", markdown: "please rename it"}}},
 		{name: "a line comment", lines: []any{commentJSONOf(12, "bob", "off by one", t0, t0, line)},
-			want: []raisedComment{{author: "bob", markdown: "off by one"}}},
+			want: []raisedComment{{author: "@bob", markdown: "off by one"}}},
 		{name: "a review with a body", reviews: []any{reviewJSONOf(13, "carol", "CHANGES_REQUESTED", "needs tests", t0)},
-			want: []raisedComment{{author: "carol", markdown: "needs tests"}}},
+			want: []raisedComment{{author: "@carol", markdown: "needs tests"}}},
 		{name: "a review with no body", reviews: []any{reviewJSONOf(14, "carol", "APPROVED", "", t0)}},
 		{name: "the user's own comment", comments: []any{commentJSONOf(15, viewerLogin, "done", t0, t0, nil)}},
 		{name: "the user's own comment in another case", comments: []any{commentJSONOf(16, "ME", "done", t0, t0, nil)}},

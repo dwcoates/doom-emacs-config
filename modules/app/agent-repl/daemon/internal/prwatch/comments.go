@@ -74,11 +74,7 @@ func (w *Watcher) bannerComments(ctx context.Context, subscriber ids.WorkspaceID
 		if strings.EqualFold(c.author, viewer) {
 			continue
 		}
-		author := c.author
-		if author == "" {
-			author = "an unknown account"
-		}
-		w.deps.Comments.Commented(subscriber, author, c.markdown)
+		w.deps.Comments.Commented(subscriber, loginWords(c.author), c.markdown)
 		raised++
 	}
 	w.deps.Log.Info(opBanner, "raised the desktop banners of the comments someone other than the user wrote", dlog.Merge(fields, dlog.Context{"raised": raised, "viewer": viewer}))

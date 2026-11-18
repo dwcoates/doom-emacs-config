@@ -98,13 +98,17 @@ func untrusted(text *agentreplv1.PullRequestActivityText) string {
 	return fence + "untrusted\n" + body + "\n" + fence
 }
 
-func authorWords(a *agentreplv1.PullRequestActivityAuthor) string {
-	login := a.GetLogin()
+// loginWords names an author by their login, as every notice and banner
+// names them: `@login`, or "an unknown account" when GitHub named none.
+func loginWords(login string) string {
 	if login == "" {
-		login = "an unknown account"
-	} else {
-		login = "@" + login
+		return "an unknown account"
 	}
+	return "@" + login
+}
+
+func authorWords(a *agentreplv1.PullRequestActivityAuthor) string {
+	login := loginWords(a.GetLogin())
 	switch a.GetAssociation() {
 	case agentreplv1.PullRequestAuthorAssociation_PULL_REQUEST_AUTHOR_ASSOCIATION_OWNER:
 		return login + " (the repository's owner)"
