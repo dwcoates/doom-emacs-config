@@ -35,6 +35,10 @@ const (
 	// envDeployBuilder names ONE executable a deploy runs as
 	// `<exe> --out <staging>` in place of the real build.
 	envDeployBuilder = "AGENT_REPL_DEPLOY_BUILDER"
+	// envRequirementsScript names the executable a deploy runs in place of
+	// the checkout's bin/requirements.sh, to write a service's definition
+	// and to install a socket holder.
+	envRequirementsScript = "AGENT_REPL_REQUIREMENTS_SCRIPT"
 	// envLaunchctl is the launchctl a service restart drives, the same
 	// contract bin/store-reset.sh honors.
 	envLaunchctl = "AGENT_REPL_LAUNCHCTL"
@@ -184,7 +188,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 	if err != nil {
 		return nil, nil, err
 	}
-	requirements := deploy.ScriptRequirements{ModuleRoot: p.Checkout, Runner: p.Runner}
+	requirements := deploy.ScriptRequirements{ModuleRoot: p.Checkout, Script: p.Getenv(envRequirementsScript), Runner: p.Runner}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, nil, fmt.Errorf("agent-repld: the home directory a holder's control socket expands against: %w", err)

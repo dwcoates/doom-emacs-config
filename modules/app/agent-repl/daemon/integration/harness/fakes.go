@@ -738,3 +738,28 @@ func NewFakeHostTools(t testing.TB, dir string) string {
 	}
 	return dir
 }
+
+// NewFakeRequirementsScript writes the stand-in for bin/requirements.sh a
+// deploy runs (AGENT_REPL_REQUIREMENTS_SCRIPT), in DIR. `define-service
+// LABEL` leaves the label's definition in the harness's service directory
+// as the real renderer would, creating it empty when missing and never
+// changing one that stands, so a restart finds it unchanged; `ensure-holder`
+// installs nothing. Nothing it does reaches the machine's service manager.
+func NewFakeRequirementsScript(t testing.TB, dir string) string {
+	t.Helper()
+	path := filepath.Join(dir, "requirements.sh")
+	script := `#!/bin/sh
+case "$1" in
+  define-service)
+    if [ "$(uname)" = Linux ]; then d="$AGENT_REPL_SYSTEMD_USER_DIR"; f="$d/$2.service"; else d="$AGENT_REPL_LAUNCH_AGENTS_DIR"; f="$d/$2.plist"; fi
+    mkdir -p "$d" && { [ -f "$f" ] || : >"$f"; } ;;
+  ensure-holder) ;;
+  *) echo "fake requirements.sh: unknown verb $1" >&2; exit 2 ;;
+esac
+`
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("harness: mkdir %s: %v", dir, err)
+	}
+	writeExecutable(t, path, script)
+	return path
+}

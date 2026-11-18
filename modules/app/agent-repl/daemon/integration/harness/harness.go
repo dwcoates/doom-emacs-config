@@ -61,7 +61,7 @@
 package harness
 
 import (
-	"agent-repld/internal/reqmanifest"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -294,25 +294,13 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 	if err := os.Symlink(filepath.Join(repo, "proto"), link); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", fmt.Errorf("link the render vocabulary into %s: %w", dir, err)
 	}
-	manifest := filepath.Join(dir, "requirements.json")
-	if err := os.Symlink(filepath.Join(repo, "requirements.json"), manifest); err != nil && !errors.Is(err, fs.ErrExist) {
-		return "", fmt.Errorf("link the requirements manifest into %s: %w", dir, err)
-	}
-	// EVERY MANIFEST THE ROOT INCLUDES IS LINKED TOO: a daemon reads the
-	// socket holders they declare at boot (holderensure.Declared), as it reads
-	// them from a real checkout.
-	includes, err := reqmanifest.Includes(manifest)
-	if err != nil {
+	// THE ROOT MANIFEST IS COPIED WITH NO INCLUDES: its per-user settings
+	// are what every daemon reads at boot (requireManifest), and a test
+	// daemon declares no socket holder of the machine's (holderensure), so
+	// none is ever probed or installed for it; it takes the harness's own
+	// holder (StartSocketHolder).
+	if err := writeManifestWithoutIncludes(filepath.Join(repo, "requirements.json"), filepath.Join(dir, "requirements.json")); err != nil {
 		return "", err
-	}
-	for _, rel := range includes {
-		link := filepath.Join(dir, rel)
-		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
-			return "", fmt.Errorf("mkdir for the included manifest %s: %w", rel, err)
-		}
-		if err := os.Symlink(filepath.Join(repo, rel), link); err != nil && !errors.Is(err, fs.ErrExist) {
-			return "", fmt.Errorf("link the included manifest %s into %s: %w", rel, dir, err)
-		}
 	}
 	return dir, nil
 }
@@ -466,4 +454,26 @@ const NoGitHubLink = "-X " + ghBinaryVar + "=/dev/null/no-github-in-tests"
 // git. Every test build of the daemon carries it.
 func MockedGitLink(gitPath string) string {
 	return "-X " + gitBinaryVar + "=" + gitPath
+}
+
+// writeManifestWithoutIncludes writes the root requirements manifest at FROM
+// to TO with its `includes` removed and every other field kept.
+func writeManifestWithoutIncludes(from, to string) error {
+	data, err := os.ReadFile(from)
+	if err != nil {
+		return fmt.Errorf("read the requirements manifest %s: %w", from, err)
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return fmt.Errorf("parse the requirements manifest %s: %w", from, err)
+	}
+	delete(m, "includes")
+	out, err := json.Marshal(m)
+	if err != nil {
+		return fmt.Errorf("render the pinned requirements manifest: %w", err)
+	}
+	if err := os.WriteFile(to, out, 0o644); err != nil {
+		return fmt.Errorf("write the pinned requirements manifest %s: %w", to, err)
+	}
+	return nil
 }

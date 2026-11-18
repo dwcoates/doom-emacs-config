@@ -58,7 +58,10 @@ func toolExited(binary string, args []string, code int, out string) error {
 type ScriptRequirements struct {
 	// ModuleRoot is the checkout holding bin/requirements.sh.
 	ModuleRoot string
-	Runner     Runner
+	// Script runs in place of ModuleRoot's bin/requirements.sh when set: a
+	// harness's stand-in, so no test writes or loads a real definition.
+	Script string
+	Runner Runner
 }
 
 // Define writes label's definition (define-service); a non-zero exit is a
@@ -76,5 +79,9 @@ func (d ScriptRequirements) EnsureHolder(ctx context.Context, id string) error {
 
 // run runs `requirements.sh VERB ARG` in ModuleRoot.
 func (d ScriptRequirements) run(ctx context.Context, verb, arg string) error {
-	return mustTool(ctx, d.Runner, d.ModuleRoot, filepath.Join(d.ModuleRoot, "bin", "requirements.sh"), verb, arg)
+	script := d.Script
+	if script == "" {
+		script = filepath.Join(d.ModuleRoot, "bin", "requirements.sh")
+	}
+	return mustTool(ctx, d.Runner, d.ModuleRoot, script, verb, arg)
 }

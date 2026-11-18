@@ -123,6 +123,10 @@ func TestScriptRequirementsRunsItsVerbInTheModuleRoot(t *testing.T) {
 		{name: "a define that could not run is a failure", run: func(r ScriptRequirements) error { return r.Define(context.Background(), TestsLabel) },
 			argv: "/m/bin/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{err: errors.New("exec: not found")},
 			wantErr: "exec: not found"},
+		{name: "a stand-in script runs in place of the checkout's", run: func(r ScriptRequirements) error {
+			r.Script = "/fake/requirements.sh"
+			return r.Define(context.Background(), TestsLabel)
+		}, argv: "/fake/requirements.sh define-service com.agentrepl.tests", answer: runAnswer{code: 0}},
 		{name: "a holder ensure's zero exit loads the holder", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },
 			argv: "/m/bin/requirements.sh ensure-holder socket-holder-store", answer: runAnswer{code: 0}},
 		{name: "a holder ensure's non-zero exit is a failure in the script's words", run: func(r ScriptRequirements) error { return r.EnsureHolder(context.Background(), "socket-holder-store") },

@@ -37,6 +37,9 @@ func LifePath(addrPath, instance string) string {
 // addressSuffix ends the file in which a daemon records its private address.
 const addressSuffix = ".addr"
 
+// AddressSuffix ends each instance's address file under LifeDirName.
+const AddressSuffix = addressSuffix
+
 // AddressPath is where daemon INSTANCE records its private listener's
 // address, beside its life lock.
 func AddressPath(addrPath, instance string) string {

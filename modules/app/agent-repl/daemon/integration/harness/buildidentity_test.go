@@ -102,6 +102,10 @@ func TestNewPinnedCheckoutCarriesNoBuildStamp(t *testing.T) {
 	if err := os.WriteFile(stamp, []byte("65f37409f0fec4d05360178b0be1c3dad5896286\n"), 0o644); err != nil {
 		t.Fatalf("write the stand-in stamp: %v", err)
 	}
+	// Every checkout carries its requirements manifest, which the pinned one copies.
+	if err := os.WriteFile(filepath.Join(repo, "requirements.json"), []byte(`{"requirements": []}`), 0o644); err != nil {
+		t.Fatalf("write the stand-in manifest: %v", err)
+	}
 
 	// Act.
 	checkout, err := newPinnedCheckout(filepath.Join(t.TempDir(), "checkout"), repo)
@@ -118,17 +122,11 @@ func TestNewPinnedCheckoutCarriesNoBuildStamp(t *testing.T) {
 	}
 }
 
-func TestThePinnedCheckoutCarriesEveryManifestTheRootIncludes(t *testing.T) {
+func TestThePinnedCheckoutsManifestIncludesNothing(t *testing.T) {
 	// Arrange
 	repo := t.TempDir()
 	if err := os.WriteFile(filepath.Join(repo, "requirements.json"), []byte(`{"includes": ["d/requirements.json"], "requirements": []}`), 0o644); err != nil {
 		t.Fatalf("write the stand-in manifest: %v", err)
-	}
-	if err := os.MkdirAll(filepath.Join(repo, "d"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "d", "requirements.json"), []byte(`{"requirements": [{"id": "x"}]}`), 0o644); err != nil {
-		t.Fatalf("write the included manifest: %v", err)
 	}
 
 	// Act
@@ -138,9 +136,9 @@ func TestThePinnedCheckoutCarriesEveryManifestTheRootIncludes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newPinnedCheckout = %v, want a laid-out checkout", err)
 	}
-	body, err := os.ReadFile(filepath.Join(checkout, "d", "requirements.json"))
-	if err != nil || string(body) != `{"requirements": [{"id": "x"}]}` {
-		t.Fatalf("the pinned checkout's included manifest = %q, %v; want the repository's", body, err)
+	body, err := os.ReadFile(filepath.Join(checkout, "requirements.json"))
+	if err != nil || string(body) != `{"requirements":[]}` {
+		t.Fatalf("the pinned checkout's manifest = %q, %v; want the repository's with no includes", body, err)
 	}
 }
 
@@ -159,7 +157,7 @@ func TestThePinnedCheckoutCarriesTheRepositorysRequirementsManifest(t *testing.T
 		t.Fatalf("newPinnedCheckout = %v, want a laid-out checkout", err)
 	}
 	body, err := os.ReadFile(filepath.Join(checkout, "requirements.json"))
-	if err != nil || string(body) != `{"requirements": []}` {
+	if err != nil || string(body) != `{"requirements":[]}` {
 		t.Fatalf("the pinned checkout's manifest = %q, %v; want the repository's", body, err)
 	}
 }
