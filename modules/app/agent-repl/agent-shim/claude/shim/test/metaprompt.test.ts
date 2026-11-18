@@ -223,6 +223,7 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
     expect(text).toContain("agent-repld merge-queue mediation dispatch -summary");
     expect(text).toContain("Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.");
+    expect(text).toContain("The dispatch comes first, before any edit or investigation of a fix: it is what moves the queue's label from ASSESSING to FIXING");
     expect(text).toContain("agent-repld workspace finished here -version-part patch");
     expect(text).not.toContain("-fresh");
   });

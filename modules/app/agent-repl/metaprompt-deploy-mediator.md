@@ -36,6 +36,7 @@
   - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
   - agent-repl ends this session once the turn ends, and the next deploy's brief starts it again.
 - Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.
+  - The dispatch comes first, before any edit or investigation of a fix: it is what moves the queue's label from ASSESSING to FIXING, so a fix begun before it is shown to the user as still assessing.
   - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem no fix has ended.
   - Each problem quotes at least one of its group's records verbatim: agent-repl reads the group from it, and records it taken on until its fix deploys.
   - The problems go on standard input as JSON, most serious first, each with its verbatim evidence:
