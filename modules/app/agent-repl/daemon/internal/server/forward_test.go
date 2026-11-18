@@ -17,6 +17,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/h2cclient"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
 )
 
@@ -41,8 +42,8 @@ func TestACallIsServedByTheDaemonThatServesItsWorkspace(t *testing.T) {
 	}{
 		{name: "a workspace this daemon serves is served here", standing: workspace.StandingOwned, successor: true, want: "here"},
 		{name: "a transferred workspace is served by the successor", standing: workspace.StandingTransferringAway, successor: true, want: "there"},
-		{name: "a workspace not yet adopted is served by the incumbent", standing: workspace.StandingNotYetAdopted, incumbent: true, want: "there"},
-		{name: "a workspace no other daemon serves is served here", standing: workspace.StandingNotYetAdopted, want: "here"},
+		{name: "a workspace not yet adopted is served by the daemon its serving row names", standing: workspace.StandingNotYetAdopted, incumbent: true, want: "there"},
+		{name: "a workspace whose row stands released for its adoption here is served here", standing: workspace.StandingNotYetAdopted, want: "here"},
 		{name: "a call already forwarded is never forwarded again", standing: workspace.StandingTransferringAway, successor: true, forwarded: true, want: "here"},
 	}
 	for _, tc := range cases {
@@ -59,11 +60,11 @@ func TestACallIsServedByTheDaemonThatServesItsWorkspace(t *testing.T) {
 					}
 					return ""
 				}
-				d.IncumbentAddress = func() string {
+				d.ServingElsewhere = func(context.Context, ids.WorkspaceID) (string, bool, error) {
 					if tc.incumbent {
-						return target
+						return target, true, nil
 					}
-					return ""
+					return "", false, nil
 				}
 			})
 			here.Verbs.api.status = &agentreplv1.WorkspaceStatus{Workspace: ref(), Name: "here"}
@@ -105,7 +106,7 @@ func TestAForwardedStreamRelaysEveryMessageFromTheServingDaemon(t *testing.T) {
 	there := httptest.NewServer(h2c.NewHandler(thereMux, &http2.Server{}))
 	defer there.Close()
 	target, _ := url.Parse(there.URL)
-	s := &server{log: dlog.NewTestLogger(), deps: Deps{Forward: h2cclient.Client()}}
+	s := &server{log: dlog.NewTestLogger(), life: context.Background(), deps: Deps{Forward: h2cclient.Client()}}
 	hereMux := http.NewServeMux()
 	hereMux.Handle(procedure, connect.NewServerStreamHandler(procedure,
 		func(ctx context.Context, req *connect.Request[agentreplv1.WatchHostWorkspaceRequest], stream *connect.ServerStream[agentreplv1.WatchHostWorkspaceResponse]) error {
@@ -203,5 +204,49 @@ func TestARefusalNamesTheSharedAddressNeverAPrivateOne(t *testing.T) {
 				t.Fatalf("the refusal named %v, want the shared address", got.Fields["address"])
 			}
 		})
+	}
+}
+
+func TestARelayedStreamEndsWithTheForwardingDaemonsLife(t *testing.T) {
+	// Arrange: the serving daemon's stream sends one message and stands.
+	const procedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
+	thereMux := http.NewServeMux()
+	thereMux.Handle(procedure, connect.NewServerStreamHandler(procedure,
+		func(ctx context.Context, _ *connect.Request[agentreplv1.WatchHostWorkspaceRequest], stream *connect.ServerStream[agentreplv1.WatchHostWorkspaceResponse]) error {
+			if err := stream.Send(&agentreplv1.WatchHostWorkspaceResponse{}); err != nil {
+				return err
+			}
+			<-ctx.Done()
+			return nil
+		}))
+	there := httptest.NewServer(h2c.NewHandler(thereMux, &http2.Server{}))
+	defer there.Close()
+	target, _ := url.Parse(there.URL)
+	life, endLife := context.WithCancel(context.Background())
+	defer endLife()
+	s := &server{log: dlog.NewTestLogger(), life: life, deps: Deps{Forward: h2cclient.Client()}}
+	hereMux := http.NewServeMux()
+	hereMux.Handle(procedure, connect.NewServerStreamHandler(procedure,
+		func(ctx context.Context, req *connect.Request[agentreplv1.WatchHostWorkspaceRequest], stream *connect.ServerStream[agentreplv1.WatchHostWorkspaceResponse]) error {
+			return forwardStream[agentreplv1.WatchHostWorkspaceRequest, agentreplv1.WatchHostWorkspaceResponse](ctx, s, "WatchHostWorkspace", target.Host, req, stream)
+		}))
+	here := httptest.NewServer(h2c.NewHandler(hereMux, &http2.Server{}))
+	defer here.Close()
+	client := connect.NewClient[agentreplv1.WatchHostWorkspaceRequest, agentreplv1.WatchHostWorkspaceResponse](h2cclient.Client(), here.URL+procedure)
+	stream, err := client.CallServerStream(context.Background(), connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}))
+	if err != nil {
+		t.Fatalf("CallServerStream: %v", err)
+	}
+	defer stream.Close()
+	if !stream.Receive() {
+		t.Fatalf("the first relayed message never came: %v", stream.Err())
+	}
+
+	// Act: the forwarding daemon begins its exit.
+	endLife()
+
+	// Assert: the relayed stream ends, so the client re-opens it elsewhere.
+	if stream.Receive() {
+		t.Fatal("the relayed stream sent again after the forwarding daemon's life ended, want it ended")
 	}
 }

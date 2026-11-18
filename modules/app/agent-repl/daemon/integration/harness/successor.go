@@ -11,12 +11,14 @@ package harness
 // to the returned Opts.
 //
 // THE STORE IS CARRIED TOO: the real store outlives every daemon, and a
-// successor reads the books its predecessor's shims kept (fakestore).
+// successor reads the books its predecessor's shims kept (fakestore). So is
+// the socket holder: one shared address outlives every daemon.
 func (d *Daemon) SuccessorOpts() Opts {
 	return Opts{
 		StateDir:    d.StateDir,
 		ProfileDir:  d.ProfileDir,
 		StoreSocket: d.StoreSocket,
+		Holder:      d.Holder,
 		ExtraArgs:   []string{"--default-config-dir", d.DefaultConfigDir},
 	}
 }

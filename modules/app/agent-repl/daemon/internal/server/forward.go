@@ -47,7 +47,16 @@ func (s *server) forwardTarget(ctx context.Context, rpc string, header http.Head
 			return target, true, nil
 		}
 	case workspace.StandingNotYetAdopted:
-		if target := s.deps.IncumbentAddress(); target != "" {
+		// THE SERVING ROW NAMES WHO SERVES IT. An older daemon still holding
+		// it gets the call; a row released for the adoption under way here
+		// means this daemon is the one adopting it, so the call -- an adopt
+		// call above all, which IS the adoption -- is served here.
+		target, ok, err := s.deps.ServingElsewhere(ctx, ids.WorkspaceID(id))
+		if err != nil {
+			s.log.Error("daemon.server.forward", "could not read the workspace's serving row to forward the call", dlog.Context{"rpc": rpc, "workspace_id": id, "cause": err.Error()})
+			return "", false, err
+		}
+		if ok {
 			return target, true, nil
 		}
 	}
@@ -81,7 +90,16 @@ func forwardUnary[Req, Resp any](ctx context.Context, s *server, rpc, target str
 
 // forwardStream re-issues the server-streaming call REQ to the daemon at
 // TARGET and relays every message it sends onto STREAM until it ends.
+//
+// A RELAYED STREAM ENDS WITH THIS DAEMON'S SERVING LIFE (Close), as every
+// standing stream it serves does: the client re-opens it on the shared
+// address, which the daemon that accepts next answers. Kept open, it held
+// this daemon's exit until the client gave up.
 func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target string, req *connect.Request[Req], stream *connect.ServerStream[Resp]) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	stop := context.AfterFunc(s.life, cancel)
+	defer stop()
 	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+req.Spec().Procedure)
 	in, err := client.CallServerStream(ctx, forwardRequest(req))
 	if err != nil {

@@ -90,7 +90,7 @@ type options struct {
 	// holder is the daemon's socket holder's control socket: the daemon
 	// holding the boot claim takes the shared listener from it and advertises
 	// its address (docs/investigations/2026-11-18-stable-sockets-design.md).
-	// Empty: the daemon advertises its own listener (a test harness's daemon).
+	// Required: run refuses a daemon with none.
 	holder string
 	// storeSocket is the store's unix socket. This flag BEATS
 	// $AGENT_REPL_STORE_SOCKET, which in turn beats the default.
@@ -332,7 +332,7 @@ func newFlagSets(program string, opts *options) (config, boot *flag.FlagSet) {
 	config.StringVar(&opts.webapp, "webapp-dist", "", "webapp dist directory to serve")
 	config.StringVar(&opts.shim, "shim-main", "", "path to the shim's dist/main.js")
 	config.StringVar(&opts.node, "node", "node", "node binary that runs the shim")
-	config.StringVar(&opts.holder, "holder", "", "the daemon's socket holder's control socket; empty: the daemon advertises its own listener")
+	config.StringVar(&opts.holder, "holder", "", "the daemon's socket holder's control socket (required): the daemon serves the shared address it keeps")
 	config.StringVar(&opts.storeSocket, "store-socket", "", "store unix socket, overriding $"+envStoreSocket)
 	config.StringVar(&opts.zettelSocket, "zettel-socket", "", "zettel unix socket, overriding $"+zettelclient.EnvSocket)
 	config.StringVar(&opts.testsSocket, "tests-socket", "", "test service unix socket, overriding $"+testsclient.EnvSocket)

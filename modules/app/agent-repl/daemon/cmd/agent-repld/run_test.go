@@ -5,6 +5,7 @@ import (
 	"agent-repld/internal/procmetrics"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/tempdirs/tempdirstest"
+	"agentrepl/logging/sockethold"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -97,11 +98,66 @@ func runIn(t *testing.T, root string, adjust ...func(*options)) error {
 	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
 	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
 	t.Setenv(dlog.LevelEnvironment, "info")
-	opts := options{stateDir: root}
+	opts := options{stateDir: root, holder: testHolder(t)}
 	for _, a := range adjust {
 		a(&opts)
 	}
 	return run(context.Background(), opts, newTestHooks().hooks)
+}
+
+// testHolder serves a shared loopback listener, named "daemon", on a control
+// socket for the test's life, as production's socket holder does, and
+// answers the control socket's path.
+func testHolder(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "rh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, err := shared.(*net.TCPListener).File()
+	if err != nil {
+		t.Fatal(err)
+	}
+	shared.Close()
+	control := filepath.Join(dir, "c.sock")
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: control, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_ = sockethold.Serve(ctx, ln, map[string]*os.File{holderDaemonSocket: file}, func(sockethold.Grant) {})
+	}()
+	t.Cleanup(func() { cancel(); <-done; file.Close(); os.RemoveAll(dir) })
+	return control
+}
+
+func TestRunRefusesADaemonWithNoSocketHolder(t *testing.T) {
+	// Arrange
+	root := shortRoot(t)
+
+	// Act
+	err := runIn(t, root, func(o *options) { o.holder = "" })
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "--holder is required") {
+		t.Fatalf("run = %v, want the missing holder refused", err)
+	}
+	found := false
+	for _, r := range runLogRecords(t, root) {
+		if r.Operation == "daemon.cmd.holder" && r.Level == "error" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("the run log holds no ERROR daemon.cmd.holder record")
+	}
 }
 
 func hasRunLogLevel(t *testing.T, raw []byte, operation, level string) bool {

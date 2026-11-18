@@ -469,6 +469,11 @@ type Opts struct {
 	// REAL running shim-store, so shims spawned by this daemon persist and
 	// read real events.
 	StoreSocket string
+	// Holder is the socket holder whose shared address this daemon serves
+	// (--holder). Empty starts one for this daemon; a successor carries its
+	// predecessor's (SuccessorOpts), as production's holder outlives every
+	// daemon.
+	Holder *SocketHolder
 	// RealStore says the store at StoreSocket is a running shim-store, which
 	// serves its own read-only face beside the socket
 	// (storesocket.ReadPath), so the harness serves no fake one there. The
@@ -529,6 +534,8 @@ type Daemon struct {
 	MultiRepoRoot string
 	// StoreSocket is the store path nothing listens on.
 	StoreSocket string
+	// Holder is the socket holder whose shared address this daemon serves.
+	Holder *SocketHolder
 	// TestsSocket is the socket of the real test service its merge gates run
 	// on, shared by every daemon over its state root (TestsSocketFor).
 	TestsSocket string
@@ -754,6 +761,10 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 	if d.StoreSocket == "" {
 		d.StoreSocket = filepath.Join(sockRoot, "store.sock")
 	}
+	d.Holder = opts.Holder
+	if d.Holder == nil {
+		d.Holder = StartSocketHolder(t)
+	}
 	if !opts.RealStore {
 		serveFakeStore(t, d.StoreSocket)
 	}
@@ -864,6 +875,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"--prompts-dir", d.PromptsDir,
 		"--default-config-dir", d.DefaultConfigDir,
 		"--multi-repo-config-dir", d.MultiRepoConfigDir,
+		"--holder", d.Holder.Control,
 	}
 	if !opts.NoFake {
 		args = append(args, "--fake")

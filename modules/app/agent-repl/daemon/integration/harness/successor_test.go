@@ -24,6 +24,20 @@ func TestSuccessorOptsCarriesThePredecessorsMachine(t *testing.T) {
 	}
 }
 
+func TestSuccessorOptsCarriesThePredecessorsSocketHolder(t *testing.T) {
+	// Arrange
+	holder := &SocketHolder{Control: "/h/control.sock", Address: "127.0.0.1:41000"}
+	d := &Daemon{StateDir: "/s/state", Holder: holder}
+
+	// Act
+	got := d.SuccessorOpts()
+
+	// Assert: one shared address outlives every daemon.
+	if got.Holder != holder {
+		t.Fatalf("SuccessorOpts().Holder = %+v, want the predecessor's", got.Holder)
+	}
+}
+
 func TestSuccessorOptsSharesThePredecessorsLocks(t *testing.T) {
 	// Arrange
 	d := &Daemon{StateDir: "/s/state", LockDir: LockDirFor("/s/state")}

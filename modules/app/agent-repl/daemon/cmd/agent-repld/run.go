@@ -181,6 +181,16 @@ func run(ctx context.Context, opts options, h hooks) error {
 	teardown := newTeardownClock(log)
 	defer teardown.report()
 
+	// A DAEMON SERVES ONLY THE SHARED ADDRESS ITS SOCKET HOLDER KEEPS: the
+	// address that outlives every daemon is the one every client reaches, and
+	// a daemon advertising its own listener would hand clients an address that
+	// closes with it (docs/investigations/2026-11-18-stable-sockets-design.md).
+	if opts.holder == "" {
+		log.Error("daemon.cmd.holder", "the daemon was started with no socket holder; it serves only the shared address a holder keeps", dlog.Context{
+			"state_root": layout.Dir()})
+		return errors.New("agent-repld: --holder is required: the daemon serves only the shared address its socket holder keeps")
+	}
+
 	// SIGQUIT IS TAKEN OVER BEFORE ANYTHING CAN WEDGE. Emacs launches the
 	// daemon with its stderr discarded, so the runtime's own SIGQUIT dump goes
 	// nowhere: pid 31984 spent ten hours listening and accepting nothing, and

@@ -31,7 +31,7 @@ func TestAHandoverOnASharedAddressIsReachedOnlyThroughThatAddress(t *testing.T) 
 	d := harness.StartDaemon(t, harness.Opts{
 		DurableState: true,
 		ExtraEnv:     []string{harness.TestAllScriptEnv(script.Path)},
-		ExtraArgs:    []string{"--holder", holder.Control},
+		Holder:       holder,
 		Timeout:      harness.HandoverChainTimeout,
 	})
 	d.AwaitAddrMatching(holder.Address, func(addr string) bool { return addr == holder.Address })

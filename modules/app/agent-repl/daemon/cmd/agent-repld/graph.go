@@ -1305,7 +1305,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// THE METRICS TARGET FOLLOWS THE ADDRESS (publishOwnership).
 		WriteDaemonAddr: func(context.Context) error { return publishOwnership(p.Claim, p.Metrics, p.Shared) },
 		AwaitBootClaim:  p.Claim.AwaitBootClaim,
-		YieldBootClaim:  p.Claim.Yield,
+		YieldBootClaim:  func() error { return yieldBootClaim(p.Claim, p.Shared) },
 		NewestDaemon: func() (string, error) {
 			ad, err := daemonaddr.ReadAdvertisement(p.Layout.DaemonAddr())
 			return ad.Daemon(), err
@@ -1940,15 +1940,18 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			IncumbentAddress: rolloutController.IncumbentAddress,
 			Forward:          h2cclient.Client(),
 			SharedAddress:    p.Shared.address,
-			Creates:          creates,
-			Feed:             feedResolver,
-			Images:           imageSources,
-			Footer:           footerResolver,
-			Topbar:           topbarResolver,
-			Sidebar:          sidebarResolver,
-			Memory:           memoryPopups,
-			Chat:             chatService,
-			Gathers:          gathers,
+			ServingElsewhere: func(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
+				return servingElsewhere(ctx, p.DB, p.Layout.DaemonAddr(), p.Instance, ws)
+			},
+			Creates: creates,
+			Feed:    feedResolver,
+			Images:  imageSources,
+			Footer:  footerResolver,
+			Topbar:  topbarResolver,
+			Sidebar: sidebarResolver,
+			Memory:  memoryPopups,
+			Chat:    chatService,
+			Gathers: gathers,
 			Revisions: revision.New(revision.Deps{
 				Shims: fleet, Feed: feedResolver, Status: footerResolver, Owed: p.DB, Bound: revision.Bound, Now: time.Now,
 				PromptsDir: paths.PromptsDir, Life: ctx, Log: log,
