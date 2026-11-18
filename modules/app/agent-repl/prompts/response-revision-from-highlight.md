@@ -20,7 +20,12 @@ Rewrite the response whole so it answers their message about those words.
 - Keep every other branch exactly as it was, word for word. Renumber a sibling only when a branch you added before it shifts its number.
 - Follow every formatting rule the original response followed.
 
-This revision is meant to be quick, because the user is waiting on it. Answer from the response and what you already know, without using any tools. Use a tool only when the answer cannot be correct without one, and treat that as a strong last resort.
+Answer without using any tools, and strongly prefer that over everything else this brief asks.
+
+- The user almost always wants a little exposition on what you already know: a clearer or fuller account of the highlighted words, drawn from the response and the conversation behind it.
+- They are not asking you to investigate further, so do not read files, run commands, or search to check or extend the response.
+- The user is also waiting on this revision, and every tool call makes them wait longer.
+- Use a tool only when the answer cannot be correct without one, and treat that as a strong last resort.
 
 Your whole reply is the revised response and nothing else: no preamble, no remark about what changed, and no code fence around it.
 

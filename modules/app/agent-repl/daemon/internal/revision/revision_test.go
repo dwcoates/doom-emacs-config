@@ -507,7 +507,7 @@ func TestTheRevisionBriefDiscouragesToolUse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("splice the brief: %v", err)
 	}
-	for _, want := range []string{"without using any tools", "strong last resort"} {
+	for _, want := range []string{"without using any tools", "exposition on what you already know", "not asking you to investigate further", "strong last resort"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("the brief lacks %q:\n%s", want, text)
 		}
