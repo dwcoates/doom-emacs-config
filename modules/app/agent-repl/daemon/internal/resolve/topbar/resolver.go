@@ -14,6 +14,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gnsurl"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/publish"
 	"agent-repld/internal/sessionwatcher"
@@ -1320,7 +1321,7 @@ func linkIcon(rawURL string) frontendv1.TopbarTitleLinkIcon {
 		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_SLACK
 	case hostIs(host, "notion.so"), hostIs(host, "notion.site"):
 		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_NOTION
-	case strings.Contains(host, "gns"):
+	case gnsurl.IsHost(host):
 		return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_GNS
 	}
 	return frontendv1.TopbarTitleLinkIcon_TOPBAR_TITLE_LINK_ICON_UNSPECIFIED
