@@ -382,6 +382,20 @@
   - Examples: a child whose repeated questions the parent answers, steps the parent judges one by one, a child watching CI or a deploy, or a parent relaying my rulings to the child.
   - Fan-out work the parent combines, waiting on one landing (the awaiting mark), and one-shot fixes need only the one update.
 
+## Child cold gates
+
+### A parent may pass its child's cold gate, only by compacting all its context with Haiku
+
+- A parent may pass a child's cold gate whenever its own work needs the child again, without asking me.
+  - Examples: a prompt it must send the child, or a question it must have the child answer.
+- It passes the gate only by a Haiku compaction of all the child's context: `agent-repld workspace pass-gate <child>`.
+  - The verb takes no answer, so the daemon chooses Haiku and the whole context itself.
+  - The prompts I left held at the gate stay held for me to send.
+- A parent never pays the cold read or clears a child's context.
+  - The agent API offers neither, and both stay my answers on the gate card.
+- Any other workspace's cold gate is passed only when I ask for it.
+- The verb's refusals are `/agent-repl-workspaces`'.
+
 ## Deleted worktrees
 
 ### A workspace whose worktree was deleted recreates it without asking
