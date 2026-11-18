@@ -1414,6 +1414,20 @@ test_the_holders_systemd_units_name_each_socket() {
   else fail "holder systemd units" "rc=$RC" "$OUT" "$(ls "$dir" 2>&1)" "$(cat "$CASE/transcript")"; fi
 }
 
+# The launchd job and the systemd service run the one argv (HOLDER_JQ's
+# holder_argv), so a holder never runs differently per platform.
+test_the_holders_launchd_and_systemd_definitions_run_one_argv() {
+  holder_case
+  run install
+  local plist_argv unit_argv
+  plist_argv=$(sed -n '/<key>ProgramArguments<\/key>/,/<\/array>/s#^ *<string>\(.*\)</string>$#\1#p' "$CASE/home/Library/LaunchAgents/com.example.hold.plist" | paste -sd' ' -)
+  PLATFORM=linux run install
+  unit_argv=$(sed -n 's/^ExecStart=//p' "$CASE/home/.config/systemd/user/com.example.hold.service")
+  if [ -n "$plist_argv" ] && [ "$plist_argv" = "$unit_argv" ]; then
+    pass "the holder's launchd job and systemd service run the one argv"
+  else fail "holder argv differs per platform" "launchd: $plist_argv" "systemd: $unit_argv"; fi
+}
+
 # define-service writes the definition install renders, from the same entry,
 # and neither builds nor loads: the daemon's deploy starts the service itself.
 test_define_service_writes_the_rendered_plist_without_building_or_loading() {

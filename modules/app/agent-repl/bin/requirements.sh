@@ -955,15 +955,26 @@ rendered_service() {
 # 2026-11-18-stable-sockets-design.md). test-requirements.sh pins this
 # rendering byte for byte.
 #
+# HOLDER_JQ is the jq every holder rendering shares, so launchd's job and
+# systemd's service run the one argv: `home` expands a leading ~/ against
+# $home, `holder_argv` is the sockethold command line of a holder ENTRY
+# under $cache, and `holder_sockets` is every socket it holds, its control
+# socket's first.
+HOLDER_JQ='
+    def home: gsub("~/"; $home + "/");
+    def holder_argv:
+      ["/usr/bin/env", $cache + "/bin/sockethold", "--control", "control"]
+        + ([.sockets[] | "--hold", .name]) + ["--log", $cache + "/log/" + .log];
+    def holder_sockets: [{name: "control", unix: .control}] + .sockets;
+'
+
 # holder_plist ENTRY: the holder's launchd plist. Its Sockets are created by
 # launchd at load and kept while the job is loaded.
 holder_plist() {
-  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" '
-    def home: gsub("~/"; $home + "/");
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" "$HOLDER_JQ"'
     def xml: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
-    (["/usr/bin/env", $cache + "/bin/sockethold", "--control", "control"]
-       + ([.sockets[] | "--hold", .name]) + ["--log", $cache + "/log/" + .log]) as $argv
-    | ([{name: "control", unix: .control}] + .sockets) as $socks
+    holder_argv as $argv
+    | holder_sockets as $socks
     | ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
        "<!-- Rendered by bin/requirements.sh holder_plist from the \(.id | xml) entry; it never changes with the services. -->",
        "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
@@ -993,10 +1004,8 @@ holder_plist() {
 # holder_service_unit ENTRY: the holder's systemd service, which takes every
 # socket unit of the holder (holder_socket_unit).
 holder_service_unit() {
-  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" '
-    def home: gsub("~/"; $home + "/");
-    (["/usr/bin/env", $cache + "/bin/sockethold", "--control", "control"]
-       + ([.sockets[] | "--hold", .name]) + ["--log", $cache + "/log/" + .log]) as $argv
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" "$HOLDER_JQ"'
+    holder_argv as $argv
     | ["# Rendered by bin/requirements.sh holder_service_unit from the \(.id) entry; it never changes with the services.",
        "[Unit]", "Description=agent-repl socket holder \(.label)",
        "", "[Service]",
@@ -1009,9 +1018,8 @@ holder_service_unit() {
 # holder_socket_unit ENTRY NAME: the systemd socket unit of the holder\'s socket
 # NAME ("control" for its control socket).
 holder_socket_unit() {
-  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg name "$2" '
-    def home: gsub("~/"; $home + "/");
-    ([{name: "control", unix: .control}] + .sockets | map(select(.name == $name)) | .[0]) as $s
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" --arg name "$2" "$HOLDER_JQ"'
+    (holder_sockets | map(select(.name == $name)) | .[0]) as $s
     | ["# Rendered by bin/requirements.sh holder_socket_unit from the \(.id) entry; it never changes with the services.",
        "[Socket]",
        (if $s.unix then "ListenStream=\($s.unix | home)" else "ListenStream=\($s.tcp):0" end),
@@ -1022,7 +1030,7 @@ holder_socket_unit() {
 }
 
 # holder_names ENTRY: the holder's socket names, its control socket's first.
-holder_names() { printf '%s\n' "$1" | jq -r '"control", (.sockets[] | .name)'; }
+holder_names() { printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" "$HOLDER_JQ"' holder_sockets[] | .name'; }
 
 # holder_definitions ENTRY: one "PATH<tab>NAME" line per definition file the
 # holder renders; NAME is empty for the plist or the service unit.
