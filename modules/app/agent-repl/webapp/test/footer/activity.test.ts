@@ -7,17 +7,22 @@ import { createTicker } from "../../src/clock.js";
 import { create } from "@bufbuild/protobuf";
 import {
   FooterAllowanceSchema,
+  FooterMoneySchema,
+  FooterMonthlySpendSchema,
   FooterStatusSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
   ENDURING_UNOBSERVED_TEXT,
   FOOTER_RATE_SEPARATOR_GAP,
+  MONTHLY_SPEND_GAP,
+  drawFooterMonthlySpend,
   drawFooterRateDivider,
   drawFooterStatusActivity,
   drawLabelledAllowance,
   enduringUsage,
   footerCountdownSpan,
+  formatMoney,
   orderedAllowances,
   salientKind,
   type FooterActivity,
@@ -205,6 +210,16 @@ function allowance(
     resetsAtS: BigInt((NOW + resetInMs) / 1000),
     ...(arm === undefined ? {} : { status: { case: arm, value: {} } }),
   };
+}
+
+/** USD cents. */
+function usd(cents: bigint): Record<string, unknown> {
+  return { amountMinor: cents, currency: "USD" };
+}
+
+/** A monthly spend of SPENT cents against LIMIT cents at UTILIZATION. */
+function cappedSpend(spent: bigint, limit: bigint, utilization: number): Record<string, unknown> {
+  return { spent: usd(spent), limit: { case: "capped", value: { limit: usd(limit), utilization } } };
 }
 
 // ---- the tier walk ------------------------------------------------------------
@@ -1775,6 +1790,89 @@ describe("the editor's composer notice joins the transient tier", () => {
   });
 });
 
+describe("drawFooterMonthlySpend", () => {
+  it("draws a capped spend against its limit", () => {
+    // Act
+    const cell = drawFooterMonthlySpend(create(FooterMonthlySpendSchema, cappedSpend(199_396n, 1_200_000n, 0.166)), "p");
+
+    // Assert
+    expect(cell.textContent).toBe(`$1,993.96${MONTHLY_SPEND_GAP}of $12,000 this month`);
+  });
+
+  it("draws an uncapped spend with no limit", () => {
+    // Act
+    const cell = drawFooterMonthlySpend(
+      create(FooterMonthlySpendSchema, { spent: usd(199_396n), limit: { case: "uncapped", value: {} } }),
+      "p",
+    );
+
+    // Assert
+    expect(cell.textContent).toBe(`$1,993.96${MONTHLY_SPEND_GAP}this month`);
+  });
+
+  it("paints a capped spent figure by its fullness", () => {
+    // Act
+    const cell = drawFooterMonthlySpend(create(FooterMonthlySpendSchema, cappedSpend(199_396n, 1_200_000n, 0.17)), "p");
+
+    // Assert
+    expect(cell.querySelector<HTMLElement>('[data-datum="spent"]')?.style.color).toBe(paintedAs(17));
+  });
+
+  it("leaves an uncapped spent figure unpainted", () => {
+    // Act
+    const cell = drawFooterMonthlySpend(
+      create(FooterMonthlySpendSchema, { spent: usd(500n), limit: { case: "uncapped", value: {} } }),
+      "p",
+    );
+
+    // Assert
+    expect(cell.querySelector<HTMLElement>('[data-datum="spent"]')?.style.color).toBe("");
+  });
+
+  it("names its limit arm", () => {
+    // Act
+    const cell = drawFooterMonthlySpend(create(FooterMonthlySpendSchema, cappedSpend(1n, 2n, 0.5)), "p");
+
+    // Assert
+    expect([cell.getAttribute("data-allowance"), cell.getAttribute("data-limit")]).toEqual(["monthly_spend", "capped"]);
+  });
+
+  it("refuses a spend with no spent amount", () => {
+    // Arrange
+    const spend = create(FooterMonthlySpendSchema, { limit: { case: "uncapped", value: {} } });
+
+    // Act / Assert
+    expect(() => drawFooterMonthlySpend(spend, "p")).toThrow(MalformedView);
+  });
+
+  it("refuses a spend with no limit arm", () => {
+    // Arrange
+    const spend = create(FooterMonthlySpendSchema, { spent: usd(500n) });
+
+    // Act / Assert
+    expect(() => drawFooterMonthlySpend(spend, "p")).toThrow(MalformedView);
+  });
+});
+
+describe("formatMoney", () => {
+  it.each([
+    { name: "a whole amount drops its minor digits", money: { amountMinor: 1_200_000n, currency: "USD" }, want: "$12,000" },
+    { name: "an amount with cents keeps them", money: { amountMinor: 22_388n, currency: "USD" }, want: "$223.88" },
+    { name: "a currency with no minor unit", money: { amountMinor: 1500n, currency: "JPY" }, want: "¥1,500" },
+  ])("$name", ({ money, want }) => {
+    // Act / Assert
+    expect(formatMoney(create(FooterMoneySchema, money), "p")).toBe(want);
+  });
+
+  it("refuses a code that is not a currency", () => {
+    // Arrange
+    const money = create(FooterMoneySchema, { amountMinor: 1n, currency: "dollars" });
+
+    // Act / Assert
+    expect(() => formatMoney(money, "p")).toThrow(MalformedView);
+  });
+});
+
 describe("orderedAllowances", () => {
   // The order is weekly, overage, whichever windows are newsworthy (owner
   // ruling, 2026-10-08). Every row but the first is a case that once drew a
@@ -1805,6 +1903,38 @@ describe("orderedAllowances", () => {
     expect(labels).toEqual(["weekly", "overage"]);
   });
 
+  it("draws the monthly spend last", () => {
+    // Arrange
+    const activity = activityOf(
+      "idle",
+      unpinnedInit(undefined, {
+        usage: {
+          weekly: { overall: allowance(0.1, false, 1000) },
+          overage: allowance(0.1, false, 1000),
+          monthlySpend: cappedSpend(1n, 2n, 0.5),
+        },
+      }),
+    );
+    const usage = enduringUsage(activity, "p");
+    if (usage === undefined) throw new Error("no usage");
+
+    // Act
+    const labels = orderedAllowances(usage).map((a) => a.label);
+
+    // Assert
+    expect(labels).toEqual(["weekly", "overage", "monthly_spend"]);
+  });
+
+  it("draws a monthly spend alone on the usage line", () => {
+    // Act
+    const cell = enduringCell({ usage: { monthlySpend: cappedSpend(199_396n, 1_200_000n, 0.166) } });
+
+    // Assert
+    expect(cell.querySelector(".footer-rate-figures")?.textContent).toBe(
+      `$1,993.96${MONTHLY_SPEND_GAP}of $12,000 this month`,
+    );
+  });
+
   // THE STRIP AND THE SHEET SHARE ONE DRAWING: every cell the strip draws is
   // drawLabelledAllowance's output for its entry, so a hand-rolled strip cell
   // that drifted from the sheet's fails here.
@@ -1816,6 +1946,7 @@ describe("orderedAllowances", () => {
         usage: {
           weekly: { overall: allowance(0.5, false, 1000), models: { sonnet: allowance(0.2, false, 1000) } },
           overage: allowance(0.1, false, 1000, "allowed"),
+          monthlySpend: cappedSpend(199_396n, 1_200_000n, 0.166),
         },
       }),
     );
