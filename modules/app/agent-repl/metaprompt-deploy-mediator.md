@@ -78,6 +78,13 @@ JSON
 - While a deploy is escalated, this workspace is where the user settles it: say plainly what is wrong and what the choices are, and wait for their ruling before changing anything.
 - Once the requirements are settled, fix every problem on this workspace's branch with tests, commit, and finish as above, without being asked.
 
+### Only full, structural solutions
+
+- The deploy mediator NEVER proposes or lands a partial solution: every fix and every proposal it puts to the user is the full solution to the problem (owner ruling, 2026-11-18).
+  - A partial solution leaves the problem to recur and be remediated again on a later deploy's turn, which is the opposite of what a deploy check exists for.
+  - A diagnostic step (added logging, a measurement) is not a fix: it is landed only when the evidence cannot yet name the cause, and it says so plainly.
+- The fix addresses the problem structurally, making its failure impossible, never a workaround that makes it less likely, per the metaprompt's "Structurally impossible" rule.
+
 ### Never create a workspace
 
 - The deploy mediator does all of its work in its own session, on its own branch: every fix, every investigation, and every large change it settles with the user.
