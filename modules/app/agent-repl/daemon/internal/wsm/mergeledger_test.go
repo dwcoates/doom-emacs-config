@@ -544,3 +544,34 @@ func TestHeldMergeRoundsAnswersEveryHeldLiveRound(t *testing.T) {
 		t.Fatalf("HeldMergeRounds = (%v, %v), want only %s held since %v", got, err, heldLease, held)
 	}
 }
+
+func TestTheUnheldSettledRoundsStepClearsOnlyASettledRoundsHold(t *testing.T) {
+	// Arrange: one settled round left held, and one live round held.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	for _, stmt := range []string{
+		`INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES ('ledger-a', '` + string(ws.ID) + `', 1)`,
+		`INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome, held_since) VALUES ('ledger-a', 1, 'fixes', 100, 200, 'abandoned', 150), ('ledger-a', 1, 'tests', 300, NULL, '', 350)`,
+	} {
+		if _, err := s.db().Exec(stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+
+	// Act
+	if _, err := s.db().Exec(unheldSettledRoundsDDL); err != nil {
+		t.Fatalf("the layout-170 step: %v", err)
+	}
+
+	// Assert
+	want := map[string]int64{"fixes": 0, "tests": 350}
+	for kind, held := range want {
+		var got int64
+		if err := s.db().QueryRow(`SELECT COALESCE(held_since, 0) FROM merge_tab_intervals WHERE lease_id = 'ledger-a' AND kind = ?`, kind).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		if got != held {
+			t.Fatalf("%s held_since = %d, want %d", kind, got, held)
+		}
+	}
+}

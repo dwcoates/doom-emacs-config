@@ -73,6 +73,11 @@ export class ScriptedQuery implements QueryLike {
   /** When set, `getSettings` rejects with it. */
   getSettingsRejects: Error | undefined;
   /**
+   * When set, the next `getSettings` calls it on entry and waits on what it
+   * answers before it answers itself.
+   */
+  getSettingsGate: (() => Promise<void>) | undefined;
+  /**
    * What `cancelAsyncMessage` answers: true when the vendor still held the
    * message and dropped it, false when it had already taken it.
    */
@@ -179,6 +184,11 @@ export class ScriptedQuery implements QueryLike {
   }
   getSettings(): Promise<AppliedSettingsLike> {
     this.calls.push("getSettings");
+    const gate = this.getSettingsGate;
+    if (gate !== undefined) {
+      this.getSettingsGate = undefined;
+      return gate().then(() => this.getSettings());
+    }
     return this.getSettingsRejects === undefined
       ? Promise.resolve({ applied: { effort: this.appliedEffort } })
       : Promise.reject(this.getSettingsRejects);
