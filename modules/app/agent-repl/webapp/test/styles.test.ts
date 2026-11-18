@@ -59,6 +59,7 @@ import { DRAGGING_CLASS } from "../src/drag.js";
 import { ELLIPSIS_TRIM_PROPERTY } from "../src/feed/ellipsis-trim.js";
 import { REVEAL_HIGHLIGHT_MS } from "../src/feed/feed.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE } from "../src/sidebar/band-fit.js";
+import { ZERO_COUNT_ATTRIBUTE } from "../src/sidebar/subsections.js";
 
 /** The selectors on which any `user-select`/`-webkit-user-select` is `none`. */
 function selectorsSuppressingSelection(css: string): string[] {
@@ -6402,6 +6403,25 @@ describe("the repository's subsections and the drag", () => {
 
   it("greys a folded subsection's name as a folded repository's", () => {
     expect(declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-collapsed\)/);
+  });
+
+  it("greys an empty subsection's name as a folded one's", () => {
+    expect(declarationsOf(`#ws-sidebar .sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head .sb-subsection-label`)).toMatch(
+      /color:\s*var\(--repo-head-collapsed\)/,
+    );
+  });
+
+  it("greys an empty subsection's header as a folded one's", () => {
+    expect([
+      declarationsOf("#ws-sidebar .sb-subsection.folded > .sb-subsection-head"),
+      declarationsOf(`#ws-sidebar .sb-subsection[${EMPTY_SUBSECTION_ATTRIBUTE}] > .sb-subsection-head`),
+    ]).toEqual([expect.stringMatching(/color:\s*var\(--repo-head-collapsed\)/), expect.stringMatching(/color:\s*var\(--repo-head-collapsed\)/)]);
+  });
+
+  it("draws a subsection's nonzero count in the open name's ink, folded, empty or open", () => {
+    expect(declarationsOf(`#ws-sidebar .sb-subsection-head .sb-count:not([${ZERO_COUNT_ATTRIBUTE}])`)).toMatch(
+      /color:\s*var\(--repo-head-expanded\)/,
+    );
   });
 
   // SUBSECTIONS WITH NOTHING UNDER THEM STAND CLOSE TOGETHER (owner request,
