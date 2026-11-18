@@ -1007,6 +1007,14 @@ message FooterStatusMerging {
     // bubble is not in the feed yet; a script hook shows nothing else while
     // it runs.
     FooterSubStatusMergingFinishing finishing = 28;
+    // The repository's deploy mediator finished its fix, and the fix runs
+    // its full test gate and lands directly on the main branch while the
+    // mediator stands by, its session ended (owner ruling, 2026-11-17). The
+    // fix lands outside the merge queue, so no queue step names it.
+    FooterSubStatusMergingTestingFix testing_fix = 30;
+    // The deploy mediator's landed fix is deploying; the mediator checks
+    // that deploy in turn from its next brief.
+    FooterSubStatusMergingDeployingFix deploying_fix = 31;
   }
   // Tags 1-4, 6-9, 11 and 12 (enqueuing, queued, pre_prompt, merge, parked,
   // post_prompt, failed, merged, fixes, conflicts) are RETIRED: the steps
@@ -1075,6 +1083,10 @@ message FooterSubStatusMergingEnqueued {
 }
 // A `finish` hook is running, drawn "finishing".
 message FooterSubStatusMergingFinishing {}
+// The deploy mediator's fix runs its gate and lands, drawn "testing fix".
+message FooterSubStatusMergingTestingFix {}
+// The deploy mediator's landed fix deploys, drawn "deploying fix".
+message FooterSubStatusMergingDeployingFix {}
 // A `pre_deploy` hook is running, drawn "pre-deploy".
 message FooterSubStatusMergingPreDeploy {}
 // The replay, drawn "rebasing 3/7".
