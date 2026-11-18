@@ -40,6 +40,18 @@ const (
 	MaxAnswerRunes = 12000
 )
 
+// The pull-request comment banner's call.
+const (
+	// BriefCommentSummary is the brief the comment summary is composed from.
+	BriefCommentSummary = "pull-request-comment-summary"
+	// CommentSummarySite is the vendor-guard site the comment summary asks
+	// under.
+	CommentSummarySite = "pull_request_comment_summary"
+	// MaxCommentRunes caps the comment the call is handed, as MaxAnswerRunes
+	// caps an answer: a comment's head is where its ask is stated.
+	MaxCommentRunes = 4000
+)
+
 // StoodDownCause names a summary the daemon's stand-down cut short.
 const StoodDownCause = "the daemon stood down"
 
@@ -74,6 +86,19 @@ func (s Summarizer) Summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 	return s.sentence(ctx, ws, turnSummary, runecap.Head(answer, MaxAnswerRunes), log)
 }
 
+// SummarizeComment answers the comment banner's summary of COMMENT, the
+// comment's markdown, through the same one-sentence call as Summarize. A
+// blank comment is summarized as nothing, with no call: the banner names its
+// author alone.
+func (s Summarizer) SummarizeComment(ctx context.Context, ws ids.WorkspaceID, comment string) string {
+	log := s.Log.With(dlog.Context{"workspace": string(ws)})
+	if strings.TrimSpace(comment) == "" {
+		log.Info(opSummary, "the pull-request comment is blank; nothing to summarize", nil)
+		return ""
+	}
+	return s.sentence(ctx, ws, commentSummary, runecap.Head(comment, MaxCommentRunes), log)
+}
+
 // sentenceCall is one kind of one-sentence Haiku call a banner's body is
 // asked of: every kind shares Summarizer.sentence's steps and records, and
 // differs only in the brief it is composed from and the words it is
@@ -97,6 +122,12 @@ type sentenceCall struct {
 var turnSummary = sentenceCall{
 	brief: BriefSummary, placeholder: "answer", site: SummarySite, what: "turn-summary",
 	unmade: "the turn was not summarized", made: "summarized the turn's final answer",
+}
+
+// commentSummary is the pull-request comment banner's call.
+var commentSummary = sentenceCall{
+	brief: BriefCommentSummary, placeholder: "comment", site: CommentSummarySite, what: "comment-summary",
+	unmade: "the pull-request comment was not summarized", made: "summarized the pull-request comment",
 }
 
 // sentence makes CALL over INPUT, answering the banner body: the summary, or
