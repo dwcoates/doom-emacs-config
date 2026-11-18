@@ -34,9 +34,56 @@ func LifePath(addrPath, instance string) string {
 	return filepath.Join(filepath.Dir(addrPath), LifeDirName, instance+lifeSuffix)
 }
 
+// addressSuffix ends the file in which a daemon records its private address.
+const addressSuffix = ".addr"
+
+// AddressPath is where daemon INSTANCE records its private listener's
+// address, beside its life lock.
+func AddressPath(addrPath, instance string) string {
+	return filepath.Join(filepath.Dir(addrPath), LifeDirName, instance+addressSuffix)
+}
+
+// ErrNoInstanceAddress marks an instance that has recorded no private
+// address: it never bound one, or it has ended.
+var ErrNoInstanceAddress = errors.New("the daemon instance records no private address")
+
+// InstanceAddress answers the private address daemon INSTANCE recorded, the
+// one a call for a workspace it serves is forwarded to
+// (docs/investigations/2026-11-18-stable-sockets-design.md, D1).
+func InstanceAddress(addrPath, instance string) (string, error) {
+	raw, err := os.ReadFile(AddressPath(addrPath, instance))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", fmt.Errorf("instance %q: %w", instance, ErrNoInstanceAddress)
+	}
+	if err != nil {
+		return "", fmt.Errorf("read instance %q's address: %w", instance, err)
+	}
+	address := strings.TrimSpace(string(raw))
+	if address == "" {
+		return "", fmt.Errorf("instance %q: an empty address file: %w", instance, ErrNoInstanceAddress)
+	}
+	return address, nil
+}
+
 // Life is a held life lock.
 type Life struct {
-	rec *recordlock.Record
+	rec      *recordlock.Record
+	addrPath string
+	instance string
+}
+
+// RecordAddress records ADDRESS as this daemon's private listener, atomically
+// (a temporary file, then a rename), so a reader sees no address or this one.
+func (l *Life) RecordAddress(address string) error {
+	path := AddressPath(l.addrPath, l.instance)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(address+"\n"), 0o600); err != nil {
+		return fmt.Errorf("write the instance address %q: %w", tmp, err)
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		return fmt.Errorf("publish the instance address %q: %w", path, err)
+	}
+	return nil
 }
 
 // HoldLife takes daemon INSTANCE's life lock for the state root of
@@ -59,11 +106,14 @@ func HoldLife(addrPath, instance string) (*Life, error) {
 	if !held {
 		return nil, fmt.Errorf("hold the life lock %q: %w", path, ErrClaimed)
 	}
-	return &Life{rec: rec}, nil
+	return &Life{rec: rec, addrPath: addrPath, instance: instance}, nil
 }
 
 // Release drops the life lock and removes its file: this daemon is ending.
 func (l *Life) Release() error {
+	if err := os.Remove(AddressPath(l.addrPath, l.instance)); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove the instance address: %w", err)
+	}
 	path := l.rec.Path()
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("remove the life lock %q: %w", path, err)
@@ -115,6 +165,10 @@ func LiveOthers(addrPath, self string) ([]string, error) {
 			continue
 		case err != nil:
 			return nil, fmt.Errorf("probe the life lock %q: %w", path, err)
+		}
+		if err := os.Remove(AddressPath(addrPath, instance)); err != nil && !errors.Is(err, os.ErrNotExist) {
+			rec.Release()
+			return nil, fmt.Errorf("remove the leftover instance address of %q: %w", instance, err)
 		}
 		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 			rec.Release()
