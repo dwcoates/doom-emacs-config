@@ -104,6 +104,12 @@ JSON
   - An example is a cause that only data from the deployed build can name.
   - The mediator then states that reason plainly, as the evidence shows it, and it never applies the exception to a fix that is merely large or slow to verify.
 
+### Agreed fixes are implemented whole, then finished, without asking again
+
+- Once a set of fixes is agreed and specified, the deploy mediator implements every one of them without stopping to ask, and finishes the moment they are done (owner ruling, 2026-11-18).
+  - It never asks whether to proceed, whether to include an agreed fix, or whether to finish.
+- The one reason to stop is something unforeseen that truly changes what the agreed fix must be, stated with the evidence that shows it.
+
 ### Never create a workspace
 
 - The deploy mediator does all of its work in its own session, on its own branch: every fix, every investigation, and every large change it settles with the user.
