@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 
@@ -331,6 +332,47 @@ func TestRPCOutcome(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := rpcOutcome(tt.err); got != tt.want {
 				t.Fatalf("rpcOutcome(%v) = %q, want %q", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRecordAbandoned(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	tests := []struct {
+		name  string
+		ctx   context.Context
+		phase string
+		want  int
+	}{
+		{name: "an answered caller is not recorded", ctx: context.Background(), phase: "handler", want: 0},
+		{name: "a caller that left in the boundary is recorded", ctx: cancelled, phase: "boundary", want: 1},
+		{name: "a caller that left in the handler is recorded", ctx: cancelled, phase: "handler", want: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+
+			// Act.
+			recordAbandoned(log, tt.ctx, "SelectWorkspace", "emacs-1-2", tt.phase, 10*time.Second)
+
+			// Assert.
+			if len(log.records) != tt.want {
+				t.Fatalf("records = %+v, want %d", log.records, tt.want)
+			}
+			if tt.want == 0 {
+				return
+			}
+			rec := log.records[0]
+			if rec.Level != "INFO" || rec.Operation != "daemon.server.request_abandoned" {
+				t.Fatalf("record = %+v, want INFO daemon.server.request_abandoned", rec)
+			}
+			for key, want := range map[string]any{"rpc": "SelectWorkspace", "request_id": "emacs-1-2", "phase": tt.phase, "waited_ms": int64(10000)} {
+				if rec.Context[key] != want {
+					t.Fatalf("context[%s] = %v, want %v", key, rec.Context[key], want)
+				}
 			}
 		})
 	}
