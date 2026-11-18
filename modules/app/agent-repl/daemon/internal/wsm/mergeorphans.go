@@ -37,6 +37,11 @@ type OrphanedMergeState struct {
 // or suspended keeps everything it owns; a merge's own teardown releases its
 // lease before it removes its entry, so no merge in flight ever stands as a
 // lease with no entry.
+//
+// A ROUND IT SETTLES IS NO LONGER HELD: settling clears the hold in the same
+// write, as every settling writer does (HoldMergeRound). A suspended merge's
+// abandoned round once kept its hold, and every read of its ledger refused it
+// as settled and held (2026-11-18, eight rounds, a merge failed on each read).
 func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (OrphanedMergeState, error) {
 	const op = "daemon.wsm.sweep_orphaned_merge_state"
 	var out OrphanedMergeState
@@ -63,7 +68,7 @@ func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (Orph
 			return err
 		}
 		out.ProgressRecords = int(n)
-		res, err = tx.ExecContext(ctx, `UPDATE merge_tab_intervals SET ended_at = ?, outcome = 'abandoned'
+		res, err = tx.ExecContext(ctx, `UPDATE merge_tab_intervals SET ended_at = ?, outcome = 'abandoned', held_since = NULL
 			WHERE ended_at IS NULL
 			  AND lease_id NOT IN (SELECT ledger_id FROM merge_queue WHERE ledger_id IS NOT NULL AND ledger_id != '')
 			  AND lease_id NOT IN (SELECT lease_id FROM merge_progress)`, at.UnixNano())

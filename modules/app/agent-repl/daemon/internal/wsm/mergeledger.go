@@ -143,6 +143,13 @@ const mergeRoundHoldDDL = `
 ALTER TABLE merge_tab_intervals ADD COLUMN held_since INTEGER;
 `
 
+// unheldSettledRoundsDDL is the layout-170 repair: every settled round the
+// orphan sweep left held (SweepOrphanedMergeState) has its hold cleared, so
+// no stored round is both settled and held.
+const unheldSettledRoundsDDL = `
+UPDATE merge_tab_intervals SET held_since = NULL WHERE held_since IS NOT NULL AND ended_at IS NOT NULL;
+`
+
 // TabOutcomeRestarted is the outcome of a round a later step cut before it
 // settled (RecordTabInterval).
 const TabOutcomeRestarted = "restarted"

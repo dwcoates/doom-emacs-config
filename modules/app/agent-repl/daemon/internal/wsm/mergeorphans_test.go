@@ -169,3 +169,26 @@ func TestTheSweepKeepsALeaseThatIsNoMerges(t *testing.T) {
 		t.Fatalf("SweepOrphanedMergeState = %+v, %v (held %v); want the restart's lease kept", swept, err, held)
 	}
 }
+
+func TestTheSweepClearsTheHoldOfAHeldRoundItSettles(t *testing.T) {
+	// Arrange: a merge suspended at its round, then taken off its queue.
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	lease := NewLeaseID()
+	openRound(t, s, ws.ID, lease)
+	held := instant.Add(time.Minute)
+	if marked, err := s.HoldMergeRound(context.Background(), lease, &held); err != nil || !marked {
+		t.Fatalf("HoldMergeRound = %v, %v; want the live round held", marked, err)
+	}
+
+	// Act
+	_, err := s.SweepOrphanedMergeState(context.Background(), instant.Add(time.Hour))
+
+	// Assert: the abandoned round is not held, so its ledger still reads.
+	if err != nil {
+		t.Fatalf("SweepOrphanedMergeState: %v", err)
+	}
+	if _, err := s.MergeLedger(context.Background(), ws.ID); err != nil {
+		t.Fatalf("MergeLedger after the sweep = %v, want the ledger read", err)
+	}
+}
