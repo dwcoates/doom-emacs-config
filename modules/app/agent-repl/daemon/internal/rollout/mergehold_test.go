@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/bounce"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -79,6 +80,47 @@ func TestAStaleBuildBounceOverAMergesLeaseIsDeferred(t *testing.T) {
 				t.Fatalf("bounce = %v, want it deferred behind the merge's lease", err)
 			}
 			if len(h.fleet.resumes) != 0 {
+				t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
+			}
+		})
+	}
+}
+
+// TestABounceWhoseRestartHoldAMergeTookFirstIsDeferred pins the race of
+// 2026-11-18 13:46:37: the lease read before the prelaunch found none, a
+// merge's admission took the lease during the prelaunch, and the restart
+// hold's take lost to it. The take is the arbiter, so the bounce is given
+// back behind the merge's lease, never failed.
+func TestABounceWhoseRestartHoldAMergeTookFirstIsDeferred(t *testing.T) {
+	tests := []struct {
+		name         string
+		reason       RelaunchReason
+		force        bool
+		wantDeferred bool
+	}{
+		{name: "a stale skill set waits for the merge", reason: ReasonSkillsChanged, wantDeferred: true},
+		{name: "a stale build waits for the merge", reason: ReasonBuildStale, wantDeferred: true},
+		{name: "a forced bounce is not deferred", reason: ReasonSkillsChanged, force: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.fleet.onPrelaunch = func(ids.WorkspaceID) {
+				if _, err := h.db.AcquireLease(context.Background(), ws, wsm.HolderMerge, wsm.PolicyHold); err != nil {
+					t.Errorf("AcquireLease: %v", err)
+				}
+			}
+
+			// Act.
+			err := h.c.shimBounce(tt.reason, tt.force, nil)(context.Background(), ws)
+
+			// Assert.
+			if errors.Is(err, bounce.ErrDeferredBehindLease) != tt.wantDeferred {
+				t.Fatalf("bounce = %v, want deferred behind the merge's lease %v", err, tt.wantDeferred)
+			}
+			if tt.wantDeferred && len(h.fleet.resumes) != 0 {
 				t.Fatalf("resumes = %v, want nothing replaced under the merge", h.fleet.resumes)
 			}
 		})
