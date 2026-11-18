@@ -26,7 +26,8 @@ const KEYFRAMES = `
 @keyframes test-loop { from { opacity: 0 } to { opacity: 1 } }
 @keyframes test-once { from { opacity: 0 } to { opacity: 1 } }
 .test-loop { animation: test-loop 1000ms linear infinite; }
-.test-once { opacity: 0; animation: test-once 200ms linear 100ms forwards; }`;
+.test-once { opacity: 0; animation: test-once 200ms linear 100ms forwards; }
+.test-pseudo-loop::after { content: "x"; animation: test-loop 1000ms linear infinite; }`;
 
 /**
  * One animation's state, read in the page. Its position is its current time
@@ -89,7 +90,7 @@ async function setShown(page: Page, shown: boolean): Promise<void> {
 async function read(page: Page, id: string): Promise<Read & { now: number; opacity: string }> {
   return page.evaluate(async (elId) => {
     const el = document.getElementById(elId)!;
-    const animation = el.getAnimations()[0];
+    const animation = el.getAnimations({ subtree: true })[0];
     await animation.ready;
     return {
       playState: animation.playState,
@@ -118,6 +119,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
   let madeResumed: { after: Read & { now: number }; expected: number };
   let oneShot: Read & { opacity: string };
   let footerWord: Read;
+  let pseudoResumed: { after: Read & { now: number }; expected: number };
 
   beforeAll(async () => {
     const css = `${await pageStylesheet()}\n${KEYFRAMES}`;
@@ -170,6 +172,17 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
     await setShown(page, true);
     oneShot = await read(page, id);
 
+    // A loop on a pseudo-element running at the hide, shown again.
+    await freshPage(page, css, script);
+    id = await add(page, "test-pseudo-loop");
+    await wait(page, 50);
+    const pseudoBefore = await read(page, id);
+    await setShown(page, false);
+    await wait(page, 400);
+    await setShown(page, true);
+    const pseudoAfter = await read(page, id);
+    pseudoResumed = { after: pseudoAfter, expected: pseudoBefore.position + (pseudoAfter.now - pseudoBefore.now) };
+
     // The footer's breathing word, under the real stylesheet's rule.
     await freshPage(page, css, script);
     id = await add(page, "pfooter-wave-letter");
@@ -201,6 +214,11 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
 
   it("leaves a one-shot that would have ended while hidden ended, at its last frame", () => {
     expect([oneShot.playState, oneShot.opacity]).toEqual(["finished", "1"]);
+  });
+
+  it("resumes a pseudo-element's loop running at the hide where it would have been", () => {
+    const { after, expected } = pseudoResumed;
+    expect([after.playState, near(after.position, expected)]).toEqual(["running", true]);
   });
 
   it("pauses the footer's breathing word by the real stylesheet's rule", () => {

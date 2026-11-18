@@ -15,7 +15,7 @@ const SINGLE_INSTALLERS = [
   "installResizeObserver",
   "installIntersectionObserver",
   "installRangeClientRects",
-  "installGetAnimations",
+  "installPseudoElementStyle",
 ];
 
 describe("the jsdom capabilities", () => {
@@ -23,7 +23,6 @@ describe("the jsdom capabilities", () => {
     { name: "ResizeObserver", present: (): boolean => typeof globalThis.ResizeObserver === "function" },
     { name: "IntersectionObserver", present: (): boolean => typeof globalThis.IntersectionObserver === "function" },
     { name: "Range.getClientRects", present: (): boolean => typeof Range.prototype.getClientRects === "function" },
-    { name: "Element.getAnimations", present: (): boolean => typeof Element.prototype.getAnimations === "function" },
   ])("installs $name", ({ present }) => {
     // Arrange / Act
     installJsdomCapabilities();
@@ -32,15 +31,31 @@ describe("the jsdom capabilities", () => {
     expect(present()).toBe(true);
   });
 
-  it("answers no animations for an element, since jsdom runs none", () => {
+  it("answers a pseudo-element's style as running no animation, though its element runs one", () => {
     // Arrange
     installJsdomCapabilities();
+    const el = document.createElement("span");
+    el.style.animationName = "spin";
+    document.body.append(el);
 
     // Act
-    const animations = document.createElement("nav").getAnimations({ subtree: true });
+    const read = [getComputedStyle(el).animationName, getComputedStyle(el, "::before").animationName];
 
     // Assert
-    expect(animations).toEqual([]);
+    expect(read).toEqual(["spin", ""]);
+    el.remove();
+  });
+
+  it("wraps the window's computed style once, however often it is installed", () => {
+    // Arrange
+    installJsdomCapabilities();
+    const first: unknown = Reflect.get(window, "getComputedStyle");
+
+    // Act
+    installJsdomCapabilities();
+
+    // Assert
+    expect(Reflect.get(window, "getComputedStyle")).toBe(first);
   });
 
   it("answers no rects for a text range, since jsdom lays nothing out", () => {

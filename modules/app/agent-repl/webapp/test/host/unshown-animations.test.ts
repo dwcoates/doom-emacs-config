@@ -8,12 +8,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   PAGE_UNSHOWN_ATTRIBUTE,
   animatedElements,
-  cssTimeMs,
   insertedElements,
   pauseAnimationsWhileUnshown,
   type AnimatedElement,
   type UnshownAnimationsEnv,
 } from "../../src/host/unshown-animations.js";
+import { PSEUDO_DELAY } from "../../src/animation-delays.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -144,7 +144,7 @@ describe("pausing a page the webhost does not show", () => {
     document.dispatchEvent(new Event("visibilitychange"));
 
     // Assert
-    expect([paused(), p.animated[0]!.moves]).toEqual([false, []]);
+    expect([paused(), p.animated[0].moves]).toEqual([false, []]);
   });
 });
 
@@ -159,7 +159,7 @@ describe("resuming a page the webhost shows again", () => {
     p.presence.setShown(true);
 
     // Assert
-    expect(p.animated[0]!.moves.map((m) => m.by)).toEqual([700]);
+    expect(p.animated[0].moves.map((m) => m.by)).toEqual([700]);
   });
 
   it("moves an element inserted while hidden on by how long since it was inserted", () => {
@@ -204,7 +204,7 @@ describe("resuming a page the webhost shows again", () => {
     p.presence.setShown(true);
 
     // Assert
-    expect(p.animated[0]!.moves.map((m) => [m.underPause, m.flushedBefore])).toEqual([[false, true]]);
+    expect(p.animated[0].moves.map((m) => [m.underPause, m.flushedBefore])).toEqual([[false, true]]);
   });
 
   it("dates an element inserted during an earlier hide from the later hide", () => {
@@ -336,20 +336,24 @@ describe("reading the page's elements", () => {
     expect(el.style.animationDelay).toBe("-500ms, -500ms");
   });
 
-  it("reads a computed time in seconds or milliseconds", () => {
-    // Arrange / Act / Assert
-    expect([cssTimeMs("1.5s"), cssTimeMs("-200ms"), cssTimeMs("0s")]).toEqual([1500, -200, 0]);
-  });
-
-  it("throws on a computed delay that is no CSS time, recording it at error", async () => {
-    // Arrange
-    const capture = captureLogRecords();
+  it("moves a pseudo-element's delays through its element", () => {
+    // Arrange: a view whose ::after runs a loop, as WebKit computes one.
+    const el = document.createElement("div");
+    document.body.append(el);
+    const loop = { animationName: "shimmer", animationDuration: "1s", animationIterationCount: "infinite", animationDirection: "normal", animationDelay: "-100ms" };
+    const view = new Proxy(window, {
+      get: (target, key) =>
+        key === "getComputedStyle"
+          ? (element: Element, pseudo?: string | null) =>
+              element === el && pseudo === "::after" ? (loop as unknown as CSSStyleDeclaration) : target.getComputedStyle(element, pseudo)
+          : (Reflect.get(target, key) as unknown),
+    });
+    const animated = animatedElements(document, view).find((a) => a.element === el)!;
 
     // Act
-    expect(() => cssTimeMs("auto")).toThrow(/no CSS time/);
+    animated.advance(400);
 
     // Assert
-    const record = await forwardedRecord(capture, "page.animations-resume-failed");
-    expect([record.level.case, record.context?.["delay"]]).toEqual(["error", "auto"]);
+    expect(el.style.getPropertyValue(PSEUDO_DELAY["::after"].property)).toBe("-500ms");
   });
 });

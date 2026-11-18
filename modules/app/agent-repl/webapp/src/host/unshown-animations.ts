@@ -31,6 +31,9 @@
  * AGENTS.md, Performance lessons). Elements are read by their computed style
  * only, and dated by the page's mutations, which name each inserted node.
  *
+ * A loop on a `::before` or `::after` is moved the same way, through its
+ * element (src/animation-delays.ts).
+ *
  * WHAT IS DATED. An element is dated by its insertion alone. An element there
  * at the hide that starts a new animation by a class or style change while
  * hidden is moved on from the hide, as its other animations are.
@@ -44,7 +47,8 @@
  */
 import { log } from "../log.js";
 import type { Presence } from "../presence.js";
-import { pageMutationObserver } from "../dom.js";
+import { pageMutationObserver, queryAll } from "../dom.js";
+import { animatedParts, nth, writeDelays } from "../animation-delays.js";
 
 /** The root attribute the stylesheet pauses every animation under. */
 export const PAGE_UNSHOWN_ATTRIBUTE = "data-page-unshown";
@@ -79,7 +83,9 @@ export function liveUnshownAnimationsEnv(doc: Document, presence: Presence): Uns
     presence,
     now: () => performance.now(),
     animated: () => animatedElements(doc, view),
-    flush: () => void view.getComputedStyle(doc.documentElement).animationPlayState,
+    // A layout read resolves every element's style; a computed-style read
+    // of one element resolves only its own (WebKit, 2026-11-18).
+    flush: () => void doc.documentElement.offsetWidth,
     observe: (fn) => {
       const observer = pageMutationObserver(doc, (records) => fn(insertedElements(records)));
       observer.observe(doc.documentElement, { subtree: true, childList: true });
@@ -88,24 +94,23 @@ export function liveUnshownAnimationsEnv(doc: Document, presence: Presence): Uns
   };
 }
 
-/** Every element under DOC whose computed style runs an animation. */
+/**
+ * Every element under DOC running an animation on itself or a pseudo-element,
+ * read off its computed style (src/animation-delays.ts).
+ */
 export function animatedElements(doc: Document, view: Window & typeof globalThis): AnimatedElement[] {
   const found: AnimatedElement[] = [];
   const walker = doc.createTreeWalker(doc.documentElement, NodeFilter.SHOW_ELEMENT);
   for (let node: Node | null = walker.currentNode; node !== null; node = walker.nextNode()) {
     const element = node as Element;
-    const computed = view.getComputedStyle(element);
-    const names = cssList(computed.animationName);
-    if (names.every((name) => name === "none")) continue;
-    if (!(element instanceof view.HTMLElement) && !(element instanceof view.SVGElement)) continue;
-    const styled = element;
+    const parts = animatedParts(element, view);
+    if (parts.length === 0) continue;
     found.push({
       element,
       advance: (byMs) => {
-        // The computed list may be shorter than the names, and repeats as
-        // CSS repeats it: every animation gets its own moved delay.
-        const delays = cssList(view.getComputedStyle(styled).animationDelay).map(cssTimeMs);
-        styled.style.animationDelay = names.map((_, i) => `${delays[i % delays.length]! - byMs}ms`).join(", ");
+        for (const { element: styled, part, names, delays } of parts) {
+          writeDelays(styled, part, names.map((_, i) => nth(delays, i) - byMs));
+        }
       },
     });
   }
@@ -118,28 +123,10 @@ export function insertedElements(records: Iterable<MutationRecord>): Element[] {
   for (const record of records) {
     for (const node of record.addedNodes) {
       if (!(node instanceof Element)) continue;
-      found.push(node, ...node.querySelectorAll("*"));
+      found.push(node, ...queryAll(node, "*"));
     }
   }
   return found;
-}
-
-/** A computed comma list's parts. */
-function cssList(value: string): string[] {
-  return value.split(",").map((part) => part.trim());
-}
-
-/** A computed CSS time (`1.3s`, `200ms`) in milliseconds; anything else is a broken style read. */
-export function cssTimeMs(value: string): number {
-  const ms = value.endsWith("ms") ? Number(value.slice(0, -2)) : value.endsWith("s") ? Number(value.slice(0, -1)) * 1000 : NaN;
-  if (!Number.isFinite(ms)) {
-    log.error(`an animation's computed delay is no CSS time (${value}); the page's animations cannot resume`, {
-      operation: "page.animations-resume-failed",
-      context: { delay: value },
-    });
-    throw new Error(`unshown-animations: an animation's computed delay is no CSS time (${value})`);
-  }
-  return ms;
 }
 
 /** Pause the page's animations while ENV's page is not shown; answers the stop. */

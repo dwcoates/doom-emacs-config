@@ -2895,6 +2895,23 @@ html[data-page-unshown] *::before,
 html[data-page-unshown] *::after {
   animation-play-state: paused !important;
 }
+/* ANIMATION-DELAYS: script moves a running animation by its delay, never by
+   asking WebKit for it, which would never free it (src/animation-delays.ts).
+   A pseudo-element has no inline style, so its delays ride a custom property
+   on its element, applied while the element wears the marker; a restart is
+   one style pass with every animation on the element stopped. `!important`
+   because each loop's own `animation` shorthand resets the delay. */
+[data-animation-delay-before]::before {
+  animation-delay: var(--animation-delay-before) !important;
+}
+[data-animation-delay-after]::after {
+  animation-delay: var(--animation-delay-after) !important;
+}
+[data-animation-restarting],
+[data-animation-restarting]::before,
+[data-animation-restarting]::after {
+  animation-name: none !important;
+}
 /* THE FEED TEXT ZOOM GLIDES (owner request, 2026-10-27: it snapped from one
    step to the next). `--feed-text-scale` is registered as a number, so the
    engine interpolates it, and a pushed scale moves to its new value over

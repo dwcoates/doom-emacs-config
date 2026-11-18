@@ -12,10 +12,16 @@
  * 5,280 live CSS animations across 18 pages, each with its keyframes and a
  * layer of its own, paused or not; the census names how many each page
  * holds and which, so the ones that outlive their purpose can be found.
+ * They are counted off computed style, every element's and its
+ * pseudo-elements', never by asking WebKit for them: an animation script has
+ * asked for is never freed (2026-11-18; the webapp's AGENTS.md, Performance
+ * lessons), so a census that asked would leak what it counted. A script's own
+ * `animate()` runs on no style and is not counted.
  */
 import { log } from "./log.js";
 import { pageSize } from "./page-size.js";
 import { every, pageAfter, type After } from "./every.js";
+import { animatedParts } from "./animation-delays.js";
 
 /** How often a page states its size. */
 export const CENSUS_EVERY_MS = 60_000;
@@ -30,21 +36,39 @@ export interface AnimationCensus {
 }
 
 /**
- * DOC's live animations, counted by name: a CSS animation by its
- * `animation-name`, anything else as `script`. Only the most numerous
- * CENSUS_ANIMATION_NAMES names are named.
+ * DOC's live CSS animations, counted by `animation-name` off VIEW's computed
+ * style. Only the most numerous CENSUS_ANIMATION_NAMES names are named.
  */
-export function animationCensus(doc: Document): AnimationCensus {
+export function animationCensus(doc: Document, view: Window & typeof globalThis = requireView(doc)): AnimationCensus {
   const counts = new Map<string, number>();
-  const all = doc.getAnimations();
-  for (const animation of all) {
-    const name = (animation as { animationName?: string }).animationName ?? "script";
-    counts.set(name, (counts.get(name) ?? 0) + 1);
+  let total = 0;
+  const walker = doc.createTreeWalker(doc.documentElement, NodeFilter.SHOW_ELEMENT);
+  for (let node: Node | null = walker.currentNode; node !== null; node = walker.nextNode()) {
+    for (const { names } of animatedParts(node as Element, view)) {
+      for (const name of names) {
+        if (name === "none") continue;
+        counts.set(name, (counts.get(name) ?? 0) + 1);
+        total += 1;
+      }
+    }
   }
   const named = [...counts.entries()]
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, CENSUS_ANIMATION_NAMES);
-  return { animations: all.length, animation_names: Object.fromEntries(named) };
+  return { animations: total, animation_names: Object.fromEntries(named) };
+}
+
+/** DOC's window, which every page's document has. */
+function requireView(doc: Document): Window & typeof globalThis {
+  const view = doc.defaultView;
+  if (view === null) {
+    log.error("a census was asked of a document with no window", {
+      operation: "page.census-windowless",
+      context: { document: doc.URL },
+    });
+    throw new Error(`page-census: ${doc.URL} has no window`);
+  }
+  return view;
 }
 
 /** Install the census on DOC's page; answers the stop. */
