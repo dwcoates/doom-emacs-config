@@ -564,7 +564,7 @@ unprioritized workspace, no ungated consent."
   (agent-repl-wire-decode-workspace-ref json))
 
 (defun agent-repl-wire-decode-create-workspace-success (json)
-  "Decode CreateWorkspaceSuccess from JSON into (:workspace REF :held-at-cold-gate H).
+  "Decode CreateWorkspaceSuccess JSON as (:workspace REF :held-at-cold-gate H).
 `workspace' is non-optional: a success without the minted identity is a
 contract breach, not an empty success.  H is (:context-tokens N) when the
 new session parked at its cold gate holds the initial prompt there, nil

@@ -414,7 +414,8 @@ the required relationship is all the form carries."
     (should (equal (agent-repl-wire-decode-create-workspace-response
                     (agent-repl-test-wire-verbs--parse
                      "{\"success\":{\"workspace\":{\"id\":\"ws-9\",\"dir\":\"/w/nine\"}}}"))
-                   '(:arm :success :value (:workspace (:id "ws-9" :dir "/w/nine")))))))
+                   '(:arm :success :value (:workspace (:id "ws-9" :dir "/w/nine")
+                                                  :held-at-cold-gate nil))))))
 
 (ert-deftest agent-repl-test-wire-verbs-create-response-error-without-cause ()
   "A CreateWorkspaceError with no cause arm is a contract breach.

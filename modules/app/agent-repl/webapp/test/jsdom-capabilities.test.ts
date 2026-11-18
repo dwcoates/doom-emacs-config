@@ -46,6 +46,25 @@ describe("the jsdom capabilities", () => {
     el.remove();
   });
 
+  it("wraps a computed style a suite installed over the substitution", () => {
+    // Arrange: a suite's own getComputedStyle, as tree-layout.ts installs.
+    installJsdomCapabilities();
+    const real: unknown = Reflect.get(window, "getComputedStyle");
+    const suiteOwn = (element: Element): CSSStyleDeclaration => (real as typeof window.getComputedStyle)(element);
+    window.getComputedStyle = suiteOwn;
+    const el = document.createElement("span");
+    el.style.animationName = "spin";
+    document.body.append(el);
+
+    // Act
+    installJsdomCapabilities();
+    const read = getComputedStyle(el, "::before").animationName;
+
+    // Assert
+    expect(read).toBe("");
+    el.remove();
+  });
+
   it("wraps the window's computed style once, however often it is installed", () => {
     // Arrange
     installJsdomCapabilities();

@@ -9,22 +9,29 @@
  * style declaring nothing, which runs no animation.
  */
 
-/** The marker the window wears once the substitution is in place, so it is installed once. */
+/**
+ * The marker the substituted `getComputedStyle` itself wears. It is on the
+ * FUNCTION, not the window: a suite that installs a `getComputedStyle` of its
+ * own (tree-layout.ts) replaces the substitution, and the next file's install
+ * must see that and wrap whatever stands now.
+ */
 const PSEUDO_AWARE = Symbol.for("agent-repl.test.pseudo-aware-computed-style");
 
 /**
- * Install the substitution on the window unless it is already in place.
- * Called before every file, as the other substitutions are; a
- * node-environment file has no window to install on.
+ * Install the substitution on the window unless the `getComputedStyle` there
+ * now is already it. Called before every file, as the other substitutions
+ * are; a node-environment file has no window to install on.
  */
 export function installPseudoElementStyle(): void {
   if (typeof window === "undefined") return;
-  const marked = window as unknown as { [PSEUDO_AWARE]?: true };
-  if (marked[PSEUDO_AWARE] === true) return;
-  const elementOnly = window.getComputedStyle.bind(window);
-  window.getComputedStyle = (element: Element, pseudo?: string | null): CSSStyleDeclaration =>
+  const current: unknown = Reflect.get(window, "getComputedStyle");
+  if (typeof current !== "function") throw new Error("jsdom: the window has no getComputedStyle to substitute");
+  if (Reflect.get(current, PSEUDO_AWARE) === true) return;
+  const elementOnly = (current as typeof window.getComputedStyle).bind(window);
+  const aware = (element: Element, pseudo?: string | null): CSSStyleDeclaration =>
     pseudo === undefined || pseudo === null || pseudo === "" ? elementOnly(element) : document.createElement("div").style;
-  marked[PSEUDO_AWARE] = true;
+  Reflect.set(aware, PSEUDO_AWARE, true);
+  window.getComputedStyle = aware;
 }
 
 /**
