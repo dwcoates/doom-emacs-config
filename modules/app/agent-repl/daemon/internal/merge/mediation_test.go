@@ -1405,3 +1405,25 @@ func TestAnUnchangedDeploysReleaseCutByTheDaemonsExitIsNoFailure(t *testing.T) {
 		})
 	}
 }
+
+func TestAnIntakeTurnTheUserInterruptedIsNeitherResumedNorEscalated(t *testing.T) {
+	// Arrange: the user interrupted the intake's turn.
+	h := checked(t)
+	owe(t, h)
+	h.turnCloses = []wsm.TurnClose{wsm.CloseKilled}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if subs := resumingBriefs(h); len(subs) != 0 {
+		t.Fatalf("resumed the intake %d times, want never", len(subs))
+	}
+	if m := owedCheck(t, h); m == nil || m.Escalated() {
+		t.Fatalf("check %+v, want it still owed and not escalated", m)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "the user interrupted the intake's turn; the check is left to the user's turns with the mediator, and no brief is sent"}); !ok {
+		t.Fatalf("records = %v, want the interrupt recorded", h.logs.Records())
+	}
+}

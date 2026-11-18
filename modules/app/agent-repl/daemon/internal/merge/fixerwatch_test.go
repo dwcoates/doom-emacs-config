@@ -15,9 +15,14 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// fixerTurnEnded records TURN of ws-fixer as ended.
+// fixerTurnEnded records TURN of ws-fixer as ended by the agent.
 func fixerTurnEnded(h *harness, turn ids.TurnID) {
-	closed, at := wsm.CloseCompleted, deployStarted.Add(2*time.Minute)
+	fixerTurnClosed(h, turn, wsm.CloseCompleted)
+}
+
+// fixerTurnClosed records TURN of ws-fixer as ended with CLOSED.
+func fixerTurnClosed(h *harness, turn ids.TurnID, closed wsm.TurnClose) {
+	at := deployStarted.Add(2 * time.Minute)
 	h.db.mu.Lock()
 	defer h.db.mu.Unlock()
 	h.db.turns["ws-fixer"] = append(h.db.turns["ws-fixer"], wsm.Turn{ID: turn, Workspace: "ws-fixer", Close: &closed, ClosedAt: &at})
@@ -227,5 +232,21 @@ func TestBriefFixerThatCannotReadItsCheckSubmitsNothing(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "could not read the check the mediator's brief is for; it is not briefed"}); !ok {
 		t.Fatalf("records = %v, want the failure recorded", h.logs.Records())
+	}
+}
+
+func TestAFixTurnTheUserInterruptedIsNotEscalated(t *testing.T) {
+	// Arrange: the user interrupted the mediator's fix turn.
+	h := finishing(t)
+	fixerTurnClosed(h, aFixerTurn.ID, wsm.CloseKilled)
+
+	// Act
+	watch(t, h, *owedCheck(t, h))
+
+	// Assert
+	stillDispatched(t, h)
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "the user interrupted the mediator's fix turn; the fix is left to the user's turns with the mediator, and nothing is escalated"}); !ok {
+		t.Fatalf("records = %v, want the interrupt recorded", h.logs.Records())
 	}
 }

@@ -607,6 +607,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		o.deps.Log.Global().Error(opMediation, "the intake's brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
 		return
 	}
+	var closed wsm.TurnClose
 	if !m.Prompted() {
 		// THE AWAIT'S ERROR IS THE ROUND'S err, never one scoped to this
 		// branch: a shadowed err dropped a failed await, and the round then
@@ -616,7 +617,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		if err != nil || turn == "" {
 			return
 		}
-		_, err = o.deps.AwaitTurnEnd(ctx, ws, turn)
+		closed, err = o.deps.AwaitTurnEnd(ctx, ws, turn)
 	} else {
 		// THE TURN WAS RECORDED BEFORE ITS BRIEF WAS QUEUED, so a round cut
 		// between the two (a refused submission, the daemon's exit) left a
@@ -631,13 +632,13 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 			}
 		}
 		o.deps.Log.Global().Info(opMediation, "the intake was told of this deploy before; its turn is reattached", withField(withField(fields, "turn", string(m.Turn)), "resumed", m.Resumed))
-		_, err = o.reattachTurn(ctx, ws, fields, m.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
+		closed, err = o.reattachTurn(ctx, ws, fields, m.Turn, told, conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION)
 	}
 	if err != nil {
 		o.awaitFailed(ctx, q, m.OwedAt, fields, "the intake's turn could not be awaited; the queue stays held until the next round", err)
 		return
 	}
-	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
+	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, closed, fields)
 	// A CHECK THE INTAKE DISPATCHED IS WATCHED BY THIS SAME ROUND: the claim
 	// it holds kept every pass the dispatch ran from starting another.
 	if now, err := o.deps.DB.MediationOf(ctx, q.key); err != nil {
@@ -740,7 +741,7 @@ func (o *orchestrator) submitCheckPrompt(ctx context.Context, ws ids.WorkspaceID
 // decided nothing about, let through and put before the user; one replaced
 // by a newer deploy is that deploy's round's; one released was decided; one
 // dispatched waits on its remediation.
-func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, owed time.Time, fields dlog.Context) {
+func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, owed time.Time, closed wsm.TurnClose, fields dlog.Context) {
 	m, err := o.deps.DB.MediationOf(ctx, q.key)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not read the check its turn ended on; the queue stays held", withField(fields, "error", err.Error()))
@@ -764,6 +765,14 @@ func (o *orchestrator) intakeTurnEnded(ctx context.Context, q checkedQueue, ws i
 	}
 	if m.Escalated() {
 		o.deps.Log.Global().Info(opMediation, "the mediator's turn ended with the deploy escalated; the queue stays held for the user", fields)
+		return
+	}
+	// A TURN THE USER INTERRUPTED IS THE USER'S (owner ruling, 2026-11-18):
+	// they took the session over, so the daemon sends no resuming brief and
+	// escalates nothing into it; the check stays owed, the queue held, and
+	// the mediator decides it in the turns the user drives.
+	if closed == wsm.CloseKilled {
+		o.deps.Log.Global().Info(opMediation, "the user interrupted the intake's turn; the check is left to the user's turns with the mediator, and no brief is sent", fields)
 		return
 	}
 	// AN INTAKE CANNOT END ITS TURN UNDECIDED (owner ruling, 2026-11-16):
@@ -825,11 +834,12 @@ func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.
 		return
 	}
 	o.deps.Log.Global().Warn(opMediation, "the intake's turn ended deciding nothing about the deploy; it is resumed once to decide it, the queue still held", fields)
-	if _, err := o.deps.AwaitTurnEnd(ctx, ws, turn); err != nil {
+	closed, err := o.deps.AwaitTurnEnd(ctx, ws, turn)
+	if err != nil {
 		o.awaitFailed(ctx, q, m.OwedAt, fields, "the resumed intake's turn could not be awaited; the queue stays held until the next round", err)
 		return
 	}
-	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, fields)
+	o.intakeTurnEnded(ctx, q, ws, m.OwedAt, closed, fields)
 }
 
 // mediationVersion is how the brief names M's build.
