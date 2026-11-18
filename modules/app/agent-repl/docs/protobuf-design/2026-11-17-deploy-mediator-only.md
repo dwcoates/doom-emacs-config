@@ -51,3 +51,13 @@ then the roster's comments.
   draws it as its `merging` arm (purple), the merging rung outranking the
   fault rung. A finish sent back to fixing, deployed or ended surfaces no
   merge, and the session's own arms stand again.
+
+### frontend.v1 roster: an async merge names its requester
+
+- WHAT: `RosterMergeQueueModeAsync` gains `requester`
+  (`RosterMergeQueueModeAsyncRequester { name }`), drawn after the merge's
+  name as a smaller, greyer, italic "(async of <name>)" on the waiting and
+  off-queue lines, cut with an ellipsis before the clock, its whole text on
+  the line's hover (owner request, 2026-11-18).
+- WHY: a click on an async merge's line selects its requester, which read as
+  the click doing nothing when the requester was the workspace in view.
