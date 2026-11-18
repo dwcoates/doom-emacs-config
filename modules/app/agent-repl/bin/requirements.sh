@@ -36,6 +36,9 @@
 #                            (`app`), rebuilt only when that hash changed
 #   location_permission      macOS lets a helper app (`app`, in the cache) name
 #                            Wi-Fi networks: Location Services allowed
+#   signing_identity         a self-signed code-signing identity (`name`) in the
+#                            login keychain, made once, that a helper app is
+#                            signed with so a rebuild keeps what macOS allowed it
 #   sudo_grant               sudo runs each of a command's `invocations` without a
 #                            password; the user installs the missing grant
 #                            (`file`, under /etc/sudoers.d) with the printed
@@ -334,6 +337,7 @@ validate_entries() {
        elif $e.kind == "app_build" then need($e; ["app", "build", "platforms"]),
          (select($e.build != null and $e.build.module == null) | "\($e._file): \($e.id): an app_build build is a path in the module (\"module\")")
        elif $e.kind == "location_permission" then need($e; ["app", "platforms"])
+       elif $e.kind == "signing_identity" then need($e; ["name", "platforms"])
        elif $e.kind == "sudo_grant" then need($e; ["command", "invocations", "file", "platforms"]),
          (select($e.command != null and ($e.command | test("^/[A-Za-z0-9_./-]+$") | not))
            | "\($e._file): \($e.id): a sudo_grant command is an absolute path of plain characters, not \($e.command)"),
@@ -581,6 +585,22 @@ check_location_permission() {
     "") STATUS=failed; DETAIL="$app answered no standing" ;;
     *) STATUS=missing; DETAIL="$app may not name Wi-Fi networks: $standing" ;;
   esac
+}
+
+# check_signing_identity: the login keychain holds a code-signing identity
+# named NAME. It is self-signed, so macOS never calls it valid; a signature
+# made with it still names its certificate, which is what keeps a rebuilt
+# app's Location Services permission (wifi-helper/build.sh).
+check_signing_identity() {
+  local e="$1" name listed
+  name="$(field "$e" .name)"
+  FIX="install makes it: a self-signed code-signing certificate named \"$name\" in the login keychain"
+  listed="$(security find-identity -p codesigning </dev/null 2>/dev/null || true)"
+  if grep -qF "\"$name\"" <<<"$listed"; then
+    STATUS=ok; DETAIL="the login keychain signs code as \"$name\""
+  else
+    STATUS=missing; DETAIL="the login keychain holds no code-signing identity named \"$name\""
+  fi
 }
 
 # SUDOERS_DIR is where a sudo_grant's file is installed; sudo reads every file
@@ -1244,6 +1264,22 @@ install_location_permission() {
     || say "install: $app could not ask for Location Services"
   return 0
 }
+# install_signing_identity: a self-signed certificate for code signing alone,
+# with its key, imported into the login keychain with codesign allowed to use
+# the key, so a build signs with it unprompted.
+install_signing_identity() {
+  local name dir rc=0
+  name="$(field "$1" .name)"
+  dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-signing.XXXXXX")"
+  printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=%s\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' "$name" >"$dir/cert.cnf"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 36500 -keyout "$dir/key.pem" -out "$dir/cert.pem" -config "$dir/cert.cnf" </dev/null >/dev/null 2>&1 \
+    && openssl pkcs12 -export -legacy -inkey "$dir/key.pem" -in "$dir/cert.pem" -out "$dir/identity.p12" -passout pass:agent-repl </dev/null >/dev/null 2>&1 \
+    && security import "$dir/identity.p12" -k "$(security login-keychain </dev/null | tr -d ' "')" -P agent-repl -T /usr/bin/codesign </dev/null >/dev/null 2>&1 \
+    || { say "install: the signing identity \"$name\" could not be made"; rc=1; }
+  rm -rf "$dir"
+  return "$rc"
+}
+
 # A grant needs the user's password, which install never asks for.
 install_sudo_grant() { return 1; }
 

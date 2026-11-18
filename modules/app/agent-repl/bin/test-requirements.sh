@@ -1034,6 +1034,66 @@ test_a_location_permission_for_an_app_not_built_is_missing() {
 }
 
 # ---------------------------------------------------------------------------
+# signing_identity.
+# ---------------------------------------------------------------------------
+
+SIGNING='{"id": "signing", "kind": "signing_identity", "why": "w", "profile": "run", "platforms": ["darwin"], "name": "case signing"}'
+
+# signing_security LISTED: a `security` that lists the identity when LISTED is
+# yes, records every call, and answers the login keychain's path.
+signing_security() {
+  write_stub security '
+case "$1" in
+  find-identity) [ -f "$STUB_DIR/.identity" ] && printf "  1) ABC \"case signing\" (CSSMERR_TP_NOT_TRUSTED)\n" ; exit 0 ;;
+  login-keychain) printf "    \"/k/login.keychain-db\"\n" ;;
+  import) touch "$STUB_DIR/.identity" ;;
+esac
+exit 0'
+  [ "$1" = yes ] && touch "$CASE/stubs/.identity"
+  write_stub openssl 'for a; do case "$a" in -out) next=1 ;; *) [ "${next:-}" = 1 ] && : >"$a"; next= ;; esac; done; exit 0'
+}
+
+test_a_listed_signing_identity_is_ok() {
+  new_case; manifest "[$SIGNING]"; signing_security yes
+  run check
+  if [ "$RC" -eq 0 ] && has 'ok          signing: the login keychain signs code as "case signing"'; then
+    pass "a signing identity the login keychain lists is ok"
+  else fail "listed identity" "rc=$RC" "$OUT"; fi
+}
+
+test_install_makes_a_missing_signing_identity_in_the_login_keychain() {
+  new_case; manifest "[$SIGNING]"; signing_security no
+  run install
+  if [ "$RC" -eq 0 ] && has "signing is missing" && ran "security import" && ran "-k /k/login.keychain-db" && ran "-T /usr/bin/codesign" \
+    && has 'ok          signing: the login keychain signs code as "case signing"'; then
+    pass "install makes a missing signing identity in the login keychain, usable by codesign"
+  else fail "missing identity" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_install_reports_a_signing_identity_it_could_not_make() {
+  new_case; manifest "[$SIGNING]"; signing_security no
+  write_stub openssl 'exit 1'
+  run install
+  if [ "$RC" -eq 1 ] && has 'install: the signing identity "case signing" could not be made' && ! ran "security import"; then
+    pass "install reports a signing identity it could not make, importing nothing"
+  else fail "identity not made" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_signing_identity_with_no_name_is_refused() {
+  new_case; manifest '[{"id": "signing", "kind": "signing_identity", "why": "w", "profile": "run", "platforms": ["darwin"]}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'signing: signing_identity needs "name"'; then pass "a signing identity with no name is refused"; else fail "identity name" "rc=$RC" "$OUT"; fi
+}
+
+test_the_wifi_helper_is_built_after_its_signing_identity() {
+  local order
+  order="$(jq -r '.requirements[] | select(.id == "wifi-helper-signing" or .id == "wifi-helper") | .id' "$MODULE/requirements.json" | paste -sd' ' -)"
+  if [ "$order" = "wifi-helper-signing wifi-helper" ]; then
+    pass "the Wi-Fi helper's signing identity is made before the helper is built"
+  else fail "signing before build" "order: $order"; fi
+}
+
+# ---------------------------------------------------------------------------
 # sudo_grant.
 # ---------------------------------------------------------------------------
 

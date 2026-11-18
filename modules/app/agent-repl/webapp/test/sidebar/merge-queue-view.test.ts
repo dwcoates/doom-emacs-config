@@ -57,6 +57,7 @@ import {
   MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_MEDIATION_CLASS,
+  MERGE_QUEUE_NEEDS_YOU_CLASS,
   MERGE_QUEUE_PAUSED_ATTRIBUTE,
   MERGE_QUEUE_REASON_CLASS,
   MERGE_QUEUE_REMEDIATING_CLASS,
@@ -763,6 +764,17 @@ describe("drawQueueMediationLabel", () => {
     drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), sc, "m").click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", want]]);
+  });
+
+  it.each([
+    ["waiting", { case: "waiting" as const, value: {} }, false],
+    ["checking", { case: "checking" as const, value: { target: target("intake") } }, false],
+    ["fixing", { case: "fixing" as const, value: { target: target("remedy") } }, false],
+    ["testing", { case: "testing" as const, value: { target: target("remedy") } }, false],
+    ["escalated", { case: "escalated" as const, value: { target: target("escalation") } }, true],
+  ])("draws the %s label red only when it waits on the user", (_name, standing, want) => {
+    const label = drawQueueMediationLabel(create(RosterMergeQueueMediationSchema, { standing }), daemon().sc, "m");
+    expect(label.classList.contains(MERGE_QUEUE_NEEDS_YOU_CLASS)).toBe(want);
   });
 
   it("selects nothing on a click while an escalation is still being made", async () => {
