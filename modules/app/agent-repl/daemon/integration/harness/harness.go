@@ -61,6 +61,7 @@
 package harness
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -297,7 +298,39 @@ func newPinnedCheckout(dir, repo string) (string, error) {
 	if err := os.Symlink(filepath.Join(repo, "requirements.json"), manifest); err != nil && !errors.Is(err, fs.ErrExist) {
 		return "", fmt.Errorf("link the requirements manifest into %s: %w", dir, err)
 	}
+	// EVERY MANIFEST THE ROOT INCLUDES IS LINKED TOO: a daemon reads the
+	// socket holders they declare at boot (holderensure.Declared), as it reads
+	// them from a real checkout.
+	includes, err := manifestIncludes(manifest)
+	if err != nil {
+		return "", err
+	}
+	for _, rel := range includes {
+		link := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+			return "", fmt.Errorf("mkdir for the included manifest %s: %w", rel, err)
+		}
+		if err := os.Symlink(filepath.Join(repo, rel), link); err != nil && !errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("link the included manifest %s into %s: %w", rel, dir, err)
+		}
+	}
 	return dir, nil
+}
+
+// manifestIncludes answers the manifests the root requirements manifest at
+// PATH includes, relative to the module root.
+func manifestIncludes(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the requirements manifest %s: %w", path, err)
+	}
+	var m struct {
+		Includes []string `json:"includes"`
+	}
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("parse the requirements manifest %s: %w", path, err)
+	}
+	return m.Includes, nil
 }
 
 // PinnedCheckout is the harness-owned checkout root, or a fatal failure if
