@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ghclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/wsm"
 )
 
@@ -517,5 +518,26 @@ func TestAnOwnedMergeThatCannotBeActedOnIsRecorded(t *testing.T) {
 	// Assert
 	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not judge closing the workspace one of whose owned pull requests merged"}); !ok {
 		t.Fatalf("records = %+v, want the failure at error", r.log.Records())
+	}
+}
+
+func TestTheShippedBriefAsksForAValidRequestedChangeToBeFixedPushedAndAnswered(t *testing.T) {
+	// Arrange
+	brief, err := prompts.Load("../../../prompts", BriefNotice)
+	if err != nil {
+		t.Fatalf("load the shipped brief: %v", err)
+	}
+
+	// Act
+	text, err := brief.Splice(map[string]string{"label": "pull request `o/r#7`", "activity": "@alice commented.", "status": "It now stands open."})
+	if err != nil {
+		t.Fatalf("Splice: %v", err)
+	}
+
+	// Assert
+	for _, want := range []string{"valid, and neither questionable nor possibly misguided", "commit it, push it", "`agent-repld workspace pr-comment`", "commit SHAs", "Ask the user about any request you doubt."} {
+		if !strings.Contains(text, want) {
+			t.Errorf("brief = %q, want it to contain %q", text, want)
+		}
 	}
 }
