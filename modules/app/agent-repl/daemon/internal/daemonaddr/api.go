@@ -29,6 +29,11 @@ type Claim interface {
 	Listener() net.Listener
 	// Address is "127.0.0.1:<port>" with the actually-bound port.
 	Address() string
+	// Advertise names the address daemon.addr advertises from the next
+	// Publish on: the shared address the daemon's socket holder keeps
+	// (docs/investigations/2026-11-18-stable-sockets-design.md, D2). Without
+	// it, a claim advertises its own Address.
+	Advertise(address string)
 	// Publish writes the advertisement to the daemon.addr path atomically
 	// (write a temporary file, then rename). The payload is the bare address
 	// on the first line and "pid=<n>" -- this daemon's process id -- on the

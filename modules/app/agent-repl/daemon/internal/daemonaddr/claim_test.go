@@ -1434,3 +1434,30 @@ func TestAYieldedClaimIsStillWhole(t *testing.T) {
 		})
 	}
 }
+
+func TestAnAdvertisedSharedAddressIsPublishedVerifiedAndWithdrawn(t *testing.T) {
+	// Arrange.
+	addrPath := newAddrPath(t)
+	c := mustBind(t, addrPath)
+	c.Advertise("127.0.0.1:41000")
+
+	// Act.
+	publishErr := c.Publish()
+	raw, _ := os.ReadFile(addrPath)
+	verifyErr := c.Verify()
+	removed, withdrawErr := c.Withdraw()
+
+	// Assert: daemon.addr names the shared address, not this claim's own.
+	if publishErr != nil {
+		t.Fatalf("Publish: %v", publishErr)
+	}
+	if want := "127.0.0.1:41000\npid=" + strconv.Itoa(os.Getpid()) + "\n"; string(raw) != want {
+		t.Fatalf("daemon.addr = %q, want %q", raw, want)
+	}
+	if verifyErr != nil {
+		t.Fatalf("Verify of the advertised address: %v", verifyErr)
+	}
+	if withdrawErr != nil || !removed {
+		t.Fatalf("Withdraw = %v, %v; want the advertisement removed", removed, withdrawErr)
+	}
+}
