@@ -208,19 +208,16 @@ func TestTestRedundancyPrintsTheOutputAndExitsByTheEnd(t *testing.T) {
 	}
 }
 
-func TestTestRedundancyFollowsAHandover(t *testing.T) {
+func TestTestRedundancyRefusedAsHandedOverIsSentNowhereElse(t *testing.T) {
 	cases := []struct {
-		name      string
-		successor []*agentreplv1.RunRedundancyResponse
-		want      int
+		name string
 	}{
-		{name: "the measurement is sent to the successor the refusal names", successor: []*agentreplv1.RunRedundancyResponse{endedWith(0)}, want: exitSuccess},
-		{name: "a successor handing over in turn is answered as refused, never chased", successor: []*agentreplv1.RunRedundancyResponse{redundancyHandedOver("127.0.0.1:1")}, want: exitRefused},
+		{name: "the measurement is answered as refused and the address its refusal names is never dialed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			successor := &redundancyDaemon{frames: tc.successor}
+			successor := &redundancyDaemon{frames: []*agentreplv1.RunRedundancyResponse{endedWith(0)}}
 			_, successorHandler := agentreplv1connect.NewAgentReplHandler(successor)
 			successorServer := httptest.NewServer(successorHandler)
 			t.Cleanup(successorServer.Close)
@@ -243,8 +240,8 @@ func TestTestRedundancyFollowsAHandover(t *testing.T) {
 			code := runNoun(context.Background(), testNoun, []string{"redundancy", "report", "-in", "/o/m.json"}, deps, &out, &errOut)
 
 			// Assert
-			if code != tc.want || successor.got.GetWorkspace().GetId() != "ws-caller" {
-				t.Fatalf("exit %d, successor request %v; stdout %q stderr %q", code, successor.got, out.String(), errOut.String())
+			if code != exitRefused || successor.got != nil {
+				t.Fatalf("exit %d, successor request %v; stdout %q stderr %q; want refused with nothing resent", code, successor.got, out.String(), errOut.String())
 			}
 		})
 	}

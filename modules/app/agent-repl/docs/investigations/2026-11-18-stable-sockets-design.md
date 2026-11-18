@@ -68,4 +68,7 @@ Today a call for a workspace this daemon does not serve is REFUSED with a typed 
   2. Emacs, on an announcement naming its own primary's address (lisp/daemon-link.el `agent-repl-link--attach-successor` already logs `successor-is-primary` and attaches nothing): a `transferred` push (lisp/host.el `agent-repl-host--transferred`) re-attaches the workspace on the primary link, whose adopt call the incumbent forwards to the successor. Today it would wait on a successor acceptance that never comes.
   3. The primary link's end at the incumbent's exit reconnects to the same shared address, which the successor then accepts; check that path promotes nothing and respawns nothing.
   4. The CLI's successorRedirect and Emacs's successor link are removed once nothing dials a private address.
+     - Done for the CLI: every verb dials the shared address and follows no refusal (the unary redirect, the test run's and the redundancy measurement's resends are gone).
+     - Emacs's successor link stays: on the shared address the primary's end redials the same address as a pending successor (`agent-repl-link--shared-reconnect`), and its acceptance is the promotion.
+     - The webapp's move notice stays: Emacs reloads the page at the primary's shared address once the adopt lands (`agent-repl-host--handover-reload-webview`), so the quiesced page is replaced, never redialed.
   5. e2e: `TestEmacsHandoverTransfersAtFreeness` and the rollout e2e run against a holder, so a handover is proved end to end on the shared address.

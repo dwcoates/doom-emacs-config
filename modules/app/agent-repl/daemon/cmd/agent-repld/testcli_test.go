@@ -136,55 +136,32 @@ func runTestCLIAcrossHandover(t *testing.T, incumbent, successor *testRunsDaemon
 	return code, out.String(), errOut.String()
 }
 
-func TestTestRunFollowsAHandover(t *testing.T) {
+func TestTestRunRefusedAsHandedOverIsSentNowhereElse(t *testing.T) {
 	cases := []struct {
-		name      string
-		successor []*agentreplv1.RunTestsResponse
-		assert    func(t *testing.T, code int, out, errOut string, successor *testRunsDaemon)
+		name   string
+		assert func(t *testing.T, code int, out, errOut string, successor *testRunsDaemon)
 	}{
 		{
-			name:      "the run is sent to the successor the refusal names",
-			successor: []*agentreplv1.RunTestsResponse{endedFrame(true)},
-			assert: func(t *testing.T, code int, out, errOut string, successor *testRunsDaemon) {
-				if code != exitSuccess || successor.got.GetWorkspace().GetId() != "ws-caller" {
-					t.Fatalf("exit %d, successor request %v; stdout %q stderr %q", code, successor.got, out, errOut)
-				}
-			},
-		},
-		{
-			name:      "the resend is told to the caller",
-			successor: []*agentreplv1.RunTestsResponse{endedFrame(true)},
-			assert: func(t *testing.T, _ int, _, errOut string, _ *testRunsDaemon) {
-				if !strings.Contains(errOut, "sending the run to its successor at") {
-					t.Fatalf("stderr = %q, want the resend noted", errOut)
-				}
-			},
-		},
-		{
-			name:      "the incumbent's refusal is not printed",
-			successor: []*agentreplv1.RunTestsResponse{endedFrame(true)},
-			assert: func(t *testing.T, _ int, out, _ string, _ *testRunsDaemon) {
-				if strings.Contains(out, "transferringAway") || strings.Count(out, "\n") != 1 {
-					t.Fatalf("stdout = %q, want only the successor's frame", out)
-				}
-			},
-		},
-		{
-			name:      "a successor handing over in turn is answered as refused, never chased",
-			successor: []*agentreplv1.RunTestsResponse{handedOverFrame("127.0.0.1:1")},
+			name: "the run is answered as refused",
 			assert: func(t *testing.T, code int, out, _ string, _ *testRunsDaemon) {
 				if code != exitRefused || !strings.Contains(out, "transferringAway") {
-					t.Fatalf("exit %d stdout %q, want the second refusal printed as refused", code, out)
+					t.Fatalf("exit %d stdout %q, want the refusal printed as refused", code, out)
 				}
 			},
 		},
 		{
-			name:      "a successor handing over in turn says what the refusal means",
-			successor: []*agentreplv1.RunTestsResponse{handedOverFrame("127.0.0.1:1")},
+			name: "the address the refusal names is never dialed",
+			assert: func(t *testing.T, _ int, _, _ string, successor *testRunsDaemon) {
+				if successor.got != nil {
+					t.Fatalf("successor request %v, want none: the shared address's daemon forwards a handed-over run itself", successor.got)
+				}
+			},
+		},
+		{
+			name: "the refusal says what it means",
 			assert: func(t *testing.T, _ int, _, errOut string, _ *testRunsDaemon) {
-				want := sayHandedOver("ws-caller", "127.0.0.1:1", "run the tests again once the restart finishes")
-				if !strings.Contains(errOut, want) {
-					t.Fatalf("stderr = %q, want %q", errOut, want)
+				if !strings.Contains(errOut, "run the tests again once the restart finishes") {
+					t.Fatalf("stderr = %q, want the handed-over refusal said", errOut)
 				}
 			},
 		},
@@ -193,7 +170,7 @@ func TestTestRunFollowsAHandover(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			incumbent := &testRunsDaemon{}
-			successor := &testRunsDaemon{frames: tc.successor}
+			successor := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{endedFrame(true)}}
 
 			// Act
 			code, out, errOut := runTestCLIAcrossHandover(t, incumbent, successor, "run", "-go", "pkg=TestA")
