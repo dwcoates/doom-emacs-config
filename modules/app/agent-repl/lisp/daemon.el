@@ -238,6 +238,17 @@ daemon runs with its metrics surface off."
   :type '(choice (const :tag "Off" nil) directory)
   :group 'agent-repl)
 
+(defcustom agent-repl-daemon-holder
+  (expand-file-name ".cache/agent-repl/sock/daemon-holder.sock" "~")
+  "The daemon\='s socket holder\='s control socket, or nil for none.
+Passed as `--holder\=': the daemon holding the boot claim takes its shared
+listener from that holder, which keeps it open across every daemon, and
+advertises it (docs/investigations/2026-11-18-stable-sockets-design.md).
+A successor the daemon spawns inherits the flag.  Nil or empty passes no
+flag, and the daemon advertises its own listener."
+  :type '(choice (const :tag "Off" nil) file)
+  :group 'agent-repl)
+
 (defcustom agent-repl-daemon-multi-repo-config-dir
   (let ((dir (getenv "MULTI_REPO_CONFIG_DIR")))
     (expand-file-name (if (and (stringp dir) (not (string-empty-p dir))) dir "~/.claude-chesscom")))
@@ -1535,13 +1546,16 @@ without either, and the process exits 2 before it serves.")
   "The full spawn argv: `agent-repl-daemon-command\=' plus the account roots.
 Every path is expanded, because the daemon compares config roots against
 resolved workspace paths and a `~\=' the shell never saw would never match.
-`--metrics-root\=' follows when `agent-repl-daemon-metrics-root\=' is set."
+`--metrics-root\=' follows when `agent-repl-daemon-metrics-root\=' is set, and
+`--holder\=' when `agent-repl-daemon-holder\=' is."
   (append agent-repl-daemon-command
           (mapcan (lambda (entry)
                     (list (car entry) (agent-repl-daemon--config-value (cdr entry))))
                   agent-repl-daemon--required-config-flags)
           (let ((metrics (agent-repl-daemon--config-value 'agent-repl-daemon-metrics-root)))
-            (and metrics (list "--metrics-root" metrics)))))
+            (and metrics (list "--metrics-root" metrics)))
+          (let ((holder (agent-repl-daemon--config-value 'agent-repl-daemon-holder)))
+            (and holder (list "--holder" holder)))))
 
 (defconst agent-repl-daemon--detach-shell "/bin/sh"
   "The shell that detaches the daemon from this Emacs\='s lifetime.

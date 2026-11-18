@@ -2,6 +2,25 @@
   "system": "daemon",
   "requirements": [
     {
+      "id": "socket-holder-daemon",
+      "kind": "socket_holder",
+      "why": "keeps the daemon's one shared address open across every daemon, so a call made during a handover queues for the daemon that accepts next instead of being refused (docs/investigations/2026-11-18-stable-sockets-design.md)",
+      "profile": "run",
+      "platforms": [
+        "darwin",
+        "linux"
+      ],
+      "label": "com.agentrepl.sockethold.daemon",
+      "control": "~/.cache/agent-repl/sock/daemon-holder.sock",
+      "sockets": [
+        {
+          "name": "daemon",
+          "tcp": "127.0.0.1"
+        }
+      ],
+      "log": "sockethold-daemon.log"
+    },
+    {
       "id": "go",
       "kind": "program",
       "why": "builds the Go systems (daemon, store, sidecar, shim-lock); Emacs cold start and every deploy run bin/build-frontend.sh",
