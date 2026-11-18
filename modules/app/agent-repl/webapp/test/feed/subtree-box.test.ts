@@ -194,6 +194,35 @@ describe("standingBox", () => {
     expect(boxedBy(row, box).map(([node]) => node)).toEqual(["1.1", "1.1.1"]);
   });
 
+  it("answers no node before any is stood", () => {
+    // Arrange + Act
+    const standing = standingBox(box);
+    // Assert
+    expect(standing.standing()).toBeUndefined();
+  });
+
+  it("answers the node last stood", () => {
+    // Arrange
+    const standing = standingBox(box);
+    drawnRow("r1", exampleTree);
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Act
+    standing.stand(document, { row: "r1", label: "1.2" });
+    // Assert
+    expect(standing.standing()).toEqual({ row: "r1", label: "1.2" });
+  });
+
+  it("answers no node once the box is taken down", () => {
+    // Arrange
+    const standing = standingBox(box);
+    drawnRow("r1", exampleTree);
+    standing.stand(document, { row: "r1", label: "1.1" });
+    // Act
+    standing.stand(document, undefined);
+    // Assert
+    expect(standing.standing()).toBeUndefined();
+  });
+
   it("keeps each standing box apart from another's", () => {
     // Arrange
     const first = standingBox(box);

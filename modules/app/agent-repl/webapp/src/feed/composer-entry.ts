@@ -28,7 +28,7 @@ import { queryAll } from "../dom.js";
 import { log } from "../log.js";
 import type { RevealGeometry, TailFollow } from "../scroll.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
+import { TREE_NODE_ATTRIBUTE, TREE_REFERENCE_ATTRIBUTE, TREE_REFERENCE_CLASS } from "../metaprompt-tree.js";
 import { revealInBubbles } from "./node-reveal.js";
 import { FEED_ROW_SELECTOR } from "./row-id.js";
 import { boxSubtree, unboxAll, standingBox, type BoxedNode, type SubtreeBox } from "./subtree-box.js";
@@ -71,7 +71,7 @@ const composerBox = standingBox({
   rightProperty: COMPOSER_RIGHT_PROPERTY,
 });
 
-/** The class every line of a node the composed subtree cites wears. */
+/** The class every line of a node the composed branch cites wears. */
 export const COMPOSER_CITED_CLASS = "mp-line-composing-cited";
 
 /** The property naming a cited box's left edge, in `ch`, on each line inside it. */
@@ -80,7 +80,7 @@ export const COMPOSER_CITED_LEFT_PROPERTY = "--composer-cited-left";
 /** The property naming a cited box's right edge, in `ch`, on each line inside it. */
 export const COMPOSER_CITED_RIGHT_PROPERTY = "--composer-cited-right";
 
-/** The box over each node the composed subtree cites (subtree-box.ts), drawn as a hovered citation's. */
+/** The box over each node the composed branch cites (subtree-box.ts), drawn as a hovered citation's. */
 const COMPOSER_CITED_BOX: SubtreeBox = {
   className: COMPOSER_CITED_CLASS,
   leftProperty: COMPOSER_CITED_LEFT_PROPERTY,
@@ -88,15 +88,22 @@ const COMPOSER_CITED_BOX: SubtreeBox = {
 };
 
 /**
- * THE NODES THE COMPOSED SUBTREE CITES ARE BOXED TOO (owner request,
+ * THE NODES THE COMPOSED BRANCH CITES ARE BOXED TOO (owner request,
  * 2026-10-29), as though the pointer were on every citation in it at once:
- * each citation (`TREE_REFERENCE_CLASS`) on a line inside the composer's box
+ * each citation (`TREE_REFERENCE_CLASS`) on a line of the composed node's own
  * boxes the node it names, in the color a hovered citation boxes it.
+ *
+ * ONLY THE COMPOSED NODE'S OWN CITATIONS COUNT, never its descendants'
+ * (owner request, 2026-11-18): a subtree citing several nodes from several
+ * branches would box them all, and the boxes would no longer say which the
+ * entry's own branch names.
  */
 function markCitedByComposer(rendered: HTMLElement): void {
   unboxAll(rendered, COMPOSER_CITED_BOX);
+  const composed = composerBox.standing()?.label;
   const cited = new Set<string>();
   for (const line of queryAll<HTMLElement>(rendered, `.${COMPOSER_ENTRY_CLASS}`)) {
+    if (line.getAttribute(TREE_NODE_ATTRIBUTE) !== composed) continue;
     for (const ref of queryAll<HTMLElement>(line, `.${TREE_REFERENCE_CLASS}`)) {
       const label = ref.getAttribute(TREE_REFERENCE_ATTRIBUTE);
       if (label === null) throw new Error("a citation the reference selector matched names no label");

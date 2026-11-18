@@ -205,6 +205,8 @@ export interface StandingBox {
   stand(doc: Document, node: BoxedNode | undefined): void;
   /** Redraw the box in RENDERED, the drawn prose of the row ROW: run on every paint. */
   mark(rendered: HTMLElement, row: string): void;
+  /** The node the box stands over now, or undefined for none. */
+  standing(): BoxedNode | undefined;
 }
 
 /** A StandingBox drawn as BOX, standing over no node to begin with. */
@@ -225,5 +227,6 @@ export function standingBox(box: SubtreeBox): StandingBox {
       }
     },
     mark,
+    standing: () => standing,
   };
 }

@@ -55,12 +55,12 @@ const cited = (el: HTMLElement): (string | null)[] =>
 const citingTree = tree([
   ["1", "Root"],
   ["1.1", "Cites a sibling (1.2) and a child (1.1.1)", 0],
-  ["1.1.1", "Child", 1],
+  ["1.1.1", "Child citing a cousin (1.3)", 1],
   ["1.2", "Sibling", 0],
   ["1.3", "Cites nothing here (1.2)", 0],
 ]);
 
-describe("the nodes the composed subtree cites", () => {
+describe("the nodes the composed branch cites", () => {
   it("are boxed along with the composed node", () => {
     // Arrange
     const row = drawnRow("r1", citingTree);
@@ -68,6 +68,15 @@ describe("the nodes the composed subtree cites", () => {
     highlight.apply(nodeEntry("r1", "1.1"));
     // Assert
     expect(cited(row)).toEqual(["1.1.1", "1.2"]);
+  });
+
+  it("leave out the nodes only a descendant of the composed node cites", () => {
+    // Arrange
+    const row = drawnRow("r1", citingTree);
+    // Act
+    highlight.apply(nodeEntry("r1", "1"));
+    // Assert: 1's own line cites nothing, though 1.1, 1.1.1 and 1.3 do.
+    expect(cited(row)).toEqual([]);
   });
 
   it("are not boxed for a composed node citing nothing", () => {
