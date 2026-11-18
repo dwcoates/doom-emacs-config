@@ -1338,6 +1338,82 @@ EOF
   else fail "rendered plist lacks:$bad" "$(cat "$plist")"; fi
 }
 
+# ---------------------------------------------------------------------------
+# socket_holder.
+# ---------------------------------------------------------------------------
+
+HOLDER_ENTRY='{"id": "holder", "kind": "socket_holder", "why": "w", "profile": "run", "platforms": ["darwin", "linux"], "label": "com.example.hold", "control": "~/.cache/agent-repl/sock/hold.sock", "sockets": [{"name": "store", "unix": "~/.cache/agent-repl/sock/s.sock"}, {"name": "daemon", "tcp": "127.0.0.1"}], "log": "hold.log"}'
+
+holder_case() {
+  new_case
+  manifest "[$HOLDER_ENTRY]"
+  write_stub build 'mkdir -p "$HOME/.cache/agent-repl/bin" && printf "#!/bin/sh\n" >"$HOME/.cache/agent-repl/bin/sockethold" && chmod +x "$HOME/.cache/agent-repl/bin/sockethold"'
+}
+
+# The holder's plist, with the case's home spelled HOME, as the golden holds it.
+holder_plist_of_case() { sed "s#$CASE/home#HOME#g" "$CASE/home/Library/LaunchAgents/com.example.hold.plist"; }
+
+test_install_renders_the_holders_plist_exactly_and_loads_it() {
+  holder_case
+  run install
+  if [ "$RC" -eq 0 ] && ran "build sockethold" && ran "launchctl bootstrap gui/$(id -u)" \
+     && has "ok          holder: com.example.hold holds its sockets" \
+     && diff <(holder_plist_of_case) "$THIS_DIR/testdata/socket-holder.plist" >/dev/null; then
+    pass "install renders the holder's plist byte for byte as pinned, and loads it"
+  else fail "holder install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")" "$(diff <(holder_plist_of_case) "$THIS_DIR/testdata/socket-holder.plist")"; fi
+}
+
+test_a_loaded_holder_matching_its_rendering_is_never_reloaded() {
+  holder_case
+  run install
+  : >"$CASE/transcript"
+  run install
+  if [ "$RC" -eq 0 ] && ! ran "launchctl bootout" && ! ran "launchctl bootstrap" && has "ok          holder:"; then
+    pass "install leaves a loaded holder whose plist matches its rendering alone, so its sockets never close"
+  else fail "holder reloaded" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_holder_whose_plist_differs_is_outdated_and_reloaded() {
+  holder_case
+  run install
+  printf '<!-- edited -->\n' >>"$CASE/home/Library/LaunchAgents/com.example.hold.plist"
+  : >"$CASE/transcript"
+  run install
+  if [ "$RC" -eq 0 ] && has "holder is outdated" && ran "launchctl bootout" && ran "launchctl bootstrap"; then
+    pass "a holder plist that differs from its rendering is outdated, and install reloads it"
+  else fail "holder outdated" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_the_holders_service_settings_never_follow_the_services() {
+  holder_case
+  run install
+  local plist="$CASE/home/Library/LaunchAgents/com.example.hold.plist"
+  if ! grep -qE "ProcessType|ThrottleInterval|ExitTimeOut|StandardOutPath" "$plist"; then
+    pass "the holder's plist carries none of the settings every service shares"
+  else fail "holder carries service settings" "$(cat "$plist")"; fi
+}
+
+test_a_held_socket_needs_exactly_one_address() {
+  new_case
+  manifest '[{"id": "holder", "kind": "socket_holder", "why": "w", "profile": "run", "platforms": ["darwin"], "label": "l", "control": "~/c.sock", "sockets": [{"name": "s", "unix": "~/s.sock", "tcp": "127.0.0.1"}], "log": "h.log"}]'
+  run check
+  if [ "$RC" -eq 2 ] && has 'every held socket needs a "name" and exactly one of "unix" or "tcp"'; then
+    pass "a held socket naming both a unix path and a tcp host is refused"
+  else fail "held socket address" "rc=$RC" "$OUT"; fi
+}
+
+test_the_holders_systemd_units_name_each_socket() {
+  holder_case
+  PLATFORM=linux run install
+  local dir="$CASE/home/.config/systemd/user"
+  if [ "$RC" -eq 0 ] && grep -q "FileDescriptorName=store" "$dir/com.example.hold-store.socket" \
+     && grep -q "ListenStream=127.0.0.1:0" "$dir/com.example.hold-daemon.socket" \
+     && grep -q "Sockets=com.example.hold-control.socket com.example.hold-store.socket com.example.hold-daemon.socket" "$dir/com.example.hold.service" \
+     && ran "systemctl --user enable --now com.example.hold-control.socket"; then
+    pass "on Linux each held socket is its own named socket unit, and the holder's service takes them all"
+  else fail "holder systemd units" "rc=$RC" "$OUT" "$(ls "$dir" 2>&1)" "$(cat "$CASE/transcript")"; fi
+}
+
 # define-service writes the definition install renders, from the same entry,
 # and neither builds nor loads: the daemon's deploy starts the service itself.
 test_define_service_writes_the_rendered_plist_without_building_or_loading() {

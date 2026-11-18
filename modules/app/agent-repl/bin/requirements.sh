@@ -57,6 +57,13 @@
 #                            command (`command`), its `args`, `env` and `log`
 #                            files, with any `files` copied from the module into
 #                            the cache
+#   socket_holder            listening sockets (`sockets`, each a `unix` path or a
+#                            `tcp` host) the platform's service manager creates
+#                            and keeps for a sockethold program (`label`), which
+#                            hands each to the server that asks on its `control`
+#                            socket. Its definition is rendered by its own
+#                            template and never changes with the services'
+#                            (docs/investigations/2026-11-18-stable-sockets-design.md)
 #   download                 files unpacked from a zip at a URL into the cache,
 #                            each pinned by its sha256
 #
@@ -357,6 +364,9 @@ validate_entries() {
            | "\($e._file): \($e.id): service needs either \"command\" or both \"build_target\" and \"binary\""),
          ($e.files // [] | .[] | select(.from == null or .to == null)
            | "\($e._file): \($e.id): every service file needs \"from\" and \"to\"")
+       elif $e.kind == "socket_holder" then need($e; ["label", "control", "sockets", "log", "platforms"]),
+         ($e.sockets // [] | .[] | select(.name == null or ((.unix == null) == (.tcp == null)))
+           | "\($e._file): \($e.id): every held socket needs a \"name\" and exactly one of \"unix\" or \"tcp\"")
        elif $e.kind == "download" then need($e; ["url", "archive", "dest", "files"]),
          (select($e.archive != null and $e.archive != "zip") | "\($e._file): \($e.id): download archive must be zip, not \($e.archive)"),
          ($e.files // [] | .[] | select(.from == null or .to == null or .sha256 == null)
@@ -936,6 +946,147 @@ rendered_service() {
          "StandardOutput=append:\($out | unit)", "StandardError=append:\($err | unit)",
          "", "[Install]", "WantedBy=default.target"]
       end | .[]'
+}
+
+# THE HOLDER'S TEMPLATE IS ITS OWN, and every service-wide setting above is
+# deliberately absent from it: a change to those re-renders every service and
+# reloads it, and a reloaded holder closes its sockets, which is the failure
+# the holder exists to remove (docs/investigations/
+# 2026-11-18-stable-sockets-design.md). test-requirements.sh pins this
+# rendering byte for byte.
+#
+# holder_plist ENTRY: the holder's launchd plist. Its Sockets are created by
+# launchd at load and kept while the job is loaded.
+holder_plist() {
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" '
+    def home: gsub("~/"; $home + "/");
+    def xml: gsub("&"; "&amp;") | gsub("<"; "&lt;") | gsub(">"; "&gt;");
+    (["/usr/bin/env", $cache + "/bin/sockethold", "--control", "control"]
+       + ([.sockets[] | "--hold", .name]) + ["--log", $cache + "/log/" + .log]) as $argv
+    | ([{name: "control", unix: .control}] + .sockets) as $socks
+    | ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+       "<!-- Rendered by bin/requirements.sh holder_plist from the \(.id | xml) entry; it never changes with the services. -->",
+       "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">",
+       "<plist version=\"1.0\">", "<dict>",
+       "    <key>Label</key>", "    <string>\(.label | xml)</string>",
+       "    <key>ProgramArguments</key>", "    <array>",
+       ($argv[] | "        <string>\(home | xml)</string>"),
+       "    </array>",
+       "    <key>Sockets</key>", "    <dict>",
+       ($socks[] |
+         "        <key>\(.name | xml)</key>", "        <dict>",
+         (if .unix then
+            "            <key>SockPathName</key>", "            <string>\(.unix | home | xml)</string>",
+            "            <key>SockPathMode</key>", "            <integer>384</integer>"
+          else
+            "            <key>SockNodeName</key>", "            <string>\(.tcp | xml)</string>",
+            "            <key>SockServiceName</key>", "            <string>0</string>",
+            "            <key>SockFamily</key>", "            <string>IPv4</string>"
+          end),
+         "        </dict>"),
+       "    </dict>",
+       "    <key>RunAtLoad</key>", "    <true/>",
+       "    <key>KeepAlive</key>", "    <true/>",
+       "</dict>", "</plist>"] | .[]'
+}
+
+# holder_service_unit ENTRY: the holder's systemd service, which takes every
+# socket unit of the holder (holder_socket_unit).
+holder_service_unit() {
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg cache "$CACHE_ROOT" '
+    def home: gsub("~/"; $home + "/");
+    (["/usr/bin/env", $cache + "/bin/sockethold", "--control", "control"]
+       + ([.sockets[] | "--hold", .name]) + ["--log", $cache + "/log/" + .log]) as $argv
+    | ["# Rendered by bin/requirements.sh holder_service_unit from the \(.id) entry; it never changes with the services.",
+       "[Unit]", "Description=agent-repl socket holder \(.label)",
+       "", "[Service]",
+       "ExecStart=\($argv | map(home) | join(" "))",
+       "Sockets=\(([("control"), (.sockets[] | .name)] | map("\($ENV.HOLDER_LABEL)-" + . + ".socket")) | join(" "))",
+       "Restart=always",
+       "", "[Install]", "WantedBy=default.target"] | .[]'
+}
+
+# holder_socket_unit ENTRY NAME: the systemd socket unit of the holder\'s socket
+# NAME ("control" for its control socket).
+holder_socket_unit() {
+  printf '%s\n' "$1" | jq -r --arg home "$HOME" --arg name "$2" '
+    def home: gsub("~/"; $home + "/");
+    ([{name: "control", unix: .control}] + .sockets | map(select(.name == $name)) | .[0]) as $s
+    | ["# Rendered by bin/requirements.sh holder_socket_unit from the \(.id) entry; it never changes with the services.",
+       "[Socket]",
+       (if $s.unix then "ListenStream=\($s.unix | home)" else "ListenStream=\($s.tcp):0" end),
+       "FileDescriptorName=\($s.name)",
+       (if $s.unix then "SocketMode=0600" else empty end),
+       "Service=\(.label).service",
+       "", "[Install]", "WantedBy=sockets.target"] | .[]'
+}
+
+# holder_names ENTRY: the holder's socket names, its control socket's first.
+holder_names() { printf '%s\n' "$1" | jq -r '"control", (.sockets[] | .name)'; }
+
+# holder_definitions ENTRY: one "PATH<tab>NAME" line per definition file the
+# holder renders; NAME is empty for the plist or the service unit.
+holder_definitions() {
+  local e="$1" label def dir name
+  label="$(field "$e" .label)"
+  def="$(service_definition_path "$label")"
+  printf '%s\t\n' "$def"
+  if [ "$(platform)" = linux ]; then
+    dir="$(dirname "$def")"
+    while IFS= read -r name; do printf '%s\t%s\n' "$dir/$label-$name.socket" "$name"; done < <(holder_names "$e")
+  fi
+}
+
+# holder_render ENTRY NAME: the rendering of one holder definition file.
+holder_render() {
+  if [ "$(platform)" = darwin ]; then holder_plist "$1"
+  elif [ -z "$2" ]; then HOLDER_LABEL="$(field "$1" .label)" holder_service_unit "$1"
+  else holder_socket_unit "$1" "$2"; fi
+}
+
+check_socket_holder() {
+  local e="$1" label path name stale=""
+  label="$(field "$e" .label)"
+  FIX="build sockethold with bin/build-frontend.sh, install the holder's definitions, and load $label"
+  while IFS=$'\t' read -r path name; do
+    if [ ! -f "$path" ] || ! holder_render "$e" "$name" | cmp -s - "$path"; then stale="$stale $path"; fi
+  done < <(holder_definitions "$e")
+  if [ ! -x "$CACHE_ROOT/bin/sockethold" ]; then
+    STATUS=missing; DETAIL="$CACHE_ROOT/bin/sockethold is not built"
+  elif [ -n "$stale" ]; then
+    STATUS=outdated; DETAIL="the holder's definitions differ from the $(field "$e" .id) entry's rendering:$stale"
+  elif ! service_held "$label"; then
+    STATUS=missing; DETAIL="$label is not loaded under the service manager"
+  else
+    STATUS=ok; DETAIL="$label holds its sockets"
+  fi
+}
+
+install_socket_holder() {
+  local e="$1" label path name uid
+  label="$(field "$e" .label)"
+  if in_linked_worktree "$MODULE_DIR"; then
+    err "install: $(field "$e" .id): not installed from the linked worktree $MODULE_DIR; the holders every workspace shares are installed from the main checkout ($(module_main_worktree)) only"
+    return 1
+  fi
+  mkdir -p "$CACHE_ROOT/bin" "$CACHE_ROOT/log"
+  "$BUILD_FRONTEND" sockethold
+  while IFS=$'\t' read -r path name; do
+    mkdir -p "$(dirname "$path")"
+    holder_render "$e" "$name" >"$path"
+  done < <(holder_definitions "$e")
+  if [ "$(platform)" = darwin ]; then
+    # A loaded holder is reloaded only here, when its definition changed on
+    # purpose: that is the one moment its sockets close.
+    service_load "$label" || { err "install: $(field "$e" .id): $SERVICE_FAILED_STEP failed"; return 1; }
+  else
+    service_step systemctl "$SERVICE_SYSTEMCTL" --user daemon-reload || return 1
+    while IFS= read -r name; do
+      service_step systemctl "$SERVICE_SYSTEMCTL" --user enable --now "$label-$name.socket" || return 1
+    done < <(holder_names "$e")
+    service_step systemctl "$SERVICE_SYSTEMCTL" --user enable "$label.service" || return 1
+    service_step systemctl "$SERVICE_SYSTEMCTL" --user restart "$label.service" || return 1
+  fi
 }
 
 # service_files ENTRY: one "FROM<tab>TO" line per file a service copies from
