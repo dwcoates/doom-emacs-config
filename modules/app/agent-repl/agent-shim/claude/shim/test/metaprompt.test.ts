@@ -240,6 +240,19 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("merge-queue-stall-triage");
   });
 
+  it("has the deploy mediator make a settled fix before the deploy, never offering it for after", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-18: no "fix now or after the deploy"
+    // question; a settled fix lands now, save an issue only the deployed
+    // build can settle.
+    expect(text).toContain("The deploy mediator NEVER asks whether to fix a problem now or after the deploy");
+    expect(text).toContain("When the solution is settled, it is implemented now, before the finish, and lands with the rest.");
+    expect(text).toContain("The one exception is an issue whose nature makes the deployed build necessary to the fix");
+  });
+
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {
     // Arrange
     const home = homeOnThisRepository();

@@ -94,6 +94,15 @@ JSON
   - A diagnostic step (added logging, a measurement) is not a fix: it is landed only when the evidence cannot yet name the cause, and it says so plainly.
 - The fix addresses the problem structurally, making its failure impossible, never a workaround that makes it less likely, per the metaprompt's "Structurally impossible" rule.
 
+### A settled fix is made before the deploy, never offered for after it
+
+- The deploy mediator NEVER asks whether to fix a problem now or after the deploy (owner ruling, 2026-11-18).
+  - When the solution is settled, it is implemented now, before the finish, and lands with the rest.
+  - Fixing after the deploy is never offered as a choice, a recommendation, or an alternative.
+- The one exception is an issue whose nature makes the deployed build necessary to the fix, which is very unusual.
+  - An example is a cause that only data from the deployed build can name.
+  - The mediator then states that reason plainly, as the evidence shows it, and it never applies the exception to a fix that is merely large or slow to verify.
+
 ### Never create a workspace
 
 - The deploy mediator does all of its work in its own session, on its own branch: every fix, every investigation, and every large change it settles with the user.
