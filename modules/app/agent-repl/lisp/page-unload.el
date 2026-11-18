@@ -443,6 +443,9 @@ the report was in flight."
      ;; THE PAGE GOES, THE SLOT STAYS: its windows are the panels.
      (agent-repl-webhost-remove ws 'unloading)
      (agent-repl--ws-put ws :page-visit nil)
+     ;; A FOLD'S UNLOAD IS REMEMBERED, so the unfold gives back exactly the
+     ;; pages the fold took early (`agent-repl-page-unload--load-unfolded').
+     (agent-repl--ws-put ws :page-folded-away (eq reason 'folded))
      (agent-repl-page-unload--report ws)
      (agent-repl--info ws "elisp.page-unload.unloaded ws=%s reason=%s held-s=%d"
                        ws reason
@@ -481,6 +484,26 @@ before anyone switches to it (owner ruling, 2026-10-29)."
     (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=working" ws)
     (agent-repl-webhost-ensure-page ws)
     t))
+
+(defun agent-repl-page-unload--load-unfolded (ws now)
+  "Load WS\='s page in the background when a fold unloaded it early; non-nil if so.
+AN UNFOLD GIVES BACK ONLY WHAT THE FOLD TOOK EARLY (owner ruling,
+2026-11-18): a page the fold unloaded whose hold still stands at NOW, its
+10-minute hold after its last turn (`agent-repl-page-unload--hold-ends'),
+is loaded again once its section unfolds.  Every other page of the section
+loads only when shown, as it would have had it never folded; a working one
+is `agent-repl-page-unload--load-working''s.  A page whose hold ran out
+while folded forgets the fold."
+  (when (and (agent-repl--ws-get ws :page-folded-away)
+             (agent-repl-page-unloaded-p ws)
+             (not (agent-repl-page-unload--folded-p ws)))
+    (agent-repl--ws-put ws :page-folded-away nil)
+    (when (and (not (agent-repl-page-unload--withheld-p ws))
+               (agent-repl-page-unload--hold-ends ws now))
+      (agent-repl-page-unload-note-mounted ws)
+      (agent-repl--info ws "elisp.page-unload.loaded ws=%s reason=unfolded-within-hold" ws)
+      (agent-repl-webhost-ensure-page ws)
+      t)))
 
 (defun agent-repl-page-unload-residency (ws)
   "What Emacs holds of WS\='s page now, as a `PageResidency' plist.
@@ -540,6 +563,7 @@ Answers how many unloads were started."
         (loaded 0))
     (dolist (ws (agent-repl--live-ws-names))
       (when (or (agent-repl-page-unload--load-working ws)
+                (agent-repl-page-unload--load-unfolded ws now)
                 (agent-repl-page-unload--load-ungated ws))
         (setq loaded (1+ loaded)))
       (when (agent-repl-page-unload--judge ws now)

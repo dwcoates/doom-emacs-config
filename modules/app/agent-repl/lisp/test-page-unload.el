@@ -960,6 +960,51 @@ of 111 reports timed out in the deploy of 2026-11-17 23:52."
     ;; Assert
     (should-not agent-repl-test-pu--events)))
 
+(ert-deftest agent-repl-test-pu-an-unfold-gives-back-a-page-the-fold-took-within-its-hold ()
+  "A page a fold unloaded inside its hold is loaded again at the unfold (owner ruling, 2026-11-18)."
+  ;; Arrange: alpha's turn ended at 900s, so its hold runs to 1400s.
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000))
+          agent-repl-test-pu--folded '("alpha"))
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--folded nil
+          agent-repl-test-pu--events nil)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should (member '(ensure "alpha") agent-repl-test-pu--events))
+    (should (agent-repl-test-pu--said-p "ws=alpha" "reason=unfolded-within-hold"))))
+
+(ert-deftest agent-repl-test-pu-an-unfold-leaves-a-page-whose-hold-ran-out-while-folded ()
+  "A page whose hold ended while its section was folded loads only when shown."
+  ;; Arrange
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--turn-ended '(("alpha" . 900000))
+          agent-repl-test-pu--folded '("alpha"))
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--folded nil
+          agent-repl-test-pu--events nil
+          agent-repl-test-pu--now 1500)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not (member '(ensure "alpha") agent-repl-test-pu--events))))
+
+(ert-deftest agent-repl-test-pu-an-unfold-loads-no-page-the-fold-did-not-take ()
+  "A page that was not loaded when its section folded is not loaded at the unfold."
+  ;; Arrange: alpha is within its hold, but held no page when it folded.
+  (agent-repl-test-pu--with '("alpha")
+    (setq agent-repl-test-pu--pages nil
+          agent-repl-test-pu--turn-ended '(("alpha" . 900000))
+          agent-repl-test-pu--folded '("alpha"))
+    (agent-repl-page-unload-pass)
+    (setq agent-repl-test-pu--folded nil
+          agent-repl-test-pu--events nil)
+    ;; Act
+    (agent-repl-page-unload-pass)
+    ;; Assert
+    (should-not agent-repl-test-pu--events)))
+
 (ert-deftest agent-repl-test-pu-the-shown-folded-page-is-kept ()
   "A folded workspace's page the host shows is never unloaded."
   ;; Arrange
