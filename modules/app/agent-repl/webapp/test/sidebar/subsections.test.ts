@@ -26,6 +26,11 @@ import {
   type SetWorkspaceOneShotRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_one_shot_pb";
 import {
+  SetWorkspaceParentResponseSchema,
+  type SetWorkspaceParentRequest,
+  type SetWorkspaceParentResponse,
+} from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_parent_pb";
+import {
   DRAG_GHOST_CLASS,
   DRAG_GHOST_INTO_CLASS,
   DRAG_SLOT_CLASS,
@@ -59,18 +64,30 @@ import { withRepositoryBlocks } from "../roster-families.js";
 import type { RosterOpenRow } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { REPOSITORY_BLOCK_CLASS } from "../../src/sidebar/row.js";
 
-/** Every ArrangeSidebar request the daemon received, and a context over it. */
-function arranged(): { sc: RailContext & SidebarContext; sent: ArrangeSidebarRequest[] } {
+/**
+ * Every ArrangeSidebar and SetWorkspaceParent request the daemon received,
+ * and a context over it, each answered with SET_PARENT (success when unsaid).
+ */
+function arranged(setParent?: () => SetWorkspaceParentResponse): {
+  sc: RailContext & SidebarContext;
+  sent: ArrangeSidebarRequest[];
+  nested: SetWorkspaceParentRequest[];
+} {
   const sent: ArrangeSidebarRequest[] = [];
+  const nested: SetWorkspaceParentRequest[] = [];
   const sc = sidebarContext(
     appContext({
       arrangeSidebar: (request) => {
         sent.push(request);
         return create(ArrangeSidebarResponseSchema, { result: { case: "success", value: { rosterRevision: 1n } } });
       },
+      setWorkspaceParent: (request) => {
+        nested.push(request);
+        return setParent?.() ?? create(SetWorkspaceParentResponseSchema, { result: { case: "success", value: { rosterRevision: 1n } } });
+      },
     }),
   );
-  return { sc, sent };
+  return { sc, sent, nested };
 }
 
 /** Draw ROSTER into the document, the rail's layer beside it; answers the open repository grouping. */
@@ -88,10 +105,17 @@ const ROW_HEIGHT = 20;
  * CURRENT place. Each box is measured when asked, so a slot that travels
  * (into a subsection, or out of one) moves and resizes the boxes around it.
  */
-function layOut(list: HTMLElement, top: number): void {
+function layOut(list: HTMLElement, top: number, lines = false): void {
   const isItem = (el: Element): boolean =>
     el.hasAttribute("data-roster-row") || el.classList.contains("sb-subsection") || el.hasAttribute("data-repository");
+  /** A row's box of nested rows, stacked under its line when LINES lays lines out. */
+  const kidsOf = (el: Element): Element | null => (lines ? el.querySelector(":scope > .kids") : null);
   const height = (el: Element): number => {
+    if (el.hasAttribute("data-roster-row")) {
+      const kids = kidsOf(el);
+      return ROW_HEIGHT + (kids === null ? 0 : height(kids));
+    }
+    if (el.classList.contains("kids")) return [...el.children].filter(isItem).reduce((sum, item) => sum + height(item), 0);
     if (el.classList.contains("sb-subsection")) {
       const rows = el.querySelector(":scope > .rows");
       return ROW_HEIGHT + (rows === null || el.classList.contains("folded") ? 0 : height(rows));
@@ -105,6 +129,8 @@ function layOut(list: HTMLElement, top: number): void {
     if (parent === null) return top;
     // A subsection's rows sit under its header; its header at its top.
     if (parent.classList.contains("sb-subsection")) return topOf(parent) + (el.classList.contains("rows") ? ROW_HEIGHT : 0);
+    // A row's line at its top, its nested rows under the line.
+    if (lines && parent.hasAttribute("data-roster-row")) return topOf(parent) + (el.classList.contains("kids") ? ROW_HEIGHT : 0);
     let y = topOf(parent);
     for (const sibling of parent.children) {
       if (sibling === el) break;
@@ -117,6 +143,13 @@ function layOut(list: HTMLElement, top: number): void {
     Object.defineProperty(el, "getBoundingClientRect", {
       configurable: true,
       value: () => box(topOf(el), el === list ? Math.max(ROW_HEIGHT, height(el)) : el.classList.contains("sb-subsection-head") ? ROW_HEIGHT : height(el)),
+    });
+  }
+  if (!lines) return;
+  for (const line of queryAll<HTMLElement>(list, "[data-roster-row] > .row")) {
+    Object.defineProperty(line, "getBoundingClientRect", {
+      configurable: true,
+      value: () => box(topOf(line), ROW_HEIGHT),
     });
   }
 }
@@ -805,8 +838,8 @@ describe("dragging a repository block", () => {
     const kids = pane.querySelector("[data-roster-row='p'] > .kids") as HTMLElement;
     const blocks = [...kids.querySelectorAll<HTMLElement>(`:scope > .${REPOSITORY_BLOCK_CLASS}`)];
     boxAt(kids, 20, 80);
-    boxAt(blocks[0]!, 40, 30);
-    boxAt(blocks[1]!, 70, 30);
+    boxAt(blocks[0], 40, 30);
+    boxAt(blocks[1], 70, 30);
     return { kids, blocks };
   }
 
@@ -832,7 +865,7 @@ describe("dragging a repository block", () => {
     const { blocks } = layOutP(pane);
 
     // Act: the repo-3 block's divider (at 75) above the repo-2 block's middle.
-    await drag(blocks[1]!.querySelector(".sb-repo-divider")!, 75, 45);
+    await drag(blocks[1].querySelector(".sb-repo-divider")!, 75, 45);
 
     // Assert
     expect(blockMove(sent)).toEqual(["p", "repo-3", "before:repo-2"]);
@@ -845,7 +878,7 @@ describe("dragging a repository block", () => {
     const { blocks } = layOutP(pane);
 
     // Act
-    await drag(blocks[0]!.querySelector(".sb-repo-divider")!, 45, 99);
+    await drag(blocks[0].querySelector(".sb-repo-divider")!, 45, 99);
 
     // Assert
     expect(blockMove(sent)).toEqual(["p", "repo-2", "end"]);
@@ -858,7 +891,7 @@ describe("dragging a repository block", () => {
     const { kids, blocks } = layOutP(pane);
 
     // Act: the repo-3 block dragged over o's line (20 to 40).
-    pointer("pointerdown", blocks[1]!.querySelector(".sb-repo-divider")!, 75);
+    pointer("pointerdown", blocks[1].querySelector(".sb-repo-divider")!, 75);
     pointer("pointermove", window, 74);
     pointer("pointermove", window, 25);
     const during = drawnKin(kids);
@@ -970,6 +1003,200 @@ describe("showsNoRows", () => {
   it("throws for an element that is no subsection", () => {
     // Arrange / Act / Assert
     expect(() => showsNoRows(document.createElement("div"))).toThrow("invariant: a row drag's target is a subsection");
+  });
+});
+
+describe("dropping a row onto another row", () => {
+  /** Rows a, b and c, each line laid out: a 0 to 20, b 20 to 40, c 40 to 60. */
+  function threeRows(setParent?: () => SetWorkspaceParentResponse): ReturnType<typeof arranged> & { pane: HTMLElement } {
+    const made = arranged(setParent);
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "b" }), row({ id: "c" })] })] }), made.sc);
+    layOut(sectionList(pane), 0, true);
+    return { ...made, pane };
+  }
+
+  /** The parent and the workspace a SetWorkspaceParent request names. */
+  function nesting(request: SetWorkspaceParentRequest | undefined): [string | undefined, string | undefined] | null {
+    return request?.parent.case === "childOf" ? [request.workspace?.id, request.parent.value.parent?.id] : null;
+  }
+
+  it("makes it a child of the row whose line's middle it was dropped on", async () => {
+    // Arrange
+    const { pane, sent, nested } = threeRows();
+
+    // Act
+    await drag(rowLine(pane, "c"), 50, 10);
+
+    // Assert
+    expect([nesting(nested[0]), nested.length, sent.length]).toEqual([["c", "a"], 1, 0]);
+  });
+
+  it("keeps where the dropped workspace lands", async () => {
+    // Arrange
+    const { pane, nested } = threeRows();
+
+    // Act
+    await drag(rowLine(pane, "c"), 50, 10);
+
+    // Assert
+    expect(nested[0]?.landingTarget).toBeUndefined();
+  });
+
+  it("makes it a child of a row below where it started", async () => {
+    // Arrange
+    const { pane, nested } = threeRows();
+
+    // Act
+    await drag(rowLine(pane, "a"), 10, 50);
+
+    // Assert
+    expect(nesting(nested[0])).toEqual(["a", "c"]);
+  });
+
+  it("places it before the row whose line's top quarter it was dropped on", async () => {
+    // Arrange
+    const { pane, sent, nested } = threeRows();
+
+    // Act
+    await drag(rowLine(pane, "c"), 50, 22);
+
+    // Assert
+    const change = sent[0]?.change;
+    expect([
+      change?.case === "placeWorkspace" && change.value.at.case === "before" ? change.value.at.value.id : null,
+      nested.length,
+    ]).toEqual(["b", 0]);
+  });
+
+  it("lights the row it would become a child of, and only while it would", () => {
+    // Arrange
+    const { pane } = threeRows();
+    const a = pane.querySelector("[data-roster-row='a']") as HTMLElement;
+    const lit = (): boolean => a.classList.contains(DROP_TARGET_CLASS);
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "c"), 50);
+    pointer("pointermove", window, 10);
+    const overTheMiddle = lit();
+    pointer("pointermove", window, 2);
+    const overTheTopQuarter = lit();
+    pointer("pointerup", window, 2);
+
+    // Assert
+    expect([overTheMiddle, overTheTopQuarter, lit()]).toEqual([true, false, false]);
+  });
+
+  it("never draws the row it would become a child of as taking the row inside unseen", () => {
+    // Arrange
+    const { pane } = threeRows();
+    const a = pane.querySelector("[data-roster-row='a']") as HTMLElement;
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "c"), 50);
+    pointer("pointermove", window, 10);
+    const ghost = document.querySelector(`.${DRAG_GHOST_CLASS}`);
+    const drawn = [a.classList.contains(DROP_TARGET_CLASS), a.classList.contains(DROP_INTO_CLASS), ghost?.classList.contains(DRAG_GHOST_INTO_CLASS)];
+    pointer("pointerup", window, 10);
+
+    // Assert
+    expect(drawn).toEqual([true, false, false]);
+  });
+
+  it("stands the slot among the children of the row it would become a child of", () => {
+    // Arrange
+    const { pane } = threeRows();
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "c"), 50);
+    pointer("pointermove", window, 10);
+    const parent = pane.querySelector("[data-roster-row='c']")?.parentElement;
+    pointer("pointerup", window, 10);
+
+    // Assert
+    expect(parent?.matches("[data-roster-row='a'] > .kids")).toBe(true);
+  });
+
+  it("stands the slot before the children a row already has", () => {
+    // Arrange
+    const { sc } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid" })] }), row({ id: "b" })] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0, true);
+
+    // Act -- a's line 0 to 20, kid 20 to 40, b 40 to 60.
+    pointer("pointerdown", rowLine(pane, "b"), 50);
+    pointer("pointermove", window, 10);
+    const kids = [...(pane.querySelector("[data-roster-row='a'] > .kids")?.children ?? [])].map((el) => el.getAttribute("data-roster-row"));
+    pointer("pointerup", window, 10);
+
+    // Assert
+    expect(kids).toEqual(["b", "kid"]);
+  });
+
+  it("keeps nesting while the pointer is over the slot the rows above moved onto", () => {
+    // Arrange -- dragging a, from above, onto c's line moves b and c up a row.
+    const { pane } = threeRows();
+    const c = pane.querySelector("[data-roster-row='c']") as HTMLElement;
+
+    // Act
+    pointer("pointerdown", rowLine(pane, "a"), 10);
+    pointer("pointermove", window, 50);
+    pointer("pointermove", window, 51);
+    const stillLit = c.classList.contains(DROP_TARGET_CLASS);
+    const parent = pane.querySelector("[data-roster-row='a']")?.parentElement;
+    pointer("pointerup", window, 51);
+
+    // Assert
+    expect([stillLit, parent?.matches("[data-roster-row='c'] > .kids")]).toEqual([true, true]);
+  });
+
+  it("never nests a row among its own family", () => {
+    // Arrange
+    const { sc } = arranged();
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a", children: [row({ id: "kid" })] }), row({ id: "b" })] })] }),
+      sc,
+    );
+    layOut(sectionList(pane), 0, true);
+    const kid = pane.querySelector("[data-roster-row='kid']") as HTMLElement;
+
+    // Act -- the press on kid lifts a; the pointer stays over kid's line.
+    pointer("pointerdown", rowLine(pane, "kid"), 30);
+    pointer("pointermove", window, 35);
+    const kidLit = kid.classList.contains(DROP_TARGET_CLASS);
+    pointer("pointerup", window, 35);
+
+    // Assert
+    expect([kidLit, kid.querySelector(":scope > .kids")]).toEqual([false, null]);
+  });
+
+  it("holds the drawing until the revision the nesting answered", async () => {
+    // Arrange
+    const { pane, sc } = threeRows(() =>
+      create(SetWorkspaceParentResponseSchema, { result: { case: "success", value: { rosterRevision: 9n } } }),
+    );
+
+    // Act
+    await drag(rowLine(pane, "c"), 50, 10);
+
+    // Assert
+    expect(sc.arrange.hold.holding()).toBe(true);
+  });
+
+  it("draws a refused nesting beside the rail's arrangement status and lets the hold go", async () => {
+    // Arrange
+    const { pane, sc } = threeRows(() => create(SetWorkspaceParentResponseSchema, { result: { case: "error", value: { cause: { case: "cycle", value: {} } } } }));
+
+    // Act
+    await drag(rowLine(pane, "c"), 50, 10);
+
+    // Assert
+    expect([sc.arrange.status.parentElement?.querySelector(".refusal")?.getAttribute("data-arm"), sc.arrange.hold.holding()]).toEqual([
+      "cycle",
+      false,
+    ]);
   });
 });
 

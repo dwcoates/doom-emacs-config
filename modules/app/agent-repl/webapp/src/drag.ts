@@ -15,9 +15,11 @@
  * region follows the pointer.
  *
  * LISTS NEST. A list may stand inside another's items (a subsection's rows
- * inside its repository's list), so each list answers the ZONE it claims
- * (`DragSpec.zoneOf`: a subsection's rows claim the whole subsection, its
- * header included), and the pointer lands in the innermost zone it is over.
+ * inside its repository's list, a row's children inside the row), so each list
+ * answers the ZONE it claims, a span of the page (`DragSpec.zoneOf`: a
+ * subsection's rows claim the whole subsection, its header included; a row's
+ * children claim the middle of the row's line down to its last child), and the
+ * pointer lands in the innermost zone it is over.
  * A list may name a TARGET (`DragSpec.targetOf`) that wears
  * `DROP_TARGET_CLASS` while the slot stands in it, so a row dragged over a
  * subsection lights the subsection it would join.
@@ -100,6 +102,12 @@ export interface DragHost {
   layer: HTMLElement;
 }
 
+/** A span of the page a list claims the pointer over, top to bottom; a `DOMRect` is one. */
+export interface Zone {
+  top: number;
+  bottom: number;
+}
+
 /** One kind of draggable item, and what a drop of it asks for. */
 export interface DragSpec {
   /** Which kind of item this is, for the records. */
@@ -114,8 +122,8 @@ export interface DragSpec {
   lists: () => HTMLElement[];
   /** LIST's items, in order: the elements the slot moves among. */
   itemsOf: (list: HTMLElement) => HTMLElement[];
-  /** The box LIST claims the pointer over; LIST itself when unsaid. */
-  zoneOf?: (list: HTMLElement) => HTMLElement;
+  /** The span of the page LIST claims the pointer over; LIST's own box when unsaid. */
+  zoneOf?: (list: HTMLElement) => Zone;
   /**
    * Dress GHOST, the copy of ITEM that follows the pointer, for a layout it
    * no longer stands in (a table row's columns); left as cloned when unsaid.
@@ -259,7 +267,7 @@ function lift(arrange: DragHost, spec: DragSpec, down: PointerEvent): Lifted {
     nextFrame(scroll);
   };
 
-  const zoneOf = spec.zoneOf ?? ((list: HTMLElement) => list);
+  const zoneOf = spec.zoneOf ?? ((list: HTMLElement) => list.getBoundingClientRect());
   let lit: HTMLElement | null = null;
   /** Light TARGET, and nothing else, as where the item would land; null lights nothing. */
   const mark = (target: HTMLElement | null): void => {
@@ -340,18 +348,19 @@ function lift(arrange: DragHost, spec: DragSpec, down: PointerEvent): Lifted {
  * list wins over it; else the one whose zone is nearest, the earlier list on
  * a tie.
  */
-export function listAt(lists: HTMLElement[], y: number, zoneOf: (list: HTMLElement) => HTMLElement): HTMLElement {
+export function listAt(lists: HTMLElement[], y: number, zoneOf: (list: HTMLElement) => Zone): HTMLElement {
   let best = lists[0];
   let bestDistance = Infinity;
   let bestHeight = Infinity;
   for (const list of lists) {
-    const box = zoneOf(list).getBoundingClientRect();
+    const box = zoneOf(list);
+    const height = box.bottom - box.top;
     const distance = y < box.top ? box.top - y : y > box.bottom ? y - box.bottom : 0;
-    const inner = distance === 0 && bestDistance === 0 && box.height < bestHeight;
+    const inner = distance === 0 && bestDistance === 0 && height < bestHeight;
     if (distance < bestDistance || inner) {
       best = list;
       bestDistance = distance;
-      bestHeight = box.height;
+      bestHeight = height;
     }
   }
   if (best === undefined) throw new Error("invariant: a drag has at least its own list to land in");

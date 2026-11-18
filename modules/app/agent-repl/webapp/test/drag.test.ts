@@ -84,7 +84,7 @@ function spanning(top: number, bottom: number): HTMLElement {
 }
 
 describe("listAt", () => {
-  const own = (list: HTMLElement): HTMLElement => list;
+  const own = (list: HTMLElement): DOMRect => list.getBoundingClientRect();
 
   it("lands in the innermost of the zones the pointer is over", () => {
     // Arrange -- a section's list (0 to 100) holding a subsection (40 to 80).
@@ -102,7 +102,7 @@ describe("listAt", () => {
     const subsection = spanning(40, 80);
 
     // Act
-    const got = listAt([outer, rows], 45, (list) => (list === rows ? subsection : list));
+    const got = listAt([outer, rows], 45, (list) => (list === rows ? subsection : list).getBoundingClientRect());
 
     // Assert
     expect(got).toBe(rows);

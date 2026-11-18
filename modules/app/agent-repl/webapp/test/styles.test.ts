@@ -6447,6 +6447,10 @@ describe("the repository's subsections and the drag", () => {
     );
   });
 
+  it("lights the row a dragged row would become a child of as it lights a subsection", () => {
+    expect(declarationsOf("#ws-sidebar .ws.drop-target")).toBe(declarationsOf("#ws-sidebar .sb-subsection.drop-target"));
+  });
+
   it("draws a subsection's name in the repository names' ink", () => {
     expect(declarationsOf("#ws-sidebar .sb-subsection-label")).toMatch(/color:\s*var\(--repo-head-expanded\)/);
   });
