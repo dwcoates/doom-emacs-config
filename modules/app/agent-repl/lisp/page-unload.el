@@ -301,7 +301,7 @@ as a flag beside them."
   "Put WS's unloaded page back in the host, its slot being shown.
 The slot and its windows stood throughout; only the page comes back.  A
 page put back for a workspace that is not working is a VISIT, which names
-its unload: it is held like any idle page, the hour after the last prompt
+its unload: it is held like any idle page, the hold after its last turn
 \(`agent-repl-page-unload--reason'), and its look restarts nothing."
   (agent-repl--ws-put ws :page-visit
                       (not (eq (agent-repl-page-unload--ws-bucket ws) 'working)))
