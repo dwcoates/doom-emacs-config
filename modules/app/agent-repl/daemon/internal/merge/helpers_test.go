@@ -113,6 +113,8 @@ type fakeDB struct {
 	mediationErr         error
 	dispatchErr          error
 	remediationFinishErr error
+	// remediationFinishesErr fails RemediationFinishes.
+	remediationFinishesErr error
 	// contextUsage is each workspace's last context reading.
 	contextUsage map[ids.WorkspaceID]wsm.ContextUsageRecord
 	// listWorkspacesErr fails ListWorkspaces.
@@ -504,6 +506,12 @@ func (f *fakeDB) RemediationFinishOf(ctx context.Context, ws ids.WorkspaceID) (*
 }
 
 func (f *fakeDB) RemediationFinishes(ctx context.Context) ([]wsm.RemediationFinish, error) {
+	f.mu.Lock()
+	err := f.remediationFinishesErr
+	f.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
 	return f.checks.RemediationFinishes(ctx)
 }
 

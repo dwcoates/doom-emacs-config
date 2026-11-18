@@ -424,6 +424,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			continue
 		}
 		o.settleMediatorSight(ctx, q, m)
+		o.surfaceFinish(ctx, q.key)
 		if m == nil {
 			continue
 		}
@@ -1075,6 +1076,7 @@ func (o *orchestrator) rosterFinish(ctx context.Context, repo wsm.RepoKey, f wsm
 // republishMediation tells the roster and the queue's subscribers a change
 // of REPO's check; a republication that fails is recorded.
 func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey) {
+	o.surfaceFinish(ctx, repo)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not republish the queue whose check changed", dlog.Context{"repo": string(repo), "error": err.Error()})
 	}
