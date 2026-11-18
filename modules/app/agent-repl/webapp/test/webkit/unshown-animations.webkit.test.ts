@@ -28,10 +28,14 @@ const KEYFRAMES = `
 .test-loop { animation: test-loop 1000ms linear infinite; }
 .test-once { opacity: 0; animation: test-once 200ms linear 100ms forwards; }`;
 
-/** One animation's state, read in the page. */
+/**
+ * One animation's state, read in the page. Its position is its current time
+ * less its delay: the pause moves an animation on by its delay, never by its
+ * current time.
+ */
 interface Read {
   playState: string;
-  currentTime: number;
+  position: number;
 }
 
 /** Start a fresh page under the real pause, shown; the presence rides on `window.presence`. */
@@ -89,7 +93,7 @@ async function read(page: Page, id: string): Promise<Read & { now: number; opaci
     await animation.ready;
     return {
       playState: animation.playState,
-      currentTime: Number(animation.currentTime),
+      position: Number(animation.currentTime) - Number(animation.effect!.getTiming().delay),
       now: Number(document.timeline.currentTime),
       opacity: getComputedStyle(el).opacity,
     };
@@ -145,7 +149,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
     await wait(page, 400);
     await setShown(page, true);
     let after = await read(page, id);
-    runningResumed = { after, expected: before.currentTime + (after.now - before.now) };
+    runningResumed = { after, expected: before.position + (after.now - before.now) };
 
     // A loop made while hidden, shown again.
     await freshPage(page, css, script);
@@ -178,7 +182,7 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
   });
 
   it("holds a running loop still while the page is not shown", () => {
-    expect([held.first.playState, held.second.currentTime]).toEqual(["paused", held.first.currentTime]);
+    expect([held.first.playState, held.second.position]).toEqual(["paused", held.first.position]);
   });
 
   it("holds a loop drawn with an inline animation shorthand still too", () => {
@@ -187,12 +191,12 @@ describe("pausing a page the webhost does not show, in WebKit", () => {
 
   it("resumes a loop running at the hide where it would have been", () => {
     const { after, expected } = runningResumed;
-    expect([after.playState, near(after.currentTime, expected)]).toEqual(["running", true]);
+    expect([after.playState, near(after.position, expected)]).toEqual(["running", true]);
   });
 
   it("resumes a loop made while hidden where it would have been", () => {
     const { after, expected } = madeResumed;
-    expect([after.playState, near(after.currentTime, expected)]).toEqual(["running", true]);
+    expect([after.playState, near(after.position, expected)]).toEqual(["running", true]);
   });
 
   it("leaves a one-shot that would have ended while hidden ended, at its last frame", () => {
