@@ -99,17 +99,22 @@ export function openKin<T = RosterOpenRow>(row: OpenKinOf<T>, rowPath: string): 
   ];
 }
 
+/**
+ * ROW at ROW_PATH and its whole open family, depth-first in drawn order: each
+ * row before its kin (`openKin`). THE ONE WALK of a family every reader of
+ * its nested rows takes.
+ */
+export function familyRows(row: RosterOpenRow, rowPath: string): PathedOpenRow[] {
+  return [{ row, path: rowPath }, ...openKin(row, rowPath).flatMap((kin) => familyRows(kin.row, kin.path))];
+}
+
 /** Every open row U draws, depth-first in drawn order: entry by entry, each row before its family. */
 export function sectionOpenRows(u: RosterRepoSection, path: string): PathedOpenRow[] {
-  const flatten = (row: RosterOpenRow, rowPath: string): PathedOpenRow[] => [
-    { row, path: rowPath },
-    ...openKin(row, rowPath).flatMap((kin) => flatten(kin.row, kin.path)),
-  ];
   return repoEntries(u, path).flatMap((entry) =>
     entry.case === "row"
-      ? flatten(entry.row, entry.path)
+      ? familyRows(entry.row, entry.path)
       : pathedOpenRows(requireMessage(entry.subsection.openRows, `${entry.path}.open_rows`), `${entry.path}.open_rows`).flatMap(
-          ({ row, path: rowPath }) => flatten(row, rowPath),
+          ({ row, path: rowPath }) => familyRows(row, rowPath),
         ),
   );
 }

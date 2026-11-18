@@ -63,7 +63,7 @@
 import { FOLDED_CLASS } from "./folded-class.js";
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { openKin, pathedOpenRows, type PathedOpenRow } from "./entries.js";
+import { familyRows, pathedOpenRows } from "./entries.js";
 import { BREATHES_CLASS, NAME_INK_CLASS, drawNameInk } from "./name-ink.js";
 import { NAME_STEADY_CLASS } from "./name-tint.js";
 import { armWorks, rosterArmMark } from "./tones.js";
@@ -238,19 +238,11 @@ export function drawRosterSubsection(
  * none does: what a folded subsection's name breathes in.
  */
 export function workingTone(rows: RosterOpenRows, path: string): string | null {
-  const walk = (at: PathedOpenRow): string | null => {
-    const row = requireMessage(at.row.row, `${at.path}.row`);
-    const arm = requireCase(row.status, `${at.path}.row.status`).case;
-    if (armWorks(arm)) return rosterArmMark(arm).toneClass;
-    for (const kin of openKin(at.row, at.path)) {
-      const tone = walk(kin);
-      if (tone !== null) return tone;
-    }
-    return null;
-  };
   for (const top of pathedOpenRows(rows, path)) {
-    const tone = walk(top);
-    if (tone !== null) return tone;
+    for (const at of familyRows(top.row, top.path)) {
+      const arm = requireCase(requireMessage(at.row.row, `${at.path}.row`).status, `${at.path}.row.status`).case;
+      if (armWorks(arm)) return rosterArmMark(arm).toneClass;
+    }
   }
   return null;
 }
