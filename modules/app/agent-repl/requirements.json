@@ -366,6 +366,16 @@
       "command": "terminal-notifier"
     },
     {
+      "id": "wifi-helper-signing",
+      "kind": "signing_identity",
+      "why": "macOS keys an ad hoc signed app's Location Services permission to its code's hash, so every rebuild of the Wi-Fi helper lost it; signed with one certificate, the permission names the certificate and survives rebuilds (wifi-helper/build.sh)",
+      "profile": "run",
+      "platforms": [
+        "darwin"
+      ],
+      "name": "agent-repl local signing"
+    },
+    {
       "id": "wifi-helper",
       "kind": "app_build",
       "why": "persistent wifi's failover reads the joined and visible Wi-Fi networks' names, which macOS gives only to an app allowed Location Services (wifi-helper/, daemon/internal/persistentwifi/scan.go)",
