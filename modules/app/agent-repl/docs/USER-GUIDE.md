@@ -201,6 +201,11 @@ A workspace keeps every link that bears on its task, such as its pull request, t
   - With several, clicking the summary drops a menu of their labels, most recently set first, and picking one opens it.
   - Links open in the Chrome profile of the account the workspace's session runs as, the same way a link in the feed opens.
   - Clicking the summary does not open the session line the heading otherwise opens.
+- In the menu, an owned link's label is drawn in the summary's purple, so the links the workspace's work made stand out.
+- A GitHub pull request's row carries a small badge on its right saying how the pull request stands.
+  - `open` is white, `draft` grey, `merged` green, and `closed` red.
+  - The daemon reads every linked pull request on its usual pull-request cadence, owned or not, so the badge follows a merge or a close on its own.
+  - A pull request the daemon has not read yet shows no badge.
 - A workspace with no summary yet has nothing to click, even with links stored.
 - The menu shows at most five links, though a workspace can store any number.
   - Once the menu is full, the agent chooses which five it shows, ranked by how much each matters to you and to the people you report the work to.

@@ -1570,14 +1570,17 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	pullRequests, err := prwatch.New(prwatch.Deps{
 		Notices: p.Metrics,
 		Ended:   verbsRef.pullRequestEnded,
-		Store:   p.DB,
-		GH:      gh,
-		Holds:   queue,
-		Briefs:  merge.BriefsFrom(paths.PromptsDir),
-		MintKey: prompthandler.MintKey,
-		Serves:  rolloutController.ServesIntake,
-		Clock:   clock.System{},
-		Every:   prwatch.DefaultEvery,
+		// A linked pull request whose state changed redraws the menus of the
+		// workspaces linking it, so each row's badge says how it stands.
+		LinksRedrawn: verbsRef.republishLinks,
+		Store:        p.DB,
+		GH:           gh,
+		Holds:        queue,
+		Briefs:       merge.BriefsFrom(paths.PromptsDir),
+		MintKey:      prompthandler.MintKey,
+		Serves:       rolloutController.ServesIntake,
+		Clock:        clock.System{},
+		Every:        prwatch.DefaultEvery,
 		// Every owned pull request standing in a GitHub merge queue is drawn
 		// by the merge orchestrator as its owner's deploying place.
 		Deployments: mergeOrchestrator,

@@ -354,7 +354,7 @@ func titleLinks(links []Link) *frontendv1.TopbarTitleLinks {
 	})
 	items := make([]*frontendv1.TopbarTitleLinkMenuItem, len(ordered))
 	for i, link := range ordered {
-		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL)}
+		items[i] = &frontendv1.TopbarTitleLinkMenuItem{Label: link.Label, Url: link.URL, Owned: link.Owned, Icon: linkIcon(link.URL), Badge: linkBadge(link.State)}
 	}
 	return &frontendv1.TopbarTitleLinks{Opens: &frontendv1.TopbarTitleLinks_Menu{
 		Menu: &frontendv1.TopbarTitleLinkMenu{Items: items}}}
@@ -1272,6 +1272,26 @@ func (r *resolver) PermissionModes(ws ids.WorkspaceID) ([]string, bool) {
 		modes = append(modes, option.GetMode())
 	}
 	return modes, true
+}
+
+// linkBadge is the badge a menu row draws for its pull request's STATE: none
+// for a link whose state is empty (no pull request, or one not yet read). A
+// state this switch does not know is a store state added without its badge,
+// and fails hard.
+func linkBadge(state wsm.PullRequestState) *frontendv1.TopbarTitleLinkBadge {
+	switch state {
+	case "":
+		return nil
+	case wsm.PullRequestStateOpen:
+		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Open{Open: &frontendv1.TopbarTitleLinkBadgeOpen{}}}
+	case wsm.PullRequestStateDraft:
+		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Draft{Draft: &frontendv1.TopbarTitleLinkBadgeDraft{}}}
+	case wsm.PullRequestStateMerged:
+		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Merged{Merged: &frontendv1.TopbarTitleLinkBadgeMerged{}}}
+	case wsm.PullRequestStateClosed:
+		return &frontendv1.TopbarTitleLinkBadge{State: &frontendv1.TopbarTitleLinkBadge_Closed{Closed: &frontendv1.TopbarTitleLinkBadgeClosed{}}}
+	}
+	panic(fmt.Sprintf("topbar: pull request state %q has no badge", state))
 }
 
 // linkIcon names the service icon a menu row draws for a url, from the url's

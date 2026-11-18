@@ -39,6 +39,7 @@ import (
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/viewquiet"
 	"agent-repld/internal/vocab"
+	"agent-repld/internal/wsm"
 )
 
 // Account is the topbar's account cell: which root the session spends as, and
@@ -403,4 +404,8 @@ type Link struct {
 	URL string
 	// Owned is whether the workspace's work made what the link points at.
 	Owned bool
+	// State is how the GitHub pull request the url names stands, as the
+	// pull-request watcher last read it; empty for any other url and for a
+	// pull request not yet read. A menu row draws it as its badge.
+	State wsm.PullRequestState
 }

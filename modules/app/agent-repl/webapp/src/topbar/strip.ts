@@ -44,6 +44,7 @@ import type {
   TopbarWorkspaceName,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { renderExternalLink } from "../link.js";
+import { drawLinkBadge } from "./link-badge.js";
 import { drawLinkIcon } from "./link-icon.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
@@ -184,8 +185,10 @@ export function drawHeadingLine(className: string, text: string): HTMLElement {
 /** The summary's menu's name in the strip's one reveal layer. */
 export const LINKS_REVEAL = "links";
 
-/** A menu row whose link the workspace's work made: drawn on a lighter ground. */
+/** A menu row whose link the workspace's work made: drawn on a lighter ground, its label in the summary's purple. */
 export const OWNED_LINK_CLASS = "is-owned";
+/** A menu row that carries a pull request badge, which reserves its margin. */
+export const BADGED_LINK_CLASS = "has-badge";
 
 /**
  * The title: the workspace's generated summary, drawn verbatim. With one shown
@@ -235,8 +238,10 @@ export function bindTitleLinkMenu(element: HTMLElement, menu: TopbarTitleLinkMen
  * recently set first), each the label drawn as its link with the url beneath
  * it as the row's dim second line, the way a model's description sits under
  * its name. A click anywhere in a row closes the menu as it opens the link.
- * The daemon serves the owned links first; an owned row is tinted, and a row
- * whose host has a known service leads with that service's icon.
+ * The daemon serves the owned links first; an owned row is tinted and its
+ * label drawn in the summary's purple, a row whose host has a known service
+ * leads with that service's icon, and a pull request's row carries its state's
+ * badge in its right margin.
  */
 export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext): HTMLElement {
   const list = document.createElement("div");
@@ -267,6 +272,11 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
     url.className = "topbar-title-link-url";
     url.textContent = item.url;
     row.append(link, url);
+    const badge = drawLinkBadge(item.badge);
+    if (badge !== null) {
+      row.classList.add(BADGED_LINK_CLASS);
+      row.append(badge);
+    }
     list.append(row);
   }
   return list;

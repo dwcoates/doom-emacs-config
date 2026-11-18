@@ -205,6 +205,12 @@ type rig struct {
 	// requests, and endedErr what the telling answers.
 	ended    []endTold
 	endedErr error
+	// linksRedrawn is every workspace told to draw its links again, and
+	// linksRedrawnErr what the telling answers.
+	linksRedrawn    []ids.WorkspaceID
+	linksRedrawnErr error
+	// deps built the watcher, so a test rebuilds it over another store.
+	deps Deps
 
 	w       *Watcher
 	db      wsm.DB
@@ -270,12 +276,17 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}, banners: &fakeComments{}}
-	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Notices: &briefprompttest.Meter{}, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
+	r.deps = Deps{Store: db, GH: r.gh, Holds: r.holds, Notices: &briefprompttest.Meter{}, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Comments: r.banners, Log: r.log,
 		Ended: func(_ context.Context, ws ids.WorkspaceID, merged bool) error {
 			r.ended = append(r.ended, endTold{ws: ws, merged: merged})
 			return r.endedErr
-		}})
+		},
+		LinksRedrawn: func(_ context.Context, ws ids.WorkspaceID) error {
+			r.linksRedrawn = append(r.linksRedrawn, ws)
+			return r.linksRedrawnErr
+		}}
+	r.w, err = New(r.deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -287,6 +298,37 @@ func newRig(t *testing.T) *rig {
 	g := r.withGQL()
 	g.setFacts(prK.Number, factsJSON("main", nil))
 	return r
+}
+
+// overStore rebuilds the rig's watcher over STORE, the rig's own store
+// behind whatever STORE changes.
+func (r *rig) overStore(store Store) {
+	r.deps.Store = store
+	w, err := New(r.deps)
+	if err != nil {
+		panic(err)
+	}
+	r.w = w
+}
+
+// link stores a reference link of the rig's workspace to prK, keyed as the
+// links verb keys it.
+func (r *rig) link(t *testing.T) {
+	t.Helper()
+	pr := prK
+	if _, err := r.db.SetWorkspaceLink(context.Background(), r.ws, wsm.LinkSet{URL: URLOf(prK), Label: "The pull request", PullRequest: &pr}); err != nil {
+		t.Fatalf("SetWorkspaceLink: %v", err)
+	}
+}
+
+// linkState answers the state the rig's workspace's link to prK carries.
+func (r *rig) linkState(t *testing.T) wsm.PullRequestState {
+	t.Helper()
+	links, err := r.db.WorkspaceLinks(context.Background(), r.ws)
+	if err != nil || len(links) != 1 {
+		t.Fatalf("WorkspaceLinks = %+v, %v; want the one link", links, err)
+	}
+	return links[0].State
 }
 
 // briefs splices the notice's placeholders in order, so a test reads them.

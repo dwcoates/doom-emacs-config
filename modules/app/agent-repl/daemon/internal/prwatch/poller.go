@@ -28,6 +28,7 @@ const (
 	opGate    = "daemon.prwatch.gate"
 	opComment = "daemon.prwatch.comment"
 	opFollow  = "daemon.prwatch.follow"
+	opLinked  = "daemon.prwatch.linked"
 )
 
 // DefaultEvery is the cadence between polls (owner ruling, 2026-10-30).
@@ -55,6 +56,8 @@ type Store interface {
 	OweGithubMergeQueueNotice(ctx context.Context, subscriber ids.WorkspaceID, queue wsm.GithubMergeQueueKey, sentences []string) error
 	OwedGithubMergeQueueNotices(ctx context.Context) ([]wsm.GithubMergeQueueOwed, error)
 	RecordGithubMergeQueueNoticeSubmitted(ctx context.Context, subscriber ids.WorkspaceID, queue wsm.GithubMergeQueueKey, turn ids.TurnID, sentences []string, took int) error
+	LinkedPullRequests(ctx context.Context) ([]wsm.PullRequestKey, error)
+	RecordPullRequestState(ctx context.Context, pr wsm.PullRequestKey, state wsm.PullRequestState, at time.Time) ([]ids.WorkspaceID, error)
 }
 
 // Deps are the watcher's collaborators: everything but the prompt handler,
@@ -85,6 +88,10 @@ type Deps struct {
 	// Comments is told each comment a subscriber is owed that someone other
 	// than the user wrote (comments.go), which raises its desktop banner.
 	Comments CommentSink
+	// LinksRedrawn is told each workspace a link of which names a pull
+	// request whose recorded state changed, so its topbar menu draws the new
+	// badge (workspace.Verbs.RepublishLinks).
+	LinksRedrawn func(ctx context.Context, ws ids.WorkspaceID) error
 	// Log is the global logger: a pull request is no workspace's.
 	Log dlog.Logger
 }
@@ -98,12 +105,16 @@ type Watcher struct {
 	// latest successful read found it (deployments.go). Only the one Tick
 	// running at a time touches it.
 	places map[wsm.PullRequestKey]*placed
+	// linkedResetsAt is when a rate limit a linked pull request's state read
+	// ran into resets; no state read is made before it (pollLinked). Only
+	// the one Tick running at a time touches it.
+	linkedResetsAt time.Time
 }
 
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	switch {
-	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Ended == nil, deps.Comments == nil, deps.Log == nil:
+	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Ended == nil, deps.Comments == nil, deps.LinksRedrawn == nil, deps.Log == nil:
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
@@ -121,31 +132,35 @@ func (w *Watcher) Run(ctx context.Context, prompts prompthandler.Submitter) {
 	w.deps.Log.Debug(opPoll, "the pull-request watcher stopped with its context", nil)
 }
 
-// Tick polls every followed pull request and every followed merge queue
-// once, then submits every notice owed, when this daemon serves. A queue
-// both kinds need is read once (queueReads).
+// Tick polls every followed pull request, the state of every other linked
+// one, and every followed merge queue once, then submits every notice owed,
+// when this daemon serves. A queue both kinds need is read once
+// (queueReads).
 func (w *Watcher) Tick(ctx context.Context, prompts prompthandler.Submitter) {
 	if !w.gate.Admits() {
 		return
 	}
 	queues := newQueueReads(w.deps.GH)
-	w.poll(ctx, queues)
+	polled := w.poll(ctx, queues)
+	w.pollLinked(ctx, polled)
 	w.pollQueues(ctx, queues)
 	w.deliverOwed(ctx, prompts)
 }
 
 // poll reads each followed pull request once and advances every subscription
-// to it.
-func (w *Watcher) poll(ctx context.Context, queues *queueReads) {
+// to it, answering every followed pull request, read or waiting out a rate
+// limit: their states are this poll's to record, never pollLinked's.
+func (w *Watcher) poll(ctx context.Context, queues *queueReads) map[wsm.PullRequestKey]bool {
+	followed := map[wsm.PullRequestKey]bool{}
 	subs, err := w.deps.Store.LivePullRequestSubscriptions(ctx)
 	if err != nil && ctx.Err() != nil {
 		// The daemon is stopping: no fact about the store.
 		w.deps.Log.Debug(opPoll, "the poll stopped with its context", nil)
-		return
+		return followed
 	}
 	if err != nil {
 		w.deps.Log.Error(opPoll, "could not read the pull-request subscriptions; nothing is polled this tick", dlog.WithCause(nil, err))
-		return
+		return followed
 	}
 	byPR := map[wsm.PullRequestKey][]wsm.PullRequestSubscription{}
 	var order []wsm.PullRequestKey
@@ -154,6 +169,7 @@ func (w *Watcher) poll(ctx context.Context, queues *queueReads) {
 			order = append(order, sub.PullRequest)
 		}
 		byPR[sub.PullRequest] = append(byPR[sub.PullRequest], sub)
+		followed[sub.PullRequest] = true
 	}
 	var read, queued []wsm.PullRequestKey
 	for _, pr := range order {
@@ -169,7 +185,7 @@ func (w *Watcher) poll(ctx context.Context, queues *queueReads) {
 	facts := w.readQueueFacts(ctx, queued)
 	for _, pr := range read {
 		if ctx.Err() != nil {
-			return
+			return followed
 		}
 		snap, ok := w.pollOne(ctx, pr, byPR[pr], facts.ask(pr), queues)
 		if _, owned := ownerOf(byPR[pr]); owned && ok {
@@ -177,6 +193,78 @@ func (w *Watcher) poll(ctx context.Context, queues *queueReads) {
 		}
 	}
 	w.tellDeployments(ctx, order, byPR)
+	return followed
+}
+
+// pollLinked reads the state of every linked pull request no subscription
+// follows (wsm.LinkedPullRequests): a reference link, or an owned one whose
+// subscription ended or was ended, so its menu row's badge says how it
+// stands. FOLLOWED holds the pull requests poll already read. A read that
+// fails leaves the recorded state as it stands; the next tick reads again,
+// and a spent rate limit is waited out.
+func (w *Watcher) pollLinked(ctx context.Context, followed map[wsm.PullRequestKey]bool) {
+	prs, err := w.deps.Store.LinkedPullRequests(ctx)
+	if err != nil && ctx.Err() != nil {
+		w.deps.Log.Debug(opLinked, "the linked pull requests' reads stopped with their context", nil)
+		return
+	}
+	if err != nil {
+		w.deps.Log.Error(opLinked, "could not read the linked pull requests; no state is read this tick", dlog.WithCause(nil, err))
+		return
+	}
+	for _, pr := range prs {
+		if followed[pr] {
+			continue
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		fields := dlog.Context{"pull_request": pr.String()}
+		if now := w.deps.Clock.Now(); now.Before(w.linkedResetsAt) {
+			w.deps.Log.Debug(opLinked, "the rate limit is spent; the linked pull requests' states are read once it resets", dlog.Merge(fields, dlog.Context{"resets_at": w.linkedResetsAt}))
+			return
+		}
+		state, err := w.reader.readState(ctx, pr)
+		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			f := failureOf(err, w.deps.Clock.Now())
+			if f.Kind == wsm.PullRequestFailureRateLimited {
+				w.linkedResetsAt = f.ResetsAt
+			}
+			// The leaf recorded a GitHub failure itself; this records what it cost.
+			w.deps.Log.Info(opLinked, "could not read the linked pull request's state; its badge stands until a later read",
+				dlog.Merge(fields, dlog.Context{"kind": string(f.Kind), "cause": err.Error()}))
+			continue
+		}
+		w.recordState(ctx, pr, state)
+	}
+}
+
+// recordState records PR's STATE as a read just found it, and redraws the
+// links of every workspace whose menu the change reaches.
+func (w *Watcher) recordState(ctx context.Context, pr wsm.PullRequestKey, state wsm.PullRequestState) {
+	fields := dlog.Context{"pull_request": pr.String(), "state": string(state)}
+	changed, err := w.deps.Store.RecordPullRequestState(ctx, pr, state, w.deps.Clock.Now())
+	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
+		w.deps.Log.Error(opLinked, "could not record the pull request's state; its links' badges stand until a later read", dlog.WithCause(fields, err))
+		return
+	}
+	if len(changed) == 0 {
+		return
+	}
+	fields["workspaces"] = len(changed)
+	w.deps.Log.Info(opLinked, "the pull request's state changed; every workspace linking it draws its links again", fields)
+	for _, ws := range changed {
+		if err := w.deps.LinksRedrawn(ctx, ws); err != nil {
+			w.deps.Log.Error(opLinked, "could not draw a workspace's links again after its pull request's state changed",
+				dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspace": string(ws)}), err))
+		}
+	}
 }
 
 // rateLimitWait answers when a spent rate limit resets, and true while any
@@ -231,6 +319,7 @@ func (w *Watcher) pollOne(ctx context.Context, pr wsm.PullRequestKey, subs []wsm
 	for _, sub := range subs {
 		w.advance(ctx, sub, snap, now)
 	}
+	w.recordState(ctx, pr, stateOf(snap.PR))
 	return snap, true
 }
 

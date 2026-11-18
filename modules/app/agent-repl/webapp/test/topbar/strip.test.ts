@@ -26,9 +26,11 @@ import {
   drawTopbarSessionLine,
   drawTopbarTitle,
   drawTopbarWorkspaceName,
+  BADGED_LINK_CLASS,
   OWNED_LINK_CLASS,
 } from "../../src/topbar/strip.js";
 import { drawLinkIcon } from "../../src/topbar/link-icon.js";
+import { LINK_BADGE_CLASS } from "../../src/topbar/link-badge.js";
 import styles from "../../src/styles.css?raw";
 import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
@@ -618,6 +620,73 @@ describe("a summary menu row's owned tint and service icon", () => {
   it("tints an owned row on a ground between the menu's and the topbar's", () => {
     const rule = withoutBlockComments(styles).match(/\.topbar-title-link-option\.is-owned\s*\{([^}]*)\}/);
     expect(rule?.[1]).toMatch(/background:\s*color-mix\(in srgb, var\(--bg\) 50%, var\(--sidebar-ground\)\)/);
+  });
+});
+
+describe("a summary menu row's pull request badge and owned label", () => {
+  type Item = { label: string; url: string; owned?: boolean; badge?: { state: { case: "open" | "draft" | "merged" | "closed"; value: object } } };
+  const rowsOf = (items: Item[]) => {
+    const { host, tc } = topbarContext();
+    const heading = drawTopbarHeading(
+      create(TopbarTitleSchema, { text: "t", links: { opens: { case: "menu", value: { items } } } }),
+      workspaceName("w"),
+      tc,
+    );
+    host.append(heading);
+    bindHeadingSessionReveal(heading, create(TopbarSessionLineSchema, { text: "s" }), tc);
+    click(heading.querySelector<HTMLElement>(".topbar-title")!);
+    return [...openPanel(host)!.querySelectorAll<HTMLElement>(".topbar-title-link-option")];
+  };
+  const PR = "https://github.com/o/r/pull/7";
+
+  it("draws a pull request's badge after its label and url, and reserves the row's margin", () => {
+    // Act
+    const [row] = rowsOf([{ label: "The fix", url: PR, badge: { state: { case: "merged", value: {} } } }]);
+    // Assert
+    const last = row!.lastElementChild as HTMLElement;
+    expect([row!.classList.contains(BADGED_LINK_CLASS), last.className, last.dataset.badge, last.textContent]).toEqual([
+      true,
+      LINK_BADGE_CLASS,
+      "merged",
+      "merged",
+    ]);
+  });
+
+  it("draws no badge, and reserves no margin, for a row served none", () => {
+    const [row] = rowsOf([{ label: "The doc", url: "https://example.com/doc" }]);
+    expect([row!.querySelector(`.${LINK_BADGE_CLASS}`), row!.classList.contains(BADGED_LINK_CLASS)]).toEqual([null, false]);
+  });
+
+  it.each([
+    ["open", "--fg"],
+    ["draft", "--muted"],
+    ["merged", "--ok"],
+    ["closed", "--err"],
+  ])("colors the %s badge with %s", (state, token) => {
+    const rule = withoutBlockComments(styles).match(
+      new RegExp(`\\.topbar-title-link-badge\\[data-badge="${state}"\\]\\s*\\{([^}]*)\\}`),
+    );
+    expect(rule?.[1]).toMatch(new RegExp(`color:\\s*var\\(${token}\\)`));
+  });
+
+  it("draws an owned row's label, and only its label, in the summary's purple", () => {
+    const teardown = installStylesheet();
+    try {
+      // Act
+      const [owned, reference] = rowsOf([
+        { label: "Mine", url: "https://a.example/1", owned: true },
+        { label: "Theirs", url: "https://a.example/2" },
+      ]);
+      // Assert
+      const summary = cascadedValueIn("topbar-strip", "topbar-title", "color");
+      expect([
+        cascadedValue(owned!.querySelector("a")!, "color"),
+        cascadedValue(reference!.querySelector("a")!, "color") === summary,
+        cascadedValue(owned!.querySelector(".topbar-title-link-url")!, "color") === summary,
+      ]).toEqual([summary, false, false]);
+    } finally {
+      teardown();
+    }
   });
 });
 

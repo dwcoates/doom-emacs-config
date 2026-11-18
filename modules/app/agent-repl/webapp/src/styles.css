@@ -8951,6 +8951,47 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .topbar-title-link-option.is-owned:hover {
   background: var(--border);
 }
+/* AN OWNED LINK'S LABEL IS THE SUMMARY'S PURPLE (owner request, 2026-11-18):
+   the label, never the url line beneath it, wears the canonical purple the
+   summary that drops the menu is drawn in, so the links the workspace's work
+   made read as its own at a glance. */
+.topbar-title-link-option.is-owned .external-link {
+  color: var(--tool-title);
+}
+/* A PULL REQUEST'S BADGE (owner request, 2026-11-18): small, subtle text in
+   the row's right margin saying how the pull request stands. OUT OF FLOW,
+   pinned inside the row's padding like a model row's corner mark, and a row
+   that carries one reserves the margin so a long label never runs under it.
+   Open is the foreground white, a draft the muted grey, a merge the status
+   green, a close the status red. */
+.topbar-title-link-option.has-badge {
+  position: relative;
+  padding-right: 4.2rem;
+}
+.topbar-title-link-badge {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.7rem;
+  font-size: 0.75em;
+  line-height: 1.2;
+  white-space: nowrap;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 0 0.35rem;
+  opacity: 0.85;
+}
+.topbar-title-link-badge[data-badge="open"] {
+  color: var(--fg);
+}
+.topbar-title-link-badge[data-badge="draft"] {
+  color: var(--muted);
+}
+.topbar-title-link-badge[data-badge="merged"] {
+  color: var(--ok);
+}
+.topbar-title-link-badge[data-badge="closed"] {
+  color: var(--err);
+}
 /* A ROW'S SECOND LINE: what identifies the row rather than what the reader
    chooses by, dim and a step smaller, ONE look in every menu. An account
    row's root path, a model's description, a summary link's url. */
