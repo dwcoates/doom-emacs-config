@@ -220,8 +220,7 @@ func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws 
 	if _, standing := v.deps.Cards.ColdGate(ws); !standing {
 		return nil
 	}
-	summarizer := defaultSummarizer()
-	compact := &agentreplv1.AnswerColdGateCompact{Model: summarizer.GetModel(), Scope: summarizer.GetScope()}
+	compact := defaultSummarizerAnswer()
 	answer := &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: compact}}
 	if resume {
 		answer.Choice = &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: compact}
