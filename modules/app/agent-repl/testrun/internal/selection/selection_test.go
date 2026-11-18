@@ -7,6 +7,7 @@ import (
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/sched"
 	"agentrepl/testrun/internal/suites"
@@ -155,22 +156,41 @@ func chunkArgv(sp suites.Split) []string {
 	return sp.Chunk(sp.Group+"#00", sp.Items).Argv
 }
 
-// goUnits is a Go suite's units for one package: a vet, the package's build,
-// its split, and a program its tests run.
+// goUnits is a Go suite's units for the package rel and one other: a vet,
+// the module build over both, each package's split, and a program rel's
+// tests run.
 func goUnits(suite, rel string) suites.Units {
-	build := run.Spec{Unit: sched.Unit{ID: suite + ":" + rel + ":build"}}
+	build := suites.GoBuild{ID: suites.ModuleBuildID(suite, ""), Suite: suite,
+		Options: gobuild.Options{Module: "/m", BinDir: "/bin", Self: "/testrun"}}
 	vet := run.Spec{Unit: sched.Unit{ID: suite + ":vet"}}
 	named := func(id string, items []string, names map[string][]string) run.Spec {
 		return run.Spec{Argv: append(append([]string{"run"}, items...), suites.FlatNames(items, names)...)}
 	}
 	split := suites.Split{
-		Group: suite + ":" + rel, Suite: suite, Items: []string{"TestA", "TestB", "TestC"},
+		Group: suite + ":" + rel, Suite: suite, Items: []string{"TestA", "TestB", "TestC"}, Package: rel,
 		Deps:  []string{build.ID, suites.ProgramUnitID("fakeshim")},
 		Named: named, Chunk: func(id string, items []string) run.Spec { return named(id, items, nil) },
 	}
 	other := split
-	other.Group, other.Items = suite+":other", []string{"TestZ"}
-	return suites.Units{Atomic: []run.Spec{vet, build}, Splits: []suites.Split{split, other}, Programs: []string{"fakeshim", "git"}}
+	other.Group, other.Items, other.Package = suite+":other", []string{"TestZ"}, "other"
+	return suites.Units{Atomic: []run.Spec{vet}, Splits: []suites.Split{split, other}, Programs: []string{"fakeshim", "git"}, GoBuilds: []suites.GoBuild{build}}.Finish()
+}
+
+// builtPackages are the packages u's module build units build.
+func builtPackages(t *testing.T, u suites.Units) [][]string {
+	t.Helper()
+	var out [][]string
+	for _, a := range u.Atomic {
+		if len(a.Argv) < 2 || a.Argv[1] != "build-tests" {
+			continue
+		}
+		o, err := gobuild.ParseBuildArgs(a.Argv[2:])
+		if err != nil {
+			t.Fatalf("build unit %s: %v", a.ID, err)
+		}
+		out = append(out, o.Packages)
+	}
+	return out
 }
 
 func TestNarrowRunsOnlyTheNamedGoTests(t *testing.T) {
@@ -197,11 +217,33 @@ func TestNarrowRunsOnlyTheNamedGoTests(t *testing.T) {
 	if got.Splits[1].Group != "daemon:internal/merge/TestB/case/inner" || !reflect.DeepEqual(chunkArgv(got.Splits[1]), []string{"run", "TestB", "TestB/case/inner"}) {
 		t.Fatalf("subtest split = %s running %v, want TestB/case/inner alone", got.Splits[1].Group, chunkArgv(got.Splits[1]))
 	}
-	if len(got.Atomic) != 1 || got.Atomic[0].ID != "daemon:internal/merge:build" {
-		t.Fatalf("atomic = %v, want only the package's build (no vet)", got.Atomic)
+	if len(got.Atomic) != 1 || got.Atomic[0].ID != "daemon:build" || !reflect.DeepEqual(builtPackages(t, got), [][]string{{"internal/merge"}}) {
+		t.Fatalf("atomic = %v, want only the module build, over the named package alone (no vet)", got.Atomic)
 	}
 	if !reflect.DeepEqual(got.Programs, []string{"fakeshim"}) {
 		t.Fatalf("programs = %v, want only the one the package's tests run", got.Programs)
+	}
+}
+
+func TestNarrowToOneSubtestBuildsItsPackage(t *testing.T) {
+	// Arrange
+	r, err := Resolve(request(goNamed(mod+"daemon/cmd/agent-repld", sub("TestB", []string{"an_accepted_move"}))), layout)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got, err := r.Narrow(suiteNamed(t, "daemon"), goUnits("daemon", "cmd/agent-repld"))
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Splits) != 1 || got.Splits[0].Group != "daemon:cmd/agent-repld/TestB/an_accepted_move" {
+		t.Fatalf("splits = %+v, want the subtest path's own", got.Splits)
+	}
+	if b := builtPackages(t, got); !reflect.DeepEqual(b, [][]string{{"cmd/agent-repld"}}) {
+		t.Fatalf("builds = %v, want the subtest's package built", b)
 	}
 }
 

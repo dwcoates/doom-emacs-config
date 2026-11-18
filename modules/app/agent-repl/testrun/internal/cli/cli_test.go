@@ -1620,8 +1620,7 @@ func packageBuild(_ suites.Layout, s roster.Suite) (suites.Units, error) {
 				return sp
 			}}
 	}
-	b := suites.GoBuild{ID: "daemon:build", Suite: "daemon", Options: gobuild.Options{Module: "/d", BinDir: "/b", Self: "/testrun"},
-		Needs: map[string]string{"daemon:a": "a", "daemon:b": "b"}}
+	b := suites.GoBuild{ID: "daemon:build", Suite: "daemon", Options: gobuild.Options{Module: "/d", BinDir: "/b", Self: "/testrun"}}
 	return suites.Units{Splits: []suites.Split{split("a"), split("b")}, GoBuilds: []suites.GoBuild{b}}.Finish(), nil
 }
 

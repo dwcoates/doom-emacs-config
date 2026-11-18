@@ -158,7 +158,8 @@ func TestTheE2EPrebuildRunsBetweenTheBuildAndTheRootPackagesChunks(t *testing.T)
 
 func TestFinishBuildsOnlyThePackagesWhoseUnitsRemain(t *testing.T) {
 	b := GoBuild{ID: "m:build", Suite: "m", Options: gobuild.Options{Module: "/m", BinDir: "/bin", Self: "/testrun"},
-		Needs: map[string]string{"m:a": "a", "m:b": "b", "m:c:compiled": "c", "m:.:prebuild": ".", "m:.": "."}}
+		Needs: map[string]string{"m:c:compiled": "c", "m:.:prebuild": "."}}
+	split := func(group, rel string) Split { return Split{Group: group, Suite: "m", Package: rel} }
 	tests := []struct {
 		name   string
 		units  Units
@@ -166,13 +167,23 @@ func TestFinishBuildsOnlyThePackagesWhoseUnitsRemain(t *testing.T) {
 	}{
 		{
 			name:   "every package's units remain",
-			units:  Units{Splits: []Split{{Group: "m:a"}, {Group: "m:b"}, {Group: "m:."}}, Atomic: []run.Spec{unit("m:c:compiled"), unit("m:.:prebuild")}},
+			units:  Units{Splits: []Split{split("m:a", "a"), split("m:b", "b"), split("m:.", ".")}, Atomic: []run.Spec{unit("m:c:compiled"), unit("m:.:prebuild")}},
 			builds: [][]string{{".", "a", "b", "c"}},
 		},
 		{
 			name:   "a dropped split's package is not built",
-			units:  Units{Splits: []Split{{Group: "m:b"}}},
+			units:  Units{Splits: []Split{split("m:b", "b")}},
 			builds: [][]string{{"b"}},
+		},
+		{
+			name:   "a split renamed by a selection still builds its package",
+			units:  Units{Splits: []Split{split("m:a/TestA/a_case", "a")}},
+			builds: [][]string{{"a"}},
+		},
+		{
+			name:   "another pass's split is not this build's",
+			units:  Units{Splits: []Split{{Group: "m:a[integration]", Suite: "m", Package: "a", Tags: "integration"}}},
+			builds: nil,
 		},
 		{
 			name:   "a package kept by an atomic unit alone is built",
@@ -186,7 +197,7 @@ func TestFinishBuildsOnlyThePackagesWhoseUnitsRemain(t *testing.T) {
 		},
 		{
 			name:   "a build placed before is replaced, never doubled",
-			units:  Units{Splits: []Split{{Group: "m:a"}}, Atomic: []run.Spec{b.Spec([]string{"a", "b"})}},
+			units:  Units{Splits: []Split{split("m:a", "a")}, Atomic: []run.Spec{b.Spec([]string{"a", "b"})}},
 			builds: [][]string{{"a"}},
 		},
 	}
@@ -208,6 +219,68 @@ func TestFinishBuildsOnlyThePackagesWhoseUnitsRemain(t *testing.T) {
 				t.Fatalf("builds = %v, want %v", builds, tt.builds)
 			}
 		})
+	}
+}
+
+func TestGoBuildBuilds(t *testing.T) {
+	b := GoBuild{ID: "m:build[integration]", Suite: "m", Options: gobuild.Options{Tags: "integration"}}
+	tests := []struct {
+		name  string
+		split Split
+		rel   string
+		ok    bool
+	}{
+		{"a split of the build's pass", Split{Group: "m:a[integration]", Suite: "m", Package: "a", Tags: "integration"}, "a", true},
+		{"a split whose group a selection renamed", Split{Group: "m:a[integration]/TestA/x", Suite: "m", Package: "a", Tags: "integration"}, "a", true},
+		{"a split of the suite's untagged pass", Split{Group: "m:a", Suite: "m", Package: "a"}, "", false},
+		{"a split of another suite", Split{Group: "n:a[integration]", Suite: "n", Package: "a", Tags: "integration"}, "", false},
+		{"a split that runs no Go binary", Split{Group: "m/f.el", Suite: "m", Tags: "integration"}, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			rel, ok := b.Builds(tt.split)
+
+			// Assert
+			if rel != tt.rel || ok != tt.ok {
+				t.Fatalf("Builds(%+v) = %q, %t; want %q, %t", tt.split, rel, ok, tt.rel, tt.ok)
+			}
+		})
+	}
+}
+
+// A SELECTION RENAMES A SPLIT'S GROUP (one subtest path's own group), and the
+// renamed split still runs, and the build still builds, its package's binary.
+func TestARenamedSplitRunsTheBinaryItsBuildBuilds(t *testing.T) {
+	// Arrange
+	module := moduleFixture(t, map[string]string{
+		"cmd/repld": "func TestA(t *testing.T) { t.Run(\"a case\", func(t *testing.T) {}) }\n",
+		"other":     "func TestZ(t *testing.T) {}\n",
+	})
+	l := Layout{Module: module, Work: t.TempDir(), Self: "/testrun"}
+	u, err := goModuleUnitsForPackages(l, roster.Suite{Name: "m"}, module, []string{"cmd/repld", "other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(u.Splits, func(sp Split) bool { return sp.Package == "cmd/repld" })
+	if i < 0 {
+		t.Fatalf("no split runs cmd/repld: %+v", u.Splits)
+	}
+	narrowed := u.Splits[i]
+	narrowed.Group += "/TestA/a_case"
+	u.Splits = []Split{narrowed}
+
+	// Act
+	got := u.Finish()
+
+	// Assert
+	builds := buildUnits(got)
+	if len(builds) != 1 || !reflect.DeepEqual(builtPackages(builds[0]), []string{"cmd/repld"}) {
+		t.Fatalf("builds = %+v, want one over cmd/repld alone", builds)
+	}
+	chunk := narrowed.Chunk(narrowed.Group+"#00", narrowed.Items)
+	if want := gobuild.BinPath(filepath.Join(l.Work, "bin", "m"), "cmd/repld"); chunk.Argv[2] != want {
+		t.Fatalf("the renamed split runs %s, want the binary its build makes, %s", chunk.Argv[2], want)
 	}
 }
 

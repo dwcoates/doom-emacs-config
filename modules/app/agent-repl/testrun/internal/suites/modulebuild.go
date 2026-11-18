@@ -24,9 +24,21 @@ type GoBuild struct {
 	Suite string
 	// Options is the build without its packages.
 	Options gobuild.Options
-	// Needs maps every unit that runs a package's binary (a split's group,
-	// or an atomic unit's ID) to that package.
+	// Needs maps every atomic unit that runs a package's binary, by its ID,
+	// to that package. A split names its own (Builds): a selection renames a
+	// split's group (one subtest path's own group), so a group is never what
+	// ties a split to its binary.
 	Needs map[string]string
+}
+
+// Builds answers the package of sp whose binary b builds: sp's own Package
+// when sp is one of b's pass (its suite and tags), and false for any other
+// split (another pass's, or one that runs no Go binary).
+func (b GoBuild) Builds(sp Split) (string, bool) {
+	if sp.Package == "" || sp.Suite != b.Suite || sp.Tags != b.Options.Tags {
+		return "", false
+	}
+	return sp.Package, true
 }
 
 // ModuleBuildID is a module pass's build unit ID.
@@ -65,17 +77,24 @@ func (u Units) Finish() Units {
 		atomic = append(atomic, a)
 		present[a.ID] = true
 	}
-	for _, sp := range u.Splits {
-		present[sp.Group] = true
-	}
 	var builds []run.Spec
 	for _, b := range u.GoBuilds {
 		seen := map[string]bool{}
 		var rels []string
-		for unit, rel := range b.Needs {
-			if present[unit] && !seen[rel] {
+		add := func(rel string) {
+			if !seen[rel] {
 				seen[rel] = true
 				rels = append(rels, rel)
+			}
+		}
+		for unit, rel := range b.Needs {
+			if present[unit] {
+				add(rel)
+			}
+		}
+		for _, sp := range u.Splits {
+			if rel, ok := b.Builds(sp); ok {
+				add(rel)
 			}
 		}
 		if len(rels) == 0 {
@@ -88,7 +107,7 @@ func (u Units) Finish() Units {
 	return u
 }
 
-// need records that unit runs package rel's binary.
+// need records that the atomic unit runs package rel's binary.
 func (b *GoBuild) need(unit, rel string) {
 	if b.Needs == nil {
 		b.Needs = map[string]string{}
