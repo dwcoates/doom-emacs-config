@@ -182,9 +182,19 @@ func (s *Service) Reveal(ctx context.Context, mergeWS ids.WorkspaceID) (bool, er
 // A LANDED MERGE THAT ASKED TO COMPACT AFTER (MergeOrigin.CompactAfter) is
 // followed by the requester's compaction, submitted right after the handback
 // down the same one delivery path, so it runs behind the handback's turn.
+//
+// A MERGE THE USER OR THE OPERATOR RELEASED (merge.DetachedOutcome.Released)
+// HANDS NOTHING BACK, in place or detached: whoever released it already knows,
+// and its bubble shows the abandoned terminal.
 func (s *Service) HandBack(ctx context.Context, requester ids.WorkspaceID, mergeWS wsm.Workspace, out merge.DetachedOutcome) error {
 	log := s.deps.Log.Global()
 	fields := dlog.Context{"requester": string(requester), "merge_workspace": string(mergeWS.ID), "outcome": out.Kind.String(), "branch": out.Branch}
+	if out.Released() {
+		fields["cause"] = string(out.Cause)
+		fields["in_place"] = out.InPlace
+		log.Info(op, "a released merge hands no report back to its requester: whoever released it already knows", fields)
+		return nil
+	}
 	label, report, err := handbackText(mergeWS, out)
 	if err != nil {
 		log.Error(op, "a detached merge ended in an undeclared way; its requester is not told", dlog.WithCause(fields, err))

@@ -401,9 +401,9 @@ func TestHandBackSubmitsADeferredReportLedByItsLabel(t *testing.T) {
 			wantLabel: "merge of sample landed", wantText: "Recently Deployed"},
 		{name: "failed", outcome: merge.DetachedOutcome{Kind: merge.DetachedFailed, Summary: "tests failed", Branch: "sample"},
 			wantLabel: "merge of sample failed", wantText: "stays hidden at /w/sample-merge, exactly where the merge stopped, listed among the closed workspaces"},
-		{name: "evicted", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the operator evicted this merge while it was running", Branch: "sample"},
+		{name: "abandoned under its workspace closing", outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the workspace was closed while this merge was running", Branch: "sample", Cause: merge.CauseWorkspaceClosed},
 			wantLabel: "merge of sample did not land",
-			wantText:  "It ended before it landed: the operator evicted this merge while it was running. Nothing of it landed. Its merge workspace `sample-merge` keeps its branch `sample-merge` with the merge's work, so that work can be queued again with `agent-repld workspace async-merge -branch sample-merge`."},
+			wantText:  "It ended before it landed: the workspace was closed while this merge was running. Nothing of it landed. Its merge workspace `sample-merge` keeps its branch `sample-merge` with the merge's work, so that work can be queued again with `agent-repld workspace async-merge -branch sample-merge`."},
 		{name: "abandoned before its fork", noFork: true, outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the fork failed", Branch: "sample"},
 			wantLabel: "merge of sample did not run", wantText: "It did not run: the fork failed."},
 	}
@@ -468,6 +468,47 @@ func TestHandBackOfAnInPlaceMergeReportsItToTheWorkspaceItRanIn(t *testing.T) {
 			}
 			if strings.Contains(sent.text, "merge workspace") {
 				t.Fatalf("text = %q, want no merge workspace named for an in-place merge", sent.text)
+			}
+		})
+	}
+}
+
+func TestHandBackOfAReleasedMergeSubmitsNothingAndRecordsWhy(t *testing.T) {
+	mergeWS := wsm.Workspace{ID: "ws-merge", Name: "sample-merge", Dir: "/w/sample-merge", Branch: "sample-merge"}
+	inPlaceWS := wsm.Workspace{ID: "ws-requester", Name: "sample", Dir: "/w/sample", Branch: "sample"}
+	tests := []struct {
+		name    string
+		mergeWS wsm.Workspace
+		outcome merge.DetachedOutcome
+	}{
+		{name: "an evicted queued detached merge", mergeWS: mergeWS,
+			outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the operator evicted this merge from the queue", Branch: "sample", Cause: merge.CauseUserDrop}},
+		{name: "an evicted running detached merge", mergeWS: mergeWS,
+			outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the operator evicted this merge while it was running", Branch: "sample", Cause: merge.CauseUserDrop}},
+		{name: "an evicted queued in-place merge", mergeWS: inPlaceWS,
+			outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the operator evicted this merge from the queue", Branch: "sample", Cause: merge.CauseUserDrop, InPlace: true}},
+		{name: "an evicted running in-place merge", mergeWS: inPlaceWS,
+			outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the operator evicted this merge while it was running", Branch: "sample", Cause: merge.CauseUserDrop, InPlace: true}},
+		{name: "a dequeued running in-place merge", mergeWS: inPlaceWS,
+			outcome: merge.DetachedOutcome{Kind: merge.DetachedAbandoned, Summary: "the user took this merge out of the queue while it was running", Branch: "sample", Cause: merge.CauseUserDequeue, InPlace: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+
+			// Act
+			err := f.svc.HandBack(context.Background(), "ws-requester", tt.mergeWS, tt.outcome)
+
+			// Assert: nothing submitted, and the skip recorded at INFO with
+			// the requester, the branch and the cause.
+			if err != nil || len(f.prompts.sent) != 0 {
+				t.Fatalf("HandBack = %v with %d submissions, want none", err, len(f.prompts.sent))
+			}
+			rec, ok := f.recordWith(dlog.LevelInfo, "a released merge hands no report back to its requester: whoever released it already knows")
+			if !ok || rec.Context["requester"] != "ws-requester" || rec.Context["branch"] != "sample" ||
+				rec.Context["cause"] != string(tt.outcome.Cause) || rec.Context["in_place"] != tt.outcome.InPlace {
+				t.Fatalf("record = %+v (found %v), want the skip recorded with its requester, branch and cause", rec, ok)
 			}
 		})
 	}

@@ -122,8 +122,10 @@ Either kind:
   why. The merge leaves the queue at once and no test run starts. CRITICAL:
   NEVER leave a repair broken, unresolved or uncommitted on purpose to make the
   merge fail; that spends a whole test run on a merge that cannot land.
-- c. A report of how a merge ended (landed, failed or evicted): report it in
-  one line, then go to step 3e for a round of an instrumentation loop;
+- c. A report of how a merge ended (landed, failed, or given up under its
+  workspace closing or the daemon shutting down; a merge the user or the
+  operator evicted or dequeued is never reported back): report it in one line,
+  then go to step 3e for a round of an instrumentation loop;
   otherwise STOP. A merge that left without landing stays off the queue with
   its request: requeue it with `merge-queue requeue NAME` (NEVER re-request it,
   NEVER make a new workspace), or end it with `merge-queue discard NAME`. A

@@ -479,6 +479,19 @@ type DetachedOutcome struct {
 	// Deploy is what became of a landing's deploy: the report of a landing
 	// the deploy was told of is owed until that deploy has run.
 	Deploy LandingDeploy
+	// Cause is why an abandoned merge left the queue, empty for every other
+	// end and for a detached request whose merge workspace could not be
+	// forked.
+	Cause AbandonCause
+}
+
+// Released reports whether the outcome is a merge the user or the operator
+// RELEASED themselves (an evict, a dequeue), queued or running, in place or
+// detached. NOBODY IS TOLD OF IT (2026-11-17): whoever released it already
+// knows, and its bubble already shows the abandoned terminal, so it hands no
+// report back to its requester and raises no resolved banner.
+func (o DetachedOutcome) Released() bool {
+	return o.Kind == DetachedAbandoned && o.Cause.releases()
 }
 
 // LandingDeploy names what a deploy did about the runtime's rollout.

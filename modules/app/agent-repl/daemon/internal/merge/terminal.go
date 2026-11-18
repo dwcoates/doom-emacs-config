@@ -210,7 +210,15 @@ func (o *orchestrator) tellThenRaise(ws ids.WorkspaceID, out DetachedOutcome, te
 // raiseResolved raises the resolved desktop banner of a merge's outcome on ws.
 // It is the ONE place a resolved banner is raised from, so every end words it
 // the same way (DetachedOutcome.bannerLine).
+//
+// A RELEASED MERGE RAISES NONE (DetachedOutcome.Released): the user or the
+// operator who released it is the one the banner would tell.
 func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
+	if out.Released() {
+		o.deps.Log.Global().Info("daemon.merge.ended", "a released merge raises no resolved banner: whoever released it already knows",
+			dlog.Context{"workspace": string(ws), "outcome": out.Kind.String(), "cause": string(out.Cause)})
+		return
+	}
 	o.deps.Banners.Resolved(ws, out.Kind.mergeEnd(), out.bannerLine())
 }
 
@@ -218,11 +226,12 @@ func (o *orchestrator) raiseResolved(ws ids.WorkspaceID, out DetachedOutcome) {
 // bubble: an ASYNC merge's requester however it ended, and a SYNC merge's own
 // workspace when it did not land (one that landed closed it).
 //
-// AN EVICTION IS REPORTED BACK TOO (2026-11-10), exactly as a landing or a
-// failure is: the requester's agent believes its merge is in line until it is
-// told otherwise (2026-11-09: the evicted `land-zettel-notifier` merge never
-// reached `desktop-notifications-missing`, which learned of it only when it
-// queued the branch again). The
+// A MERGE THE USER OR THE OPERATOR RELEASED (an evict, a dequeue) IS NOT
+// REPORTED BACK (owner ruling, 2026-11-17, superseding 2026-11-10's): whoever
+// released it already knows, and its bubble shows the abandoned terminal, so
+// the report only sat queued in the requester as noise. Its owner
+// (DetachedMerges.HandBack) skips it on DetachedOutcome.Released. Every other
+// abandonment is reported, as a landing or a failure is. The
 // bubble's own "open merge workspace" button (SelectWorkspace's own reveal,
 // internal/server/workspaces.go) is the one way in from here, by owner
 // ruling (2026-10-20): a merge workspace is never auto-revealed in the tab
@@ -1224,7 +1233,7 @@ func (o *orchestrator) publishAbandonedWith(ctx context.Context, ws ids.Workspac
 			}, headAbandoned)
 		o.closeReleasedBubble(ctx, ws, ledger, cause)
 	}
-	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary}
+	out := DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause}
 	if ledger != "" {
 		o.ended(ctx, ws, out)
 	} else {
@@ -1454,7 +1463,7 @@ func (r *run) abandonTerminal(ctx context.Context, cause AbandonCause) {
 			Reason:    &frontendv1.FeedMergeError_Abandoned{Abandoned: &frontendv1.FeedMergeAbandoned{Summary: summary}},
 		})
 		r.o.closeReleasedBubble(ctx, r.ws, r.lease.ID, cause)
-		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary})
+		r.o.ended(ctx, r.ws, DetachedOutcome{Kind: DetachedAbandoned, Summary: summary, Cause: cause})
 	})
 	// The surfaces come AFTER the terminal and the release, as a queued
 	// merge's abandon orders them: the merge never happened as far as the

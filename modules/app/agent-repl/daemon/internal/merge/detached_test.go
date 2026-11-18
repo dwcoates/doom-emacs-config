@@ -1019,7 +1019,7 @@ func TestTheReportAndTheDeployReadTheHoldOnce(t *testing.T) {
 	}
 }
 
-func TestAnEvictedAsyncMergeIsHandedBackToItsRequester(t *testing.T) {
+func TestAnEvictedAsyncMergeIsHandedBackMarkedReleased(t *testing.T) {
 	// Arrange: an async request handed off and waiting in line.
 	h := newHarness(t)
 	if err := requestDetached(t, h, RequestedByUser); err != nil {
@@ -1031,12 +1031,14 @@ func TestAnEvictedAsyncMergeIsHandedBackToItsRequester(t *testing.T) {
 		t.Fatalf("Evict: %v", err)
 	}
 
-	// Assert: the requester is told, as a landing or a failure is, and
-	// nothing needs the user, so the merge workspace stays hidden.
+	// Assert: the outcome reaches the handback's owner marked released, which
+	// tells the requester nothing (mergeworkspace.HandBack), and nothing
+	// needs the user, so the merge workspace stays hidden.
 	sent := h.detached.sent()
 	if len(sent) != 1 || sent[0].requester != theWorkspace || sent[0].mergeWS != theMergeWorkspace ||
-		sent[0].outcome.Kind != DetachedAbandoned || sent[0].outcome.Summary != abandonSummaries[CauseUserDrop] {
-		t.Fatalf("handbacks = %+v, want the eviction told to the requester", sent)
+		sent[0].outcome.Kind != DetachedAbandoned || sent[0].outcome.Summary != abandonSummaries[CauseUserDrop] ||
+		sent[0].outcome.Cause != CauseUserDrop || !sent[0].outcome.Released() {
+		t.Fatalf("handbacks = %+v, want the eviction handed back marked released", sent)
 	}
 	if revealed := h.detached.revealed(); len(revealed) != 0 {
 		t.Fatalf("reveals = %v, want none for an eviction", revealed)
