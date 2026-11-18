@@ -1553,3 +1553,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): A deploy mediator escalating in its own turn is only shown, so setting its effort no longer hangs the escalation.
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A deploy mediator whose fix runs is drawn testing fix or deploying fix, and a cut escalation telling is recorded at INFO
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): The daemon records each accepted connection that closed before delivering a request, to trace calls lost across handovers.
+- 2026-11-17 deploy-mediator (landed in queue bypass mode): Merges whose orphaned rounds were left held read again, and a session closing mid effort read records no fault.
