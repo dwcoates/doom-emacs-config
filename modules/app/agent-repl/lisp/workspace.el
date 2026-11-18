@@ -2720,6 +2720,17 @@ in it is the walk's position, so the landing leads nothing."
         (agent-repl--history-with-visit agent-repl--workspace-history visit)
       agent-repl--workspace-history)))
 
+(defun agent-repl--record-visit (log-ws visit reason)
+  "Put VISIT's workspace in `agent-repl--workspace-history' as the newest visit.
+The ONE writer of a visit's place (`agent-repl--history-with-visit'), for
+the visit that lasted the dwell (`agent-repl--end-visit') and the one the
+user prompted in (`agent-repl--note-visit-prompted') alike.  LOG-WS is the
+record's sink; REASON names what made it a visit."
+  (setq agent-repl--workspace-history
+        (agent-repl--history-with-visit agent-repl--workspace-history visit))
+  (agent-repl--info log-ws "elisp.workspace.visit-recorded ws=%s dwell=%.1fs reason=%s"
+                    (plist-get visit :name) (agent-repl--visit-dwell visit) reason))
+
 (defun agent-repl--end-visit (log-ws reason)
   "End the visit the frame stands in, recording it when it lasted long enough.
 A VISIT IS A SELECTION THAT LASTED `agent-repl-visit-dwell-seconds'.  One
@@ -2733,11 +2744,7 @@ when no visit is running."
           (dwell (agent-repl--visit-dwell visit)))
       (setq agent-repl--current-visit nil)
       (if (>= dwell agent-repl-visit-dwell-seconds)
-          (progn
-            (setq agent-repl--workspace-history
-                  (agent-repl--history-with-visit agent-repl--workspace-history visit))
-            (agent-repl--info log-ws "elisp.workspace.visit-recorded ws=%s dwell=%.1fs reason=%s"
-                              name dwell reason))
+          (agent-repl--record-visit log-ws visit reason)
         (agent-repl--info log-ws
                           "elisp.workspace.visit-dropped ws=%s dwell=%.1fs min=%ds reason=%s"
                           name dwell agent-repl-visit-dwell-seconds reason)))))
@@ -2757,13 +2764,8 @@ not a view of it."
   (let ((visit agent-repl--current-visit))
     (when (equal (plist-get visit :name) ws)
       (when (equal ws agent-repl--recency-walk-landing)
-        (setq agent-repl--recency-walk-landing nil)
-        (agent-repl--info ws "elisp.workspace.recency-walk-ended landing=%s reason=prompt" ws)
-        (agent-repl--stamp-workspace-viewed ws))
-      (setq agent-repl--workspace-history
-            (agent-repl--history-with-visit agent-repl--workspace-history visit))
-      (agent-repl--info ws "elisp.workspace.visit-recorded ws=%s dwell=%.1fs reason=prompt"
-                        ws (agent-repl--visit-dwell visit)))))
+        (agent-repl--clear-recency-walk ws "prompt"))
+      (agent-repl--record-visit ws visit "prompt"))))
 
 (defun agent-repl--visit-renamed (visit old new)
   "Return VISIT with the workspace OLD renamed NEW wherever it names it."
@@ -2809,13 +2811,25 @@ daemon commits the landing's durable instant on its own side
 LOG-WS is the record's sink; REASON names what ended the walk.  No-op when
 no walk is running."
   (when agent-repl--recency-walk-landing
-    (let ((landing agent-repl--recency-walk-landing))
-      (setq agent-repl--recency-walk-landing nil)
-      (agent-repl--info log-ws "elisp.workspace.recency-walk-ended landing=%s reason=%s"
-                        landing reason)
-      (agent-repl--stamp-workspace-viewed landing)
+    (let ((landing (agent-repl--clear-recency-walk log-ws reason)))
       (when (equal (plist-get agent-repl--current-visit :name) landing)
         (agent-repl--end-visit log-ws reason)))))
+
+(defun agent-repl--clear-recency-walk (log-ws reason)
+  "Clear the running recency walk, stamping its landing viewed; return the landing.
+The ONE end of a walk's landing (`agent-repl--recency-walk-landing'), for a
+switch that ends it (`agent-repl--end-recency-walk') and a prompt sent on
+it (`agent-repl--note-visit-prompted') alike: what each then does with the
+visit standing is its own.  LOG-WS is the record's sink; REASON names what
+ended the walk.  A walk must be running."
+  (let ((landing agent-repl--recency-walk-landing))
+    (unless landing
+      (agent-repl--fatal log-ws "elisp.workspace.recency-walk-clear-without-walk reason=%s" reason))
+    (setq agent-repl--recency-walk-landing nil)
+    (agent-repl--info log-ws "elisp.workspace.recency-walk-ended landing=%s reason=%s"
+                      landing reason)
+    (agent-repl--stamp-workspace-viewed landing)
+    landing))
 
 (agent-repl--ws-add-activated-hook #'agent-repl--record-workspace-history)
 

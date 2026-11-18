@@ -2257,6 +2257,98 @@ transiently activated workspace while eager-open is in progress."
         (should (equal agent-repl--workspace-history '("b" "a" "c")))
         (should (equal (agent-repl--selection-history) '("b" "a" "c")))))))
 
+(ert-deftest agent-repl-test-record-visit-puts-the-visit-first-and-logs-it ()
+  "Recording a visit places it newest behind its :ahead and logs its dwell and reason."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("new" "b" "a"))
+            (records nil))
+        (setq agent-repl-test--clock 103.0)
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+          ;; Act
+          (agent-repl--record-visit "c" (list :name "a" :began 100.0 :ahead '("new")) "why"))
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("new" "a" "b")))
+        (should (equal records
+                       '(("c" . "elisp.workspace.visit-recorded ws=a dwell=3.0s reason=why"))))))))
+
+(ert-deftest agent-repl-test-visit-recorders-share-record-visit ()
+  "Both ways a visit is recorded go through `agent-repl--record-visit'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 120.0
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--recency-walk-landing nil)
+            (calls nil))
+        (cl-letf (((symbol-function 'agent-repl--record-visit)
+                   (lambda (_log-ws visit reason) (push (list (plist-get visit :name) reason) calls))))
+          ;; Act
+          (let ((agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+            (agent-repl--end-visit "x" "activation"))
+          (let ((agent-repl--current-visit (list :name "b" :began 100.0 :ahead nil)))
+            (agent-repl--note-visit-prompted "b")))
+        ;; Assert
+        (should (equal calls '(("b" "prompt") ("a" "activation"))))))))
+
+(ert-deftest agent-repl-test-clear-recency-walk-clears-stamps-logs-and-returns-the-landing ()
+  "Clearing a walk drops its landing, stamps it viewed, logs it, and returns it."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--recency-walk-landing "b")
+          (stamped nil)
+          (records nil))
+      (cl-letf (((symbol-function 'agent-repl--stamp-workspace-viewed)
+                 (lambda (name) (push name stamped)))
+                ((symbol-function 'agent-repl--info)
+                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        ;; Act
+        (should (equal (agent-repl--clear-recency-walk "c" "why") "b")))
+      ;; Assert
+      (should-not agent-repl--recency-walk-landing)
+      (should (equal stamped '("b")))
+      (should (equal records '(("c" . "elisp.workspace.recency-walk-ended landing=b reason=why")))))))
+
+(ert-deftest agent-repl-test-clear-recency-walk-without-a-walk-fails-hard ()
+  "Clearing a walk that is not running is a bug, so it signals and stamps nothing."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--recency-walk-landing nil)
+          (stamped nil)
+          (fatals nil))
+      (cl-letf (((symbol-function 'agent-repl--stamp-workspace-viewed)
+                 (lambda (name) (push name stamped)))
+                ((symbol-function 'agent-repl--fatal)
+                 (lambda (ws fmt &rest args)
+                   (push (cons ws (apply #'format fmt args)) fatals)
+                   (error "fatal"))))
+        ;; Act
+        (should-error (agent-repl--clear-recency-walk "c" "why")))
+      ;; Assert
+      (should (equal fatals '(("c" . "elisp.workspace.recency-walk-clear-without-walk reason=why"))))
+      (should-not stamped))))
+
+(ert-deftest agent-repl-test-walk-enders-share-clear-recency-walk ()
+  "Both ways a walk ends go through `agent-repl--clear-recency-walk'."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 101.0
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit nil)
+            (calls nil))
+        (cl-letf (((symbol-function 'agent-repl--clear-recency-walk)
+                   (lambda (_log-ws reason)
+                     (push reason calls)
+                     (prog1 agent-repl--recency-walk-landing
+                       (setq agent-repl--recency-walk-landing nil)))))
+          ;; Act
+          (let ((agent-repl--recency-walk-landing "a"))
+            (agent-repl--end-recency-walk "x" "activation"))
+          (let ((agent-repl--recency-walk-landing "b")
+                (agent-repl--current-visit (list :name "b" :began 100.0 :ahead nil)))
+            (agent-repl--note-visit-prompted "b")))
+        ;; Assert
+        (should (equal calls '("prompt" "activation")))))))
+
 (ert-deftest agent-repl-test-move-visit-to-continues-the-same-workspaces-visit ()
   "Re-activating the workspace the visit names keeps its start, so its dwell keeps counting."
   (agent-repl-test--with-clean-state
