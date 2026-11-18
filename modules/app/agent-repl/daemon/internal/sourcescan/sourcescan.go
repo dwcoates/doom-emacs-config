@@ -157,3 +157,43 @@ func EachDaemonSource(t testing.TB, root string, skip []string, visit func(fset 
 		t.Fatalf("sourcescan: walk the daemon sources: %v", err)
 	}
 }
+
+// EachSourceIn parses every .go file in the one directory DIR and hands each
+// to VISIT with its file set, sorted by name: production sources only, or with
+// WITHTESTS the test files too (a rule over how tests build their fixtures).
+// A directory with no such source fails the test: a rule over nothing proves
+// nothing.
+func EachSourceIn(t testing.TB, dir string, withTests bool, visit func(fset *token.FileSet, file *ast.File)) {
+	t.Helper()
+	names, err := filepath.Glob(filepath.Join(dir, "*.go"))
+	if err != nil {
+		t.Fatalf("sourcescan: glob %s: %v", dir, err)
+	}
+	sort.Strings(names)
+	fset := token.NewFileSet()
+	visited := 0
+	for _, name := range names {
+		if !withTests && strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("sourcescan: parse %s: %v", name, err)
+		}
+		visit(fset, file)
+		visited++
+	}
+	if visited == 0 {
+		t.Fatalf("sourcescan: no .go files in %s", dir)
+	}
+}
+
+// IsSelector reports whether N is the qualified reference PKG.NAME.
+func IsSelector(n ast.Node, pkg, name string) bool {
+	sel, ok := n.(*ast.SelectorExpr)
+	if !ok {
+		return false
+	}
+	id, ok := sel.X.(*ast.Ident)
+	return ok && id.Name == pkg && sel.Sel.Name == name
+}

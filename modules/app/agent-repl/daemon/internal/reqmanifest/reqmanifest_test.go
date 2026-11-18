@@ -1,9 +1,9 @@
 package reqmanifest
 
 import (
+	"agent-repld/internal/sourcescan"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
@@ -60,36 +60,20 @@ func TestEveryReaderOfTheIncludesCallsIncludes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			entries, err := os.ReadDir(tt.dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fset := token.NewFileSet()
 			calls, ownField := 0, ""
 
 			// Act
-			for _, e := range entries {
-				if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-					continue
-				}
-				f, err := parser.ParseFile(fset, filepath.Join(tt.dir, e.Name()), nil, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
+			sourcescan.EachSourceIn(t, tt.dir, false, func(fset *token.FileSet, f *ast.File) {
 				ast.Inspect(f, func(n ast.Node) bool {
-					switch n := n.(type) {
-					case *ast.Field:
-						if n.Tag != nil && strings.Contains(n.Tag.Value, `json:"includes"`) {
-							ownField = fset.Position(n.Pos()).String()
-						}
-					case *ast.SelectorExpr:
-						if id, ok := n.X.(*ast.Ident); ok && id.Name == "reqmanifest" && n.Sel.Name == "Includes" {
-							calls++
-						}
+					if field, ok := n.(*ast.Field); ok && field.Tag != nil && strings.Contains(field.Tag.Value, `json:"includes"`) {
+						ownField = fset.Position(field.Pos()).String()
+					}
+					if sourcescan.IsSelector(n, "reqmanifest", "Includes") {
+						calls++
 					}
 					return true
 				})
-			}
+			})
 
 			// Assert
 			if ownField != "" || calls == 0 {

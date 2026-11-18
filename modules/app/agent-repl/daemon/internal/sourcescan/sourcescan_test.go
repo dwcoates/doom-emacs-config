@@ -265,3 +265,73 @@ func TestDaemonRootIsTheModuleRoot(t *testing.T) {
 		t.Fatalf("DaemonRoot = %q, want %q", root, want)
 	}
 }
+
+func TestEachSourceInVisitsTheDirectorysSourcesInOrder(t *testing.T) {
+	cases := []struct {
+		name      string
+		withTests bool
+		want      []string
+	}{
+		{name: "production only skips the tests", want: []string{"a.go", "b.go"}},
+		{name: "with tests visits the tests too", withTests: true, want: []string{"a.go", "a_test.go", "b.go"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			dir := t.TempDir()
+			for name, body := range map[string]string{"b.go": "package p\n", "a.go": "package p\n", "a_test.go": "package p\n", "notes.txt": "x"} {
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var visited []string
+
+			// Act
+			EachSourceIn(t, dir, tc.withTests, func(fset *token.FileSet, file *ast.File) {
+				visited = append(visited, filepath.Base(fset.Position(file.Pos()).Filename))
+			})
+
+			// Assert
+			if !slices.Equal(visited, tc.want) {
+				t.Fatalf("visited %v, want %v", visited, tc.want)
+			}
+		})
+	}
+}
+
+func TestEachSourceInOverNothingFails(t *testing.T) {
+	// Arrange
+	fake := &fakeTB{TB: t}
+
+	// Act
+	EachSourceIn(fake, t.TempDir(), true, func(*token.FileSet, *ast.File) {})
+
+	// Assert
+	if !fake.failed || !strings.Contains(fake.message, "no .go files") {
+		t.Fatalf("failed=%v message=%q, want the empty directory refused", fake.failed, fake.message)
+	}
+}
+
+func TestIsSelectorMatchesOnlyTheQualifiedReference(t *testing.T) {
+	cases := []struct {
+		name string
+		expr ast.Node
+		want bool
+	}{
+		{name: "the reference itself", expr: &ast.SelectorExpr{X: ast.NewIdent("pkg"), Sel: ast.NewIdent("Name")}, want: true},
+		{name: "another package's", expr: &ast.SelectorExpr{X: ast.NewIdent("other"), Sel: ast.NewIdent("Name")}},
+		{name: "another name", expr: &ast.SelectorExpr{X: ast.NewIdent("pkg"), Sel: ast.NewIdent("Other")}},
+		{name: "no selector", expr: ast.NewIdent("Name")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := IsSelector(tc.expr, "pkg", "Name")
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("IsSelector = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

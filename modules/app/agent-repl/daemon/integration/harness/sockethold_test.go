@@ -1,12 +1,9 @@
 package harness
 
 import (
+	"agent-repld/internal/sourcescan"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -23,31 +20,17 @@ func TestEveryDaemonTestHolderIsHoldtests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			entries, err := os.ReadDir(tt.dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fset := token.NewFileSet()
 			var served []string
 
 			// Act
-			for _, e := range entries {
-				if !strings.HasSuffix(e.Name(), ".go") {
-					continue
-				}
-				f, err := parser.ParseFile(fset, filepath.Join(tt.dir, e.Name()), nil, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
+			sourcescan.EachSourceIn(t, tt.dir, true, func(fset *token.FileSet, f *ast.File) {
 				ast.Inspect(f, func(n ast.Node) bool {
-					if sel, ok := n.(*ast.SelectorExpr); ok {
-						if id, ok := sel.X.(*ast.Ident); ok && id.Name == "sockethold" && sel.Sel.Name == "Serve" {
-							served = append(served, fset.Position(sel.Pos()).String())
-						}
+					if sourcescan.IsSelector(n, "sockethold", "Serve") {
+						served = append(served, fset.Position(n.Pos()).String())
 					}
 					return true
 				})
-			}
+			})
 
 			// Assert
 			if len(served) > 0 {

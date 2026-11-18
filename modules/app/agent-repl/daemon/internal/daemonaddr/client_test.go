@@ -1,12 +1,9 @@
 package daemonaddr
 
 import (
+	"agent-repld/internal/sourcescan"
 	"go/ast"
-	"go/parser"
 	"go/token"
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -49,36 +46,20 @@ func TestNoPackageHandRollsTheClientAddress(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			entries, err := os.ReadDir(tt.dir)
-			if err != nil {
-				t.Fatal(err)
-			}
-			fset := token.NewFileSet()
 			calls, ownDecider := 0, ""
 
 			// Act
-			for _, e := range entries {
-				if !strings.HasSuffix(e.Name(), ".go") || strings.HasSuffix(e.Name(), "_test.go") {
-					continue
-				}
-				f, err := parser.ParseFile(fset, filepath.Join(tt.dir, e.Name()), nil, 0)
-				if err != nil {
-					t.Fatal(err)
-				}
+			sourcescan.EachSourceIn(t, tt.dir, false, func(fset *token.FileSet, f *ast.File) {
 				ast.Inspect(f, func(n ast.Node) bool {
-					switch n := n.(type) {
-					case *ast.FuncDecl:
-						if n.Name.Name == "clientAddress" {
-							ownDecider = fset.Position(n.Pos()).String()
-						}
-					case *ast.SelectorExpr:
-						if id, ok := n.X.(*ast.Ident); ok && id.Name == "daemonaddr" && n.Sel.Name == "ClientAddress" {
-							calls++
-						}
+					if d, ok := n.(*ast.FuncDecl); ok && d.Name.Name == "clientAddress" {
+						ownDecider = fset.Position(d.Pos()).String()
+					}
+					if sourcescan.IsSelector(n, "daemonaddr", "ClientAddress") {
+						calls++
 					}
 					return true
 				})
-			}
+			})
 
 			// Assert
 			if ownDecider != "" || calls == 0 {
