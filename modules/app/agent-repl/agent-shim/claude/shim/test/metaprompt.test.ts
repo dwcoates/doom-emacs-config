@@ -382,6 +382,16 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("without asking me any questions or for permission");
   });
 
+  it("stores no separate link for a GNS subpage of a page the workspace owns, and stores any other subpage owned", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readMetaprompt(home);
+    // Assert
+    expect(text).toContain("A GNS subpage the work adds under a GNS page the workspace already owns as a link is never stored separately");
+    expect(text).toContain("A GNS subpage the work adds under a page the workspace does not own is stored owned");
+  });
+
   it("requires every open pull request an agent makes to be shown in the menu, ahead of merged ones and references", () => {
     // Arrange
     const home = homeOnThisRepository();

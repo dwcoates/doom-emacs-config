@@ -340,6 +340,8 @@
     - The URL comes from the creating command's output, or for a pull request from `gh pr view --json url`, never a guessed one.
   - This holds whoever made it: the workspace's own agent, a skill such as `create-or-update-pr`, or a subagent working for the workspace.
   - It holds in every repository, not only agent-repl's own.
+  - A GNS subpage the work adds under a GNS page the workspace already owns as a link is never stored separately, because the owned page stands for it.
+  - A GNS subpage the work adds under a page the workspace does not own is stored owned, like any other resource it creates.
 - Every pull request an agent makes is also the workspace's canonical link.
   - Canonical means that while the pull request is open, it is one of the menu's shown links.
     - The workspace shows it with `-show` in the same turn it is stored, whenever storing it left it unshown.

@@ -370,3 +370,69 @@ func TestDeployablePullRequestsLeaveOutTheClosedUnmerged(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkspaceLinksGNSSubpages(t *testing.T) {
+	const (
+		page    = "https://gns.example.com/key/teams.core"
+		subpage = "https://gns.example.com/app/teams.core.review.app?s=v"
+	)
+	tests := []struct {
+		name string
+		// held is the links stored before the set.
+		held []linkStep
+		set  LinkSet
+		// refusedBy is the owned page a refusal names; empty when the set
+		// is stored.
+		refusedBy string
+	}{
+		{name: "an owned subpage of an owned page is refused", held: []linkStep{setOwnedLink(page, "The team's page")},
+			set: LinkSet{URL: subpage, Label: "The review app", Owned: true}, refusedBy: page},
+		{name: "a deeper owned subpage is refused", held: []linkStep{setOwnedLink(page, "The team's page")},
+			set: LinkSet{URL: "https://gns.example.com/key/teams.core.notes.2026", Label: "This year's notes", Owned: true}, refusedBy: page},
+		{name: "an owned subpage of a referenced page is stored", held: []linkStep{setLink(page, "The team's page")},
+			set: LinkSet{URL: subpage, Label: "The review app", Owned: true}},
+		{name: "a subpage stored as a reference is stored", held: []linkStep{setOwnedLink(page, "The team's page")},
+			set: LinkSet{URL: subpage, Label: "The review app"}},
+		{name: "an owned page that is no subpage is stored", held: []linkStep{setOwnedLink(page, "The team's page")},
+			set: LinkSet{URL: "https://gns.example.com/key/teams.core-chess", Label: "Another team's page", Owned: true}},
+		{name: "relabeling the owned page itself is stored", held: []linkStep{setOwnedLink(page, "The team's page")},
+			set: LinkSet{URL: page, Label: "The team's main page", Owned: true}},
+		{name: "an owned parent of an owned page is stored", held: []linkStep{setOwnedLink(subpage, "The review app")},
+			set: LinkSet{URL: page, Label: "The team's page", Owned: true}},
+		{name: "an owned url that is no GNS page is stored", held: []linkStep{setOwnedLink(page, "The team's page")},
+			set: LinkSet{URL: "https://example.com/key/teams.core.notes", Label: "A lookalike page", Owned: true}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			ws := testWorkspace(t, s)
+			standing := applyLinkSteps(t, s, ws.ID, tt.held)
+
+			// Act
+			got, err := s.SetWorkspaceLink(context.Background(), ws.ID, tt.set)
+
+			// Assert
+			read, _ := s.WorkspaceLinks(context.Background(), ws.ID)
+			if tt.refusedBy == "" {
+				if err != nil || got[0].URL != tt.set.URL || got[0].Owned != tt.set.Owned {
+					t.Fatalf("set = %+v, %v; want the link stored at the front", got, err)
+				}
+				return
+			}
+			var subpageErr *SubpageOfOwnedLinkError
+			if !errors.As(err, &subpageErr) || subpageErr.URL != tt.set.URL || subpageErr.OwnedPageURL != tt.refusedBy {
+				t.Fatalf("err = %v, want a subpage refusal naming %q", err, tt.refusedBy)
+			}
+			if !slices.Equal(read, standing) {
+				t.Errorf("links = %+v, want the standing %+v untouched", read, standing)
+			}
+			if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelDebug, Operation: "daemon.wsm.set_workspace_link"}); !ok {
+				t.Errorf("no DEBUG record of the refused set: %v", log.Records())
+			}
+			if hasErrorRecord(log.Records(), "daemon.wsm.set_workspace_link", string(ws.ID)) {
+				t.Errorf("the refusal was recorded as an ERROR: %v", log.Records())
+			}
+		})
+	}
+}

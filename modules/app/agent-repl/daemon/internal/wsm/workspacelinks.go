@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/gnsurl"
 )
 
 // workspaceLinksDDL is the layout-85 addition: every link an agent stored for
@@ -100,6 +101,29 @@ func (e *UnknownLinkError) Error() string {
 	return fmt.Sprintf("wsm: the workspace holds no link %q", e.URL)
 }
 
+// SubpageOfOwnedLinkError is an owned set naming a GNS subpage of a GNS page
+// the workspace already owns as a link (gnsurl.Page.Contains): the owned page
+// stands for its subpages, so nothing is stored. It is the store answering
+// what was asked, never a failure.
+type SubpageOfOwnedLinkError struct {
+	// URL is the url as the caller named it.
+	URL string
+	// OwnedPageURL is the stored owned link whose page contains it.
+	OwnedPageURL string
+}
+
+func (e *SubpageOfOwnedLinkError) Error() string {
+	return fmt.Sprintf("wsm: %q is a GNS subpage of the owned link %q", e.URL, e.OwnedPageURL)
+}
+
+// isLinkRefusal reports whether ERR is a links write refusing what was asked
+// (the verb turns each into the rpc's arm), never the store failing.
+func isLinkRefusal(err error) bool {
+	var unknown *UnknownLinkError
+	var subpage *SubpageOfOwnedLinkError
+	return errors.As(err, &unknown) || errors.As(err, &subpage)
+}
+
 // errTooManyShown is a show naming more links than ShownLinkLimit. The verb
 // refuses that before it reaches the store, so here it is a caller's defect.
 var errTooManyShown = errors.New("wsm: a show names at most ShownLinkLimit links")
@@ -118,7 +142,8 @@ func (s *store) WorkspaceLinks(ctx context.Context, id WorkspaceID) ([]Workspace
 
 // SetWorkspaceLink stores SET's url under its label and ownership, or
 // relabels it when ID already holds it, making it the most recently set
-// either way. A new link is shown while fewer than ShownLinkLimit are; a
+// either way. An owned GNS page that is a subpage of another GNS page ID
+// owns is a *SubpageOfOwnedLinkError, and nothing changes. A new link is shown while fewer than ShownLinkLimit are; a
 // relabeled one keeps its placement. In the same transaction an owned pull
 // request takes SET.Subscribe when ID holds no subscription to it, and a link
 // no longer owned ends the subscription its ownership took. It answers every
@@ -146,6 +171,11 @@ func (s *store) SetWorkspaceLink(ctx context.Context, id WorkspaceID, set LinkSe
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
 			return err
+		}
+		if set.Owned {
+			if err := refuseSubpageOfOwnedInTx(ctx, tx, id, url); err != nil {
+				return err
+			}
 		}
 		var next, shown int64
 		if err := tx.QueryRowContext(ctx,
@@ -267,6 +297,31 @@ func (s *store) ClearWorkspaceLinks(ctx context.Context, id WorkspaceID) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM workspace_links WHERE workspace_id = ?`, id)
 		return err
 	})
+}
+
+// refuseSubpageOfOwnedInTx answers a *SubpageOfOwnedLinkError when URL is a
+// GNS page some other owned link of ID's contains, read in the set's own
+// transaction so no concurrent set can slip a subpage past an owned page
+// stored meanwhile. Nil for every url that is no GNS page.
+func refuseSubpageOfOwnedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, url string) error {
+	page, ok := gnsurl.ParsePage(url)
+	if !ok {
+		return nil
+	}
+	owned, err := listRows(ctx, tx, `SELECT url FROM workspace_links WHERE workspace_id = ? AND owned = 1 AND url != ? ORDER BY set_seq`,
+		func(row interface{ Scan(...any) error }) (string, error) {
+			var held string
+			return held, row.Scan(&held)
+		}, id, url)
+	if err != nil {
+		return err
+	}
+	for _, held := range owned {
+		if heldPage, isPage := gnsurl.ParsePage(held); isPage && heldPage.Contains(page) {
+			return &SubpageOfOwnedLinkError{URL: url, OwnedPageURL: held}
+		}
+	}
+	return nil
 }
 
 // requireWorkspaceRow answers ErrNotFound when ID is not registered, so a

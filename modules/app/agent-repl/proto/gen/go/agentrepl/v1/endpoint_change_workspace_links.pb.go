@@ -538,6 +538,7 @@ type ChangeWorkspaceLinksError struct {
 	//	*ChangeWorkspaceLinksError_TooManyShown
 	//	*ChangeWorkspaceLinksError_UnknownAnnouncedLink
 	//	*ChangeWorkspaceLinksError_PullRequestOwnedElsewhere
+	//	*ChangeWorkspaceLinksError_SubpageOfOwnedLink
 	Cause         isChangeWorkspaceLinksError_Cause `protobuf_oneof:"cause"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -670,6 +671,15 @@ func (x *ChangeWorkspaceLinksError) GetPullRequestOwnedElsewhere() *ChangeWorksp
 	return nil
 }
 
+func (x *ChangeWorkspaceLinksError) GetSubpageOfOwnedLink() *ChangeWorkspaceLinksSubpageOfOwnedLink {
+	if x != nil {
+		if x, ok := x.Cause.(*ChangeWorkspaceLinksError_SubpageOfOwnedLink); ok {
+			return x.SubpageOfOwnedLink
+		}
+	}
+	return nil
+}
+
 type isChangeWorkspaceLinksError_Cause interface {
 	isChangeWorkspaceLinksError_Cause()
 }
@@ -729,6 +739,13 @@ type ChangeWorkspaceLinksError_PullRequestOwnedElsewhere struct {
 	PullRequestOwnedElsewhere *ChangeWorkspaceLinksPullRequestOwnedElsewhere `protobuf:"bytes,10,opt,name=pull_request_owned_elsewhere,json=pullRequestOwnedElsewhere,proto3,oneof"`
 }
 
+type ChangeWorkspaceLinksError_SubpageOfOwnedLink struct {
+	// A set stored a GNS page OWNED that is a subpage of a GNS page the
+	// workspace already owns as a link. The owned page's link already
+	// reaches the subpage, so a separate link for it is never stored.
+	SubpageOfOwnedLink *ChangeWorkspaceLinksSubpageOfOwnedLink `protobuf:"bytes,11,opt,name=subpage_of_owned_link,json=subpageOfOwnedLink,proto3,oneof"`
+}
+
 func (*ChangeWorkspaceLinksError_UnknownWorkspace) isChangeWorkspaceLinksError_Cause() {}
 
 func (*ChangeWorkspaceLinksError_WorkspaceRefMismatch) isChangeWorkspaceLinksError_Cause() {}
@@ -748,6 +765,8 @@ func (*ChangeWorkspaceLinksError_TooManyShown) isChangeWorkspaceLinksError_Cause
 func (*ChangeWorkspaceLinksError_UnknownAnnouncedLink) isChangeWorkspaceLinksError_Cause() {}
 
 func (*ChangeWorkspaceLinksError_PullRequestOwnedElsewhere) isChangeWorkspaceLinksError_Cause() {}
+
+func (*ChangeWorkspaceLinksError_SubpageOfOwnedLink) isChangeWorkspaceLinksError_Cause() {}
 
 // The workspace id is not in the daemon's registry. DELIBERATELY EMPTY.
 type ChangeWorkspaceLinksUnknownWorkspace struct {
@@ -1255,6 +1274,70 @@ func (x *ChangeWorkspaceLinksPullRequestOwnedElsewhere) GetOwnerName() string {
 	return ""
 }
 
+// The owned link names a GNS subpage of a page the workspace already owns.
+// Nothing was stored: the page the workspace owns stands for its subpages.
+// A GNS page is an http or https url on a GNS host whose path is
+// `/key/<key>`, `/keys/<key>` or `/app/<key>`, the key a dotted GNS name; a
+// subpage of it is a page on the same host whose key extends the owned
+// page's key by one or more dotted segments (`teams.x.notes` under
+// `teams.x`), whatever the route of either. A subpage of a GNS page the
+// workspace does NOT own, or holds only as a reference, is stored owned as
+// any other link is.
+type ChangeWorkspaceLinksSubpageOfOwnedLink struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The url exactly as the request named it.
+	Url string `protobuf:"bytes,1,opt,name=url,proto3" json:"url,omitempty"`
+	// The url of the owned link whose GNS page contains it, exactly as that
+	// link was stored.
+	OwnedPageUrl  string `protobuf:"bytes,2,opt,name=owned_page_url,json=ownedPageUrl,proto3" json:"owned_page_url,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ChangeWorkspaceLinksSubpageOfOwnedLink) Reset() {
+	*x = ChangeWorkspaceLinksSubpageOfOwnedLink{}
+	mi := &file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ChangeWorkspaceLinksSubpageOfOwnedLink) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ChangeWorkspaceLinksSubpageOfOwnedLink) ProtoMessage() {}
+
+func (x *ChangeWorkspaceLinksSubpageOfOwnedLink) ProtoReflect() protoreflect.Message {
+	mi := &file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ChangeWorkspaceLinksSubpageOfOwnedLink.ProtoReflect.Descriptor instead.
+func (*ChangeWorkspaceLinksSubpageOfOwnedLink) Descriptor() ([]byte, []int) {
+	return file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ChangeWorkspaceLinksSubpageOfOwnedLink) GetUrl() string {
+	if x != nil {
+		return x.Url
+	}
+	return ""
+}
+
+func (x *ChangeWorkspaceLinksSubpageOfOwnedLink) GetOwnedPageUrl() string {
+	if x != nil {
+		return x.OwnedPageUrl
+	}
+	return ""
+}
+
 var File_agentrepl_v1_endpoint_change_workspace_links_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
@@ -1281,7 +1364,7 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\x05error\x18\x02 \x01(\v2'.agentrepl.v1.ChangeWorkspaceLinksErrorH\x00R\x05errorB\b\n" +
 	"\x06result\"Q\n" +
 	"\x1bChangeWorkspaceLinksSuccess\x122\n" +
-	"\x05links\x18\x01 \x01(\v2\x1c.agentrepl.v1.WorkspaceLinksR\x05links\"\xfc\a\n" +
+	"\x05links\x18\x01 \x01(\v2\x1c.agentrepl.v1.WorkspaceLinksR\x05links\"\xe7\b\n" +
 	"\x19ChangeWorkspaceLinksError\x12a\n" +
 	"\x11unknown_workspace\x18\x01 \x01(\v22.agentrepl.v1.ChangeWorkspaceLinksUnknownWorkspaceH\x00R\x10unknownWorkspace\x12n\n" +
 	"\x16workspace_ref_mismatch\x18\x02 \x01(\v26.agentrepl.v1.ChangeWorkspaceLinksWorkspaceRefMismatchH\x00R\x14workspaceRefMismatch\x12a\n" +
@@ -1293,7 +1376,8 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\x0etoo_many_shown\x18\b \x01(\v2..agentrepl.v1.ChangeWorkspaceLinksTooManyShownH\x00R\ftooManyShown\x12n\n" +
 	"\x16unknown_announced_link\x18\t \x01(\v26.agentrepl.v1.ChangeWorkspaceLinksUnknownAnnouncedLinkH\x00R\x14unknownAnnouncedLink\x12~\n" +
 	"\x1cpull_request_owned_elsewhere\x18\n" +
-	" \x01(\v2;.agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhereH\x00R\x19pullRequestOwnedElsewhereB\a\n" +
+	" \x01(\v2;.agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhereH\x00R\x19pullRequestOwnedElsewhere\x12i\n" +
+	"\x15subpage_of_owned_link\x18\v \x01(\v24.agentrepl.v1.ChangeWorkspaceLinksSubpageOfOwnedLinkH\x00R\x12subpageOfOwnedLinkB\a\n" +
 	"\x05cause\"&\n" +
 	"$ChangeWorkspaceLinksUnknownWorkspace\"M\n" +
 	"(ChangeWorkspaceLinksWorkspaceRefMismatch\x12!\n" +
@@ -1321,7 +1405,10 @@ const file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc = "" +
 	"\x03url\x18\x01 \x01(\tR\x03url\x120\n" +
 	"\x05owner\x18\x02 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\x05owner\x12\x1d\n" +
 	"\n" +
-	"owner_name\x18\x03 \x01(\tR\townerNameB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"owner_name\x18\x03 \x01(\tR\townerName\"`\n" +
+	"&ChangeWorkspaceLinksSubpageOfOwnedLink\x12\x10\n" +
+	"\x03url\x18\x01 \x01(\tR\x03url\x12$\n" +
+	"\x0eowned_page_url\x18\x02 \x01(\tR\fownedPageUrlB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescOnce sync.Once
@@ -1335,7 +1422,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescGZIP() []byt
 	return file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_agentrepl_v1_endpoint_change_workspace_links_proto_goTypes = []any{
 	(*ChangeWorkspaceLinksRequest)(nil),                   // 0: agentrepl.v1.ChangeWorkspaceLinksRequest
 	(*ChangeWorkspaceLinksSet)(nil),                       // 1: agentrepl.v1.ChangeWorkspaceLinksSet
@@ -1355,20 +1442,21 @@ var file_agentrepl_v1_endpoint_change_workspace_links_proto_goTypes = []any{
 	(*ChangeWorkspaceLinksTooManyShown)(nil),              // 15: agentrepl.v1.ChangeWorkspaceLinksTooManyShown
 	(*ChangeWorkspaceLinksUnknownAnnouncedLink)(nil),      // 16: agentrepl.v1.ChangeWorkspaceLinksUnknownAnnouncedLink
 	(*ChangeWorkspaceLinksPullRequestOwnedElsewhere)(nil), // 17: agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhere
-	(*v1.WorkspaceRef)(nil),                               // 18: workspace.v1.WorkspaceRef
-	(*WorkspaceLinkOwnership)(nil),                        // 19: agentrepl.v1.WorkspaceLinkOwnership
-	(*WorkspaceLinks)(nil),                                // 20: agentrepl.v1.WorkspaceLinks
+	(*ChangeWorkspaceLinksSubpageOfOwnedLink)(nil),        // 18: agentrepl.v1.ChangeWorkspaceLinksSubpageOfOwnedLink
+	(*v1.WorkspaceRef)(nil),                               // 19: workspace.v1.WorkspaceRef
+	(*WorkspaceLinkOwnership)(nil),                        // 20: agentrepl.v1.WorkspaceLinkOwnership
+	(*WorkspaceLinks)(nil),                                // 21: agentrepl.v1.WorkspaceLinks
 }
 var file_agentrepl_v1_endpoint_change_workspace_links_proto_depIdxs = []int32{
-	18, // 0: agentrepl.v1.ChangeWorkspaceLinksRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	19, // 0: agentrepl.v1.ChangeWorkspaceLinksRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.ChangeWorkspaceLinksRequest.set:type_name -> agentrepl.v1.ChangeWorkspaceLinksSet
 	2,  // 2: agentrepl.v1.ChangeWorkspaceLinksRequest.remove:type_name -> agentrepl.v1.ChangeWorkspaceLinksRemove
 	3,  // 3: agentrepl.v1.ChangeWorkspaceLinksRequest.show:type_name -> agentrepl.v1.ChangeWorkspaceLinksShow
 	4,  // 4: agentrepl.v1.ChangeWorkspaceLinksRequest.clear:type_name -> agentrepl.v1.ChangeWorkspaceLinksClear
-	19, // 5: agentrepl.v1.ChangeWorkspaceLinksSet.ownership:type_name -> agentrepl.v1.WorkspaceLinkOwnership
+	20, // 5: agentrepl.v1.ChangeWorkspaceLinksSet.ownership:type_name -> agentrepl.v1.WorkspaceLinkOwnership
 	6,  // 6: agentrepl.v1.ChangeWorkspaceLinksResponse.success:type_name -> agentrepl.v1.ChangeWorkspaceLinksSuccess
 	7,  // 7: agentrepl.v1.ChangeWorkspaceLinksResponse.error:type_name -> agentrepl.v1.ChangeWorkspaceLinksError
-	20, // 8: agentrepl.v1.ChangeWorkspaceLinksSuccess.links:type_name -> agentrepl.v1.WorkspaceLinks
+	21, // 8: agentrepl.v1.ChangeWorkspaceLinksSuccess.links:type_name -> agentrepl.v1.WorkspaceLinks
 	8,  // 9: agentrepl.v1.ChangeWorkspaceLinksError.unknown_workspace:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownWorkspace
 	9,  // 10: agentrepl.v1.ChangeWorkspaceLinksError.workspace_ref_mismatch:type_name -> agentrepl.v1.ChangeWorkspaceLinksWorkspaceRefMismatch
 	10, // 11: agentrepl.v1.ChangeWorkspaceLinksError.transferring_away:type_name -> agentrepl.v1.ChangeWorkspaceLinksTransferringAway
@@ -1379,12 +1467,13 @@ var file_agentrepl_v1_endpoint_change_workspace_links_proto_depIdxs = []int32{
 	15, // 16: agentrepl.v1.ChangeWorkspaceLinksError.too_many_shown:type_name -> agentrepl.v1.ChangeWorkspaceLinksTooManyShown
 	16, // 17: agentrepl.v1.ChangeWorkspaceLinksError.unknown_announced_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksUnknownAnnouncedLink
 	17, // 18: agentrepl.v1.ChangeWorkspaceLinksError.pull_request_owned_elsewhere:type_name -> agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhere
-	18, // 19: agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhere.owner:type_name -> workspace.v1.WorkspaceRef
-	20, // [20:20] is the sub-list for method output_type
-	20, // [20:20] is the sub-list for method input_type
-	20, // [20:20] is the sub-list for extension type_name
-	20, // [20:20] is the sub-list for extension extendee
-	0,  // [0:20] is the sub-list for field type_name
+	18, // 19: agentrepl.v1.ChangeWorkspaceLinksError.subpage_of_owned_link:type_name -> agentrepl.v1.ChangeWorkspaceLinksSubpageOfOwnedLink
+	19, // 20: agentrepl.v1.ChangeWorkspaceLinksPullRequestOwnedElsewhere.owner:type_name -> workspace.v1.WorkspaceRef
+	21, // [21:21] is the sub-list for method output_type
+	21, // [21:21] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_change_workspace_links_proto_init() }
@@ -1414,6 +1503,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_init() {
 		(*ChangeWorkspaceLinksError_TooManyShown)(nil),
 		(*ChangeWorkspaceLinksError_UnknownAnnouncedLink)(nil),
 		(*ChangeWorkspaceLinksError_PullRequestOwnedElsewhere)(nil),
+		(*ChangeWorkspaceLinksError_SubpageOfOwnedLink)(nil),
 	}
 	file_agentrepl_v1_endpoint_change_workspace_links_proto_msgTypes[11].OneofWrappers = []any{}
 	type x struct{}
@@ -1422,7 +1512,7 @@ func file_agentrepl_v1_endpoint_change_workspace_links_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc), len(file_agentrepl_v1_endpoint_change_workspace_links_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

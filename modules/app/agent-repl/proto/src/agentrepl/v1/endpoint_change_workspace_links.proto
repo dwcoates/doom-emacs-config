@@ -140,6 +140,10 @@ message ChangeWorkspaceLinksError {
     // place in the pull request's GitHub merge queue the sidebar's merge
     // queue draws, so a second owner is refused.
     ChangeWorkspaceLinksPullRequestOwnedElsewhere pull_request_owned_elsewhere = 10;
+    // A set stored a GNS page OWNED that is a subpage of a GNS page the
+    // workspace already owns as a link. The owned page's link already
+    // reaches the subpage, so a separate link for it is never stored.
+    ChangeWorkspaceLinksSubpageOfOwnedLink subpage_of_owned_link = 11;
   }
 }
 
@@ -218,4 +222,21 @@ message ChangeWorkspaceLinksPullRequestOwnedElsewhere {
   workspace.v1.WorkspaceRef owner = 2;
   // That workspace's name, for the refusal's words.
   string owner_name = 3;
+}
+
+// The owned link names a GNS subpage of a page the workspace already owns.
+// Nothing was stored: the page the workspace owns stands for its subpages.
+// A GNS page is an http or https url on a GNS host whose path is
+// `/key/<key>`, `/keys/<key>` or `/app/<key>`, the key a dotted GNS name; a
+// subpage of it is a page on the same host whose key extends the owned
+// page's key by one or more dotted segments (`teams.x.notes` under
+// `teams.x`), whatever the route of either. A subpage of a GNS page the
+// workspace does NOT own, or holds only as a reference, is stored owned as
+// any other link is.
+message ChangeWorkspaceLinksSubpageOfOwnedLink {
+  // The url exactly as the request named it.
+  string url = 1;
+  // The url of the owned link whose GNS page contains it, exactly as that
+  // link was stored.
+  string owned_page_url = 2;
 }

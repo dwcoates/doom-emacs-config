@@ -532,6 +532,12 @@ creating workspaces there with `-repository DIR`.
     - A pull request has ONE owning workspace. Storing it `-owned` while
       another open workspace owns it is refused `pull_request_owned_elsewhere`,
       naming the owner; store it `-reference` instead.
+    - A GNS page (`https://<gns host>/key/<key>`, `/keys/<key>` or
+      `/app/<key>`) whose dotted key extends the key of a GNS page this
+      workspace already holds `-owned` (`teams.x.notes` under `teams.x`) is
+      a subpage of it. Storing such a subpage `-owned` is refused
+      `subpage_of_owned_link`, naming the owned page as `owned_page_url`,
+      and nothing is stored.
   - The menu shows at most five links. While it has room a new link is
     shown; once it is full a new link is stored unshown, and the answer's
     `links.menu` is `full` with `unshown` above zero. Then name the five the
