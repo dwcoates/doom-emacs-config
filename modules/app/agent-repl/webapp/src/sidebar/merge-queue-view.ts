@@ -672,7 +672,9 @@ export function drawRosterMergeQueueWaiting(
   const numeral = document.createElement("span");
   numeral.className = MERGE_QUEUE_POSITION_CLASS;
   numeral.textContent = `${position}`;
-  line.append(numeral, drawSubjectName(subject, `${path}.subject`));
+  const name = drawSubjectName(subject, `${path}.subject`);
+  line.append(numeral, name);
+  appendAsyncOf(line, name, subject, `${path}.subject`);
   line.appendChild(drawClock(sc, msOf(u.queuedAtMs, `${path}.queued_at_ms`)));
   return line;
 }
@@ -727,7 +729,10 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
   const discard = requireMessage(requireMessage(u.discard, `${path}.discard`).merge, `${path}.discard.merge`);
   const line = drawSubjectControl(subject, sc, MERGE_QUEUE_OFF_QUEUE_CLASS, `${path}.subject`);
   const label = drawQueueLabel(cause.text, "sb-mq-off-queue-cause", "why this merge left the queue");
-  line.append(drawSubjectName(subject, `${path}.subject`), label);
+  const name = drawSubjectName(subject, `${path}.subject`);
+  line.append(name);
+  appendAsyncOf(line, name, subject, `${path}.subject`);
+  line.append(label);
   line.appendChild(
     drawOffQueueControl("↺", "requeue", "put this merge back in line, at the back", (control) =>
       fireVerb(control, {
@@ -782,6 +787,35 @@ function drawOffQueueControl(glyph: string, verb: string, title: string, act: (c
 /** A GitHub merge queue place as drawn: "#3 of 5". */
 export function githubPlaceText(u: RosterMergeQueueGithubPlace): string {
   return `#${u.place} of ${u.total}`;
+}
+
+/** The class of an async merge's "(async of <requester>)" note. */
+export const MERGE_QUEUE_ASYNC_OF_CLASS = "sb-mq-async-of";
+
+/** An async merge's note as drawn: "(async of <requester>)". */
+export function asyncOfText(requester: string): string {
+  return `(async of ${requester})`;
+}
+
+/**
+ * Appends to LINE, for an async merge, the quieter "(async of <requester>)"
+ * note after its name (owner request, 2026-11-18): a click on the line lands
+ * on the requester, so the line says whose merge it is. The note is cut with
+ * an ellipsis when the line is short of room, and the line's hover shows it
+ * whole. NAME is the line's name, drawn by drawSubjectName. A sync merge's
+ * line gains nothing.
+ */
+function appendAsyncOf(line: HTMLElement, name: HTMLElement, u: RosterMergeQueueSubject, path: string): void {
+  const mode = requireCase(requireMessage(u.mode, `${path}.mode`).mode, `${path}.mode.mode`);
+  if (mode.case !== "async") return;
+  const requester = requireMessage(mode.value.requester, `${path}.mode.async.requester`);
+  const note = document.createElement("span");
+  note.className = MERGE_QUEUE_ASYNC_OF_CLASS;
+  note.textContent = asyncOfText(requester.name);
+  line.appendChild(note);
+  line.title = note.textContent;
+  // The name's own "async merge" hover would hide the line's on the name.
+  name.removeAttribute("title");
 }
 
 /** A merge's name, with an async merge saying so on hover. */

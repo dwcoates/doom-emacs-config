@@ -2650,7 +2650,7 @@ describe("the recently merged rows' stylesheet", () => {
     return drawn;
   };
 
-  it("starts a merged row's name where a waiting merge's line, and its bullet, start", () => {
+  it("starts a merged row's name where a waiting merge's line starts", () => {
     const drawn = drawnGroup(1);
     const line = drawn.querySelector<HTMLElement>(".merged-section .merged-group .ws > .row")!;
     const waiting = drawn.querySelector<HTMLElement>(".sb-mq-waiting")!;
@@ -2660,9 +2660,9 @@ describe("the recently merged rows' stylesheet", () => {
     ]);
   });
 
-  it("indents by the queue's padding, the status mark's width and the line's gap", () => {
+  it("indents by a row's own left padding, as the OPEN section's rows start", () => {
     const drawn = drawnGroup(1);
-    expect(inRail(drawn, (rail) => cascadedValue(rail, "--mq-list-indent"))).toBe("calc(0.9rem + var(--ws-mark-width) + 0.45rem)");
+    expect(inRail(drawn, (rail) => cascadedValue(rail, "--mq-list-indent"))).toBe("0.9rem");
   });
 
   it("draws no bullet on a merged row", () => {

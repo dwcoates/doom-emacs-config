@@ -1138,8 +1138,10 @@ body {
 #ws-sidebar .sb-mq-off-queue .sb-mq-name { font-size: var(--mq-name-font-size); }
 /* A WAITING MERGE'S LINE AND A RECENTLY MERGED ROW START AT ONE INDENT
    (owner request, 2026-11-01): a merged row's name stands where a waiting
-   merge's bullet does, so the two sections' lists read alike. */
-#ws-sidebar { --mq-list-indent: calc(0.9rem + var(--ws-mark-width) + 0.45rem); }
+   merge's position numeral does, so the two sections' lists read alike. THE
+   INDENT IS A ROW'S OWN LEFT PADDING (owner request, 2026-11-18), as the
+   OPEN section's rows start, so a line has the room its async note takes. */
+#ws-sidebar { --mq-list-indent: 0.9rem; }
 #ws-sidebar .sb-mq-waiting,
 #ws-sidebar .sb-mq-github,
 #ws-sidebar .sb-mq-off-queue {
@@ -1147,6 +1149,20 @@ body {
   font-size: 0.9em;
   line-height: var(--merged-row-line-h);
   padding-left: var(--mq-list-indent);
+}
+/* AN ASYNC MERGE'S "(async of <requester>)" NOTE is smaller, greyer and
+   italic beside its name (owner request, 2026-11-18). It gives way first:
+   it shrinks to an ellipsis before the name or the clock does, and the
+   line's hover shows it whole. */
+#ws-sidebar .sb-mq-async-of {
+  color: var(--repo-head-collapsed);
+  font-size: 0.85em;
+  font-style: italic;
+  min-width: 0;
+  flex: 0 1000 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 /* THE STAGES wear the bubble's tab glyphs, and their colours from the
    bubble's own rules (".merge-tab-glyph.is-live" and its siblings). */
@@ -1687,7 +1703,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 }
 /* A RECENTLY MERGED ROW IS DRAWN AS A WAITING MERGE'S LINE IS, WITH NO
    BULLET (owner request, 2026-11-01): its name in the waiting names' size,
-   starting where their bullets do (--mq-list-indent), and in the merged
+   starting where their numerals do (--mq-list-indent), and in the merged
    rows' own grey, a step greyer than an open row's. */
 #ws-sidebar .repo.merged-section .ws > .row { padding-left: var(--mq-list-indent); }
 #ws-sidebar .repo.merged-section .row .name.band-name {

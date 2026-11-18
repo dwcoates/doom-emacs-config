@@ -1346,6 +1346,9 @@ func TestEachMergeInTheQueueIsDrawnUnderItsOwnName(t *testing.T) {
 	type drawn struct {
 		credited, name string
 		async          bool
+		// requester is an async merge's "(async of <name>)" note: its
+		// credited workspace's name.
+		requester string
 		// merge is the queue entry's workspace every ask about it names.
 		merge string
 	}
@@ -1365,7 +1368,7 @@ func TestEachMergeInTheQueueIsDrawnUnderItsOwnName(t *testing.T) {
 			name:       "an async merge is drawn under its own name, credited to its requester",
 			line:       []sidebar.QueueEntry{{Workspace: "w-merge", Credited: "w1", Async: true, AsyncName: "land-one", Admitted: true}},
 			workspaces: []wsm.Workspace{workspace("w1", "one"), mergeWorkspace("w-merge", "land-one", "w1")},
-			want:       []drawn{{credited: "w1", name: "land-one", async: true, merge: "w-merge"}},
+			want:       []drawn{{credited: "w1", name: "land-one", async: true, requester: "one", merge: "w-merge"}},
 		},
 		{
 			name: "several async merges from one requester are drawn apart",
@@ -1376,9 +1379,9 @@ func TestEachMergeInTheQueueIsDrawnUnderItsOwnName(t *testing.T) {
 			},
 			workspaces: []wsm.Workspace{workspace("w1", "one"), mergeWorkspace("w-merge", "land-one", "w1"), mergeWorkspace("w-merge2", "land-two", "w1")},
 			want: []drawn{
-				{credited: "w1", name: "land-one", async: true, merge: "w-merge"},
-				{credited: "w1", name: "land-two", async: true, merge: "w-merge2"},
-				{credited: "w1", name: "land-three", async: true, merge: "w1"},
+				{credited: "w1", name: "land-one", async: true, requester: "one", merge: "w-merge"},
+				{credited: "w1", name: "land-two", async: true, requester: "one", merge: "w-merge2"},
+				{credited: "w1", name: "land-three", async: true, requester: "one", merge: "w1"},
 			},
 		},
 	}
@@ -1399,7 +1402,8 @@ func TestEachMergeInTheQueueIsDrawnUnderItsOwnName(t *testing.T) {
 			}
 			got := make([]drawn, 0, len(subjects))
 			for _, sub := range subjects {
-				got = append(got, drawn{credited: sub.GetWorkspace().GetId(), name: sub.GetName(), async: sub.GetMode().GetAsync() != nil, merge: sub.GetMerge().GetId()})
+				got = append(got, drawn{credited: sub.GetWorkspace().GetId(), name: sub.GetName(), async: sub.GetMode().GetAsync() != nil,
+					requester: sub.GetMode().GetAsync().GetRequester().GetName(), merge: sub.GetMerge().GetId()})
 			}
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("drawn = %+v, want %+v", got, tc.want)

@@ -332,7 +332,8 @@ func queueSubject(credited wsm.Workspace, entry QueueEntry) *frontendv1.RosterMe
 	mode := &frontendv1.RosterMergeQueueMode{Mode: &frontendv1.RosterMergeQueueMode_Sync{Sync: &frontendv1.RosterMergeQueueModeSync{}}}
 	name := credited.Name
 	if entry.Async {
-		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{}}
+		mode.Mode = &frontendv1.RosterMergeQueueMode_Async{Async: &frontendv1.RosterMergeQueueModeAsync{
+			Requester: &frontendv1.RosterMergeQueueModeAsyncRequester{Name: credited.Name}}}
 		name = entry.AsyncName
 	}
 	return &frontendv1.RosterMergeQueueSubject{Workspace: credited.Ref(), Name: name, Reveal: entry.Reveal, Mode: mode,

@@ -541,12 +541,14 @@ export function drawnEntries(list: Element): string[] {
  * said), running sync unless ASYNC, revealing REVEAL when given, and standing
  * on its queue as MERGE (ID unless said).
  */
-export function queueSubject(id: string, init: { name?: string; async?: boolean; reveal?: string; merge?: string } = {}): RosterMergeQueueSubject {
+export function queueSubject(id: string, init: { name?: string; async?: boolean; requester?: string; reveal?: string; merge?: string } = {}): RosterMergeQueueSubject {
   return create(RosterMergeQueueSubjectSchema, {
     workspace: { id, dir: `/w/${id}` },
     name: init.name ?? id,
     reveal: init.reveal === undefined ? undefined : { value: init.reveal },
-    mode: { mode: init.async === true ? { case: "async", value: {} } : { case: "sync", value: {} } },
+    mode: {
+      mode: init.async === true ? { case: "async", value: { requester: { name: init.requester ?? id } } } : { case: "sync", value: {} },
+    },
     merge: { id: init.merge ?? id },
   });
 }

@@ -11,7 +11,7 @@ import { pageStylesheet } from "./stylesheets";
 
 const MARKUP = `<nav id="ws-sidebar" style="width:260px">
 <div class="repo merge-queue-section"><div class="rows"><div class="merged-group"><div class="rows sb-merge-queue">
-<div class="sb-mq-waiting"><span class="sb-mq-name">behind</span><span class="sb-mq-clock">1m</span></div>
+<div class="sb-mq-waiting"><span class="sb-mq-position">1</span><span class="sb-mq-name">behind</span><span class="sb-mq-clock">1m</span></div>
 </div></div></div></div>
 <div class="repo merged-section"><div class="rows"><div class="merged-group"><div class="rows">
 <div class="ws"><div class="row"><span class="name band-name">landed</span><span class="when">3h</span></div></div>
@@ -21,6 +21,7 @@ interface Drawn {
   height: number;
   nameSize: string;
   nameLeft: number;
+  startLeft: number;
   durationSize: string;
 }
 
@@ -45,6 +46,7 @@ describe("a recently merged row against a waiting merge's line in WebKit", () =>
           height: el.getBoundingClientRect().height,
           nameSize: getComputedStyle(n).fontSize,
           nameLeft: n.getBoundingClientRect().left,
+          startLeft: (el.firstElementChild as HTMLElement).getBoundingClientRect().left,
           durationSize: getComputedStyle(el.querySelector(duration) as HTMLElement).fontSize,
         };
       };
@@ -64,8 +66,8 @@ describe("a recently merged row against a waiting merge's line in WebKit", () =>
     expect(merged.nameSize).toBe(waiting.nameSize);
   });
 
-  it("starts a merged row's name where a waiting name starts", () => {
-    expect(merged.nameLeft).toBeCloseTo(waiting.nameLeft, 1);
+  it("starts a merged row's name where a waiting line's numeral starts", () => {
+    expect(merged.nameLeft).toBeCloseTo(waiting.startLeft, 1);
   });
 
   it("draws a waiting merge's clock in its name's size", () => {
