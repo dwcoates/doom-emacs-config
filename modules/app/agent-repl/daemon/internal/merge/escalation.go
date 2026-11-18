@@ -33,8 +33,10 @@ const BriefDeployEscalation = "deploy-escalation"
 func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said bool, fields dlog.Context) (ids.WorkspaceID, error) {
 	repoDir := q.repository.Dir
 	fields = withField(fields, "summary", summary)
+	// A TELLING THE DAEMON'S EXIT OR A HANDOVER CUT is no failure: the
+	// next daemon's pass tells it again (mediationFailed records it at INFO).
 	failed := func(message string, err error) (ids.WorkspaceID, error) {
-		o.deps.Log.Global().Error(opMediation, message, withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, message, err)
 		return "", err
 	}
 	// THE MEDIATOR THAT ESCALATED IN ITS OWN TURN IS ONLY SHOWN, never

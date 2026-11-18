@@ -98,13 +98,13 @@ func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, show b
 	}
 	fields = withField(fields, "mediator", string(mediator.ws))
 	if err := o.deps.DeployChecks.Refresh(ctx, mediator.ws); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "the deploy mediator's worktree could not be brought to the main branch's tip; it is not briefed", err)
 		return standing{}, fmt.Errorf("merge: refresh the deploy mediator %s: %w", mediator.ws, err)
 	}
 	// THE MEDIATOR IS RECORDED BEFORE THE EFFORT IS SET: setting it starts a
 	// made mediator's shim, whose landing reads the record.
 	if err := o.deps.DeployChecks.SetDeployMediatorEffort(ctx, mediator.ws); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator's effort could not be set; it is not briefed", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "the deploy mediator's effort could not be set; it is not briefed", err)
 		return standing{}, fmt.Errorf("merge: set the deploy mediator %s's effort: %w", mediator.ws, err)
 	}
 	if show {
@@ -133,7 +133,7 @@ func (o *orchestrator) showMediator(ctx context.Context, q checkedQueue, fields 
 // ERROR.
 func (o *orchestrator) show(ctx context.Context, mediator standing, fields dlog.Context) error {
 	if err := o.deps.DeployChecks.Resume(ctx, mediator.ws); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator could not be shown for its brief; it is not briefed", withField(fields, "error", err.Error()))
+		o.mediationFailed(ctx, fields, "the deploy mediator could not be shown for its brief; it is not briefed", err)
 		return fmt.Errorf("merge: show the deploy mediator %s: %w", mediator.ws, err)
 	}
 	return nil

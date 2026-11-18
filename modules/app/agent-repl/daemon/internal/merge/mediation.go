@@ -1245,7 +1245,9 @@ func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.
 // (intakeRound).
 func (o *orchestrator) tellEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said bool, fields dlog.Context) {
 	if _, err := o.escalate(ctx, q, m, summary, problems, window, said, fields); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the escalated check could not be told to the mediator; the queue stays held, and the next pass tells it again", fields)
+		// ESCALATE RECORDED WHY, at ERROR or, for a cut, at INFO: this
+		// records only that the check waits for the next pass.
+		o.deps.Log.Global().Info(opMediation, "the escalated check was not told to the mediator; the queue stays held, and the next pass tells it again", fields)
 		return
 	}
 	o.takeOnProblems(ctx, q.key, problems, escalatedKeys(window), "taken on with the escalation", fields)
