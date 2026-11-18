@@ -9,12 +9,14 @@ import (
 	"sync"
 
 	"agentrepl/logging/buildreport"
+	"agentrepl/logging/sockethold"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/holderensure"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/restarttiming"
@@ -182,6 +184,18 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 	if err != nil {
 		return nil, nil, err
 	}
+	requirements := deploy.ScriptRequirements{ModuleRoot: p.Checkout, Runner: p.Runner}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the home directory a holder's control socket expands against: %w", err)
+	}
+	holders, err := holderensure.Declared(p.Checkout, home)
+	if err != nil {
+		return nil, nil, fmt.Errorf("agent-repld: the socket holders the deploy brings up: %w", err)
+	}
+	// The store takes its sockets from the holder that holds its socket, if
+	// one is declared (holderensure.HolderOfSocket).
+	storeHolder, _ := holderensure.HolderOfSocket(holders, p.Store)
 	restarter := &deploy.Restarter{
 		Services:    services,
 		StoreSocket: p.Store,
@@ -192,7 +206,10 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		CacheBin:    where.cacheBin,
 		ReportDir:   where.reportDir,
 		Restarts:    p.Restarts,
-		Define:      deploy.ScriptRequirements{ModuleRoot: p.Checkout, Runner: p.Runner}.Define,
+		Define:      requirements.Define,
+		EnsureHolder: (&holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe,
+			Install: requirements.EnsureHolder, Log: log}).EnsureID,
+		StoreHolder: storeHolder,
 	}
 	deployer, err := deploy.New(deploy.Deps{
 		Restarts:   p.Restarts,

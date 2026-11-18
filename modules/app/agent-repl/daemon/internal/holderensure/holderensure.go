@@ -29,12 +29,9 @@ import (
 // op is the operation every record of the ensure is filed under.
 const op = "daemon.holder.ensure"
 
-// The ids of the holders agent-repl's own services take their sockets from
-// (daemon/requirements.json, agent-shim/shim-store/requirements.json).
-const (
-	DaemonHolder = "socket-holder-daemon"
-	StoreHolder  = "socket-holder-store"
-)
+// DaemonHolder is the id of the holder the daemon takes its shared listener
+// from (daemon/requirements.json).
+const DaemonHolder = "socket-holder-daemon"
 
 // InstallBound bounds one holder install: the sockethold build (0.92s with a
 // cold cache, 0.19s warm), the manifests' load and the render (0.13s), and
@@ -47,11 +44,12 @@ const InstallBound = 3 * time.Second
 // the cold build and the render, without the unmeasured load.
 const InstallMeasured = 1050 * time.Millisecond
 
-// Holder is one socket holder requirement: its id, and its control socket
-// with a leading ~ expanded.
+// Holder is one socket holder requirement: its id, its control socket, and
+// the unix sockets it holds, each with a leading ~ expanded.
 type Holder struct {
 	ID      string
 	Control string
+	Sockets []string
 }
 
 // manifest is the slice of a requirements manifest the holders are read from.
@@ -62,6 +60,9 @@ type manifest struct {
 		Kind      string   `json:"kind"`
 		Platforms []string `json:"platforms"`
 		Control   string   `json:"control"`
+		Sockets   []struct {
+			Unix string `json:"unix"`
+		} `json:"sockets"`
 	} `json:"requirements"`
 }
 
@@ -91,7 +92,18 @@ func Declared(root, home string) ([]Holder, error) {
 			if err != nil {
 				return nil, fmt.Errorf("holderensure: the control socket of %s: %w", e.ID, err)
 			}
-			out = append(out, Holder{ID: e.ID, Control: control})
+			h := Holder{ID: e.ID, Control: control}
+			for _, sock := range e.Sockets {
+				if sock.Unix == "" {
+					continue
+				}
+				path, err := dirpath.Absolute(sock.Unix, home)
+				if err != nil {
+					return nil, fmt.Errorf("holderensure: a socket %s holds: %w", e.ID, err)
+				}
+				h.Sockets = append(h.Sockets, path)
+			}
+			out = append(out, h)
 		}
 	}
 	return out, nil
@@ -117,6 +129,18 @@ func ControlOf(holders []Holder, id string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("holderensure: no requirement on %s declares the socket holder %s", runtime.GOOS, id)
+}
+
+// HolderOfSocket answers the id of the holder among HOLDERS that holds the
+// unix socket SOCKET, false when none does: a server listening there takes it
+// from that holder, and one at a socket no holder declares binds its own.
+func HolderOfSocket(holders []Holder, socket string) (string, bool) {
+	for _, h := range holders {
+		if slices.Contains(h.Sockets, socket) {
+			return h.ID, true
+		}
+	}
+	return "", false
 }
 
 // Ensurer proves a holder serves a control socket, and installs a declared
@@ -177,4 +201,15 @@ func (e *Ensurer) Ensure(ctx context.Context, control string) error {
 	delete(fields, "error")
 	e.Log.Info(op, "installed the holder", fields)
 	return nil
+}
+
+// EnsureID is Ensure for the declared holder ID's control socket. An id no
+// requirement declares is an error.
+func (e *Ensurer) EnsureID(ctx context.Context, id string) error {
+	control, err := ControlOf(e.Holders, id)
+	if err != nil {
+		e.Log.Error(op, "the holder to ensure is one no requirement declares", dlog.Context{"holder": id, "error": err.Error()})
+		return err
+	}
+	return e.Ensure(ctx, control)
 }

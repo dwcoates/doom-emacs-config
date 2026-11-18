@@ -44,8 +44,8 @@ func TestDeclaredReadsEveryHolderTheManifestsDeclareForThisPlatform(t *testing.T
 	}{
 		{name: "a holder in an included manifest is read with its control expanded", files: map[string]string{
 			"requirements.json":   `{"includes": ["d/requirements.json"], "requirements": []}`,
-			"d/requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "control": "~/c.sock"}]}`,
-		}, want: []Holder{{ID: "h", Control: "/home/me/c.sock"}}},
+			"d/requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "control": "~/c.sock", "sockets": [{"name": "s", "unix": "~/s.sock"}, {"name": "t", "tcp": "127.0.0.1"}]}]}`,
+		}, want: []Holder{{ID: "h", Control: "/home/me/c.sock", Sockets: []string{"/home/me/s.sock"}}}},
 		{name: "a holder in the root manifest is read", files: map[string]string{
 			"requirements.json": `{"requirements": [{"id": "h", "kind": "socket_holder", "platforms": ["` + runtime.GOOS + `"], "control": "/c.sock"}]}`,
 		}, want: []Holder{{ID: "h", Control: "/c.sock"}}},
@@ -167,6 +167,68 @@ func TestEnsure(t *testing.T) {
 			rec, ok := dlog.FindRecord(log.Records(), q)
 			if !ok || rec.Context["control"] != tt.control {
 				t.Fatalf("records = %+v, want %+v naming the control socket", log.Records(), q)
+			}
+		})
+	}
+}
+
+func TestEnsureIDEnsuresTheDeclaredHoldersControlSocket(t *testing.T) {
+	tests := []struct {
+		name      string
+		id        string
+		wantProbe string
+		wantErr   bool
+	}{
+		{name: "a declared holder's control socket is probed", id: "store-holder", wantProbe: "/s.sock"},
+		{name: "an undeclared holder is an error, and nothing is probed", id: "nothing", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestLogger()
+			var probed string
+			e := &Ensurer{
+				Holders: []Holder{{ID: "store-holder", Control: "/s.sock"}},
+				Probe:   func(_ context.Context, control string) error { probed = control; return nil },
+				Install: func(context.Context, string) error { return errors.New("never installed") },
+				Log:     log,
+			}
+
+			// Act
+			err := e.EnsureID(context.Background(), tt.id)
+
+			// Assert
+			if (err != nil) != tt.wantErr || probed != tt.wantProbe {
+				t.Fatalf("EnsureID = %v, probed %q; want error %v, probed %q", err, probed, tt.wantErr, tt.wantProbe)
+			}
+			if tt.wantErr {
+				if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: op, Message: "the holder to ensure is one no requirement declares"}); !ok {
+					t.Fatalf("records = %+v, want the undeclared holder at ERROR", log.Records())
+				}
+			}
+		})
+	}
+}
+
+func TestHolderOfSocketFindsTheHolderThatHoldsIt(t *testing.T) {
+	holders := []Holder{{ID: "store-holder", Control: "/c.sock", Sockets: []string{"/store.sock", "/store-read.sock"}}}
+	tests := []struct {
+		name   string
+		socket string
+		want   string
+		wantOK bool
+	}{
+		{name: "a held socket names its holder", socket: "/store-read.sock", want: "store-holder", wantOK: true},
+		{name: "a socket no holder declares names none", socket: "/tmp/test-store.sock"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, ok := HolderOfSocket(holders, tt.socket)
+
+			// Assert
+			if got != tt.want || ok != tt.wantOK {
+				t.Fatalf("HolderOfSocket = (%q, %v), want (%q, %v)", got, ok, tt.want, tt.wantOK)
 			}
 		})
 	}

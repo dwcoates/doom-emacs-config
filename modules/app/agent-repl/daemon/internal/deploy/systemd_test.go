@@ -149,3 +149,35 @@ func TestSystemdUserDefinitionIsTheLabelsUnit(t *testing.T) {
 		t.Fatalf("Definition = %q, want /u/x.service", got)
 	}
 }
+
+func TestSystemdUserReloadReadsTheChangedUnitThenRestarts(t *testing.T) {
+	tests := []struct {
+		name     string
+		answers  map[string]runAnswer
+		wantArgv []string
+		wantErr  bool
+	}{
+		{name: "the units are reloaded, then the unit restarted", answers: map[string]runAnswer{},
+			wantArgv: []string{"systemctl daemon-reload --user", "systemctl restart --user x.service"}},
+		{name: "a failed daemon-reload restarts nothing", answers: map[string]runAnswer{"systemctl daemon-reload --user": {out: "Failed", code: 1}},
+			wantArgv: []string{"systemctl daemon-reload --user"}, wantErr: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			s, runner := newSystemdUser(tc.answers)
+
+			// Act
+			err := s.Reload(context.Background(), "x")
+
+			// Assert
+			var got []string
+			for _, c := range runner.Calls() {
+				got = append(got, strings.Join(c, " "))
+			}
+			if (err != nil) != tc.wantErr || strings.Join(got, ",") != strings.Join(tc.wantArgv, ",") {
+				t.Fatalf("Reload = %v, ran %v; want error %v, ran %v", err, got, tc.wantErr, tc.wantArgv)
+			}
+		})
+	}
+}

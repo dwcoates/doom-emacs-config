@@ -100,6 +100,17 @@ func (l *fakeServiceManager) Restart(_ context.Context, label string) error {
 	return nil
 }
 
+func (l *fakeServiceManager) Reload(_ context.Context, label string) error {
+	l.record("reload " + label)
+	if l.restartErr != nil {
+		return l.restartErr
+	}
+	if label == StoreLabel && l.onRestart != nil {
+		l.onRestart()
+	}
+	return nil
+}
+
 func (l *fakeServiceManager) Stop(_ context.Context, label string) error {
 	l.record("stop " + label)
 	l.mu.Lock()
@@ -139,6 +150,22 @@ type restarterHarness struct {
 	defineErr error
 	// defineWritesNothing makes a successful Define leave no definition.
 	defineWritesNothing bool
+	// definition is what a successful Define writes; "" writes the
+	// definition every service is installed with, so a restart finds it
+	// unchanged.
+	definition string
+	// holderErr is what EnsureHolder answers; ensuredHolders records each
+	// holder it was asked for.
+	holderErr      error
+	ensuredHolders []string
+}
+
+// ensureHolder is the harness's EnsureHolder: it records "ensure-holder <id>"
+// among the service manager's calls.
+func (h *restarterHarness) ensureHolder(_ context.Context, id string) error {
+	h.services.record("ensure-holder " + id)
+	h.ensuredHolders = append(h.ensuredHolders, id)
+	return h.holderErr
 }
 
 // define is the harness's Define: it records "define <label>" among the
@@ -151,7 +178,11 @@ func (h *restarterHarness) define(_ context.Context, label string) error {
 	if h.defineWritesNothing {
 		return nil
 	}
-	return os.WriteFile(filepath.Join(h.services.dir, label+".plist"), []byte("<plist/>"), 0o644)
+	body := h.definition
+	if body == "" {
+		body = "<plist/>"
+	}
+	return os.WriteFile(filepath.Join(h.services.dir, label+".plist"), []byte(body), 0o644)
 }
 
 // processExit is the harness's ProcessExit: it waits on the pid's entry in
@@ -200,25 +231,31 @@ func newRestarter(t *testing.T) *restarterHarness {
 		}
 	})
 	plists := t.TempDir()
-	writeFile(t, filepath.Join(plists, SidecarLabel+".plist"), "<plist/>")
+	// The store and the sidecar are installed with their definitions; a test
+	// that needs a standalone's writes it.
+	for _, label := range []string{StoreLabel, SidecarLabel} {
+		writeFile(t, filepath.Join(plists, label+".plist"), "<plist/>")
+	}
 	log := dlog.NewTestLogger()
 	h := &restarterHarness{services: newFakeServiceManager(plists), log: log, sock: filepath.Join(sockDir, "store.sock"), alive: map[int]bool{},
 		restarts: &restarttimingtest.Recorder{}, clock: newBoundClock(),
 		// The store runs until a test ends it; the sidecar's bootout ends it.
 		exits: map[int]chan struct{}{10: make(chan struct{})}, awaiting: make(chan int, 8)}
 	h.r = &Restarter{
-		CacheBin:    t.TempDir(),
-		ReportDir:   t.TempDir(),
-		Alive:       func(pid int) bool { return h.alive[pid] },
-		Services:    h.services,
-		StoreSocket: h.sock,
-		StoreLog:    filepath.Join(t.TempDir(), "shim-store.err.log"),
-		Windows:     DefaultServiceWindows,
-		Clock:       h.clock,
-		Log:         log,
-		Restarts:    h.restarts,
-		ProcessExit: h.processExit,
-		Define:      h.define,
+		CacheBin:     t.TempDir(),
+		ReportDir:    t.TempDir(),
+		Alive:        func(pid int) bool { return h.alive[pid] },
+		Services:     h.services,
+		StoreSocket:  h.sock,
+		StoreLog:     filepath.Join(t.TempDir(), "shim-store.err.log"),
+		Windows:      DefaultServiceWindows,
+		Clock:        h.clock,
+		Log:          log,
+		Restarts:     h.restarts,
+		ProcessExit:  h.processExit,
+		Define:       h.define,
+		EnsureHolder: h.ensureHolder,
+		StoreHolder:  "store-holder",
 	}
 	return h
 }
@@ -247,6 +284,86 @@ func loggedTo(log *dlog.TestLogger, level, substr string) bool {
 	return false
 }
 
+func TestRestartStoreSettlesItsHolderAndDefinitionBeforeAnythingStops(t *testing.T) {
+	tests := []struct {
+		name       string
+		arrange    func(h *restarterHarness)
+		wantActs   []string
+		wantErr    bool
+		wantRecord string
+	}{
+		{name: "a changed definition is reloaded, never kickstarted", arrange: func(h *restarterHarness) { h.definition = "<plist with --holder/>" },
+			wantActs:   []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "reload " + StoreLabel, "start " + SidecarLabel},
+			wantRecord: "a service's definition changed since it was loaded; it is reloaded on it"},
+		{name: "a holder that cannot be brought up stops nothing", arrange: func(h *restarterHarness) { h.holderErr = errors.New("install failed") },
+			wantActs: []string{"ensure-holder store-holder"}, wantErr: true},
+		{name: "a definition that cannot be written stops nothing", arrange: func(h *restarterHarness) { h.defineErr = errors.New("define-service exited 1") },
+			wantActs: []string{"ensure-holder store-holder", "define " + StoreLabel}, wantErr: true,
+			wantRecord: "a service's definition could not be written from its requirements entry; nothing was restarted"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			h.services.onRestart = func() { h.bindSocket(t) }
+			tt.arrange(h)
+
+			// Act
+			err := h.r.RestartStore(context.Background())
+
+			// Assert
+			if (err != nil) != tt.wantErr || fmt.Sprint(h.acts()) != fmt.Sprint(tt.wantActs) {
+				t.Fatalf("RestartStore = %v, acts %v; want error %v, acts %v", err, h.acts(), tt.wantErr, tt.wantActs)
+			}
+			if tt.wantRecord != "" {
+				if _, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Operation: opServices, Message: tt.wantRecord}); !ok {
+					t.Fatalf("records = %+v, want %q", h.log.Records(), tt.wantRecord)
+				}
+			}
+		})
+	}
+}
+
+func TestAStoreAtASocketNoHolderHoldsEnsuresNoHolder(t *testing.T) {
+	// Arrange: no declared holder holds the store's socket.
+	h := newRestarter(t)
+	h.r.StoreHolder = ""
+	h.services.onRestart = func() { h.bindSocket(t) }
+
+	// Act
+	err := h.r.RestartStore(context.Background())
+
+	// Assert
+	want := []string{"define " + StoreLabel, "stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
+	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) || len(h.ensuredHolders) != 0 {
+		t.Fatalf("RestartStore = %v, acts %v, holders %v; want %v and no holder ensured", err, h.acts(), h.ensuredHolders, want)
+	}
+}
+
+func TestAStoreStartedFromNothingHasItsHolderEnsuredFirst(t *testing.T) {
+	// Arrange: the store is unloaded with no definition.
+	h := newRestarter(t)
+	h.services.loaded[StoreLabel] = false
+	if err := os.Remove(filepath.Join(h.services.dir, StoreLabel+".plist")); err != nil {
+		t.Fatal(err)
+	}
+	h.services.onStart = func(label string) {
+		if label == StoreLabel {
+			h.bindSocket(t)
+		}
+	}
+
+	// Act
+	_ = h.r.EnsureLoaded(context.Background())
+
+	// Assert
+	acts := h.acts()
+	at := func(act string) int { return slices.Index(acts, act) }
+	if at("ensure-holder store-holder") < 0 || at("start "+StoreLabel) < 0 || at("ensure-holder store-holder") > at("start "+StoreLabel) {
+		t.Fatalf("acts %v, want the store's holder ensured before the store starts", acts)
+	}
+}
+
 func TestRestartStoreTakesTheRecordedSafeOrder(t *testing.T) {
 	// Arrange: the new store binds its socket as soon as it is kickstarted.
 	h := newRestarter(t)
@@ -265,7 +382,7 @@ func TestRestartStoreTakesTheRecordedSafeOrder(t *testing.T) {
 			acts = append(acts, c)
 		}
 	}
-	want := []string{"stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
+	want := []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
 	if strings.Join(acts, ",") != strings.Join(want, ",") {
 		t.Fatalf("launchd acts = %v, want %v", acts, want)
 	}
@@ -472,7 +589,7 @@ func TestRestartSidecarKickstartsItAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartSidecar: %v", err)
 	}
-	if calls := h.services.Calls(); len(calls) != 1 || calls[0] != "restart "+SidecarLabel {
+	if calls := h.services.Calls(); fmt.Sprint(calls) != fmt.Sprint([]string{"define " + SidecarLabel, "restart " + SidecarLabel}) {
 		t.Fatalf("calls = %v, want one sidecar kickstart", calls)
 	}
 }
@@ -712,9 +829,12 @@ func TestEnsureLoadedBootstrapsAnUnloadedSidecarWithoutTouchingTheStore(t *testi
 // started (ensureLoaded); one whose definition cannot be written is refused,
 // and nothing is started.
 func TestEnsureLoadedRefusesAnUnloadedServiceWhosePlistCannotBeWritten(t *testing.T) {
-	// Arrange.
+	// Arrange: the store is unloaded with no definition.
 	h := newRestarter(t)
 	h.services.loaded[StoreLabel] = false
+	if err := os.Remove(filepath.Join(h.services.dir, StoreLabel+".plist")); err != nil {
+		t.Fatal(err)
+	}
 	h.defineErr = errors.New("define-service exited 1")
 
 	// Act.
@@ -792,7 +912,7 @@ func TestEnsureCurrentRestartsAStaleStoreAndItsSidecarInTheSafeOrder(t *testing.
 	err := h.r.EnsureCurrent(context.Background())
 
 	// Assert
-	want := []string{"stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
+	want := []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "restart " + StoreLabel, "start " + SidecarLabel}
 	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
 	}
@@ -823,7 +943,7 @@ func TestEnsureCurrentRestartsAStaleSidecarAlone(t *testing.T) {
 	err := h.r.EnsureCurrent(context.Background())
 
 	// Assert
-	if want := []string{"restart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"define " + SidecarLabel, "restart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
 	}
 }
@@ -860,7 +980,7 @@ func TestEnsureCurrentDoesNotRestartAStoreItJustBootstrapped(t *testing.T) {
 	err := h.r.EnsureCurrent(context.Background())
 
 	// Assert
-	if want := []string{"start " + StoreLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"ensure-holder store-holder", "start " + StoreLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("EnsureCurrent = %v, acts %v; want %v", err, h.acts(), want)
 	}
 }
@@ -1007,7 +1127,7 @@ func TestEnsureStoreCurrentsSecondHalfRestartsAStaleSidecar(t *testing.T) {
 	err = sidecar(context.Background())
 
 	// Assert
-	if want := []string{"restart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
+	if want := []string{"define " + SidecarLabel, "restart " + SidecarLabel}; err != nil || fmt.Sprint(h.acts()) != fmt.Sprint(want) {
 		t.Fatalf("second half = %v, acts %v; want %v", err, h.acts(), want)
 	}
 }
@@ -1066,8 +1186,9 @@ func TestRestartStandaloneKickstartsItAlone(t *testing.T) {
 	for _, sv := range Standalones {
 		for _, tc := range cases {
 			t.Run(sv.Short+"/"+tc.name, func(t *testing.T) {
-				// Arrange
+				// Arrange: the standalone is loaded from its definition.
 				h := newRestarter(t)
+				writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
 				h.services.restartErr = tc.restartErr
 
 				// Act
@@ -1080,7 +1201,7 @@ func TestRestartStandaloneKickstartsItAlone(t *testing.T) {
 					}
 					return
 				}
-				if acts := h.acts(); err != nil || len(acts) != 1 || acts[0] != "restart "+sv.Label {
+				if acts := h.acts(); err != nil || fmt.Sprint(acts) != fmt.Sprint([]string{"define " + sv.Label, "restart " + sv.Label}) {
 					t.Fatalf("RestartStandalone = %v, acts = %v, want one %s kickstart", err, acts, sv.Label)
 				}
 			})
@@ -1106,8 +1227,9 @@ func TestEnsureCurrentKeepsEveryStandaloneLoadedAndCurrent(t *testing.T) {
 		want    func(sv Standalone) []string
 	}{
 		{name: "a stale one is restarted alone", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
+			writeFile(t, filepath.Join(h.services.dir, sv.Label+".plist"), "<plist/>")
 			h.running(t, sv.Label, sv.Service, 40, "old "+sv.Short, "new "+sv.Short)
-		}, want: func(sv Standalone) []string { return []string{"restart " + sv.Label} }},
+		}, want: func(sv Standalone) []string { return []string{"define " + sv.Label, "restart " + sv.Label} }},
 		{name: "a current one is left alone", arrange: func(t *testing.T, h *restarterHarness, sv Standalone) {
 			h.running(t, sv.Label, sv.Service, 40, "new "+sv.Short, "new "+sv.Short)
 		}, want: func(Standalone) []string { return nil }},
