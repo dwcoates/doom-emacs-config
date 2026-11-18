@@ -20,6 +20,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -2064,5 +2065,15 @@ func TestPathStands(t *testing.T) {
 				t.Fatalf("pathStands(%s) = %v, %v; want %v, error %v", tt.path, got, err, tt.want, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestEveryLiveAbsenceIsReadThroughPathStands(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "os.Lstat(")
+
+	// Assert: pathStands' own read is the only one.
+	if !slices.Equal(sites, []string{"deploy.go"}) {
+		t.Fatalf("os.Lstat sites = %v, want only pathStands' in deploy.go", sites)
 	}
 }
