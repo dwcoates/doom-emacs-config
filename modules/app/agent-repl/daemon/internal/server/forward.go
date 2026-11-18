@@ -32,6 +32,9 @@ func (s *server) forwardTarget(ctx context.Context, rpc string, header http.Head
 	if header.Get(ForwardedHeader) != "" {
 		return "", false, nil
 	}
+	if target, ok := adoptTarget(rpc, s.deps.SuccessorAddress()); ok {
+		return target, true, nil
+	}
 	id := requestWorkspaceID(msg)
 	if id == "" {
 		return "", false, nil
@@ -61,6 +64,23 @@ func (s *server) forwardTarget(ctx context.Context, rpc string, header http.Head
 		}
 	}
 	return "", false, nil
+}
+
+// adoptRPCs are the calls that ARE an adoption: a client joining the
+// rendezvous a handover arms on its successor.
+var adoptRPCs = map[string]bool{"AdoptWebWorkspace": true, "AdoptHostWorkspace": true}
+
+// adoptTarget answers SUCCESSOR for an adopt call while a handover has one.
+// THE RENDEZVOUS LIVES ON THE SUCCESSOR: a client that reloads onto the
+// shared address mid-handover reaches the incumbent, which still accepts on
+// it, before the workspace stands transferred there, and only the successor
+// can adopt it. Any other call, and an adopt call with no handover in flight,
+// is decided by its workspace's standing.
+func adoptTarget(rpc, successor string) (string, bool) {
+	if adoptRPCs[rpc] && successor != "" {
+		return successor, true
+	}
+	return "", false
 }
 
 // forwardRequest copies REQ for TARGET: its message and headers, marked as

@@ -250,3 +250,29 @@ func TestARelayedStreamEndsWithTheForwardingDaemonsLife(t *testing.T) {
 		t.Fatal("the relayed stream sent again after the forwarding daemon's life ended, want it ended")
 	}
 }
+
+func TestAnAdoptCallGoesToTheSuccessorWhileAHandoverHasOne(t *testing.T) {
+	cases := []struct {
+		name      string
+		rpc       string
+		successor string
+		want      string
+		wantOK    bool
+	}{
+		{name: "a web adopt goes to the successor", rpc: "AdoptWebWorkspace", successor: "127.0.0.1:2", want: "127.0.0.1:2", wantOK: true},
+		{name: "a host adopt goes to the successor", rpc: "AdoptHostWorkspace", successor: "127.0.0.1:2", want: "127.0.0.1:2", wantOK: true},
+		{name: "an adopt with no handover in flight is decided by its standing", rpc: "AdoptWebWorkspace"},
+		{name: "any other call is decided by its standing", rpc: "GetWorkspaceStatus", successor: "127.0.0.1:2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, ok := adoptTarget(tc.rpc, tc.successor)
+
+			// Assert
+			if got != tc.want || ok != tc.wantOK {
+				t.Fatalf("adoptTarget(%q, %q) = (%q, %v), want (%q, %v)", tc.rpc, tc.successor, got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}

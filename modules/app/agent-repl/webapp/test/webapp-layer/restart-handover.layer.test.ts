@@ -119,9 +119,10 @@ it(
     // as carried (`lifecycle.ts:344-350`).
     expect(address).not.toBe("");
     expect(textOf(banner)).toBe(`workspace moved to ${address}`);
-    // A DIFFERENT DAEMON, not this page's own: the successor listens on its
-    // own loopback port, which is the whole reason this page cannot follow it.
-    expect(`http://${address}`).not.toBe(realDaemon().baseUrl);
+    // THE SHARED ADDRESS, this page's own: every daemon serves the one
+    // address its socket holder keeps, so the move names no other daemon's
+    // port, and Emacs reloads the page there.
+    expect(`http://${address}`).toBe(realDaemon().baseUrl);
 
     // Assert (2) — the page went quiet, and the refusal it now gets is the
     // LOCAL one: `callUnary` refuses before the wire, and the composer draws
