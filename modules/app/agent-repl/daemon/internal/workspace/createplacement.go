@@ -14,6 +14,9 @@ import (
 const (
 	// ArmPlacementOnChild is a placement on a workspace with a parent.
 	ArmPlacementOnChild = "placement_on_child"
+	// ArmRequestedByDeployMediator is a create the repository's deploy
+	// mediator asked for, which it never does (owner ruling, 2026-11-18).
+	ArmRequestedByDeployMediator = "requested_by_deploy_mediator"
 	// ArmPlacementOnMergeWorkspace is a placement beside an async merge.
 	ArmPlacementOnMergeWorkspace = "placement_on_merge_workspace"
 	// ArmPlacementRequiresWorkspace is a placement asked by the user.
