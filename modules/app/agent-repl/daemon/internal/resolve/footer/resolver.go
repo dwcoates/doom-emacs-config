@@ -1442,6 +1442,7 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 				}
 				batch.text = questionLead(res.Start.GetBatch())
 				s.questions[id] = batch
+				r.askOpened(ws, s)
 			})
 	default:
 		r.mutate(ws, "daemon.footer.on_question", "the footer closed a question batch",
@@ -1449,6 +1450,7 @@ func (r *resolver) OnQuestion(ws ids.WorkspaceID, agent *conversationv1.AgentId,
 				r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected the question-close transition",
 					dlog.Context{"question_id": id})
 				s.dropQuestion(id)
+				r.askClosed(ws, s)
 			})
 	}
 }
@@ -1489,6 +1491,7 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 				}
 				ask.text = gatedCall(res.Start.GetPrompt())
 				s.permissions[id] = ask
+				r.askOpened(ws, s)
 			})
 	default:
 		r.mutate(ws, "daemon.footer.on_permission", "the footer closed a consent ask",
@@ -1496,6 +1499,7 @@ func (r *resolver) OnPermission(ws ids.WorkspaceID, agent *conversationv1.AgentI
 				r.logOf(ws, s).Debug("daemon.footer.transition_decision", "selected the permission-close transition",
 					dlog.Context{"permission_id": id})
 				s.dropPermission(id)
+				r.askClosed(ws, s)
 			})
 	}
 }
