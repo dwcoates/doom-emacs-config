@@ -182,16 +182,18 @@ func (c *Controller) askAuthorization(ctx context.Context) {
 }
 
 // Expected time and bound of StopAsks' pkill, spawned the way the daemon
-// spawns it. Measured 2026-11-16 on the owner's laptop: 1500 pkills of a
-// pattern matching nothing, run through scriptrunner from a Go process
-// holding the daemon's 520MB heap while a 13-unit test run (an e2e among
-// them) shared the host at load average 4 to 6: median 15ms, p99 19ms, worst
-// 56ms. The bound is 2.5 times the worst. An earlier 40ms bound, measured on
-// a shell's pkill with no test load (worst 17ms over 30 runs), fired under
-// the merge queue's test gate (2026-11-16).
+// spawns it. The live daemon deploys on the same host the merge queue's test
+// gate runs on, so the healthy worst case is the one under that gate's load.
+// Measured 2026-11-17 19:07 in the gate's full run of the selected suites
+// (8 slots, 1146s of cpu in 180s): the deploy timed this stop of a one-line
+// fake pkill at 200ms, and the daemon's 259 spawns of a fake git across that
+// run's kept artifacts had a p99 of 78ms and a worst of 91ms. The expected
+// time is the 200ms the gate measured, and the bound 2.5 times it. The
+// earlier 140ms bound, measured 2026-11-16 at load average 4 to 6 (1500
+// pkills, worst 56ms), fired under that gate.
 const (
-	stopAsksExpected = 56 * time.Millisecond
-	stopAsksBound    = 140 * time.Millisecond
+	stopAsksExpected = 200 * time.Millisecond
+	stopAsksBound    = 500 * time.Millisecond
 )
 
 // StopAsks stops every authorize ask of the helper app installed in TOOLS
