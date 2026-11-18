@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -319,5 +320,37 @@ func TestAStopAsksThatOutlivesItsBoundSaysSo(t *testing.T) {
 	// Assert
 	if err == nil || !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "did not end within 500ms (expected 200ms)") {
 		t.Fatalf("StopAsks error = %v, want the bound and its measurement named", err)
+	}
+}
+
+func TestScanContextCarriesTheHelpersStandingTime(t *testing.T) {
+	standing := int64(23)
+	cases := []struct {
+		name string
+		raw  string
+		want any
+	}{
+		{name: "a helper that heard its standing states its time", raw: `{"authorization":"authorized","standing_ms":23}`, want: standing},
+		{name: "a helper that never heard it states none", raw: `{"authorization":"authorized"}`, want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			var scan wifiScan
+			if err := json.Unmarshal([]byte(tc.raw), &scan); err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			ctx := scanContext(scan, 300*time.Millisecond)
+
+			// Assert
+			if got := ctx["standing_ms"]; got != tc.want {
+				t.Fatalf("standing_ms = %v, want %v", got, tc.want)
+			}
+			if ctx["took_ms"] != int64(300) {
+				t.Fatalf("took_ms = %v, want 300", ctx["took_ms"])
+			}
+		})
 	}
 }
