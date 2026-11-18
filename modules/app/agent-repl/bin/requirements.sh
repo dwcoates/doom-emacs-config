@@ -1434,9 +1434,19 @@ install_signing_identity() {
   dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-repl-signing.XXXXXX")"
   printf '[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN=%s\n[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\nextendedKeyUsage=critical,codeSigning\n' "$name" >"$dir/cert.cnf"
   openssl req -x509 -newkey rsa:2048 -nodes -days 36500 -keyout "$dir/key.pem" -out "$dir/cert.pem" -config "$dir/cert.cnf" </dev/null >/dev/null 2>&1 \
-    && openssl pkcs12 -export -legacy -inkey "$dir/key.pem" -in "$dir/cert.pem" -out "$dir/identity.p12" -passout pass:agent-repl </dev/null >/dev/null 2>&1 \
+    && openssl pkcs12 -export -legacy -name "$name" -inkey "$dir/key.pem" -in "$dir/cert.pem" -out "$dir/identity.p12" -passout pass:agent-repl </dev/null >/dev/null 2>&1 \
     && security import "$dir/identity.p12" -k "$(security login-keychain </dev/null | tr -d ' "')" -P agent-repl -T /usr/bin/codesign </dev/null >/dev/null 2>&1 \
     || { say "install: the signing identity \"$name\" could not be made"; rc=1; }
+  # The key carries the identity's name as its label (-name above), which is
+  # how the partition list finds it.
+  # THE KEY'S PARTITION LIST names the tools that may use it unprompted. An
+  # import's -T alone leaves it unset, so macOS asked for the login keychain's
+  # password at every codesign (2026-11-18). Setting it needs that password
+  # once, which security asks for itself.
+  if [ "$rc" = 0 ]; then
+    security set-key-partition-list -S apple-tool:,apple:,codesign: -s -l "$name" "$(security login-keychain </dev/null | tr -d ' "')" >/dev/null \
+      || { say "install: the signing identity \"$name\" was made, but codesign could not be allowed to use its key unprompted"; rc=1; }
+  fi
   rm -rf "$dir"
   return "$rc"
 }

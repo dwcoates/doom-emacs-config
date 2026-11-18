@@ -179,7 +179,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		ModuleRoot: p.Checkout,
 		LogDir:     filepath.Join(deployDir, "logs"),
 		Override:   p.Getenv(envDeployBuilder),
-		WifiHelper: where.wifiApp != "",
+		WifiInstalled: where.wifiApp,
 		Runner:     p.Runner,
 		Clock:      rollout.SystemClock{},
 		Log:        log,

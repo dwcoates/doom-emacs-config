@@ -1047,6 +1047,7 @@ case "$1" in
   find-identity) [ -f "$STUB_DIR/.identity" ] && printf "  1) ABC \"case signing\" (CSSMERR_TP_NOT_TRUSTED)\n" ; exit 0 ;;
   login-keychain) printf "    \"/k/login.keychain-db\"\n" ;;
   import) touch "$STUB_DIR/.identity" ;;
+  set-key-partition-list) [ -f "$STUB_DIR/.partition-refused" ] && exit 1 ;;
 esac
 exit 0'
   [ "$1" = yes ] && touch "$CASE/stubs/.identity"
@@ -1068,6 +1069,23 @@ test_install_makes_a_missing_signing_identity_in_the_login_keychain() {
     && has 'ok          signing: the login keychain signs code as "case signing"'; then
     pass "install makes a missing signing identity in the login keychain, usable by codesign"
   else fail "missing identity" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_install_lets_codesign_use_the_new_key_unprompted() {
+  new_case; manifest "[$SIGNING]"; signing_security no
+  run install
+  if [ "$RC" -eq 0 ] && ran "set-key-partition-list -S apple-tool:,apple:,codesign: -s -l case signing" && ran "-name case signing"; then
+    pass "install sets the new key's partition list, so codesign uses it without a password prompt"
+  else fail "partition list" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_install_reports_a_partition_list_it_could_not_set() {
+  new_case; manifest "[$SIGNING]"; signing_security no
+  touch "$CASE/stubs/.partition-refused"
+  run install
+  if [ "$RC" -eq 1 ] && has 'install: the signing identity "case signing" was made, but codesign could not be allowed to use its key unprompted'; then
+    pass "install reports a partition list it could not set"
+  else fail "partition list refused" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }
 
 test_install_reports_a_signing_identity_it_could_not_make() {

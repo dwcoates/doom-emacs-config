@@ -169,19 +169,19 @@ func TestAFailedOverrideIsTheBuildStep(t *testing.T) {
 func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.T) {
 	tests := []struct {
 		name       string
-		wifiHelper bool
-		want       string
+		installed string
+		want      string
 	}{
-		{name: "the platform with a helper builds it", wifiHelper: true,
-			want: "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app"},
-		{name: "a platform with none does not", wifiHelper: false,
+		{name: "the platform with a helper builds it, reusing the installed app", installed: "/home/.cache/agent-repl/AgentReplWifi.app",
+			want: "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app --reuse /home/.cache/agent-repl/AgentReplWifi.app"},
+		{name: "a platform with none does not", installed: "",
 			want: "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 " + Targets[len(Targets)-1]},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
 			b, runner, _ := newScriptBuilder(t, map[string]runAnswer{})
-			b.WifiHelper = tc.wifiHelper
+			b.WifiInstalled = tc.installed
 
 			// Act
 			if err := b.Build(context.Background(), "/staging/1"); err != nil {
@@ -199,9 +199,9 @@ func TestTheWifiHelperIsBuiltLastByItsOwnBuildWhereThePlatformHasOne(t *testing.
 
 func TestAFailedWifiHelperBuildNamesItsStep(t *testing.T) {
 	// Arrange
-	step := "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app"
+	step := "bash /checkout/modules/app/agent-repl/wifi-helper/build.sh /staging/1/wifi-helper/AgentReplWifi.app --reuse /home/.cache/agent-repl/AgentReplWifi.app"
 	b, _, _ := newScriptBuilder(t, map[string]runAnswer{step: {out: "swiftc: error: no such module", code: 1}})
-	b.WifiHelper = true
+	b.WifiInstalled = "/home/.cache/agent-repl/AgentReplWifi.app"
 
 	// Act
 	err := b.Build(context.Background(), "/staging/1")
