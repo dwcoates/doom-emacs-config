@@ -433,6 +433,56 @@ whose calls are the observation."
     ;; Act / Assert
     (should-not (agent-repl-roster-repository-of "m" roster))))
 
+;;; --- A workspace's repository, by its name
+
+(defmacro agent-repl-test-roster--with-refs (refs &rest body)
+  "Run BODY with `agent-repl--ws-get' answering REFS, an alist of name to ref."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl--ws-get)
+              (lambda (ws key) (and (eq key :ref) (cdr (assoc ws ,refs))))))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-repository-for-ws-answers-the-section-key ()
+  "A workspace's repository is the key of the section holding its ref's id."
+  ;; Arrange
+  (let ((agent-repl-roster-view
+         (agent-repl-test-roster--roster
+          :sections (list (agent-repl-test-roster--section
+                           "beta" (list (agent-repl-test-roster--row "b" "b-row" :ready)))))))
+    (agent-repl-test-roster--with-refs '(("b-ws" . (:id "b")))
+      ;; Act / Assert
+      (should (equal (agent-repl-roster-repository-for-ws "b-ws")
+                     '(:id "repo-beta" :dir "/r/beta"))))))
+
+(ert-deftest agent-repl-test-roster-repository-for-ws-is-nil-off-the-roster ()
+  "A workspace whose id no section holds has no repository yet."
+  ;; Arrange
+  (let ((agent-repl-roster-view (agent-repl-test-roster--roster :sections nil)))
+    (agent-repl-test-roster--with-refs '(("x" . (:id "x")))
+      ;; Act / Assert
+      (should-not (agent-repl-roster-repository-for-ws "x")))))
+
+(ert-deftest agent-repl-test-roster-repository-for-ws-is-nil-without-a-ref ()
+  "A persp-mode placeholder carries no ref, so it names no repository."
+  (agent-repl-test-roster--with-refs nil
+    (should-not (agent-repl-roster-repository-for-ws "main"))))
+
+(ert-deftest agent-repl-test-roster-repository-for-ws-is-nil-for-no-workspace ()
+  "No perspective at all names no repository, and never reads a ref."
+  (cl-letf (((symbol-function 'agent-repl--ws-get)
+             (lambda (&rest _) (error "nil names no workspace to read"))))
+    (should-not (agent-repl-roster-repository-for-ws nil))))
+
+(ert-deftest agent-repl-test-roster-repository-for-ws-is-the-commands-only-lookup ()
+  "commands.el reads a workspace's repository only through the shared lookup.
+A hand-rolled ref-to-section walk there would drift from the helper."
+  (let ((source (with-temp-buffer
+                  (insert-file-contents
+                   (expand-file-name "commands.el" agent-repl-test-roster--dir))
+                  (buffer-string))))
+    (should (string-match-p "(agent-repl-roster-repository-for-ws " source))
+    (should-not (string-match-p "(agent-repl-roster-repository-of " source))))
+
 (ert-deftest agent-repl-test-roster-walk-visits-children-depth-first ()
   "A row precedes its children, which is the contract's render order."
   ;; Arrange

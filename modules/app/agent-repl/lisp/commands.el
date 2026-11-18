@@ -116,7 +116,7 @@
 (declare-function agent-repl-name-prefix-string "agent-repl-status" (prefix &optional height frame))
 (declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
-(declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
+(declare-function agent-repl-roster-repository-for-ws "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
@@ -1031,12 +1031,10 @@ by the caller."
 ALIST is `agent-repl--switch-display-alist''s.  A MAIN WORKSPACE IS THE
 ONE WHOSE DIRECTORY IS ITS REPOSITORY'S (the daemon's `IsMainWorktree'),
 and the repository is the roster section holding WS
-\(`agent-repl-roster-repository-of').  Nil when WS is no workspace (a
+\(`agent-repl-roster-repository-for-ws').  Nil when WS is no workspace (a
 persp-mode placeholder), when no roster section holds it yet, or when
 ALIST does not offer that main workspace."
-  (let* ((ref (and ws (agent-repl--ws-get ws :ref)))
-         (repository (and ref (agent-repl-roster-repository-of (plist-get ref :id))))
-         (dir (plist-get repository :dir)))
+  (let ((dir (plist-get (agent-repl-roster-repository-for-ws ws) :dir)))
     (and dir
          (car (seq-find (lambda (cell) (equal (plist-get (cdr cell) :dir) dir))
                         alist)))))
