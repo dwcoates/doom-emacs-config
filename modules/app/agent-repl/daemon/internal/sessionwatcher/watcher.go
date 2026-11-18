@@ -288,17 +288,35 @@ type watcher struct {
 	seenClosings map[string]struct{}
 
 	// retiredWork is every detached-work HANDLE this watcher reaped at its
-	// terminal. A retired handle is never live again: the contract retires a
-	// handle at its run's end, by equality, and a later announcement for it is
-	// a RE-SERVING — the vendor's end-of-run notification upserts the
-	// announcement row to add the output path, and that upsert rides the live
-	// watch again. Re-admitting it put a finished run back in the live set,
-	// re-opened its watch and re-placed its whole sub-feed, and its settle then
-	// dropped it a millisecond later: the footer's "added agent" churn. The
-	// footer holds the same rule for the same reason (chips.go retiredWork).
+	// terminal. A retired handle stays out of the live set: a later
+	// announcement for it is a RE-SERVING -- the vendor's end-of-run
+	// notification upserts the announcement row to add the output path, and
+	// that upsert rides the live watch again. Re-admitting it put a finished run
+	// back in the live set, re-opened its watch and re-placed its whole
+	// sub-feed, and its settle then dropped it a millisecond later: the
+	// footer's "added agent" churn.
 	//
 	// UNBOUNDED BY DESIGN, as seenClosings is: one entry per detached run.
 	retiredWork map[string]struct{}
+
+	// heldByLevel is every retired handle the live-work level still has to
+	// DROP before the retirement ends (level mode, shells excepted).
+	//
+	// A RETIREMENT LASTS UNTIL THE LEVEL STOPS NAMING THE HANDLE. A terminal
+	// reaches the watcher on the work's own stream, which shares no ordering
+	// with the session stream's level, so a level pushed before the shim saw
+	// the end can still name the handle after its terminal: that level is
+	// stale, and the retirement keeps it out. Levels are ordered on their one
+	// stream, so once a level omits the handle every later level naming it
+	// states the vendor running it AGAIN: a subagent that resumes on its own
+	// (it backgrounded a shell, ended its turn, and the shell's notification
+	// woke it) keeps its handle for the new run, and refusing that run left its
+	// rows undrawn and its watch closed while it worked (2026-11-18). So the
+	// first level that omits a handle releases it (applyLevelLocked).
+	//
+	// A SHELL IS NEVER HELD HERE: the level never names a shell, its end has
+	// one writer, and its retirement is for good.
+	heldByLevel map[string]struct{}
 
 	sessionStream shimclient.Stream[*shimv1.WatchSessionResponse]
 	// sessionOpening is the session watch's open in flight, as on agentWatch.
@@ -498,6 +516,7 @@ func start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, se
 
 		seenClosings: map[string]struct{}{},
 		retiredWork:  map[string]struct{}{},
+		heldByLevel:  map[string]struct{}{},
 		unseenAsks:   map[string]struct{}{},
 
 		openAtAttach: session.OpenAtAttach,

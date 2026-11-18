@@ -1766,7 +1766,7 @@ func (w *watcher) concludedFirstLocked(work *conversationv1.AgentDetachedWork, k
 		})
 		return false
 	}
-	w.retiredWork[handle] = struct{}{}
+	w.retireLocked(handle, kind)
 	w.describeOnlyLocked(work)
 	read := "none"
 	if kind == kindBash {

@@ -4,6 +4,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"path/filepath"
 	"reflect"
 	"sort"
 	"testing"
@@ -347,5 +348,83 @@ func TestLiveWorkSetNames(t *testing.T) {
 				t.Fatalf("Names() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestAgentMembersAreTheLiveAgentsAndThePendingHandles(t *testing.T) {
+	// Arrange.
+	live := LiveWorkSet{
+		Agents:   []*conversationv1.AgentId{{Value: "a-1"}},
+		Pending:  []*conversationv1.DetachedWorkId{{Value: "w-2"}},
+		Shells:   []*conversationv1.DetachedWorkId{{Value: "sh-3"}},
+		Monitors: []*conversationv1.DetachedWorkId{{Value: "m-4"}},
+	}
+
+	// Act.
+	members := live.AgentMembers()
+
+	// Assert.
+	if len(members) != 2 {
+		t.Fatalf("members = %v, want a-1 and w-2 only", members)
+	}
+	for _, id := range []string{"a-1", "w-2"} {
+		if _, ok := members[id]; !ok {
+			t.Fatalf("members = %v, want %s", members, id)
+		}
+	}
+}
+
+func TestAgentsNewSinceAreTheMembersThePreviousSetDidNotHold(t *testing.T) {
+	// Arrange.
+	live := LiveWorkSet{Agents: []*conversationv1.AgentId{{Value: "b"}, {Value: "a"}, {Value: "c"}}}
+	prev := map[string]struct{}{"b": {}}
+
+	// Act.
+	fresh := live.AgentsNewSince(prev)
+
+	// Assert.
+	if len(fresh) != 2 || fresh[0] != "a" || fresh[1] != "c" {
+		t.Fatalf("fresh = %v, want [a c], sorted", fresh)
+	}
+}
+
+func TestAgentsNewSinceAnEmptyPreviousSetIsEveryMember(t *testing.T) {
+	// Arrange.
+	live := LiveWorkSet{Pending: []*conversationv1.DetachedWorkId{{Value: "w-1"}}}
+
+	// Act.
+	fresh := live.AgentsNewSince(nil)
+
+	// Assert.
+	if len(fresh) != 1 || fresh[0] != "w-1" {
+		t.Fatalf("fresh = %v, want [w-1]", fresh)
+	}
+}
+
+func TestEveryViewFindsASubagentNewToTheSetThroughAgentsNewSince(t *testing.T) {
+	// Arrange: the views that take a run's end as final, and must draw the
+	// subagent live again when the set lists it anew.
+	want := []string{"internal/resolve/feed/subagent.go", "internal/resolve/footer/livework.go"}
+
+	// Act.
+	root := sourcescan.DaemonRoot(t)
+	var sites []string
+	sourcescan.EachDaemonSource(t, root, nil, func(fset *token.FileSet, file *ast.File) {
+		ast.Inspect(file, func(n ast.Node) bool {
+			if sel, ok := n.(*ast.SelectorExpr); ok && sel.Sel.Name == "AgentsNewSince" {
+				rel, err := filepath.Rel(root, fset.Position(sel.Pos()).Filename)
+				if err != nil {
+					t.Fatalf("relative path: %v", err)
+				}
+				sites = append(sites, rel)
+			}
+			return true
+		})
+	})
+
+	// Assert.
+	sort.Strings(sites)
+	if !reflect.DeepEqual(sites, want) {
+		t.Fatalf("AgentsNewSince is called from %v, want %v", sites, want)
 	}
 }

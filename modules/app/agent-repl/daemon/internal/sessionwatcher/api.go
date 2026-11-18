@@ -71,6 +71,41 @@ func (s LiveWorkSet) Empty() bool {
 	return len(s.Agents) == 0 && len(s.Shells) == 0 && len(s.Monitors) == 0 && len(s.Pending) == 0
 }
 
+// AgentMembers answers the set's subagents by value: each live agent's id and
+// each pending handle (a pending item is a subagent the level named before its
+// announcement described it).
+func (s LiveWorkSet) AgentMembers() map[string]struct{} {
+	members := make(map[string]struct{}, len(s.Agents)+len(s.Pending))
+	for _, agent := range s.Agents {
+		members[agent.GetValue()] = struct{}{}
+	}
+	for _, handle := range s.Pending {
+		members[handle.GetValue()] = struct{}{}
+	}
+	return members
+}
+
+// AgentsNewSince answers, sorted, the set's AgentMembers that PREV did not
+// hold: the subagents the watcher admitted since the publication PREV was read
+// from.
+//
+// A SUBAGENT NEW TO THE SET IS RUNNING, EVEN ONE A VIEW SAW END. The watcher
+// lists a handle it retired only once a live-work level has dropped it, and
+// every level naming it after that states a NEW run of the same handle (a
+// subagent that resumes on its own keeps its handle; watcher.heldByLevel). So
+// a view that took a run's end as final takes a subagent new to the set as
+// that new run, and draws it live again.
+func (s LiveWorkSet) AgentsNewSince(prev map[string]struct{}) []string {
+	var fresh []string
+	for id := range s.AgentMembers() {
+		if _, held := prev[id]; !held {
+			fresh = append(fresh, id)
+		}
+	}
+	sort.Strings(fresh)
+	return fresh
+}
+
 // The prefixes a live item's record name carries: its kind, then its handle.
 const (
 	NameAgent   = "agent:"

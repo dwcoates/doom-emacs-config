@@ -4158,3 +4158,106 @@ func TestAKindlessDetachmentFailsHardAndDrawsNothing(t *testing.T) {
 	}, nil, nil)
 	t.Fatal("a kindless detachment returned, want a panic")
 }
+
+func TestUnderTheLevelASettlingSubagentNewToTheSetRunsAgain(t *testing.T) {
+	// Arrange: the level dropped it with no terminal, so its head is settling.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act: the level names it again, for its second run.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetLive() == nil {
+		t.Fatalf("state = %+v, want live", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestUnderTheLevelASettledSubagentNewToTheSetRunsAgain(t *testing.T) {
+	// Arrange: its first run's terminal settled it, and the level dropped it.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+			}},
+		}},
+	})
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetLive() == nil {
+		t.Fatalf("state = %+v, want live", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestASubagentTheSetKeepsListingStaysSettledAtItsTerminal(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.send(&conversationv1.AgentActivity{
+		ActivityId: &conversationv1.AgentActivityId{Value: "spawn-1"},
+		Item: &conversationv1.AgentActivity_Subagent{Subagent: &conversationv1.AgentSubagent{
+			Result: &conversationv1.AgentSubagent_Success{Success: &conversationv1.AgentSubagentSuccess{
+				SettledAt: &conversationv1.AgentActivitySettledAt{AtMs: 9_000},
+			}},
+		}},
+	})
+
+	// Act: a publication that still lists it is no new run.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetSucceeded() == nil {
+		t.Fatalf("state = %+v, want still settled succeeded", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestBeforeTheLevelAnEndedSubagentNewToTheSetStaysEnded(t *testing.T) {
+	// Arrange: without the level the set is the announcements' account, and
+	// its leaving settled the head lost.
+	h := newHarness(t)
+	created := runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Assert.
+	if bubbleOf(h.bubbleRow("spawn-1", created)).GetSettled().GetLost() == nil {
+		t.Fatalf("state = %+v, want still settled lost", bubbleOf(h.bubbleRow("spawn-1", created)).GetState())
+	}
+}
+
+func TestARevivedHeadIsRecordedWithWhatItWas(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.levelMode()
+	runningDetachedSubagent(h)
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents())
+
+	// Act.
+	h.resolver.OnLiveWorkChanged(testWorkspace, liveAgents("agent-explore"))
+
+	// Assert.
+	for _, r := range h.log.Records() {
+		if r.Operation == "daemon.feed.detached_subagent_runs_again" && r.Level == "info" && r.Context["was"] == "settling" {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the revival at INFO naming it was settling", h.log.Records())
+}

@@ -44,7 +44,7 @@ type LiveWorkSet = sessionwatcher.LiveWorkSet
 // part of the set alone, because only the main agent's work is drawn
 // (owner.go). The whole set is still what the footer holds and counts.
 func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
-	var dropped, added, readded []string
+	var dropped, added, readded, ranAgain []string
 	var minted *mintedFocus
 	r.mutate(ws, "daemon.footer.on_live_work_changed", "the footer took the live-work set",
 		dlog.Context{
@@ -56,6 +56,7 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 			// holds, because `background` and the deploy's wait count it.
 			drawn := r.mainAgentWork(s, live)
 			minted = mintFocus(s, launchedWork(s, r.mainAgentWork(s, s.liveWork), drawn), drawn)
+			ranAgain = releaseRunsAgain(s, live)
 			s.liveWork = live
 			s.liveWorkSeen = true
 			dropped, added, readded = reconcileLiveWork(s, live, r.opts.clock.Now())
@@ -74,6 +75,9 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 			// 0 tok) and nothing will ever describe it again. Named here so a
 			// zero-token row is explained by the log alone.
 			"readded_retired": readded,
+			// Subagents whose run the footer saw end, new to the set: each
+			// runs again, and its frames describe its row afresh.
+			"ran_again": ranAgain,
 		})
 	if minted != nil {
 		r.workspaceLog(ws).Info("daemon.footer.focus_minted",
@@ -85,6 +89,23 @@ func (r *resolver) OnLiveWorkChanged(ws ids.WorkspaceID, live LiveWorkSet) {
 				"launched":   minted.launched,
 			})
 	}
+}
+
+// releaseRunsAgain forgets the retirement of every subagent new to LIVE whose
+// run the footer saw end, and answers them. Such a subagent runs again under
+// the same handle (sessionwatcher's AgentsNewSince), so the start and progress
+// frames of its new run describe its row rather than being refused as replays
+// of the run that ended.
+func releaseRunsAgain(s *wsState, live LiveWorkSet) []string {
+	var released []string
+	for _, id := range live.AgentsNewSince(s.liveWork.AgentMembers()) {
+		if _, done := s.retiredWork[id]; !done {
+			continue
+		}
+		delete(s.retiredWork, id)
+		released = append(released, sessionwatcher.NameAgent+id)
+	}
+	return released
 }
 
 // reconcileLiveWork makes the footer's DETACHED rows agree with the set: a row

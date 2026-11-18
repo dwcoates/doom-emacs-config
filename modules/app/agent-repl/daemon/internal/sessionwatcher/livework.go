@@ -122,7 +122,7 @@ func (w *watcher) concludeLocked(handle string, why conclusion) bool {
 	// for good, so a level still naming it a moment longer cannot re-admit it.
 	if _, waiting := w.pending[handle]; waiting && handle != "" {
 		delete(w.pending, handle)
-		w.retiredWork[handle] = struct{}{}
+		w.retireLocked(handle, kindSubagent)
 		w.log.Info("daemon.sessionwatcher.live_work_retired", "a pending detached item concluded before its announcement described it", dlog.Context{
 			"work_id": handle, "kind": "pending", "conclusion": string(why), "pending_after": len(w.pending),
 		})
@@ -133,7 +133,7 @@ func (w *watcher) concludeLocked(handle string, why conclusion) bool {
 		return false
 	}
 	delete(w.live, handle)
-	w.retiredWork[handle] = struct{}{}
+	w.retireLocked(handle, item.kind)
 	watch := "none"
 	switch item.kind {
 	case kindSubagent:
@@ -152,6 +152,17 @@ func (w *watcher) concludeLocked(handle string, why conclusion) bool {
 		"conclusion": string(why), "watch": watch, "live_after": len(w.live),
 	})
 	return true
+}
+
+// retireLocked retires HANDLE, of KIND, from the live set. Under the live-work
+// level every kind but a shell is held until a level omits it (heldByLevel); a
+// shell's retirement is for good. A pending item's kind is unknown, and it is
+// held as a subagent is: the level named it, so the level releases it.
+func (w *watcher) retireLocked(handle string, kind detachedKind) {
+	w.retiredWork[handle] = struct{}{}
+	if w.levelModeLocked() && kind != kindBash {
+		w.heldByLevel[handle] = struct{}{}
+	}
 }
 
 // dropAgentWatchLocked closes and forgets one agent watch, answering the state
