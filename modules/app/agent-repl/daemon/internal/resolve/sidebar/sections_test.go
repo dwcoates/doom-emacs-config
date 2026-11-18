@@ -1930,6 +1930,53 @@ func TestTheMergeQueueDrawsTheDeployCheckItWaitsOnWithItsClickTarget(t *testing.
 	}
 }
 
+func TestAnEscalatedCheckIsDrawnFixingOnlyWhileItsMediatorIsMidTurn(t *testing.T) {
+	cases := []struct {
+		name      string
+		turns     func(r sidebar.Resolver)
+		wantLabel string
+	}{
+		{name: "a mediator with no turn leaves the check the user's", turns: func(sidebar.Resolver) {}, wantLabel: "escalated"},
+		{name: "a mediator mid-turn draws the check as fixing", turns: func(r sidebar.Resolver) {
+			r.SetTurn("w2", &footer.TurnStarted{At: time.UnixMilli(1), Act: footer.ActPrompt})
+		}, wantLabel: "fixing"},
+		{name: "a mediator's turn that ended with no finish leaves the check the user's again", turns: func(r sidebar.Resolver) {
+			r.SetTurn("w2", &footer.TurnStarted{At: time.UnixMilli(1), Act: footer.ActPrompt})
+			r.SetTurnEnded("w2", wsm.CloseCompleted)
+		}, wantLabel: "escalated"},
+		{name: "another workspace's turn does not draw the check as fixing", turns: func(r sidebar.Resolver) {
+			r.SetTurn("w1", &footer.TurnStarted{At: time.UnixMilli(1), Act: footer.ActPrompt})
+		}, wantLabel: "escalated"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the repository's deploy check is escalated to w2.
+			r, _ := newResolver(t)
+			r.SetMergeQueue(theRepo, sidebar.MergeQueue{Mediation: &sidebar.QueueMediation{Repo: repo.ID, Stage: sidebar.MediationEscalated, Mediator: "w2"}})
+			r.SetRegistry(queueView(workspace("w1", "one"), workspace("w2", "deploy-mediator")))
+
+			// Act.
+			tc.turns(r)
+
+			// Assert.
+			groups := queuedGroups(latest(t, r))
+			if len(groups) != 1 {
+				t.Fatalf("queue groups = %d, want the repository's queue listed", len(groups))
+			}
+			label, target := "", ""
+			switch standing := groups[0].GetQueue().GetMediation().GetStanding().(type) {
+			case *frontendv1.RosterMergeQueueMediation_Fixing:
+				label, target = "fixing", standing.Fixing.GetTarget().GetWorkspace().GetId()
+			case *frontendv1.RosterMergeQueueMediation_Escalated:
+				label, target = "escalated", standing.Escalated.GetTarget().GetWorkspace().GetId()
+			}
+			if label != tc.wantLabel || target != "w2" {
+				t.Fatalf("label = %s selecting %q, want %s selecting w2", label, target, tc.wantLabel)
+			}
+		})
+	}
+}
+
 func TestADeployMediatorTheRegistryDoesNotCarryIsRecorded(t *testing.T) {
 	cases := []struct {
 		name      string

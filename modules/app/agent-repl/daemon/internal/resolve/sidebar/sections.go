@@ -143,7 +143,7 @@ func (r *resolver) drawMergeQueue(q repoQueue, log dlog.Logger) *frontendv1.Rost
 		return queueSubject(credited, entry), true
 	}
 	if m := q.mediation; m != nil {
-		out.Mediation = drawMediation(*m, byID, log)
+		out.Mediation = drawMediation(*m, byID, r.state.turnInFlight(m.Mediator), log)
 	}
 	for _, entry := range q.remediating {
 		sub, ok := subject(entry)
@@ -267,7 +267,13 @@ func drawMergeQueuePause(pause *wsm.MergeQueuePause) *frontendv1.RosterMergeQueu
 // registry does not carry is a broken roster: it is recorded, and the label
 // is drawn unclickable while rolling out, and not at all otherwise, since
 // those standings require their target.
-func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log dlog.Logger) *frontendv1.RosterMergeQueueMediation {
+//
+// AN ESCALATED CHECK WHOSE MEDIATOR IS MID-TURN IS DRAWN AS FIXING (owner
+// ruling, 2026-11-18): WORKING reports the mediator's turn in flight, so the
+// label reads that the mediator is at work on what the user settled, and
+// reads that the deploy needs the user again once the turn ends with no
+// finish. The label follows the same turn the mediator's own row draws.
+func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, working bool, log dlog.Logger) *frontendv1.RosterMergeQueueMediation {
 	const op = "daemon.sidebar.merge_queue"
 	target := func(ws ids.WorkspaceID) *frontendv1.RosterMergeQueueMediationTarget {
 		if ws == "" {
@@ -282,7 +288,11 @@ func drawMediation(m QueueMediation, byID map[ids.WorkspaceID]wsm.Workspace, log
 		}
 		return &frontendv1.RosterMergeQueueMediationTarget{Workspace: record.Ref()}
 	}
-	switch m.Stage {
+	stage := m.Stage
+	if stage == MediationEscalated && working && m.Mediator != "" {
+		stage = MediationFixing
+	}
+	switch stage {
 	case MediationWaiting:
 		return &frontendv1.RosterMergeQueueMediation{Standing: &frontendv1.RosterMergeQueueMediation_Waiting{
 			Waiting: &frontendv1.RosterMergeQueueMediationWaiting{Target: target(m.Mediator)}}}
