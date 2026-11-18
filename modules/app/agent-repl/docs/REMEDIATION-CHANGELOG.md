@@ -1550,3 +1550,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-17 merge-queue-stall-triage (landed in queue bypass mode): A bypass session defers to the deploy mediator and watches it as it runs
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): A hot reload no longer floods the daemon with page-unloading reports, and the news digest brief requires a link on every item.
 - 2026-11-17 deploy-mediator (landed in queue bypass mode): The daemon records each unary rpc whose caller timed out or left before it answered, by request id and the phase it was held in.
+- 2026-11-17 deploy-mediator (landed in queue bypass mode): A deploy mediator escalating in its own turn is only shown, so setting its effort no longer hangs the escalation.
