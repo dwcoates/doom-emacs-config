@@ -1304,7 +1304,7 @@ test_install_builds_renders_and_loads_a_launchd_service() {
   run install
   local plist="$CASE/home/Library/LaunchAgents/com.example.svc.plist" h="$CASE/home"
   if [ "$RC" -eq 0 ] && ran "build svc" \
-     && ran "launchctl bootstrap gui/$(id -u) $plist" && ran "launchctl kickstart -k gui/$(id -u)/com.example.svc" \
+     && ran "launchctl bootstrap gui/$(id -u) $plist" && ! ran "launchctl kickstart" \
      && ! ran "launchctl bootout" && ! ran "systemctl" && has "ok          svc: com.example.svc running from $plist"; then
     pass "install builds the service, renders its plist, and loads it"
   else fail "service install" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
@@ -1609,7 +1609,7 @@ test_a_changed_service_file_is_outdated_and_reinstalled() {
   : >"$CASE/transcript"
   run install
   if [ "$RC" -eq 0 ] && has "svcd is outdated" && has "lacks the module's copy of metrics/scrape.yml" \
-     && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" && ran "launchctl kickstart -k gui/$(id -u)/com.example.svcd"; then
+     && cmp -s "$CASE/module/cfg/scrape.yml" "$CASE/home/.cache/agent-repl/metrics/scrape.yml" && ran "launchctl bootout gui/$(id -u)" && ran "launchctl bootstrap gui/$(id -u)"; then
     pass "a service file that differs from the module's is outdated, copied again and the service restarted"
   else fail "stale service file" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
 }

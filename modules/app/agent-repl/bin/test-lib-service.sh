@@ -95,10 +95,11 @@ test_load_reads_the_new_definition_and_runs_it() {
   reset darwin; service_load com.x.svc; mac="$(transcript)"
   reset darwin; STUB_HELD=1 service_load com.x.svc; held="$(transcript)"
   reset linux; service_load com.x.svc; linux="$(transcript)"
-  if [ "$mac" = "launchctl print gui/$uid/com.x.svc"$'\n'"launchctl bootstrap gui/$uid $TMP/agents/com.x.svc.plist"$'\n'"launchctl kickstart -k gui/$uid/com.x.svc" ] &&
+  if [ "$mac" = "launchctl print gui/$uid/com.x.svc"$'\n'"launchctl bootstrap gui/$uid $TMP/agents/com.x.svc.plist" ] &&
+     ! grep -q kickstart <<<"$held" &&
      [ "$(sed -n 2p <<<"$held")" = "launchctl bootout gui/$uid $TMP/agents/com.x.svc.plist" ] &&
      [ "$linux" = "systemctl --user daemon-reload"$'\n'"systemctl --user enable com.x.svc.service"$'\n'"systemctl --user restart com.x.svc.service" ]; then
-    pass "a load bootstraps and kickstarts (booting a held service out first), or reloads, enables and restarts the unit"
+    pass "a load bootstraps, which starts the service, and never kickstarts it (booting a held service out first), or reloads, enables and restarts the unit"
   else fail "load" "$mac" "$held" "$linux"; fi
 }
 
