@@ -361,6 +361,9 @@ var Suites = []Suite{
 		// renders too.
 		Reuse: &Reuse{Inputs: []string{"agent-shim/shim-store/", "testdata/history-golden/"}}},
 	{Name: "lock", Kind: GoModule, Path: "agent-shim/shim-lock", Reuse: &Reuse{}},
+	// THE SOCKET HOLDER, which keeps the store's and the daemon's listening
+	// sockets open across every restart of the servers on them.
+	{Name: "sockethold", Kind: GoModule, Path: "agent-shim/sockethold", Reuse: &Reuse{Inputs: []string{"agent-shim/logging/go/sockethold/"}}},
 	{Name: "zettel", Kind: GoModule, Path: "zettel", Programs: map[string][]string{"integration": {"zettel"}},
 		Reuse: &Reuse{Inputs: []string{"zettel/"}}},
 	// THE TEST SERVICE, which owns every merge gate's run so a daemon deploy

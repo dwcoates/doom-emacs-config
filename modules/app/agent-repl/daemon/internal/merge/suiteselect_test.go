@@ -269,6 +269,19 @@ func TestSelectSuitesMapsShimLockToItsSuiteAndTheShims(t *testing.T) {
 	}
 }
 
+// TestSelectSuitesMapsTheSocketHolderToItsSuite covers the socket holder: its
+// own suite, the end-to-end suites and the scans.
+func TestSelectSuitesMapsTheSocketHolderToItsSuite(t *testing.T) {
+	// Act.
+	got := SelectSuites([]string{"modules/app/agent-repl/agent-shim/sockethold/main.go"})
+
+	// Assert.
+	want := strings.Join(inRosterOrder(setOf([]string{"sockethold", "e2e", "repo-scans"})), ",")
+	if got.Full || strings.Join(got.Suites, ",") != want {
+		t.Fatalf("sockethold selected %v (full=%v), want %s", got.Suites, got.Full, want)
+	}
+}
+
 // TestSelectSuitesMapsTheGrammarToItsConsumers covers tree-sitter-tldr/: a
 // shared component selects its own suite, its consumer the daemon, the
 // end-to-end suites whose real daemon serves the parse, and the scans, in
