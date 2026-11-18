@@ -42,8 +42,11 @@ export const NAME_INK_CLASS = "name-ink";
 /** The attribute the copies draw their text from. */
 export const NAME_INK_TEXT_ATTRIBUTE = "data-name";
 
+/** The class of a breathing name (`tones.ts` `MarkMotion`). */
+export const BREATHES_CLASS = "breathes";
+
 /** The classes of a name whose looping animation the ink box carries. */
-export const NAME_INK_MOTIONS: readonly string[] = ["breathes", REVIVING_CLASS, VIEW_DWELL_CLASS];
+export const NAME_INK_MOTIONS: readonly string[] = [BREATHES_CLASS, REVIVING_CLASS, VIEW_DWELL_CLASS];
 
 /**
  * Give LABEL, whose text is NAME, the ink box its looping animations move,

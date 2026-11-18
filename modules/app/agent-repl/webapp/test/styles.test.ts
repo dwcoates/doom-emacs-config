@@ -5294,7 +5294,7 @@ describe("the rail's marks", () => {
     ["the resting copy", "#ws-sidebar .row .name.breathes > .name-ink::before", "ws-pulse-rest"],
   ])("times %s's breath by the one mark cycle", (_copy, selector, keyframes) => {
     // Arrange / Act
-    const rule = ownDeclarationsOf(selector);
+    const rule = declarationsOf(selector);
 
     // Assert
     expect(rule).toMatch(new RegExp(`animation:\\s*${keyframes}\\s+var\\(--ws-mark-cycle\\)\\s+ease-in-out\\s+infinite`));
@@ -5321,7 +5321,7 @@ describe("the rail's marks", () => {
   it("draws the copies' own ink and strike line in the copy's own color", () => {
     // Arrange / Act
     const rule =
-      rulesOf(stylesheet).find((r) => r.selectors.join(",") === "#ws-sidebar .row .name > .name-ink::before,#ws-sidebar .row .name > .name-ink::after")?.declarations ?? "";
+      rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .row .name > .name-ink::before") && r.selectors.includes("#ws-sidebar .row .name > .name-ink::after"))?.declarations ?? "";
 
     // Assert
     expect([
@@ -5337,10 +5337,54 @@ describe("the rail's marks", () => {
   // their weights sum to one and the crossfade is the color mix it replaced.
   it("adds the peak copy to the resting one inside the ink box's own group", () => {
     // Arrange / Act
-    const [box, peak] = [ownDeclarationsOf("#ws-sidebar .row .name > .name-ink") ?? "", ownDeclarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after") ?? ""];
+    const [box, peak] = [declarationsOf("#ws-sidebar .row .name > .name-ink") ?? "", declarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after") ?? ""];
 
     // Assert
     expect([/isolation:\s*isolate/.test(box), /pointer-events:\s*none/.test(box), /mix-blend-mode:\s*plus-lighter/.test(peak)]).toEqual([true, true, true]);
+  });
+
+  // A FOLDED SUBSECTION'S NAME BREATHES AS A ROW'S NAME DOES (owner request,
+  // 2026-11-18): each rule of the row name's held tone and breath lists the
+  // folded subsection's name too, so the two can never draw apart.
+  it.each([
+    ["the held tone", "#ws-sidebar .row .name.tinted", ".tinted"],
+    ["the breath's rest ink", "#ws-sidebar .row .name.tinted.breathes", ".tinted.breathes"],
+    ["the hidden own text", "#ws-sidebar .row .name.breathes", ".breathes"],
+    ["the ink box", "#ws-sidebar .row .name > .name-ink", " > .name-ink"],
+    ["the copies' text", "#ws-sidebar .row .name > .name-ink::before", " > .name-ink::before"],
+    ["the peak copy hidden at rest", "#ws-sidebar .row .name > .name-ink::after", " > .name-ink::after"],
+    ["the resting copy's loop", "#ws-sidebar .row .name.breathes > .name-ink::before", ".breathes > .name-ink::before"],
+    ["the peak copy's loop", "#ws-sidebar .row .name.breathes > .name-ink::after", ".breathes > .name-ink::after"],
+    ["the peak copy's tone", "#ws-sidebar .row .name.tinted.breathes > .name-ink::after", ".tinted.breathes > .name-ink::after"],
+  ])("draws %s of a folded subsection's name in the row name's own rule", (_part, rowSelector, suffix) => {
+    // Arrange
+    const folded = `#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label${suffix}`;
+
+    // Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes(rowSelector) && r.selectors.includes(folded));
+
+    // Assert
+    expect(rule).toBeDefined();
+  });
+
+  // Only a FOLDED subsection's name breathes: every subsection-name breath
+  // rule is gated on the fold.
+  it("breathes no subsection name that is not folded", () => {
+    // Arrange / Act
+    const ungated = rulesOf(stylesheet)
+      .flatMap((r) => r.selectors)
+      .filter((sel) => /\.sb-subsection-label[^,]*(\.breathes|\.tinted|\.name-ink)/.test(sel) && !sel.includes(".sb-subsection.folded"));
+
+    // Assert
+    expect(ungated).toEqual([]);
+  });
+
+  it.each(["blue", "purple", "red", "turquoise", "yellow", "green"])("names the %s tone a subsection's name breathes in", (tone) => {
+    // Arrange / Act
+    const rule = declarationsOf(`#ws-sidebar .sb-subsection-label.tone-${tone}`) ?? "";
+
+    // Assert
+    expect(rule).toMatch(/--name-tone:/);
   });
 
   // THE MARK STANDS STILL (owner request, 2026-10-14): the name breathes in
@@ -5397,7 +5441,7 @@ describe("the rail's marks", () => {
     const weights = ["0%, 100%", "50%"].map((stop) => [at("ws-pulse", stop), at("ws-pulse-rest", stop)]);
 
     // Assert
-    expect([weights, ownDeclarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after")?.match(/(?:^|;)\s*color:\s*([^;]+);/)?.[1]]).toEqual([
+    expect([weights, declarationsOf("#ws-sidebar .row .name.breathes > .name-ink::after")?.match(/(?:^|;)\s*color:\s*([^;]+);/)?.[1]]).toEqual([
       [["0", "1"], ["1", "0"]],
       "var(--name-peak)",
     ]);

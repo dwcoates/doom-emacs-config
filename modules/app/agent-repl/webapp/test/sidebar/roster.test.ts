@@ -44,7 +44,7 @@ import {
   mergedTodayCommitsText,
   OPEN_COUNT_CLASS,
   OPEN_SECTION_CLASS,
-  paintRepoHoldsCurrent,
+  paintRepoSection,
   SECTION_LABEL_CLASS,
   todaysMerges,
   mergedTodayCountText,
@@ -375,14 +375,14 @@ describe("a section holding the current workspace never collapses", () => {
   });
 });
 
-describe("paintRepoHoldsCurrent", () => {
+describe("paintRepoSection", () => {
   it("refuses a drawn section whose subsections are not the wire's", () => {
     // Arrange
     const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "a", subsections: [{ id: "s1" }] })] }), sidebarContext());
     const element = drawn.querySelector(".repo-section") as HTMLElement;
 
     // Act / Assert
-    expect(() => paintRepoHoldsCurrent(element, repoSection({ id: "a", subsections: [{ id: "s2" }] }), "section")).toThrow(
+    expect(() => paintRepoSection(element, repoSection({ id: "a", subsections: [{ id: "s2" }] }), "section")).toThrow(
       /s2 is not the one drawn/,
     );
   });
