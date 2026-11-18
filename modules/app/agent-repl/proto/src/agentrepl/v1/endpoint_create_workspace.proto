@@ -764,6 +764,10 @@ message CreateWorkspaceError {
     // is closed, a child, a main workspace, a merge workspace, already in a
     // subsection, of another repository, or named twice.
     CreateWorkspaceGatherNotGatherable gather_not_gatherable = 61;
+    // The requester is its repository's deploy mediator, which never
+    // creates a workspace of any kind: it does all of its work in its own
+    // session (owner ruling, 2026-11-18).
+    CreateWorkspaceRequestedByDeployMediator requested_by_deploy_mediator = 63;
   }
 }
 // A placement on a child workspace.
@@ -798,6 +802,18 @@ message CreateWorkspaceGatherNotGatherable {
   // The gathered workspace.
   workspace.v1.WorkspaceRef workspace = 1;
   // Why it cannot be gathered, as a sentence.
+  string detail = 2;
+}
+// A create the repository's deploy mediator asked for. The deploy mediator
+// checks every deploy and fixes what it dispatches on its own branch, so a
+// workspace it made would carry work the mediator owns out of its session and
+// out of the deploy check that follows its fix. Refused before anything is
+// named or built.
+message CreateWorkspaceRequestedByDeployMediator {
+  // The deploy mediator that asked.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Why the create is refused and where the work belongs, as a sentence the
+  // mediator's agent reads: it does the work in its own session.
   string detail = 2;
 }
 // A requested model the creating login does not offer.
