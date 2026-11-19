@@ -76,6 +76,8 @@
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-sigil-word-bounds "sigil-word" (sigil))
 (declare-function agent-repl-sigil-word-table "sigil-word" (category sigil candidates &optional sort))
+(declare-function agent-repl-sigil-word-ask-key "sigil-word" (bounds unanswered))
+(declare-function agent-repl-sigil-word-next-known "sigil-word" (sigil known-p limit))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
 (declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
 (declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
@@ -170,19 +172,12 @@ an ellipsis when cut.  Empty when the runtime stated neither."
 
 (defun agent-repl--command-completion-next-known (limit)
   "Return (START . END) of the next known slash word before LIMIT, or nil.
-A known slash word -- as `agent-repl--command-completion-bounds' finds it --
-names a command in the composer's catalog, by its name or an alias.  Point
-is left past the word answered."
-  (let ((catalog agent-repl--command-completion-catalog)
-        found)
-    (while (and catalog (not found) (search-forward "/" limit t))
-      (when-let* ((bounds (agent-repl--command-completion-bounds)))
-        (when (and (= (car bounds) (1- (point)))
-                   (agent-repl--command-completion-entry
-                    catalog (buffer-substring-no-properties (car bounds) (cdr bounds))))
-          (setq found bounds))
-        (goto-char (cdr bounds))))
-    found))
+A known slash word names a command in the composer's catalog, by its name
+or an alias (`agent-repl-sigil-word-next-known').  Point is left past the
+word answered."
+  (when-let* ((catalog agent-repl--command-completion-catalog))
+    (agent-repl-sigil-word-next-known
+     ?/ (lambda (word) (agent-repl--command-completion-entry catalog word)) limit)))
 
 (defun agent-repl--command-completion-mark (beg end)
   "Mark every known slash word on the lines BEG to END, and unmark the rest.
@@ -262,11 +257,9 @@ and says so in the log -- the next slash word asks again."
 
 (defun agent-repl--command-completion-ask-key (bounds)
   "Return the ask key for the slash word at BOUNDS, or nil when it asks nothing.
-The key of a bare `/' is (START . TICK); a longer slash word asks only in a
-composer that has never asked, keyed the same way."
-  (when (or (= (- (cdr bounds) (car bounds)) 1)
-            (null agent-repl--command-completion-asked-at))
-    (cons (car bounds) (buffer-chars-modified-tick))))
+A bare `/' asks; a longer slash word asks only in a composer that has never
+asked (`agent-repl-sigil-word-ask-key')."
+  (agent-repl-sigil-word-ask-key bounds (null agent-repl--command-completion-asked-at)))
 
 (defun agent-repl-command-completion-at-point ()
   "Complete the slash word at point against the workspace's slash commands.

@@ -54,6 +54,8 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-sigil-word-bounds "sigil-word" (sigil))
 (declare-function agent-repl-sigil-word-table "sigil-word" (category sigil candidates &optional sort))
+(declare-function agent-repl-sigil-word-ask-key "sigil-word" (bounds unanswered))
+(declare-function agent-repl-sigil-word-next-known "sigil-word" (sigil known-p limit))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-part-starts "completion-match" (word names separators))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
@@ -156,17 +158,11 @@ public channel stating no purpose."
 
 (defun agent-repl--slack-channel-completion-next-known (limit)
   "Return (START . END) of the next hash word naming a known channel before LIMIT.
-Nil when none is left.  Point is left past the word answered."
-  (let ((channels agent-repl--slack-channel-completion-channels)
-        found)
-    (while (and channels (not found) (search-forward "#" limit t))
-      (when-let* ((bounds (agent-repl--slack-channel-completion-bounds)))
-        (when (and (= (car bounds) (1- (point)))
-                   (agent-repl--slack-channel-completion-entry
-                    channels (buffer-substring-no-properties (car bounds) (cdr bounds))))
-          (setq found bounds))
-        (goto-char (cdr bounds))))
-    found))
+Nil when none is left (`agent-repl-sigil-word-next-known').  Point is left
+past the word answered."
+  (when-let* ((channels agent-repl--slack-channel-completion-channels))
+    (agent-repl-sigil-word-next-known
+     ?# (lambda (word) (agent-repl--slack-channel-completion-entry channels word)) limit)))
 
 (defun agent-repl--slack-channel-completion-mark (beg end)
   "Mark every known hash word on the lines BEG to END, and unmark the rest."
@@ -241,11 +237,9 @@ hash word asks again."
 
 (defun agent-repl--slack-channel-completion-ask-key (bounds)
   "Return the ask key for the hash word at BOUNDS, or nil when it asks nothing.
-The key of a bare `#' is (START . TICK); a longer hash word asks only while
-no channels are in hand, keyed the same way."
-  (when (or (= (- (cdr bounds) (car bounds)) 1)
-            (null agent-repl--slack-channel-completion-channels))
-    (cons (car bounds) (buffer-chars-modified-tick))))
+A bare `#' asks; a longer hash word asks only while no channels are in hand
+\(`agent-repl-sigil-word-ask-key')."
+  (agent-repl-sigil-word-ask-key bounds (null agent-repl--slack-channel-completion-channels)))
 
 (defun agent-repl-slack-channel-completion-at-point ()
   "Complete the hash word at point against the user's Slack channels.

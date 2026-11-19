@@ -100,5 +100,30 @@ word."
         (t (complete-with-action action candidates string predicate))))
      sort)))
 
+(defun agent-repl-sigil-word-ask-key (bounds unanswered)
+  "Return the key a composer asks for its sigil's candidates under, or nil.
+BOUNDS is the sigil word's (START . END).  A bare sigil -- just typed --
+asks, keyed (START . TICK) by `buffer-chars-modified-tick', so typing it
+again, even where it stood, is a new ask.  A longer word asks only while
+UNANSWERED is non-nil (nothing to complete from is in hand yet), keyed
+the same way.  The caller asks when the key differs from its last one."
+  (when (or (= (- (cdr bounds) (car bounds)) 1) unanswered)
+    (cons (car bounds) (buffer-chars-modified-tick))))
+
+(defun agent-repl-sigil-word-next-known (sigil known-p limit)
+  "Return (START . END) of the next SIGIL word before LIMIT KNOWN-P accepts.
+KNOWN-P is called with the word's text, sigil included.  A sigil word is
+`agent-repl-sigil-word-bounds''s, so a sigil mid-word starts none.  Point
+is left past the word answered, or at LIMIT's side of the last sigil
+searched; nil when no such word is left."
+  (let (found)
+    (while (and (not found) (search-forward (char-to-string sigil) limit t))
+      (when-let* ((bounds (agent-repl-sigil-word-bounds sigil)))
+        (when (and (= (car bounds) (1- (point)))
+                   (funcall known-p (buffer-substring-no-properties (car bounds) (cdr bounds))))
+          (setq found bounds))
+        (goto-char (cdr bounds))))
+    found))
+
 (provide 'sigil-word)
 ;;; sigil-word.el ends here
