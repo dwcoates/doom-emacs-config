@@ -2849,6 +2849,40 @@ exactly the point a dedicated stream flushes status 200, and the unary is
 withheld until it does. So a view published after `SubscribePage` returns
 cannot be missed, which is the same guarantee the header flush gives.
 
+### A page call names the daemon that holds the page, and a view comes from the daemon that serves it
+
+Two daemons run side by side at a deploy's handover. A page's stream lives in
+whichever one accepted it, and a workspace is served by whichever one holds
+its serving row. Those are independent, so two rules hold
+(`docs/protobuf-design/page-attachment-handover.md`):
+
+- **A PAGE CALL IS SERVED ONLY BY THE DAEMON THAT ISSUED ITS ATTACHMENT.**
+  `PageAttached` issues a `PageAttachment` (this daemon's instance and a
+  sequence it never reissues); `SubscribePage` and `UnsubscribePage` echo it.
+  `forwardTarget` routes a call that names a daemon by that daemon BEFORE any
+  workspace rule (`requestInstance`, `instanceTarget`), and never by the
+  workspace in a subscribe's arm. An attachment that is over (its daemon no
+  longer runs, the page holds no stream here, or it was issued a newer one) is
+  answered `page_gone`, recorded at INFO: the page reattaches and subscribes
+  again. It is never a refusal, which a page files as an outage.
+- **A WORKSPACE'S VIEW IS RELAYED FROM THE DAEMON THAT SERVES IT.** When a
+  subscription's workspace is served by another live daemon, the page's
+  daemon runs the body as `relayWatch`: the dedicated rpc on that daemon,
+  written into the page's sink. A feed tail is relayed from the daemon that
+  minted its token (`FeedWatchToken.instance`), which holds its pin. Every
+  stream carried from another daemon goes through `pipeStream`, forwarded and
+  relayed alike.
+  - The target states its acceptance in the `Agent-Repl-Accepted` response
+    header, since a refused stream answers headers too.
+  - The target holds the relayed page as connected to the workspace
+    (`Agent-Repl-Relayed-Page`, `holdRelayedPage`), so the page facts an open
+    waits on live with the daemon that serves the workspace.
+  - A target that ends the view cleanly ends the subscription `moved`, and the
+    page subscribes again. A handed-away workspace still ends `failed` with
+    `handed_away`.
+- **A NEW ARM OF `SubscribePageRequest` THAT NAMES A WORKSPACE GETS A `Relay`**
+  in `pageWatchFor`, or a page on the other daemon cannot draw it.
+
 ## Production stop bounds NEST; they are never equal
 
 A stop is a SEQUENCE of promises, and each outer one must strictly contain

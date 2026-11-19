@@ -108,15 +108,20 @@ Design mode: autonomous. Landing: ONE landing, with no compatibility path
 
 ## Implementation state
 
-Kept current so a compaction loses nothing. Order of work:
+Landed on the workspace's branch, in one landing:
 
-1. Protos and regenerated bindings.
-2. Daemon: attachment mint and check, routing by instance, body relay with
-   acceptance, relay ending, page registration at the serving daemon, feed
-   token instance, adopt routing by serving row, newer attach replaces older.
-3. Webapp: stamp the attachment, `page_gone`, the `moved` ending.
-4. Fakes and tests: Go unit, webapp vitest, daemon integration, elisp fake.
-5. Changelog line, metrics catalog, finish (one landing).
+- Protos and regenerated bindings.
+- Daemon (`daemon/internal/server`): `forward.go` (`requestInstance`,
+  `instanceTarget`, `servingTarget`, `pipeStream`), `relay.go`
+  (`relayTarget`, `relayWatch`), `page.go` (attachment mint and check,
+  `pageGone`, newer attach replaces older, `holdRelayedPage`), `accept.go`
+  (`Agent-Repl-Accepted`, `withAcceptHook`). `daemon/internal/resolve/feed`
+  mints tokens under its instance. `daemon/cmd/agent-repld/sharedtake.go`
+  resolves an instance's address (`instanceAddress`).
+- Webapp (`webapp/src/rpc`): `page-streams.ts`, `streams.ts`
+  (`StreamHandle.reopen`), `planned-reopen.ts`.
+- Tests beside each source file, the webapp's fake daemon, and the daemon
+  integration pages.
 
 Dropped, with reasons:
 

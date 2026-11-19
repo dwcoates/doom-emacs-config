@@ -29,9 +29,9 @@
  * THE ATTACHMENT IS A LATCH AND IT ALWAYS SETTLES. `watch()` awaits the page's
  * attachment before subscribing, because the daemon refuses a subscription for
  * a page it has not registered. The promise RESOLVES on the daemon's `attached`
- * frame and REJECTS when the page's stream ends without one — it never merely
- * stays pending, or this module would have reinvented the silent hang it exists
- * to remove. A rejection reaches the caller's own `watchStream` as an ordinary
+ * frame and REJECTS when the page's stream ends without one. The one attach
+ * it does not resolve on is a daemon serving another webapp build: the page
+ * subscribes nothing until its reload, which ends the stream and so rejects. A rejection reaches the caller's own `watchStream` as an ordinary
  * open failure, which files its card and retries on backoff, by which time the
  * page's stream has reopened and re-attached.
  *
