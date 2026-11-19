@@ -1643,3 +1643,30 @@ func TestRegisterAllRepublishesTheRosterOnce(t *testing.T) {
 		t.Fatalf("roster republications = %d, want exactly one for the batch", len(f.sidebar.registries))
 	}
 }
+
+func TestRegistrationStatesTheNamesGlyphOnTheNaming(t *testing.T) {
+	tests := []struct {
+		name       string
+		originator string
+		want       string
+	}{
+		{name: "an emoji-ack workspace's naming carries the thumbs up", originator: wsm.OriginatorEmojiAck, want: "👍"},
+		{name: "any other workspace's naming carries none", originator: "user_or_workspace", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+
+			// Act.
+			if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{Originator: tt.originator}); err != nil {
+				t.Fatalf("Register: %v", err)
+			}
+
+			// Assert.
+			if n := len(f.topbarNamings); n == 0 || f.topbarNamings[n-1].Glyph != tt.want {
+				t.Fatalf("namings = %+v, want the last carrying glyph %q", f.topbarNamings, tt.want)
+			}
+		})
+	}
+}

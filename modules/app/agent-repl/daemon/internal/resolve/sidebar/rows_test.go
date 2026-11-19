@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
@@ -2046,5 +2048,38 @@ func TestAMirroredArmsMoveIsLoggedAsTheRowsArmChange(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("no status_arm_changed record for the mirrored move: %v", surfaces.Records())
+	}
+}
+
+// THE NAME'S GLYPH IS THE DAEMON'S (frontend.v1.RosterRowNameGlyph): an
+// emoji-ack workspace's row wears the thumbs up before its name, every other
+// row none, and the name itself is the registry's slug either way.
+func TestARowsNameWearsTheGlyphExactlyForAnEmojiAckWorkspace(t *testing.T) {
+	cases := []struct {
+		name      string
+		emojiAck  bool
+		wantGlyph *frontendv1.RosterRowNameGlyph
+	}{
+		{name: "an emoji-ack workspace wears the thumbs up", emojiAck: true, wantGlyph: &frontendv1.RosterRowNameGlyph{Text: "👍"}},
+		{name: "any other workspace wears none", emojiAck: false, wantGlyph: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			ws := workspace(string(theWS), "acked")
+			ws.EmojiAck = tc.emojiAck
+
+			// Act.
+			r := live(t, arrange(t, ws))
+
+			// Assert.
+			name := onlyRow(t, r).GetName()
+			if name.GetText() != "acked" {
+				t.Fatalf("name text = %q, want the registry name alone", name.GetText())
+			}
+			if !proto.Equal(name.GetGlyph(), tc.wantGlyph) {
+				t.Fatalf("name glyph = %v, want %v", name.GetGlyph(), tc.wantGlyph)
+			}
+		})
 	}
 }

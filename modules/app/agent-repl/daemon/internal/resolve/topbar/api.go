@@ -80,6 +80,9 @@ type Naming struct {
 	// line beneath the summary (TopbarWorkspaceName). It is never composed
 	// into the title.
 	Name string
+	// Glyph is the glyph drawn before the name (TopbarWorkspaceName.glyph),
+	// resolved by nameglyph.Of; empty when the name wears none.
+	Glyph string
 	// ConfigDir is the account root this session spends from — the middle
 	// field of the session line. A daemon fact (the repo-under-root rule
 	// determines it), so it rides the naming rather than any vendor frame.

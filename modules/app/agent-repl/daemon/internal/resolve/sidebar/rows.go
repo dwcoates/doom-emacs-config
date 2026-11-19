@@ -8,6 +8,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/nameglyph"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -138,7 +139,7 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	out := &frontendv1.RosterRow{
 		Workspace: &frontendv1.RosterRowWorkspace{
 			Workspace: rec.Ref()},
-		Name:    &frontendv1.RosterRowName{Text: rec.Name},
+		Name:    rowName(rec),
 		Current: &frontendv1.RosterRowCurrent{Current: current},
 		When:    when(rec, mergeStartedAt, clock),
 		Detail:  detail(rec, s.summary, rc),
@@ -558,4 +559,14 @@ func departureArm(arm string) bool {
 func (r *resolver) logArmChange(ws ids.WorkspaceID, arm, previous, cause string) {
 	r.logFor(ws).Info("daemon.sidebar.status_arm_changed", "the roster published a new status arm for the row",
 		dlog.Context{"arm": arm, "previous_arm": previous, "cause": cause})
+}
+
+// rowName is REC's name element: its registry name, and the glyph drawn before
+// it when the workspace wears one (nameglyph.Of).
+func rowName(rec wsm.Workspace) *frontendv1.RosterRowName {
+	name := &frontendv1.RosterRowName{Text: rec.Name}
+	if glyph, ok := nameglyph.Of(rec); ok {
+		name.Glyph = &frontendv1.RosterRowNameGlyph{Text: glyph}
+	}
+	return name
 }
