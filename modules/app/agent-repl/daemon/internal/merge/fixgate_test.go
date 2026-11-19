@@ -216,3 +216,21 @@ func TestAWorkspaceThatIsNoMediatorCannotResolveATokenNamingItself(t *testing.T)
 		t.Fatalf("TestLogPath = %v; want the token refused as no merge this feed draws", err)
 	}
 }
+
+// EVERY GATE'S LOG HAS ONE SHAPE: a queue merge's and a mediator's are named
+// by testsLogOf, so each is resolved and pruned alike.
+func TestEveryGatesLogIsNamedByOneShape(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	merge, mediator := h.o.testLog("abc123", 2), h.o.fixGateLog("def456", 3)
+
+	// Assert
+	if merge != h.o.testsLogOf("abc123", 2) || mediator != h.o.testsLogOf("def456", 3) {
+		t.Fatalf("merge %+v, mediator %+v; want both named by testsLogOf", merge, mediator)
+	}
+	if !IsLog(filepath.Base(merge.path)) || !IsLog(filepath.Base(mediator.path)) || mediator.token != "def456/3" {
+		t.Fatalf("merge %+v, mediator %+v; want logs the retention pass knows, tokens key/round", merge, mediator)
+	}
+}

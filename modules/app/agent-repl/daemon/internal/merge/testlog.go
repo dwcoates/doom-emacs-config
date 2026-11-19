@@ -46,9 +46,16 @@ type testLog struct {
 
 // testLog names one tests round's log.
 func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
+	return o.testsLogOf(string(lease), round)
+}
+
+// testsLogOf names round ROUND's tests log of KEY (a merge's lease, a deploy
+// mediator's workspace): THE ONE SHAPE of a tests log's token and path, so
+// every gate's log is resolved and pruned alike (TestLogPath, IsLog).
+func (o *orchestrator) testsLogOf(key string, round int) testLog {
 	return testLog{
-		token: fmt.Sprintf("%s/%d", lease, round),
-		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", lease, round)),
+		token: fmt.Sprintf("%s/%d", key, round),
+		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", key, round)),
 	}
 }
 

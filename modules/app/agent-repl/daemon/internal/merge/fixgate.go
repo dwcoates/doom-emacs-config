@@ -3,7 +3,6 @@ package merge
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
@@ -28,10 +27,7 @@ const fixGateLabel = "testing the fix"
 // token is the mediator and the attempt, which TestLogPath resolves for the
 // mediator's own feed.
 func (o *orchestrator) fixGateLog(ws ids.WorkspaceID, round int) testLog {
-	return testLog{
-		token: fmt.Sprintf("%s/%d", ws, round),
-		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", ws, round)),
-	}
+	return o.testsLogOf(string(ws), round)
 }
 
 // fixGateRun is one attempt of a mediator's fix at its gate, as its card
