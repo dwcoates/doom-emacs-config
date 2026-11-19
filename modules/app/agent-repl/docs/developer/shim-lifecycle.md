@@ -189,6 +189,15 @@ timer of its own. The details live in `daemon/internal/cachelapse`:
 - **Cutoff.** Beats stop once the workspace has been idle for
   `drain.DefaultIdleCutoff` (24 hours, owner ruling 2026-10-28). The idle sweep
   then parks the session, and its park carries no next keep-alive.
+- **A long network outage pulls the near beats forward** (owner request,
+  2026-11-18). When the network comes back after being down for more than
+  `OutagePrefetchMinimum` (5 minutes) straight, every workspace whose next
+  beat is due within `OutagePrefetchWindow` (20 minutes) gets its beat at
+  once. The outage is dated by `netstate.Monitor`, which tells the keeper its
+  length at the restore edge (`netstate.Monitor.OnRestored`). A workspace at
+  its cold gate owes no beat and is not pulled. The pulled beat is an
+  ordinary beat that went out early, so the next one is timed an interval
+  after it (`cachelapse/outage.go`).
 - **Hidden workspaces** beat no more, and their cache lapses on its own clock.
   **Closed workspaces** get the one beat they were owed, then lapse.
 - A parked session is never brought back by a read or a look. Only its next

@@ -131,6 +131,8 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// queued is read below; a reason found before it reads none.
 	queued := false
 	none := func(nb noBeat, why string) (beatPlan, bool) {
+		// A BEAT THAT IS NOT OWED IS NOT OWED EARLY EITHER.
+		delete(k.early, ws)
 		k.owesNone(ctx, log, record, why)
 		k.own(ctx, log, record, queued, false, nb, why)
 		return beatPlan{}, false
@@ -217,6 +219,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if !plan.bound && !plan.parked {
 		return none(noBeatCold, "neither of its conversations has a warm cache to keep, or each one's last keep-alive is spent")
 	}
+	plan.due = k.pulledForward(ws, plan.due)
 	engaged := session.LastEngagementAt
 	if engaged.IsZero() {
 		engaged = session.StartedAt
@@ -340,6 +343,7 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		k.beatParked(ctx, log, ws, shim)
 	}
 	if !plan.bound {
+		k.beatAnswered(ws)
 		log.Info(opDrive, "the parked conversation's keep-alive is due and the running conversation owes none", fields)
 		return
 	}
@@ -369,6 +373,12 @@ func (k *Keeper) sendBeat(ctx context.Context, ws ids.WorkspaceID, now time.Time
 		}
 		k.beats[ws] = now.Add(BeatRetry)
 		return
+	}
+	// A BEAT PULLED FORWARD STANDS UNTIL THE SHIM ANSWERS ONE (outage.go),
+	// except one that waits on live detached work, which goes out early
+	// still once that work ends.
+	if answer.GetSkipped().GetDetachedWorkLive() == nil {
+		k.beatAnswered(ws)
 	}
 	switch {
 	case answer.GetSent() != nil:
