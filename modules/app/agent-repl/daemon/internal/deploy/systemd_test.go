@@ -62,7 +62,6 @@ func TestSystemdUserVerbs(t *testing.T) {
 	}{
 		{name: "restart restarts the unit", call: func(s *SystemdUser) error { return s.Restart(context.Background(), "x") }, argv: "systemctl restart --user x.service"},
 		{name: "stop stops the unit", call: func(s *SystemdUser) error { return s.Stop(context.Background(), "x") }, argv: "systemctl stop --user x.service"},
-		{name: "start starts the unit", call: func(s *SystemdUser) error { return s.Start(context.Background(), "x") }, argv: "systemctl start --user x.service"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -150,16 +149,16 @@ func TestSystemdUserDefinitionIsTheLabelsUnit(t *testing.T) {
 	}
 }
 
-func TestSystemdUserReloadReadsTheChangedUnitThenRestarts(t *testing.T) {
+func TestSystemdUserStartReadsTheChangedUnitThenStarts(t *testing.T) {
 	tests := []struct {
 		name     string
 		answers  map[string]runAnswer
 		wantArgv []string
 		wantErr  bool
 	}{
-		{name: "the units are reloaded, then the unit restarted", answers: map[string]runAnswer{},
-			wantArgv: []string{"systemctl daemon-reload --user", "systemctl restart --user x.service"}},
-		{name: "a failed daemon-reload restarts nothing", answers: map[string]runAnswer{"systemctl daemon-reload --user": {out: "Failed", code: 1}},
+		{name: "the units are reloaded, then the unit started", answers: map[string]runAnswer{},
+			wantArgv: []string{"systemctl daemon-reload --user", "systemctl start --user x.service"}},
+		{name: "a failed daemon-reload starts nothing", answers: map[string]runAnswer{"systemctl daemon-reload --user": {out: "Failed", code: 1}},
 			wantArgv: []string{"systemctl daemon-reload --user"}, wantErr: true},
 	}
 	for _, tc := range tests {
@@ -168,7 +167,7 @@ func TestSystemdUserReloadReadsTheChangedUnitThenRestarts(t *testing.T) {
 			s, runner := newSystemdUser(tc.answers)
 
 			// Act
-			err := s.Reload(context.Background(), "x")
+			err := s.Start(context.Background(), "x")
 
 			// Assert
 			var got []string
@@ -176,8 +175,9 @@ func TestSystemdUserReloadReadsTheChangedUnitThenRestarts(t *testing.T) {
 				got = append(got, strings.Join(c, " "))
 			}
 			if (err != nil) != tc.wantErr || strings.Join(got, ",") != strings.Join(tc.wantArgv, ",") {
-				t.Fatalf("Reload = %v, ran %v; want error %v, ran %v", err, got, tc.wantErr, tc.wantArgv)
+				t.Fatalf("Start = %v, ran %v; want error %v, ran %v", err, got, tc.wantErr, tc.wantArgv)
 			}
 		})
 	}
 }
+

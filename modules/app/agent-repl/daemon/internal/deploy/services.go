@@ -73,15 +73,13 @@ type ServiceManager interface {
 	// Restart restarts a held service in place, on the definition the
 	// manager loaded.
 	Restart(ctx context.Context, label string) error
-	// Reload restarts a held service on its installed definition as it is
-	// now, for a definition that changed since the manager loaded it.
-	Reload(ctx context.Context, label string) error
 	// Stop takes the service out of the manager's keeping, so nothing
 	// relaunches it. A service the manager no longer holds may answer an
 	// error wrapping ErrServiceNotLoaded: it is already where Stop leads.
 	Stop(ctx context.Context, label string) error
-	// Start brings the service back from its installed definition and runs
-	// it.
+	// Start brings the service back from its installed definition AS IT IS
+	// NOW and runs it: a definition changed since the manager last loaded it
+	// is the one started.
 	Start(ctx context.Context, label string) error
 	// Definition is the installed definition Start brings label back from:
 	// a launchd plist, or a systemd unit file.
@@ -210,11 +208,11 @@ func (r *Restarter) restartStore(ctx context.Context, reload bool) error {
 	if err != nil {
 		return err
 	}
-	if err := r.stopSidecar(ctx, fields); err != nil {
+	if err := r.stopService(ctx, SidecarLabel, "the sidecar", "the store was NOT restarted", fields); err != nil {
 		return err
 	}
 	r.Log.Info(opServices, "restarting the store", dlog.Merge(fields, dlog.Context{"definition_changed": changed, "reload": reload}))
-	if err := r.restartOn(ctx, StoreLabel, changed || reload); err != nil {
+	if err := r.restartOn(ctx, StoreLabel, changed || reload, fields); err != nil {
 		r.failed("the store restart failed; the sidecar is down and was NOT started again", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", StoreLabel, err)
 	}
@@ -291,7 +289,7 @@ func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
 	if err != nil {
 		return err
 	}
-	if err := r.restartOn(ctx, s.Label, changed); err != nil {
+	if err := r.restartOn(ctx, s.Label, changed, fields); err != nil {
 		r.failed("the "+s.Short+" restart failed", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", s.Label, err)
 	}
@@ -588,13 +586,35 @@ func (r *Restarter) redefine(ctx context.Context, label string, fields dlog.Cont
 	return changed, nil
 }
 
-// restartOn restarts the held service label: reloaded on its definition when
-// that CHANGED, in place otherwise.
-func (r *Restarter) restartOn(ctx context.Context, label string, changed bool) error {
-	if changed {
-		return r.Services.Reload(ctx, label)
+// restartOn restarts service label: on its definition as it is now when that
+// CHANGED, in place otherwise.
+//
+// A SERVICE THE MANAGER DOES NOT HOLD IS STARTED, never restarted in place
+// (2026-11-18: a rollback's kickstart of a store booted out by the failed
+// deploy found nothing to restart, exit 113).
+//
+// A CHANGED DEFINITION IS LOADED ONLY ONCE THE MANAGER HAS LET GO OF THE OLD
+// ONE (2026-11-18: a bootstrap run straight after its bootout found launchd
+// still holding the store, "Bootstrap failed: 5: Input/output error"): the
+// service is stopped through stopService, which waits on the kernel's report
+// of its process's exit and confirms the manager no longer holds it, and only
+// then started.
+func (r *Restarter) restartOn(ctx context.Context, label string, changed bool, fields dlog.Context) error {
+	held, _, err := r.Services.Status(ctx, label)
+	if err != nil {
+		return fmt.Errorf("deploy: read %s: %w", label, err)
 	}
-	return r.Services.Restart(ctx, label)
+	if !held {
+		r.Log.Info(opServices, "the service manager does not hold the service; it is started from its definition", dlog.Merge(fields, dlog.Context{"label": label}))
+		return r.Services.Start(ctx, label)
+	}
+	if !changed {
+		return r.Services.Restart(ctx, label)
+	}
+	if err := r.stopService(ctx, label, label, "it was NOT started on its changed definition", fields); err != nil {
+		return err
+	}
+	return r.Services.Start(ctx, label)
 }
 
 // RestartSidecar restarts the sidecar alone. The store never moved, so its
@@ -609,7 +629,7 @@ func (r *Restarter) restartSidecar(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := r.restartOn(ctx, SidecarLabel, changed); err != nil {
+	if err := r.restartOn(ctx, SidecarLabel, changed, fields); err != nil {
 		r.failed("the sidecar restart failed", fields, err)
 		return fmt.Errorf("deploy: restart %s: %w", SidecarLabel, err)
 	}
@@ -617,51 +637,53 @@ func (r *Restarter) restartSidecar(ctx context.Context) error {
 	return nil
 }
 
-// stopSidecar stops the sidecar and waits for its process's exit, the
-// kernel's report that it left; the service manager, which let go of the
-// label in the stop, must then no longer hold it.
-func (r *Restarter) stopSidecar(ctx context.Context, fields dlog.Context) error {
-	loaded, pid, err := r.Services.Status(ctx, SidecarLabel)
+// stopService stops service LABEL (called WHAT in its records) and waits for
+// its process's exit, the kernel's report that it left; the service manager,
+// which let go of the label in the stop, must then no longer hold it. A stop
+// that cannot be confirmed is a failure whose record says CONSEQUENCE.
+func (r *Restarter) stopService(ctx context.Context, label, what, consequence string, fields dlog.Context) error {
+	fields = dlog.Merge(fields, dlog.Context{"label": label})
+	loaded, pid, err := r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read the sidecar's service-manager state; nothing was stopped", fields, err)
-		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
+		r.failed("could not read "+what+"'s service-manager state; nothing was stopped", fields, err)
+		return fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if !loaded {
-		r.Log.Info(opServices, "the sidecar is already stopped", fields)
+		r.Log.Info(opServices, what+" is already stopped", fields)
 		return nil
 	}
 	fields = dlog.Merge(fields, dlog.Context{"pid": pid})
-	r.Log.Info(opServices, "stopping the sidecar before the store restarts", fields)
-	if err := r.Services.Stop(ctx, SidecarLabel); errors.Is(err, ErrServiceNotLoaded) {
-		// THE SIDECAR LEFT BETWEEN THE LOOK AND THE BOOTOUT: the domain no
-		// longer holds it, which is the state the stop was asked to reach.
-		r.Log.Info(opServices, "the sidecar had already stopped when it was stopped", dlog.WithCause(fields, err))
+	r.Log.Info(opServices, "stopping "+what, fields)
+	if err := r.Services.Stop(ctx, label); errors.Is(err, ErrServiceNotLoaded) {
+		// THE SERVICE LEFT BETWEEN THE LOOK AND THE STOP: the domain no longer
+		// holds it, which is the state the stop was asked to reach.
+		r.Log.Info(opServices, what+" had already stopped when it was stopped", dlog.WithCause(fields, err))
 	} else if err != nil {
 		// A stop that errs may still have taken effect; the exit and the
 		// service manager's view below are the authority on whether it did.
-		r.Log.Warn(opServices, "the sidecar stop answered an error; waiting on its process's exit", dlog.WithCause(fields, err))
+		r.Log.Warn(opServices, what+"'s stop answered an error; waiting on its process's exit", dlog.WithCause(fields, err))
 	}
 	if pid != 0 {
 		if err := r.awaitExit(ctx, pid); err != nil {
 			if ctx.Err() == nil {
-				r.Log.Error(opServices, "the sidecar's process did not exit within the upper bound; the store was NOT restarted",
+				r.Log.Error(opServices, what+"'s process did not exit within the upper bound; "+consequence,
 					dlog.Merge(fields, dlog.Context{"max": r.Windows.Max.String(), "cause": err.Error()}))
 			} else {
-				r.failed("the sidecar's stop ended with its context", fields, ctx.Err())
+				r.failed(what+"'s stop ended with its context", fields, ctx.Err())
 			}
-			return fmt.Errorf("deploy: %s (pid %d) did not exit: %w", SidecarLabel, pid, err)
+			return fmt.Errorf("deploy: %s (pid %d) did not exit: %w", label, pid, err)
 		}
 	}
-	loaded, _, err = r.Services.Status(ctx, SidecarLabel)
+	loaded, _, err = r.Services.Status(ctx, label)
 	if err != nil {
-		r.failed("could not read the sidecar's service-manager state once it stopped", fields, err)
-		return fmt.Errorf("deploy: read %s: %w", SidecarLabel, err)
+		r.failed("could not read "+what+"'s service-manager state once it stopped", fields, err)
+		return fmt.Errorf("deploy: read %s: %w", label, err)
 	}
 	if loaded {
-		r.Log.Error(opServices, "the service manager still holds the sidecar after its stop and its process's exit; the store was NOT restarted", fields)
-		return fmt.Errorf("deploy: the service manager still holds %s after its stop", SidecarLabel)
+		r.Log.Error(opServices, "the service manager still holds "+what+" after its stop and its process's exit; "+consequence, fields)
+		return fmt.Errorf("deploy: the service manager still holds %s after its stop", label)
 	}
-	r.Log.Info(opServices, "the sidecar is stopped", fields)
+	r.Log.Info(opServices, what+" is stopped", fields)
 	return nil
 }
 
