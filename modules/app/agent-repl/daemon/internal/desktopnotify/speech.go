@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/standdown"
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
@@ -26,10 +27,19 @@ const EnvSayCmd = "AGENT_REPL_SAY_CMD"
 // a scripted device and no test ever reads the host's audio.
 const EnvAudioOutputCmd = "AGENT_REPL_AUDIO_OUTPUT_CMD"
 
+// EnvBluetoothCmd overrides the program a Bluetooth output's device class is
+// read with, exactly as EnvAudioOutputCmd does the audio output's.
+const EnvBluetoothCmd = "AGENT_REPL_BLUETOOTH_CMD"
+
 // audioOutputBound bounds one read of the current audio output. The read
-// (system_profiler SPAudioDataType -json) took 70-80ms over five runs at a
-// load average of 7 (measured 2026-11-18), so three times the slowest.
+// (`agent-repld audio-output`) took 40-80ms over five runs at a load average
+// of 8.4 (measured 2026-11-18), so three times the slowest.
 const audioOutputBound = 240 * time.Millisecond
+
+// bluetoothBound bounds one read of the Bluetooth devices' classes. The read
+// (system_profiler SPBluetoothDataType -json) took 60-80ms over three runs at
+// a load average of 8 (measured 2026-11-18), so three times the slowest.
+const bluetoothBound = 240 * time.Millisecond
 
 // The speech program's measured cost, which sayBound is sized from: `say`
 // took 1.02-1.04s to start and render a one-word line, and read a 28-word
@@ -47,30 +57,51 @@ func sayBound(text string) time.Duration {
 	return 3 * (sayStartup + time.Duration(words)*sayPerWord)
 }
 
-// Transport is how an audio device is attached, as CoreAudio names it.
-type Transport string
-
-// The transports CoreAudio reports, as system_profiler spells them.
+// The Bluetooth device classes system_profiler reports (device_minorType)
+// that are worn: the Class of Device's audio minor classes for headphones and
+// for a wearable headset.
 const (
-	TransportBluetooth Transport = "coreaudio_device_type_bluetooth"
-	TransportBuiltIn   Transport = "coreaudio_device_type_builtin"
-	TransportUSB       Transport = "coreaudio_device_type_usb"
+	BluetoothHeadphones = "Headphones"
+	BluetoothHeadset    = "Headset"
 )
 
 // AudioOutput is the device the host plays its sound through now: CoreAudio's
-// default output device.
+// default output device and, for a Bluetooth one, its device class.
 type AudioOutput struct {
-	Name      string
-	Transport Transport
+	audiooutput.Device
+	// BluetoothClass is a Bluetooth output's device class as system_profiler
+	// reports it (device_minorType), empty for any other output and for a
+	// Bluetooth output whose class could not be found.
+	BluetoothClass string
 }
 
-// ListeningDevice reports whether out is a device the user listens on away
-// from the screen, the headphone half of the condition a banner is read aloud
-// on. THIS IS THE ONE PREDICATE: today it is AirPods only (a Bluetooth device
-// named for them), and widening it to other headphones changes this function
-// alone.
-func ListeningDevice(out AudioOutput) bool {
-	return out.Transport == TransportBluetooth && strings.Contains(strings.ToLower(out.Name), "airpods")
+// PrivateListeningDevice reports whether out is a device only its wearer
+// hears: the headphone half of the condition a banner is read aloud on. THIS
+// IS THE ONE PREDICATE, and widening or narrowing what counts changes this
+// function alone.
+//
+// Owner ruling, 2026-11-18: "Just airpods, unless we can programmatically
+// identify some or all headphone types. We just don't want it to be speakers
+// that play for everyone to hear." So only a kind macOS positively
+// identifies as worn counts:
+//   - the built-in output with its headphone jack as its data source, never
+//     its internal speakers;
+//   - a Bluetooth output whose device class is headphones or a headset, which
+//     is how AirPods and Apple's other earbuds and headphones report.
+//
+// Everything else is a speaker and is silent: another Bluetooth class
+// (loudspeaker, portable audio, hands-free), a Bluetooth output whose class
+// is unknown, and every USB, HDMI, DisplayPort, AirPlay or other output. A
+// kind that cannot be positively identified is never guessed to be worn.
+func PrivateListeningDevice(out AudioOutput) bool {
+	switch out.Transport {
+	case audiooutput.TransportBuiltIn:
+		return out.DataSource == audiooutput.DataSourceHeadphones
+	case audiooutput.TransportBluetooth, audiooutput.TransportBluetoothLE:
+		return out.BluetoothClass == BluetoothHeadphones || out.BluetoothClass == BluetoothHeadset
+	default:
+		return false
+	}
 }
 
 // WifiStanding is the daemon's own persistent-wifi standing, as its
@@ -81,46 +112,61 @@ type WifiStanding interface {
 	Latest() (*agentreplv1.PersistentWifiState, bool)
 }
 
-// SpeechPlatform names a platform's speech and audio-output programs. A
-// platform with no Say speaks nothing.
+// SpeechPlatform names a platform's speech programs. A platform with no Say
+// speaks nothing.
 type SpeechPlatform struct {
 	// Say is the speech program's binary; its argv is `-- TEXT`.
 	Say string
 	// AudioOutput is the program the current audio output is read with, and
-	// AudioOutputArgs its argv.
+	// AudioOutputArgs its argv: it prints one audiooutput.Device.
 	AudioOutput     string
 	AudioOutputArgs []string
+	// Bluetooth is the program the Bluetooth devices' classes are read with,
+	// and BluetoothArgs its argv.
+	Bluetooth     string
+	BluetoothArgs []string
 }
 
 // supported reports whether the platform can speak at all.
 func (p SpeechPlatform) supported() bool { return p.Say != "" }
 
-// SpeechPlatformFor answers the speech programs for a GOOS: `say` and
-// system_profiler's CoreAudio report on macOS, the system's own binaries.
-// Any other platform speaks nothing, which is no error: its banners are drawn
-// as ever.
-func SpeechPlatformFor(goos string) SpeechPlatform {
+// SpeechPlatformFor answers the speech programs for a GOOS: on macOS `say`,
+// the daemon's own `audio-output` verb (selfExe) for CoreAudio's default
+// output, and system_profiler's Bluetooth report for a Bluetooth output's
+// class. Any other platform speaks nothing, which is no error: its banners
+// are drawn as ever.
+//
+// THE BLUETOOTH CLASS IS READ FROM system_profiler, NOT IOBluetooth: a
+// command-line process that asks IOBluetooth for a device's class is killed
+// by macOS's privacy check for want of a Bluetooth usage description
+// (measured 2026-11-18, exit 134), while system_profiler reports the same
+// class for every connected device.
+func SpeechPlatformFor(goos, selfExe string) SpeechPlatform {
 	if goos != "darwin" {
 		return SpeechPlatform{}
 	}
 	return SpeechPlatform{
 		Say:             "/usr/bin/say",
-		AudioOutput:     "/usr/sbin/system_profiler",
-		AudioOutputArgs: []string{"SPAudioDataType", "-json"},
+		AudioOutput:     selfExe,
+		AudioOutputArgs: []string{audiooutput.Verb},
+		Bluetooth:       "/usr/sbin/system_profiler",
+		BluetoothArgs:   []string{"SPBluetoothDataType", "-json"},
 	}
 }
 
 // WithOverrides answers p with each program an override names put in its
-// place: say for the speech program, audioOutput for the audio read.
-func (p SpeechPlatform) WithOverrides(say, audioOutput string) SpeechPlatform {
+// place: say for the speech program, audioOutput and bluetooth for the reads.
+func (p SpeechPlatform) WithOverrides(say, audioOutput, bluetooth string) SpeechPlatform {
 	if !p.supported() {
 		return p
 	}
-	if say != "" {
-		p.Say = say
-	}
-	if audioOutput != "" {
-		p.AudioOutput = audioOutput
+	for _, o := range []struct {
+		field *string
+		value string
+	}{{&p.Say, say}, {&p.AudioOutput, audioOutput}, {&p.Bluetooth, bluetooth}} {
+		if o.value != "" {
+			*o.field = o.value
+		}
 	}
 	return p
 }
@@ -153,11 +199,11 @@ type Silence string
 
 // The reasons a banner is not read aloud, each the condition that decided it.
 const (
-	SilenceUnsupported       Silence = "speech_unsupported"
-	SilenceWifiUnread        Silence = "persistent_wifi_unread"
-	SilenceWifiOff           Silence = "persistent_wifi_off"
-	SilenceOutputUnreadable  Silence = "audio_output_unreadable"
-	SilenceNoListeningDevice Silence = "no_listening_device"
+	SilenceUnsupported      Silence = "speech_unsupported"
+	SilenceWifiUnread       Silence = "persistent_wifi_unread"
+	SilenceWifiOff          Silence = "persistent_wifi_off"
+	SilenceOutputUnreadable Silence = "audio_output_unreadable"
+	SilenceNoPrivateDevice  Silence = "no_private_listening_device"
 )
 
 // decide answers whether banner is read aloud, and the silence that decided
@@ -188,20 +234,20 @@ func (s *Speech) decide(ctx context.Context, log dlog.Logger) (bool, Silence) {
 	out, err := s.readOutput(ctx)
 	if err != nil {
 		log.Error(opSpeak, "the current audio output could not be read; the banner is not read aloud", dlog.Context{
-			"program": s.platform.AudioOutput, "bound_ms": audioOutputBound.Milliseconds(),
 			"cause": err.Error(), "decided_by": string(SilenceOutputUnreadable),
 		})
 		return false, SilenceOutputUnreadable
 	}
-	if !ListeningDevice(out) {
-		log.Info(opSpeak, "the current audio output is no listening device; the banner is not read aloud", dlog.Context{
-			"device": out.Name, "transport": string(out.Transport), "decided_by": string(SilenceNoListeningDevice),
-		})
-		return false, SilenceNoListeningDevice
+	fields := dlog.Context{
+		"device": out.Name, "transport": out.Transport, "data_source": out.DataSource, "bluetooth_class": out.BluetoothClass,
 	}
-	log.Info(opSpeak, "persistent wifi mode is on and a listening device is the audio output; reading the banner aloud", dlog.Context{
-		"device": out.Name, "transport": string(out.Transport), "decided_by": "persistent_wifi_on_and_listening_device",
-	})
+	if !PrivateListeningDevice(out) {
+		fields["decided_by"] = string(SilenceNoPrivateDevice)
+		log.Info(opSpeak, "the current audio output is no private listening device; the banner is not read aloud", fields)
+		return false, SilenceNoPrivateDevice
+	}
+	fields["decided_by"] = "persistent_wifi_on_and_private_listening_device"
+	log.Info(opSpeak, "persistent wifi mode is on and a private listening device is the audio output; reading the banner aloud", fields)
 	return true, ""
 }
 
@@ -241,53 +287,67 @@ func SpokenText(banner Banner) string {
 	return strings.Join(lines, "\n")
 }
 
-// readOutput reads CoreAudio's default output device through the platform's
-// audio-output program, bounded.
+// readOutput reads CoreAudio's default output device and, for a Bluetooth
+// one, its device class, each through its program and under its bound. The
+// error names the program and its bound.
 func (s *Speech) readOutput(ctx context.Context) (AudioOutput, error) {
 	stdout, err := runWithin(ctx, audioOutputBound, s.runner, s.platform.AudioOutput, s.platform.AudioOutputArgs, nil)
 	if err != nil {
+		return AudioOutput{}, fmt.Errorf("%s (bound %v): %w", s.platform.AudioOutput, audioOutputBound, err)
+	}
+	device, err := audiooutput.Decode(stdout)
+	if err != nil {
 		return AudioOutput{}, err
 	}
-	return parseAudioOutput(stdout)
-}
-
-// spAudioReport is the part of system_profiler's SPAudioDataType report a
-// default output device is read from.
-type spAudioReport struct {
-	SPAudioDataType []struct {
-		Items []struct {
-			Name          string `json:"_name"`
-			DefaultOutput string `json:"coreaudio_default_audio_output_device"`
-			Transport     string `json:"coreaudio_device_transport"`
-		} `json:"_items"`
-	} `json:"SPAudioDataType"`
-}
-
-// spaudioYes is how the report marks the default output device.
-const spaudioYes = "spaudio_yes"
-
-// parseAudioOutput reads the one default output device from the report. A
-// report that is not JSON, names no default output, or names more than one is
-// an error: the output is never guessed.
-func parseAudioOutput(stdout string) (AudioOutput, error) {
-	var report spAudioReport
-	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
-		return AudioOutput{}, fmt.Errorf("decode the audio report: %w", err)
+	out := AudioOutput{Device: device}
+	if device.Transport != audiooutput.TransportBluetooth && device.Transport != audiooutput.TransportBluetoothLE {
+		return out, nil
 	}
-	var found []AudioOutput
-	for _, group := range report.SPAudioDataType {
-		for _, item := range group.Items {
-			if item.DefaultOutput == spaudioYes {
-				found = append(found, AudioOutput{Name: item.Name, Transport: Transport(item.Transport)})
+	address, ok := audiooutput.BluetoothAddress(device.UID)
+	if !ok {
+		// A Bluetooth output whose UID names no address has no class to
+		// find: it is unidentified, and so a speaker.
+		return out, nil
+	}
+	report, err := runWithin(ctx, bluetoothBound, s.runner, s.platform.Bluetooth, s.platform.BluetoothArgs, nil)
+	if err != nil {
+		return AudioOutput{}, fmt.Errorf("%s (bound %v): %w", s.platform.Bluetooth, bluetoothBound, err)
+	}
+	out.BluetoothClass, err = bluetoothClass(report, address)
+	if err != nil {
+		return AudioOutput{}, err
+	}
+	return out, nil
+}
+
+// spBluetoothReport is the part of system_profiler's SPBluetoothDataType
+// report a connected device's class is read from: each connected device is
+// one object keyed by its name.
+type spBluetoothReport struct {
+	SPBluetoothDataType []struct {
+		Connected []map[string]struct {
+			Address   string `json:"device_address"`
+			MinorType string `json:"device_minorType"`
+		} `json:"device_connected"`
+	} `json:"SPBluetoothDataType"`
+}
+
+// bluetoothClass answers the class of the connected device at address, and
+// "" when no connected device is there. A report that is not JSON is an
+// error.
+func bluetoothClass(stdout, address string) (string, error) {
+	var report spBluetoothReport
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		return "", fmt.Errorf("decode the Bluetooth report: %w", err)
+	}
+	for _, controller := range report.SPBluetoothDataType {
+		for _, named := range controller.Connected {
+			for _, device := range named {
+				if strings.EqualFold(device.Address, address) {
+					return device.MinorType, nil
+				}
 			}
 		}
 	}
-	switch len(found) {
-	case 0:
-		return AudioOutput{}, fmt.Errorf("the audio report names no default output device")
-	case 1:
-		return found[0], nil
-	default:
-		return AudioOutput{}, fmt.Errorf("the audio report names %d default output devices: %+v", len(found), found)
-	}
+	return "", nil
 }

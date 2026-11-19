@@ -283,19 +283,33 @@ func NewFakeSay(t testing.TB, dir string) *Recorder {
 	return NewRecorderExecutable(t, dir, "say")
 }
 
-// FakeAudioOutputReport is what the fake audio-output reader prints: the
-// host's built-in speakers as its default output, so a banner is never read
-// aloud unless a test scripts a listening device (SetStdout).
-const FakeAudioOutputReport = `{"SPAudioDataType":[{"_items":[{"_name":"MacBook Pro Speakers",` +
-	`"coreaudio_default_audio_output_device":"spaudio_yes","coreaudio_device_transport":"coreaudio_device_type_builtin"}]}]}`
+// FakeAudioOutput is what the fake audio-output reader prints (the daemon's
+// `audio-output` verb's line): the host's built-in speakers, so a banner is
+// never read aloud unless a test scripts a private listening device
+// (SetStdout).
+const FakeAudioOutput = `{"name":"MacBook Pro Speakers","transport":"bltn","uid":"BuiltInSpeakerDevice","data_source":"ispk"}` + "\n"
 
 // NewFakeAudioOutput writes the program the current audio output is read
 // with (AGENT_REPL_AUDIO_OUTPUT_CMD). It records the argv and prints
-// FakeAudioOutputReport, so no test ever reads the host's audio.
+// FakeAudioOutput, so no test ever reads the host's audio.
 func NewFakeAudioOutput(t testing.TB, dir string) *Recorder {
 	t.Helper()
 	r := NewRecorderExecutable(t, dir, "audio-output")
-	r.SetStdout(FakeAudioOutputReport)
+	r.SetStdout(FakeAudioOutput)
+	return r
+}
+
+// FakeBluetoothReport is what the fake Bluetooth reader prints: no device
+// connected.
+const FakeBluetoothReport = `{"SPBluetoothDataType":[{}]}`
+
+// NewFakeBluetooth writes the program a Bluetooth output's class is read with
+// (AGENT_REPL_BLUETOOTH_CMD). It records the argv and prints
+// FakeBluetoothReport, so no test ever reads the host's Bluetooth.
+func NewFakeBluetooth(t testing.TB, dir string) *Recorder {
+	t.Helper()
+	r := NewRecorderExecutable(t, dir, "bluetooth")
+	r.SetStdout(FakeBluetoothReport)
 	return r
 }
 

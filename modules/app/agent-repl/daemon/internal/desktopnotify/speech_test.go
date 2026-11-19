@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
@@ -78,29 +79,48 @@ func (r *speechRunner) spoken() []string {
 	return out
 }
 
-var darwinSpeech = SpeechPlatformFor("darwin")
+var darwinSpeech = SpeechPlatformFor("darwin", "/bin/agent-repld")
 
-// audioReport is a system_profiler report whose default output is NAME over
-// TRANSPORT.
-func audioReport(name string, transport Transport) string {
-	return `{"SPAudioDataType":[{"_items":[` +
-		`{"_name":"MacBook Pro Microphone","coreaudio_default_audio_input_device":"spaudio_yes","coreaudio_device_transport":"coreaudio_device_type_builtin"},` +
-		`{"_name":"` + name + `","coreaudio_default_audio_output_device":"spaudio_yes","coreaudio_device_transport":"` + string(transport) + `"}` +
-		`],"_name":"coreaudio_device"}]}`
+// deviceLine is the audio-output verb's line for device.
+func deviceLine(device audiooutput.Device) string {
+	var b strings.Builder
+	if err := audiooutput.Encode(&b, device); err != nil {
+		panic(err)
+	}
+	return b.String()
 }
 
+// The devices a test's audio output reads.
 var (
-	airpodsReport  = audioReport("Dodge's AirPods Pro", TransportBluetooth)
-	speakersReport = audioReport("MacBook Pro Speakers", TransportBuiltIn)
+	airpods  = audiooutput.Device{Name: "Dodge’s AirPods Pro", Transport: audiooutput.TransportBluetooth, UID: "F8-CB-15-F0-AE-6C:output"}
+	speakers = audiooutput.Device{Name: "MacBook Pro Speakers", Transport: audiooutput.TransportBuiltIn, UID: "BuiltInSpeakerDevice", DataSource: audiooutput.DataSourceInternalSpeakers}
 )
 
-// newSpeechRunner scripts the audio read's and the speech program's answers.
+// bluetoothReport is a system_profiler Bluetooth report with one connected
+// device at address of class, and one device of another class not connected.
+func bluetoothReport(address, class string) string {
+	return `{"SPBluetoothDataType":[{"controller_properties":{"controller_address":"84:2F:57:A5:57:FA"},` +
+		`"device_connected":[{"Dodge’s AirPods Pro":{"device_address":"` + address + `","device_minorType":"` + class + `"}}],` +
+		`"device_not_connected":[{"Kitchen":{"device_address":"74:8F:3C:18:4E:EE","device_minorType":"Loudspeaker"}}]}]}`
+}
+
+var airpodsReport = bluetoothReport("F8:CB:15:F0:AE:6C", BluetoothHeadphones)
+
+// newSpeechRunner scripts the audio output the verb prints (and, for a
+// Bluetooth one, the Bluetooth report) and the speech program's answer.
 func newSpeechRunner(audio speechAnswer, say speechAnswer) *speechRunner {
 	return &speechRunner{answers: map[string]speechAnswer{
 		darwinSpeech.AudioOutput: audio,
+		darwinSpeech.Bluetooth:   {stdout: airpodsReport},
 		darwinSpeech.Say:         say,
 	}}
 }
+
+// onAirpods and onSpeakers are the audio output's answers for each device.
+var (
+	onAirpods  = speechAnswer{stdout: deviceLine(airpods)}
+	onSpeakers = speechAnswer{stdout: deviceLine(speakers)}
+)
 
 // quietSpeech is the speech of a notifier test about something else: macOS
 // with persistent wifi off, so it runs nothing.
@@ -120,7 +140,7 @@ func newSpeechFixture(goos string, standing WifiStanding, runner *speechRunner) 
 	f := speechFixture{backend: &fakeBackend{}, runner: runner, log: log}
 	f.notifier = New(Deps{
 		Focus: NewFocus(log), Backend: f.backend, Chime: &fakeChime{},
-		Speech: NewSpeech(goos, SpeechPlatformFor(goos), runner, standing),
+		Speech: NewSpeech(goos, SpeechPlatformFor(goos, "/bin/agent-repld"), runner, standing),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 	return f
@@ -136,7 +156,7 @@ func (f speechFixture) postOne() {
 
 func TestSpeechReadsTheBannerAloudWhenBothConditionsHold(t *testing.T) {
 	// Arrange
-	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(speechAnswer{stdout: airpodsReport}, speechAnswer{}))
+	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
 
 	// Act
 	f.postOne()
@@ -150,7 +170,7 @@ func TestSpeechReadsTheBannerAloudWhenBothConditionsHold(t *testing.T) {
 		t.Fatalf("say argv %q, want the text behind --", runs[len(runs)-1].args)
 	}
 	r, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: "info", Operation: opSpeak})
-	if !ok || r.Context["decided_by"] != "persistent_wifi_on_and_listening_device" || r.Context["device"] != "Dodge's AirPods Pro" || r.Context["kind"] != KindTurnEnded {
+	if !ok || r.Context["decided_by"] != "persistent_wifi_on_and_private_listening_device" || r.Context["device"] != "Dodge’s AirPods Pro" || r.Context["bluetooth_class"] != BluetoothHeadphones || r.Context["kind"] != KindTurnEnded {
 		t.Fatalf("decision record = %+v (found %v), want both conditions, the device and the kind", r, ok)
 	}
 }
@@ -169,9 +189,9 @@ func TestSpeechIsSilentUnlessBothConditionsHold(t *testing.T) {
 	}{
 		{name: "persistent wifi off", goos: "darwin", standing: wifiOff, wantLevel: "info", wantBy: SilenceWifiOff},
 		{name: "persistent wifi not yet read", goos: "darwin", standing: fakeStanding{}, wantLevel: "info", wantBy: SilenceWifiUnread},
-		{name: "airpods absent", goos: "darwin", standing: wifiOn, audio: speechAnswer{stdout: speakersReport}, wantLevel: "info", wantBy: SilenceNoListeningDevice, wantRuns: 1},
-		{name: "the audio read fails", goos: "darwin", standing: wifiOn, audio: speechAnswer{err: errors.New("system_profiler: signal: killed")}, wantLevel: "error", wantBy: SilenceOutputUnreadable, wantRuns: 1},
-		{name: "the audio report is unreadable", goos: "darwin", standing: wifiOn, audio: speechAnswer{stdout: "not json"}, wantLevel: "error", wantBy: SilenceOutputUnreadable, wantRuns: 1},
+		{name: "airpods absent", goos: "darwin", standing: wifiOn, audio: onSpeakers, wantLevel: "info", wantBy: SilenceNoPrivateDevice, wantRuns: 1},
+		{name: "the audio read fails", goos: "darwin", standing: wifiOn, audio: speechAnswer{err: errors.New("agent-repld: signal: killed")}, wantLevel: "error", wantBy: SilenceOutputUnreadable, wantRuns: 1},
+		{name: "the audio output is unreadable", goos: "darwin", standing: wifiOn, audio: speechAnswer{stdout: "not json"}, wantLevel: "error", wantBy: SilenceOutputUnreadable, wantRuns: 1},
 		{name: "a platform with no speech", goos: "linux", standing: wifiOn, wantLevel: "info", wantBy: SilenceUnsupported},
 	}
 	for _, tc := range cases {
@@ -196,7 +216,7 @@ func TestSpeechIsSilentUnlessBothConditionsHold(t *testing.T) {
 			if !ok || r.Context["decided_by"] != string(tc.wantBy) {
 				t.Fatalf("decision record = %+v (found %v), want %s decided by %s", r, ok, tc.wantLevel, tc.wantBy)
 			}
-			if tc.audio.err != nil && r.Context["cause"] != tc.audio.err.Error() {
+			if tc.audio.err != nil && !strings.Contains(r.Context["cause"].(string), tc.audio.err.Error()) {
 				t.Fatalf("failure record = %+v, want the read's cause", r)
 			}
 		})
@@ -237,7 +257,7 @@ func TestSpeechFailureLeavesTheBannerOut(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(speechAnswer{stdout: airpodsReport}, speechAnswer{err: tc.err}))
+			f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{err: tc.err}))
 			started := time.Now()
 
 			// Act
@@ -263,7 +283,7 @@ func TestSpeechFailureLeavesTheBannerOut(t *testing.T) {
 
 func TestSpeechRunsOnlyOnceTheBannerIsMade(t *testing.T) {
 	// Arrange
-	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(speechAnswer{stdout: airpodsReport}, speechAnswer{}))
+	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
 	ranBeforeMade := false
 	f.backend.onPost = func() { ranBeforeMade = len(f.runner.ran()) > 0 }
 
@@ -281,7 +301,7 @@ func TestSpeechRunsOnlyOnceTheBannerIsMade(t *testing.T) {
 
 func TestSpeechSaysNothingForABannerNotMade(t *testing.T) {
 	// Arrange
-	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(speechAnswer{stdout: airpodsReport}, speechAnswer{}))
+	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
 	f.backend.err = errors.New("exit status 64")
 
 	// Act
@@ -295,7 +315,7 @@ func TestSpeechSaysNothingForABannerNotMade(t *testing.T) {
 
 func TestSpeechSaysNothingOnceTheDaemonStandsDown(t *testing.T) {
 	// Arrange: Close begins while the banner is handed over, before it is made.
-	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(speechAnswer{stdout: airpodsReport}, speechAnswer{}))
+	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
 	closed := make(chan struct{})
 	f.backend.onPost = func() {
 		go func() { f.notifier.Close(); close(closed) }()
@@ -335,7 +355,7 @@ func TestEveryKindOfBannerIsReadAloud(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Arrange
-			f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(speechAnswer{stdout: airpodsReport}, speechAnswer{}))
+			f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
 
 			// Act
 			tc.raise(f.notifier)
@@ -378,60 +398,141 @@ func TestSpeechHasOneChokePoint(t *testing.T) {
 	}
 }
 
-func TestListeningDevice(t *testing.T) {
+func TestPrivateListeningDevice(t *testing.T) {
+	bluetooth := func(class string) AudioOutput {
+		return AudioOutput{Device: audiooutput.Device{Name: "a device", Transport: audiooutput.TransportBluetooth}, BluetoothClass: class}
+	}
 	cases := []struct {
 		name string
 		out  AudioOutput
 		want bool
 	}{
-		{name: "airpods over bluetooth", out: AudioOutput{Name: "Dodge's AirPods Pro", Transport: TransportBluetooth}, want: true},
-		{name: "airpods max over bluetooth", out: AudioOutput{Name: "AirPods Max", Transport: TransportBluetooth}, want: true},
-		{name: "the name in any case", out: AudioOutput{Name: "my airpods", Transport: TransportBluetooth}, want: true},
-		{name: "other bluetooth headphones", out: AudioOutput{Name: "WH-1000XM5", Transport: TransportBluetooth}, want: false},
-		{name: "built-in speakers", out: AudioOutput{Name: "MacBook Pro Speakers", Transport: TransportBuiltIn}, want: false},
-		{name: "an airpods name off bluetooth", out: AudioOutput{Name: "AirPods", Transport: TransportUSB}, want: false},
-		{name: "no transport", out: AudioOutput{Name: "AirPods"}, want: false},
+		{name: "airpods: bluetooth headphones", out: AudioOutput{Device: airpods, BluetoothClass: BluetoothHeadphones}, want: true},
+		{name: "a bluetooth headset", out: bluetooth(BluetoothHeadset), want: true},
+		{name: "bluetooth le headphones", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportBluetoothLE}, BluetoothClass: BluetoothHeadphones}, want: true},
+		{name: "the built-in headphone jack", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportBuiltIn, DataSource: audiooutput.DataSourceHeadphones}}, want: true},
+		{name: "the built-in speakers", out: AudioOutput{Device: speakers}, want: false},
+		{name: "the built-in output with no data source", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportBuiltIn}}, want: false},
+		{name: "a bluetooth loudspeaker", out: bluetooth("Loudspeaker"), want: false},
+		{name: "bluetooth portable audio", out: bluetooth("Portable Audio"), want: false},
+		{name: "a bluetooth hands-free device", out: bluetooth("Hands-Free"), want: false},
+		{name: "an unidentifiable bluetooth output", out: bluetooth(""), want: false},
+		{name: "airpods by name with no class", out: AudioOutput{Device: airpods}, want: false},
+		{name: "a usb output", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportUSB, DataSource: audiooutput.DataSourceHeadphones}}, want: false},
+		{name: "an hdmi output", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportHDMI}}, want: false},
+		{name: "a displayport display", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportDisplayPort}}, want: false},
+		{name: "an airplay output", out: AudioOutput{Device: audiooutput.Device{Transport: audiooutput.TransportAirPlay}}, want: false},
+		{name: "an unknown transport", out: AudioOutput{Device: audiooutput.Device{Transport: "virt"}, BluetoothClass: BluetoothHeadphones}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := ListeningDevice(tc.out)
+			got := PrivateListeningDevice(tc.out)
 
 			// Assert
 			if got != tc.want {
-				t.Fatalf("ListeningDevice(%+v) = %v, want %v", tc.out, got, tc.want)
+				t.Fatalf("PrivateListeningDevice(%+v) = %v, want %v", tc.out, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestParseAudioOutput(t *testing.T) {
+// TestSpeechReadsTheOutputsKind pins how the audio output's kind is read: a
+// Bluetooth output's class from the report, joined on its address, and an
+// unidentifiable one read as a speaker.
+func TestSpeechReadsTheOutputsKind(t *testing.T) {
+	cases := []struct {
+		name      string
+		device    audiooutput.Device
+		bluetooth speechAnswer
+		wantSpeak bool
+		wantLevel string
+		wantRuns  int
+	}{
+		{name: "connected airpods are read aloud to", device: airpods, bluetooth: speechAnswer{stdout: airpodsReport}, wantSpeak: true, wantLevel: "info", wantRuns: 3},
+		{name: "the address is matched in any case", device: airpods, bluetooth: speechAnswer{stdout: bluetoothReport("f8:cb:15:f0:ae:6c", BluetoothHeadphones)}, wantSpeak: true, wantLevel: "info", wantRuns: 3},
+		{name: "a connected loudspeaker is silent", device: airpods, bluetooth: speechAnswer{stdout: bluetoothReport("F8:CB:15:F0:AE:6C", "Loudspeaker")}, wantLevel: "info", wantRuns: 2},
+		{name: "an output the report does not show connected is unidentifiable and silent", device: airpods, bluetooth: speechAnswer{stdout: bluetoothReport("AA:BB:CC:DD:EE:FF", BluetoothHeadphones)}, wantLevel: "info", wantRuns: 2},
+		{name: "a bluetooth uid naming no address is unidentifiable and silent", device: audiooutput.Device{Name: "AirPods", Transport: audiooutput.TransportBluetooth, UID: "odd"}, wantLevel: "info", wantRuns: 1},
+		{name: "the built-in headphone jack reads no bluetooth report", device: audiooutput.Device{Transport: audiooutput.TransportBuiltIn, DataSource: audiooutput.DataSourceHeadphones}, wantSpeak: true, wantLevel: "info", wantRuns: 2},
+		{name: "a failed bluetooth read is silent and recorded", device: airpods, bluetooth: speechAnswer{err: errors.New("system_profiler: signal: killed")}, wantLevel: "error", wantRuns: 2},
+		{name: "an unreadable bluetooth report is silent and recorded", device: airpods, bluetooth: speechAnswer{stdout: "not json"}, wantLevel: "error", wantRuns: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			runner := &speechRunner{answers: map[string]speechAnswer{
+				darwinSpeech.AudioOutput: {stdout: deviceLine(tc.device)},
+				darwinSpeech.Bluetooth:   tc.bluetooth,
+				darwinSpeech.Say:         {},
+			}}
+			f := newSpeechFixture("darwin", wifiOn, runner)
+
+			// Act
+			f.postOne()
+
+			// Assert
+			if got := len(f.runner.spoken()) == 1; got != tc.wantSpeak {
+				t.Fatalf("spoke %q, want spoken=%v", f.runner.spoken(), tc.wantSpeak)
+			}
+			if got := len(f.runner.ran()); got != tc.wantRuns {
+				t.Fatalf("ran %+v, want %d runs", f.runner.ran(), tc.wantRuns)
+			}
+			if _, ok := dlog.FindRecord(f.log.Records(), dlog.RecordQuery{Level: tc.wantLevel, Operation: opSpeak}); !ok {
+				t.Fatalf("no %s record of the decision", tc.wantLevel)
+			}
+		})
+	}
+}
+
+func TestSpeechReadsEachProgramUnderItsBound(t *testing.T) {
+	// Arrange
+	f := newSpeechFixture("darwin", wifiOn, newSpeechRunner(onAirpods, speechAnswer{}))
+	started := time.Now()
+
+	// Act
+	f.postOne()
+
+	// Assert
+	bounds := map[string]time.Duration{darwinSpeech.AudioOutput: audioOutputBound, darwinSpeech.Bluetooth: bluetoothBound}
+	for _, run := range f.runner.ran() {
+		bound, ok := bounds[run.bin]
+		if !ok {
+			continue
+		}
+		if run.deadline.IsZero() || run.deadline.Before(started.Add(bound)) || run.deadline.After(time.Now().Add(bound)) {
+			t.Fatalf("%s ran under deadline %v, want its bound %v", run.bin, run.deadline, bound)
+		}
+	}
+}
+
+func TestBluetoothClass(t *testing.T) {
 	cases := []struct {
 		name    string
 		stdout  string
-		want    AudioOutput
+		address string
+		want    string
 		wantErr string
 	}{
-		{name: "the default output", stdout: airpodsReport, want: AudioOutput{Name: "Dodge's AirPods Pro", Transport: TransportBluetooth}},
-		{name: "not json", stdout: "garbage", wantErr: "decode the audio report"},
-		{name: "no default output", stdout: `{"SPAudioDataType":[{"_items":[{"_name":"Mic","coreaudio_default_audio_input_device":"spaudio_yes"}]}]}`, wantErr: "names no default output device"},
-		{name: "no devices", stdout: `{"SPAudioDataType":[]}`, wantErr: "names no default output device"},
-		{name: "two default outputs", stdout: `{"SPAudioDataType":[{"_items":[{"_name":"A","coreaudio_default_audio_output_device":"spaudio_yes"},{"_name":"B","coreaudio_default_audio_output_device":"spaudio_yes"}]}]}`, wantErr: "names 2 default output devices"},
+		{name: "the connected device's class", stdout: airpodsReport, address: "F8:CB:15:F0:AE:6C", want: BluetoothHeadphones},
+		{name: "a device not connected has no class", stdout: airpodsReport, address: "74:8F:3C:18:4E:EE", want: ""},
+		{name: "no devices", stdout: `{"SPBluetoothDataType":[{}]}`, address: "F8:CB:15:F0:AE:6C", want: ""},
+		{name: "not json", stdout: "garbage", address: "F8:CB:15:F0:AE:6C", wantErr: "decode the Bluetooth report"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, err := parseAudioOutput(tc.stdout)
+			got, err := bluetoothClass(tc.stdout, tc.address)
 
 			// Assert
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
-					t.Fatalf("parseAudioOutput err = %v, want %q", err, tc.wantErr)
+					t.Fatalf("bluetoothClass err = %v, want %q", err, tc.wantErr)
 				}
 				return
 			}
 			if err != nil || got != tc.want {
-				t.Fatalf("parseAudioOutput = %+v, %v, want %+v", got, err, tc.want)
+				t.Fatalf("bluetoothClass = %q, %v, want %q", got, err, tc.want)
 			}
 		})
 	}
@@ -489,13 +590,16 @@ func TestSpeechPlatformFor(t *testing.T) {
 		goos string
 		want SpeechPlatform
 	}{
-		{name: "macOS speaks through say and reads CoreAudio's report", goos: "darwin", want: SpeechPlatform{Say: "/usr/bin/say", AudioOutput: "/usr/sbin/system_profiler", AudioOutputArgs: []string{"SPAudioDataType", "-json"}}},
+		{name: "macOS speaks through say and reads CoreAudio through the daemon's own verb", goos: "darwin", want: SpeechPlatform{
+			Say: "/usr/bin/say", AudioOutput: "/bin/agent-repld", AudioOutputArgs: []string{audiooutput.Verb},
+			Bluetooth: "/usr/sbin/system_profiler", BluetoothArgs: []string{"SPBluetoothDataType", "-json"},
+		}},
 		{name: "linux speaks nothing", goos: "linux", want: SpeechPlatform{}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := SpeechPlatformFor(tc.goos)
+			got := SpeechPlatformFor(tc.goos, "/bin/agent-repld")
 
 			// Assert
 			if !reflect.DeepEqual(got, tc.want) {
@@ -507,23 +611,24 @@ func TestSpeechPlatformFor(t *testing.T) {
 
 func TestSpeechPlatformWithOverrides(t *testing.T) {
 	cases := []struct {
-		name            string
-		platform        SpeechPlatform
-		say, audio      string
-		wantSay, wantAO string
+		name                  string
+		platform              SpeechPlatform
+		say, audio, bluetooth string
+		want                  [3]string
 	}{
-		{name: "both overridden", platform: darwinSpeech, say: "/fake/say", audio: "/fake/audio", wantSay: "/fake/say", wantAO: "/fake/audio"},
-		{name: "none overridden", platform: darwinSpeech, wantSay: "/usr/bin/say", wantAO: "/usr/sbin/system_profiler"},
-		{name: "an unsupported platform stays silent", platform: SpeechPlatform{}, say: "/fake/say", audio: "/fake/audio"},
+		{name: "every program overridden", platform: darwinSpeech, say: "/fake/say", audio: "/fake/audio", bluetooth: "/fake/bt", want: [3]string{"/fake/say", "/fake/audio", "/fake/bt"}},
+		{name: "none overridden", platform: darwinSpeech, want: [3]string{"/usr/bin/say", "/bin/agent-repld", "/usr/sbin/system_profiler"}},
+		{name: "one overridden", platform: darwinSpeech, bluetooth: "/fake/bt", want: [3]string{"/usr/bin/say", "/bin/agent-repld", "/fake/bt"}},
+		{name: "an unsupported platform stays silent", platform: SpeechPlatform{}, say: "/fake/say", audio: "/fake/audio", bluetooth: "/fake/bt"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := tc.platform.WithOverrides(tc.say, tc.audio)
+			got := tc.platform.WithOverrides(tc.say, tc.audio, tc.bluetooth)
 
 			// Assert
-			if got.Say != tc.wantSay || got.AudioOutput != tc.wantAO {
-				t.Fatalf("WithOverrides = %+v, want say %q and audio %q", got, tc.wantSay, tc.wantAO)
+			if [3]string{got.Say, got.AudioOutput, got.Bluetooth} != tc.want {
+				t.Fatalf("WithOverrides = %+v, want %v", got, tc.want)
 			}
 		})
 	}

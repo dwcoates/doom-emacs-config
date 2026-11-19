@@ -512,11 +512,12 @@ type Daemon struct {
 	// (AGENT_REPL_CHIME_CMD), so no test ever plays a real sound.
 	Chime *Recorder
 	// Say records every banner read aloud (AGENT_REPL_SAY_CMD), and
-	// AudioOutput answers the audio output speech reads
-	// (AGENT_REPL_AUDIO_OUTPUT_CMD), so no test ever speaks or reads the
-	// host's audio.
+	// AudioOutput and Bluetooth answer the audio output speech reads
+	// (AGENT_REPL_AUDIO_OUTPUT_CMD, AGENT_REPL_BLUETOOTH_CMD), so no test
+	// ever speaks or reads the host's audio or Bluetooth.
 	Say         *Recorder
 	AudioOutput *Recorder
+	Bluetooth   *Recorder
 	// HostToolsDir holds the fake persistent-wifi host tools
 	// (AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR), so no test ever reads or changes
 	// the real machine's power or network settings.
@@ -741,6 +742,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		Chime:              NewFakeChime(t, filepath.Join(root, "bin")),
 		Say:                NewFakeSay(t, filepath.Join(root, "bin")),
 		AudioOutput:        NewFakeAudioOutput(t, filepath.Join(root, "bin")),
+		Bluetooth:          NewFakeBluetooth(t, filepath.Join(root, "bin")),
 		HostToolsDir:       NewFakeHostTools(t, filepath.Join(root, "host-tools")),
 		Lid:                NewFakeLid(t, sockRoot),
 		PowerSource:        NewFakePowerSource(t, sockRoot),
@@ -942,6 +944,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		"AGENT_REPL_CHIME_CMD="+d.Chime.Path,
 		"AGENT_REPL_SAY_CMD="+d.Say.Path,
 		"AGENT_REPL_AUDIO_OUTPUT_CMD="+d.AudioOutput.Path,
+		"AGENT_REPL_BLUETOOTH_CMD="+d.Bluetooth.Path,
 		"AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR="+d.HostToolsDir,
 		"AGENT_REPL_PERSISTENT_WIFI_HOTSPOT="+FakeHotspot,
 		"AGENT_REPL_PERSISTENT_WIFI_LID="+d.Lid.Path,

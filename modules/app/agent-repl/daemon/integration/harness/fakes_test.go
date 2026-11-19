@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"agent-repld/internal/audiooutput"
 	"agent-repld/internal/sourcescan"
 )
 
@@ -334,14 +335,15 @@ func TestLinkPromptsStagesReadOnlyPromptsOnAnotherFilesystem(t *testing.T) {
 	}
 }
 
-func TestFakeSpeechProgramsSpeakNothingAndReadTheBuiltInSpeakers(t *testing.T) {
+func TestFakeSpeechProgramsSpeakNothingAndReadNoPrivateDevice(t *testing.T) {
 	cases := []struct {
 		name       string
 		fake       func(t testing.TB, dir string) *Recorder
 		args       []string
 		wantStdout string
 	}{
-		{name: "the audio-output reader prints the built-in speakers", fake: NewFakeAudioOutput, args: []string{"SPAudioDataType", "-json"}, wantStdout: FakeAudioOutputReport},
+		{name: "the audio-output reader prints the built-in speakers", fake: NewFakeAudioOutput, args: []string{"audio-output"}, wantStdout: FakeAudioOutput},
+		{name: "the bluetooth reader prints no device", fake: NewFakeBluetooth, args: []string{"SPBluetoothDataType", "-json"}, wantStdout: FakeBluetoothReport},
 		{name: "say prints nothing", fake: NewFakeSay, args: []string{"--", "hello"}, wantStdout: ""},
 	}
 	for _, tc := range cases {
@@ -357,5 +359,21 @@ func TestFakeSpeechProgramsSpeakNothingAndReadTheBuiltInSpeakers(t *testing.T) {
 				t.Fatalf("ran %s: %q, %v, want %q", r.Path, out, err, tc.wantStdout)
 			}
 		})
+	}
+}
+
+// TestFakeAudioOutputIsADeviceTheDaemonReads pins that the fake prints the
+// one shape the daemon's verb prints, and that it names no private
+// listening device.
+func TestFakeAudioOutputIsADeviceTheDaemonReads(t *testing.T) {
+	// Act
+	device, err := audiooutput.Decode(FakeAudioOutput)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Decode(FakeAudioOutput): %v", err)
+	}
+	if device.Transport != audiooutput.TransportBuiltIn || device.DataSource != audiooutput.DataSourceInternalSpeakers {
+		t.Fatalf("FakeAudioOutput = %+v, want the built-in speakers", device)
 	}
 }

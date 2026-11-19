@@ -74,18 +74,19 @@ func resolveChime(log dlog.Logger) (desktopnotify.Chime, error) {
 }
 
 // buildSpeech builds the speech every made banner is read aloud through when
-// the daemon's persistent wifi mode is on and a listening device is the audio
-// output: this GOOS's programs, each overridden by its environment variable
+// the daemon's persistent wifi mode is on and a private listening device is
+// the audio output: this GOOS's programs, each overridden by its environment variable
 // when set, run through the one exec Runner the banner program runs through.
-func buildSpeech(standing desktopnotify.WifiStanding) *desktopnotify.Speech {
-	return desktopnotify.NewSpeech(runtime.GOOS, speechPlatform(), desktopnotify.ExecRunner{}, standing)
+func buildSpeech(standing desktopnotify.WifiStanding, selfExe string) *desktopnotify.Speech {
+	return desktopnotify.NewSpeech(runtime.GOOS, speechPlatform(selfExe), desktopnotify.ExecRunner{}, standing)
 }
 
-// speechPlatform is this GOOS's speech programs with the environment's
-// overrides in place.
-func speechPlatform() desktopnotify.SpeechPlatform {
-	return desktopnotify.SpeechPlatformFor(runtime.GOOS).
-		WithOverrides(os.Getenv(desktopnotify.EnvSayCmd), os.Getenv(desktopnotify.EnvAudioOutputCmd))
+// speechPlatform is this GOOS's speech programs, the audio output read
+// through this daemon binary (selfExe), with the environment's overrides in
+// place.
+func speechPlatform(selfExe string) desktopnotify.SpeechPlatform {
+	return desktopnotify.SpeechPlatformFor(runtime.GOOS, selfExe).WithOverrides(
+		os.Getenv(desktopnotify.EnvSayCmd), os.Getenv(desktopnotify.EnvAudioOutputCmd), os.Getenv(desktopnotify.EnvBluetoothCmd))
 }
 
 // wifiStandingForwarder carries the persistent-wifi controller's published

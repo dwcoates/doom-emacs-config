@@ -265,10 +265,11 @@ func TestSpeechPlatformTakesTheOverrides(t *testing.T) {
 	// Arrange
 	t.Setenv(desktopnotify.EnvSayCmd, "/tmp/fake-say")
 	t.Setenv(desktopnotify.EnvAudioOutputCmd, "/tmp/fake-audio")
-	want := desktopnotify.SpeechPlatformFor(runtime.GOOS).WithOverrides("/tmp/fake-say", "/tmp/fake-audio")
+	t.Setenv(desktopnotify.EnvBluetoothCmd, "/tmp/fake-bluetooth")
+	want := desktopnotify.SpeechPlatformFor(runtime.GOOS, "/bin/agent-repld").WithOverrides("/tmp/fake-say", "/tmp/fake-audio", "/tmp/fake-bluetooth")
 
 	// Act
-	got := speechPlatform()
+	got := speechPlatform("/bin/agent-repld")
 
 	// Assert
 	if !reflect.DeepEqual(got, want) {
