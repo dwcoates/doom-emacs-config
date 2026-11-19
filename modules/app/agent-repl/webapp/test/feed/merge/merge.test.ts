@@ -4,15 +4,26 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
+import { createRouterTransport } from "@connectrpc/connect";
+import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
+import {
+  OpenExternalResponseSchema,
+  type OpenExternalRequest,
+} from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
+import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
+import { createTicker } from "../../../src/clock.js";
+import { createAgentReplClient } from "../../../src/rpc/client.js";
+import { testAppContext } from "../../rpc/app-context.js";
 import {
   type FeedMerge,
   FeedMergeSchema,
+  FeedMergeBranchLineTargetPullRequestSchema,
   FeedMergeErrorSchema,
   FeedMergeModeSchema,
   FeedMergeWorkspaceSwitchSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText, liveMergeClock, mergeBadge, settledMergeClock } from "../../../src/feed/merge/merge.js";
+import { BRANCH_LINE_TARGET_LINK_CLASS, drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText, liveMergeClock, mergeBadge, settledMergeClock } from "../../../src/feed/merge/merge.js";
 import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
@@ -44,6 +55,71 @@ describe("drawFeedMerge: the head's constant props", () => {
   it("draws the ⇄ glyph for the vocabulary's merge icon", () => {
     const el = draw(mergeHead({ case: "update" }));
     expect(el.querySelector(".merge-glyph")?.textContent).toBe("⇄");
+  });
+});
+
+describe("drawFeedMerge: the branch line's target", () => {
+  const PR = "https://github.com/o/r/pull/7";
+
+  /** A head on ROW's line whose target opens PULLREQUEST when it is given. */
+  function lineHead(label: string, pullRequest?: string): FeedMerge {
+    const msg = mergeHead({ case: "update" }, { label });
+    const target = msg.head?.branchLine?.target;
+    if (pullRequest !== undefined && target !== undefined) {
+      target.pullRequest = create(FeedMergeBranchLineTargetPullRequestSchema, { url: pullRequest });
+    }
+    return msg;
+  }
+
+  /** Draws MSG against a context whose OpenExternal records its requests. */
+  function drawOpening(msg: FeedMerge): { el: HTMLElement; opened: OpenExternalRequest[] } {
+    const opened: OpenExternalRequest[] = [];
+    const transport = createRouterTransport(({ service }) => {
+      service(AgentRepl, {
+        openExternal: (req) => {
+          opened.push(req);
+          return create(OpenExternalResponseSchema, { result: { case: "success", value: {} } });
+        },
+      });
+    });
+    const ctx = testAppContext({
+      client: createAgentReplClient(transport),
+      workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
+      ticker: createTicker(1000),
+      failures: { report: () => {}, retract: () => {} },
+      composerEnabled: false,
+    });
+    return { el: drawFeedMerge(msg, rowContext(ctx, mergeRow("m1"))), opened };
+  }
+
+  it("draws a target with no pull request as plain text", () => {
+    const el = draw(lineHead("fix → /repo"));
+    expect(el.querySelector(".merge-label")?.innerHTML).toBe("fix → /repo");
+  });
+
+  it("draws a target with a pull request as the line's one link, text unchanged", () => {
+    const el = draw(lineHead("fix → /repo", PR));
+    const links = el.querySelectorAll(`.merge-label a.${BRANCH_LINE_TARGET_LINK_CLASS}`);
+    expect([...links].map((a) => [a.textContent, a.getAttribute("href")])).toEqual([["/repo", PR]]);
+    expect(el.querySelector(".merge-label")?.textContent).toBe("fix → /repo");
+  });
+
+  it("opens the pull request through OpenExternal when the target is clicked", async () => {
+    const { el, opened } = drawOpening(lineHead("fix → /repo", PR));
+    el.querySelector<HTMLAnchorElement>(`.${BRANCH_LINE_TARGET_LINK_CLASS}`)?.click();
+    for (let i = 0; i < 20; i += 1) await vi.advanceTimersByTimeAsync(0);
+    expect(opened.map((r) => r.url)).toEqual([PR]);
+  });
+
+  it("draws a line with no target as its source alone, with no arrow", () => {
+    const el = draw(lineHead("c0ffee"));
+    expect(el.querySelector(".merge-label")?.innerHTML).toBe("c0ffee");
+  });
+
+  it("refuses a line with no source", () => {
+    const msg = lineHead("fix → /repo");
+    if (msg.head?.branchLine !== undefined) msg.head.branchLine.source = undefined;
+    expect(() => draw(msg)).toThrow(MalformedView);
   });
 });
 
@@ -98,7 +174,7 @@ describe("drawFeedMerge: every result arm", () => {
 
   it("refuses a live head whose stage oneof is unset", () => {
     const msg = create(FeedMergeSchema, {
-      head: { glyph: { icon: "merge" }, label: { text: "x" }, runtime: { startedAtMs: 0n } },
+      head: { glyph: { icon: "merge" }, branchLine: { source: { text: "x" } }, runtime: { startedAtMs: 0n } },
       result: { case: "update", value: {} },
     });
     expect(() => draw(msg)).toThrow(MalformedView);
@@ -179,7 +255,7 @@ describe("drawFeedMerge: malformed views", () => {
     const msg = create(FeedMergeSchema, {
       head: {
         glyph: { icon: "merge" },
-        label: { text: "x" },
+        branchLine: { source: { text: "x" } },
         runtime: { startedAtMs: 0n },
         fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
       },
@@ -196,7 +272,7 @@ describe("drawFeedMerge: malformed views", () => {
     const msg = create(FeedMergeSchema, {
       head: {
         glyph: { icon: "merge" },
-        label: { text: "x" },
+        branchLine: { source: { text: "x" } },
         runtime: { startedAtMs: 0n },
         fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
       },

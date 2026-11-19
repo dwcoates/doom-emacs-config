@@ -2081,7 +2081,7 @@ describe("mountBubble: an overlay question in place of the sub-feed", () => {
       keyOf: (row: FeedRow) => {
         const label =
           row.row.case === "activity" && row.row.value.unit.case === "merge"
-            ? row.row.value.unit.value.head?.label?.text ?? ""
+            ? row.row.value.unit.value.head?.branchLine?.source?.text ?? ""
             : "";
         return label.startsWith("Q:") ? label : undefined;
       },

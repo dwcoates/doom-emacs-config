@@ -5,6 +5,7 @@
  * body, the queue and the suites suites all build a tab the same way, from the
  * generated schemas rather than by hand.
  */
+import { branchLineInit } from "../branch-line.js";
 import { create } from "@bufbuild/protobuf";
 import {
   FeedIdSchema,
@@ -205,7 +206,7 @@ export function mergeHead(
   return create(FeedMergeSchema, {
     head: {
       glyph: { icon: opts.icon ?? "merge" },
-      label: { text: opts.label ?? "branch → master" },
+      branchLine: branchLineInit(opts.label ?? "branch → master"),
       runtime: { startedAtMs: opts.startedAtMs ?? 0n },
       fold: { folded: true, decidedBy: { case: "daemon", value: {} } },
       version:
