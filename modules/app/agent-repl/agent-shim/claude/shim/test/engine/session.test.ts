@@ -7179,12 +7179,12 @@ describe("the converter's own health", () => {
 
 describe("the model the vendor answers on", () => {
   /** An assistant message reporting the model that produced it. */
-  const answeredOn = (model: string): never =>
+  const answeredOn = (model: string, parentToolUseId: string | null = null): never =>
     ({
       type: "assistant",
       uuid: `u-${model}`,
       session_id: "s",
-      parent_tool_use_id: null,
+      parent_tool_use_id: parentToolUseId,
       message: { model, content: [] },
     }) as never;
 
@@ -7215,6 +7215,17 @@ describe("the model the vendor answers on", () => {
     });
 
     expect(names).toContain("claude-haiku-4-5");
+  });
+
+  it("never adopts a subagent's model as the session's", async () => {
+    const h = harness();
+    await started(h);
+
+    const names = await pushedModels(h, async () => {
+      await h.engine.onSdkMessage(answeredOn("claude-haiku-4-5", "toolu_listener"));
+    });
+
+    expect(names).not.toContain("claude-haiku-4-5");
   });
 
   it("pushes nothing when the reported model is the one in effect", async () => {

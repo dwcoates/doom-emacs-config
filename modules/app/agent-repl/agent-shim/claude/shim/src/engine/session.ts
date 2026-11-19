@@ -3272,6 +3272,12 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       const requestId = (message as { request_id?: unknown }).request_id;
       if (typeof requestId === "string" && requestId !== "") setRequestId(requestId);
       if (attribution.keepalive) return;
+      // A SUBAGENT'S MODEL IS NEVER THE SESSION'S. A subagent defined on
+      // another model (a Haiku listener, say) streams its own assistant
+      // messages here, and adopting their `message.model` would flip the
+      // session's chip, and every later authoritative field, to the
+      // subagent's model for as long as it runs.
+      if (message.parent_tool_use_id !== null) return;
       // UNSOLICITED CHANGES ARE STILL CHANGES: nothing called SetSessionModel,
       // so this message is the only evidence the swap happened.
       noteReportedModel((message.message as { model?: unknown } | undefined)?.model);
