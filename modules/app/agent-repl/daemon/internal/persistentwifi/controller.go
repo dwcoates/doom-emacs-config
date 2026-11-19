@@ -126,9 +126,6 @@ type Controller struct {
 	// Services permission since a scan last heard it allowed
 	// (askAuthorization).
 	authorizeAsked bool
-	// hotspot is the hotspot dwell: while the quiet state stands on the
-	// hotspot, when each known network was first seen (hotspotdwell.go).
-	hotspot hotspotDwell
 	// failoverCancel cancels the failover attempt in flight; nil while none
 	// runs (attemptFailover).
 	failoverCancel context.CancelFunc
