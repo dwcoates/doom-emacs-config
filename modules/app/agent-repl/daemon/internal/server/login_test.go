@@ -11,6 +11,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
 	"agent-repld/internal/login"
 	"agent-repld/internal/merge"
 )
@@ -353,4 +354,98 @@ func TestOpenInEditorAnswersAnUnknownMergeTestLog(t *testing.T) {
 	if resp.Msg.GetError().GetUnknownMergeTestLog() == nil || len(h.Verbs.editorOpens) != 0 {
 		t.Fatalf("result = %v, opens %v, want unknown_merge_test_log and nothing relayed", resp.Msg.GetResult(), h.Verbs.editorOpens)
 	}
+}
+
+// TestALinkClickTellsTheEditorTheReaderFollowedALink pins that every link a
+// page follows, outward or into the editor, tells the workspace's host stream
+// first (link_followed), so Emacs counts the workspace viewed.
+func TestALinkClickTellsTheEditorTheReaderFollowedALink(t *testing.T) {
+	tests := []struct {
+		name  string
+		click func(h *harness) error
+	}{
+		{
+			name: "OpenExternal",
+			click: func(h *harness) error {
+				_, err := h.Client.OpenExternal(context.Background(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+					Workspace: ref(), Url: "https://example.com/a"}))
+				return err
+			},
+		},
+		{
+			name: "OpenInEditor workspace_file",
+			click: func(h *harness) error {
+				_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_WorkspaceFile{WorkspaceFile: &agentreplv1.OpenInEditorWorkspaceFile{Path: "lisp/core.el"}}}))
+				return err
+			},
+		},
+		{
+			name: "OpenInEditor terminal_command",
+			click: func(h *harness) error {
+				_, err := h.Client.OpenInEditor(context.Background(), connect.NewRequest(&agentreplv1.OpenInEditorRequest{Workspace: ref(),
+					Target: &agentreplv1.OpenInEditorRequest_TerminalCommand{TerminalCommand: &agentreplv1.OpenInEditorTerminalCommand{Command: "ls"}}}))
+				return err
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			stream := holdHostStream(t, h)
+
+			// Act.
+			err := tt.click(h)
+			push := receiveHostEvent(t, stream)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("%s: %v", tt.name, err)
+			}
+			if push.GetLinkFollowed() == nil {
+				t.Fatalf("push = %v, want link_followed", push)
+			}
+		})
+	}
+}
+
+func TestOpenExternalStillOpensTheLinkAfterTellingTheEditor(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	holdHostStream(t, h)
+
+	// Act.
+	_, err := h.Client.OpenExternal(context.Background(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+		Workspace: ref(), Url: "https://example.com/a"}))
+
+	// Assert.
+	if err != nil || len(h.Verbs.externalOpens) != 1 || h.Verbs.externalOpens[0] != "https://example.com/a" {
+		t.Fatalf("OpenExternal = %v, opens %v, want the link handed to the browser", err, h.Verbs.externalOpens)
+	}
+}
+
+func TestALinkFollowedIsRecordedAtInfoNamingTheHostStreams(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	log := dlog.NewTestLogger()
+	h.Surfaces.workspace = log
+	holdHostStream(t, h)
+
+	// Act.
+	_, err := h.Client.OpenExternal(context.Background(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
+		Workspace: ref(), Url: "https://example.com/a"}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("OpenExternal: %v", err)
+	}
+	for _, rec := range log.Records() {
+		if rec.Operation == "OpenExternal" && rec.Level == "info" &&
+			rec.Message == "told the editor the reader followed a link in the workspace's page" &&
+			rec.Context["host_streams"] == 1 {
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the link followed at info naming one host stream", log.Records())
 }

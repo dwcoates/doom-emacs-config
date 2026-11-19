@@ -62,7 +62,16 @@ type SelectInEditorRequest struct {
 	// click, and a page not yet listening takes it when it attaches; on the
 	// daemon's route it rides the select. A merge queue entry for an async merge
 	// sets it to the merge's bubble in its requester's feed.
-	Reveal        *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
+	Reveal *v11.FeedId `protobuf:"bytes,2,opt,name=reveal,proto3,oneof" json:"reveal,omitempty"`
+	// THE WORKSPACE WHOSE FEED LINK MADE THE CLICK: a feed's jump to another
+	// workspace (a mention, a merge bubble's switch, a merge step's target)
+	// names the page it was clicked in. The daemon tells that workspace's host
+	// stream the reader followed a link in it
+	// (WatchHostWorkspaceResponse.link_followed) before either route switches,
+	// so Emacs counts it viewed. Unset for a rail row or a thread, which are no
+	// workspace's page. Resolved as `workspace` is, and refused with the same
+	// arms.
+	FollowedFrom  *v1.WorkspaceRef `protobuf:"bytes,3,opt,name=followed_from,json=followedFrom,proto3,oneof" json:"followed_from,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -107,6 +116,13 @@ func (x *SelectInEditorRequest) GetWorkspace() *v1.WorkspaceRef {
 func (x *SelectInEditorRequest) GetReveal() *v11.FeedId {
 	if x != nil {
 		return x.Reveal
+	}
+	return nil
+}
+
+func (x *SelectInEditorRequest) GetFollowedFrom() *v1.WorkspaceRef {
+	if x != nil {
+		return x.FollowedFrom
 	}
 	return nil
 }
@@ -462,11 +478,13 @@ var File_agentrepl_v1_endpoint_select_in_editor_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_select_in_editor_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_select_in_editor.proto\x12\fagentrepl.v1\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\x8e\x01\n" +
+	",agentrepl/v1/endpoint_select_in_editor.proto\x12\fagentrepl.v1\x1a,agentrepl/v1/endpoint_select_workspace.proto\x1a\x16frontend/v1/feed.proto\x1a\x1cworkspace/v1/workspace.proto\"\xe6\x01\n" +
 	"\x15SelectInEditorRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x120\n" +
-	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01B\t\n" +
-	"\a_reveal\"\x9e\x01\n" +
+	"\x06reveal\x18\x02 \x01(\v2\x13.frontend.v1.FeedIdH\x00R\x06reveal\x88\x01\x01\x12D\n" +
+	"\rfollowed_from\x18\x03 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x01R\ffollowedFrom\x88\x01\x01B\t\n" +
+	"\a_revealB\x10\n" +
+	"\x0e_followed_from\"\x9e\x01\n" +
 	"\x16SelectInEditorResponse\x12?\n" +
 	"\asuccess\x18\x01 \x01(\v2#.agentrepl.v1.SelectInEditorSuccessH\x00R\asuccess\x129\n" +
 	"\x05error\x18\x02 \x01(\v2!.agentrepl.v1.SelectInEditorErrorH\x00R\x05errorB\b\n" +
@@ -515,20 +533,21 @@ var file_agentrepl_v1_endpoint_select_in_editor_proto_goTypes = []any{
 var file_agentrepl_v1_endpoint_select_in_editor_proto_depIdxs = []int32{
 	5,  // 0: agentrepl.v1.SelectInEditorRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	6,  // 1: agentrepl.v1.SelectInEditorRequest.reveal:type_name -> frontend.v1.FeedId
-	2,  // 2: agentrepl.v1.SelectInEditorResponse.success:type_name -> agentrepl.v1.SelectInEditorSuccess
-	4,  // 3: agentrepl.v1.SelectInEditorResponse.error:type_name -> agentrepl.v1.SelectInEditorError
-	3,  // 4: agentrepl.v1.SelectInEditorSuccess.relayed:type_name -> agentrepl.v1.SelectInEditorRelayed
-	7,  // 5: agentrepl.v1.SelectInEditorSuccess.selected:type_name -> agentrepl.v1.SelectWorkspaceSuccess
-	8,  // 6: agentrepl.v1.SelectInEditorError.unknown_workspace:type_name -> agentrepl.v1.SelectWorkspaceUnknownWorkspace
-	9,  // 7: agentrepl.v1.SelectInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
-	10, // 8: agentrepl.v1.SelectInEditorError.transferring_away:type_name -> agentrepl.v1.SelectWorkspaceTransferringAway
-	11, // 9: agentrepl.v1.SelectInEditorError.not_yet_adopted:type_name -> agentrepl.v1.SelectWorkspaceNotYetAdopted
-	12, // 10: agentrepl.v1.SelectInEditorError.standing_down:type_name -> agentrepl.v1.SelectWorkspaceStandingDown
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	5,  // 2: agentrepl.v1.SelectInEditorRequest.followed_from:type_name -> workspace.v1.WorkspaceRef
+	2,  // 3: agentrepl.v1.SelectInEditorResponse.success:type_name -> agentrepl.v1.SelectInEditorSuccess
+	4,  // 4: agentrepl.v1.SelectInEditorResponse.error:type_name -> agentrepl.v1.SelectInEditorError
+	3,  // 5: agentrepl.v1.SelectInEditorSuccess.relayed:type_name -> agentrepl.v1.SelectInEditorRelayed
+	7,  // 6: agentrepl.v1.SelectInEditorSuccess.selected:type_name -> agentrepl.v1.SelectWorkspaceSuccess
+	8,  // 7: agentrepl.v1.SelectInEditorError.unknown_workspace:type_name -> agentrepl.v1.SelectWorkspaceUnknownWorkspace
+	9,  // 8: agentrepl.v1.SelectInEditorError.workspace_ref_mismatch:type_name -> agentrepl.v1.SelectWorkspaceWorkspaceRefMismatch
+	10, // 9: agentrepl.v1.SelectInEditorError.transferring_away:type_name -> agentrepl.v1.SelectWorkspaceTransferringAway
+	11, // 10: agentrepl.v1.SelectInEditorError.not_yet_adopted:type_name -> agentrepl.v1.SelectWorkspaceNotYetAdopted
+	12, // 11: agentrepl.v1.SelectInEditorError.standing_down:type_name -> agentrepl.v1.SelectWorkspaceStandingDown
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_select_in_editor_proto_init() }

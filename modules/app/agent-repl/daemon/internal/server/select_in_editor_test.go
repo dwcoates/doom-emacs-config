@@ -364,3 +364,62 @@ func TestSelectInEditorRecordsTheRelaysRevealAtInfo(t *testing.T) {
 	}
 	t.Fatalf("records = %+v, want the relay at info naming the reveal", log.Records())
 }
+
+func TestSelectInEditorFollowedFromAFeedTellsTheSourceBeforeTheSwitch(t *testing.T) {
+	// Arrange: the page's own workspace is the source and the target alike,
+	// so one host stream carries both pushes in the order they were made.
+	h := newHarness(t)
+	stream := holdHostStream(t, h)
+
+	// Act.
+	_, err := h.Client.SelectInEditor(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectInEditorRequest{Workspace: ref(), FollowedFrom: ref()}))
+	first := receiveHostEvent(t, stream)
+	second := receiveHostEvent(t, stream)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectInEditor: %v", err)
+	}
+	if first.GetLinkFollowed() == nil || second.GetSelectRequested() == nil {
+		t.Fatalf("pushes = %v, %v, want link_followed then select_requested", first, second)
+	}
+}
+
+func TestSelectInEditorFollowedFromAnUnknownWorkspaceIsRefusedByArm(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	holdHostStream(t, h)
+
+	// Act.
+	resp, err := h.Client.SelectInEditor(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectInEditorRequest{
+			Workspace:    ref(),
+			FollowedFrom: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("SelectInEditor: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if got := h.Verbs.selects.Load(); got != 0 {
+		t.Fatalf("selects = %d, want none for an unknown source", got)
+	}
+}
+
+func TestSelectInEditorFollowedFromABlankRefIsInvalidArgument(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, err := h.Client.SelectInEditor(context.Background(),
+		connect.NewRequest(&agentreplv1.SelectInEditorRequest{Workspace: ref(), FollowedFrom: &workspacev1.WorkspaceRef{}}))
+
+	// Assert.
+	if got := connectCode(t, err); got != connect.CodeInvalidArgument {
+		t.Fatalf("code = %v, want invalid_argument", got)
+	}
+}

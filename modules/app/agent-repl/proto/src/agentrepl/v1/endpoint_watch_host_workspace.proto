@@ -163,6 +163,15 @@ message WatchHostWorkspaceResponse {
     // composer offers is always a link in the feed. State, not an event: a
     // late subscriber is sent the set in force first.
     frontend.v1.WorkspaceMentionTargets mention_targets = 22;
+    // THE READER FOLLOWED A LINK IN THIS WORKSPACE'S PAGE: an outward link
+    // (OpenExternal), an editor link (OpenInEditor, any target), or a jump to
+    // another workspace from its feed (SelectInEditorRequest.followed_from).
+    // Following a link is proof the reader read the page, so Emacs counts the
+    // workspace viewed at once, as the view dwell would have: its row goes
+    // PARTIAL (MarkWorkspaceViewed) and its visit enters the selection
+    // history however short it was. An event, not state: never replayed to a
+    // late subscriber, because a click belongs to the moment it was made.
+    HostWorkspaceLinkFollowed link_followed = 23;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention
@@ -284,6 +293,10 @@ message HostWorkspaceResponseQuestionTaken {}
 // it rides names the workspace, and requesting the switch to it is the whole
 // of Emacs's obligation.
 message HostWorkspaceSelectRequested {}
+// The reader followed a link in this workspace's page. Empty: the stream it
+// rides names the workspace, and counting the workspace viewed is the whole
+// of Emacs's obligation.
+message HostWorkspaceLinkFollowed {}
 // The user clicked the load button the webhost draws for this workspace's
 // held-back page. Empty: the stream it rides names the workspace, and loading
 // its page is the whole of Emacs's obligation.

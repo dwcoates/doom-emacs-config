@@ -1201,6 +1201,9 @@ func (s *server) SelectWorkspace(
 // A REVEAL THE CLICK CARRIES is asked of the page on either route: as the click
 // is relayed, since the editor's own select carries none, or with the daemon's
 // select, exactly as SelectWorkspace reveals it.
+//
+// A FEED'S JUMP (followed_from) is a link the reader followed in that
+// workspace's page, which its editor is told first (pushLinkFollowed).
 func (s *server) SelectInEditor(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.SelectInEditorRequest],
@@ -1210,6 +1213,15 @@ func (s *server) SelectInEditor(
 	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
 	if done {
 		return answer(resp, cerr)
+	}
+	// A FEED'S JUMP NAMES THE PAGE IT WAS CLICKED IN, which is resolved as the
+	// subject is and told it was read before either route switches.
+	if from := req.Msg.GetFollowedFrom(); from != nil {
+		source, cerr, done := s.subjectForField(ctx, rpc, "followed_from", from, resp)
+		if done {
+			return answer(resp, cerr)
+		}
+		s.pushLinkFollowed(source.Log, rpc, source.Record.ID)
 	}
 	reveal := req.Msg.GetReveal()
 	if heard := s.pushSelectRequested(subject.Record.ID); heard > 0 {
