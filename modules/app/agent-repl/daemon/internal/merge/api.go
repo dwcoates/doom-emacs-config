@@ -802,7 +802,7 @@ type Deps struct {
 // DeployCheckWorkspaces is what the deploy checks need of the workspaces
 // (workspace.Verbs, bound after the queue is built).
 type DeployCheckWorkspaces interface {
-	// CreateDeployMediator makes a repository's deploy mediator, hidden,
+	// CreateDeployMediator makes a repository's deploy mediator, in sight,
 	// unprompted and in remote control.
 	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
 	// SetDeployMediatorEffort sets the deploy mediator to its effort; it
@@ -818,15 +818,12 @@ type DeployCheckWorkspaces interface {
 	// StopNow ends a deploy check workspace at once, its session killed
 	// mid-turn: a chain's end never lets its intake's turn run on.
 	StopNow(ctx context.Context, ws ids.WorkspaceID) error
-	// StandBy hides a remediation or escalation whose finish was accepted and
-	// ends its session at once, keeping it open until its fix deploys.
+	// StandBy ends the session of a remediation or escalation whose finish
+	// was accepted, keeping it open and in sight until its fix deploys.
 	StandBy(ctx context.Context, ws ids.WorkspaceID) error
-	// Resume shows a standing-by workspace again, for the brief sending it
-	// back to work.
+	// Resume shows a hidden deploy check workspace again: the mediator
+	// stands in sight for good, so any hide of it is undone.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error
-	// Hide hides a standing fixer no check holds its queue for, its session
-	// untouched.
-	Hide(ctx context.Context, ws ids.WorkspaceID) error
 	// Refresh brings the standing fixer's worktree to its parent's tip
 	// before a new brief.
 	Refresh(ctx context.Context, ws ids.WorkspaceID) error

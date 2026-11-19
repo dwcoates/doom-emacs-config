@@ -467,9 +467,6 @@ func (o *orchestrator) releaseEscalated(ctx context.Context, repo wsm.RepoKey, m
 	}
 	if released {
 		o.deps.Log.Global().Info(opMediation, why+"; its check is released and the queue advances", fields)
-		// A RELEASED ESCALATION'S MEDIATOR IS HIDDEN: no check holds the
-		// queue for it any more, and its session is left as it is.
-		o.hideMediator(ctx, repo, fields)
 		o.republishMediation(ctx, repo)
 		o.kick(repo)
 	}

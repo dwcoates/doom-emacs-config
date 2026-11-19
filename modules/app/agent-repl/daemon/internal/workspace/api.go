@@ -419,7 +419,7 @@ type Verbs interface {
 	// its own on BASE as it stands now, recorded as forked for ORIGIN's
 	// request.
 	CreateMergeWorkspace(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error)
-	// CreateDeployMediator makes the hidden deploy mediator NAME of the
+	// CreateDeployMediator makes the deploy mediator NAME of the
 	// repository at REPODIR, unprompted and in remote control
 	// (deploychecks.go).
 	CreateDeployMediator(ctx context.Context, repoDir, name string) (wsm.Workspace, error)
@@ -478,11 +478,9 @@ type Verbs interface {
 	// RefreshDeployCheck brings a standing fixer's worktree to its parent's
 	// tip before a new brief.
 	RefreshDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
-	// StandByDeployCheck hides a finished deploy check workspace and ends
-	// its session at once, keeping it open (deploychecks.go).
+	// StandByDeployCheck ends a finished deploy check workspace's session at
+	// once, keeping it open and in sight (deploychecks.go).
 	StandByDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
-	// HideDeployCheck hides a standing fixer no check holds its queue for.
-	HideDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// ResumeDeployCheck shows a standing-by deploy check workspace again.
 	ResumeDeployCheck(ctx context.Context, ws ids.WorkspaceID) error
 	// CloseSelf is the workspace's own agent closing it: the asking turn is

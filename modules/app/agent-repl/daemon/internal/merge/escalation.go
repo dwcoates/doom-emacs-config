@@ -49,7 +49,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	if said {
 		escalation, err = o.showMediator(ctx, q, fields)
 	} else {
-		escalation, err = o.readyMediator(ctx, q, true, fields)
+		escalation, err = o.readyMediator(ctx, q, fields)
 	}
 	if err != nil {
 		return failed("the deploy mediator could not be readied for the escalation; the user is not told of the escalated deploy", err)

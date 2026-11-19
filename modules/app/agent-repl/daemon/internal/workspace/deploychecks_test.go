@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -14,13 +15,13 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-func TestTheDeployMediatorIsMadeHiddenOnOpusWithNoPrompt(t *testing.T) {
+func TestTheDeployMediatorIsMadeShownOnOpusWithNoPrompt(t *testing.T) {
 	// Act
 	spec := deployMediatorSpec("/repo", "deploy-mediator")
 
 	// Assert
-	if spec.RepoDir != "/repo" || spec.Name != "deploy-mediator" || spec.Model != "opus" || !spec.Hidden || spec.InitialPrompt != "" {
-		t.Fatalf("spec = %+v, want an unprompted, hidden workspace on opus", spec)
+	if spec.RepoDir != "/repo" || spec.Name != "deploy-mediator" || spec.Model != "opus" || spec.Hidden || spec.InitialPrompt != "" {
+		t.Fatalf("spec = %+v, want an unprompted workspace on opus, in sight", spec)
 	}
 }
 
@@ -169,7 +170,7 @@ func TestStoppingAnUnknownDeployCheckWorkspaceKillsNothing(t *testing.T) {
 	}
 }
 
-func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
+func TestAFinishedDeployCheckWorkspaceStandsByInSightAndOpen(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
@@ -178,38 +179,8 @@ func TestAFinishedDeployCheckWorkspaceStandsByHiddenAndOpen(t *testing.T) {
 	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
 
 	// Assert
-	if err != nil || len(f.shim.killedSession) != 1 || !f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
-		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, hidden and still open", err, f.shim.killedSession, f.db.workspaces[ws])
-	}
-}
-
-func TestHideDeployCheck(t *testing.T) {
-	tests := []struct {
-		name       string
-		hidden     bool
-		closed     bool
-		wantHidden bool
-	}{
-		{name: "a fixer in sight is hidden, its session untouched", wantHidden: true},
-		{name: "a hidden fixer is left as it is", hidden: true, wantHidden: true},
-		{name: "a closed fixer is left as it is", closed: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			record := f.workspace("w1", t.TempDir())
-			record.Hidden, record.Closed = tt.hidden, tt.closed
-			f.db.workspaces[record.ID] = record
-
-			// Act
-			err := f.verbs.(*verbs).HideDeployCheck(context.Background(), record.ID)
-
-			// Assert
-			if err != nil || f.db.workspaces[record.ID].Hidden != tt.wantHidden || len(f.shim.killedSession) != 0 {
-				t.Fatalf("HideDeployCheck = %v, hidden %v, kills %v; want hidden %v and no kill", err, f.db.workspaces[record.ID].Hidden, f.shim.killedSession, tt.wantHidden)
-			}
-		})
+	if err != nil || len(f.shim.killedSession) != 1 || f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
+		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, in sight and still open", err, f.shim.killedSession, f.db.workspaces[ws])
 	}
 }
 
@@ -418,36 +389,17 @@ func fixerWithChild(t *testing.T, f *fixture) (fixer, child ids.WorkspaceID) {
 	return fixer, record.ID
 }
 
-func TestHidingTheFixerHidesTheWorkspacesItMade(t *testing.T) {
-	tests := []struct {
-		name  string
-		hide  func(v *verbs, ws ids.WorkspaceID) error
-		kills int
-	}{
-		{name: "a fixer standing by at its finish", kills: 1, hide: func(v *verbs, ws ids.WorkspaceID) error {
-			return v.StandByDeployCheck(context.Background(), ws)
-		}},
-		{name: "a fixer whose queue no check holds", hide: func(v *verbs, ws ids.WorkspaceID) error {
-			return v.HideDeployCheck(context.Background(), ws)
-		}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			f := newFixture(t)
-			fixer, child := fixerWithChild(t, f)
+func TestStandingTheFixerByLeavesItAndTheWorkspacesItMadeInSight(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	fixer, child := fixerWithChild(t, f)
 
-			// Act
-			err := tt.hide(f.verbs.(*verbs), fixer)
+	// Act
+	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), fixer)
 
-			// Assert
-			if err != nil || !f.db.workspaces[fixer].Hidden || !f.db.workspaces[child].Hidden || len(f.shim.killedSession) != tt.kills {
-				t.Fatalf("hide = %v, fixer hidden %v, child hidden %v, kills %v; want both hidden", err, f.db.workspaces[fixer].Hidden, f.db.workspaces[child].Hidden, f.shim.killedSession)
-			}
-			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opSetHidden, Message: "hid the deploy check workspace with its family"}); !ok {
-				t.Fatalf("records = %+v, want the family's hide recorded", f.log.logger.Records())
-			}
-		})
+	// Assert
+	if err != nil || f.db.workspaces[fixer].Hidden || f.db.workspaces[child].Hidden || len(f.shim.killedSession) != 1 {
+		t.Fatalf("StandByDeployCheck = %v, fixer hidden %v, child hidden %v, kills %v; want both in sight and one kill", err, f.db.workspaces[fixer].Hidden, f.db.workspaces[child].Hidden, f.shim.killedSession)
 	}
 }
 
@@ -455,7 +407,8 @@ func TestResumingTheFixerShowsTheWorkspacesHiddenWithIt(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	fixer, child := fixerWithChild(t, f)
-	if err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), fixer); err != nil {
+	// An earlier build hid the fixer with its family.
+	if _, err := f.db.HideFamily(context.Background(), fixer, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -468,18 +421,12 @@ func TestResumingTheFixerShowsTheWorkspacesHiddenWithIt(t *testing.T) {
 	}
 }
 
-func TestAFamilyHideOrShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
+func TestAFamilyShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
 	tests := []struct {
 		name    string
 		act     func(v *verbs, ws ids.WorkspaceID) error
 		message string
 	}{
-		{name: "a stand-by", message: "could not hide the deploy check workspace with its family", act: func(v *verbs, ws ids.WorkspaceID) error {
-			return v.StandByDeployCheck(context.Background(), ws)
-		}},
-		{name: "a hide", message: "could not hide the deploy check workspace with its family", act: func(v *verbs, ws ids.WorkspaceID) error {
-			return v.HideDeployCheck(context.Background(), ws)
-		}},
 		{name: "a resume", message: "could not show the deploy check workspace with its family", act: func(v *verbs, ws ids.WorkspaceID) error {
 			return v.ResumeDeployCheck(context.Background(), ws)
 		}},

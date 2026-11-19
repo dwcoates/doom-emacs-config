@@ -423,7 +423,7 @@ func (o *orchestrator) Mediate(ctx context.Context) {
 			}
 			continue
 		}
-		o.settleMediatorSight(ctx, q, m)
+		o.keepMediatorShown(ctx, q)
 		o.surfaceFinish(ctx, q.key)
 		if m == nil {
 			continue
@@ -663,9 +663,7 @@ func (o *orchestrator) awaitFailed(ctx context.Context, q checkedQueue, owed tim
 }
 
 // mediatorFor answers the deploy mediator check M is told to: readied
-// (readyMediator) and left hidden before its first telling, since it is in
-// sight only while it fixes or waits on the user; as it stands once M was
-// told, since its turn on M is reattached and a refresh would move its
+// (readyMediator) before its first telling; as it stands once M was told, since its turn on M is reattached and a refresh would move its
 // worktree under that turn.
 func (o *orchestrator) mediatorFor(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) (ids.WorkspaceID, error) {
 	if m.Prompted() {
@@ -675,7 +673,7 @@ func (o *orchestrator) mediatorFor(ctx context.Context, q checkedQueue, m wsm.Me
 		}
 		return mediator.ws, nil
 	}
-	mediator, err := o.readyMediator(ctx, q, false, fields)
+	mediator, err := o.readyMediator(ctx, q, fields)
 	if err != nil {
 		return "", fmt.Errorf("merge: the queue's deploy mediator: %w", err)
 	}
