@@ -658,7 +658,7 @@ func TestTheTestsTabDrawsTheRunnersSeatWaitUntilItTakesASeat(t *testing.T) {
 func TestAnUnreadableSeatWaitLineIsRecordedAtError(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	g := &gateRun{r: &run{o: h.o, ws: theWorkspace}, states: map[string]suiteState{}, counts: newSuiteCounts()}
+	g := &gateRun{r: &run{o: h.o, ws: theWorkspace}, tracker: newSuiteTracker(h.o.nowMS)}
 	line := "[agent-repl-tests] " + seatwait.Marker + "waiting, reason=gremlins (x); holders=[]; available=1MiB wired=0MiB ceiling=1MiB floor=1MiB rank=0"
 
 	// Act
@@ -671,8 +671,8 @@ func TestAnUnreadableSeatWaitLineIsRecordedAtError(t *testing.T) {
 			recorded = true
 		}
 	}
-	if !recorded || g.seatWait != nil {
-		t.Fatalf("recorded %v, seat wait %v; want the line recorded at ERROR and no wait drawn", recorded, g.seatWait)
+	if !recorded || g.tracker.seatWait != nil {
+		t.Fatalf("recorded %v, seat wait %v; want the line recorded at ERROR and no wait drawn", recorded, g.tracker.seatWait)
 	}
 }
 
