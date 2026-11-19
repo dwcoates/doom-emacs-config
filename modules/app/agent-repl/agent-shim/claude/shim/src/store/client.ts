@@ -91,6 +91,15 @@ export interface StoreClient {
   getAgentByVendorTask(
     request: storev1.GetAgentByVendorTaskRequest,
   ): Promise<storev1.GetAgentByVendorTaskResponse>;
+  /**
+   * The same, answered only once the record holds the pairing and the agent's
+   * start; `timeoutMs` is the caller's bound, ending the wait as a transport
+   * error (DeadlineExceeded).
+   */
+  awaitAgentByVendorTask(
+    request: storev1.AwaitAgentByVendorTaskRequest,
+    timeoutMs: number,
+  ): Promise<storev1.AwaitAgentByVendorTaskResponse>;
   /** Which session holds the delivered copy of one cross-session message. */
   getPeerDelivery(request: storev1.GetPeerDeliveryRequest): Promise<storev1.GetPeerDeliveryResponse>;
   /** What kind of detached work one unit left as, and whether the record holds it as ended. */
@@ -152,6 +161,8 @@ export function createStoreClient(socketPath: string): StoreClient {
     getLiveWork: (request) => unaryRoundTrip("GetLiveWork", () => client.getLiveWork(request)),
     getAgentByVendorTask: (request) =>
       unaryRoundTrip("GetAgentByVendorTask", () => client.getAgentByVendorTask(request)),
+    awaitAgentByVendorTask: (request, timeoutMs) =>
+      unaryRoundTrip("AwaitAgentByVendorTask", () => client.awaitAgentByVendorTask(request, { timeoutMs })),
     getDetachedWork: (request) => unaryRoundTrip("GetDetachedWork", () => client.getDetachedWork(request)),
     getPeerDelivery: (request) => unaryRoundTrip("GetPeerDelivery", () => client.getPeerDelivery(request)),
     writeBatch: (request) => unaryRoundTrip("WriteBatch", () => client.writeBatch(request)),

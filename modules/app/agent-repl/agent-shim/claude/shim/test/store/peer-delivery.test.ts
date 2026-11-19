@@ -34,6 +34,7 @@ function lookupClient(answer: () => Promise<storev1.GetPeerDeliveryResponse>): {
       getSidecarCursors: refuse,
       getLiveWork: refuse,
       getAgentByVendorTask: refuse,
+      awaitAgentByVendorTask: refuse,
       getDetachedWork: refuse,
       writeBatch: refuse,
       getPeerDelivery: (request) => {

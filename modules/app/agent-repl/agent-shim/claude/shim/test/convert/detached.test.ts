@@ -40,6 +40,7 @@ import {
   startedInForeground,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskAwaitingCommission,
   taskAwaitingKind,
   taskCall,
   taskCommission,
@@ -2004,10 +2005,12 @@ describe("taskAwaitingAgent: the resume the store must name", () => {
     expect(awaiting(RESUME_STARTED, registry, calls)).toBe("a5583");
   });
 
-  it("names the task when this fold never saw its call and holds no commission", () => {
-    // Arrange, Act, Assert: the minting rule names the agent, and the store its
-    // commission (a backgrounded subagent's own spawn).
-    expect(awaiting(RESUME_STARTED)).toBe("a5583");
+  it("names nothing when this fold never saw its call: its commission is waited for instead", () => {
+    // Arrange, Act, Assert: the minting rule names the agent, and the store's
+    // record of a spawn only the sidecar reads is waited for in the background
+    // (`taskAwaitingCommission`), never looked up ahead of the message
+    // (a nested spawn asked 0.66s before its pickup, 2026-11-18).
+    expect(awaiting(RESUME_STARTED)).toBeUndefined();
   });
 
   it("names nothing when this fold never saw its call but holds its commission", () => {
@@ -2073,6 +2076,98 @@ describe("taskAwaitingAgent: the resume the store must name", () => {
 
     // Act, Assert.
     expect(awaiting(RESUME_STARTED, registry, calls)).toBe("a5583");
+  });
+});
+
+/** Whether the engine must wait for the store to record `fields`' task's commission. */
+function awaitingCommission(
+  fields: Record<string, unknown>,
+  registry = createTaskKindRegistry(),
+  calls: CallRegistry = createCallRegistry(),
+): string | undefined {
+  return taskAwaitingCommission(taskMessage(fields), foldContext({}), registry, calls);
+}
+
+const NESTED_STARTED = { subtype: "task_started", task_id: "a2f09", tool_use_id: "toolu_nested", task_type: "local_agent" };
+
+describe("taskAwaitingCommission: the nested spawn whose record is waited for", () => {
+  it("names the task of a subagent whose call this fold never saw and whose commission it lacks", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingCommission(NESTED_STARTED)).toBe("a2f09");
+  });
+
+  it("names nothing once the wait for the task has started", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberCommissionAwaited("a2f09");
+
+    // Act, Assert.
+    expect(awaitingCommission(NESTED_STARTED, registry)).toBeUndefined();
+  });
+
+  it("names nothing when the fold holds the task's commission", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberCommission("a2f09", create(conversationv1.AgentSubagentPromptSchema, { text: "review" }));
+
+    // Act, Assert.
+    expect(awaitingCommission(NESTED_STARTED, registry)).toBeUndefined();
+  });
+
+  it("names nothing when the fold saw the task's call", () => {
+    // Arrange.
+    const calls = createCallRegistry();
+    openCall(calls, "toolu_nested", "Agent");
+
+    // Act, Assert.
+    expect(awaitingCommission(NESTED_STARTED, createTaskKindRegistry(), calls)).toBeUndefined();
+  });
+
+  it("names nothing for a task that is not a subagent", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingCommission({ ...NESTED_STARTED, task_type: "local_bash" })).toBeUndefined();
+  });
+
+  it("names nothing for an ambient task", () => {
+    // Arrange, Act, Assert.
+    expect(awaitingCommission({ ...NESTED_STARTED, skip_transcript: true })).toBeUndefined();
+  });
+
+  it("names nothing for a message that is not a system message", () => {
+    // Arrange.
+    const message = { type: "assistant", uuid: "u", session_id: "s" } as unknown as SdkMessage;
+
+    // Act, Assert.
+    expect(taskAwaitingCommission(message, foldContext({}), createTaskKindRegistry(), createCallRegistry())).toBeUndefined();
+  });
+});
+
+describe("convertDetached: a nested spawn whose commission is awaited", () => {
+  it("announces the subagent under the minted agent and records the pending commission at INFO, never ERROR", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberCommissionAwaited("a2f09");
+    const before = logSinkMark();
+
+    // Act.
+    const entries = convert(NESTED_STARTED, {}, registry, createCallRegistry());
+
+    // Assert.
+    expect(subagentOf(entries[0])).toBe("toolu_nested");
+    const records = logRecordsSince(before);
+    expect(records.filter((record) => record.level === "error")).toEqual([]);
+    expect(records.some((record) => record.level === "info" && record.message.includes("the store's record of the spawn is awaited"))).toBe(true);
+  });
+
+  it("records the missing commission at ERROR when no wait was started", () => {
+    // Arrange.
+    const before = logSinkMark();
+
+    // Act.
+    convert(NESTED_STARTED, {}, createTaskKindRegistry(), createCallRegistry());
+
+    // Assert.
+    expect(logRecordsSince(before).some((record) => record.level === "error")).toBe(true);
   });
 });
 
@@ -3378,7 +3473,9 @@ describe("taskCall", () => {
   });
 
   it("is the one lookup the restatement, the agent ask and the conversion share", () => {
-    // Arrange: every reader in convert/detached.ts resolves a task's call through it.
+    // Arrange: every reader in convert/detached.ts resolves a task's call through
+    // it: the restatement, the agent ask, the commission wait's ask, and the
+    // conversion.
     const source = readFileSync(
       join(dirname(fileURLToPath(import.meta.url)), "../../src/convert/detached.ts"),
       "utf8",
@@ -3388,6 +3485,6 @@ describe("taskCall", () => {
     const handRolled = source.split("\n").filter((line) => line.includes("?? taskKinds.callOf(")).length;
 
     // Assert.
-    expect([handRolled, (source.match(/taskCall\(taskId, toolUseId, taskKinds, calls\)/g) ?? []).length]).toEqual([1, 3]);
+    expect([handRolled, (source.match(/taskCall\(taskId, toolUseId, taskKinds, calls\)/g) ?? []).length]).toEqual([1, 4]);
   });
 });

@@ -133,3 +133,62 @@ export async function lookupAgentByVendorTask(
   );
   return answer;
 }
+
+/**
+ * HOW LONG A NESTED SPAWN'S PAIRING MAY TAKE TO REACH THE RECORD: 8s.
+ *
+ * The pairing and the start are the sidecar's, read from the spawner's own
+ * transcript. Measured 2026-11-18 across 24 new subagent transcripts: the
+ * sidecar first read each 0.22s to 1.13s after its first record, and once
+ * 3.12s; 8s is about 2.5 times that worst case.
+ */
+export const NESTED_SPAWN_RECORD_BOUND_MS = 8_000;
+
+/** The measured healthy worst case {@link NESTED_SPAWN_RECORD_BOUND_MS} is sized from. */
+export const NESTED_SPAWN_RECORD_MEASURED_MS = 3_120;
+
+/**
+ * Wait for the store to record which agent `vendorTaskId` names AND what it
+ * was commissioned with (store.v1 AwaitAgentByVendorTask), within `boundMs`.
+ *
+ * NOT RETRIED: a wait that answers on the record's own change has no condition
+ * another attempt could change. A bound that fires, a transport error, or a
+ * store failure is the `failed` answer, which the caller records.
+ */
+export async function awaitAgentByVendorTask(
+  client: StoreClient,
+  session: conversationv1.AgentId,
+  vendorTaskId: string,
+  boundMs: number,
+): Promise<VendorTaskAnswer> {
+  if (session.value === "" || vendorTaskId === "") {
+    return {
+      kind: "failed",
+      detail: `the wait names ${session.value === "" ? "no session" : "no vendor task locator"}; the store is never asked an incomplete question`,
+    };
+  }
+  let response: storev1.AwaitAgentByVendorTaskResponse;
+  try {
+    response = await client.awaitAgentByVendorTask(
+      create(storev1.AwaitAgentByVendorTaskRequestSchema, { session, vendorTaskId }),
+      boundMs,
+    );
+  } catch (error) {
+    return { kind: "failed", detail: `AwaitAgentByVendorTask did not answer within ${boundMs}ms: ${String(error)}` };
+  }
+  const result = response.result;
+  switch (result.case) {
+    case "success": {
+      const { agent, commission } = result.value;
+      if (agent === undefined || agent.value === "" || commission === undefined) {
+        return { kind: "failed", detail: "the store answered the wait's success naming no agent or no commission" };
+      }
+      LOGGER.debug({ agent: session.value, task_id: vendorTaskId, found: agent.value }, "the store answered a nested spawn's wait");
+      return { kind: "found", agent, commission };
+    }
+    case "failure":
+      return { kind: "failed", detail: result.value.detail };
+    default:
+      return { kind: "failed", detail: "the store answered AwaitAgentByVendorTask with no result arm set" };
+  }
+}

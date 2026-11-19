@@ -513,6 +513,12 @@ export interface Persistence {
    */
   agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer>;
   /**
+   * The same, answered only once the record holds the agent AND its
+   * commission, within `boundMs` (store/locator.ts `awaitAgentByVendorTask`).
+   * Never rejects: a bound that fires is the `failed` answer.
+   */
+  awaitAgentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string, boundMs: number): Promise<VendorTaskAnswer>;
+  /**
    * WHICH SESSIONS hold the two ends of one cross-session message, by its
    * delivery id (store/peer-delivery.ts). Never rejects: a failure is the
    * `failed` answer, and the caller writes the one record for it.
@@ -705,6 +711,8 @@ export function unavailablePersistence(): Persistence {
     liveWork: () => Promise.reject(refuse("liveWork")),
     agentByVendorTask: () =>
       Promise.resolve({ kind: "failed", detail: "shim persistence: agentByVendorTask has no store to reach in this build" }),
+    awaitAgentByVendorTask: () =>
+      Promise.resolve({ kind: "failed", detail: "shim persistence: awaitAgentByVendorTask has no store to reach in this build" }),
     detachedWork: () =>
       Promise.resolve({ kind: "failed", detail: "shim persistence: detachedWork has no store to reach in this build" }),
     peerDelivery: () =>

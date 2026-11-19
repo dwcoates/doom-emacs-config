@@ -82,6 +82,7 @@ import {
   restateTaskMessage,
   taskAgentKnowledge,
   taskAwaitingAgent,
+  taskAwaitingCommission,
   taskAwaitingKind,
   vendorTaskTypeOf,
   type TaskAgentKnowledge,
@@ -222,6 +223,10 @@ interface Fold {
    * it; any other answer is kept for the refusal record that follows.
    */
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /** The task whose commission the engine waits for (convert/detached.ts `taskAwaitingCommission`). A read. */
+  taskAwaitingCommission(message: SdkMessage, context: FoldContext): string | undefined;
+  /** The engine started the wait for a task {@link Fold.taskAwaitingCommission} named. */
+  noteCommissionAwaited(taskId: string): void;
   /**
    * The task whose kind the STORE must state before `message` is folded, and
    * the unit it is asked by, or `undefined` (convert/detached.ts
@@ -340,6 +345,8 @@ export function createFold(): Fold {
       }
       state.taskKinds.rememberStoreAnswer(taskId, describeVendorTaskAnswer(answer));
     },
+    taskAwaitingCommission: (message, context) => taskAwaitingCommission(message, context, state.taskKinds, state.calls),
+    noteCommissionAwaited: (taskId) => state.taskKinds.rememberCommissionAwaited(taskId),
     taskAwaitingKind: (message, context) => taskAwaitingKind(message, context, state.taskKinds),
     learnTaskKind(taskId, answer) {
       state.taskKinds.rememberKindAnswer(taskId, describeDetachedWorkAnswer(answer));

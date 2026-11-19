@@ -103,7 +103,7 @@ import {
 } from "./persistence.js";
 import { createReader } from "./reader.js";
 import { lookupDetachedWork, type DetachedWorkAnswer } from "./detached-work.js";
-import { lookupAgentByVendorTask, type VendorTaskAnswer } from "./locator.js";
+import { awaitAgentByVendorTask, lookupAgentByVendorTask, type VendorTaskAnswer } from "./locator.js";
 import { lookupPeerDelivery, type PeerDeliveryAnswer } from "./peer-delivery.js";
 import { createReconciler } from "./reconcile.js";
 
@@ -1250,6 +1250,10 @@ export function createPersistence(options: PersistenceOptions): Persistence {
 
     agentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string): Promise<VendorTaskAnswer> {
       return lookupAgentByVendorTask({ client: options.client, retry, sleep }, session, vendorTaskId);
+    },
+
+    awaitAgentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string, boundMs: number): Promise<VendorTaskAnswer> {
+      return awaitAgentByVendorTask(options.client, session, vendorTaskId, boundMs);
     },
 
     peerDelivery(deliveryId: string): Promise<PeerDeliveryAnswer> {

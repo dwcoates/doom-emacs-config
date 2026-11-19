@@ -8,7 +8,12 @@ import { create } from "@bufbuild/protobuf";
 import { describe, expect, it } from "vitest";
 import { conversationv1, storev1 } from "../../src/proto.js";
 import type { StoreClient } from "../../src/store/client.js";
-import { describeVendorTaskAnswer, lookupAgentByVendorTask } from "../../src/store/locator.js";
+import {
+  awaitAgentByVendorTask,
+  describeVendorTaskAnswer,
+  lookupAgentByVendorTask,
+  NESTED_SPAWN_RECORD_BOUND_MS,
+} from "../../src/store/locator.js";
 
 /** The schedule, shortened so the assertions are about behavior, not time. */
 const RETRY = { backoffMs: [1], maxAttempts: 2 } as const;
@@ -36,6 +41,7 @@ function lookupClient(answer: () => Promise<storev1.GetAgentByVendorTaskResponse
       getSidecarCursors: refuse,
       getLiveWork: refuse,
       getDetachedWork: refuse,
+      awaitAgentByVendorTask: refuse,
       getPeerDelivery: refuse,
       writeBatch: refuse,
       getAgentByVendorTask: (request) => {
@@ -222,5 +228,115 @@ describe("describeVendorTaskAnswer", () => {
   ] as const)("names the $answer.kind answer as $text", ({ answer, text }) => {
     // Arrange, Act, Assert
     expect(describeVendorTaskAnswer(answer)).toBe(text);
+  });
+});
+
+/** A client answering only the commission wait, recording every request and its bound. */
+function waitClient(answer: () => Promise<storev1.AwaitAgentByVendorTaskResponse>): {
+  client: StoreClient;
+  waits: { request: storev1.AwaitAgentByVendorTaskRequest; timeoutMs: number }[];
+} {
+  const waits: { request: storev1.AwaitAgentByVendorTaskRequest; timeoutMs: number }[] = [];
+  const refuse = (): never => {
+    throw new Error("the wait suite did not expect that call");
+  };
+  return {
+    waits,
+    client: {
+      openAgentSession: refuse,
+      watchAgentSession: refuse,
+      watchBashRun: refuse,
+      readAgentPage: refuse,
+      getWorkflow: refuse,
+      getSidecarCursors: refuse,
+      getLiveWork: refuse,
+      getDetachedWork: refuse,
+      getAgentByVendorTask: refuse,
+      getPeerDelivery: refuse,
+      writeBatch: refuse,
+      awaitAgentByVendorTask: (request, timeoutMs) => {
+        waits.push({ request, timeoutMs });
+        return answer();
+      },
+    },
+  };
+}
+
+const waited = (commission: boolean): storev1.AwaitAgentByVendorTaskResponse =>
+  create(storev1.AwaitAgentByVendorTaskResponseSchema, {
+    result: {
+      case: "success",
+      value: create(storev1.AwaitAgentByVendorTaskSuccessSchema, {
+        agent: create(conversationv1.AgentIdSchema, { value: "toolu_nested" }),
+        commission: commission ? create(conversationv1.AgentSubagentPromptSchema, { text: "review" }) : undefined,
+      }),
+    },
+  });
+
+describe("awaitAgentByVendorTask", () => {
+  it("answers found with the agent and commission, asking once under the caller's bound", async () => {
+    // Arrange
+    const { client, waits } = waitClient(() => Promise.resolve(waited(true)));
+
+    // Act
+    const answer = await awaitAgentByVendorTask(client, SESSION, "a2f09", NESTED_SPAWN_RECORD_BOUND_MS);
+
+    // Assert
+    expect(answer.kind === "found" ? [answer.agent.value, answer.commission?.text] : answer).toEqual(["toolu_nested", "review"]);
+    expect(waits.map((w) => [w.request.session?.value, w.request.vendorTaskId, w.timeoutMs])).toEqual([
+      ["main-1", "a2f09", NESTED_SPAWN_RECORD_BOUND_MS],
+    ]);
+  });
+
+  it("answers failed when the store's success names no commission", async () => {
+    // Arrange
+    const { client } = waitClient(() => Promise.resolve(waited(false)));
+
+    // Act
+    const answer = await awaitAgentByVendorTask(client, SESSION, "a2f09", NESTED_SPAWN_RECORD_BOUND_MS);
+
+    // Assert
+    expect(answer.kind).toBe("failed");
+  });
+
+  it("answers failed with the store's account on its failure arm", async () => {
+    // Arrange
+    const { client } = waitClient(() =>
+      Promise.resolve(
+        create(storev1.AwaitAgentByVendorTaskResponseSchema, {
+          result: { case: "failure", value: create(storev1.AwaitAgentByVendorTaskFailureSchema, { detail: "database is locked" }) },
+        }),
+      ),
+    );
+
+    // Act
+    const answer = await awaitAgentByVendorTask(client, SESSION, "a2f09", NESTED_SPAWN_RECORD_BOUND_MS);
+
+    // Assert
+    expect(answer).toEqual({ kind: "failed", detail: "database is locked" });
+  });
+
+  it("answers failed naming the bound when the wait does not answer within it", async () => {
+    // Arrange
+    const { client, waits } = waitClient(() => Promise.reject(new Error("[deadline_exceeded] the operation timed out")));
+
+    // Act
+    const answer = await awaitAgentByVendorTask(client, SESSION, "a2f09", 8000);
+
+    // Assert
+    expect(answer.kind === "failed" ? answer.detail : "").toContain("did not answer within 8000ms");
+    expect(waits).toHaveLength(1);
+  });
+
+  it("never asks the store an incomplete question", async () => {
+    // Arrange
+    const { client, waits } = waitClient(() => Promise.resolve(waited(true)));
+
+    // Act
+    const answer = await awaitAgentByVendorTask(client, SESSION, "", NESTED_SPAWN_RECORD_BOUND_MS);
+
+    // Assert
+    expect(answer.kind).toBe("failed");
+    expect(waits).toEqual([]);
   });
 });

@@ -224,6 +224,15 @@ export interface EngineFold {
   retireUserDetach(toolUseId: string, why: string): void;
   /** Hand the fold the store's answer for a task {@link EngineFold.taskAwaitingAgent} named. */
   learnTaskAgent(taskId: string, answer: VendorTaskAnswer): void;
+  /**
+   * The vendor task whose COMMISSION the engine must wait for in the
+   * background — a subagent whose spawning call this process never saw, such
+   * as a nested spawn — or `undefined` (convert/detached.ts
+   * `taskAwaitingCommission`). A read: it records nothing.
+   */
+  taskAwaitingCommission(message: SdkMessage, context: FoldContext): string | undefined;
+  /** The engine started the wait for a task {@link EngineFold.taskAwaitingCommission} named. */
+  noteCommissionAwaited(taskId: string): void;
   /** Which agent a vendor task is running, as the fold knows it. */
   taskAgent(taskId: string): TaskAgentKnowledge;
   /**
@@ -270,6 +279,8 @@ export function turnBoundaryOnlyFold(): EngineFold {
     // knows none.
     taskAwaitingAgent: (): undefined => undefined,
     learnTaskAgent: (): void => undefined,
+    taskAwaitingCommission: (): undefined => undefined,
+    noteCommissionAwaited: (): void => undefined,
     taskAwaitingKind: (): undefined => undefined,
     learnTaskKind: (): void => undefined,
     // CONVERTS NO PATCH, so a request has nothing to name.
