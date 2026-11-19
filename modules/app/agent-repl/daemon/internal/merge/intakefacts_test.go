@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/wsm"
 )
 
 // rec is a log record of OP and MSG at LEVEL, its raw line naming them.
@@ -72,39 +72,6 @@ func TestSortFindingsMarksEachGroupNewOrSeenBefore(t *testing.T) {
 	}
 }
 
-func TestRenderFindingsQuotesEachGroupsSample(t *testing.T) {
-	tests := []struct {
-		name   string
-		groups []FindingGroup
-		want   []string
-	}{
-		{name: "no findings says so", want: []string{"No system logged a warning or an error in the window."}},
-		{name: "a new and a seen group", groups: []FindingGroup{
-			{Operation: "a", Message: "m", Level: "error", Count: 2, Sample: "{raw-a}", Class: wsm.WindowNew},
-			{Operation: "b", Message: "n", Level: "warn", Count: 1, Before: 3, Sample: "{raw-b}", Class: wsm.WindowSeenBefore},
-		}, want: []string{"- NEW: 2 ERROR of a: m\n  {raw-a}", "- SEEN BEFORE, never taken on (3 in the span before): 1 WARN of b: n\n  {raw-b}"}},
-		{name: "a group taken on says what the mediator found before", groups: []FindingGroup{
-			{Operation: "c", Message: "o", Level: "warn", Count: 1, Before: 1, Sample: "{raw-c}", Class: wsm.WindowOwned, Findings: "the sink warning"},
-		}, want: []string{"- TAKEN ON, your fix of it still under way: 1 WARN of c: o", "  You found before: the sink warning"}},
-		{name: "a recurred group says it outlived the fix", groups: []FindingGroup{
-			{Operation: "d", Message: "p", Level: "warn", Count: 4, Before: 2, Sample: "{raw-d}", Class: wsm.WindowRecurred, Findings: "first\nsecond"},
-		}, want: []string{"- RECURRED after your fix deployed: 4 WARN of d: p", "  You found before: first / second"}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := RenderFindings(tt.groups)
-
-			// Assert
-			for _, w := range tt.want {
-				if !strings.Contains(got, w) {
-					t.Fatalf("RenderFindings = %q, want it to hold %q", got, w)
-				}
-			}
-		})
-	}
-}
-
 func TestTheIntakesBriefSortsTheWindowAgainstTheSpanBeforeTheDeploy(t *testing.T) {
 	// Arrange
 	h := checked(t)
@@ -133,12 +100,40 @@ func TestTheIntakesBriefSortsTheWindowAgainstTheSpanBeforeTheDeploy(t *testing.T
 	if !window[0].Equal(deployStarted) || !before[1].Equal(deployStarted) || before[1].Sub(before[0]) != window[1].Sub(window[0]) {
 		t.Fatalf("read window %v and before %v, want equal spans either side of the deploy", window, before)
 	}
-	values := h.briefValues[len(h.briefValues)-1]
-	if !strings.Contains(values["facts"], "- NEW: 1 ERROR of daemon.merge: boom") || !strings.Contains(values["facts"], "- SEEN BEFORE, never taken on (1 in the span before): 1 WARN of daemon.shim") {
-		t.Fatalf("facts = %q, want the merge error NEW and the shim warning SEEN BEFORE", values["facts"])
+}
+
+func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
+	// Arrange: a window holding a warning and an error.
+	h := checked(t)
+	owe(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) {
+		return []LogRecord{rec("warn", "daemon.shim", "tail lag"), rec("error", "daemon.merge", "boom")}, nil
 	}
-	if values["bound"] != fmt.Sprint(theBound) || !strings.Contains(values["chain"], "first deploy") {
-		t.Fatalf("bound %q, chain %q; want the repository's bound and a first deploy", values["bound"], values["chain"])
+	q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
+
+	// Act
+	_, window, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+
+	// Assert: the brief's values name the deploy and where to look, and none
+	// of them carries a record; the window the store keeps still holds both
+	// groups.
+	if err != nil {
+		t.Fatalf("intakeBrief = %v", err)
+	}
+	values := h.briefValues[len(h.briefValues)-1]
+	var names []string
+	for name, value := range values {
+		names = append(names, name)
+		if strings.Contains(value, "boom") || strings.Contains(value, "tail lag") {
+			t.Fatalf("the brief's %s carries a record of the window: %q", name, value)
+		}
+	}
+	sort.Strings(names)
+	if got := strings.Join(names, ","); got != "deploy_started,ending,gate_log,repo_dir,version,window_started" {
+		t.Fatalf("the brief was given %s", got)
+	}
+	if values["window_started"] != deployStarted.UTC().Format(time.RFC3339) || len(window.Groups) != 2 {
+		t.Fatalf("window_started %q and %d stored groups; want the deploy's start and both groups kept", values["window_started"], len(window.Groups))
 	}
 }
 
@@ -157,40 +152,5 @@ func TestAWindowThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake's brief could not be composed; the queue stays held"}); !ok {
 		t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
-	}
-}
-
-func TestTheChainSoFarNamesWhatEachFixLanded(t *testing.T) {
-	// Arrange: one remediation dispatched and landed, its fix deployed.
-	h := checked(t)
-	ctx := context.Background()
-	owe(t, h)
-	withMediator(t, h)
-	if _, err := h.db.DispatchMediation(ctx, mediationKey(h), deployStarted, deployStarted, aFixerTurn); err != nil {
-		t.Fatal(err)
-	}
-	h.db.mu.Lock()
-	h.db.workspaces["ws-fixer"] = wsm.Workspace{ID: "ws-fixer", Name: "deploy-remediation-x", Repo: theRepository}
-	h.db.mu.Unlock()
-	if _, err := h.db.BeginRemediationFinish(ctx, wsm.RemediationFinish{Workspace: "ws-fixer", Repo: mediationKey(h), StartedAt: deployStarted}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.db.AdvanceRemediationFinish(ctx, "ws-fixer", wsm.RemediationGating, wsm.RemediationLanding, deployStarted); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := h.db.RecordRemediationLanded(ctx, "ws-fixer", "abc123", []string{"daemon/x.go"}, deployStarted); err != nil {
-		t.Fatal(err)
-	}
-	oweAt(t, h, deployStarted.Add(time.Minute))
-	q, _, _ := h.o.checkedQueueOf(ctx, mediationKey(h))
-
-	// Act
-	got, err := h.o.chainSoFar(ctx, q, *owedCheck(t, h))
-
-	// Assert
-	for _, want := range []string{"deployed 1 of your fixes in a row", "Your fix landed abc123, changing daemon/x.go."} {
-		if err != nil || !strings.Contains(got, want) {
-			t.Fatalf("chainSoFar = (%q, %v), want it to hold %q", got, err, want)
-		}
 	}
 }

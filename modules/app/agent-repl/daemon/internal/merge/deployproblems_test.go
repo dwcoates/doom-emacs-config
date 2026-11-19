@@ -375,25 +375,3 @@ func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
 		})
 	}
 }
-
-func TestTheBriefMarksAProblemPastItsFixes(t *testing.T) {
-	tests := []struct {
-		name  string
-		fixes int
-		want  bool
-	}{
-		{name: "after three fixes it is marked", fixes: 3, want: true},
-		{name: "after two it is not", fixes: 2},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := RenderFindings([]FindingGroup{{Operation: "a", Message: "m", Level: "error", Count: 1, Class: wsm.WindowRecurred, Fixes: tt.fixes}})
-
-			// Assert
-			if marked := strings.Contains(got, "only an escalation is accepted"); marked != tt.want {
-				t.Fatalf("brief %q, want marked %v", got, tt.want)
-			}
-		})
-	}
-}

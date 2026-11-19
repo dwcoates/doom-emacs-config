@@ -220,15 +220,15 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-17: one standing mediator checks every
     // deploy, fixes what it dispatches, and settles escalations with the user.
     expect(text).toContain("This session is the deploy mediator: the one workspace agent-repl keeps to check every deploy");
-    expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
+    expect(text).toContain("agent-repld merge-queue mediation approve -problems -summary");
     expect(text).toContain("agent-repld merge-queue mediation dispatch -summary");
-    expect(text).toContain("Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.");
-    expect(text).toContain("The dispatch comes first, before any edit or investigation of a fix: it is what moves the queue's label from ASSESSING to FIXING");
+    expect(text).toContain("`dispatch`: call it when you can fix what the deploy broke yourself, before you start the fix. Then fix it in the same turn.");
+    expect(text).toContain("it is what moves the queue's label from ASSESSING to FIXING");
     expect(text).toContain("agent-repld workspace finished here -version-part patch");
     expect(text).not.toContain("-fresh");
   });
 
-  it("has the deploy mediator approve only when it took on every group", () => {
+  it("has the deploy mediator investigate the deploy itself, and states what agent-repl still refuses", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
@@ -236,8 +236,8 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-16: an old problem never taken on is
     // dispatched or escalated, never approved past, and never filed with a
     // named workspace.
-    expect(text).toContain("Every group is TAKEN ON, or the window holds none");
-    expect(text).toContain("A SEEN BEFORE or RECURRED group is dispatched as a NEW one is");
+    expect(text).toContain("It refuses an approval while a group of records is neither taken on nor named as ignored (`problems_unowned`)");
+    expect(text).toContain("The brief names the deploy and what there is to investigate it with, and states nothing it found");
     expect(text).not.toContain("merge-queue-stall-triage");
   });
 

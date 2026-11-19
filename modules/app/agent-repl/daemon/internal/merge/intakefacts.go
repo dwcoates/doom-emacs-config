@@ -12,13 +12,12 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// THE INTAKE'S FACTS (owner ruling 3, 2026-11-14). The intake runs on a
-// weaker model that only states problems, so the daemon does the sorting it
-// would otherwise reason out: every warning and error since the deploy began
-// is grouped by its operation and message, and each group is marked NEW (no
-// record of it in the same span before the deploy) or SEEN BEFORE (with its
-// count then). Only a NEW group can be a problem the deploy caused; a SEEN
-// BEFORE group is filed elsewhere and never holds the queue (ruling 1).
+// THE WINDOW'S GROUPS. Every warning and error since the repository's last
+// check is grouped by its operation and message, and each group is stood
+// against the span before the window and the problems the mediator took on.
+// The groups are what a decision is judged against (DecideMediation); the
+// brief states none of them (intakeBrief): the mediator reads the logs
+// itself.
 
 // LogRecord is one warning or error a system logged, as the log reader read
 // it.
@@ -186,46 +185,15 @@ func severity(level string) int {
 	return 0
 }
 
-// RenderFindings is the brief's facts: one block per group, its standing,
-// its sample quoted verbatim and, for a problem the mediator took on, its
-// earlier findings, or a line saying the window holds none.
-func RenderFindings(groups []FindingGroup) string {
-	if len(groups) == 0 {
-		return "No system logged a warning or an error in the window."
-	}
-	var b strings.Builder
-	for i, g := range groups {
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		var standing string
-		switch g.Class {
-		case wsm.WindowNew:
-			standing = "NEW"
-		case wsm.WindowSeenBefore:
-			standing = fmt.Sprintf("SEEN BEFORE, never taken on (%d in the span before)", g.Before)
-		case wsm.WindowOwned:
-			standing = "TAKEN ON, your fix of it still under way"
-		case wsm.WindowRecurred:
-			standing = "RECURRED after your fix deployed"
-			if pastItsFixes(g.Class, g.Fixes) {
-				standing = fmt.Sprintf("RECURRED after your fix deployed, after %d fixes in all: only an escalation is accepted", g.Fixes)
-			}
-		default:
-			panic(fmt.Sprintf("merge: a finding group with no class: %+v", g))
-		}
-		b.WriteString(fmt.Sprintf("- %s: %d %s of %s: %s\n  %s\n", standing, g.Count, strings.ToUpper(g.Level), g.Operation, g.Message, g.Sample))
-		if g.Findings != "" {
-			b.WriteString("  You found before: " + strings.ReplaceAll(g.Findings, "\n", " / ") + "\n")
-		}
-	}
-	return b.String()
-}
-
-// intakeBrief composes the intake's brief of check M on queue Q: the deploy,
-// the chain so far against its bound, and the window's findings, each stood
-// against the span before the window and the problems the repository's
-// deploy checks keep. It answers the window as the brief tells it.
+// intakeBrief composes the intake's brief of check M on queue Q, and answers
+// the window the check covers.
+//
+// THE BRIEF STATES THE DEPLOY AND WHAT THE MEDIATOR HAS TO INVESTIGATE IT
+// WITH, AND NOTHING IT FOUND (owner ruling, 2026-11-19). The mediator reads
+// the logs, the metrics and the doctor itself and decides what matters; the
+// brief names where they are and what each decision does. The window's
+// records are still read and sorted here, for the window the store keeps
+// (CheckWindow.Groups), which a decision is judged against.
 //
 // THE WINDOW STARTS WHERE THE REPOSITORY'S LAST CHECK READ TO, never at the
 // deploy's start (owner ruling, 2026-11-16): a landing logs between its
@@ -253,13 +221,13 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
 	}
 	groups := classifyFindings(SortFindings(window, before), problems)
-	chain, err := o.chainSoFar(ctx, q, m)
-	if err != nil {
-		return "", wsm.CheckWindow{}, err
-	}
 	gate, gated, err := lastGateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
+	}
+	gateLog := "none logged one"
+	if gated {
+		gateLog = "`" + gate.Path + "`"
 	}
 	brief, err := o.deps.Briefs(BriefDeployIntake, map[string]string{
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
@@ -267,10 +235,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		"window_started": since.UTC().Format(time.RFC3339),
 		"repo_dir":       q.repository.Dir,
 		"version":        mediationVersion(m),
-		"chain":          chain,
-		"bound":          fmt.Sprint(q.bound),
-		"facts":          RenderFindings(groups),
-		"reuse":          RenderReuse(gate, gated),
+		"gate_log":       gateLog,
 	})
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
@@ -303,29 +268,6 @@ func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.
 	return m.OwedAt, nil
 }
 
-// chainSoFar is the brief's account of check M's chain: its first deploy, or
-// how many of the mediator's fixes it deployed in a row and what each
-// landed.
-func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, error) {
-	if m.ChainRedeploys == 0 && !m.Dispatched {
-		return "this is the chain's first deploy; no fix has been dispatched.", nil
-	}
-	finishes, err := o.deps.DB.RemediationFinishes(ctx)
-	if err != nil {
-		return "", fmt.Errorf("merge: read what the chain's fixes landed: %w", err)
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("the chain began at %s and has deployed %d of your fixes in a row.",
-		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys))
-	for _, f := range finishes {
-		if !sameQueue(f.Repo, q.key) || f.LandedHead == "" {
-			continue
-		}
-		b.WriteString(fmt.Sprintf(" Your fix landed %s, changing %s.", f.LandedHead, strings.Join(f.LandedPaths, ", ")))
-	}
-	return b.String(), nil
-}
-
 // RenderEnding is how the checked deploy ended, as the intake's brief says
 // it: a deploy that stopped short is a problem of the deploy itself, its
 // records in the window like any other's.
@@ -336,9 +278,9 @@ func RenderEnding(ending wsm.DeployEnding) string {
 	case wsm.DeployUnchanged:
 		return "It finished, changing nothing."
 	case wsm.DeployStoppedShort:
-		return "It STOPPED SHORT of finishing: a build, a restart or a rollout failed or could not finish. That failure is this deploy's problem; its records are among the findings below."
+		return "It STOPPED SHORT of finishing: a build, a restart or a rollout failed or could not finish."
 	case "":
-		return "How it ended was not recorded; read it from the findings below."
+		return "How it ended was not recorded."
 	}
 	panic(fmt.Sprintf("merge: a deploy ending the store never records: %q", ending))
 }

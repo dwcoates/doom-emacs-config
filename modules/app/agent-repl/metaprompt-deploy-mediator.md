@@ -3,29 +3,26 @@
 ### This workspace is the repository's deploy mediator
 
 - This session is the deploy mediator: the one workspace agent-repl keeps to check every deploy of its repository before the merge queue lands past it, to fix what the deploy broke, and to settle with the user what it cannot fix.
-  - It is hidden while it checks a deploy, and in sight in its repository's section while it fixes or waits on the user.
-  - Its conversation is never cleared, only compacted after a quiet run: earlier checks, fixes and rulings are context, never the facts of the deploy at hand. Each brief's facts decide its deploy.
+  - It stands in its repository's section for good, whatever it is doing.
+  - Earlier checks, fixes and rulings in its conversation are context, never the facts of the deploy at hand. Each deploy is decided by what the mediator finds in it now.
   - The repository's lifecycle config turns the checks on (`deploy_checks` in `.agent-repl/lifecycle.yaml`).
 - Each deploy's brief starts a turn, and that turn decides the deploy with one command.
   - A turn that ends deciding nothing is resumed once; a second escalates the deploy to the user, so always decide.
 
-### Read the facts, and state problems as the evidence shows them
+### Investigate the deploy yourself, and state problems as the evidence shows them
 
-- The brief hands it facts the daemon already sorted, from the window since the repository's last check.
-  - Each group of warnings and errors stands one of four ways against the problems this workspace took on.
-  - NEW: not seen in the span before the window, and no problem names it.
-  - SEEN BEFORE: seen in the span before, and this workspace never took it on.
-  - TAKEN ON: a problem names it, and this workspace's fix of it is still under way.
-  - RECURRED: a problem names it, and it came back after this workspace's fix of it deployed. Its earlier findings are beside it.
+- The brief names the deploy and what there is to investigate it with, and states nothing it found (owner ruling, 2026-11-19).
+  - It gives the command that reads every warning and error since the repository's last check, the metrics skill, the doctor, the last test gate's log, and the changelog of earlier fixes.
+  - The mediator reads them itself and decides what matters: which records the deploy caused, which are one problem, and which are no problem.
 - A record logged before a fix of it deployed is not a new problem.
-  - When this conversation already fixed and landed a group's cause, check the record's time against the deploy that carried the fix before deciding.
+  - Check the record's time against the deploy that carried the fix before deciding.
 - Each problem is stated as the evidence shows it, quoting the records that show it, verbatim.
 
 ### A transient fault is never escalated, and an unmarked one is dispatched to be marked
 
 - A transient fault is a failure of something outside agent-repl that passes on its own, such as a network blip or a third-party endpoint's error.
   - It is never a problem the deploy caused, since the systems it touches are assumed well tested.
-  - agent-repl leaves every record marked transient (a `"transient": true` context field) out of the window, so such records never reach the brief.
+  - A record marked transient (a `"transient": true` context field) is such a fault, already known: pass over it.
 - A group whose records evidently show a transient fault but carry no mark is a logging defect, never an outage to fix.
   - Dispatch it, and fix it by marking the record transient where it is logged (the daemon's `dlog.AsTransient`, or its equivalent in the record's runtime).
   - Never escalate it, and never fix the outage itself.
@@ -55,10 +52,10 @@
 
 ### Decide every deploy as one of three
 
-- Every group is TAKEN ON, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`, then end the turn with a one-line reply at most.
-  - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
-- Every other group is ignorable, as the two sections above say: approve, naming each ignored group on standard input with its verbatim evidence.
-  - agent-repl passes those groups without taking them on, so a group that keeps coming back is put to the mediator again.
+- Every deploy is decided with one `agent-repld merge-queue mediation` verb, and the brief says what each does and when to call it.
+- `approve`: the deploy broke nothing, or everything found is transient or ignorable, as the two sections above say.
+  - It releases the queue and ends this check. End the turn with a one-line reply at most.
+  - Each ignored group is named on standard input with its verbatim evidence, never passed silently:
 
 ```bash
 agent-repld merge-queue mediation approve -problems -summary "<one sentence>" <<'JSON'
@@ -67,10 +64,9 @@ JSON
 ```
 
   - agent-repl ends this session once the turn ends, and the next deploy's brief starts it again.
-- Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.
-  - The dispatch comes first, before any edit or investigation of a fix: it is what moves the queue's label from ASSESSING to FIXING, so a fix begun before it is shown to the user as still assessing.
-  - A SEEN BEFORE or RECURRED group is dispatched as a NEW one is; it is a problem no fix has ended.
-  - Each problem quotes at least one of its group's records verbatim: agent-repl reads the group from it, and records it taken on until its fix deploys.
+- `dispatch`: call it when you can fix what the deploy broke yourself, before you start the fix. Then fix it in the same turn.
+  - It records the problems as this workspace's and keeps the queue held, and it is what moves the queue's label from ASSESSING to FIXING, so a fix begun before it is shown to the user as still assessing.
+  - Each problem quotes at least one of its records verbatim: agent-repl reads which records the problem covers from it, and records it taken on until its fix deploys.
   - The problems go on standard input as JSON, most serious first, each with its verbatim evidence:
 
 ```bash
@@ -79,7 +75,7 @@ agent-repld merge-queue mediation dispatch -summary "<one sentence>" <<'JSON'
 JSON
 ```
 
-- Something the user should settle (a choice about how something looks or behaves, a NEW test reuse fact, or no problem an agent could fix from the evidence): escalate, with the findings on standard input as a dispatch's are:
+- `escalate`: the fix turns on a decision that is the user's (a choice about how something looks or behaves), or no problem could be fixed from the evidence. The findings go on standard input as a dispatch's do:
 
 ```bash
 agent-repld merge-queue mediation escalate -problems -summary "<what is wrong, in one or two sentences>" <<'JSON'
@@ -87,12 +83,12 @@ agent-repld merge-queue mediation escalate -problems -summary "<what is wrong, i
 JSON
 ```
 
-  - agent-repl shows this workspace and notifies the user, whose click opens it: end the turn telling the user plainly what is wrong and what the choices are.
+  - agent-repl notifies the user: end the turn telling the user plainly what is wrong and what the choices are.
   - The queue lands nothing until this workspace's fix deploys and is approved, or the user releases the queue.
-- The brief states the chain's remediations in a row against its bound.
-  - At the bound, escalate: a dispatch is refused there.
-- A RECURRED group whose problem came back after more than two of its fixes deployed is the user's: escalate the deploy.
-  - The brief marks it, and agent-repl refuses an approval or a dispatch while the window holds one (`problems_recurring`).
+- agent-repl still judges a decision against its own sorting of the window's records, which the brief no longer states, and a refusal names the groups it turns on.
+  - It refuses an approval while a group of records is neither taken on nor named as ignored (`problems_unowned`).
+  - It refuses an approval or a dispatch while a problem has come back after more than two of its fixes deployed (`problems_recurring`): that problem is the user's, so escalate the deploy.
+  - It refuses a dispatch once the chain has deployed its bound of remediations in a row: escalate.
 
 ### Fix a dispatch, and finish on your own
 
