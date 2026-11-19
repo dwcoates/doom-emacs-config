@@ -519,7 +519,10 @@ func (r *resolver) openRows(nodes []openNode, folded bool, numbers *tabNumberer,
 // children's.
 func (r *resolver) openRow(node openNode, folded bool, numbers *tabNumberer, rc rowContext, log dlog.Logger) *frontendv1.RosterOpenRow {
 	surfaced := folded && node.ws.DrawnInsideFold()
-	out := &frontendv1.RosterOpenRow{Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded && !surfaced), Surfaced: surfaced}
+	out := &frontendv1.RosterOpenRow{
+		Row: r.row(node.ws, rc, log), Tab: numbers.tab(folded && !surfaced), Surfaced: surfaced,
+		RecencyGutter: r.recencyGutter(node.ws.ID),
+	}
 	// THE CHILDREN FOLD COVERS EVERY CHILD, the own-repository ones and every
 	// repository block's rows alike (frontend.v1.RosterOpenRow.children_fold).
 	if len(node.children) > 0 || len(node.blocks) > 0 {

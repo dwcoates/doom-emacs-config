@@ -48,6 +48,7 @@ import (
 	"agent-repld/internal/resolve/feed"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/resolve/sidebar"
+	"agent-repld/internal/streamslot"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
@@ -2239,7 +2240,34 @@ type fakeSidebar struct {
 	topic publish.Topic[*frontendv1.WorkspaceRoster]
 	// revision is what Revision answers.
 	revision uint64
+	// recency is the recency reach Emacs streams attach and reports replace,
+	// held as the real roster holds it: scoped to the stream.
+	recency streamslot.Slot[sidebar.RecencyReach]
+	// recencyReleased, when a test sets it before a stream opens, is told
+	// each stream's release of its reach.
+	recencyReleased chan struct{}
 }
+
+func (f *fakeSidebar) AttachRecencyReach() (release func()) {
+	generation, _ := f.recency.Attach(sidebar.RecencyReach{})
+	released := f.recencyReleased
+	return func() {
+		f.recency.Release(generation)
+		if released != nil {
+			released <- struct{}{}
+		}
+	}
+}
+
+func (f *fakeSidebar) ReportRecencyReach(reach sidebar.RecencyReach) error {
+	if _, _, attached := f.recency.Update(reach); !attached {
+		return sidebar.ErrNoEmacsStream
+	}
+	return nil
+}
+
+// heldRecencyReach answers the reach standing, and whether a stream stands.
+func (f *fakeSidebar) heldRecencyReach() (sidebar.RecencyReach, bool) { return f.recency.Get() }
 
 func (f *fakeSidebar) Topic() *publish.Topic[*frontendv1.WorkspaceRoster] { return &f.topic }
 
