@@ -3386,7 +3386,12 @@ message FeedMergeQueueOfferHeadline {
 // The bubble's head line: the constant props.
 message FeedMergeHead {
   FeedMergeGlyph glyph = 1;
-  FeedMergeLabel label = 2;
+  // Tag 2 (`label`, the whole branch line as one string) is RETIRED: the
+  // line's source and target are elements of their own, so the target can
+  // open the pull request the merge deploys (`branch_line`). A stored head
+  // carrying it is carried onto `branch_line` by a wsm layout step.
+  reserved 2;
+  reserved "label";
   FeedMergeRuntime runtime = 3;
   FeedMergeFold fold = 4;
   // Tag 5 RETIRED (optional FeedMergeWorkspaceSwitch workspace_switch): the
@@ -3406,6 +3411,10 @@ message FeedMergeHead {
   // recorded before the head carried its mode; such a row is drawn with the
   // sync defaults and no switch.
   optional FeedMergeMode mode = 7;
+  // The branch line: what is merged, then where to, drawn source, arrow,
+  // target ("ABC/fix-flaky-test → master"). Set on every head the daemon
+  // publishes.
+  FeedMergeBranchLine branch_line = 8;
 }
 
 // How a merge runs. THE ARM IS THE MODE, and what only one mode has rides
@@ -3515,8 +3524,52 @@ message FeedMergeGlyph {
   string icon = 1;
 }
 
-// The branch line, resolved ("ABC/fix-flaky-test → master").
-message FeedMergeLabel {
+// The head's branch line: the source, then an arrow the client draws, then
+// the target. The arrow is the client's glyph, never part of either text.
+message FeedMergeBranchLine {
+  // What is merged.
+  FeedMergeBranchLineSource source = 1;
+  // Where it lands. UNSET only when what the merge lands could not be read
+  // and the merging workspace's own id stands in as the source; the line
+  // then draws the source alone, with no arrow.
+  optional FeedMergeBranchLineTarget target = 2;
+}
+
+// The source element: the branch merged ("ABC/fix-flaky-test"), or the
+// merging workspace's id when the branch could not be read. Drawn verbatim.
+message FeedMergeBranchLineSource {
+  string text = 1;
+}
+
+// The target element: the checkout the merge lands in, drawn verbatim, and,
+// for a merge that deploys through a GitHub pull request, that pull request,
+// which a click on the target opens.
+message FeedMergeBranchLineTarget {
+  // The checkout the merge lands in, drawn verbatim.
+  string text = 1;
+  // The pull request the merge deploys. PRESENT only when the merging
+  // workspace, or for an async merge the workspace that asked for it, owns
+  // exactly one GitHub pull request that was not closed unmerged, stored as
+  // an owned link (agentrepl.v1.WorkspaceLinkOwned): a repository whose
+  // finish stage opens a pull request and whose deploy adds it to the GitHub
+  // merge queue stores it that way. UNSET on every other merge, so
+  // agent-repl's own merges onto master draw a plain target. UNSET too until
+  // the finish stage stores the link; the daemon draws the head again the
+  // moment a workspace's links change.
+  optional FeedMergeBranchLineTargetPullRequest pull_request = 2;
+}
+
+// The pull request a merge's target opens. The client draws the target as a
+// link that opens URL through agentrepl.v1.AgentRepl.OpenExternal, in the
+// Chrome profile of the workspace's login, never in the page.
+message FeedMergeBranchLineTargetPullRequest {
+  // The pull request's github.com url, as the owned link stores it.
+  string url = 1;
+}
+
+// The fix gate head's label: one resolved sentence naming what the gate
+// tests ("testing the fix to the deploy of 0.472.2"), drawn verbatim.
+message FeedFixGateLabel {
   string text = 1;
 }
 
@@ -4168,7 +4221,7 @@ message FeedFixGate {
 message FeedFixGateHead {
   // What is tested, resolved by the daemon ("testing the fix to the deploy
   // of 0.472.2"), drawn verbatim.
-  FeedMergeLabel label = 1;
+  FeedFixGateLabel label = 1;
   // Which attempt this is, counting from 1, of how many the fix gets before
   // the chain is escalated to the user. Drawn as "attempt 2 of 3".
   uint32 attempt = 2;

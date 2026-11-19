@@ -15824,8 +15824,9 @@ func (x *FooterExpandedMerges) GetRows() []*FooterMergeRow {
 // One async merge's line: ⇄ · branch line · step · (waiting on you) · clock · ▸.
 type FooterMergeRow struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The bubble head's branch line ("fix-flaky → master"), drawn verbatim
-	// (frontend.v1.FeedMergeLabel).
+	// The bubble head's branch line ("fix-flaky → master"), composed by the
+	// daemon from the head's source and target (frontend.v1.FeedMergeBranchLine)
+	// and drawn verbatim.
 	Label *FooterMergeRowLabel `protobuf:"bytes,1,opt,name=label,proto3" json:"label,omitempty"`
 	// The step the merge stands on: the bubble's CURRENT top-level tab — the
 	// newest one still live, else the newest one drawn. UNSET while the bubble

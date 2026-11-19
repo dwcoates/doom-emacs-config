@@ -7757,8 +7757,9 @@ export const FooterExpandedMergesSchema: GenMessage<FooterExpandedMerges> = /*@_
  */
 export type FooterMergeRow = Message<"frontend.v1.FooterMergeRow"> & {
   /**
-   * The bubble head's branch line ("fix-flaky → master"), drawn verbatim
-   * (frontend.v1.FeedMergeLabel).
+   * The bubble head's branch line ("fix-flaky → master"), composed by the
+   * daemon from the head's source and target (frontend.v1.FeedMergeBranchLine)
+   * and drawn verbatim.
    *
    * @generated from field: frontend.v1.FooterMergeRowLabel label = 1;
    */
