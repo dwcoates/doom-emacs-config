@@ -189,7 +189,7 @@ func TestDrawUserBlocksLinksAPromptsReferences(t *testing.T) {
 	content := &conversationv1.UserContent{Blocks: []*conversationv1.UserContentBlock{
 		{Block: &conversationv1.UserContentBlock_Text{Text: &conversationv1.TextBlock{Text: "review #12"}}},
 	}}
-	link := func(parsed *frontendv1.ParsedProse) { h.resolver.LinkPulls(testWorkspace, parsed) }
+	link := func(parsed *frontendv1.ParsedProse) { h.resolver.DrawLinks(testWorkspace, parsed) }
 
 	// Act.
 	blocks := DrawUserBlocks(content, func(s string) string { return s }, refusingResolver, link, nil, dlog.NewTestLogger())
@@ -531,7 +531,7 @@ func TestLinkPullsLinksAPromptMirroredOutsideTheResolver(t *testing.T) {
 	parsed := prose.ParsePrompt(dlog.NewTestLogger(), "review #613")
 
 	// Act.
-	h.resolver.LinkPulls(testWorkspace, parsed)
+	h.resolver.DrawLinks(testWorkspace, parsed)
 
 	// Assert.
 	if got := plainMarkdown(t, parsed); got != "review "+linkedGns613 {

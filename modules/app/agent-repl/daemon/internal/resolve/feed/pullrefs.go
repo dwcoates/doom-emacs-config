@@ -57,15 +57,6 @@ func (r *resolver) pullTarget(ws ids.WorkspaceID) *pullrefs.Target {
 	return &target
 }
 
-// LinkPulls links PARSED's pull request references as the workspace's feed
-// links its own (linkPulls), for a settled text drawn outside the resolver:
-// the prompt queue's mirror of an accepted prompt.
-func (r *resolver) LinkPulls(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.linkPulls(ws, parsed, false)
-}
-
 // knownPulls answers the pull requests workspace WS's text has named, loading
 // them from the durable record the first time this process asks. They live
 // beside the workspaces' states rather than on one, so a reset that empties

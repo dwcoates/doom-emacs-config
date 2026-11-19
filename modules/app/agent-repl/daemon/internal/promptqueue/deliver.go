@@ -372,7 +372,7 @@ func (q *queue) retractAccepted(ws ids.WorkspaceID, turn ids.TurnID) {
 // back on the watch -- so a mirror that drew less than the resolver drew LESS
 // THAN THE PERSON SAID, for the whole session. It dropped every image block.
 func (q *queue) mirrorBlocks(ws ids.WorkspaceID, said *conversationv1.UserSaid) []*frontendv1.FeedUserPromptBlock {
-	link := func(parsed *frontendv1.ParsedProse) { q.deps.Feed.LinkPulls(ws, parsed) }
+	link := func(parsed *frontendv1.ParsedProse) { q.deps.Feed.DrawLinks(ws, parsed) }
 	return feed.DrawUserBlocks(said.GetContent(), q.deps.StripSentinels, q.deps.ResolveImage,
 		link, q.deps.Feed.RecentCodeSpans(ws), q.deps.Log.Global())
 }

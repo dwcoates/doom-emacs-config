@@ -156,11 +156,12 @@ type Resolver interface {
 	// verbs install it as they bind the workspace's views, before anything
 	// is drawn for it.
 	SetPullTarget(ws ids.WorkspaceID, target *pullrefs.Target)
-	// LinkPulls links a settled text's pull request references as the
-	// workspace's feed links its own: to the pull requests its text named
+	// DrawLinks draws a settled text's links as the workspace's feed draws
+	// its own (links.go): every link without inline code markers, and its
+	// pull request references linked to the pull requests its text named
 	// before, else into its repository. The prompt queue's mirror of an
-	// accepted prompt links through it.
-	LinkPulls(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse)
+	// accepted prompt draws its links through it.
+	DrawLinks(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse)
 	// RecentCodeSpans answers the inline code spans of the workspace's last
 	// RecentFinalResponses final responses (codespans.go). The prompt queue's
 	// mirror of an accepted prompt marks them up through it.

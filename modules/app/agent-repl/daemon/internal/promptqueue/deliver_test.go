@@ -89,7 +89,7 @@ func TestDeliverMirrorsTheAcceptedPromptIntoTheFeed(t *testing.T) {
 }
 
 // The mirror links the prompt's pull request references through the feed's
-// LinkPulls for its workspace, as the replayed draw does.
+// DrawLinks for its workspace, as the replayed draw does.
 func TestDeliverMirrorsAPromptsPullReferencesLinked(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
@@ -107,7 +107,7 @@ func TestDeliverMirrorsAPromptsPullReferencesLinked(t *testing.T) {
 		t.Fatalf("the mirrored prompt = %q, want %q", got, want)
 	}
 	if len(h.feed.linkedFor) != 1 || h.feed.linkedFor[0] != theWorkspace {
-		t.Fatalf("LinkPulls was asked for %v, want once for %s", h.feed.linkedFor, theWorkspace)
+		t.Fatalf("DrawLinks was asked for %v, want once for %s", h.feed.linkedFor, theWorkspace)
 	}
 }
 
