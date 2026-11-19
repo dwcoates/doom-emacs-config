@@ -6,6 +6,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 )
 
@@ -209,5 +210,53 @@ func TestASilenceTheStripNeverDrewRecordsNoEnd(t *testing.T) {
 	// Assert
 	if records := recordsOf(h.log.Records(), "daemon.footer.vendor_silence_ended"); len(records) != 0 {
 		t.Fatalf("records = %+v, want none: the strip never read waiting", records)
+	}
+}
+
+func TestAnAnsweredAskStartsTheSilenceClockAgainFromItsAnswer(t *testing.T) {
+	closeQuestion := &conversationv1.AgentQuestion{Id: &conversationv1.AgentQuestionId{Value: "q-1"},
+		Result: &conversationv1.AgentQuestion_Success{Success: &conversationv1.AgentQuestionSuccess{}}}
+	closePermission := &conversationv1.AgentPermission{Id: &conversationv1.AgentPermissionId{Value: "ask-1"},
+		Result: &conversationv1.AgentPermission_Success{Success: &conversationv1.AgentPermissionSuccess{}}}
+	tests := []struct {
+		name  string
+		open  func(h *harness)
+		close func(h *harness)
+	}{
+		{name: "a question",
+			open:  func(h *harness) { h.r.OnQuestion(testWS, mainAgent, questionStart("q-1", "which?")) },
+			close: func(h *harness) { h.r.OnQuestion(testWS, mainAgent, closeQuestion) }},
+		{name: "a consent ask",
+			open: func(h *harness) {
+				h.r.OnPermission(testWS, mainAgent, permissionStart("ask-1", "Claude wants to read foo"))
+			},
+			close: func(h *harness) { h.r.OnPermission(testWS, mainAgent, closePermission) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the turn has been heard from, and its ask waits on the
+			// user past the silence threshold.
+			h := newHarness(t)
+			inTurn(h)
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "start"))
+			h.r.OnActivity(testWS, mainAgent, itemFrame(t, "u-1", "read", "success"))
+			tt.open(h)
+			h.clock.Advance(DefaultVendorSilence * 3)
+
+			// Act: the user answers.
+			tt.close(h)
+
+			// Assert: thinking now, and waiting only once the vendor stays
+			// silent past the threshold from the answer.
+			if got := stepName(working(t, h)); got == "waiting" {
+				t.Fatalf("step = %q right after the answer, want the wait on the user never counted as the vendor's silence", got)
+			}
+			answered := h.clock.Now()
+			h.clock.Advance(DefaultVendorSilence + time.Second)
+			salient, line := silenceLine(t, h)
+			if salient.GetAt().GetAtMs() != answered.UnixMilli() || line.GetNotStarted().GetLastHeard().GetText() != "the answer went out" {
+				t.Fatalf("silence line at %d (%v), want it from the answer at %d", salient.GetAt().GetAtMs(), line, answered.UnixMilli())
+			}
+		})
 	}
 }

@@ -1368,8 +1368,20 @@ message RosterMergeQueueMode {
 }
 // In place. No fields.
 message RosterMergeQueueModeSync {}
-// Async. No fields.
-message RosterMergeQueueModeAsync {}
+// Async: the merge runs in a hidden merge workspace for its requester.
+message RosterMergeQueueModeAsync {
+  // REQUIRED. The requester the merge runs for, drawn after the merge's name
+  // as a quieter "(async of <name>)", so an async merge reads as whose it is
+  // and a click's landing on the requester is expected.
+  RosterMergeQueueModeAsyncRequester requester = 1;
+}
+// The requester an async merge runs for, drawn "(async of <name>)": cut with
+// an ellipsis when the line is short of room, its whole text on a hover of
+// the line.
+message RosterMergeQueueModeAsyncRequester {
+  // The requester workspace's name, verbatim.
+  string name = 1;
+}
 
 // THE HEAD OF THE QUEUE, drawn as a small merge bubble: who it is, the stages
 // it has been through, and where it stands.

@@ -54,6 +54,7 @@ import {
   githubPlaceText,
   MERGE_QUEUE_CLASS,
   MERGE_QUEUE_GITHUB_CLASS,
+  MERGE_QUEUE_ASYNC_OF_CLASS,
   MERGE_QUEUE_OFF_QUEUE_CLASS,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_MEDIATION_CLASS,
@@ -1052,6 +1053,37 @@ describe("drawRosterMergeQueueWaiting", () => {
     ]);
   });
 
+  it("notes an async merge's requester after its name, whole on the line's hover", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueWaiting(
+      waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "fix-it", async: true, requester: "triage" }) }),
+      1,
+      sc,
+      "w",
+    );
+    expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
+      ["sb-mq-position", "1"],
+      ["sb-mq-name", "fix-it"],
+      [MERGE_QUEUE_ASYNC_OF_CLASS, "(async of triage)"],
+      ["sb-mq-clock", formatTickedElapsed(3_000)],
+    ]);
+    expect([line.title, line.querySelector(".sb-mq-name")?.hasAttribute("title")]).toEqual(["(async of triage)", false]);
+  });
+
+  it("notes nothing after a sync merge's name", () => {
+    const { sc } = daemon();
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w");
+    expect([line.querySelector(`.${MERGE_QUEUE_ASYNC_OF_CLASS}`), line.title]).toEqual([null, ""]);
+  });
+
+  it("refuses an async merge that names no requester", () => {
+    const { sc } = daemon();
+    const subject = create(RosterMergeQueueSubjectSchema, {
+      workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "async", value: {} } }, merge: { id: "w1" },
+    });
+    expect(() => drawRosterMergeQueueWaiting(waitingMerge("w1", { subject }), 1, sc, "w")).toThrow(MalformedView);
+  });
+
   it("draws no front mark on a waiting merge", () => {
     const { sc } = daemon();
     const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w");
@@ -1215,6 +1247,15 @@ describe("drawRosterMergeQueueOffQueue", () => {
     const { sc } = offQueueDaemon();
     const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue").querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
     expect([line?.querySelector(".sb-mq-name")?.textContent, line?.querySelector(".sb-mq-off-queue-cause")?.textContent]).toEqual(["w2", "evicted"]);
+  });
+
+  it("notes an async merge's requester after its name, before why it left", () => {
+    const { sc } = offQueueDaemon();
+    const off = offQueue("w2", "evicted");
+    off.subject = queueSubject("w2", { name: "fix-it", async: true, requester: "triage" });
+    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue").querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
+    expect([...line.children].slice(0, 3).map((el) => el.textContent)).toEqual(["fix-it", "(async of triage)", "evicted"]);
+    expect(line.title).toBe("(async of triage)");
   });
 
   it("requeues the merge's own workspace at the back, as the user, without selecting the line", async () => {

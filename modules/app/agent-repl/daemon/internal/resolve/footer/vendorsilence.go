@@ -36,6 +36,10 @@ type lastHeard struct {
 // the response has come back.
 var heardTurnOpened = lastHeard{text: "the prompt went out", cause: "turn_opened"}
 
+// heardAskAnswered is the last of a turn's open asks answered: the answer
+// went back to the vendor, and nothing of its response has come back.
+var heardAskAnswered = lastHeard{text: "the answer went out", cause: "ask_answered"}
+
 // heardOf words one classified frame as the vendor's last word. Thinking and
 // reply text are a response streaming; so is any item still running. An item
 // that landed, or one with no lifecycle, closed out an exchange. A subagent's
@@ -75,6 +79,24 @@ func (r *resolver) heardFromVendor(ws ids.WorkspaceID, s *wsState, heard lastHea
 	s.heardAt = r.opts.clock.Now()
 	s.heard = heard
 	s.silence = r.opts.clock.AfterFunc(r.opts.vendorSilence, func() { r.vendorSilenceElapsed(ws) })
+}
+
+// askOpened stops the silence clock while a question or a consent ask is
+// open: the turn waits on the user then, never on the vendor (2026-11-18: a
+// question answered after nine minutes drew `waiting` the moment it was
+// answered, the wait on the user counted as the vendor's silence).
+func (r *resolver) askOpened(ws ids.WorkspaceID, s *wsState) {
+	r.endSilence(ws, s, "ask_opened")
+}
+
+// askClosed starts the silence clock again from now once the turn's last
+// open ask is answered: the answer went back to the vendor, which is heard
+// from again only when its response comes.
+func (r *resolver) askClosed(ws ids.WorkspaceID, s *wsState) {
+	if s.turn == nil || len(s.questions) > 0 || len(s.permissions) > 0 {
+		return
+	}
+	r.heardFromVendor(ws, s, heardAskAnswered)
 }
 
 // endSilence stops the silence timer and, when the strip had turned to
