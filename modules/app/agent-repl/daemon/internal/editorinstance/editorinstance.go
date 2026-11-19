@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"time"
 
+	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 )
 
@@ -89,6 +90,13 @@ func (t *Tracker) Connected(ctx context.Context, instance string) (bool, error) 
 	isNew, err := t.store.NoteEditorInstance(ctx, instance, at)
 	if err != nil {
 		fields["cause"] = err.Error()
+		if ctxend.Is(err) {
+			// THE EMACS LEFT BEFORE ITS INSTANCE WAS RECORDED (2026-11-18: an
+			// Emacs quit during its restart): the caller ending the request
+			// is no store failure.
+			t.log.Info(op, "the Emacs left before its instance was recorded", fields)
+			return false, fmt.Errorf("editorinstance: record %q: %w", instance, err)
+		}
 		t.log.Error(op, "the Emacs instance could not be recorded", fields)
 		return false, fmt.Errorf("editorinstance: record %q: %w", instance, err)
 	}

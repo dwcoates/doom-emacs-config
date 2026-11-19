@@ -161,3 +161,28 @@ func logged(logs *dlog.TestSurfaces, level string) bool {
 	_, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Level: level, Operation: op})
 	return ok
 }
+
+func TestConnectedRecordsAnEmacsThatLeftAtInfo(t *testing.T) {
+	// Arrange: the Emacs's request ended before the store recorded it.
+	store := &fakeStore{err: context.Canceled}
+	logs := dlog.NewTestSurfaces()
+	starts := &fakeStarts{}
+	tracker, err := New(store, func() bool { return true }, epoch, logs.Global(), starts)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	// Act
+	got, err := tracker.Connected(context.Background(), "e1")
+
+	// Assert
+	if !errors.Is(err, context.Canceled) || got {
+		t.Fatalf("Connected = (%v, %v), want the cancellation returned", got, err)
+	}
+	if logged(logs, "error") || !logged(logs, "info") {
+		t.Fatalf("records = %v, want INFO and no ERROR", logs.Records())
+	}
+	if len(starts.began) != 0 {
+		t.Fatalf("began %d sessions, want none", len(starts.began))
+	}
+}
