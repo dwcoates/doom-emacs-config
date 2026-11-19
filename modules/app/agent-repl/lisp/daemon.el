@@ -1407,7 +1407,7 @@ ordered and the next unrequested departure is heard in full."
       (agent-repl--error scope agent-repl-daemon--exit-log-format
                          status trimmed "nil"))))
   (when (eq proc agent-repl--frontend-daemon-process)
-    (agent-repl-daemon--retire-own-addr)
+    (agent-repl-daemon--retire-own-addr (process-id proc))
     (setq agent-repl--frontend-daemon-process nil)))
 
 (defun agent-repl-daemon--link-address-of (proc)
@@ -1478,28 +1478,37 @@ address is decided now, at INFO; otherwise the process is remembered
       (setq agent-repl-daemon--handed-over agent-repl--frontend-daemon-process)
       (agent-repl--info scope "elisp.daemon.handed-over address=%S" address)))))
 
-(defun agent-repl-daemon--retire-own-addr ()
+(defun agent-repl-daemon--retire-own-addr (pid)
   "Remove `daemon.addr' when it still names the daemon THIS Emacs spawned.
-A daemon that exits cleanly removes its own file; one that is killed, or
-that dies, does not — and the file it leaves is the stale address the next
-cold start reads back as readiness.  The content is checked against the
-address our own daemon published, so a SUCCESSOR's file (a blue-green
-rollout writes a different address into the same path) is never retired."
-  (let ((own agent-repl-daemon--own-address))
+PID is that daemon's process id.  A daemon that exits cleanly removes its
+own file; one that is killed, or that dies, does not -- and the file it
+leaves is the stale address the next cold start reads back as readiness.
+
+AN ADVERTISEMENT IS ITS ADVERTISER'S PID, NEVER ITS ADDRESS.  Every daemon
+advertises the same shared address (the socket holder's), so a successor's
+file names the same address as the daemon it replaced; matching on the
+address deleted the successor's fresh advertisement when the old daemon
+exited, and the successor stood down on its vanished state
+\(2026-11-18 22:11).  Only a file whose `pid=' line is PID is retired; a
+file naming another pid, or none, is kept."
+  (let ((own agent-repl-daemon--own-address)
+        (scope '(:agent-repl-central "the resident daemon lifecycle spans workspaces")))
     (when own
       (let ((current (condition-case nil
                          (agent-repl-connect-read-daemon-addr)
-                       (error nil))))
+                       (error nil)))
+            (advertiser (condition-case nil
+                            (agent-repl-connect-read-daemon-addr-pid)
+                          (error nil))))
         (cond
          ((null current)
-          (agent-repl--log '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
-                           "elisp.daemon.own-addr-already-gone address=%S" own))
-         ((equal current own)
+          (agent-repl--log scope "elisp.daemon.own-addr-already-gone address=%S" own))
+         ((and (integerp pid) (eql advertiser pid))
           (agent-repl-daemon--retire-stale-addr own "own-daemon-exited"))
          (t
-          (agent-repl--info '(:agent-repl-central "the resident daemon lifecycle spans workspaces")
-                            "elisp.daemon.own-addr-kept own=%S current=%S reason=successor-published"
-                            own current))))
+          (agent-repl--info scope
+                            "elisp.daemon.own-addr-kept own=%S own-pid=%S current=%S advertiser-pid=%S reason=another-advertiser"
+                            own pid current advertiser))))
       (setq agent-repl-daemon--own-address nil))))
 
 (defun agent-repl-daemon--exited-p (proc)
