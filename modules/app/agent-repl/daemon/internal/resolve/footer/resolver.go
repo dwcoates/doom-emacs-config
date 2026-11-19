@@ -1,6 +1,7 @@
 package footer
 
 import (
+	"errors"
 	"time"
 
 	"fmt"
@@ -211,6 +212,9 @@ func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 	if s.log != nil {
 		return s.log
 	}
+	if log, ok := r.resolveUnboundLocked(ws, s); ok {
+		return log
+	}
 	log := r.log.Global().With(dlog.Context{
 		"workspace_id":        string(ws),
 		"invariant_violation": "footer resolver frame for a workspace with no bound directory",
@@ -225,6 +229,37 @@ func (r *resolver) logOf(ws ids.WorkspaceID, s *wsState) dlog.Logger {
 		log.Error("daemon.footer.unbound_workspace", "a footer record arrived for a workspace whose directory was never bound", nil)
 	}
 	return log
+}
+
+// resolveUnboundLocked resolves the logger of a workspace the footer was never
+// bound to, through the registry (WithWorkspaceDir), and binds it. A
+// directory since removed is ordinary: its records go to the central sink
+// naming it. A workspace the registry cannot answer is not resolved, and
+// logOf records the violation. Caller holds r.mu.
+func (r *resolver) resolveUnboundLocked(ws ids.WorkspaceID, s *wsState) (dlog.Logger, bool) {
+	if r.opts.workspaceDir == nil {
+		return nil, false
+	}
+	dir, err := r.opts.workspaceDir(ws)
+	if err != nil {
+		r.log.Global().Debug("daemon.footer.resolve_unbound", "the registry could not answer an unbound workspace's directory",
+			dlog.Context{"workspace_id": string(ws), "cause": err.Error()})
+		return nil, false
+	}
+	log, err := r.log.Workspace(dir)
+	switch {
+	case errors.Is(err, dlog.ErrWorkspaceDirGone):
+		log = r.log.WorkspaceOrCentral(dir)
+	case err != nil:
+		r.log.Global().Debug("daemon.footer.resolve_unbound", "an unbound workspace's log sink could not be opened",
+			dlog.Context{"workspace_id": string(ws), "workspace_dir": dir, "cause": err.Error()})
+		return nil, false
+	}
+	s.dir = dir
+	s.log = log.With(dlog.Context{"workspace_id": string(ws)})
+	s.log.Debug("daemon.footer.bind", "the footer resolved an unbound workspace through the registry",
+		dlog.Context{"workspace_dir": dir})
+	return s.log, true
 }
 
 // mutate runs one accumulation change under the lock and republishes the whole

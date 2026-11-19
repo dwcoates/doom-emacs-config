@@ -586,6 +586,18 @@ type options struct {
 	// usageSink keeps an account root's evidence durable (WithAccountUsageSink);
 	// nil keeps nothing.
 	usageSink func(wsm.AccountUsage) error
+	// workspaceDir resolves a workspace the footer was never bound to
+	// (WithWorkspaceDir); nil resolves none.
+	workspaceDir func(ws ids.WorkspaceID) (string, error)
+}
+
+// WithWorkspaceDir sets how the footer resolves the directory of a workspace
+// it was never bound to: a closed workspace is never registered, yet its
+// merges still reach the strip (2026-11-18: sidebar-hover-commit-counts's
+// merge head). The registry answers its directory, and a directory since
+// removed routes the workspace's records to the central sink.
+func WithWorkspaceDir(resolve func(ws ids.WorkspaceID) (string, error)) Option {
+	return func(o *options) { o.workspaceDir = resolve }
 }
 
 // WithAccountUsages hands the resolver the usage evidence the state store kept
