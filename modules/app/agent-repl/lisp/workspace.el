@@ -2872,12 +2872,12 @@ no walk is running."
         (agent-repl--end-visit log-ws reason)))))
 
 (defun agent-repl--clear-recency-walk (log-ws reason)
-  "Clear the running recency walk, stamping its landing viewed; return the landing.
+  "Clear the running recency walk, stamping its landing viewed; return it.
 The ONE end of a walk's landing (`agent-repl--recency-walk-landing'), for a
 switch that ends it (`agent-repl--end-recency-walk') and a prompt sent or
-a link followed on it (`agent-repl--record-standing-visit') alike: what each then does with the
-visit standing is its own.  LOG-WS is the record's sink; REASON names what
-ended the walk.  A walk must be running."
+a link followed on it (`agent-repl--record-standing-visit') alike: what
+each then does with the visit standing is its own.  LOG-WS is the
+record's sink; REASON names what ended the walk.  A walk must be running."
   (let ((landing agent-repl--recency-walk-landing))
     (unless landing
       (agent-repl--fatal log-ws "elisp.workspace.recency-walk-clear-without-walk reason=%s" reason))
