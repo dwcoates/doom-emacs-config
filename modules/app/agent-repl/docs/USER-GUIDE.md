@@ -989,6 +989,10 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - A link opened in the browser, a file or log opened in Emacs, a run control, and a jump to another workspace from the feed all count.
   - Its sidebar row and tab dim as they do after you have looked at a finished turn for a few seconds.
   - It takes its place in the `s-[` order however briefly you were on it, so `s-[` from the workspace a jump landed on goes back to it.
+- **A colored bar left of a sidebar row's tab number shows how few presses of `s-[` or `s-]` reach it.**
+  - Orange means `s-[` reaches it in fewer presses, purple means `s-]` does.
+  - The bar is brightest at one press and fades with each press after it.
+  - At most the six nearest each way have a bar.
 
 ## Reopening a merged workspace
 
