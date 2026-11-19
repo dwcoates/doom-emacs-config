@@ -1616,8 +1616,17 @@ RING-FN is called with the workspace the step starts from and answers
 every tab in the ring's order (`agent-repl--cycle-target''s ALL); the drawn
 tabs are the ones the step may land on, so a tab a collapsed section folds
 is passed over, as the numerals pass it over (owner request, 2026-11-17).
-OP names the gesture's records
-\(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
+The request itself is `agent-repl--step-workspace-to''s, with OP and TRIGGER."
+  (agent-repl--step-workspace-to
+   n (lambda (current names)
+       (agent-repl--cycle-target (funcall ring-fn current) names current n))
+   op trigger))
+
+(defun agent-repl--step-workspace-to (n target-fn op trigger)
+  "Request the DRAWN tab TARGET-FN picks for a step of N from the current workspace.
+TARGET-FN is called with the workspace the step starts from and the drawn
+tab names, and answers the tab to land on or nil.  N is only recorded.
+OP names the gesture's records \(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
 switch request's (`agent-repl-host-request-switch').
 
 THE STEP STARTS FROM THE MOST RECENT REQUEST while one is unanswered
@@ -1626,7 +1635,7 @@ moves only when the roster says so, and a key pressed twice before it does
 must land two steps over, not one.  The target is REQUESTED, never
 switched to here.
 
-A bar with no tabs, and a start that is not in the ring (a pseudo
+A bar with no tabs, and a start TARGET-FN finds no tab from (a pseudo
 perspective, or a workspace whose tab the roster has torn down), are
 LOGGED NO-OPS: there is no slot to count from, and inventing one would
 land the user somewhere the picture never offered.
@@ -1640,9 +1649,8 @@ harvest fails a run on every warning."
   (let* ((names (agent-repl--drawn-tab-names))
          (shown (agent-repl--ws-current-name))
          (current (or (agent-repl-host-pending-selection) shown))
-         (all (funcall ring-fn current))
          (log-ws (agent-repl--gesture-log-ws shown op))
-         (target (agent-repl--cycle-target all names current n)))
+         (target (funcall target-fn current names)))
     (if (null target)
         (agent-repl--info log-ws (format "elisp.commands.%s-no-position n=%%d tabs=%%d from=%%s" op)
                           n (length names) current)

@@ -1342,6 +1342,39 @@ formatted `info' records, newest first."
       ;; Assert
       (should (equal scopes '((:agent-repl-context "a probe from a placeholder names no workspace")))))))
 
+(ert-deftest agent-repl-test-commands-step-to-hands-the-target-fn-the-start-and-drawn-tabs ()
+  "The target function is given the pending start and the drawn tabs, and its pick is requested."
+  ;; Arrange
+  (let ((seen nil))
+    (agent-repl-test-commands--with-step '("a" "b" "c") "a" "b"
+      ;; Act
+      (agent-repl--step-workspace-to 1 (lambda (from names) (setq seen (list from names)) "a")
+                                     "probe" 'probe)
+      ;; Assert
+      (should (equal seen '("b" ("a" "b" "c"))))
+      (should (equal requests '(("a" probe))))
+      (should (member "elisp.commands.probe n=1 from=b target=a" records)))))
+
+(ert-deftest agent-repl-test-commands-step-to-with-no-target-is-a-logged-no-op ()
+  "A target function answering nil requests nothing and records its op's no-position."
+  (agent-repl-test-commands--with-step '("a" "b") "a" nil
+    ;; Act
+    (agent-repl--step-workspace-to -1 (lambda (_ _) nil) "probe" 'probe)
+    ;; Assert
+    (should-not requests)
+    (should (member "elisp.commands.probe-no-position n=-1 tabs=2 from=a" records))))
+
+(ert-deftest agent-repl-test-commands-step-requests-through-step-to ()
+  "A ring step requests through `agent-repl--step-workspace-to', never its own request."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--step-workspace-to)
+               (lambda (n _target op trigger) (push (list n op trigger) calls))))
+      ;; Act
+      (agent-repl--step-workspace 1 (lambda (_) '("a")) "probe" 'probe)
+      ;; Assert
+      (should (equal calls '((1 "probe" probe)))))))
+
 (ert-deftest agent-repl-test-commands-cycle-steps-through-the-shared-helper ()
   "`s-{' / `s-}' go through `agent-repl--step-workspace', never a hand-rolled walk."
   ;; Arrange
