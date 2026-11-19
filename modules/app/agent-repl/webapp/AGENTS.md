@@ -357,10 +357,9 @@ hand any more:
   `WatchDaemon`) consumes the frame before `onPush`, and a run that then ends
   cleanly is logged at info (`rpc.stream-ended-planned`) and reopened at once
   with NO `daemonUnreachable` filed. A clean end without it, or an error after
-  it, is the unreachable failure it always was. The daemon sends the frame on
-  its dedicated rpcs only; a page mux subscription is not given one (the
-  `WatchPage` stream has no ending arm), so today the page's own end still
-  reads as the failure.
+  it, is the unreachable failure it always was. The page's own stream carries
+  the arm too (`WatchPageResponse.ending`), sent once every subscription on it
+  has sent its last frame, and the page reopens from it the same way.
 - **A PAGE CALL ECHOES ITS ATTACHMENT, AND TWO ENDS ARE PLANNED REOPENS.**
   `PageAttached` issues a `PageAttachment` naming the daemon that holds the
   page's stream, and `SubscribePage` and `UnsubscribePage` echo it
