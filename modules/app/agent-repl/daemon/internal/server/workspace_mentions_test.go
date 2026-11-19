@@ -7,21 +7,29 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
-// mentionRow is an open row naming workspace ID as NAME, with CHILDREN nested under it.
+// mentionRow is an open row naming workspace ID as NAME, in no stated
+// repository, with CHILDREN nested under it.
 func mentionRow(id, name string, children ...*frontendv1.RosterOpenRow) *frontendv1.RosterOpenRow {
-	return &frontendv1.RosterOpenRow{
-		Row: &frontendv1.RosterRow{
-			Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: "/w/" + id}},
-			Name:      &frontendv1.RosterRowName{Text: name},
-		},
-		Children: children,
+	return mentionRowIn(id, name, "", children...)
+}
+
+// mentionRowIn is mentionRow in REPOSITORY ("" for none stated).
+func mentionRowIn(id, name, repository string, children ...*frontendv1.RosterOpenRow) *frontendv1.RosterOpenRow {
+	row := &frontendv1.RosterRow{
+		Workspace: &frontendv1.RosterRowWorkspace{Workspace: &workspacev1.WorkspaceRef{Id: id, Dir: "/w/" + id}},
+		Name:      &frontendv1.RosterRowName{Text: name},
 	}
+	if repository != "" {
+		row.Repository = &frontendv1.RosterRowRepository{Name: repository}
+	}
+	return &frontendv1.RosterOpenRow{Row: row, Children: children}
 }
 
 // mentionRoster is a roster whose one repository section holds ROWS, in no
@@ -50,9 +58,10 @@ func targetNames(targets *frontendv1.WorkspaceMentionTargets) []string {
 	return out
 }
 
-// TestMentionTargetsResolvesTheViewersSet pins which open workspaces a page
-// may link: the Open section's, in its order, less the viewer's own, every
-// shared name, every unnamed row, and every hidden workspace.
+// TestMentionTargetsResolvesTheViewersSet pins which workspaces a viewer may
+// mention: the Open section's in its order then the hidden section's, less
+// the viewer's own, every unnamed row, and every shared name that the
+// viewer's repository does not settle.
 func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -97,10 +106,62 @@ func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 			want:   []string{"beta=b"},
 		},
 		{
-			name:   "a hidden workspace is no target",
+			name:   "a hidden workspace is a target after the Open section's",
 			roster: mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}, mentionRow("h", "hidden")),
 			viewer: "v",
+			want:   []string{"alpha=a", "hidden=h"},
+		},
+		{
+			name:   "a hidden viewer is no target",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")}, mentionRow("v", "viewer")),
+			viewer: "v",
 			want:   []string{"alpha=a"},
+		},
+		{
+			name: "a shared name names the one workspace in the viewer's repository",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{
+				mentionRowIn("v", "viewer", "doom"), mentionRowIn("z", "fix", "zettel"), mentionRowIn("d", "fix", "doom"),
+			}),
+			viewer: "v",
+			want:   []string{"fix=d"},
+		},
+		{
+			name: "a shared name open twice in the viewer's repository is no target",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{
+				mentionRowIn("v", "viewer", "doom"), mentionRowIn("a", "fix", "doom"), mentionRowIn("b", "fix", "doom"),
+			}),
+			viewer: "v",
+			want:   nil,
+		},
+		{
+			name: "a shared name in none of the viewer's repository is no target",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{
+				mentionRowIn("v", "viewer", "doom"), mentionRowIn("a", "fix", "zettel"), mentionRowIn("b", "fix", "cee"),
+			}),
+			viewer: "v",
+			want:   nil,
+		},
+		{
+			name: "a shared name prefers no one when the viewer's repository is unknown",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{
+				mentionRowIn("a", "fix", "doom"), mentionRowIn("b", "fix", "zettel"),
+			}),
+			viewer: "v",
+			want:   nil,
+		},
+		{
+			name: "a name the viewer shares with a workspace of another repository is no target",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{
+				mentionRowIn("v", "same", "doom"), mentionRowIn("b", "same", "zettel"),
+			}),
+			viewer: "v",
+			want:   nil,
+		},
+		{
+			name:   "a name shared between an open and a hidden workspace is settled the same way",
+			roster: mentionRoster([]*frontendv1.RosterOpenRow{mentionRowIn("v", "viewer", "doom"), mentionRowIn("a", "fix", "zettel")}, mentionRowIn("h", "fix", "doom")),
+			viewer: "v",
+			want:   []string{"fix=h"},
 		},
 		{
 			name:   "an empty roster has no targets",
@@ -117,6 +178,71 @@ func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 			// Assert.
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("targets = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMentionTargetsStateEachTargetsRepository pins the repository the
+// composer annotates a completion with: the row's, or none when the row
+// states none.
+func TestMentionTargetsStateEachTargetsRepository(t *testing.T) {
+	cases := []struct {
+		name       string
+		repository string
+		want       *frontendv1.WorkspaceMentionRepository
+	}{
+		{name: "a stated repository rides on the target", repository: "doom", want: &frontendv1.WorkspaceMentionRepository{Name: "doom"}},
+		{name: "an unstated repository leaves the target's unset", repository: "", want: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			roster := mentionRoster([]*frontendv1.RosterOpenRow{mentionRowIn("a", "alpha", tc.repository)})
+
+			// Act.
+			got := mentionTargets(roster, "v").GetTargets()
+
+			// Assert.
+			if len(got) != 1 {
+				t.Fatalf("targets = %v, want one", got)
+			}
+			if !proto.Equal(got[0].GetRepository(), tc.want) || (tc.want == nil) != (got[0].Repository == nil) {
+				t.Fatalf("repository = %v, want %v", got[0].GetRepository(), tc.want)
+			}
+		})
+	}
+}
+
+// TestMentionTargetsTrackerAnswersOnlyChanges pins the host stream's change
+// filter: the first set is a change, an equal set is not, a different one is.
+func TestMentionTargetsTrackerAnswersOnlyChanges(t *testing.T) {
+	// Arrange.
+	tracker := mentionTargetsTracker{viewer: "v"}
+	alpha := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")})
+	beta := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
+
+	steps := []struct {
+		name        string
+		roster      *frontendv1.WorkspaceRoster
+		wantChanged bool
+		wantNames   []string
+	}{
+		{name: "the first set is a change", roster: alpha, wantChanged: true, wantNames: []string{"alpha=a"}},
+		{name: "an equal set is no change", roster: alpha, wantChanged: false, wantNames: []string{"alpha=a"}},
+		{name: "a different set is a change", roster: beta, wantChanged: true, wantNames: []string{"alpha=a", "beta=b"}},
+	}
+	for _, step := range steps {
+		t.Run(step.name, func(t *testing.T) {
+			// Act.
+			set, changed := tracker.next(step.roster)
+
+			// Assert.
+			if changed != step.wantChanged {
+				t.Fatalf("changed = %v, want %v", changed, step.wantChanged)
+			}
+			if got := targetNames(set); !slices.Equal(got, step.wantNames) {
+				t.Fatalf("targets = %v, want %v", got, step.wantNames)
 			}
 		})
 	}
@@ -322,5 +448,88 @@ func TestAPageCarriesItsWorkspaceMentions(t *testing.T) {
 	}
 	if got := targetNames(push.GetWorkspaceMentions().GetTargets()); !slices.Equal(got, []string{"alpha=a"}) {
 		t.Fatalf("the push carried targets %v, want [alpha=a]", got)
+	}
+}
+
+// receiveHostMentionTargets reads the host stream up to its next
+// mention_targets push, skipping every other arm.
+func receiveHostMentionTargets(
+	t *testing.T,
+	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
+) *frontendv1.WorkspaceMentionTargets {
+	t.Helper()
+	return receivePush(t, stream, "the mention targets", func(r *agentreplv1.WatchHostWorkspaceResponse) *frontendv1.WorkspaceMentionTargets {
+		return r.GetMentionTargets()
+	})
+}
+
+// TestTheHostStreamPushesOnlyAChangedSetOfMentionTargets pins the composer's
+// feed end to end: the first roster's set arrives, a roster that changes no
+// target pushes nothing, and the next change arrives as the next set.
+func TestTheHostStreamPushesOnlyAChangedSetOfMentionTargets(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	viewer := string(testWorkspaceID)
+	first := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow(viewer, "viewer"), mentionRow("a", "alpha")})
+	sameTargets := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow(viewer, "viewer"), mentionRow("a", "alpha")})
+	sameTargets.Revision = 2
+	changed := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
+	h.Sidebar.topic.Publish(first)
+	stream := dialHostStream(t, h, ctx)
+
+	// Act.
+	var got [][]string
+	got = append(got, targetNames(receiveHostMentionTargets(t, stream)))
+	h.Sidebar.topic.Publish(sameTargets)
+	h.Sidebar.topic.Publish(changed)
+	got = append(got, targetNames(receiveHostMentionTargets(t, stream)))
+
+	// Assert.
+	want := [][]string{{"alpha=a"}, {"alpha=a", "beta=b"}}
+	if !slices.EqualFunc(got, want, slices.Equal) {
+		t.Fatalf("sets = %v, want %v", got, want)
+	}
+}
+
+// TestTheComposerCompletesExactlyTheNamesThePageLinks pins the invariant the
+// one resolve exists for: for one viewer and one roster, the host stream's
+// mention_targets (what the composer completes) equal the page's
+// WatchWorkspaceMentions targets (what the feed links).
+func TestTheComposerCompletesExactlyTheNamesThePageLinks(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	viewer := string(testWorkspaceID)
+	h.Sidebar.topic.Publish(mentionRoster(
+		[]*frontendv1.RosterOpenRow{
+			mentionRowIn(viewer, "viewer", "doom"), mentionRowIn("a", "fix", "doom"), mentionRowIn("b", "fix", "zettel"),
+			mentionRowIn("c", "gamma", "zettel"),
+		},
+		mentionRowIn("h", "hidden", "doom"),
+	))
+	host := dialHostStream(t, h, ctx)
+	page, err := h.Client.WatchWorkspaceMentions(ctx, connect.NewRequest(&agentreplv1.WatchWorkspaceMentionsRequest{
+		Viewer: &workspacev1.WorkspaceRef{Id: viewer},
+	}))
+	if err != nil {
+		t.Fatalf("open the page's stream: %v", err)
+	}
+
+	// Act.
+	completable := receiveHostMentionTargets(t, host)
+	if !page.Receive() {
+		t.Fatalf("receive the page's set: %v", page.Err())
+	}
+	linkable := page.Msg().GetTargets()
+
+	// Assert.
+	if !proto.Equal(completable, linkable) {
+		t.Fatalf("completable %v != linkable %v", targetNames(completable), targetNames(linkable))
+	}
+	if want := []string{"fix=a", "gamma=c", "hidden=h"}; !slices.Equal(targetNames(linkable), want) {
+		t.Fatalf("targets = %v, want %v", targetNames(linkable), want)
 	}
 }

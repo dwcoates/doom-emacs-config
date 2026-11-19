@@ -1187,7 +1187,7 @@ func receiveHostEventPastSelection(
 ) *agentreplv1.WatchHostWorkspaceResponse {
 	t.Helper()
 	return receivePush(t, stream, "an event", func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
-		if r.GetHost() != nil || r.GetSelection() != nil {
+		if hostStandingState(r) || r.GetSelection() != nil {
 			return nil
 		}
 		return r

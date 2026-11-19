@@ -368,7 +368,8 @@ func (s *server) WatchHostWorkspace(
 }
 
 // serveHost serves the host stream's sources onto one wire: the `host` state,
-// the `selection` state, the `mentions` state, the `transferred` notice and the three event arms.
+// the `selection` state, the `mentions` state, the `mention_targets` state,
+// the `transferred` notice and the three event arms.
 // They are separate sources (see host.go) and this is the one place they are
 // merged, in publication order per source.
 func (s *server) serveHost(
@@ -394,6 +395,11 @@ func (s *server) serveHost(
 	// record in force, so every fresh subscription -- a reconnect, a restart
 	// on either side -- hydrates Emacs with it first.
 	mentions, ackMentions := s.deps.Mentions.Topic(ws).SubscribeStream(streamCtx)
+	// THE MENTION TARGETS are the names the composer completes: the very set
+	// this workspace's page links (mentionTargets), resolved from the roster
+	// topic, which replays the roster in force, and sent only when it changes.
+	rosters, ackRoster := s.deps.Sidebar.Topic().SubscribeStream(streamCtx)
+	targets := mentionTargetsTracker{viewer: string(ws)}
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
@@ -455,6 +461,21 @@ func (s *server) serveHost(
 			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
 				Push: &agentreplv1.WatchHostWorkspaceResponse_Mentions{Mentions: record},
 			}, ackMentions
+		case roster, ok := <-rosters:
+			if !ok {
+				log.Debug(rpc, "the standing stream's subscription closed", nil)
+				return nil
+			}
+			set, changed := targets.next(roster)
+			if !changed {
+				ackRoster()
+				continue
+			}
+			log.Debug(rpc, "sent a changed set of workspace mention targets",
+				dlog.Context{"targets": len(set.GetTargets())})
+			push, ack = &agentreplv1.WatchHostWorkspaceResponse{
+				Push: &agentreplv1.WatchHostWorkspaceResponse_MentionTargets{MentionTargets: set},
+			}, ackRoster
 		}
 		if err := out.Send(push); err != nil {
 			log.Debug(rpc, "the standing stream's client went away",

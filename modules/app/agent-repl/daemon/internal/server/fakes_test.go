@@ -2694,13 +2694,20 @@ func receiveWebEvent(
 	})
 }
 
+// hostStandingState reports whether R is standing state every host
+// subscription is sent first (the host state, the mention targets), never the
+// event a test waits for.
+func hostStandingState(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+	return r.GetHost() != nil || r.GetMentionTargets() != nil
+}
+
 func receiveHostEvent(
 	t *testing.T,
 	stream *connect.ServerStreamForClient[agentreplv1.WatchHostWorkspaceResponse],
 ) *agentreplv1.WatchHostWorkspaceResponse {
 	t.Helper()
 	return receivePush(t, stream, "an event", func(r *agentreplv1.WatchHostWorkspaceResponse) *agentreplv1.WatchHostWorkspaceResponse {
-		if r.GetHost() != nil {
+		if hostStandingState(r) {
 			return nil
 		}
 		return r

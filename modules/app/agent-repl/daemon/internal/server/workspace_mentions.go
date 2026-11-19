@@ -14,7 +14,7 @@ import (
 )
 
 // WatchWorkspaceMentions serves one page's workspace mention targets: the
-// names its response trees link to the workspaces they switch to.
+// names its bubbles link to the workspaces they switch to.
 func (s *server) WatchWorkspaceMentions(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.WatchWorkspaceMentionsRequest],
@@ -63,30 +63,95 @@ func (s *server) watchWorkspaceMentions(
 	})
 }
 
-// mentionTargets resolves VIEWER's workspace mention targets from ROSTER: the
-// Open section's workspaces in its drawn order, less VIEWER's own and less
-// every name two of them share, since a shared name names no one workspace.
-// Hidden workspaces are not in the Open section and so are never targets.
+// mentionTargets resolves VIEWER's workspace mention targets from ROSTER:
+// the one set the viewer's page links and the viewer's composer completes
+// (frontend.v1.WorkspaceMentionTargets), so the two cannot differ.
+//
+// Every workspace the roster carries that is not closed is a candidate: the
+// Open section's in its drawn order, then the hidden section's. A name only
+// one candidate carries names it. A name several carry names the one of them
+// in the viewer's own repository when exactly one is, and otherwise no one.
+// The viewer's own workspace is never a target, and a name it carries names
+// no other workspace either, so a word the reader's own workspace is called
+// never switches somewhere else.
 func mentionTargets(roster *frontendRoster, viewer string) *frontendv1.WorkspaceMentionTargets {
-	rows := rosterwalk.OpenRows(roster)
-	named := make(map[string]int, len(rows))
-	for _, open := range rows {
-		named[open.GetRow().GetName().GetText()]++
+	var rows []*frontendv1.RosterRow
+	for _, open := range rosterwalk.OpenRows(roster) {
+		rows = append(rows, open.GetRow())
 	}
+	rows = append(rows, rosterwalk.HiddenRows(roster)...)
+
+	viewerRepository := ""
+	byName := make(map[string][]*frontendv1.RosterRow, len(rows))
+	for _, row := range rows {
+		if row.GetWorkspace().GetWorkspace().GetId() == viewer {
+			viewerRepository = row.GetRepository().GetName()
+		}
+		if name := row.GetName().GetText(); name != "" {
+			byName[name] = append(byName[name], row)
+		}
+	}
+
 	targets := &frontendv1.WorkspaceMentionTargets{}
-	for _, open := range rows {
-		row := open.GetRow()
+	for _, row := range rows {
 		name := row.GetName().GetText()
-		ref := row.GetWorkspace().GetWorkspace()
-		if name == "" || named[name] > 1 || ref.GetId() == viewer {
+		if name == "" || mentionNamed(byName[name], viewerRepository) != row {
 			continue
 		}
-		targets.Targets = append(targets.Targets, &frontendv1.WorkspaceMentionTarget{
+		ref := row.GetWorkspace().GetWorkspace()
+		if ref.GetId() == viewer {
+			continue
+		}
+		target := &frontendv1.WorkspaceMentionTarget{
 			Name:      &frontendv1.WorkspaceMentionName{Text: name},
 			Workspace: ref,
-		})
+		}
+		if repository := row.GetRepository().GetName(); repository != "" {
+			target.Repository = &frontendv1.WorkspaceMentionRepository{Name: repository}
+		}
+		targets.Targets = append(targets.Targets, target)
 	}
 	return targets
+}
+
+// mentionNamed answers the row a name CARRIERS share names, or nil: the one
+// carrier, or the one of several in VIEWERREPOSITORY ("" for a viewer whose
+// repository is unknown, which prefers no one).
+func mentionNamed(carriers []*frontendv1.RosterRow, viewerRepository string) *frontendv1.RosterRow {
+	if len(carriers) == 1 {
+		return carriers[0]
+	}
+	var named *frontendv1.RosterRow
+	for _, row := range carriers {
+		if viewerRepository == "" || row.GetRepository().GetName() != viewerRepository {
+			continue
+		}
+		if named != nil {
+			return nil
+		}
+		named = row
+	}
+	return named
+}
+
+// mentionTargetsTracker resolves one viewer's mention targets from each
+// roster in turn, answering whether the set differs from the last it
+// answered: the host stream's change filter, since the roster publishes on
+// every row change and nearly none of those change a target.
+type mentionTargetsTracker struct {
+	viewer string
+	last   *frontendv1.WorkspaceMentionTargets
+}
+
+// next resolves ROSTER's targets, and whether they differ from the last set
+// next answered (the first set always does).
+func (t *mentionTargetsTracker) next(roster *frontendRoster) (*frontendv1.WorkspaceMentionTargets, bool) {
+	set := mentionTargets(roster, t.viewer)
+	if t.last != nil && proto.Equal(t.last, set) {
+		return set, false
+	}
+	t.last = set
+	return set, true
 }
 
 // changedOnlySink sends a frame only when it differs from the last one it
