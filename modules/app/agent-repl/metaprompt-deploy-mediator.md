@@ -50,6 +50,8 @@
 | ispell, the spell checker | no reply, a process given nothing to check | a one-off user-driven error |
 | `daemon.ghclient.post` | a 404 "Parent comment not found" | GitHub's own; certifiably transient |
 | the vendor query | exit code 143, "the vendor query is gone", "recorded a session fault" for code 143 | the vendor process was terminated outside agent-repl |
+| `daemon.sidebar.merge_queue` | "the deploy mediator is one the registry does not carry", while the user has removed the deploy mediator | the user removed the mediator, and a new one is made at the next deploy |
+| `daemon.merge.mediation` | "the intake's turn could not be awaited" with the session watcher closed, or "could not read the deploy mediator to settle whether it is in sight" with not found, after the user removed the mediator | the user removed the mediator |
 
 ### Decide every deploy as one of three
 
