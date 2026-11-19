@@ -2279,7 +2279,41 @@ Company itself is never loaded: PARENT stands in for its global
                   map)
       ;; Assert.
       (should (equal (sort (mapcar #'key-description keys) #'string<)
-                     '("RET" "RET"))))))
+                     '("C-SPC" "RET" "RET"))))))
+
+(ert-deftest agent-repl-input-company-map-control-space-does-not-complete ()
+  "`C-SPC' with company's popup up runs the composer's `C-SPC', not a completion."
+  ;; Arrange.
+  (let ((parent (make-sparse-keymap)))
+    (define-key parent (kbd "C-SPC") #'ignore)
+    ;; Act.
+    (agent-repl-test-input--with-company parent
+      ;; Assert.
+      (should (eq (lookup-key company-active-map (kbd "C-SPC"))
+                  #'agent-repl-input-company-control-space)))))
+
+(ert-deftest agent-repl-input-company-control-space-opens-the-next-entry ()
+  "`C-SPC' in the popup on a filled entry closes it and opens the next sibling."
+  ;; Arrange.
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'company-abort) (lambda () (push 'abort calls)))
+              ((symbol-function 'agent-repl-prompt-entries--label-at-point)
+               (lambda () "1.2 "))
+              ((symbol-function 'agent-repl-prompt-entries-advance-or-open-sibling)
+               (lambda () (interactive) (push 'advance calls))))
+      (with-temp-buffer
+        (agent-repl-input-mode)
+        (let* ((ours (make-sparse-keymap))
+               (minor-mode-map-alist (cons (cons t ours) minor-mode-map-alist)))
+          (define-key ours (kbd "C-SPC")
+                      (alist-get (kbd "C-SPC") agent-repl-prompt-entries--insert-entry-keys
+                                 nil nil #'equal))
+          ;; Act.
+          (agent-repl-input-company-control-space))
+        ;; Assert.
+        (should (equal (nreverse calls) '(abort advance)))
+        (should (eq this-command
+                    #'agent-repl-prompt-entries-advance-or-open-sibling))))))
 
 ;;;; ---- The send edge is durable ----
 
