@@ -46,6 +46,7 @@ describe("createStoreClient", () => {
 
     // Assert.
     expect(verbs).toEqual([
+      "awaitAgentByVendorTask",
       "getAgentByVendorTask",
       "getDetachedWork",
       "getLiveWork",
