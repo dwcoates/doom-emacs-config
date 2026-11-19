@@ -203,3 +203,90 @@ func TestListenReclaimingRefusesANonSocket(t *testing.T) {
 		t.Errorf("err = %v, want StepNotASocket", err)
 	}
 }
+
+func TestAListenerUnlinksOnlyItsOwnSocketFile(t *testing.T) {
+	tests := []struct {
+		name     string
+		replace  bool
+		wantPath bool
+	}{
+		{name: "its own socket file is unlinked on close", wantPath: false},
+		{name: "a socket another listener bound at the path since is left", replace: true, wantPath: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := filepath.Join(shortDir(t), "s.sock")
+			ln, _, err := Listen(path, time.Second)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if tt.replace {
+				// Another process (launchd, for a socket holder) took the name.
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				other, err := net.Listen("unix", path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				other.(*net.UnixListener).SetUnlinkOnClose(false)
+				t.Cleanup(func() { _ = other.Close() })
+			}
+
+			// Act
+			closeErr := ln.Close()
+
+			// Assert
+			if closeErr != nil {
+				t.Fatalf("Close = %v", closeErr)
+			}
+			_, statErr := os.Lstat(path)
+			if exists := statErr == nil; exists != tt.wantPath {
+				t.Fatalf("path exists = %v (%v), want %v", exists, statErr, tt.wantPath)
+			}
+		})
+	}
+}
+
+func TestAListenerWhosePathIsAlreadyGoneClosesCleanly(t *testing.T) {
+	// Arrange
+	path := filepath.Join(shortDir(t), "s.sock")
+	ln, _, err := Listen(path, time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	err = ln.Close()
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Close = %v, want nil for a path already gone", err)
+	}
+}
+
+func TestAbandonUnlinkingRemovesThePathItBound(t *testing.T) {
+	// Arrange
+	path := filepath.Join(shortDir(t), "s.sock")
+	ln, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln.SetUnlinkOnClose(false)
+	cause := &Error{Step: StepRestrict, Path: path, Err: errors.New("chmod refused")}
+
+	// Act
+	err = abandonUnlinking(ln, path, cause)
+
+	// Assert
+	if !errors.Is(err, cause) {
+		t.Fatalf("abandonUnlinking = %v, want the cause", err)
+	}
+	if _, statErr := os.Lstat(path); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("path still exists (%v), want it unlinked", statErr)
+	}
+}
