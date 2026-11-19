@@ -38,6 +38,25 @@ func TestASuccessorThatTookOverFromADeploySaysUpdated(t *testing.T) {
 	}
 }
 
+func TestASuccessorSaysUpdatedFromAManifestItsWatcherHasNotReadYet(t *testing.T) {
+	// Arrange: the deploy's manifest is on disk, and nothing has told the
+	// controller the handover is a deploy's.
+	h := newHarness(t)
+	h.workspace(t)
+	if err := h.c.writeManifest(context.Background(), deployManifest); err != nil {
+		t.Fatalf("writeManifest: %v", err)
+	}
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	stated := h.progress.statements()
+	if len(stated) != 1 || stated[0] == nil || stated[0].Phase != deployprogress.Updated {
+		t.Fatalf("statements = %+v, want one updated", stated)
+	}
+}
+
 func TestTheUpdatedLineNotesAStaleShimRegisteredBehindItsWork(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
