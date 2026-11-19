@@ -145,9 +145,10 @@ REPOSITORIES the one repository the daemon stated for it, or nil."
           (agent-repl-host-mention-targets ws)))
 
 (defun agent-repl-workspace-completion-at-point ()
-  "Complete the name word at point against the composer's mention targets.
+  "Complete the name word at point against its composer's mention targets.
 The composer's `completion-at-point-functions' entry.  Answers nil when
-point is in no name word, or the word begins a part of no target's name.  Each name is annotated with its repository
+point is in no name word, or the word begins a part of no target's name.
+Each name is annotated with its repository
 \(`agent-repl--workspace-completion-annotation').  Deliberately unlogged:
 completion runs per keystroke."
   (when-let* ((bounds (agent-repl--workspace-completion-bounds))
@@ -196,10 +197,11 @@ word is never one."
         found))))
 
 (defun agent-repl--workspace-completion-mark (beg end)
-  "Mark every mention target's name on the lines BEG to END, and unmark the rest.
-The targets are the current buffer's owner's (`agent-repl-host-mention-targets'),
-none when the buffer has no owner.  Marked through
-`agent-repl-composer-mark-lines', in the face known slash commands wear."
+  "Mark every mention target's name on lines BEG to END, unmarking the rest.
+The targets are the current buffer's owner's
+\(`agent-repl-host-mention-targets'), none when the buffer has no owner.
+Marked through `agent-repl-composer-mark-lines', in the face known slash
+commands wear."
   (agent-repl-composer-mark-lines
    beg end 'agent-repl-workspace-completion-known
    (agent-repl--workspace-completion-next-known

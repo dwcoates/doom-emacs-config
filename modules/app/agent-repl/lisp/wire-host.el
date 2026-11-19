@@ -734,7 +734,8 @@ without their slash, WORKSPACES as the roster names them."
      (agent-repl-wire--decode-required-string "WorkspaceMentionName" 'text object))))
 
 (defun agent-repl-wire-decode-workspace-mention-target (value)
-  "Decode VALUE as `WorkspaceMentionTarget', a plist (:name :workspace :repository).
+  "Decode VALUE as `WorkspaceMentionTarget', a target plist.
+The plist is (:name NAME :workspace WORKSPACE :repository REPOSITORY).
 NAME is the name string, WORKSPACE its `WorkspaceRef' plist, and REPOSITORY
 the repository's name string, or nil when the daemon stated none."
   (let* ((message "WorkspaceMentionTarget")
