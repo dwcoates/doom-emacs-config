@@ -89,6 +89,7 @@ import (
 	"agent-repld/internal/shimidentity"
 	"agent-repld/internal/shimlife"
 	"agent-repld/internal/signin"
+	"agent-repld/internal/slackchannels"
 	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/startslots"
 	"agent-repld/internal/storereader"
@@ -637,6 +638,19 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// from them and the feed marks them in user prompts. Fed by the fleet's
 	// watchers and read by ListSlashCommands and the feed resolver.
 	slashCommands := commandcatalog.New()
+
+	// THE USER'S SLACK CHANNELS, as the Emacs composer completes them after a
+	// `#`. Read through the GNS CLI on the first ask and hourly after, never
+	// at boot, through the one script runner.
+	slackChannels, err := slackchannels.New(slackchannels.Deps{
+		Read: slackchannels.GNSReader(scripts, home),
+		Now:  time.Now,
+		Life: ctx,
+		Log:  log,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("agent-repld: build the Slack channels: %w", err)
+	}
 
 	// THE COMPOSER MENTIONS: the commands and workspaces each workspace's own
 	// final responses mentioned, which order the Emacs composer's completions.
@@ -1917,6 +1931,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			}),
 			SessionFacts:     hostSessionFacts{fleet: fleet},
 			SlashCommands:    slashCommands,
+			SlackChannels:    slackChannels,
 			Mentions:         mentions,
 			DB:               p.DB,
 			Prompts:          handler,
