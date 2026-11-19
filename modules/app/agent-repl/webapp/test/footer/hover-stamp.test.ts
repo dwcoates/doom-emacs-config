@@ -1,19 +1,18 @@
 // @vitest-environment jsdom
 /**
- * response-usage — the hovered response's usage, drawn in the strip's
- * activity cell in place of the daemon's activity line.
+ * hover-stamp — the hovered bubble's stamp, drawn in the strip's activity
+ * cell in place of the daemon's activity line.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTicker } from "../../src/clock.js";
-import type { ResponseUsage } from "../../src/feed/response-usage.js";
+import type { HoverStamp } from "../../src/feed/hover-stamp.js";
 import {
-  RESPONSE_USAGE_ARM,
-  RESPONSE_USAGE_LABEL,
-  RESPONSE_USAGE_TIER,
-  drawResponseUsageActivity,
-  overlayResponseUsage,
-  responseDuration,
-} from "../../src/footer/response-usage.js";
+  HOVER_STAMP_ARM,
+  HOVER_STAMP_TIER,
+  drawHoverStampActivity,
+  hoverDuration,
+  overlayHoverStamp,
+} from "../../src/footer/hover-stamp.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
 const NOW = 1_000_000;
@@ -27,13 +26,18 @@ afterEach(() => {
 });
 
 /**
- * A usage settled SETTLED_AGO_MS before now, or arriving (null), whose span
- * took TOOK_MS, or has no known start (null).
+ * A response's stamp settled SETTLED_AGO_MS before now, or arriving (null),
+ * whose span took TOOK_MS, or has no known start (null).
  */
-function usage(settledAgoMs: number | null, tookMs: number | null = null): ResponseUsage {
-  const settledAtMs = settledAgoMs === null ? null : NOW - settledAgoMs;
-  const startedAtMs = tookMs === null ? null : (settledAtMs ?? NOW) - tookMs;
-  return { text: "2.1k", color: "rgb(1, 2, 3)", settledAtMs, startedAtMs };
+function usage(settledAgoMs: number | null, tookMs: number | null = null): HoverStamp {
+  const atMs = settledAgoMs === null ? null : NOW - settledAgoMs;
+  const startedAtMs = tookMs === null ? null : (atMs ?? NOW) - tookMs;
+  return { label: "Response", tokens: { text: "2.1k", color: "rgb(1, 2, 3)" }, atMs, startedAtMs };
+}
+
+/** A stamp labelled LABEL, with no figure, sent or settled AT_MS, begun at STARTED_AT_MS. */
+function stamp(label: string, atMs: number | null, startedAtMs: number | null = null): HoverStamp {
+  return { label, tokens: null, atMs, startedAtMs };
 }
 
 /** A strip holding the given cells' classes, in order. */
@@ -47,94 +51,138 @@ function stripOf(...classes: string[]): HTMLElement {
   return strip;
 }
 
-describe("drawResponseUsageActivity", () => {
+describe("drawHoverStampActivity", () => {
   it("is an activity cell of its own tier and kind", () => {
     // Act
-    const cell = drawResponseUsageActivity(usage(0), createTicker(1000));
+    const cell = drawHoverStampActivity(usage(0), createTicker(1000));
     // Assert
     expect([
       cell.classList.contains("footer-activity"),
       cell.classList.contains("pfooter-grow"),
       cell.getAttribute("data-tier"),
       cell.getAttribute("data-arm"),
-    ]).toEqual([true, true, RESPONSE_USAGE_TIER, RESPONSE_USAGE_ARM]);
+    ]).toEqual([true, true, HOVER_STAMP_TIER, HOVER_STAMP_ARM]);
   });
 
   it("draws the figure in its heat's color", () => {
     // Act
-    const tokens = drawResponseUsageActivity(usage(0), createTicker(1000)).querySelector<HTMLElement>(".footer-response-tokens");
+    const tokens = drawHoverStampActivity(usage(0), createTicker(1000)).querySelector<HTMLElement>(".footer-hover-tokens");
     // Assert
-    expect([tokens?.textContent, tokens?.style.color]).toEqual(["2.1k tokens", "rgb(1, 2, 3)"]);
+    expect([tokens?.textContent, tokens?.style.color]).toEqual([" 2.1k tokens", "rgb(1, 2, 3)"]);
   });
 
-  it("opens the line naming it a response", () => {
+  it("opens the line with its label", () => {
     // Act
-    const line = drawResponseUsageActivity(usage(0), createTicker(1000)).querySelector(".footer-response-usage");
+    const line = drawHoverStampActivity(usage(0), createTicker(1000)).querySelector(".footer-hover-stamp");
     // Assert
-    expect(line?.firstChild?.textContent).toBe(RESPONSE_USAGE_LABEL);
+    expect(line?.firstChild?.textContent).toBe("Response");
   });
 
   it("draws how long ago a settled response settled", () => {
     // Act
-    const cell = drawResponseUsageActivity(usage(330_000), createTicker(1000));
+    const cell = drawHoverStampActivity(usage(330_000), createTicker(1000));
     // Assert
     expect(cell.textContent).toBe("Response 2.1k tokens · 5m 30s ago");
   });
 
   it("draws how long a settled response took, between its figure and its age", () => {
     // Act
-    const cell = drawResponseUsageActivity(usage(330_000, 90_000), createTicker(1000));
+    const cell = drawHoverStampActivity(usage(330_000, 90_000), createTicker(1000));
     // Assert
     expect(cell.textContent).toBe("Response 2.1k tokens, 1m 30s · 5m 30s ago");
   });
 
-  it("draws no duration for an arriving response, even with a known start", () => {
+  it("draws how long ago a prompt was sent, after its label alone", () => {
     // Act
-    const cell = drawResponseUsageActivity(usage(null, 90_000), createTicker(1000));
+    const cell = drawHoverStampActivity(stamp("Prompt", NOW - 600_000), createTicker(1000));
     // Assert
-    expect([cell.textContent, cell.querySelector(".footer-response-duration")]).toEqual(["Response 2.1k tokens", null]);
+    expect([cell.textContent, cell.querySelector(".footer-hover-tokens")]).toEqual(["Prompt · 10m ago", null]);
+  });
+
+  it("draws how long a settled tool call took and how long ago it settled", () => {
+    // Act
+    const cell = drawHoverStampActivity(stamp("Tool call Bash", NOW - 120_000, NOW - 132_000), createTicker(1000));
+    // Assert
+    expect(cell.textContent).toBe("Tool call Bash, 12s · 2m ago");
+  });
+
+  it("draws a unit still under way with its span ticking up and no age", () => {
+    // Act
+    const cell = drawHoverStampActivity(stamp("Testing the fix", null, NOW - 250_000), createTicker(1000));
+    // Assert
+    expect([cell.textContent, cell.querySelector("[data-age]"), cell.querySelector("[data-elapsed]") !== null]).toEqual([
+      "Testing the fix, 4m 10s",
+      null,
+      true,
+    ]);
+  });
+
+  it("keeps a running span current on the shared clock", () => {
+    // Arrange
+    const cell = drawHoverStampActivity(stamp("Merge", null, NOW - 250_000), createTicker(1000));
+    // Act
+    vi.advanceTimersByTime(5_000);
+    // Assert
+    expect(cell.textContent).toBe("Merge, 4m 15s");
+  });
+
+  it("draws the label alone for a unit with no instant at all", () => {
+    // Act
+    const cell = drawHoverStampActivity(stamp("Hook", null), createTicker(1000));
+    // Assert
+    expect(cell.textContent).toBe("Hook");
+  });
+
+  it("draws the figure alone after the label while an arriving response has no known start", () => {
+    // Act
+    const cell = drawHoverStampActivity(usage(null), createTicker(1000));
+    // Assert
+    expect([cell.textContent, cell.querySelector("[data-age]")]).toEqual(["Response 2.1k tokens", null]);
   });
 
   it("keeps the age current on the shared clock", () => {
     // Arrange
-    const cell = drawResponseUsageActivity(usage(330_000), createTicker(1000));
+    const cell = drawHoverStampActivity(usage(330_000), createTicker(1000));
     // Act
     vi.advanceTimersByTime(30_000);
     // Assert
     expect(cell.querySelector(".footer-activity-age")?.textContent).toBe(" · 6m ago");
   });
 
-  it("draws the figure alone while the response is arriving", () => {
+  it("records what it draws, naming the label and whether it runs", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
     // Act
-    const cell = drawResponseUsageActivity(usage(null), createTicker(1000));
+    drawHoverStampActivity(stamp("Testing the fix", null, NOW - 1_000), createTicker(1000));
     // Assert
-    expect([cell.textContent, cell.querySelector("[data-age]")]).toEqual(["Response 2.1k tokens", null]);
+    const record = await forwardedRecord(capture, "footer.hover-stamp");
+    expect([record.context?.label, record.context?.running, record.context?.settled]).toEqual(["Testing the fix", true, false]);
   });
 });
 
-describe("responseDuration", () => {
+describe("hoverDuration", () => {
   it.each([
     ["a settled span", usage(0, 90_000), "1m 30s"],
     ["a part second, rounded up", usage(0, 5_984), "6s"],
     ["a span that settled where it began", usage(0, 0), "0s"],
-    ["an arriving response", usage(null, 90_000), null],
+    ["a unit still under way", usage(null, 90_000), null],
     ["a span with no known start", usage(0), null],
   ])("states %s", (_name, u, want) => {
     // Act / Assert
-    expect(responseDuration(u)).toBe(want);
+    expect(hoverDuration(u)).toBe(want);
   });
 });
 
-describe("overlayResponseUsage", () => {
-  it("puts the usage in the strip's activity cell, in its place", () => {
+describe("overlayHoverStamp", () => {
+  it("puts the stamp in the strip's activity cell, in its place", () => {
     // Arrange
     const strip = stripOf("footer-status", "pfooter-cell pfooter-grow footer-activity", "footer-clock");
     // Act
-    overlayResponseUsage(strip, usage(0), createTicker(1000));
+    overlayHoverStamp(strip, usage(0), createTicker(1000));
     // Assert
     expect([...strip.children].map((c) => c.getAttribute("data-arm") ?? c.className)).toEqual([
       "footer-status",
-      RESPONSE_USAGE_ARM,
+      HOVER_STAMP_ARM,
       "footer-clock",
     ]);
   });
@@ -144,16 +192,16 @@ describe("overlayResponseUsage", () => {
     ["two activity cells", stripOf("footer-activity", "footer-activity")],
   ])("refuses a strip with %s", (_name, strip) => {
     // Act / Assert
-    expect(() => overlayResponseUsage(strip, usage(0), createTicker(1000))).toThrow(/activity cells, not one/);
+    expect(() => overlayHoverStamp(strip, usage(0), createTicker(1000))).toThrow(/activity cells, not one/);
   });
 
   it("records the refusal at error, with how many cells it found", async () => {
     // Arrange
     const capture = captureLogRecords();
     // Act
-    expect(() => overlayResponseUsage(stripOf("footer-status"), usage(0), createTicker(1000))).toThrow();
+    expect(() => overlayHoverStamp(stripOf("footer-status"), usage(0), createTicker(1000))).toThrow();
     // Assert
-    const record = await forwardedRecord(capture, "footer.response-usage.no-cell");
+    const record = await forwardedRecord(capture, "footer.hover-stamp.no-cell");
     expect([record.level.case, record.context?.cells]).toEqual(["error", 0]);
   });
 
@@ -162,7 +210,7 @@ describe("overlayResponseUsage", () => {
     const strip = stripOf("footer-status");
     const before = strip.innerHTML;
     // Act
-    expect(() => overlayResponseUsage(strip, usage(0), createTicker(1000))).toThrow();
+    expect(() => overlayHoverStamp(strip, usage(0), createTicker(1000))).toThrow();
     // Assert
     expect(strip.innerHTML).toBe(before);
   });

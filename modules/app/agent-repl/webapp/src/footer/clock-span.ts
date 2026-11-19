@@ -8,8 +8,11 @@ import type { Ticker } from "../clock.js";
 import { formatTickedAge } from "../duration.js";
 import { tick } from "../feed/ticking.js";
 
-/** What a clock span counts, stamped as `data-countdown` or `data-age`. */
-export type FooterClock = "countdown" | "age";
+/**
+ * What a clock span counts, stamped as `data-countdown`, `data-age`, or
+ * `data-elapsed` (a span still running, counted up from its start).
+ */
+export type FooterClock = "countdown" | "age" | "elapsed";
 
 /**
  * A span that counts CLOCK, wearing CLASSNAME when one is given, painted by

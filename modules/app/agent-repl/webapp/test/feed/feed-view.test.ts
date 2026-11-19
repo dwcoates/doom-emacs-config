@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   FeedBreadcrumbSchema,
+  FeedHoverStampSchema,
   FeedIdSchema,
   FeedPageSchema,
   FeedRowRemovedSchema,
@@ -20,6 +21,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { GetFeedPageResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { hoverStampOf } from "../../src/feed/hover-stamp.js";
 import { installPromptEcho } from "../../src/prompt-echo.js";
 import { TurnIdSchema } from "../../../proto/gen/ts/conversation/v1/turn_pb";
 import {
@@ -4900,5 +4902,147 @@ describe("createFeedController's held-row lookup", () => {
 
     // Assert
     expect(throws).toHaveLength(1);
+  });
+});
+
+describe("createFeedController: every row's hover stamp", () => {
+  /** ROW carrying a hover stamp labelled LABEL, settled at AT_MS. */
+  function hovering(row: FeedRow, label: string, atMs = 5_000n): FeedRow {
+    row.hover = create(FeedHoverStampSchema, { label: { text: label }, atMs });
+    return row;
+  }
+
+  /** The row element of row ID in HOST. */
+  function rowEl(host: HTMLElement, id: string): HTMLElement {
+    const el = host.querySelector<HTMLElement>(`[data-feed-row="${id}"]`);
+    if (el === null) throw new Error(`no row ${id} is drawn`);
+    return el;
+  }
+
+  it.each([
+    ["an ordinary row", () => responseRow("r")],
+    ["a bubble row", () => mergeRow("r")],
+  ])("records the stamp of %s on its element as it is drawn", (_name, row) => {
+    // Arrange
+    const { controller, host } = fixture();
+    // Act
+    controller.applyPage(page([hovering(row(), "Merge")]), "replace");
+    // Assert
+    expect(hoverStampOf(rowEl(host, "r"))?.label).toBe("Merge");
+  });
+
+  it("restates the stamp when the row is re-pushed with another", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page([hovering(responseRow("r"), "Response")]), "replace");
+    // Act
+    controller.upsert(hovering(responseRow("r"), "Response", 9_000n));
+    // Assert
+    expect(hoverStampOf(rowEl(host, "r"))?.atMs).toBe(9_000);
+  });
+
+  it("forgets the stamp when the row is re-pushed with none", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page([hovering(responseRow("r"), "Response")]), "replace");
+    // Act
+    controller.upsert(responseRow("r"));
+    // Assert
+    expect(hoverStampOf(rowEl(host, "r"))).toBeNull();
+  });
+
+  it("keeps the card when a re-push changes only the stamp", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page([hovering(responseRow("r"), "Response")]), "replace");
+    const before = host.querySelector(".stub-response");
+    // Act
+    controller.upsert(hovering(responseRow("r"), "Response", 9_000n));
+    // Assert
+    expect(host.querySelector(".stub-response")).toBe(before);
+  });
+
+  it("keeps a prompt's bubble when a re-push changes its stamp and its flags", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page([userPromptRow("p1", "one", "t1", true)]), "replace");
+    const before = host.querySelector('[data-feed-row="p1"] .bubble');
+    // Act
+    controller.upsert(hovering(userPromptRow("p1", "one", "t1", false), "Prompt"));
+    // Assert
+    expect([host.querySelector('[data-feed-row="p1"] .bubble') === before, hoverStampOf(rowEl(host, "p1"))?.label]).toEqual([
+      true,
+      "Prompt",
+    ]);
+  });
+
+  it("logs a stamp it adopted in place, naming the feed and the row", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const { controller } = fixture();
+    controller.applyPage(page([hovering(responseRow("r"), "Response")]), "replace");
+    // Act
+    controller.upsert(hovering(responseRow("r"), "Response", 9_000n));
+    // Assert
+    const record = await forwardedRecord(capture, "feed.hover-adopted");
+    expect(record.context).toMatchObject({ feed: "root", row: "r" });
+  });
+
+  it("redraws a re-push that changes the card, even with the same stamp", () => {
+    // Arrange
+    const { controller, host } = fixture();
+    controller.applyPage(page([hovering(responseRow("r", "one"), "Response")]), "replace");
+    const before = host.querySelector(".stub-response");
+    // Act
+    controller.upsert(hovering(responseRow("r", "two"), "Response"));
+    // Assert
+    expect(host.querySelector(".stub-response")).not.toBe(before);
+  });
+
+  describe("a malformed stamp", () => {
+    /** A response row whose stamp settled before it began. */
+    function malformed(): FeedRow {
+      const row = responseRow("r");
+      row.hover = create(FeedHoverStampSchema, { label: { text: "Response" }, atMs: 5_000n, startedAtMs: 6_000n });
+      return row;
+    }
+
+    it("is refused: the row keeps no stamp", () => {
+      // Arrange
+      const { controller, host } = fixture();
+      // Act
+      controller.applyPage(page([malformed()]), "replace");
+      // Assert
+      expect(hoverStampOf(rowEl(host, "r"))).toBeNull();
+    });
+
+    it("still draws the row's card", () => {
+      // Arrange
+      const { controller, host } = fixture();
+      // Act
+      controller.applyPage(page([malformed()]), "replace");
+      // Assert
+      expect(host.querySelector(".stub-response")).not.toBeNull();
+    });
+
+    it("is reported once, as frame_undecodable", () => {
+      // Arrange
+      const { controller, h } = fixture();
+      // Act
+      controller.applyPage(page([malformed()]), "replace");
+      // Assert
+      expect(h.sink.reported).toEqual(["frameUndecodable"]);
+    });
+
+    it("is recorded at error, naming the row and the field", async () => {
+      // Arrange
+      const capture = captureLogRecords();
+      const { controller } = fixture();
+      // Act
+      controller.applyPage(page([malformed()]), "replace");
+      // Assert
+      const record = await forwardedRecord(capture, "feed.row-malformed");
+      expect([record.level.case, record.context?.row, record.context?.path]).toEqual(["error", "r", "FeedRow.hover.started_at_ms"]);
+    });
   });
 });

@@ -66,6 +66,7 @@ import { revealInBubbles } from "./node-reveal.js";
 import { subtreeSpan } from "./subtree-box.js";
 import { TREE_CLASS } from "../metaprompt-tree.js";
 import { BUBBLE_CLASS } from "../bubble/draw.js";
+import { recordRowHover } from "./hover-stamp.js";
 import { MalformedView, isMalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
@@ -80,6 +81,7 @@ import type { ScrollPosition, TailFollow } from "../scroll.js";
 import type { AppContext } from "../rpc/context.js";
 import { clone, equals } from "@bufbuild/protobuf";
 import {
+  FeedHoverStampSchema,
   FeedRowSchema,
   type FeedBreadcrumb,
   type FeedId,
@@ -1468,10 +1470,14 @@ export function createFeedController(
    * survive a re-push of its own head.
    */
   function updateHeld(held: RowState, row: FeedRow): void {
-    if (adoptPromptFlagsInPlace(held, row)) return;
+    if (adoptInPlace(held, row)) {
+      recordHover(held.element, row);
+      return;
+    }
     held.row = row;
     held.dirty = true;
     applyRowAttributes(held.element, row);
+    recordHover(held.element, row);
   }
 
   /**
@@ -1488,6 +1494,7 @@ export function createFeedController(
     const element = document.createElement("article");
     element.className = "feed-item";
     applyRowAttributes(element, row);
+    recordHover(element, row);
     const state: RowState = {
       row,
       key,
@@ -1809,6 +1816,16 @@ export function createFeedController(
 
   /** The compact stand-in for a row this build could not draw. */
   function malformedPlaceholder(err: MalformedView, row: FeedRow): HTMLElement {
+    reportMalformed(err, row);
+    const el = document.createElement("div");
+    el.className = "row-malformed";
+    el.setAttribute("data-arm", "malformed");
+    el.textContent = `unreadable row at ${err.path}`;
+    return el;
+  }
+
+  /** Record and report ROW's malformed view ERR, through the feed's one channel. */
+  function reportMalformed(err: MalformedView, row: FeedRow): void {
     log.error(`a feed row could not be drawn: ${err.message}`, {
       operation: "feed.row-malformed",
       context: {
@@ -1819,11 +1836,22 @@ export function createFeedController(
       },
     });
     opts.ctx.failures.report(frameUndecodable(err.detail, err.path));
-    const el = document.createElement("div");
-    el.className = "row-malformed";
-    el.setAttribute("data-arm", "malformed");
-    el.textContent = `unreadable row at ${err.path}`;
-    return el;
+  }
+
+  /**
+   * THE ROW'S HOVER STAMP, recorded on its element on every push of it
+   * (hover-stamp.ts): the one recorder every hoverable kind goes through,
+   * whatever the row draws. A malformed stamp is refused and reported as the
+   * feed reports any malformed view; the row keeps no stamp and its card
+   * still draws.
+   */
+  function recordHover(el: HTMLElement, row: FeedRow): void {
+    try {
+      recordRowHover(el, row);
+    } catch (err) {
+      if (!isMalformedView(err)) throw err;
+      reportMalformed(err, row);
+    }
   }
 
   // ---- the walk ---------------------------------------------------------
@@ -2149,8 +2177,10 @@ export function createFeedController(
   }
 
   /**
-   * A PROMPT RE-PUSH THAT CHANGES ONLY ITS `working` AND `awaitingUser` FLAGS
-   * DRAWS NOTHING.
+   * A RE-PUSH THAT CHANGES ONLY WHAT THE CARD DOES NOT DRAW DRAWS NOTHING: a
+   * prompt's `working` and `awaitingUser` flags, and any row's hover stamp,
+   * which the footer reads off the row's element (hover-stamp.ts) and the
+   * caller records.
    *
    * Whether a prompt's turn is still working, and whether it is waiting on the
    * user, are the daemon's facts (`FeedUserPrompt.working`/`.awaitingUser`,
@@ -2164,13 +2194,17 @@ export function createFeedController(
    * Answers whether the re-push was adopted. Anything else about the row
    * changing, or a row not yet drawn, takes the ordinary redraw.
    */
-  function adoptPromptFlagsInPlace(held: RowState, row: FeedRow): boolean {
-    if (!isPromptRow(row) || !isPromptRow(held.row) || held.dirty) return false;
-    if (!equals(FeedRowSchema, withPromptFlagsOf(held.row, row), row))
+  function adoptInPlace(held: RowState, row: FeedRow): boolean {
+    if (held.dirty) return false;
+    const prompt = isPromptRow(row) && isPromptRow(held.row);
+    // A non-prompt row's identical re-push is no adoption: only a changed
+    // stamp is the fact a redraw would be wasted on.
+    if (!prompt && sameHover(held.row, row)) return false;
+    if (!equals(FeedRowSchema, withUndrawnFactsOf(held.row, row), row))
       return false;
     held.row = row;
-    log.debug("adopted a prompt row's flags in place", {
-      operation: "feed.prompt-flags-adopted",
+    log.debug(prompt ? "adopted a prompt row's flags in place" : "adopted a row's hover stamp in place", {
+      operation: prompt ? "feed.prompt-flags-adopted" : "feed.hover-adopted",
       context: {
         feed: feedName(),
         row: requireMessage(row.id, "FeedRow.id").value,
@@ -2259,12 +2293,13 @@ function isSentPrompt(row: FeedRow): boolean {
 }
 
 /**
- * A copy of prompt row ROW carrying FROM's turn flags (`working`,
- * `awaitingUser`), so a re-push differing from ROW only in those compares
- * equal to the copy.
+ * A copy of ROW carrying what FROM states that no card draws: its hover stamp
+ * and, between two prompt rows, its turn flags (`working`, `awaitingUser`), so
+ * a re-push differing from ROW only in those compares equal to the copy.
  */
-function withPromptFlagsOf(row: FeedRow, from: FeedRow): FeedRow {
+function withUndrawnFactsOf(row: FeedRow, from: FeedRow): FeedRow {
   const copy = clone(FeedRowSchema, row);
+  copy.hover = from.hover === undefined ? undefined : clone(FeedHoverStampSchema, from.hover);
   if (
     (copy.row.case === "userPrompt" && from.row.case === "userPrompt") ||
     (copy.row.case === "agentPrompt" && from.row.case === "agentPrompt")
@@ -2273,6 +2308,12 @@ function withPromptFlagsOf(row: FeedRow, from: FeedRow): FeedRow {
     copy.row.value.awaitingUser = from.row.value.awaitingUser;
   }
   return copy;
+}
+
+/** Whether rows A and B state the same hover stamp. */
+function sameHover(a: FeedRow, b: FeedRow): boolean {
+  if (a.hover === undefined || b.hover === undefined) return a.hover === b.hover;
+  return equals(FeedHoverStampSchema, a.hover, b.hover);
 }
 
 /** Whether this row's arm is a bubble — a sub-feed with a collapsed head. */

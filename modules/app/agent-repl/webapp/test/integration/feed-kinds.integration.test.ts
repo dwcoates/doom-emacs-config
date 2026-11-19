@@ -82,6 +82,8 @@ import {
   WORKSPACE_ID,
   activityRow,
   agentPromptRow,
+  hoverStamp,
+  type RowInit,
   mcpToolCallUnit,
   artifactUnit,
   coldGateResolvedRow,
@@ -152,13 +154,13 @@ afterEach(async () => {
  * out whole: the cases read what the row says, not how it arrived.
  */
 /**
- * The footer's activity line while the pointer is on ROW's bubble: where a
- * response's usage stamp is drawn (src/footer/response-usage.ts).
+ * The footer's activity line while the pointer is on ROW's card: where the
+ * row's hover stamp is drawn (src/footer/hover-stamp.ts).
  */
 async function hoveredUsageLine(row: HTMLElement): Promise<string> {
-  const bubble = row.querySelector(".bubble");
-  if (bubble === null) throw new Error("the row drew no bubble to hover");
-  bubble.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+  const card = row.firstElementChild;
+  if (card === null) throw new Error("the row drew no card to hover");
+  card.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
   await harness.settle();
   return document.querySelector('[data-component="footer"] .footer-activity')?.textContent ?? "";
 }
@@ -378,11 +380,44 @@ describe.each(RESPONSE_STATES)("a %s response", (state) => {
 
   it("draws the usage stamp verbatim in the footer while the bubble is hovered", async () => {
     // Arrange
-    const row = await drawRow(activityRow(responseUnit(state, "prose", "9.9k in / 1 out")));
+    const row = await drawRow(activityRow(responseUnit(state, "prose", "9.9k in / 1 out"), { hover: hoverStamp("Response", "9.9k in / 1 out") }));
     // Act
     const line = await hoveredUsageLine(row);
     // Assert
     expect(line).toContain("9.9k in / 1 out");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Every hoverable kind's stamp, through the one recorder
+// ---------------------------------------------------------------------------
+
+describe("every hoverable kind shows its stamp in the footer while its card is hovered", () => {
+  /** Each kind the daemon stamps, drawn through the real feed with its stamp. */
+  const KINDS: ReadonlyArray<[string, (hover: RowInit) => FeedRow]> = [
+    ["a user prompt", (o) => userPromptRow("do the thing", o)],
+    ["an agent prompt", (o) => agentPromptRow("please review", o)],
+    ["a response", (o) => activityRow(responseUnit("success"), o)],
+    ["a tool call", (o) => activityRow(toolCallReturnedUnit("text"), o)],
+    ["a skill", (o) => activityRow(skillUnit("loaded"), o)],
+    ["a hook", (o) => activityRow(hookUnit("failed"), o)],
+    ["a permission", (o) => permissionRow("open", undefined, o)],
+    ["a question", (o) => questionRow("open", o)],
+    ["a shell", (o) => shellHeadRow("live", o)],
+    ["a sync subagent", (o) => activityRow(subagentUnit("live"), o)],
+    ["a detached subagent", (o) => detachedSubagentRow("live", o)],
+    ["a merge", (o) => activityRow(mergeUnit("update"), o)],
+    ["a fix gate", (o) => activityRow(fixGateUnit(), o)],
+  ];
+
+  it.each(KINDS)("%s", async (name, build) => {
+    // Arrange
+    const label = `stamp of ${name}`;
+    const row = await drawRow(build({ hover: hoverStamp(label) }));
+    // Act
+    const line = await hoveredUsageLine(row);
+    // Assert
+    expect(line).toBe(label);
   });
 });
 
@@ -1924,7 +1959,7 @@ describe("token formatting across surfaces", () => {
 
   it("draws the daemon's own usage stamp verbatim in the footer, whatever its scale", async () => {
     // Arrange / Act: the feed never reformats what the daemon composed.
-    const row = await drawRow(activityRow(responseUnit("success", "prose", "1.2M in / 3.4k out")));
+    const row = await drawRow(activityRow(responseUnit("success", "prose", "1.2M in / 3.4k out"), { hover: hoverStamp("Response", "1.2M in / 3.4k out") }));
     // Assert
     expect(await hoveredUsageLine(row)).toContain("1.2M in / 3.4k out");
   });
@@ -1933,14 +1968,14 @@ describe("token formatting across surfaces", () => {
     // Arrange / Act: a stamp that disagrees with the ruling is still drawn as
     // sent — reformatting it would be the client deriving, and the disagreement
     // is the daemon's to fix.
-    const row = await drawRow(activityRow(responseUnit("success", "prose", "1234.6k in")));
+    const row = await drawRow(activityRow(responseUnit("success", "prose", "1234.6k in"), { hover: hoverStamp("Response", "1234.6k in") }));
     // Assert
     expect(await hoveredUsageLine(row)).toContain("1234.6k in");
   });
 
   it("carries the call site's own suffix, not the formatter's", async () => {
     // Arrange / Act
-    const row = await drawRow(activityRow(responseUnit("success", "prose", "182k tok")));
+    const row = await drawRow(activityRow(responseUnit("success", "prose", "182k tok"), { hover: hoverStamp("Response", "182k tok") }));
     // Assert
     expect(await hoveredUsageLine(row)).toContain("182k tok");
   });

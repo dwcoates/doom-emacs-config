@@ -65,7 +65,7 @@ import { installProseLinkRouting } from "../../src/link";
 import { createRowRenderers } from "../../src/feed/renderers";
 import { mountFooter, type FooterHandle } from "../../src/footer/footer";
 import { createEditorNotices } from "../../src/footer/editor-notice";
-import { installResponseUsageHover } from "../../src/feed/response-usage";
+import { installHoverStamp } from "../../src/feed/hover-stamp";
 import { pageFocusLeft } from "../../src/focus-left";
 import { mountTopbar } from "../../src/topbar/topbar";
 import { mountSidebar } from "../../src/sidebar/sidebar";
@@ -878,7 +878,7 @@ async function mountApp(
   });
   handles.push(footer);
   // A HOVERED RESPONSE'S USAGE IS READ IN THE FOOTER, as main.ts wires it.
-  handles.push({ dispose: installResponseUsageHover(shell.feed, (usage) => footer.showResponseUsage(usage), pageFocusLeft()) });
+  handles.push({ dispose: installHoverStamp(shell.feed, (stamp) => footer.showHoverStamp(stamp), pageFocusLeft()) });
   // PROSE LINKS ROUTE as the boot routes them (main.ts hangs the same one
   // delegated interceptor over the feed's scroll zone).
   const removeProseLinkRouting = installProseLinkRouting(ctx, shell.feedScroll);
