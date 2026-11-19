@@ -370,7 +370,11 @@ var Suites = []Suite{
 	// never cuts one. Its tests start real child processes of its own.
 	{Name: "testservice", Kind: GoModule, Path: "testservice", Reuse: &Reuse{Inputs: []string{"testservice/"}}},
 	{Name: "logging", Kind: GoModule, Path: "agent-shim/logging/go", Reuse: &Reuse{Inputs: []string{"proto/vocab/"}}},
-	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{}},
+	{Name: "protohelpers", Kind: GoModule, Path: "proto/helpers/go", Reuse: &Reuse{Units: map[string][]string{
+		// The elisp codec's guard reads every codec file it holds to the
+		// proto.
+		"elispcodec": {"lisp/"},
+	}}},
 	// THE ERT SUITE'S FAKE DAEMON IS TESTED AS ITS OWN MODULE: the ert suite
 	// only builds the binary, so until 2026-11-15 its Go tests gated no
 	// landing and every change to them was run by hand. Its tests read only
