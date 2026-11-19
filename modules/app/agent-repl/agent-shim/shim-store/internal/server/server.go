@@ -780,12 +780,12 @@ func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[
 		return agentByVendorTaskFailure(ref), nil
 	}
 
-	agent, found, err := s.store.AgentByVendorTask(correlated(ctx, req.Header()), session, task)
+	rec, err := s.recordedAgentAndCommission(correlated(ctx, req.Header()), session, task)
 	if err != nil {
 		ref := storeFailure(log, "store.rpc.get-agent-by-vendor-task", err, fields)
 		return agentByVendorTaskFailure(ref), nil
 	}
-	if !found {
+	if !rec.found {
 		log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering not_found")
 		return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
 			Result: &storev1.GetAgentByVendorTaskResponse_NotFound{NotFound: &storev1.GetAgentByVendorTaskNotFound{}},
@@ -794,16 +794,8 @@ func (s *Server) GetAgentByVendorTask(ctx context.Context, req *connect.Request[
 	// THE COMMISSION RIDES THE SAME ANSWER (GetAgentByVendorTaskSuccess.
 	// commission): a record holding the agent's lineage but no start answers
 	// the agent with the commission UNSET, and the caller reports that.
-	commission, described, err := s.store.AgentCommission(correlated(ctx, req.Header()), agent)
-	if err != nil {
-		ref := storeFailure(log, "store.rpc.get-agent-by-vendor-task", err, fields)
-		return agentByVendorTaskFailure(ref), nil
-	}
-	success := &storev1.GetAgentByVendorTaskSuccess{Agent: &conversationv1.AgentId{Value: agent}}
-	if described {
-		success.Commission = commission
-	}
-	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent %s commission_recorded=%t", agent, described)
+	success := &storev1.GetAgentByVendorTaskSuccess{Agent: &conversationv1.AgentId{Value: rec.agent}, Commission: rec.commission}
+	log.LogVerbose(logging.Fields{Operation: "store.rpc.get-agent-by-vendor-task"}, "answering agent %s commission_recorded=%t", rec.agent, rec.commission != nil)
 	return connect.NewResponse(&storev1.GetAgentByVendorTaskResponse{
 		Result: &storev1.GetAgentByVendorTaskResponse_Success{Success: success},
 	}), nil

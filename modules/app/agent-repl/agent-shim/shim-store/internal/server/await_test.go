@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -177,5 +178,63 @@ func TestACommittedWriteBatchWakesTheWaiters(t *testing.T) {
 	case <-taken:
 	default:
 		t.Fatal("a committed write left the waiters asleep")
+	}
+}
+
+func TestRecordedAgentAndCommission(t *testing.T) {
+	prompt := &conversationv1.AgentSubagentPrompt{Text: "review"}
+	tests := []struct {
+		name    string
+		arrange func(*fakeStore)
+		want    vendorTaskRecord
+		wantErr bool
+	}{
+		{name: "no pairing on record", arrange: func(*fakeStore) {}, want: vendorTaskRecord{}},
+		{name: "the pairing with no start", arrange: func(s *fakeStore) { s.byTaskAgent, s.byTaskFound = "toolu_spawn", true },
+			want: vendorTaskRecord{agent: "toolu_spawn", found: true}},
+		{name: "the pairing and its start", arrange: func(s *fakeStore) {
+			s.byTaskAgent, s.byTaskFound, s.commission = "toolu_spawn", true, prompt
+		}, want: vendorTaskRecord{agent: "toolu_spawn", found: true, commission: prompt}},
+		{name: "the pairing read fails", arrange: func(s *fakeStore) { s.byTaskErr = errors.New("locked") }, wantErr: true},
+		{name: "the commission read fails", arrange: func(s *fakeStore) {
+			s.byTaskAgent, s.byTaskFound, s.commissionErr = "toolu_spawn", true, errors.New("locked")
+		}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			store := newFakeStore()
+			tt.arrange(store)
+			s := New(store, testLogger(), 0)
+
+			// Act
+			got, err := s.recordedAgentAndCommission(context.Background(), "main-1", "a1b2")
+
+			// Assert
+			if (err != nil) != tt.wantErr || got != tt.want {
+				t.Fatalf("recordedAgentAndCommission = (%+v, %v), want (%+v, error %v)", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBothVendorTaskLookupsShareTheOneRecordRead(t *testing.T) {
+	// Arrange
+	sources := map[string]string{}
+	for _, file := range []string{"server.go", "await.go"} {
+		b, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[file] = string(b)
+	}
+
+	// Act
+	direct := strings.Count(sources["server.go"]+sources["await.go"], "s.store.AgentByVendorTask(")
+	shared := strings.Count(sources["server.go"], "s.recordedAgentAndCommission(") + strings.Count(sources["await.go"], "s.recordedAgentAndCommission(")
+
+	// Assert
+	if direct != 1 || shared != 2 {
+		t.Fatalf("direct pairing reads %d, shared record reads %d; want the one read inside the helper, taken by both lookups", direct, shared)
 	}
 }

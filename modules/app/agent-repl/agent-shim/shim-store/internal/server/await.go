@@ -36,12 +36,13 @@ func (s *Server) AwaitAgentByVendorTask(ctx context.Context, req *connect.Reques
 	for reads := 1; ; reads++ {
 		// TAKEN BEFORE THE READ (commitSignal): a commit after the read wakes it.
 		committed := s.commits.next()
-		agent, commission, ready, err := s.recordedAgentAndCommission(rctx, session, task)
+		rec, err := s.recordedAgentAndCommission(rctx, session, task)
 		if err != nil {
 			ref := storeFailure(log, op, err, fields)
 			return awaitAgentByVendorTaskFailure(ref), nil
 		}
-		if ready {
+		agent, commission := rec.agent, rec.commission
+		if rec.found && commission != nil {
 			log.Log(logging.Fields{Operation: op}, "the record holds agent %s and its commission after %d read(s)", agent, reads)
 			return connect.NewResponse(&storev1.AwaitAgentByVendorTaskResponse{
 				Result: &storev1.AwaitAgentByVendorTaskResponse_Success{Success: &storev1.AwaitAgentByVendorTaskSuccess{
@@ -65,18 +66,31 @@ func (s *Server) AwaitAgentByVendorTask(ctx context.Context, req *connect.Reques
 	}
 }
 
+// vendorTaskRecord is what the record holds of one vendor task locator: the
+// agent it is paired with (FOUND), and that agent's commission (nil when the
+// record holds no start for it).
+type vendorTaskRecord struct {
+	agent      string
+	found      bool
+	commission *conversationv1.AgentSubagentPrompt
+}
+
 // recordedAgentAndCommission reads the pairing and, once it is on record, the
-// agent's commission. READY only when both are.
-func (s *Server) recordedAgentAndCommission(ctx context.Context, session, task string) (string, *conversationv1.AgentSubagentPrompt, bool, error) {
+// agent's commission: the one read GetAgentByVendorTask and
+// AwaitAgentByVendorTask share.
+func (s *Server) recordedAgentAndCommission(ctx context.Context, session, task string) (vendorTaskRecord, error) {
 	agent, found, err := s.store.AgentByVendorTask(ctx, session, task)
 	if err != nil || !found {
-		return "", nil, false, err
+		return vendorTaskRecord{}, err
 	}
 	commission, described, err := s.store.AgentCommission(ctx, agent)
 	if err != nil {
-		return "", nil, false, fmt.Errorf("reading the commission of agent %s: %w", agent, err)
+		return vendorTaskRecord{}, fmt.Errorf("reading the commission of agent %s: %w", agent, err)
 	}
-	return agent, commission, described, nil
+	if !described {
+		commission = nil
+	}
+	return vendorTaskRecord{agent: agent, found: true, commission: commission}, nil
 }
 
 // awaitAgentByVendorTaskFailure has GetAgentByVendorTask's two arms.
