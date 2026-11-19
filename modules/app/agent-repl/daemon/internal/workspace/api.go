@@ -493,9 +493,19 @@ type Verbs interface {
 	CarryOutSelfClose(ctx context.Context, ws ids.WorkspaceID) error
 	// TellOwnedPullRequestsMerged tells WS, once, that every pull request it
 	// owns has merged (wsm.OwnedPullRequestsMerged), and that closing it is
-	// its own to do; nothing closes it for its merged pull requests. The pull
-	// request watcher calls it on each owned pull request's merge.
+	// its own to do; nothing closes it for its merged pull requests.
+	// PullRequestEnded calls it on each followed pull request's merge.
 	TellOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error
+	// RepublishLinks reads WS's links again and hands the topbar and the
+	// sidebar what each draws of them, for a change to their pull requests'
+	// subscriptions no links verb made (workspacelinks.go).
+	RepublishLinks(ctx context.Context, ws ids.WorkspaceID) error
+	// PullRequestEnded takes the end of a pull request WS follows, merged or
+	// closed: its links are republished, and a merge may tell it its owned
+	// pull requests all merged (TellOwnedPullRequestsMerged). The pull request
+	// watcher calls it on
+	// every end.
+	PullRequestEnded(ctx context.Context, ws ids.WorkspaceID, merged bool) error
 	// SurfaceForWork marks a workspace whose turn starts under a fold as drawn
 	// inside it (WorkSurfacings calls it).
 	SurfaceForWork(ctx context.Context, ws ids.WorkspaceID) error

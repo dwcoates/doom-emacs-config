@@ -2865,6 +2865,20 @@ type fakeSidebar struct {
 	stamps     []sidebar.SelectStamp
 	// refuseSelection makes SetSelection refuse every change.
 	refuseSelection bool
+	// openOwned records every SetOpenOwnedPullRequest call, in order.
+	openOwned []openOwnedTold
+}
+
+// openOwnedTold is one SetOpenOwnedPullRequest call.
+type openOwnedTold struct {
+	WS   ids.WorkspaceID
+	Open bool
+}
+
+func (s *fakeSidebar) SetOpenOwnedPullRequest(ws ids.WorkspaceID, open bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.openOwned = append(s.openOwned, openOwnedTold{WS: ws, Open: open})
 }
 
 // revivingEdge is one SetReviving call.

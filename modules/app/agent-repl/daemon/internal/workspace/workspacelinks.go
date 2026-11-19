@@ -153,10 +153,53 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 		log.Error(opChangeLinks, "could not change the links", dlog.WithCause(fields, err))
 		return nil, fmt.Errorf("change the links of %q: %w", ws, err)
 	}
-	v.deps.Topbar.SetLinks(ws, ShownLinks(links))
+	v.publishLinks(ws, links)
 	fields["links"], fields["shown"] = len(links), len(ShownLinks(links))
 	log.Info(opChangeLinks, done, fields)
 	return links, nil
+}
+
+// publishLinks hands every view of a workspace's links what it draws: the
+// topbar title the shown links, and the sidebar row whether the workspace
+// owns a pull request still open (wsm.OwnedPullRequestOpen). Every verb that
+// changes the links, or what their pull requests' subscriptions record, ends
+// here, so the two views never disagree about the links.
+func (v *verbs) publishLinks(ws ids.WorkspaceID, links []wsm.WorkspaceLink) {
+	v.deps.Topbar.SetLinks(ws, ShownLinks(links))
+	v.deps.Sidebar.SetOpenOwnedPullRequest(ws, wsm.OwnedPullRequestOpen(links))
+}
+
+// RepublishLinks reads the workspace's links again and publishes them
+// (publishLinks), for a change that reached their pull requests'
+// subscriptions without a links verb: a subscription taken or ended by its
+// own rpc, or a followed pull request's end.
+func (v *verbs) RepublishLinks(ctx context.Context, ws ids.WorkspaceID) error {
+	_, log, err := v.record(ctx, rpcChangeWorkspaceLinks, ws)
+	if err != nil {
+		return err
+	}
+	links, err := v.deps.DB.WorkspaceLinks(ctx, ws)
+	if err != nil {
+		log.Error(opRepublishLinks, "could not read the workspace's links to republish them", dlog.Context{"cause": err.Error()})
+		return fmt.Errorf("republish the links of %q: %w", ws, err)
+	}
+	v.publishLinks(ws, links)
+	log.Debug(opRepublishLinks, "republished the workspace's links", dlog.Context{"links": len(links), "open_owned_pull_request": wsm.OwnedPullRequestOpen(links)})
+	return nil
+}
+
+// PullRequestEnded takes the end of a pull request WS follows: its links are
+// republished, so the row stops drawing an owned pull request that is no
+// longer open, and a merge may tell the workspace its owned pull requests
+// all merged (TellOwnedPullRequestsMerged).
+func (v *verbs) PullRequestEnded(ctx context.Context, ws ids.WorkspaceID, merged bool) error {
+	if err := v.RepublishLinks(ctx, ws); err != nil {
+		return err
+	}
+	if !merged {
+		return nil
+	}
+	return v.TellOwnedPullRequestsMerged(ctx, ws)
 }
 
 // refuseOwnedElsewhere refuses a set owning a pull request another open

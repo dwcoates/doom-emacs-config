@@ -65,6 +65,11 @@ func (f *fakeRemotes) RemoteURL(context.Context, string, string) (string, bool, 
 	return f.url, true, nil
 }
 
+func (v *fakeVerbs) RepublishLinks(_ context.Context, ws ids.WorkspaceID) error {
+	v.republished = append(v.republished, ws)
+	return v.republishErr
+}
+
 func (d *fakeDB) SubscribePullRequest(_ context.Context, sub wsm.PullRequestSubscription) (bool, error) {
 	if d.prSubscribeErr != nil {
 		return false, d.prSubscribeErr
@@ -241,6 +246,9 @@ func TestUnsubscribePullRequestAnswersWhetherOneStood(t *testing.T) {
 			if err != nil || (resp.Msg.GetSuccess().GetUnsubscribed() != nil) != held || (resp.Msg.GetSuccess().GetNotSubscribed() != nil) == held {
 				t.Fatalf("UnsubscribePullRequest = %v, %v; want ended %v", resp, err, held)
 			}
+			if republished := len(h.Verbs.republished) == 1; republished != held {
+				t.Fatalf("republished %v, want a republish exactly when a subscription ended", h.Verbs.republished)
+			}
 		})
 	}
 }
@@ -345,6 +353,55 @@ func TestCommentOnPullRequestValidation(t *testing.T) {
 			// Assert
 			if connect.CodeOf(err) != connect.CodeInvalidArgument || len(h.PRs.comments) != 0 {
 				t.Fatalf("CommentOnPullRequest = %v, want invalid_argument and nothing posted", err)
+			}
+		})
+	}
+}
+
+func TestSubscribePullRequestRepublishesTheLinks(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.SubscribePullRequest(context.Background(), subscribePR("https://github.com/ChessCom/explanation-engine/pull/8047"))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("SubscribePullRequest: %v", err)
+	}
+	if len(h.Verbs.republished) != 1 || h.Verbs.republished[0] != testWorkspaceID {
+		t.Fatalf("republished %v, want the subscriber's links republished once", h.Verbs.republished)
+	}
+}
+
+func TestPullRequestSubscriptionRpcsFailWhenTheLinksCannotBeRepublished(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(h *harness) error
+	}{
+		{name: "a subscribe", act: func(h *harness) error {
+			_, err := h.Client.SubscribePullRequest(context.Background(), subscribePR("https://github.com/ChessCom/explanation-engine/pull/8047"))
+			return err
+		}},
+		{name: "an unsubscribe", act: func(h *harness) error {
+			h.DB.prSubs = []wsm.PullRequestSubscription{{Subscriber: testWorkspaceID, PullRequest: testPR}}
+			_, err := h.Client.UnsubscribePullRequest(context.Background(), connect.NewRequest(&agentreplv1.UnsubscribePullRequestRequest{
+				Subscriber: ref(), PullRequest: prwatch.RefProto(testPR)}))
+			return err
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.Verbs.republishErr = errors.New("the links cannot be read")
+
+			// Act
+			err := tt.act(h)
+
+			// Assert
+			if connect.CodeOf(err) != connect.CodeInternal {
+				t.Fatalf("err = %v, want an internal failure", err)
 			}
 		})
 	}

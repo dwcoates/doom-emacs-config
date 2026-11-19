@@ -79,9 +79,9 @@ type Deps struct {
 	// Deployments is told, after every poll, each owned pull request standing
 	// in a GitHub merge queue (deployments.go).
 	Deployments DeploymentSink
-	// OwnedMerged is told each workspace one of whose owned pull requests
-	// merged (workspace.Verbs.TellOwnedPullRequestsMerged), which tells it once its last one has.
-	OwnedMerged func(ctx context.Context, ws ids.WorkspaceID) error
+	// Ended is told each workspace one of whose followed pull requests
+	// merged or closed, and whether it merged (workspace.Verbs.PullRequestEnded).
+	Ended func(ctx context.Context, ws ids.WorkspaceID, merged bool) error
 	// Log is the global logger: a pull request is no workspace's.
 	Log dlog.Logger
 }
@@ -100,7 +100,7 @@ type Watcher struct {
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	switch {
-	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.OwnedMerged == nil, deps.Log == nil:
+	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Ended == nil, deps.Log == nil:
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
@@ -353,16 +353,15 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		w.deps.Log.Info(opPoll, "the subscription moved since it was read; the next poll reads again", fields)
 	case end != nil:
 		w.deps.Log.Info(opPoll, "the pull request ended; its subscription ended after telling it", fields)
-		// A MERGE MAY BE THE LAST OF ITS WORKSPACE'S OWNED PULL REQUESTS, which
-		// tells the workspace so; closing it is its own (owner ruling,
-		// 2026-11-16). Whatever the
-		// subscription's origin: an owned pull request its workspace follows
-		// again with narrowed events is followed as `requested`, and the
-		// verb judges ownership from the workspace's links.
-		if end.Merged {
-			if err := w.deps.OwnedMerged(ctx, sub.Subscriber); err != nil {
-				w.deps.Log.Error(opPoll, "could not tell the workspace one of whose owned pull requests merged", dlog.WithCause(fields, err))
-			}
+		// AN END CHANGES WHAT THE WORKSPACE'S ROW DRAWS, and a merge may be the
+		// last of its owned pull requests, which tells the workspace so;
+		// closing it is its own (owner ruling, 2026-11-16). Whatever the
+		// subscription's origin: an owned
+		// pull request its workspace follows again with narrowed events is
+		// followed as `requested`, and the verb judges ownership from the
+		// workspace's links.
+		if err := w.deps.Ended(ctx, sub.Subscriber, end.Merged); err != nil {
+			w.deps.Log.Error(opPoll, "could not act on the end of the workspace's pull request", dlog.WithCause(fields, err))
 		}
 	case len(owed) > 0:
 		w.deps.Log.Info(opPoll, "the pull request's activity is owed to its subscriber", fields)

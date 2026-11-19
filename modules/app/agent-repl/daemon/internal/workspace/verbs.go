@@ -37,6 +37,7 @@ const (
 	opViewDwell            = "daemon.workspace.view_dwell"
 	opSetPriority          = "daemon.workspace.set_priority"
 	opChangeLinks          = "daemon.workspace.change_links"
+	opRepublishLinks       = "daemon.workspace.republish_links"
 	opSetName              = "daemon.workspace.set_name"
 	opSetHidden            = "daemon.workspace.set_hidden"
 	opBacklogColdGate      = "daemon.workspace.backlog_cold_gate"
