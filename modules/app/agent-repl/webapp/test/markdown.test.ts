@@ -578,7 +578,7 @@ describe("a link is never drawn as code", () => {
 // and its code spans beside them.
 describe("the daemon's drawn links render whole", () => {
   type Entry = { markdown: string; hrefs: string[]; codes: string[]; drawn: string };
-  it.each((linkCode as Entry[]).map((entry) => ({ ...entry, name: JSON.stringify(entry.markdown) })))(
+  it.each((linkCode as unknown as Entry[]).map((entry) => ({ ...entry, name: JSON.stringify(entry.markdown) })))(
     "renders $name as its links and code",
     ({ drawn, hrefs, codes }) => {
       // Arrange
