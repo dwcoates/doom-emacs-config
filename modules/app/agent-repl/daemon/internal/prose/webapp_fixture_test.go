@@ -7,6 +7,8 @@ import (
 	"os"
 	"testing"
 
+	"agent-repld/internal/goldenfile"
+
 	"google.golang.org/protobuf/encoding/protojson"
 )
 
@@ -78,22 +80,5 @@ func webappFixture(t *testing.T) []byte {
 }
 
 func TestWebappFixtureIsParsesAnswerForEveryInput(t *testing.T) {
-	// Arrange.
-	want := webappFixture(t)
-
-	// Act.
-	if *update {
-		if err := os.WriteFile(webappFixturePath, want, 0o644); err != nil {
-			t.Fatalf("write %s: %v", webappFixturePath, err)
-		}
-	}
-	got, err := os.ReadFile(webappFixturePath)
-
-	// Assert.
-	if err != nil {
-		t.Fatalf("read %s: %v", webappFixturePath, err)
-	}
-	if !bytes.Equal(got, want) {
-		t.Errorf("%s is stale: rerun with -update", webappFixturePath)
-	}
+	goldenfile.Check(t, webappFixturePath, webappFixture(t), *update)
 }
