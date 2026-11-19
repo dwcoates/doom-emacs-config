@@ -3283,6 +3283,41 @@ so no close pushes a tab to the back any more."
   "Every tab hidden leaves no landing."
   (should-not (agent-repl--cycle-target '("a" "b") nil "a" 1)))
 
+;;;; ---- The ring walk ----
+
+(ert-deftest agent-repl-test-commands-ring-walk-meets-the-drawn-tabs-in-step-order ()
+  "One revolution forward meets every drawn tab after CURRENT, then CURRENT."
+  (should (equal (agent-repl--ring-walk '("a" "b" "c" "d") '("a" "b" "c" "d") "b" 1)
+                 '("c" "d" "a" "b"))))
+
+(ert-deftest agent-repl-test-commands-ring-walk-backward-wraps-the-other-way ()
+  "A step of -1 meets the tabs before CURRENT first, wrapping from the start."
+  (should (equal (agent-repl--ring-walk '("a" "b" "c" "d") '("a" "b" "c" "d") "b" -1)
+                 '("a" "d" "c" "b"))))
+
+(ert-deftest agent-repl-test-commands-ring-walk-passes-over-an-undrawn-tab ()
+  "A tab DRAWN leaves out is never met."
+  (should (equal (agent-repl--ring-walk '("a" "folded" "b") '("a" "b") "a" 1)
+                 '("b" "a"))))
+
+(ert-deftest agent-repl-test-commands-ring-walk-from-an-undrawn-current-omits-it ()
+  "A current workspace that is not drawn steps from its place but is never met."
+  (should (equal (agent-repl--ring-walk '("a" "folded" "b") '("a" "b") "folded" 1)
+                 '("b" "a"))))
+
+(ert-deftest agent-repl-test-commands-ring-walk-is-nil-off-the-ring ()
+  "A current workspace with no place in ALL meets nothing."
+  (should-not (agent-repl--ring-walk '("a" "b") '("a" "b") "elsewhere" 1)))
+
+(ert-deftest agent-repl-test-commands-cycle-target-reads-the-ring-walk ()
+  "The chords' landing is the ring walk's, so the gutter's presses cannot drift from it."
+  (should (string-match-p "agent-repl--ring-walk"
+                          (format "%S" (symbol-function 'agent-repl--cycle-target)))))
+
+(ert-deftest agent-repl-test-commands-cycle-target-wraps-past-a-revolution ()
+  "More steps than drawn tabs wrap around the ring."
+  (should (equal (agent-repl--cycle-target '("a" "b" "c") '("a" "b" "c") "a" 4) "b")))
+
 (ert-deftest agent-repl-test-commands-tab-slot-gestures-share-one-helper ()
   "Every tab-slot gesture command goes through `agent-repl--act-on-tab-slot'.
 A command that re-implemented the slot checks would drift from the others."
