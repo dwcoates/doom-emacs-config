@@ -21,7 +21,7 @@
  */
 import { parseWindowLevel, type AppliedLevel, type LevelWindow, type WindowLevel } from "../../../agent-shim/logging/ts/level-window.js";
 import { bootFailed } from "../failure/sink.js";
-import { FOCUS_LEFT_EMACS, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
+import { focusLeftReason, focusMovedCause, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { pageQuiet } from "../quiet.js";
 import { installDaemonLatencyReport, type LatencyReporter } from "../latency-report.js";
 import { log } from "../log.js";
@@ -61,12 +61,14 @@ export interface SidebarPage {
    */
   setLogLevel(level: string, untilMs: number | null): string;
   /**
-   * Emacs moved its focus (the selected window changed, or the frame lost the
-   * focus): the rail lets go of what the pointer raised. A key the web view
-   * forwards to Emacs selects another window without the page ever losing
-   * the focus, so the page cannot see this for itself.
+   * Emacs moved its focus over CAUSE (`window`: the selected window changed,
+   * or the frame lost the focus; `composer`: the user typed or clicked in the
+   * composer): the rail lets go of what the pointer raised. A key the web
+   * view forwards to Emacs selects another window without the page ever
+   * losing the focus, so the page cannot see this for itself. A CAUSE that
+   * names none is refused; an absent one is `window`.
    */
-  focusMoved(): string;
+  focusMoved(cause?: unknown): string;
   /**
    * Whether persistent wifi's lid-closed quiet state stands (quiet.ts): the
    * rail's clock and seen-only work stop while it does. A QUIET that is not a
@@ -196,8 +198,13 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
           return answer("setLogLevel", null, "opened", { level: parsed, until_ms: applied.untilMs });
       }
     },
-    focusMoved() {
-      focusLeft.left(FOCUS_LEFT_EMACS);
+    focusMoved(value) {
+      const cause = focusMovedCause(value);
+      if (cause === null) {
+        note("warn", `focusMoved was handed ${JSON.stringify(value)}, which is no cause`);
+        return answer("focusMoved", null, "refused");
+      }
+      focusLeft.left(focusLeftReason(cause));
       return answer("focusMoved", null, "sent");
     },
     setQuiet(value) {

@@ -11,7 +11,7 @@ import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.
 import { FOCUS_LEFT_EMACS, connectToHost, type HostLink } from "../../src/host/embed.js";
 import { HOST_CHANNEL, type PageToHost } from "../../src/host/protocol.js";
 import { createPresence, type PresenceSource } from "../../src/presence.js";
-import { createFocusLeft, type FocusLeftSource } from "../../src/focus-left.js";
+import { createFocusLeft, FOCUS_LEFT_COMPOSER, type FocusLeftSource } from "../../src/focus-left.js";
 import { createWebhostFailureView, type WebhostFailureView } from "../../src/failure/webhost.js";
 import { captureLogRecords, type LogCapture } from "../log-capture.js";
 import { createRestyleTurns, type RestyleTurnsSource } from "../../src/host/restyle-turn.js";
@@ -327,10 +327,18 @@ describe("a bubble expanded over the webapp", () => {
 describe("Emacs moving its focus", () => {
   it("tells the page's focus-left signal that Emacs moved its focus", () => {
     // Act
-    fromHost({ channel: HOST_CHANNEL, kind: "focusMoved" });
+    fromHost({ channel: HOST_CHANNEL, kind: "focusMoved", cause: "window" });
 
     // Assert
     expect(leftFor).toEqual([FOCUS_LEFT_EMACS]);
+  });
+
+  it("tells the page's focus-left signal that the composer was used", () => {
+    // Act
+    fromHost({ channel: HOST_CHANNEL, kind: "focusMoved", cause: "composer" });
+
+    // Assert
+    expect(leftFor).toEqual([FOCUS_LEFT_COMPOSER]);
   });
 });
 

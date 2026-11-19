@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // The host page: one iframe per workspace, one shown, state replayed on hello,
 // facts mirrored for Emacs. See src/host/host.ts.
-import { FOCUS_LEFT_EMACS, pageFocusLeft } from "../../src/focus-left.js";
+import { FOCUS_LEFT_COMPOSER, FOCUS_LEFT_EMACS, pageFocusLeft } from "../../src/focus-left.js";
 import { createDaemonOrigin } from "../../src/rpc/daemon-origin.js";
 import { LevelWindow } from "../../../agent-shim/logging/ts/level-window.js";
 import { levelApplyShapeOf } from "./level-apply-shape.js";
@@ -1322,18 +1322,50 @@ describe("the webhost's sidebar", () => {
     expect([outcome, toA]).toEqual(["refused", []]);
   });
 
-  it("tells every page Emacs moved its focus", () => {
+  it.each(["window", "composer"])("tells every page Emacs moved its focus for the %s", (cause) => {
     // Arrange
     pages(host, "a", "b");
     const toA = postsTo("a");
     const toB = postsTo("b");
 
     // Act
+    const outcome = parsed(host.focusMoved(cause)).outcome;
+
+    // Assert
+    const moved = { channel: HOST_CHANNEL, kind: "focusMoved", cause };
+    expect([outcome, toA, toB]).toEqual(["sent", [moved], [moved]]);
+  });
+
+  it("tells every page a focus move with no cause, from an Emacs before the cause, as a window's", () => {
+    // Arrange
+    pages(host, "a");
+    const toA = postsTo("a");
+
+    // Act
     const outcome = parsed(host.focusMoved()).outcome;
 
     // Assert
-    const moved = { channel: HOST_CHANNEL, kind: "focusMoved" };
-    expect([outcome, toA, toB]).toEqual(["sent", [moved], [moved]]);
+    expect([outcome, toA]).toEqual(["sent", [{ channel: HOST_CHANNEL, kind: "focusMoved", cause: "window" }]]);
+  });
+
+  it("refuses a focus move naming no cause, telling no page and letting go of nothing", () => {
+    // Arrange
+    pages(host, "a");
+    const toA = postsTo("a");
+    const left: string[] = [];
+    const unsubscribe = pageFocusLeft().onLeft((why) => left.push(why));
+
+    // Act
+    const answer = parsed(host.focusMoved("keyboard"));
+
+    // Assert
+    unsubscribe();
+    expect([answer.outcome, answer.notes, toA, left]).toEqual([
+      "refused",
+      [{ level: "warn", text: 'focusMoved was handed "keyboard", which is no cause' }],
+      [],
+      [],
+    ]);
   });
 
   it("tells every page the reader pressed the webhost's own document", () => {
@@ -1369,11 +1401,24 @@ describe("the webhost's sidebar", () => {
     const unsubscribe = pageFocusLeft().onLeft((why) => left.push(why));
 
     // Act
-    host.focusMoved();
+    host.focusMoved("window");
 
     // Assert
     unsubscribe();
     expect(left).toEqual([FOCUS_LEFT_EMACS]);
+  });
+
+  it("tells the webhost's own document the composer was used, so its sidebar lets go", () => {
+    // Arrange
+    const left: string[] = [];
+    const unsubscribe = pageFocusLeft().onLeft((why) => left.push(why));
+
+    // Act
+    host.focusMoved("composer");
+
+    // Assert
+    unsubscribe();
+    expect(left).toEqual([FOCUS_LEFT_COMPOSER]);
   });
 
   it("tells every page its own standing failures", () => {

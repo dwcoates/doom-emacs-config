@@ -14,7 +14,8 @@ describe("parseHostToPage", () => {
       { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: 1_700_000_000_123, reloadStartedAtMs: 1_700_000_000_100 },
     ],
     ["dismissDigest", { channel: HOST_CHANNEL, kind: "dismissDigest" }],
-    ["focusMoved", { channel: HOST_CHANNEL, kind: "focusMoved" }],
+    ["focusMoved for a window", { channel: HOST_CHANNEL, kind: "focusMoved", cause: "window" }],
+    ["focusMoved for the composer", { channel: HOST_CHANNEL, kind: "focusMoved", cause: "composer" }],
     ["quiet beginning", { channel: HOST_CHANNEL, kind: "quiet", quiet: true }],
     ["quiet ending", { channel: HOST_CHANNEL, kind: "quiet", quiet: false }],
     ["webhostPressed", { channel: HOST_CHANNEL, kind: "webhostPressed" }],
@@ -48,6 +49,14 @@ describe("parseHostToPage", () => {
     expect(message).toEqual(data);
   });
 
+  it("reads a focusMoved without a cause, from a host before the cause, as a window's", () => {
+    // Arrange / Act
+    const message = parseHostToPage({ channel: HOST_CHANNEL, kind: "focusMoved" });
+
+    // Assert
+    expect(message).toEqual({ channel: HOST_CHANNEL, kind: "focusMoved", cause: "window" });
+  });
+
   it.each([
     ["another channel", { channel: "other", kind: "presence", shown: true }],
     ["a non-object", "presence"],
@@ -55,6 +64,7 @@ describe("parseHostToPage", () => {
     ["an unknown kind", { channel: HOST_CHANNEL, kind: "teleport" }],
     ["presence without a boolean", { channel: HOST_CHANNEL, kind: "presence", shown: "yes" }],
     ["quiet without a boolean", { channel: HOST_CHANNEL, kind: "quiet", quiet: 1 }],
+    ["focusMoved naming no cause", { channel: HOST_CHANNEL, kind: "focusMoved", cause: "keyboard" }],
     ["presence with a switch start that is not a number", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: "now" }],
     ["presence with a non-finite switch start", { channel: HOST_CHANNEL, kind: "presence", shown: true, switchStartedAtMs: NaN }],
     ["presence with a reload start that is not a number", { channel: HOST_CHANNEL, kind: "presence", shown: true, reloadStartedAtMs: "then" }],

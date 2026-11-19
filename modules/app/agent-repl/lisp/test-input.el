@@ -2081,6 +2081,29 @@ workspace from the working directory, so no source tag rides it."
     ;; Assert.
     (should visual-line-mode)))
 
+(ert-deftest agent-repl-input-mode-tells-the-pages-after-each-command ()
+  "Every command in the composer, a key or a click, tells the pages it was used."
+  ;; Arrange.
+  (with-temp-buffer
+    (agent-repl-input-mode)
+    (let ((told 0))
+      (cl-letf (((symbol-function 'agent-repl-webhost-composer-used) (lambda () (cl-incf told))))
+        ;; Act.
+        (run-hooks 'post-command-hook)
+        ;; Assert.
+        (should (local-variable-p 'post-command-hook))
+        (should (= told 1))))))
+
+(ert-deftest agent-repl-input-mode-leaves-other-buffers-commands-untold ()
+  "A command outside the composer tells the pages nothing of the composer."
+  ;; Arrange.
+  (with-temp-buffer
+    (agent-repl-input-mode))
+  (with-temp-buffer
+    ;; Assert.
+    (should-not (memq #'agent-repl-webhost-composer-used (default-value 'post-command-hook)))
+    (should-not (memq #'agent-repl-webhost-composer-used post-command-hook))))
+
 (ert-deftest agent-repl-input-mode-paints-the-composer-background ()
   "The composer paints `agent-repl-input-background' lifted 3% behind its text."
   ;; Arrange.

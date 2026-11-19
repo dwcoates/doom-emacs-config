@@ -3,7 +3,17 @@
  * focus-left — the one place a page hears that the user's focus left it.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FOCUS_LEFT_BLUR, FOCUS_LEFT_HIDDEN, createFocusLeft, pageFocusLeft, type FocusLeftSource } from "../src/focus-left.js";
+import {
+  FOCUS_LEFT_BLUR,
+  FOCUS_LEFT_COMPOSER,
+  FOCUS_LEFT_EMACS,
+  FOCUS_LEFT_HIDDEN,
+  createFocusLeft,
+  focusLeftReason,
+  focusMovedCause,
+  pageFocusLeft,
+  type FocusLeftSource,
+} from "../src/focus-left.js";
 import { createPresence, type PresenceSource } from "../src/presence.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 
@@ -92,5 +102,33 @@ describe("pageFocusLeft", () => {
   it("is one signal per page", () => {
     // Act / Assert
     expect(pageFocusLeft()).toBe(pageFocusLeft());
+  });
+});
+
+describe("focusMovedCause", () => {
+  it.each([
+    ["a window's", "window", "window"],
+    ["the composer's", "composer", "composer"],
+    ["an absent cause, from a build before the cause, as a window's", undefined, "window"],
+    ["a string naming no cause as none", "keyboard", null],
+    ["a non-string as none", 1, null],
+    ["null as none", null, null],
+  ])("reads %s", (_name, value, expected) => {
+    // Act
+    const cause = focusMovedCause(value);
+    // Assert
+    expect(cause).toBe(expected);
+  });
+});
+
+describe("focusLeftReason", () => {
+  it.each([
+    ["window", FOCUS_LEFT_EMACS],
+    ["composer", FOCUS_LEFT_COMPOSER],
+  ] as const)("tells the listeners the focus left for a %s move as its own reason", (cause, why) => {
+    // Act
+    const reason = focusLeftReason(cause);
+    // Assert
+    expect(reason).toBe(why);
   });
 });
