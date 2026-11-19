@@ -122,8 +122,8 @@ func TestAnApprovalIsNeverJudgedAgainstTheWindow(t *testing.T) {
 		{name: "a new group does not refuse it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew)}},
 		{name: "an old group never taken on does not refuse it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowSeenBefore)}},
 		{name: "a group back after its fix does not refuse it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowRecurred)}},
-		{name: "a group back after more than two fixes does not refuse it", groups: []wsm.WindowGroup{
-			{Operation: sinkKey.Operation, Message: sinkKey.Message, Class: wsm.WindowRecurred, Fixes: 3}}},
+		{name: "a group back after more than five fixes does not refuse it", groups: []wsm.WindowGroup{
+			{Operation: sinkKey.Operation, Message: sinkKey.Message, Class: wsm.WindowRecurred, Fixes: 6}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -316,10 +316,10 @@ func TestAProblemPastItsFixesIsNeverDispatchedAgain(t *testing.T) {
 		decision MediationDecision
 		wantArm  string
 	}{
-		{name: "a dispatch of a group past two fixes is refused", group: recurred(3), decision: MediationDispatch, wantArm: ArmProblemsRecurring},
-		{name: "an approval of a group past two fixes is accepted", group: recurred(3), decision: MediationApprove},
-		{name: "an escalation of a group past two fixes is accepted", group: recurred(3), decision: MediationEscalate},
-		{name: "a dispatch of a group after two fixes is accepted", group: recurred(2), decision: MediationDispatch},
+		{name: "a dispatch of a group past five fixes is refused", group: recurred(6), decision: MediationDispatch, wantArm: ArmProblemsRecurring},
+		{name: "an approval of a group past five fixes is accepted", group: recurred(6), decision: MediationApprove},
+		{name: "an escalation of a group past five fixes is accepted", group: recurred(6), decision: MediationEscalate},
+		{name: "a dispatch of a group after five fixes is accepted", group: recurred(5), decision: MediationDispatch},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -343,7 +343,7 @@ func TestAProblemPastItsFixesIsNeverDispatchedAgain(t *testing.T) {
 			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
 				t.Fatalf("DecideMediation = %v, want the %s refusal", err, tt.wantArm)
 			}
-			if groups, _ := refused.Fields["groups"].([]string); len(groups) != 1 || !strings.Contains(groups[0], "(3 fixes)") {
+			if groups, _ := refused.Fields["groups"].([]string); len(groups) != 1 || !strings.Contains(groups[0], "(6 fixes)") {
 				t.Fatalf("refusal fields %v, want the group named with its fixes", refused.Fields)
 			}
 			if m := owedCheck(t, h); m == nil || m.Dispatched || m.Escalated() {

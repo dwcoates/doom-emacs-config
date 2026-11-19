@@ -55,8 +55,10 @@ const (
 	// ArmRemediationBoundReached refuses a dispatch once the chain deployed
 	// as many remediations in a row as its repository allows.
 	ArmRemediationBoundReached = "remediation_bound_reached"
-	// ArmProblemsUnowned is retired: it refused an approval while the check's window held a
-	// group no one owns: NEW, SEEN BEFORE, or RECURRED after its fix.
+	// ArmProblemsUnowned is DEPRECATED and never answered (2026-11-19): it
+	// refused an approval while the check's window held a group no one owned.
+	// The mediator alone decides an approval now. It stays named because the
+	// protobuf still declares its arm.
 	ArmProblemsUnowned = "problems_unowned"
 	// ArmProblemsRecurring refuses anything but an escalation while the
 	// check's window holds a group that came back after more than
@@ -941,7 +943,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	// THE MEDIATOR ALONE DECIDES WHETHER A DEPLOY IS APPROVED (owner ruling,
 	// 2026-11-19): an approval is never judged against the window's records.
 	// A DISPATCH of a problem past its fixes is still refused (owner ruling,
-	// 2026-11-16): a fix that came back more than twice is the user's.
+	// 2026-11-16): a fix that came back more than five times is the user's.
 	if recurring := recurringGroups(window); d.Kind == MediationDispatch && len(recurring) > 0 {
 		refusal := &RefusalError{Arm: ArmProblemsRecurring, Workspace: ws,
 			Reason: fmt.Sprintf("the window holds %d groups that came back after more than %d of their fixes deployed; escalate", len(recurring), maxFixesBeforeEscalation),
@@ -1135,9 +1137,10 @@ func (o *orchestrator) toldWindow(ctx context.Context, repo wsm.RepoKey, fields 
 }
 
 // maxFixesBeforeEscalation is how many fixes of one problem may deploy
-// before its recurrence is the user's (owner ruling, 2026-11-16): a problem
-// that comes back after more than two is escalated, never dispatched again.
-const maxFixesBeforeEscalation = 2
+// before its recurrence is the user's (owner rulings, 2026-11-16 and
+// 2026-11-19, which raised it from two): a problem that comes back after
+// more than five is escalated, never dispatched again.
+const maxFixesBeforeEscalation = 5
 
 // pastItsFixes reports whether a group of CLASS whose problem's fixes
 // deployed FIXES times came back past what a remediation may try.

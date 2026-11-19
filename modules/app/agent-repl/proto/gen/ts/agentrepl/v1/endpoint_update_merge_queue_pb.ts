@@ -731,9 +731,11 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
     case: "remediationBoundReached";
   } | {
     /**
-     * An approval while the check's window holds a warning or error no one
-     * owns: a NEW one, an old one nobody owns, or one that came back after
-     * its fix deployed. Dispatch or escalate them instead.
+     * DEPRECATED (2026-11-19): never answered. It refused an approval while
+     * the check's window held a warning or error no one owned. The deploy
+     * mediator alone now decides whether a deploy is approved, so no approval
+     * is refused on what its window holds. The arm stays declared so a
+     * client built before the change still decodes it.
      *
      * @generated from field: agentrepl.v1.UpdateMergeQueueProblemsUnowned problems_unowned = 19;
      */
@@ -741,9 +743,9 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
     case: "problemsUnowned";
   } | {
     /**
-     * An approval or a dispatch while the check's window holds a problem that
-     * came back after more than two of its fixes deployed: only an
-     * escalation is accepted (owner ruling, 2026-11-16).
+     * A dispatch while the check's window holds a problem that came back
+     * after more than five of its fixes deployed: only an escalation is
+     * accepted. An approval is never refused for it.
      *
      * @generated from field: agentrepl.v1.UpdateMergeQueueProblemsRecurring problems_recurring = 20;
      */
@@ -967,7 +969,8 @@ export const UpdateMergeQueueNoRepairTurnSchema: GenMessage<UpdateMergeQueueNoRe
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 30);
 
 /**
- * The unowned-problems refusal.
+ * The unowned-problems refusal. DEPRECATED (2026-11-19): never answered; see
+ * UpdateMergeQueueError.problems_unowned.
  *
  * @generated from message agentrepl.v1.UpdateMergeQueueProblemsUnowned
  */
@@ -995,7 +998,7 @@ export const UpdateMergeQueueProblemsUnownedSchema: GenMessage<UpdateMergeQueueP
  */
 export type UpdateMergeQueueProblemsRecurring = Message<"agentrepl.v1.UpdateMergeQueueProblemsRecurring"> & {
   /**
-   * Each group that came back after more than two of its fixes deployed, as
+   * Each group that came back after more than five of its fixes deployed, as
    * "OPERATION: MESSAGE (FIXES fixes)", in the window's order.
    *
    * @generated from field: repeated string groups = 1;

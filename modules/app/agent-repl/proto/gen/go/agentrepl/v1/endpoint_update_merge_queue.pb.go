@@ -1531,16 +1531,18 @@ type UpdateMergeQueueError_RemediationBoundReached struct {
 }
 
 type UpdateMergeQueueError_ProblemsUnowned struct {
-	// An approval while the check's window holds a warning or error no one
-	// owns: a NEW one, an old one nobody owns, or one that came back after
-	// its fix deployed. Dispatch or escalate them instead.
+	// DEPRECATED (2026-11-19): never answered. It refused an approval while
+	// the check's window held a warning or error no one owned. The deploy
+	// mediator alone now decides whether a deploy is approved, so no approval
+	// is refused on what its window holds. The arm stays declared so a
+	// client built before the change still decodes it.
 	ProblemsUnowned *UpdateMergeQueueProblemsUnowned `protobuf:"bytes,19,opt,name=problems_unowned,json=problemsUnowned,proto3,oneof"`
 }
 
 type UpdateMergeQueueError_ProblemsRecurring struct {
-	// An approval or a dispatch while the check's window holds a problem that
-	// came back after more than two of its fixes deployed: only an
-	// escalation is accepted (owner ruling, 2026-11-16).
+	// A dispatch while the check's window holds a problem that came back
+	// after more than five of its fixes deployed: only an escalation is
+	// accepted. An approval is never refused for it.
 	ProblemsRecurring *UpdateMergeQueueProblemsRecurring `protobuf:"bytes,20,opt,name=problems_recurring,json=problemsRecurring,proto3,oneof"`
 }
 
@@ -2055,7 +2057,8 @@ func (*UpdateMergeQueueNoRepairTurn) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{30}
 }
 
-// The unowned-problems refusal.
+// The unowned-problems refusal. DEPRECATED (2026-11-19): never answered; see
+// UpdateMergeQueueError.problems_unowned.
 type UpdateMergeQueueProblemsUnowned struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Each unowned group, as "OPERATION: MESSAGE (CLASS)", in the window's
@@ -2105,7 +2108,7 @@ func (x *UpdateMergeQueueProblemsUnowned) GetGroups() []string {
 // The recurring-problems refusal.
 type UpdateMergeQueueProblemsRecurring struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Each group that came back after more than two of its fixes deployed, as
+	// Each group that came back after more than five of its fixes deployed, as
 	// "OPERATION: MESSAGE (FIXES fixes)", in the window's order.
 	Groups        []string `protobuf:"bytes,1,rep,name=groups,proto3" json:"groups,omitempty"`
 	unknownFields protoimpl.UnknownFields

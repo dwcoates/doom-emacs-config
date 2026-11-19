@@ -92,7 +92,7 @@ JSON
   - The queue lands nothing until this workspace's fix deploys and is approved, or the user releases the queue.
 - The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval (owner ruling, 2026-11-19).
 - agent-repl still refuses a dispatch in two cases, and each means escalate.
-  - A problem came back after more than two of its fixes deployed (`problems_recurring`): that problem is the user's.
+  - A problem came back after more than five of its fixes deployed (`problems_recurring`): that problem is the user's.
   - The chain has deployed its bound of remediations in a row (`remediation_bound_reached`).
 
 ### Fix a dispatch, and finish on your own
