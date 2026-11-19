@@ -1,7 +1,6 @@
 package footer
 
 import (
-	"errors"
 	"time"
 
 	"fmt"
@@ -246,11 +245,8 @@ func (r *resolver) resolveUnboundLocked(ws ids.WorkspaceID, s *wsState) (dlog.Lo
 			dlog.Context{"workspace_id": string(ws), "cause": err.Error()})
 		return nil, false
 	}
-	log, err := r.log.Workspace(dir)
-	switch {
-	case errors.Is(err, dlog.ErrWorkspaceDirGone):
-		log = r.log.WorkspaceOrCentral(dir)
-	case err != nil:
+	log, err := dlog.WorkspaceUnlessGone(r.log, dir)
+	if err != nil {
 		r.log.Global().Debug("daemon.footer.resolve_unbound", "an unbound workspace's log sink could not be opened",
 			dlog.Context{"workspace_id": string(ws), "workspace_dir": dir, "cause": err.Error()})
 		return nil, false
