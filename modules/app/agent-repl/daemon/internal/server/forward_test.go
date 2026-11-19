@@ -160,6 +160,7 @@ func TestNewRefusesNoForwardingClientOrSharedAddressSource(t *testing.T) {
 	}{
 		{name: "no forwarding client", without: func(d *Deps) { d.Forward = nil }, want: "the forwarding client"},
 		{name: "no shared address source", without: func(d *Deps) { d.SharedAddress = nil }, want: "a shared address source"},
+		{name: "no daemon instance address lookup", without: func(d *Deps) { d.InstanceAddress = nil }, want: "the daemon instance address lookup"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

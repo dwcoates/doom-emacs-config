@@ -107,7 +107,7 @@ func TestOpenTabsWaitsForTheWorkspacesPageToDraw(t *testing.T) {
 		t.Fatalf("WatchPage = error %v", err)
 	}
 	frames := pageFrames(t, ctx, pageStream)
-	awaitPageFrame(t, ctx, frames, "the attachment latch")
+	attachment := awaitPageFrame(t, ctx, frames, "the attachment latch").GetAttached().GetAttachment()
 	open := d.OpenTabs(loadingPageOpen(ws))
 	waitCtx, cancel := d.WaitCtx()
 	defer cancel()
@@ -120,7 +120,7 @@ func TestOpenTabsWaitsForTheWorkspacesPageToDraw(t *testing.T) {
 
 	// Act: the page watches the workspace's footer, then reports it drawn.
 	if _, err := d.Client().SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
-		Page: "page-1", Subscription: "footer",
+		Page: "page-1", Subscription: "footer", Attachment: attachment,
 		Request: &agentreplv1.SubscribePageRequest_Footer{Footer: &agentreplv1.WatchFooterRequest{Workspace: ws}},
 	})); err != nil {
 		t.Fatalf("SubscribePage = error %v", err)

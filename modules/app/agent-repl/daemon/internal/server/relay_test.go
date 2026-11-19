@@ -224,10 +224,13 @@ func TestRelayTargetNamesTheDaemonAViewIsServedFrom(t *testing.T) {
 		name     string
 		watch    pageWatch
 		standing workspace.Standing
-		want     string
+		// successor is the daemon a handover in flight hands workspaces to.
+		successor string
+		want      string
 	}{
 		{name: "a view of the daemon itself is never relayed", watch: pageWatch{Name: "WatchDaemon"}, standing: workspace.StandingNotYetAdopted},
 		{name: "a workspace this daemon serves is served here", watch: pageWatch{Name: "WatchFooter", Workspace: "ws-1", Relay: relay}, standing: workspace.StandingOwned},
+		{name: "a workspace handed to a successor is relayed from the successor", watch: pageWatch{Name: "WatchFooter", Workspace: "ws-1", Relay: relay}, standing: workspace.StandingTransferringAway, successor: "127.0.0.1:3", want: "127.0.0.1:3"},
 		{name: "a workspace another daemon serves is relayed from it", watch: pageWatch{Name: "WatchFooter", Workspace: "ws-1", Relay: relay}, standing: workspace.StandingNotYetAdopted, want: "127.0.0.1:1"},
 		{name: "a feed tail another running daemon pinned is relayed from it", watch: pageWatch{Name: "WatchFeed", Minter: "daemon-there", Relay: relay}, standing: workspace.StandingOwned, want: "127.0.0.1:2"},
 		{name: "a feed tail this daemon pinned is served here", watch: pageWatch{Name: "WatchFeed", Minter: string(testInstance), Relay: relay}, standing: workspace.StandingOwned},
@@ -238,7 +241,7 @@ func TestRelayTargetNamesTheDaemonAViewIsServedFrom(t *testing.T) {
 			// Arrange
 			h := newHarness(t, func(d *Deps) {
 				d.Ownership = &fakeOwnership{standing: tc.standing}
-				d.SuccessorAddress = func() string { return "" }
+				d.SuccessorAddress = func() string { return tc.successor }
 				d.ServingElsewhere = func(context.Context, ids.WorkspaceID) (string, bool, error) {
 					return "127.0.0.1:1", true, nil
 				}
