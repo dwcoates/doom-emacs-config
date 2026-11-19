@@ -38,12 +38,11 @@
 (declare-function agent-repl--ws-by-ref-id "workspace" (id))
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl-serial-create "core" (&rest slots))
-(declare-function agent-repl-serial-send "core" (serial report send))
+(declare-function agent-repl-serial-send-to-newest "core" (serial report scope label send))
 (declare-function agent-repl--info "core" (ws fmt &rest args))
 (declare-function agent-repl--log-verbose "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl--error "core" (ws fmt &rest args))
-(declare-function agent-repl-link-newest "daemon-link" ())
 (declare-function agent-repl-rpc-report-editor-focus "rpc" (conn request &rest keys))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (defvar agent-repl--global-log-scope)
@@ -108,23 +107,17 @@ tell: the link edge that answers the next daemon reports again
 Emacs held when it was built.  While a report is in flight, the
 new one is OWED and sent when that one is answered
 \(`agent-repl--focus-serial')."
-  (let ((conn (agent-repl-link-newest)))
-    (if (null conn)
-        (agent-repl--log agent-repl--focus-log-scope
-                         "elisp.notifications.focus-report skipped reason=no-link")
-      (when (eq (agent-repl-serial-send
-                 agent-repl--focus-serial #'agent-repl--focus-report
-                 (lambda (done)
-                   (let ((focused (and (agent-repl--emacs-focused-p) t)))
-                     (agent-repl--info agent-repl--focus-log-scope
-                                       "elisp.notifications.focus-report send focused=%s" focused)
-                     (agent-repl-rpc-report-editor-focus
-                      conn (list :focus (agent-repl-wire-editor-focus focused))
-                      :on-response (lambda (response) (agent-repl--focus-report-answered focused response done))
-                      :on-failure (lambda (detail) (agent-repl--focus-report-failed focused detail done))))))
-                :owed)
-        (agent-repl--log agent-repl--focus-log-scope
-                         "elisp.notifications.focus-report owed reason=in-flight")))))
+  (agent-repl-serial-send-to-newest
+   agent-repl--focus-serial #'agent-repl--focus-report
+   agent-repl--focus-log-scope "notifications.focus-report"
+   (lambda (conn done)
+     (let ((focused (and (agent-repl--emacs-focused-p) t)))
+       (agent-repl--info agent-repl--focus-log-scope
+                         "elisp.notifications.focus-report send focused=%s" focused)
+       (agent-repl-rpc-report-editor-focus
+        conn (list :focus (agent-repl-wire-editor-focus focused))
+        :on-response (lambda (response) (agent-repl--focus-report-answered focused response done))
+        :on-failure (lambda (detail) (agent-repl--focus-report-failed focused detail done)))))))
 
 (defun agent-repl--focus-report-answered (focused response done)
   "Record the daemon's RESPONSE to a report of FOCUSED, then end it with DONE.

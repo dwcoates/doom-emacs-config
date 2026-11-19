@@ -7748,6 +7748,48 @@ the page read."
 
 ;;;; ---- Serialized reports ----
 
+;;;; ---- Daemon-wide reports to the newest daemon ----
+
+(ert-deftest agent-repl-test-core-send-to-newest-hands-the-newest-link-to-send ()
+  "A report runs SEND with the newest daemon's connection."
+  (let ((serial (agent-repl-serial-create))
+        (got nil))
+    (cl-letf (((symbol-function 'agent-repl-link-newest) (lambda () 'newest)))
+      (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report"
+                                        (lambda (conn _done) (setq got conn))))
+    (should (eq got 'newest))))
+
+(ert-deftest agent-repl-test-core-send-to-newest-with-no-link-records-the-skip ()
+  "With no daemon the report sends nothing and records why."
+  (let ((serial (agent-repl-serial-create))
+        (sent nil)
+        (records nil))
+    (cl-letf (((symbol-function 'agent-repl-link-newest) #'ignore)
+              ((symbol-function 'agent-repl--log) (agent-repl-test--record-leveled-into records 'debug)))
+      (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report" (lambda (&rest _) (setq sent t))))
+    (should-not sent)
+    (should (equal records '((debug . "elisp.x.report skipped reason=no-link"))))))
+
+(ert-deftest agent-repl-test-core-send-to-newest-in-flight-records-the-debt ()
+  "A report while one is in flight is owed, and recorded as owed."
+  (let ((serial (agent-repl-serial-create))
+        (sent 0)
+        (records nil))
+    (cl-letf (((symbol-function 'agent-repl-link-newest) (lambda () 'newest))
+              ((symbol-function 'agent-repl--log) (agent-repl-test--record-leveled-into records 'debug)))
+      (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report" (lambda (&rest _) (cl-incf sent)))
+      (agent-repl-serial-send-to-newest serial #'ignore 'scope "x.report" (lambda (&rest _) (cl-incf sent))))
+    (should (= sent 1))
+    (should (agent-repl-serial-owed serial))
+    (should (equal records '((debug . "elisp.x.report owed reason=in-flight"))))))
+
+(ert-deftest agent-repl-test-core-daemon-wide-reports-share-one-dispatch ()
+  "Every daemon-wide report dispatches through `agent-repl-serial-send-to-newest'.
+A reporter that read the newest link itself would drift from the others."
+  (dolist (fn '(agent-repl--focus-report agent-repl--recency-reach-report))
+    (should (string-match-p "agent-repl-serial-send-to-newest" (format "%S" (symbol-function fn))))
+    (should-not (string-match-p "(agent-repl-link-newest)" (format "%S" (symbol-function fn))))))
+
 (ert-deftest agent-repl-test-core-serial-sends-when-nothing-is-in-flight ()
   "With nothing in flight the send runs at once."
   (let ((serial (agent-repl-serial-create))

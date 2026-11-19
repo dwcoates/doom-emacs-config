@@ -29,7 +29,7 @@
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--error "core")
 (declare-function agent-repl-serial-create "core")
-(declare-function agent-repl-serial-send "core" (serial report send))
+(declare-function agent-repl-serial-send-to-newest "core" (serial report scope label send))
 (declare-function agent-repl--ws-current-name "workspace")
 (declare-function agent-repl--ws-add-activated-hook "workspace" (fn))
 (declare-function agent-repl--drawn-tab-names "commands")
@@ -37,7 +37,6 @@
 (declare-function agent-repl--ring-walk "commands" (all drawn current step))
 (declare-function agent-repl-host-pending-selection "host")
 (declare-function agent-repl-host-ref "host" (ws))
-(declare-function agent-repl-link-newest "daemon-link")
 (declare-function agent-repl-rpc-report-recency-reach "rpc" (conn request &rest keys))
 
 (defvar agent-repl-roster-update-functions)
@@ -121,16 +120,10 @@ computed once that settles rather than at every step.")
   "Report the walk's reach to the newest daemon, when it changed.
 With no link there is no stream to belong to, and the link edge that
 answers the next daemon reports again (`agent-repl--recency-reach-on-link')."
-  (let ((conn (agent-repl-link-newest)))
-    (if (null conn)
-        (agent-repl--log agent-repl--recency-reach-log-scope
-                         "elisp.recency-reach.report skipped reason=no-link")
-      (when (eq (agent-repl-serial-send
-                 agent-repl--recency-reach-serial #'agent-repl--recency-reach-report
-                 (lambda (done) (agent-repl--recency-reach-send conn done)))
-                :owed)
-        (agent-repl--log agent-repl--recency-reach-log-scope
-                         "elisp.recency-reach.report owed reason=in-flight")))))
+  (agent-repl-serial-send-to-newest
+   agent-repl--recency-reach-serial #'agent-repl--recency-reach-report
+   agent-repl--recency-reach-log-scope "recency-reach.report"
+   #'agent-repl--recency-reach-send))
 
 (defun agent-repl--recency-reach-send (conn done)
   "Send CONN the current reach unless the daemon already holds it; then DONE."
