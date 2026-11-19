@@ -923,6 +923,24 @@ Kept with its text properties, so an image in the draft comes back too.")
   (let ((buf (agent-repl--input-buffer ws)))
     (and buf (buffer-local-value 'agent-repl--input-question-standing buf))))
 
+(defun agent-repl--input-set-aside (ws)
+  "Set the current composer's contents aside for WS, and answer what was set.
+THE ONE SET-ASIDE a composer makes when something else takes it over: the
+contents are saved to WS's history as the discard saves them
+\(`agent-repl--input-save-to-history' with DISCARD, so the up arrow brings
+them back) and erased.  Answers nil over a blank composer, else the plist
+\(:text TEXT :entry ENTRY): TEXT is the contents with their text
+properties, so an image comes back too, and ENTRY is the very history item
+the save added, or nil when it added none (the words were already the
+ring's head)."
+  (let ((draft (unless (string-blank-p (buffer-string)) (buffer-string))))
+    (agent-repl--input-save-to-history ws t)
+    (erase-buffer)
+    (when draft
+      (list :text draft
+            :entry (and (eq (car agent-repl--input-history) agent-repl--history-discard-entry)
+                        (car agent-repl--input-history))))))
+
 (defun agent-repl-input-response-question (ws change)
   "Follow CHANGE of WS's question about a final response in its composer.
 CHANGE is the host push's arm: `:asked', `:moved', `:withdrawn' or `:taken'
@@ -937,11 +955,9 @@ is a broken decoder, and is fatal."
       (with-current-buffer buf
         (pcase change
           (:asked
-           (let ((draft (unless (string-blank-p (buffer-string)) (buffer-string))))
-             (agent-repl--input-save-to-history ws t)
-             (erase-buffer)
-             (setq agent-repl--input-question-draft draft
-                   agent-repl--input-question-standing t)))
+           (setq agent-repl--input-question-draft
+                 (plist-get (agent-repl--input-set-aside ws) :text)
+                 agent-repl--input-question-standing t))
           (:moved
            (setq agent-repl--input-question-standing t))
           (:withdrawn

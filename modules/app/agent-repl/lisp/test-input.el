@@ -5959,6 +5959,76 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
                           (agent-repl--input-rollback-confirmation
                            (agent-repl-test-input--plan) (agent-repl-test-input--resend-of "x")))))
 
+;;;; ---- Setting the composer's contents aside ----
+
+(ert-deftest agent-repl-input-set-aside-erases-the-composer ()
+  "Setting aside leaves the composer empty."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    ;; Act
+    (with-current-buffer buf (agent-repl--input-set-aside "ws-q"))
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) ""))))
+
+(ert-deftest agent-repl-input-set-aside-answers-the-text-with-its-properties ()
+  "The answer's text keeps its text properties, so an image comes back."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert (propertize "my draft" 'agent-repl-test-mark t)))
+    ;; Act
+    (let ((set (with-current-buffer buf (agent-repl--input-set-aside "ws-q"))))
+      ;; Assert
+      (should (equal (plist-get set :text) "my draft"))
+      (should (get-text-property 0 'agent-repl-test-mark (plist-get set :text))))))
+
+(ert-deftest agent-repl-input-set-aside-answers-the-history-item-it-added ()
+  "The answer's entry is the very history item the save pushed."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    ;; Act
+    (let ((set (with-current-buffer buf (agent-repl--input-set-aside "ws-q"))))
+      ;; Assert
+      (should (eq (plist-get set :entry)
+                  (car (buffer-local-value 'agent-repl--input-history buf))))
+      (should (equal (plist-get set :entry) "my draft")))))
+
+(ert-deftest agent-repl-input-set-aside-of-the-ring-head-answers-no-entry ()
+  "Words already at the ring's head add no item, so no entry is answered."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf
+      (setq agent-repl--input-history (list "sent before"))
+      (insert "sent before"))
+    ;; Act
+    (let ((set (with-current-buffer buf (agent-repl--input-set-aside "ws-q"))))
+      ;; Assert
+      (should (equal (plist-get set :text) "sent before"))
+      (should-not (plist-get set :entry))
+      (should (equal (agent-repl-test-input--question-history buf) '("sent before"))))))
+
+(ert-deftest agent-repl-input-set-aside-of-a-blank-composer-answers-nil ()
+  "A blank composer has nothing to set aside, and adds no history item."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "  "))
+    ;; Act / Assert
+    (should-not (with-current-buffer buf (agent-repl--input-set-aside "ws-q")))
+    (should-not (agent-repl-test-input--question-history buf))))
+
+(ert-deftest agent-repl-input-set-aside-is-shared-by-every-takeover ()
+  "An asked question sets the draft aside through the helper."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (let (calls)
+      (cl-letf (((symbol-function 'agent-repl--input-set-aside)
+                 (lambda (ws) (push ws calls) nil)))
+        ;; Act
+        (agent-repl-input-response-question "ws-q" :asked))
+      ;; Assert
+      (should (equal calls '("ws-q"))))))
+
 ;;;; ---- A question about a final response ----
 
 (defmacro agent-repl-test-input--with-question (&rest body)
