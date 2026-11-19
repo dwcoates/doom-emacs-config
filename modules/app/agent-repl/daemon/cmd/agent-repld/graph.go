@@ -48,6 +48,7 @@ import (
 	"agent-repld/internal/heldingress"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
@@ -999,11 +1000,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			if queue := coldGates; queue != nil {
 				queue.ColdGateRaised(ws)
 			}
-		},
-		ColdGateRetired: func(ws ids.WorkspaceID) {
-			if queue := coldGates; queue != nil {
-				queue.ColdGateRetired(ws)
-			}
 			// A GATE ON A STANDING DEPLOY CHECK IS ANSWERED AT ONCE, off the
 			// raise (owner ruling, 2026-11-17): no deploy check waits on one.
 			inflight.Go(func() {
@@ -1011,6 +1007,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 					log.Error("daemon.workspace.deploy_checks", "the cold gate on a standing deploy check could not be answered", dlog.Context{"workspace": string(ws), "cause": err.Error()})
 				}
 			})
+		},
+		ColdGateRetired: func(ws ids.WorkspaceID) {
+			if queue := coldGates; queue != nil {
+				queue.ColdGateRetired(ws)
+			}
 		},
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
