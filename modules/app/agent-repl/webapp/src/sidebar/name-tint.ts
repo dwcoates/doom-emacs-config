@@ -29,6 +29,7 @@
  */
 import nameFade from "../../../proto/vocab/name-fade.json";
 import { rosterStatusColor, toneClass } from "../vocab.js";
+import { placeOneShot } from "../animation-delays.js";
 
 /** The class of a name held at its status tone (a turn is running). */
 export const NAME_STEADY_CLASS = "tinted";
@@ -87,6 +88,5 @@ export function applyNameTint(label: HTMLElement, tint: NameTint | null): void {
     return;
   }
   label.classList.add(NAME_FADING_CLASS);
-  label.style.setProperty(NAME_FADE_PROPERTY, `${NAME_FADE_MS}ms`);
-  label.style.setProperty(NAME_FADE_DELAY_PROPERTY, `-${Math.round(tint.elapsedMs)}ms`);
+  placeOneShot(label, NAME_FADE_PROPERTY, NAME_FADE_MS, NAME_FADE_DELAY_PROPERTY, tint.elapsedMs);
 }

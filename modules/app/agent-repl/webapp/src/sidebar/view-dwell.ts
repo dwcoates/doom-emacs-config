@@ -22,6 +22,7 @@
 import type { RosterRowViewDwell } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../rpc/malformed.js";
 import { msOf } from "../rpc/strict.js";
+import { placeOneShot } from "../animation-delays.js";
 
 /** The class of a name receding over the view dwell; the ink box keys on it. */
 export const VIEW_DWELL_CLASS = "viewing";
@@ -54,6 +55,5 @@ export function viewDwellElapsedMs(dwell: ViewDwell, nowMs: number): number {
 /** Draw DWELL on the name LABEL, as of NOW. */
 export function applyViewDwell(label: HTMLElement, dwell: ViewDwell, nowMs: number): void {
   label.classList.add(VIEW_DWELL_CLASS);
-  label.style.setProperty(VIEW_DWELL_PROPERTY, `${dwell.lengthMs}ms`);
-  label.style.setProperty(VIEW_DWELL_DELAY_PROPERTY, `-${Math.round(viewDwellElapsedMs(dwell, nowMs))}ms`);
+  placeOneShot(label, VIEW_DWELL_PROPERTY, dwell.lengthMs, VIEW_DWELL_DELAY_PROPERTY, viewDwellElapsedMs(dwell, nowMs));
 }

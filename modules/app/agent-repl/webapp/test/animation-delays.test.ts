@@ -13,11 +13,14 @@ import {
   cssTimeMs,
   nth,
   partAnimations,
+  placeOneShot,
   restartAnimations,
   writeDelays,
 } from "../src/animation-delays.js";
 import { captureLogRecords, forwardedRecord } from "./log-capture.js";
 import { codeUnder } from "./files-under.js";
+import { readFileSync } from "node:fs";
+import { codeOf } from "./source-text.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -222,6 +225,36 @@ describe("the call sites", () => {
 
       // Assert
       expect(shape).toEqual([true, false]);
+    },
+  );
+});
+
+describe("placeOneShot", () => {
+  it.each([
+    { name: "hands the element the length and minus the time already run", elapsed: 1_250, want: ["5000ms", "-1250ms"] },
+    { name: "reads a run not yet begun as no delay at all", elapsed: 0, want: ["5000ms", "0ms"] },
+    { name: "places the animation to the whole millisecond", elapsed: 1_249.6, want: ["5000ms", "-1250ms"] },
+  ])("$name", ({ elapsed, want }) => {
+    // Arrange
+    const el = document.createElement("span");
+
+    // Act
+    placeOneShot(el, "--length", 5_000, "--delay", elapsed);
+
+    // Assert
+    expect([el.style.getPropertyValue("--length"), el.style.getPropertyValue("--delay")]).toEqual(want);
+  });
+
+  // EVERY ONE-SHOT IS PLACED BY THE ONE HELPER: a site that spells its own
+  // length and negative delay would drift from the others' format.
+  it.each(["sidebar/name-tint.ts", "sidebar/view-dwell.ts", "sidebar/fold-fade.ts", "sidebar/selection-fade.ts"])(
+    "places %s's one-shot through placeOneShot",
+    (file) => {
+      // Arrange
+      const code = codeOf(readFileSync(path.join(here, "../src", file), "utf8"));
+
+      // Act / Assert
+      expect([code.includes("placeOneShot("), /setProperty\([^)]*`\$\{-|setProperty\([^)]*`-\$\{/.test(code)]).toEqual([true, false]);
     },
   );
 });

@@ -33,6 +33,7 @@
  */
 import { drawnRowsOf } from "./drawn-rows.js";
 import { log } from "../log.js";
+import { placeOneShot } from "../animation-delays.js";
 
 /** How long the highlighted row's number takes to rise into white, in milliseconds. */
 export const SELECTION_NUMBER_RISE_MS = 500;
@@ -105,8 +106,7 @@ export function createSelectionFade(root: ParentNode, now: () => number = () => 
     }
     if (running === null) return;
     const { animation } = running.fade;
-    row.style.setProperty(animation.durationProperty, `${animation.ms}ms`);
-    row.style.setProperty(animation.delayProperty, `${-running.elapsed}ms`);
+    placeOneShot(row, animation.durationProperty, animation.ms, animation.delayProperty, running.elapsed);
     row.classList.add(animation.className);
   };
 

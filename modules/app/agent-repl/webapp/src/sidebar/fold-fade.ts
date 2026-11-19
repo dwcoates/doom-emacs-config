@@ -20,6 +20,7 @@
  */
 import { drawnRowsOf } from "./drawn-rows.js";
 import { log } from "../log.js";
+import { placeOneShot } from "../animation-delays.js";
 import { SURFACED_ROW_CLASS } from "./row.js";
 
 /** How long a row a fold stops drawing takes to fade away, in milliseconds. */
@@ -65,8 +66,7 @@ export function createFoldFade(
       }
       return;
     }
-    row.style.setProperty(FOLD_FADE_DURATION_PROPERTY, `${FOLD_FADE_MS}ms`);
-    row.style.setProperty(FOLD_FADE_DELAY_PROPERTY, `${-(now() - start)}ms`);
+    placeOneShot(row, FOLD_FADE_DURATION_PROPERTY, FOLD_FADE_MS, FOLD_FADE_DELAY_PROPERTY, now() - start);
     row.classList.add(SURFACED_ROW_CLASS, FOLD_FADING_CLASS);
   };
 
