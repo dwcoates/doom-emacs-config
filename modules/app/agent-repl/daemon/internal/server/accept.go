@@ -94,6 +94,7 @@ func (w *acceptWriter) accept(contentType string) {
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
+	w.Header().Set(AcceptedHeader, "1")
 	if w.frames != nil && w.tag != "" {
 		w.counter = w.frames.register(w.tag)
 	}
@@ -145,6 +146,23 @@ func withAcceptNotifier(ctx context.Context, notify func()) context.Context {
 	return context.WithValue(ctx, acceptNotifierKey{}, notify)
 }
 
+// acceptHookKey carries a function run when the stream is accepted, in
+// addition to the acceptance itself.
+type acceptHookKey struct{}
+
+// withAcceptHook arms HOOK to run when the stream serving CTX is accepted,
+// before its acceptance is stated. Unlike withAcceptNotifier it replaces
+// nothing: the stream still flushes its own headers.
+func withAcceptHook(ctx context.Context, hook func()) context.Context {
+	return context.WithValue(ctx, acceptHookKey{}, hook)
+}
+
+// acceptHookFrom answers the hook armed for the stream, nil for none.
+func acceptHookFrom(ctx context.Context) func() {
+	hook, _ := ctx.Value(acceptHookKey{}).(func())
+	return hook
+}
+
 // acceptNotifierFrom answers the acceptance signal armed for a muxed
 // subscription, nil for a stream serving its own request.
 func acceptNotifierFrom(ctx context.Context) func() {
@@ -156,6 +174,9 @@ func acceptNotifierFrom(ctx context.Context) func() {
 // accepted. It is called AFTER the subscription is registered and AFTER every
 // refusal has been answered, so a refused open stays a refusal.
 func (s *server) acceptStream(ctx context.Context, rpc string) {
+	if hook := acceptHookFrom(ctx); hook != nil {
+		hook()
+	}
 	if notify := acceptNotifierFrom(ctx); notify != nil {
 		notify()
 		s.log.Debug(rpc, "a muxed subscription was accepted on its page's stream", nil)

@@ -657,6 +657,9 @@ func newResolver(deps Deps) (*resolver, error) {
 	if deps.Log == nil {
 		return nil, errors.New("feed: Deps.Log is required")
 	}
+	if deps.Instance == "" {
+		return nil, errors.New("feed: Deps.Instance is required")
+	}
 	if deps.WorkspaceDir == nil {
 		return nil, errors.New("feed: Deps.WorkspaceDir is required")
 	}

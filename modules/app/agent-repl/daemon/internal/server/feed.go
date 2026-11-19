@@ -133,6 +133,13 @@ func (s *server) watchFeed(
 		return err
 	}
 	token := msg.GetWatch()
+	// A TOKEN ANOTHER DAEMON MINTED IS UNKNOWN HERE (FeedWatchToken.instance).
+	// It reaches this daemon only when its minter no longer runs
+	// (forward.go instanceTarget), and the client opens the feed again.
+	if token.GetInstance() != string(s.deps.Instance) {
+		return TransportClosed(s.log, rpc, "unknown_token",
+			fmt.Sprintf("feed watch token %q was minted by daemon %q, not this one", token.GetValue(), token.GetInstance()), true)
+	}
 	target, known := s.tokenTargetFor(token.GetValue())
 	if !known {
 		return TransportClosed(s.log, rpc, "unknown_token",

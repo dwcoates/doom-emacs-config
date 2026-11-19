@@ -113,8 +113,7 @@ Kept current so a compaction loses nothing. Order of work:
 1. Protos and regenerated bindings.
 2. Daemon: attachment mint and check, routing by instance, body relay with
    acceptance, relay ending, page registration at the serving daemon, feed
-   token instance, adopt routing by serving row, newer attach replaces older,
-   failed yield resumes accepting, accept-gap metric.
+   token instance, adopt routing by serving row, newer attach replaces older.
 3. Webapp: stamp the attachment, `page_gone`, the `moved` ending.
 4. Fakes and tests: Go unit, webapp vitest, daemon integration, elisp fake.
 5. Changelog line, metrics catalog, finish (one landing).
@@ -131,3 +130,12 @@ Dropped, with reasons:
   routed by attachment, and it strands pages if the yield fails.
 - Holding an early subscribe on the successor until the page attaches: a timer
   in place of a fact the attachment states.
+- Resuming the shared accept after a failed claim yield: after
+  `daemonaddr.claim.Yield()` fails, whether this daemon still holds the claim
+  is unknowable from inside it, so resuming could leave two daemons accepting.
+  A flock release is a mechanism expected to be reliable; its failure is
+  recorded at ERROR (`rollout.controller.yieldToSuccessor`) and no fallback
+  is built around it.
+- A metric for the gap between the yield and the successor's first accept: it
+  was to size the reconnect burst that ending every page at the yield would
+  have caused, and that design was dropped.

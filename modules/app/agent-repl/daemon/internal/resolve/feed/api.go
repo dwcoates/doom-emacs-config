@@ -468,6 +468,11 @@ type ImageResolver func(*conversationv1.ImageBlock) (src string, alt string, err
 type Deps struct {
 	// Log is the daemon's logging surface. Required.
 	Log dlog.Surfaces
+	// Instance is this daemon process's identity, which every watch token it
+	// mints names (FeedWatchToken.instance): a tail's pin lives in the daemon
+	// that minted its token, and two daemons run side by side at a handover.
+	// Required.
+	Instance ids.InstanceID
 	// Stalls is the lock stall watchdog the resolver's mutex is registered
 	// with. OPTIONAL: nil leaves it unwatched, which is what every test that
 	// does not exercise it leaves it. Production always wires it: every
