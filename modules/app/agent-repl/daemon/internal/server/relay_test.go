@@ -28,6 +28,14 @@ import (
 // own.
 const relayBound = 2 * time.Second
 
+// pagesHeld answers how many holders SURFACE counts for page ID: its own
+// stream here, and every relayed subscription run here for it.
+func pagesHeld(surface *server, id string) int {
+	surface.mu.Lock()
+	defer surface.mu.Unlock()
+	return surface.pagePresence[id]
+}
+
 // servingElsewhereAt builds a surface that does not serve the test workspace,
 // whose serving row names the daemon at TARGET.
 func servingElsewhereAt(t *testing.T, target string) *harness {
@@ -280,9 +288,7 @@ func TestARelayedStreamHoldsItsPageConnectedToItsWorkspaceHere(t *testing.T) {
 	}
 
 	// Assert
-	surface.mu.Lock()
-	present := surface.pagePresence["page-1"]
-	surface.mu.Unlock()
+	present := pagesHeld(surface, "page-1")
 	if present != 1 {
 		t.Fatalf("the relayed page is held %d times here, want 1", present)
 	}
@@ -313,9 +319,7 @@ func TestHoldRelayedPageHoldsFromAcceptanceUntilRelease(t *testing.T) {
 			tc.act(accepted, release)
 
 			// Assert
-			surface.mu.Lock()
-			present := surface.pagePresence["page-1"]
-			surface.mu.Unlock()
+			present := pagesHeld(surface, "page-1")
 			if present != tc.want {
 				t.Fatalf("the page is held %d times, want %d", present, tc.want)
 			}

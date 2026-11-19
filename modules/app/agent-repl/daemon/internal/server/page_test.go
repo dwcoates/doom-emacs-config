@@ -742,9 +742,7 @@ func TestDetachingAReplacedStreamLeavesItsReplacementAttached(t *testing.T) {
 	if held, _ := surface.pageFor("page-1"); held != newer {
 		t.Fatal("the replaced stream's detach removed its replacement")
 	}
-	surface.mu.Lock()
-	present := surface.pagePresence["page-1"]
-	surface.mu.Unlock()
+	present := pagesHeld(surface, "page-1")
 	if present != 1 {
 		t.Fatalf("the page is held %d times after the replaced stream detached, want 1", present)
 	}
