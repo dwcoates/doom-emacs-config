@@ -218,7 +218,7 @@ func TestTailRefusesATokenThisDaemonNeverMinted(t *testing.T) {
 
 	// Act.
 	_, err := h.resolver.Tail(context.Background(), testWorkspace, rootFeed(),
-		&agentreplv1.FeedWatchToken{Value: "forged"})
+		&agentreplv1.FeedWatchToken{Value: "forged", Instance: string(testInstance)})
 
 	// Assert.
 	if !errors.Is(err, ErrUnknownToken) {
@@ -226,6 +226,39 @@ func TestTailRefusesATokenThisDaemonNeverMinted(t *testing.T) {
 	}
 	if !h.hasRecord("warn", "daemon.feed.tail_unknown_token") {
 		t.Fatalf("records = %+v, want a WARN daemon.feed.tail_unknown_token", h.records())
+	}
+}
+
+func TestTailRefusesATokenAnotherDaemonMinted(t *testing.T) {
+	// Arrange: a token this daemon minted, restated as another daemon's. The
+	// value is a counter each daemon runs for itself, so the same value names
+	// a different feed in each.
+	h := newHarness(t)
+	_, token := h.openPage(rootFeed(), "reader-1")
+	foreign := &agentreplv1.FeedWatchToken{Value: token.GetValue(), Instance: "another-daemon"}
+
+	// Act.
+	_, err := h.resolver.Tail(context.Background(), testWorkspace, rootFeed(), foreign)
+
+	// Assert.
+	if !errors.Is(err, ErrUnknownToken) {
+		t.Fatalf("Tail err = %v, want ErrUnknownToken", err)
+	}
+	if !h.hasRecord("warn", "daemon.feed.tail_foreign_instance") {
+		t.Fatalf("records = %+v, want a WARN daemon.feed.tail_foreign_instance", h.records())
+	}
+}
+
+func TestAMintedTokenNamesTheDaemonThatMintedIt(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+
+	// Act.
+	_, token := h.openPage(rootFeed(), "reader-1")
+
+	// Assert.
+	if token.GetInstance() != string(testInstance) {
+		t.Fatalf("the token names daemon %q, want %q", token.GetInstance(), testInstance)
 	}
 }
 

@@ -255,6 +255,29 @@ func TestWatchFeedRefusesAnUnmintedToken(t *testing.T) {
 	}
 }
 
+// TestWatchFeedRefusesATokenAnotherDaemonMinted pins that a token is honored
+// only by its minter: a value this daemon also minted, named as another
+// daemon's, is unknown here.
+func TestWatchFeedRefusesATokenAnotherDaemonMinted(t *testing.T) {
+	// Arrange: this daemon minted ft-1 too.
+	h := newHarness(t)
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
+	if _, err := h.Client.OpenFeed(context.Background(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+
+	// Act.
+	stream, err := h.Client.WatchFeed(context.Background(), connect.NewRequest(&agentreplv1.WatchFeedRequest{
+		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: "daemon-that-exited"},
+	}))
+	err = firstStreamErr(stream, err)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "WatchFeed closed the stream: unknown_token") {
+		t.Fatalf("error = %v, want the transport-closed unknown_token cause", err)
+	}
+}
+
 // TestWatchFeedTailsFromTheMintedToken pins that a token OpenFeed minted opens
 // its feed's tail and delivers the rows.
 func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {

@@ -40,6 +40,10 @@ type fakeSurfaces struct {
 }
 
 // Global implements dlog.Surfaces.
+// testInstance is the daemon instance every resolver under test mints its
+// watch tokens under.
+const testInstance = ids.InstanceID("daemon-under-test")
+
 func (f *fakeSurfaces) Global() dlog.Logger { return f.log }
 
 // Workspace implements dlog.Surfaces.
@@ -260,6 +264,7 @@ func newDurableHarness(t *testing.T, stores durableStores) *harness {
 
 	resolver, err := newResolver(Deps{
 		Commands:     h.catalogs.Catalog,
+		Instance:     testInstance,
 		Log:          &fakeSurfaces{log: log},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/ws", nil },
 		Encode:       testEncode,
@@ -567,7 +572,7 @@ func rowIDs(rows []*frontendv1.FeedRow) []string {
 
 func TestNewRefusesWithoutALogSurface(t *testing.T) {
 	// Arrange, Act.
-	_, err := New(Deps{WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", nil }})
+	_, err := New(Deps{Instance: testInstance, WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", nil }})
 
 	// Assert.
 	if err == nil {
@@ -595,6 +600,7 @@ func TestNewWatchesTheResolverMutex(t *testing.T) {
 
 	// Act.
 	r, err := newResolver(Deps{
+		Instance:     testInstance,
 		Log:          &fakeSurfaces{log: dlog.NewTestLogger()},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", nil },
 		Stalls:       stalls,
@@ -611,7 +617,7 @@ func TestNewWatchesTheResolverMutex(t *testing.T) {
 
 func TestNewRefusesWithoutAWorkspaceDirResolver(t *testing.T) {
 	// Arrange, Act.
-	_, err := New(Deps{Log: &fakeSurfaces{log: dlog.NewTestLogger()}})
+	_, err := New(Deps{Instance: testInstance, Log: &fakeSurfaces{log: dlog.NewTestLogger()}})
 
 	// Assert.
 	if err == nil {
@@ -619,10 +625,24 @@ func TestNewRefusesWithoutAWorkspaceDirResolver(t *testing.T) {
 	}
 }
 
+func TestNewRefusesWithoutADaemonInstance(t *testing.T) {
+	// Arrange, Act.
+	_, err := New(Deps{
+		Log:          &fakeSurfaces{log: dlog.NewTestLogger()},
+		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", nil },
+	})
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "Deps.Instance") {
+		t.Fatalf("New = %v, want a refusal naming the missing instance", err)
+	}
+}
+
 func TestUnresolvableWorkspaceIsRecordedAsAnInvariantViolation(t *testing.T) {
 	// Arrange: a surface whose workspace sink refuses.
 	log := dlog.NewTestLogger()
 	r, err := newResolver(Deps{
+		Instance:     testInstance,
 		Log:          &fakeSurfaces{log: log, dirErr: fmt.Errorf("no sink")},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/ws", nil },
 		Encode:       testEncode,
@@ -653,6 +673,7 @@ func TestAWorkspaceWhoseDirectoryIsGoneLogsCentrallyWithNoError(t *testing.T) {
 	// Arrange: a closed workspace's worktree was removed.
 	log := dlog.NewTestLogger()
 	r, err := newResolver(Deps{
+		Instance:     testInstance,
 		Log:          &fakeSurfaces{log: log, dirErr: fmt.Errorf("resolve workspace: %w", dlog.ErrWorkspaceDirGone)},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/gone", nil },
 		Encode:       testEncode,
@@ -720,6 +741,7 @@ func TestAWorkspaceLookupFailureIsClassifiedByItsCause(t *testing.T) {
 			// Arrange.
 			log := dlog.NewTestLogger()
 			r, err := newResolver(Deps{
+				Instance:     testInstance,
 				Log:          &fakeSurfaces{log: log},
 				WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "", tc.cause },
 				Encode:       testEncode,

@@ -24,4 +24,9 @@ Investigations owed on assumptions about systems outside the contract.
   quiet would not answer `SubscribePage` until its first push.
 - How to verify: the server unit test that relays a quiet accepted stream and
   asserts the subscribe answers before any push.
-- Status: OPEN until that test passes.
+- Status: CONFIRMED 2026-11-19 by
+  `server.TestARelayedSubscriptionAnswersOnceItsTargetAcceptsWithNothingPushed`
+  and `server.TestAForwardedStreamIsAcceptedWhenItsTargetAcceptsWithNothingPushed`:
+  both answer with no message sent. The target states its acceptance in the
+  `Agent-Repl-Accepted` response header, since a refused stream answers
+  headers too.

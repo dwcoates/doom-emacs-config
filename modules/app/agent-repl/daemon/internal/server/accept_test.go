@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,6 +20,60 @@ func TestAcceptFlushesTheStreamingContentType(t *testing.T) {
 	// Assert.
 	if got := recorder.Header().Get("Content-Type"); got != "application/connect+json" {
 		t.Fatalf("Content-Type = %q, want the request's streaming codec", got)
+	}
+}
+
+// TestAcceptStatesTheAcceptanceInItsHeaders pins what a daemon relaying this
+// stream reads: a refused stream answers headers too, so the acceptance is a
+// header of its own and not the headers' arrival.
+func TestAcceptStatesTheAcceptanceInItsHeaders(t *testing.T) {
+	// Arrange.
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+
+	// Act.
+	writer.accept("application/connect+json")
+
+	// Assert.
+	if recorder.Header().Get(AcceptedHeader) == "" {
+		t.Fatal("an accepted stream's headers do not state its acceptance")
+	}
+}
+
+// TestAResponseNeverAcceptedStatesNoAcceptance pins the other half: a
+// response the handler wrote without accepting carries no acceptance.
+func TestAResponseNeverAcceptedStatesNoAcceptance(t *testing.T) {
+	// Arrange.
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+
+	// Act.
+	writer.WriteHeader(http.StatusOK)
+
+	// Assert.
+	if got := recorder.Header().Get(AcceptedHeader); got != "" {
+		t.Fatalf("a response nobody accepted states acceptance %q", got)
+	}
+}
+
+// TestAcceptStreamRunsItsHookBeforeStatingTheAcceptance pins the order a
+// relayed page's hold depends on: the hook has run by the time the client can
+// read that the stream is accepted.
+func TestAcceptStreamRunsItsHookBeforeStatingTheAcceptance(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	recorder := httptest.NewRecorder()
+	writer := &acceptWriter{ResponseWriter: recorder}
+	var headersWrittenAtHook bool
+	ctx := context.WithValue(context.Background(), acceptWriterKey{}, writer)
+	ctx = withAcceptHook(ctx, func() { headersWrittenAtHook = writer.wroteHeader })
+
+	// Act.
+	h.Server.(*server).acceptStream(ctx, "WatchFooter")
+
+	// Assert.
+	if headersWrittenAtHook || !writer.wroteHeader {
+		t.Fatalf("the hook ran with headers written = %v, and the stream ended with headers written = %v", headersWrittenAtHook, writer.wroteHeader)
 	}
 }
 
