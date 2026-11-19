@@ -186,6 +186,18 @@ An absent field is the proto3 default, which protojson omits."
           ((stringp raw) raw)
           (t (agent-repl-wire--fail message-name field "expected a string")))))
 
+(defun agent-repl-wire--require-fields (message-name value fields)
+  "Refuse plist VALUE, an encoder's input for MESSAGE-NAME, missing a FIELDS key.
+FIELDS are the plist keywords of the message's REQUIRED fields, each named
+on the wire by the keyword without its colon (`:workspace' is `workspace').
+The first one VALUE lacks is refused before anything is built, so an
+incomplete request errors before send, never on the wire.  A key that is
+present counts, whatever its value: the field's own encoder judges that."
+  (dolist (field fields)
+    (unless (plist-member value field)
+      (agent-repl-wire--fail message-name (intern (substring (symbol-name field) 1))
+                             "required message field is absent"))))
+
 (defun agent-repl-wire--require-string (message-name field value)
   "Return VALUE as MESSAGE-NAME's required non-empty string FIELD, or fail.
 A non-string is unset, and an empty string is empty: both are breaches."
@@ -641,8 +653,7 @@ they are shown."
 (defun agent-repl-wire-encode-user-said (value)
   "Encode the UserSaid plist VALUE `(:content)'.
 `content' is not optional: what a person said is the whole message."
-  (unless (plist-member value :content)
-    (agent-repl-wire--fail "UserSaid" 'content "required message field is absent"))
+  (agent-repl-wire--require-fields "UserSaid" value '(:content))
   (agent-repl-wire--encoded
    "UserSaid"
    (list (cons 'content (agent-repl-wire-encode-user-said-content

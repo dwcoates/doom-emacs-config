@@ -95,6 +95,36 @@ does not write to the durable sink."
                                                hits)))
                      (list file (if (equal file "wire-common.el") 1 0)))))))
 
+;;;; ---- Required message fields ----
+
+(ert-deftest agent-repl-test-wire-common-require-fields-passes-a-complete-value ()
+  "Every required key present passes, a key present with nil included."
+  (should (null (agent-repl-test-wire-common--breach
+                 (lambda () (agent-repl-wire--require-fields "M" '(:a 1 :b nil) '(:a :b)))))))
+
+(ert-deftest agent-repl-test-wire-common-require-fields-refuses-the-first-missing-key ()
+  "The first missing key is refused, named on the wire without its colon."
+  (dolist (case '(((:b 1) ("M" a "required message field is absent"))
+                  ((:a 1) ("M" b "required message field is absent"))
+                  (() ("M" a "required message field is absent"))))
+    (should (equal (agent-repl-test-wire-common--breach
+                    (lambda () (agent-repl-wire--require-fields "M" (car case) '(:a :b))))
+                   (cadr case)))))
+
+(ert-deftest agent-repl-test-wire-common-every-required-field-is-checked-by-the-helper ()
+  "No encoder hand-rolls the absent-field breach: the helpers raise it.
+The one other site, AnswerEditorEvaluation's, refuses a nil value as well
+as a missing key, so it is not the helper's check."
+  (dolist (file '(("wire-common.el" . 2) ("wire-host.el" . 1) ("wire-roster.el" . 0)
+                  ("wire-chat.el" . 0) ("wire-verbs.el" . 0)))
+    (let ((source (with-temp-buffer
+                    (insert-file-contents (expand-file-name (car file) agent-repl-test--module-dir))
+                    (buffer-string)))
+          (hits 0) (start 0))
+      (while (string-match "\"required message field is absent\"" source start)
+        (setq hits (1+ hits) start (match-end 0)))
+      (should (equal (cons (car file) hits) file)))))
+
 ;;;; ---- Repeated strings ----
 
 (defun agent-repl-test-wire-common--repeated-string (json)

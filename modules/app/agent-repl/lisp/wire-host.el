@@ -42,6 +42,7 @@
 (declare-function agent-repl-wire--decode-string "wire-common")
 (declare-function agent-repl-wire--decode-required-string "wire-common")
 (declare-function agent-repl-wire--require-string "wire-common")
+(declare-function agent-repl-wire--require-fields "wire-common")
 (declare-function agent-repl-wire-decode-not-yet-adopted "wire-common" (message-name value))
 (declare-function agent-repl-wire--decoded "wire-common")
 (declare-function agent-repl-wire--encode-empty "wire-common")
@@ -999,9 +1000,7 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
 
 (defun agent-repl-wire-encode-watch-host-workspace-request (value)
   "Encode the WatchHostWorkspaceRequest plist VALUE `(:workspace REF)'."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "WatchHostWorkspaceRequest" 'workspace
-                           "required message field is absent"))
+  (agent-repl-wire--require-fields "WatchHostWorkspaceRequest" value '(:workspace))
   (agent-repl-wire--encoded
    "WatchHostWorkspaceRequest"
    (list (cons 'workspace
@@ -1332,9 +1331,7 @@ VALUE is `(:workspace REF :keep-selection-history BOOL
 of the recency walk; false is proto3's default and is omitted.  MS, the
 Unix-millisecond instant the user's switch began, is omitted when nil: a
 select no keystroke began carries none."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "SelectWorkspaceRequest" 'workspace
-                           "required message field is absent"))
+  (agent-repl-wire--require-fields "SelectWorkspaceRequest" value '(:workspace))
   (let ((started (plist-get value :switch-started-at-ms)))
     (unless (or (null started) (integerp started))
       (agent-repl-wire--fail "SelectWorkspaceRequest" 'switchStartedAtMs
@@ -1464,8 +1461,7 @@ arm this codec does not know is refused as an unknown field."
   "Encode the NAME request plist VALUE `(:workspace REF)'.
 NAME is the rpc's name, e.g. \"ReportPageUnloading\"."
   (let ((message (concat name "Request")))
-    (unless (plist-member value :workspace)
-      (agent-repl-wire--fail message 'workspace "required message field is absent"))
+    (agent-repl-wire--require-fields message value '(:workspace))
     (agent-repl-wire--encoded
      message
      (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))))))
@@ -1556,8 +1552,7 @@ and nil for the empty arms."
     "PageResidency" 'state value
     `((:loaded loaded
                ,(lambda (v)
-                  (unless (plist-member v :release)
-                    (agent-repl-wire--fail "PageResidencyLoaded" 'release "required message field is absent"))
+                  (agent-repl-wire--require-fields "PageResidencyLoaded" v '(:release))
                   (agent-repl-wire--encoded
                    "PageResidencyLoaded"
                    (list (cons 'release (agent-repl-wire-encode-page-residency-release
@@ -1568,10 +1563,7 @@ and nil for the empty arms."
   "Encode ReportPageResidencyRequest VALUE `(:workspace REF :residency R)'.
 Emacs's statement of what it holds of the workspace's page and when it
 lets go (page-unload.el)."
-  (dolist (field '(:workspace :residency))
-    (unless (plist-member value field)
-      (agent-repl-wire--fail "ReportPageResidencyRequest" (intern (substring (symbol-name field) 1))
-                             "required message field is absent")))
+  (agent-repl-wire--require-fields "ReportPageResidencyRequest" value '(:workspace :residency))
   (agent-repl-wire--encoded
    "ReportPageResidencyRequest"
    (list (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
@@ -1617,10 +1609,7 @@ length, which the daemon refuses otherwise."
 The editor's report that it started, or stopped, counting the user's
 dwell on the workspace; DWELL is as
 `agent-repl-wire-encode-report-view-dwell-request-dwell' takes it."
-  (dolist (field '(:workspace :dwell))
-    (unless (plist-member value field)
-      (agent-repl-wire--fail "ReportViewDwellRequest" (intern (substring (symbol-name field) 1))
-                             "required message field is absent")))
+  (agent-repl-wire--require-fields "ReportViewDwellRequest" value '(:workspace :dwell))
   (agent-repl-wire--encoded
    "ReportViewDwellRequest"
    (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
@@ -1641,9 +1630,7 @@ Recorded; the roster stream carries the row's dwell marker."
   "Encode the AdoptHostWorkspaceRequest plist VALUE `(:workspace REF)'.
 The VERB identifies the participant — Emacs and the webview have sibling
 adopt verbs — so nothing in the request self-declares the caller's kind."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "AdoptHostWorkspaceRequest" 'workspace
-                           "required message field is absent"))
+  (agent-repl-wire--require-fields "AdoptHostWorkspaceRequest" value '(:workspace))
   (agent-repl-wire--encoded
    "AdoptHostWorkspaceRequest"
    (list (cons 'workspace
@@ -1802,9 +1789,7 @@ naming neither is refused HERE, before anything is sent."
 (defun agent-repl-wire-encode-report-editor-focus-request (value)
   "Encode the ReportEditorFocusRequest plist VALUE `(:focus F)'.
 The focus is REQUIRED."
-  (unless (plist-member value :focus)
-    (agent-repl-wire--fail "ReportEditorFocusRequest" 'focus
-                           "required message field is absent"))
+  (agent-repl-wire--require-fields "ReportEditorFocusRequest" value '(:focus))
   (agent-repl-wire--encoded
    "ReportEditorFocusRequest"
    (list (cons 'focus (agent-repl-wire-encode-editor-focus
@@ -1908,10 +1893,7 @@ opens: a new one is how the daemon tells a full Emacs restart from a
 reconnect (`agent-repl-wire-encode-editor-instance')."
   (let ((build (plist-get value :elisp-build)))
     (agent-repl-wire--require-string "WatchDaemonEmacs" 'elispBuild build)
-    (unless (plist-member value :focus)
-      (agent-repl-wire--fail "WatchDaemonEmacs" 'focus "required message field is absent"))
-    (unless (plist-member value :instance)
-      (agent-repl-wire--fail "WatchDaemonEmacs" 'instance "required message field is absent"))
+    (agent-repl-wire--require-fields "WatchDaemonEmacs" value '(:focus :instance))
     (agent-repl-wire--encoded
      "WatchDaemonEmacs"
      (append
@@ -2381,8 +2363,7 @@ list is the daemon saying none stands."
   "Encode the OpenTabsWorkspace plist VALUE `(:workspace REF :page ONEOF)'.
 THE PAGE ARM IS REQUIRED: `:loading' when this Emacs is loading the
 workspace's web page, `:none' when it draws none."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "OpenTabsWorkspace" 'workspace "required message field is absent"))
+  (agent-repl-wire--require-fields "OpenTabsWorkspace" value '(:workspace))
   (agent-repl-wire--encoded
    "OpenTabsWorkspace"
    (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
@@ -2664,9 +2645,7 @@ UpdatePersistentWifiMode's success)."
 (defun agent-repl-wire-encode-list-slash-commands-request (value)
   "Encode the ListSlashCommandsRequest plist VALUE `(:workspace REF)'.
 The composer asks for every slash command the workspace's runtime answers."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "ListSlashCommandsRequest" 'workspace
-                           "required message field is absent"))
+  (agent-repl-wire--require-fields "ListSlashCommandsRequest" value '(:workspace))
   (agent-repl-wire--encoded
    "ListSlashCommandsRequest"
    (list (cons 'workspace
