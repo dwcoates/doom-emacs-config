@@ -61,6 +61,7 @@
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--do-log "core")
 (declare-function agent-repl--error "core")
+(declare-function agent-repl--fatal "core")
 (declare-function agent-repl--git-string-quiet "core")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl--now "core" ())
