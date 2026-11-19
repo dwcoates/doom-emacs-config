@@ -218,6 +218,54 @@ The notices it hands its page are captured in
         (agent-repl--send :command-update-pr "update the pr"))
       (should-not (seq-find (lambda (p) (eq (nth 1 p) :composer-prompted-at)) puts)))))
 
+(ert-deftest agent-repl-input-a-user-send-notes-the-visit-prompted ()
+  "A prompt the user sends tells the visit history the workspace was prompted."
+  (agent-repl-test-input--with
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
+                 (lambda (ws) (push ws noted))))
+        ;; Arrange
+        (agent-repl-test-input--type "my draft")
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert
+      (should (equal noted '("ws-one"))))))
+
+(ert-deftest agent-repl-input-a-canned-send-notes-the-visit-prompted ()
+  "A canned command the user runs is a prompt they sent, so it notes the visit too."
+  (agent-repl-test-input--with
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
+                 (lambda (ws) (push ws noted))))
+        ;; Act
+        (agent-repl--send :command-update-pr "update the pr"))
+      ;; Assert
+      (should (equal noted '("ws-one"))))))
+
+(ert-deftest agent-repl-input-a-queue-drain-does-not-note-the-visit-prompted ()
+  "A deferred prompt's drain is not the user writing now, so the visit is not noted."
+  (agent-repl-test-input--with
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
+                 (lambda (ws) (push ws noted))))
+        ;; Act
+        (agent-repl--send agent-repl--prompt-queue-drain-origin "written earlier"))
+      ;; Assert
+      (should-not noted))))
+
+(ert-deftest agent-repl-input-an-empty-send-does-not-note-the-visit-prompted ()
+  "An empty composer sends nothing, so the visit is not noted."
+  (agent-repl-test-input--with
+    (let ((noted nil))
+      (cl-letf (((symbol-function 'agent-repl--note-visit-prompted)
+                 (lambda (ws) (push ws noted))))
+        ;; Arrange
+        (agent-repl-test-input--type "   ")
+        ;; Act
+        (agent-repl--send :user-sent))
+      ;; Assert
+      (should-not noted))))
+
 (ert-deftest agent-repl-input-an-explicit-text-send-keeps-the-draft ()
   "A canned command composed its own words and must not eat an unrelated draft."
   (agent-repl-test-input--with
