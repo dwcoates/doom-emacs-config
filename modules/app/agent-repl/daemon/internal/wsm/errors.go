@@ -260,7 +260,7 @@ func (h HoldKind) String() string {
 }
 
 // valid reports whether the delivery is one of the declared deliveries.
-func (d Delivery) valid() bool { return d >= DeliveryOrdinary && d <= DeliveryDeferred }
+func (d Delivery) valid() bool { return d >= DeliveryOrdinary && d <= DeliveryNow }
 
 // String names a delivery, for logs.
 func (d Delivery) String() string {
@@ -269,6 +269,8 @@ func (d Delivery) String() string {
 		return "ordinary"
 	case DeliveryDeferred:
 		return "deferred"
+	case DeliveryNow:
+		return "now"
 	default:
 		return fmt.Sprintf("delivery(%d)", int(d))
 	}

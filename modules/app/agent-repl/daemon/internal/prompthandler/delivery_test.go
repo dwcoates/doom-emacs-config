@@ -10,6 +10,7 @@ import (
 
 func TestDeliveryOfMapsEveryValue(t *testing.T) {
 	deferred := agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED
+	now := agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_NOW
 	unspecified := agentreplv1.SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_UNSPECIFIED
 	unknown := agentreplv1.SubmitPromptDelivery(99)
 	tests := []struct {
@@ -20,6 +21,7 @@ func TestDeliveryOfMapsEveryValue(t *testing.T) {
 	}{
 		{name: "an absent delivery is ordinary", in: nil, want: wsm.DeliveryOrdinary},
 		{name: "DEFERRED is deferred", in: &deferred, want: wsm.DeliveryDeferred},
+		{name: "NOW is now", in: &now, want: wsm.DeliveryNow},
 		{name: "UNSPECIFIED is never sent", in: &unspecified, wantErr: true},
 		{name: "an unknown value is never read as ordinary", in: &unknown, wantErr: true},
 	}

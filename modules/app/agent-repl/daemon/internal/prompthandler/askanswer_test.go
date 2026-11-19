@@ -51,6 +51,24 @@ func TestAnAnsweredSendMintsNoTurnAndReachesNoQueue(t *testing.T) {
 	}
 }
 
+func TestASendSentNowCanBeATypedAnswer(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.asks.answered = true
+
+	// Act.
+	outcome, err := h.h.Submit(context.Background(), theWorkspace, userSaid("use OAuth"), "key-1",
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT, nil, wsm.DeliveryNow, nil)
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if outcome.Recognition != RecognizedAskAnswer || len(h.queue.forwarded()) != 0 {
+		t.Fatalf("outcome = %+v, forwarded = %d, want the ask answered and nothing queued", outcome, len(h.queue.forwarded()))
+	}
+}
+
 func TestASendWithNoStandingAskIsAnOrdinaryPrompt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

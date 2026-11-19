@@ -862,6 +862,10 @@ const (
 	// DeliveryDeferred runs as its own turn after the running one: never
 	// classified, never interjected.
 	DeliveryDeferred
+	// DeliveryNow goes past every held prompt, never classified: whatever
+	// holds it, it is held already pressed "Send now" (SentNow), so it goes
+	// as a released held prompt does.
+	DeliveryNow
 )
 
 // HoldKind is a DAEMON-SIDE condition holding a prompt, independent of any

@@ -819,6 +819,7 @@ func TestPutHeldPromptRoundTripsTheDelivery(t *testing.T) {
 	}{
 		{name: "an ordinary prompt", delivery: DeliveryOrdinary},
 		{name: "a deferred prompt", delivery: DeliveryDeferred},
+		{name: "a prompt sent now", delivery: DeliveryNow},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
