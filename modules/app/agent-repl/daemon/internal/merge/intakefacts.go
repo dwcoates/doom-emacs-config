@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -185,6 +186,82 @@ func severity(level string) int {
 	return 0
 }
 
+// DigestSite is one logging site's records in a window: every record one
+// operation logged at one level.
+type DigestSite struct {
+	Level     string
+	Operation string
+	Count     int
+	// Sample is the first of its records, verbatim.
+	Sample string
+}
+
+// DigestSites groups WINDOW by the site that logged each record: its
+// operation and level. A record's MESSAGE is left out of the key on purpose:
+// messages carry workspace names, page ids and paths, so one site logging
+// about thirty workspaces is one line here, not thirty. The sites are sorted
+// errors first, then by count.
+func DigestSites(window []LogRecord) []DigestSite {
+	type key struct{ level, operation string }
+	sites := map[key]*DigestSite{}
+	var order []key
+	for _, r := range window {
+		k := key{strings.ToLower(r.Level), r.Operation}
+		site, ok := sites[k]
+		if !ok {
+			site = &DigestSite{Level: k.level, Operation: r.Operation, Sample: r.Raw}
+			sites[k] = site
+			order = append(order, k)
+		}
+		site.Count++
+	}
+	out := make([]DigestSite, 0, len(order))
+	for _, k := range order {
+		out = append(out, *sites[k])
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if severity(out[i].Level) != severity(out[j].Level) {
+			return severity(out[i].Level) > severity(out[j].Level)
+		}
+		return out[i].Count > out[j].Count
+	})
+	return out
+}
+
+// RenderDigest is the digest file's text: a table of every logging site with
+// its count, then one verbatim sample record per site, in the same order.
+func RenderDigest(sites []DigestSite, since, through time.Time) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Warnings and errors from %s through %s, one line per logging site (level and operation).\n\n",
+		since.UTC().Format(time.RFC3339), through.UTC().Format(time.RFC3339))
+	b.WriteString("COUNT  LEVEL  OPERATION\n")
+	for _, site := range sites {
+		fmt.Fprintf(&b, "%5d  %-5s  %s\n", site.Count, site.Level, site.Operation)
+	}
+	b.WriteString("\nOne sample record per site, verbatim, in the same order:\n\n")
+	for _, site := range sites {
+		b.WriteString(site.Sample + "\n")
+	}
+	return b.String()
+}
+
+// DigestPath is where the digest of the check owed at OWED is written, in
+// the queue's logs directory DIR. It is one of the queue's logs (IsLog), so
+// the retention pass prunes it with the rest.
+func DigestPath(dir string, owed time.Time) string {
+	return filepath.Join(dir, fmt.Sprintf("deploy_check-%d.log", owed.Unix()))
+}
+
+// writeDigest writes WINDOW's digest for the check owed at OWED and answers
+// its path.
+func (o *orchestrator) writeDigest(window []LogRecord, owed, since, through time.Time) (string, error) {
+	path := DigestPath(LogsDir(o.deps.StateDir), owed)
+	if err := writeLog(path, RenderDigest(DigestSites(window), since, through)); err != nil {
+		return "", fmt.Errorf("merge: write the check's digest: %w", err)
+	}
+	return path, nil
+}
+
 // intakeBrief composes the intake's brief of check M on queue Q, and answers
 // the window the check covers.
 //
@@ -229,6 +306,13 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	if gated {
 		gateLog = "`" + gate.Path + "`"
 	}
+	// THE DIGEST IS WRITTEN BEFORE THE MEDIATOR IS TOLD, so its first read is
+	// one small file rather than every record: each logging site once, with
+	// its count and one sample.
+	digest, err := o.writeDigest(window, m.OwedAt, since, now)
+	if err != nil {
+		return "", wsm.CheckWindow{}, err
+	}
 	brief, err := o.deps.Briefs(BriefDeployIntake, map[string]string{
 		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
 		"ending":         RenderEnding(m.DeployEnding),
@@ -236,6 +320,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		"repo_dir":       q.repository.Dir,
 		"version":        mediationVersion(m),
 		"gate_log":       gateLog,
+		"digest":         digest,
 	})
 	if err != nil {
 		return "", wsm.CheckWindow{}, err

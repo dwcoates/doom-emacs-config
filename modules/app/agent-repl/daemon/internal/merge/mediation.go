@@ -55,7 +55,7 @@ const (
 	// ArmRemediationBoundReached refuses a dispatch once the chain deployed
 	// as many remediations in a row as its repository allows.
 	ArmRemediationBoundReached = "remediation_bound_reached"
-	// ArmProblemsUnowned refuses an approval while the check's window holds a
+	// ArmProblemsUnowned is retired: it refused an approval while the check's window held a
 	// group no one owns: NEW, SEEN BEFORE, or RECURRED after its fix.
 	ArmProblemsUnowned = "problems_unowned"
 	// ArmProblemsRecurring refuses anything but an escalation while the
@@ -139,6 +139,9 @@ const (
 	MediationUnmediated = "unmediated"
 	// MediationUnchanged: the deploy changed nothing, so it was not checked.
 	MediationUnchanged = "unchanged"
+	// MediationQuiet: no system logged a warning or an error in the check's
+	// window, so the mediator was not run.
+	MediationQuiet = "quiet"
 )
 
 // The outcomes a remediation's span ends in (Meter.ObserveRemediation): from
@@ -525,7 +528,7 @@ func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm
 	// A CHECK RELEASED WITH NOTHING TO FIX IS QUIET: approved, or a deploy
 	// that changed nothing. Its count is what compacts the standing
 	// workspaces after their work (noteQuietCheck).
-	if outcome == MediationApproved || outcome == MediationUnchanged {
+	if outcome == MediationApproved || outcome == MediationUnchanged || outcome == MediationQuiet {
 		o.noteQuietCheck(ctx, repo, dlog.Context{"repo": string(repo), "outcome": outcome})
 	}
 	return true, nil
@@ -596,17 +599,25 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		o.deps.Log.Global().Info(opMediation, "this deploy's check is escalated; the queue waits for the user", fields)
 		return
 	}
+	brief, window, err := o.intakeBrief(ctx, q, m)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the intake's brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
+		return
+	}
+	// A WINDOW WITH NO WARNING AND NO ERROR NEEDS NO MEDIATOR (owner ruling,
+	// 2026-11-19): there is nothing for it to investigate, so the check is
+	// released here and no session is started. A check the mediator was told
+	// of already is its own to decide, whatever the window holds now.
+	if !m.Prompted() && len(window.Groups) == 0 {
+		o.releaseQuiet(ctx, q, m, window, fields)
+		return
+	}
 	ws, err := o.mediatorFor(ctx, q, m, fields)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "the deploy mediator could not be found or made; the queue stays held for it", err)
 		return
 	}
 	fields["mediator"] = string(ws)
-	brief, window, err := o.intakeBrief(ctx, q, m)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the intake's brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
-		return
-	}
 	var closed wsm.TurnClose
 	if !m.Prompted() {
 		// THE AWAIT'S ERROR IS THE ROUND'S err, never one scoped to this
@@ -646,6 +657,25 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	} else if owes(now, m.OwedAt) && now.Dispatched {
 		o.watchFixer(ctx, q, *now, fields)
 	}
+}
+
+// releaseQuiet releases check M of queue Q, whose WINDOW holds no warning and
+// no error, without running the mediator, and records where the check read
+// to so the next check's window starts there.
+func (o *orchestrator) releaseQuiet(ctx context.Context, q checkedQueue, m wsm.Mediation, window wsm.CheckWindow, fields dlog.Context) {
+	fields = withField(withField(fields, "window_started", window.Start.UTC().Format(time.RFC3339Nano)), "window_through", window.Through.UTC().Format(time.RFC3339Nano))
+	if _, err := o.deps.DB.RecordMediationWindow(ctx, q.key, m.OwedAt, window); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the quiet window could not be recorded as read; the queue stays held", withField(fields, "error", err.Error()))
+		return
+	}
+	released, err := o.releaseCheck(ctx, q.key, m, MediationQuiet)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the quiet check could not be released; the queue stays held", withField(fields, "error", err.Error()))
+		return
+	}
+	o.deps.Log.Global().Info(opMediation, "no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run", withField(fields, "released", released))
+	o.republishMediation(ctx, q.key)
+	o.kick(q.key)
 }
 
 // awaitFailed settles a failed await of the intake's turn on the check owed
@@ -908,39 +938,27 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if err != nil {
 		return err
 	}
-	// A PROBLEM PAST ITS FIXES IS THE USER'S (owner ruling, 2026-11-16): while
-	// the window holds one, only an escalation is accepted.
-	if recurring := recurringGroups(window); d.Kind != MediationEscalate && len(recurring) > 0 {
+	// THE MEDIATOR ALONE DECIDES WHETHER A DEPLOY IS APPROVED (owner ruling,
+	// 2026-11-19): an approval is never judged against the window's records.
+	// A DISPATCH of a problem past its fixes is still refused (owner ruling,
+	// 2026-11-16): a fix that came back more than twice is the user's.
+	if recurring := recurringGroups(window); d.Kind == MediationDispatch && len(recurring) > 0 {
 		refusal := &RefusalError{Arm: ArmProblemsRecurring, Workspace: ws,
 			Reason: fmt.Sprintf("the window holds %d groups that came back after more than %d of their fixes deployed; escalate", len(recurring), maxFixesBeforeEscalation),
 			Fields: map[string]any{"groups": recurring}}
-		logRefusal(o.deps.Log.Global(), opMediation, "refused a decision other than an escalation while the window holds problems past their fixes", withField(fields, "recurring", recurring), refusal)
+		logRefusal(o.deps.Log.Global(), opMediation, "refused a dispatch while the window holds problems past their fixes", withField(fields, "recurring", recurring), refusal)
 		return refusal
 	}
 	if d.Kind == MediationDispatch {
 		return o.dispatch(ctx, q, m, ws, d, fields)
 	}
-	// AN APPROVAL LEAVES NO PROBLEM UNTAKEN (owner ruling, 2026-11-16): a
-	// warning or error the mediator never took on, old or new, is dispatched
-	// or escalated, never approved past, or it recurs with no one to end it.
-	//
 	// A GROUP THE MEDIATOR JUDGED IGNORABLE IS NAMED, NEVER SILENTLY PASSED
-	// (owner ruling, 2026-11-18): an approval's problems are the groups it
-	// ignores, each quoting its records, such as a one-off user-driven error
-	// or a record of the metaprompt's probably-transient table. They do not
-	// count against this approval, and they are not taken on, so a group that
-	// keeps coming back is put to the mediator again by every later check.
-	ignored := problemKeys(d.Problems)
-	if d.Kind == MediationApprove && len(ignored) > 0 {
+	// (owner ruling, 2026-11-18): an approval's problems are the records it
+	// ignores, such as a one-off user-driven error or a record of the
+	// metaprompt's probably-transient table. They are recorded, not judged.
+	if d.Kind == MediationApprove && len(d.Problems) > 0 {
 		o.deps.Log.Global().Info(opMediation, "the mediator approves past the groups it judged ignorable, naming each",
 			withField(fields, "ignored", problemStatements(d.Problems)))
-	}
-	if untaken := untakenGroupsExcept(window, ignored); d.Kind == MediationApprove && len(untaken) > 0 {
-		refusal := &RefusalError{Arm: ArmProblemsUnowned, Workspace: ws,
-			Reason: fmt.Sprintf("the window holds %d groups you have not taken on; dispatch or escalate them", len(untaken)),
-			Fields: map[string]any{"groups": untaken}}
-		logRefusal(o.deps.Log.Global(), opMediation, "refused an approval while the check's window holds groups the mediator never took on", withField(fields, "untaken", untaken), refusal)
-		return refusal
 	}
 	// AN ESCALATION HOLDS THE QUEUE (owner ruling, 2026-11-16): the check
 	// stays owed, escalated, until the mediator's fix deploys or the user
@@ -1134,23 +1152,6 @@ func recurringGroups(window wsm.CheckWindow) []string {
 	for _, g := range window.Groups {
 		if pastItsFixes(g.Class, g.Fixes) {
 			out = append(out, fmt.Sprintf("%s: %s (%d fixes)", g.Operation, g.Message, g.Fixes))
-		}
-	}
-	return out
-}
-
-// untakenGroupsExcept names every group of WINDOW the mediator has not taken
-// on, or that came back after its fix, as "OPERATION: MESSAGE (CLASS)", in its
-// order, less every group IGNORED names.
-func untakenGroupsExcept(window wsm.CheckWindow, ignored []wsm.ProblemKey) []string {
-	skip := make(map[wsm.ProblemKey]bool, len(ignored))
-	for _, k := range ignored {
-		skip[k] = true
-	}
-	var out []string
-	for _, g := range window.Groups {
-		if g.Class != wsm.WindowOwned && !skip[wsm.ProblemKey{Operation: g.Operation, Message: g.Message}] {
-			out = append(out, fmt.Sprintf("%s: %s (%s)", g.Operation, g.Message, g.Class))
 		}
 	}
 	return out

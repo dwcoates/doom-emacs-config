@@ -1,10 +1,14 @@
-<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{deploy_started}}, {{ending}}, {{window_started}}, {{repo_dir}}, {{version}}, {{gate_log}} -->
+<!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{deploy_started}}, {{ending}}, {{window_started}}, {{repo_dir}}, {{version}}, {{gate_log}}, {{digest}} -->
 A deploy of `{{repo_dir}}` began at {{deploy_started}} ({{version}}). {{ending}} The merge queue lands nothing past it until you decide it.
 
 Your job: find out whether this deploy left agent-repl healthy, fix what it broke, and decide the deploy.
 
+Investigate cheaply: start from the digest, and read whole records only for the sites that look like this deploy's doing.
+
 What you have:
-- Warnings and errors since the last check: `bin/logs.sh --all --level warn --since {{window_started}}`
+- A digest of every warning and error since the last check, one line and one sample record per logging site: `{{digest}}`
+- The same, sampled live: `bin/logs.sh --all --level warn --since {{window_started}} --tally --sample 1`
+  - Add `--runtime A,B` to narrow it, and drop `--tally --sample 1` only to read one site's records in full.
 - Metrics: the `/agent-repl-metrics` skill
 - Health: `~/.claude/skills/agent-repl-runtime/run.sh --doctor`
 - The last test gate before the deploy: {{gate_log}}

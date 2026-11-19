@@ -228,7 +228,7 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("-fresh");
   });
 
-  it("has the deploy mediator investigate the deploy itself, and states what agent-repl still refuses", () => {
+  it("has the deploy mediator investigate the deploy itself from the digest, and be the sole decider of an approval", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
@@ -236,7 +236,8 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-16: an old problem never taken on is
     // dispatched or escalated, never approved past, and never filed with a
     // named workspace.
-    expect(text).toContain("It refuses an approval while a group of records is neither taken on nor named as ignored (`problems_unowned`)");
+    expect(text).toContain("The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval");
+    expect(text).toContain("Start from the digest, which holds one line and one sample record per logging site");
     expect(text).toContain("The brief names the deploy and what there is to investigate it with, and states nothing it found");
     expect(text).not.toContain("merge-queue-stall-triage");
   });

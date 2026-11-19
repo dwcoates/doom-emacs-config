@@ -12,8 +12,13 @@
 ### Investigate the deploy yourself, and state problems as the evidence shows them
 
 - The brief names the deploy and what there is to investigate it with, and states nothing it found (owner ruling, 2026-11-19).
-  - It gives the command that reads every warning and error since the repository's last check, the metrics skill, the doctor, the last test gate's log, and the changelog of earlier fixes.
+  - It names a digest file of the window's warnings and errors, the command that samples them live, the metrics skill, the doctor, the last test gate's log, and the changelog of earlier fixes.
   - The mediator reads them itself and decides what matters: which records the deploy caused, which are one problem, and which are no problem.
+- Investigate cheaply: the check should cost few tokens and little time.
+  - Start from the digest, which holds one line and one sample record per logging site (a record's level and operation).
+  - Read a site's records in full only when its sample looks like this deploy's doing.
+  - Never read the whole window's records.
+- agent-repl does not run the mediator for a window that holds no warning and no error: it releases that deploy itself.
 - A record logged before a fix of it deployed is not a new problem.
   - Check the record's time against the deploy that carried the fix before deciding.
 - Each problem is stated as the evidence shows it, quoting the records that show it, verbatim.
@@ -85,10 +90,10 @@ JSON
 
   - agent-repl notifies the user: end the turn telling the user plainly what is wrong and what the choices are.
   - The queue lands nothing until this workspace's fix deploys and is approved, or the user releases the queue.
-- agent-repl still judges a decision against its own sorting of the window's records, which the brief no longer states, and a refusal names the groups it turns on.
-  - It refuses an approval while a group of records is neither taken on nor named as ignored (`problems_unowned`).
-  - It refuses an approval or a dispatch while a problem has come back after more than two of its fixes deployed (`problems_recurring`): that problem is the user's, so escalate the deploy.
-  - It refuses a dispatch once the chain has deployed its bound of remediations in a row: escalate.
+- The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval (owner ruling, 2026-11-19).
+- agent-repl still refuses a dispatch in two cases, and each means escalate.
+  - A problem came back after more than two of its fixes deployed (`problems_recurring`): that problem is the user's.
+  - The chain has deployed its bound of remediations in a row (`remediation_bound_reached`).
 
 ### Fix a dispatch, and finish on your own
 

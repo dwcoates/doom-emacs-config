@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -129,7 +131,7 @@ func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
 		}
 	}
 	sort.Strings(names)
-	if got := strings.Join(names, ","); got != "deploy_started,ending,gate_log,repo_dir,version,window_started" {
+	if got := strings.Join(names, ","); got != "deploy_started,digest,ending,gate_log,repo_dir,version,window_started" {
 		t.Fatalf("the brief was given %s", got)
 	}
 	if values["window_started"] != deployStarted.UTC().Format(time.RFC3339) || len(window.Groups) != 2 {
@@ -152,5 +154,175 @@ func TestAWindowThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
 	}
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake's brief could not be composed; the queue stays held"}); !ok {
 		t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
+	}
+}
+
+func TestDigestSitesGroupsTheWindowByLoggingSite(t *testing.T) {
+	// Arrange: one site logging about two workspaces, another at two levels.
+	window := []LogRecord{
+		rec("warn", "daemon.shim", "tail lag on ws-a"),
+		rec("error", "daemon.merge", "boom"),
+		rec("warn", "daemon.shim", "tail lag on ws-b"),
+		rec("warn", "daemon.merge", "slow"),
+		rec("warn", "daemon.shim", "tail lag on ws-c"),
+	}
+
+	// Act
+	got := DigestSites(window)
+
+	// Assert: errors first, then by count; a site's differing messages are
+	// one line, and its sample is its first record.
+	var lines []string
+	for _, site := range got {
+		lines = append(lines, fmt.Sprintf("%s %s %d", site.Level, site.Operation, site.Count))
+	}
+	if want := "error daemon.merge 1|warn daemon.shim 3|warn daemon.merge 1"; strings.Join(lines, "|") != want {
+		t.Fatalf("DigestSites = %v, want %s", lines, want)
+	}
+	if got[1].Sample != window[0].Raw {
+		t.Fatalf("the shim site's sample is %q, want its first record %q", got[1].Sample, window[0].Raw)
+	}
+}
+
+func TestRenderDigestStatesEachSitesCountAndSample(t *testing.T) {
+	cases := []struct {
+		name  string
+		sites []DigestSite
+		want  []string
+	}{
+		{name: "each site is one table line and one sample",
+			sites: []DigestSite{{Level: "error", Operation: "daemon.merge", Count: 2, Sample: `{"operation":"daemon.merge"}`}},
+			want:  []string{"    2  error  daemon.merge\n", "\n{\"operation\":\"daemon.merge\"}\n"}},
+		{name: "a window with no site still states its span",
+			want: []string{"Warnings and errors from 2026-11-19T17:00:00Z through 2026-11-19T18:00:00Z"}},
+	}
+	since := time.Date(2026, 11, 19, 17, 0, 0, 0, time.UTC)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := RenderDigest(tc.sites, since, since.Add(time.Hour))
+
+			// Assert
+			for _, want := range tc.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("RenderDigest = %q, want it to hold %q", got, want)
+				}
+			}
+		})
+	}
+}
+
+func TestTheIntakesBriefNamesADigestItWroteOfTheWindow(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) {
+		return []LogRecord{rec("error", "daemon.merge", "boom")}, nil
+	}
+	q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
+
+	// Act
+	_, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+
+	// Assert
+	if err != nil {
+		t.Fatalf("intakeBrief = %v", err)
+	}
+	path := h.briefValues[len(h.briefValues)-1]["digest"]
+	if path != DigestPath(LogsDir(h.stateDir), deployStarted) {
+		t.Fatalf("the brief names digest %q, want the check's own", path)
+	}
+	written, readErr := os.ReadFile(path)
+	if readErr != nil || !strings.Contains(string(written), "    1  error  daemon.merge\n") {
+		t.Fatalf("the digest reads (%q, %v), want the merge site's line", written, readErr)
+	}
+}
+
+func TestADigestThatCannotBeWrittenKeepsTheQueueHeld(t *testing.T) {
+	// Arrange: the logs directory's place is taken by a file.
+	h := checked(t)
+	owe(t, h)
+	if err := os.MkdirAll(filepath.Dir(LogsDir(h.stateDir)), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(LogsDir(h.stateDir), []byte("in the way"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) {
+		return []LogRecord{rec("error", "daemon.merge", "boom")}, nil
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if owedCheck(t, h) == nil || len(h.queue.submissions) != 0 {
+		t.Fatalf("submitted %d; want no brief and the check still owed", len(h.queue.submissions))
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake's brief could not be composed; the queue stays held"}); !ok {
+		t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
+	}
+}
+
+func TestAQuietWindowReleasesTheCheckWithoutTheMediator(t *testing.T) {
+	cases := []struct {
+		name string
+		// window is what every system logged since the last check.
+		window []LogRecord
+		// wantReleased is whether the check is released with no mediator run.
+		wantReleased bool
+	}{
+		{name: "a window with no warning and no error releases the check", wantReleased: true},
+		{name: "a window holding one warning is the mediator's", window: []LogRecord{rec("warn", "daemon.shim", "tail lag")}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return tc.window, nil }
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			released := owedCheck(t, h) == nil
+			quiet := len(h.recordsFor("info", opMediation, "no system logged a warning or an error in the check's window; the deploy is released and the mediator is not run")) == 1
+			if released != tc.wantReleased || quiet != tc.wantReleased {
+				t.Fatalf("released %v and recorded quiet %v, want both %v", released, quiet, tc.wantReleased)
+			}
+			if tc.wantReleased && len(h.queue.submissions) != 0 {
+				t.Fatalf("submitted %d briefs, want the mediator never told", len(h.queue.submissions))
+			}
+		})
+	}
+}
+
+func TestAQuietReleaseRecordsWhereTheCheckReadTo(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, nil }
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert: the next check's window starts where this one read to.
+	through, found, err := h.db.CheckedThrough(context.Background(), mediationKey(h))
+	if err != nil || !found || through.Before(deployStarted) {
+		t.Fatalf("CheckedThrough = (%v, %v, %v), want this check's read recorded", through, found, err)
+	}
+}
+
+func TestACheckDigestIsOneOfTheQueuesLogs(t *testing.T) {
+	// Arrange
+	path := DigestPath("/state/merge-logs", time.Unix(1795121928, 0))
+
+	// Act
+	isLog := IsLog(filepath.Base(path))
+
+	// Assert: the retention pass prunes it with the queue's other logs.
+	if !isLog || filepath.Base(path) != "deploy_check-1795121928.log" {
+		t.Fatalf("the digest is %s (a queue log: %v), want deploy_check-1795121928.log pruned with the rest", path, isLog)
 	}
 }
