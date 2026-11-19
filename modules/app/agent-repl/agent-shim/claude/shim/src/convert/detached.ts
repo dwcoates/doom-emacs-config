@@ -1291,22 +1291,10 @@ export function taskAwaitingAgent(
   taskKinds: TaskKindRegistry,
   calls: CallRegistry,
 ): string | undefined {
-  if (message.type !== "system") return undefined;
-  const raw = message as unknown as RawTask;
-  if (raw.subtype === undefined || !AGENT_NAMING_SUBTYPES.has(raw.subtype)) return undefined;
-  if (raw.skip_transcript === true) return undefined;
-  const taskId = raw.task_id;
-  if (typeof taskId !== "string" || taskId === "") return undefined;
-  // A RE-REPORT OF A CONCLUDED TASK names no agent: the fold writes nothing for
-  // it (`convertDetached`), so there is nothing to name one for.
-  if (raw.subtype === "task_notification" && taskKinds.concludedOnRecord(taskId)) return undefined;
-  const commissionKnown = taskKinds.commissionOf(taskId) !== undefined;
-  if (taskKinds.agentOf(taskId) !== undefined && commissionKnown) return undefined;
-  const known = context.liveTask(taskId);
-  const taskType = raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType;
-  if (taskKindOf(taskType) !== "subagent") return undefined;
-  const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
-  if (toolUseId === undefined || toolUseId === "") return undefined;
+  const task = agentNamingSubagentTask(message, context, taskKinds);
+  if (task === undefined) return undefined;
+  const { taskId, toolUseId } = task;
+  if (taskKinds.agentOf(taskId) !== undefined && taskKinds.commissionOf(taskId) !== undefined) return undefined;
   const call = taskCall(taskId, toolUseId, taskKinds, calls);
   // THE SPAWN STATES BOTH: its id is the agent and its input the commission.
   if (call !== undefined && isSpawnCall(call)) return undefined;
@@ -1339,20 +1327,41 @@ export function taskAwaitingCommission(
   taskKinds: TaskKindRegistry,
   calls: CallRegistry,
 ): string | undefined {
+  const task = agentNamingSubagentTask(message, context, taskKinds);
+  if (task === undefined) return undefined;
+  const { taskId, toolUseId } = task;
+  if (taskKinds.commissionOf(taskId) !== undefined || taskKinds.commissionAwaited(taskId)) return undefined;
+  if (taskCall(taskId, toolUseId, taskKinds, calls) !== undefined) return undefined;
+  return taskId;
+}
+
+/**
+ * THE SUBAGENT TASK A MESSAGE NAMES AN AGENT FOR, with its call's id, or
+ * `undefined` — the one reading both store asks share
+ * ({@link taskAwaitingAgent}, {@link taskAwaitingCommission}): a system task
+ * message of an agent-naming subtype, not ambient, naming a task, not a
+ * re-report of a task concluded on record, of the subagent kind, whose call's
+ * id is stated or remembered. A PURE READ.
+ */
+export function agentNamingSubagentTask(
+  message: SdkMessage,
+  context: FoldContext,
+  taskKinds: TaskKindRegistry,
+): { readonly taskId: string; readonly toolUseId: string } | undefined {
   if (message.type !== "system") return undefined;
   const raw = message as unknown as RawTask;
   if (raw.subtype === undefined || !AGENT_NAMING_SUBTYPES.has(raw.subtype)) return undefined;
   if (raw.skip_transcript === true) return undefined;
   const taskId = raw.task_id;
   if (typeof taskId !== "string" || taskId === "") return undefined;
+  // A RE-REPORT OF A CONCLUDED TASK names no agent: the fold writes nothing for
+  // it (`convertDetached`), so there is nothing to name one for.
   if (raw.subtype === "task_notification" && taskKinds.concludedOnRecord(taskId)) return undefined;
-  if (taskKinds.commissionOf(taskId) !== undefined || taskKinds.commissionAwaited(taskId)) return undefined;
   const known = context.liveTask(taskId);
   if (taskKindOf(raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType) !== "subagent") return undefined;
   const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
   if (toolUseId === undefined || toolUseId === "") return undefined;
-  if (taskCall(taskId, toolUseId, taskKinds, calls) !== undefined) return undefined;
-  return taskId;
+  return { taskId, toolUseId };
 }
 
 /** What the fold knows about WHICH AGENT one vendor task is running. */

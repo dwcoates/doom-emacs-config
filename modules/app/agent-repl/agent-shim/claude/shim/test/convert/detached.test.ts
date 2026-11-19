@@ -41,6 +41,7 @@ import {
   taskAgentKnowledge,
   taskAwaitingAgent,
   taskAwaitingCommission,
+  agentNamingSubagentTask,
   taskAwaitingKind,
   taskCall,
   taskCommission,
@@ -3486,5 +3487,47 @@ describe("taskCall", () => {
 
     // Assert.
     expect([handRolled, (source.match(/taskCall\(taskId, toolUseId, taskKinds, calls\)/g) ?? []).length]).toEqual([1, 4]);
+  });
+});
+
+describe("agentNamingSubagentTask: the reading both store asks share", () => {
+  it.each([
+    { name: "a subagent's start", fields: NESTED_STARTED, want: { taskId: "a2f09", toolUseId: "toolu_nested" } },
+    { name: "a task of another kind", fields: { ...NESTED_STARTED, task_type: "local_bash" }, want: undefined },
+    { name: "an ambient task", fields: { ...NESTED_STARTED, skip_transcript: true }, want: undefined },
+    { name: "a subtype that names no agent", fields: { ...NESTED_STARTED, subtype: "task_progress" }, want: undefined },
+    { name: "a message naming no task", fields: { ...NESTED_STARTED, task_id: "" }, want: undefined },
+    { name: "a task naming no call", fields: { ...NESTED_STARTED, tool_use_id: undefined }, want: undefined },
+  ])("reads $name", ({ fields, want }) => {
+    // Arrange, Act, Assert.
+    expect(agentNamingSubagentTask(taskMessage(fields), foldContext({}), createTaskKindRegistry())).toEqual(want);
+  });
+
+  it("reads nothing of a re-report of a task concluded on record", () => {
+    // Arrange.
+    const registry = createTaskKindRegistry();
+    registry.rememberConcludedOnRecord("a2f09");
+
+    // Act, Assert.
+    expect(agentNamingSubagentTask(taskMessage({ ...NESTED_STARTED, subtype: "task_notification" }), foldContext({}), registry)).toBeUndefined();
+  });
+
+  it("is the one reading both store asks take, none hand-rolled", () => {
+    // Arrange.
+    const source = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../../src/convert/detached.ts"), "utf8");
+
+    const body = (name: string): string => {
+      const start = source.indexOf(`export function ${name}(`);
+      return source.slice(start, source.indexOf("\n}\n", start));
+    };
+
+    // Act.
+    const asks = ["taskAwaitingAgent", "taskAwaitingCommission"].map(body);
+
+    // Assert.
+    expect(asks.map((ask) => [ask.includes("agentNamingSubagentTask(message, context, taskKinds)"), ask.includes("AGENT_NAMING_SUBTYPES")])).toEqual([
+      [true, false],
+      [true, false],
+    ]);
   });
 });
