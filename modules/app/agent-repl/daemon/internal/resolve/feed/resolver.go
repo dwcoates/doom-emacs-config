@@ -603,6 +603,10 @@ type feedState struct {
 	// interim (interim.go): the record `upsert` stamps FeedResponse.interim
 	// from on every draw.
 	interim map[string]bool
+	// sentAtMs is the instant each prompt row's prompt was sent, epoch ms:
+	// the place of the first conversation entry that drew it, the record
+	// `upsert` stamps the row's hover stamp from (hover.go).
+	sentAtMs map[string]int64
 	// entryRows is, per entry base, how many rows that entry has first drawn
 	// in this feed: the next row's sub-index (order.go).
 	entryRows map[string]uint32
@@ -890,6 +894,7 @@ func (r *resolver) feed(s *wsState, addr feedid.Feed) *feedState {
 		nonDurable: map[string]bool{},
 		superseded: map[string]bool{},
 		interim:    map[string]bool{},
+		sentAtMs:   map[string]int64{},
 		entryRows:  map[string]uint32{},
 		followers:  map[string]uint32{},
 		retention:  r.deps.TailRetention,
@@ -1167,6 +1172,9 @@ func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, dur
 	// gains it on the publication that settles it and no producer can publish
 	// a row whose selectability disagrees with the one rule (selection.go).
 	stampSelectable(at.feed, snapshot)
+	// A ROW'S `hover` IS STATED HERE TOO, by the one rule over its kind, so
+	// every hoverable kind's stamp follows every redraw of it (hover.go).
+	stampHover(s, f, id, snapshot)
 	// A FAULT ENDING TAKES ITS TURN'S VENDOR NOTICES, whose rows are retired
 	// after this row's own publication (notice.go).
 	for _, notice := range r.foldNoticesIntoEnding(s, f, id, snapshot) {
@@ -1518,6 +1526,7 @@ func (r *resolver) retireAs(s *wsState, addr feedid.Feed, id string, removed *fr
 	delete(f.rank, id)
 	delete(f.superseded, id)
 	delete(f.interim, id)
+	delete(f.sentAtMs, id)
 	at := -1
 	for i, existing := range f.order {
 		if existing == id {
