@@ -102,9 +102,11 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 		t.Fatalf("WatchPage = error %v, want the page's one stream", err)
 	}
 	frames := pageFrames(t, ctx, stream)
-	if first := awaitPageFrame(t, ctx, frames, "the attachment latch"); first.GetAttached() == nil {
-		t.Fatalf("the page's first frame = %T, want PageAttached", first.GetFrame())
+	first := awaitPageFrame(t, ctx, frames, "the attachment latch")
+	if first.GetAttached().GetAttachment().GetInstance() == "" {
+		t.Fatalf("the page's first frame = %v, want PageAttached issuing an attachment", first)
 	}
+	attachment := first.GetAttached().GetAttachment()
 
 	// The two views that must be OPENED before they can be watched.
 	feedResp, err := page.OpenFeed(ctx, connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: f.ws}))
@@ -134,8 +136,10 @@ func TestOnePageHoldsEveryViewOverOneConnection(t *testing.T) {
 	}
 	for _, req := range subscriptions {
 		req.Page = "page-everything"
-		if _, err := page.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
-			t.Fatalf("SubscribePage{%s} = error %v, want an accepted subscription", req.GetSubscription(), err)
+		req.Attachment = attachment
+		resp, err := page.SubscribePage(ctx, connect.NewRequest(req))
+		if err != nil || resp.Msg.GetSuccess().GetSubscribed() == nil {
+			t.Fatalf("SubscribePage{%s} = (%v, %v), want an accepted subscription", req.GetSubscription(), resp, err)
 		}
 	}
 

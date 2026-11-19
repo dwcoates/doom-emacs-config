@@ -24,6 +24,8 @@ import { tmpdir } from "node:os";
  * here because the harness imports this module.
  */
 export const FAKE_DAEMON_WEBAPP_BUILD = "integration";
+/** The instance id the fake daemon issues every page attachment under. */
+export const FAKE_DAEMON_INSTANCE = "fake-daemon";
 import { join } from "node:path";
 import {
   ScalarType,
@@ -1080,9 +1082,13 @@ export function createFakeDaemon(): FakeDaemon {
     readonly outbound: Channel<WatchPageResponse>;
     /** Every live subscription, by its client-minted id, with its own abort. */
     readonly subscriptions: Map<string, AbortController>;
+    /** The attachment this stream was issued, which every page call on it echoes. */
+    readonly attachment: { instance: string; sequence: bigint };
   }
 
   const pageStates = new Map<string, PageState>();
+  /** Numbers the attachments this fake issues; never reissued. */
+  let attachmentSequence = 0n;
   const pageDetachWaiters = new Map<string, Array<() => void>>();
 
   /** Wake tests waiting for the server-side `WatchPage` finally to finish. */
@@ -1622,9 +1628,11 @@ export function createFakeDaemon(): FakeDaemon {
             Code.AlreadyExists,
           );
         }
+        attachmentSequence += 1n;
         const state: PageState = {
           outbound: new Channel<WatchPageResponse>(),
           subscriptions: new Map(),
+          attachment: { instance: FAKE_DAEMON_INSTANCE, sequence: attachmentSequence },
         };
         pageStates.set(page, state);
         // THE LATCH GOES FIRST AND EXACTLY ONCE. `SubscribePage` names a page
@@ -1632,7 +1640,10 @@ export function createFakeDaemon(): FakeDaemon {
         // it has read this frame.
         state.outbound.push(
           create(WatchPageResponseSchema, {
-            frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: FAKE_DAEMON_WEBAPP_BUILD }) },
+            frame: {
+              case: "attached",
+              value: create(PageAttachedSchema, { webappBuild: FAKE_DAEMON_WEBAPP_BUILD, attachment: state.attachment }),
+            },
           }),
         );
         try {
@@ -1653,11 +1664,15 @@ export function createFakeDaemon(): FakeDaemon {
         record("subscribePage", request);
         consumeFailure("subscribePage");
         const state = pageStates.get(request.page);
-        if (state === undefined) {
-          throw new ConnectError(
-            `no stream is attached for page ${JSON.stringify(request.page)}`,
-            Code.FailedPrecondition,
-          );
+        // A CALL ANSWERS FOR THE ATTACHMENT IT ECHOES, as the daemon's does:
+        // an attachment this page no longer stands under is `page_gone`, never
+        // a refusal.
+        if (
+          state === undefined ||
+          request.attachment?.instance !== state.attachment.instance ||
+          request.attachment.sequence !== state.attachment.sequence
+        ) {
+          return { result: { case: "success", value: { outcome: { case: "pageGone", value: {} } } } };
         }
         if (state.subscriptions.has(request.subscription)) {
           throw new ConnectError(
@@ -1686,7 +1701,7 @@ export function createFakeDaemon(): FakeDaemon {
         const source = openSubscriptionSource(request.request, controller.signal);
         state.subscriptions.set(request.subscription, controller);
         void pumpSubscription(state, request.subscription, kind, source, controller);
-        return {};
+        return { result: { case: "success", value: { outcome: { case: "subscribed", value: {} } } } };
       },
       unsubscribePage(request) {
         record("unsubscribePage", request);

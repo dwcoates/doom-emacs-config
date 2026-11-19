@@ -2203,6 +2203,10 @@ type harness struct {
 	// ServingElsewhere is the private address of another daemon whose
 	// serving row holds the workspace, "" when none does.
 	ServingElsewhere string
+	// Instances are the OTHER daemons that run, by instance id, with each
+	// one's private address (Deps.InstanceAddress). An instance not here does
+	// not run.
+	Instances map[ids.InstanceID]string
 	// ColdGates are the standing cold gates ColdGateOf answers, by workspace.
 	ColdGates map[ids.WorkspaceID]*conversationv1.SessionCold
 	// Deps is the COMPLETE dependency set the surface was built from, so a
@@ -2464,6 +2468,11 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ServingElsewhere: func(context.Context, ids.WorkspaceID) (string, bool, error) {
 			return h.ServingElsewhere, h.ServingElsewhere != "", nil
 		},
+		Instance: testInstance,
+		InstanceAddress: func(instance ids.InstanceID) (string, bool, error) {
+			address, alive := h.Instances[instance]
+			return address, alive, nil
+		},
 		ColdGateOf: func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) {
 			cold, ok := h.ColdGates[ws]
 			return cold, ok
@@ -2516,9 +2525,46 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		h.HTTP.Close()
 		_ = surface.Close()
 	})
-	h.Client = agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL, connect.WithInterceptors(markForwarded{}))
-	h.Unmarked = agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL)
+	h.Client = echoingAttachments{agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL, connect.WithInterceptors(markForwarded{})), h}
+	h.Unmarked = echoingAttachments{agentreplv1connect.NewAgentReplClient(h.HTTP.Client(), h.HTTP.URL), h}
 	return h
+}
+
+// testInstance is the instance id every harness surface runs as.
+const testInstance = ids.InstanceID("daemon-under-test")
+
+// echoingAttachments is a client that does what a page does with the
+// attachment it was issued: a SubscribePage or UnsubscribePage that names
+// none is sent with the one its page stands under on the surface. A test of
+// a call with another attachment, or with none, sets the field itself (an
+// empty PageAttachment is sent as it is).
+type echoingAttachments struct {
+	agentreplv1connect.AgentReplClient
+	h *harness
+}
+
+// attachmentOf answers the attachment PAGE stands under on the harness's
+// surface, or one of this daemon's that names no stream when it holds none.
+func (h *harness) attachmentOf(page string) *agentreplv1.PageAttachment {
+	out := &agentreplv1.PageAttachment{Instance: string(h.Deps.Instance)}
+	if held, ok := h.Server.(*server).pageFor(page); ok {
+		out.Sequence = held.sequence
+	}
+	return out
+}
+
+func (c echoingAttachments) SubscribePage(ctx context.Context, req *connect.Request[agentreplv1.SubscribePageRequest]) (*connect.Response[agentreplv1.SubscribePageResponse], error) {
+	if req.Msg.Attachment == nil {
+		req.Msg.Attachment = c.h.attachmentOf(req.Msg.GetPage())
+	}
+	return c.AgentReplClient.SubscribePage(ctx, req)
+}
+
+func (c echoingAttachments) UnsubscribePage(ctx context.Context, req *connect.Request[agentreplv1.UnsubscribePageRequest]) (*connect.Response[agentreplv1.UnsubscribePageResponse], error) {
+	if req.Msg.Attachment == nil {
+		req.Msg.Attachment = c.h.attachmentOf(req.Msg.GetPage())
+	}
+	return c.AgentReplClient.UnsubscribePage(ctx, req)
 }
 
 // markForwarded marks every call as forwarded (ForwardedHeader).

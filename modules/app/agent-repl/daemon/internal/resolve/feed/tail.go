@@ -58,6 +58,15 @@ func (r *resolver) Tail(ctx context.Context, ws ids.WorkspaceID, feed feedid.Fee
 	defer r.mu.Unlock()
 	log := r.logger(ws)
 
+	// A TOKEN ANOTHER DAEMON MINTED IS UNKNOWN HERE, whatever its value: the
+	// value is a counter each daemon runs for itself, so the same value names
+	// a different feed in each.
+	if token.GetInstance() != string(r.deps.Instance) {
+		log.Warn("daemon.feed.tail_foreign_instance",
+			"a tail was opened with a token another daemon minted",
+			dlog.Context{"token": token.GetValue(), "minted_by": token.GetInstance(), "instance": string(r.deps.Instance)})
+		return nil, ErrUnknownToken
+	}
 	minted, ok := r.tokens[token.GetValue()]
 	if !ok {
 		log.Warn("daemon.feed.tail_unknown_token",
@@ -117,5 +126,5 @@ func (r *resolver) mintToken(ws ids.WorkspaceID, f *feedState) *agentreplv1.Feed
 	r.tokenSeq++
 	value := fmt.Sprintf("ft-%d", r.tokenSeq)
 	r.tokens[value] = &watchToken{ws: ws, feedKey: f.key, afterSeq: f.seq}
-	return &agentreplv1.FeedWatchToken{Value: value}
+	return &agentreplv1.FeedWatchToken{Value: value, Instance: string(r.deps.Instance)}
 }

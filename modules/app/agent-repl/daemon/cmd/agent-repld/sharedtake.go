@@ -123,6 +123,26 @@ func yieldBootClaim(claim interface{ Yield() error }, shared *sharedTake) error 
 	return claim.Yield()
 }
 
+// instanceAddress answers the private address daemon INSTANCE recorded and
+// whether that daemon runs, for a call that names a daemon (a page call's
+// attachment, a feed token's minter). An instance that no longer runs
+// answers alive false. One that runs and records no address is an invariant
+// violation: every live daemon records its address at boot.
+func instanceAddress(addrPath string, instance ids.InstanceID) (string, bool, error) {
+	alive, err := daemonaddr.Alive(addrPath, string(instance))
+	if err != nil {
+		return "", false, fmt.Errorf("probe daemon %s: %w", instance, err)
+	}
+	if !alive {
+		return "", false, nil
+	}
+	address, err := daemonaddr.InstanceAddress(addrPath, string(instance))
+	if err != nil {
+		return "", false, fmt.Errorf("daemon %s runs and records no address: %w", instance, err)
+	}
+	return address, true, nil
+}
+
 // servingRows is the slice of the state client servingElsewhere reads.
 type servingRows interface {
 	Serving(ctx context.Context, id ids.WorkspaceID) (*ids.InstanceID, error)
@@ -143,16 +163,12 @@ func servingElsewhere(ctx context.Context, db servingRows, addrPath string, self
 	if owner == nil || *owner == self {
 		return "", false, nil
 	}
-	alive, err := daemonaddr.Alive(addrPath, string(*owner))
+	address, alive, err := instanceAddress(addrPath, *owner)
 	if err != nil {
-		return "", false, fmt.Errorf("probe %q's serving daemon %s: %w", ws, *owner, err)
+		return "", false, fmt.Errorf("%q's serving daemon %s: %w", ws, *owner, err)
 	}
 	if !alive {
 		return "", false, fmt.Errorf("%q's serving row names %s, which is not running", ws, *owner)
-	}
-	address, err := daemonaddr.InstanceAddress(addrPath, string(*owner))
-	if err != nil {
-		return "", false, fmt.Errorf("%q's serving daemon %s: %w", ws, *owner, err)
 	}
 	return address, true, nil
 }

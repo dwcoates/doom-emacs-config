@@ -10,6 +10,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 )
 
 // requestLoggingServer owns the transport boundary around every generated RPC
@@ -122,6 +123,16 @@ func serveStream[Req, Resp any](
 		return boundaryFailure(err)
 	}
 	defer boundary.enter()(&err)
+	// A STREAM ANOTHER DAEMON RELAYS FOR A PAGE IT HOLDS (relayWatch) connects
+	// that page to the stream's workspace here, from the stream's acceptance
+	// until it ends.
+	if page := req.Header().Get(RelayedPageHeader); page != "" {
+		if ws := requestWorkspaceID(requestMessage(req)); ws != "" {
+			accepted, release := s.server.holdRelayedPage(page, ids.WorkspaceID(ws))
+			defer release()
+			ctx = withAcceptHook(ctx, accepted)
+		}
+	}
 	return handle(ctx, req, stream)
 }
 

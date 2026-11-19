@@ -79,11 +79,23 @@ function pageEnding(): WatchPageResponse {
 }
 
 /** A frame carrying the attachment latch. */
-function attached(): WatchPageResponse {
+/** The attach frame, issuing attachment SEQUENCE of the scripted daemon. */
+function attached(sequence = 1n): WatchPageResponse {
   return create(WatchPageResponseSchema, {
-    frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: "test-webapp-build" }) },
+    frame: {
+      case: "attached",
+      value: create(PageAttachedSchema, {
+        webappBuild: "test-webapp-build",
+        attachment: { instance: "daemon-a", sequence },
+      }),
+    },
   });
 }
+
+/** The answer of a subscription that exists. */
+const SUBSCRIBED = { result: { case: "success" as const, value: { outcome: { case: "subscribed" as const, value: {} } } } };
+/** The answer of a subscribe whose attachment is over. */
+const PAGE_GONE = { result: { case: "success" as const, value: { outcome: { case: "pageGone" as const, value: {} } } } };
 
 /** A frame carrying one footer push addressed to SUBSCRIPTION. */
 function footerPush(subscription: string, mark: bigint): WatchPageResponse {
@@ -160,6 +172,10 @@ interface FakeDaemon {
   refuseSubscribeWith(err: ConnectError | null): void;
   /** Refuse every UnsubscribePage with this error. */
   refuseUnsubscribeWith(err: ConnectError | null): void;
+  /** Answer the next SubscribePage `page_gone`. */
+  answerNextSubscribePageGone(): void;
+  /** Answer the next SubscribePage with no outcome set. */
+  answerNextSubscribeEmpty(): void;
 }
 
 /**
@@ -179,6 +195,8 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
   let open = true;
   let refusal: ConnectError | null = null;
   let unsubscribeRefusal: ConnectError | null = null;
+  let goneNext = false;
+  let emptyNext = false;
 
   const state: FakeDaemon = {
     streamOpens,
@@ -198,6 +216,12 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
     },
     refuseUnsubscribeWith(err: ConnectError | null): void {
       unsubscribeRefusal = err;
+    },
+    answerNextSubscribePageGone(): void {
+      goneNext = true;
+    },
+    answerNextSubscribeEmpty(): void {
+      emptyNext = true;
     },
   };
 
@@ -222,7 +246,15 @@ function fakeDaemon(): { client: ReturnType<typeof createAgentReplClient>; daemo
       subscribePage: (req) => {
         if (refusal !== null) throw refusal;
         subscribes.push(req);
-        return {};
+        if (goneNext) {
+          goneNext = false;
+          return PAGE_GONE;
+        }
+        if (emptyNext) {
+          emptyNext = false;
+          return { result: { case: "success" as const, value: {} } };
+        }
+        return SUBSCRIBED;
       },
       unsubscribePage: (req) => {
         unsubscribes.push(req);
@@ -1311,6 +1343,187 @@ describe("the page's daemon moving", () => {
 
     // Assert
     expect(daemon.unsubscribes).toEqual([]);
+    ctx.quiesce();
+  });
+});
+
+describe("the page's attachment", () => {
+  /** A component's standing footer stream riding the page of CTX. */
+  function footerStream(ctx: AppContext) {
+    return watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: (_client, signal) => ctx.streams.watch("footer", { workspace: WORKSPACE }, signal),
+      onPush: () => undefined,
+    });
+  }
+
+  it("echoes the attachment the daemon issued on a subscribe", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached(7n));
+    await settle();
+
+    // Act
+    const handle = footerStream(ctx);
+    await settle();
+
+    // Assert
+    expect(daemon.subscribes.map((req) => [req.attachment?.instance, req.attachment?.sequence])).toEqual([
+      ["daemon-a", 7n],
+    ]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("echoes the attachment a subscription was made under on its unsubscribe", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached(7n));
+    await settle();
+    const handle = footerStream(ctx);
+    await settle();
+
+    // Act
+    handle.cancel();
+    await settle();
+
+    // Assert
+    expect(daemon.unsubscribes.map((req) => [req.attachment?.instance, req.attachment?.sequence])).toEqual([
+      ["daemon-a", 7n],
+    ]);
+    ctx.quiesce();
+  });
+
+  it("subscribes nothing on an attach that issued no attachment", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const ctx = contextFor(client, sink);
+    await settle();
+    const handle = footerStream(ctx);
+
+    // Act
+    daemon.send(
+      create(WatchPageResponseSchema, {
+        frame: { case: "attached", value: create(PageAttachedSchema, { webappBuild: "test-webapp-build" }) },
+      }),
+    );
+    await settle();
+
+    // Assert: the frame is refused as malformed, and no subscribe is sent.
+    expect([daemon.subscribes.length, sink.reported]).toEqual([0, ["frameUndecodable"]]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("reopens the page's stream when a subscribe answers page_gone under the current attachment", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached(1n));
+    await settle();
+    daemon.answerNextSubscribePageGone();
+
+    // Act
+    const handle = footerStream(ctx);
+    await settle();
+
+    // Assert: the page opened its stream a second time.
+    expect(daemon.streamOpens).toEqual(["WatchPage", "WatchPage"]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("makes the subscription again under the next attachment after page_gone, filing nothing", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const ctx = contextFor(client, sink);
+    await settle();
+    daemon.send(attached(1n));
+    await settle();
+    daemon.answerNextSubscribePageGone();
+    const handle = footerStream(ctx);
+    await settle();
+
+    // Act: the reopened stream attaches under a new attachment.
+    daemon.send(attached(2n));
+    await settle();
+
+    // Assert
+    expect([daemon.subscribes.map((req) => req.attachment?.sequence), sink.reported]).toEqual([[1n, 2n], []]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("sends no unsubscribe for a subscribe that answered page_gone", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached(1n));
+    await settle();
+    daemon.answerNextSubscribePageGone();
+
+    // Act
+    const handle = footerStream(ctx);
+    await settle();
+
+    // Assert
+    expect(daemon.unsubscribes).toEqual([]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("subscribes again at once when the serving daemon ends a relayed view, filing nothing", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const sink = new RecordingSink();
+    const ctx = contextFor(client, sink);
+    await settle();
+    daemon.send(attached(1n));
+    await settle();
+    const handle = footerStream(ctx);
+    await settle();
+
+    // Act
+    daemon.send(ended(daemon.subscribes[0].subscription, { case: "moved", value: {} }));
+    await settle();
+
+    // Assert: a second subscription under the same attachment, and no failure.
+    expect([daemon.subscribes.map((req) => req.attachment?.sequence), sink.reported]).toEqual([[1n, 1n], []]);
+    handle.cancel();
+    ctx.quiesce();
+  });
+
+  it("refuses a subscribe answer that names no outcome", async () => {
+    // Arrange
+    const { client, daemon } = fakeDaemon();
+    const ctx = contextFor(client, new RecordingSink());
+    await settle();
+    daemon.send(attached(1n));
+    await settle();
+    daemon.answerNextSubscribeEmpty();
+
+    // Act
+    const outcome = (async () => {
+      for await (const _ of ctx.streams.watch("footer", { workspace: WORKSPACE }, new AbortController().signal)) {
+        // Nothing to draw.
+      }
+    })().then(
+      () => null,
+      (err: unknown) => err,
+    );
+    await settle();
+
+    // Assert
+    expect(String(await outcome)).toContain("SubscribePageResponse.result");
     ctx.quiesce();
   });
 });

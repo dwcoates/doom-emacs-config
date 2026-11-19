@@ -161,6 +161,11 @@ type Deps struct {
 	// tells a client is it when set (daemonaddr.ClientAddress): a client never learns a
 	// daemon's private address, which closes with its daemon. Required.
 	SharedAddress func() string
+	// InstanceAddress answers the private address of daemon INSTANCE and
+	// whether that daemon runs: where a call naming a daemon is forwarded
+	// (forward.go instanceTarget). An instance that no longer runs answers
+	// alive false and no error. Required.
+	InstanceAddress func(instance ids.InstanceID) (address string, alive bool, err error)
 	// Forward is the client a call for a workspace another daemon serves is
 	// forwarded on (forward.go): h2c to that daemon's private address.
 	// Required.
@@ -460,6 +465,15 @@ type server struct {
 	// it, because HTTP/1.1 caps a browser at about six connections per host and
 	// a server-streaming call pins one for its whole life (page.go).
 	pages map[string]*pageStream
+	// pageSeq numbers the attachments this daemon issues
+	// (PageAttachment.sequence): never reissued, so a call left over from a
+	// page's earlier attachment is told apart from its current one's.
+	pageSeq uint64
+	// pagePresence counts what holds each page id connected to this daemon:
+	// its own stream here (attachPage), and every relayed subscription
+	// another daemon runs here for it (holdRelayedPage). The opens are told
+	// of a page while its count is above zero. Guarded by mu.
+	pagePresence map[string]int
 	// hostIdentityAwaited records when a workspace's host view was FIRST
 	// withheld because its session record carries no host identity yet. Right
 	// after Emacs subscribes to WatchHostWorkspace, the shim may not have
@@ -601,6 +615,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a shared address source")
 	case deps.ServingElsewhere == nil:
 		return nil, missing("the serving-row lookup")
+	case deps.InstanceAddress == nil:
+		return nil, missing("the daemon instance address lookup")
 	case deps.ColdGateOf == nil:
 		return nil, missing("the cold gate lookup")
 	case deps.Forward == nil:
@@ -706,6 +722,7 @@ func New(deps Deps) (Server, error) {
 		movedAway:               make(map[ids.WorkspaceID]bool),
 		watchTokens:             make(map[string]tokenTarget),
 		pages:                   make(map[string]*pageStream),
+		pagePresence:            make(map[string]int),
 		hostIdentityAwaited:     make(map[ids.WorkspaceID]time.Time),
 		now:                     time.Now,
 		selections:              make(map[ids.WorkspaceID]*selectionState),

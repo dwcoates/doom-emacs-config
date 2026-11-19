@@ -14,7 +14,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/feed_token.proto.
  */
 export const file_agentrepl_v1_feed_token: GenFile = /*@__PURE__*/
-  fileDesc("Ch1hZ2VudHJlcGwvdjEvZmVlZF90b2tlbi5wcm90bxIMYWdlbnRyZXBsLnYxIh8KDkZlZWRXYXRjaFRva2VuEg0KBXZhbHVlGAEgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
+  fileDesc("Ch1hZ2VudHJlcGwvdjEvZmVlZF90b2tlbi5wcm90bxIMYWdlbnRyZXBsLnYxIjEKDkZlZWRXYXRjaFRva2VuEg0KBXZhbHVlGAEgASgJEhAKCGluc3RhbmNlGAIgASgJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
 
 /**
  * The address of ONE feed's tail, minted by OpenFeed and echoed verbatim by
@@ -23,15 +23,30 @@ export const file_agentrepl_v1_feed_token: GenFile = /*@__PURE__*/
  * client cannot watch a feed it never opened and the page/tail seam cannot
  * gap or overlap. Daemon-owned; never parsed, never constructed.
  *
+ * THE PIN LIVES IN THE DAEMON THAT MINTED IT, so the token names that daemon
+ * and a tail is opened there, whichever daemon receives the request. Two
+ * daemons run side by side at a deploy's handover, and a token that named no
+ * daemon could be honored by the wrong one.
+ *
  * @generated from message agentrepl.v1.FeedWatchToken
  */
 export type FeedWatchToken = Message<"agentrepl.v1.FeedWatchToken"> & {
   /**
-   * The opaque value.
+   * The opaque value, unique within the daemon that minted it.
    *
    * @generated from field: string value = 1;
    */
   value: string;
+
+  /**
+   * The daemon process that minted the token (its instance id), the only one
+   * that holds its pin. A daemon that receives a tail request naming another
+   * instance sends it there; when that process no longer runs the token is
+   * unknown, and the client opens the feed again. REQUIRED and not empty.
+   *
+   * @generated from field: string instance = 2;
+   */
+  instance: string;
 };
 
 /**

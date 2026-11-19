@@ -9,9 +9,11 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 )
 
@@ -56,6 +58,12 @@ var errPageGone = fmt.Errorf("server: the page's stream has ended")
 // pageStream is one attached page: its outbound writer and its subscriptions.
 type pageStream struct {
 	id string
+	// sequence is this attachment's number (PageAttachment.sequence): a page
+	// call is served only when it echoes it.
+	sequence uint64
+	// cancel ends the page's stream, which a newer attachment of the same
+	// page id does to the one it replaces.
+	cancel context.CancelFunc
 	// out carries pushes to the single writer goroutine. UNBUFFERED, so a
 	// subscription's pump blocks until the writer has taken its push.
 	out chan *agentreplv1.WatchPageResponse
@@ -123,18 +131,27 @@ func (s pageSink[R]) Send(msg *R) error {
 	})
 }
 
-// attachPage registers a page and answers its stream. A SECOND stream for one
-// page id is REFUSED rather than replacing the first: the first page's
-// subscriptions would otherwise become addressable by a client that does not
-// own them.
-func (s *server) attachPage(id string, ctx context.Context) (*pageStream, error) {
+// attachPage registers a page, issues its attachment, and answers its stream.
+//
+// A SECOND STREAM FOR ONE PAGE ID REPLACES THE FIRST. A page holds exactly
+// one, so a second is the page reopening after an end this daemon has not
+// finished unwinding (the client reopens the moment it reads the ending, and
+// the first handler's detach has not run yet). The first stream is ended,
+// which ends every subscription on it, and the second is issued its own
+// sequence, so a call still echoing the first's is answered `page_gone`.
+func (s *server) attachPage(id string, ctx context.Context, cancel context.CancelFunc) *pageStream {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, held := s.pages[id]; held {
-		return nil, fmt.Errorf("page %q already holds a stream on this daemon", id)
+	if older, held := s.pages[id]; held {
+		older.cancel()
+		s.log.Info("WatchPage", "a page attached again while its earlier stream still stood here; the earlier stream is ended",
+			dlog.Context{"page": id, "replaced_sequence": older.sequence})
 	}
+	s.pageSeq++
 	p := &pageStream{
 		id:         id,
+		sequence:   s.pageSeq,
+		cancel:     cancel,
 		out:        make(chan *agentreplv1.WatchPageResponse),
 		ctx:        ctx,
 		writerGone: make(chan struct{}),
@@ -143,8 +160,8 @@ func (s *server) attachPage(id string, ctx context.Context) (*pageStream, error)
 	s.pages[id] = p
 	// THE OPENS LEARN OF THE PAGE UNDER THE SAME LOCK, so the attach and the
 	// detach of one page id reach them in the order the map changed.
-	s.deps.Opens.PageAttached(id)
-	return p, nil
+	s.pagePresentLocked(id)
+	return p
 }
 
 // detachPage forgets a page whose stream has ended. Its subscriptions die with
@@ -154,10 +171,74 @@ func (s *server) detachPage(p *pageStream) {
 	defer s.mu.Unlock()
 	if held, ok := s.pages[p.id]; ok && held == p {
 		delete(s.pages, p.id)
-		// Every fact the page held (what it serves, what it drew) ends
-		// with its stream.
-		s.deps.Opens.PageDetached(p.id)
 	}
+	// Every fact the page held (what it serves, what it drew) ends once
+	// nothing holds the page here: a stream that was replaced leaves the
+	// page present under its replacement.
+	s.pageAbsentLocked(p.id)
+}
+
+// pagePresentLocked counts one more holder of page ID on this daemon, telling
+// the opens of the page when it is the first. The caller holds mu.
+func (s *server) pagePresentLocked(id string) {
+	s.pagePresence[id]++
+	if s.pagePresence[id] == 1 {
+		s.deps.Opens.PageAttached(id)
+	}
+}
+
+// pageAbsentLocked counts one holder of page ID gone, telling the opens the
+// page is gone when it was the last. The caller holds mu.
+func (s *server) pageAbsentLocked(id string) {
+	count, held := s.pagePresence[id]
+	if !held {
+		panic(fmt.Sprintf("server: page %q was released with no holder counted", id))
+	}
+	if count > 1 {
+		s.pagePresence[id] = count - 1
+		return
+	}
+	delete(s.pagePresence, id)
+	s.deps.Opens.PageDetached(id)
+}
+
+// holdRelayedPage holds page PAGE as connected to workspace WS on this daemon
+// for a relayed subscription (RelayedPageHeader): the page's stream is on
+// another daemon, which runs the subscription here because this daemon serves
+// WS. ACCEPTED is called when the subscription is accepted, which is when the
+// page's watch of the workspace exists, and RELEASE when its stream ends.
+func (s *server) holdRelayedPage(page string, ws ids.WorkspaceID) (accepted func(), release func()) {
+	var (
+		mu   sync.Mutex
+		held bool
+	)
+	accepted = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if held {
+			return
+		}
+		held = true
+		s.mu.Lock()
+		s.pagePresentLocked(page)
+		s.mu.Unlock()
+		s.deps.Opens.PageServes(page, ws)
+		s.deps.Pages.Served(page, ws)
+		s.log.Debug("daemon.server.relayed_page", "a page on another daemon is connected to a workspace this daemon serves",
+			dlog.Context{"page": page, dlog.KeyWorkspaceID: string(ws)})
+	}
+	release = func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if !held {
+			return
+		}
+		held = false
+		s.mu.Lock()
+		s.pageAbsentLocked(page)
+		s.mu.Unlock()
+	}
+	return accepted, release
 }
 
 // pageFor answers an attached page.
@@ -191,10 +272,7 @@ func (s *server) WatchPage(
 	streamCtx, cancel := s.streamContext(ctx)
 	defer cancel()
 
-	page, err := s.attachPage(req.Msg.GetPage(), streamCtx)
-	if err != nil {
-		return TransportClosed(s.log, rpc, "page_already_attached", err.Error(), false)
-	}
+	page := s.attachPage(req.Msg.GetPage(), streamCtx, cancel)
 	defer s.detachPage(page)
 	defer close(page.writerGone)
 	// THE WEB VIEW HOST'S BUILD AND RELOAD GENERATION stand for as long as
@@ -217,9 +295,12 @@ func (s *server) WatchPage(
 	}
 	s.acceptStream(ctx, rpc)
 	s.log.Info(rpc, "attached a page's one standing stream",
-		dlog.Context{"page": page.id, "webapp_build": webapp})
+		dlog.Context{"page": page.id, "webapp_build": webapp, "sequence": page.sequence})
 	if err := out.Send(&agentreplv1.WatchPageResponse{
-		Frame: &agentreplv1.WatchPageResponse_Attached{Attached: &agentreplv1.PageAttached{WebappBuild: webapp}},
+		Frame: &agentreplv1.WatchPageResponse_Attached{Attached: &agentreplv1.PageAttached{
+			WebappBuild: webapp,
+			Attachment:  &agentreplv1.PageAttachment{Instance: string(s.deps.Instance), Sequence: page.sequence},
+		}},
 	}); err != nil {
 		s.log.Debug(rpc, "the page went away before it was told it was attached",
 			dlog.Context{"page": page.id, "cause": err.Error()})
@@ -272,16 +353,34 @@ func (s *server) SubscribePage(
 	case req.Msg.GetRequest() == nil:
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("%s: request names no watch to open", rpc))
+	case req.Msg.GetAttachment().GetInstance() == "":
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("%s: attachment is required", rpc))
 	}
 
-	page, attached := s.pageFor(req.Msg.GetPage())
-	if !attached {
-		return nil, TransportClosed(s.log, rpc, "page_not_attached",
-			fmt.Sprintf("no page %q holds a stream on this daemon; WatchPage must be attached first",
-				req.Msg.GetPage()), true)
+	page, gone := s.pageUnder(req.Msg.GetPage(), req.Msg.GetAttachment())
+	if gone != "" {
+		return s.pageGone(rpc, req.Msg, gone), nil
 	}
 
 	watch, known := s.pageWatchFor(page, req.Msg)
+	if known {
+		// THE VIEW COMES FROM THE DAEMON THAT SERVES IT. A workspace another
+		// live daemon serves, or a feed tail another daemon pinned, is run as
+		// a relay of the dedicated rpc on that daemon; everything else runs
+		// here.
+		target, elsewhere, err := s.relayTarget(ctx, watch)
+		if err != nil {
+			return nil, boundaryFailure(err)
+		}
+		if elsewhere {
+			relay := watch.Relay
+			watch.Run = func(ctx context.Context) error { return relay(ctx, target) }
+			s.log.Debug(rpc, "a page subscription is relayed from the daemon that serves it", dlog.Context{
+				"page": page.id, "subscription": req.Msg.GetSubscription(), "watch": watch.Name, "target": target,
+			})
+		}
+	}
 	if !known {
 		// An arm the schema grew and `pageWatchFor` did not. It is a defect in
 		// this daemon, not a client error, and it is raised rather than
@@ -307,8 +406,7 @@ func (s *server) SubscribePage(
 	if page.closing {
 		page.mu.Unlock()
 		cancel()
-		return nil, TransportClosed(s.log, rpc, "page_closing",
-			fmt.Sprintf("page %q is ending with this daemon's planned exit", req.Msg.GetPage()), false)
+		return s.pageGone(rpc, req.Msg, "the page is ending with this daemon's planned exit"), nil
 	}
 	page.subs[req.Msg.GetSubscription()] = record
 	page.running.Add(1)
@@ -355,7 +453,7 @@ func (s *server) SubscribePage(
 		s.log.Debug(rpc, "a page subscription was accepted", dlog.Context{
 			"page": page.id, "subscription": req.Msg.GetSubscription(), "watch": watch.Name,
 		})
-		return connect.NewResponse(&agentreplv1.SubscribePageResponse{}), nil
+		return connect.NewResponse(subscribedAnswer()), nil
 	case err := <-done:
 		// ACCEPTANCE WINS WHEN BOTH ARE READY, and they are ready together
 		// whenever a body accepts and then finishes at once — a login terminal
@@ -369,7 +467,7 @@ func (s *server) SubscribePage(
 			s.log.Debug(rpc, "a page subscription was accepted and ended at once", dlog.Context{
 				"page": page.id, "subscription": req.Msg.GetSubscription(), "watch": watch.Name,
 			})
-			return connect.NewResponse(&agentreplv1.SubscribePageResponse{}), nil
+			return connect.NewResponse(subscribedAnswer()), nil
 		default:
 		}
 		// The body finished before it accepted: a refusal, or a validation
@@ -387,6 +485,48 @@ func (s *server) SubscribePage(
 	}
 }
 
+// pageUnder answers the page PAGE attached here under ATTACHMENT, or why that
+// attachment is over: the daemon that issued it is not this one (which a call
+// reaches only when that daemon no longer runs: forward.go instanceTarget),
+// the page holds no stream here, or it was issued a newer attachment.
+func (s *server) pageUnder(id string, attachment *agentreplv1.PageAttachment) (*pageStream, string) {
+	if attachment.GetInstance() != string(s.deps.Instance) {
+		return nil, "the daemon that issued the attachment no longer runs"
+	}
+	page, attached := s.pageFor(id)
+	if !attached {
+		return nil, "the page holds no stream on this daemon"
+	}
+	if page.sequence != attachment.GetSequence() {
+		return nil, "the page was issued a newer attachment"
+	}
+	return page, ""
+}
+
+// pageGone answers a subscribe whose attachment is over, and records it. It
+// is a planned outcome, recorded at INFO: the page ends that attachment and
+// subscribes again under its next one.
+func (s *server) pageGone(rpc string, req *agentreplv1.SubscribePageRequest, why string) *connect.Response[agentreplv1.SubscribePageResponse] {
+	s.log.Info("daemon.server.page_gone", "a page call carried an attachment that is over; it was answered page_gone", dlog.Context{
+		"rpc": rpc, "page": req.GetPage(), "subscription": req.GetSubscription(),
+		"instance": req.GetAttachment().GetInstance(), "sequence": req.GetAttachment().GetSequence(), "why": why,
+	})
+	return connect.NewResponse(&agentreplv1.SubscribePageResponse{
+		Result: &agentreplv1.SubscribePageResponse_Success{Success: &agentreplv1.SubscribePageSuccess{
+			Outcome: &agentreplv1.SubscribePageSuccess_PageGone{PageGone: &agentreplv1.SubscribePagePageGone{}},
+		}},
+	})
+}
+
+// subscribedAnswer is the answer of a subscription that exists.
+func subscribedAnswer() *agentreplv1.SubscribePageResponse {
+	return &agentreplv1.SubscribePageResponse{
+		Result: &agentreplv1.SubscribePageResponse_Success{Success: &agentreplv1.SubscribePageSuccess{
+			Outcome: &agentreplv1.SubscribePageSuccess_Subscribed{Subscribed: &agentreplv1.SubscribePageSubscribed{}},
+		}},
+	}
+}
+
 // UnsubscribePage ends one subscription and leaves the page's others alone.
 //
 // THE END IS STILL ANNOUNCED, carrying the `unsubscribed` arm. The ending is
@@ -395,7 +535,8 @@ func (s *server) SubscribePage(
 // for and an end that raced its request.
 //
 // Unsubscribing one that does not exist is SUCCESS: the end is the state the
-// caller asked for, and a subscription the daemon already ended is that state.
+// caller asked for, and a subscription the daemon already ended, or one made
+// under an attachment that is itself over, is that state.
 func (s *server) UnsubscribePage(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.UnsubscribePageRequest],
@@ -408,11 +549,14 @@ func (s *server) UnsubscribePage(
 	case req.Msg.GetSubscription() == "":
 		return nil, connect.NewError(connect.CodeInvalidArgument,
 			fmt.Errorf("%s: subscription is required", rpc))
+	case req.Msg.GetAttachment().GetInstance() == "":
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			fmt.Errorf("%s: attachment is required", rpc))
 	}
 	answer := connect.NewResponse(&agentreplv1.UnsubscribePageResponse{})
 
-	page, attached := s.pageFor(req.Msg.GetPage())
-	if !attached {
+	page, gone := s.pageUnder(req.Msg.GetPage(), req.Msg.GetAttachment())
+	if gone != "" {
 		return answer, nil
 	}
 	page.mu.Lock()
@@ -501,6 +645,13 @@ func endedFrame(id string, unsubscribed bool, err error) (*agentreplv1.PageSubsc
 			Unsubscribed: &agentreplv1.PageSubscriptionUnsubscribed{},
 		}
 		return ended, "unsubscribed"
+	case errors.Is(err, errSubscriptionMoved):
+		// THE SERVING DAEMON ENDED THE VIEW CLEANLY (relayWatch): nothing
+		// failed and the view is still wanted, so the page subscribes again.
+		ended.How = &agentreplv1.PageSubscriptionEnded_Moved{
+			Moved: &agentreplv1.PageSubscriptionMoved{},
+		}
+		return ended, "moved"
 	case err != nil:
 		ended.How = &agentreplv1.PageSubscriptionEnded_Failed{Failed: failedAs(err)}
 		return ended, "failed"
@@ -548,6 +699,16 @@ type pageWatch struct {
 	Name string
 	// Run serves it, writing into the page's mux.
 	Run func(context.Context) error
+	// Workspace is the workspace whose serving daemon holds the view, empty
+	// for a view of the daemon itself (the roster, the daemon stream).
+	Workspace ids.WorkspaceID
+	// Minter is the daemon instance that holds the view's pin: a feed tail's
+	// token names it. Empty for every other watch.
+	Minter string
+	// Relay serves it from the daemon at TARGET instead of this one, writing
+	// that daemon's pushes into the page's mux. Nil for a watch that is never
+	// relayed.
+	Relay func(ctx context.Context, target string) error
 }
 
 // pageWatchFor resolves one subscription request onto the watch behind it.
@@ -566,7 +727,7 @@ func (s *server) pageWatchFor(
 			wrap: func(m *agentreplv1.WatchWorkspaceRosterResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Roster{Roster: m}}
 			}}
-		return pageWatch{"WatchWorkspaceRoster", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchWorkspaceRoster", Run: func(ctx context.Context) error {
 			return serveThenEnd(s, "WatchWorkspaceRoster", sink, rosterEnding(), func() error { return s.watchWorkspaceRoster(ctx, watch.Roster, sink) })
 		}}, true
 	case *agentreplv1.SubscribePageRequest_WebWorkspace:
@@ -574,15 +735,19 @@ func (s *server) pageWatchFor(
 			wrap: func(m *agentreplv1.WatchWebWorkspaceResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_WebWorkspace{WebWorkspace: m}}
 			}}
-		return pageWatch{"WatchWebWorkspace", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchWebWorkspace", Run: func(ctx context.Context) error {
 			return s.watchWebWorkspace(ctx, watch.WebWorkspace, sink)
-		}}, true
+		},
+			Workspace: ids.WorkspaceID(watch.WebWorkspace.GetWorkspace().GetId()),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchWebWorkspace", agentreplv1connect.AgentReplWatchWebWorkspaceProcedure, target, page.id, watch.WebWorkspace, sink)
+			}}, true
 	case *agentreplv1.SubscribePageRequest_Daemon:
 		sink := pageSink[agentreplv1.WatchDaemonResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchDaemonResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Daemon{Daemon: m}}
 			}}
-		return pageWatch{"WatchDaemon", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchDaemon", Run: func(ctx context.Context) error {
 			return serveThenEnd(s, "WatchDaemon", sink, daemonEnding(), func() error { return s.watchDaemon(ctx, watch.Daemon, sink) })
 		}}, true
 	case *agentreplv1.SubscribePageRequest_Topbar:
@@ -590,49 +755,73 @@ func (s *server) pageWatchFor(
 			wrap: func(m *agentreplv1.WatchTopbarResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Topbar{Topbar: m}}
 			}}
-		return pageWatch{"WatchTopbar", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchTopbar", Run: func(ctx context.Context) error {
 			return s.watchTopbar(ctx, watch.Topbar, sink)
-		}}, true
+		},
+			Workspace: ids.WorkspaceID(watch.Topbar.GetWorkspace().GetId()),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchTopbar", agentreplv1connect.AgentReplWatchTopbarProcedure, target, page.id, watch.Topbar, sink)
+			}}, true
 	case *agentreplv1.SubscribePageRequest_WorkspaceMentions:
 		sink := pageSink[agentreplv1.WatchWorkspaceMentionsResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchWorkspaceMentionsResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_WorkspaceMentions{WorkspaceMentions: m}}
 			}}
-		return pageWatch{"WatchWorkspaceMentions", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchWorkspaceMentions", Run: func(ctx context.Context) error {
 			return serveThenEnd(s, "WatchWorkspaceMentions", sink, workspaceMentionsEnding(), func() error { return s.watchWorkspaceMentions(ctx, watch.WorkspaceMentions, sink) })
-		}}, true
+		},
+			Workspace: ids.WorkspaceID(watch.WorkspaceMentions.GetViewer().GetId()),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchWorkspaceMentions", agentreplv1connect.AgentReplWatchWorkspaceMentionsProcedure, target, page.id, watch.WorkspaceMentions, sink)
+			}}, true
 	case *agentreplv1.SubscribePageRequest_Chat:
 		sink := pageSink[agentreplv1.WatchChatResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchChatResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Chat{Chat: m}}
 			}}
-		return pageWatch{"WatchChat", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchChat", Run: func(ctx context.Context) error {
 			return s.watchChat(ctx, watch.Chat, sink)
-		}}, true
+		},
+			Workspace: ids.WorkspaceID(watch.Chat.GetThread().GetId()),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchChat", agentreplv1connect.AgentReplWatchChatProcedure, target, page.id, watch.Chat, sink)
+			}}, true
 	case *agentreplv1.SubscribePageRequest_Footer:
 		sink := pageSink[agentreplv1.WatchFooterResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchFooterResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Footer{Footer: m}}
 			}}
-		return pageWatch{"WatchFooter", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchFooter", Run: func(ctx context.Context) error {
 			return s.watchFooter(ctx, watch.Footer, sink)
-		}}, true
+		},
+			Workspace: ids.WorkspaceID(watch.Footer.GetWorkspace().GetId()),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchFooter", agentreplv1connect.AgentReplWatchFooterProcedure, target, page.id, watch.Footer, sink)
+			}}, true
 	case *agentreplv1.SubscribePageRequest_Feed:
 		sink := pageSink[agentreplv1.WatchFeedResponse]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.WatchFeedResponse) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_Feed{Feed: m}}
 			}}
-		return pageWatch{"WatchFeed", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchFeed", Run: func(ctx context.Context) error {
 			return s.watchFeed(ctx, watch.Feed, sink)
-		}}, true
+		},
+			Minter: watch.Feed.GetWatch().GetInstance(),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchFeed", agentreplv1connect.AgentReplWatchFeedProcedure, target, page.id, watch.Feed, sink)
+			}}, true
 	case *agentreplv1.SubscribePageRequest_LoginTerminal:
 		sink := pageSink[agentreplv1.LoginTerminalOutput]{page: page, sub: sub,
 			wrap: func(m *agentreplv1.LoginTerminalOutput) *agentreplv1.PageFrame {
 				return &agentreplv1.PageFrame{Payload: &agentreplv1.PageFrame_LoginTerminal{LoginTerminal: m}}
 			}}
-		return pageWatch{"WatchLoginTerminal", func(ctx context.Context) error {
+		return pageWatch{Name: "WatchLoginTerminal", Run: func(ctx context.Context) error {
 			return s.watchLoginTerminal(ctx, watch.LoginTerminal, sink)
-		}}, true
+		},
+			Workspace: ids.WorkspaceID(watch.LoginTerminal.GetWorkspace().GetId()),
+			Relay: func(ctx context.Context, target string) error {
+				return relayWatch(ctx, s, "WatchLoginTerminal", agentreplv1connect.AgentReplWatchLoginTerminalProcedure, target, page.id, watch.LoginTerminal, sink)
+			}}, true
 	default:
 		return pageWatch{}, false
 	}

@@ -104,6 +104,7 @@ func daemonOverWith(t *testing.T, store DurableRows, adjust func(*Deps)) (*resol
 	t.Helper()
 	log := dlog.NewTestLogger()
 	deps := Deps{
+		Instance:     testInstance,
 		Log:          &fakeSurfaces{log: log},
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/ws", nil },
 		Encode:       testEncode,

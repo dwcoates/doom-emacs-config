@@ -357,10 +357,23 @@ hand any more:
   `WatchDaemon`) consumes the frame before `onPush`, and a run that then ends
   cleanly is logged at info (`rpc.stream-ended-planned`) and reopened at once
   with NO `daemonUnreachable` filed. A clean end without it, or an error after
-  it, is the unreachable failure it always was. The daemon sends the frame on
-  its dedicated rpcs only; a page mux subscription is not given one (the
-  `WatchPage` stream has no ending arm), so today the page's own end still
-  reads as the failure.
+  it, is the unreachable failure it always was. The page's own stream carries
+  the arm too (`WatchPageResponse.ending`), sent once every subscription on it
+  has sent its last frame, and the page reopens from it the same way.
+- **A PAGE CALL ECHOES ITS ATTACHMENT, AND TWO ENDS ARE PLANNED REOPENS.**
+  `PageAttached` issues a `PageAttachment` naming the daemon that holds the
+  page's stream, and `SubscribePage` and `UnsubscribePage` echo it
+  (`src/rpc/page-streams.ts`), so the daemon that receives a call sends it to
+  the one holding the page. Two ends throw `PlannedReopen`
+  (`src/rpc/planned-reopen.ts`), which `watchStream` reopens from at once with
+  nothing filed (`rpc.stream-ended-planned-reopen`):
+  - `SubscribePage` answered `page_gone`: the attachment is over. The page
+    detaches and reopens its own stream (`StreamHandle.reopen`), and the
+    subscription is made again under the next attachment.
+  - A subscription ended `moved`: the daemon serving a relayed view ended it
+    cleanly, and the view is made again.
+  An attach that issues no attachment is a malformed frame, and the page
+  subscribes nothing on it.
 - **A DAEMON MOVE REOPENS EVERY STREAM AT ONCE.** The web view host's daemon
   moves at a handover (`Host.setDaemon`, `src/rpc/daemon-origin.ts`), and its
   context passes the move on (`DaemonContext.onDaemonMoved`). `watchStream`

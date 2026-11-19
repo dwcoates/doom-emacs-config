@@ -22,9 +22,24 @@
 // THE ATTACHMENT IS A LATCH, NOT A RACE. `SubscribePage` names a page that must
 // already be attached, so its first frame — `PageAttached` — is sent the moment
 // the daemon has registered the page and BEFORE any subscription can exist. A
-// client subscribes only after reading it; a `SubscribePage` for a page the
-// daemon has not attached is REFUSED, loudly, rather than buffered against a
-// stream that may never arrive.
+// client subscribes only after reading it.
+//
+// A PAGE CALL NAMES THE DAEMON THAT HOLDS THE PAGE. Two daemons run side by
+// side at a deploy's handover, the page's stream lives in exactly one of them,
+// and a unary call is a new connection that either may accept. So
+// `PageAttached` hands the page a `PageAttachment`, every `SubscribePage` and
+// `UnsubscribePage` echoes it, and whichever daemon receives the call sends it
+// to the daemon the attachment names. A call is therefore only ever evaluated
+// by the daemon that issued its attachment; when that daemon no longer holds
+// the page, the answer is `page_gone`, which ends that attachment and is not a
+// failure.
+//
+// A WORKSPACE'S VIEW COMES FROM THE DAEMON THAT SERVES THE WORKSPACE, which
+// need not be the one holding the page. The page's daemon then runs the
+// subscription as a relay of the dedicated rpc on the serving daemon and
+// writes its pushes into the page's stream, in either direction: a page on the
+// departing daemon watching a workspace already handed on, or a page on the
+// successor watching a workspace the departing daemon still serves.
 //
 // AN ENDING NAMES ITSELF. `PageSubscriptionEnded` carries a `how` arm, so a
 // client the daemon unsubscribed, a source that simply finished, and a watch
@@ -58,9 +73,11 @@ message WatchPageRequest {
   // The page's own identity, minted by the client and unique for the life of
   // the loaded document. `SubscribePage` and `UnsubscribePage` name it.
   //
-  // TWO STREAMS FOR ONE PAGE ID IS A REFUSAL, not a replacement: a page holds
-  // exactly one, and a second would leave the first's subscriptions addressable
-  // by a client that no longer owns them.
+  // A SECOND STREAM FOR ONE PAGE ID REPLACES THE FIRST. A page holds exactly
+  // one, so a second can only be the page reopening after an end the daemon
+  // has not finished unwinding. The first stream and every subscription on it
+  // end, and the second is issued its own `PageAttachment`, so a call still
+  // carrying the first's is answered `page_gone`.
   string page = 1;
   // PRESENT ONLY ON THE PAGE STREAMS OF EMACS'S OWN WEB VIEWS: the web view
   // host's and the sidebar's (webapp/src/host/document.ts). They are the
@@ -134,6 +151,28 @@ message PageAttached {
   // reload was pushed. The reload itself is the deploy's
   // (WatchWebWorkspaceResponse.reload_webapp, WatchDaemonResponse.reload_webhost).
   string webapp_build = 1;
+  // This attachment's identity, echoed on every page call made under it.
+  // REQUIRED.
+  PageAttachment attachment = 2;
+}
+
+// One attachment of one page to one daemon: which daemon holds the page's
+// stream, and which of that page's attachments to it this is.
+//
+// MINTED BY THE DAEMON AND ECHOED UNCHANGED. A page never builds or alters
+// one. It exists so a page call states which stream it belongs to, instead of
+// being matched to a stream by whichever daemon happened to accept the call.
+message PageAttachment {
+  // The daemon process that holds the page's stream (its instance id). A
+  // daemon that receives a page call naming another instance sends the call
+  // there, or answers `page_gone` when that process no longer runs. REQUIRED
+  // and not empty.
+  string instance = 1;
+  // Which attachment this is among the ones that daemon has issued: a value
+  // it never issues twice. A page that reattaches to the same daemon is
+  // issued a new one, so a call left over from its earlier attachment cannot
+  // be mistaken for one of the current attachment's.
+  uint64 sequence = 2;
 }
 
 // One push, addressed to the subscription that asked for it.
@@ -186,6 +225,13 @@ message PageSubscriptionEnded {
     // The watch failed. Carries the SAME error the dedicated rpc would have
     // ended its own stream with.
     PageSubscriptionFailed failed = 4;
+    // The daemon that served this subscription's workspace ended the view
+    // without an error: it stood down, or stopped serving the workspace.
+    // Nothing failed, and the view is still wanted, so the page subscribes
+    // again at once and is served by whichever daemon serves the workspace
+    // now. Sent only for a subscription the page's daemon relayed from
+    // another daemon.
+    PageSubscriptionMoved moved = 5;
   }
 }
 
@@ -194,6 +240,10 @@ message PageSubscriptionUnsubscribed {}
 
 // Presence is the fact: the source finished of its own accord.
 message PageSubscriptionSourceEnded {}
+
+// Presence is the fact: the serving daemon ended the view cleanly, and the
+// page subscribes again.
+message PageSubscriptionMoved {}
 
 // A subscription that ended in FAILURE, carrying the error verbatim.
 //
@@ -228,12 +278,16 @@ message PageSubscriptionHandedAway {
 // Starts one subscription on an already-attached page.
 //
 // A REFUSAL IS A CONNECT ERROR, exactly as a refused `Watch*` open is. This
-// verb IS the open, and a `SubscribePage` that answers is a subscription that
-// exists: the daemon registers it with its publisher BEFORE replying, so a view
-// published after the reply cannot be missed.
+// verb IS the open, and a `SubscribePage` that answers `subscribed` is a
+// subscription that exists: the daemon registers it with its publisher BEFORE
+// replying, so a view published after the reply cannot be missed.
 message SubscribePageRequest {
   // The page whose stream carries the pushes.
   string page = 1;
+  // The attachment the page was issued on the stream that is to carry the
+  // pushes (`PageAttached.attachment`), echoed unchanged. REQUIRED: a call
+  // without one is malformed (Connect InvalidArgument).
+  PageAttachment attachment = 13;
   // The subscription's own id, minted by the client. It addresses every
   // `PageFrame` this subscription produces and is what `UnsubscribePage` names.
   // Reusing a live one is a refusal.
@@ -260,16 +314,46 @@ message SubscribePageRequest {
   reserved "holds";
 }
 
-// The subscription exists. It carries nothing: the acceptance IS the answer.
-message SubscribePageResponse {}
+// THE ARM IS THE OUTCOME. There is no error arm: a refused subscription is a
+// Connect error, as a refused `Watch*` open is.
+message SubscribePageResponse {
+  oneof result {
+    SubscribePageSuccess success = 1;
+  }
+}
+
+// The call was served by the daemon its attachment names, which answers one
+// of two things about that attachment.
+message SubscribePageSuccess {
+  oneof outcome {
+    // The subscription exists.
+    SubscribePageSubscribed subscribed = 1;
+    // The attachment the call carried is over: the daemon that issued it no
+    // longer runs, or no longer holds the page under it (the page's stream
+    // ended there, or the page reattached and was issued another). NOT A
+    // FAILURE: nothing was subscribed, the page ends that attachment and
+    // subscribes again under its next one, and files nothing.
+    SubscribePagePageGone page_gone = 2;
+  }
+}
+
+// Presence is the fact: the subscription exists. The acceptance IS the answer.
+message SubscribePageSubscribed {}
+
+// Presence is the fact: the attachment the call carried is over.
+message SubscribePagePageGone {}
 
 // Ends one subscription without disturbing the page's other ones.
 message UnsubscribePageRequest {
   string page = 1;
   string subscription = 2;
+  // The attachment the subscription was made under, echoed unchanged.
+  // REQUIRED: a call without one is malformed (Connect InvalidArgument).
+  PageAttachment attachment = 3;
 }
 
 // The subscription is over. Unsubscribing one that does not exist is NOT a
 // refusal — the end is the state the caller asked for, and a subscription the
-// daemon already ended is exactly that state.
+// daemon already ended, or one under an attachment that is itself over, is
+// exactly that state.
 message UnsubscribePageResponse {}

@@ -13,7 +13,17 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 // the tail to begin exactly after the page the open answered with, so a
 // client cannot watch a feed it never opened and the page/tail seam cannot
 // gap or overlap. Daemon-owned; never parsed, never constructed.
+//
+// THE PIN LIVES IN THE DAEMON THAT MINTED IT, so the token names that daemon
+// and a tail is opened there, whichever daemon receives the request. Two
+// daemons run side by side at a deploy's handover, and a token that named no
+// daemon could be honored by the wrong one.
 message FeedWatchToken {
-  // The opaque value.
+  // The opaque value, unique within the daemon that minted it.
   string value = 1;
+  // The daemon process that minted the token (its instance id), the only one
+  // that holds its pin. A daemon that receives a tail request naming another
+  // instance sends it there; when that process no longer runs the token is
+  // unknown, and the client opens the feed again. REQUIRED and not empty.
+  string instance = 2;
 }

@@ -22,9 +22,24 @@
 // THE ATTACHMENT IS A LATCH, NOT A RACE. `SubscribePage` names a page that must
 // already be attached, so its first frame — `PageAttached` — is sent the moment
 // the daemon has registered the page and BEFORE any subscription can exist. A
-// client subscribes only after reading it; a `SubscribePage` for a page the
-// daemon has not attached is REFUSED, loudly, rather than buffered against a
-// stream that may never arrive.
+// client subscribes only after reading it.
+//
+// A PAGE CALL NAMES THE DAEMON THAT HOLDS THE PAGE. Two daemons run side by
+// side at a deploy's handover, the page's stream lives in exactly one of them,
+// and a unary call is a new connection that either may accept. So
+// `PageAttached` hands the page a `PageAttachment`, every `SubscribePage` and
+// `UnsubscribePage` echoes it, and whichever daemon receives the call sends it
+// to the daemon the attachment names. A call is therefore only ever evaluated
+// by the daemon that issued its attachment; when that daemon no longer holds
+// the page, the answer is `page_gone`, which ends that attachment and is not a
+// failure.
+//
+// A WORKSPACE'S VIEW COMES FROM THE DAEMON THAT SERVES THE WORKSPACE, which
+// need not be the one holding the page. The page's daemon then runs the
+// subscription as a relay of the dedicated rpc on the serving daemon and
+// writes its pushes into the page's stream, in either direction: a page on the
+// departing daemon watching a workspace already handed on, or a page on the
+// successor watching a workspace the departing daemon still serves.
 //
 // AN ENDING NAMES ITSELF. `PageSubscriptionEnded` carries a `how` arm, so a
 // client the daemon unsubscribed, a source that simply finished, and a watch
@@ -68,7 +83,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file agentrepl/v1/endpoint_watch_page.proto.
  */
 export const file_agentrepl_v1_endpoint_watch_page: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIl0KEFdhdGNoUGFnZVJlcXVlc3QSDAoEcGFnZRgBIAEoCRIvCgd3ZWJob3N0GAIgASgLMhkuYWdlbnRyZXBsLnYxLldlYmhvc3RQYWdlSACIAQFCCgoIX3dlYmhvc3QiWQoLV2ViaG9zdFBhZ2USFAoMd2ViYXBwX2J1aWxkGAEgASgJEh4KEXJlbG9hZF9nZW5lcmF0aW9uGAIgASgNSACIAQFCFAoSX3JlbG9hZF9nZW5lcmF0aW9uIt8BChFXYXRjaFBhZ2VSZXNwb25zZRIuCghhdHRhY2hlZBgBIAEoCzIaLmFnZW50cmVwbC52MS5QYWdlQXR0YWNoZWRIABInCgRwdXNoGAIgASgLMhcuYWdlbnRyZXBsLnYxLlBhZ2VGcmFtZUgAEjQKBWVuZGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25FbmRlZEgAEjIKBmVuZGluZxgEIAEoCzIgLmFnZW50cmVwbC52MS5EYWVtb25TdHJlYW1FbmRpbmdIAEIHCgVmcmFtZSIkCgxQYWdlQXR0YWNoZWQSFAoMd2ViYXBwX2J1aWxkGAEgASgJIsMECglQYWdlRnJhbWUSFAoMc3Vic2NyaXB0aW9uGAEgASgJEjwKBnJvc3RlchgCIAEoCzIqLmFnZW50cmVwbC52MS5XYXRjaFdvcmtzcGFjZVJvc3RlclJlc3BvbnNlSAASQAoNd2ViX3dvcmtzcGFjZRgDIAEoCzInLmFnZW50cmVwbC52MS5XYXRjaFdlYldvcmtzcGFjZVJlc3BvbnNlSAASMwoGZGFlbW9uGAQgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRGFlbW9uUmVzcG9uc2VIABIzCgZ0b3BiYXIYBSABKAsyIS5hZ2VudHJlcGwudjEuV2F0Y2hUb3BiYXJSZXNwb25zZUgAEjMKBmZvb3RlchgGIAEoCzIhLmFnZW50cmVwbC52MS5XYXRjaEZvb3RlclJlc3BvbnNlSAASLwoEZmVlZBgIIAEoCzIfLmFnZW50cmVwbC52MS5XYXRjaEZlZWRSZXNwb25zZUgAEjsKDmxvZ2luX3Rlcm1pbmFsGAkgASgLMiEuYWdlbnRyZXBsLnYxLkxvZ2luVGVybWluYWxPdXRwdXRIABIvCgRjaGF0GAogASgLMh8uYWdlbnRyZXBsLnYxLldhdGNoQ2hhdFJlc3BvbnNlSAASSgoSd29ya3NwYWNlX21lbnRpb25zGAsgASgLMiwuYWdlbnRyZXBsLnYxLldhdGNoV29ya3NwYWNlTWVudGlvbnNSZXNwb25zZUgAQgkKB3BheWxvYWRKBAgHEAhSBWhvbGRzIvMBChVQYWdlU3Vic2NyaXB0aW9uRW5kZWQSFAoMc3Vic2NyaXB0aW9uGAEgASgJEkIKDHVuc3Vic2NyaWJlZBgCIAEoCzIqLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uVW5zdWJzY3JpYmVkSAASQQoMc291cmNlX2VuZGVkGAMgASgLMikuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25Tb3VyY2VFbmRlZEgAEjYKBmZhaWxlZBgEIAEoCzIkLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uRmFpbGVkSABCBQoDaG93Ih4KHFBhZ2VTdWJzY3JpcHRpb25VbnN1YnNjcmliZWQiHQobUGFnZVN1YnNjcmlwdGlvblNvdXJjZUVuZGVkIosBChZQYWdlU3Vic2NyaXB0aW9uRmFpbGVkEgwKBGNvZGUYASABKAkSDwoHbWVzc2FnZRgCIAEoCRJCCgtoYW5kZWRfYXdheRgDIAEoCzIoLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uSGFuZGVkQXdheUgAiAEBQg4KDF9oYW5kZWRfYXdheSItChpQYWdlU3Vic2NyaXB0aW9uSGFuZGVkQXdheRIPCgdhZGRyZXNzGAEgASgJItoEChRTdWJzY3JpYmVQYWdlUmVxdWVzdBIMCgRwYWdlGAEgASgJEhQKDHN1YnNjcmlwdGlvbhgCIAEoCRI7CgZyb3N0ZXIYAyABKAsyKS5hZ2VudHJlcGwudjEuV2F0Y2hXb3Jrc3BhY2VSb3N0ZXJSZXF1ZXN0SAASPwoNd2ViX3dvcmtzcGFjZRgEIAEoCzImLmFnZW50cmVwbC52MS5XYXRjaFdlYldvcmtzcGFjZVJlcXVlc3RIABIyCgZkYWVtb24YBSABKAsyIC5hZ2VudHJlcGwudjEuV2F0Y2hEYWVtb25SZXF1ZXN0SAASMgoGdG9wYmFyGAYgASgLMiAuYWdlbnRyZXBsLnYxLldhdGNoVG9wYmFyUmVxdWVzdEgAEjIKBmZvb3RlchgHIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaEZvb3RlclJlcXVlc3RIABIuCgRmZWVkGAkgASgLMh4uYWdlbnRyZXBsLnYxLldhdGNoRmVlZFJlcXVlc3RIABJBCg5sb2dpbl90ZXJtaW5hbBgKIAEoCzInLmFnZW50cmVwbC52MS5XYXRjaExvZ2luVGVybWluYWxSZXF1ZXN0SAASLgoEY2hhdBgLIAEoCzIeLmFnZW50cmVwbC52MS5XYXRjaENoYXRSZXF1ZXN0SAASSQoSd29ya3NwYWNlX21lbnRpb25zGAwgASgLMisuYWdlbnRyZXBsLnYxLldhdGNoV29ya3NwYWNlTWVudGlvbnNSZXF1ZXN0SABCCQoHcmVxdWVzdEoECAgQCVIFaG9sZHMiFwoVU3Vic2NyaWJlUGFnZVJlc3BvbnNlIjwKFlVuc3Vic2NyaWJlUGFnZVJlcXVlc3QSDAoEcGFnZRgBIAEoCRIUCgxzdWJzY3JpcHRpb24YAiABKAkiGQoXVW5zdWJzY3JpYmVQYWdlUmVzcG9uc2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_endpoint_watch_workspace_roster, file_agentrepl_v1_endpoint_watch_web_workspace, file_agentrepl_v1_endpoint_watch_daemon, file_agentrepl_v1_endpoint_watch_topbar, file_agentrepl_v1_endpoint_watch_footer, file_agentrepl_v1_endpoint_watch_feed, file_agentrepl_v1_endpoint_watch_login_terminal, file_agentrepl_v1_endpoint_watch_chat, file_agentrepl_v1_endpoint_watch_workspace_mentions]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfd2F0Y2hfcGFnZS5wcm90bxIMYWdlbnRyZXBsLnYxIl0KEFdhdGNoUGFnZVJlcXVlc3QSDAoEcGFnZRgBIAEoCRIvCgd3ZWJob3N0GAIgASgLMhkuYWdlbnRyZXBsLnYxLldlYmhvc3RQYWdlSACIAQFCCgoIX3dlYmhvc3QiWQoLV2ViaG9zdFBhZ2USFAoMd2ViYXBwX2J1aWxkGAEgASgJEh4KEXJlbG9hZF9nZW5lcmF0aW9uGAIgASgNSACIAQFCFAoSX3JlbG9hZF9nZW5lcmF0aW9uIt8BChFXYXRjaFBhZ2VSZXNwb25zZRIuCghhdHRhY2hlZBgBIAEoCzIaLmFnZW50cmVwbC52MS5QYWdlQXR0YWNoZWRIABInCgRwdXNoGAIgASgLMhcuYWdlbnRyZXBsLnYxLlBhZ2VGcmFtZUgAEjQKBWVuZGVkGAMgASgLMiMuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25FbmRlZEgAEjIKBmVuZGluZxgEIAEoCzIgLmFnZW50cmVwbC52MS5EYWVtb25TdHJlYW1FbmRpbmdIAEIHCgVmcmFtZSJWCgxQYWdlQXR0YWNoZWQSFAoMd2ViYXBwX2J1aWxkGAEgASgJEjAKCmF0dGFjaG1lbnQYAiABKAsyHC5hZ2VudHJlcGwudjEuUGFnZUF0dGFjaG1lbnQiNAoOUGFnZUF0dGFjaG1lbnQSEAoIaW5zdGFuY2UYASABKAkSEAoIc2VxdWVuY2UYAiABKAQiwwQKCVBhZ2VGcmFtZRIUCgxzdWJzY3JpcHRpb24YASABKAkSPAoGcm9zdGVyGAIgASgLMiouYWdlbnRyZXBsLnYxLldhdGNoV29ya3NwYWNlUm9zdGVyUmVzcG9uc2VIABJACg13ZWJfd29ya3NwYWNlGAMgASgLMicuYWdlbnRyZXBsLnYxLldhdGNoV2ViV29ya3NwYWNlUmVzcG9uc2VIABIzCgZkYWVtb24YBCABKAsyIS5hZ2VudHJlcGwudjEuV2F0Y2hEYWVtb25SZXNwb25zZUgAEjMKBnRvcGJhchgFIAEoCzIhLmFnZW50cmVwbC52MS5XYXRjaFRvcGJhclJlc3BvbnNlSAASMwoGZm9vdGVyGAYgASgLMiEuYWdlbnRyZXBsLnYxLldhdGNoRm9vdGVyUmVzcG9uc2VIABIvCgRmZWVkGAggASgLMh8uYWdlbnRyZXBsLnYxLldhdGNoRmVlZFJlc3BvbnNlSAASOwoObG9naW5fdGVybWluYWwYCSABKAsyIS5hZ2VudHJlcGwudjEuTG9naW5UZXJtaW5hbE91dHB1dEgAEi8KBGNoYXQYCiABKAsyHy5hZ2VudHJlcGwudjEuV2F0Y2hDaGF0UmVzcG9uc2VIABJKChJ3b3Jrc3BhY2VfbWVudGlvbnMYCyABKAsyLC5hZ2VudHJlcGwudjEuV2F0Y2hXb3Jrc3BhY2VNZW50aW9uc1Jlc3BvbnNlSABCCQoHcGF5bG9hZEoECAcQCFIFaG9sZHMiqQIKFVBhZ2VTdWJzY3JpcHRpb25FbmRlZBIUCgxzdWJzY3JpcHRpb24YASABKAkSQgoMdW5zdWJzY3JpYmVkGAIgASgLMiouYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25VbnN1YnNjcmliZWRIABJBCgxzb3VyY2VfZW5kZWQYAyABKAsyKS5hZ2VudHJlcGwudjEuUGFnZVN1YnNjcmlwdGlvblNvdXJjZUVuZGVkSAASNgoGZmFpbGVkGAQgASgLMiQuYWdlbnRyZXBsLnYxLlBhZ2VTdWJzY3JpcHRpb25GYWlsZWRIABI0CgVtb3ZlZBgFIAEoCzIjLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uTW92ZWRIAEIFCgNob3ciHgocUGFnZVN1YnNjcmlwdGlvblVuc3Vic2NyaWJlZCIdChtQYWdlU3Vic2NyaXB0aW9uU291cmNlRW5kZWQiFwoVUGFnZVN1YnNjcmlwdGlvbk1vdmVkIosBChZQYWdlU3Vic2NyaXB0aW9uRmFpbGVkEgwKBGNvZGUYASABKAkSDwoHbWVzc2FnZRgCIAEoCRJCCgtoYW5kZWRfYXdheRgDIAEoCzIoLmFnZW50cmVwbC52MS5QYWdlU3Vic2NyaXB0aW9uSGFuZGVkQXdheUgAiAEBQg4KDF9oYW5kZWRfYXdheSItChpQYWdlU3Vic2NyaXB0aW9uSGFuZGVkQXdheRIPCgdhZGRyZXNzGAEgASgJIowFChRTdWJzY3JpYmVQYWdlUmVxdWVzdBIMCgRwYWdlGAEgASgJEjAKCmF0dGFjaG1lbnQYDSABKAsyHC5hZ2VudHJlcGwudjEuUGFnZUF0dGFjaG1lbnQSFAoMc3Vic2NyaXB0aW9uGAIgASgJEjsKBnJvc3RlchgDIAEoCzIpLmFnZW50cmVwbC52MS5XYXRjaFdvcmtzcGFjZVJvc3RlclJlcXVlc3RIABI/Cg13ZWJfd29ya3NwYWNlGAQgASgLMiYuYWdlbnRyZXBsLnYxLldhdGNoV2ViV29ya3NwYWNlUmVxdWVzdEgAEjIKBmRhZW1vbhgFIAEoCzIgLmFnZW50cmVwbC52MS5XYXRjaERhZW1vblJlcXVlc3RIABIyCgZ0b3BiYXIYBiABKAsyIC5hZ2VudHJlcGwudjEuV2F0Y2hUb3BiYXJSZXF1ZXN0SAASMgoGZm9vdGVyGAcgASgLMiAuYWdlbnRyZXBsLnYxLldhdGNoRm9vdGVyUmVxdWVzdEgAEi4KBGZlZWQYCSABKAsyHi5hZ2VudHJlcGwudjEuV2F0Y2hGZWVkUmVxdWVzdEgAEkEKDmxvZ2luX3Rlcm1pbmFsGAogASgLMicuYWdlbnRyZXBsLnYxLldhdGNoTG9naW5UZXJtaW5hbFJlcXVlc3RIABIuCgRjaGF0GAsgASgLMh4uYWdlbnRyZXBsLnYxLldhdGNoQ2hhdFJlcXVlc3RIABJJChJ3b3Jrc3BhY2VfbWVudGlvbnMYDCABKAsyKy5hZ2VudHJlcGwudjEuV2F0Y2hXb3Jrc3BhY2VNZW50aW9uc1JlcXVlc3RIAEIJCgdyZXF1ZXN0SgQICBAJUgVob2xkcyJYChVTdWJzY3JpYmVQYWdlUmVzcG9uc2USNQoHc3VjY2VzcxgBIAEoCzIiLmFnZW50cmVwbC52MS5TdWJzY3JpYmVQYWdlU3VjY2Vzc0gAQggKBnJlc3VsdCKYAQoUU3Vic2NyaWJlUGFnZVN1Y2Nlc3MSOwoKc3Vic2NyaWJlZBgBIAEoCzIlLmFnZW50cmVwbC52MS5TdWJzY3JpYmVQYWdlU3Vic2NyaWJlZEgAEjgKCXBhZ2VfZ29uZRgCIAEoCzIjLmFnZW50cmVwbC52MS5TdWJzY3JpYmVQYWdlUGFnZUdvbmVIAEIJCgdvdXRjb21lIhkKF1N1YnNjcmliZVBhZ2VTdWJzY3JpYmVkIhcKFVN1YnNjcmliZVBhZ2VQYWdlR29uZSJuChZVbnN1YnNjcmliZVBhZ2VSZXF1ZXN0EgwKBHBhZ2UYASABKAkSFAoMc3Vic2NyaXB0aW9uGAIgASgJEjAKCmF0dGFjaG1lbnQYAyABKAsyHC5hZ2VudHJlcGwudjEuUGFnZUF0dGFjaG1lbnQiGQoXVW5zdWJzY3JpYmVQYWdlUmVzcG9uc2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_agentrepl_v1_daemon_stream_ending, file_agentrepl_v1_endpoint_watch_workspace_roster, file_agentrepl_v1_endpoint_watch_web_workspace, file_agentrepl_v1_endpoint_watch_daemon, file_agentrepl_v1_endpoint_watch_topbar, file_agentrepl_v1_endpoint_watch_footer, file_agentrepl_v1_endpoint_watch_feed, file_agentrepl_v1_endpoint_watch_login_terminal, file_agentrepl_v1_endpoint_watch_chat, file_agentrepl_v1_endpoint_watch_workspace_mentions]);
 
 /**
  * Opens the page's one stream.
@@ -80,9 +95,11 @@ export type WatchPageRequest = Message<"agentrepl.v1.WatchPageRequest"> & {
    * The page's own identity, minted by the client and unique for the life of
    * the loaded document. `SubscribePage` and `UnsubscribePage` name it.
    *
-   * TWO STREAMS FOR ONE PAGE ID IS A REFUSAL, not a replacement: a page holds
-   * exactly one, and a second would leave the first's subscriptions addressable
-   * by a client that no longer owns them.
+   * A SECOND STREAM FOR ONE PAGE ID REPLACES THE FIRST. A page holds exactly
+   * one, so a second can only be the page reopening after an end the daemon
+   * has not finished unwinding. The first stream and every subscription on it
+   * end, and the second is issued its own `PageAttachment`, so a call still
+   * carrying the first's is answered `page_gone`.
    *
    * @generated from field: string page = 1;
    */
@@ -236,6 +253,14 @@ export type PageAttached = Message<"agentrepl.v1.PageAttached"> & {
    * @generated from field: string webapp_build = 1;
    */
   webappBuild: string;
+
+  /**
+   * This attachment's identity, echoed on every page call made under it.
+   * REQUIRED.
+   *
+   * @generated from field: agentrepl.v1.PageAttachment attachment = 2;
+   */
+  attachment?: PageAttachment | undefined;
 };
 
 /**
@@ -244,6 +269,45 @@ export type PageAttached = Message<"agentrepl.v1.PageAttached"> & {
  */
 export const PageAttachedSchema: GenMessage<PageAttached> = /*@__PURE__*/
   messageDesc(file_agentrepl_v1_endpoint_watch_page, 3);
+
+/**
+ * One attachment of one page to one daemon: which daemon holds the page's
+ * stream, and which of that page's attachments to it this is.
+ *
+ * MINTED BY THE DAEMON AND ECHOED UNCHANGED. A page never builds or alters
+ * one. It exists so a page call states which stream it belongs to, instead of
+ * being matched to a stream by whichever daemon happened to accept the call.
+ *
+ * @generated from message agentrepl.v1.PageAttachment
+ */
+export type PageAttachment = Message<"agentrepl.v1.PageAttachment"> & {
+  /**
+   * The daemon process that holds the page's stream (its instance id). A
+   * daemon that receives a page call naming another instance sends the call
+   * there, or answers `page_gone` when that process no longer runs. REQUIRED
+   * and not empty.
+   *
+   * @generated from field: string instance = 1;
+   */
+  instance: string;
+
+  /**
+   * Which attachment this is among the ones that daemon has issued: a value
+   * it never issues twice. A page that reattaches to the same daemon is
+   * issued a new one, so a call left over from its earlier attachment cannot
+   * be mistaken for one of the current attachment's.
+   *
+   * @generated from field: uint64 sequence = 2;
+   */
+  sequence: bigint;
+};
+
+/**
+ * Describes the message agentrepl.v1.PageAttachment.
+ * Use `create(PageAttachmentSchema)` to create a new message.
+ */
+export const PageAttachmentSchema: GenMessage<PageAttachment> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 4);
 
 /**
  * One push, addressed to the subscription that asked for it.
@@ -330,7 +394,7 @@ export type PageFrame = Message<"agentrepl.v1.PageFrame"> & {
  * Use `create(PageFrameSchema)` to create a new message.
  */
 export const PageFrameSchema: GenMessage<PageFrame> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 4);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 5);
 
 /**
  * A subscription that has ended, AND WHY.
@@ -383,6 +447,19 @@ export type PageSubscriptionEnded = Message<"agentrepl.v1.PageSubscriptionEnded"
      */
     value: PageSubscriptionFailed;
     case: "failed";
+  } | {
+    /**
+     * The daemon that served this subscription's workspace ended the view
+     * without an error: it stood down, or stopped serving the workspace.
+     * Nothing failed, and the view is still wanted, so the page subscribes
+     * again at once and is served by whichever daemon serves the workspace
+     * now. Sent only for a subscription the page's daemon relayed from
+     * another daemon.
+     *
+     * @generated from field: agentrepl.v1.PageSubscriptionMoved moved = 5;
+     */
+    value: PageSubscriptionMoved;
+    case: "moved";
   } | { case: undefined; value?: undefined };
 };
 
@@ -391,7 +468,7 @@ export type PageSubscriptionEnded = Message<"agentrepl.v1.PageSubscriptionEnded"
  * Use `create(PageSubscriptionEndedSchema)` to create a new message.
  */
 export const PageSubscriptionEndedSchema: GenMessage<PageSubscriptionEnded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 5);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 6);
 
 /**
  * Presence is the fact: the client asked for this end.
@@ -406,7 +483,7 @@ export type PageSubscriptionUnsubscribed = Message<"agentrepl.v1.PageSubscriptio
  * Use `create(PageSubscriptionUnsubscribedSchema)` to create a new message.
  */
 export const PageSubscriptionUnsubscribedSchema: GenMessage<PageSubscriptionUnsubscribed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 6);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 7);
 
 /**
  * Presence is the fact: the source finished of its own accord.
@@ -421,7 +498,23 @@ export type PageSubscriptionSourceEnded = Message<"agentrepl.v1.PageSubscription
  * Use `create(PageSubscriptionSourceEndedSchema)` to create a new message.
  */
 export const PageSubscriptionSourceEndedSchema: GenMessage<PageSubscriptionSourceEnded> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 7);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 8);
+
+/**
+ * Presence is the fact: the serving daemon ended the view cleanly, and the
+ * page subscribes again.
+ *
+ * @generated from message agentrepl.v1.PageSubscriptionMoved
+ */
+export type PageSubscriptionMoved = Message<"agentrepl.v1.PageSubscriptionMoved"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.PageSubscriptionMoved.
+ * Use `create(PageSubscriptionMovedSchema)` to create a new message.
+ */
+export const PageSubscriptionMovedSchema: GenMessage<PageSubscriptionMoved> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 9);
 
 /**
  * A subscription that ended in FAILURE, carrying the error verbatim.
@@ -469,7 +562,7 @@ export type PageSubscriptionFailed = Message<"agentrepl.v1.PageSubscriptionFaile
  * Use `create(PageSubscriptionFailedSchema)` to create a new message.
  */
 export const PageSubscriptionFailedSchema: GenMessage<PageSubscriptionFailed> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 8);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 10);
 
 /**
  * The successor daemon a handed-away workspace now belongs to.
@@ -491,15 +584,15 @@ export type PageSubscriptionHandedAway = Message<"agentrepl.v1.PageSubscriptionH
  * Use `create(PageSubscriptionHandedAwaySchema)` to create a new message.
  */
 export const PageSubscriptionHandedAwaySchema: GenMessage<PageSubscriptionHandedAway> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 9);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 11);
 
 /**
  * Starts one subscription on an already-attached page.
  *
  * A REFUSAL IS A CONNECT ERROR, exactly as a refused `Watch*` open is. This
- * verb IS the open, and a `SubscribePage` that answers is a subscription that
- * exists: the daemon registers it with its publisher BEFORE replying, so a view
- * published after the reply cannot be missed.
+ * verb IS the open, and a `SubscribePage` that answers `subscribed` is a
+ * subscription that exists: the daemon registers it with its publisher BEFORE
+ * replying, so a view published after the reply cannot be missed.
  *
  * @generated from message agentrepl.v1.SubscribePageRequest
  */
@@ -510,6 +603,15 @@ export type SubscribePageRequest = Message<"agentrepl.v1.SubscribePageRequest"> 
    * @generated from field: string page = 1;
    */
   page: string;
+
+  /**
+   * The attachment the page was issued on the stream that is to carry the
+   * pushes (`PageAttached.attachment`), echoed unchanged. REQUIRED: a call
+   * without one is malformed (Connect InvalidArgument).
+   *
+   * @generated from field: agentrepl.v1.PageAttachment attachment = 13;
+   */
+  attachment?: PageAttachment | undefined;
 
   /**
    * The subscription's own id, minted by the client. It addresses every
@@ -592,14 +694,25 @@ export type SubscribePageRequest = Message<"agentrepl.v1.SubscribePageRequest"> 
  * Use `create(SubscribePageRequestSchema)` to create a new message.
  */
 export const SubscribePageRequestSchema: GenMessage<SubscribePageRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 10);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 12);
 
 /**
- * The subscription exists. It carries nothing: the acceptance IS the answer.
+ * THE ARM IS THE OUTCOME. There is no error arm: a refused subscription is a
+ * Connect error, as a refused `Watch*` open is.
  *
  * @generated from message agentrepl.v1.SubscribePageResponse
  */
 export type SubscribePageResponse = Message<"agentrepl.v1.SubscribePageResponse"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SubscribePageResponse.result
+   */
+  result: {
+    /**
+     * @generated from field: agentrepl.v1.SubscribePageSuccess success = 1;
+     */
+    value: SubscribePageSuccess;
+    case: "success";
+  } | { case: undefined; value?: undefined };
 };
 
 /**
@@ -607,7 +720,77 @@ export type SubscribePageResponse = Message<"agentrepl.v1.SubscribePageResponse"
  * Use `create(SubscribePageResponseSchema)` to create a new message.
  */
 export const SubscribePageResponseSchema: GenMessage<SubscribePageResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 11);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 13);
+
+/**
+ * The call was served by the daemon its attachment names, which answers one
+ * of two things about that attachment.
+ *
+ * @generated from message agentrepl.v1.SubscribePageSuccess
+ */
+export type SubscribePageSuccess = Message<"agentrepl.v1.SubscribePageSuccess"> & {
+  /**
+   * @generated from oneof agentrepl.v1.SubscribePageSuccess.outcome
+   */
+  outcome: {
+    /**
+     * The subscription exists.
+     *
+     * @generated from field: agentrepl.v1.SubscribePageSubscribed subscribed = 1;
+     */
+    value: SubscribePageSubscribed;
+    case: "subscribed";
+  } | {
+    /**
+     * The attachment the call carried is over: the daemon that issued it no
+     * longer runs, or no longer holds the page under it (the page's stream
+     * ended there, or the page reattached and was issued another). NOT A
+     * FAILURE: nothing was subscribed, the page ends that attachment and
+     * subscribes again under its next one, and files nothing.
+     *
+     * @generated from field: agentrepl.v1.SubscribePagePageGone page_gone = 2;
+     */
+    value: SubscribePagePageGone;
+    case: "pageGone";
+  } | { case: undefined; value?: undefined };
+};
+
+/**
+ * Describes the message agentrepl.v1.SubscribePageSuccess.
+ * Use `create(SubscribePageSuccessSchema)` to create a new message.
+ */
+export const SubscribePageSuccessSchema: GenMessage<SubscribePageSuccess> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 14);
+
+/**
+ * Presence is the fact: the subscription exists. The acceptance IS the answer.
+ *
+ * @generated from message agentrepl.v1.SubscribePageSubscribed
+ */
+export type SubscribePageSubscribed = Message<"agentrepl.v1.SubscribePageSubscribed"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubscribePageSubscribed.
+ * Use `create(SubscribePageSubscribedSchema)` to create a new message.
+ */
+export const SubscribePageSubscribedSchema: GenMessage<SubscribePageSubscribed> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 15);
+
+/**
+ * Presence is the fact: the attachment the call carried is over.
+ *
+ * @generated from message agentrepl.v1.SubscribePagePageGone
+ */
+export type SubscribePagePageGone = Message<"agentrepl.v1.SubscribePagePageGone"> & {
+};
+
+/**
+ * Describes the message agentrepl.v1.SubscribePagePageGone.
+ * Use `create(SubscribePagePageGoneSchema)` to create a new message.
+ */
+export const SubscribePagePageGoneSchema: GenMessage<SubscribePagePageGone> = /*@__PURE__*/
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 16);
 
 /**
  * Ends one subscription without disturbing the page's other ones.
@@ -624,6 +807,14 @@ export type UnsubscribePageRequest = Message<"agentrepl.v1.UnsubscribePageReques
    * @generated from field: string subscription = 2;
    */
   subscription: string;
+
+  /**
+   * The attachment the subscription was made under, echoed unchanged.
+   * REQUIRED: a call without one is malformed (Connect InvalidArgument).
+   *
+   * @generated from field: agentrepl.v1.PageAttachment attachment = 3;
+   */
+  attachment?: PageAttachment | undefined;
 };
 
 /**
@@ -631,12 +822,13 @@ export type UnsubscribePageRequest = Message<"agentrepl.v1.UnsubscribePageReques
  * Use `create(UnsubscribePageRequestSchema)` to create a new message.
  */
 export const UnsubscribePageRequestSchema: GenMessage<UnsubscribePageRequest> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 12);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 17);
 
 /**
  * The subscription is over. Unsubscribing one that does not exist is NOT a
  * refusal — the end is the state the caller asked for, and a subscription the
- * daemon already ended is exactly that state.
+ * daemon already ended, or one under an attachment that is itself over, is
+ * exactly that state.
  *
  * @generated from message agentrepl.v1.UnsubscribePageResponse
  */
@@ -648,5 +840,5 @@ export type UnsubscribePageResponse = Message<"agentrepl.v1.UnsubscribePageRespo
  * Use `create(UnsubscribePageResponseSchema)` to create a new message.
  */
 export const UnsubscribePageResponseSchema: GenMessage<UnsubscribePageResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_watch_page, 13);
+  messageDesc(file_agentrepl_v1_endpoint_watch_page, 18);
 

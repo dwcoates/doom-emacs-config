@@ -11,11 +11,24 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
 // ForwardedHeader marks a call one daemon forwarded to the daemon serving its
 // workspace. A daemon never forwards a call that carries it again.
 const ForwardedHeader = "Agent-Repl-Forwarded"
+
+// RelayedPageHeader names the page a relayed subscription pushes to
+// (relayWatch): the daemon holding the page's stream sets it on the dedicated
+// stream it opens at the daemon serving the workspace, which holds the page
+// as connected to that workspace for as long as the stream stands.
+const RelayedPageHeader = "Agent-Repl-Relayed-Page"
+
+// AcceptedHeader is set on the response headers of a standing stream the
+// daemon ACCEPTED (acceptWriter.accept). A refused stream answers headers
+// too, with its refusal in the trailer, so a daemon relaying another's
+// stream reads the acceptance here rather than from the headers' arrival.
+const AcceptedHeader = "Agent-Repl-Accepted"
 
 // FORWARDING REPLACES THE REDIRECT (docs/investigations/
 // 2026-11-18-stable-sockets-design.md, D3). Every client reaches the one
@@ -32,17 +45,79 @@ func (s *server) forwardTarget(ctx context.Context, rpc string, header http.Head
 	if header.Get(ForwardedHeader) != "" {
 		return "", false, nil
 	}
-	if target, ok := adoptTarget(rpc, s.deps.SuccessorAddress()); ok {
-		return target, true, nil
+	// A CALL THAT NAMES A DAEMON GOES TO THAT DAEMON, before any workspace
+	// rule: a page call belongs to the daemon holding the page's stream, and
+	// a feed tail to the daemon holding its pin, whichever daemon serves the
+	// workspace the call's arm happens to name.
+	if instance, named := requestInstance(msg); named {
+		return s.instanceTarget(rpc, instance)
 	}
 	id := requestWorkspaceID(msg)
 	if id == "" {
+		if target, ok := adoptTarget(rpc, s.deps.SuccessorAddress()); ok {
+			return target, true, nil
+		}
 		return "", false, nil
 	}
-	standing, err := s.deps.Ownership.Standing(ctx, ids.WorkspaceID(id))
+	return s.servingTarget(ctx, rpc, ids.WorkspaceID(id))
+}
+
+// requestInstance answers the daemon instance a call names, and whether the
+// call is one that names a daemon at all: a page call names the daemon that
+// issued its attachment, a feed tail the daemon that minted its token. An
+// empty instance on such a call is malformed, which its handler refuses.
+func requestInstance(msg proto.Message) (string, bool) {
+	switch m := msg.(type) {
+	case *agentreplv1.SubscribePageRequest:
+		return m.GetAttachment().GetInstance(), true
+	case *agentreplv1.UnsubscribePageRequest:
+		return m.GetAttachment().GetInstance(), true
+	case *agentreplv1.WatchFeedRequest:
+		return m.GetWatch().GetInstance(), true
+	}
+	return "", false
+}
+
+// instanceTarget answers the private address of daemon INSTANCE when it is
+// another live daemon. This daemon's own instance, and one that no longer
+// runs, are served here: the handler answers what a call for a daemon that is
+// gone is owed (a page call `page_gone`, a feed tail `unknown_token`).
+func (s *server) instanceTarget(rpc, instance string) (string, bool, error) {
+	if instance == "" || instance == string(s.deps.Instance) {
+		return "", false, nil
+	}
+	address, alive, err := s.deps.InstanceAddress(ids.InstanceID(instance))
+	if err != nil {
+		s.log.Error("daemon.server.forward", "could not resolve the daemon a call names to forward it", dlog.Context{"rpc": rpc, "instance": instance, "cause": err.Error()})
+		return "", false, err
+	}
+	if !alive {
+		s.log.Info("daemon.server.forward", "the daemon a call names no longer runs; the call is answered here", dlog.Context{"rpc": rpc, "instance": instance})
+		return "", false, nil
+	}
+	return address, true, nil
+}
+
+// servingTarget answers the private address of the daemon that serves WS,
+// when that is not this one.
+//
+// AN ADOPT CALL GOES WHERE ITS WORKSPACE'S RENDEZVOUS IS. For a workspace
+// this daemon serves or has handed on, that is its successor while a handover
+// has one (adoptTarget). For a workspace this daemon has NOT adopted it is
+// decided by the serving row like any other call: an older daemon that still
+// holds the workspace takes it, never this daemon's own successor, which
+// serves nothing of a workspace two generations back.
+func (s *server) servingTarget(ctx context.Context, rpc string, ws ids.WorkspaceID) (string, bool, error) {
+	id := string(ws)
+	standing, err := s.deps.Ownership.Standing(ctx, ws)
 	if err != nil {
 		s.log.Error("daemon.server.forward", "could not resolve the call's serving standing to forward it", dlog.Context{"rpc": rpc, "workspace_id": id, "cause": err.Error()})
 		return "", false, err
+	}
+	if standing != workspace.StandingNotYetAdopted {
+		if target, ok := adoptTarget(rpc, s.deps.SuccessorAddress()); ok {
+			return target, true, nil
+		}
 	}
 	switch standing {
 	case workspace.StandingTransferringAway:
@@ -120,15 +195,39 @@ func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target st
 	defer cancel()
 	stop := context.AfterFunc(s.life, cancel)
 	defer stop()
-	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+req.Spec().Procedure)
-	in, err := client.CallServerStream(ctx, forwardRequest(req))
+	return pipeStream[Req, Resp](ctx, s, rpc, target, req.Spec().Procedure, forwardRequest(req), stream, func() { s.acceptStream(ctx, rpc) })
+}
+
+// pipeStream opens the server-streaming rpc at PROCEDURE on the daemon at
+// TARGET with REQ and writes every message it sends into SINK, answering how
+// the target's stream ended: nil for a clean end, its error otherwise. It is
+// the one place a stream is carried from another daemon, for a forwarded
+// stream (forwardStream) and a relayed page subscription (relayWatch) alike.
+//
+// THE TARGET'S ACCEPTANCE IS STATED ONCE, BEFORE ANY MESSAGE. ACCEPTED is
+// called when the target's response headers state it (AcceptedHeader), so a
+// watch the target accepted with nothing to push yet is accepted here too, or
+// the client would read "accepted but quiet" as "not accepted" (accept.go). A
+// target that sends a message without stating acceptance has a stream that
+// stands all the same, so the message is the acceptance.
+func pipeStream[Req, Resp any](ctx context.Context, s *server, rpc, target, procedure string, req *connect.Request[Req], sink streamSink[Resp], accepted func()) error {
+	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+procedure)
+	in, err := client.CallServerStream(ctx, req)
 	if err != nil {
 		s.log.Info("daemon.server.forward", "the daemon a stream was forwarded to refused it", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
 		return err
 	}
 	defer in.Close()
+	stated := in.ResponseHeader().Get(AcceptedHeader) != ""
+	if stated {
+		accepted()
+	}
 	for in.Receive() {
-		if err := stream.Send(in.Msg()); err != nil {
+		if !stated {
+			stated = true
+			accepted()
+		}
+		if err := sink.Send(in.Msg()); err != nil {
 			return fmt.Errorf("relay %s from %s: %w", rpc, target, err)
 		}
 	}

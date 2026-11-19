@@ -127,6 +127,15 @@ JSON
   - A diagnostic step (added logging, a measurement) is not a fix: it is landed only when the evidence cannot yet name the cause, and it says so plainly.
 - The fix addresses the problem structurally, making its failure impossible, never a workaround that makes it less likely, per the metaprompt's "Structurally impossible" rule.
 
+### One remediation is one landing, never several
+
+- Everything a deploy's remediation needs lands in ONE finish: the deploy mediator NEVER plans, proposes, or offers a second landing for the same remediation (owner ruling, 2026-11-19).
+  - This holds for every shape a second landing takes: a follow-up that removes a compatibility path, a cleanup, a part deferred until the first deploys, a "phase two".
+  - It holds in every plan and every proposal put to the user, not only in what is landed.
+- A change that seems to need two landings is redesigned until one carries it whole.
+  - A path kept only so a later landing can remove it is never built: the one landing ships the final shape.
+  - What the build being replaced does during the landing deploy's own handover is stated plainly as a fact of that deploy, never bridged by a temporary path.
+
 ### A settled fix is made before the deploy, never offered for after it
 
 - The deploy mediator NEVER asks whether to fix a problem now or after the deploy (owner ruling, 2026-11-18).

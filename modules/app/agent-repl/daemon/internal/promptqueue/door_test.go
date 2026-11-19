@@ -37,6 +37,7 @@ type doorWorld struct {
 func doorFeed(t *testing.T, db wsm.DB) feed.Resolver {
 	t.Helper()
 	resolver, err := feed.New(feed.Deps{
+		Instance:     "daemon-under-test",
 		Log:          dlog.NewTestSurfaces(),
 		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return t.TempDir(), nil },
 		ResolveImage: func(*conversationv1.ImageBlock) (string, string, error) { return "", "", nil },

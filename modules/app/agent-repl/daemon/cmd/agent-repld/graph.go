@@ -703,8 +703,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	history := &historyForwarder{}
 	deliveries := &deliveryForwarder{}
 	feedResolver, err := feed.New(feed.Deps{
-		Log:   p.Surfaces,
-		Quiet: viewGate,
+		Log:      p.Surfaces,
+		Instance: p.Instance,
+		Quiet:    viewGate,
 		// A ZETTEL CHAT THREAD LEARNS ITS ANSWERS from the feed, which folds
 		// them, and a WORKSPACE GATHER follows its prompts' folds and answers
 		// there (feed.AnswerSink).
@@ -1943,6 +1944,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			SharedAddress:    p.Shared.address,
 			ServingElsewhere: func(ctx context.Context, ws ids.WorkspaceID) (string, bool, error) {
 				return servingElsewhere(ctx, p.DB, p.Layout.DaemonAddr(), p.Instance, ws)
+			},
+			InstanceAddress: func(instance ids.InstanceID) (string, bool, error) {
+				return instanceAddress(p.Layout.DaemonAddr(), instance)
 			},
 			ColdGateOf: fleet.StandingColdGate,
 			Creates:    creates,

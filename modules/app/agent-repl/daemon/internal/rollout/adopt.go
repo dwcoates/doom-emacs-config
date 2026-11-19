@@ -1878,6 +1878,12 @@ func (c *controller) armFromManifestBeforeTakeover(fields dlog.Context) {
 	if !found {
 		return
 	}
+	// WHETHER THE HANDOVER IS A DEPLOY'S IS READ HERE TOO, for the same
+	// reason: the takeover finishes the deploy's story (finishDeployStory)
+	// right after joining mode ends, and the manifest's watcher records the
+	// deploy on its own schedule. Read 0.7ms after the takeover had finished
+	// its story, the successor never said `updated` (merge gate 2026-11-19).
+	c.recordDeployTakeover(m)
 	armed := c.armSessions(m.Daemon, m.WrittenAt, m.Sessions)
 	c.log.Info(opAdopt, "armed the manifest's workspaces before ending joining mode, so none reads as owned before its adoption",
 		dlog.Merge(fields, dlog.Context{"armed": armed, "outgoing_daemon": string(m.Daemon)}))

@@ -32,7 +32,7 @@ func TestOpenFeedMintsTheWatchToken(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.page = page()
-	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
 
 	// Act.
 	resp, err := h.Client.OpenFeed(context.Background(),
@@ -53,7 +53,7 @@ func TestOpenFeedDefaultsToTheRootFeed(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.page = page()
-	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
 
 	// Act.
 	if _, err := h.Client.OpenFeed(context.Background(),
@@ -116,7 +116,7 @@ func TestGetFeedPageFirstServesTheNewestPage(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.page = page()
-	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
 
 	// Act.
 	resp, err := h.Client.GetFeedPage(context.Background(),
@@ -245,7 +245,30 @@ func TestWatchFeedRefusesAnUnmintedToken(t *testing.T) {
 
 	// Act.
 	stream, err := h.Client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{
-		Watch: &agentreplv1.FeedWatchToken{Value: "ft-never"},
+		Watch: &agentreplv1.FeedWatchToken{Value: "ft-never", Instance: string(testInstance)},
+	}))
+	err = firstStreamErr(stream, err)
+
+	// Assert.
+	if err == nil || !strings.Contains(err.Error(), "WatchFeed closed the stream: unknown_token") {
+		t.Fatalf("error = %v, want the transport-closed unknown_token cause", err)
+	}
+}
+
+// TestWatchFeedRefusesATokenAnotherDaemonMinted pins that a token is honored
+// only by its minter: a value this daemon also minted, named as another
+// daemon's, is unknown here.
+func TestWatchFeedRefusesATokenAnotherDaemonMinted(t *testing.T) {
+	// Arrange: this daemon minted ft-1 too.
+	h := newHarness(t)
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
+	if _, err := h.Client.OpenFeed(context.Background(), connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
+		t.Fatalf("OpenFeed: %v", err)
+	}
+
+	// Act.
+	stream, err := h.Client.WatchFeed(context.Background(), connect.NewRequest(&agentreplv1.WatchFeedRequest{
+		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: "daemon-that-exited"},
 	}))
 	err = firstStreamErr(stream, err)
 
@@ -261,7 +284,7 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	h.Feed.page = page()
-	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
 	h.Feed.tail = &fakeTail{pubs: make(chan feed.Publication, 1), token: h.Feed.token}
 	if _, err := h.Client.OpenFeed(context.Background(),
 		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
@@ -272,7 +295,7 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 
 	// Act.
 	stream, err := h.Client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{
-		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1"},
+		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)},
 	}))
 	if err != nil {
 		t.Fatalf("WatchFeed: %v", err)
@@ -293,14 +316,14 @@ func TestWatchFeedTailsFromTheMintedToken(t *testing.T) {
 func openRootWatch(t *testing.T, h *harness, ctx context.Context) *connect.ServerStreamForClient[agentreplv1.WatchFeedResponse] {
 	t.Helper()
 	h.Feed.page = page()
-	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
 	h.Feed.tail = &fakeTail{pubs: make(chan feed.Publication, 1), token: h.Feed.token}
 	if _, err := h.Client.OpenFeed(context.Background(),
 		connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ref()})); err != nil {
 		t.Fatalf("OpenFeed: %v", err)
 	}
 	stream, err := h.Client.WatchFeed(ctx, connect.NewRequest(&agentreplv1.WatchFeedRequest{
-		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1"},
+		Watch: &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)},
 	}))
 	if err != nil {
 		t.Fatalf("WatchFeed: %v", err)
@@ -378,7 +401,7 @@ func TestOpenFeedRecordsTheOpenAtInfoWithItsDuration(t *testing.T) {
 	log := dlog.NewTestLogger()
 	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
 	h.Feed.page = page()
-	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1"}
+	h.Feed.token = &agentreplv1.FeedWatchToken{Value: "ft-1", Instance: string(testInstance)}
 
 	// Act.
 	if _, err := h.Client.OpenFeed(context.Background(),

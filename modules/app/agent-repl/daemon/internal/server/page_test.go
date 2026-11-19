@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"testing"
 	"time"
 
@@ -236,66 +235,183 @@ func TestPageCarriesTwoSubscriptionsAtOnce(t *testing.T) {
 	}
 }
 
-// TestSubscribePageRefusesAnUnattachedPage pins the latch's error half: a
-// subscription for a page that holds no stream is REFUSED, loudly, rather than
-// buffered against a stream that may never arrive.
-func TestSubscribePageRefusesAnUnattachedPage(t *testing.T) {
-	// Arrange: no page has attached.
+// footerSubscription is a footer subscription on PAGE under ATTACHMENT, nil
+// for the attachment the page stands under.
+func footerSubscription(page string, attachment *agentreplv1.PageAttachment) *agentreplv1.SubscribePageRequest {
+	return &agentreplv1.SubscribePageRequest{
+		Page:         page,
+		Attachment:   attachment,
+		Subscription: "footer-1",
+		Request: &agentreplv1.SubscribePageRequest_Footer{
+			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
+		},
+	}
+}
+
+// TestSubscribePageAnswersPageGoneForAnAttachmentThatIsOver pins every way an
+// attachment is over: each is answered `page_gone`, never a refusal, and
+// subscribes nothing.
+func TestSubscribePageAnswersPageGoneForAnAttachmentThatIsOver(t *testing.T) {
+	cases := []struct {
+		name string
+		// attached is whether page-1 holds a stream when the call arrives.
+		attached bool
+		// attachment builds what the call echoes, from the one the page
+		// stands under.
+		attachment func(current *agentreplv1.PageAttachment) *agentreplv1.PageAttachment
+		why        string
+	}{
+		{
+			name:       "the page holds no stream on this daemon",
+			attachment: func(current *agentreplv1.PageAttachment) *agentreplv1.PageAttachment { return current },
+			why:        "the page holds no stream on this daemon",
+		},
+		{
+			name:     "the page was issued a newer attachment",
+			attached: true,
+			attachment: func(current *agentreplv1.PageAttachment) *agentreplv1.PageAttachment {
+				return &agentreplv1.PageAttachment{Instance: current.GetInstance(), Sequence: current.GetSequence() + 1}
+			},
+			why: "the page was issued a newer attachment",
+		},
+		{
+			name:     "the daemon that issued the attachment no longer runs",
+			attached: true,
+			attachment: func(current *agentreplv1.PageAttachment) *agentreplv1.PageAttachment {
+				return &agentreplv1.PageAttachment{Instance: "daemon-that-exited", Sequence: current.GetSequence()}
+			},
+			why: "the daemon that issued the attachment no longer runs",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			log := &recordingLogger{}
+			h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log} })
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tc.attached {
+				attachPageStream(t, h, ctx, "page-1")
+			}
+			req := footerSubscription("page-1", tc.attachment(h.attachmentOf("page-1")))
+
+			// Act.
+			resp, err := h.Unmarked.SubscribePage(ctx, connect.NewRequest(req))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess().GetPageGone() == nil {
+				t.Fatalf("SubscribePage = (%v, %v), want page_gone", resp, err)
+			}
+			if page, held := h.Server.(*server).pageFor("page-1"); held {
+				page.mu.Lock()
+				subs := len(page.subs)
+				page.mu.Unlock()
+				if subs != 0 {
+					t.Fatalf("the page holds %d subscriptions after page_gone", subs)
+				}
+			}
+			var recorded bool
+			for _, rec := range log.at("INFO") {
+				if rec.Operation == "daemon.server.page_gone" && rec.Context["why"] == tc.why &&
+					rec.Context["rpc"] == "SubscribePage" && rec.Context["page"] == "page-1" {
+					recorded = true
+				}
+			}
+			if !recorded {
+				t.Fatalf("no page_gone record names %q; got %v", tc.why, log.records)
+			}
+		})
+	}
+}
+
+// TestAPageCallWithNoAttachmentIsMalformed pins that the attachment is
+// required on both page verbs: a call that names no daemon cannot be routed
+// to the one holding its page.
+func TestAPageCallWithNoAttachmentIsMalformed(t *testing.T) {
+	cases := []struct {
+		name string
+		call func(ctx context.Context, h *harness) error
+	}{
+		{name: "SubscribePage", call: func(ctx context.Context, h *harness) error {
+			_, err := h.Client.SubscribePage(ctx, connect.NewRequest(footerSubscription("page-1", &agentreplv1.PageAttachment{})))
+			return err
+		}},
+		{name: "UnsubscribePage", call: func(ctx context.Context, h *harness) error {
+			_, err := h.Client.UnsubscribePage(ctx, connect.NewRequest(&agentreplv1.UnsubscribePageRequest{
+				Page: "page-1", Subscription: "footer-1", Attachment: &agentreplv1.PageAttachment{},
+			}))
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			attachPageStream(t, h, ctx, "page-1")
+
+			// Act.
+			err := tc.call(ctx, h)
+
+			// Assert.
+			if err == nil {
+				t.Fatal("a page call with no attachment was served")
+			}
+			if got := connectCode(t, err); got != connect.CodeInvalidArgument {
+				t.Fatalf("the refusal came back as %v, not invalid_argument", got)
+			}
+		})
+	}
+}
+
+// TestPageAttachIssuesAnAttachment pins what the latch hands the page: the
+// daemon's own instance and a sequence, which every later page call echoes.
+func TestPageAttachIssuesAnAttachment(t *testing.T) {
+	// Arrange.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Act.
-	_, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
-		Page:         "never-attached",
-		Subscription: "footer-1",
-		Request: &agentreplv1.SubscribePageRequest_Footer{
-			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
-		},
-	}))
+	stream := attachPageStream(t, h, ctx, "page-1")
 
 	// Assert.
-	if err == nil {
-		t.Fatal("subscribing to an unattached page was accepted")
-	}
-	if got := connectCode(t, err); got != connect.CodeNotFound {
-		t.Fatalf("the refusal came back as %v, not not_found", got)
+	got := stream.Msg().GetAttached().GetAttachment()
+	held, _ := h.Server.(*server).pageFor("page-1")
+	if got.GetInstance() != string(testInstance) || got.GetSequence() == 0 || got.GetSequence() != held.sequence {
+		t.Fatalf("the attachment issued was %v, want this daemon's instance and the page's sequence %d", got, held.sequence)
 	}
 }
 
-// TestSubscribePageRecordsAnUnattachedPageRefusal pins the canonical log record
-// behind that refusal: the one place a page-mux refusal enters the shared log.
-func TestSubscribePageRecordsAnUnattachedPageRefusal(t *testing.T) {
+// TestUnsubscribePageUnderAnAttachmentThatIsOverEndsNothing pins that an
+// unsubscribe left over from an earlier attachment cannot end a subscription
+// the page made under its current one, even when both use the same id.
+func TestUnsubscribePageUnderAnAttachmentThatIsOverEndsNothing(t *testing.T) {
 	// Arrange.
-	log := &recordingLogger{}
-	h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log} })
+	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	attachPageStream(t, h, ctx, "page-1")
+	subscribePage(t, ctx, h, footerSubscription("page-1", nil))
+	stale := h.attachmentOf("page-1")
+	stale.Sequence++
 
 	// Act.
-	_, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
-		Page:         "never-attached",
-		Subscription: "footer-1",
-		Request: &agentreplv1.SubscribePageRequest_Footer{
-			Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()},
-		},
+	_, err := h.Client.UnsubscribePage(ctx, connect.NewRequest(&agentreplv1.UnsubscribePageRequest{
+		Page: "page-1", Subscription: "footer-1", Attachment: stale,
 	}))
-	if err == nil {
-		t.Fatal("subscribing to an unattached page was accepted")
-	}
 
 	// Assert.
-	var found bool
-	for _, rec := range log.at("INFO") {
-		if rec.Operation == opTransportClosed && rec.Context["cause"] == "page_not_attached" {
-			found = true
-			if rec.Context["rpc"] != "SubscribePage" {
-				t.Fatalf("the refusal was recorded against rpc %v", rec.Context["rpc"])
-			}
-		}
+	if err != nil {
+		t.Fatalf("UnsubscribePage: %v", err)
 	}
-	if !found {
-		t.Fatalf("no page_not_attached refusal was recorded; got %v", log.records)
+	page, _ := h.Server.(*server).pageFor("page-1")
+	page.mu.Lock()
+	_, live := page.subs["footer-1"]
+	page.mu.Unlock()
+	if !live {
+		t.Fatal("an unsubscribe under another attachment ended the subscription")
 	}
 }
 
@@ -328,33 +444,35 @@ func TestSubscribePageRefusesASecondSubscriptionOnOneId(t *testing.T) {
 	}
 }
 
-// TestWatchPageRefusesASecondStreamForOnePage pins the page's own uniqueness: a
-// second stream would make the first page's subscriptions addressable by a
-// client that does not own them.
-func TestWatchPageRefusesASecondStreamForOnePage(t *testing.T) {
+// TestASecondStreamForOnePageReplacesTheFirst pins what a page that reopens
+// before the daemon has unwound its earlier stream gets: the earlier stream
+// ends, and the second is attached under its own attachment.
+func TestASecondStreamForOnePageReplacesTheFirst(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	attachPageStream(t, h, ctx, "page-1")
+	first, err := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{Page: "page-1"}))
+	if err != nil {
+		t.Fatalf("open the page's stream: %v", err)
+	}
+	if !first.Receive() {
+		t.Fatalf("the first stream ended before it attached: %v", first.Err())
+	}
+	firstAttachment := first.Msg().GetAttached().GetAttachment()
 
 	// Act.
-	second, dialErr := h.Client.WatchPage(ctx, connect.NewRequest(&agentreplv1.WatchPageRequest{Page: "page-1"}))
-	if dialErr != nil {
-		// A refusal may surface on the open itself.
-		if got := connectCode(t, dialErr); got != connect.CodeFailedPrecondition {
-			t.Fatalf("the refusal came back as %v, not failed_precondition", got)
-		}
-		return
-	}
+	second := attachPageStream(t, h, ctx, "page-1")
 
-	// Assert: or on the first receive, which is where a Connect stream reports
-	// a handler that refused before sending anything.
-	if second.Receive() {
-		t.Fatalf("a second stream for one page was served frame %T", second.Msg().GetFrame())
+	// Assert.
+	if first.Receive() {
+		t.Fatalf("the replaced stream was served frame %T", first.Msg().GetFrame())
 	}
-	if got := connectCode(t, second.Err()); got != connect.CodeFailedPrecondition {
-		t.Fatalf("the refusal came back as %v, not failed_precondition", got)
+	if err := first.Err(); err != nil {
+		t.Fatalf("the replaced stream ended in %v, want a clean end", err)
+	}
+	if got := second.Msg().GetAttached().GetAttachment().GetSequence(); got == firstAttachment.GetSequence() {
+		t.Fatalf("both streams were issued sequence %d", got)
 	}
 }
 
@@ -373,7 +491,7 @@ func TestSubscribePageForwardsAWatchsOwnRefusal(t *testing.T) {
 		Page: "page-1", Subscription: "feed-1",
 		Request: &agentreplv1.SubscribePageRequest_Feed{
 			Feed: &agentreplv1.WatchFeedRequest{
-				Watch: &agentreplv1.FeedWatchToken{Value: "never-minted"},
+				Watch: &agentreplv1.FeedWatchToken{Value: "never-minted", Instance: string(testInstance)},
 			},
 		},
 	}))
@@ -563,10 +681,7 @@ func TestDetachingAPageReleasesItsId(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	page, err := surface.attachPage("page-1", ctx)
-	if err != nil {
-		t.Fatalf("attach the page: %v", err)
-	}
+	page := surface.attachPage("page-1", ctx, cancel)
 
 	// Act.
 	surface.detachPage(page)
@@ -575,32 +690,61 @@ func TestDetachingAPageReleasesItsId(t *testing.T) {
 	if _, held := surface.pageFor("page-1"); held {
 		t.Fatal("a detached page still holds its id")
 	}
-	if _, err := surface.attachPage("page-1", ctx); err != nil {
-		t.Fatalf("the released id was refused to the next page: %v", err)
+}
+
+// TestAttachingOneIdTwiceEndsTheEarlierStream pins the replacement at the
+// registry's own level: the second attachment of one page id ends the first's
+// stream and stands in its place under a sequence of its own.
+func TestAttachingOneIdTwiceEndsTheEarlierStream(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	surface := h.Server.(*server)
+	olderCtx, endOlder := context.WithCancel(context.Background())
+	defer endOlder()
+	older := surface.attachPage("page-1", olderCtx, endOlder)
+	newerCtx, endNewer := context.WithCancel(context.Background())
+	defer endNewer()
+
+	// Act.
+	newer := surface.attachPage("page-1", newerCtx, endNewer)
+
+	// Assert.
+	if olderCtx.Err() == nil {
+		t.Fatal("the earlier stream was left standing")
+	}
+	if newerCtx.Err() != nil {
+		t.Fatal("the newer stream was ended")
+	}
+	if held, _ := surface.pageFor("page-1"); held != newer {
+		t.Fatal("the registry does not hold the newer attachment")
+	}
+	if newer.sequence == older.sequence {
+		t.Fatalf("both attachments were issued sequence %d", newer.sequence)
 	}
 }
 
-// TestAttachingOneIdTwiceIsRefusedInTheRegistry pins the uniqueness at its own
-// level, so the guarantee is not only observable through a served stream.
-func TestAttachingOneIdTwiceIsRefusedInTheRegistry(t *testing.T) {
+// TestDetachingAReplacedStreamLeavesItsReplacementAttached pins that the
+// earlier stream's late detach takes nothing from the page that replaced it:
+// not its registration, and not the opens' knowledge that the page is here.
+func TestDetachingAReplacedStreamLeavesItsReplacementAttached(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	surface, ok := h.Server.(*server)
-	if !ok {
-		t.Fatalf("the surface under test is %T, not the one that holds the page registry", h.Server)
-	}
+	surface := h.Server.(*server)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if _, err := surface.attachPage("page-1", ctx); err != nil {
-		t.Fatalf("attach the page: %v", err)
-	}
+	older := surface.attachPage("page-1", ctx, cancel)
+	newer := surface.attachPage("page-1", ctx, cancel)
 
 	// Act.
-	_, err := surface.attachPage("page-1", ctx)
+	surface.detachPage(older)
 
 	// Assert.
-	if err == nil {
-		t.Fatal("one page id was attached twice")
+	if held, _ := surface.pageFor("page-1"); held != newer {
+		t.Fatal("the replaced stream's detach removed its replacement")
+	}
+	present := pagesHeld(surface, "page-1")
+	if present != 1 {
+		t.Fatalf("the page is held %d times after the replaced stream detached, want 1", present)
 	}
 }
 
@@ -962,9 +1106,7 @@ func TestASlowPageDoesNotStallATopicsOtherSubscribers(t *testing.T) {
 	defer cancel()
 	pageCtx, endPage := context.WithCancel(ctx)
 	defer endPage()
-	if _, err := surface.attachPage("stalled-page", pageCtx); err != nil {
-		t.Fatalf("attach the stalled page: %v", err)
-	}
+	surface.attachPage("stalled-page", pageCtx, endPage)
 	subscribePage(t, ctx, h, &agentreplv1.SubscribePageRequest{
 		Page: "stalled-page", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{
@@ -1289,9 +1431,10 @@ func TestAPlannedCloseEndsAPageInOrder(t *testing.T) {
 	}
 }
 
-// TestAPageClosingRefusesANewSubscription pins the drain's bound: once a
-// planned exit drains a page, nothing new may join what it waits out.
-func TestAPageClosingRefusesANewSubscription(t *testing.T) {
+// TestAPageClosingAnswersANewSubscriptionPageGone pins the drain's bound:
+// once a planned exit drains a page, nothing new may join what it waits out,
+// and the page is told its attachment is over rather than refused.
+func TestAPageClosingAnswersANewSubscriptionPageGone(t *testing.T) {
 	// Arrange: a page whose drain has begun.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1306,22 +1449,26 @@ func TestAPageClosingRefusesANewSubscription(t *testing.T) {
 	page.mu.Unlock()
 
 	// Act
-	_, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
+	resp, err := h.Client.SubscribePage(ctx, connect.NewRequest(&agentreplv1.SubscribePageRequest{
 		Page: "page-1", Subscription: "footer-1",
 		Request: &agentreplv1.SubscribePageRequest_Footer{Footer: &agentreplv1.WatchFooterRequest{Workspace: ref()}},
 	}))
 
 	// Assert
-	if err == nil || !strings.Contains(err.Error(), "ending with this daemon's planned exit") {
-		t.Fatalf("SubscribePage = %v, want the closing page's refusal", err)
+	if err != nil || resp.Msg.GetSuccess().GetPageGone() == nil {
+		t.Fatalf("SubscribePage = (%v, %v), want page_gone", resp, err)
 	}
 }
 
 // subscribePage subscribes REQ on its page, failing the test on a refusal.
 func subscribePage(t *testing.T, ctx context.Context, h *harness, req *agentreplv1.SubscribePageRequest) {
 	t.Helper()
-	if _, err := h.Client.SubscribePage(ctx, connect.NewRequest(req)); err != nil {
+	resp, err := h.Client.SubscribePage(ctx, connect.NewRequest(req))
+	if err != nil {
 		t.Fatalf("subscribe %s: %v", req.GetSubscription(), err)
+	}
+	if resp.Msg.GetSuccess().GetSubscribed() == nil {
+		t.Fatalf("subscribe %s answered %v, want subscribed", req.GetSubscription(), resp.Msg)
 	}
 }
 

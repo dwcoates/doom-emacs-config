@@ -99,7 +99,7 @@ record's `address`.
 
 | rpc | refusal | condition | package |
 | --- | --- | --- | --- |
-| WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted, or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
+| WatchFeed | `unknown_token` | a `FeedWatchToken` this daemon never minted (one another daemon minted included: `FeedWatchToken.instance`), or one whose mint site is gone (`feed.ErrUnknownToken`) | server / feed |
 | WatchFeed | `token_expired` | a token whose pinned start is no longer retained (`feed.ErrTokenExpired`) — the client must re-open the feed | feed |
 | WatchLoginTerminal | `no_login_open` | a login terminal watch on a workspace with no standing login pty (`login.ErrNoSession`). The unary `SendLoginInput` HAS the arm; the stream has no error message at all | login |
 | WatchFooter / WatchTopbar / WatchHostWorkspace / WatchWebWorkspace / WatchLoginTerminal | `unknown_workspace`, `workspace_ref_mismatch`, `transferring_away`, `not_yet_adopted` | every per-workspace STANDING STREAM refuses an unknown, mismatched or unowned workspace before it opens | server |

@@ -30,10 +30,20 @@ const (
 // the tail to begin exactly after the page the open answered with, so a
 // client cannot watch a feed it never opened and the page/tail seam cannot
 // gap or overlap. Daemon-owned; never parsed, never constructed.
+//
+// THE PIN LIVES IN THE DAEMON THAT MINTED IT, so the token names that daemon
+// and a tail is opened there, whichever daemon receives the request. Two
+// daemons run side by side at a deploy's handover, and a token that named no
+// daemon could be honored by the wrong one.
 type FeedWatchToken struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The opaque value.
-	Value         string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// The opaque value, unique within the daemon that minted it.
+	Value string `protobuf:"bytes,1,opt,name=value,proto3" json:"value,omitempty"`
+	// The daemon process that minted the token (its instance id), the only one
+	// that holds its pin. A daemon that receives a tail request naming another
+	// instance sends it there; when that process no longer runs the token is
+	// unknown, and the client opens the feed again. REQUIRED and not empty.
+	Instance      string `protobuf:"bytes,2,opt,name=instance,proto3" json:"instance,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -75,13 +85,21 @@ func (x *FeedWatchToken) GetValue() string {
 	return ""
 }
 
+func (x *FeedWatchToken) GetInstance() string {
+	if x != nil {
+		return x.Instance
+	}
+	return ""
+}
+
 var File_agentrepl_v1_feed_token_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_feed_token_proto_rawDesc = "" +
 	"\n" +
-	"\x1dagentrepl/v1/feed_token.proto\x12\fagentrepl.v1\"&\n" +
+	"\x1dagentrepl/v1/feed_token.proto\x12\fagentrepl.v1\"B\n" +
 	"\x0eFeedWatchToken\x12\x14\n" +
-	"\x05value\x18\x01 \x01(\tR\x05valueB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x05value\x18\x01 \x01(\tR\x05value\x12\x1a\n" +
+	"\binstance\x18\x02 \x01(\tR\binstanceB*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_feed_token_proto_rawDescOnce sync.Once

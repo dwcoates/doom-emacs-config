@@ -235,6 +235,67 @@ func (f fakeServingRows) Serving(context.Context, ids.WorkspaceID) (*ids.Instanc
 	return f.owner, f.err
 }
 
+func TestInstanceAddressAnswersWhereARunningDaemonIs(t *testing.T) {
+	// Arrange: a state root where "elder" runs and records its address, and
+	// "mute" runs and records none.
+	addrPath := filepath.Join(t.TempDir(), "daemon.addr")
+	elder, err := daemonaddr.HoldLife(addrPath, "elder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer elder.Release()
+	if err := elder.RecordAddress("127.0.0.1:5000"); err != nil {
+		t.Fatal(err)
+	}
+	mute, err := daemonaddr.HoldLife(addrPath, "mute")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mute.Release()
+	cases := []struct {
+		name      string
+		instance  ids.InstanceID
+		want      string
+		wantAlive bool
+		wantErr   string
+	}{
+		{name: "a daemon that runs answers its recorded address", instance: "elder", want: "127.0.0.1:5000", wantAlive: true},
+		{name: "a daemon that no longer runs answers not alive, and no error", instance: "gone"},
+		{name: "a daemon that runs and records no address is a violation", instance: "mute", wantErr: "records no address"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got, alive, err := instanceAddress(addrPath, tc.instance)
+
+			// Assert
+			if tc.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+					t.Fatalf("instanceAddress = %v, want an error naming %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || got != tc.want || alive != tc.wantAlive {
+				t.Fatalf("instanceAddress = (%q, %v, %v), want (%q, %v)", got, alive, err, tc.want, tc.wantAlive)
+			}
+		})
+	}
+}
+
+// TestOnlyInstanceAddressResolvesADaemonsPrivateAddress keeps the lookup of
+// another daemon's private address in one place: a second site that probes
+// and reads it by hand would judge "runs" and "records an address" apart from
+// the one every forward rests on.
+func TestOnlyInstanceAddressResolvesADaemonsPrivateAddress(t *testing.T) {
+	// Act
+	sites := sourcescan.Sites(t, "daemonaddr.InstanceAddress(")
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "sharedtake.go" {
+		t.Fatalf("daemonaddr.InstanceAddress is called from %v, want only instanceAddress in sharedtake.go", sites)
+	}
+}
+
 func TestServingElsewhereFollowsTheServingRow(t *testing.T) {
 	// Arrange: a state root where instance "elder" lives and records its address.
 	addrPath := filepath.Join(t.TempDir(), "daemon.addr")
