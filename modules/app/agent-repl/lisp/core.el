@@ -3359,6 +3359,38 @@ every line's annotations line up whatever names the list offers.  THE ONE
 MEASURE every completion list that aligns a column past its names uses."
   (+ gap (apply #'max 0 (mapcar #'string-width names))))
 
+(defun agent-repl-name-glyph-height (glyph &optional frame)
+  "Return the face height GLYPH, a name's glyph, is drawn at in FRAME, or nil.
+An emoji's font is taller than the text's at the same size: measured
+2026-11-18 on the owner's Emacs, Menlo at 13px stands 15px high (ascent 12,
+descent 3) and Apple Color Emoji at 13px 21px (16 and 5), so an unscaled
+thumbs up stretches its line and reads larger than the name beside it.
+The answer is the ratio of the two heights, read from the fonts FRAME
+actually draws the text and GLYPH in (`internal-char-font'), so the glyph
+stands exactly as high as the name's line at any font size and on any
+host.  A frame with no fonts (a terminal, batch) draws GLYPH as one more
+character cell, so it answers nil."
+  (with-selected-frame (or frame (selected-frame))
+    (let ((text (car-safe (internal-char-font nil ?a)))
+          (emoji (car-safe (internal-char-font nil (aref glyph 0)))))
+      (when (and (fontp text 'font-object) (fontp emoji 'font-object))
+        (let ((text-info (query-font text))
+              (emoji-info (query-font emoji)))
+          (/ (float (+ (aref text-info 4) (aref text-info 5)))
+             (+ (aref emoji-info 4) (aref emoji-info 5))))))))
+
+(defun agent-repl-name-glyph-string (glyph &optional height)
+  "Return GLYPH, the daemon's glyph for a workspace name, as drawn text.
+HEIGHT is the face height it is drawn at, measured by
+`agent-repl-name-glyph-height' when nil; a frame with none draws GLYPH
+unscaled.  THE ONE DRAWING of a
+name's glyph every Emacs list of workspace names uses, followed by the
+space that parts it from the name."
+  (unless (and (stringp glyph) (not (string-empty-p glyph)))
+    (error "agent-repl: a name glyph carries its glyph, not %S" glyph))
+  (let ((scale (or height (agent-repl-name-glyph-height glyph))))
+    (concat (if scale (propertize glyph 'face (list :height scale)) glyph) " ")))
+
 ;;;; ---- Completion reads that tune ivy ----
 
 (defun agent-repl--completing-read-under-ivy (alist entry prompt table)

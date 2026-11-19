@@ -94,13 +94,27 @@ The repository the row's workspace belongs to, as its section is headed."
   (agent-repl-wire-roster--decode-repository-name "RosterRowRepository" value))
 
 (defun agent-repl-wire-decode-roster-row-name (value)
-  "Decode VALUE as `RosterRowName', a plist `(:text)'.
-Never an identity or a join key: names collide across repos."
+  "Decode VALUE as `RosterRowName', a plist `(:text :glyph)'.
+Never an identity or a join key: names collide across repos.  `:text' is
+the registry's slug alone; `:glyph' is the glyph drawn before it
+\=(`agent-repl-wire-decode-roster-row-name-glyph'), nil when it wears none."
   (let ((object (agent-repl-wire--object "RosterRowName" value)))
-    (agent-repl-wire--check-keys "RosterRowName" object '(text))
+    (agent-repl-wire--check-keys "RosterRowName" object '(text glyph))
     (agent-repl-wire--decoded
      "RosterRowName"
-     (list :text (agent-repl-wire--decode-string "RosterRowName" 'text object)))))
+     (list :text (agent-repl-wire--decode-string "RosterRowName" 'text object)
+           :glyph (agent-repl-wire--decode-optional-message
+                   "RosterRowName" 'glyph object
+                   #'agent-repl-wire-decode-roster-row-name-glyph)))))
+
+(defun agent-repl-wire-decode-roster-row-name-glyph (value)
+  "Decode VALUE as `RosterRowNameGlyph', a plist `(:text)'.
+The glyph the daemon draws before an emoji-ack workspace's name."
+  (let ((object (agent-repl-wire--object "RosterRowNameGlyph" value)))
+    (agent-repl-wire--check-keys "RosterRowNameGlyph" object '(text))
+    (agent-repl-wire--decoded
+     "RosterRowNameGlyph"
+     (list :text (agent-repl-wire--decode-string "RosterRowNameGlyph" 'text object)))))
 
 (defun agent-repl-wire-decode-roster-row-current (value)
   "Decode VALUE as `RosterRowCurrent', a plist `(:current)'.

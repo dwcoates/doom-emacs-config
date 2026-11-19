@@ -7975,3 +7975,44 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
     (should (eq (nth 0 (car logged)) 'info))
     (should (eq (car (nth 1 (car logged))) :agent-repl-central))
     (should (string-prefix-p "elisp.core.sink-opened-after-workspace-ended:" (nth 2 (car logged))))))
+
+;;;; ---- A name's glyph ----
+
+(ert-deftest agent-repl-test-core-name-glyph-string-draws-at-the-given-height ()
+  "The glyph is drawn at HEIGHT and parted from the name by one space."
+  (let ((drawn (agent-repl-name-glyph-string "👍" 0.7)))
+    (should (equal (substring-no-properties drawn) "👍 "))
+    (should (equal (get-text-property 0 'face drawn) '(:height 0.7)))
+    (should-not (get-text-property 1 'face drawn))))
+
+(ert-deftest agent-repl-test-core-name-glyph-string-measures-the-height ()
+  "With no HEIGHT the glyph is drawn at the frame's measured ratio."
+  (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) 0.5)))
+    (should (equal (get-text-property 0 'face (agent-repl-name-glyph-string "👍"))
+                   '(:height 0.5)))))
+
+(ert-deftest agent-repl-test-core-name-glyph-string-unscaled-without-fonts ()
+  "A frame with no fonts draws the glyph as it is."
+  (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) nil)))
+    (let ((drawn (agent-repl-name-glyph-string "👍")))
+      (should (equal drawn "👍 "))
+      (should-not (get-text-property 0 'face drawn)))))
+
+(ert-deftest agent-repl-test-core-name-glyph-string-refuses-no-glyph ()
+  "An empty glyph is a caller's defect and fails hard."
+  (should-error (agent-repl-name-glyph-string "" 1.0))
+  (should-error (agent-repl-name-glyph-string nil 1.0)))
+
+(ert-deftest agent-repl-test-core-name-glyph-height-is-the-ratio-of-the-fonts ()
+  "The height is the text font's line height over the emoji font's."
+  (cl-letf (((symbol-function 'internal-char-font)
+             (lambda (_pos ch) (list (if (eq ch ?a) 'text 'emoji))))
+            ((symbol-function 'fontp) (lambda (_f &optional _k) t))
+            ((symbol-function 'query-font)
+             (lambda (f) (if (eq f 'text) [n f 13 13 12 3 0 0 nil] [n f 13 13 16 5 0 0 nil]))))
+    (should (equal (agent-repl-name-glyph-height "👍") (/ 15.0 21)))))
+
+(ert-deftest agent-repl-test-core-name-glyph-height-is-nil-without-fonts ()
+  "A frame that draws no fonts (batch, a terminal) answers nil."
+  (cl-letf (((symbol-function 'internal-char-font) (lambda (_pos _ch) nil)))
+    (should-not (agent-repl-name-glyph-height "👍"))))
