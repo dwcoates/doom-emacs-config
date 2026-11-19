@@ -358,8 +358,14 @@ func (r *resolver) settleTurnPrompts(s *wsState, turn ids.TurnID) {
 // stamped with TURN: the rows whose `working` and `awaiting_user` flags that
 // turn's edges move.
 func isTurnPrompt(row *frontendv1.FeedRow, turn string) bool {
-	return row.GetTurn().GetValue() == turn &&
-		(row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil)
+	return row.GetTurn().GetValue() == turn && isPromptRow(row)
+}
+
+// isPromptRow reports whether ROW is a prompt bubble, a person's (user
+// prompt) or an agent's (agent prompt): the one test of the two kinds of
+// prompt row, so every rule that treats prompts alike names the same rows.
+func isPromptRow(row *frontendv1.FeedRow) bool {
+	return row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil
 }
 
 // republishRows re-publishes, in place on its own feed, every stored row of

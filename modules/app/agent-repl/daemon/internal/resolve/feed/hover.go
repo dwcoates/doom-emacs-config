@@ -45,11 +45,6 @@ func stampHover(s *wsState, f *feedState, id string, row *frontendv1.FeedRow) {
 	row.Hover = hoverOf(row, f.sentAtMs[id])
 }
 
-// isPromptRow reports whether ROW is a prompt bubble, a person's or an agent's.
-func isPromptRow(row *frontendv1.FeedRow) bool {
-	return row.GetUserPrompt() != nil || row.GetAgentPrompt() != nil
-}
-
 // hoverOf answers ROW's hover stamp, SENT being the instant its prompt was
 // sent (zero when none is known or the row is no prompt), or nil for a kind
 // that shows nothing when hovered.
