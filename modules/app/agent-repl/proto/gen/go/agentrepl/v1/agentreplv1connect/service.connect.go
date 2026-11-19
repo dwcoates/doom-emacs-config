@@ -328,6 +328,9 @@ const (
 	// AgentReplReportEditorFocusProcedure is the fully-qualified name of the AgentRepl's
 	// ReportEditorFocus RPC.
 	AgentReplReportEditorFocusProcedure = "/agentrepl.v1.AgentRepl/ReportEditorFocus"
+	// AgentReplReportRecencyReachProcedure is the fully-qualified name of the AgentRepl's
+	// ReportRecencyReach RPC.
+	AgentReplReportRecencyReachProcedure = "/agentrepl.v1.AgentRepl/ReportRecencyReach"
 	// AgentReplWatchHostWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchHostWorkspace RPC.
 	AgentReplWatchHostWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
@@ -568,6 +571,7 @@ var (
 	agentReplReportPageUnloadingMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ReportPageUnloading")
 	agentReplReportPageResidencyMethodDescriptor               = agentReplServiceDescriptor.Methods().ByName("ReportPageResidency")
 	agentReplReportEditorFocusMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ReportEditorFocus")
+	agentReplReportRecencyReachMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ReportRecencyReach")
 	agentReplWatchHostWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchHostWorkspace")
 	agentReplWatchDaemonMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("WatchDaemon")
 	agentReplOpenTabsMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("OpenTabs")
@@ -955,6 +959,10 @@ type AgentReplClient interface {
 	// banner on it, and a gain answers the newest held banner's workspace,
 	// which Emacs selects. See endpoint_report_editor_focus.proto.
 	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
+	// How few presses of the recency walk (`s-[`, `s-]`) reach each nearby
+	// tab, which the sidebar draws as its rows' gutters; replaced whole. See
+	// endpoint_report_recency_reach.proto.
+	ReportRecencyReach(context.Context, *connect.Request[v1.ReportRecencyReachRequest]) (*connect.Response[v1.ReportRecencyReachResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error)
@@ -1772,6 +1780,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplReportEditorFocusMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		reportRecencyReach: connect.NewClient[v1.ReportRecencyReachRequest, v1.ReportRecencyReachResponse](
+			httpClient,
+			baseURL+AgentReplReportRecencyReachProcedure,
+			connect.WithSchema(agentReplReportRecencyReachMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		watchHostWorkspace: connect.NewClient[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchHostWorkspaceProcedure,
@@ -2174,6 +2188,7 @@ type agentReplClient struct {
 	reportPageUnloading               *connect.Client[v1.ReportPageUnloadingRequest, v1.ReportPageUnloadingResponse]
 	reportPageResidency               *connect.Client[v1.ReportPageResidencyRequest, v1.ReportPageResidencyResponse]
 	reportEditorFocus                 *connect.Client[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse]
+	reportRecencyReach                *connect.Client[v1.ReportRecencyReachRequest, v1.ReportRecencyReachResponse]
 	watchHostWorkspace                *connect.Client[v1.WatchHostWorkspaceRequest, v1.WatchHostWorkspaceResponse]
 	watchDaemon                       *connect.Client[v1.WatchDaemonRequest, v1.WatchDaemonResponse]
 	openTabs                          *connect.Client[v1.OpenTabsRequest, v1.OpenTabsResponse]
@@ -2753,6 +2768,11 @@ func (c *agentReplClient) ReportEditorFocus(ctx context.Context, req *connect.Re
 	return c.reportEditorFocus.CallUnary(ctx, req)
 }
 
+// ReportRecencyReach calls agentrepl.v1.AgentRepl.ReportRecencyReach.
+func (c *agentReplClient) ReportRecencyReach(ctx context.Context, req *connect.Request[v1.ReportRecencyReachRequest]) (*connect.Response[v1.ReportRecencyReachResponse], error) {
+	return c.reportRecencyReach.CallUnary(ctx, req)
+}
+
 // WatchHostWorkspace calls agentrepl.v1.AgentRepl.WatchHostWorkspace.
 func (c *agentReplClient) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchHostWorkspaceResponse], error) {
 	return c.watchHostWorkspace.CallServerStream(ctx, req)
@@ -3326,6 +3346,10 @@ type AgentReplHandler interface {
 	// banner on it, and a gain answers the newest held banner's workspace,
 	// which Emacs selects. See endpoint_report_editor_focus.proto.
 	ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error)
+	// How few presses of the recency walk (`s-[`, `s-]`) reach each nearby
+	// tab, which the sidebar draws as its rows' gutters; replaced whole. See
+	// endpoint_report_recency_reach.proto.
+	ReportRecencyReach(context.Context, *connect.Request[v1.ReportRecencyReachRequest]) (*connect.Response[v1.ReportRecencyReachResponse], error)
 	// The host-facing view of one workspace, per-workspace subscription. See
 	// endpoint_watch_host_workspace.proto.
 	WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error
@@ -4139,6 +4163,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplReportEditorFocusMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplReportRecencyReachHandler := connect.NewUnaryHandler(
+		AgentReplReportRecencyReachProcedure,
+		svc.ReportRecencyReach,
+		connect.WithSchema(agentReplReportRecencyReachMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchHostWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchHostWorkspaceProcedure,
 		svc.WatchHostWorkspace,
@@ -4644,6 +4674,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplReportPageResidencyHandler.ServeHTTP(w, r)
 		case AgentReplReportEditorFocusProcedure:
 			agentReplReportEditorFocusHandler.ServeHTTP(w, r)
+		case AgentReplReportRecencyReachProcedure:
+			agentReplReportRecencyReachHandler.ServeHTTP(w, r)
 		case AgentReplWatchHostWorkspaceProcedure:
 			agentReplWatchHostWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplWatchDaemonProcedure:
@@ -5169,6 +5201,10 @@ func (UnimplementedAgentReplHandler) ReportPageResidency(context.Context, *conne
 
 func (UnimplementedAgentReplHandler) ReportEditorFocus(context.Context, *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportEditorFocus is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportRecencyReach(context.Context, *connect.Request[v1.ReportRecencyReachRequest]) (*connect.Response[v1.ReportRecencyReachResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportRecencyReach is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchHostWorkspace(context.Context, *connect.Request[v1.WatchHostWorkspaceRequest], *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {

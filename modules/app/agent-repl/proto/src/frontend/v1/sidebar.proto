@@ -464,6 +464,40 @@ message RosterOpenRow {
   // from it, and when the user folds the section again. False on a row no
   // fold covers and on a row the fold hides.
   bool surfaced = 7;
+  // The row's RECENCY GUTTER: the bar drawn left of its tab number when
+  // Emacs's recency walk reaches the tab in few presses. SET exactly when
+  // the connected Emacs reported a reach for the workspace
+  // (agentrepl.v1.ReportRecencyReach); UNSET otherwise. At most six rows
+  // carry each direction.
+  optional RosterOpenRowRecencyGutter recency_gutter = 8;
+}
+
+// THE RECENCY GUTTER: which chord of the recency walk reaches the row's tab
+// in fewer presses, and how many. Emacs resolves it with the walk's own
+// stepping (agentrepl.v1.RecencyReach), so the bar always tells the truth
+// about where the presses land. The webapp paints `older` the canonical
+// orange and `newer` the canonical purple, full at one press and more muted
+// with every press after it.
+message RosterOpenRowRecencyGutter {
+  // THE ARM IS THE DIRECTION; exactly one is set, unset is malformed.
+  oneof reach {
+    // `s-[` reaches the tab, toward workspaces viewed longer ago.
+    RosterOpenRowRecencyGutterOlder older = 1;
+    // `s-]` reaches the tab, toward workspaces viewed more recently.
+    RosterOpenRowRecencyGutterNewer newer = 2;
+  }
+}
+
+// Reached by `s-[`.
+message RosterOpenRowRecencyGutterOlder {
+  // How many presses land on the tab, from 1.
+  uint32 presses = 1;
+}
+
+// Reached by `s-]`.
+message RosterOpenRowRecencyGutterNewer {
+  // How many presses land on the tab, from 1.
+  uint32 presses = 1;
 }
 
 // A row's children's fold, as a subsection's is drawn

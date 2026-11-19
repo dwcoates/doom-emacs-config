@@ -1,0 +1,98 @@
+// endpoint_report_recency_reach.proto — ReportRecencyReach: how few presses
+// of Emacs's recency walk (`s-[` older, `s-]` newer) reach each nearby tab.
+// HOST section.
+//
+// EMACS OWNS THE WALK'S ORDER. The ring `s-[` and `s-]` step along is the
+// selection history Emacs keeps (its visits, filtered by their dwell), so only
+// Emacs can say where a press lands. It computes each tab's reach with the
+// very stepping the chords use, starting where the next press starts, and
+// reports it here; the daemon draws it on the Open section's rows
+// (frontend.v1.RosterOpenRow.recency_gutter) and derives nothing.
+//
+// THE REPORT IS REPLACED WHOLE. Each report states every reach that stands,
+// so a tab absent from it has none, and nothing from an earlier report can
+// linger. Emacs reports again whenever a reach changes: a switch, a new
+// visit in the history, a tab opened, closed or folded away.
+//
+// THE REACH LIVES AND DIES WITH EMACS'S WatchDaemon STREAM, as its desktop
+// focus does (ReportEditorFocus): a stream's attach starts with no reach, the
+// stream's end clears it, and a later stream supersedes an earlier one. So
+// the sidebar never draws a reach no connected Emacs walks. A report with no
+// Emacs stream standing is refused, and the stream that comes back is
+// reported to again.
+//
+// IDEMPOTENT: reporting the reach already held is a success and changes
+// nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportRecencyReachRequest {
+  // Every tab the walk reaches soonest, in no particular order: at most the
+  // six nearest in each direction. A workspace appears at most once (a
+  // second entry for one is Connect InvalidArgument). EMPTY = no tab has a
+  // reach (a bar with no other tab).
+  repeated RecencyReach reaches = 1;
+}
+
+// ONE TAB'S REACH: the direction that reaches it in fewer presses, and how
+// many. A tab equally far both ways is reached `older`.
+message RecencyReach {
+  // The workspace whose tab is reached. REQUIRED. A workspace no open row
+  // holds by the time the daemon draws is drawn nowhere.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // Which chord reaches the tab in fewer presses. THE ARM IS THE DIRECTION;
+  // REQUIRED, unset is Connect InvalidArgument.
+  oneof direction {
+    // `s-[`, toward workspaces viewed longer ago.
+    RecencyReachOlder older = 2;
+    // `s-]`, toward workspaces viewed more recently, wrapping from the
+    // oldest.
+    RecencyReachNewer newer = 3;
+  }
+}
+
+// Reached by `s-[`.
+message RecencyReachOlder {
+  // How many presses land on the tab, from 1. Zero is Connect
+  // InvalidArgument.
+  uint32 presses = 1;
+}
+
+// Reached by `s-]`.
+message RecencyReachNewer {
+  // How many presses land on the tab, from 1. Zero is Connect
+  // InvalidArgument.
+  uint32 presses = 1;
+}
+
+// THE ARM IS THE OUTCOME.
+message ReportRecencyReachResponse {
+  oneof result {
+    ReportRecencyReachSuccess success = 1;
+    ReportRecencyReachError error = 2;
+  }
+}
+
+// The roster now draws the reported reach. DELIBERATELY EMPTY: the arm is
+// the fact.
+message ReportRecencyReachSuccess {}
+
+// Why the reach was not taken.
+message ReportRecencyReachError {
+  // THE ARM IS THE CAUSE; REQUIRED.
+  oneof cause {
+    // No Emacs WatchDaemon stream stands on this daemon: the reach belongs to
+    // that stream, and a report with none has nothing to belong to. The
+    // stream that comes back is reported to again.
+    ReportRecencyReachNoEmacsStream no_emacs_stream = 1;
+  }
+}
+
+// No Emacs stream stands. DELIBERATELY EMPTY: the arm is the fact.
+message ReportRecencyReachNoEmacsStream {}
