@@ -789,6 +789,24 @@ func TestFailResolutionRecordsNoErrorForAnEndedRequest(t *testing.T) {
 	}
 }
 
+// TestFailRecordsARequestItsCallerEndedAtInfo: a cancelled request is the
+// caller leaving, answered canceled and recorded once at INFO, never ERROR.
+func TestFailRecordsARequestItsCallerEndedAtInfo(t *testing.T) {
+	// Arrange.
+	log := &recordingLogger{}
+
+	// Act.
+	got := fail(log, "ReportLatencies", fmt.Errorf("read workspace %q: %w", "w1", context.Canceled))
+
+	// Assert.
+	if got.Code() != connect.CodeCanceled {
+		t.Fatalf("fail code = %v, want canceled", got.Code())
+	}
+	if len(log.at("ERROR")) != 0 || len(log.at("INFO")) != 1 {
+		t.Fatalf("records ERROR %+v, INFO %+v; want one INFO and no ERROR", log.at("ERROR"), log.at("INFO"))
+	}
+}
+
 // TestFailResolutionRecordsAGenuineFailureAtError: everything else still fails
 // loudly.
 func TestFailResolutionRecordsAGenuineFailureAtError(t *testing.T) {
