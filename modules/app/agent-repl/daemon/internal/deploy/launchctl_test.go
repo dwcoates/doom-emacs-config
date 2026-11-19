@@ -196,4 +196,3 @@ func TestLaunchctlStartBootstrapsThePlistAsItIsNow(t *testing.T) {
 		})
 	}
 }
-

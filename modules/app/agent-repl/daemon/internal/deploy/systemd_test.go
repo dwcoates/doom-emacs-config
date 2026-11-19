@@ -180,4 +180,3 @@ func TestSystemdUserStartReadsTheChangedUnitThenStarts(t *testing.T) {
 		})
 	}
 }
-
