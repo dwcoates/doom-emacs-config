@@ -48,6 +48,7 @@ import { drawLinkIcon } from "./link-icon.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
+import { drawNameGlyph } from "../name-glyph.js";
 import { toneClass, topbarTone } from "../vocab.js";
 import type { TopbarContext } from "./context.js";
 
@@ -271,7 +272,13 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
   return list;
 }
 
-/** The workspace's name, drawn verbatim on the heading's second line. */
+/**
+ * The workspace's name, drawn verbatim on the heading's second line, after
+ * the glyph the daemon puts before it when the name wears one
+ * (`name-glyph.ts`). The tooltip is the name alone.
+ */
 export function drawTopbarWorkspaceName(u: TopbarWorkspaceName): HTMLElement {
-  return drawHeadingLine("topbar-workspace-name", u.text);
+  const line = drawHeadingLine("topbar-workspace-name", u.text);
+  if (u.glyph !== undefined) line.prepend(drawNameGlyph(u.glyph, "TopbarWorkspaceName.glyph"));
+  return line;
 }

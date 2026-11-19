@@ -28,6 +28,7 @@ import {
   OWNED_LINK_CLASS,
 } from "../../src/topbar/strip.js";
 import { drawLinkIcon } from "../../src/topbar/link-icon.js";
+import { drawNameGlyph } from "../../src/name-glyph.js";
 import styles from "../../src/styles.css?raw";
 import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
@@ -213,6 +214,24 @@ describe("drawHeadingLine", () => {
     ["workspace name", () => drawTopbarWorkspaceName(workspaceName("t")), "topbar-workspace-name"],
   ])("draws the %s as a heading line", (_, draw, className) => {
     expect(draw().outerHTML).toBe(drawHeadingLine(className, "t").outerHTML);
+  });
+});
+
+describe("drawTopbarWorkspaceName's glyph", () => {
+  it("draws the name's glyph before the name, the tooltip the name alone", () => {
+    // Act
+    const line = drawTopbarWorkspaceName(create(TopbarWorkspaceNameSchema, { text: "acked", glyph: { text: "👍" } }));
+
+    // Assert
+    expect([line.firstElementChild?.outerHTML, line.textContent, line.title]).toEqual([
+      drawNameGlyph({ text: "👍" }, "TopbarWorkspaceName.glyph").outerHTML,
+      "👍acked",
+      "acked",
+    ]);
+  });
+
+  it("draws no glyph for a name that wears none", () => {
+    expect(drawTopbarWorkspaceName(workspaceName("plain")).querySelector(".name-glyph")).toBeNull();
   });
 });
 
