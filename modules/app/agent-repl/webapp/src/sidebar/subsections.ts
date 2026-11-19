@@ -8,7 +8,7 @@
  * subsection and its subsections, in the daemon's order (`entries.ts`). A
  * workspace is put in one by dragging its row there, and the Emacs tab bar
  * follows: entry by entry, a subsection's workspaces where it stands
- * (`arrange.ts`). Its rows are indented under its header. An empty
+ * (`arrange.ts`). Its top-level rows are not indented under its header. An empty
  * subsection still draws its header, and a row dropped onto it lands in its
  * (empty) rows list.
  *

@@ -1220,12 +1220,10 @@ body {
    rows wherever they were arranged, each a small header over its rows, and
    fold away with the repository (their list is the section's .rows). An
    empty subsection draws its header alone, and a row dragged onto that
-   header lands in it (src/drag.ts). A subsection's rows
-   are INDENTED under its header (owner request, 2026-10-20), so a row in it
-   reads apart from the repository's own rows around it: one --row-indent
-   step (see "THE ROW INDENT" below). */
-#ws-sidebar .sb-subsection > .rows { --row-indent-parent: var(--row-indent); }
-#ws-sidebar .sb-subsection > .rows > .ws { --row-indent: calc(var(--row-indent-parent) + 0.9rem); }
+   header lands in it (src/drag.ts). A subsection's top-level rows are NOT
+   indented under its header (owner request, 2026-11-19): they start at the
+   repository's own rows' indent, and only their children indent, one
+   generation step each (see "THE ROW INDENT" below). */
 #ws-sidebar .sb-subsection-head {
   /* THE SIDEBAR DRAWS NO FOLD TRIANGLE (owner request, 2026-10-31;
      src/sidebar/section-fold.ts foldOnClick): a click anywhere on the header
@@ -1400,8 +1398,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    row's out-of-flow ⋯ stands at too, so their right edges never drift. */
 #ws-sidebar { --row-pad-right: 0.7rem; }
 /* THE ROW INDENT (owner request, 2026-10-20): a nested row -- a child
-   workspace, or a row in a subsection -- indents only its status mark and
-   name. Its tab number, its gutter bar and its highlight start at the
+   workspace -- indents only its status mark and name. Its tab number, its gutter bar and its highlight start at the
    section's left edge at every depth, so the numbers read as one column.
    No container is indented: each row's line pads by --row-indent, which
    every .ws inherits and each nesting adds one step to, through
