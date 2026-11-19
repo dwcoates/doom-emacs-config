@@ -124,14 +124,66 @@ func bind(path string, occupied func(absolute string) error) (net.Listener, Resu
 	case !errors.Is(statErr, os.ErrNotExist):
 		return nil, Result{}, &Error{Step: StepInspect, Path: absolute, Err: statErr}
 	}
-	listener, err := net.Listen("unix", absolute)
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: absolute, Net: "unix"})
 	if err != nil {
 		return nil, Result{}, &Error{Step: StepBind, Path: absolute, Err: err}
 	}
+	// THE PATH IS UNLINKED ONLY WHILE IT IS STILL THIS LISTENER'S SOCKET
+	// (ownedListener), never by Go's unlink-on-close, which removes whatever
+	// sits at the name.
+	listener.SetUnlinkOnClose(false)
 	if err := os.Chmod(absolute, 0o600); err != nil {
-		return nil, Result{}, abandon(listener, &Error{Step: StepRestrict, Path: absolute, Err: err})
+		return nil, Result{}, abandonUnlinking(listener, absolute, &Error{Step: StepRestrict, Path: absolute, Err: err})
 	}
-	return listener, result, nil
+	bound, err := os.Lstat(absolute)
+	if err != nil {
+		return nil, Result{}, abandonUnlinking(listener, absolute, &Error{Step: StepInspect, Path: absolute, Err: err})
+	}
+	return &ownedListener{UnixListener: listener, path: absolute, bound: bound}, result, nil
+}
+
+// ownedListener unlinks its path on Close ONLY while the path is still the
+// socket file this listener created.
+//
+// A PROCESS REMOVES ONLY ITS OWN SOCKET FILE. On 2026-11-18 a store that
+// bound store.sock itself was stopped after launchd had bound the same path
+// for the store's socket holder; Go's unlink-on-close removed the name, which
+// was by then the holder's socket, and the next store served on a socket no
+// client could reach (the daemon read it as wedged).
+type ownedListener struct {
+	*net.UnixListener
+	path  string
+	bound os.FileInfo
+}
+
+// Close closes the listener, then unlinks its path when the path is still
+// the socket this listener bound. A path another process has since bound is
+// left alone.
+func (l *ownedListener) Close() error {
+	closeErr := l.UnixListener.Close()
+	current, err := os.Lstat(l.path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return closeErr
+	case err != nil:
+		return errors.Join(closeErr, fmt.Errorf("inspect %s before unlinking it: %w", l.path, err))
+	case !os.SameFile(current, l.bound):
+		return closeErr
+	}
+	if err := os.Remove(l.path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return errors.Join(closeErr, fmt.Errorf("unlink %s: %w", l.path, err))
+	}
+	return closeErr
+}
+
+// abandonUnlinking is abandon for a listener bound with unlink-on-close off:
+// the path it just created is removed with it.
+func abandonUnlinking(listener *net.UnixListener, path string, cause *Error) error {
+	err := abandon(listener, cause)
+	if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return errors.Join(err, fmt.Errorf("unlink the abandoned socket %s: %w", path, removeErr))
+	}
+	return err
 }
 
 // abandon closes a listener whose setup failed after it bound, answering the

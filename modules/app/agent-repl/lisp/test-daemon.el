@@ -105,6 +105,9 @@ proxy for `no dial' the transport records would otherwise prove.")
 (defvar agent-repl-test-daemon--timers nil
   "Captured `run-with-timer' calls, newest first: `(SECONDS . FUNCTION)'.")
 
+(defvar agent-repl-test-daemon--own-pid 4242
+  "The pid `process-id' answers for the stand-in daemon process.")
+
 (defvar agent-repl-test-daemon--logs nil
   "Captured `(LEVEL . TEXT)' log entries, newest first.")
 
@@ -217,6 +220,8 @@ a scenario names which pids are alive rather than depending on the host.")
                 (lambda () agent-repl-test-daemon--address))
                ((symbol-function 'agent-repl-connect-read-daemon-addr-pid)
                 (lambda () agent-repl-test-daemon--addr-pid))
+               ((symbol-function 'process-id)
+                (lambda (_proc) agent-repl-test-daemon--own-pid))
                ((symbol-function 'process-attributes)
                 (lambda (pid)
                   (when (memq pid agent-repl-test-daemon--alive-pids)
@@ -1216,7 +1221,9 @@ the spawn, called the daemon booted, and linked to a refused port."
     (setq agent-repl-test-daemon--address "127.0.0.1:9001")
     (agent-repl-daemon--boot-tick)
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
-    (setq agent-repl--frontend-daemon-process 'the-daemon-process)
+    ;; The file still carries the exited daemon's own pid.
+    (setq agent-repl--frontend-daemon-process 'the-daemon-process
+          agent-repl-test-daemon--addr-pid agent-repl-test-daemon--own-pid)
     (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
               ((symbol-function 'process-exit-status) (lambda (_proc) 1)))
       ;; Act
@@ -1233,7 +1240,9 @@ the spawn, called the daemon booted, and linked to a refused port."
     (setq agent-repl-test-daemon--address "127.0.0.1:9001")
     (agent-repl-daemon--boot-tick)
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:9002")
+    ;; The successor's file carries the successor's pid.
     (setq agent-repl-test-daemon--address "127.0.0.1:9002"
+          agent-repl-test-daemon--addr-pid 5151
           agent-repl--frontend-daemon-process 'the-daemon-process)
     (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
               ((symbol-function 'process-exit-status) (lambda (_proc) 0)))
@@ -1636,7 +1645,9 @@ has to survive the spawn to excuse the exit it was given for."
     (setq agent-repl-test-daemon--address "127.0.0.1:9001")
     (agent-repl-daemon--boot-tick)
     (agent-repl-test-daemon--write-addr-file "127.0.0.1:9001")
-    (setq agent-repl--frontend-daemon-process 'the-daemon-process)
+    ;; The file still carries the exited daemon's own pid.
+    (setq agent-repl--frontend-daemon-process 'the-daemon-process
+          agent-repl-test-daemon--addr-pid agent-repl-test-daemon--own-pid)
     (cl-letf (((symbol-function 'process-live-p) (lambda (_object) nil))
               ((symbol-function 'process-exit-status) (lambda (_proc) 1)))
       ;; Act
@@ -2769,3 +2780,59 @@ the shutdown schedule exists to avoid."
 (provide 'test-daemon)
 
 ;;; test-daemon.el ends here
+
+;;; The exited daemon's own advertisement, identified by its pid.
+
+(ert-deftest agent-repl-test-daemon-own-addr-retired-when-it-names-the-exited-pid ()
+  "The file of the daemon this Emacs spawned goes when it still carries that pid."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
+    (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+          agent-repl-test-daemon--addr-pid 4242
+          agent-repl-daemon--own-address "127.0.0.1:59704")
+    ;; Act
+    (agent-repl-daemon--retire-own-addr 4242)
+    ;; Assert
+    (should-not (file-exists-p agent-repl-test-daemon--addr-file))
+    (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.stale-addr-removed"))))
+
+(ert-deftest agent-repl-test-daemon-own-addr-kept-when-a-successor-advertises-the-same-address ()
+  "A successor advertising the shared address under its own pid is never retired.
+On 2026-11-18 a match on the address alone deleted the successor's file."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
+    (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+          agent-repl-test-daemon--addr-pid 5151
+          agent-repl-daemon--own-address "127.0.0.1:59704")
+    ;; Act
+    (agent-repl-daemon--retire-own-addr 4242)
+    ;; Assert
+    (should (file-exists-p agent-repl-test-daemon--addr-file))
+    (should (agent-repl-test-daemon--logged-p :info "elisp.daemon.own-addr-kept"))))
+
+(ert-deftest agent-repl-test-daemon-own-addr-kept-when-the-file-names-no-pid ()
+  "A file advertising no pid is not guessed to be the exited daemon's."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (agent-repl-test-daemon--write-addr-file "127.0.0.1:59704")
+    (setq agent-repl-test-daemon--address "127.0.0.1:59704"
+          agent-repl-test-daemon--addr-pid nil
+          agent-repl-daemon--own-address "127.0.0.1:59704")
+    ;; Act
+    (agent-repl-daemon--retire-own-addr 4242)
+    ;; Assert
+    (should (file-exists-p agent-repl-test-daemon--addr-file))))
+
+(ert-deftest agent-repl-test-daemon-own-addr-forgotten-after-the-exit ()
+  "The exit forgets the own address whatever it found."
+  (agent-repl-test-daemon--with-harness
+    ;; Arrange
+    (setq agent-repl-test-daemon--address nil
+          agent-repl-daemon--own-address "127.0.0.1:59704")
+    ;; Act
+    (agent-repl-daemon--retire-own-addr 4242)
+    ;; Assert
+    (should-not agent-repl-daemon--own-address)
+    (should (agent-repl-test-daemon--logged-p :log "elisp.daemon.own-addr-already-gone"))))
