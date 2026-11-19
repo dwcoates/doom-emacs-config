@@ -13,8 +13,9 @@
 ;;
 ;; A NAME WORD is a run of the characters workspace names are made of
 ;; (`agent-repl--workspace-completion-name-chars').  A word that is part of a
-;; slash word is the command completion's (command-completion.el), never
-;; this one's.
+;; slash word is the command completion's (command-completion.el), and one
+;; that is part of a hash word the Slack channels' (slack-channel-completion.el),
+;; never this one's.
 ;;
 ;; MATCHING IS AT A NAME PART'S START, NOT ANYWHERE.  A name's parts are
 ;; split at `-', `_' and `.' (`agent-repl--workspace-completion-separators'),
@@ -69,6 +70,7 @@
 (declare-function agent-repl--input-composers "input" ())
 
 (defvar agent-repl-host-mention-targets-functions)
+(defvar agent-repl-sigil-word-sigils)
 
 (defface agent-repl-workspace-completion-repository
   '((t :inherit shadow))
@@ -81,8 +83,9 @@ Dimmer than the name, so the name stays what the eye reads first."
 
 (defun agent-repl--workspace-completion-bounds ()
   "Return (START . END) of the name word around point, or nil.
-Nil when point is in no name word, and when the word is part of a slash
-word: the character before it is `/'."
+Nil when point is in no name word, and when the word is part of a sigil
+word: the character before it is `/' (a command) or `#' (a Slack
+channel)."
   (save-excursion
     (let* ((here (point))
            (start (progn (skip-chars-backward agent-repl--workspace-completion-name-chars) (point)))
@@ -90,7 +93,7 @@ word: the character before it is `/'."
                        (skip-chars-forward agent-repl--workspace-completion-name-chars)
                        (point))))
       (when (and (< start end)
-                 (not (eq (char-before start) ?/)))
+                 (not (memq (char-before start) agent-repl-sigil-word-sigils)))
         (cons start end)))))
 
 (defconst agent-repl--workspace-completion-separators "-_."
@@ -192,7 +195,7 @@ word is never one."
     (lambda (limit)
       (let (found)
         (while (and names (not found) (re-search-forward re limit t))
-          (unless (eq (char-before (match-beginning 0)) ?/)
+          (unless (memq (char-before (match-beginning 0)) agent-repl-sigil-word-sigils)
             (setq found (agent-repl--workspace-completion-known-word
                          (match-beginning 0) (match-end 0) names))))
         found))))

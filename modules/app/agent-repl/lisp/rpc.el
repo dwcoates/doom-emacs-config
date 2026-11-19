@@ -173,6 +173,8 @@
 (declare-function agent-repl-wire-encode-session-health-request "wire-verbs" (request))
 (declare-function agent-repl-wire-encode-list-slash-commands-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-list-slash-commands-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-list-slack-channels-request "wire-host" (&optional request))
+(declare-function agent-repl-wire-decode-list-slack-channels-response "wire-host" (alist))
 (declare-function agent-repl-wire-decode-session-health-response "wire-verbs" (alist))
 
 ;;;; ---- The two generic paths ----
@@ -781,6 +783,15 @@ transport failure means there is not one.")
   "Ask the daemon for every slash command one workspace's runtime answers.
 The answer is the catalog the workspace's session last stated, or
 `unstated' when none has been: the composer's completion source.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-list-slack-channels
+  "ListSlackChannels"
+  agent-repl-wire-encode-list-slack-channels-request
+  agent-repl-wire-decode-list-slack-channels-response
+  "Ask the daemon for every Slack channel the user is a member of.
+The answer is the list the daemon last read, `pending' while its first
+read runs, or the error arm when no read has succeeded: the composer's
+`#' completion source.")
 
 ;;;; ---- Streams ----
 

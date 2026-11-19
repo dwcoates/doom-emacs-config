@@ -27,6 +27,11 @@
 
 (declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
 
+(defconst agent-repl-sigil-word-sigils '(?/ ?#)
+  "Every sigil a composer completion opens its word with.
+A word right after one is that sigil's completion's, never a plain word's
+\(workspace-completion.el).")
+
 (defconst agent-repl-sigil-word-opening-chars "([{<\"'`“‘"
   "The punctuation a sigil word may follow inside its whitespace-bounded run.
 A `skip-chars-forward' set: opening brackets and quotes, so `(/clear' and

@@ -663,6 +663,20 @@ The input window underlines misspelled words as you type.
     - The daemon reads each final response as it lands and keeps what it mentioned, so the order survives a restart.
   - Last come the rest, in their usual order.
 
+## Completing Slack channels in the input window
+
+- A word that begins with `#` completes against every Slack channel you are a member of on your work Slack.
+  - The list is your GNS login's: the daemon reads it with `gns slack channel list-mine`.
+  - Public and private channels are offered; archived channels and direct messages are not.
+- A word matches a channel that has a part starting with it, as workspace names match.
+  - `#gen` offers `#general`, and `#back` offers `#team-backend`.
+- Each channel shows whether it is private and what it is for, when its purpose says.
+- A channel you have completed before is offered first.
+- A `#` word naming one of your channels is drawn purple, as a known slash command is.
+- The daemon reads the list the first time you type `#`, and again once it is an hour old.
+  - The first read takes about 15 seconds, so the first `#` after the daemon starts may offer nothing.
+  - If the read fails (an expired GNS login, say), the agent-repl log says why, and the next `#` tries again.
+
 ## A one-shot in agent-repl
 
 `SPC TAB o` makes a one-shot in agent-repl's own repository, whichever workspace you press it in.

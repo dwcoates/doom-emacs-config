@@ -3,8 +3,10 @@
 ;;; Commentary:
 
 ;; A COMPOSER COMPLETION OFFERS WHAT THE READER IS LIKELY TO WANT FIRST.  The
-;; slash commands (command-completion.el) and the workspace names
-;; (workspace-completion.el) are both offered in one order, in three tiers:
+;; slash commands (command-completion.el), the workspace names
+;; (workspace-completion.el) and the Slack channels
+;; (slack-channel-completion.el) are all offered in one order, in three
+;; tiers (a channel is never mentioned, so it has only the first and last):
 ;;
 ;;   1. SELECTED: every candidate the reader took from a composer's completion
 ;;      before, the most recently taken first.  Taking one is completing it --
@@ -32,7 +34,8 @@
 
 (defvar agent-repl--completion-order-selected (make-hash-table :test 'equal)
   "When each composer completion candidate was last taken, by (KIND . NAME).
-KIND is `command' or `workspace'; NAME is the candidate without a slash.
+KIND is `command', `workspace' or `channel'; NAME is the candidate
+without its slash or hash.
 The value is a counter from `agent-repl--completion-order-clock', so two
 selections in one instant are still ordered.")
 
@@ -41,7 +44,7 @@ selections in one instant are still ordered.")
 
 (defun agent-repl-completion-order-note-selected (kind name)
   "Record that the reader just took NAME, a completion of KIND, in a composer."
-  (cl-assert (memq kind '(command workspace)) nil "unknown completion kind: %S" kind)
+  (cl-assert (memq kind '(command workspace channel)) nil "unknown completion kind: %S" kind)
   (puthash (cons kind name) (cl-incf agent-repl--completion-order-clock)
            agent-repl--completion-order-selected))
 

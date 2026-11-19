@@ -2749,6 +2749,89 @@ replaces it."
                   "{\"success\":{\"stated\":{\"catalog\":{\"commands\":[{\"name\":\"a\",\"aliases\":[7]}]}}}}")
                  '("SessionCommandCatalogEntry" aliases "expected a string"))))
 
+;;;; ---- ListSlackChannels ----
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-request-is-empty ()
+  "ListSlackChannels names nothing: the channels are the user's."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize (or (agent-repl-wire-encode-list-slack-channels-request) '())))
+                 "{}")))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-listed-decodes ()
+  "A listed answer decodes every channel, its purpose nil when absent."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  (concat "{\"success\":{\"listed\":{\"channels\":["
+                          "{\"id\":\"C1\",\"name\":\"general\",\"publicChannel\":{},"
+                          "\"purpose\":\"Announcements\"},"
+                          "{\"id\":\"C2\",\"name\":\"team\",\"privateChannel\":{}}]}}}"))
+                 '(:arm :success
+                   :value (:arm :listed
+                           :value (:channels
+                                   ((:id "C1" :name "general"
+                                     :visibility (:arm :public-channel :value nil)
+                                     :purpose "Announcements")
+                                    (:id "C2" :name "team"
+                                     :visibility (:arm :private-channel :value nil)
+                                     :purpose nil))))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-empty-list-decodes ()
+  "A listed answer with no channels is a list of none."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"success\":{\"listed\":{}}}")
+                 '(:arm :success :value (:arm :listed :value (:channels nil))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-pending-decodes ()
+  "Pending is an answer inside success."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"success\":{\"pending\":{}}}")
+                 '(:arm :success :value (:arm :pending :value nil)))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-read-failed-decodes ()
+  "The error arm decodes its cause with the daemon's detail."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"error\":{\"readFailed\":{\"detail\":\"gns exited 1\"}}}")
+                 '(:arm :error
+                   :value (:cause (:arm :read-failed :value (:detail "gns exited 1")))))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-unset-listing-is-a-breach ()
+  "A success naming neither listed nor pending is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"success\":{}}")
+                 '("ListSlackChannelsSuccess" listing "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-unset-visibility-is-a-breach ()
+  "A channel that is neither public nor private is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"success\":{\"listed\":{\"channels\":[{\"id\":\"C1\",\"name\":\"a\"}]}}}")
+                 '("SlackChannel" visibility "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-nameless-channel-is-a-breach ()
+  "A channel with no name is a breach: nothing completes to a bare hash."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"success\":{\"listed\":{\"channels\":[{\"id\":\"C1\",\"publicChannel\":{}}]}}}")
+                 '("SlackChannel" name "a channel name is never empty"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-unknown-channel-field-is-a-breach ()
+  "A channel field this codec does not hold is refused."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"success\":{\"listed\":{\"channels\":[{\"id\":\"C1\",\"name\":\"a\",\"publicChannel\":{},\"topic\":\"x\"}]}}}")
+                 '("SlackChannel" topic "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-list-slack-channels-unset-cause-is-a-breach ()
+  "An error naming no cause is a breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-list-slack-channels-response
+                  "{\"error\":{}}")
+                 '("ListSlackChannelsError" cause "oneof is unset"))))
+
 ;;;; ---- The response question push ----
 
 (ert-deftest agent-repl-test-wire-host-response-question-decodes-each-change ()

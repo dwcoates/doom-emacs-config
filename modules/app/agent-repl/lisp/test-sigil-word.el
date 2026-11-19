@@ -93,8 +93,9 @@
                (lambda (sigil) (push sigil sigils) nil)))
       ;; Act
       (agent-repl--command-completion-bounds)
+      (agent-repl--slack-channel-completion-bounds)
       ;; Assert
-      (should (equal sigils '(?/))))))
+      (should (equal sigils '(?# ?/))))))
 
 (ert-deftest agent-repl-test-sigil-word-every-sigil-completion-builds-its-table-through-it ()
   "Every sigil completion's table is a sigil table."
@@ -104,8 +105,14 @@
                (lambda (category sigil _candidates &optional _sort) (push (cons category sigil) made) 'table)))
       ;; Act
       (agent-repl--command-completion-table '("/a"))
+      (agent-repl--slack-channel-completion-table '("#a"))
       ;; Assert
-      (should (equal made `((,agent-repl--command-completion-category . "/")))))))
+      (should (equal made `((,agent-repl--slack-channel-completion-category . "#")
+                            (,agent-repl--command-completion-category . "/")))))))
+
+(ert-deftest agent-repl-test-sigil-word-sigils-are-every-sigil-completions ()
+  "The sigil list names exactly the sigils the composer's completions open with."
+  (should (equal agent-repl-sigil-word-sigils '(?/ ?#))))
 
 (provide 'test-sigil-word)
 ;;; test-sigil-word.el ends here

@@ -122,6 +122,11 @@ takes them."
   (agent-repl-test-workspace-completion--with "/agent-repl" '("agent-repl-skill-migration")
     (should-not (agent-repl-workspace-completion-at-point))))
 
+(ert-deftest agent-repl-test-workspace-completion-leaves-a-hash-word-alone ()
+  "A word that is part of a hash word is the Slack channels' completion's."
+  (agent-repl-test-workspace-completion--with "#agent-repl" '("agent-repl-skill-migration")
+    (should-not (agent-repl-workspace-completion-at-point))))
+
 (ert-deftest agent-repl-test-workspace-completion-offers-nothing-outside-a-word ()
   "Point after whitespace is in no name word."
   (agent-repl-test-workspace-completion--with "agent " '("agent-repl-skill-migration")
@@ -240,6 +245,14 @@ takes them."
   (agent-repl-test-workspace-completion--marking '("parser-fix")
     ;; Act
     (insert "run /parser-fix now")
+    ;; Assert
+    (should-not (agent-repl-test-workspace-completion--marked))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-skips-a-hash-word ()
+  "A name inside a hash word is the Slack channels' completion's, never marked here."
+  (agent-repl-test-workspace-completion--marking '("parser-fix")
+    ;; Act
+    (insert "ask in #parser-fix now")
     ;; Assert
     (should-not (agent-repl-test-workspace-completion--marked))))
 

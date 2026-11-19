@@ -219,8 +219,10 @@
                (lambda (word _names separators) (push (cons word separators) calls) nil)))
       ;; Act
       (agent-repl--workspace-completion-matches "w" '("w"))
+      (agent-repl--slack-channel-completion-candidates "c" '((:name "c")))
       ;; Assert
-      (should (equal calls `(("w" . ,agent-repl--workspace-completion-separators)))))))
+      (should (equal calls `(("c" . ,agent-repl--slack-channel-completion-separators)
+                             ("w" . ,agent-repl--workspace-completion-separators)))))))
 
 (provide 'test-completion-match)
 ;;; test-completion-match.el ends here

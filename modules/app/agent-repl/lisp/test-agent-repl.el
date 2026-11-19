@@ -38,6 +38,7 @@
   (load (expand-file-name "test-completion-order.el" dir) nil t)
   (load (expand-file-name "test-composer-mark.el" dir) nil t)
   (load (expand-file-name "test-command-completion.el" dir) nil t)
+  (load (expand-file-name "test-slack-channel-completion.el" dir) nil t)
   (load (expand-file-name "test-workspace-completion.el" dir) nil t)
   (load (expand-file-name "test-commands.el" dir) nil t)
   (load (expand-file-name "test-config.el" dir) nil t)
