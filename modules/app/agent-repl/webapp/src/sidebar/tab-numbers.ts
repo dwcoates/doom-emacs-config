@@ -14,11 +14,10 @@
  * empty slot, and the roster drawer fills every slot from the push once it is
  * drawn, kept sections included.
  */
-import type { RosterOpenRow, RosterOpenRowTab, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
-import { openKin, repoEntries } from "./entries.js";
+import type { RosterOpenRowTab, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { openRowWorkspaces } from "./entries.js";
 import { decorativeElement, queryAll } from "../dom.js";
 import { log } from "../log.js";
-import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 
 /** The class of a row's number slot, which `paintTabNumbers` fills. */
@@ -34,26 +33,10 @@ export const TAB_NUMBER_ATTRIBUTE = "data-tab-number";
  */
 export function tabNumbers(u: RosterRepositoryView, path: string): Map<string, number> {
   const numbers = new Map<string, number>();
-  const seen = new Set<string>();
-  const visit = (row: RosterOpenRow, rowPath: string): void => {
-    const id = requireMessage(requireMessage(row.row, `${rowPath}.row`).workspace, `${rowPath}.row.workspace`).workspace?.id;
-    if (id === undefined) throw new MalformedView(`${rowPath}.row.workspace.workspace`, "an open row names no workspace");
-    if (seen.has(id)) throw new MalformedView(`${rowPath}.row.workspace`, `workspace ${id} has two open rows`);
-    seen.add(id);
+  for (const { id, row, path: rowPath } of openRowWorkspaces(u, path)) {
     const number = tabNumber(row.tab, `${rowPath}.tab`);
     if (number !== undefined) numbers.set(id, number);
-    for (const kin of openKin(row, rowPath)) visit(kin.row, kin.path);
-  };
-  u.sections.forEach((section, s) => {
-    for (const entry of repoEntries(section, `${path}.sections[${s}]`)) {
-      if (entry.case === "row") {
-        visit(entry.row, entry.path);
-        continue;
-      }
-      const rows = requireMessage(entry.subsection.openRows, `${entry.path}.open_rows`);
-      rows.rows.forEach((row, i) => visit(row, `${entry.path}.open_rows.rows[${i}]`));
-    }
-  });
+  }
   return numbers;
 }
 

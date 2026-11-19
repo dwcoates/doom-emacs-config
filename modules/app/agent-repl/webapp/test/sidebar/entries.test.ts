@@ -1,9 +1,14 @@
 // The one read of a repository section's body. See src/sidebar/entries.ts.
 import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { RosterRepoSectionSchema, type RosterRepoSection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import {
+  RosterRepoSectionSchema,
+  RosterRepositoryViewSchema,
+  type RosterRepoSection,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   openKin,
+  openRowWorkspaces,
   repoEntries,
   repoSectionRegions,
   sectionOpenRows,
@@ -108,5 +113,68 @@ describe("openKin", () => {
     if (entry?.case !== "row") throw new Error("test: a row entry");
     withRepositoryBlocks(entry.value, [{ repo: "repo-2", rows: [row({ id: "x" })] }]);
     expect(ids(sectionOpenRows(section, "s"))).toEqual(["p", "o", "x", "q"]);
+  });
+});
+
+describe("openRowWorkspaces", () => {
+  it("reads every section's open rows with their workspace ids, in drawn order", () => {
+    // Arrange
+    const u = create(RosterRepositoryViewSchema, { sections: [example(), repoSection({ id: "repo-2", rows: [row({ id: "z" })] })] });
+
+    // Act
+    const got = openRowWorkspaces(u, "v").map((open) => open.id);
+
+    // Assert
+    expect(got).toEqual(["a", "d", "e", "b", "k", "c", "z"]);
+  });
+
+  it("paths each row under its section", () => {
+    // Arrange
+    const u = create(RosterRepositoryViewSchema, { sections: [example()] });
+
+    // Act
+    const first = openRowWorkspaces(u, "v")[0];
+
+    // Assert
+    expect(first.path).toBe("v.sections[0].entries[0].row");
+  });
+
+  it("refuses a workspace with two open rows", () => {
+    // Arrange
+    const u = create(RosterRepositoryViewSchema, {
+      sections: [repoSection({ id: "repo-1", rows: [row({ id: "a" }), row({ id: "a" })] })],
+    });
+
+    // Act
+    const read = (): unknown => openRowWorkspaces(u, "v");
+
+    // Assert
+    expect(read).toThrow(MalformedView);
+    expect(read).toThrow(/workspace a has two open rows/);
+  });
+
+  it("refuses an open row naming no workspace", () => {
+    // Arrange
+    const u = create(RosterRepositoryViewSchema, {
+      sections: [{ entries: [{ entry: { case: "row", value: { row: { workspace: {} } } } }] }],
+    });
+
+    // Act
+    const read = (): unknown => openRowWorkspaces(u, "v");
+
+    // Assert
+    expect(read).toThrow(/an open row names no workspace/);
+  });
+
+  it("is the read every slot painter keys rows by", async () => {
+    // Arrange
+    const { readFileSync } = await import("node:fs");
+    const source = (file: string): string => readFileSync(new URL(`../../src/sidebar/${file}`, import.meta.url), "utf8");
+
+    // Act / Assert
+    for (const file of ["tab-numbers.ts"]) {
+      expect(source(file)).toContain("openRowWorkspaces(");
+      expect(source(file)).not.toContain("openKin(");
+    }
   });
 });
