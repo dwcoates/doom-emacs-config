@@ -6,7 +6,6 @@ import (
 	"go/ast"
 	"go/token"
 	"net"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -288,26 +287,8 @@ func TestInstanceAddressAnswersWhereARunningDaemonIs(t *testing.T) {
 // and reads it by hand would judge "runs" and "records an address" apart from
 // the one every forward rests on.
 func TestOnlyInstanceAddressResolvesADaemonsPrivateAddress(t *testing.T) {
-	// Arrange
-	names, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Act
-	var sites []string
-	for _, name := range names {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for range strings.Count(string(source), "daemonaddr.InstanceAddress(") {
-			sites = append(sites, name)
-		}
-	}
+	sites := sourcescan.Sites(t, "daemonaddr.InstanceAddress(")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "sharedtake.go" {

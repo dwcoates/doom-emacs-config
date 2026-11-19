@@ -6,8 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,6 +20,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/workspace"
 )
 
@@ -486,26 +485,8 @@ func TestPipeStreamStatesItsTargetsAcceptanceOnce(t *testing.T) {
 // from another daemon on pipeStream, so a forwarded stream and a relayed page
 // subscription cannot come to state their target's acceptance differently.
 func TestOnlyPipeStreamCarriesAStreamFromAnotherDaemon(t *testing.T) {
-	// Arrange
-	names, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// Act
-	var sites []string
-	for _, name := range names {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		source, err := os.ReadFile(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for range strings.Count(string(source), ".CallServerStream(") {
-			sites = append(sites, name)
-		}
-	}
+	sites := sourcescan.Sites(t, ".CallServerStream(")
 
 	// Assert
 	if len(sites) != 1 || sites[0] != "forward.go" {
