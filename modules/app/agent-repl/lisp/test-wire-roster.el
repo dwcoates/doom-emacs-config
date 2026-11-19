@@ -252,6 +252,23 @@ status arm and whatever else the case is about."
                    "\"ready\":{}" "\"viewed\":{\"mode\":\"partial\"}"))
                  '("RosterRowViewed" mode "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-view-dwell ()
+  "A row carrying `viewDwell' decodes its start and length."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-row
+                             (agent-repl-test-wire-roster--row
+                              "\"done\":{}" "\"viewDwell\":{\"startedAtMs\":\"1700000000000\",\"lengthMs\":\"5000\"}"))
+                            :view-dwell)
+                 '(:started-at-ms 1700000000000 :length-ms 5000))))
+
+(ert-deftest agent-repl-test-wire-roster-row-view-dwell-refuses-an-unknown-field ()
+  "`RosterRowViewDwell' carries its start and length and nothing else."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"done\":{}" "\"viewDwell\":{\"startedAtMs\":\"1\",\"lengthMs\":\"5\",\"mode\":1}"))
+                 '("RosterRowViewDwell" mode "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-reviving-marker ()
   "A row carrying `reviving' decodes it as PRESENT."
   (should (eq (plist-get (agent-repl-test-wire-roster--decode

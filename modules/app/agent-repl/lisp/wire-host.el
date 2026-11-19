@@ -1593,6 +1593,44 @@ The editor's report that the user has now SEEN this workspace."
 Marked; the roster stream carries the row's viewed marker."
   (agent-repl-wire--decode-subject-response "MarkWorkspaceViewed" value))
 
+;;;; ---- ReportViewDwell ----
+
+(defun agent-repl-wire-encode-report-view-dwell-request-dwell (value)
+  "Encode `ReportViewDwellRequest''s oneof `dwell' VALUE.
+VALUE is `(:arm :counting :value (:length-ms MS))' or
+`(:arm :stopped :value nil)'.  MS is a positive integer: the dwell's
+length, which the daemon refuses otherwise."
+  (agent-repl-wire--encode-oneof
+   "ReportViewDwellRequest" 'dwell value
+   `((:counting counting
+                ,(lambda (v)
+                   (let ((ms (plist-get v :length-ms)))
+                     (unless (and (integerp ms) (> ms 0))
+                       (agent-repl-wire--fail "ReportViewDwellCounting" 'length_ms
+                                              "expected a positive integer"))
+                     (agent-repl-wire--encoded "ReportViewDwellCounting"
+                                               (list (cons 'lengthMs ms))))))
+     (:stopped stopped ,(lambda (v) (agent-repl-wire--encode-empty "ReportViewDwellStopped" v))))))
+
+(defun agent-repl-wire-encode-report-view-dwell-request (value)
+  "Encode ReportViewDwellRequest VALUE `(:workspace REF :dwell DWELL)'.
+The editor's report that it started, or stopped, counting the user's
+dwell on the workspace; DWELL is as
+`agent-repl-wire-encode-report-view-dwell-request-dwell' takes it."
+  (dolist (field '(:workspace :dwell))
+    (unless (plist-member value field)
+      (agent-repl-wire--fail "ReportViewDwellRequest" (intern (substring (symbol-name field) 1))
+                             "required message field is absent")))
+  (agent-repl-wire--encoded
+   "ReportViewDwellRequest"
+   (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+         (agent-repl-wire-encode-report-view-dwell-request-dwell (plist-get value :dwell)))))
+
+(defun agent-repl-wire-decode-report-view-dwell-response (value)
+  "Decode VALUE as `ReportViewDwellResponse'.  THE ARM IS THE OUTCOME.
+Recorded; the roster stream carries the row's dwell marker."
+  (agent-repl-wire--decode-subject-response "ReportViewDwell" value))
+
 ;;;; ---- AdoptHostWorkspace ----
 
 (defun agent-repl-wire-encode-adopt-host-workspace-request-workspace (value)

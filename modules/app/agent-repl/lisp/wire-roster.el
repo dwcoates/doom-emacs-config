@@ -183,6 +183,20 @@ daemon also raises it by itself when a /clear or compaction completes."
   (agent-repl-wire--decode-empty "RosterRowViewed" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-view-dwell (value)
+  "Decode VALUE as `RosterRowViewDwell'.
+Returns `(:started-at-ms MS :length-ms LEN)': the editor's own dwell, as
+the daemon stamped it on the selected row whose dwell will draw it
+PARTIAL.  The webapp sidebar fades the row's name over it; Emacs counts
+the dwell itself (`agent-repl--tab-dwell-pending') and draws nothing from
+the marker, but decodes it like every other field of the row."
+  (let ((object (agent-repl-wire--object "RosterRowViewDwell" value)))
+    (agent-repl-wire--check-keys "RosterRowViewDwell" object '(startedAtMs lengthMs))
+    (agent-repl-wire--decoded
+     "RosterRowViewDwell"
+     (list :started-at-ms (agent-repl-wire--decode-int64 "RosterRowViewDwell" 'startedAtMs object)
+           :length-ms (agent-repl-wire--decode-int64 "RosterRowViewDwell" 'lengthMs object)))))
+
 (defconst agent-repl-wire-roster-row-idle-async-unread-arms
   '((done :done agent-repl-wire-decode-roster-row-status-done)
     (interrupted :interrupted agent-repl-wire-decode-roster-row-status-interrupted)
@@ -826,14 +840,14 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention priority viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
 Returns `(:workspace W :attention A :priority P :viewed V
-:idle-async-unread IU :reviving R
+:view-dwell VD :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
 :merge-paused MP :merge-turn MT :last-selected L :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
@@ -860,6 +874,9 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :viewed (agent-repl-wire--decode-optional-message
                     "RosterRow" 'viewed object
                     #'agent-repl-wire-decode-roster-row-viewed)
+           :view-dwell (agent-repl-wire--decode-optional-message
+                        "RosterRow" 'viewDwell object
+                        #'agent-repl-wire-decode-roster-row-view-dwell)
            :idle-async-unread (agent-repl-wire--decode-optional-message
                                "RosterRow" 'idleAsyncUnread object
                                #'agent-repl-wire-decode-roster-row-idle-async-unread)

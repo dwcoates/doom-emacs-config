@@ -69,6 +69,7 @@
 (declare-function agent-repl-rpc-register-workspaces "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-select-workspace "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-mark-workspace-viewed "rpc" (conn request &rest keys))
+(declare-function agent-repl-rpc-report-view-dwell "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-residency "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-report-page-unloading "rpc" (conn request &rest keys))
 (declare-function agent-repl-rpc-adopt-host-workspace "rpc" (conn request &rest keys))
@@ -1228,6 +1229,53 @@ yet: an unregistered workspace has no row to mark."
    ws "mark-viewed" #'agent-repl-rpc-mark-workspace-viewed
    (lambda () (agent-repl--log ws "elisp.host.marked-viewed ws=%s" ws))
    #'ignore))
+
+(defun agent-repl-host-report-view-dwell (ws dwell)
+  "Tell the daemon Emacs started, or stopped, counting the view dwell on WS.
+DWELL is `(:arm :counting :value (:length-ms MS))' or
+`(:arm :stopped :value nil)', as `agent-repl-rpc-report-view-dwell'
+encodes it.  The roster carries a counting dwell on WS\='s row while it
+will draw the row PARTIAL, so the sidebar fades the row\='s name over the
+dwell rather than flipping it when `agent-repl-host-mark-viewed' lands.
+
+ONE REPORT IN FLIGHT PER WORKSPACE (endpoint_report_view_dwell.proto).
+Two reports in flight at once could be served out of order, and a stop
+served after the count that followed it would end a dwell still running.
+So a report made while WS\='s last one is unanswered is only HELD, as
+`:view-dwell-wanted', and the answer to the one in flight sends whatever
+is wanted then, if it is not what was sent: each report is a fresh
+plist, so a later count of the same length is still sent, and a held
+report a later one replaced is never sent at all.
+
+FIRE AND FORGET otherwise, like `agent-repl-host-mark-viewed': the dwell
+is presentation, every outcome is recorded by
+`agent-repl-host--send-subject-verb', and a report that never lands
+leaves the sidebar flipping the name at the dwell\='s end, as it did
+before the report existed."
+  (agent-repl-host--put ws :view-dwell-wanted dwell)
+  (unless (plist-get (agent-repl-host--entry ws) :view-dwell-in-flight)
+    (agent-repl-host--send-view-dwell ws)))
+
+(defun agent-repl-host--send-view-dwell (ws)
+  "Send WS\='s wanted view-dwell report, the one report in flight for WS.
+Its answer, whatever it is, sends the report wanted by then when that is
+not the one just sent (`agent-repl-host-report-view-dwell')."
+  (let ((dwell (plist-get (agent-repl-host--entry ws) :view-dwell-wanted)))
+    (agent-repl-host--put ws :view-dwell-in-flight t)
+    (let ((answered
+           (lambda ()
+             (agent-repl-host--put ws :view-dwell-in-flight nil)
+             (unless (eq (plist-get (agent-repl-host--entry ws) :view-dwell-wanted) dwell)
+               (agent-repl-host--send-view-dwell ws)))))
+      (agent-repl-host--send-subject-verb
+       ws "view-dwell"
+       (lambda (conn request &rest args)
+         (apply #'agent-repl-rpc-report-view-dwell conn
+                (append request (list :dwell dwell)) args))
+       (lambda ()
+         (agent-repl--log ws "elisp.host.view-dwell-reported ws=%s dwell=%S" ws (plist-get dwell :arm))
+         (funcall answered))
+       answered))))
 
 (defun agent-repl-host--on-workspace-activated (&rest _)
   "Tell the daemon about a perspective activation Emacs made on its own.

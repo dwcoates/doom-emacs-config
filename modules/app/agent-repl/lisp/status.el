@@ -39,6 +39,7 @@
 (declare-function agent-repl-roster-last-turn-boundary-ms "roster" (ws))
 (declare-function agent-repl--ws-window-conf "workspace")
 (declare-function agent-repl-host-mark-viewed "host")
+(declare-function agent-repl-host-report-view-dwell "host")
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-roster-row-attention-p "roster")
 (declare-function agent-repl-roster-row-id "roster")
@@ -3377,7 +3378,9 @@ For background workspaces, inspects the saved persp window configuration."
   "Drop the pending view dwell, if any, recording REASON.
 Cancels its timer AND advances `agent-repl--tab-dwell-generation', so even
 a timer whose cancellation came too late finds no record of its own
-generation and does nothing (`agent-repl--tab-dwell-fire')."
+generation and does nothing (`agent-repl--tab-dwell-fire').  It reports
+the dwell STOPPED to the daemon, so the sidebar returns the row\='s name
+to its unviewed colour at once (`agent-repl-host-report-view-dwell')."
   (let ((pending agent-repl--tab-dwell-pending))
     (when pending
       (let ((timer (plist-get pending :timer)))
@@ -3387,7 +3390,8 @@ generation and does nothing (`agent-repl--tab-dwell-fire')."
                        "tab-view: dwell dropped ws=%s generation=%s reason=%s"
                        (plist-get pending :ws) (plist-get pending :generation) reason)
       (setq agent-repl--tab-dwell-pending nil)
-      (cl-incf agent-repl--tab-dwell-generation))))
+      (cl-incf agent-repl--tab-dwell-generation)
+      (agent-repl-host-report-view-dwell (plist-get pending :ws) '(:arm :stopped :value nil)))))
 
 (defun agent-repl--tab-dwell-eligible-p (ws)
   "Return non-nil when WS can still accrue a view dwell.
@@ -3464,12 +3468,20 @@ exercised without sleeping."
   "Timer callback: try to demote WS now that its dwell deadline arrived.
 GENERATION is the generation the timer was armed under.  A timer whose
 GENERATION is not the pending dwell's has been SUPERSEDED — re-armed,
-dropped, or already spent — and does nothing but record that it fired."
+dropped, or already spent — and does nothing but record that it fired.
+
+A dwell whose deadline finds WS no longer eligible
+\(`agent-repl--tab-dwell-eligible-p') is DROPPED there, which reports it
+stopped: the sidebar has carried the name to the viewed grey by its
+deadline, and a dwell that will not demote must not leave it there."
   (let ((pending agent-repl--tab-dwell-pending))
     (if (and pending
              (equal ws (plist-get pending :ws))
              (eql generation (plist-get pending :generation)))
-        (agent-repl--tab-dwell-note ws (current-time))
+        (or (agent-repl--tab-dwell-note ws (current-time))
+            (unless (agent-repl--tab-dwell-eligible-p ws)
+              (agent-repl--tab-dwell-drop "not-eligible-at-deadline")
+              nil))
       (agent-repl--log ws "tab-view: superseded dwell timer ignored ws=%s generation=%s pending=%s"
                        ws generation (and pending (plist-get pending :generation)))
       nil)))
@@ -3482,7 +3494,10 @@ When WS is eligible (`agent-repl--tab-dwell-eligible-p'), the pending
 dwell is REPLACED: the old one is dropped (its timer cancelled and its
 generation retired), and a new record with the threshold
 `agent-repl--tab-dwell-seconds' chooses is installed with its one-shot
-timer.  When WS is not eligible, a pending dwell that is WS's own is
+timer, and reported COUNTING to the daemon, so the sidebar fades the
+row\='s name over exactly that threshold
+\(`agent-repl-host-report-view-dwell').  When WS is not eligible, a
+pending dwell that is WS's own is
 dropped, and one belonging to the workspace the user IS viewing is left
 running: a background workspace's status change says nothing about how
 long the user has looked at another one.
@@ -3500,6 +3515,8 @@ Does NOT clear the demotion — only the daemon does that."
             (list :ws ws :at now :seconds seconds :generation generation
                   :timer (run-with-timer seconds nil #'agent-repl--tab-dwell-fire
                                          ws generation)))
+      (agent-repl-host-report-view-dwell
+       ws (list :arm :counting :value (list :length-ms (round (* 1000 seconds)))))
       (agent-repl--log ws "tab-view: dwell armed ws=%s origin=%s seconds=%s generation=%s"
                        ws origin seconds generation))))
 

@@ -124,6 +124,9 @@ and a transport failure or a held call is the batch\='s own."
 (defvar agent-repl-test-host--mark-viewed-answer nil
   "What the stubbed MarkWorkspaceViewed answers; see the harness.")
 
+(defvar agent-repl-test-host--view-dwell-answer nil
+  "What the stubbed ReportViewDwell answers; see the harness.")
+
 (defvar agent-repl-test-host--unloading-answer nil
   "What the stubbed ReportPageUnloading answers; see the harness.")
 
@@ -281,6 +284,8 @@ unary rpc can produce, which the contract never collapses into one."
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--unloading-answer
           (list :response (list :arm :success :value nil)))
+         (agent-repl-test-host--view-dwell-answer
+          (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--residency-answer
           (list :response (list :arm :success :value nil)))
          (agent-repl-test-host--adopt-answer
@@ -311,6 +316,12 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (conn request &rest keys)
                   (push (list "MarkWorkspaceViewed" conn request) agent-repl-test-host--calls)
                   (agent-repl-test-host--answer agent-repl-test-host--mark-viewed-answer
+                                                (plist-get keys :on-response)
+                                                (plist-get keys :on-failure))))
+               ((symbol-function 'agent-repl-rpc-report-view-dwell)
+                (lambda (conn request &rest keys)
+                  (push (list "ReportViewDwell" conn request) agent-repl-test-host--calls)
+                  (agent-repl-test-host--answer agent-repl-test-host--view-dwell-answer
                                                 (plist-get keys :on-response)
                                                 (plist-get keys :on-failure))))
                ((symbol-function 'agent-repl-rpc-report-page-residency)
@@ -620,6 +631,101 @@ looked at."
     (agent-repl-test-host--subscribe "ws-1")
     ;; Assert
     (should (null (assoc "SelectWorkspace" agent-repl-test-host--calls)))))
+
+;;;; ---- View dwell ----
+
+(defconst agent-repl-test-host--counting
+  '(:arm :counting :value (:length-ms 5000))
+  "A counting view-dwell report, as status.el makes one.")
+
+(defun agent-repl-test-host--view-dwell-reports ()
+  "The dwell of every ReportViewDwell sent, oldest first."
+  (mapcar (lambda (call) (plist-get (nth 2 call) :dwell))
+          (reverse (cl-remove-if-not (lambda (call) (equal (car call) "ReportViewDwell"))
+                                     agent-repl-test-host--calls))))
+
+(ert-deftest agent-repl-test-host-view-dwell-echoes-the-ref-and-the-dwell ()
+  "ReportViewDwell carries the daemon-minted ref and the dwell it was handed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil)
+    ;; Act
+    (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+    ;; Assert
+    (should (equal (nth 2 (car agent-repl-test-host--calls))
+                   (list :workspace (agent-repl-test-host--ref)
+                         :dwell agent-repl-test-host--counting)))))
+
+(ert-deftest agent-repl-test-host-view-dwell-holds-a-report-while-one-is-in-flight ()
+  "A second report waits for the first one\='s answer: one in flight per workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil
+          agent-repl-test-host--view-dwell-answer '(:held))
+    (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+    ;; Act
+    (agent-repl-host-report-view-dwell "ws-1" (list :arm :stopped :value nil))
+    ;; Assert
+    (should (equal (agent-repl-test-host--view-dwell-reports)
+                   (list agent-repl-test-host--counting)))))
+
+(ert-deftest agent-repl-test-host-view-dwell-sends-the-latest-held-report-on-the-answer ()
+  "The answer sends what is wanted by then, and a report it replaced is never sent."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil
+          agent-repl-test-host--view-dwell-answer '(:held))
+    (let ((stopped (list :arm :stopped :value nil))
+          (recount (list :arm :counting :value (list :length-ms 1000))))
+      (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+      (agent-repl-host-report-view-dwell "ws-1" stopped)
+      (agent-repl-host-report-view-dwell "ws-1" recount)
+      ;; Act
+      (agent-repl-test-host--answer-held (list :arm :success :value nil))
+      ;; Assert
+      (should (equal (agent-repl-test-host--view-dwell-reports)
+                     (list agent-repl-test-host--counting recount))))))
+
+(ert-deftest agent-repl-test-host-view-dwell-sends-an-equal-later-count-again ()
+  "A later count of the same length is a new dwell, so it is sent too."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil
+          agent-repl-test-host--view-dwell-answer '(:held))
+    (agent-repl-host-report-view-dwell "ws-1" (list :arm :counting :value (list :length-ms 5000)))
+    (agent-repl-host-report-view-dwell "ws-1" (list :arm :counting :value (list :length-ms 5000)))
+    ;; Act
+    (agent-repl-test-host--answer-held (list :arm :success :value nil))
+    ;; Assert
+    (should (= (length (agent-repl-test-host--view-dwell-reports)) 2))))
+
+(ert-deftest agent-repl-test-host-view-dwell-refusal-is-logged-and-frees-the-next-report ()
+  "A refused report is surfaced at ERROR, and the next report is sent, not held forever."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (setq agent-repl-test-host--calls nil
+          agent-repl-test-host--view-dwell-answer
+          (list :response (list :arm :error :value nil)))
+    (agent-repl-host-report-view-dwell "ws-1" agent-repl-test-host--counting)
+    ;; Act
+    (agent-repl-host-report-view-dwell "ws-1" (list :arm :stopped :value nil))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :error "elisp.host.view-dwell-refused"))
+    (should (= (length (agent-repl-test-host--view-dwell-reports)) 2))))
+
+(ert-deftest agent-repl-test-host-view-dwell-without-a-ref-sends-nothing ()
+  "An unregistered workspace has no row to draw a dwell on, and holds nothing back."
+  (agent-repl-test-host--with-harness
+    ;; Act
+    (agent-repl-host-report-view-dwell "ws-unknown" agent-repl-test-host--counting)
+    ;; Assert
+    (should (null agent-repl-test-host--calls))
+    (should (null (plist-get (agent-repl-host--entry "ws-unknown") :view-dwell-in-flight)))))
 
 ;;;; ---- Mark viewed ----
 

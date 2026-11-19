@@ -533,6 +533,10 @@ The daemon half of the display mode: a test asserts on this list rather
 than on a live rpc, so the PARTIAL path's report is verified without a
 connection.")
 
+(defvar agent-repl-test--dwell-reports nil
+  "Every `agent-repl-host-report-view-dwell' call under the macro, newest first.
+Each entry is (WS . DWELL), the dwell as the daemon would be told it.")
+
 (defvar agent-repl-test--row-viewed nil
   "Workspace -> the stubbed roster row's decoded `:viewed' marker.")
 
@@ -558,14 +562,17 @@ workspace stands in for a roster push whose row carries `RosterRowViewed'."
   "Run BODY with fresh view-dwell state and every side effect stubbed.
 `run-with-timer' records into `agent-repl-test--dwell-timers' and
 schedules nothing real, the logging sink records into
-`agent-repl-test--dwell-logs', and `agent-repl-host-mark-viewed' records
-into `agent-repl-test--viewed-reports' instead of dialling the daemon."
+`agent-repl-test--dwell-logs', `agent-repl-host-mark-viewed' records
+into `agent-repl-test--viewed-reports' and
+`agent-repl-host-report-view-dwell' into `agent-repl-test--dwell-reports',
+instead of dialling the daemon."
   (declare (indent 0))
   `(agent-repl-test--with-row-viewed
      (let ((agent-repl--tab-dwell-pending nil)
            (agent-repl--tab-dwell-generation 0)
            (agent-repl-test--dwell-timers nil)
            (agent-repl-test--dwell-logs nil)
+           (agent-repl-test--dwell-reports nil)
            (agent-repl-test--viewed-reports nil))
        (cl-letf (((symbol-function 'run-with-timer)
                   (lambda (secs _repeat fn &rest args)
@@ -576,7 +583,9 @@ into `agent-repl-test--viewed-reports' instead of dialling the daemon."
                  ((symbol-function 'agent-repl--log)
                   (agent-repl-test--record-into agent-repl-test--dwell-logs))
                  ((symbol-function 'agent-repl-host-mark-viewed)
-                  (lambda (ws) (push ws agent-repl-test--viewed-reports) t)))
+                  (lambda (ws) (push ws agent-repl-test--viewed-reports) t))
+                 ((symbol-function 'agent-repl-host-report-view-dwell)
+                  (lambda (ws dwell) (push (cons ws dwell) agent-repl-test--dwell-reports))))
          ,@body))))
 
 (defmacro agent-repl-test--viewing (ws status &rest body)
@@ -670,6 +679,72 @@ The status-change and viewed-cleared reactions to one push must agree."
       ;; Assert
       (should (equal (car (car agent-repl-test--dwell-timers)) 1))
       (should (equal (plist-get agent-repl--tab-dwell-pending :seconds) 1)))))
+
+(ert-deftest agent-repl-test-tab-dwell-arm-reports-the-dwell-counting ()
+  "Arming reports the dwell COUNTING at its threshold, so the sidebar fades over it."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      ;; Act
+      (agent-repl--tab-dwell-arm "ws1" (current-time) 'activation)
+      ;; Assert
+      (should (equal (car agent-repl-test--dwell-reports)
+                     '("ws1" :arm :counting :value (:length-ms 5000)))))))
+
+(ert-deftest agent-repl-test-tab-dwell-drop-reports-the-dwell-stopped ()
+  "Dropping a pending dwell reports it STOPPED for its own workspace."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (current-time) 'activation)
+      ;; Act
+      (agent-repl--tab-dwell-drop "test")
+      ;; Assert
+      (should (equal (car agent-repl-test--dwell-reports)
+                     '("ws1" :arm :stopped :value nil))))))
+
+(ert-deftest agent-repl-test-tab-dwell-drop-without-a-dwell-reports-nothing ()
+  "No pending dwell, nothing to stop: the daemon is told nothing."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    ;; Act
+    (agent-repl--tab-dwell-drop "test")
+    ;; Assert
+    (should-not agent-repl-test--dwell-reports)))
+
+(ert-deftest agent-repl-test-tab-dwell-deadline-on-an-ineligible-workspace-reports-it-stopped ()
+  "A deadline that finds the workspace no longer eligible drops the dwell.
+The sidebar carried the name to the viewed grey by then, so it must be
+told the dwell stopped rather than left there."
+  ;; Arrange: armed while viewed, then the panels close.
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (time-subtract (current-time) (seconds-to-time 6))
+                                 'activation))
+    (let ((timer (car agent-repl-test--dwell-timers)))
+      (agent-repl-test--viewing "ws1" :done
+        (cl-letf (((symbol-function 'agent-repl--ws-agent-open-p) (lambda (_ws) nil)))
+          ;; Act
+          (agent-repl-test--fire-dwell-timer timer)
+          ;; Assert
+          (should-not agent-repl-test--viewed-reports)
+          (should-not agent-repl--tab-dwell-pending)
+          (should (equal (car agent-repl-test--dwell-reports)
+                         '("ws1" :arm :stopped :value nil))))))))
+
+(ert-deftest agent-repl-test-tab-dwell-deadline-that-demotes-reports-no-stop ()
+  "A dwell that completes is ended by the viewed report alone, never a stop."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (agent-repl-test--viewing "ws1" :done
+      (agent-repl--tab-dwell-arm "ws1" (time-subtract (current-time) (seconds-to-time 6))
+                                 'activation)
+      ;; Act
+      (agent-repl-test--fire-dwell-timer (car agent-repl-test--dwell-timers))
+      ;; Assert
+      (should (equal agent-repl-test--viewed-reports '("ws1")))
+      (should-not (cl-find-if (lambda (r) (eq (plist-get (cdr r) :arm) :stopped))
+                              agent-repl-test--dwell-reports)))))
 
 (ert-deftest agent-repl-test-tab-dwell-superseded-timer-does-nothing ()
   "A timer superseded by a re-arm does NOTHING when it fires.

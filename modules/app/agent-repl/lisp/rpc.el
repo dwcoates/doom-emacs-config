@@ -75,6 +75,8 @@
 (declare-function agent-repl-wire-decode-select-workspace-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-mark-workspace-viewed-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-mark-workspace-viewed-response "wire-host" (alist))
+(declare-function agent-repl-wire-encode-report-view-dwell-request "wire-host" (request))
+(declare-function agent-repl-wire-decode-report-view-dwell-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-page-residency-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-report-page-residency-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-page-unloading-request "wire-host" (request))
@@ -393,6 +395,15 @@ batch would only repeat.")
   agent-repl-wire-decode-get-workspace-status-response
   "Ask the daemon for a workspace's status, open or closed.
 Emacs reads only its standing: whether the workspace is still open.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-view-dwell
+  "ReportViewDwell"
+  agent-repl-wire-encode-report-view-dwell-request
+  agent-repl-wire-decode-report-view-dwell-response
+  "Tell the daemon Emacs started, or stopped, counting the view dwell.
+The roster carries a counting dwell on the selected row it will draw
+PARTIAL, so the sidebar fades the row\='s name over the dwell instead of
+flipping it when `agent-repl-rpc-mark-workspace-viewed' lands.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-mark-workspace-viewed
   "MarkWorkspaceViewed"
