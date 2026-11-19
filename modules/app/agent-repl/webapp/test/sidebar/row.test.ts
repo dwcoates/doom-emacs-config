@@ -672,6 +672,43 @@ describe("the when-column", () => {
     expect([when.hasAttribute("data-cache"), when.hasAttribute("data-cache-cold")]).toEqual([true, false]);
   });
 
+  it.each([
+    { place: "grouping" as const, want: "absolute" },
+    { place: "hidden" as const, want: "static" },
+  ])("takes the $place row's ⋯ off the line only in the open section", ({ place, want }) => {
+    // Arrange
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R", place);
+    // Act
+    const position = inRail(drawn, () => cascadedValue(moreOf(drawn), "position"));
+    // Assert
+    expect(position).toBe(want);
+  });
+
+  it("stands an open row's ⋯ at the right padding a merge queue line's clock ends at", () => {
+    // Arrange
+    const rules = rulesOf(stylesheet);
+    const paddingRight = (selector: string): string | undefined =>
+      /padding:\s*\S+\s+(\S+)/.exec(rules.find((rule) => rule.selectors.includes(selector))?.declarations ?? "")?.[1];
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+    // Act
+    const right = inRail(drawn, () => cascadedValue(moreOf(drawn), "right"));
+    // Assert
+    expect([right, paddingRight("#ws-sidebar .row"), paddingRight("#ws-sidebar .sb-mq-waiting")]).toEqual([
+      "0.7rem",
+      "0.7rem",
+      "0.7rem",
+    ]);
+  });
+
+  it("draws a hovered open row's ⋯ in its duration's place", () => {
+    // Arrange / Act
+    const hiding = rulesOf(stylesheet).find((rule) =>
+      rule.selectors.includes("#ws-sidebar:not(.sb-hover-suspended) .ws:not(.receded) > .row:hover > .when"),
+    )?.declarations;
+    // Assert
+    expect(hiding).toMatch(/visibility:\s*hidden/);
+  });
+
 });
 
 describe("the detail panel", () => {

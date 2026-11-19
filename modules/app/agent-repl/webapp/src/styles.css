@@ -7349,6 +7349,18 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar:not(.sb-hover-suspended) .row:hover .sb-more,
 #ws-sidebar .sb-more:focus-visible { opacity: 1; }
 #ws-sidebar:not(.sb-hover-suspended) .sb-more:hover { color: var(--fg); }
+/* AN OPEN ROW'S DURATION STANDS AT THE ROW'S RIGHT PADDING (owner request,
+   2026-11-19), as a merge queue line's clock does: the quiet control takes no
+   room on the line, and a hovered row draws it in the duration's place. */
+#ws-sidebar .ws:not(.receded) > .row { position: relative; }
+#ws-sidebar .ws:not(.receded) > .row > .sb-more {
+  position: absolute;
+  right: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+#ws-sidebar:not(.sb-hover-suspended) .ws:not(.receded) > .row:hover > .when,
+#ws-sidebar .ws:not(.receded) > .row:has(> .sb-more:focus-visible) > .when { visibility: hidden; }
 
 /* THE VERB MENU stands beside its row in the detail panel's card (see the
    panel's rule); its entries reach the card's edges, their words on the
