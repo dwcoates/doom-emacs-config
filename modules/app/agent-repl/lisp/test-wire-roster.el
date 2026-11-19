@@ -1999,8 +1999,8 @@ A hand-rolled list decoder would skip the shared helper and fail here."
           "\"expanded\":{\"collapsible\":{}}" member "}"))
 
 (defconst agent-repl-test-wire-roster--subject
-  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{}},\"merge\":{\"id\":\"w1-merge\"}}"
-  "A merge queue subject's JSON: w1, named one, revealing b1, async, as merge w1-merge.")
+  "{\"workspace\":{\"id\":\"w1\",\"dir\":\"/src\"},\"name\":\"one\",\"reveal\":{\"value\":\"b1\"},\"mode\":{\"async\":{\"requester\":{\"name\":\"doom-main\"}}},\"merge\":{\"id\":\"w1-merge\"}}"
+  "A merge queue subject's JSON: w1, named one, revealing b1, async of doom-main, as merge w1-merge.")
 
 (defun agent-repl-test-wire-roster--merged-section-with (members)
   "Return a Recently Merged section JSON carrying MEMBERS, JSON members or \"\"."
@@ -2033,6 +2033,34 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                    '((:id "r1" :dir "/src") (:text "doom") "one" :async "b1" "queue" (:started-at-ms 5)
                      (:arm :merging :value nil) 9
                      (:paused-at-ms 7 :by (:arm :workspace :value "doom") :hard t))))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-decodes-its-requester ()
+  "An async mode carries the requester it runs for, by name."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-merge-queue-mode-async
+                  "{\"requester\":{\"name\":\"doom-main\"}}")
+                 '(:requester (:name "doom-main")))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-without-its-requester-is-a-breach ()
+  "Tag 1, the requester, is REQUIRED: an async mode without it is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-mode-async "{}")
+                 '("RosterMergeQueueModeAsync" requester "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-async-requester-refuses-an-extra-key ()
+  "A requester carries its name alone: any other key is an unknown field."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-merge-queue-mode-async-requester
+                  "{\"name\":\"doom-main\",\"workspace\":{}}")
+                 '("RosterMergeQueueModeAsyncRequester" workspace "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-merge-queue-mode-decodes-an-async-subject-as-its-arm ()
+  "A subject whose mode is async decodes to the `:async' arm, its requester included on the wire."
+  (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                             #'agent-repl-wire-decode-roster-merge-queue-subject
+                             agent-repl-test-wire-roster--subject)
+                            :mode)
+                 '(:arm :async))))
 
 (ert-deftest agent-repl-test-wire-roster-merge-queue-waiting-refuses-the-retired-racing-field ()
   "Tag 4, a merge racing behind the head, is retired: a waiting merge

@@ -1338,6 +1338,29 @@ open row in no subsection, or `:subsection'.  It is never unset."
 ;; but the codec refuses unknown fields, so it is decoded and validated
 ;; whole.
 
+(defun agent-repl-wire-decode-roster-merge-queue-mode-async-requester (value)
+  "Decode VALUE as `RosterMergeQueueModeAsyncRequester', a plist `(:name NAME)'.
+NAME is the requester workspace's name, verbatim."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueModeAsyncRequester" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueModeAsyncRequester" object '(name))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueModeAsyncRequester"
+     (list :name (agent-repl-wire--decode-string
+                  "RosterMergeQueueModeAsyncRequester" 'name object)))))
+
+(defun agent-repl-wire-decode-roster-merge-queue-mode-async (value)
+  "Decode VALUE as `RosterMergeQueueModeAsync', a plist `(:requester REQUESTER)'.
+REQUESTER is the workspace the merge runs for
+\(`agent-repl-wire-decode-roster-merge-queue-mode-async-requester'); it is
+required."
+  (let ((object (agent-repl-wire--object "RosterMergeQueueModeAsync" value)))
+    (agent-repl-wire--check-keys "RosterMergeQueueModeAsync" object '(requester))
+    (agent-repl-wire--decoded
+     "RosterMergeQueueModeAsync"
+     (list :requester (agent-repl-wire--decode-message
+                       "RosterMergeQueueModeAsync" 'requester object
+                       #'agent-repl-wire-decode-roster-merge-queue-mode-async-requester)))))
+
 (defun agent-repl-wire-decode-roster-merge-queue-mode (value)
   "Decode VALUE as `RosterMergeQueueMode', a plist `(:arm ARM)'.
 ARM is `:sync' or `:async'.  It is never unset."
@@ -1349,7 +1372,7 @@ ARM is `:sync' or `:async'.  It is never unset."
                  (agent-repl-wire--decode-oneof
                   "RosterMergeQueueMode" 'mode object
                   `((sync :sync ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueModeSync" v)))
-                    (async :async ,(lambda (v) (agent-repl-wire--decode-empty "RosterMergeQueueModeAsync" v)))))
+                    (async :async agent-repl-wire-decode-roster-merge-queue-mode-async)))
                  :arm)))))
 
 (defun agent-repl-wire-decode-roster-merge-queue-subject (value)
