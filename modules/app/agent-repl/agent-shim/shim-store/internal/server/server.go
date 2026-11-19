@@ -60,6 +60,9 @@ type Server struct {
 	// the only stop.
 	done     chan struct{}
 	stopOnce sync.Once
+
+	// commits wakes every AwaitAgentByVendorTask after each committed write.
+	commits *commitSignal
 }
 
 var _ storev1connect.ShimStoreHandler = (*Server)(nil)
@@ -80,6 +83,7 @@ func New(store Store, log *logging.Logger, watchBuffer int) *Server {
 		fan:     newFanout(watchBuffer, lineKey),
 		bashFan: newFanout(watchBuffer, bashRowKey),
 		done:    make(chan struct{}),
+		commits: newCommitSignal(),
 	}
 	s.http = &http.Server{Handler: s.handler(), ReadHeaderTimeout: 10 * time.Second}
 	log.Log(logging.Fields{Operation: "store.server.new"}, "store.v1.ShimStore ready watch_buffer=%d", s.fan.buffer)
@@ -265,6 +269,7 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 		// the only moment a live watcher can be told about them.
 		s.publish(log, msg.GetProducer(), result.Lines)
 		s.publishBashRows(log, msg.GetProducer(), result.BashRows)
+		s.commits.fire()
 		ref := storeFailure(log, "store.rpc.write-batch", err, logging.Fields{Producer: msg.GetProducer()})
 		return writeBatchFailure(ref), nil
 	}
@@ -274,6 +279,7 @@ func (s *Server) WriteBatch(ctx context.Context, req *connect.Request[storev1.Wr
 		result.Written, result.Absorbed, len(result.Skipped), len(result.Lines), len(result.BashRows), result.Shapes)
 	s.publish(log, msg.GetProducer(), result.Lines)
 	s.publishBashRows(log, msg.GetProducer(), result.BashRows)
+	s.commits.fire()
 	return connect.NewResponse(&storev1.WriteBatchResponse{
 		Result: &storev1.WriteBatchResponse_Success{Success: &storev1.WriteBatchSuccess{
 			Skipped:  skippedEntries(result.Skipped),

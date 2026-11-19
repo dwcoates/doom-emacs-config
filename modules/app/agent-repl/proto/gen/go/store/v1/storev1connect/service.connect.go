@@ -67,6 +67,9 @@ const (
 	// ShimStoreGetAgentByVendorTaskProcedure is the fully-qualified name of the ShimStore's
 	// GetAgentByVendorTask RPC.
 	ShimStoreGetAgentByVendorTaskProcedure = "/store.v1.ShimStore/GetAgentByVendorTask"
+	// ShimStoreAwaitAgentByVendorTaskProcedure is the fully-qualified name of the ShimStore's
+	// AwaitAgentByVendorTask RPC.
+	ShimStoreAwaitAgentByVendorTaskProcedure = "/store.v1.ShimStore/AwaitAgentByVendorTask"
 	// ShimStoreGetShellRunClaimsProcedure is the fully-qualified name of the ShimStore's
 	// GetShellRunClaims RPC.
 	ShimStoreGetShellRunClaimsProcedure = "/store.v1.ShimStore/GetShellRunClaims"
@@ -98,6 +101,7 @@ var (
 	shimStoreGetSidecarCursorsMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("GetSidecarCursors")
 	shimStoreGetLiveWorkMethodDescriptor                     = shimStoreServiceDescriptor.Methods().ByName("GetLiveWork")
 	shimStoreGetAgentByVendorTaskMethodDescriptor            = shimStoreServiceDescriptor.Methods().ByName("GetAgentByVendorTask")
+	shimStoreAwaitAgentByVendorTaskMethodDescriptor          = shimStoreServiceDescriptor.Methods().ByName("AwaitAgentByVendorTask")
 	shimStoreGetShellRunClaimsMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("GetShellRunClaims")
 	shimStoreGetRunSettlementsMethodDescriptor               = shimStoreServiceDescriptor.Methods().ByName("GetRunSettlements")
 	shimStoreGetLiveShellRunsAnnouncedBeforeMethodDescriptor = shimStoreServiceDescriptor.Methods().ByName("GetLiveShellRunsAnnouncedBefore")
@@ -141,6 +145,10 @@ type ShimStoreClient interface {
 	// agent, and when that agent raises an ask. The pairing is the sidecar's,
 	// written with the agent's first rows (EntryBatch.agent_locators).
 	GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error)
+	// The same question, answered only once the record holds both the pairing
+	// and the agent's start. The shim waits on it for a nested spawn, whose
+	// halves only the sidecar reads, under a bound of its own.
+	AwaitAgentByVendorTask(context.Context, *connect.Request[v1.AwaitAgentByVendorTaskRequest]) (*connect.Response[v1.AwaitAgentByVendorTaskResponse], error)
 	// WHICH RUN each held shell spool belongs to, from the claims the shim wrote
 	// (EntryBatch.shell_run_claims), with the book that holds each run's
 	// launching call. The sidecar asks for the spools no transcript line claimed.
@@ -234,6 +242,12 @@ func NewShimStoreClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(shimStoreGetAgentByVendorTaskMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		awaitAgentByVendorTask: connect.NewClient[v1.AwaitAgentByVendorTaskRequest, v1.AwaitAgentByVendorTaskResponse](
+			httpClient,
+			baseURL+ShimStoreAwaitAgentByVendorTaskProcedure,
+			connect.WithSchema(shimStoreAwaitAgentByVendorTaskMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		getShellRunClaims: connect.NewClient[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse](
 			httpClient,
 			baseURL+ShimStoreGetShellRunClaimsProcedure,
@@ -284,6 +298,7 @@ type shimStoreClient struct {
 	getSidecarCursors               *connect.Client[v1.GetSidecarCursorsRequest, v1.GetSidecarCursorsResponse]
 	getLiveWork                     *connect.Client[v1.GetLiveWorkRequest, v1.GetLiveWorkResponse]
 	getAgentByVendorTask            *connect.Client[v1.GetAgentByVendorTaskRequest, v1.GetAgentByVendorTaskResponse]
+	awaitAgentByVendorTask          *connect.Client[v1.AwaitAgentByVendorTaskRequest, v1.AwaitAgentByVendorTaskResponse]
 	getShellRunClaims               *connect.Client[v1.GetShellRunClaimsRequest, v1.GetShellRunClaimsResponse]
 	getRunSettlements               *connect.Client[v1.GetRunSettlementsRequest, v1.GetRunSettlementsResponse]
 	getLiveShellRunsAnnouncedBefore *connect.Client[v1.GetLiveShellRunsAnnouncedBeforeRequest, v1.GetLiveShellRunsAnnouncedBeforeResponse]
@@ -335,6 +350,11 @@ func (c *shimStoreClient) GetLiveWork(ctx context.Context, req *connect.Request[
 // GetAgentByVendorTask calls store.v1.ShimStore.GetAgentByVendorTask.
 func (c *shimStoreClient) GetAgentByVendorTask(ctx context.Context, req *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error) {
 	return c.getAgentByVendorTask.CallUnary(ctx, req)
+}
+
+// AwaitAgentByVendorTask calls store.v1.ShimStore.AwaitAgentByVendorTask.
+func (c *shimStoreClient) AwaitAgentByVendorTask(ctx context.Context, req *connect.Request[v1.AwaitAgentByVendorTaskRequest]) (*connect.Response[v1.AwaitAgentByVendorTaskResponse], error) {
+	return c.awaitAgentByVendorTask.CallUnary(ctx, req)
 }
 
 // GetShellRunClaims calls store.v1.ShimStore.GetShellRunClaims.
@@ -402,6 +422,10 @@ type ShimStoreHandler interface {
 	// agent, and when that agent raises an ask. The pairing is the sidecar's,
 	// written with the agent's first rows (EntryBatch.agent_locators).
 	GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error)
+	// The same question, answered only once the record holds both the pairing
+	// and the agent's start. The shim waits on it for a nested spawn, whose
+	// halves only the sidecar reads, under a bound of its own.
+	AwaitAgentByVendorTask(context.Context, *connect.Request[v1.AwaitAgentByVendorTaskRequest]) (*connect.Response[v1.AwaitAgentByVendorTaskResponse], error)
 	// WHICH RUN each held shell spool belongs to, from the claims the shim wrote
 	// (EntryBatch.shell_run_claims), with the book that holds each run's
 	// launching call. The sidecar asks for the spools no transcript line claimed.
@@ -491,6 +515,12 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(shimStoreGetAgentByVendorTaskMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	shimStoreAwaitAgentByVendorTaskHandler := connect.NewUnaryHandler(
+		ShimStoreAwaitAgentByVendorTaskProcedure,
+		svc.AwaitAgentByVendorTask,
+		connect.WithSchema(shimStoreAwaitAgentByVendorTaskMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	shimStoreGetShellRunClaimsHandler := connect.NewUnaryHandler(
 		ShimStoreGetShellRunClaimsProcedure,
 		svc.GetShellRunClaims,
@@ -547,6 +577,8 @@ func NewShimStoreHandler(svc ShimStoreHandler, opts ...connect.HandlerOption) (s
 			shimStoreGetLiveWorkHandler.ServeHTTP(w, r)
 		case ShimStoreGetAgentByVendorTaskProcedure:
 			shimStoreGetAgentByVendorTaskHandler.ServeHTTP(w, r)
+		case ShimStoreAwaitAgentByVendorTaskProcedure:
+			shimStoreAwaitAgentByVendorTaskHandler.ServeHTTP(w, r)
 		case ShimStoreGetShellRunClaimsProcedure:
 			shimStoreGetShellRunClaimsHandler.ServeHTTP(w, r)
 		case ShimStoreGetRunSettlementsProcedure:
@@ -602,6 +634,10 @@ func (UnimplementedShimStoreHandler) GetLiveWork(context.Context, *connect.Reque
 
 func (UnimplementedShimStoreHandler) GetAgentByVendorTask(context.Context, *connect.Request[v1.GetAgentByVendorTaskRequest]) (*connect.Response[v1.GetAgentByVendorTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.GetAgentByVendorTask is not implemented"))
+}
+
+func (UnimplementedShimStoreHandler) AwaitAgentByVendorTask(context.Context, *connect.Request[v1.AwaitAgentByVendorTaskRequest]) (*connect.Response[v1.AwaitAgentByVendorTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("store.v1.ShimStore.AwaitAgentByVendorTask is not implemented"))
 }
 
 func (UnimplementedShimStoreHandler) GetShellRunClaims(context.Context, *connect.Request[v1.GetShellRunClaimsRequest]) (*connect.Response[v1.GetShellRunClaimsResponse], error) {

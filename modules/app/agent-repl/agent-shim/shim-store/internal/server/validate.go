@@ -388,6 +388,18 @@ func validateGetAgentByVendorTaskRequest(req *storev1.GetAgentByVendorTaskReques
 	return nil
 }
 
+// validateAwaitAgentByVendorTaskRequest is the use site for
+// AwaitAgentByVendorTask: the same two fields as GetAgentByVendorTask's.
+func validateAwaitAgentByVendorTaskRequest(req *storev1.AwaitAgentByVendorTaskRequest) *refusal {
+	if req.GetSession() == nil || req.GetSession().GetValue() == "" {
+		return refuse(SiteSessionEmpty, "session", "session: AwaitAgentByVendorTask names no session, and the store never answers it unscoped")
+	}
+	if req.GetVendorTaskId() == "" {
+		return refuse(SiteVendorTaskEmpty, "vendor_task_id", "vendor_task_id: the wait names no vendor task locator")
+	}
+	return nil
+}
+
 // validateGetPeerDeliveryRequest is the use site for GetPeerDelivery: the
 // delivery id, set and non-empty. Unscoped on purpose: the answer is always
 // another session.

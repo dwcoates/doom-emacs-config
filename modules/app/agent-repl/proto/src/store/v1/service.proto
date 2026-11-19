@@ -14,6 +14,7 @@ syntax = "proto3";
 package store.v1;
 
 
+import "store/v1/endpoint_await_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_agent_by_vendor_task.proto";
 import "store/v1/endpoint_get_detached_work.proto";
 import "store/v1/endpoint_get_live_shell_runs_announced_before.proto";
@@ -78,6 +79,11 @@ service ShimStore {
   // agent, and when that agent raises an ask. The pairing is the sidecar's,
   // written with the agent's first rows (EntryBatch.agent_locators).
   rpc GetAgentByVendorTask(GetAgentByVendorTaskRequest) returns (GetAgentByVendorTaskResponse);
+
+  // The same question, answered only once the record holds both the pairing
+  // and the agent's start. The shim waits on it for a nested spawn, whose
+  // halves only the sidecar reads, under a bound of its own.
+  rpc AwaitAgentByVendorTask(AwaitAgentByVendorTaskRequest) returns (AwaitAgentByVendorTaskResponse);
 
   // WHICH RUN each held shell spool belongs to, from the claims the shim wrote
   // (EntryBatch.shell_run_claims), with the book that holds each run's
