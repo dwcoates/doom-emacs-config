@@ -7,6 +7,7 @@ import { createControl } from "../../src/control.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import STYLESHEET from "../../src/styles.css?raw";
 import { drawChipRun, drawTopbarView, mountTopbar, signInRequestToOpen } from "../../src/topbar/topbar.js";
+import { pageFocusLeft } from "../../src/focus-left.js";
 import { createLocalFailures, type LocalFailures } from "../../src/failure/local.js";
 import { pagePresence } from "../../src/presence.js";
 import type { AppContext } from "../../src/rpc/context.js";
@@ -356,7 +357,7 @@ describe("mountTopbar", () => {
     ctx: AppContext,
     failures: LocalFailures = createLocalFailures(),
   ) {
-    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
     handle.watch(ctx, { openLogin: () => undefined });
     return handle;
   }
@@ -383,7 +384,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([requesting("1")]), { openLogin });
     await settle();
@@ -397,7 +398,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([requesting("1"), requesting("1")]), { openLogin });
     await settle();
@@ -411,7 +412,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([requesting("1"), view(), requesting("2")]), { openLogin });
     await settle();
@@ -425,7 +426,7 @@ describe("mountTopbar", () => {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
     const openLogin = vi.fn();
-    const handle = mountTopbar(host, { failures: createLocalFailures(), geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures: createLocalFailures(), geometry: GEOMETRY });
     // ACT
     handle.watch(daemon([view()]), { openLogin });
     await settle();
@@ -575,7 +576,7 @@ describe("mountTopbar: the chip's client-local failures", () => {
   function mountUnwatched(failures: LocalFailures) {
     const host = document.createElement("div");
     document.body.replaceChildren(host);
-    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
     return { host, handle };
   }
 
@@ -669,7 +670,7 @@ describe("mountTopbar: the chip's client-local failures", () => {
     );
     const host = document.createElement("div");
     document.body.replaceChildren(host);
-    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
     // ACT
     handle.watch(ctx, { openLogin: () => undefined });
     await settle();
@@ -692,7 +693,7 @@ describe("mountTopbar: the chip's client-local failures", () => {
     );
     const host = document.createElement("div");
     document.body.replaceChildren(host);
-    const handle = mountTopbar(host, { failures, geometry: GEOMETRY });
+    const handle = mountTopbar(host, { focusLeft: pageFocusLeft(), failures, geometry: GEOMETRY });
     // ACT
     handle.watch(ctx, { openLogin: () => undefined });
     await settle();

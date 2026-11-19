@@ -760,7 +760,7 @@ async function mountApp(
   // MAIN.TS'S OWN ORDER: the topbar is mounted before any stream, so its
   // warning chip can list a failure that stops one from ever opening.
   const failures = createLocalFailures();
-  const topbar = mountTopbar(shell.topbar, { failures });
+  const topbar = mountTopbar(shell.topbar, { failures, focusLeft: pageFocusLeft() });
   const composerEnabled = options.composer === true;
 
   // THE REAL PAGE MUX, on purpose. This harness drives a REAL daemon, so its

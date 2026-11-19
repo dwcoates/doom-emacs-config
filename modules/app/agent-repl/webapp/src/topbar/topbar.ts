@@ -69,6 +69,7 @@ import { drawTopbarPersistentWifi } from "./persistent-wifi.js";
 import { drawTopbarRemoteControl } from "./remote-control.js";
 import { drawTopbarQueueBypass } from "./queue-bypass.js";
 import { bindAccountReveal } from "./account.js";
+import type { FocusLeft } from "../focus-left.js";
 import { mountRevealLayer, type RevealGeometry } from "./reveal.js";
 import { bindAgentReplSessionReveal } from "./session.js";
 import {
@@ -92,6 +93,8 @@ export interface Handle {
 export interface TopbarDeps {
   /** The client-local failures the heading's warnings list beside the pushed ones. */
   readonly failures: LocalFailureView;
+  /** The page's focus-left signal, which closes the open reveal. */
+  readonly focusLeft: FocusLeft;
   /** Injected by tests, where jsdom reports every rect as zero. */
   geometry?: RevealGeometry;
 }
@@ -145,7 +148,7 @@ export function mountTopbar(host: HTMLElement, deps: TopbarDeps): TopbarHandle {
 
   // Mounted AFTER the strip so the layer is the later sibling and paints over
   // it; both live inside the host, which is the reveal's positioning context.
-  const reveals = mountRevealLayer(host, deps.geometry);
+  const reveals = mountRevealLayer(host, deps.focusLeft, deps.geometry);
   const cc: WarningChipContext = { reveals, localFailures: () => deps.failures.standing() };
 
   /** The context `watch` built, and the last view drawn over it. */

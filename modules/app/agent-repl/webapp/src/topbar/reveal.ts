@@ -23,8 +23,14 @@
  * IT CLOSES ON A CLICK OUTSIDE AND ON ESCAPE, the two gestures every dropdown
  * answers to. The click listener is on the document because the point is to
  * catch clicks the layer never sees.
+ *
+ * AND WHEN THE USER'S FOCUS LEAVES THE PAGE (focus-left.ts; owner request,
+ * 2026-11-19): a click into another web view or Emacs window, the page
+ * hidden, or a key or a click in the composer. The composer is an Emacs
+ * buffer, so neither gesture above ever reaches the page from there.
  */
 import { stopTicking } from "../feed/ticking.js";
+import type { FocusLeft } from "../focus-left.js";
 import { log } from "../log.js";
 import { clampReveal, type Rect } from "./clamp.js";
 import { viewportOf } from "../placement.js";
@@ -71,6 +77,7 @@ const DOM_GEOMETRY: RevealGeometry = {
  */
 export function mountRevealLayer(
   host: HTMLElement,
+  focusLeft: FocusLeft,
   geometry: RevealGeometry = DOM_GEOMETRY,
 ): RevealLayer {
   const layer = document.createElement("div");
@@ -161,6 +168,7 @@ export function mountRevealLayer(
 
   document.addEventListener("click", onDocumentClick);
   document.addEventListener("keydown", onKeydown);
+  const stopFocusLeft = focusLeft.onLeft(close);
 
   return {
     current: () => openName,
@@ -201,6 +209,7 @@ export function mountRevealLayer(
     dispose(): void {
       document.removeEventListener("click", onDocumentClick);
       document.removeEventListener("keydown", onKeydown);
+      stopFocusLeft();
       openName = null;
       entries.clear();
       stopTicking(layer);

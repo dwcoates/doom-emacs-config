@@ -11,6 +11,7 @@ import { installPageLogger } from "./page-log";
 import type { TopbarContext } from "../../src/topbar/context.js";
 import { drawTopbarPersistentWifi } from "../../src/topbar/persistent-wifi.js";
 import { mountRevealLayer } from "../../src/topbar/reveal.js";
+import { pageFocusLeft } from "../../src/focus-left.js";
 import { drawTopbarView } from "../../src/topbar/topbar.js";
 import { appContext } from "../topbar/fixtures.js";
 
@@ -100,7 +101,7 @@ const records = installPageLogger("topbar");
 
 /** The context every drawn cell is handed; nothing here clicks, so no rpc is scripted. */
 function topbarContext(): TopbarContext {
-  return { ctx: appContext(), reveals: mountRevealLayer(host()), openLogin: () => undefined, localFailures: () => [] };
+  return { ctx: appContext(), reveals: mountRevealLayer(host(), pageFocusLeft()), openLogin: () => undefined, localFailures: () => [] };
 }
 
 /**
@@ -192,7 +193,7 @@ window.topbarPage = {
     header.append(strip);
     const tc: TopbarContext = {
       ctx: appContext(),
-      reveals: mountRevealLayer(header),
+      reveals: mountRevealLayer(header, pageFocusLeft()),
       openLogin: () => undefined,
       localFailures: () => [],
     };
