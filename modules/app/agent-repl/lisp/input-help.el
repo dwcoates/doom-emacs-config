@@ -56,8 +56,7 @@
      :keymaps (agent-repl-input-mode-map)
      :bindings ((agent-repl-send "Send the composer's contents.")
                 (agent-repl-input-control-return
-                 "Send with the send postfix appended. With a multi-select standing and an empty composer, confirm its ticks instead."
-                 :variables (agent-repl-send-postfix))
+                 "Send now, past the held prompts and never classified. From an empty composer, send the latest held prompt now, or confirm a standing multi-select's ticks.")
                 (agent-repl-send-with-prefix "Send with the send prefix prepended."
                                              :variables (agent-repl-send-prefix))
                 (agent-repl-queue-deferred-prompt "Defer the prompt until the current turn ends.")

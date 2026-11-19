@@ -2767,7 +2767,8 @@ arm this codec does not know is refused as an unknown field."
   (agent-repl-wire-encode-workspace-ref ref))
 
 (defconst agent-repl-wire-submit-prompt-deliveries
-  '((:deferred . "SUBMIT_PROMPT_DELIVERY_DEFERRED"))
+  '((:deferred . "SUBMIT_PROMPT_DELIVERY_DEFERRED")
+    (:now . "SUBMIT_PROMPT_DELIVERY_NOW"))
   "The SubmitPromptDelivery vocabulary Emacs sends, keyword to wire name.
 UNSPECIFIED is deliberately ABSENT: the ordinary delivery is the field's
 ABSENCE, and a request carrying the zero value is refused as

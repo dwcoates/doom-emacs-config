@@ -2396,7 +2396,8 @@ the composer.  A canned command, a metaprompt read and a queue re-drive
 all compose their own text and leave the user\='s draft alone.
 
 DELIVERY is the `SubmitPromptDelivery' keyword the submission asks for
-(`:deferred' for `SPC j RET'), nil for the ordinary delivery.  It rides the
+(`:deferred' for `SPC j RET', `:now' for `C-RET'), nil for the ordinary
+delivery.  It rides the
 request and every path that holds the prompt on disk.
 
 The ref is REQUIRED on every submit: it names WHICH workspace the
@@ -2480,7 +2481,7 @@ draft as words (a command prefix, a seeded prompt) gets the words."
   (when (agent-repl--input-buffer ws)
     (agent-repl--input-parts-text (agent-repl--read-input-parts ws))))
 
-(defun agent-repl--send (origin &optional prompt ws force-metaprompt)
+(defun agent-repl--send (origin &optional prompt ws force-metaprompt delivery)
   "Submit PROMPT (or the input buffer's contents) to workspace WS.
 ORIGIN is this send site's own `PromptOrigin' keyword and is REQUIRED --
 it rides the wire and the daemon persists it onto the turn's durable
@@ -2494,7 +2495,8 @@ was composed by the caller (a canned command, a metaprompt, a queue
 re-drive), and the user's own draft is left untouched -- those sites
 record their prompt on the ack instead.  When WS is nil the current
 workspace is used.  FORCE-METAPROMPT prepends the on-demand
-read-directive.
+read-directive.  DELIVERY is the `SubmitPromptDelivery' keyword the
+submission asks for (`:now' for `C-RET'), nil for the ordinary one.
 
 While the composer is editing a held prompt, a from-buffer send COMMITS
 the edit instead (`agent-repl-held-edit-commit') and returns nil.
@@ -2511,8 +2513,8 @@ Returns the submission's idempotency key, or nil when nothing was sent."
     (unless ws
       (agent-repl--fatal '(:agent-repl-central "the record reports that no workspace exists") "elisp.input.no-workspace origin=%S prompt-supplied=%s"
                          origin (not (null prompt))))
-    (agent-repl--info ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s"
-                      ws origin force-metaprompt (null prompt))
+    (agent-repl--info ws "elisp.input.send ws=%s origin=%S force-metaprompt=%s from-buffer=%s delivery=%S"
+                      ws origin force-metaprompt (null prompt) delivery)
     (agent-repl--input-check-gate ws)
     (let* ((parts (if prompt (list prompt) (agent-repl--read-input-parts ws)))
            (raw (agent-repl--input-parts-text parts))
@@ -2560,7 +2562,7 @@ Returns the submission's idempotency key, or nil when nothing was sent."
             ;; submission nothing.
             (let ((snapshot (when from-buffer
                               (agent-repl--input-optimistic-clear ws raw))))
-              (agent-repl--input-submit ws said origin raw nil from-buffer snapshot))))))))
+              (agent-repl--input-submit ws said origin raw nil from-buffer snapshot delivery))))))))
 
 ;;;; ---- The send sites --------------------------------------------------
 ;;
@@ -2709,7 +2711,7 @@ choices."
 (defun agent-repl--input-confirm-choice (ws)
   "Return the confirm `C-RET' sends for WS's standing ask, or nil.
 Only a multi-select question is confirmed, and only from an empty
-composer: with text in it `C-RET' sends the latest held prompt now."
+composer: with text in it `C-RET' sends that text now."
   (let* ((ask (agent-repl-host-standing-ask ws))
          (kind (plist-get ask :kind))
          (question (plist-get kind :value)))
@@ -2811,31 +2813,23 @@ Each cause says why and what happens next, never one sentence for all."
                         "elisp.input.release-refused-unknown-cause cause=%S" arm)
      (error "agent-repl: a release refused for an unknown cause %S" arm))))
 
-(defconst agent-repl--input-not-held-arms '(:no-such-hold :already-delivered)
-  "The release refusals that say the prompt is no longer held.
-`C-RET' reads either one as no held prompt to send now, and sends the
-composer's text as `RET' would.")
+;; `C-RET' IS "SEND NOW" (owner request, 2026-11-19): with words in the
+;; composer they go past every held prompt, never classified
+;; (`SUBMIT_PROMPT_DELIVERY_NOW'), exactly as an empty composer's `C-RET'
+;; sends its latest held prompt now.
 
-(defun agent-repl-send-held-now (&optional on-not-held)
+(defun agent-repl-send-held-now ()
   "Send now the composer's most recently sent held prompt.
 The composer is never read, cleared or altered: text standing in it stays
 where it is and is not sent.  The daemon answers `already delivered' or
-`no such hold' when the prompt is no longer held, said in the echo area.
-
-ON-NOT-HELD, when given, is called instead of saying so whenever there
-is no held prompt to send: none was sent from this composer, or the
-daemon answers one of `agent-repl--input-not-held-arms'."
+`no such hold' when the prompt is no longer held, said in the echo area."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (turn (gethash ws agent-repl--input-last-sent-turns)))
-    (cond
-     ((and (null turn) on-not-held)
-      (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-held" ws)
-      (funcall on-not-held))
-     ((null turn)
-      (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-sent" ws)
-      (message "agent-repl: no prompt sent from this composer to send now"))
-     (t
+    (if (null turn)
+        (progn
+          (agent-repl--info ws "elisp.input.send-held-now ws=%s outcome=nothing-sent" ws)
+          (message "agent-repl: no prompt sent from this composer to send now"))
       (agent-repl--info ws "elisp.input.send-held-now ws=%s turn=%s" ws (plist-get turn :value))
       (agent-repl-verbs--send
        #'agent-repl-rpc-update-held-prompt (agent-repl-verbs--conn ws)
@@ -2848,54 +2842,35 @@ daemon answers one of `agent-repl--input-not-held-arms'."
                            ws (plist-get turn :value)))
        :on-error
        (lambda (value)
-         (let ((arm (plist-get (plist-get value :cause) :arm)))
-           (cond
-            ((memq arm agent-repl--input-handover-arms) nil)
-            ((and on-not-held (memq arm agent-repl--input-not-held-arms))
-             (agent-repl--info ws "elisp.input.send-held-now-not-held ws=%s turn=%s cause=%S"
-                               ws (plist-get turn :value) arm)
-             (funcall on-not-held)
-             t)
-            (t
-             (agent-repl--info ws "elisp.input.send-held-now-refused ws=%s turn=%s cause=%S"
-                               ws (plist-get turn :value) (plist-get value :cause))
-             (message "agent-repl: send now: %s" (agent-repl--input-release-refusal-text value))
-             t)))))))))
+         (unless (memq (plist-get (plist-get value :cause) :arm) agent-repl--input-handover-arms)
+           (agent-repl--info ws "elisp.input.send-held-now-refused ws=%s turn=%s cause=%S"
+                             ws (plist-get turn :value) (plist-get value :cause))
+           (message "agent-repl: send now: %s" (agent-repl--input-release-refusal-text value))
+           t))))))
 
-(defun agent-repl--input-send-if-unchanged (ws buf tick)
-  "Send WS's composer BUF as `RET' would, when it still stands at TICK.
-TICK is BUF's `buffer-chars-modified-tick' when `C-RET' was pressed, so
-only the text the person saw is sent: a composer changed since, or gone,
-is left as it is and said so.  A blank composer sends nothing."
-  (cond
-   ((not (buffer-live-p buf))
-    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=composer-gone" ws))
-   ((/= tick (buffer-chars-modified-tick buf))
-    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=composer-changed" ws)
-    (message "agent-repl: the composer changed before it could be sent; nothing was sent"))
-   ((with-current-buffer buf (agent-repl--input-composer-blank-p))
-    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=nothing-held-or-typed" ws)
-    (message "agent-repl: no held prompt to send now"))
-   (t
-    (agent-repl--info ws "elisp.input.control-return-send ws=%s outcome=sent" ws)
-    (agent-repl-send ws))))
+(defun agent-repl-send-now (&optional ws)
+  "Submit WS's composer contents now, past every held prompt.
+The words are sent as `RET' sends them (`PROMPT_ORIGIN_USER_SENT'), asking
+for the `:now' delivery: the daemon never classifies them, and whatever
+would hold them, they go as a held prompt released by
+`agent-repl-send-held-now' goes.  WS defaults to the current workspace."
+  (interactive)
+  (agent-repl--send :user-sent nil ws nil :now))
 
 (defun agent-repl-input-control-return ()
-  "Confirm a standing multi-select, else send the held prompt or the composer.
+  "Confirm a standing multi-select, else send now.
 `C-RET' finalizes the ticks a multi-select question was given by number,
-from an empty composer.  Otherwise it is `agent-repl-send-held-now': with
-a held prompt standing, that prompt is sent now and the composer's text
-is untouched.  With none held, the composer's text is sent as `RET'
-sends it, and an empty composer sends nothing."
+from an empty composer.  Otherwise, with words in the composer, they are
+sent now, past every held prompt and never classified
+\=(`agent-repl-send-now'); from an empty composer, the latest held prompt
+is sent now (`agent-repl-send-held-now')."
   (interactive)
   (let* ((ws (agent-repl--ws-current-name))
          (confirm (agent-repl--input-confirm-choice ws)))
-    (if confirm
-        (agent-repl--input-answer-choice ws confirm)
-      (let ((buf (current-buffer))
-            (tick (buffer-chars-modified-tick)))
-        (agent-repl-send-held-now
-         (lambda () (agent-repl--input-send-if-unchanged ws buf tick)))))))
+    (cond
+     (confirm (agent-repl--input-answer-choice ws confirm))
+     ((agent-repl--input-composer-blank-p) (agent-repl-send-held-now))
+     (t (agent-repl-send-now ws)))))
 
 ;;;; ---- Keybindings -----------------------------------------------------
 
@@ -2938,8 +2913,8 @@ sends it, and an empty composer sends nothing."
 ;; SEND AND NEWLINE IN EMACS STATE.  The `:ni' entries in the `map!' form above
 ;; live in evil's normal and insert auxiliary maps only, so in evil's emacs
 ;; state (and in a session without evil) `RET' fell through to the global
-;; `newline', and the only chord that sent was `C-RET' -- which appends
-;; `agent-repl-send-postfix'.  The plain mode map is what emacs state reads;
+;; `newline', and the only chord that sent was `C-RET', which sends now
+;; (`agent-repl-input-control-return').  The plain mode map is what emacs state reads;
 ;; in normal and insert state the evil auxiliary maps still outrank it, so
 ;; these change nothing there.
 (define-key agent-repl-input-mode-map (kbd "RET") #'agent-repl-send)
