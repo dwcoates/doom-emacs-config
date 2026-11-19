@@ -163,16 +163,12 @@ func servingElsewhere(ctx context.Context, db servingRows, addrPath string, self
 	if owner == nil || *owner == self {
 		return "", false, nil
 	}
-	alive, err := daemonaddr.Alive(addrPath, string(*owner))
+	address, alive, err := instanceAddress(addrPath, *owner)
 	if err != nil {
-		return "", false, fmt.Errorf("probe %q's serving daemon %s: %w", ws, *owner, err)
+		return "", false, fmt.Errorf("%q's serving daemon %s: %w", ws, *owner, err)
 	}
 	if !alive {
 		return "", false, fmt.Errorf("%q's serving row names %s, which is not running", ws, *owner)
-	}
-	address, err := daemonaddr.InstanceAddress(addrPath, string(*owner))
-	if err != nil {
-		return "", false, fmt.Errorf("%q's serving daemon %s: %w", ws, *owner, err)
 	}
 	return address, true, nil
 }
