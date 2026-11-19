@@ -31,7 +31,8 @@ Findings are collected at the end, in "Audit findings".
 | Command | Does | Evil key | Context | Emacs mode |
 | --- | --- | --- | --- | --- |
 | `agent-repl-send` | Submit the composer's contents. | `RET` (normal, insert) | composer | works |
-| `agent-repl-send-with-postfix` | Append `agent-repl-send-postfix`, then submit. | `C-RET`, `s-RET` (remap of `+default/newline-below`) | composer | works |
+| `agent-repl-input-control-return` | With text, send it now (`agent-repl-send-now`), past the held prompts and unclassified; from an empty composer, send the latest held prompt now or confirm a multi-select. | `C-RET`, `s-RET` (remap of `+default/newline-below`) | composer | works |
+| `agent-repl-send-with-postfix` | Append `agent-repl-send-postfix`, then submit. | - | - | - |
 | `agent-repl-send-with-prefix` | Prepend `agent-repl-send-prefix`, then submit. | `C-S-RET`, `S-s-RET` (remap of `+default/newline-above`) | composer | works |
 | `agent-repl-send-with-metaprompt` | Submit with the metaprompt read-directive prepended. | - | - | - |
 | `agent-repl-send-and-hide` | Submit, then hide both panels. | - | - | - |
