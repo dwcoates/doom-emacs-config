@@ -2,11 +2,13 @@
 
 ;;; Commentary:
 
-;; A WORD IN THE COMPOSER THAT BEGINS A PART OF AN OPEN WORKSPACE'S NAME
-;; COMPLETES TO IT: typing `agent-repl-ski', or `skill', or `skill-mig',
-;; offers `agent-repl-skill-migration' while that workspace is open.  The
-;; candidates are the names of every workspace the roster carries that is
-;; not closed (`agent-repl-roster-open-workspaces'), read from the push
+;; A WORD IN THE COMPOSER THAT BEGINS A PART OF A MENTIONABLE WORKSPACE'S
+;; NAME COMPLETES TO IT: typing `agent-repl-ski', or `skill', or
+;; `skill-mig', offers `agent-repl-skill-migration' while that workspace is
+;; open.  The candidates are the composer's own workspace's mention targets
+;; (`agent-repl-host-mention-targets'), the very set the daemon serves that
+;; workspace's page as the names its feed links, so a name the composer
+;; completes is always a link in the feed.  They are read from the push
 ;; already in hand, so completion never waits on the daemon.
 ;;
 ;; A NAME WORD is a run of the characters workspace names are made of
@@ -30,9 +32,9 @@
 ;;
 ;; EACH NAME IS ANNOTATED WITH ITS REPOSITORY, in a column aligned past the
 ;; longest name offered and drawn in a dimmer face
-;; (`agent-repl-workspace-completion-repository'), read from the same push
-;; (`agent-repl-roster-open-workspaces').  Names collide across
-;; repositories, so a name open in several names each of them.
+;; (`agent-repl-workspace-completion-repository'), read from the same push.
+;; Every target names one workspace, so each annotation names one
+;; repository.
 ;;
 ;; A WORD MATCHING NO OPEN WORKSPACE'S NAME FALLS THROUGH: the capf answers
 ;; nil, so the next completion function answers it.  It decides that by its
@@ -40,22 +42,21 @@
 ;; by Emacs's prefix-only `:exclusive no' test, which would drop every match
 ;; past a name's first part.
 ;;
-;; AN OPEN WORKSPACE'S NAME IS PURPLE IN THE COMPOSER, as a known slash
-;; command is: every name word that names an open workspace exactly -- typed,
+;; A MENTIONABLE WORKSPACE'S NAME IS PURPLE IN THE COMPOSER, as a known slash
+;; command is: every name word that names a mention target exactly -- typed,
 ;; completed or pasted -- takes `agent-repl-composer-known' through an overlay
 ;; (composer-mark.el), the one face the known commands wear.  A name word
 ;; ending a sentence is matched without its trailing periods, as a slash word
 ;; is matched without its closing punctuation.  An edit re-marks the lines it
-;; touched; a roster push, which may open or close a workspace, re-marks every
-;; composer whole.
+;; touched; a change of a workspace's mention targets re-marks its composer
+;; whole.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'subr-x)
 
-(declare-function agent-repl-roster-open-workspaces "agent-repl-roster" ())
-(declare-function agent-repl-roster-open-workspace-names "agent-repl-roster" ())
+(declare-function agent-repl-host-mention-targets "agent-repl-host" (ws))
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
@@ -66,7 +67,7 @@
 (declare-function agent-repl-composer-mark-lines "composer-mark" (beg end tag find))
 (declare-function agent-repl--input-composers "input" ())
 
-(defvar agent-repl-roster-update-functions)
+(defvar agent-repl-host-mention-targets-functions)
 
 (defface agent-repl-workspace-completion-repository
   '((t :inherit shadow))
@@ -134,17 +135,25 @@ repository the daemon did not state."
                                 'face 'agent-repl-workspace-completion-repository))
           "")))))
 
+(defun agent-repl--workspace-completion-workspaces (ws)
+  "Return WS's composer's completable workspaces, as (NAME . REPOSITORIES).
+One element per mention target of WS (`agent-repl-host-mention-targets'),
+REPOSITORIES the one repository the daemon stated for it, or nil."
+  (mapcar (lambda (target)
+            (let ((repository (plist-get target :repository)))
+              (cons (plist-get target :name) (and repository (list repository)))))
+          (agent-repl-host-mention-targets ws)))
+
 (defun agent-repl-workspace-completion-at-point ()
-  "Complete the name word at point against the open workspaces' names.
+  "Complete the name word at point against the composer's mention targets.
 The composer's `completion-at-point-functions' entry.  Answers nil when
-point is in no name word, or the word begins a part of no open workspace's
-name.  Each name is annotated with its repository
+point is in no name word, or the word begins a part of no target's name.  Each name is annotated with its repository
 \(`agent-repl--workspace-completion-annotation').  Deliberately unlogged:
 completion runs per keystroke."
   (when-let* ((bounds (agent-repl--workspace-completion-bounds))
               (ws (agent-repl--buffer-owner (current-buffer)))
               (word (buffer-substring-no-properties (car bounds) (cdr bounds)))
-              (workspaces (agent-repl-roster-open-workspaces))
+              (workspaces (agent-repl--workspace-completion-workspaces ws))
               (names (agent-repl--workspace-completion-matches
                       word (mapcar #'car workspaces))))
     (agent-repl-completion-match-capf
@@ -158,7 +167,7 @@ completion runs per keystroke."
      (agent-repl--workspace-completion-annotation
       (mapcar (lambda (name) (assoc name workspaces)) names)))))
 
-;;;; ---- Marking open workspaces' names ----
+;;;; ---- Marking mentionable workspaces' names ----
 
 (defun agent-repl--workspace-completion-known-word (start end names)
   "Return (START . END'), the name word START to END naming one of NAMES, or nil.
@@ -187,12 +196,16 @@ word is never one."
         found))))
 
 (defun agent-repl--workspace-completion-mark (beg end)
-  "Mark every open workspace's name on the lines BEG to END, and unmark the rest.
-Marked through `agent-repl-composer-mark-lines', in the face known slash
-commands wear."
+  "Mark every mention target's name on the lines BEG to END, and unmark the rest.
+The targets are the current buffer's owner's (`agent-repl-host-mention-targets'),
+none when the buffer has no owner.  Marked through
+`agent-repl-composer-mark-lines', in the face known slash commands wear."
   (agent-repl-composer-mark-lines
    beg end 'agent-repl-workspace-completion-known
-   (agent-repl--workspace-completion-next-known (agent-repl-roster-open-workspace-names))))
+   (agent-repl--workspace-completion-next-known
+    (when-let* ((ws (agent-repl--buffer-owner (current-buffer))))
+      (mapcar (lambda (target) (plist-get target :name))
+              (agent-repl-host-mention-targets ws))))))
 
 (defun agent-repl--workspace-completion-on-change (beg end _len)
   "Re-mark the composer's lines BEG to END after an edit.
@@ -200,15 +213,16 @@ The composer's `after-change-functions' entry; unlogged, as it runs per
 keystroke."
   (agent-repl--workspace-completion-mark beg end))
 
-(defun agent-repl--workspace-completion-mark-composers (_roster)
-  "Re-mark every composer whole, as a roster push may open or close a workspace.
-Installed on `agent-repl-roster-update-functions'; unlogged, as the roster
+(defun agent-repl--workspace-completion-mark-composers (ws)
+  "Re-mark WS's composers whole, as WS's mention targets changed.
+Installed on `agent-repl-host-mention-targets-functions'; unlogged, as the
 push it follows is logged."
   (dolist (buf (agent-repl--input-composers))
-    (with-current-buffer buf
-      (agent-repl--workspace-completion-mark (point-min) (point-max)))))
+    (when (equal (agent-repl--buffer-owner buf) ws)
+      (with-current-buffer buf
+        (agent-repl--workspace-completion-mark (point-min) (point-max))))))
 
-(add-hook 'agent-repl-roster-update-functions #'agent-repl--workspace-completion-mark-composers)
+(add-hook 'agent-repl-host-mention-targets-functions #'agent-repl--workspace-completion-mark-composers)
 
 (provide 'workspace-completion)
 ;;; workspace-completion.el ends here

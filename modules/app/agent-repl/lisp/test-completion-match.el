@@ -176,8 +176,9 @@
     (let ((callers nil))
       (cl-letf (((symbol-function 'agent-repl-completion-match-capf)
                  (lambda (&rest _) (push 'called callers) 'answer))
-                ((symbol-function 'agent-repl-roster-open-workspaces)
-                 (lambda () '(("agent-repl-workspaces" "doom")))))
+                ((symbol-function 'agent-repl-host-mention-targets)
+                 (lambda (_ws) '((:name "agent-repl-workspaces" :workspace (:id "w" :dir "/w")
+                                  :repository "doom")))))
         ;; Act
         (insert "/work")
         (let ((command (agent-repl-command-completion-at-point)))

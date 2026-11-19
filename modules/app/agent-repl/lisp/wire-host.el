@@ -715,6 +715,59 @@ without their slash, WORKSPACES as the roster names them."
      (list :commands (agent-repl-wire--decode-repeated-string message 'commands object)
            :workspaces (agent-repl-wire--decode-repeated-string message 'workspaces object)))))
 
+;;;; ---- The mention targets push ----
+
+(defun agent-repl-wire-decode-workspace-mention-repository (value)
+  "Decode VALUE as `WorkspaceMentionRepository', its never-empty name string."
+  (let ((object (agent-repl-wire--object "WorkspaceMentionRepository" value)))
+    (agent-repl-wire--check-keys "WorkspaceMentionRepository" object '(name))
+    (agent-repl-wire--decoded
+     "WorkspaceMentionRepository"
+     (agent-repl-wire--decode-required-string "WorkspaceMentionRepository" 'name object))))
+
+(defun agent-repl-wire-decode-workspace-mention-name (value)
+  "Decode VALUE as `WorkspaceMentionName', its never-empty text string."
+  (let ((object (agent-repl-wire--object "WorkspaceMentionName" value)))
+    (agent-repl-wire--check-keys "WorkspaceMentionName" object '(text))
+    (agent-repl-wire--decoded
+     "WorkspaceMentionName"
+     (agent-repl-wire--decode-required-string "WorkspaceMentionName" 'text object))))
+
+(defun agent-repl-wire-decode-workspace-mention-target (value)
+  "Decode VALUE as `WorkspaceMentionTarget', a plist (:name :workspace :repository).
+NAME is the name string, WORKSPACE its `WorkspaceRef' plist, and REPOSITORY
+the repository's name string, or nil when the daemon stated none."
+  (let* ((message "WorkspaceMentionTarget")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(name workspace repository))
+    (agent-repl-wire--decoded
+     message
+     (list :name (agent-repl-wire--decode-message
+                  message 'name object #'agent-repl-wire-decode-workspace-mention-name)
+           :workspace (agent-repl-wire--decode-message
+                       message 'workspace object #'agent-repl-wire-decode-workspace-ref)
+           :repository (agent-repl-wire--decode-optional-message
+                        message 'repository object
+                        #'agent-repl-wire-decode-workspace-mention-repository)))))
+
+(defun agent-repl-wire-decode-workspace-mention-targets (value)
+  "Decode VALUE as `WorkspaceMentionTargets', a list of target plists.
+Each is `agent-repl-wire-decode-workspace-mention-target''s, in the daemon's
+order.  A name served twice is a contract breach: the daemon serves
+distinct names only."
+  (let* ((message "WorkspaceMentionTargets")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys message object '(targets))
+    (let ((targets (agent-repl-wire--decode-repeated
+                    message 'targets object #'agent-repl-wire-decode-workspace-mention-target))
+          (seen (make-hash-table :test 'equal)))
+      (dolist (target targets)
+        (let ((name (plist-get target :name)))
+          (when (gethash name seen)
+            (agent-repl-wire--fail message 'targets (format "the name %S is served twice" name)))
+          (puthash name t seen)))
+      (agent-repl-wire--decoded message targets))))
+
 ;;;; ---- The selection push ----
 
 (defun agent-repl-wire-decode-host-workspace-selection (value)
@@ -986,6 +1039,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `mentions' push arm VALUE as its `(:commands :workspaces)' plist."
   (agent-repl-wire-decode-host-workspace-mentions value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-mention-targets (value)
+  "Decode the `mention_targets' push arm VALUE as its list of target plists."
+  (agent-repl-wire-decode-workspace-mention-targets value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-selection (value)
   "Decode the `selection' push arm VALUE as its `(:kind KIND)' plist."
   (agent-repl-wire-decode-host-workspace-selection value))
@@ -1053,6 +1110,8 @@ Returns a plist (:command STRING)."
                           agent-repl-wire-decode-watch-host-workspace-response-notification-clicked)
      (selection :selection agent-repl-wire-decode-watch-host-workspace-response-selection)
      (mentions :mentions agent-repl-wire-decode-watch-host-workspace-response-mentions)
+     (mentionTargets :mention-targets
+                     agent-repl-wire-decode-watch-host-workspace-response-mention-targets)
      (evaluate :evaluate agent-repl-wire-decode-watch-host-workspace-response-evaluate)
      (finalResponseClicked :final-response-clicked
                            agent-repl-wire-decode-watch-host-workspace-response-final-response-clicked)
@@ -1076,7 +1135,7 @@ Returns a plist (:command STRING)."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending notificationClicked selection evaluate
        finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn responseTextHighlighted responseQuestion mentions))
+       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

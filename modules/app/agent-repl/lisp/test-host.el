@@ -2195,6 +2195,70 @@ answers `:unknown' and records the breach rather than opening."
     ;; Act / Assert
     (should-error (agent-repl-host-mentions "ws-1" 'skill))))
 
+;;;; ---- The mention targets ----
+
+(defconst agent-repl-test-host--targets
+  '((:name "beta" :workspace (:id "b" :dir "/w/b") :repository "doom")
+    (:name "alpha" :workspace (:id "a" :dir "/w/a") :repository nil))
+  "Two decoded mention targets, as the host watch's push carries them.")
+
+(ert-deftest agent-repl-test-host-mention-targets-are-nil-before-the-first-push ()
+  "A workspace whose host watch pushed no targets completes no name."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act / Assert
+    (should-not (agent-repl-host-mention-targets "ws-1"))))
+
+(ert-deftest agent-repl-test-host-mention-targets-push-is-read-back ()
+  "The pushed targets are answered as pushed, in order."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mention-targets :value agent-repl-test-host--targets))
+    ;; Assert
+    (should (equal (agent-repl-host-mention-targets "ws-1") agent-repl-test-host--targets))))
+
+(ert-deftest agent-repl-test-host-mention-targets-push-whole-replaces-the-set ()
+  "A later push replaces the set whole, an empty one included."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mention-targets :value agent-repl-test-host--targets))
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :mention-targets :value nil))
+    ;; Assert
+    (should-not (agent-repl-host-mention-targets "ws-1"))))
+
+(ert-deftest agent-repl-test-host-mention-targets-push-runs-the-hook-with-the-workspace ()
+  "The push runs `agent-repl-host-mention-targets-functions' with its workspace, once recorded."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let* ((seen nil)
+           (agent-repl-host-mention-targets-functions
+            (list (lambda (ws) (push (list ws (agent-repl-host-mention-targets ws)) seen)))))
+      ;; Act
+      (agent-repl-test-host--push
+       "ws-1" (list :arm :mention-targets :value agent-repl-test-host--targets))
+      ;; Assert
+      (should (equal seen (list (list "ws-1" agent-repl-test-host--targets)))))))
+
+(ert-deftest agent-repl-test-host-mention-targets-push-is-logged ()
+  "The push is recorded with how many targets it carried."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push
+     "ws-1" (list :arm :mention-targets :value agent-repl-test-host--targets))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p
+             :log "elisp.host.mention-targets ws=ws-1 targets=2"))))
+
 (ert-deftest agent-repl-test-host-a-push-after-the-workspace-is-forgotten-is-dropped ()
   "A frame that arrives after `agent-repl-host-forget' re-creates nothing."
   (agent-repl-test-host--with-harness
