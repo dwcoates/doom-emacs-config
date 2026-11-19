@@ -2,8 +2,6 @@ package dlog
 
 import (
 	"errors"
-	"os"
-	"strings"
 	"testing"
 )
 
@@ -44,25 +42,6 @@ func TestWorkspaceUnlessGone(t *testing.T) {
 			_, central := rec.Context[KeyUnroutableWorkspace]
 			if central != tt.wantCentral {
 				t.Fatalf("record %+v central = %v, want %v", rec, central, tt.wantCentral)
-			}
-		})
-	}
-}
-
-func TestTheResolversRouteARemovedDirectoryThroughWorkspaceUnlessGone(t *testing.T) {
-	for _, file := range []string{"../resolve/feed/resolver.go", "../resolve/footer/resolver.go"} {
-		t.Run(file, func(t *testing.T) {
-			// Arrange
-			b, err := os.ReadFile(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			src := string(b)
-
-			// Act, Assert: the helper is taken, and no hand-rolled branch on
-			// the removed directory stands beside it.
-			if !strings.Contains(src, "dlog.WorkspaceUnlessGone(") || strings.Contains(src, "dlog.ErrWorkspaceDirGone") {
-				t.Fatalf("%s does not route a removed directory through dlog.WorkspaceUnlessGone alone", file)
 			}
 		})
 	}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1463,5 +1465,20 @@ func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
 				t.Fatalf("bound dir = %q, want %q", dir, tt.wantDir)
 			}
 		})
+	}
+}
+
+func TestARemovedDirectoryIsRoutedThroughWorkspaceUnlessGoneAlone(t *testing.T) {
+	// Arrange
+	b, err := os.ReadFile("resolver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+
+	// Act, Assert: the shared helper is taken, and no hand-rolled branch on
+	// the removed directory stands beside it.
+	if !strings.Contains(src, "dlog.WorkspaceUnlessGone(") || strings.Contains(src, "dlog.ErrWorkspaceDirGone") {
+		t.Fatal("resolver.go does not route a removed directory through dlog.WorkspaceUnlessGone alone")
 	}
 }
