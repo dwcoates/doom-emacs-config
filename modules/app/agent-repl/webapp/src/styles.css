@@ -1868,6 +1868,14 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
   #ws-sidebar .row .name.breathes.reviving > .name-ink::after {
     animation: ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite, ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
   }
+  /* A name that revives while the view dwell counts runs both: the shimmer
+     moves the copies, the dwell crossfades them. */
+  #ws-sidebar .row .name.viewing.reviving > .name-ink::before {
+    animation: ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite, name-view-dwell-out var(--name-view-dwell) linear var(--name-view-dwell-delay, 0s) 1 both;
+  }
+  #ws-sidebar .row .name.viewing.reviving > .name-ink::after {
+    animation: ws-revive-counter var(--ws-revive-cycle) ease-in-out infinite, name-view-dwell-in var(--name-view-dwell) linear var(--name-view-dwell-delay, 0s) 1 both;
+  }
 }
 @keyframes ws-revive-shimmer {
   from { transform: translateX(-60%); }
@@ -7161,7 +7169,8 @@ bubble-body.bubble-body { display: block; }
    and its text for everything that reads it. The copies draw the strike line
    themselves, since a decoration never reaches an absolutely positioned box. */
 #ws-sidebar .row .name.breathes,
-#ws-sidebar .row .name.reviving {
+#ws-sidebar .row .name.reviving,
+#ws-sidebar .row .name.viewing {
   position: relative;
   -webkit-text-fill-color: transparent;
   text-decoration-color: transparent;
@@ -7206,6 +7215,33 @@ bubble-body.bubble-body { display: block; }
   animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
 }
 #ws-sidebar .row .name.tinted.breathes > .name-ink::after { color: var(--name-bright); }
+/* THE NAME RECEDES OVER THE VIEW DWELL (owner request, 2026-11-19;
+   src/sidebar/view-dwell.ts): the copy in the name's own colour, any
+   ended-turn fade included, fades out as the copy in the viewed grey fades
+   in, once, linearly, over `--name-view-dwell`, with the delay minus the time
+   already dwelt. The two are ADDED in the ink box's own group (plus-lighter)
+   with opacities that sum to one, as the breath's are, so the name never
+   reads bolder mid-fade. Both copies hold their last frame, so the name
+   rests at the grey until the viewed marker's push redraws it there. Only a
+   turn-end row dwells, and no turn-end row breathes, so the two never share
+   the copies. */
+#ws-sidebar .row .name.viewing > .name-ink::before {
+  animation: name-view-dwell-out var(--name-view-dwell) linear var(--name-view-dwell-delay, 0s) 1 both;
+}
+#ws-sidebar .row .name.viewing > .name-ink::after {
+  display: block;
+  color: var(--muted);
+  mix-blend-mode: plus-lighter;
+  animation: name-view-dwell-in var(--name-view-dwell) linear var(--name-view-dwell-delay, 0s) 1 both;
+}
+@keyframes name-view-dwell-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes name-view-dwell-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
 
 /* THE ATTENTION MARKER, on the ONE cadence frontend.v1.RosterRowAttention
    specifies: two blinks of 500 ms on / 500 ms off, then steady. The phases are
