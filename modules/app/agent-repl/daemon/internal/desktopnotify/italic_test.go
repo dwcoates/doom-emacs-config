@@ -27,3 +27,30 @@ func TestItalic(t *testing.T) {
 		})
 	}
 }
+
+func TestPlain(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{name: "italic capitals folded", input: "𝘈𝘡", want: "AZ"},
+		{name: "italic small letters folded", input: "𝘢𝘻", want: "az"},
+		{name: "ascii kept", input: "Fixed 2 bugs.", want: "Fixed 2 bugs."},
+		{name: "non-ascii kept", input: "é✅", want: "é✅"},
+		{name: "the letter past the small block kept", input: string(sansItalicSmallA + 26), want: string(sansItalicSmallA + 26)},
+		{name: "empty", input: "", want: ""},
+		{name: "inverts Italic", input: Italic("Fixed 2 bugs, Zed."), want: "Fixed 2 bugs, Zed."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := Plain(tc.input)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Plain(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}

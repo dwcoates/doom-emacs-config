@@ -26,3 +26,21 @@ const (
 	sansItalicCapitalA = '\U0001D608'
 	sansItalicSmallA   = '\U0001D622'
 )
+
+// Plain answers s with every letter Italic slanted folded back to ASCII, so a
+// banner's text read aloud is its words and not the names of mathematical
+// symbols. Every other character is left as it is.
+func Plain(s string) string {
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch {
+		case r >= sansItalicCapitalA && r < sansItalicCapitalA+26:
+			out = append(out, 'A'+(r-sansItalicCapitalA))
+		case r >= sansItalicSmallA && r < sansItalicSmallA+26:
+			out = append(out, 'a'+(r-sansItalicSmallA))
+		default:
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
