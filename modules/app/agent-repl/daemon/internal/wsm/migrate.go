@@ -319,7 +319,10 @@ var migrations = []migration{
 	{To: 168, Name: "deploy_mediators", Kind: MigrationAdditive, DDL: deployMediatorsDDL},
 	{To: 169, Name: "retired_deploy_checks", Kind: MigrationContract, DDL: retiredDeployChecksDDL},
 	{To: 170, Name: "unheld_settled_rounds", Kind: MigrationContract, DDL: unheldSettledRoundsDDL},
-	{To: 171, Name: "deploy_ignored_records", Kind: MigrationContract, DDL: ignoredRecordsDDL},
+	// ADDITIVE, NEVER A CONTRACT: the build reads this table from its first
+	// deploy check, which runs while an older daemon may still serve, and a
+	// contract step waits for that daemon to end.
+	{To: 171, Name: "deploy_ignored_records", Kind: MigrationAdditive, DDL: ignoredRecordsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
