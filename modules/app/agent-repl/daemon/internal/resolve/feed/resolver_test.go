@@ -649,6 +649,36 @@ func TestUnresolvableWorkspaceIsRecordedAsAnInvariantViolation(t *testing.T) {
 	}
 }
 
+func TestAWorkspaceWhoseDirectoryIsGoneLogsCentrallyWithNoError(t *testing.T) {
+	// Arrange: a closed workspace's worktree was removed.
+	log := dlog.NewTestLogger()
+	r, err := newResolver(Deps{
+		Log:          &fakeSurfaces{log: log, dirErr: fmt.Errorf("resolve workspace: %w", dlog.ErrWorkspaceDirGone)},
+		WorkspaceDir: func(ids.WorkspaceID) (string, error) { return "/tmp/gone", nil },
+		Encode:       testEncode,
+		EncodeFeed:   testEncodeFeed,
+	})
+	if err != nil {
+		t.Fatalf("newResolver: %v", err)
+	}
+
+	// Act.
+	r.mu.Lock()
+	got := r.logger(testWorkspace)
+	r.mu.Unlock()
+	got.Info("probe", "a feed record", nil)
+
+	// Assert: no ERROR, and the record still reaches the central sink.
+	for _, record := range log.Records() {
+		if record.Level == "error" {
+			t.Fatalf("records = %+v, want no ERROR for a removed directory", log.Records())
+		}
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "probe"}); !ok {
+		t.Fatalf("records = %+v, want the feed record kept", log.Records())
+	}
+}
+
 // TestAWorkspaceLookupFailureIsClassifiedByItsCause separates the two things a
 // failed workspace lookup can mean. The lookup runs under the DAEMON'S OWN
 // context, so a cancelled read is the daemon shutting down -- a fact, recorded

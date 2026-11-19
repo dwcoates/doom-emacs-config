@@ -742,6 +742,17 @@ func (r *resolver) logger(ws ids.WorkspaceID) dlog.Logger {
 		return global
 	}
 	l, err := r.deps.Log.Workspace(dir)
+	if errors.Is(err, dlog.ErrWorkspaceDirGone) {
+		// A WORKSPACE WHOSE DIRECTORY IS GONE IS ORDINARY, not a broken sink:
+		// a merged or nuked workspace keeps its row with its worktree removed,
+		// and its feed is still rendered (2026-11-18: a closed workspace's
+		// boot restore recorded an ERROR that the footer then teed onto a
+		// strip it never bound). Its records go to the central sink, naming
+		// it (dlog.Surfaces.WorkspaceOrCentral).
+		l = r.deps.Log.WorkspaceOrCentral(dir).With(dlog.Context{"workspace": string(ws)})
+		r.loggers[ws] = l
+		return l
+	}
 	if err != nil {
 		global.Error("daemon.feed.workspace_sink_unavailable",
 			"the feed resolver could not open a workspace's log sink; its records are unroutable",
