@@ -107,7 +107,7 @@ import { FINAL_RESPONSE_CLASS } from "../rows/turn-ended.js";
 import { easeIntoLook, readBubbleLook } from "../../bubble/collapse-motion.js";
 import { drawOutcomeCard } from "../marker.js";
 import { linkAnswers } from "../entries.js";
-import { linkWorkspaceMentions } from "../workspace-mentions.js";
+import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
 import { bubbleCopyControl, reserveCopyRoom } from "../../bubble/copy-room.js";
 import { questionControl } from "../response-question.js";
 import { readResponseUsage, setResponseUsage } from "../response-usage.js";
@@ -278,10 +278,11 @@ export function drawFeedResponse(u: FeedResponse, rc: RowContext): HTMLElement {
   // A RESPONSE THAT CAN BE COPIED CAN BE ASKED ABOUT: its question control
   // sits just left of the copy control (response-question.ts).
   const question = copy === undefined ? undefined : questionControl(rowId);
-  const prose = markdownSlot(RESPONSE_PROSE_CLASS, served, (rendered) => {
+  // THE PROSE IS A MENTION SCOPE: a workspace's name anywhere in it switches
+  // to it (workspace-mentions.ts).
+  const prose = markdownSlot(`${RESPONSE_PROSE_CLASS} ${MENTION_TEXT_CLASS}`, served, (rendered) => {
     if (answers.length > 0) linkAnswers(rendered, answers);
-    // A WORKSPACE'S NAME IN THE TREE switches to it (workspace-mentions.ts).
-    linkWorkspaceMentions(rendered);
+    linkWorkspaceMentionsInText(rendered);
     markComposerEntry(rendered, rowId);
     markRevealedNode(rendered, rowId);
   });

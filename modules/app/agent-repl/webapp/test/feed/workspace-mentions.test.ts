@@ -20,7 +20,7 @@ import {
   WORKSPACE_MENTION_CLASS,
   applyMentionTargets,
   installWorkspaceMentionClicks,
-  linkWorkspaceMentions,
+  linkWorkspaceMentionsInText,
   readMentionTargets,
   resetMentionTargets,
   watchWorkspaceMentions,
@@ -42,12 +42,20 @@ function targets(...names: string[]): WorkspaceMentionTargets {
   });
 }
 
-/** A drawn tree whose one line's text is BODY (HTML), under a rail and a label. */
-function tree(body: string): HTMLElement {
+/** A response's prose, a mention scope, holding the rendered HTML BODY. */
+function responseProse(body: string): HTMLElement {
   const root = document.createElement("div");
-  root.innerHTML = `<div class="mp-tree"><div class="mp-line"><span class="mp-connectors">├── </span><span class="mp-label">1</span> ${body}</div></div>`;
+  root.className = `response-prose ${MENTION_TEXT_CLASS}`;
+  root.innerHTML = body;
   document.body.append(root);
   return root;
+}
+
+/** A response's prose holding one tree whose one line's text is BODY (HTML), under a rail and a label. */
+function tree(body: string): HTMLElement {
+  return responseProse(
+    `<div class="mp-tree"><div class="mp-line"><span class="mp-connectors">├── </span><span class="mp-label">1</span> ${body}</div></div>`,
+  );
 }
 
 /** Every mention drawn in ROOT, as "text=id". */
@@ -76,7 +84,7 @@ describe("linkWorkspaceMentions", () => {
       applyMentionTargets(targets(...tc.served), () => []);
       const root = tree(tc.body);
       // ACT
-      linkWorkspaceMentions(root);
+      linkWorkspaceMentionsInText(root);
       // ASSERT
       expect(mentions(root)).toEqual(tc.want);
     });
@@ -87,18 +95,7 @@ describe("linkWorkspaceMentions", () => {
     applyMentionTargets(targets("1"), () => []);
     const root = tree("text");
     // ACT
-    linkWorkspaceMentions(root);
-    // ASSERT
-    expect(mentions(root)).toEqual([]);
-  });
-
-  it("never searches prose outside a tree", () => {
-    // ARRANGE
-    applyMentionTargets(targets("alpha"), () => []);
-    const root = document.createElement("div");
-    root.innerHTML = "<p>see <code>alpha</code></p>";
-    // ACT
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     // ASSERT
     expect(mentions(root)).toEqual([]);
   });
@@ -109,7 +106,7 @@ describe("linkWorkspaceMentions", () => {
     const root = tree("see alpha and <code>alpha</code>.");
     const before = root.textContent;
     // ACT
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     // ASSERT
     expect(root.textContent).toBe(before);
   });
@@ -119,11 +116,56 @@ describe("linkWorkspaceMentions", () => {
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("see alpha and <code>alpha</code>");
     // ACT
-    linkWorkspaceMentions(root);
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
+    linkWorkspaceMentionsInText(root);
     // ASSERT
     expect(mentions(root)).toEqual(["alpha=ws-alpha", "alpha=ws-alpha"]);
     expect(root.querySelectorAll(`.${WORKSPACE_MENTION_CLASS} .${WORKSPACE_MENTION_CLASS}`)).toHaveLength(0);
+  });
+});
+
+describe("linkWorkspaceMentionsInText in a response's prose outside any tree", () => {
+  const cases: Array<{ name: string; body: string; want: string[] }> = [
+    { name: "links a code span in a paragraph", body: "<p>see <code>alpha</code> now</p>", want: ["alpha=ws-alpha"] },
+    { name: "links a name in plain text in a paragraph", body: "<p>see alpha now</p>", want: ["alpha=ws-alpha"] },
+    { name: "links a name in bold text", body: "<p><strong>alpha</strong> is done</p>", want: ["alpha=ws-alpha"] },
+    { name: "links a name in a table cell", body: "<table><tbody><tr><td><code>alpha</code> (#12)</td></tr></tbody></table>", want: ["alpha=ws-alpha"] },
+    { name: "links a name in a list item", body: "<ul><li>alpha opened a pull request</li></ul>", want: ["alpha=ws-alpha"] },
+    { name: "never links inside a fenced code block", body: "<pre><code>alpha</code></pre>", want: [] },
+    { name: "never links inside a link", body: '<p><a href="https://x.test"><code>alpha</code></a></p>', want: [] },
+  ];
+  for (const tc of cases) {
+    it(tc.name, () => {
+      // ARRANGE
+      applyMentionTargets(targets("alpha"), () => []);
+      const root = responseProse(tc.body);
+      // ACT
+      linkWorkspaceMentionsInText(root);
+      // ASSERT
+      expect(mentions(root)).toEqual(tc.want);
+    });
+  }
+
+  it("strips the code markers from a linked code span", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const root = responseProse("<p>see <code>alpha</code></p>");
+    // ACT
+    linkWorkspaceMentionsInText(root);
+    // ASSERT
+    expect(root.querySelectorAll(`.${WORKSPACE_MENTION_CLASS} code, code`)).toHaveLength(0);
+    expect(root.textContent).toBe("see alpha");
+  });
+
+  it("is re-linked by a push like any other mention scope", () => {
+    // ARRANGE
+    applyMentionTargets(targets("alpha"), () => []);
+    const root = responseProse("<p>alpha and beta</p>");
+    linkWorkspaceMentionsInText(root);
+    // ACT
+    applyMentionTargets(targets("beta"), () => [root]);
+    // ASSERT
+    expect(mentions(root)).toEqual(["beta=ws-beta"]);
   });
 });
 
@@ -142,7 +184,7 @@ describe("a whole-text slot (a prompt's text)", () => {
     applyMentionTargets(targets("alpha"), () => []);
     const slot = promptText("see alpha now");
     // ACT
-    linkWorkspaceMentions(slot);
+    linkWorkspaceMentionsInText(slot);
     // ASSERT
     expect(mentions(slot)).toEqual(["alpha=ws-alpha"]);
   });
@@ -152,7 +194,7 @@ describe("a whole-text slot (a prompt's text)", () => {
     applyMentionTargets(targets("alpha"), () => []);
     const slot = promptText("see <code>alpha</code>");
     // ACT
-    linkWorkspaceMentions(slot);
+    linkWorkspaceMentionsInText(slot);
     // ASSERT
     expect(mentions(slot)).toEqual(["alpha=ws-alpha"]);
   });
@@ -162,7 +204,7 @@ describe("a whole-text slot (a prompt's text)", () => {
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("see <code>alpha</code>");
     // ACT
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     // ASSERT
     expect(mentions(root)).toEqual(["alpha=ws-alpha"]);
     expect(root.querySelectorAll(`.${WORKSPACE_MENTION_CLASS} code`)).toHaveLength(0);
@@ -173,7 +215,7 @@ describe("a whole-text slot (a prompt's text)", () => {
     applyMentionTargets(targets("alpha"), () => []);
     const slot = promptText("see alpha-beta");
     // ACT
-    linkWorkspaceMentions(slot);
+    linkWorkspaceMentionsInText(slot);
     // ASSERT
     expect(mentions(slot)).toEqual([]);
   });
@@ -182,7 +224,7 @@ describe("a whole-text slot (a prompt's text)", () => {
     // ARRANGE
     applyMentionTargets(targets("alpha"), () => []);
     const slot = promptText("alpha and beta");
-    linkWorkspaceMentions(slot);
+    linkWorkspaceMentionsInText(slot);
     // ACT
     applyMentionTargets(targets("beta"), () => [slot]);
     // ASSERT
@@ -196,7 +238,7 @@ describe("applyMentionTargets", () => {
     // ARRANGE
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("alpha and <code>beta</code>");
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     // ACT
     applyMentionTargets(targets("beta"), () => [root]);
     // ASSERT
@@ -237,7 +279,7 @@ describe("readMentionTargets", () => {
     const root = tree("alpha");
     // ACT
     expect(() => applyMentionTargets(targets("a", "a"), () => [root])).toThrow(MalformedView);
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     // ASSERT
     expect(mentions(root)).toEqual(["alpha=ws-alpha"]);
   });
@@ -265,7 +307,7 @@ describe("installWorkspaceMentionClicks", () => {
     // ARRANGE
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("<code>alpha</code>");
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     const { calls, selected, uninstall } = page(root);
     // ACT
     root.querySelector<HTMLElement>(`.${WORKSPACE_MENTION_CLASS}`)?.click();
@@ -281,7 +323,7 @@ describe("installWorkspaceMentionClicks", () => {
     // ARRANGE
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("alpha");
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     const { uninstall } = page(root);
     const beneath = vi.fn();
     root.querySelector(".mp-line")?.addEventListener("click", beneath);
@@ -298,7 +340,7 @@ describe("installWorkspaceMentionClicks", () => {
     // ARRANGE
     applyMentionTargets(targets("alpha"), () => []);
     const root = tree("alpha");
-    linkWorkspaceMentions(root);
+    linkWorkspaceMentionsInText(root);
     const { calls, uninstall } = page(root);
     // ACT
     const event = new MouseEvent("click", { bubbles: true, cancelable: true, button: 0, metaKey: true });
