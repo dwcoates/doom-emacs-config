@@ -482,6 +482,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
                       (list "{\"loadPageRequested\":{}}" :load-page-requested)
+                      (list "{\"linkFollowed\":{}}" :link-followed)
                       (list "{\"composeEntry\":{\"label\":\"3.1\"}}" :compose-entry)
                       (list "{\"chatTextHighlighted\":{}}" :chat-text-highlighted)
                       (list "{\"responseTextHighlighted\":{}}" :response-text-highlighted)
@@ -914,6 +915,22 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-host-workspace-select-requested
                   "{\"workspace\":\"w\"}")
                  '("HostWorkspaceSelectRequested" workspace "unknown field"))))
+
+;;;; ---- The link-followed push ----
+
+(ert-deftest agent-repl-test-wire-host-link-followed-decodes-empty ()
+  "The link-followed push is empty: presence is the fact, and the stream names the workspace."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-host-workspace-response
+                  "{\"linkFollowed\":{}}")
+                 '(:arm :link-followed :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-link-followed-refuses-a-field ()
+  "A field on the empty link-followed message is refused, not ignored."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-host-workspace-link-followed
+                  "{\"url\":\"u\"}")
+                 '("HostWorkspaceLinkFollowed" url "unknown field"))))
 
 ;;;; ---- The load button push ----
 
@@ -1879,7 +1896,7 @@ opens are OpenTabs streams."
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
-                             "responseQuestion" "mentions" "mentionTargets")
+                             "responseQuestion" "mentions" "mentionTargets" "linkFollowed")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

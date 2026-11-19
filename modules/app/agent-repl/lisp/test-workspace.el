@@ -2114,6 +2114,141 @@ transiently activated workspace while eager-open is in progress."
         (should (equal records
                        '(("c" . "elisp.workspace.visit-dropped ws=a dwell=2.5s min=10s reason=picker"))))))))
 
+;;;; ---- Tests: a link followed in a page keeps its visit ----
+
+(ert-deftest agent-repl-test-end-visit-remembers-a-dropped-visit-as-the-last-ended ()
+  "A dropped visit is remembered as the last ended, unrecorded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq agent-repl-test--clock 101.0)
+        ;; Act
+        (agent-repl--end-visit "c" "activation")
+        ;; Assert
+        (should (equal agent-repl--last-ended-visit
+                       '(:visit (:name "a" :began 100.0 :ahead nil) :recorded nil)))))))
+
+(ert-deftest agent-repl-test-end-visit-remembers-a-recorded-visit-as-the-last-ended ()
+  "A recorded visit is remembered as the last ended, recorded."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 0.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (setq agent-repl-test--clock 110.0)
+        ;; Act
+        (agent-repl--end-visit "c" "activation")
+        ;; Assert
+        (should (plist-get agent-repl--last-ended-visit :recorded))))))
+
+(ert-deftest agent-repl-test-keep-visit-records-the-standing-visit-at-once ()
+  "A link followed in the workspace shown records its brief standing visit now."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 101.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history '("b"))
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        ;; Act
+        (agent-repl--keep-visit "a")
+        ;; Assert
+        (should (equal agent-repl--workspace-history '("a" "b")))
+        (should (equal (plist-get agent-repl--current-visit :name) "a"))))))
+
+(ert-deftest agent-repl-test-keep-visit-logs-the-standing-visit-it-records ()
+  "The visit a followed link records is logged with reason=link-followed."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 101.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--recency-walk-landing nil)
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil))
+            (records nil))
+        (cl-letf (((symbol-function 'agent-repl--info)
+                   (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+          ;; Act
+          (agent-repl--keep-visit "a"))
+        ;; Assert
+        (should (equal records
+                       '(("a" . "elisp.workspace.visit-recorded ws=a dwell=1.0s reason=link-followed"))))))))
+
+(ert-deftest agent-repl-test-keep-visit-ends-a-recency-walk-standing-on-it ()
+  "A link followed on a recency walk's landing ends the walk there."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-clock 101.0
+      ;; Arrange
+      (let ((agent-repl--workspace-history nil)
+            (agent-repl--recency-walk-landing "a")
+            (agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
+        (cl-letf (((symbol-function 'agent-repl--stamp-workspace-viewed) #'ignore))
+          ;; Act
+          (agent-repl--keep-visit "a"))
+        ;; Assert
+        (should-not agent-repl--recency-walk-landing)))))
+
+(ert-deftest agent-repl-test-keep-visit-records-the-dropped-visit-that-ended-last ()
+  "A link's news arriving after its switch records the visit it was followed in,
+behind the visit the switch began."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("b"))
+          (agent-repl--current-visit (list :name "c" :began 101.0 :ahead nil))
+          (agent-repl--last-ended-visit
+           (list :visit (list :name "a" :began 100.0 :ahead nil) :recorded nil)))
+      ;; Act
+      (cl-letf (((symbol-function 'agent-repl--now) (lambda () 102.0)))
+        (agent-repl--keep-visit "a"))
+      ;; Assert
+      (should (equal (agent-repl--selection-history) '("c" "a" "b")))
+      (should (plist-get agent-repl--last-ended-visit :recorded)))))
+
+(ert-deftest agent-repl-test-keep-visit-records-the-ended-visit-once ()
+  "A visit that ended recorded is not recorded again by a link's late news."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("b" "a"))
+          (agent-repl--current-visit nil)
+          (agent-repl--last-ended-visit
+           (list :visit (list :name "a" :began 100.0 :ahead nil) :recorded t)))
+      ;; Act
+      (agent-repl--keep-visit "a")
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("b" "a"))))))
+
+(ert-deftest agent-repl-test-keep-visit-with-no-visit-to-keep-changes-nothing ()
+  "A workspace neither shown nor left last has no visit to keep, which is logged."
+  (agent-repl-test--with-clean-state
+    ;; Arrange
+    (let ((agent-repl--workspace-history '("b"))
+          (agent-repl--current-visit (list :name "c" :began 101.0 :ahead nil))
+          (agent-repl--last-ended-visit
+           (list :visit (list :name "d" :began 100.0 :ahead nil) :recorded nil))
+          (records nil))
+      (cl-letf (((symbol-function 'agent-repl--info)
+                 (lambda (ws fmt &rest args) (push (cons ws (apply #'format fmt args)) records))))
+        ;; Act
+        (agent-repl--keep-visit "a"))
+      ;; Assert
+      (should (equal agent-repl--workspace-history '("b")))
+      (should (equal records
+                     '(("a" . "elisp.workspace.visit-kept ws=a visit=none current=c last-ended=d")))))))
+
+(ert-deftest agent-repl-test-ws-rename-state-renames-the-last-ended-visit ()
+  "A rename carries the visit that ended last to the new name."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl--ws-put "old" :project-dir "/old/path")
+    (let ((agent-repl--workspace-history nil)
+          (agent-repl--last-ended-visit
+           (list :visit (list :name "old" :began 100.0 :ahead nil) :recorded nil)))
+      ;; Act
+      (agent-repl--ws-rename-state "old" "new" "/new/path")
+      ;; Assert
+      (should (equal agent-repl--last-ended-visit
+                     '(:visit (:name "new" :began 100.0 :ahead nil) :recorded nil))))))
+
 (ert-deftest agent-repl-test-end-visit-without-a-visit-changes-nothing ()
   "With no visit standing, ending one records nothing and logs nothing."
   (agent-repl-test--with-clean-state
@@ -2275,7 +2410,7 @@ transiently activated workspace while eager-open is in progress."
                        '(("c" . "elisp.workspace.visit-recorded ws=a dwell=3.0s reason=why"))))))))
 
 (ert-deftest agent-repl-test-visit-recorders-share-record-visit ()
-  "Both ways a visit is recorded go through `agent-repl--record-visit'."
+  "Every way a visit is recorded goes through `agent-repl--record-visit'."
   (agent-repl-test--with-clean-state
     (agent-repl-test--with-clock 120.0
       (let ((agent-repl--workspace-history nil)
@@ -2287,9 +2422,16 @@ transiently activated workspace while eager-open is in progress."
           (let ((agent-repl--current-visit (list :name "a" :began 100.0 :ahead nil)))
             (agent-repl--end-visit "x" "activation"))
           (let ((agent-repl--current-visit (list :name "b" :began 100.0 :ahead nil)))
-            (agent-repl--note-visit-prompted "b")))
+            (agent-repl--note-visit-prompted "b"))
+          (let ((agent-repl--current-visit (list :name "c" :began 100.0 :ahead nil)))
+            (agent-repl--keep-visit "c"))
+          (let ((agent-repl--current-visit nil)
+                (agent-repl--last-ended-visit
+                 (list :visit (list :name "d" :began 100.0 :ahead nil) :recorded nil)))
+            (agent-repl--keep-visit "d")))
         ;; Assert
-        (should (equal calls '(("b" "prompt") ("a" "activation"))))))))
+        (should (equal calls '(("d" "link-followed-late") ("c" "link-followed")
+                               ("b" "prompt") ("a" "activation"))))))))
 
 (ert-deftest agent-repl-test-clear-recency-walk-clears-stamps-logs-and-returns-the-landing ()
   "Clearing a walk drops its landing, stamps it viewed, logs it, and returns it."
