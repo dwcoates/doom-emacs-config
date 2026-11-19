@@ -135,6 +135,7 @@ func (c condenser) condense(ctx context.Context, period string, material []sourc
 		return nil, nil, &ModelFailedError{Reason: "the brief could not be spliced: " + err.Error()}
 	}
 	resp, err := c.headless.Run(ctx, headless.Request{
+		Kind:      headless.KindInference,
 		Site:      Site,
 		Model:     Model,
 		Format:    headless.FormatJSON,

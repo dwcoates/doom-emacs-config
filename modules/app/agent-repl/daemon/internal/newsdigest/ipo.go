@@ -61,6 +61,7 @@ func (c condenser) ipoOutlook(ctx context.Context, today time.Time, prior *front
 		return nil, &ModelFailedError{Reason: "the IPO outlook's brief could not be spliced: " + err.Error()}
 	}
 	resp, err := c.headless.Run(ctx, headless.Request{
+		Kind:      headless.KindToolCalls,
 		Site:      IpoSite,
 		Model:     Model,
 		Format:    headless.FormatJSON,

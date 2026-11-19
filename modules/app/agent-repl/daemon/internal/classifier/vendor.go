@@ -128,6 +128,7 @@ func spliceBrief(brief prompts.Prompt, values map[string]string) (string, error)
 // for plain text under the classifier's own guard site.
 func (j *vendorJudge) runHeadless(ctx context.Context, question string) (string, error) {
 	resp, err := j.headless.Run(ctx, headless.Request{
+		Kind:    headless.KindInference,
 		Site:    VendorSite,
 		Format:  headless.FormatText,
 		Prompt:  question,

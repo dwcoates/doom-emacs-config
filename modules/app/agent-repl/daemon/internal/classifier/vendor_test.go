@@ -171,3 +171,28 @@ func TestSpliceBriefSurfacesAnUnknownPlaceholder(t *testing.T) {
 		t.Fatal("spliceBrief() = nil error, want the brief's own refusal")
 	}
 }
+
+// recordingRunner is a headless.Runner that keeps the request it was asked.
+type recordingRunner struct{ req headless.Request }
+
+func (r *recordingRunner) Bin() string { return "fake-claude" }
+
+func (r *recordingRunner) Run(_ context.Context, req headless.Request) (headless.Response, error) {
+	r.req = req
+	return headless.Response{Text: TokenHold}, nil
+}
+
+func TestVendorJudgeAsksAsPureInference(t *testing.T) {
+	// Arrange
+	runner := &recordingRunner{}
+	j := newVendorJudge(permissiveGuard(t), runner, "unused")
+	// Act
+	_, err := j.runHeadless(context.Background(), "q")
+	// Assert
+	if err != nil {
+		t.Fatalf("runHeadless: %v", err)
+	}
+	if runner.req.Kind != headless.KindInference || len(runner.req.Tools) != 0 {
+		t.Fatalf("request = %+v, want pure inference", runner.req)
+	}
+}

@@ -137,6 +137,7 @@ func (v *verbs) mintName(ctx context.Context, log dlog.Logger, repoDir, prompt, 
 		log.Debug(opNaming, "the naming prompt", dlog.Context{"prompt": question, "attempt": attempt})
 
 		resp, err := v.deps.Headless.Run(ctx, headless.Request{
+			Kind:      headless.KindInference,
 			Site:      NamingSite,
 			Model:     headless.ModelHaiku,
 			Format:    headless.FormatJSON,

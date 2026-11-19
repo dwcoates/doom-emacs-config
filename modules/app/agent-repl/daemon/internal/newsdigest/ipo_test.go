@@ -126,7 +126,7 @@ func TestIpoOutlookAsksSonnetToSearchTheWebUnderItsSite(t *testing.T) {
 		t.Fatalf("ipoOutlook: %v", err)
 	}
 	req := runner.asked()[0]
-	if req.Site != IpoSite || req.Model != headless.ModelSonnet || req.Format != headless.FormatJSON ||
+	if req.Kind != headless.KindToolCalls || req.Site != IpoSite || req.Model != headless.ModelSonnet || req.Format != headless.FormatJSON ||
 		req.ConfigDir != "/accounts/default" || req.Timeout != DefaultModelTimeout ||
 		len(req.Tools) != 1 || req.Tools[0] != "WebSearch" {
 		t.Fatalf("request = %+v, want Sonnet under %s with WebSearch alone, a JSON envelope, on the default account", req, IpoSite)

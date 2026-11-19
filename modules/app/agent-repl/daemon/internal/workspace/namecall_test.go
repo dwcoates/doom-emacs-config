@@ -135,7 +135,7 @@ func TestCreateAsksTheNamingCallUnderItsOwnGuardSite(t *testing.T) {
 	}
 
 	// Assert.
-	if f.headless.calls[0].Site != NamingSite {
+	if f.headless.calls[0].Site != NamingSite || f.headless.calls[0].Kind != headless.KindInference {
 		t.Fatalf("site = %q, want %q", f.headless.calls[0].Site, NamingSite)
 	}
 }

@@ -95,17 +95,37 @@ type Request struct {
 	Prompt string
 	// Timeout bounds the run. Zero leaves the bound to ctx alone.
 	Timeout time.Duration
-	// Tools are the built-in CLI tools the run may use ("WebSearch"): exactly
-	// these are made available (`--tools`) and pre-approved
-	// (`--allowedTools`), since a headless run has no one to ask. Empty adds
-	// neither flag, so the run keeps the CLI's own tool set, every gated tool
-	// refused.
+	// Kind is what the run may do: KindInference or KindToolCalls. Required:
+	// every headless call states which kind it is, and one that states none
+	// is a caller bug, so Run panics.
+	Kind Kind
+	// Tools are the built-in CLI tools a KindToolCalls run may use
+	// ("WebSearch"): exactly these are made available (`--tools`) and
+	// pre-approved (`--allowedTools`), since a headless run has no one to
+	// ask. A KindToolCalls run names at least one, and a KindInference run
+	// names none; either broken is a caller bug, and Run panics.
 	Tools []string
-	// Plain makes the run bare inference: no tools at all (`--tools ""`) and
-	// an empty system prompt (`--system-prompt ""`), so the model sees only
-	// Prompt. A Plain request naming Tools is a caller bug, and Run panics.
-	Plain bool
 }
+
+// Kind is what a headless run may do.
+//
+// EVERY HEADLESS CALL IS PURE INFERENCE UNLESS IT HAS A VERY GOOD REASON NOT
+// TO BE (owner ruling, 2026-11-19): a daemon question is a short
+// classification or a short piece of writing, and a run that keeps the CLI's
+// own tool set may spend its bound on tool calls. Which kind a new call is,
+// is the user's to say when it is added.
+type Kind int
+
+const (
+	// KindUnspecified is a request that stated no kind; Run panics on it.
+	KindUnspecified Kind = iota
+	// KindInference is bare inference: no tools at all (`--tools ""`) and an
+	// empty system prompt (`--system-prompt ""`), so the model sees only
+	// Prompt.
+	KindInference
+	// KindToolCalls may call exactly the Request's Tools.
+	KindToolCalls
+)
 
 // Response is one headless answer.
 type Response struct {

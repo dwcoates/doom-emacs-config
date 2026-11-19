@@ -209,6 +209,7 @@ func (u *Updater) Update(ctx context.Context, req Request) (Result, error) {
 		return Result{}, err
 	}
 	resp, err := u.headless.Run(ctx, headless.Request{
+		Kind:    headless.KindInference,
 		Site:    Site,
 		Model:   Model,
 		Format:  headless.FormatText,

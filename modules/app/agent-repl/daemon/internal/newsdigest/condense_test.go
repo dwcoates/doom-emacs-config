@@ -195,7 +195,7 @@ func TestCondenseAsksSonnetUnderTheDigestsSiteWithTheMaterial(t *testing.T) {
 		t.Fatalf("condense: %v", err)
 	}
 	req := runner.asked()[0]
-	if req.Site != Site || req.Model != headless.ModelSonnet || req.Format != headless.FormatJSON ||
+	if req.Kind != headless.KindInference || req.Site != Site || req.Model != headless.ModelSonnet || req.Format != headless.FormatJSON ||
 		req.ConfigDir != "/accounts/default" || req.Timeout != DefaultModelTimeout {
 		t.Fatalf("request = %+v, want Sonnet under %s with a JSON envelope on the default account", req, Site)
 	}
