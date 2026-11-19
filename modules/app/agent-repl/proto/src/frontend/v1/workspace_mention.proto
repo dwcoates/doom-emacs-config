@@ -1,10 +1,13 @@
 // workspace_mention.proto — A WORKSPACE MENTION: a workspace's name in a
-// response's tree, drawn as a link whose click switches to that workspace.
+// response or a prompt, drawn as a link whose click switches to that
+// workspace, and the same name offered as a completion in that workspace's
+// composer.
 //
-// The page draws the links; the daemon decides WHICH names are links. It
-// serves the mention targets (`WorkspaceMentionTargets`) for one page, and the
-// page links every whole-name occurrence of a served name in a tree's text and
-// nothing else, so a page never decides on its own that a word names a
+// The page draws the links and Emacs offers the completions; the daemon
+// decides WHICH names are both. It serves one set of mention targets
+// (`WorkspaceMentionTargets`) per viewing workspace, to its page and to its
+// composer alike, so a name the composer completes is always a name the feed
+// links, and neither side ever decides on its own that a word names a
 // workspace.
 
 syntax = "proto3";
@@ -15,35 +18,59 @@ import "workspace/v1/workspace.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
-// Every workspace a response's tree may mention, as one page links them.
+// Every workspace a response or prompt may mention, as one viewing workspace
+// links them in its feed and completes them in its composer.
 //
-// THE SET IS RESOLVED, NOT RAW. It holds the open workspaces the sidebar's
-// Open section shows, less the viewing page's own workspace (a link to the
-// page the reader is already on would switch nowhere), less every name two of
-// them share (a name that collides across repositories names no ONE workspace,
-// so it is drawn as plain text rather than as a link that might switch to the
-// wrong one). A hidden workspace is never a target: switching to it would
-// select a workspace the sidebar does not show.
+// THE SET IS RESOLVED, NOT RAW. It holds every workspace the roster carries
+// that is not closed -- the Open section's and the hidden section's alike,
+// since a hidden workspace is still one the user can name and select. A name
+// two of them share names one of them only when exactly one of those is in
+// the viewer's own repository, and then names that one; otherwise the name
+// names no ONE workspace and is no target, drawn as plain text and never
+// completed, rather than linked to a workspace that might be the wrong one.
+// The viewing workspace's own is never a target (a link to the page the
+// reader is already on would switch nowhere), and a name it carries names no
+// other workspace either, so the reader's own workspace's name never switches
+// somewhere else.
+//
+// ONE SET, TWO READERS. The page receives it on `WatchWorkspaceMentions` and
+// Emacs on the host stream's `mention_targets` arm, resolved by the one
+// daemon function for the same viewer, so what is completable and what is
+// linkable cannot differ.
 //
 // Pushed whole, and again only when the set changes, so a push is always a
-// change a page re-links its drawn trees for.
+// change a page re-links its drawn bubbles for and a composer re-marks for.
 message WorkspaceMentionTargets {
-  // The targets, in the sidebar's Open-section order. Every name is distinct.
+  // The targets: the Open section's in its drawn order, then the hidden
+  // section's in its drawn order. Every name is distinct.
   repeated WorkspaceMentionTarget targets = 1;
 }
 
-// One workspace a mention may switch to: the name a tree's text writes, and
+// One workspace a mention may switch to: the name a bubble's text writes, and
 // the workspace a click on it selects.
 message WorkspaceMentionTarget {
   // The name a mention is matched by.
   WorkspaceMentionName name = 1;
   // The workspace a click selects (`SelectWorkspace`), echoed verbatim.
   workspace.v1.WorkspaceRef workspace = 2;
+  // The repository the workspace belongs to, which the composer annotates
+  // the completion with. UNSET only for a workspace whose repository the
+  // daemon's registry does not carry, which the roster already logs; the
+  // completion is then offered with no annotation.
+  optional WorkspaceMentionRepository repository = 5;
+}
+
+// The repository a mention target's workspace belongs to, as the composer's
+// completion annotation draws it.
+message WorkspaceMentionRepository {
+  // The repository's name, as the sidebar heads its section. Never empty.
+  string name = 1;
 }
 
 // A workspace's name, exactly as the sidebar draws it. A mention is a WHOLE
-// occurrence of it: an inline code span whose whole text is the name, or the
-// name in plain text bounded by characters no workspace name is made of.
+// occurrence of it anywhere in a bubble's prose: an inline code span whose
+// whole text is the name, or the name in plain text bounded by characters no
+// workspace name is made of.
 message WorkspaceMentionName {
   // The name's text, never empty.
   string text = 1;
