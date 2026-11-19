@@ -6018,16 +6018,153 @@ ON-SUCCESS receives the success value; it defaults to ignoring it."
     (should-not (agent-repl-test-input--question-history buf))))
 
 (ert-deftest agent-repl-input-set-aside-is-shared-by-every-takeover ()
-  "An asked question sets the draft aside through the helper."
+  "An asked question and a highlight both set the draft aside through the helper."
   (agent-repl-test-input--with-question
     ;; Arrange
     (let (calls)
       (cl-letf (((symbol-function 'agent-repl--input-set-aside)
                  (lambda (ws) (push ws calls) nil)))
         ;; Act
-        (agent-repl-input-response-question "ws-q" :asked))
+        (agent-repl-input-response-question "ws-q" :asked)
+        (agent-repl-input-text-highlighted "ws-q"))
       ;; Assert
-      (should (equal calls '("ws-q"))))))
+      (should (equal calls '("ws-q" "ws-q"))))))
+
+;;;; ---- A highlight in a response sets the draft aside ----
+
+(ert-deftest agent-repl-input-a-highlight-clears-the-composer-into-history ()
+  "A highlight saves the draft to history and clears the composer."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    ;; Act
+    (agent-repl-input-text-highlighted "ws-q")
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) ""))
+    (should (equal (agent-repl-test-input--question-history buf) '("my draft")))))
+
+(ert-deftest agent-repl-input-a-highlight-over-an-empty-composer-sets-nothing-aside ()
+  "A highlight over an empty composer keeps no draft and records it."
+  (agent-repl-test-input--with-question
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+        ;; Act
+        (agent-repl-input-text-highlighted "ws-q"))
+      ;; Assert
+      (should-not (buffer-local-value 'agent-repl--input-highlight-draft buf))
+      (should (member "elisp.input.text-highlighted ws=ws-q outcome=empty draft-len=0 entry=nil" infos)))))
+
+(ert-deftest agent-repl-input-a-second-highlight-keeps-the-reply-being-written ()
+  "A highlight while a draft is aside leaves the composer's reply alone."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-text-highlighted "ws-q")
+    (with-current-buffer buf (insert "why?"))
+    ;; Act
+    (agent-repl-input-text-highlighted "ws-q")
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) "why?"))
+    (should (equal (plist-get (buffer-local-value 'agent-repl--input-highlight-draft buf) :text)
+                   "my draft"))))
+
+(ert-deftest agent-repl-input-a-highlight-with-no-composer-is-recorded ()
+  "A workspace with no composer records the highlight and edits nothing."
+  (let (infos)
+    (cl-letf (((symbol-function 'agent-repl--input-buffer) (lambda (_ws) nil))
+              ((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+      ;; Act
+      (agent-repl-input-text-highlighted "ws-none"))
+    ;; Assert
+    (should (member "elisp.input.text-highlighted ws=ws-none outcome=no-composer" infos))))
+
+(ert-deftest agent-repl-input-an-accepted-send-puts-the-highlight-draft-back ()
+  "The next accepted composer send restores the draft the highlight set aside."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-text-highlighted "ws-q")
+    ;; Act
+    (agent-repl--input-accepted "ws-q" "why?" :response-revising t)
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) "my draft"))
+    (should-not (buffer-local-value 'agent-repl--input-highlight-draft buf))))
+
+(ert-deftest agent-repl-input-a-restored-highlight-draft-leaves-history ()
+  "The restored draft's history item is taken out; the sent prompt stays."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-text-highlighted "ws-q")
+    (with-current-buffer buf (agent-repl--history-push "why?"))
+    ;; Act
+    (agent-repl--input-restore-highlight-draft "ws-q")
+    ;; Assert
+    (should (equal (agent-repl-test-input--question-history buf) '("why?")))
+    (should-not (buffer-local-value 'agent-repl--history-discard-entry buf))))
+
+(ert-deftest agent-repl-input-a-restored-highlight-draft-keeps-an-older-identical-prompt ()
+  "A draft already at the ring's head added no item, so no item is removed."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf
+      (setq agent-repl--input-history (list "sent before"))
+      (insert "sent before"))
+    (agent-repl-input-text-highlighted "ws-q")
+    ;; Act
+    (agent-repl--input-restore-highlight-draft "ws-q")
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) "sent before"))
+    (should (equal (agent-repl-test-input--question-history buf) '("sent before")))))
+
+(ert-deftest agent-repl-input-a-busy-composer-keeps-its-words-over-the-highlight-draft ()
+  "Words typed since the send stay, and the draft is let go, still in history."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-text-highlighted "ws-q")
+    (with-current-buffer buf (insert "next thought"))
+    ;; Act
+    (let ((outcome (agent-repl--input-restore-highlight-draft "ws-q")))
+      ;; Assert
+      (should (eq outcome 'composer-busy))
+      (should (equal (with-current-buffer buf (buffer-string)) "next thought"))
+      (should (member "my draft" (agent-repl-test-input--question-history buf)))
+      (should-not (buffer-local-value 'agent-repl--input-highlight-draft buf)))))
+
+(ert-deftest agent-repl-input-a-restore-with-nothing-aside-does-nothing ()
+  "With no draft set aside the composer and history are untouched."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "typing"))
+    ;; Act / Assert
+    (should-not (agent-repl--input-restore-highlight-draft "ws-q"))
+    (should (equal (with-current-buffer buf (buffer-string)) "typing"))))
+
+(ert-deftest agent-repl-input-a-restored-highlight-draft-is-recorded ()
+  "The restoration is recorded at INFO."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-text-highlighted "ws-q")
+    (let (infos)
+      (cl-letf (((symbol-function 'agent-repl--info) (agent-repl-test--record-into infos)))
+        ;; Act
+        (agent-repl--input-restore-highlight-draft "ws-q"))
+      ;; Assert
+      (should (member "elisp.input.highlight-draft ws=ws-q outcome=restored draft-len=8 entry-removed=t" infos)))))
+
+(ert-deftest agent-repl-input-a-caller-composed-accept-keeps-the-highlight-draft-aside ()
+  "Only a composer send restores the draft: a canned send leaves it aside."
+  (agent-repl-test-input--with-question
+    ;; Arrange
+    (with-current-buffer buf (insert "my draft"))
+    (agent-repl-input-text-highlighted "ws-q")
+    ;; Act
+    (agent-repl--input-accepted "ws-q" "/canned" :turn nil)
+    ;; Assert
+    (should (equal (with-current-buffer buf (buffer-string)) ""))
+    (should (buffer-local-value 'agent-repl--input-highlight-draft buf))))
 
 ;;;; ---- A question about a final response ----
 

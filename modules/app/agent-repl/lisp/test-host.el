@@ -397,6 +397,8 @@ unary rpc can produce, which the contract never collapses into one."
                 (lambda (ws) (push (cons :activate ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-input-focus-for-reply)
                 (lambda (ws) (push (cons :focus-for-reply ws) agent-repl-test-host--effects)))
+               ((symbol-function 'agent-repl-input-text-highlighted)
+                (lambda (ws) (push (cons :text-highlighted ws) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-input-compose-entry)
                 (lambda (ws label) (push (list :compose-entry ws label) agent-repl-test-host--effects)))
                ((symbol-function 'agent-repl-input-response-question)
@@ -2789,6 +2791,16 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.final-response-clicked ws=ws-1"))))
 
+(ert-deftest agent-repl-test-host-final-response-click-leaves-the-draft-in-place ()
+  "A final response's click sets nothing aside: only a highlight does."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :final-response-clicked :value nil))
+    ;; Assert
+    (should-not (assq :text-highlighted agent-repl-test-host--effects))))
+
 ;;;; ---- The chat highlight ----
 
 (ert-deftest agent-repl-test-host-chat-highlight-focuses-this-threads-composer ()
@@ -2811,6 +2823,17 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.chat-text-highlighted ws=ws-1"))))
 
+(ert-deftest agent-repl-test-host-chat-highlight-sets-the-draft-aside-before-focusing ()
+  "A chat highlight sets the composer's draft aside, then focuses the composer."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :chat-text-highlighted :value nil))
+    ;; Assert
+    (should (equal (seq-take agent-repl-test-host--effects 2)
+                   '((:focus-for-reply . "ws-1") (:text-highlighted . "ws-1"))))))
+
 ;;;; ---- The response highlight ----
 
 (ert-deftest agent-repl-test-host-response-highlight-focuses-this-workspaces-composer ()
@@ -2832,6 +2855,17 @@ answers `:unknown' and records the breach rather than opening."
     (agent-repl-test-host--push "ws-1" (list :arm :response-text-highlighted :value nil))
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.response-text-highlighted ws=ws-1"))))
+
+(ert-deftest agent-repl-test-host-response-highlight-sets-the-draft-aside-before-focusing ()
+  "A response highlight sets the composer's draft aside, then focuses the composer."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    ;; Act
+    (agent-repl-test-host--push "ws-1" (list :arm :response-text-highlighted :value nil))
+    ;; Assert
+    (should (equal (seq-take agent-repl-test-host--effects 2)
+                   '((:focus-for-reply . "ws-1") (:text-highlighted . "ws-1"))))))
 
 (ert-deftest agent-repl-test-host-both-reply-picks-share-one-handler ()
   "A final response's click and both highlights go through one handler."
