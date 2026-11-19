@@ -276,6 +276,13 @@ type Orchestrator interface {
 	// DecideMediation is the chain's intake WS's decision on the deploy its
 	// chain owes a check of (mediation.go).
 	DecideMediation(ctx context.Context, ws ids.WorkspaceID, d Decision) error
+	// IgnoreRecords records KIND as a kind of log record the deploy checks
+	// leave out, on the word of deploy mediator WS; UnignoreRecords
+	// withdraws the kind of OPERATION whose message holds MESSAGECONTAINS.
+	// A workspace that is no repository's deploy mediator is refused
+	// (ArmNotMediator).
+	IgnoreRecords(ctx context.Context, ws ids.WorkspaceID, kind wsm.IgnoredRecordKind) error
+	UnignoreRecords(ctx context.Context, ws ids.WorkspaceID, operation, messageContains string) error
 	// ReleaseEscalation releases the hold a repository's escalation puts on
 	// its queue (remediationfinish.go).
 	ReleaseEscalation(ctx context.Context, scope RepositoryScope) error

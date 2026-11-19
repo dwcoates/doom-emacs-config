@@ -469,6 +469,18 @@ func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationF
 	return f.checks.BeginRemediationFinish(ctx, rf)
 }
 
+func (f *fakeDB) IgnoredRecordKinds(ctx context.Context) ([]wsm.IgnoredRecordKind, error) {
+	return f.checks.IgnoredRecordKinds(ctx)
+}
+
+func (f *fakeDB) IgnoreRecordKind(ctx context.Context, k wsm.IgnoredRecordKind) error {
+	return f.checks.IgnoreRecordKind(ctx, k)
+}
+
+func (f *fakeDB) UnignoreRecordKind(ctx context.Context, operation, messageContains string) (bool, error) {
+	return f.checks.UnignoreRecordKind(ctx, operation, messageContains)
+}
+
 func (f *fakeDB) DeployProblems(ctx context.Context, repo wsm.RepoKey) ([]wsm.DeployProblem, error) {
 	return f.checks.DeployProblems(ctx, repo)
 }

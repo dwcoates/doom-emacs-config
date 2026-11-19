@@ -21,6 +21,9 @@ Decide the deploy with one `agent-repld merge-queue mediation` verb:
 - `dispatch -summary "<one sentence>"`, with the problems as JSON on standard input
   - Records the problems as yours and keeps the queue held while you fix them.
   - Call it when you can fix what the deploy broke yourself, before you start the fix. Then fix it and run `agent-repld workspace finished here`.
+- `ignore -operation <operation> [-message <text>] -why "<one sentence>"`
+  - Records a kind of record every later check leaves out: every record of the operation, or only those whose message holds the text. It decides no deploy.
+  - Call it when a record is a fault outside agent-repl that passes on its own, or a one-off the user's own action causes, whatever the circumstances. `unignore` withdraws one.
 - `escalate -problems -summary "<one or two sentences>"`, with the problems as JSON on standard input
   - Notifies the user. The queue stays held until they rule.
   - Call it when the fix turns on a decision that is the user's, or when you cannot fix the problem from the evidence.

@@ -274,6 +274,7 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("A group that is not in the table may still be transient: absence from the table implies nothing.");
     expect(text).toContain("When the user rules during remediation that a group is ignorable or transient, the mediator adds or updates its row at once");
     expect(text).toContain("agent-repld merge-queue mediation approve -problems");
+    expect(text).toContain("agent-repl keeps the kinds of record known to be transient or ignorable in its store, and drops every record of one before a check");
   });
 
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {

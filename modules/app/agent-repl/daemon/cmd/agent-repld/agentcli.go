@@ -215,7 +215,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"release-escalation": {usage: "release-escalation -repository here|DIR", run: queueReleaseEscalation},
 		"give-up":            {usage: "give-up -reason TEXT", run: queueGiveUp},
 		"subscribe":          {usage: "subscribe [-repository here|DIR]", run: queueSubscribe},
-		"mediation":          {usage: "mediation approve|escalate [-problems]|dispatch -summary TEXT (problems are JSON on stdin)", run: queueMediation},
+		"mediation":          {usage: "mediation approve|escalate [-problems]|dispatch -summary TEXT (problems are JSON on stdin) | mediation ignore -operation OP [-message TEXT] -why TEXT | mediation unignore -operation OP [-message TEXT]", run: queueMediation},
 		"unsubscribe":        {usage: "unsubscribe [-repository here|DIR]", run: queueUnsubscribe},
 	},
 	repositoryNoun: {
@@ -2419,12 +2419,39 @@ func queueMediation(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
 	summary := fs.String("summary", "", "what it found, in a sentence or two (required)")
 	withProblems := fs.Bool("problems", false, "an escalation's findings, or the groups an approval ignores, follow on stdin as JSON, as a dispatch's problems do")
+	operation := fs.String("operation", "", "ignore/unignore: the operation whose records the deploy checks leave out (required)")
+	messageText := fs.String("message", "", "ignore/unignore: text a record's message must hold to match; every record of the operation when not given")
+	why := fs.String("why", "", "ignore: why a record of this kind is no problem a deploy caused (required)")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
 	}
 	if len(positionals) != 1 {
 		return c.usageFailed("name the decision: approve, escalate or dispatch")
+	}
+	// IGNORE AND UNIGNORE CHANGE WHAT EVERY LATER CHECK LEAVES OUT, and decide
+	// no deploy: they need no summary and no owed check.
+	if positionals[0] == "ignore" || positionals[0] == "unignore" {
+		if strings.TrimSpace(*operation) == "" {
+			return c.usageFailed("-operation is required: the operation whose records are left out")
+		}
+		kind := &agentreplv1.IgnoredRecordKind{Operation: *operation}
+		if *messageText != "" {
+			kind.MessageContains = messageText
+		}
+		change := &agentreplv1.UpdateMergeQueueIgnoredRecords{Change: &agentreplv1.UpdateMergeQueueIgnoredRecords_Remove{
+			Remove: &agentreplv1.UpdateMergeQueueIgnoredRecordsRemove{Kind: kind}}}
+		if positionals[0] == "ignore" {
+			if strings.TrimSpace(*why) == "" {
+				return c.usageFailed("-why is required: why a record of this kind is no problem a deploy caused")
+			}
+			change.Change = &agentreplv1.UpdateMergeQueueIgnoredRecords_Add{
+				Add: &agentreplv1.UpdateMergeQueueIgnoredRecordsAdd{Kind: kind, Why: *why}}
+		}
+		if !c.dial(*stateDir) {
+			return exitFailure
+		}
+		return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_IgnoredRecords{IgnoredRecords: change}})
 	}
 	m := &agentreplv1.UpdateMergeQueueMediation{Summary: *summary}
 	if positionals[0] == "dispatch" && *withProblems {
@@ -2458,7 +2485,7 @@ func queueMediation(c *cliCall, args []string) int {
 		}
 		m.Decision = &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{Problems: problems}}
 	default:
-		return c.usageFailed("the decision is approve, escalate or dispatch, not %q", positionals[0])
+		return c.usageFailed("the verb is approve, escalate, dispatch, ignore or unignore, not %q", positionals[0])
 	}
 	if strings.TrimSpace(*summary) == "" {
 		return c.usageFailed("-summary is required: what the check found")

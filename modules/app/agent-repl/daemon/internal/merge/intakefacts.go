@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
@@ -186,6 +187,84 @@ func severity(level string) int {
 	return 0
 }
 
+// LeftOut is one kind of record a window's read left out, and how many of
+// the window's records were of it.
+type LeftOut struct {
+	Kind  wsm.IgnoredRecordKind
+	Count int
+}
+
+// leaveOut drops from RECORDS every record of one of KINDS, answering what
+// is left and, per kind that matched, how many it dropped, in KINDS' order.
+func leaveOut(records []LogRecord, kinds []wsm.IgnoredRecordKind) ([]LogRecord, []LeftOut) {
+	counts := make([]int, len(kinds))
+	kept := make([]LogRecord, 0, len(records))
+	for _, r := range records {
+		dropped := false
+		for i, k := range kinds {
+			if k.Matches(r.Operation, r.Message) {
+				counts[i]++
+				dropped = true
+				break
+			}
+		}
+		if !dropped {
+			kept = append(kept, r)
+		}
+	}
+	var left []LeftOut
+	for i, k := range kinds {
+		if counts[i] > 0 {
+			left = append(left, LeftOut{Kind: k, Count: counts[i]})
+		}
+	}
+	return kept, left
+}
+
+// IgnoreRecords implements Orchestrator.
+func (o *orchestrator) IgnoreRecords(ctx context.Context, ws ids.WorkspaceID, kind wsm.IgnoredRecordKind) error {
+	fields := dlog.Context{"workspace": string(ws), "operation": kind.Operation, "message_contains": kind.MessageContains, "why": kind.Why}
+	if err := o.mediatorOnly(ctx, ws, fields); err != nil {
+		return err
+	}
+	kind.AddedAt = o.deps.Now()
+	if err := o.deps.DB.IgnoreRecordKind(ctx, kind); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the kind of record to leave out of the deploy checks could not be recorded", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Log.Global().Info(opMediation, "the deploy mediator recorded a kind of record the deploy checks leave out", fields)
+	return nil
+}
+
+// UnignoreRecords implements Orchestrator.
+func (o *orchestrator) UnignoreRecords(ctx context.Context, ws ids.WorkspaceID, operation, messageContains string) error {
+	fields := dlog.Context{"workspace": string(ws), "operation": operation, "message_contains": messageContains}
+	if err := o.mediatorOnly(ctx, ws, fields); err != nil {
+		return err
+	}
+	removed, err := o.deps.DB.UnignoreRecordKind(ctx, operation, messageContains)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the kind of record the deploy checks leave out could not be withdrawn", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Log.Global().Info(opMediation, "the deploy mediator withdrew a kind of record the deploy checks leave out", withField(fields, "was_recorded", removed))
+	return nil
+}
+
+// mediatorOnly refuses WS unless it is a repository's deploy mediator.
+func (o *orchestrator) mediatorOnly(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+	_, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read whether the workspace changing the ignored records is a deploy mediator", withField(fields, "error", err.Error()))
+		return err
+	}
+	if !isMediator {
+		o.deps.Log.Global().Warn(opMediation, "refused a change to the ignored records from a workspace that is no repository's deploy mediator", fields)
+		return refuse(ArmNotMediator, ws, "this workspace is no repository's deploy mediator")
+	}
+	return nil
+}
+
 // DigestSite is one logging site's records in a window: every record one
 // operation logged at one level.
 type DigestSite struct {
@@ -230,7 +309,7 @@ func DigestSites(window []LogRecord) []DigestSite {
 
 // RenderDigest is the digest file's text: a table of every logging site with
 // its count, then one verbatim sample record per site, in the same order.
-func RenderDigest(sites []DigestSite, since, through time.Time) string {
+func RenderDigest(sites []DigestSite, left []LeftOut, since, through time.Time) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "Warnings and errors from %s through %s, one line per logging site (level and operation).\n\n",
 		since.UTC().Format(time.RFC3339), through.UTC().Format(time.RFC3339))
@@ -241,6 +320,12 @@ func RenderDigest(sites []DigestSite, since, through time.Time) string {
 	b.WriteString("\nOne sample record per site, verbatim, in the same order:\n\n")
 	for _, site := range sites {
 		b.WriteString(site.Sample + "\n")
+	}
+	if len(left) > 0 {
+		b.WriteString("\nLeft out, as kinds of record known to be transient or ignorable (count, operation, message text, why):\n\n")
+		for _, l := range left {
+			fmt.Fprintf(&b, "%5d  %s  %q  %s\n", l.Count, l.Kind.Operation, l.Kind.MessageContains, l.Kind.Why)
+		}
 	}
 	return b.String()
 }
@@ -254,9 +339,9 @@ func DigestPath(dir string, owed time.Time) string {
 
 // writeDigest writes WINDOW's digest for the check owed at OWED and answers
 // its path.
-func (o *orchestrator) writeDigest(window []LogRecord, owed, since, through time.Time) (string, error) {
+func (o *orchestrator) writeDigest(window []LogRecord, left []LeftOut, owed, since, through time.Time) (string, error) {
 	path := DigestPath(LogsDir(o.deps.StateDir), owed)
-	if err := writeLog(path, RenderDigest(DigestSites(window), since, through)); err != nil {
+	if err := writeLog(path, RenderDigest(DigestSites(window), left, since, through)); err != nil {
 		return "", fmt.Errorf("merge: write the check's digest: %w", err)
 	}
 	return path, nil
@@ -293,6 +378,15 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	if err != nil {
 		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the span before the window: %w", err)
 	}
+	// THE KINDS OF RECORD KNOWN TO BE TRANSIENT OR IGNORABLE ARE LEFT OUT
+	// (wsm ignoredrecords.go), of the window and of the span before it alike:
+	// a window holding only such records holds nothing for the mediator.
+	kinds, err := o.deps.DB.IgnoredRecordKinds(ctx)
+	if err != nil {
+		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the kinds of record the checks leave out: %w", err)
+	}
+	window, left := leaveOut(window, kinds)
+	before, _ = leaveOut(before, kinds)
 	problems, err := o.deps.DB.DeployProblems(ctx, q.key)
 	if err != nil {
 		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
@@ -309,7 +403,7 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	// THE DIGEST IS WRITTEN BEFORE THE MEDIATOR IS TOLD, so its first read is
 	// one small file rather than every record: each logging site once, with
 	// its count and one sample.
-	digest, err := o.writeDigest(window, m.OwedAt, since, now)
+	digest, err := o.writeDigest(window, left, m.OwedAt, since, now)
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
 	}

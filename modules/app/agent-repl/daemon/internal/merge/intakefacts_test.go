@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // rec is a log record of OP and MSG at LEVEL, its raw line naming them.
@@ -188,8 +189,12 @@ func TestRenderDigestStatesEachSitesCountAndSample(t *testing.T) {
 	cases := []struct {
 		name  string
 		sites []DigestSite
+		left  []LeftOut
 		want  []string
 	}{
+		{name: "a kind that was left out is stated with its count and why",
+			left: []LeftOut{{Kind: wsm.IgnoredRecordKind{Operation: "daemon.ghclient.post", MessageContains: "Parent comment not found", Why: "GitHub's own"}, Count: 3}},
+			want: []string{"    3  daemon.ghclient.post  \"Parent comment not found\"  GitHub's own\n"}},
 		{name: "each site is one table line and one sample",
 			sites: []DigestSite{{Level: "error", Operation: "daemon.merge", Count: 2, Sample: `{"operation":"daemon.merge"}`}},
 			want:  []string{"    2  error  daemon.merge\n", "\n{\"operation\":\"daemon.merge\"}\n"}},
@@ -200,7 +205,7 @@ func TestRenderDigestStatesEachSitesCountAndSample(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got := RenderDigest(tc.sites, since, since.Add(time.Hour))
+			got := RenderDigest(tc.sites, tc.left, since, since.Add(time.Hour))
 
 			// Assert
 			for _, want := range tc.want {
@@ -324,5 +329,125 @@ func TestACheckDigestIsOneOfTheQueuesLogs(t *testing.T) {
 	// Assert: the retention pass prunes it with the queue's other logs.
 	if !isLog || filepath.Base(path) != "deploy_check-1795121928.log" {
 		t.Fatalf("the digest is %s (a queue log: %v), want deploy_check-1795121928.log pruned with the rest", path, isLog)
+	}
+}
+
+func TestLeaveOutDropsTheRecordsOfEveryKnownKind(t *testing.T) {
+	kinds := []wsm.IgnoredRecordKind{
+		{Operation: "daemon.ghclient.post", MessageContains: "Parent comment not found", Why: "GitHub's own"},
+		{Operation: "elisp.spell", Why: "user-driven"},
+	}
+	cases := []struct {
+		name     string
+		record   LogRecord
+		wantKept bool
+	}{
+		{name: "a record of a kind's operation holding its text is left out", record: rec("error", "daemon.ghclient.post", "404 Parent comment not found")},
+		{name: "a record of that operation without the text is kept", record: rec("error", "daemon.ghclient.post", "500 server error"), wantKept: true},
+		{name: "every record of an operation named with no text is left out", record: rec("error", "elisp.spell", "anything at all")},
+		{name: "a record of another operation holding the text is kept", record: rec("error", "daemon.merge", "Parent comment not found"), wantKept: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			kept, left := leaveOut([]LogRecord{tc.record}, kinds)
+
+			// Assert
+			if (len(kept) == 1) != tc.wantKept || (len(left) == 1) == tc.wantKept {
+				t.Fatalf("leaveOut kept %d and left out %v, want kept %v", len(kept), left, tc.wantKept)
+			}
+		})
+	}
+}
+
+func TestLeaveOutCountsWhatEachKindDropped(t *testing.T) {
+	// Arrange
+	kinds := []wsm.IgnoredRecordKind{{Operation: "elisp.spell", Why: "user-driven"}, {Operation: "never.logged", Why: "unused"}}
+	records := []LogRecord{rec("error", "elisp.spell", "a"), rec("error", "elisp.spell", "b"), rec("warn", "daemon.merge", "c")}
+
+	// Act
+	kept, left := leaveOut(records, kinds)
+
+	// Assert: one entry, for the kind that matched, with its count.
+	if len(kept) != 1 || len(left) != 1 || left[0].Kind.Operation != "elisp.spell" || left[0].Count != 2 {
+		t.Fatalf("leaveOut kept %d and left out %+v, want one kept and two spell records left out", len(kept), left)
+	}
+}
+
+func TestAWindowHoldingOnlyIgnoredKindsReleasesTheCheckWithoutTheMediator(t *testing.T) {
+	// Arrange: the window's only record is of a kind the checks leave out.
+	h := checked(t)
+	owe(t, h)
+	if err := h.db.IgnoreRecordKind(context.Background(), wsm.IgnoredRecordKind{Operation: "daemon.shim", Why: "passes on its own", AddedAt: deployStarted}); err != nil {
+		t.Fatal(err)
+	}
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) {
+		return []LogRecord{rec("warn", "daemon.shim", "tail lag")}, nil
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if owedCheck(t, h) != nil || len(h.queue.submissions) != 0 {
+		t.Fatalf("submitted %d briefs with the check still owed %v; want it released and the mediator never told", len(h.queue.submissions), owedCheck(t, h) != nil)
+	}
+}
+
+func TestOnlyADeployMediatorChangesTheIgnoredRecords(t *testing.T) {
+	kind := wsm.IgnoredRecordKind{Operation: "daemon.shim", MessageContains: "tail lag", Why: "passes on its own"}
+	cases := []struct {
+		name string
+		// mediator is whether the asking workspace is the queue's mediator.
+		mediator bool
+		// change runs one change as workspace ws-fixer.
+		change   func(h *harness) error
+		wantKept int
+	}{
+		{name: "the mediator records a kind", mediator: true, wantKept: 1,
+			change: func(h *harness) error { return h.o.IgnoreRecords(context.Background(), "ws-fixer", kind) }},
+		{name: "the mediator withdraws a kind", mediator: true,
+			change: func(h *harness) error {
+				if err := h.o.IgnoreRecords(context.Background(), "ws-fixer", kind); err != nil {
+					return err
+				}
+				return h.o.UnignoreRecords(context.Background(), "ws-fixer", kind.Operation, kind.MessageContains)
+			}},
+		{name: "a workspace that is no mediator is refused, and nothing is recorded",
+			change: func(h *harness) error { return h.o.IgnoreRecords(context.Background(), "ws-fixer", kind) }},
+		{name: "a workspace that is no mediator cannot withdraw one",
+			change: func(h *harness) error {
+				return h.o.UnignoreRecords(context.Background(), "ws-fixer", kind.Operation, kind.MessageContains)
+			}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			if tc.mediator {
+				owe(t, h)
+				withMediator(t, h)
+			}
+			seeded, err := h.db.IgnoredRecordKinds(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			err = tc.change(h)
+
+			// Assert
+			var refused *RefusalError
+			if tc.mediator == errors.As(err, &refused) || (tc.mediator && err != nil) {
+				t.Fatalf("the change = %v, want refused %v", err, !tc.mediator)
+			}
+			if !tc.mediator && refused.Arm != ArmNotMediator {
+				t.Fatalf("refused as %s, want %s", refused.Arm, ArmNotMediator)
+			}
+			kinds, readErr := h.db.IgnoredRecordKinds(context.Background())
+			if readErr != nil || len(kinds)-len(seeded) != tc.wantKept {
+				t.Fatalf("kinds went from %d to %d (%v), want %d more", len(seeded), len(kinds), readErr, tc.wantKept)
+			}
+		})
 	}
 }

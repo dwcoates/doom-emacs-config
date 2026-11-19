@@ -112,6 +112,28 @@ func (s *server) UpdateMergeQueue(
 		return connect.NewResponse(resp), nil
 	}
 
+	if ignored := req.Msg.GetIgnoredRecords(); ignored != nil {
+		_, mediator := askerOf(req.Msg.GetRequester())
+		var err error
+		switch change := ignored.GetChange().(type) {
+		case *agentreplv1.UpdateMergeQueueIgnoredRecords_Add:
+			err = s.deps.Merge.IgnoreRecords(ctx, mediator, wsm.IgnoredRecordKind{
+				Operation:       change.Add.GetKind().GetOperation(),
+				MessageContains: change.Add.GetKind().GetMessageContains(),
+				Why:             change.Add.GetWhy(),
+			})
+		case *agentreplv1.UpdateMergeQueueIgnoredRecords_Remove:
+			err = s.deps.Merge.UnignoreRecords(ctx, mediator, change.Remove.GetKind().GetOperation(), change.Remove.GetKind().GetMessageContains())
+		default:
+			panic(fmt.Sprintf("server: UpdateMergeQueue ignored_records change %T past validation", ignored.GetChange()))
+		}
+		if err != nil {
+			return answer(resp, s.answerRefusal(s.log, rpc, resp, err, nil))
+		}
+		resp.Result = &agentreplv1.UpdateMergeQueueResponse_Success{Success: &agentreplv1.UpdateMergeQueueSuccess{}}
+		return connect.NewResponse(resp), nil
+	}
+
 	if give := req.Msg.GetGiveUp(); give != nil {
 		return s.actOnQueuedMerge(ctx, rpc, give.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
 			return s.deps.Merge.GiveUp(ctx, ws, give.GetReason())
@@ -214,6 +236,8 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "release_escalation"
 	case *agentreplv1.UpdateMergeQueueRequest_GiveUp:
 		return "give_up"
+	case *agentreplv1.UpdateMergeQueueRequest_IgnoredRecords:
+		return "ignored_records"
 	}
 	panic(fmt.Sprintf("server: UpdateMergeQueue arm %T past validation has no name", req.GetAction()))
 }
