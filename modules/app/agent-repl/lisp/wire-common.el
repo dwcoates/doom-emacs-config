@@ -458,10 +458,6 @@ both empty, so a refusal naming neither is refused as malformed."
              :children children
              :landing-into landing-into)))))
 
-(defun agent-repl-wire-decode-workspace-parent-not-open-state (value)
-  "Decode VALUE as one empty `WorkspaceParentNotOpen' state arm."
-  (agent-repl-wire--decode-empty "WorkspaceParentNotOpenState" value))
-
 (defun agent-repl-wire-decode-workspace-parent-not-open (value)
   "Decode VALUE as `WorkspaceParentNotOpen', a plist `(:parent REF :state ARM)'.
 The arm is `:hidden', `:closed' or `:closing' (a queued merge closes the
@@ -475,9 +471,9 @@ parent once it lands); it is never unset."
                     #'agent-repl-wire-decode-workspace-ref)
            :state (agent-repl-wire--decode-oneof
                    "WorkspaceParentNotOpen" 'state object
-                   '((hidden :hidden agent-repl-wire-decode-workspace-parent-not-open-state)
-                     (closed :closed agent-repl-wire-decode-workspace-parent-not-open-state)
-                     (closing :closing agent-repl-wire-decode-workspace-parent-not-open-state)))))))
+                   `((hidden :hidden ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenHidden" v)))
+                     (closed :closed ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenClosed" v)))
+                     (closing :closing ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceParentNotOpenClosing" v)))))))))
 
 (defun agent-repl-wire-encode-workspace-ref (value)
   "Encode the WorkspaceRef plist VALUE as a protojson alist.

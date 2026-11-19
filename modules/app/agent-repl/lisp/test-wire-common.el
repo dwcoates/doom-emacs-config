@@ -1234,6 +1234,20 @@ RECORDS names a variable the caller has bound."
   (should-error (agent-repl-test-wire-common--quiet
                   (agent-repl-wire-call 'transcode #'identity 1))))
 
+(ert-deftest agent-repl-test-wire-common-a-parent-not-open-state-names-its-own-message-in-a-breach ()
+  "Each state arm is its own empty message (`WorkspaceParentNotOpenHidden',
+`...Closed', `...Closing'), so a payload on one is refused under that name."
+  (dolist (case '(("hidden" . "WorkspaceParentNotOpenHidden")
+                  ("closed" . "WorkspaceParentNotOpenClosed")
+                  ("closing" . "WorkspaceParentNotOpenClosing")))
+    (should (equal (agent-repl-test-wire-common--breach
+                    (lambda ()
+                      (agent-repl-wire-decode-workspace-parent-not-open
+                       (agent-repl-test-wire-common--parse
+                        (format "{\"parent\":{\"id\":\"p\",\"dir\":\"/w/p\"},\"%s\":{\"extra\":1}}"
+                                (car case))))))
+                   (list (cdr case) 'extra "unknown field")))))
+
 (provide 'test-wire-common)
 
 ;;; test-wire-common.el ends here
