@@ -9011,7 +9011,7 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 /* A DEPLOY MEDIATOR'S FIX AT ITS GATE (cards/fix-gate.ts; owner ruling,
    2026-11-19): the merge bubble's head over the tests tab's run, no tab
    strip. It stops where an expanded merge bubble stops, and only its run
-   scrolls, never chaining into the feed, as the tests tab's run does. */
+   scrolls. */
 .tool-card.fix-gate {
   display: flex;
   flex-direction: column;
@@ -9021,7 +9021,6 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .fix-gate > .fix-gate-run {
   min-height: 0;
   overflow-y: auto;
-  overscroll-behavior: contain;
   padding-top: 0.3rem;
 }
 .fix-gate-attempt,
