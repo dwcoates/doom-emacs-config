@@ -362,6 +362,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; (command-completion.el and workspace-completion.el, below) answer by: a
 ;; completion offers itself only when its own table's styles match.
 (agent-repl--load-module "completion-match")
+;; WHY: sigil-word.el is the one shape of a composer word that opens with a
+;; sigil -- its bounds and the table completing the text after the sigil --
+;; shared by command-completion.el (`/') and slack-channel-completion.el
+;; (`#'), below.  It builds its table through completion-match.el, above.
+(agent-repl--load-module "sigil-word")
 ;; WHY: completion-order.el is the one order both composer completions offer
 ;; their candidates in: taken before, then mentioned by the composer's own
 ;; workspace (host.el's record), then the rest.

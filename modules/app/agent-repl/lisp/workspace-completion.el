@@ -60,6 +60,7 @@
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
 (declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
+(declare-function agent-repl-completion-match-part-starts "completion-match" (word names separators))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
 (declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
 (declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
@@ -98,10 +99,10 @@ word: the character before it is `/'."
 (defun agent-repl--workspace-completion-matches (word names)
   "Return the NAMES WORD occurs in at a part's start, in NAMES's order.
 A part starts at the name's start or just after one of
-`agent-repl--workspace-completion-separators'."
-  (let ((re (concat "\\(?:\\`\\|[" agent-repl--workspace-completion-separators "]\\)"
-                    (regexp-quote word))))
-    (cl-remove-if-not (lambda (name) (string-match-p re name)) names)))
+`agent-repl--workspace-completion-separators'
+\(`agent-repl-completion-match-part-starts')."
+  (agent-repl-completion-match-part-starts
+   word names agent-repl--workspace-completion-separators))
 
 (defconst agent-repl--workspace-completion-category 'agent-repl-workspace-name
   "This capf's own completion category, named to no other table's.

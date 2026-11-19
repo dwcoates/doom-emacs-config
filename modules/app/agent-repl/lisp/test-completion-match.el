@@ -190,5 +190,37 @@
             (should (eq workspace 'answer))
             (should (= (length callers) 2))))))))
 
+;;;; ---- Part-start matching ----
+
+(ert-deftest agent-repl-test-completion-match-part-starts-match-a-names-start ()
+  "A word matches a name it begins."
+  (should (equal (agent-repl-completion-match-part-starts "par" '("parser-migration" "x") "-_.")
+                 '("parser-migration"))))
+
+(ert-deftest agent-repl-test-completion-match-part-starts-match-after-a-separator ()
+  "A word matches a name one of whose parts it begins, in the names' order."
+  (should (equal (agent-repl-completion-match-part-starts
+                  "mig" '("db.migrate" "parser-migration" "team_mig") "-_.")
+                 '("db.migrate" "parser-migration" "team_mig"))))
+
+(ert-deftest agent-repl-test-completion-match-part-starts-skip-a-mid-part-match ()
+  "A word inside a part, at no part's start, matches nothing."
+  (should-not (agent-repl-completion-match-part-starts "on" '("parser-migration") "-_.")))
+
+(ert-deftest agent-repl-test-completion-match-part-starts-quote-the-word ()
+  "A word's regexp characters match only themselves."
+  (should-not (agent-repl-completion-match-part-starts "a." '("ab") "-")))
+
+(ert-deftest agent-repl-test-completion-match-every-part-start-completion-matches-through-it ()
+  "Every completion matching at a name part's start narrows through the helper."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl-completion-match-part-starts)
+               (lambda (word _names separators) (push (cons word separators) calls) nil)))
+      ;; Act
+      (agent-repl--workspace-completion-matches "w" '("w"))
+      ;; Assert
+      (should (equal calls `(("w" . ,agent-repl--workspace-completion-separators)))))))
+
 (provide 'test-completion-match)
 ;;; test-completion-match.el ends here

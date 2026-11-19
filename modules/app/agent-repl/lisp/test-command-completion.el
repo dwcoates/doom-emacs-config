@@ -846,12 +846,12 @@ in `completion-category-overrides', with the `substring' then `flex' styles."
 
 (ert-deftest agent-repl-test-command-completion-opening-chars-are-the-contracts ()
   "The opening punctuation is the contract's."
-  (should (equal agent-repl--command-completion-opening-chars
+  (should (equal agent-repl-sigil-word-opening-chars
                  (agent-repl-test-command-completion--slash-word "opening"))))
 
 (ert-deftest agent-repl-test-command-completion-closing-chars-are-the-contracts ()
   "The closing punctuation is the contract's."
-  (should (equal agent-repl--command-completion-closing-chars
+  (should (equal agent-repl-sigil-word-closing-chars
                  (agent-repl-test-command-completion--slash-word "closing"))))
 
 (ert-deftest agent-repl-test-command-completion-marks-every-contract-case ()

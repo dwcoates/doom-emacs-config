@@ -61,5 +61,15 @@ next completion function, so PROPS must not carry `:exclusive'."
          (buffer-substring-no-properties beg (point)) table)
     (append (list beg end table) props)))
 
+(defun agent-repl-completion-match-part-starts (word names separators)
+  "Return the NAMES WORD occurs in at a part's start, in NAMES's order.
+A part starts at a name's start or just after one of SEPARATORS, a string
+of characters as a regexp character class holds them (a `-' first).  A
+word of prose matches a name only where one of the name's parts begins,
+so `on' never offers `parser-migration'."
+  (let ((re (concat "\\(?:\\`\\|[" separators "]\\)"
+                    (regexp-quote word))))
+    (cl-remove-if-not (lambda (name) (string-match-p re name)) names)))
+
 (provide 'completion-match)
 ;;; completion-match.el ends here

@@ -49,12 +49,10 @@
 ;; then description) is cut to `agent-repl-command-completion-annotation-width'
 ;; columns; the full description is the candidate's doc signature.
 ;;
-;; PUNCTUATION AROUND A SLASH WORD IS NOT PART OF IT.  A slash word may
-;; follow opening brackets and quotes, and drops trailing closing brackets,
-;; quotes and sentence punctuation, so `(/merge-queue).' completes and marks
-;; `/merge-queue' just as a whitespace-bounded one does.  The webapp marks a
-;; drawn user prompt's known commands by the same rule; both are held to
-;; proto/vocab/slash-word.json.
+;; PUNCTUATION AROUND A SLASH WORD IS NOT PART OF IT, so `(/merge-queue).'
+;; completes and marks `/merge-queue' just as a whitespace-bounded one does:
+;; a slash word is the `/' sigil word (sigil-word.el), which also owns the
+;; table that completes the text after the slash.
 ;;
 ;; A KNOWN COMMAND IS PURPLE IN THE COMPOSER.  Every slash word naming a
 ;; command in the catalog in hand -- typed, completed or pasted -- takes
@@ -76,7 +74,8 @@
 (declare-function agent-repl-host-conn-or-primary "agent-repl-host" (ws))
 (declare-function agent-repl-host-route-handover "agent-repl-host" (ws arm slug))
 (declare-function agent-repl-completion-match-capf "completion-match" (beg end table &rest props))
-(declare-function agent-repl-completion-match-table "completion-match" (category collection &optional sort))
+(declare-function agent-repl-sigil-word-bounds "sigil-word" (sigil))
+(declare-function agent-repl-sigil-word-table "sigil-word" (category sigil candidates &optional sort))
 (declare-function agent-repl-completion-order-sorter "completion-order" (kind mentioned key))
 (declare-function agent-repl-completion-order-exit-function "completion-order" (kind key))
 (declare-function agent-repl-host-mentions "agent-repl-host" (ws kind))
@@ -102,39 +101,10 @@ TICK, and so a new ask.")
 
 ;;;; ---- The slash word at point ----
 
-(defconst agent-repl--command-completion-opening-chars "([{<\"'`\u201c\u2018"
-  "The punctuation a slash word may follow inside its whitespace-bounded run.
-A `skip-chars-forward' set: opening brackets and quotes, so `(/clear' and
-`\"/clear' hold the slash word `/clear'.")
-
-(defconst agent-repl--command-completion-closing-chars ")]}>\"'`.,;:!?\u201d\u2019\u2026"
-  "The punctuation a slash word's whitespace-bounded run may end in, outside it.
-A `skip-chars-backward' set: closing brackets and quotes and sentence
-punctuation, so `/clear).' holds the slash word `/clear'.")
-
 (defun agent-repl--command-completion-bounds ()
   "Return (START . END) of the slash word around point, or nil.
-A slash word lies in a run of non-whitespace.  It begins with `/' at the
-run's start or after the run's leading opening punctuation
-\(`agent-repl--command-completion-opening-chars'), and ends at the run's
-end less its trailing closing punctuation
-\(`agent-repl--command-completion-closing-chars'), never before the slash's
-next character.  Point sits inside it or at its end."
-  (save-excursion
-    (let* ((here (point))
-           (run-start (progn (skip-chars-backward "^[:space:]") (point)))
-           (run-end (progn (goto-char here) (skip-chars-forward "^[:space:]") (point)))
-           (start (progn (goto-char run-start)
-                         (skip-chars-forward agent-repl--command-completion-opening-chars run-end)
-                         (point))))
-      (when (and (< start run-end)
-                 (eq (char-after start) ?/))
-        (let ((end (progn (goto-char run-end)
-                          (skip-chars-backward agent-repl--command-completion-closing-chars
-                                               (1+ start))
-                          (point))))
-          (when (<= start here end)
-            (cons start end)))))))
+The slash word is the `/' sigil word (`agent-repl-sigil-word-bounds')."
+  (agent-repl-sigil-word-bounds ?/))
 
 ;;;; ---- Candidates ----
 
@@ -165,38 +135,11 @@ or the whole slashed word; both name the same command."
 
 (defun agent-repl--command-completion-table (candidates &optional sort)
   "Return a completion table over CANDIDATES, in this capf's own category.
-SORT, when given, is the order a completion UI offers them in
-\(`agent-repl-completion-match-table').
-A plain collection function -- STRING PREDICATE ACTION, as
-`completion-at-point-functions' may return -- that answers a `metadata'
-ACTION with `agent-repl--command-completion-category' and otherwise
-completes over CANDIDATES the usual way, via `complete-with-action'.
-
-A `boundaries' ACTION answers that every CANDIDATE's leading `/' is
-outside the completed field, so the `substring' style's pattern is built
-from the command's NAME alone -- `/profile' is then a substring of
-`/agent-repl-profile' because `profile' is a substring of
-`agent-repl-profile', even though `/profile' the literal eight characters
-never occurs in it.
-
-THE ANSWERS AGREE WITH THAT BOUNDARY.  For a STRING past its leading `/',
-every ACTION completes the NAME after the slash, through
-`completion-table-with-context': all-completions answers bare names, as
-a completion UI expects of a field that starts after the `/' -- it keeps
-the typed `/' and replaces only what follows, so a slashed answer would
-insert a second `/' -- while try-completion answers the whole slashed
-word."
-  (let ((names (mapcar #'agent-repl--command-completion-name candidates)))
-    (agent-repl-completion-match-table
-     agent-repl--command-completion-category
-     (lambda (string predicate action)
-       (cond
-        ((string-prefix-p "/" string)
-         (completion-table-with-context "/" names (substring string 1) predicate action))
-        ((eq (car-safe action) 'boundaries)
-         (cons 'boundaries (cons 0 (length (cdr action)))))
-        (t (complete-with-action action candidates string predicate))))
-     sort)))
+SORT, when given, is the order a completion UI offers them in.  The table
+is the `/' sigil table (`agent-repl-sigil-word-table'): its field starts
+after the slash, so `/profile' matches `/agent-repl-profile' by the
+command's NAME."
+  (agent-repl-sigil-word-table agent-repl--command-completion-category "/" candidates sort))
 
 (defun agent-repl--command-completion-entry (catalog candidate)
   "Return the CATALOG entry CANDIDATE names, as its name or an alias, or nil."
