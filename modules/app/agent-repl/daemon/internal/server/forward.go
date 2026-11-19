@@ -195,21 +195,39 @@ func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target st
 	defer cancel()
 	stop := context.AfterFunc(s.life, cancel)
 	defer stop()
-	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+req.Spec().Procedure)
-	in, err := client.CallServerStream(ctx, forwardRequest(req))
+	return pipeStream[Req, Resp](ctx, s, rpc, target, req.Spec().Procedure, forwardRequest(req), stream, func() { s.acceptStream(ctx, rpc) })
+}
+
+// pipeStream opens the server-streaming rpc at PROCEDURE on the daemon at
+// TARGET with REQ and writes every message it sends into SINK, answering how
+// the target's stream ended: nil for a clean end, its error otherwise. It is
+// the one place a stream is carried from another daemon, for a forwarded
+// stream (forwardStream) and a relayed page subscription (relayWatch) alike.
+//
+// THE TARGET'S ACCEPTANCE IS STATED ONCE, BEFORE ANY MESSAGE. ACCEPTED is
+// called when the target's response headers state it (AcceptedHeader), so a
+// watch the target accepted with nothing to push yet is accepted here too, or
+// the client would read "accepted but quiet" as "not accepted" (accept.go). A
+// target that sends a message without stating acceptance has a stream that
+// stands all the same, so the message is the acceptance.
+func pipeStream[Req, Resp any](ctx context.Context, s *server, rpc, target, procedure string, req *connect.Request[Req], sink streamSink[Resp], accepted func()) error {
+	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+procedure)
+	in, err := client.CallServerStream(ctx, req)
 	if err != nil {
 		s.log.Info("daemon.server.forward", "the daemon a stream was forwarded to refused it", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
 		return err
 	}
 	defer in.Close()
-	// THE TARGET'S ACCEPTANCE IS THIS STREAM'S: a watch the target accepted
-	// with nothing to push yet is accepted here too, or the client would read
-	// "accepted but quiet" as "not accepted" (accept.go).
-	if in.ResponseHeader().Get(AcceptedHeader) != "" {
-		s.acceptStream(ctx, rpc)
+	stated := in.ResponseHeader().Get(AcceptedHeader) != ""
+	if stated {
+		accepted()
 	}
 	for in.Receive() {
-		if err := stream.Send(in.Msg()); err != nil {
+		if !stated {
+			stated = true
+			accepted()
+		}
+		if err := sink.Send(in.Msg()); err != nil {
 			return fmt.Errorf("relay %s from %s: %w", rpc, target, err)
 		}
 	}

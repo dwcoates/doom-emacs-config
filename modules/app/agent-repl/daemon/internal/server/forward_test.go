@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -15,6 +17,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/h2cclient"
@@ -418,5 +421,94 @@ func TestAForwardedStreamIsAcceptedWhenItsTargetAcceptsWithNothingPushed(t *test
 	// Assert
 	if header.Get(AcceptedHeader) == "" {
 		t.Fatalf("the forwarded stream stated no acceptance within %s", relayBound)
+	}
+}
+
+// sinkOf collects what a piped stream wrote.
+type sinkOf[R any] struct{ got []*R }
+
+func (s *sinkOf[R]) Send(msg *R) error {
+	s.got = append(s.got, msg)
+	return nil
+}
+
+func TestPipeStreamStatesItsTargetsAcceptanceOnce(t *testing.T) {
+	refusal := connect.NewError(connect.CodeFailedPrecondition, errors.New("refused"))
+	cases := []struct {
+		name string
+		// states is whether the target states acceptance in its headers.
+		states bool
+		// messages is how many messages the target sends.
+		messages int
+		// end is what the target's stream returns.
+		end          error
+		wantAccepted int
+		wantErr      bool
+	}{
+		{name: "a target that states acceptance and pushes nothing is accepted", states: true, wantAccepted: 1},
+		{name: "a target that states acceptance and pushes is accepted once", states: true, messages: 2, wantAccepted: 1},
+		{name: "a target that pushes without stating acceptance is accepted by its first message", messages: 2, wantAccepted: 1},
+		{name: "a target that refuses is never accepted, and its refusal is the answer", end: refusal, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			target := scriptedFooterDaemon(t, func(_ context.Context, _ *connect.Request[agentreplv1.WatchFooterRequest], stream *connect.ServerStream[agentreplv1.WatchFooterResponse]) error {
+				if tc.states {
+					stream.ResponseHeader().Set(AcceptedHeader, "1")
+				}
+				for range tc.messages {
+					if err := stream.Send(&agentreplv1.WatchFooterResponse{}); err != nil {
+						return err
+					}
+				}
+				return tc.end
+			})
+			s := &server{log: dlog.NewTestLogger(), life: context.Background(), deps: Deps{Forward: h2cclient.Client()}}
+			sink := &sinkOf[agentreplv1.WatchFooterResponse]{}
+			accepted := 0
+
+			// Act
+			err := pipeStream[agentreplv1.WatchFooterRequest, agentreplv1.WatchFooterResponse](context.Background(), s, "WatchFooter", target,
+				agentreplv1connect.AgentReplWatchFooterProcedure, connect.NewRequest(&agentreplv1.WatchFooterRequest{Workspace: ref()}), sink,
+				func() { accepted++ })
+
+			// Assert
+			if (err != nil) != tc.wantErr || accepted != tc.wantAccepted || len(sink.got) != tc.messages {
+				t.Fatalf("pipeStream = %v with %d acceptances and %d messages, want error %v, %d and %d",
+					err, accepted, len(sink.got), tc.wantErr, tc.wantAccepted, tc.messages)
+			}
+		})
+	}
+}
+
+// TestOnlyPipeStreamCarriesAStreamFromAnotherDaemon keeps every stream carried
+// from another daemon on pipeStream, so a forwarded stream and a relayed page
+// subscription cannot come to state their target's acceptance differently.
+func TestOnlyPipeStreamCarriesAStreamFromAnotherDaemon(t *testing.T) {
+	// Arrange
+	names, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	var sites []string
+	for _, name := range names {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range strings.Count(string(source), ".CallServerStream(") {
+			sites = append(sites, name)
+		}
+	}
+
+	// Assert
+	if len(sites) != 1 || sites[0] != "forward.go" {
+		t.Fatalf("a server stream is opened at another daemon from %v, want only pipeStream in forward.go", sites)
 	}
 }

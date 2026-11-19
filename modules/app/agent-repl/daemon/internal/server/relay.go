@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"connectrpc.com/connect"
 
@@ -55,39 +54,22 @@ func (s *server) relayTarget(ctx context.Context, watch pageWatch) (string, bool
 func relayWatch[Req, Resp any](ctx context.Context, s *server, rpc, procedure, target, page string, req *Req, sink streamSink[Resp]) error {
 	relayCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+procedure)
 	out := connect.NewRequest(req)
 	out.Header().Set(ForwardedHeader, "1")
 	out.Header().Set(RelayedPageHeader, page)
 	fields := dlog.Context{"rpc": rpc, "target": target, "page": page}
-	in, err := client.CallServerStream(relayCtx, out)
-	if err != nil {
-		s.log.Info("daemon.server.relay", "the daemon a page subscription is relayed from could not be asked", dlog.WithCause(fields, err))
-		return err
-	}
-	defer in.Close()
-	accepted := in.ResponseHeader().Get(AcceptedHeader) != ""
-	if accepted {
-		s.acceptStream(ctx, rpc)
-	}
-	for in.Receive() {
-		if !accepted {
-			// A push is itself the proof of a stream that stands.
-			accepted = true
-			s.acceptStream(ctx, rpc)
-		}
-		if err := sink.Send(in.Msg()); err != nil {
-			return fmt.Errorf("relay %s from %s: %w", rpc, target, err)
-		}
-	}
-	if err := in.Err(); err != nil {
-		if ctx.Err() == nil {
-			s.log.Info("daemon.server.relay", "the daemon a page subscription is relayed from ended it with an error", dlog.WithCause(fields, err))
+	err := pipeStream[Req, Resp](relayCtx, s, rpc, target, procedure, out, sink, func() { s.acceptStream(ctx, rpc) })
+	switch {
+	case ctx.Err() != nil:
+		// The subscription was ended from this side (the page unsubscribed,
+		// or its stream ended): whatever the target then reported is that.
+		if err == nil {
+			return ctx.Err()
 		}
 		return err
-	}
-	if ctx.Err() != nil {
-		return ctx.Err()
+	case err != nil:
+		s.log.Info("daemon.server.relay", "the daemon a page subscription is relayed from ended it with an error", dlog.WithCause(fields, err))
+		return err
 	}
 	s.log.Info("daemon.server.relay", "the daemon a page subscription is relayed from ended it cleanly; the page subscribes again", fields)
 	return errSubscriptionMoved
