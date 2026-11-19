@@ -1144,6 +1144,19 @@ func (r *resolver) SetSummary(ws ids.WorkspaceID, text string) {
 		dlog.Context{"empty": line == ""}, func(s *wsState) { s.summary = line })
 }
 
+// SetOpenOwnedPullRequest installs whether the workspace owns a pull request
+// still open. An unchanged fact renders nothing.
+func (r *resolver) SetOpenOwnedPullRequest(ws ids.WorkspaceID, open bool) {
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.set_open_owned_pull_request", "the roster took whether the workspace owns an open pull request",
+		dlog.Context{"open": open}, func(s *wsState, _ dlog.Logger) bool {
+			if s.openOwnedPullRequest == open {
+				return false
+			}
+			s.openOwnedPullRequest = open
+			return true
+		})
+}
+
 // ---- SidebarSink ----------------------------------------------------------
 
 // OnSessionStarted marks the row live.

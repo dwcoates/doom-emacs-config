@@ -161,6 +161,10 @@ type wsState struct {
 	merge footer.MergeFacts
 	// summary is the row detail's summary line, empty when none is set.
 	summary string
+	// openOwnedPullRequest reports that the workspace owns a pull request
+	// still open (SetOpenOwnedPullRequest), which the row's
+	// frontend.v1.RosterRowOpenOwnedPullRequest marker states.
+	openOwnedPullRequest bool
 	// outline is a chat thread's outline, as the chat service last handed
 	// it; nil while it has none.
 	outline *frontendv1.RosterThreadOutline
