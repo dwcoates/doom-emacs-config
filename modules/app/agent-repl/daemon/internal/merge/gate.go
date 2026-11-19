@@ -368,7 +368,8 @@ func (g *gateRun) reset() {
 func (g *gateRun) edge(line string) {
 	g.runnerEdge(line)
 	took, err := g.tracker.take(line)
-	g.lineFailed(line, err)
+	recordUnreadLine(g.r.o.log(context.Background(), g.r.ws), "daemon.merge.tests", line, err,
+		dlog.Context{"workspace": string(g.r.ws), "round": g.round.n})
 	// A REUSED SUITE TAKES NO FOOTER EDGE (owner ruling, 2026-10-14): it
 	// neither started nor ended in this gate.
 	if took.suite != "" && took.state != suiteStateReused {
@@ -379,21 +380,6 @@ func (g *gateRun) edge(line string) {
 	if took.moved {
 		g.publishLive()
 	}
-}
-
-// lineFailed records a line the tracker could not read: a seat line at
-// ERROR, an uncountable line at WARN (suiteTracker.take).
-func (g *gateRun) lineFailed(line string, err error) {
-	if err == nil {
-		return
-	}
-	fields := dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()}
-	logger := g.r.o.log(context.Background(), g.r.ws)
-	if errors.Is(err, errSeatLine) {
-		logger.Error("daemon.merge.tests", errSeatLine.Error(), fields)
-		return
-	}
-	logger.Warn("daemon.merge.tests", errCountLine.Error(), fields)
 }
 
 // seatWaitView is a runner's seat wait as the tests tab draws it, begun at

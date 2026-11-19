@@ -6,6 +6,8 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
+	"agent-repld/internal/dlog"
+
 	"agentrepl/testrun/seatwait"
 )
 
@@ -67,6 +69,24 @@ var (
 	errSeatLine  = errors.New("a test runner's RAM disk seat line could not be read")
 	errCountLine = errors.New("a test runner line could not be counted")
 )
+
+// recordUnreadLine records ERR, a line LINE the tracker could not read,
+// under OP on LOG: an unreadable seat line at ERROR, an uncountable line at
+// WARN, with FIELDS. The one record of an unread line for every gate.
+func recordUnreadLine(log dlog.Logger, op, line string, err error, fields dlog.Context) {
+	if err == nil {
+		return
+	}
+	record := dlog.Context{"line": line, "error": err.Error()}
+	for k, v := range fields {
+		record[k] = v
+	}
+	if errors.Is(err, errSeatLine) {
+		log.Error(op, errSeatLine.Error(), record)
+		return
+	}
+	log.Warn(op, errCountLine.Error(), record)
+}
 
 // take follows LINE: a seat line stands or clears the seat wait, a unit's
 // verdict or a suite's planned total moves a started suite's counts, and a

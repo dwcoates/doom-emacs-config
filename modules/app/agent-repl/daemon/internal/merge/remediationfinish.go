@@ -297,20 +297,26 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 		return fmt.Errorf("merge: no test command is configured for the remediation's gate")
 	}
 	argv = gateArgv(append([]string(nil), argv...), o.deps.TestMetricsRoot)
-	archive := filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", f.Workspace, f.GateRounds+1))
+	// THE ATTEMPT IS DRAWN IN THE MEDIATOR'S FEED AS IT RUNS (fixgate.go).
+	card := o.newFixGateRun(f, fields)
+	archive := card.log.path
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate started", withField(fields, "archive", archive))
-	result, err := o.runRemediationGate(ctx, record.Dir, argv, archive)
+	result, err := o.runRemediationGate(ctx, record.Dir, argv, archive, card.line)
 	if err != nil {
+		card.failed("the gate could not run: " + err.Error())
 		return err
 	}
 	if why, broken := gateDidNotRun(result.ExitCode); broken {
+		card.failed("the gate did not run: " + why)
 		return fmt.Errorf("merge: the remediation's gate did not run: %s; the whole run is archived at %s", why, archive)
 	}
 	if !result.Passed {
 		failing := readFailingTests(result.Tail, filepath.Join(record.Dir, moduleRoot)).render(archive)
+		card.failed(fmt.Sprintf("the suite failed (exit %d); the fix goes back to work", result.ExitCode))
 		o.deps.Log.Global().Info(opRemediationFinish, "the remediation's full gate failed", withField(withField(fields, "archive", archive), "exit_code", result.ExitCode))
 		return o.resumeRemediation(ctx, f, BriefRemediationGateFailed, map[string]string{"archive_path": archive, "failing_tests": failing}, fields)
 	}
+	card.passed()
 	after, err := o.deps.Git.ResolveRef(ctx, target.repoRoot, record.Branch)
 	if err != nil {
 		return err
@@ -329,10 +335,10 @@ func (o *orchestrator) remediationGate(ctx context.Context, f wsm.RemediationFin
 	return o.remediationLand(ctx, f, withField(fields, "step", string(f.Step)))
 }
 
-// runRemediationGate runs ARGV in DIR, writing every line to ARCHIVE, and
-// answers the run.
-func (o *orchestrator) runRemediationGate(ctx context.Context, dir string, argv []string, archive string) (GateResult, error) {
-	measured, err := o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, func(string) {})
+// runRemediationGate runs ARGV in DIR, handing each line to ONLINE as it is
+// written and writing every line to ARCHIVE, and answers the run.
+func (o *orchestrator) runRemediationGate(ctx context.Context, dir string, argv []string, archive string, onLine func(string)) (GateResult, error) {
+	measured, err := o.deps.TestRunner.RunLinesMeasured(ctx, dir, argv, onLine)
 	if err != nil {
 		return GateResult{}, fmt.Errorf("merge: run the remediation's gate: %w", err)
 	}

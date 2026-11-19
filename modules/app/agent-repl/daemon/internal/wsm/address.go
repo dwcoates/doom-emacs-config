@@ -162,6 +162,7 @@ var rowKinds = map[feedid.RowKind]struct{}{
 	feedid.KindDetachedShell:    {},
 	feedid.KindShellHead:        {},
 	feedid.KindSynth:            {},
+	feedid.KindFixGate:          {},
 }
 
 // knownRowKind reports whether kind is one of feedid's declared kinds.
