@@ -317,12 +317,11 @@ type fakeDB struct {
 	slackOrigins       map[ids.WorkspaceID]string
 	slackOriginErr     error
 	slackOriginReadErr error
-	// originators are the recorded originators; originatorErr fails a
-	// record.
-	originators   map[ids.WorkspaceID]string
-	originatorErr error
-	linksErr      error
-	linksReadErr  error
+	// originators are the originators registrations recorded
+	// (RegisterFacts.Originator).
+	originators  map[ids.WorkspaceID]string
+	linksErr     error
+	linksReadErr error
 	// linkSets is every link set the verbs wrote, in order.
 	linkSets []wsm.LinkSet
 	// prSubs answers WorkspacePullRequestSubscriptions.
@@ -748,7 +747,15 @@ func (d *fakeDB) RegisterWorkspace(_ context.Context, dir string, facts wsm.Regi
 	if facts.Closure != nil {
 		ws.Closed, ws.Closure = true, facts.Closure
 	}
-	// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, as the store's insert does.
+	// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR,
+	// as the store's insert does.
+	if facts.Originator != "" {
+		if d.originators == nil {
+			d.originators = map[ids.WorkspaceID]string{}
+		}
+		d.originators[id] = facts.Originator
+		ws.EmojiAck = facts.Originator == wsm.OriginatorEmojiAck
+	}
 	if facts.Hidden || facts.Intake {
 		at := time.Unix(1, 0)
 		ws.Hidden, ws.HiddenAt = true, &at
@@ -1029,19 +1036,6 @@ func (d *fakeDB) SetWorkspaceSlackOrigin(_ context.Context, id ids.WorkspaceID, 
 		d.slackOrigins = map[ids.WorkspaceID]string{}
 	}
 	d.slackOrigins[id] = url
-	return nil
-}
-
-// SetWorkspaceOriginator records who created the workspace; originatorErr
-// fails it and records nothing.
-func (d *fakeDB) SetWorkspaceOriginator(_ context.Context, id ids.WorkspaceID, originator string) error {
-	if d.originatorErr != nil {
-		return d.originatorErr
-	}
-	if d.originators == nil {
-		d.originators = map[ids.WorkspaceID]string{}
-	}
-	d.originators[id] = originator
 	return nil
 }
 

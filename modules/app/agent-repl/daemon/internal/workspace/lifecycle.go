@@ -93,14 +93,11 @@ func (v *verbs) creationStageOf(cfg *repoconfigv1.LifecycleConfig, spec CreateSp
 	return creationStage{repoRoot: repoDir, hooks: hooks}
 }
 
-// recordOrigin records who created RECORD and, for a workspace created for a
-// Slack message, the message, stored among its links as a reference. Every
+// recordOrigin records, for a workspace created for a Slack message, the
+// message, stored among its links as a reference. Who created the workspace
+// is written with its registration (wsm.RegisterFacts.Originator). Every
 // later stage's hooks read both.
 func (v *verbs) recordOrigin(ctx context.Context, log dlog.Logger, record wsm.Workspace, spec CreateSpec) error {
-	if err := v.deps.DB.SetWorkspaceOriginator(ctx, record.ID, spec.originator.String()); err != nil {
-		log.Error(opCreate, "could not record who created the workspace", dlog.Context{"originator": spec.originator.String(), "cause": err.Error()})
-		return fmt.Errorf("create %q: record its originator: %w", record.Name, err)
-	}
 	if spec.SlackThread == "" {
 		return nil
 	}
