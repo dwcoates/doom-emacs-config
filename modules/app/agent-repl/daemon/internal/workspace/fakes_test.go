@@ -2337,9 +2337,11 @@ type fakeMerge struct {
 	queued bool
 	closed []ids.WorkspaceID
 	// hidden are the workspaces OnHidden was told of, in order.
-	hidden     []ids.WorkspaceID
-	enqueued   []ids.WorkspaceID
-	enqueueErr error
+	hidden []ids.WorkspaceID
+	// linksChanged records every WorkspaceLinksChanged.
+	linksChanged []ids.WorkspaceID
+	enqueued     []ids.WorkspaceID
+	enqueueErr   error
 	// steps records the restart's suspension and take-back, in order, and
 	// the rollout's bounces are appended by the tests that need the order.
 	steps      []string
@@ -2360,6 +2362,11 @@ type fakeMerge struct {
 	// ownResumeNone makes ResumeOwnPause answer that no pause of the
 	// workspace's own stood.
 	ownResumeNone bool
+}
+
+// WorkspaceLinksChanged records the workspace whose links changed.
+func (f *fakeMerge) WorkspaceLinksChanged(ws ids.WorkspaceID) {
+	f.linksChanged = append(f.linksChanged, ws)
 }
 
 // ownResume is one ResumeOwnPause the fake was asked for.

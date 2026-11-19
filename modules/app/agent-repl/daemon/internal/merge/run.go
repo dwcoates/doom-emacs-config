@@ -527,10 +527,10 @@ func (r *run) head(result any) {
 }
 
 // label is the bubble's head line: what is merged, and where to.
-func (r *run) label() string {
+func (r *run) label() branchLine {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return branchLabel(r.subject.branch, r.subject.targetLabel())
+	return branchLineOf(r.subject.branch, r.subject.targetLabel())
 }
 
 // runAdmitted is one admitted merge, from its start to its end: the run, then

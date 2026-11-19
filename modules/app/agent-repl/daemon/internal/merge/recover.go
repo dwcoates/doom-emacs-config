@@ -448,7 +448,7 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
 	// always had, and the footer shows the step the merge stands on before the
 	// resumed run's first word.
-	label := branchLabel(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+	label := branchLineOf(doc.Subject.Branch, doc.Subject.subject().targetLabel())
 	if doc.BackInLine {
 		// A MERGE BACK IN LINE FROM ITS REPAIR is drawn waiting, never at the
 		// repair its record last stood on (drawBackInLine); the queue's redraw

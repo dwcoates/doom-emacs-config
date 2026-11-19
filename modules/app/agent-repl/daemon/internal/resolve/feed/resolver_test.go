@@ -1144,8 +1144,11 @@ func TestAMergeHeadIsUpsertedWhereTheOrchestratorPlacesIt(t *testing.T) {
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{
 				Head: &frontendv1.FeedMergeHead{
-					Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
-					Label:   &frontendv1.FeedMergeLabel{Text: "ABC/fix-flaky → master"},
+					Glyph: &frontendv1.FeedMergeGlyph{Icon: "merge"},
+					BranchLine: &frontendv1.FeedMergeBranchLine{
+						Source: &frontendv1.FeedMergeBranchLineSource{Text: "ABC/fix-flaky"},
+						Target: &frontendv1.FeedMergeBranchLineTarget{Text: "master"},
+					},
 					Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: 1_000},
 					Fold:    &frontendv1.FeedMergeFold{Folded: false},
 				},

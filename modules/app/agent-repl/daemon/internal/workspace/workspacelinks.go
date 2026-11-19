@@ -167,6 +167,7 @@ func (v *verbs) changeLinks(ctx context.Context, ws ids.WorkspaceID, fields dlog
 func (v *verbs) publishLinks(ws ids.WorkspaceID, links []wsm.WorkspaceLink) {
 	v.deps.Topbar.SetLinks(ws, ShownLinks(links))
 	v.deps.Sidebar.SetOpenOwnedPullRequest(ws, wsm.OwnedPullRequestOpen(links))
+	v.deps.Merge.WorkspaceLinksChanged(ws)
 }
 
 // RepublishLinks reads the workspace's links again and publishes them

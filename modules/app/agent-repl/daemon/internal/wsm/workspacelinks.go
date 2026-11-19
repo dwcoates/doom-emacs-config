@@ -375,10 +375,7 @@ func hasRepeat(urls []string) bool {
 // (owner ruling, 2026-11-10).
 func OwnedPullRequestsMerged(links []WorkspaceLink) (owns, merged bool) {
 	merged = true
-	for _, link := range links {
-		if !isOwnedPullRequest(link) {
-			continue
-		}
+	for _, link := range OwnedPullRequestLinks(links) {
 		owns = true
 		if link.Follow == nil || link.Follow.Ended == nil || !link.Follow.Ended.Merged {
 			merged = false
@@ -393,16 +390,39 @@ func OwnedPullRequestsMerged(links []WorkspaceLink) (owns, merged bool) {
 // that merged or closed, or one no longer followed (its state cannot be
 // known), is not open.
 func OwnedPullRequestOpen(links []WorkspaceLink) bool {
-	for _, link := range links {
-		if isOwnedPullRequest(link) && link.Follow != nil && link.Follow.Ended == nil {
+	for _, link := range OwnedPullRequestLinks(links) {
+		if link.Follow != nil && link.Follow.Ended == nil {
 			return true
 		}
 	}
 	return false
 }
 
-// isOwnedPullRequest reports whether LINK is a canonical owned pull request:
-// an owned link naming a GitHub pull request.
-func isOwnedPullRequest(link WorkspaceLink) bool {
-	return link.Owned && link.PullRequest != nil
+// OwnedPullRequestLinks is LINKS' canonical owned pull requests: the owned
+// links naming a GitHub pull request, in LINKS' order. Every rule that reads a
+// workspace's own pull requests reads them through it.
+func OwnedPullRequestLinks(links []WorkspaceLink) []WorkspaceLink {
+	var out []WorkspaceLink
+	for _, link := range links {
+		if link.Owned && link.PullRequest != nil {
+			out = append(out, link)
+		}
+	}
+	return out
+}
+
+// DeployablePullRequests is the urls of LINKS' owned pull requests that a
+// deploy may still carry: every one but those whose subscription recorded a
+// close without a merge. One still open, one merged, and one no longer
+// followed are each counted, so a merge's head keeps naming its pull request
+// once it merges.
+func DeployablePullRequests(links []WorkspaceLink) []string {
+	var out []string
+	for _, link := range OwnedPullRequestLinks(links) {
+		if link.Follow != nil && link.Follow.Ended != nil && !link.Follow.Ended.Merged {
+			continue
+		}
+		out = append(out, link.URL)
+	}
+	return out
 }

@@ -329,6 +329,7 @@ func (d *fakeDB) ClearFinishProgress(_ context.Context, ws ids.WorkspaceID) erro
 
 func newFakeDB() *fakeDB {
 	return &fakeDB{
+		links:         map[ids.WorkspaceID][]wsm.WorkspaceLink{},
 		originators:   map[ids.WorkspaceID]string{},
 		slackOrigins:  map[ids.WorkspaceID]string{},
 		finish:        map[ids.WorkspaceID]wsm.FinishProgress{},

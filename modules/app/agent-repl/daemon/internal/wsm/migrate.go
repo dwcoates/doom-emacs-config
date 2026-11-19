@@ -329,6 +329,7 @@ var migrations = []migration{
 	{To: 172, Name: "sidebar_view_section_heights", Kind: MigrationAdditive, DDL: sectionHeightsDDL},
 	{To: 173, Name: "merge_queue_cold_gated", Kind: MigrationAdditive, DDL: mergeQueueColdGatedDDL},
 	{To: 174, Name: "settled_rounds_unheld", Kind: MigrationAdditive, DDL: settledRoundsUnheldDDL},
+	{To: 175, Name: "durable_rows_retired_merge_labels", Kind: MigrationContract, Rewrite: carryRetiredMergeHeadLabelRows},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

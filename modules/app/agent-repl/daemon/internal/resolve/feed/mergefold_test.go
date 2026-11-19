@@ -392,7 +392,7 @@ func TestRewriteRecordedHeadRestatesTheStoredRowOnly(t *testing.T) {
 
 	// Act
 	rewriteRecordedHead(t, store, func(head *frontendv1.FeedMergeHead) {
-		head.Label = &frontendv1.FeedMergeLabel{Text: "rewritten"}
+		head.BranchLine = &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: "rewritten"}}
 	})
 
 	// Assert
@@ -401,8 +401,8 @@ func TestRewriteRecordedHeadRestatesTheStoredRowOnly(t *testing.T) {
 	if err := proto.Unmarshal(recorded.Row, row); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetLabel().GetText()
-	if got := row.GetActivity().GetMerge().GetHead().GetLabel().GetText(); got != "rewritten" || drawn == "rewritten" {
+	drawn := feedRows(r, rootFeed())[0].GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().GetText()
+	if got := row.GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().GetText(); got != "rewritten" || drawn == "rewritten" {
 		t.Fatalf("recorded label = %q, drawn label = %q; want only the record rewritten", got, drawn)
 	}
 }

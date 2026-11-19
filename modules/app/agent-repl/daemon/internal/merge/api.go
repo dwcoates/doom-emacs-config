@@ -240,6 +240,12 @@ type Orchestrator interface {
 	// requester's bubble head with its switch. It is a no-op for a workspace
 	// that is no merge workspace or is already revealed.
 	RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID, cause string) error
+	// WorkspaceLinksChanged draws again the heads of WS's merges, and of the
+	// async merges WS asked for, once WS's links changed: a merge's target
+	// opens the pull request the workspace owns
+	// (frontend.v1.FeedMergeBranchLineTarget.pull_request), which a finish
+	// hook stores mid-merge.
+	WorkspaceLinksChanged(ws ids.WorkspaceID)
 	// InterruptTab stops the turn an AGENTIC merge tab of REQUESTER's feed
 	// draws (agentrepl.v1.InterruptRequest.merge_tab): the merge workspace's
 	// turn for an async merge, which also reveals that workspace, or the

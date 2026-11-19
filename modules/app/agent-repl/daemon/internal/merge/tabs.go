@@ -13,6 +13,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -159,12 +160,15 @@ func frontTabLabel(round tabRound) *frontendv1.FeedMergeTabLabel {
 
 // headRow builds the bubble's collapsed head: the branch line, the clock, and
 // THE ARM THAT IS THE STATE of the merge as a whole.
-func headRow(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int64, result any) *frontendv1.FeedRow {
+//
+// PULLREQUEST is the url of the pull request the merge deploys, which the
+// target opens, empty when it names none (headPullRequest).
+func headRow(ws ids.WorkspaceID, lease ids.LeaseID, line branchLine, pullRequest string, startedMS int64, result any) *frontendv1.FeedRow {
 	merge := &frontendv1.FeedMerge{
 		Head: &frontendv1.FeedMergeHead{
-			Glyph:   &frontendv1.FeedMergeGlyph{Icon: "merge"},
-			Label:   &frontendv1.FeedMergeLabel{Text: label},
-			Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: startedMS},
+			Glyph:      &frontendv1.FeedMergeGlyph{Icon: "merge"},
+			BranchLine: line.view(pullRequest),
+			Runtime:    &frontendv1.FeedMergeRuntime{StartedAtMs: startedMS},
 			// NO FOLD: the feed resolver settles it on publication, the
 			// reader's recorded fold or the daemon's default, at its one
 			// deciding site (resolve/feed/mergefold.go).
@@ -398,12 +402,15 @@ const (
 	// headOffer is the restate the merge-queue question's raising or
 	// retirement draws.
 	headOffer headCause = "offer"
+	// headLinks is the restate a change of a workspace's links draws, so the
+	// target opens the pull request a finish hook stored mid-merge.
+	headLinks headCause = "links"
 )
 
 // headArgs is the last head publishHead drew for one merging workspace.
 type headArgs struct {
 	lease     ids.LeaseID
-	label     string
+	line      branchLine
 	startedMS int64
 	result    any
 }
@@ -423,10 +430,10 @@ type headArgs struct {
 // The publication is ordered by the head book (headBook): a live publication
 // of a ledger already resolved is not drawn. The arguments are kept, so a
 // reveal can restate the head with its switch (restateHead).
-func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, label string, startedMS int64, result any, cause headCause) {
+func (o *orchestrator) publishHead(ws ids.WorkspaceID, lease ids.LeaseID, line branchLine, startedMS int64, result any, cause headCause) {
 	o.heads.mu.Lock()
 	defer o.heads.mu.Unlock()
-	o.drawHead(ws, headArgs{lease: lease, label: label, startedMS: startedMS, result: result}, cause)
+	o.drawHead(ws, headArgs{lease: lease, line: line, startedMS: startedMS, result: result}, cause)
 }
 
 // restateHead draws WS's merge head again as it was last drawn, so a change
@@ -470,7 +477,7 @@ func (o *orchestrator) drawHead(ws ids.WorkspaceID, head headArgs, cause headCau
 		o.heads.resolved[head.lease] = true
 	}
 	at := o.bubbleOf(ws)
-	row := headRow(at.ws, head.lease, head.label, head.startedMS, head.result)
+	row := headRow(at.ws, head.lease, head.line, o.headPullRequest(ws, at, head.line), head.startedMS, head.result)
 	row.GetActivity().GetMerge().Head.Mode = o.headMode(ws, at)
 	pinned := headIsLive(head.result) && !at.async()
 	fields["pinned"] = pinned
@@ -529,9 +536,52 @@ func (o *orchestrator) upsertTab(ws ids.WorkspaceID, lease ids.LeaseID, key tabK
 	o.deps.Feed.UpsertDurable(at.ws, mergeFeed(lease), tabRow(at.ws, lease, key, tab))
 }
 
-// branchLabel resolves the head's branch line ("ABC/fix-flaky → master").
-func branchLabel(source, target string) string {
-	return fmt.Sprintf("%s → %s", source, target)
+// branchLine is the head's branch line: what is merged, and where to
+// (frontend.v1.FeedMergeBranchLine). An EMPTY TARGET is a line whose target
+// could not be read, the merging workspace's own id standing in as its source
+// (unreadLine).
+type branchLine struct {
+	source, target string
+}
+
+// branchLineOf is the line merging SOURCE into TARGET ("ABC/fix-flaky →
+// master"). An empty target is a defect: a line that could not be read is
+// unreadLine's.
+func branchLineOf(source, target string) branchLine {
+	if target == "" {
+		panic(fmt.Sprintf("merge: the branch line of %q names no target", source))
+	}
+	return branchLine{source: source, target: target}
+}
+
+// unreadLine is the line of WS's merge when what it lands could not be read:
+// the workspace's own id, and no target.
+func unreadLine(ws ids.WorkspaceID) branchLine {
+	return branchLine{source: string(ws)}
+}
+
+// text is the line as one string, the way the queued banner names it
+// (footer.BranchLineText).
+func (l branchLine) text() string {
+	return footer.BranchLineText(l.view(""))
+}
+
+// view draws the line, its target opening PULLREQUEST when that is not empty.
+// A pull request on a line with no target is a defect: the pull request is the
+// target's.
+func (l branchLine) view(pullRequest string) *frontendv1.FeedMergeBranchLine {
+	out := &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: l.source}}
+	if l.target == "" {
+		if pullRequest != "" {
+			panic(fmt.Sprintf("merge: the unread line of %q names the pull request %s", l.source, pullRequest))
+		}
+		return out
+	}
+	out.Target = &frontendv1.FeedMergeBranchLineTarget{Text: l.target}
+	if pullRequest != "" {
+		out.Target.PullRequest = &frontendv1.FeedMergeBranchLineTargetPullRequest{Url: pullRequest}
+	}
+	return out
 }
 
 // queueSnapshot renders one repository's queue as this workspace sees it:

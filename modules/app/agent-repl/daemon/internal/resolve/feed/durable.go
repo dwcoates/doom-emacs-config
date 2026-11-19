@@ -67,8 +67,17 @@ func (r *resolver) restoreDurable(s *wsState) {
 	drawn := 0
 	for _, stored := range rows {
 		fields := dlog.Context{"row": stored.RowID, "key": stored.OrderKey}
+		// A MERGE HEAD STORED WITH ITS RETIRED LABEL is read as layout 174
+		// will rewrite it, so a head the contract step has not yet reached
+		// is drawn rather than refused.
+		raw, _, err := wsm.CarryRetiredMergeHeadLabel(stored.Row)
+		if err != nil {
+			fields["cause"] = err.Error()
+			log.Error(opDurable, "a durable row could not be decoded and is drawn nowhere", fields)
+			continue
+		}
 		row := &frontendv1.FeedRow{}
-		if err := proto.Unmarshal(stored.Row, row); err != nil {
+		if err := proto.Unmarshal(raw, row); err != nil {
 			fields["cause"] = err.Error()
 			log.Error(opDurable, "a durable row could not be decoded and is drawn nowhere", fields)
 			continue
@@ -81,7 +90,7 @@ func (r *resolver) restoreDurable(s *wsState) {
 		// alone: served, the webapp refuses the whole page it is on. A retired
 		// shape is re-encoded by a wsm layout step, so one reaching here is a
 		// retirement no step carried over.
-		if carriesUnknownFields(stored.Row, row) {
+		if carriesUnknownFields(raw, row) {
 			log.Error(opDurable, "a durable row carries fields this build has no descriptor for and is drawn nowhere", fields)
 			continue
 		}

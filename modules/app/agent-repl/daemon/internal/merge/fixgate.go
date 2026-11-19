@@ -101,7 +101,7 @@ func (g *fixGateRun) publish(card *frontendv1.FeedFixGate, written bool) {
 		link = g.o.testLogLink(g.log)
 	}
 	card.Head = &frontendv1.FeedFixGateHead{
-		Label:       &frontendv1.FeedMergeLabel{Text: fixGateLabel},
+		Label:       &frontendv1.FeedFixGateLabel{Text: fixGateLabel},
 		Attempt:     uint32(g.attempt),
 		MaxAttempts: uint32(MaxFixAttempts),
 	}
