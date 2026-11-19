@@ -165,21 +165,17 @@ func TestLaunchctlDefinitionIsTheLabelsPlist(t *testing.T) {
 	}
 }
 
-func TestLaunchctlReloadBootsOutAndBootstrapsThePlistAsItIsNow(t *testing.T) {
+func TestLaunchctlStartBootstrapsThePlistAsItIsNow(t *testing.T) {
 	tests := []struct {
 		name     string
 		answers  map[string]runAnswer
 		wantArgv []string
 		wantErr  bool
 	}{
-		{name: "a loaded service is booted out, then bootstrapped", answers: map[string]runAnswer{},
-			wantArgv: []string{"launchctl bootout gui/501/x", "launchctl bootstrap gui/501 /p/x.plist"}},
-		{name: "a service the domain no longer holds is bootstrapped", answers: map[string]runAnswer{"launchctl bootout gui/501/x": {code: 113}},
-			wantArgv: []string{"launchctl bootout gui/501/x", "launchctl bootstrap gui/501 /p/x.plist"}},
-		{name: "a failed bootout bootstraps nothing", answers: map[string]runAnswer{"launchctl bootout gui/501/x": {out: "5: Input/output error", code: 5}},
-			wantArgv: []string{"launchctl bootout gui/501/x"}, wantErr: true},
-		{name: "a failed bootstrap is the reload's failure", answers: map[string]runAnswer{"launchctl bootstrap gui/501 /p/x.plist": {out: "Bootstrap failed: 5", code: 5}},
-			wantArgv: []string{"launchctl bootout gui/501/x", "launchctl bootstrap gui/501 /p/x.plist"}, wantErr: true},
+		{name: "the plist is bootstrapped", answers: map[string]runAnswer{},
+			wantArgv: []string{"launchctl bootstrap gui/501 /p/x.plist"}},
+		{name: "a failed bootstrap is the start's failure", answers: map[string]runAnswer{"launchctl bootstrap gui/501 /p/x.plist": {out: "Bootstrap failed: 5", code: 5}},
+			wantArgv: []string{"launchctl bootstrap gui/501 /p/x.plist"}, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -187,7 +183,7 @@ func TestLaunchctlReloadBootsOutAndBootstrapsThePlistAsItIsNow(t *testing.T) {
 			l, runner := newLaunchctl(tc.answers)
 
 			// Act
-			err := l.Reload(context.Background(), "x")
+			err := l.Start(context.Background(), "x")
 
 			// Assert
 			var got []string
@@ -195,7 +191,7 @@ func TestLaunchctlReloadBootsOutAndBootstrapsThePlistAsItIsNow(t *testing.T) {
 				got = append(got, strings.Join(c, " "))
 			}
 			if (err != nil) != tc.wantErr || strings.Join(got, ",") != strings.Join(tc.wantArgv, ",") {
-				t.Fatalf("Reload = %v, ran %v; want error %v, ran %v", err, got, tc.wantErr, tc.wantArgv)
+				t.Fatalf("Start = %v, ran %v; want error %v, ran %v", err, got, tc.wantErr, tc.wantArgv)
 			}
 		})
 	}

@@ -31,6 +31,9 @@ type fakeServiceManager struct {
 	// loaded is what Status answers per label.
 	loaded map[string]bool
 	pid    map[string]int
+	// onStopped runs when a service is stopped: the harness ends its
+	// process there, as the manager's stop does.
+	onStopped func(label string)
 	// onRestart runs when the store is restarted (a test binds the socket,
 	// or grows the log, or kills the process there).
 	onRestart func()
@@ -100,31 +103,35 @@ func (l *fakeServiceManager) Restart(_ context.Context, label string) error {
 	return nil
 }
 
-func (l *fakeServiceManager) Reload(_ context.Context, label string) error {
-	l.record("reload " + label)
-	if l.restartErr != nil {
-		return l.restartErr
-	}
-	if label == StoreLabel && l.onRestart != nil {
-		l.onRestart()
-	}
-	return nil
-}
-
 func (l *fakeServiceManager) Stop(_ context.Context, label string) error {
 	l.record("stop " + label)
 	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.loaded[label] = false
-	return l.stopErr
+	stopped, err := l.onStopped, l.stopErr
+	l.mu.Unlock()
+	if stopped != nil {
+		stopped(label)
+	}
+	return err
 }
 
 func (l *fakeServiceManager) Start(_ context.Context, label string) error {
 	l.record("start " + label)
-	if l.startErr == nil && l.onStart != nil {
+	if l.startErr != nil {
+		return l.startErr
+	}
+	l.mu.Lock()
+	l.loaded[label] = true
+	l.mu.Unlock()
+	if l.onStart != nil {
 		l.onStart(label)
 	}
-	return l.startErr
+	// A STARTED STORE BOOTS as a restarted one does: the test's hook binds
+	// its socket.
+	if label == StoreLabel && l.onRestart != nil {
+		l.onRestart()
+	}
+	return nil
 }
 
 func (l *fakeServiceManager) Definition(label string) string {
@@ -214,7 +221,12 @@ func (h *restarterHarness) processExit(ctx context.Context, pid int) error {
 func (h *restarterHarness) exit(pid int) {
 	h.exitsMu.Lock()
 	defer h.exitsMu.Unlock()
-	close(h.exits[pid])
+	select {
+	case <-h.exits[pid]:
+		// Already exited: a process exits once.
+	default:
+		close(h.exits[pid])
+	}
 }
 
 func newRestarter(t *testing.T) *restarterHarness {
@@ -245,6 +257,12 @@ func newRestarter(t *testing.T) *restarterHarness {
 		restarts: &restarttimingtest.Recorder{}, clock: newBoundClock(),
 		// The store runs until a test ends it; the sidecar's bootout ends it.
 		exits: map[int]chan struct{}{10: make(chan struct{})}, awaiting: make(chan int, 8)}
+	// A STOPPED STORE'S PROCESS EXITS, as launchd's bootout ends it.
+	h.services.onStopped = func(label string) {
+		if label == StoreLabel {
+			h.exit(10)
+		}
+	}
 	h.r = &Restarter{
 		CacheBin:     t.TempDir(),
 		ReportDir:    t.TempDir(),
@@ -299,8 +317,8 @@ func TestRestartStoreSettlesItsHolderAndDefinitionBeforeAnythingStops(t *testing
 		wantErr    bool
 		wantRecord string
 	}{
-		{name: "a changed definition is reloaded, never kickstarted", arrange: func(h *restarterHarness) { h.definition = "<plist with --holder/>" },
-			wantActs:   []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "reload " + StoreLabel, "start " + SidecarLabel},
+		{name: "a changed definition is stopped, then started, never kickstarted", arrange: func(h *restarterHarness) { h.definition = "<plist with --holder/>" },
+			wantActs:   []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "stop " + StoreLabel, "start " + StoreLabel, "start " + SidecarLabel},
 			wantRecord: "a service's definition changed since it was loaded; it is reloaded on it"},
 		{name: "a holder that cannot be brought up stops nothing", arrange: func(h *restarterHarness) { h.holderErr = errors.New("install failed") },
 			wantActs: []string{"ensure-holder store-holder"}, wantErr: true},
@@ -356,7 +374,7 @@ func TestTheBootMovesAStoreOffItsHolderOntoIt(t *testing.T) {
 		wantErr  bool
 	}{
 		{name: "a store whose holder is not up is reloaded onto it", down: true,
-			wantActs: []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "reload " + StoreLabel, "start " + SidecarLabel}},
+			wantActs: []string{"ensure-holder store-holder", "define " + StoreLabel, "stop " + SidecarLabel, "stop " + StoreLabel, "start " + StoreLabel, "start " + SidecarLabel}},
 		{name: "a store whose holder serves is left alone"},
 		{name: "a probe that fails stops the boot's step and restarts nothing", probeErr: errors.New("probe hung"),
 			wantErr: true},
@@ -630,7 +648,7 @@ func TestRestartSidecarKickstartsItAlone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartSidecar: %v", err)
 	}
-	if calls := h.services.Calls(); fmt.Sprint(calls) != fmt.Sprint([]string{"define " + SidecarLabel, "restart " + SidecarLabel}) {
+	if calls := h.acts(); fmt.Sprint(calls) != fmt.Sprint([]string{"define " + SidecarLabel, "restart " + SidecarLabel}) {
 		t.Fatalf("calls = %v, want one sidecar kickstart", calls)
 	}
 }
@@ -1424,5 +1442,70 @@ func TestRestartStandaloneLoadsAServiceTheManagerDoesNotHold(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestRestartOn(t *testing.T) {
+	tests := []struct {
+		name      string
+		held      bool
+		changed   bool
+		stopErr   error
+		stillHeld bool
+		wantActs  []string
+		wantErr   bool
+	}{
+		{name: "a held service on an unchanged definition is restarted in place", held: true,
+			wantActs: []string{"restart " + SidecarLabel}},
+		{name: "a held service on a changed definition is stopped, then started", held: true, changed: true,
+			wantActs: []string{"stop " + SidecarLabel, "start " + SidecarLabel}},
+		{name: "a service the manager does not hold is started, never restarted", held: false,
+			wantActs: []string{"start " + SidecarLabel}},
+		{name: "a service the manager does not hold on a changed definition is started", held: false, changed: true,
+			wantActs: []string{"start " + SidecarLabel}},
+		{name: "a service the manager still holds after its stop is not started", held: true, changed: true, stillHeld: true,
+			wantActs: []string{"stop " + SidecarLabel}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			h.services.loaded[SidecarLabel] = tt.held
+			if tt.stillHeld {
+				h.services.statusesUntilGone = 1_000
+			}
+
+			// Act
+			err := h.r.restartOn(context.Background(), SidecarLabel, tt.changed, dlog.Context{})
+
+			// Assert
+			if (err != nil) != tt.wantErr || fmt.Sprint(h.acts()) != fmt.Sprint(tt.wantActs) {
+				t.Fatalf("restartOn = %v, acts %v; want error %v, acts %v", err, h.acts(), tt.wantErr, tt.wantActs)
+			}
+		})
+	}
+}
+
+func TestRestartOnWaitsForTheStoppedProcessToExitBeforeStarting(t *testing.T) {
+	// Arrange: the sidecar's process (pid 20) has not exited yet.
+	h := newRestarter(t)
+	h.exitsMu.Lock()
+	h.exits[20] = make(chan struct{})
+	h.exitsMu.Unlock()
+	done := make(chan error, 1)
+
+	// Act
+	go func() { done <- h.r.restartOn(context.Background(), SidecarLabel, true, dlog.Context{}) }()
+	<-h.awaiting
+	before := h.acts()
+	h.exit(20)
+	err := <-done
+
+	// Assert
+	if fmt.Sprint(before) != fmt.Sprint([]string{"stop " + SidecarLabel}) {
+		t.Fatalf("acts before the exit = %v, want only the stop", before)
+	}
+	if err != nil || fmt.Sprint(h.acts()) != fmt.Sprint([]string{"stop " + SidecarLabel, "start " + SidecarLabel}) {
+		t.Fatalf("restartOn = %v, acts %v; want the start only after the exit", err, h.acts())
 	}
 }
