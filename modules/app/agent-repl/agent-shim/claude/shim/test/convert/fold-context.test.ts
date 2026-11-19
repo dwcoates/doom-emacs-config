@@ -13,10 +13,15 @@ import {
   bookFor,
   mcpServerNames,
   spawningCallOf,
+  spawningCallOfMessage,
   subagentBook,
 } from "../../src/convert/fold-context.js";
 import type { FoldContext } from "../../src/convert/fold-context.js";
 import { foldContext, MAIN_AGENT } from "./fold-harness.js";
+import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+import { filesUnder } from "../files-under.js";
 
 /** The context an ENGINE THAT PREDATES these fields hands the fold. */
 function contextWithout(field: "mcpServerNames" | "subagentFor"): FoldContext {
@@ -90,6 +95,40 @@ describe("which stream a vendor message rides", () => {
 
     // Assert
     expect(spawningCall).toBe("toolu_spawn");
+  });
+});
+
+describe("which stream a whole vendor message rides", () => {
+  it.each([
+    { name: "a null parent", message: { type: "assistant", parent_tool_use_id: null } },
+    { name: "an absent parent", message: { type: "system", subtype: "init" } },
+    { name: "an empty parent", message: { type: "assistant", parent_tool_use_id: "" } },
+  ])("is the main stream for $name", ({ message }) => {
+    // Act
+    const spawningCall = spawningCallOfMessage(message);
+
+    // Assert
+    expect(spawningCall).toBeUndefined();
+  });
+
+  it("is the spawning call a subagent's message names", () => {
+    // Act
+    const spawningCall = spawningCallOfMessage({ type: "assistant", parent_tool_use_id: "toolu_spawn" });
+
+    // Assert
+    expect(spawningCall).toBe("toolu_spawn");
+  });
+
+  it("is the one reader the engine uses: no engine file reads parent_tool_use_id itself", () => {
+    // Arrange
+    const shim = fileURLToPath(new URL("../..", import.meta.url));
+    const engine = filesUnder(join(shim, "src", "engine")).filter((file) => file.endsWith(".ts"));
+
+    // Act
+    const handRolled = engine.filter((file) => /\.parent_tool_use_id\b|parent_tool_use_id\?:/.test(readFileSync(file, "utf8")));
+
+    // Assert
+    expect(handRolled.map((file) => relative(shim, file))).toEqual([]);
   });
 });
 

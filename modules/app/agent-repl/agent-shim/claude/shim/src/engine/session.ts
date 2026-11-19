@@ -254,6 +254,7 @@ import {
 } from "./turn.js";
 import { saidContent, saidContentShape, type SaidContent } from "./said-content.js";
 import { transcriptPath } from "./vendor-paths.js";
+import { spawningCallOfMessage } from "../convert/fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-engine-session", operation: "shim.engine.session" });
 
@@ -2211,7 +2212,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    */
   function noteMainApiResponse(message: SdkMessage, attribution: KeepaliveAttribution, running: VendorTurn): void {
     if (message.type !== "assistant") return;
-    if (message.parent_tool_use_id !== null) return;
+    if (spawningCallOfMessage(message) !== undefined) return;
     if ((message.message as { usage?: unknown } | undefined)?.usage === undefined) return;
     if (attribution.keepalive) return;
     // THE TURN THE RESPONSE BELONGS TO, BY ITS ECHO: a vendor-started turn's
@@ -2770,8 +2771,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
 
   /** Lift the main-thread bound to MESSAGE's own instant, when it states one. */
   function noteMainRecordInstant(message: SdkMessage): void {
-    const parent = (message as { parent_tool_use_id?: unknown }).parent_tool_use_id;
-    if (parent !== null && parent !== undefined) return;
+    if (spawningCallOfMessage(message) !== undefined) return;
     const at = recordTimestampMs(message);
     if (at !== undefined && at > lastMainRecordMs) lastMainRecordMs = at;
   }
@@ -3277,7 +3277,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // messages here, and adopting their `message.model` would flip the
       // session's chip, and every later authoritative field, to the
       // subagent's model for as long as it runs.
-      if (message.parent_tool_use_id !== null) return;
+      if (spawningCallOfMessage(message) !== undefined) return;
       // UNSOLICITED CHANGES ARE STILL CHANGES: nothing called SetSessionModel,
       // so this message is the only evidence the swap happened.
       noteReportedModel((message.message as { model?: unknown } | undefined)?.model);
@@ -7136,7 +7136,7 @@ export function createEngine(deps: EngineDeps): SessionEngine {
    * one's -- refreshing the cache is what it is for.
    */
   function noteCacheRequest(message: SdkMessage): void {
-    if (message.type !== "assistant" || message.parent_tool_use_id !== null) return;
+    if (message.type !== "assistant" || spawningCallOfMessage(message) !== undefined) return;
     const request = cacheRequestOf(message as TranscriptLine);
     if (request === undefined) return;
     cadence?.noteRequest(request);

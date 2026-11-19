@@ -37,6 +37,7 @@
 import { create } from "@bufbuild/protobuf";
 import { conversationv1 } from "../proto.js";
 import type { SdkMessage, SdkUserMessageReplay } from "../sdk/types.js";
+import { spawningCallOfMessage } from "../convert/fold-context.js";
 
 /**
  * How many of the shim's own send uuids are remembered.
@@ -101,7 +102,7 @@ function replayText(message: SdkUserMessageReplay): string {
 export function classifyReplay(message: SdkUserMessageReplay, own: OwnSends): Replay {
   const uuid = message.uuid;
   if (own.has(uuid)) return { kind: "own", uuid };
-  if (message.parent_tool_use_id !== null) return { kind: "other", uuid, why: "a subagent's message" };
+  if (spawningCallOfMessage(message) !== undefined) return { kind: "other", uuid, why: "a subagent's message" };
   if (message.isSynthetic === true) return { kind: "other", uuid, why: "a synthetic message the harness composed" };
   const origin = message.origin;
   if (origin !== undefined && origin.kind !== "human") {

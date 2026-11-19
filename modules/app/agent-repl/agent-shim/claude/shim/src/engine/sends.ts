@@ -102,6 +102,7 @@
 import { bindLog } from "../log.js";
 import type { SdkMessage } from "../sdk/types.js";
 import { commandLifecycleOf, type CommandLifecycle } from "./peer-send.js";
+import { spawningCallOfMessage } from "../convert/fold-context.js";
 
 const LOGGER = bindLog({ component: "shim-engine-sends", operation: "shim.engine.sends" });
 
@@ -206,7 +207,7 @@ export function stampedSends(message: SdkMessage): { readonly answers: string; r
   let stamps: { user_message_uuid?: string; user_message_uuids?: string[] } | undefined;
   if (message.type === "assistant" || message.type === "stream_event") {
     // Subagent frames are never stamped; they belong to whatever turn is running.
-    if (message.parent_tool_use_id !== null) return undefined;
+    if (spawningCallOfMessage(message) !== undefined) return undefined;
     stamps = message;
   } else if (message.type === "result") {
     stamps = message;
@@ -227,10 +228,10 @@ export function stampedSends(message: SdkMessage): { readonly answers: string; r
 
 /** A frame that is a turn's REPLY rather than its preamble: the vendor stamps the first of these. */
 export function isTopLevelReply(message: SdkMessage): boolean {
-  if (message.type === "assistant") return message.parent_tool_use_id === null;
+  if (message.type === "assistant") return spawningCallOfMessage(message) === undefined;
   // Every declared stream event is a reply frame: the SDK's event union has no
   // `ping` arm, which is the one kind the vendor leaves unstamped.
-  if (message.type === "stream_event") return message.parent_tool_use_id === null;
+  if (message.type === "stream_event") return spawningCallOfMessage(message) === undefined;
   return message.type === "system" && message.subtype === "thinking_tokens";
 }
 
