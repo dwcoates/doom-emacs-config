@@ -7,12 +7,12 @@
  * at the first Receive, so a silent stream is indistinguishable from a refused
  * one and the daemon's whole bring-up blocks on it.
  */
-import { create } from "@bufbuild/protobuf";
+import { type MessageInitShape, create } from "@bufbuild/protobuf";
 import { nextPush } from "../next-push.js";
 import { describe, expect, it } from "vitest";
 import { logRecordsSince, logSinkMark } from "../log-records.js";
 import { conversationv1 } from "../../src/proto.js";
-import { SessionPushes, SUBSCRIBER_QUEUE_LIMIT } from "../../src/engine/pushes.js";
+import { SessionPushes, SUBSCRIBER_QUEUE_LIMIT, transientFault } from "../../src/engine/pushes.js";
 
 function modelChanged(name: string): conversationv1.SessionUpdate {
   return create(conversationv1.SessionUpdateSchema, {
@@ -312,6 +312,72 @@ describe("faults", () => {
         .filter((record) => record.message === "recorded a session fault")
         .map((record) => record.level),
     ).toEqual(["error"]);
+  });
+
+  describe("a session fault's transient mark", () => {
+    const kinds: ReadonlyArray<{
+      name: string;
+      kind: MessageInitShape<typeof conversationv1.SessionFaultSchema>["kind"];
+      transient: boolean;
+    }> = [
+      { name: "a failed vendor query is transient", kind: { case: "vendorQueryFailed", value: {} }, transient: true },
+      { name: "a failed keep-alive is transient", kind: { case: "keepaliveFailed", value: {} }, transient: true },
+      { name: "an unreachable network is transient", kind: { case: "networkUnreachable", value: {} }, transient: true },
+      { name: "an unreachable store is agent-repl's own", kind: { case: "storeUnreachable", value: {} }, transient: false },
+      { name: "a converter defect is agent-repl's own", kind: { case: "converterDefect", value: {} }, transient: false },
+      { name: "a poisoned log sink is agent-repl's own", kind: { case: "logSinkPoisoned", value: {} }, transient: false },
+      { name: "a fault naming no kind is not transient", kind: { case: undefined }, transient: false },
+    ];
+    for (const tc of kinds) {
+      it(tc.name, () => {
+        // Arrange
+        const subject = create(conversationv1.SessionFaultSchema, { component: "c", detail: "d", kind: tc.kind });
+
+        // Act
+        const transient = transientFault(subject);
+
+        // Assert
+        expect(transient).toBe(tc.transient);
+      });
+    }
+
+    it("marks the error record of a transient fault, so the deploy checks leave it out", () => {
+      // Arrange
+      const pushes = new SessionPushes(() => 1, "test-build-sha");
+      const before = logSinkMark();
+
+      // Act
+      pushes.fault(
+        create(conversationv1.SessionFaultSchema, {
+          component: "vendor",
+          detail: "the vendor did not answer",
+          kind: { case: "vendorQueryFailed", value: {} },
+        }),
+      );
+
+      // Assert
+      expect(
+        logRecordsSince(before)
+          .filter((record) => record.message === "recorded a session fault")
+          .map((record) => [record.level, record.context.transient]),
+      ).toEqual([["error", true]]);
+    });
+
+    it("leaves the error record of agent-repl's own fault unmarked", () => {
+      // Arrange
+      const pushes = new SessionPushes(() => 1, "test-build-sha");
+      const before = logSinkMark();
+
+      // Act
+      pushes.fault(fault("the store went away"));
+
+      // Assert
+      expect(
+        logRecordsSince(before)
+          .filter((record) => record.message === "recorded a session fault")
+          .map((record) => [record.level, record.context.transient]),
+      ).toEqual([["error", undefined]]);
+    });
   });
 
   it("logs the first network fault at info, never error", () => {

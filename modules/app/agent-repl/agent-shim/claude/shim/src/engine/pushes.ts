@@ -104,6 +104,37 @@ class Subscriber {
 }
 
 /** The fan-out, and the session's own diagnostic memory. */
+/**
+ * Whether a session fault of each kind is TRANSIENT: a failure of something
+ * outside agent-repl (the vendor, the network) that passes on its own, as
+ * opposed to a fault of agent-repl's own (its store, its converter, its log
+ * sink). Owner ruling, 2026-11-19.
+ *
+ * EVERY KIND IS NAMED, so a kind the schema gains does not compile until
+ * someone says which it is. A record marked transient (`transient: true` in
+ * its context) is left out of the daemon's deploy checks.
+ */
+const FAULT_KIND_IS_TRANSIENT: Record<NonNullable<conversationv1.SessionFault["kind"]["case"]>, boolean> = {
+  // A vendor call failed: the vendor's or the network's doing.
+  vendorQueryFailed: true,
+  // A keep-alive is a vendor call too.
+  keepaliveFailed: true,
+  // This machine's network.
+  networkUnreachable: true,
+  // agent-repl's own store.
+  storeUnreachable: false,
+  // A bug in the shim's converter.
+  converterDefect: false,
+  // agent-repl's own logging.
+  logSinkPoisoned: false,
+};
+
+/** Whether FAULT is transient (FAULT_KIND_IS_TRANSIENT); a fault naming no kind is not. */
+export function transientFault(fault: conversationv1.SessionFault): boolean {
+  const kind = fault.kind.case;
+  return kind === undefined ? false : FAULT_KIND_IS_TRANSIENT[kind];
+}
+
 export class SessionPushes {
   private readonly subscribers = new Set<Subscriber>();
   private readonly faults: conversationv1.SessionFault[] = [];
@@ -328,7 +359,13 @@ export class SessionPushes {
         // the log has anything to fix, so it is INFO.
         LOGGER.info({ component: fault.component, kind, detail: fault.detail }, "recorded the network unreachable");
       } else {
-        LOGGER.error({ component: fault.component, kind, detail: fault.detail }, "recorded a session fault");
+        // A FAULT OF SOMETHING OUTSIDE AGENT-REPL IS MARKED TRANSIENT
+        // (transientFault), so the daemon's deploy checks leave its record
+        // out: it is still an error to whoever reads this session's log.
+        LOGGER.error(
+          { component: fault.component, kind, detail: fault.detail, ...(transientFault(fault) ? { transient: true } : {}) },
+          "recorded a session fault",
+        );
       }
     } else {
       this.faults[index] = fault;
