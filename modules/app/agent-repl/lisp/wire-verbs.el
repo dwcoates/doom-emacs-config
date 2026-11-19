@@ -4088,7 +4088,7 @@ approval."
 
 (defun agent-repl-wire-decode-update-merge-queue-problems-recurring (json)
   "Decode UpdateMergeQueueProblemsRecurring from JSON into `(:groups GROUPS)':
-each log group that came back after more than two of its fixes deployed,
+each log group that came back after more than five of its fixes deployed,
 refusing anything but an escalation."
   (let ((message "UpdateMergeQueueProblemsRecurring"))
     (agent-repl-wire-verbs--check-keys message json '(groups))

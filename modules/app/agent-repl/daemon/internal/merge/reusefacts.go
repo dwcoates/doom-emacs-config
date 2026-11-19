@@ -9,33 +9,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"agentrepl/testrun/reusewhy"
 )
 
-// THE GATES' TEST REUSE (owner rulings, 2026-11-15) is one of the facts the
-// daemon hands the intake: the reuse of the gate that ran last before the
-// deploy. A gate's unit runs rather than being reused for a reason its log
-// states (reusewhy). Most reasons EXPLAIN the run: the unit's inputs changed,
-// it failed before, or it is never reused by design, and a gate whose branch
-// moves a protobuf or a shared library rightly reuses nothing. The rest name
-// no change of the unit's own (its record is missing, the run reused nothing,
-// the host could not confine it), so a gate with many of them is a NEW fact,
-// which the intake escalates; anything else is SEEN BEFORE.
-
-// reuseUnexplainedUnits is the fewest units run for no explaining reason
-// that make a gate's reuse NEW. Measured 2026-11-15 over the last 44 gate
-// logs in the queue's logs directory: every run unit but at most 3 per gate
-// (never recorded) was explained, including the nine gates that reused none;
-// the bound is about 3 times that.
-const reuseUnexplainedUnits = 10
-
-// explainingWhy are the reasons that explain a unit's run.
-var explainingWhy = map[string]bool{
-	reusewhy.FailedBefore:  true,
-	reusewhy.InputsChanged: true,
-	reusewhy.Never:         true,
-}
+// THE GATE THAT RAN LAST BEFORE A DEPLOY is one of the things the deploy
+// mediator's brief points it at (intakeBrief): the gate's log, found as the
+// newest log that states its run's test reuse. What that reuse means is the
+// mediator's to judge from the log (owner ruling, 2026-11-19).
 
 // GateReuse is one gate's reuse, as its log's runner lines state it.
 type GateReuse struct {
@@ -46,26 +25,6 @@ type GateReuse struct {
 	// units by why they ran ("inputs changed", "failed before", ...).
 	Units, Reused, Run int
 	Why                map[string]int
-}
-
-// Unexplained is how many of the gate's run units ran for no explaining
-// reason (explainingWhy).
-func (g GateReuse) Unexplained() int {
-	n := 0
-	for why, count := range g.Why {
-		if !explainingWhy[why] {
-			n += count
-		}
-	}
-	return n
-}
-
-// Rate is the share of the gate's units it reused.
-func (g GateReuse) Rate() float64 {
-	if g.Units == 0 {
-		return 0
-	}
-	return float64(g.Reused) / float64(g.Units)
 }
 
 // reuseLine reads a runner's reuse line: an optional suite's name, the
@@ -151,30 +110,4 @@ func lastGateReuseBefore(dir string, at time.Time) (GateReuse, bool, error) {
 		return reuse, true, nil
 	}
 	return GateReuse{}, false, nil
-}
-
-// JudgeReuse answers whether GATE's reuse is NEW: whether it ran
-// reuseUnexplainedUnits or more units for no explaining reason.
-func JudgeReuse(gate GateReuse) bool {
-	return gate.Unexplained() >= reuseUnexplainedUnits
-}
-
-// RenderReuse is the brief's reuse fact for GATE, the gate that ran last
-// before the deploy; OK is false when no gate logged its reuse.
-func RenderReuse(gate GateReuse, ok bool) string {
-	if !ok {
-		return "No gate logged its test reuse before this deploy."
-	}
-	standing := "SEEN BEFORE"
-	if JudgeReuse(gate) {
-		standing = "NEW"
-	}
-	whys := make([]string, 0, len(gate.Why))
-	for why, n := range gate.Why {
-		whys = append(whys, fmt.Sprintf("%d %s", n, why))
-	}
-	sort.Strings(whys)
-	return fmt.Sprintf("- %s: the last gate before the deploy (%s) reused %d of %d units (%.0f%%) and ran %d (%s); %d of them ran for no reason of their own (not %s, %s or %s), and %d or more is NEW.",
-		standing, gate.Path, gate.Reused, gate.Units, 100*gate.Rate(), gate.Run, strings.Join(whys, ", "), gate.Unexplained(),
-		reusewhy.InputsChanged, reusewhy.FailedBefore, reusewhy.Never, reuseUnexplainedUnits)
 }

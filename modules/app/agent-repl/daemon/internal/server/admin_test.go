@@ -1246,6 +1246,104 @@ func TestUpdateMergeQueueAnswersAMediationRefusal(t *testing.T) {
 	}
 }
 
+// ignoredAdd and ignoredRemove are the two changes to the records the deploy
+// checks leave out.
+func ignoredAdd(kind *agentreplv1.IgnoredRecordKind, why string) *agentreplv1.UpdateMergeQueueIgnoredRecords {
+	return &agentreplv1.UpdateMergeQueueIgnoredRecords{Change: &agentreplv1.UpdateMergeQueueIgnoredRecords_Add{
+		Add: &agentreplv1.UpdateMergeQueueIgnoredRecordsAdd{Kind: kind, Why: why}}}
+}
+
+func ignoredRemove(kind *agentreplv1.IgnoredRecordKind) *agentreplv1.UpdateMergeQueueIgnoredRecords {
+	return &agentreplv1.UpdateMergeQueueIgnoredRecords{Change: &agentreplv1.UpdateMergeQueueIgnoredRecords_Remove{
+		Remove: &agentreplv1.UpdateMergeQueueIgnoredRecordsRemove{Kind: kind}}}
+}
+
+func TestUpdateMergeQueueChangesTheIgnoredRecordsOnTheMediatorsWord(t *testing.T) {
+	text := "Parent comment not found"
+	kind := &agentreplv1.IgnoredRecordKind{Operation: "daemon.ghclient.post", MessageContains: &text}
+	tests := []struct {
+		name        string
+		change      *agentreplv1.UpdateMergeQueueIgnoredRecords
+		wantAdded   int
+		wantRemoved int
+	}{
+		{name: "an add records the kind with its reason", change: ignoredAdd(kind, "GitHub's own"), wantAdded: 1},
+		{name: "a remove withdraws the kind", change: ignoredRemove(kind), wantRemoved: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: agent(), Action: &agentreplv1.UpdateMergeQueueRequest_IgnoredRecords{IgnoredRecords: tt.change}}))
+
+			// Assert.
+			if err != nil || resp.Msg.GetSuccess() == nil {
+				t.Fatalf("UpdateMergeQueue = (%v, %v), want success", resp, err)
+			}
+			if len(h.Merge.ignoredKinds) != tt.wantAdded || len(h.Merge.unignoredKinds) != tt.wantRemoved {
+				t.Fatalf("added %v and removed %v, want %d and %d", h.Merge.ignoredKinds, h.Merge.unignoredKinds, tt.wantAdded, tt.wantRemoved)
+			}
+			got := append(h.Merge.ignoredKinds, h.Merge.unignoredKinds...)[0]
+			if got.kind.Operation != "daemon.ghclient.post" || got.kind.MessageContains != text || (tt.wantAdded == 1 && got.kind.Why != "GitHub's own") {
+				t.Fatalf("the change carried %+v", got.kind)
+			}
+		})
+	}
+}
+
+func TestUpdateMergeQueueAnswersARefusedChangeToTheIgnoredRecords(t *testing.T) {
+	// Arrange: the asking workspace is no deploy mediator.
+	h := newHarness(t)
+	h.Merge.ignoreErr = &merge.RefusalError{Arm: merge.ArmNotMediator, Reason: "this workspace is no repository's deploy mediator"}
+
+	// Act.
+	resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+		Requester: agent(), Action: &agentreplv1.UpdateMergeQueueRequest_IgnoredRecords{
+			IgnoredRecords: ignoredAdd(&agentreplv1.IgnoredRecordKind{Operation: "op"}, "why")}}))
+
+	// Assert.
+	if err != nil || resp.Msg.GetError() == nil {
+		t.Fatalf("UpdateMergeQueue = (%v, %v), want the refusal as the error arm", resp, err)
+	}
+}
+
+func TestUpdateMergeQueueRefusesAMalformedChangeToTheIgnoredRecords(t *testing.T) {
+	empty := ""
+	tests := []struct {
+		name      string
+		requester *agentreplv1.WorkspaceRequester
+		change    *agentreplv1.UpdateMergeQueueIgnoredRecords
+	}{
+		{name: "no change", requester: agent(), change: &agentreplv1.UpdateMergeQueueIgnoredRecords{}},
+		{name: "the user changing them", requester: userRequester(), change: ignoredAdd(&agentreplv1.IgnoredRecordKind{Operation: "op"}, "why")},
+		{name: "an add with no reason", requester: agent(), change: ignoredAdd(&agentreplv1.IgnoredRecordKind{Operation: "op"}, " ")},
+		{name: "an add naming no operation", requester: agent(), change: ignoredAdd(&agentreplv1.IgnoredRecordKind{Operation: " "}, "why")},
+		{name: "a remove naming no operation", requester: agent(), change: ignoredRemove(&agentreplv1.IgnoredRecordKind{})},
+		{name: "a message text set empty", requester: agent(), change: ignoredAdd(&agentreplv1.IgnoredRecordKind{Operation: "op", MessageContains: &empty}, "why")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: tt.requester, Action: &agentreplv1.UpdateMergeQueueRequest_IgnoredRecords{IgnoredRecords: tt.change}}))
+
+			// Assert.
+			if got := connectCode(t, err); got != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", got)
+			}
+			if len(h.Merge.ignoredKinds)+len(h.Merge.unignoredKinds) != 0 {
+				t.Fatal("a malformed change reached the merge orchestrator")
+			}
+		})
+	}
+}
+
 func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
 	tests := []struct {
 		name      string

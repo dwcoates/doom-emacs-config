@@ -58,91 +58,6 @@ func TestParseGateReuseReadsTheRunsReuse(t *testing.T) {
 	}
 }
 
-func TestUnexplainedCountsTheUnitsRunForNoReasonOfTheirOwn(t *testing.T) {
-	tests := []struct {
-		name string
-		why  map[string]int
-		want int
-	}{
-		{name: "changed inputs, earlier failures and never-reused units explain their runs",
-			why: map[string]int{"inputs changed": 326, "failed before": 1, "never reused": 12}},
-		{name: "every other reason is unexplained", want: 10,
-			why: map[string]int{"never recorded": 3, "not reusing": 4, "targeted": 2, "no sandbox": 1, "inputs changed": 5}},
-		{name: "a gate that ran nothing", why: map[string]int{}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := GateReuse{Why: tt.why}.Unexplained()
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("Unexplained = %d, want %d", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestJudgeReuseFindsAGateThatRanManyUnitsForNoReasonOfTheirOwn(t *testing.T) {
-	tests := []struct {
-		name string
-		gate GateReuse
-		want bool
-	}{
-		{name: "a gate reusing nothing because every unit's inputs changed",
-			gate: GateReuse{Units: 339, Run: 339, Why: map[string]int{"inputs changed": 326, "failed before": 1, "never reused": 12}}},
-		{name: "a gate with a few units never recorded",
-			gate: GateReuse{Units: 339, Reused: 330, Run: 9, Why: map[string]int{"never recorded": 3, "inputs changed": 6}}},
-		{name: "a gate one unit short of the bound",
-			gate: GateReuse{Units: 339, Reused: 330, Run: 9, Why: map[string]int{"never recorded": 9}}},
-		{name: "a gate at the bound", want: true,
-			gate: GateReuse{Units: 339, Reused: 329, Run: 10, Why: map[string]int{"never recorded": 10}}},
-		{name: "a gate whose records were lost", want: true,
-			gate: GateReuse{Units: 339, Run: 339, Why: map[string]int{"never recorded": 339}}},
-		{name: "a gate that reused nothing at all", want: true,
-			gate: GateReuse{Units: 339, Run: 339, Why: map[string]int{"not reusing": 339}}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := JudgeReuse(tt.gate)
-
-			// Assert
-			if got != tt.want {
-				t.Fatalf("JudgeReuse = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestRenderReuseStatesTheLastGatesUnexplainedRuns(t *testing.T) {
-	tests := []struct {
-		name string
-		gate GateReuse
-		ok   bool
-		want string
-	}{
-		{name: "no gate before the deploy", want: "No gate logged its test reuse before this deploy."},
-		{name: "a gate with many unexplained runs", ok: true,
-			gate: GateReuse{Path: "/l/a-tests-1.log", Units: 670, Run: 670, Why: map[string]int{"never recorded": 670}},
-			want: "- NEW: the last gate before the deploy (/l/a-tests-1.log) reused 0 of 670 units (0%) and ran 670 (670 never recorded); 670 of them ran for no reason of their own (not inputs changed, failed before or never reused), and 10 or more is NEW."},
-		{name: "a gate whose runs are all explained", ok: true,
-			gate: GateReuse{Path: "/l/a-tests-1.log", Units: 670, Run: 670, Why: map[string]int{"inputs changed": 670}},
-			want: "- SEEN BEFORE: the last gate before the deploy (/l/a-tests-1.log) reused 0 of 670 units (0%) and ran 670 (670 inputs changed); 0 of them"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := RenderReuse(tt.gate, tt.ok)
-
-			// Assert
-			if !strings.Contains(got, tt.want) {
-				t.Fatalf("RenderReuse = %q, want it to hold %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestLastGateReuseBeforeReadsTheNewestGateBeforeTheDeploy(t *testing.T) {
 	// Arrange
 	dir := t.TempDir()
@@ -195,20 +110,35 @@ func TestAGateLogDirectoryThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
 	}
 }
 
-func TestTheIntakesBriefStatesTheGatesReuse(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	writeGate(t, mkdir(t, LogsDir(h.stateDir)), "aa-tests-1.log", reuseLog(670, 0), deployStarted.Add(-time.Minute))
-	q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
+func TestTheIntakesBriefNamesTheLastGatesLog(t *testing.T) {
+	cases := []struct {
+		name string
+		// gate is whether a gate logged its reuse before the deploy.
+		gate bool
+		want string
+	}{
+		{name: "the gate that ran last before the deploy is named by its log", gate: true, want: "aa-tests-1.log`"},
+		{name: "a deploy no gate ran before says so", want: "none logged one"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			if tc.gate {
+				writeGate(t, mkdir(t, LogsDir(h.stateDir)), "aa-tests-1.log", reuseLog(670, 0), deployStarted.Add(-time.Minute))
+			}
+			q, _, _ := h.o.checkedQueueOf(context.Background(), mediationKey(h))
 
-	// Act
-	_, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
+			// Act
+			_, _, err := h.o.intakeBrief(context.Background(), q, *owedCheck(t, h))
 
-	// Assert
-	values := h.briefValues[len(h.briefValues)-1]
-	if err != nil || !strings.Contains(values["reuse"], "reused 0 of 670 units") {
-		t.Fatalf("intakeBrief = %v, reuse %q; want the gate's reuse stated", err, values["reuse"])
+			// Assert
+			values := h.briefValues[len(h.briefValues)-1]
+			if err != nil || !strings.HasSuffix(values["gate_log"], tc.want) {
+				t.Fatalf("intakeBrief = %v, gate_log %q; want it to end %q", err, values["gate_log"], tc.want)
+			}
+		})
 	}
 }
 

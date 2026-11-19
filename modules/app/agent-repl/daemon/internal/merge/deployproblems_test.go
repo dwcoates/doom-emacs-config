@@ -112,21 +112,18 @@ func TestAWindowGroupStandsAgainstTheProblemsKept(t *testing.T) {
 	}
 }
 
-func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
+func TestAnApprovalIsNeverJudgedAgainstTheWindow(t *testing.T) {
 	tests := []struct {
-		name     string
-		groups   []wsm.WindowGroup
-		wantArm  string
-		wantKept []string
+		name   string
+		groups []wsm.WindowGroup
 	}{
-		{name: "a window of owned groups is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowOwned)}},
 		{name: "an empty window is approved"},
-		{name: "a new group refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew)}, wantArm: ArmProblemsUnowned,
-			wantKept: []string{sinkKey.Operation + ": " + sinkKey.Message + " (new)"}},
-		{name: "an old group never taken on refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowSeenBefore)}, wantArm: ArmProblemsUnowned,
-			wantKept: []string{sinkKey.Operation + ": " + sinkKey.Message + " (seen_before)"}},
-		{name: "a group back after its fix refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowRecurred)}, wantArm: ArmProblemsUnowned,
-			wantKept: []string{sinkKey.Operation + ": " + sinkKey.Message + " (recurred)"}},
+		{name: "a window of owned groups is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowOwned)}},
+		{name: "a new group does not refuse it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew)}},
+		{name: "an old group never taken on does not refuse it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowSeenBefore)}},
+		{name: "a group back after its fix does not refuse it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowRecurred)}},
+		{name: "a group back after more than five fixes does not refuse it", groups: []wsm.WindowGroup{
+			{Operation: sinkKey.Operation, Message: sinkKey.Message, Class: wsm.WindowRecurred, Fixes: 6}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,18 +137,8 @@ func TestAnApprovalIsJudgedAgainstTheWindowsOwners(t *testing.T) {
 			err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean"})
 
 			// Assert
-			if tt.wantArm == "" {
-				if err != nil || owedCheck(t, h) != nil {
-					t.Fatalf("DecideMediation = %v, want the approval to release the check", err)
-				}
-				return
-			}
-			var refused *RefusalError
-			if !errors.As(err, &refused) || refused.Arm != tt.wantArm || !slices.Equal(refused.Fields["groups"].([]string), tt.wantKept) {
-				t.Fatalf("DecideMediation = %v, want the %s refusal naming %v", err, tt.wantArm, tt.wantKept)
-			}
-			if owedCheck(t, h) == nil || len(h.checks.stopped) != 0 {
-				t.Fatalf("stopped %v, want the check still owed and the mediator left at work", h.checks.stopped)
+			if err != nil || owedCheck(t, h) != nil {
+				t.Fatalf("DecideMediation = %v, want the approval to release the check", err)
 			}
 		})
 	}
@@ -161,15 +148,12 @@ func TestAnApprovalPassesTheGroupsItNamesIgnorable(t *testing.T) {
 	other := wsm.WindowGroup{Operation: "daemon.persistentwifi.failover", Message: "no networks", Class: wsm.WindowNew}
 	ignoreSink := []DeployProblem{{Statement: "a one-off user-driven error", Evidence: []string{sinkRecord.Raw}}}
 	tests := []struct {
-		name     string
-		groups   []wsm.WindowGroup
-		wantArm  string
-		wantKept []string
+		name   string
+		groups []wsm.WindowGroup
 	}{
 		{name: "an approval naming every unowned group ignorable is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew)}},
 		{name: "an approval naming a recurred group ignorable is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowRecurred)}},
-		{name: "a group the approval does not name still refuses it", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew), other}, wantArm: ArmProblemsUnowned,
-			wantKept: []string{other.Operation + ": " + other.Message + " (new)"}},
+		{name: "an approval naming one group of two is approved", groups: []wsm.WindowGroup{sinkGroup(wsm.WindowNew), other}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -183,13 +167,6 @@ func TestAnApprovalPassesTheGroupsItNamesIgnorable(t *testing.T) {
 			err := decideTold(h, Decision{Kind: MediationApprove, Summary: "clean", Problems: ignoreSink})
 
 			// Assert
-			if tt.wantArm != "" {
-				var refused *RefusalError
-				if !errors.As(err, &refused) || refused.Arm != tt.wantArm || !slices.Equal(refused.Fields["groups"].([]string), tt.wantKept) {
-					t.Fatalf("DecideMediation = %v, want the %s refusal naming %v", err, tt.wantArm, tt.wantKept)
-				}
-				return
-			}
 			if err != nil || owedCheck(t, h) != nil {
 				t.Fatalf("DecideMediation = %v, want the approval to release the check", err)
 			}
@@ -329,7 +306,7 @@ func TestDecidedProblemsThatCannotBeTakenOnAreAnError(t *testing.T) {
 	}
 }
 
-func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
+func TestAProblemPastItsFixesIsNeverDispatchedAgain(t *testing.T) {
 	recurred := func(fixes int) wsm.WindowGroup {
 		return wsm.WindowGroup{Operation: sinkKey.Operation, Message: sinkKey.Message, Class: wsm.WindowRecurred, Fixes: fixes}
 	}
@@ -339,10 +316,10 @@ func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
 		decision MediationDecision
 		wantArm  string
 	}{
-		{name: "a dispatch of a group past two fixes is refused", group: recurred(3), decision: MediationDispatch, wantArm: ArmProblemsRecurring},
-		{name: "an approval of a group past two fixes is refused", group: recurred(3), decision: MediationApprove, wantArm: ArmProblemsRecurring},
-		{name: "an escalation of a group past two fixes is accepted", group: recurred(3), decision: MediationEscalate},
-		{name: "a dispatch of a group after two fixes is accepted", group: recurred(2), decision: MediationDispatch},
+		{name: "a dispatch of a group past five fixes is refused", group: recurred(6), decision: MediationDispatch, wantArm: ArmProblemsRecurring},
+		{name: "an approval of a group past five fixes is accepted", group: recurred(6), decision: MediationApprove},
+		{name: "an escalation of a group past five fixes is accepted", group: recurred(6), decision: MediationEscalate},
+		{name: "a dispatch of a group after five fixes is accepted", group: recurred(5), decision: MediationDispatch},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -366,33 +343,11 @@ func TestAProblemPastItsFixesIsOnlyEscalated(t *testing.T) {
 			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
 				t.Fatalf("DecideMediation = %v, want the %s refusal", err, tt.wantArm)
 			}
-			if groups, _ := refused.Fields["groups"].([]string); len(groups) != 1 || !strings.Contains(groups[0], "(3 fixes)") {
+			if groups, _ := refused.Fields["groups"].([]string); len(groups) != 1 || !strings.Contains(groups[0], "(6 fixes)") {
 				t.Fatalf("refusal fields %v, want the group named with its fixes", refused.Fields)
 			}
 			if m := owedCheck(t, h); m == nil || m.Dispatched || m.Escalated() {
 				t.Fatalf("check %+v, want it owed and undecided", m)
-			}
-		})
-	}
-}
-
-func TestTheBriefMarksAProblemPastItsFixes(t *testing.T) {
-	tests := []struct {
-		name  string
-		fixes int
-		want  bool
-	}{
-		{name: "after three fixes it is marked", fixes: 3, want: true},
-		{name: "after two it is not", fixes: 2},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Act
-			got := RenderFindings([]FindingGroup{{Operation: "a", Message: "m", Level: "error", Count: 1, Class: wsm.WindowRecurred, Fixes: tt.fixes}})
-
-			// Assert
-			if marked := strings.Contains(got, "only an escalation is accepted"); marked != tt.want {
-				t.Fatalf("brief %q, want marked %v", got, tt.want)
 			}
 		})
 	}

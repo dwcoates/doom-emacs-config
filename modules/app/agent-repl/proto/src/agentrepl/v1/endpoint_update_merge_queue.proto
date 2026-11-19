@@ -52,6 +52,14 @@ message UpdateMergeQueueRequest {
     // 2026-11-17). The requester must be the workspace whose merge it is.
     // (Added 2026-11-17.)
     UpdateMergeQueueGiveUp give_up = 17;
+    // The deploy mediator records, or withdraws, a kind of log record the
+    // deploy checks leave out: a fault of something outside agent-repl that
+    // passes on its own, or a one-off the user's own action causes. The
+    // daemon drops every record that matches one before it judges whether a
+    // deploy's window holds anything, and before it writes the window's
+    // digest, so a window holding only such records runs no mediator. Only a
+    // repository's deploy mediator may change them. (Added 2026-11-19.)
+    UpdateMergeQueueIgnoredRecords ignored_records = 18;
   }
   // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
   // agent (`agent-repld`'s command line). Every action on a queue is recorded
@@ -70,6 +78,42 @@ message UpdateMergeQueueRequest {
   reserved 5, 6, 9, 10, 11, 12;
   reserved "hold_rollouts", "release_rollouts", "subscribe", "unsubscribe", "disable_racing", "enable_racing";
 }
+// One change to the log records the deploy checks leave out.
+message UpdateMergeQueueIgnoredRecords {
+  // THE ARM IS THE CHANGE.
+  oneof change {
+    // Leave a kind of record out from now on.
+    UpdateMergeQueueIgnoredRecordsAdd add = 1;
+    // Stop leaving a kind of record out.
+    UpdateMergeQueueIgnoredRecordsRemove remove = 2;
+  }
+}
+// Leave every record of one kind out of the deploy checks.
+message UpdateMergeQueueIgnoredRecordsAdd {
+  // REQUIRED. Which records.
+  IgnoredRecordKind kind = 1;
+  // REQUIRED, never blank. Why a record of this kind is no problem a deploy
+  // caused, in a sentence. Recorded with the kind and shown in each digest.
+  string why = 2;
+}
+// Stop leaving every record of one kind out. Withdrawing a kind that was
+// never recorded is the state the caller asked for, and is no refusal.
+message UpdateMergeQueueIgnoredRecordsRemove {
+  // REQUIRED. Which records, exactly as they were recorded.
+  IgnoredRecordKind kind = 1;
+}
+// A kind of log record: every record one operation logs, or only those of
+// its records whose message holds a given text.
+message IgnoredRecordKind {
+  // REQUIRED, never blank. The record's `operation`, exactly.
+  string operation = 1;
+  // Text the record's `message` must hold for the record to match. UNSET
+  // matches every record of the operation. An operation that logs both a
+  // fault of its own and one that passes names the passing one here, so its
+  // real faults still reach the mediator.
+  optional string message_contains = 2;
+}
+
 message UpdateMergeQueuePause {
   // WHICH repository's queue. UNSET = every repository that has a queue
   // (the daemon-wide switch). The queue is per repository, so a caller that
@@ -278,13 +322,15 @@ message UpdateMergeQueueError {
     // A dispatch once the chain has deployed as many remediations in a row as
     // its repository allows: only an escalation is accepted now.
     UpdateMergeQueueRemediationBoundReached remediation_bound_reached = 18;
-    // An approval while the check's window holds a warning or error no one
-    // owns: a NEW one, an old one nobody owns, or one that came back after
-    // its fix deployed. Dispatch or escalate them instead.
+    // DEPRECATED (2026-11-19): never answered. It refused an approval while
+    // the check's window held a warning or error no one owned. The deploy
+    // mediator alone now decides whether a deploy is approved, so no approval
+    // is refused on what its window holds. The arm stays declared so a
+    // client built before the change still decodes it.
     UpdateMergeQueueProblemsUnowned problems_unowned = 19;
-    // An approval or a dispatch while the check's window holds a problem that
-    // came back after more than two of its fixes deployed: only an
-    // escalation is accepted (owner ruling, 2026-11-16).
+    // A dispatch while the check's window holds a problem that came back
+    // after more than five of its fixes deployed: only an escalation is
+    // accepted. An approval is never refused for it.
     UpdateMergeQueueProblemsRecurring problems_recurring = 20;
     // A release of an escalation's hold while no escalation holds the
     // repository's queue. (Added 2026-11-17.)
@@ -325,7 +371,8 @@ message UpdateMergeQueueNoMediationOwed {}
 message UpdateMergeQueueNoEscalationHeld {}
 // The no-repair-turn refusal. No fields: the caller knows its own turn.
 message UpdateMergeQueueNoRepairTurn {}
-// The unowned-problems refusal.
+// The unowned-problems refusal. DEPRECATED (2026-11-19): never answered; see
+// UpdateMergeQueueError.problems_unowned.
 message UpdateMergeQueueProblemsUnowned {
   // Each unowned group, as "OPERATION: MESSAGE (CLASS)", in the window's
   // order.
@@ -333,7 +380,7 @@ message UpdateMergeQueueProblemsUnowned {
 }
 // The recurring-problems refusal.
 message UpdateMergeQueueProblemsRecurring {
-  // Each group that came back after more than two of its fixes deployed, as
+  // Each group that came back after more than five of its fixes deployed, as
   // "OPERATION: MESSAGE (FIXES fixes)", in the window's order.
   repeated string groups = 1;
 }

@@ -1357,6 +1357,29 @@ func validateUpdateMergeQueueRequest(req *agentreplv1.UpdateMergeQueueRequest) *
 		}
 		return invalid("move_to.place", "a move to a place names the merge it goes beside")
 	}
+	if ignored := req.GetIgnoredRecords(); ignored != nil {
+		if req.GetRequester().GetWorkspace() == nil {
+			return invalid("requester", "only a deploy mediator's agent changes the records the deploy checks leave out")
+		}
+		var kind *agentreplv1.IgnoredRecordKind
+		switch change := ignored.GetChange().(type) {
+		case *agentreplv1.UpdateMergeQueueIgnoredRecords_Add:
+			kind = change.Add.GetKind()
+			if strings.TrimSpace(change.Add.GetWhy()) == "" {
+				return invalid("ignored_records.add.why", "an ignored kind of record says why it is ignored")
+			}
+		case *agentreplv1.UpdateMergeQueueIgnoredRecords_Remove:
+			kind = change.Remove.GetKind()
+		default:
+			return invalid("ignored_records.change", "a change to the ignored records adds a kind or removes one")
+		}
+		if strings.TrimSpace(kind.GetOperation()) == "" {
+			return invalid("ignored_records.kind.operation", "an ignored kind of record names its operation")
+		}
+		if kind.MessageContains != nil && kind.GetMessageContains() == "" {
+			return invalid("ignored_records.kind.message_contains", "the message text is left unset to match every record of the operation, never set empty")
+		}
+	}
 	if m := req.GetMediation(); m != nil {
 		if m.GetDecision() == nil {
 			return invalid("mediation.decision", "a mediation names its decision")

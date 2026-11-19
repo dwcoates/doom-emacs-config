@@ -740,6 +740,13 @@ type DB interface {
 	TakeOnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, findings string, at time.Time) error
 	// FixDeployProblems marks every open problem of a repository fixed.
 	FixDeployProblems(ctx context.Context, repo RepoKey, at time.Time) (int, error)
+	// IgnoredRecordKinds answers every kind of log record the deploy checks
+	// leave out (ignoredrecords.go).
+	IgnoredRecordKinds(ctx context.Context) ([]IgnoredRecordKind, error)
+	// IgnoreRecordKind records a kind of record the deploy checks leave out.
+	IgnoreRecordKind(ctx context.Context, k IgnoredRecordKind) error
+	// UnignoreRecordKind withdraws one, answering whether it was recorded.
+	UnignoreRecordKind(ctx context.Context, operation, messageContains string) (bool, error)
 	// CheckedThrough answers where a repository's deploy checks have read
 	// its logs up to.
 	CheckedThrough(ctx context.Context, repo RepoKey) (time.Time, bool, error)

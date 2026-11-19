@@ -220,15 +220,15 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-17: one standing mediator checks every
     // deploy, fixes what it dispatches, and settles escalations with the user.
     expect(text).toContain("This session is the deploy mediator: the one workspace agent-repl keeps to check every deploy");
-    expect(text).toContain("`agent-repld merge-queue mediation approve -summary");
+    expect(text).toContain("agent-repld merge-queue mediation approve -problems -summary");
     expect(text).toContain("agent-repld merge-queue mediation dispatch -summary");
-    expect(text).toContain("Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.");
-    expect(text).toContain("The dispatch comes first, before any edit or investigation of a fix: it is what moves the queue's label from ASSESSING to FIXING");
+    expect(text).toContain("`dispatch`: call it when you can fix what the deploy broke yourself, before you start the fix. Then fix it in the same turn.");
+    expect(text).toContain("it is what moves the queue's label from ASSESSING to FIXING");
     expect(text).toContain("agent-repld workspace finished here -version-part patch");
     expect(text).not.toContain("-fresh");
   });
 
-  it("has the deploy mediator approve only when it took on every group", () => {
+  it("has the deploy mediator investigate the deploy itself from the digest, and be the sole decider of an approval", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
@@ -236,8 +236,9 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-16: an old problem never taken on is
     // dispatched or escalated, never approved past, and never filed with a
     // named workspace.
-    expect(text).toContain("Every group is TAKEN ON, or the window holds none");
-    expect(text).toContain("A SEEN BEFORE or RECURRED group is dispatched as a NEW one is");
+    expect(text).toContain("The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval");
+    expect(text).toContain("Start from the digest, which holds one line and one sample record per logging site");
+    expect(text).toContain("The brief names the deploy and what there is to investigate it with, and states nothing it found");
     expect(text).not.toContain("merge-queue-stall-triage");
   });
 
@@ -263,16 +264,17 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Once a set of fixes is agreed and specified, the deploy mediator implements every one of them without stopping to ask, and finishes the moment they are done");
   });
 
-  it("has the deploy mediator ignore a few user-driven errors and keep the probably-transient table", () => {
+  it("has the deploy mediator ignore a few user-driven errors, and keep what it learns in the store or its notes", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("deploy_mediator", home);
     // Assert — owner ruling 2026-11-18.
     expect(text).toContain("A one-off error, or a few, that the user's own action caused is ignored");
-    expect(text).toContain("A group that is not in the table may still be transient: absence from the table implies nothing.");
-    expect(text).toContain("When the user rules during remediation that a group is ignorable or transient, the mediator adds or updates its row at once");
+    expect(text).toContain("When the user rules during remediation that a group is ignorable or transient, the mediator records it at once, without asking");
+    expect(text).toContain("it is kept in the mediator's notes file, never in this metaprompt");
     expect(text).toContain("agent-repld merge-queue mediation approve -problems");
+    expect(text).toContain("agent-repl keeps the kinds of record known to be transient or ignorable in its store, and drops every record of one before a check");
   });
 
   it("names this session's transcript the bypass queue mode session, apart from an earlier non-bypass session", () => {

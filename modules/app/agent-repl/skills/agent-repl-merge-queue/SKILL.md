@@ -274,6 +274,10 @@ Either kind:
     `merge-queue mediation approve|escalate -summary TEXT`, or
     `merge-queue mediation dispatch -summary TEXT` reading the
     problems from standard input as a JSON list of `{"statement", "evidence"}`.
+  - The mediator also keeps the kinds of log record the checks leave out,
+    with `merge-queue mediation ignore -operation OP [-message TEXT] -why TEXT`
+    and `merge-queue mediation unignore -operation OP [-message TEXT]`; a
+    check whose window holds no other warning or error runs no mediator.
   - Refusals: `not_mediator` (not the workspace the check was told to), `no_mediation_owed` (a
     fix is dispatched already), `remediation_bound_reached` (the chain's bound;
     only an escalation is accepted).

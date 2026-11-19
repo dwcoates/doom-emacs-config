@@ -4,21 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/wsm"
 )
 
-// THE INTAKE'S FACTS (owner ruling 3, 2026-11-14). The intake runs on a
-// weaker model that only states problems, so the daemon does the sorting it
-// would otherwise reason out: every warning and error since the deploy began
-// is grouped by its operation and message, and each group is marked NEW (no
-// record of it in the same span before the deploy) or SEEN BEFORE (with its
-// count then). Only a NEW group can be a problem the deploy caused; a SEEN
-// BEFORE group is filed elsewhere and never holds the queue (ruling 1).
+// THE WINDOW'S GROUPS. Every warning and error since the repository's last
+// check is grouped by its operation and message, and each group is stood
+// against the span before the window and the problems the mediator took on.
+// The groups are what a decision is judged against (DecideMediation); the
+// brief states none of them (intakeBrief): the mediator reads the logs
+// itself.
 
 // LogRecord is one warning or error a system logged, as the log reader read
 // it.
@@ -186,46 +187,175 @@ func severity(level string) int {
 	return 0
 }
 
-// RenderFindings is the brief's facts: one block per group, its standing,
-// its sample quoted verbatim and, for a problem the mediator took on, its
-// earlier findings, or a line saying the window holds none.
-func RenderFindings(groups []FindingGroup) string {
-	if len(groups) == 0 {
-		return "No system logged a warning or an error in the window."
-	}
-	var b strings.Builder
-	for i, g := range groups {
-		if i > 0 {
-			b.WriteString("\n")
-		}
-		var standing string
-		switch g.Class {
-		case wsm.WindowNew:
-			standing = "NEW"
-		case wsm.WindowSeenBefore:
-			standing = fmt.Sprintf("SEEN BEFORE, never taken on (%d in the span before)", g.Before)
-		case wsm.WindowOwned:
-			standing = "TAKEN ON, your fix of it still under way"
-		case wsm.WindowRecurred:
-			standing = "RECURRED after your fix deployed"
-			if pastItsFixes(g.Class, g.Fixes) {
-				standing = fmt.Sprintf("RECURRED after your fix deployed, after %d fixes in all: only an escalation is accepted", g.Fixes)
+// LeftOut is one kind of record a window's read left out, and how many of
+// the window's records were of it.
+type LeftOut struct {
+	Kind  wsm.IgnoredRecordKind
+	Count int
+}
+
+// leaveOut drops from RECORDS every record of one of KINDS, answering what
+// is left and, per kind that matched, how many it dropped, in KINDS' order.
+func leaveOut(records []LogRecord, kinds []wsm.IgnoredRecordKind) ([]LogRecord, []LeftOut) {
+	counts := make([]int, len(kinds))
+	kept := make([]LogRecord, 0, len(records))
+	for _, r := range records {
+		dropped := false
+		for i, k := range kinds {
+			if k.Matches(r.Operation, r.Message) {
+				counts[i]++
+				dropped = true
+				break
 			}
-		default:
-			panic(fmt.Sprintf("merge: a finding group with no class: %+v", g))
 		}
-		b.WriteString(fmt.Sprintf("- %s: %d %s of %s: %s\n  %s\n", standing, g.Count, strings.ToUpper(g.Level), g.Operation, g.Message, g.Sample))
-		if g.Findings != "" {
-			b.WriteString("  You found before: " + strings.ReplaceAll(g.Findings, "\n", " / ") + "\n")
+		if !dropped {
+			kept = append(kept, r)
+		}
+	}
+	var left []LeftOut
+	for i, k := range kinds {
+		if counts[i] > 0 {
+			left = append(left, LeftOut{Kind: k, Count: counts[i]})
+		}
+	}
+	return kept, left
+}
+
+// IgnoreRecords implements Orchestrator.
+func (o *orchestrator) IgnoreRecords(ctx context.Context, ws ids.WorkspaceID, kind wsm.IgnoredRecordKind) error {
+	fields := dlog.Context{"workspace": string(ws), "operation": kind.Operation, "message_contains": kind.MessageContains, "why": kind.Why}
+	if err := o.mediatorOnly(ctx, ws, fields); err != nil {
+		return err
+	}
+	kind.AddedAt = o.deps.Now()
+	if err := o.deps.DB.IgnoreRecordKind(ctx, kind); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the kind of record to leave out of the deploy checks could not be recorded", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Log.Global().Info(opMediation, "the deploy mediator recorded a kind of record the deploy checks leave out", fields)
+	return nil
+}
+
+// UnignoreRecords implements Orchestrator.
+func (o *orchestrator) UnignoreRecords(ctx context.Context, ws ids.WorkspaceID, operation, messageContains string) error {
+	fields := dlog.Context{"workspace": string(ws), "operation": operation, "message_contains": messageContains}
+	if err := o.mediatorOnly(ctx, ws, fields); err != nil {
+		return err
+	}
+	removed, err := o.deps.DB.UnignoreRecordKind(ctx, operation, messageContains)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "the kind of record the deploy checks leave out could not be withdrawn", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Log.Global().Info(opMediation, "the deploy mediator withdrew a kind of record the deploy checks leave out", withField(fields, "was_recorded", removed))
+	return nil
+}
+
+// mediatorOnly refuses WS unless it is a repository's deploy mediator.
+func (o *orchestrator) mediatorOnly(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) error {
+	_, isMediator, err := o.deps.DB.MediatorRepoOf(ctx, ws)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read whether the workspace changing the ignored records is a deploy mediator", withField(fields, "error", err.Error()))
+		return err
+	}
+	if !isMediator {
+		o.deps.Log.Global().Warn(opMediation, "refused a change to the ignored records from a workspace that is no repository's deploy mediator", fields)
+		return refuse(ArmNotMediator, ws, "this workspace is no repository's deploy mediator")
+	}
+	return nil
+}
+
+// DigestSite is one logging site's records in a window: every record one
+// operation logged at one level.
+type DigestSite struct {
+	Level     string
+	Operation string
+	Count     int
+	// Sample is the first of its records, verbatim.
+	Sample string
+}
+
+// DigestSites groups WINDOW by the site that logged each record: its
+// operation and level. A record's MESSAGE is left out of the key on purpose:
+// messages carry workspace names, page ids and paths, so one site logging
+// about thirty workspaces is one line here, not thirty. The sites are sorted
+// errors first, then by count.
+func DigestSites(window []LogRecord) []DigestSite {
+	type key struct{ level, operation string }
+	sites := map[key]*DigestSite{}
+	var order []key
+	for _, r := range window {
+		k := key{strings.ToLower(r.Level), r.Operation}
+		site, ok := sites[k]
+		if !ok {
+			site = &DigestSite{Level: k.level, Operation: r.Operation, Sample: r.Raw}
+			sites[k] = site
+			order = append(order, k)
+		}
+		site.Count++
+	}
+	out := make([]DigestSite, 0, len(order))
+	for _, k := range order {
+		out = append(out, *sites[k])
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if severity(out[i].Level) != severity(out[j].Level) {
+			return severity(out[i].Level) > severity(out[j].Level)
+		}
+		return out[i].Count > out[j].Count
+	})
+	return out
+}
+
+// RenderDigest is the digest file's text: a table of every logging site with
+// its count, then one verbatim sample record per site, in the same order.
+func RenderDigest(sites []DigestSite, left []LeftOut, since, through time.Time) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Warnings and errors from %s through %s, one line per logging site (level and operation).\n\n",
+		since.UTC().Format(time.RFC3339), through.UTC().Format(time.RFC3339)))
+	b.WriteString("COUNT  LEVEL  OPERATION\n")
+	for _, site := range sites {
+		b.WriteString(fmt.Sprintf("%5d  %-5s  %s\n", site.Count, site.Level, site.Operation))
+	}
+	b.WriteString("\nOne sample record per site, verbatim, in the same order:\n\n")
+	for _, site := range sites {
+		b.WriteString(site.Sample + "\n")
+	}
+	if len(left) > 0 {
+		b.WriteString("\nLeft out, as kinds of record known to be transient or ignorable (count, operation, message text, why):\n\n")
+		for _, l := range left {
+			b.WriteString(fmt.Sprintf("%5d  %s  %q  %s\n", l.Count, l.Kind.Operation, l.Kind.MessageContains, l.Kind.Why))
 		}
 	}
 	return b.String()
 }
 
-// intakeBrief composes the intake's brief of check M on queue Q: the deploy,
-// the chain so far against its bound, and the window's findings, each stood
-// against the span before the window and the problems the repository's
-// deploy checks keep. It answers the window as the brief tells it.
+// DigestPath is where the digest of the check owed at OWED is written, in
+// the queue's logs directory DIR. It is one of the queue's logs (IsLog), so
+// the retention pass prunes it with the rest.
+func DigestPath(dir string, owed time.Time) string {
+	return filepath.Join(dir, fmt.Sprintf("deploy_check-%d.log", owed.Unix()))
+}
+
+// writeDigest writes WINDOW's digest for the check owed at OWED and answers
+// its path.
+func (o *orchestrator) writeDigest(window []LogRecord, left []LeftOut, owed, since, through time.Time) (string, error) {
+	path := DigestPath(LogsDir(o.deps.StateDir), owed)
+	if err := writeLog(path, RenderDigest(DigestSites(window), left, since, through)); err != nil {
+		return "", fmt.Errorf("merge: write the check's digest: %w", err)
+	}
+	return path, nil
+}
+
+// intakeBrief composes the intake's brief of check M on queue Q, and answers
+// the window the check covers.
+//
+// THE BRIEF STATES THE DEPLOY AND WHAT THE MEDIATOR HAS TO INVESTIGATE IT
+// WITH, AND NOTHING IT FOUND (owner ruling, 2026-11-19). The mediator reads
+// the logs, the metrics and the doctor itself and decides what matters; the
+// brief names where they are and what each decision does. The window's
+// records are still read and sorted here, for the window the store keeps
+// (CheckWindow.Groups), which a decision is judged against.
 //
 // THE WINDOW STARTS WHERE THE REPOSITORY'S LAST CHECK READ TO, never at the
 // deploy's start (owner ruling, 2026-11-16): a landing logs between its
@@ -248,16 +378,32 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 	if err != nil {
 		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the span before the window: %w", err)
 	}
+	// THE KINDS OF RECORD KNOWN TO BE TRANSIENT OR IGNORABLE ARE LEFT OUT
+	// (wsm ignoredrecords.go), of the window and of the span before it alike:
+	// a window holding only such records holds nothing for the mediator.
+	kinds, err := o.deps.DB.IgnoredRecordKinds(ctx)
+	if err != nil {
+		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the kinds of record the checks leave out: %w", err)
+	}
+	window, left := leaveOut(window, kinds)
+	before, _ = leaveOut(before, kinds)
 	problems, err := o.deps.DB.DeployProblems(ctx, q.key)
 	if err != nil {
 		return "", wsm.CheckWindow{}, fmt.Errorf("merge: read the repository's deploy problems: %w", err)
 	}
 	groups := classifyFindings(SortFindings(window, before), problems)
-	chain, err := o.chainSoFar(ctx, q, m)
+	gate, gated, err := lastGateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
 	}
-	gate, gated, err := lastGateReuseBefore(LogsDir(o.deps.StateDir), m.OwedAt)
+	gateLog := "none logged one"
+	if gated {
+		gateLog = "`" + gate.Path + "`"
+	}
+	// THE DIGEST IS WRITTEN BEFORE THE MEDIATOR IS TOLD, so its first read is
+	// one small file rather than every record: each logging site once, with
+	// its count and one sample.
+	digest, err := o.writeDigest(window, left, m.OwedAt, since, now)
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
 	}
@@ -267,10 +413,8 @@ func (o *orchestrator) intakeBrief(ctx context.Context, q checkedQueue, m wsm.Me
 		"window_started": since.UTC().Format(time.RFC3339),
 		"repo_dir":       q.repository.Dir,
 		"version":        mediationVersion(m),
-		"chain":          chain,
-		"bound":          fmt.Sprint(q.bound),
-		"facts":          RenderFindings(groups),
-		"reuse":          RenderReuse(gate, gated),
+		"gate_log":       gateLog,
+		"digest":         digest,
 	})
 	if err != nil {
 		return "", wsm.CheckWindow{}, err
@@ -303,29 +447,6 @@ func (o *orchestrator) windowStart(ctx context.Context, repo wsm.RepoKey, m wsm.
 	return m.OwedAt, nil
 }
 
-// chainSoFar is the brief's account of check M's chain: its first deploy, or
-// how many of the mediator's fixes it deployed in a row and what each
-// landed.
-func (o *orchestrator) chainSoFar(ctx context.Context, q checkedQueue, m wsm.Mediation) (string, error) {
-	if m.ChainRedeploys == 0 && !m.Dispatched {
-		return "this is the chain's first deploy; no fix has been dispatched.", nil
-	}
-	finishes, err := o.deps.DB.RemediationFinishes(ctx)
-	if err != nil {
-		return "", fmt.Errorf("merge: read what the chain's fixes landed: %w", err)
-	}
-	var b strings.Builder
-	b.WriteString(fmt.Sprintf("the chain began at %s and has deployed %d of your fixes in a row.",
-		m.ChainStartedAt.UTC().Format(time.RFC3339), m.ChainRedeploys))
-	for _, f := range finishes {
-		if !sameQueue(f.Repo, q.key) || f.LandedHead == "" {
-			continue
-		}
-		b.WriteString(fmt.Sprintf(" Your fix landed %s, changing %s.", f.LandedHead, strings.Join(f.LandedPaths, ", ")))
-	}
-	return b.String(), nil
-}
-
 // RenderEnding is how the checked deploy ended, as the intake's brief says
 // it: a deploy that stopped short is a problem of the deploy itself, its
 // records in the window like any other's.
@@ -336,9 +457,9 @@ func RenderEnding(ending wsm.DeployEnding) string {
 	case wsm.DeployUnchanged:
 		return "It finished, changing nothing."
 	case wsm.DeployStoppedShort:
-		return "It STOPPED SHORT of finishing: a build, a restart or a rollout failed or could not finish. That failure is this deploy's problem; its records are among the findings below."
+		return "It STOPPED SHORT of finishing: a build, a restart or a rollout failed or could not finish."
 	case "":
-		return "How it ended was not recorded; read it from the findings below."
+		return "How it ended was not recorded."
 	}
 	panic(fmt.Sprintf("merge: a deploy ending the store never records: %q", ending))
 }

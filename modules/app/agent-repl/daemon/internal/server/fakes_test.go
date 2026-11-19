@@ -1225,6 +1225,10 @@ type fakeMerge struct {
 	releasedEscalations  []merge.RepositoryScope
 	escalationReleaseErr error
 	merge.Orchestrator
+	// ignoredKinds and unignoredKinds record every IgnoreRecords and
+	// UnignoreRecords, which ignoreErr answers.
+	ignoredKinds, unignoredKinds []fakeIgnoredKind
+	ignoreErr                    error
 	// decisions records every DecideMediation, which decideErr answers.
 	decisions []fakeDecision
 	decideErr error
@@ -1478,6 +1482,22 @@ type fakeDecision struct {
 func (f *fakeMerge) DecideMediation(_ context.Context, ws ids.WorkspaceID, d merge.Decision) error {
 	f.decisions = append(f.decisions, fakeDecision{ws: ws, decision: d})
 	return f.decideErr
+}
+
+func (f *fakeMerge) IgnoreRecords(_ context.Context, ws ids.WorkspaceID, kind wsm.IgnoredRecordKind) error {
+	f.ignoredKinds = append(f.ignoredKinds, fakeIgnoredKind{ws: ws, kind: kind})
+	return f.ignoreErr
+}
+
+func (f *fakeMerge) UnignoreRecords(_ context.Context, ws ids.WorkspaceID, operation, messageContains string) error {
+	f.unignoredKinds = append(f.unignoredKinds, fakeIgnoredKind{ws: ws, kind: wsm.IgnoredRecordKind{Operation: operation, MessageContains: messageContains}})
+	return f.ignoreErr
+}
+
+// fakeIgnoredKind is one change to the ignored records the fake was asked for.
+type fakeIgnoredKind struct {
+	ws   ids.WorkspaceID
+	kind wsm.IgnoredRecordKind
 }
 
 func (f *fakeMerge) ReleaseEscalation(_ context.Context, scope merge.RepositoryScope) error {

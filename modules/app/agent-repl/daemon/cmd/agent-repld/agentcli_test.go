@@ -3686,6 +3686,48 @@ func TestMediationApprovesPastTheGroupsItIgnoresWhenAsked(t *testing.T) {
 	}
 }
 
+func TestMediationIgnoreAndUnignoreChangeTheRecordsTheChecksLeaveOut(t *testing.T) {
+	tests := []struct {
+		name     string
+		args     []string
+		wantAdd  bool
+		wantText string
+		wantSet  bool
+	}{
+		{name: "ignore records a kind of one operation's records holding a text",
+			args:    []string{"mediation", "ignore", "-operation", "daemon.ghclient.post", "-message", "Parent comment not found", "-why", "GitHub's own"},
+			wantAdd: true, wantText: "Parent comment not found", wantSet: true},
+		{name: "ignore with no text names every record of the operation",
+			args:    []string{"mediation", "ignore", "-operation", "elisp.spell", "-why", "user-driven"},
+			wantAdd: true},
+		{name: "unignore withdraws a kind",
+			args:     []string{"mediation", "unignore", "-operation", "daemon.ghclient.post", "-message", "Parent comment not found"},
+			wantText: "Parent comment not found", wantSet: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			change := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetIgnoredRecords()
+			kind := change.GetAdd().GetKind()
+			if !tt.wantAdd {
+				kind = change.GetRemove().GetKind()
+			}
+			if (change.GetAdd() != nil) != tt.wantAdd || kind.GetOperation() != tt.args[3] || kind.GetMessageContains() != tt.wantText || (kind.MessageContains != nil) != tt.wantSet {
+				t.Fatalf("the change = %v, want add %v of %s holding %q", change, tt.wantAdd, tt.args[3], tt.wantText)
+			}
+		})
+	}
+}
+
 func TestMediationRefusesAMalformedCall(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -3695,6 +3737,9 @@ func TestMediationRefusesAMalformedCall(t *testing.T) {
 	}{
 		{name: "no decision", args: []string{"mediation", "-summary", "x"}, want: "approve, escalate or dispatch"},
 		{name: "an unknown decision", args: []string{"mediation", "reject", "-summary", "x"}, want: "not \"reject\""},
+		{name: "an ignore naming no operation", args: []string{"mediation", "ignore", "-why", "w"}, want: "-operation is required"},
+		{name: "an ignore giving no reason", args: []string{"mediation", "ignore", "-operation", "op"}, want: "-why is required"},
+		{name: "an unignore naming no operation", args: []string{"mediation", "unignore"}, want: "-operation is required"},
 		{name: "no summary", args: []string{"mediation", "approve"}, want: "-summary is required"},
 		{name: "the retired remediation choice", args: []string{"mediation", "dispatch", "-fresh", "-summary", "x"}, stdin: aProblemJSON, want: "-fresh"},
 		{name: "a dispatch whose problems are not JSON", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},

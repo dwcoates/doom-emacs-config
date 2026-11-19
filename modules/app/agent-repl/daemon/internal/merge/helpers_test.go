@@ -469,6 +469,18 @@ func (f *fakeDB) BeginRemediationFinish(ctx context.Context, rf wsm.RemediationF
 	return f.checks.BeginRemediationFinish(ctx, rf)
 }
 
+func (f *fakeDB) IgnoredRecordKinds(ctx context.Context) ([]wsm.IgnoredRecordKind, error) {
+	return f.checks.IgnoredRecordKinds(ctx)
+}
+
+func (f *fakeDB) IgnoreRecordKind(ctx context.Context, k wsm.IgnoredRecordKind) error {
+	return f.checks.IgnoreRecordKind(ctx, k)
+}
+
+func (f *fakeDB) UnignoreRecordKind(ctx context.Context, operation, messageContains string) (bool, error) {
+	return f.checks.UnignoreRecordKind(ctx, operation, messageContains)
+}
+
 func (f *fakeDB) DeployProblems(ctx context.Context, repo wsm.RepoKey) ([]wsm.DeployProblem, error) {
 	return f.checks.DeployProblems(ctx, repo)
 }
@@ -3846,8 +3858,11 @@ func (h *harness) deps() Deps {
 		Standing:     h.standing,
 		DeployChecks: h.checks,
 		ReadLogs: func(_ context.Context, _ string, since, until time.Time) ([]LogRecord, error) {
+			// A WINDOW HOLDS A WARNING UNLESS A TEST SAYS OTHERWISE, so a
+			// round tells the mediator: a window with none releases the
+			// check without it (releaseQuiet).
 			if h.logRecords == nil {
-				return nil, nil
+				return []LogRecord{rec("warn", "daemon.standing", "a warning every window of these tests holds")}, nil
 			}
 			return h.logRecords(since, until)
 		},
