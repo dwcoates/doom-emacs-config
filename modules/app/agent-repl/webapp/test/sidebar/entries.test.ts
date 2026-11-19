@@ -172,7 +172,7 @@ describe("openRowWorkspaces", () => {
     const source = (file: string): string => readFileSync(new URL(`../../src/sidebar/${file}`, import.meta.url), "utf8");
 
     // Act / Assert
-    for (const file of ["tab-numbers.ts"]) {
+    for (const file of ["tab-numbers.ts", "recency-gutters.ts"]) {
       expect(source(file)).toContain("openRowWorkspaces(");
       expect(source(file)).not.toContain("openKin(");
     }

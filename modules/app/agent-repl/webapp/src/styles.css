@@ -1459,6 +1459,39 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
   font-variant-numeric: tabular-nums;
 }
 
+/* THE RECENCY GUTTER (src/sidebar/recency-gutters.ts, owner request,
+   2026-11-19): a bar at the row's left edge, left of its tab number, when
+   Emacs's recency walk reaches the tab in few presses. `s-[` (older) is the
+   canonical orange and `s-]` (newer) the canonical purple (--blocked), full
+   at one press and more muted with each press after it. The slot takes no
+   width (its margin hands back the row's gap), so the numbers keep their
+   column; the bar is drawn from the row's content edge back to its own. */
+#ws-sidebar .sb-gutter {
+  flex: 0 0 0;
+  width: 0;
+  align-self: stretch;
+  margin-right: -0.45rem;
+  position: relative;
+  --gutter-strength: 100%;
+}
+#ws-sidebar .sb-gutter[data-recency]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: calc(0.15rem - 0.9rem - var(--row-indent));
+  width: 3px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--gutter-hue) var(--gutter-strength), transparent);
+}
+#ws-sidebar .sb-gutter[data-recency="older"] { --gutter-hue: var(--canonical-orange); }
+#ws-sidebar .sb-gutter[data-recency="newer"] { --gutter-hue: var(--blocked); }
+#ws-sidebar .sb-gutter[data-recency-presses="2"] { --gutter-strength: 78%; }
+#ws-sidebar .sb-gutter[data-recency-presses="3"] { --gutter-strength: 60%; }
+#ws-sidebar .sb-gutter[data-recency-presses="4"] { --gutter-strength: 46%; }
+#ws-sidebar .sb-gutter[data-recency-presses="5"] { --gutter-strength: 35%; }
+#ws-sidebar .sb-gutter[data-recency-presses="6"] { --gutter-strength: 27%; }
+
 /* THE BANDS UNDER THE REPOSITORY SECTIONS -- Merge Queue, Recently Merged,
    then Hidden Workspaces (owner requests, 2026-10-27: the queues and merges
    moved above Hidden; 2026-11-01: split into two sections) -- hold no repository's section, so each is set off from the list above by

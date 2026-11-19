@@ -3291,17 +3291,27 @@ describe("appendRowKids", () => {
 
 
 describe("the tab number slot", () => {
-  it("leads an open row's line with an empty number slot before the status mark", () => {
+  it("leads an open row's line with its empty gutter slot, then an empty number slot, then the status mark", () => {
     // Act
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
 
     // Assert
     const line = drawn.querySelector(":scope > .row")!;
-    expect([line.children[0].className, line.children[0].textContent, line.children[1].classList.contains("st")]).toEqual([
-      "sb-num",
-      "",
-      true,
-    ]);
+    expect([
+      line.children[0].className,
+      line.children[0].hasAttribute("data-recency"),
+      line.children[1].className,
+      line.children[1].textContent,
+      line.children[2].classList.contains("st"),
+    ]).toEqual(["sb-gutter", false, "sb-num", "", true]);
+  });
+
+  it.each<RowPlace>(["merged", "hidden"])("draws no gutter slot on a %s band row", (place) => {
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", closed: place === "merged" }), sidebarContext(), "R", place);
+
+    // Assert
+    expect(drawn.querySelector(".sb-gutter")).toBeNull();
   });
 
   it.each<RowPlace>(["merged", "hidden"])("draws no number slot on a %s band row", (place) => {

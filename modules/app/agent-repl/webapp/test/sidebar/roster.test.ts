@@ -8,12 +8,14 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
   RosterLabelSchema,
+  RosterOpenRowRecencyGutterSchema,
   RosterRepoDivergenceSchema,
   RosterSectionHeaderSchema,
   RosterOpenHeaderSchema,
   RosterRepoSectionSchema,
   WorkspaceRosterSchema,
   RosterColdGateSchema,
+  type RosterOpenRow,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
@@ -2759,6 +2761,45 @@ describe("the recently merged rows' stylesheet", () => {
     const el = drawn.querySelector<HTMLElement>(selector)!;
     el.hidden = true;
     expect(inRail(drawn, () => cascadedValue(el, "display"))).toBe("none");
+  });
+});
+
+describe("the open rows' recency gutters", () => {
+  /** The direction painted on workspace ID's gutter, or null when bare. */
+  const gutterOf = (drawn: HTMLElement, id: string): string | null =>
+    drawn.querySelector(`[data-roster-row='${id}'] > .row > .sb-gutter`)?.getAttribute("data-recency") ?? null;
+
+  /** The roster U's open row for workspace "x", its one repository's first row. */
+  const openX = (u: ReturnType<typeof roster>): RosterOpenRow => {
+    const first = u.repository?.sections[0]?.entries[0]?.entry;
+    if (first?.case !== "row") throw new Error("the fixture has its open row");
+    return first.value;
+  };
+
+  it("paints each reached row's gutter from the push", () => {
+    // Arrange
+    const u = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" }), row({ id: "y" })] })], tabs: [{ id: "x" }, { id: "y" }] });
+    openX(u).recencyGutter = create(RosterOpenRowRecencyGutterSchema, { reach: { case: "newer", value: { presses: 2 } } });
+
+    // Act
+    const drawn = createRosterDrawer(sidebarContext()).draw(u);
+
+    // Assert
+    expect([gutterOf(drawn, "x"), gutterOf(drawn, "y")]).toEqual(["newer", null]);
+  });
+
+  it("bares a gutter the next push no longer carries", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const reached = roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })], tabs: [{ id: "x" }] });
+    openX(reached).recencyGutter = create(RosterOpenRowRecencyGutterSchema, { reach: { case: "older", value: { presses: 1 } } });
+    drawer.draw(reached);
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [repoSection({ id: "a", rows: [row({ id: "x" })] })], tabs: [{ id: "x" }] }));
+
+    // Assert
+    expect(gutterOf(drawn, "x")).toBeNull();
   });
 });
 
