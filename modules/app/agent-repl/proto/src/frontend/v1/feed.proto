@@ -742,6 +742,10 @@ message FeedTurnActivity {
     // A CHESS BOARD the agent showed the reader: a CEE CLI session's game,
     // drawn as the CEE CLI webapp's own widget. See chess_board.proto.
     FeedChessBoard chess_board = 12;
+    // A DEPLOY MEDIATOR'S FIX AT ITS GATE: the full suite its finish runs
+    // before the fix lands, drawn in the mediator's own feed as a merge
+    // bubble with the tests tab's content alone. See FeedFixGate.
+    FeedFixGate fix_gate = 13;
   }
 }
 
@@ -4134,6 +4138,41 @@ message FeedMergeTestsRunOutput {
   // place of the still empty suite list, so a run held back by other runs'
   // RAM disks never reads as an empty or stalled tab.
   optional FeedMergeTestsRunSeatWait seat_wait = 3;
+}
+
+// ---- A deploy mediator's fix at its gate ----
+
+// A DEPLOY MEDIATOR'S FIX AT ITS GATE (owner ruling, 2026-11-19): the full
+// suite the daemon runs on the mediator's branch once its fix finishes,
+// before the fix lands directly (agentrepl.v1.FinishWorkspaceSuccess
+// .landing_directly). Drawn in the MEDIATOR'S OWN FEED, in the merge bubble's
+// frame (head, badge, clock) with no tab strip: its body is the tests tab's
+// run output and nothing else. ONE ROW PER GATE ATTEMPT, keyed by the
+// attempt, so a gate that failed and sent the fix back stands above the next
+// attempt's. Replaced whole on every push.
+message FeedFixGate {
+  FeedFixGateHead head = 1;
+  // Where the attempt stands; the head's badge. Exactly one is set.
+  oneof state {
+    // The suites are running.
+    FeedMergeTabLive live = 2;
+    // The run ended: every suite passed (succeeded), or it failed, or the
+    // gate could not run (failed, with its one-line account).
+    FeedMergeTabSettled settled = 3;
+  }
+  // The run's tests view: the suites, the seat wait, the log.
+  FeedMergeTestsRunOutput output = 4;
+}
+
+// The gate attempt's head.
+message FeedFixGateHead {
+  // What is tested, resolved by the daemon ("testing the fix to the deploy
+  // of 0.472.2"), drawn verbatim.
+  FeedMergeLabel label = 1;
+  // Which attempt this is, counting from 1, of how many the fix gets before
+  // the chain is escalated to the user. Drawn as "attempt 2 of 3".
+  uint32 attempt = 2;
+  uint32 max_attempts = 3;
 }
 
 // ---- A run's wait for a RAM disk seat, before it plans ----
