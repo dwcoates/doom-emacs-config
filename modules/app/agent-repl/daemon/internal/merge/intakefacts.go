@@ -311,11 +311,11 @@ func DigestSites(window []LogRecord) []DigestSite {
 // its count, then one verbatim sample record per site, in the same order.
 func RenderDigest(sites []DigestSite, left []LeftOut, since, through time.Time) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Warnings and errors from %s through %s, one line per logging site (level and operation).\n\n",
-		since.UTC().Format(time.RFC3339), through.UTC().Format(time.RFC3339))
+	b.WriteString(fmt.Sprintf("Warnings and errors from %s through %s, one line per logging site (level and operation).\n\n",
+		since.UTC().Format(time.RFC3339), through.UTC().Format(time.RFC3339)))
 	b.WriteString("COUNT  LEVEL  OPERATION\n")
 	for _, site := range sites {
-		fmt.Fprintf(&b, "%5d  %-5s  %s\n", site.Count, site.Level, site.Operation)
+		b.WriteString(fmt.Sprintf("%5d  %-5s  %s\n", site.Count, site.Level, site.Operation))
 	}
 	b.WriteString("\nOne sample record per site, verbatim, in the same order:\n\n")
 	for _, site := range sites {
@@ -324,7 +324,7 @@ func RenderDigest(sites []DigestSite, left []LeftOut, since, through time.Time) 
 	if len(left) > 0 {
 		b.WriteString("\nLeft out, as kinds of record known to be transient or ignorable (count, operation, message text, why):\n\n")
 		for _, l := range left {
-			fmt.Fprintf(&b, "%5d  %s  %q  %s\n", l.Count, l.Kind.Operation, l.Kind.MessageContains, l.Kind.Why)
+			b.WriteString(fmt.Sprintf("%5d  %s  %q  %s\n", l.Count, l.Kind.Operation, l.Kind.MessageContains, l.Kind.Why))
 		}
 	}
 	return b.String()
