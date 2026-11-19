@@ -2536,6 +2536,34 @@ func TestAHandoverYieldsTheBootClaimOnceItsTransferPassIsOver(t *testing.T) {
 	awaitRecord(t, h, opHandover, "the transfer pass is over: the successor takes over now, and this daemon serves what is still busy here until each workspace is free to move")
 }
 
+func TestAHandoverDrainsItsMergesBeforeItYieldsTheBootClaim(t *testing.T) {
+	// Arrange: the yield records itself on the shared order, so the drain's
+	// place relative to it is read from one sequence.
+	yielded := make(chan struct{}, 1)
+	var h *harness
+	h = newHarness(t, func(d *Deps) {
+		d.YieldBootClaim = func() error {
+			h.order.record("yield")
+			yielded <- struct{}{}
+			return nil
+		}
+	})
+	h.workspace(t)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	<-yielded
+
+	// Assert
+	taken := h.order.Taken()
+	drain, yield := indexOf(taken, "drain_merges"), indexOf(taken, "yield")
+	if drain < 0 || drain > yield {
+		t.Fatalf("steps = %v, want the merges drained before the boot claim is yielded", taken)
+	}
+}
+
 func TestAHandoverWhoseYieldFailsSaysSo(t *testing.T) {
 	// Arrange
 	yielded := make(chan struct{}, 1)

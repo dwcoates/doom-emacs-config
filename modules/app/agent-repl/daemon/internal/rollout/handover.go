@@ -467,7 +467,7 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 		}
 		pass.Wait()
 		if !plan.restart {
-			c.yieldToSuccessor(fields)
+			c.yieldToSuccessor(ctx, fields)
 		}
 		refused := len(plan.workspaces) - requested
 		c.followHandover(ctx, plan, outcomes, requested, refused, &windows)
@@ -482,10 +482,21 @@ func (c *controller) completeHandover(ctx context.Context, plan *handoverPlan) {
 // 2): it advertises, says the deploy is done, serves the queue and takes the
 // next deploy, never waiting on a busy workspace here. A yield that fails is
 // recorded and the successor takes over at this daemon's exit, as before.
-func (c *controller) yieldToSuccessor(fields dlog.Context) {
+//
+// THE MERGES RUNNING HERE LET GO BEFORE THE YIELD. The successor reviews the
+// queues the moment it takes over, and reads a merge lease no run of its own
+// holds as a dead process's: a waiting member's background rebase still
+// running here then had its lease released under it (2026-11-19,
+// monthly-spend-usage-line: "lease ... not found" at the rebase's own
+// release, the drain having begun after the yield). Drained first, every
+// lease such a merge holds is given back, or left to its recorded resume,
+// before the successor can read it, and the queues are the successor's alone
+// from the yield on.
+func (c *controller) yieldToSuccessor(ctx context.Context, fields dlog.Context) {
 	if c.deps.YieldBootClaim == nil {
 		return
 	}
+	c.deps.Merges.Drain(context.WithoutCancel(ctx))
 	c.mu.Lock()
 	holdouts := len(c.handover.holdouts)
 	c.unlock()
@@ -664,15 +675,12 @@ func (c *controller) followHandover(ctx context.Context, plan *handoverPlan, out
 	// no process either way.
 	c.standDownTheUntransferred(ctx, plan.untransferable)
 
-	// THE MERGES STILL RUNNING HERE LET GO BEFORE THE EXIT BEGINS. A
-	// workspace no transfer moved keeps its merge here (a waiting member's
-	// background rebase among them), and the successor takes over the moment
-	// this daemon's shutdown begins: its queue review then read a lease this
-	// daemon's live rebase still held as a dead process's and released it
-	// under the rebase (2026-11-16, linux-runtime-port: "lease ... not
-	// found" at the rebase's own release). Drained here, every lease such a
-	// merge holds is given back, or left to its recorded resume, before the
-	// successor can read it. The teardown's own drain then finds nothing.
+	// THE MERGES STILL RUNNING HERE LET GO BEFORE THE EXIT BEGINS, for a
+	// handover whose boot claim was never yielded (yieldToSuccessor drained
+	// them there otherwise, and this drain then finds nothing): the successor
+	// takes over the moment this daemon's shutdown begins, and its queue
+	// review would read a lease a live rebase here still held as a dead
+	// process's (2026-11-16, linux-runtime-port).
 	c.deps.Merges.Drain(context.WithoutCancel(ctx))
 	c.log.Info(opHandover, "every workspace is transferred; exiting", fields)
 	if err := c.deps.Exit(ctx); err != nil {
