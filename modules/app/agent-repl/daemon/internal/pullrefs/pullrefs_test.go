@@ -67,6 +67,11 @@ func TestLinkify(t *testing.T) {
 		{name: "an arriving text leaves its last repo reference", in: "gns-server#36", arriving: true, want: "gns-server#36"},
 		{name: "an arriving text links an earlier repo reference", in: "gns-server#3617 and a#3", arriving: true, want: gnsPull + " and a#3"},
 		{name: "a settled text links its last repo reference", in: "gns-server#3617", want: gnsPull},
+		{name: "a reference inside a bare URL is left alone", in: "https://x.dev/a_(#12) #12", want: "https://x.dev/a_(#12) " + pull12},
+		{name: "a reference inside an autolink is left alone", in: "<https://x.dev/(#12)> #12", want: "<https://x.dev/(#12)> " + pull12},
+		{name: "a reference definition is left alone", in: "[r]: https://x.dev/ \"(#12)\"\n#12", want: "[r]: https://x.dev/ \"(#12)\"\n" + pull12},
+		{name: "a reference link's text is left alone", in: "[see #12][r] #12\n\n[r]: u", want: "[see #12][r] " + pull12 + "\n\n[r]: u"},
+		{name: "an escaped hash is left alone", in: "\\#12", want: "\\#12"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
