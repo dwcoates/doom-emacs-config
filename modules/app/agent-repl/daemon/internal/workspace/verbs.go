@@ -34,6 +34,7 @@ const (
 	opSelect               = "daemon.workspace.select"
 	opFollowSelected       = "daemon.workspace.follow_selection"
 	opMarkViewed           = "daemon.workspace.mark_viewed"
+	opViewDwell            = "daemon.workspace.view_dwell"
 	opSetPriority          = "daemon.workspace.set_priority"
 	opChangeLinks          = "daemon.workspace.change_links"
 	opSetName              = "daemon.workspace.set_name"

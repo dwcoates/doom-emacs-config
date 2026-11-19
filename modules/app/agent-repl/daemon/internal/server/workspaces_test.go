@@ -1494,6 +1494,107 @@ func TestMarkWorkspaceViewedRefusesAnUnknownWorkspace(t *testing.T) {
 	}
 }
 
+// ---- ReportViewDwell -------------------------------------------------------
+
+// TestReportViewDwellHandsEachArmToItsVerb pins that a counting report starts
+// the dwell at its length and a stopped report stops it, each on the resolved
+// workspace.
+func TestReportViewDwellHandsEachArmToItsVerb(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *agentreplv1.ReportViewDwellRequest
+		want viewDwellCall
+	}{
+		{
+			name: "counting starts the dwell at its length",
+			req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Counting{
+				Counting: &agentreplv1.ReportViewDwellCounting{LengthMs: 5000},
+			}},
+			want: viewDwellCall{ws: testWorkspaceID, length: 5 * time.Second},
+		},
+		{
+			name: "stopped stops the dwell",
+			req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Stopped{
+				Stopped: &agentreplv1.ReportViewDwellStopped{},
+			}},
+			want: viewDwellCall{ws: testWorkspaceID, stopped: true},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			// Act.
+			resp, err := h.Client.ReportViewDwell(context.Background(), connect.NewRequest(tc.req))
+			// Assert.
+			if err != nil {
+				t.Fatalf("ReportViewDwell: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if len(h.Verbs.viewDwells) != 1 || h.Verbs.viewDwells[0] != tc.want {
+				t.Fatalf("dwell calls = %+v, want exactly %+v", h.Verbs.viewDwells, tc.want)
+			}
+		})
+	}
+}
+
+// TestReportViewDwellRefusesAMalformedRequest pins that an unset dwell arm and
+// a counting dwell without a positive length are InvalidArgument, and reach no
+// verb.
+func TestReportViewDwellRefusesAMalformedRequest(t *testing.T) {
+	cases := []struct {
+		name string
+		req  *agentreplv1.ReportViewDwellRequest
+	}{
+		{name: "an unset dwell arm", req: &agentreplv1.ReportViewDwellRequest{Workspace: ref()}},
+		{name: "a zero length", req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Counting{
+			Counting: &agentreplv1.ReportViewDwellCounting{},
+		}}},
+		{name: "a negative length", req: &agentreplv1.ReportViewDwellRequest{Workspace: ref(), Dwell: &agentreplv1.ReportViewDwellRequest_Counting{
+			Counting: &agentreplv1.ReportViewDwellCounting{LengthMs: -1},
+		}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			// Act.
+			_, err := h.Client.ReportViewDwell(context.Background(), connect.NewRequest(tc.req))
+			// Assert.
+			if connect.CodeOf(err) != connect.CodeInvalidArgument {
+				t.Fatalf("err = %v, want InvalidArgument", err)
+			}
+			if len(h.Verbs.viewDwells) != 0 {
+				t.Fatalf("dwell calls = %+v, want none for a malformed request", h.Verbs.viewDwells)
+			}
+		})
+	}
+}
+
+// TestReportViewDwellRefusesAnUnknownWorkspace pins that an id the registry
+// does not hold answers the unknown_workspace arm rather than a transport error.
+func TestReportViewDwellRefusesAnUnknownWorkspace(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	// Act.
+	resp, err := h.Client.ReportViewDwell(context.Background(), connect.NewRequest(&agentreplv1.ReportViewDwellRequest{
+		Workspace: &workspacev1.WorkspaceRef{Id: "ws-nope"},
+		Dwell:     &agentreplv1.ReportViewDwellRequest_Stopped{Stopped: &agentreplv1.ReportViewDwellStopped{}},
+	}))
+	// Assert.
+	if err != nil {
+		t.Fatalf("ReportViewDwell: %v", err)
+	}
+	if resp.Msg.GetError().GetUnknownWorkspace() == nil {
+		t.Fatalf("result = %v, want unknown_workspace", resp.Msg.GetResult())
+	}
+	if len(h.Verbs.viewDwells) != 0 {
+		t.Fatalf("dwell calls = %+v, want none for an unknown workspace", h.Verbs.viewDwells)
+	}
+}
+
 // TestASelectWhoseCallerLeftRecordsNoError is the 18:28:56 switch at the rpc:
 // the caller cancelled mid-revival, and "the rpc failed" was recorded twice
 // at ERROR for a select nobody was still waiting on.

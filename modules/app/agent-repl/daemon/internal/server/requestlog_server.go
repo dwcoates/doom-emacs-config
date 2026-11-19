@@ -733,6 +733,13 @@ func (s *requestLoggingServer) MarkWorkspaceViewed(
 	return serveUnary(s, ctx, "MarkWorkspaceViewed", req, s.server.MarkWorkspaceViewed)
 }
 
+func (s *requestLoggingServer) ReportViewDwell(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportViewDwellRequest],
+) (*connect.Response[agentreplv1.ReportViewDwellResponse], error) {
+	return serveUnary(s, ctx, "ReportViewDwell", req, s.server.ReportViewDwell)
+}
+
 func (s *requestLoggingServer) ReportEditorFocus(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportEditorFocusRequest],

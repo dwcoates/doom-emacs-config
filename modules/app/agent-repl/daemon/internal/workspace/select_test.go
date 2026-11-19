@@ -619,6 +619,71 @@ func TestFollowStoredSelectionLogsTheFollowAtInfo(t *testing.T) {
 	}
 }
 
+// ---- View dwell ------------------------------------------------------------
+
+func TestViewDwellReportsReachTheRoster(t *testing.T) {
+	cases := []struct {
+		name   string
+		report func(v Verbs) error
+		want   string
+	}{
+		{
+			name:   "a start hands the roster the dwell's length",
+			report: func(v Verbs) error { return v.StartViewDwell(context.Background(), "w1", 5*time.Second) },
+			want:   "start w1 5s",
+		},
+		{
+			name:   "a stop ends the roster's dwell",
+			report: func(v Verbs) error { return v.StopViewDwell(context.Background(), "w1") },
+			want:   "stop w1",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act.
+			if err := tc.report(f.verbs); err != nil {
+				t.Fatalf("report: %v", err)
+			}
+
+			// Assert.
+			if len(f.sidebar.dwells) != 1 || f.sidebar.dwells[0] != tc.want {
+				t.Fatalf("roster dwell reports = %v, want [%s]", f.sidebar.dwells, tc.want)
+			}
+		})
+	}
+}
+
+func TestViewDwellReportsRefuseAnUnknownWorkspace(t *testing.T) {
+	cases := []struct {
+		name   string
+		report func(v Verbs) error
+	}{
+		{name: "a start", report: func(v Verbs) error { return v.StartViewDwell(context.Background(), "nope", time.Second) }},
+		{name: "a stop", report: func(v Verbs) error { return v.StopViewDwell(context.Background(), "nope") }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+
+			// Act.
+			err := tc.report(f.verbs)
+
+			// Assert: an unregistered workspace has no row to draw a dwell on.
+			if err == nil {
+				t.Fatal("the dwell report was accepted for a workspace the registry does not hold")
+			}
+			if len(f.sidebar.dwells) != 0 {
+				t.Fatalf("roster dwell reports = %v, want none for a refused report", f.sidebar.dwells)
+			}
+		})
+	}
+}
+
 // ---- MarkViewed ------------------------------------------------------------
 
 func TestMarkViewedTellsTheRoster(t *testing.T) {

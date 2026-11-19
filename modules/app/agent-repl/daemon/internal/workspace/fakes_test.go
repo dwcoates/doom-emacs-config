@@ -2851,6 +2851,9 @@ type fakeSidebar struct {
 	registries []sidebar.Registry
 	selected   []ids.WorkspaceID
 	viewed     []ids.WorkspaceID
+	// dwells records every view-dwell report, in order: "start <ws> <length>"
+	// or "stop <ws>".
+	dwells []string
 	// reviving records every REVIVING edge, in order.
 	reviving []revivingEdge
 	// calls records the ORDER the resolver was told things in, which is what
@@ -2918,6 +2921,18 @@ func (s *fakeSidebar) Selected() (ids.WorkspaceID, bool) {
 		return "", false
 	}
 	return s.selected[len(s.selected)-1], true
+}
+
+func (s *fakeSidebar) SetViewDwell(ws ids.WorkspaceID, length time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dwells = append(s.dwells, fmt.Sprintf("start %s %s", ws, length))
+}
+
+func (s *fakeSidebar) StopViewDwell(ws ids.WorkspaceID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dwells = append(s.dwells, fmt.Sprintf("stop %s", ws))
 }
 
 func (s *fakeSidebar) SetViewed(ws ids.WorkspaceID) {

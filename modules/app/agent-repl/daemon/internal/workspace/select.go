@@ -251,6 +251,33 @@ func (v *verbs) MarkViewed(ctx context.Context, ws ids.WorkspaceID) error {
 	return nil
 }
 
+// StartViewDwell records that the editor started counting the user's dwell
+// on the workspace. Like MarkViewed it is a view fact: no durable record, no
+// revival, and the roster alone decides whether the row draws it.
+func (v *verbs) StartViewDwell(ctx context.Context, ws ids.WorkspaceID, length time.Duration) error {
+	_, log, err := v.owned(ctx, "ReportViewDwell", ws)
+	if err != nil {
+		return err
+	}
+	log.Debug(opViewDwell, "the editor started counting the user's dwell on the workspace", dlog.Context{
+		"dwell": "counting", "length_ms": length.Milliseconds(),
+	})
+	v.deps.Sidebar.SetViewDwell(ws, length)
+	return nil
+}
+
+// StopViewDwell records that the editor stopped counting the user's dwell on
+// the workspace before it completed.
+func (v *verbs) StopViewDwell(ctx context.Context, ws ids.WorkspaceID) error {
+	_, log, err := v.owned(ctx, "ReportViewDwell", ws)
+	if err != nil {
+		return err
+	}
+	log.Debug(opViewDwell, "the editor stopped counting the user's dwell on the workspace", dlog.Context{"dwell": "stopped"})
+	v.deps.Sidebar.StopViewDwell(ws)
+	return nil
+}
+
 // SetHidden moves a workspace into the roster's hidden section, or back out of
 // it, stamping when it was hidden. The roster hoists a hidden workspace's row
 // out of every grouping, and the editor's tab bar stops drawing its tab off

@@ -167,6 +167,17 @@ type Resolver interface {
 	// turn-end arm. There is no lowering setter: the next turn is what makes
 	// a new result unread.
 	SetViewed(ws ids.WorkspaceID)
+	// SetViewDwell records that the editor started counting a dwell of
+	// LENGTH on the workspace, as of the roster's clock now, replacing any
+	// standing one. The row carries it (frontend.v1.RosterRowViewDwell) only
+	// while the dwell will recede the row's name: the row is selected, on a
+	// turn-end arm, with its result unread. A viewed report (SetViewed), a
+	// stop (StopViewDwell), the selection leaving the workspace and a status
+	// change each end it. LENGTH is positive: the caller refuses any other.
+	SetViewDwell(ws ids.WorkspaceID, length time.Duration)
+	// StopViewDwell ends the workspace's standing dwell, if any: the editor
+	// stopped counting it before it completed.
+	StopViewDwell(ws ids.WorkspaceID)
 	// SetStateUnreported installs, or lifts, the fact that a shim taken back
 	// after a failed handover has not re-reported its session state: the
 	// degraded rung, drawn `degraded`.

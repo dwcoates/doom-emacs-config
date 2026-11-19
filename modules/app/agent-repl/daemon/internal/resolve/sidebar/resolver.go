@@ -832,6 +832,12 @@ func (r *resolver) SetSelected(ws ids.WorkspaceID) {
 	r.mutateWorkspace(ws, "daemon.sidebar.set_selected",
 		"the roster took the selection and cleared the workspace's attention marker",
 		nil, func(*wsState) {
+			// THE SELECTION LEAVING A WORKSPACE ENDS ITS DWELL: the user is no
+			// longer looking at it, so a later return counts a fresh one
+			// rather than drawing this one's elapsed fade.
+			if previous := r.state.selected; previous != nil && *previous != ws {
+				r.state.workspace(*previous).dwell = nil
+			}
 			selected := ws
 			r.state.selected = &selected
 		})
@@ -860,6 +866,9 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 	r.mutateWorkspaceLogged(ws, "daemon.sidebar.set_viewed",
 		"the roster took the editor's viewed report; it reads the result only on a turn-end row",
 		nil, func(s *wsState, log dlog.Logger) {
+			// THE VERDICT ENDS THE DWELL, whether or not it reads the result:
+			// the editor has stopped counting either way.
+			s.dwell = nil
 			if !s.lastArmSeen || !s.viewReadsResult(s.lastArm) {
 				log.Debug("daemon.sidebar.row_viewed_refused",
 					"the row is not on a turn-end arm, so the viewed report was dropped and the row stays FULL",
@@ -877,6 +886,29 @@ func (r *resolver) SetViewed(ws ids.WorkspaceID) {
 				})
 			s.result = resultRead
 			s.resultSettled = true
+		})
+}
+
+// SetViewDwell implements Resolver.
+func (r *resolver) SetViewDwell(ws ids.WorkspaceID, length time.Duration) {
+	r.mutateWorkspace(ws, "daemon.sidebar.set_view_dwell",
+		"the roster took the editor's view dwell; the row carries it while it will recede the name",
+		dlog.Context{"length_ms": length.Milliseconds()}, func(s *wsState) {
+			s.dwell = &viewDwell{startedAt: r.now(), length: length}
+		})
+}
+
+// StopViewDwell implements Resolver. Stopping a workspace with no dwell is a
+// success that changes nothing, so it publishes nothing.
+func (r *resolver) StopViewDwell(ws ids.WorkspaceID) {
+	r.mutateWorkspaceIf(ws, "daemon.sidebar.stop_view_dwell",
+		"the roster ended the editor's view dwell before it completed",
+		nil, func(s *wsState, _ dlog.Logger) bool {
+			if s.dwell == nil {
+				return false
+			}
+			s.dwell = nil
+			return true
 		})
 }
 
