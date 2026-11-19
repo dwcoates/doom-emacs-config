@@ -12,7 +12,7 @@ import {
   FeedMergeWorkspaceSwitchSchema,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText } from "../../../src/feed/merge/merge.js";
+import { drawFeedMerge, drawFeedMergeGlyph, drawMergeCommitText, liveMergeClock, mergeBadge, settledMergeClock } from "../../../src/feed/merge/merge.js";
 import { countingTicker, drawnBefore, harness, mergeRow, rowContext } from "../harness.js";
 import { oneofArms } from "../../arms.js";
 import { mergeHead } from "./fixtures.js";
@@ -483,5 +483,32 @@ describe("drawMergeCommitText", () => {
     const count = (file: string) =>
       (readFileSync(path.join(dir, file), "utf8").match(/className = "merge-commit"/g) ?? []).length;
     expect([count("merge.ts"), count("step-tabs.ts")]).toEqual([1, 0]);
+  });
+});
+
+describe("the merge-styled head's shared parts (merge.ts, cards/fix-gate.ts)", () => {
+  it("draws a badge as the word in its tone", () => {
+    const el = mergeBadge("merged", "is-succeeded");
+    expect([el.className, el.textContent]).toEqual(["merge-badge is-succeeded", "merged"]);
+  });
+
+  it("draws a live clock as the head's clock, counting from its start", () => {
+    const h = harness();
+    const el = liveMergeClock(1_000_000 - 65_000, rowContext(h.ctx, mergeRow("m1")));
+    expect(el.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
+    expect(el.textContent).toBe("1m 5s");
+  });
+
+  it("draws a settled clock as the head's clock, holding the span that ran", () => {
+    const el = settledMergeClock(125_000);
+    expect(el.classList.contains(HEAD_CLOCK_CLASS)).toBe(true);
+    expect(el.textContent).toBe("2m 5s");
+  });
+
+  it("is the one badge every merge head arm draws: the head's badges are mergeBadge's shape", () => {
+    for (const msg of [mergeHead({ case: "update" }), mergeHead({ case: "success", endedAtMs: 61_000n, commit: "c" })]) {
+      const badge = draw(msg).querySelector(".merge-badge");
+      expect(badge?.className.startsWith("merge-badge ")).toBe(true);
+    }
   });
 });

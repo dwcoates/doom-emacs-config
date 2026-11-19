@@ -23,6 +23,7 @@ import { drawFeedCommandRefused } from "../panels/refused.js";
 import { drawFeedArtifact } from "./cards/artifact.js";
 import { drawFeedChessBoard } from "./cards/chess-board.js";
 import { drawFeedFindings } from "./cards/findings.js";
+import { drawFeedFixGate } from "./cards/fix-gate.js";
 import { drawFeedHook } from "./cards/hook.js";
 import { drawFeedPlan } from "./cards/plan.js";
 import { drawFeedResponse } from "./cards/response.js";
@@ -64,6 +65,7 @@ import type {
   FeedDetachedSubagent,
   FeedCommandRefused,
   FeedFindings,
+  FeedFixGate,
   FeedHook,
   FeedId,
   FeedMerge,
@@ -111,6 +113,8 @@ export interface RowRenderers {
   chessBoard(unit: FeedChessBoard, rc: RowContext): HTMLElement;
   /** A subagent's returned result, drawn inside its own card (its feed). */
   subagentResult(unit: FeedSubagentResult, rc: RowContext): HTMLElement;
+  /** A deploy mediator's fix at its gate: a merge-styled head over the run's output. */
+  fixGate(unit: FeedFixGate, rc: RowContext): HTMLElement;
   /** The detached shell bubble's spool BODY (on its sub-feed); the head is `shellHead`. */
   shell(unit: FeedShell, rc: RowContext): HTMLElement;
   /** The detached shell bubble's collapsed HEAD line; its body is `shell`. */
@@ -193,6 +197,7 @@ export function createRowRenderers(_ctx: AppContext): RowRenderers {
     findings: withCardQuestion(drawFeedFindings),
     chessBoard: withCardQuestion(drawFeedChessBoard),
     subagentResult: withCardQuestion(drawFeedSubagentResult),
+    fixGate: withCardQuestion(drawFeedFixGate),
     shell: withCardQuestion(drawFeedShellBody),
     shellHead: withCardQuestion(drawFeedShellHead),
     permission: withCardQuestion(drawFeedPermission),

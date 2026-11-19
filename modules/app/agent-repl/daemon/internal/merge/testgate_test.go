@@ -416,7 +416,7 @@ func TestAPlannedTotalThatDoesNotReadFailsThePaint(t *testing.T) {
 func TestALiveLineThatDoesNotCountIsRecordedAtWarn(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	g := &gateRun{r: &run{o: h.o, ws: theWorkspace}, states: map[string]suiteState{}, counts: newSuiteCounts()}
+	g := &gateRun{r: &run{o: h.o, ws: theWorkspace}, tracker: newSuiteTracker(h.o.nowMS)}
 
 	// Act
 	g.edge(strings.TrimSuffix(unreadableTotal, "\n"))

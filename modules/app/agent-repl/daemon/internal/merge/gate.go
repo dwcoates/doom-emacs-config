@@ -55,7 +55,7 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (verdi
 	dir := r.subject.dir
 	rangeSpec := tip + ".." + head
 	g := &gateRun{r: r, round: round, log: r.o.testLog(r.lease.ID, round.n),
-		states: map[string]suiteState{}, sources: map[string]string{}, counts: newSuiteCounts(), begun: begun}
+		tracker: newSuiteTracker(r.o.nowMS), begun: begun}
 	paths, err := r.git.ChangedPaths(ctx, dir, rangeSpec)
 	if err != nil && (r.stopping(err) || r.cut(err)) {
 		return gateVerdict{}, err
@@ -297,26 +297,14 @@ type gateRun struct {
 	runnerSeen bool
 
 	mu sync.Mutex
-	// suites are the tab's live rows, in the order the suites started.
-	suites []*frontendv1.FeedMergeTestSuite
-	// states are each started suite's standing, by name.
-	states map[string]suiteState
-	// sources are the earlier runs the reused suites name, by suite.
-	sources map[string]string
-	// counts are each suite's unit counts as the lines have reported them.
-	counts *suiteCounts
-	// seatWait is the runner's wait for a RAM disk seat while it waits, nil
-	// otherwise (seatEdge).
-	seatWait *frontendv1.FeedMergeTestsRunSeatWait
+	// tracker follows the run's lines into the tab's tests view.
+	tracker *suiteTracker
 }
 
-// publishLive publishes the live run drawing SUITES, with the log link and
-// the runner's seat wait as they stand.
-func (g *gateRun) publishLive(suites []*frontendv1.FeedMergeTestSuite) {
-	g.mu.Lock()
-	wait := g.seatWait
-	g.mu.Unlock()
-	g.r.publishRunOutput(g.round, g.round.live(), &frontendv1.FeedMergeTestsRunOutput{Suites: suites, Log: g.link(), SeatWait: wait})
+// publishLive publishes the live run as its tracker stands, with the log
+// link.
+func (g *gateRun) publishLive() {
+	g.r.publishRunOutput(g.round, g.round.live(), g.tracker.view(g.link()))
 }
 
 // link is the round's log link, nil until the run has written the log.
@@ -367,87 +355,31 @@ func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) 
 // reset puts the gate run back to its start: no suite seen, no runner line,
 // no seat wait.
 func (g *gateRun) reset() {
+	g.tracker.reset()
 	g.mu.Lock()
 	defer g.mu.Unlock()
-	g.suites, g.states, g.sources, g.counts = nil, map[string]suiteState{}, map[string]string{}, newSuiteCounts()
-	g.seatWait, g.runnerSeen, g.written = nil, false, false
+	g.runnerSeen, g.written = false, false
 }
 
-// edge follows one line of the script: a suite starting, passing or failing
-// moves its tab row and takes the testing step's line, and a unit's verdict
-// or a suite's planned total moves the suite's counts.
+// edge follows one line of the script through the run's tracker: a suite
+// starting, passing or failing moves its tab row and takes the testing step's
+// line, and a unit's verdict, a suite's planned total or a seat line moves
+// the tab. A line the tracker cannot read is recorded and moves nothing.
 func (g *gateRun) edge(line string) {
 	g.runnerEdge(line)
-	if g.seatEdge(line) {
-		return
-	}
-	if name, counted := g.countLine(line); counted {
-		g.mu.Lock()
-		state, started := g.states[name]
-		if started {
-			g.setTabSuite(name, state)
-		}
-		suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
-		g.mu.Unlock()
-		if started {
-			g.publishLive(suites)
-		}
-		return
-	}
-	name, state, ok := suiteEdge(line)
-	if !ok {
-		return
-	}
-	g.mu.Lock()
-	g.states[name] = state
-	if _, source, reused := reusedSuite(line); reused {
-		g.sources[name] = source
-	}
-	g.setTabSuite(name, state)
-	suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
-	g.mu.Unlock()
+	took, err := g.tracker.take(line)
+	recordUnreadLine(g.r.o.log(context.Background(), g.r.ws), "daemon.merge.tests", line, err,
+		dlog.Context{"workspace": string(g.r.ws), "round": g.round.n})
 	// A REUSED SUITE TAKES NO FOOTER EDGE (owner ruling, 2026-10-14): it
 	// neither started nor ended in this gate.
-	if state != suiteStateReused {
+	if took.suite != "" && took.state != suiteStateReused {
 		g.r.updateFacts(func(f *footer.MergeFacts) {
-			f.Line = suiteLine(name, state)
+			f.Line = suiteLine(took.suite, took.state)
 		})
 	}
-	g.publishLive(suites)
-}
-
-// seatEdge follows the runner's RAM disk seat lines (seatwait), answering
-// whether line was one: a wait stands the run's seat wait in the tests tab,
-// keeping the start of a wait already drawn, and the seat taken (or none)
-// clears it. A wait line that does not read is recorded at ERROR and moves
-// nothing: the runner wrote it with the one spelling this reads.
-func (g *gateRun) seatEdge(line string) bool {
-	w, waiting, err := seatwait.Parse(line)
-	if err != nil {
-		g.r.o.log(context.Background(), g.r.ws).Error("daemon.merge.tests", "a test runner's RAM disk seat line could not be read",
-			dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()})
-		return true
+	if took.moved {
+		g.publishLive()
 	}
-	if !waiting && !seatwait.Ended(line) {
-		return false
-	}
-	g.mu.Lock()
-	was := g.seatWait
-	switch {
-	case waiting && was != nil:
-		g.seatWait = seatWaitView(w, was.GetStartedAtMs())
-	case waiting:
-		g.seatWait = seatWaitView(w, g.r.o.nowMS())
-	default:
-		g.seatWait = nil
-	}
-	suites := append([]*frontendv1.FeedMergeTestSuite(nil), g.suites...)
-	g.mu.Unlock()
-	if !waiting && was == nil {
-		return true
-	}
-	g.publishLive(suites)
-	return true
 }
 
 // seatWaitView is a runner's seat wait as the tests tab draws it, begun at
@@ -504,34 +436,6 @@ func (g *gateRun) since() float64 { return g.r.o.deps.Now().Sub(g.begun).Seconds
 func (g *gateRun) cut(ctx context.Context, by, then string) {
 	g.r.o.log(ctx, g.r.ws).Info("daemon.merge.tests", "the merge's test gate was cut before its verdict by "+by+"; "+then, dlog.Context{
 		"workspace": string(g.r.ws), "round": g.round.n, "by": by, "since_gate_start_seconds": g.since()})
-}
-
-// countLine moves the counts one line reports, answering the suite it moved.
-// A line it cannot read is recorded at WARN and moves nothing: the run goes
-// on, and the gate's final parse of the whole output fails it loudly.
-func (g *gateRun) countLine(line string) (string, bool) {
-	g.mu.Lock()
-	name, counted, err := g.counts.take(line)
-	g.mu.Unlock()
-	if err != nil {
-		g.r.o.log(context.Background(), g.r.ws).Warn("daemon.merge.tests", "a test runner line could not be counted",
-			dlog.Context{"workspace": string(g.r.ws), "round": g.round.n, "line": line, "error": err.Error()})
-		return "", false
-	}
-	return name, counted
-}
-
-// setTabSuite stands a suite's tab row at its edge, with its counts so far.
-// Called with g.mu held.
-func (g *gateRun) setTabSuite(name string, state suiteState) {
-	suite := tabSuite(name, state, g.counts.of(name), g.sources[name])
-	for i, existing := range g.suites {
-		if existing.GetName() == name {
-			g.suites[i] = suite
-			return
-		}
-	}
-	g.suites = append(g.suites, suite)
 }
 
 // suiteEdge reads one line of the script as a suite's edge: starting, passed

@@ -42,7 +42,7 @@ func (g *gateRun) runOnService(ctx context.Context, dir string, argv []string) (
 	g.written = true
 	writer := bufio.NewWriter(file)
 	var writeErr error
-	g.publishLive(nil)
+	g.publishLive()
 	run, err := g.serviceRun(ctx, dir, argv)
 	if err != nil {
 		_ = file.Close()

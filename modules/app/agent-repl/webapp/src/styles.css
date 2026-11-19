@@ -9008,6 +9008,23 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
 .merge-badge.is-succeeded { color: var(--ok); }
 .merge-badge.is-failed { color: var(--err); }
 .merge-badge.is-abandoned { color: var(--muted); }
+/* A DEPLOY MEDIATOR'S FIX AT ITS GATE (cards/fix-gate.ts; owner ruling,
+   2026-11-19): the merge bubble's head over the tests tab's run, no tab
+   strip. It stops where an expanded merge bubble stops, and only its run
+   scrolls. */
+.tool-card.fix-gate {
+  display: flex;
+  flex-direction: column;
+  max-height: calc(var(--feed-item-max-h) * 0.45);
+}
+.fix-gate > .fix-gate-head { flex: 0 0 auto; }
+.fix-gate > .fix-gate-run {
+  min-height: 0;
+  overflow-y: auto;
+  padding-top: 0.3rem;
+}
+.fix-gate-attempt,
+.fix-gate-summary { color: var(--muted); font-size: 0.85em; white-space: nowrap; }
 /* A PAUSED QUEUE (owner request, 2026-10-23; feed/merge/paused.ts): a pause
    glyph and a word in --merge-paused, on a soft wash of it. The head draws it
    as a pill after its badge, folded and expanded alike, and the queue tab as a

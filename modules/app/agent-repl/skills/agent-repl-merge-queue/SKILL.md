@@ -256,8 +256,8 @@ Either kind:
     mediator across every deploy, on Opus at low effort: it checks each
     deploy, fixes what it dispatches to itself in the same turn (finishing on
     its own), and settles an escalation with the user (finishing once they
-    agree). It stays open and warm; it is in sight only while it fixes or
-    waits on the user, and the queue's purple label opens it otherwise; its
+    agree). It stays open, warm and in sight in its repository's section for
+    good, and the queue's purple label opens it too; its
     conversation is compacted by Haiku the moment three quiet checks follow a
     dispatch or an escalation, never cleared.
   - The sidebar labels the repository in purple: "HOT-LOADING ZETTEL" while

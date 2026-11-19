@@ -89,6 +89,10 @@ const (
 	// queue has not accepted. Keyed by the entry's idempotency key, because the
 	// turn it will run as does not exist until it is accepted.
 	KindIngress RowKind = "ingress"
+	// KindFixGate is one attempt of a deploy mediator's fix at its gate
+	// (frontend.v1.FeedFixGate), on the mediator's root feed. Keyed by the
+	// finish's start and the attempt.
+	KindFixGate RowKind = "fix_gate"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -109,6 +113,7 @@ var AllRowKinds = []RowKind{
 	KindSynth,
 	KindPeer,
 	KindIngress,
+	KindFixGate,
 }
 
 func knownKind(k RowKind) bool {

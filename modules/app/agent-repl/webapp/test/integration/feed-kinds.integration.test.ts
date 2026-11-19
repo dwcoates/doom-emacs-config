@@ -94,6 +94,7 @@ import {
   shellHeadRow,
   peerMessageRow,
   subagentResultUnit,
+  fixGateUnit,
   subagentHandbackRow,
   mergeHandbackRow,
   removedRow,
@@ -208,6 +209,7 @@ describe("arm coverage", () => {
       "findings",
       "chessBoard",
       "subagentResult",
+      "fixGate",
     ]);
   });
 
@@ -812,6 +814,17 @@ describe("a subagent's returned result", () => {
     const row = await drawRow(activityRow(subagentResultUnit("undelivered")));
     // Assert
     expect(row.querySelector(".subagent-result-reason")?.textContent).toBe("the parent is gone");
+  });
+});
+
+describe("a deploy mediator's fix at its gate", () => {
+  it("draws the merge-styled head over the run's suites, with no tab strip", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(fixGateUnit()));
+    // Assert
+    expect(row.querySelector(".fix-gate .merge-label")?.textContent).toBe("testing the fix");
+    expect(row.querySelector(".fix-gate .fix-gate-run .merge-suites")).not.toBeNull();
+    expect(row.querySelector(".fix-gate .merge-tabs")).toBeNull();
   });
 });
 

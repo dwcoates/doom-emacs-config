@@ -4726,9 +4726,6 @@ type fakeDeployChecks struct {
 	standByErr       error
 	// resumeErr fails every Resume.
 	resumeErr error
-	// hidden records each fixer hidden, and hideErr fails it.
-	hidden  []ids.WorkspaceID
-	hideErr error
 	// refreshed and compacted record each fixer refresh and each compaction;
 	// refreshErr and compactErr fail them.
 	refreshed, compacted   []ids.WorkspaceID
@@ -4805,13 +4802,6 @@ func (f *fakeDeployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) erro
 	f.stoodBy = append(f.stoodBy, ws)
 	f.standByCtxErrs = append(f.standByCtxErrs, ctx.Err())
 	return f.standByErr
-}
-
-func (f *fakeDeployChecks) Hide(_ context.Context, ws ids.WorkspaceID) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.hidden = append(f.hidden, ws)
-	return f.hideErr
 }
 
 func (f *fakeDeployChecks) Refresh(_ context.Context, ws ids.WorkspaceID) error {

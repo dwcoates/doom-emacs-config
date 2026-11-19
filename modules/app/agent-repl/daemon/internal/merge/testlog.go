@@ -46,9 +46,16 @@ type testLog struct {
 
 // testLog names one tests round's log.
 func (o *orchestrator) testLog(lease ids.LeaseID, round int) testLog {
+	return o.testsLogOf(string(lease), round)
+}
+
+// testsLogOf names round ROUND's tests log of KEY (a merge's lease, a deploy
+// mediator's workspace): THE ONE SHAPE of a tests log's token and path, so
+// every gate's log is resolved and pruned alike (TestLogPath, IsLog).
+func (o *orchestrator) testsLogOf(key string, round int) testLog {
 	return testLog{
-		token: fmt.Sprintf("%s/%d", lease, round),
-		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", lease, round)),
+		token: fmt.Sprintf("%s/%d", key, round),
+		path:  filepath.Join(LogsDir(o.deps.StateDir), fmt.Sprintf("%s-tests-%d.log", key, round)),
 	}
 }
 
@@ -151,6 +158,19 @@ func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, toke
 	if !found || lease == "" || err != nil || round < 1 {
 		return "", refusal("the token is not one this daemon mints", reasonTestLogMalformed, nil)
 	}
+	// A DEPLOY MEDIATOR'S OWN GATE LOG, clicked in its own feed (fixgate.go):
+	// the token names the mediator itself.
+	if lease == string(ws) {
+		path, isMediator, err := o.fixGateLogPath(ctx, ws, round)
+		if err != nil {
+			log.Error(op, "could not read whether the workspace is a deploy mediator to resolve a test log token",
+				dlog.Context{"workspace": string(ws), "token": token, "error": err.Error()})
+			return "", err
+		}
+		if isMediator {
+			return o.existingTestLog(ctx, ws, token, path)
+		}
+	}
 	ran, err := o.deps.DB.MergeLedgerWorkspace(ctx, ids.LeaseID(lease))
 	if errors.Is(err, wsm.ErrNotFound) {
 		return "", refusal("the token names no merge this daemon's ledger holds", reasonTestLogNotDrawnHere, nil)
@@ -164,7 +184,15 @@ func (o *orchestrator) TestLogPath(ctx context.Context, ws ids.WorkspaceID, toke
 		return "", refusal("the token names a merge whose bubble another workspace's feed draws", reasonTestLogNotDrawnHere,
 			dlog.Context{"merge_workspace": string(ran), "drawn_in": string(drawnIn)})
 	}
-	path := o.testLog(ids.LeaseID(lease), round).path
+	return o.existingTestLog(ctx, ws, token, o.testLog(ids.LeaseID(lease), round).path)
+}
+
+// existingTestLog answers PATH, the log TOKEN names for workspace WS's feed,
+// once it is still on disk; a log the retention pass removed is refused
+// (aged_out), recorded at INFO.
+func (o *orchestrator) existingTestLog(ctx context.Context, ws ids.WorkspaceID, token, path string) (string, error) {
+	const op = "daemon.merge.test_log"
+	log := o.log(ctx, ws)
 	if _, err := os.Stat(path); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			why := fmt.Sprintf("the log %s is no longer there", path)

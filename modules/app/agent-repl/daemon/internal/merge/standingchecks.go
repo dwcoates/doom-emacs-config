@@ -87,11 +87,9 @@ func (o *orchestrator) makeMediator(ctx context.Context, q checkedQueue, fields 
 }
 
 // readyMediator answers queue Q's mediator ready to be briefed: its worktree
-// at the main branch's tip (Refresh), at its effort, and shown when SHOW
-// (an escalation's brief), since it is in sight only while it holds its queue
-// at work (owner ruling, 2026-11-17). A check's brief leaves it hidden: a
-// dispatch shows it (dispatch).
-func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, show bool, fields dlog.Context) (standing, error) {
+// at the main branch's tip (Refresh), at its effort, and shown, since it
+// stands in sight for good (owner ruling, 2026-11-19).
+func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, fields dlog.Context) (standing, error) {
 	mediator, err := o.mediatorOf(ctx, q, fields)
 	if err != nil {
 		return standing{}, err
@@ -107,10 +105,8 @@ func (o *orchestrator) readyMediator(ctx context.Context, q checkedQueue, show b
 		o.mediationFailed(ctx, fields, "the deploy mediator's effort could not be set; it is not briefed", err)
 		return standing{}, fmt.Errorf("merge: set the deploy mediator %s's effort: %w", mediator.ws, err)
 	}
-	if show {
-		if err := o.show(ctx, mediator, fields); err != nil {
-			return standing{}, err
-		}
+	if err := o.show(ctx, mediator, fields); err != nil {
+		return standing{}, err
 	}
 	return mediator, nil
 }
@@ -129,8 +125,7 @@ func (o *orchestrator) showMediator(ctx context.Context, q checkedQueue, fields 
 	return mediator, nil
 }
 
-// show puts MEDIATOR in sight for its escalation, recording a failure at
-// ERROR.
+// show puts MEDIATOR in sight for its brief, recording a failure at ERROR.
 func (o *orchestrator) show(ctx context.Context, mediator standing, fields dlog.Context) error {
 	if err := o.deps.DeployChecks.Resume(ctx, mediator.ws); err != nil {
 		o.mediationFailed(ctx, fields, "the deploy mediator could not be shown for its brief; it is not briefed", err)
@@ -139,16 +134,15 @@ func (o *orchestrator) show(ctx context.Context, mediator standing, fields dlog.
 	return nil
 }
 
-// settleMediatorSight shows queue Q's mediator while check M has it at
-// work holding the queue (a dispatch whose finish is not under way, or an
-// escalation), and hides it otherwise (owner ruling, 2026-11-17). Every pass
-// settles it, so a mediator a transition left in the wrong sight is put
-// right.
-func (o *orchestrator) settleMediatorSight(ctx context.Context, q checkedQueue, m *wsm.Mediation) {
+// keepMediatorShown shows queue Q's mediator whenever it is hidden: it
+// stands in its repository's section for good (owner ruling, 2026-11-19,
+// replacing 2026-11-17's sight only while at work), so a mediator an earlier
+// build hid, or the user hid, is shown again by the next pass.
+func (o *orchestrator) keepMediatorShown(ctx context.Context, q checkedQueue) {
 	fields := dlog.Context{"repo": string(q.key)}
 	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, q.key)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to settle whether it is in sight", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
 	if !found {
@@ -158,28 +152,17 @@ func (o *orchestrator) settleMediatorSight(ctx context.Context, q checkedQueue, 
 	fields = withField(fields, "mediator", string(mediator))
 	record, err := o.deps.DB.Workspace(ctx, mediator)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to settle whether it is in sight", withField(fields, "error", err.Error()))
+		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to keep it shown", withField(fields, "error", err.Error()))
 		return
 	}
-	atWork := m != nil && (m.Dispatched || m.Escalated())
-	if atWork && m.Dispatched {
-		finish, err := o.finishUnderWay(ctx, q.key)
-		if err != nil {
-			o.deps.Log.Global().Error(opMediation, "could not read whether the mediator's finish is under way to settle whether it is in sight", withField(fields, "error", err.Error()))
-			return
-		}
-		atWork = finish == nil
+	if !record.Hidden {
+		return
 	}
-	switch {
-	case atWork && record.Hidden:
-		if err := o.deps.DeployChecks.Resume(ctx, mediator); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the deploy mediator at work could not be shown", withField(fields, "error", err.Error()))
-		}
-	case !atWork && !record.Hidden:
-		if err := o.deps.DeployChecks.Hide(ctx, mediator); err != nil {
-			o.deps.Log.Global().Error(opMediation, "the deploy mediator no check holds its queue for could not be hidden", withField(fields, "error", err.Error()))
-		}
+	if err := o.deps.DeployChecks.Resume(ctx, mediator); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the hidden deploy mediator could not be shown", withField(fields, "error", err.Error()))
+		return
 	}
+	o.deps.Log.Global().Info(opMediation, "showed the hidden deploy mediator; it stands in its repository's section for good", fields)
 }
 
 // markBriefed records queue Q's mediator briefed, once its first brief is
@@ -253,22 +236,4 @@ func (o *orchestrator) compactMediator(ctx context.Context, q wsm.RepoKey, field
 		defer leave()
 		compact(life)
 	})
-}
-
-// hideMediator hides queue REPO's mediator, which no check holds the queue
-// for any more. A queue with no mediator recorded has nothing to hide; a
-// failure is recorded, and the next pass settles its sight
-// (settleMediatorSight).
-func (o *orchestrator) hideMediator(ctx context.Context, repo wsm.RepoKey, fields dlog.Context) {
-	recorded, found, err := o.deps.DB.DeployMediatorOf(ctx, repo)
-	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "could not read the deploy mediator to hide it", withField(fields, "error", err.Error()))
-		return
-	}
-	if !found {
-		return
-	}
-	if err := o.deps.DeployChecks.Hide(ctx, recorded.Workspace); err != nil {
-		o.deps.Log.Global().Error(opMediation, "the deploy mediator no check holds its queue for could not be hidden", withField(withField(fields, "mediator", string(recorded.Workspace)), "error", err.Error()))
-	}
 }

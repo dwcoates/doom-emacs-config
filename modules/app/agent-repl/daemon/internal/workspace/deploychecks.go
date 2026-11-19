@@ -33,11 +33,12 @@ const (
 )
 
 // deployMediatorSpec is the create of the deploy mediator NAME of the
-// repository at REPODIR: hidden, since it is in sight only while it fixes or
-// waits on the user, on the mediator's model, with no initial prompt.
+// repository at REPODIR: shown, since it stands in its repository's section
+// for good (owner ruling, 2026-11-19), on the mediator's model, with no
+// initial prompt.
 func deployMediatorSpec(repoDir, name string) CreateSpec {
 	spec := NewCreateSpec(lifecycleconfig.OriginatorUserOrWorkspace)
-	spec.RepoDir, spec.Name, spec.Hidden, spec.Model = repoDir, name, true, mediatorModel
+	spec.RepoDir, spec.Name, spec.Model = repoDir, name, mediatorModel
 	return spec
 }
 
@@ -108,41 +109,21 @@ func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 }
 
 // StandByDeployCheck implements Verbs: a fixer whose finish the daemon
-// accepted is hidden and its session ended, once the turn that finished
-// ended (merge.orchestrator.standFinishedBy awaits it). The fixer is in sight only while it is at work holding
-// its queue (owner ruling, 2026-11-17): from its finish on, its repository's
-// deploy check label is how it is reached. It stays open and warm
-// (wsm.Workspace.DeployMediator), and its next brief shows it again.
+// accepted has its session ended, once the turn that finished ended
+// (merge.orchestrator.standFinishedBy awaits it). IT STAYS IN SIGHT (owner
+// ruling, 2026-11-19, replacing 2026-11-17's hide): the mediator stands in
+// its repository's section for good, so its gate, landing and deploy are
+// watched where it stands. It stays open and warm
+// (wsm.Workspace.DeployMediator), and its next brief brings its session up.
 func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "StandByDeployCheck", ws)
 	if err != nil {
 		return err
 	}
-	if err := v.hideFamily(ctx, log, ws); err != nil {
-		return fmt.Errorf("stand the deploy check %s by: hide: %w", ws, err)
-	}
 	if _, err := v.endSession(ctx, log, ws); err != nil {
 		return fmt.Errorf("stand the deploy check %s by: %w", ws, err)
 	}
-	log.Info(opDeployChecks, "the finished deploy check workspace stands by: hidden, its session ended, open and warm for its next brief", nil)
-	return nil
-}
-
-// HideDeployCheck implements Verbs: hides standing fixer WS, which no check
-// holds its queue for any more (a released escalation, a fixer left in
-// sight by an earlier build), its session untouched.
-func (v *verbs) HideDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
-	record, log, err := v.owned(ctx, "HideDeployCheck", ws)
-	if err != nil {
-		return err
-	}
-	if record.Hidden || record.Closed {
-		return nil
-	}
-	if err := v.hideFamily(ctx, log, ws); err != nil {
-		return fmt.Errorf("hide the deploy check %s: %w", ws, err)
-	}
-	log.Info(opDeployChecks, "the deploy check workspace holds its queue no more; it is hidden, its session untouched", nil)
+	log.Info(opDeployChecks, "the finished deploy check workspace stands by: its session ended, in sight and open for its next brief", nil)
 	return nil
 }
 
@@ -251,23 +232,9 @@ func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error
 	return nil
 }
 
-// hideFamily hides standing deploy check WS with the workspaces it made
-// (owner ruling, 2026-11-17: "hide its kids too"): a fixer is drawn only
-// while it holds its queue, and a hide of it alone is refused while any
-// child of it is open (wsm.HasOpenChildrenError).
-func (v *verbs) hideFamily(ctx context.Context, log dlog.Logger, ws wsm.WorkspaceID) error {
-	members, err := v.deps.DB.HideFamily(ctx, ws, v.now())
-	if err != nil {
-		log.Error(opSetHidden, "could not hide the deploy check workspace with its family", dlog.Context{"cause": err.Error()})
-		return err
-	}
-	log.Info(opSetHidden, "hid the deploy check workspace with its family", dlog.Context{"hidden": true, "family": familyIDs(members)})
-	v.familyMoved(ctx, log, ws, members)
-	return nil
-}
-
 // showFamily shows standing deploy check WS and the workspaces hidden with
-// it.
+// it: a mediator an earlier build hid, with the workspaces it made (owner
+// ruling, 2026-11-17: "hide its kids too").
 func (v *verbs) showFamily(ctx context.Context, log dlog.Logger, ws wsm.WorkspaceID) error {
 	members, err := v.deps.DB.ShowFamily(ctx, ws)
 	if err != nil {
