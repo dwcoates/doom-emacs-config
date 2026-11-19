@@ -684,7 +684,7 @@ describe("the when-column", () => {
     expect(position).toBe(want);
   });
 
-  it("stands an open row's ⋯ at the right padding a merge queue line's clock ends at", () => {
+  it("stands an open row's ⋯ at the one right padding a row and a merge queue line share", () => {
     // Arrange
     const rules = rulesOf(stylesheet);
     const paddingRight = (selector: string): string | undefined =>
@@ -694,9 +694,9 @@ describe("the when-column", () => {
     const right = inRail(drawn, () => cascadedValue(moreOf(drawn), "right"));
     // Assert
     expect([right, paddingRight("#ws-sidebar .row"), paddingRight("#ws-sidebar .sb-mq-waiting")]).toEqual([
-      "0.7rem",
-      "0.7rem",
-      "0.7rem",
+      "var(--row-pad-right)",
+      "var(--row-pad-right)",
+      "var(--row-pad-right)",
     ]);
   });
 

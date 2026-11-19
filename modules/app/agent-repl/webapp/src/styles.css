@@ -1095,7 +1095,7 @@ body {
 #ws-sidebar .sb-mq-waiting,
 #ws-sidebar .sb-mq-github,
 #ws-sidebar .sb-mq-off-queue {
-  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
+  padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) 0.9rem;
   cursor: pointer;
   min-width: 0;
 }
@@ -1387,6 +1387,9 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    built out of it (Recently Merged's --merged-row-h), so the two never drift.
    Halved from 0.28rem so the rows sit closer (owner request, 2026-10-19). */
 #ws-sidebar { --row-pad-y: 0.14rem; }
+/* ONE RIGHT PADDING for a row's line and a merge queue line, which an open
+   row's out-of-flow ⋯ stands at too, so their right edges never drift. */
+#ws-sidebar { --row-pad-right: 0.7rem; }
 /* THE ROW INDENT (owner request, 2026-10-20): a nested row -- a child
    workspace, or a row in a subsection -- indents only its status mark and
    name. Its tab number, its gutter bar and its highlight start at the
@@ -1404,7 +1407,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
      row's parts do (the name's glyph, below) can take it back exactly. */
   --row-gap: 0.45rem;
   gap: var(--row-gap);
-  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));
+  padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) calc(0.9rem + var(--row-indent));
   border-radius: 5px;
   cursor: pointer;
   min-width: 0;
@@ -7355,7 +7358,7 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .ws:not(.receded) > .row { position: relative; }
 #ws-sidebar .ws:not(.receded) > .row > .sb-more {
   position: absolute;
-  right: 0.7rem;
+  right: var(--row-pad-right);
   top: 50%;
   transform: translateY(-50%);
 }
