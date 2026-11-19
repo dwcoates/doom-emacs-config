@@ -35,6 +35,16 @@
  * open failure, which files its card and retries on backoff, by which time the
  * page's stream has reopened and re-attached.
  *
+ * EVERY PAGE CALL ECHOES THE ATTACHMENT. Two daemons run side by side at a
+ * deploy's handover, the page's stream is in one of them, and a unary call is
+ * a new connection either may accept. `PageAttached` hands the page a
+ * `PageAttachment` naming the daemon that holds the stream; `SubscribePage`
+ * and `UnsubscribePage` echo it, and the daemon that receives the call sends
+ * it to the one the attachment names. When that daemon no longer holds the
+ * page it answers `page_gone`, which is not a failure: the generation is over,
+ * so the page detaches, reopens its stream, and the subscription is made
+ * again under the next attachment (planned-reopen.ts).
+ *
  * A DAEMON MOVE ENDS THE GENERATION AT ONCE (the web view host's
  * `setDaemon`, `StreamContext.onDaemonMoved`). Every subscription on the page
  * belongs to the daemon being left, so the page detaches synchronously inside
@@ -46,6 +56,7 @@
  */
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
+import { PlannedReopen } from "./planned-reopen.js";
 // CONNECT'S OWN PARSER, not a second copy of its table. `PageSubscriptionFailed`
 // carries the code as connect-go spells it, and this is the function connect
 // itself parses that spelling with; duplicating the mapping here would be two
@@ -60,6 +71,7 @@ import {
   SubscribePageResponseSchema,
   WatchPageResponseSchema,
   type WebhostPageSchema,
+  type PageAttachment,
   type PageFrame,
   type SubscribePageRequest,
   type WatchPageResponse,
@@ -199,6 +211,8 @@ class FrameQueue<T> {
 interface Attachment {
   /** Resolves once the daemon has registered the page; rejects when it will not. */
   readonly ready: Promise<void>;
+  /** The attachment the daemon issued, set before `ready` resolves and echoed on every page call. */
+  issued: PageAttachment | undefined;
   resolve(): void;
   reject(cause: unknown): void;
   settled: boolean;
@@ -216,6 +230,7 @@ function newAttachment(): Attachment {
   void ready.catch(() => undefined);
   const attachment: Attachment = {
     ready,
+    issued: undefined,
     settled: false,
     resolve(): void {
       if (attachment.settled) return;
@@ -312,10 +327,17 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
           });
           return;
         }
+        // A DAEMON OF THIS BUILD ALWAYS ISSUES ONE. Its absence is a malformed
+        // frame, and the page subscribes nothing on an attachment it cannot
+        // name.
+        if (frame.value.attachment === undefined || frame.value.attachment.instance === "") {
+          throw new MalformedView("PageAttached.attachment", "the daemon attached the page and issued no attachment");
+        }
         log.info("the page's one standing stream is attached", {
           operation: "rpc.page-attached",
-          context: { page },
+          context: { page, instance: frame.value.attachment.instance, sequence: String(frame.value.attachment.sequence) },
         });
+        attachment.issued = frame.value.attachment;
         attachment.resolve();
         attachedListeners.notify();
         return;
@@ -418,6 +440,17 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
             queue.fail(failure);
             return;
           }
+          case "moved":
+            // THE DAEMON SERVING THE VIEW ENDED IT CLEANLY (it stood down, or
+            // stopped serving the workspace). Nothing failed and the view is
+            // still wanted: the caller's stream reopens at once and is served
+            // by whichever daemon serves it now.
+            log.info("a page subscription's serving daemon ended it; subscribing again", {
+              operation: "rpc.page-subscription-moved",
+              context: { page, subscription: ended.subscription },
+            });
+            queue.fail(new PlannedReopen("the daemon serving the view ended it"));
+            return;
           default:
             throw new MalformedView(
               "PageSubscriptionEnded.how",
@@ -460,6 +493,10 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
     const generation = attachment;
     await generation.ready;
     if (signal.aborted) return;
+    const issued = generation.issued;
+    if (issued === undefined) {
+      throw new Error("page-streams: an attachment resolved with nothing issued");
+    }
 
     const id = `${kind}-${++nextId}`;
     const queue = new FrameQueue<PageFrame>();
@@ -467,13 +504,14 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
     const stopOnAbort = (): void => queue.close();
     signal.addEventListener("abort", stopOnAbort, { once: true });
     try {
-      await callUnary(
+      const answer = await callUnary(
         ctx,
         "SubscribePage",
         (client) =>
           client.subscribePage(
             {
               page,
+              attachment: issued,
               subscription: id,
               // The arm and its value are correlated by K, which the compiler
               // cannot carry through a generic construction of the oneof.
@@ -483,6 +521,26 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
           ),
         SubscribePageResponseSchema,
       );
+      const outcome = answer.result.case === "success" ? answer.result.value.outcome.case : undefined;
+      if (outcome === "pageGone") {
+        // THE ATTACHMENT THIS CALL ECHOED IS OVER. When it is still the
+        // page's current one, the page's stream is ending and has not said
+        // so yet: the generation ends here and the stream reopens, so the
+        // subscription made again waits on the next attachment rather than
+        // echoing this one a second time.
+        log.info("the page's attachment is over; the subscription is made again under the next one", {
+          operation: "rpc.page-gone",
+          context: { page, subscription: id, kind, current: generation === attachment },
+        });
+        if (generation === attachment) {
+          detach();
+          stream.reopen();
+        }
+        throw new PlannedReopen("the page's attachment is over");
+      }
+      if (outcome !== "subscribed") {
+        throw new MalformedView("SubscribePageResponse.result", "the answer names no outcome");
+      }
       for await (const frame of queue.drain()) {
         if (signal.aborted) return;
         yield payloadOf(kind, frame);
@@ -493,14 +551,14 @@ export function startPageStreams(ctx: PageStreamContext, page: string, webhost?:
       // TELL THE DAEMON ONLY WHILE THERE IS A PAGE TO TELL. A detached page's
       // subscriptions are already gone daemon-side with the stream that owned
       // them, so the unary would be work nobody has to do.
-      if (generation === attachment) void unsubscribe(id);
+      if (generation === attachment) void unsubscribe(id, issued);
     }
   }
 
-  /** End one subscription daemon-side. */
-  async function unsubscribe(id: string): Promise<void> {
+  /** End one subscription daemon-side, under the attachment ISSUED it was made under. */
+  async function unsubscribe(id: string, issued: PageAttachment): Promise<void> {
     try {
-      await ctx.client.unsubscribePage({ page, subscription: id });
+      await ctx.client.unsubscribePage({ page, subscription: id, attachment: issued });
     } catch (err) {
       // The page is going away, or already has. It is RECORDED and not
       // reported: the daemon drops every subscription a departed page held, so

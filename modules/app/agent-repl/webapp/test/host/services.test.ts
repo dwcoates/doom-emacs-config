@@ -68,6 +68,7 @@ function recordingColdGates() {
       cancel: () => {
         watched.cancelled = true;
       },
+      reopen: () => undefined,
     };
   };
   return { watchColdGates, watched };

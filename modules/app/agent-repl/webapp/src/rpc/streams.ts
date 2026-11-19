@@ -61,6 +61,7 @@ import { assertNoUnknownFields } from "./strict.js";
 import { successorOf, workspaceMoved } from "./moved.js";
 import type { AgentReplClient } from "./client.js";
 import { pageEnded } from "../page-teardown.js";
+import { PlannedReopen } from "./planned-reopen.js";
 import { errorCause } from "../error-cause.js";
 
 /** How a stream's run finished. `cancelled` is the only legitimate one. */
@@ -74,6 +75,13 @@ export type StreamEnd =
 export interface StreamHandle {
   /** Abort the stream and stop reopening it. Idempotent. */
   cancel(): void;
+  /**
+   * End the current run and open the stream again at once, filing nothing:
+   * its owner knows the run is over before its transport does (the page's
+   * stream, told by `page_gone` that its attachment is over). A no-op on a
+   * cancelled stream.
+   */
+  reopen(): void;
 }
 
 /** The slice of the AppContext a stream needs; the whole context fits. */
@@ -183,6 +191,8 @@ export function watchStream<Res extends Message>(
   let endingSeen = false;
   /** Whether the daemon moved under this run, which ends it to reopen there. Reset per run. */
   let daemonMoved = false;
+  /** Whether this run's owner asked for it to be reopened (`reopen()`). Reset per run. */
+  let reopenAsked = false;
   /** Resolves the current backoff wait early when the stream is cancelled. */
   let wakeFromBackoff: (() => void) | null = null;
 
@@ -352,6 +362,7 @@ export function watchStream<Res extends Message>(
       controller = new AbortController();
       endingSeen = false;
       daemonMoved = false;
+      reopenAsked = false;
       let end: StreamEnd;
       // A DRAW THAT THREW is the page's defect, never the link's (owner
       // ruling, 2026-10-18): it ends this run apart from a transport failure,
@@ -406,6 +417,27 @@ export function watchStream<Res extends Message>(
         backoffMs = initialMs;
         continue;
       }
+      // ITS OWNER ASKED FOR IT (`reopen()`): the run ended because it was told
+      // to, so nothing is filed and it reopens at once.
+      if (reopenAsked) {
+        log.info(`the ${opts.name} stream ended at its owner's request; reopening`, {
+          operation: "rpc.stream-ended-reopen-asked",
+          context: { rpc: opts.name, end: end.kind },
+        });
+        backoffMs = initialMs;
+        continue;
+      }
+      // THE DAEMON PLANNED THIS END (planned-reopen.ts): the page's attachment
+      // is over, or the daemon serving a relayed view ended it cleanly.
+      // Nothing failed, so nothing is filed and the stream reopens at once.
+      if (end.kind === "transport_failure" && end.error instanceof PlannedReopen) {
+        log.info(`the ${opts.name} stream ended as planned (${end.error.message}); reopening`, {
+          operation: "rpc.stream-ended-planned-reopen",
+          context: { rpc: opts.name, reason: end.error.message },
+        });
+        backoffMs = initialMs;
+        continue;
+      }
       // THE DAEMON SAID SO FIRST: a clean end after the planned-ending frame
       // is a stand-down, not a fault. Nothing is filed; the stream reopens at
       // once and finds whichever daemon serves now. An ERROR after the frame
@@ -444,6 +476,16 @@ export function watchStream<Res extends Message>(
       });
       unsubscribeFromQuiesce();
       unsubscribeFromMove();
+      controller.abort();
+      wakeFromBackoff?.();
+    },
+    reopen(): void {
+      if (cancelled) return;
+      reopenAsked = true;
+      log.info(`${opts.name} is reopening at its owner's request`, {
+        operation: "rpc.stream-reopen-asked",
+        context: { rpc: opts.name },
+      });
       controller.abort();
       wakeFromBackoff?.();
     },

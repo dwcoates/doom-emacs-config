@@ -23,6 +23,7 @@ import {
   standingClientFailure,
 } from "../../src/rpc/link.js";
 import { SUCCESSOR_HEADER, successorOf } from "../../src/rpc/moved.js";
+import { PlannedReopen } from "../../src/rpc/planned-reopen.js";
 import { watchStream, type StreamEnd } from "../../src/rpc/streams.js";
 import { registerWorkspaceMoved } from "../../src/rpc/moved.js";
 import { createDaemonOrigin, type DaemonOrigin } from "../../src/rpc/daemon-origin.js";
@@ -733,6 +734,124 @@ describe("watchStream: a planned ending", () => {
     expect(
       lines.some(([level, line]) => level === "info" && line.includes("rpc.stream-ended-planned")),
     ).toBe(true);
+  });
+});
+
+describe("watchStream: an end the daemon planned (PlannedReopen)", () => {
+  /** A stream whose nth open throws SCRIPT[n], or hangs when the script has run out. */
+  function plannedStream(ctx: AppContext, script: ReadonlyArray<unknown>) {
+    const state = { openCount: 0 };
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: async function* (_client, signal) {
+        const thrown = script[state.openCount];
+        state.openCount += 1;
+        if (thrown !== undefined) throw thrown;
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+        yield* [] as WatchFooterResponse[];
+      },
+      onPush: () => undefined,
+      backoff: BACKOFF,
+    });
+    return { handle, state };
+  }
+
+  it("files no daemonUnreachable for a run that ended in a planned reopen", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    // ACT
+    const { handle } = plannedStream(contextFor(client, sink), [new PlannedReopen("the page's attachment is over")]);
+    await settle();
+    // ASSERT
+    expect(sink.reported).toEqual([]);
+    handle.cancel();
+  });
+
+  it("reopens at once after a planned reopen, without waiting out a backoff", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    // ACT
+    const { handle, state } = plannedStream(contextFor(client, new RecordingSink()), [
+      new PlannedReopen("the page's attachment is over"),
+    ]);
+    await settle();
+    // ASSERT
+    expect(state.openCount).toBe(2);
+    handle.cancel();
+  });
+
+  it("still files daemonUnreachable for any other thrown end", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    // ACT
+    const { handle } = plannedStream(contextFor(client, sink), [new Error("the link broke")]);
+    await settle();
+    // ASSERT
+    expect(sink.reported).toContain("daemonUnreachable");
+    handle.cancel();
+  });
+});
+
+describe("watchStream: reopen", () => {
+  /** A stream that stays open until aborted, counting its opens. */
+  function standingStream(ctx: AppContext) {
+    const state = { openCount: 0 };
+    const handle = watchStream(ctx, {
+      name: "WatchFooter",
+      schema: WatchFooterResponseSchema,
+      open: async function* (_client, signal) {
+        state.openCount += 1;
+        await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
+        yield* [] as WatchFooterResponse[];
+      },
+      onPush: () => undefined,
+      backoff: BACKOFF,
+    });
+    return { handle, state };
+  }
+
+  it("ends the run and opens the stream again at once", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    const { handle, state } = standingStream(contextFor(client, new RecordingSink()));
+    await settle();
+    // ACT
+    handle.reopen();
+    await settle();
+    // ASSERT
+    expect(state.openCount).toBe(2);
+    handle.cancel();
+  });
+
+  it("files no daemonUnreachable for the run it ended", async () => {
+    // ARRANGE
+    const sink = new RecordingSink();
+    const { client } = scriptedClient([[]]);
+    const { handle } = standingStream(contextFor(client, sink));
+    await settle();
+    // ACT
+    handle.reopen();
+    await settle();
+    // ASSERT
+    expect(sink.reported).toEqual([]);
+    handle.cancel();
+  });
+
+  it("opens nothing on a cancelled stream", async () => {
+    // ARRANGE
+    const { client } = scriptedClient([[]]);
+    const { handle, state } = standingStream(contextFor(client, new RecordingSink()));
+    await settle();
+    handle.cancel();
+    await settle();
+    // ACT
+    handle.reopen();
+    await settle();
+    // ASSERT
+    expect(state.openCount).toBe(1);
   });
 });
 
