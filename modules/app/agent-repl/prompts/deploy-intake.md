@@ -13,6 +13,8 @@ What you have:
 - Health: `~/.claude/skills/agent-repl-runtime/run.sh --doctor`
 - The last test gate before the deploy: {{gate_log}}
 - What your earlier fixes changed: `docs/REMEDIATION-CHANGELOG.md`
+- Your own notes on records that need judgement: `docs/DEPLOY-MEDIATOR-NOTES.md`
+  - It is yours to write: add a note when you learn something about a record that the `ignore` verb cannot express, and land it with your next fix.
 
 Decide the deploy with one `agent-repld merge-queue mediation` verb:
 - `approve -summary "<one sentence>"`

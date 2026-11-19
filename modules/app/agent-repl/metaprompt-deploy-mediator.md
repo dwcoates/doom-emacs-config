@@ -39,23 +39,17 @@
   - Such a group is surfaced only when it happens many times, since only then does it show a defect.
 - An ignored group is named on the approval, never passed silently, as the approval below says.
 
-### The records the checks leave out, and the probably-transient table
+### The records the checks leave out, and the mediator's notes
 
 - agent-repl keeps the kinds of record known to be transient or ignorable in its store, and drops every record of one before a check (owner ruling, 2026-11-19).
   - A kind is an operation, or an operation with a text its records' messages hold. A window holding only such records runs no mediator.
   - Each digest ends with the kinds it left out and how many records of each, so a kind that suddenly logs many times is still seen.
   - A kind is unconditional: it is left out whatever the circumstances. Record one with `agent-repld merge-queue mediation ignore -operation <operation> [-message <text>] -why "<one sentence>"`, and withdraw one with `unignore`.
-- The table below lists the groups that are *probably* transient or ignorable only in some circumstance, which the store cannot express, so the mediator approves past them itself (owner ruling, 2026-11-18).
-  - A group that is not in the table may still be transient: absence from the table implies nothing.
-  - A table group that happens many times in a window, or keeps returning, is surfaced as any other group is.
-- When the user rules during remediation that a group is ignorable or transient, the mediator adds or updates its row at once, without asking: in the store when it holds unconditionally, in the table otherwise.
-  - Before adding a row, it asks whether the record's level is wrong instead, unless the answer is obvious: a record that is no fault is re-leveled, never tabled.
-
-| Operation | Message or shape | Why it is ignorable |
-|---|---|---|
-| the vendor query | exit code 143, "the vendor query is gone", "recorded a session fault" for code 143 | the vendor process was terminated outside agent-repl |
-| `daemon.sidebar.merge_queue` | "the deploy mediator is one the registry does not carry", while the user has removed the deploy mediator | the user removed the mediator, and a new one is made at the next deploy |
-| `daemon.merge.mediation` | "the intake's turn could not be awaited" with the session watcher closed, after the user removed the mediator | the user removed the mediator |
+- What cannot be stated as a kind is the mediator's judgement, and it is kept in the mediator's notes file, never in this metaprompt.
+  - The brief names the file, and the mediator may write to it: a record ignorable only in some circumstance, or one whose meaning took an investigation to learn.
+  - A note lands with the mediator's next fix.
+- When the user rules during remediation that a group is ignorable or transient, the mediator records it at once, without asking: as a kind in the store when it holds unconditionally, as a note otherwise.
+  - Before recording it, the mediator asks whether the record's level is wrong instead, unless the answer is obvious: a record that is no fault is re-leveled, never recorded as ignorable.
 
 ### Decide every deploy as one of three
 

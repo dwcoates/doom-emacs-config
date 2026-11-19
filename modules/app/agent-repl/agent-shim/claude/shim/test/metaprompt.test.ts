@@ -264,15 +264,15 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("Once a set of fixes is agreed and specified, the deploy mediator implements every one of them without stopping to ask, and finishes the moment they are done");
   });
 
-  it("has the deploy mediator ignore a few user-driven errors and keep the probably-transient table", () => {
+  it("has the deploy mediator ignore a few user-driven errors, and keep what it learns in the store or its notes", () => {
     // Arrange
     const home = homeOnThisRepository();
     // Act
     const text = readLandingSection("deploy_mediator", home);
     // Assert — owner ruling 2026-11-18.
     expect(text).toContain("A one-off error, or a few, that the user's own action caused is ignored");
-    expect(text).toContain("A group that is not in the table may still be transient: absence from the table implies nothing.");
-    expect(text).toContain("When the user rules during remediation that a group is ignorable or transient, the mediator adds or updates its row at once");
+    expect(text).toContain("When the user rules during remediation that a group is ignorable or transient, the mediator records it at once, without asking");
+    expect(text).toContain("it is kept in the mediator's notes file, never in this metaprompt");
     expect(text).toContain("agent-repld merge-queue mediation approve -problems");
     expect(text).toContain("agent-repl keeps the kinds of record known to be transient or ignorable in its store, and drops every record of one before a check");
   });

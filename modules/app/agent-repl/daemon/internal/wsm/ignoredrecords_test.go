@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"agent-repld/internal/dlog"
@@ -33,7 +34,7 @@ func TestIgnoredRecordKindMatchesItsOperationAndText(t *testing.T) {
 	}
 }
 
-func TestTheIgnoredRecordsStartWithTheKindsTheMetapromptTableHeld(t *testing.T) {
+func TestTheIgnoredRecordsStartWithTheKindsTheOwnerRuledIgnorable(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 
@@ -41,8 +42,18 @@ func TestTheIgnoredRecordsStartWithTheKindsTheMetapromptTableHeld(t *testing.T) 
 	kinds, err := s.IgnoredRecordKinds(context.Background())
 
 	// Assert
-	if err != nil || len(kinds) != 2 || kinds[1].Operation != "daemon.ghclient.post" || kinds[1].MessageContains != "Parent comment not found" {
-		t.Fatalf("IgnoredRecordKinds = (%+v, %v), want the spell checker's and GitHub's kinds", kinds, err)
+	var got []string
+	for _, k := range kinds {
+		got = append(got, k.Operation+"|"+k.MessageContains)
+	}
+	want := []string{
+		"agent-repl.elisp-spell-no-reply-ws-s-buffer-s-word-s-process-s-pid-s-cause-s-outcome-reset|",
+		"daemon.ghclient.post|Parent comment not found",
+		"shim.engine.session|the vendor query could not be started",
+		"shim.engine.session|the vendor query is gone",
+	}
+	if err != nil || strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("IgnoredRecordKinds = (%v, %v), want %v", got, err, want)
 	}
 }
 

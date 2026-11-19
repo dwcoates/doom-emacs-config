@@ -21,15 +21,17 @@ import (
 //
 // A KIND IS UNCONDITIONAL. It matches every record of its operation, or
 // every one whose message holds a text. A record that is ignorable only in
-// some circumstance (after the user removed the mediator, say) is not a
-// kind: it stays the mediator's judgement, in its metaprompt's table.
+// some circumstance is not a kind: it is the mediator's judgement, which it
+// keeps in its notes file (docs/DEPLOY-MEDIATOR-NOTES.md).
 //
 // The table is the machine's, not a repository's: the checks of every
 // repository read the same logs.
 
 // ignoredRecordsDDL is the layout-171 addition: the kinds of record the
-// deploy checks leave out, seeded with the two unconditional rows the
-// mediator's metaprompt table held.
+// deploy checks leave out, seeded with the kinds the owner ruled ignorable
+// before the table existed: the spell checker's no-reply, GitHub's 404 for a
+// gone parent comment, and every failure of the vendor query (owner ruling,
+// 2026-11-19: a vendor or a network problem, never agent-repl's).
 //
 // IT IS A CONTRACT STEP, though it only adds a table. It follows the contract
 // steps 169 and 170, and an additive step after a contract cannot be applied
@@ -50,7 +52,11 @@ INSERT INTO deploy_ignored_records (operation, message_contains, why, added_at) 
   ('agent-repl.elisp-spell-no-reply-ws-s-buffer-s-word-s-process-s-pid-s-cause-s-outcome-reset', '',
    'a one-off user-driven error: the spell checker gave no reply for a word', 1795132800000000000),
   ('daemon.ghclient.post', 'Parent comment not found',
-   'GitHub''s own 404 for a comment whose parent is gone; it passes on its own', 1795132800000000000);
+   'GitHub''s own 404 for a comment whose parent is gone; it passes on its own', 1795132800000000000),
+  ('shim.engine.session', 'the vendor query could not be started',
+   'the vendor or the network: every failure of the vendor query is one or the other', 1795132800000000000),
+  ('shim.engine.session', 'the vendor query is gone',
+   'the vendor or the network: every failure of the vendor query is one or the other', 1795132800000000000);
 `
 
 // IgnoredRecordKind is one kind of log record the deploy checks leave out.
