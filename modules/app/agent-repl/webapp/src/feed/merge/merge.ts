@@ -103,7 +103,7 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
     case "update":
       el.setAttribute("data-state", "update");
       // THE BADGE COMES BEFORE THE CLOCK (owner ruling, 2026-10-11).
-      el.append(badge(liveWord(result.value), "is-live"));
+      el.append(mergeBadge(liveWord(result.value), "is-live"));
       if (result.value.paused !== undefined) {
         el.setAttribute("data-paused", "");
         el.append(drawPausedMark("merge-badge is-paused", PAUSED_WORD));
@@ -113,7 +113,7 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
       return el;
     case "success": {
       el.setAttribute("data-state", "success");
-      el.append(badge("merged", "is-succeeded"));
+      el.append(mergeBadge("merged", "is-succeeded"));
       end.append(settledClock(runtime, msOf(result.value.endedAtMs, `${PATH}.success.ended_at_ms`)));
       // THE VERSION A MERGE ONTO AGENT-REPL'S MASTER LANDED AS, when the
       // daemon resolved one (version.ts).
@@ -221,10 +221,10 @@ export function drawFeedMergeError(error: FeedMergeError): HTMLElement {
   el.className = "merge-error";
   switch (reason.case) {
     case "failed":
-      el.append(badge("failed", "is-failed"));
+      el.append(mergeBadge("failed", "is-failed"));
       return el;
     case "abandoned":
-      el.append(badge("abandoned", "is-abandoned"));
+      el.append(mergeBadge("abandoned", "is-abandoned"));
       return el;
     default:
       return unreachableArm(`${PATH}.error.reason`, armName(reason));
@@ -248,8 +248,12 @@ export function liveWord(update: FeedMergeUpdate): string {
   }
 }
 
-/** The head's badge: the word for the merge as a whole. No counts (R5). */
-function badge(word: string, tone: string): HTMLElement {
+/**
+ * A merge-styled head's badge: the word for the work as a whole, in its tone
+ * (`is-live`, `is-succeeded`, `is-failed`). No counts (R5). Shared with the
+ * fix gate's card (cards/fix-gate.ts), which wears the merge head's frame.
+ */
+export function mergeBadge(word: string, tone: string): HTMLElement {
   const el = document.createElement("span");
   el.className = `merge-badge ${tone}`;
   el.textContent = word;
@@ -261,12 +265,20 @@ function badge(word: string, tone: string): HTMLElement {
  * instant while the merge waits, its admission once it is being worked on.
  */
 function drawLiveClock(runtime: FeedMergeRuntime, rc: RowContext): HTMLElement {
-  const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
+  return liveMergeClock(msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`), rc);
+}
+
+/** A merge-styled head's live clock, counting up from STARTEDMS. */
+export function liveMergeClock(startedMs: number, rc: RowContext): HTMLElement {
   return asHeadClock(reservedLiveElapsedClock(rc.ctx.ticker, "merge-clock", startedMs));
 }
 
 /** The settled clock: the span that ran, stopped where it stopped. */
 function settledClock(runtime: FeedMergeRuntime, endedMs: number): HTMLElement {
-  const startedMs = msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`);
-  return asHeadClock(reservedSettledElapsedClock("merge-clock", endedMs - startedMs));
+  return settledMergeClock(endedMs - msOf(runtime.startedAtMs, `${PATH}.head.runtime.started_at_ms`));
+}
+
+/** A merge-styled head's settled clock: the SPANMS that ran, stopped. */
+export function settledMergeClock(spanMs: number): HTMLElement {
+  return asHeadClock(reservedSettledElapsedClock("merge-clock", spanMs));
 }
