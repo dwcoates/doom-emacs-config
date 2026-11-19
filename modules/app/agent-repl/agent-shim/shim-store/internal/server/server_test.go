@@ -179,6 +179,9 @@ type fakeStore struct {
 	byTaskSession string
 	byTaskID      string
 	byTaskAsked   bool
+	// byTaskReads, when non-nil, is sent one value per lookup, so a test
+	// knows a wait has read the record before it changes it.
+	byTaskReads chan struct{}
 
 	// the shell run claims answer, and what the last lookup asked for
 	claims      []db.ClaimedRun
@@ -326,9 +329,12 @@ func (f *fakeStore) LiveWork(_ context.Context, session string) (*storev1.GetLiv
 
 func (f *fakeStore) AgentByVendorTask(_ context.Context, session, vendorTaskID string) (string, bool, error) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.byTaskAsked = true
 	f.byTaskSession, f.byTaskID = session, vendorTaskID
-	f.mu.Unlock()
+	if f.byTaskReads != nil {
+		f.byTaskReads <- struct{}{}
+	}
 	return f.byTaskAgent, f.byTaskFound, f.byTaskErr
 }
 

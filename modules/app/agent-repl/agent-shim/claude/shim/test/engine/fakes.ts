@@ -701,6 +701,20 @@ export class RecordingPersistence implements Persistence {
     return Promise.resolve(this.vendorTasks.get(vendorTaskId) ?? { kind: "not_found" });
   }
   /**
+   * Every commission wait the engine started, in order, each answered when
+   * the test calls its `answer`.
+   */
+  readonly vendorTaskWaits: {
+    readonly lookup: string;
+    readonly boundMs: number;
+    readonly answer: (answer: VendorTaskAnswer) => void;
+  }[] = [];
+  awaitAgentByVendorTask(session: conversationv1.AgentId, vendorTaskId: string, boundMs: number): Promise<VendorTaskAnswer> {
+    return new Promise((resolve) => {
+      this.vendorTaskWaits.push({ lookup: `${session.value}/${vendorTaskId}`, boundMs, answer: resolve });
+    });
+  }
+  /**
    * The store's answer per unit, by its activity id; an unlisted unit answers
    * `not_found`, which is what a store that never heard of it says.
    */
@@ -866,6 +880,19 @@ export class RecordingFold implements EngineFold {
 
   taskAwaitingAgent(message: SdkMessage): string | undefined {
     return this.awaitingFor(message);
+  }
+
+  /** The task whose commission a message awaits the store for; none unless a suite says so. */
+  awaitingCommissionFor: (message: SdkMessage) => string | undefined = () => undefined;
+  /** Every task the engine said it started a commission wait for, in order. */
+  readonly commissionsAwaited: string[] = [];
+
+  taskAwaitingCommission(message: SdkMessage): string | undefined {
+    return this.awaitingCommissionFor(message);
+  }
+
+  noteCommissionAwaited(taskId: string): void {
+    this.commissionsAwaited.push(taskId);
   }
 
   /** The task whose kind a message awaits the store for; none unless a suite says so. */

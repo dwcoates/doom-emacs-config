@@ -150,14 +150,33 @@ func TestOnlyKnownNetworksInSightAreTriedInOrderAndStopAtTheFirstJoin(t *testing
 	if len(tries) != 2 || tries[0]["joined"] != false || tries[1]["joined"] != true || tries[1]["took_ms"] == nil {
 		t.Fatalf("join records = %+v, want each join recorded with its outcome and duration", tries)
 	}
-	for _, level := range []string{"debug", "info", "warn", "error"} {
-		for _, r := range h.records(level, opFailover) {
-			for _, v := range r.Context {
-				if s, ok := v.(string); ok && (strings.Contains(s, "Office") || strings.Contains(s, "Cafe") || strings.Contains(s, "Home")) {
-					t.Fatalf("failover record %q names a saved network: %+v", r.Message, r.Context)
-				}
-			}
-		}
+}
+
+// TestEveryJoinAttemptIsRecordedWithTheNetworkAndItsError pins the owner's
+// 2026-11-18 ruling: a join record naming neither the network nor its error
+// said nothing of two visible networks' repeated failures.
+func TestEveryJoinAttemptIsRecordedWithTheNetworkAndItsError(t *testing.T) {
+	// Arrange: Office will not join; Cafe joins.
+	h := lostClosed(t)
+	h.r.on(argPreferred, answer{out: preferred("Office", "Cafe", hotspot)})
+	h.sight(inSight("", "Cafe", "Office"))
+	h.r.on(argJoinNamed("Office"), answer{out: "Could not find network Office.", code: 1})
+	h.r.on(argJoinNamed("Cafe"), answer{})
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, "")})
+
+	// Act.
+	h.tickAt(0)
+
+	// Assert.
+	tries := h.failoverRecords("info", "joined a Wi-Fi network, or tried to")
+	if len(tries) != 2 || tries[0]["network"] != "Office" || tries[1]["network"] != "Cafe" {
+		t.Fatalf("join records = %+v, want each naming its network", tries)
+	}
+	if cause, _ := tries[0]["error"].(string); !strings.Contains(cause, "Could not find network Office.") {
+		t.Fatalf("failed join record = %+v, want its error", tries[0])
+	}
+	if _, has := tries[1]["error"]; has {
+		t.Fatalf("joined record = %+v, want no error", tries[1])
 	}
 }
 
@@ -230,7 +249,10 @@ func TestAScanThatNamesNoNetworkIsAnErrorOnceAndTheHotspotIsStillTried(t *testin
 	}
 }
 
-func TestAJoinedHotspotEndsTheFailoverAndStartsTheDwell(t *testing.T) {
+// TestAJoinedHotspotEndsTheFailoverAndIsKept pins the owner's 2026-11-18
+// ruling: with the lid closed the hotspot is never left for a known network,
+// so nothing is scheduled once it is joined.
+func TestAJoinedHotspotEndsTheFailoverAndIsKept(t *testing.T) {
 	// Arrange: no saved network but the hotspot, which joins.
 	h := lostClosed(t)
 	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
@@ -247,8 +269,8 @@ func TestAJoinedHotspotEndsTheFailoverAndStartsTheDwell(t *testing.T) {
 	if h.c.failover.attempts != 0 || !h.c.failover.lost.IsZero() {
 		t.Fatalf("failover = %+v, want it cleared", h.c.failover)
 	}
-	if !h.c.hotspot.on || h.c.hotspot.check != time.Unix(0, 0).Add(hotspotCheckEvery) {
-		t.Fatalf("dwell = %+v, want it on the hotspot, its first check one cadence on", h.c.hotspot)
+	if in, waiting := h.c.failoverRetryIn(); waiting {
+		t.Fatalf("failoverRetryIn = (%v, true), want nothing scheduled on the hotspot", in)
 	}
 }
 

@@ -1434,6 +1434,7 @@ describe("liveWork against a store that cannot be reached", () => {
       getSidecarCursors: refuse,
       getLiveWork: () => Promise.reject(new Error("connect ECONNREFUSED")),
       getAgentByVendorTask: () => Promise.reject(new Error("unused")),
+      awaitAgentByVendorTask: () => Promise.reject(new Error("unused")),
       getDetachedWork: () => Promise.reject(new Error("unused")),
       getPeerDelivery: () => Promise.reject(new Error("unused")),
       writeBatch: refuse,

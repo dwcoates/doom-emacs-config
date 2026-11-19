@@ -99,9 +99,6 @@ func (c *Controller) holdQuietLocked(ctx context.Context, mode modeKnown, energy
 
 func (c *Controller) enterQuietLocked(ctx context.Context, mode modeKnown, energy, trigger string) quietSteps {
 	c.quiet = true
-	// WHETHER THE MACHINE STANDS ON THE HOTSPOT is learned at the quiet
-	// state's first beat (hotspotdwell.go).
-	c.hotspot = hotspotDwell{unknown: true, check: c.clock.Now()}
 	energyStep := c.holdEnergyLocked(ctx, energy, trigger)
 	c.views.Set(true)
 	frozen := c.freezer.Freeze(ctx, trigger)
@@ -122,7 +119,6 @@ func (c *Controller) leaveQuietLocked(ctx context.Context, mode modeKnown, energ
 	c.views.Set(false)
 	c.quiet = false
 	c.abandonFailoverLocked()
-	c.hotspot = hotspotDwell{}
 	display := c.wakeDisplayLocked(ctx, trigger)
 	thawed := c.freezer.Frozen()
 	c.freezer.Thaw(ctx, trigger)

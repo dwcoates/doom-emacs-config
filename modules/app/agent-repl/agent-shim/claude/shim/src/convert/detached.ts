@@ -408,7 +408,14 @@ function announcedKind(facts: TaskFacts, taskKinds: TaskKindRegistry): Announced
   const agent = runningAgent(facts, taskKinds);
   if (agent === undefined) return undefined;
   const commission = knownCommission(facts.taskId, facts.call, taskKinds);
-  if (commission === undefined) {
+  if (commission === undefined && taskKinds.commissionAwaited(facts.taskId)) {
+    // THE COMMISSION IS ON ITS WAY: the engine waits for the sidecar's record
+    // of it (`taskAwaitingCommission`), and the run's later frames restate it.
+    LOGGER.info(
+      { uuid: facts.uuid, task_id: facts.taskId, tool_use_id: facts.toolUseId, agent: agent.value },
+      "a subagent announcement states no commission yet: the store's record of the spawn is awaited",
+    );
+  } else if (commission === undefined) {
     // THE ANNOUNCEMENT STILL STANDS: the work is live whether or not this shim
     // can say what it was asked. The store was asked first (engine:
     // `taskAwaitingAgent`), and its answer is part of this record.
@@ -799,6 +806,14 @@ export interface TaskKindRegistry {
   /** The store's remembered answer for a task, or `undefined` if it was never asked. */
   storeAnswerOf(taskId: string): string | undefined;
   /**
+   * Remember that the engine is WAITING for the store to record a task's
+   * commission (`taskAwaitingCommission`), so the wait starts once and an
+   * announcement made meanwhile states the commission as pending.
+   */
+  rememberCommissionAwaited(taskId: string): void;
+  /** Whether the engine waits for the store to record this task's commission. */
+  commissionAwaited(taskId: string): boolean;
+  /**
    * Remember what the STORE answered when asked what detached work a task's
    * unit left as (`taskAwaitingKind`), for a task whose kind this process did
    * not hold — so the refusal that may follow can say so, and the ask is not
@@ -936,6 +951,7 @@ export function createTaskKindRegistry(): TaskKindRegistry {
       owner?: conversationv1.AgentId;
       storeAnswer?: string;
       kindAnswer?: string;
+      commissionAwaited?: boolean;
       concludedOnRecord?: boolean;
     }
   >();
@@ -1029,6 +1045,13 @@ export function createTaskKindRegistry(): TaskKindRegistry {
     },
     storeAnswerOf(taskId) {
       return facts.get(taskId)?.storeAnswer;
+    },
+    rememberCommissionAwaited(taskId) {
+      reserve(facts, FACTS_LOST);
+      facts.set(taskId, { ...facts.get(taskId), commissionAwaited: true });
+    },
+    commissionAwaited(taskId) {
+      return facts.get(taskId)?.commissionAwaited === true;
     },
     rememberKindAnswer(taskId, kindAnswer) {
       reserve(facts, FACTS_LOST);
@@ -1268,6 +1291,63 @@ export function taskAwaitingAgent(
   taskKinds: TaskKindRegistry,
   calls: CallRegistry,
 ): string | undefined {
+  const task = agentNamingSubagentTask(message, context, taskKinds);
+  if (task === undefined) return undefined;
+  const { taskId, toolUseId } = task;
+  if (taskKinds.agentOf(taskId) !== undefined && taskKinds.commissionOf(taskId) !== undefined) return undefined;
+  const call = taskCall(taskId, toolUseId, taskKinds, calls);
+  // THE SPAWN STATES BOTH: its id is the agent and its input the commission.
+  if (call !== undefined && isSpawnCall(call)) return undefined;
+  // A CALL THIS FOLD NEVER SAW is read as the spawn by the minting rule, so the
+  // agent needs no store; its commission does, and is WAITED for, never looked
+  // up ahead of the message (`taskAwaitingCommission`).
+  if (call === undefined) return undefined;
+  return taskId;
+}
+
+/**
+ * THE TASK WHOSE COMMISSION THE STORE MUST BE WAITED FOR, or `undefined`.
+ *
+ * A subagent task whose call this process never saw: a NESTED SPAWN (a
+ * subagent spawned by a subagent, whose spawning call is in its spawner's
+ * transcript) or a backgrounded subagent's own spawn. The minting rule names
+ * its agent from the task's `tool_use_id`; its commission is in a transcript
+ * only the sidecar reads, which may reach the record after this message
+ * (2026-11-18: asked 0.66s before the pickup). So the message is folded at
+ * once, and the engine waits for the record IN THE BACKGROUND
+ * (store.v1 AwaitAgentByVendorTask); the run's later frames restate the
+ * commission once it is learned.
+ *
+ * Asked once per task: a wait already started for it answers `undefined`.
+ * A PURE READ, like {@link taskAwaitingAgent}.
+ */
+export function taskAwaitingCommission(
+  message: SdkMessage,
+  context: FoldContext,
+  taskKinds: TaskKindRegistry,
+  calls: CallRegistry,
+): string | undefined {
+  const task = agentNamingSubagentTask(message, context, taskKinds);
+  if (task === undefined) return undefined;
+  const { taskId, toolUseId } = task;
+  if (taskKinds.commissionOf(taskId) !== undefined || taskKinds.commissionAwaited(taskId)) return undefined;
+  if (taskCall(taskId, toolUseId, taskKinds, calls) !== undefined) return undefined;
+  return taskId;
+}
+
+/**
+ * THE SUBAGENT TASK A MESSAGE NAMES AN AGENT FOR, with its call's id, or
+ * `undefined` — the one reading both store asks share
+ * ({@link taskAwaitingAgent}, {@link taskAwaitingCommission}): a system task
+ * message of an agent-naming subtype, not ambient, naming a task, not a
+ * re-report of a task concluded on record, of the subagent kind, whose call's
+ * id is stated or remembered. A PURE READ.
+ */
+export function agentNamingSubagentTask(
+  message: SdkMessage,
+  context: FoldContext,
+  taskKinds: TaskKindRegistry,
+): { readonly taskId: string; readonly toolUseId: string } | undefined {
   if (message.type !== "system") return undefined;
   const raw = message as unknown as RawTask;
   if (raw.subtype === undefined || !AGENT_NAMING_SUBTYPES.has(raw.subtype)) return undefined;
@@ -1277,20 +1357,11 @@ export function taskAwaitingAgent(
   // A RE-REPORT OF A CONCLUDED TASK names no agent: the fold writes nothing for
   // it (`convertDetached`), so there is nothing to name one for.
   if (raw.subtype === "task_notification" && taskKinds.concludedOnRecord(taskId)) return undefined;
-  const commissionKnown = taskKinds.commissionOf(taskId) !== undefined;
-  if (taskKinds.agentOf(taskId) !== undefined && commissionKnown) return undefined;
   const known = context.liveTask(taskId);
-  const taskType = raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType;
-  if (taskKindOf(taskType) !== "subagent") return undefined;
+  if (taskKindOf(raw.task_type ?? taskKinds.kindOf(taskId) ?? known?.taskType) !== "subagent") return undefined;
   const toolUseId = raw.tool_use_id ?? known?.toolUseId ?? taskKinds.toolUseFor(taskId);
   if (toolUseId === undefined || toolUseId === "") return undefined;
-  const call = taskCall(taskId, toolUseId, taskKinds, calls);
-  // THE SPAWN STATES BOTH: its id is the agent and its input the commission.
-  if (call !== undefined && isSpawnCall(call)) return undefined;
-  // A CALL THIS FOLD NEVER SAW is read as the spawn by the minting rule, so the
-  // agent needs no store; its commission does, unless already held.
-  if (call === undefined && commissionKnown) return undefined;
-  return taskId;
+  return { taskId, toolUseId };
 }
 
 /** What the fold knows about WHICH AGENT one vendor task is running. */

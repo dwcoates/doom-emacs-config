@@ -7,6 +7,7 @@
  * teardown resolves every pending callback as denied before anything else,
  * because an unresolved `canUseTool` wedges the vendor process outright.
  */
+import { NESTED_SPAWN_RECORD_BOUND_MS, NESTED_SPAWN_RECORD_MEASURED_MS } from "../../src/store/locator.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { nextPush } from "../next-push.js";
 import { testTempDir } from "../temp-dir.js";
@@ -19592,5 +19593,96 @@ describe("HoldParkedBridge", () => {
 
     // Assert
     expect(eventOf(await frames.next())).toEqual({ refused: "alreadyStarted" });
+  });
+});
+
+/**
+ * A SUBAGENT SPAWNED BY A SUBAGENT (2026-11-18): its spawning call is in its
+ * spawner's own transcript, which only the sidecar reads, so the engine folds
+ * the announcement at once and waits for the store's record of the commission
+ * in the background, under its measured bound.
+ */
+describe("a nested spawn whose commission the engine waits for", () => {
+  const LOCATOR = "a2f09";
+  const AGENT = create(conversationv1.AgentIdSchema, { value: "toolu_nested" });
+  const nestedStarted = {
+    type: "system",
+    subtype: "task_started",
+    task_id: LOCATOR,
+    tool_use_id: "toolu_nested",
+    task_type: "local_agent",
+    uuid: "00000000-0000-4000-8000-0000000000e1",
+    session_id: "s",
+  } as never as SdkMessage;
+
+  async function nestedHarness(): Promise<Harness> {
+    const h = harness();
+    h.fold.awaitingCommissionFor = (message) => (message === nestedStarted ? LOCATOR : undefined);
+    await started(h);
+    return h;
+  }
+
+  it("folds the announcement before the store answers", async () => {
+    // Arrange.
+    const h = await nestedHarness();
+    let folded = false;
+    h.fold.entriesFor = (message) => {
+      if (message === nestedStarted) folded = true;
+      return [];
+    };
+
+    // Act.
+    await h.engine.onSdkMessage(nestedStarted);
+
+    // Assert.
+    expect([folded, h.persistence.vendorTaskWaits.length, h.fold.learned]).toEqual([true, 1, []]);
+  });
+
+  it("starts the wait once, noted with the fold, under the measured bound", async () => {
+    // Arrange.
+    const h = await nestedHarness();
+
+    // Act.
+    await h.engine.onSdkMessage(nestedStarted);
+
+    // Assert.
+    expect(h.fold.commissionsAwaited).toEqual([LOCATOR]);
+    expect(h.persistence.vendorTaskWaits.map((wait) => wait.boundMs)).toEqual([NESTED_SPAWN_RECORD_BOUND_MS]);
+    expect(h.persistence.vendorTaskLookups).toEqual([]);
+  });
+
+  it("hands the fold the store's answer when it arrives and records it at INFO", async () => {
+    // Arrange.
+    const h = await nestedHarness();
+    await h.engine.onSdkMessage(nestedStarted);
+    const from = logSinkMark();
+    const answer = { kind: "found", agent: AGENT, commission: create(conversationv1.AgentSubagentPromptSchema, { text: "review" }) } as const;
+
+    // Act.
+    h.persistence.vendorTaskWaits[0]?.answer(answer);
+    await drainTurns();
+
+    // Assert.
+    expect(h.fold.learned).toEqual([{ taskId: LOCATOR, answer }]);
+    expect(logLevelFor(from, "the store recorded the agent and commission of a subagent whose spawn this process never saw")).toBe("info");
+  });
+
+  it("records a wait the bound ended at ERROR, naming the task, the bound and the measured time", async () => {
+    // Arrange.
+    const h = await nestedHarness();
+    await h.engine.onSdkMessage(nestedStarted);
+    const from = logSinkMark();
+
+    // Act.
+    h.persistence.vendorTaskWaits[0]?.answer({ kind: "failed", detail: "AwaitAgentByVendorTask did not answer within 8000ms" });
+    await drainTurns();
+
+    // Assert.
+    const message = "the store did not record a subagent's spawn within its bound; its frames restate no commission";
+    expect({ level: logLevelFor(from, message), context: logContextFor(from, message) }).toMatchObject({
+      level: "error",
+      context: { task_id: LOCATOR, bound_ms: NESTED_SPAWN_RECORD_BOUND_MS, measured_ms: NESTED_SPAWN_RECORD_MEASURED_MS },
+    });
+    expect(h.fold.learned.map((learned) => learned.answer.kind)).toEqual(["failed"]);
   });
 });

@@ -20,3 +20,4 @@ export * from "../../../../proto/gen/ts/store/v1/endpoint_read_agent_page_pb.js"
 export * from "../../../../proto/gen/ts/store/v1/endpoint_watch_agent_session_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/endpoint_watch_bash_run_pb.js";
 export * from "../../../../proto/gen/ts/store/v1/endpoint_write_batch_pb.js";
+export * from "../../../../proto/gen/ts/store/v1/endpoint_await_agent_by_vendor_task_pb.js";

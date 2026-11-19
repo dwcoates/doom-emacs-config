@@ -640,8 +640,15 @@ func failResolution(log dlog.Logger, rpc string, err error) *connect.Error {
 }
 
 // fail renders an ordinary (non-refusal) failure as a Connect internal error,
-// logged at ERROR so nothing is swallowed.
+// logged at ERROR so nothing is swallowed. A failure that is the request's own
+// context ending is the caller leaving, never the daemon failing: it is
+// recorded once at INFO and answered canceled (ReportLatencies cancelled at
+// the 2026-11-18 handover).
 func fail(log dlog.Logger, rpc string, err error) *connect.Error {
+	if ctxend.Is(err) {
+		log.Info(rpc, "the caller ended the request before it was answered", dlog.Context{"cause": err.Error()})
+		return connect.NewError(connect.CodeCanceled, err)
+	}
 	// A failure that already NAMED its Connect code keeps it: the shutdown
 	// refusal is UNAVAILABLE, and restamping it internal would tell the client
 	// the daemon broke rather than that it went away.

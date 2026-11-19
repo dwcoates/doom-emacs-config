@@ -307,15 +307,20 @@ quiet state, not the switch.
   nothing is answered AT ONCE, with no grace: a saved network that a scan sees
   now, in the owner's preference order, then the hotspot. No saved network out
   of sight is tried, and no unknown network ever is
-  (`joinVisibleKnown` in `daemon/internal/persistentwifi/failover.go`). While
-  the quiet state stands on the hotspot, a saved network that has stayed in
-  sight for a minute is joined in its place (`hotspotdwell.go`).
+  (`joinVisibleKnown` in `daemon/internal/persistentwifi/failover.go`). The
+  hotspot is never left with the lid closed (owner ruling, 2026-11-18, which
+  retired the one-minute dwell that left it for a saved network in sight):
+  macOS's own auto-join takes a saved network once the lid opens.
 - WHY: on 2026-11-14 an attempt joined every saved network in turn, each
   unbounded and recorded only at DEBUG; it ran three minutes with the lid
   closed, never reached the hotspot, and the owner lost the connection. The
   owner ruled: join only what macOS knows and can see, then the hotspot;
   connect at once with no connection, and leave the hotspot for a known
-  network only once it has been in sight for a minute.
+  network only once it has been in sight for a minute. On 2026-11-18 the dwell's join of a known network failed and dropped the
+  hotspot, and a later switch took a network that dropped seven minutes on;
+  each time the hotspot could not be rejoined unattended ("Could not find
+  network", -3900 tmpErr), likely because an idle iPhone hotspot stops
+  broadcasting until Instant Hotspot wakes it. The owner retired the dwell.
 - HOW THE NAMES ARE READ: macOS names Wi-Fi networks only to an app allowed
   Location Services, so the scan is agent-repl's Wi-Fi helper app
   (`wifi-helper/`, CoreWLAN), launched with `open` so the permission is the

@@ -64,7 +64,11 @@ import { contextCutUpsertKey, terminalUpsertKey } from "../store/keys.js";
 import { updateEntry } from "../store/update-entry.js";
 import { PersistenceError, REPAINT } from "../store/persistence.js";
 import { describeDetachedWorkAnswer } from "../store/detached-work.js";
-import { describeVendorTaskAnswer } from "../store/locator.js";
+import {
+  describeVendorTaskAnswer,
+  NESTED_SPAWN_RECORD_BOUND_MS,
+  NESTED_SPAWN_RECORD_MEASURED_MS,
+} from "../store/locator.js";
 import type { AgentPageSession, PersistEntry, Persistence, RecordPlace } from "../store/persistence.js";
 import {
   announceLiveWork,
@@ -2528,6 +2532,11 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (awaitingKind !== undefined) await kindFromStore(awaitingKind.taskId, awaitingKind.unit);
       const awaitingAgent = deps.fold.taskAwaitingAgent(message, foldContext(attribution, verdict.turn));
       if (awaitingAgent !== undefined) await agentFromStore(awaitingAgent, "announcement");
+      // A SUBAGENT WHOSE SPAWN THIS PROCESS NEVER SAW (a nested spawn) has its
+      // commission WAITED FOR, never awaited here: only the sidecar reads its
+      // spawn, and holding this loop for it would hold every message behind it.
+      const awaitingCommission = deps.fold.taskAwaitingCommission(message, foldContext(attribution, verdict.turn));
+      if (awaitingCommission !== undefined) awaitCommissionFromStore(awaitingCommission);
       converterDefectThisMessage = false;
       // WHAT IT SAYS OF AN ASK THE VENDOR WITHDREW (Remote Control), before the
       // fold, so the ask's settlement lands ahead of the rows that proved it.
@@ -6735,6 +6744,43 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       "the store named no agent for a vendor task this process cannot name itself",
     );
     return undefined;
+  }
+
+  /**
+   * WAIT, IN THE BACKGROUND, for the store to record what a subagent this
+   * process never saw spawn was commissioned with (store.v1
+   * AwaitAgentByVendorTask), bounded by NESTED_SPAWN_RECORD_BOUND_MS. The
+   * answer is handed to the fold, so the run's later frames restate the
+   * commission. This is the ONE record of the wait's outcome: INFO when the
+   * store answered, ERROR when the bound fired or the store could not answer.
+   */
+  function awaitCommissionFromStore(vendorTaskId: string): void {
+    deps.fold.noteCommissionAwaited(vendorTaskId);
+    LOGGER.info(
+      { task_id: vendorTaskId, bound_ms: NESTED_SPAWN_RECORD_BOUND_MS },
+      "waiting for the store to record a subagent whose spawn this process never saw",
+    );
+    void deps.persistence
+      .awaitAgentByVendorTask(requireIdentity().agentId, vendorTaskId, NESTED_SPAWN_RECORD_BOUND_MS)
+      .then((answer) => {
+        deps.fold.learnTaskAgent(vendorTaskId, answer);
+        if (answer.kind === "found") {
+          LOGGER.info(
+            { task_id: vendorTaskId, agent: answer.agent.value },
+            "the store recorded the agent and commission of a subagent whose spawn this process never saw",
+          );
+          return;
+        }
+        LOGGER.error(
+          {
+            task_id: vendorTaskId,
+            bound_ms: NESTED_SPAWN_RECORD_BOUND_MS,
+            measured_ms: NESTED_SPAWN_RECORD_MEASURED_MS,
+            detail: describeVendorTaskAnswer(answer),
+          },
+          "the store did not record a subagent's spawn within its bound; its frames restate no commission",
+        );
+      });
   }
 
   /**

@@ -1,0 +1,79 @@
+// endpoint_await_agent_by_vendor_task.proto — AwaitAgentByVendorTask: WHICH
+// AGENT a vendor task locator names, and what it was commissioned with,
+// answered once the record holds both.
+//
+// WHY A WAIT. A subagent spawned BY A SUBAGENT (a nested spawn) starts from a
+// call in its spawner's own transcript, which only the sidecar reads; the
+// vendor announces the nested task on the shim's stream, often before the
+// sidecar has read either half (2026-11-18: asked 0.66s before the pickup, and
+// answered not_found). GetAgentByVendorTask answers the record as it stands, so
+// its answer depended on which of the two came first. This one answers only
+// once the pairing and the agent's start are both on record, so their order
+// cannot matter.
+//
+// THE CALLER BOUNDS IT. The wait has no bound of its own: it ends when the
+// record answers, when the caller's deadline or cancellation ends the call
+// (a transport error the caller records), or when the store shuts down
+// (UNAVAILABLE).
+//
+// SCOPED LIKE GetAgentByVendorTask: the answer is confined to the caller's
+// lineage.
+
+syntax = "proto3";
+
+package store.v1;
+
+import "conversation/v1/agent_activity.proto";
+
+option go_package = "agentrepl/proto/store/v1;storev1";
+
+// Wait for the agent and commission one vendor task locator names.
+message AwaitAgentByVendorTaskRequest {
+  // REQUIRED. The caller's MAIN agent id, exactly as
+  // GetAgentByVendorTaskRequest.session. UNSET or empty is refused with
+  // `invalid_request`.
+  conversation.v1.AgentId session = 1;
+  // REQUIRED. The vendor's task locator, verbatim. Empty is refused with
+  // `invalid_request`.
+  string vendor_task_id = 2;
+}
+
+// The agent and its commission, or why the wait could not be served. THE ARM
+// IS THE ANSWER.
+message AwaitAgentByVendorTaskResponse {
+  oneof result {
+    AwaitAgentByVendorTaskSuccess success = 1;
+    AwaitAgentByVendorTaskFailure failure = 2;
+  }
+}
+
+// The record pairs the locator with one agent of the lineage, and holds that
+// agent's start.
+message AwaitAgentByVendorTaskSuccess {
+  // The agent, under the cross-plane minting rule.
+  conversation.v1.AgentId agent = 1;
+  // WHAT THE AGENT WAS COMMISSIONED WITH, as GetAgentByVendorTaskSuccess.
+  // commission states it. ALWAYS SET: the wait answers only once it is
+  // recorded.
+  conversation.v1.AgentSubagentPrompt commission = 2;
+}
+
+// The wait could not be served. THE ARM IS WHY.
+message AwaitAgentByVendorTaskFailure {
+  // The store's account, for a human and for logs; never switched on.
+  string detail = 1;
+  oneof kind {
+    // `session` or `vendor_task_id` unset or empty.
+    AwaitAgentByVendorTaskInvalidRequest invalid_request = 2;
+    // The database failed, or the record breaks the pairing's invariant;
+    // `detail` says which.
+    AwaitAgentByVendorTaskStorageFailure storage_failure = 3;
+  }
+}
+// The request was malformed.
+message AwaitAgentByVendorTaskInvalidRequest {
+  // Which field, as the store names it — for the caller's logs.
+  string field = 1;
+}
+// The database failed; `detail` carries the driver's text.
+message AwaitAgentByVendorTaskStorageFailure {}
