@@ -98,6 +98,7 @@
 (declare-function agent-repl-roster-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-drawn-tab-order "agent-repl-roster" ())
 (declare-function agent-repl-roster-navigable-tab-order "agent-repl-roster" ())
+(declare-function agent-repl-roster-family-of "agent-repl-roster" (name &optional roster))
 (declare-function agent-repl-roster-numbered-tab "agent-repl-roster" (number))
 (declare-function agent-repl-roster-tab-number-of "agent-repl-roster" (name))
 (declare-function agent-repl-roster-selection-recency-order "agent-repl-roster" (names))
@@ -1678,6 +1679,44 @@ neighbours (`agent-repl--step-workspace')."
   "Switch to the tab RIGHT of the current one on the tab bar, wrapping."
   (interactive)
   (agent-repl--workspace-cycle 1))
+
+;; `M-s-{' and `M-s-}' walk the sidebar's FAMILY rather than the bar: the
+;; previous or next AUNT (a sibling of the current workspace's parent), and
+;; the previous or next sibling when there is no aunt that way.  Neither
+;; wraps: past the last aunt the walk falls back to the siblings, and past
+;; the last sibling it is a logged no-op.
+
+(defun agent-repl--adjacent-drawn (name group drawn n)
+  "Return the first DRAWN name after NAME in GROUP, going the way N points.
+Before NAME when N is negative.  Never wraps: nil past GROUP's end, or
+when NAME is not in GROUP."
+  (let ((tail (member name (if (< n 0) (reverse group) group))))
+    (seq-find (lambda (each) (member each drawn)) (cdr tail))))
+
+(defun agent-repl--aunt-target (current drawn n)
+  "Return the DRAWN tab an aunt step the way N points lands on from CURRENT.
+CURRENT's parent's adjacent sibling, else CURRENT's own adjacent sibling,
+else nil (`agent-repl-roster-family-of', `agent-repl--adjacent-drawn')."
+  (let* ((family (and current (agent-repl-roster-family-of current)))
+         (parent (plist-get family :parent)))
+    (or (and parent (agent-repl--adjacent-drawn parent (plist-get family :aunts) drawn n))
+        (agent-repl--adjacent-drawn current (plist-get family :siblings) drawn n))))
+
+(defun agent-repl--aunt-walk (n)
+  "Step to the aunt the way N points, else the sibling (`agent-repl--aunt-target')."
+  (agent-repl--step-workspace-to
+   n (lambda (current names) (agent-repl--aunt-target current names n))
+   "aunt-walk" 'cycle))
+
+(defun agent-repl-switch-aunt-previous ()
+  "Switch to the previous sibling of this workspace's parent, else its own previous sibling."
+  (interactive)
+  (agent-repl--aunt-walk -1))
+
+(defun agent-repl-switch-aunt-next ()
+  "Switch to the next sibling of this workspace's parent, else its own next sibling."
+  (interactive)
+  (agent-repl--aunt-walk 1))
 
 (defconst agent-repl--working-states
   (mapcar #'car (seq-filter (lambda (row) (equal (cdr row) "red"))

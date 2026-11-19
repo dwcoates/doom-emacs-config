@@ -136,6 +136,8 @@
                 (agent-repl-switch-right "Switch to the tab on the right, wrapping.")
                 (agent-repl-switch-older "Go back to the workspace viewed before this one.")
                 (agent-repl-switch-newer "Go forward to the workspace viewed after this one.")
+                (agent-repl-switch-aunt-previous "Go to the previous sibling of this workspace's parent, else this workspace's previous sibling.")
+                (agent-repl-switch-aunt-next "Go to the next sibling of this workspace's parent, else this workspace's next sibling.")
                 (agent-repl-switch-working-left "Go to the previous workspace that is working or was prompted in the last 15 minutes.")
                 (agent-repl-switch-working-right "Go to the next workspace that is working or was prompted in the last 15 minutes.")
                 (agent-repl-switch-to-previous-workspace "Switch to the workspace or chat thread selected before this one.")

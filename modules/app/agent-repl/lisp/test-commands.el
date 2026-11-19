@@ -1387,6 +1387,86 @@ formatted `info' records, newest first."
       ;; Assert
       (should (equal calls '((1 "cycle" cycle) (-1 "cycle" cycle)))))))
 
+;;;; ---- M-s-{ / M-s-} walk to the aunt, else the sibling ----
+
+(ert-deftest agent-repl-test-commands-adjacent-drawn-steps-forward ()
+  "A positive step answers the next name in the group."
+  (should (equal (agent-repl--adjacent-drawn "b" '("a" "b" "c") '("a" "b" "c") 1) "c")))
+
+(ert-deftest agent-repl-test-commands-adjacent-drawn-steps-backward ()
+  "A negative step answers the previous name in the group."
+  (should (equal (agent-repl--adjacent-drawn "b" '("a" "b" "c") '("a" "b" "c") -1) "a")))
+
+(ert-deftest agent-repl-test-commands-adjacent-drawn-never-wraps ()
+  "Past the group's end there is no neighbor."
+  (should-not (agent-repl--adjacent-drawn "c" '("a" "b" "c") '("a" "b" "c") 1)))
+
+(ert-deftest agent-repl-test-commands-adjacent-drawn-passes-undrawn-names ()
+  "A name the bar does not draw is passed over."
+  (should (equal (agent-repl--adjacent-drawn "a" '("a" "b" "c") '("a" "c") 1) "c")))
+
+(ert-deftest agent-repl-test-commands-adjacent-drawn-off-the-group-is-nil ()
+  "A name not in the group has no neighbor in it."
+  (should-not (agent-repl--adjacent-drawn "z" '("a" "b") '("a" "b") 1)))
+
+(defmacro agent-repl-test-commands--with-family (family &rest body)
+  "Run BODY with `agent-repl-roster-family-of' answering FAMILY for any name."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-roster-family-of) (lambda (_) ,family)))
+     ,@body))
+
+(ert-deftest agent-repl-test-commands-aunt-target-lands-on-the-parents-next-sibling ()
+  "A child steps to the sibling after its parent."
+  (agent-repl-test-commands--with-family '(:parent "p" :siblings ("c1" "c2") :aunts ("o" "p" "q"))
+    (should (equal (agent-repl--aunt-target "c1" '("o" "p" "c1" "c2" "q") 1) "q"))))
+
+(ert-deftest agent-repl-test-commands-aunt-target-lands-on-the-parents-previous-sibling ()
+  "A child steps back to the sibling before its parent."
+  (agent-repl-test-commands--with-family '(:parent "p" :siblings ("c1" "c2") :aunts ("o" "p" "q"))
+    (should (equal (agent-repl--aunt-target "c2" '("o" "p" "c1" "c2" "q") -1) "o"))))
+
+(ert-deftest agent-repl-test-commands-aunt-target-falls-back-to-the-sibling-past-the-last-aunt ()
+  "With no aunt that way, the step lands on the workspace's own sibling."
+  (agent-repl-test-commands--with-family '(:parent "p" :siblings ("c1" "c2") :aunts ("o" "p"))
+    (should (equal (agent-repl--aunt-target "c1" '("o" "p" "c1" "c2") 1) "c2"))))
+
+(ert-deftest agent-repl-test-commands-aunt-target-of-a-top-level-workspace-is-its-sibling ()
+  "A workspace with no parent steps to its sibling."
+  (agent-repl-test-commands--with-family '(:parent nil :siblings ("a" "b" "c") :aunts nil)
+    (should (equal (agent-repl--aunt-target "b" '("a" "b" "c") -1) "a"))))
+
+(ert-deftest agent-repl-test-commands-aunt-target-with-neither-is-nil ()
+  "With no aunt and no sibling that way there is no target."
+  (agent-repl-test-commands--with-family '(:parent "p" :siblings ("c1") :aunts ("p"))
+    (should-not (agent-repl--aunt-target "c1" '("p" "c1") 1))))
+
+(ert-deftest agent-repl-test-commands-aunt-target-with-no-family-is-nil ()
+  "A workspace the roster gives no family has no target."
+  (agent-repl-test-commands--with-family nil
+    (should-not (agent-repl--aunt-target "x" '("a") 1))))
+
+(ert-deftest agent-repl-test-commands-aunt-walk-requests-the-aunt ()
+  "`M-s-}' requests the parent's next sibling as a cycle switch, recorded as an aunt walk."
+  (agent-repl-test-commands--with-step '("p" "c1" "q") "c1" nil
+    (agent-repl-test-commands--with-family '(:parent "p" :siblings ("c1") :aunts ("p" "q"))
+      ;; Act
+      (agent-repl-switch-aunt-next)
+      ;; Assert
+      (should (equal requests '(("q" cycle))))
+      (should (member "elisp.commands.aunt-walk n=1 from=c1 target=q" records)))))
+
+(ert-deftest agent-repl-test-commands-aunt-walk-steps-through-the-shared-helper ()
+  "`M-s-{' / `M-s-}' go through `agent-repl--step-workspace-to', never a hand-rolled request."
+  ;; Arrange
+  (let ((calls nil))
+    (cl-letf (((symbol-function 'agent-repl--step-workspace-to)
+               (lambda (n _target op trigger) (push (list n op trigger) calls))))
+      ;; Act
+      (agent-repl-switch-aunt-previous)
+      (agent-repl-switch-aunt-next)
+      ;; Assert
+      (should (equal calls '((1 "aunt-walk" cycle) (-1 "aunt-walk" cycle)))))))
+
 ;;;; ---- s-[ / s-] walk the selection history ----
 
 (defmacro agent-repl-test-commands--with-history (tabs hidden history current &rest body)

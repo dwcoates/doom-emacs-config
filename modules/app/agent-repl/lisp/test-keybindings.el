@@ -202,6 +202,12 @@
            (regexp-quote "(map! \"s-[\" #'agent-repl-switch-older\n      \"s-]\" #'agent-repl-switch-newer)")
            (agent-repl-test-keybindings--source))))
 
+(ert-deftest agent-repl-test-keybindings-aunt-walk-chords-are-bound ()
+  "`M-s-{' walks to the previous aunt, `M-s-}' to the next, each else the sibling."
+  (should (string-match-p
+           (regexp-quote "(map! \"M-s-{\" #'agent-repl-switch-aunt-previous\n      \"M-s-}\" #'agent-repl-switch-aunt-next)")
+           (agent-repl-test-keybindings--source))))
+
 (ert-deftest agent-repl-test-keybindings-composer-commands-are-defined ()
   "The composer-local commands input.el binds exist."
   (dolist (cmd '(agent-repl-send
