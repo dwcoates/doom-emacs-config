@@ -252,9 +252,11 @@ func TestAnAdoptCallerThatGivesUpFirstAnswersNotYetAdopted(t *testing.T) {
 // waited 10s for a page whose own adopt had been refused, and nothing above
 // DEBUG on the successor said the host was waiting or on whom.
 func TestAWaitingParticipantIsRecordedAtInfo(t *testing.T) {
-	// Arrange
+	// Arrange: the adoption is held, so it cannot finish first and answer
+	// the host "already adopted" (the gate's run, 2026-11-18).
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	holdAdoption(t, h)
 	arm(t, h, ws, Participants{Host: true, Web: true})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
