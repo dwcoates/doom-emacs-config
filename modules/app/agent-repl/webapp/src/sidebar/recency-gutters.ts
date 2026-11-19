@@ -15,8 +15,8 @@
  */
 import type { RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { openRowWorkspaces } from "./entries.js";
-import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { decorativeElement } from "../dom.js";
+import { rowSlots } from "./row-slots.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 
 /** The class of a row's gutter slot, which `paintRecencyGutters` fills. */
@@ -59,10 +59,7 @@ export function recencyGutters(u: RosterRepositoryView, path: string): Map<strin
 
 /** The empty slot a row draws its gutter into. */
 export function drawRecencyGutterSlot(): HTMLElement {
-  const slot = document.createElement("span");
-  slot.className = RECENCY_GUTTER_CLASS;
-  slot.setAttribute("aria-hidden", "true");
-  return slot;
+  return decorativeElement("span", RECENCY_GUTTER_CLASS);
 }
 
 /**
@@ -70,15 +67,7 @@ export function drawRecencyGutterSlot(): HTMLElement {
  * with no reach leaves its slot bare, which draws nothing.
  */
 export function paintRecencyGutters(root: ParentNode, gutters: ReadonlyMap<string, RecencyGutter>): void {
-  for (const slot of queryAll<HTMLElement>(root, `.${RECENCY_GUTTER_CLASS}`)) {
-    const id = slot.closest("[data-roster-row]")?.getAttribute("data-roster-row");
-    if (id === undefined || id === null) {
-      log.error("a recency gutter slot sits outside any roster row", {
-        operation: "sidebar.recency-gutters.orphan-slot",
-        context: { gutters: gutters.size },
-      });
-      throw new Error("sidebar recency gutters: a gutter slot outside any roster row");
-    }
+  for (const { slot, id } of rowSlots(root, RECENCY_GUTTER_CLASS, "sidebar.recency-gutters.orphan-slot", { gutters: gutters.size })) {
     const gutter = gutters.get(id);
     if (gutter === undefined) {
       slot.removeAttribute(RECENCY_ATTRIBUTE);

@@ -16,8 +16,8 @@
  */
 import type { RosterOpenRowTab, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { openRowWorkspaces } from "./entries.js";
-import { decorativeElement, queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { decorativeElement } from "../dom.js";
+import { rowSlots } from "./row-slots.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 
 /** The class of a row's number slot, which `paintTabNumbers` fills. */
@@ -69,15 +69,7 @@ export function drawTabNumberSlot(): HTMLElement {
  * empty, holding its width so the names stay aligned.
  */
 export function paintTabNumbers(root: ParentNode, numbers: ReadonlyMap<string, number>): void {
-  for (const slot of queryAll<HTMLElement>(root, `.${TAB_NUMBER_CLASS}`)) {
-    const id = slot.closest("[data-roster-row]")?.getAttribute("data-roster-row");
-    if (id === undefined || id === null) {
-      log.error("a tab number slot sits outside any roster row", {
-        operation: "sidebar.tab-numbers.orphan-slot",
-        context: { slots: numbers.size },
-      });
-      throw new Error("sidebar tab numbers: a number slot outside any roster row");
-    }
+  for (const { slot, id } of rowSlots(root, TAB_NUMBER_CLASS, "sidebar.tab-numbers.orphan-slot", { slots: numbers.size })) {
     const number = numbers.get(id);
     const text = number === undefined ? "" : String(number);
     if (slot.textContent === text) continue;
