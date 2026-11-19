@@ -63,6 +63,7 @@ import "agentrepl/v1/endpoint_inspect_chess_board_square.proto";
 import "agentrepl/v1/endpoint_interrupt.proto";
 import "agentrepl/v1/endpoint_kill_workspace.proto";
 import "agentrepl/v1/endpoint_list_rollback_prompts.proto";
+import "agentrepl/v1/endpoint_list_slack_channels.proto";
 import "agentrepl/v1/endpoint_list_slash_commands.proto";
 import "agentrepl/v1/endpoint_list_workspace_transcripts.proto";
 import "agentrepl/v1/endpoint_load_feed_through.proto";
@@ -645,6 +646,14 @@ service AgentRepl {
   // composer's completion. See endpoint_list_slash_commands.proto.
   rpc ListSlashCommands(ListSlashCommandsRequest) returns (ListSlashCommandsResponse) {
     // A READ: it changes nothing (`agent-repld -dry-run` lets it through).
+    option idempotency_level = NO_SIDE_EFFECTS;
+  }
+
+  // Every Slack channel the user is a member of on their work Slack, for the
+  // composer's `#` completion. See endpoint_list_slack_channels.proto.
+  rpc ListSlackChannels(ListSlackChannelsRequest) returns (ListSlackChannelsResponse) {
+    // A READ: it changes nothing durably (`agent-repld -dry-run` lets it
+    // through). It may start a read of the channels, which is a cache fill.
     option idempotency_level = NO_SIDE_EFFECTS;
   }
 

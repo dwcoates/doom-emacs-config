@@ -1,0 +1,111 @@
+// endpoint_list_slack_channels.proto — ListSlackChannels: every Slack channel
+// the user is a member of on their work Slack, for the host-native composer to
+// complete as the user types `#`. HOST section, beside ListSlashCommands.
+//
+// THE LIST IS THE USER'S, NOT A WORKSPACE'S. Channel membership belongs to the
+// person at the keyboard, so the request names no workspace and every composer
+// of the daemon is answered the same list.
+//
+// THE DAEMON READS IT THROUGH GNS, ON DEMAND. The daemon asks the work
+// account's Slack (`gns slack channel list-mine`) the first time any composer
+// asks, keeps the answer, and reads it again once it is an hour old. A read
+// takes seconds, so an ask is never held on one: it is answered from what is
+// in hand, and the read it started lands for the next ask. One read runs at a
+// time however many composers ask.
+//
+// A READ. It records nothing durably.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Asks for the channels. Empty: the list is the user's own, not any
+// workspace's, so there is nothing to name.
+message ListSlackChannelsRequest {}
+
+// THE ARM IS THE OUTCOME. error = the daemon could not read the channels at
+// all; a read still under way is an ANSWER, carried in the success arm.
+message ListSlackChannelsResponse {
+  // Whether the daemon has the channels to answer with.
+  oneof result {
+    // What the daemon knows of the channels.
+    ListSlackChannelsSuccess success = 1;
+    // The daemon holds no list, because its last read of one failed.
+    ListSlackChannelsError error = 2;
+  }
+}
+
+// What the daemon knows of the user's channels.
+message ListSlackChannelsSuccess {
+  // THE ARM IS WHAT IS KNOWN: the channels, or that the first read of them
+  // is still under way. Exclusive: the channels only exist once a read has
+  // answered.
+  oneof listing {
+    // The channels the daemon's last successful read answered.
+    ListSlackChannelsListed listed = 1;
+    // No read has answered since this daemon started, and one is under way
+    // now. A composer offers nothing and asks again at its next `#`.
+    ListSlackChannelsPending pending = 2;
+  }
+}
+
+// The channels, as the last successful read answered them. A later read that
+// fails leaves these standing (the failure is the daemon's log's), so a
+// composer keeps completing from a list that is at worst an hour or so old.
+message ListSlackChannelsListed {
+  // Every public and private channel the user is a member of, archived ones
+  // excluded, in Slack's own order. Direct messages and group DMs are not
+  // channels and are never listed.
+  repeated SlackChannel channels = 1;
+}
+
+// The first read of the channels has not answered yet.
+message ListSlackChannelsPending {}
+
+// The daemon holds no list of channels. Validation failures are Connect
+// InvalidArgument, never an arm.
+message ListSlackChannelsError {
+  // Why the daemon has no list.
+  oneof cause {
+    // The daemon's last read of the channels failed, and no earlier read
+    // succeeded. The next ask starts another read.
+    ListSlackChannelsReadFailed read_failed = 1;
+  }
+}
+
+// A read of the channels failed: gns could not be run, exited non-zero
+// (commonly an expired GNS login), ran past its bound, or answered something
+// that is not its channel list.
+message ListSlackChannelsReadFailed {
+  // What failed, in one line a person can act on (e.g. "gns exited 1: HTTP
+  // 401: Invalid or expired JWT").
+  string detail = 1;
+}
+
+// One Slack channel the user is a member of.
+message SlackChannel {
+  // Slack's channel id (e.g. "C0ARC3TSB"): stable across renames, and what a
+  // Slack link or a `<#id>` mention names the channel by.
+  string id = 1;
+  // The channel's name without its `#` (e.g. "general"), which is what the
+  // composer completes and inserts after the `#`.
+  string name = 2;
+  // Who may see the channel. Exclusive: a channel is exactly one of the two.
+  oneof visibility {
+    // Anyone in the Slack workspace may find and join it.
+    SlackChannelPublic public_channel = 3;
+    // Only its members may see it.
+    SlackChannelPrivate private_channel = 4;
+  }
+  // The channel's stated purpose, what it is for, when it states one. UNSET
+  // when its purpose is blank.
+  optional string purpose = 5;
+}
+
+// The channel is public.
+message SlackChannelPublic {}
+
+// The channel is private.
+message SlackChannelPrivate {}
