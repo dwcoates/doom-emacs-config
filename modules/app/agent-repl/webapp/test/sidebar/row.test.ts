@@ -20,6 +20,7 @@ import { withRepositoryBlocks } from "../roster-families.js";
 import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { heatColor } from "../../src/heat.js";
+import { rosterStatusColor, toneClass } from "../../src/vocab.js";
 import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
 import {
   BAND_RETURNS,
@@ -3309,5 +3310,70 @@ describe("the tab number slot", () => {
 
     // Assert
     expect(drawn.querySelector(".sb-num")).toBeNull();
+  });
+});
+
+// AN OPEN OWNED PULL REQUEST INKS THE DURATION GREEN (owner request,
+// 2026-11-19): the open section's when-column takes the green the `ready` arm
+// paints the rest of the row, at full strength; the bands draw nothing for it.
+describe("the open owned pull request's duration", () => {
+  const paintOf = (drawn: HTMLElement): [string, string] =>
+    inRail(drawn, () => [
+      cascadedValue(durationOf(drawn), "color"),
+      cascadedValue(durationOf(drawn), "opacity") || "1",
+    ]);
+
+  it("inks an open row's duration green at full strength", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", openOwnedPullRequest: true }), sidebarContext(), "R");
+
+    // Assert.
+    expect([durationOf(drawn).hasAttribute("data-open-owned-pull-request"), ...paintOf(drawn)]).toEqual([
+      true,
+      "var(--ok)",
+      "1",
+    ]);
+  });
+
+  it("inks the duration in the green the ready arm paints the row", () => {
+    // Arrange.
+    const drawn = drawRosterRow(row({ id: "ws-1", openOwnedPullRequest: true }), sidebarContext(), "R");
+    const ready = document.createElement("span");
+    ready.className = toneClass(rosterStatusColor("ready"));
+    drawn.appendChild(ready);
+
+    // Act.
+    const [duration, tone] = inRail(drawn, () => [cascadedValue(durationOf(drawn), "color"), cascadedValue(ready, "color")]);
+
+    // Assert.
+    expect(duration).toBe(tone);
+  });
+
+  it("inks a counting duration green too", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(
+      row({ id: "ws-1", openOwnedPullRequest: true, when: { case: "turnRunning", value: { startedAtMs: BigInt(NOW) } } }),
+      sidebarContext(),
+      "R",
+    );
+
+    // Assert.
+    expect(paintOf(drawn)).toEqual(["var(--ok)", "1"]);
+  });
+
+  it("leaves the duration grey for a row without the marker", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+
+    // Assert.
+    expect([durationOf(drawn).hasAttribute("data-open-owned-pull-request"), paintOf(drawn)[0]]).toEqual([false, "var(--muted)"]);
+  });
+
+  it.each(["merged", "hidden"] as const)("draws nothing for the marker in the %s band", (place) => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", openOwnedPullRequest: true }), sidebarContext(), "R", place);
+
+    // Assert.
+    expect(drawn.querySelector(".when")!.hasAttribute("data-open-owned-pull-request")).toBe(false);
   });
 });

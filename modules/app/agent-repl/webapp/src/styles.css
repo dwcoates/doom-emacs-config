@@ -1905,6 +1905,14 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 #ws-sidebar .ws:not(.receded) > .row > .when:not([data-when="noTurnRunning"]) {
   opacity: var(--when-counting-opacity);
 }
+/* AN OPEN OWNED PULL REQUEST INKS THE DURATION GREEN (owner request,
+   2026-11-19): an open row whose workspace owns a pull request still open
+   (frontend.v1.RosterRowOpenOwnedPullRequest) draws its when-column in the
+   green the `ready` arm paints the rest of the row, at full strength. */
+#ws-sidebar .ws:not(.receded) > .row > .when[data-open-owned-pull-request] {
+  color: var(--ok);
+  opacity: 1;
+}
 /* THERE IS NO CHEVRON (owner ruling, 2026-09-14): "Hovering the workspace
    should have the same effect as opening the chevron currently does. No need
    for a chevron to show the dropdown on hover." The row opens its own panel
