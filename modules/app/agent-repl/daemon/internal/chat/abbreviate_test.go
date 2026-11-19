@@ -142,7 +142,7 @@ func TestHeadlessAbbreviator(t *testing.T) {
 				t.Fatalf("Abbreviate = %q, %v; want %q", got, err, tc.want)
 			}
 			req := runner.calls[0]
-			if req.Site != AbbreviationSite || req.Model != headless.ModelHaiku || req.ConfigDir != "/acct" || req.Prompt != "abbreviate: "+longQuestion {
+			if req.Kind != headless.KindInference || req.Site != AbbreviationSite || req.Model != headless.ModelHaiku || req.ConfigDir != "/acct" || req.Prompt != "abbreviate: "+longQuestion {
 				t.Fatalf("request = %+v, want the brief spliced, under the thread's account", req)
 			}
 		})

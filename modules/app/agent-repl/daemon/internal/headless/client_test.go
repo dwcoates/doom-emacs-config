@@ -66,7 +66,7 @@ func TestRunRefusesARequestWithNoSite(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Prompt: "q"})
 
 	// Assert.
 	if err == nil {
@@ -80,7 +80,7 @@ func TestRunRefusesWhenTheGuardForbidsTheSite(t *testing.T) {
 	c, seen := scripted(t, forbiddingGuard(t), DefaultBin, "ok", nil)
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -100,7 +100,7 @@ func TestRunPermitsAnExplicitBinaryUnderTheGuard(t *testing.T) {
 	c, seen := scripted(t, forbiddingGuard(t), "/tmp/fake-claude", "ok", nil)
 
 	// Act.
-	if _, err := c.Run(context.Background(), Request{Site: "workspace_naming", Prompt: "q"}); err != nil {
+	if _, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"}); err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
 
@@ -116,7 +116,7 @@ func TestRunRefusesWithNoBinaryConfigured(t *testing.T) {
 	c.bin = ""
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -130,7 +130,7 @@ func TestRunAnswersWithStdoutForATextRun(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "ROUTE_HOLD\n", nil)
 
 	// Act.
-	got, err := c.Run(context.Background(), Request{Site: "classifier", Format: FormatText, Prompt: "q"})
+	got, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Format: FormatText, Prompt: "q"})
 
 	// Assert.
 	if err != nil {
@@ -146,7 +146,7 @@ func TestRunReadsTheResultOutOfAJSONEnvelope(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", `{"type":"result","result":"flaky-login-test"}`, nil)
 
 	// Act.
-	got, err := c.Run(context.Background(), Request{Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
+	got, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
 
 	// Assert.
 	if err != nil {
@@ -162,7 +162,7 @@ func TestRunRefusesAnUnparseableEnvelope(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "not json at all", nil)
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -177,7 +177,7 @@ func TestRunRefusesAnEnvelopeThatReportsItsOwnError(t *testing.T) {
 		`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"credit balance too low"}`, nil)
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: FormatJSON, Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -227,7 +227,7 @@ func TestRunReportsAnExitFailureAsAnExitStatus(t *testing.T) {
 	c, _ := scripted(t, permissiveGuard(t), "fake-claude", "", errors.New("exit status 3"))
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Site: "classifier", Prompt: "q"})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Prompt: "q"})
 
 	// Assert.
 	var hErr *Error
@@ -280,7 +280,7 @@ func TestRunCarriesWhatAFailedRunSaidOnStdout(t *testing.T) {
 			c, _ := scripted(t, permissiveGuard(t), "fake-claude", tt.stdout, errors.New("exit status 1"))
 
 			// Act.
-			_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Format: tt.format, Prompt: "q"})
+			_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Format: tt.format, Prompt: "q"})
 
 			// Assert.
 			var hErr *Error
@@ -306,7 +306,7 @@ func TestRunReportsAnExpiredDeadlineAsATimeout(t *testing.T) {
 	}
 
 	// Act.
-	_, err := c.Run(context.Background(), Request{Site: "workspace_naming", Prompt: "q", Timeout: time.Millisecond})
+	_, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "workspace_naming", Prompt: "q", Timeout: time.Millisecond})
 
 	// Assert.
 	var hErr *Error
@@ -328,25 +328,25 @@ func TestRunComposesTheExactArgv(t *testing.T) {
 	}{
 		{
 			name: "a json run with a model",
-			req:  Request{Site: "workspace_naming", Model: ModelHaiku, Format: FormatJSON, Prompt: "q"},
+			req:  Request{Kind: KindInference, Site: "workspace_naming", Model: ModelHaiku, Format: FormatJSON, Prompt: "q"},
 			out:  `{"result":"x"}`,
-			want: "-p --output-format json --model " + ModelHaiku + " " + wantPinned,
+			want: "-p --output-format json --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
 		},
 		{
 			name: "a text run with no model omits the model flag",
-			req:  Request{Site: "classifier", Prompt: "q"},
+			req:  Request{Kind: KindInference, Site: "classifier", Prompt: "q"},
 			out:  "ok",
-			want: "-p --output-format text " + wantPinned,
+			want: "-p --output-format text --tools  --system-prompt  " + wantPinned,
 		},
 		{
 			name: "a run with tools makes exactly those available and approved",
-			req:  Request{Site: "news_digest_ipo", Model: ModelSonnet, Format: FormatJSON, Prompt: "q", Tools: []string{"WebSearch", "WebFetch"}},
+			req:  Request{Kind: KindToolCalls, Site: "news_digest_ipo", Model: ModelSonnet, Format: FormatJSON, Prompt: "q", Tools: []string{"WebSearch", "WebFetch"}},
 			out:  `{"result":"x"}`,
 			want: "-p --output-format json --model " + ModelSonnet + " --tools WebSearch,WebFetch --allowedTools WebSearch,WebFetch " + wantPinned,
 		},
 		{
-			name: "a plain run has no tools and an empty system prompt",
-			req:  Request{Site: "turn_summary", Model: ModelHaiku, Prompt: "q", Plain: true},
+			name: "an inference run has no tools and an empty system prompt",
+			req:  Request{Kind: KindInference, Site: "turn_summary", Model: ModelHaiku, Prompt: "q"},
 			out:  "ok",
 			want: "-p --output-format text --model " + ModelHaiku + " --tools  --system-prompt  " + wantPinned,
 		},
@@ -377,12 +377,11 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 		name string
 		req  Request
 	}{
-		{name: "the bare minimum", req: Request{Site: "classifier", Prompt: "q"}},
-		{name: "a model and a text format", req: Request{Site: "classifier", Model: "sonnet", Format: FormatText, Prompt: "q"}},
-		{name: "a config dir", req: Request{Site: "workspace_naming", ConfigDir: "/roots/multi", Prompt: "q"}},
-		{name: "a timeout", req: Request{Site: "title_synth", Timeout: time.Minute, Prompt: "q"}},
-		{name: "tools", req: Request{Site: "news_digest_ipo", Tools: []string{"WebSearch"}, Prompt: "q"}},
-		{name: "plain", req: Request{Site: "turn_summary", Plain: true, Prompt: "q"}},
+		{name: "the bare minimum", req: Request{Kind: KindInference, Site: "classifier", Prompt: "q"}},
+		{name: "a model and a text format", req: Request{Kind: KindInference, Site: "classifier", Model: "sonnet", Format: FormatText, Prompt: "q"}},
+		{name: "a config dir", req: Request{Kind: KindInference, Site: "workspace_naming", ConfigDir: "/roots/multi", Prompt: "q"}},
+		{name: "a timeout", req: Request{Kind: KindInference, Site: "title_synth", Timeout: time.Minute, Prompt: "q"}},
+		{name: "tools", req: Request{Kind: KindToolCalls, Site: "news_digest_ipo", Tools: []string{"WebSearch"}, Prompt: "q"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -402,26 +401,39 @@ func TestRunPinsItsSettingsWhateverTheRequestSays(t *testing.T) {
 	}
 }
 
-// TestRunPanicsOnAPlainRunNamingTools pins the invariant that bare inference
-// and a tool set are exclusive: a caller asking for both is a bug.
-func TestRunPanicsOnAPlainRunNamingTools(t *testing.T) {
-	// Arrange.
-	c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
-	req := Request{Site: "turn_summary", Plain: true, Tools: []string{"WebSearch"}, Prompt: "q"}
-
-	// Act.
-	var recovered any
-	func() {
-		defer func() { recovered = recover() }()
-		_, _ = c.Run(context.Background(), req)
-	}()
-
-	// Assert.
-	if recovered == nil {
-		t.Fatal("Run() did not panic on a Plain run naming tools")
+// TestRunPanicsOnARequestWhoseKindIsBroken pins that every headless call
+// states its kind, and that the kind and the tool set agree: a caller that
+// breaks either is a bug, and nothing is spawned.
+func TestRunPanicsOnARequestWhoseKindIsBroken(t *testing.T) {
+	tests := []struct {
+		name string
+		req  Request
+	}{
+		{name: "no kind", req: Request{Site: "classifier", Prompt: "q"}},
+		{name: "an unknown kind", req: Request{Kind: Kind(99), Site: "classifier", Prompt: "q"}},
+		{name: "an inference run naming tools", req: Request{Kind: KindInference, Site: "turn_summary", Tools: []string{"WebSearch"}, Prompt: "q"}},
+		{name: "a tool-calling run naming no tools", req: Request{Kind: KindToolCalls, Site: "news_digest_ipo", Prompt: "q"}},
 	}
-	if seen.Args != nil {
-		t.Fatalf("argv = %q, want no spawn", seen.Args)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
+
+			// Act.
+			var recovered any
+			func() {
+				defer func() { recovered = recover() }()
+				_, _ = c.Run(context.Background(), tt.req)
+			}()
+
+			// Assert.
+			if recovered == nil {
+				t.Fatal("Run() did not panic")
+			}
+			if seen.Args != nil {
+				t.Fatalf("argv = %q, want no spawn", seen.Args)
+			}
+		})
 	}
 }
 
@@ -459,7 +471,7 @@ func TestRunPutsThePromptOnStdin(t *testing.T) {
 	c, seen := scripted(t, permissiveGuard(t), "fake-claude", "ok", nil)
 
 	// Act.
-	if _, err := c.Run(context.Background(), Request{Site: "classifier", Prompt: "the composed question"}); err != nil {
+	if _, err := c.Run(context.Background(), Request{Kind: KindInference, Site: "classifier", Prompt: "the composed question"}); err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}
 
@@ -480,7 +492,7 @@ func TestRunExportsTheConfigDir(t *testing.T) {
 
 	// Act.
 	if _, err := c.Run(context.Background(), Request{
-		Site: "workspace_naming", Prompt: "q", ConfigDir: "/roots/multi",
+		Kind: KindInference, Site: "workspace_naming", Prompt: "q", ConfigDir: "/roots/multi",
 	}); err != nil {
 		t.Fatalf("Run() error = %v, want nil", err)
 	}

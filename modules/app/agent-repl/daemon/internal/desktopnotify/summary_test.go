@@ -77,7 +77,7 @@ func TestSummarizeAsksHaikuAsPlainInferenceUnderTheWorkspacesAccount(t *testing.
 	if got != "Fixed the flaky test." {
 		t.Fatalf("summary = %q", got)
 	}
-	if h.req.Model != headless.ModelHaiku || !h.req.Plain || len(h.req.Tools) != 0 ||
+	if h.req.Model != headless.ModelHaiku || h.req.Kind != headless.KindInference || len(h.req.Tools) != 0 ||
 		h.req.Site != SummarySite || h.req.ConfigDir != "/acct" {
 		t.Fatalf("request = %+v, want plain haiku with no tools under turn_summary on /acct", *h.req)
 	}

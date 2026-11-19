@@ -117,7 +117,7 @@ func (s Summarizer) summarize(ctx context.Context, ws ids.WorkspaceID, answer st
 		Site:      SummarySite,
 		Model:     SummaryModel,
 		Format:    headless.FormatText,
-		Plain:     true,
+		Kind:      headless.KindInference,
 		ConfigDir: configDir,
 		Prompt:    question,
 		Timeout:   timeout,

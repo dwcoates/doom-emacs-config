@@ -167,7 +167,7 @@ func TestTheSameStoryAcrossRunsIsToldOnce(t *testing.T) {
 		t.Fatalf("merged = %v, want both members' links and the merged reason", merged)
 	}
 	asked := w.runner.asked()
-	if len(asked) != 1 || asked[0].Site != WeekSite || asked[0].Model != headless.ModelSonnet ||
+	if len(asked) != 1 || asked[0].Site != WeekSite || asked[0].Kind != headless.KindInference || asked[0].Model != headless.ModelSonnet ||
 		!strings.Contains(asked[0].Prompt, "id: r1") || !strings.Contains(asked[0].Prompt, "id: r2") {
 		t.Fatalf("asked = %+v, want one Sonnet merge call under the week's site naming both items", asked)
 	}

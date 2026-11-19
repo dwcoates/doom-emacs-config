@@ -568,7 +568,7 @@ is Emacs-wide: a focused Emacs, whatever workspace it shows, gets no banner.
   `ladder.ResolveTurnEnd`, the table the roster's arm comes from: `done` and
   `interrupted` raise ✅ over a one-sentence Haiku summary of the final answer,
   set in Unicode sans-serif italic letters (`desktopnotify.Italic`), naming no commit SHA
-  (bare inference: `headless.Request.Plain`, no tools and no system prompt), `turn_failed`
+  (bare inference: `headless.KindInference`, no tools and no system prompt), `turn_failed`
   raises ❌ over the errored ending's line.
 - **Agent notifications** (a permission ask, a question, an agent push) raise
   the workspace's banner from `workspace.verbs.Notify`, beside the attention
@@ -2158,6 +2158,23 @@ merged row a crash left open) brings it back as an ordinary open workspace:
 4. `merge.Orchestrator.RetireConcluded` drops the landed merge's standing
    facts, so the row and the footer stop drawing it merged.
 
+## Every headless call states its kind
+
+Every `internal/headless` run states what it may do in
+`headless.Request.Kind`, and `headless.Client.Run` panics on a request that
+states none:
+
+- `headless.KindInference` is bare inference: no tools (`--tools ""`) and an
+  empty system prompt, so the model sees only the prompt. Every headless call
+  is this kind unless it has a very good reason not to be (owner ruling,
+  2026-11-19).
+- `headless.KindToolCalls` may call exactly the tools in
+  `headless.Request.Tools`, which it must name. Only the IPO outlook is this
+  kind today.
+
+When an agent adds a headless call to an agent-repl backend, it asks the user
+which kind the call is, and never picks one itself.
+
 ## Workspace naming: one call, and a fork brings its conversation
 
 A create with no supplied name is named by ONE headless Haiku call
@@ -3319,7 +3336,7 @@ week. A failed merge fails the run as a condensing failure does.
 **IPO outlook** (`ipo.go`, `NewsDigestOverlay.ipo`). Every digest-making run
 asks a third Sonnet call (`prompts/news-digest-ipo-outlook.md`, site
 `news_digest_ipo`) for the current best guess at when Anthropic and OpenAI go
-public. It is the one headless call given a tool: `headless.Request.Tools`
+public. It is the one headless call given a tool (`headless.KindToolCalls`): `headless.Request.Tools`
 makes `WebSearch` alone available and pre-approved, because the watched
 sources carry no IPO reporting. The latest digest's outlook (wsm
 `latest_overlay`, so a dismissed one still counts) is handed to the call so a

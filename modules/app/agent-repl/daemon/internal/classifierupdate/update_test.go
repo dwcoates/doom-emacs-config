@@ -233,7 +233,7 @@ func TestUpdateAsksTheRewriteUnderItsOwnSiteAndModel(t *testing.T) {
 
 	// Assert.
 	asked := f.runner.asked[0]
-	if asked.Site != Site || asked.Model != Model || asked.Format != headless.FormatText || asked.Timeout != RunTimeout {
+	if asked.Kind != headless.KindInference || asked.Site != Site || asked.Model != Model || asked.Format != headless.FormatText || asked.Timeout != RunTimeout {
 		t.Fatalf("asked %+v, want site %s, model %s, text, %s", asked, Site, Model, RunTimeout)
 	}
 }

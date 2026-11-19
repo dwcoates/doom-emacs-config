@@ -184,6 +184,7 @@ func (c condenser) mergeWeek(ctx context.Context, items []riskItem) ([]riskItem,
 		return nil, &ModelFailedError{Reason: "the week's brief could not be spliced: " + err.Error()}
 	}
 	resp, err := c.headless.Run(ctx, headless.Request{
+		Kind:      headless.KindInference,
 		Site:      WeekSite,
 		Model:     Model,
 		Format:    headless.FormatJSON,

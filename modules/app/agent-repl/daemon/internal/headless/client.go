@@ -40,8 +40,13 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if req.Site == "" {
 		return Response{}, fmt.Errorf("headless: a run must name its vendor-guard site")
 	}
-	if req.Plain && len(req.Tools) > 0 {
-		panic(fmt.Sprintf("headless: a Plain run for site %q named tools %v", req.Site, req.Tools))
+	switch {
+	case req.Kind == KindInference && len(req.Tools) > 0:
+		panic(fmt.Sprintf("headless: an inference run for site %q named tools %v", req.Site, req.Tools))
+	case req.Kind == KindToolCalls && len(req.Tools) == 0:
+		panic(fmt.Sprintf("headless: a tool-calling run for site %q named no tools", req.Site))
+	case req.Kind != KindInference && req.Kind != KindToolCalls:
+		panic(fmt.Sprintf("headless: the run for site %q states no kind (%d)", req.Site, req.Kind))
 	}
 	// THE GUARD AND THE BINARY ARE ONE RULE, and it is login's, stated once
 	// here for every headless call: the guard refuses only the DEFAULT
@@ -66,11 +71,11 @@ func (c *Client) Run(ctx context.Context, req Request) (Response, error) {
 	if req.Model != "" {
 		args = append(args, "--model", req.Model)
 	}
-	if len(req.Tools) > 0 {
+	switch req.Kind {
+	case KindToolCalls:
 		tools := strings.Join(req.Tools, ",")
 		args = append(args, "--tools", tools, "--allowedTools", tools)
-	}
-	if req.Plain {
+	case KindInference:
 		args = append(args, "--tools", "", "--system-prompt", "")
 	}
 	args = append(args, pinnedArgs...)
