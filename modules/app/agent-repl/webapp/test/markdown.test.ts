@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { codeBlockHtml } from "../src/code-block.js";
 import { escapeHtml } from "../src/highlight.js";
 import { inline, LEAD_CLASS, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
+import linkCode from "./fixtures/link-code.json";
 
 describe("renderMarkdown blocks", () => {
   it("renders headings at their level", () => {
@@ -566,6 +567,36 @@ describe("a link is never drawn as code", () => {
   ])("inline puts no code inside a link for $name", ({ src }) => {
     expect(inline(src)).not.toMatch(/<a [^>]*>[^]*?<code>/);
   });
+});
+
+// THE DAEMON DRAWS EVERY LINK WITHOUT CODE MARKERS (codespans.Unmark), and
+// marks a prompt's inline code only outside links (codespans.Markup), by its
+// own reading of where a link is (daemon/internal/mdinline). This renderer is
+// the authority on that, so each corpus text the daemon drew
+// (test/fixtures/link-code.json, written by the daemon's codespans package)
+// must render with exactly its links, each href clean, no code in any link,
+// and its code spans beside them.
+describe("the daemon's drawn links render whole", () => {
+  type Entry = { markdown: string; hrefs: string[]; codes: string[]; drawn: string };
+  it.each((linkCode as Entry[]).map((entry) => ({ ...entry, name: JSON.stringify(entry.markdown) })))(
+    "renders $name as its links and code",
+    ({ drawn, hrefs, codes }) => {
+      // Arrange
+      const el = document.createElement("div");
+
+      // Act
+      el.innerHTML = renderMarkdown(drawn);
+
+      // Assert
+      const anchors = [...el.querySelectorAll("a")];
+      expect(anchors.map((a) => a.getAttribute("href"))).toEqual(hrefs);
+      for (const a of anchors) {
+        expect(a.querySelector("code")).toBeNull();
+        expect(a.textContent).not.toContain("`");
+      }
+      expect([...el.querySelectorAll("code")].map((c) => c.textContent)).toEqual(codes);
+    },
+  );
 });
 
 describe("a file link draws its file name, not its path", () => {

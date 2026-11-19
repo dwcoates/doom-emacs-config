@@ -1,8 +1,13 @@
 // Package codespans carries the inline code of an agent's final responses
-// into the prompts a person sends next. A person typing a prompt in Emacs
-// writes `foo_bar()` as plain text when the response they read showed it as
-// code; Extract reads the inline code spans out of the responses, and Markup
-// wraps every plain occurrence of one of them in the prompt in backticks.
+// into the prompts a person sends next, and keeps inline code out of every
+// drawn link. A person typing a prompt in Emacs writes `foo_bar()` as plain
+// text when the response they read showed it as code; Extract reads the
+// inline code spans out of the responses, and Markup wraps every plain
+// occurrence of one of them in the prompt in backticks. Unmark draws every
+// link of a text, a prompt's or a response's, with no code marker in it.
+//
+// Both read a text's inline structure with mdinline, the reading the webapp's
+// renderer makes, so neither can mistake a link for prose.
 package codespans
 
 import (
@@ -10,6 +15,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"agent-repld/internal/mdinline"
 )
 
 // minLength is the shortest span worth marking: a one-character span would
@@ -22,27 +29,37 @@ const minLength = 2
 func Extract(markdown string) []string {
 	var spans []string
 	seen := map[string]bool{}
-	scanLines(markdown, func(line string) {
-		for _, seg := range segments(line) {
-			if !seg.code {
+	doc := mdinline.Read(markdown)
+	for _, line := range doc.Lines {
+		if line.Kind != mdinline.Prose {
+			continue
+		}
+		for _, s := range doc.Spans(line.Text) {
+			if s.Kind != mdinline.Code {
 				continue
 			}
-			span := strings.TrimSpace(seg.inner)
+			span := strings.TrimSpace(s.Inner)
 			if utf8.RuneCountInString(span) < minLength || strings.Contains(span, "`") || seen[span] {
 				continue
 			}
 			seen[span] = true
 			spans = append(spans, span)
 		}
-	}, nil)
+	}
 	return spans
 }
 
 // Markup answers TEXT with every plain occurrence of one of SPANS wrapped in
-// backticks. Text already inside an inline code span or a fenced block is left
-// alone, the longest span wins where two overlap, and a span that begins or
-// ends with a word character matches only where the text beside it is not a
-// word character, so `go` does not mark the start of `gopher`.
+// backticks. Only prose is marked (mdinline.Text): never a fenced block, a
+// code span, an escape, or any part of a link (its text, its destination, a
+// bare URL, an autolink, a reference definition), since a code span inside a
+// link breaks it. The longest span wins where two overlap, and a span that
+// begins or ends with a word character matches only where the text beside it
+// is not a word character, so `go` does not mark the start of `gopher`.
+//
+// Regression (2026-11-19): a prompt's bare URL was marked inside, drawing
+// https://github.com/`ChessCom`/x with the backticks in its href. Links are
+// now read by mdinline, never scanned as prose.
 func Markup(text string, spans []string) string {
 	if len(spans) == 0 {
 		return text
@@ -51,48 +68,54 @@ func Markup(text string, spans []string) string {
 	sort.SliceStable(ordered, func(i, j int) bool { return len(ordered[i]) > len(ordered[j]) })
 	var out strings.Builder
 	out.Grow(len(text))
-	scanLines(text, func(line string) {
-		for _, seg := range segments(line) {
-			if seg.code {
-				out.WriteString(seg.raw)
+	doc := mdinline.Read(text)
+	for _, line := range doc.Lines {
+		if line.Kind != mdinline.Prose {
+			out.WriteString(line.Text)
+			continue
+		}
+		for _, s := range doc.Spans(line.Text) {
+			if s.Kind != mdinline.Text {
+				out.WriteString(s.Raw)
 				continue
 			}
-			markupPlain(&out, seg.raw, ordered)
+			markupPlain(&out, line.Text, s.At, s.At+len(s.Raw), ordered)
 		}
-	}, func(line string) { out.WriteString(line) })
+	}
 	return out.String()
 }
 
-// markupPlain writes PLAIN, text outside any code span, to OUT with the spans
-// it holds wrapped.
-func markupPlain(out *strings.Builder, plain string, spans []string) {
-	for i := 0; i < len(plain); {
-		if span := spanAt(plain, i, spans); span != "" {
+// markupPlain writes LINE[FROM:TO], prose, to OUT with the spans it holds
+// wrapped. A span's boundaries are judged against the whole line.
+func markupPlain(out *strings.Builder, line string, from, to int, spans []string) {
+	for i := from; i < to; {
+		if span := spanAt(line, i, to, spans); span != "" {
 			out.WriteString("`" + span + "`")
 			i += len(span)
 			continue
 		}
-		_, size := utf8.DecodeRuneInString(plain[i:])
-		out.WriteString(plain[i : i+size])
+		_, size := utf8.DecodeRuneInString(line[i:])
+		out.WriteString(line[i : i+size])
 		i += size
 	}
 }
 
-// spanAt answers the first of SPANS standing at PLAIN[at:] with a boundary on
-// each side, "" for none.
-func spanAt(plain string, at int, spans []string) string {
+// spanAt answers the first of SPANS standing at LINE[at:], ending by TO, with
+// a boundary on each side, "" for none.
+func spanAt(line string, at, to int, spans []string) string {
 	for _, span := range spans {
-		if span == "" || strings.Contains(span, "`") || !strings.HasPrefix(plain[at:], span) {
+		if span == "" || strings.Contains(span, "`") || !strings.HasPrefix(line[at:to], span) {
 			continue
 		}
 		first, _ := utf8.DecodeRuneInString(span)
 		last, _ := utf8.DecodeLastRuneInString(span)
-		before, _ := utf8.DecodeLastRuneInString(plain[:at])
-		after, _ := utf8.DecodeRuneInString(plain[at+len(span):])
-		if at > 0 && isWord(first) && isWord(before) {
+		before, _ := utf8.DecodeLastRuneInString(line[:at])
+		after, _ := utf8.DecodeRuneInString(line[at+len(span):])
+		// A backslash before the span would escape the backtick that opens it.
+		if at > 0 && (line[at-1] == '\\' || isWord(first) && isWord(before)) {
 			continue
 		}
-		if at+len(span) < len(plain) && isWord(last) && isWord(after) {
+		if at+len(span) < len(line) && isWord(last) && isWord(after) {
 			continue
 		}
 		return span
@@ -100,106 +123,97 @@ func spanAt(plain string, at int, spans []string) string {
 	return ""
 }
 
-func isWord(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
-
-// segment is one stretch of a line: plain text, or an inline code span with
-// its backtick runs (raw) and the code between them (inner).
-type segment struct {
-	raw, inner string
-	code       bool
-}
-
-// segments splits LINE into plain stretches and inline code spans. A backtick
-// run with no closing run of the same length is plain text.
-func segments(line string) []segment {
-	var out []segment
-	plainFrom := 0
-	for i := 0; i < len(line); {
-		if line[i] != '`' {
-			i++
-			continue
-		}
-		run := backtickRun(line, i)
-		end := closingRun(line, i+run, run)
-		if end < 0 {
-			i += run
-			continue
-		}
-		if i > plainFrom {
-			out = append(out, segment{raw: line[plainFrom:i]})
-		}
-		out = append(out, segment{raw: line[i : end+run], inner: line[i+run : end], code: true})
-		i = end + run
-		plainFrom = i
+// Unmark answers MARKDOWN with no inline code marker in any link: a link's
+// text draws its code spans as plain text, and every backtick is taken out of
+// a link's destination, a bare URL, an autolink, and a reference definition's
+// destination. So [`foo`](https://x/`y`) draws as [foo](https://x/y) and a
+// bare https://x/`y` as https://x/y. Everything outside a link is left as
+// written.
+func Unmark(markdown string) string {
+	if !strings.Contains(markdown, "`") {
+		return markdown
 	}
-	if plainFrom < len(line) {
-		out = append(out, segment{raw: line[plainFrom:]})
-	}
-	return out
-}
-
-func backtickRun(line string, at int) int {
-	n := 0
-	for at+n < len(line) && line[at+n] == '`' {
-		n++
-	}
-	return n
-}
-
-// closingRun answers where the next backtick run of exactly RUN backticks
-// begins at or after FROM, -1 for none.
-func closingRun(line string, from, run int) int {
-	for i := from; i < len(line); {
-		if line[i] != '`' {
-			i++
-			continue
-		}
-		n := backtickRun(line, i)
-		if n == run {
-			return i
-		}
-		i += n
-	}
-	return -1
-}
-
-// scanLines calls PLAIN for every line of TEXT outside a fenced code block,
-// and FENCED, when non-nil, for every line inside or opening or closing one.
-func scanLines(text string, plain func(string), fenced func(string)) {
-	var fence string
-	for _, line := range strings.SplitAfter(text, "\n") {
-		trimmed := strings.TrimLeft(line, " ")
-		if fence == "" {
-			if marker := fenceMarker(trimmed); marker != "" && len(line)-len(trimmed) <= 3 {
-				fence = marker
-				if fenced != nil {
-					fenced(line)
-				}
-				continue
+	var out strings.Builder
+	out.Grow(len(markdown))
+	doc := mdinline.Read(markdown)
+	for _, line := range doc.Lines {
+		switch line.Kind {
+		case mdinline.Prose:
+			for _, s := range doc.Spans(line.Text) {
+				unmarkSpan(&out, doc, s)
 			}
-			plain(line)
-			continue
-		}
-		if strings.Trim(strings.TrimSpace(trimmed), fence[:1]) == "" && len(strings.TrimSpace(trimmed)) >= len(fence) {
-			fence = ""
-		}
-		if fenced != nil {
-			fenced(line)
+		case mdinline.Definition:
+			unmarkSpan(&out, doc, *line.Def)
+		default:
+			out.WriteString(line.Text)
 		}
 	}
+	return out.String()
 }
 
-// fenceMarker answers the run of three or more backticks or tildes TRIMMED
-// opens a fence with, "" for none.
-func fenceMarker(trimmed string) string {
-	for _, c := range []byte{'`', '~'} {
-		n := 0
-		for n < len(trimmed) && trimmed[n] == c {
-			n++
-		}
-		if n >= 3 {
-			return trimmed[:n]
+// unmarkSpan writes S to OUT, without code markers when it is a link.
+func unmarkSpan(out *strings.Builder, doc mdinline.Doc, s mdinline.Span) {
+	if !s.IsLink() {
+		out.WriteString(s.Raw)
+		return
+	}
+	out.WriteString(s.Open)
+	for _, inner := range doc.Spans(s.Label) {
+		switch {
+		case inner.Kind == mdinline.Code:
+			out.WriteString(plainCode(inner.Inner))
+		case inner.IsLink():
+			unmarkSpan(out, doc, inner)
+		default:
+			out.WriteString(inner.Raw)
 		}
 	}
-	return ""
+	out.WriteString(s.Mid)
+	out.WriteString(strings.ReplaceAll(s.Dest, "`", ""))
+	out.WriteString(s.Tail)
 }
+
+// plainCode is CODE, a code span's content, written to draw as the same
+// characters in plain text. Its content is normalized as CommonMark draws a
+// code span (one space each side dropped when both are there), and only the
+// characters that could open markup where they stand are escaped: an escape
+// splits the renderer's text, which would stop a file link's text being read
+// as one path (webapp markdown.ts, file-link-label).
+func plainCode(code string) string {
+	if len(code) >= 2 && code[0] == ' ' && code[len(code)-1] == ' ' && strings.TrimSpace(code) != "" {
+		code = code[1 : len(code)-1]
+	}
+	var out strings.Builder
+	for i := 0; i < len(code); i++ {
+		c := code[i]
+		if needsEscape(code, i) {
+			out.WriteByte('\\')
+		}
+		out.WriteByte(c)
+	}
+	return out.String()
+}
+
+// needsEscape reports whether CODE[I] could open markup in plain text: an
+// emphasis or strikethrough delimiter, a bracket, an autolink or entity
+// opener, a formula's `$`, a backslash or a backtick. An `_` inside a word, a
+// lone `~` and a `!` not before `[` stay as written.
+func needsEscape(code string, i int) bool {
+	switch c := code[i]; c {
+	case '\\', '`', '*', '[', ']', '<', '&', '$':
+		return true
+	case '_':
+		return !(i > 0 && i+1 < len(code) && isWordByte(code[i-1]) && isWordByte(code[i+1]))
+	case '~':
+		return i+1 < len(code) && code[i+1] == '~' || i > 0 && code[i-1] == '~'
+	case '!':
+		return i+1 < len(code) && code[i+1] == '['
+	}
+	return false
+}
+
+func isWordByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
+
+func isWord(r rune) bool { return r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r) }
