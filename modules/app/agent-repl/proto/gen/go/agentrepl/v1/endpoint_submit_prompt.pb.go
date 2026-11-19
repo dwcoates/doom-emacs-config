@@ -49,6 +49,15 @@ const (
 	// the client -- and a turn end delivers held prompts one at a time, oldest
 	// first, so several deferred prompts run as that many turns in order.
 	SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_DEFERRED SubmitPromptDelivery = 1
+	// NOW: sent now, past every held prompt and never classified (`C-RET` on a
+	// composer with text in it). It goes to the session at once when nothing
+	// runs. Whatever would hold it, it is held already pressed "Send now"
+	// (agentrepl.v1.UpdateHeldPromptRequest's release), so it goes exactly as a
+	// released held prompt does: it joins the running turn, interrupts a turn it
+	// cannot join, or waits on a blocker that clears on its own, ahead of every
+	// other held prompt. A release refusal (an edit standing ahead of it) leaves
+	// it held, queued in order and still never classified.
+	SubmitPromptDelivery_SUBMIT_PROMPT_DELIVERY_NOW SubmitPromptDelivery = 2
 )
 
 // Enum value maps for SubmitPromptDelivery.
@@ -56,10 +65,12 @@ var (
 	SubmitPromptDelivery_name = map[int32]string{
 		0: "SUBMIT_PROMPT_DELIVERY_UNSPECIFIED",
 		1: "SUBMIT_PROMPT_DELIVERY_DEFERRED",
+		2: "SUBMIT_PROMPT_DELIVERY_NOW",
 	}
 	SubmitPromptDelivery_value = map[string]int32{
 		"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED": 0,
 		"SUBMIT_PROMPT_DELIVERY_DEFERRED":    1,
+		"SUBMIT_PROMPT_DELIVERY_NOW":         2,
 	}
 )
 
@@ -2528,10 +2539,11 @@ const file_agentrepl_v1_endpoint_submit_prompt_proto_rawDesc = "" +
 	"\x1eSubmitPromptFeedNotInWorkspace\"\x1d\n" +
 	"\x1bSubmitPromptFeedUndecodable\"/\n" +
 	"\x15SubmitPromptNoSession\x12\x16\n" +
-	"\x06detail\x18\x01 \x01(\tR\x06detail*c\n" +
+	"\x06detail\x18\x01 \x01(\tR\x06detail*\x83\x01\n" +
 	"\x14SubmitPromptDelivery\x12&\n" +
 	"\"SUBMIT_PROMPT_DELIVERY_UNSPECIFIED\x10\x00\x12#\n" +
-	"\x1fSUBMIT_PROMPT_DELIVERY_DEFERRED\x10\x01B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
+	"\x1fSUBMIT_PROMPT_DELIVERY_DEFERRED\x10\x01\x12\x1e\n" +
+	"\x1aSUBMIT_PROMPT_DELIVERY_NOW\x10\x02B*Z(agentrepl/proto/agentrepl/v1;agentreplv1b\x06proto3"
 
 var (
 	file_agentrepl_v1_endpoint_submit_prompt_proto_rawDescOnce sync.Once
