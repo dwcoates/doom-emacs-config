@@ -150,6 +150,31 @@ message LifecycleConfig {
   // (docs/investigations/2026-11-14-deploy-intake-plan.md). UNSET: the
   // repository's deploys hold nothing.
   optional DeployChecks deploy_checks = 12;
+  // How the daemon tells a workspace about one of this repository's pull
+  // requests it follows (agentrepl.v1.PullRequestSubscription). UNSET: every
+  // check run counts toward a commit's CI outcome.
+  //
+  // UNLIKE EVERY OTHER KEY, THIS ONE IS READ FROM GITHUB, from the file as it
+  // stands at the commit whose checks are judged (the pull request's head),
+  // never from a checkout: a followed pull request belongs to its own
+  // repository whichever workspace follows it, and the commit's file is the
+  // one its workflows were defined beside. The file at a commit never
+  // changes, so it is read once per commit. A commit with no file has no gate
+  // checks; one whose file is unusable fails the subscription's read, naming
+  // the file, until a commit fixes it.
+  optional PullRequestFollowing pull_requests = 13;
+}
+
+// How a repository's pull requests are followed.
+message PullRequestFollowing {
+  // The names of the repository's GATE CHECKS: check runs that fail until a
+  // person acts (an approval, a label), not until the code is right, such as
+  // a required-review gate. They are left out of every commit's CI outcome
+  // (agentrepl.v1.PullRequestActivityChecksConcluded), so a pull request
+  // still waiting on its reviewer is told its CI passed, and is told nothing
+  // of the gate itself: the approval is told as a review. A name matches a
+  // check run's name exactly, as GitHub shows it.
+  repeated string gate_checks = 1;
 }
 
 // How a repository's deploys are checked.

@@ -114,25 +114,26 @@ func TestDiffOfANeverAnchoredSubscriptionTellsItemsButNotAnOpenState(t *testing.
 	}
 }
 
-func TestDiffTellsEachChecksLatestFinishedRunOnce(t *testing.T) {
+func TestDiffTellsTheHeadsWholeRunOnce(t *testing.T) {
 	tests := []struct {
 		name   string
 		prev   []remoteCheck
 		head   string
 		checks []remoteCheck
+		gates  map[string]bool
 		want   []string
 	}{
-		{name: "a run that finished", checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}, head: "h",
-			want: []string{"test:passed"}},
-		{name: "a finished run waits for a sibling still going", checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}, {ID: 2, Name: "lint"}}, head: "h"},
-		{name: "a run still going is not told", checks: []remoteCheck{{ID: 1, Name: "test"}}, head: "h"},
-		{name: "a re-run's latest result is told", prev: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "failure"}}, head: "h",
-			checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "failure"}, {ID: 2, Name: "test", Completed: true, Conclusion: "success"}},
-			want:   []string{"test:passed"}},
-		{name: "an unchanged run is not told again", prev: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}, head: "h",
-			checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}},
-		{name: "a new head tells its checks afresh", prev: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}, head: "h2",
-			checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}, want: []string{"test:passed"}},
+		{name: "a run that passed is told", checks: []remoteCheck{done(1, "test", "success")}, head: "h", want: []string{"h:passed"}},
+		{name: "a run still going is not told", checks: []remoteCheck{done(1, "test", "success"), {ID: 2, Name: "lint"}}, head: "h"},
+		{name: "a failure is told while the rest still run", checks: []remoteCheck{done(1, "test", "failure"), {ID: 2, Name: "lint"}}, head: "h", want: []string{"h:failed"}},
+		{name: "a passed run is not told again", prev: []remoteCheck{done(1, "test", "success")}, head: "h", checks: []remoteCheck{done(1, "test", "success")}},
+		{name: "a further failure is not told again", prev: []remoteCheck{done(1, "a", "failure"), {ID: 2, Name: "b"}}, head: "h",
+			checks: []remoteCheck{done(1, "a", "failure"), done(2, "b", "failure")}},
+		{name: "a re-run that passes is told", prev: []remoteCheck{done(1, "test", "failure")}, head: "h",
+			checks: []remoteCheck{done(1, "test", "failure"), done(2, "test", "success")}, want: []string{"h:passed"}},
+		{name: "a new head tells its run afresh", prev: []remoteCheck{done(1, "test", "success")}, head: "h2", checks: []remoteCheck{done(1, "test", "success")}, want: []string{"h2:passed"}},
+		{name: "a failing gate check leaves the run passing", head: "h", checks: []remoteCheck{done(1, "test", "success"), done(2, "review-or-self-certified", "failure")},
+			gates: map[string]bool{"review-or-self-certified": true}, want: []string{"h:passed"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -140,16 +141,20 @@ func TestDiffTellsEachChecksLatestFinishedRunOnce(t *testing.T) {
 			prev := anchor(snapshot{PR: openPR("h"), Checks: tt.prev, ChecksRead: true})
 
 			// Act
-			_, activity := diff(snapshot{PR: openPR(tt.head), Checks: tt.checks, ChecksRead: true}, prev, true)
+			_, activity := diff(snapshot{PR: openPR(tt.head), Checks: tt.checks, ChecksRead: true, Gates: tt.gates}, prev, true)
 
 			// Assert
 			var got []string
 			for _, a := range activity {
-				c := a.GetCheckFinished()
-				got = append(got, c.GetName()+":"+conclusionWords(c.GetConclusion()))
+				c := a.GetChecksConcluded()
+				outcome := outcomeFailed
+				if c.GetPassed() != nil {
+					outcome = outcomePassed
+				}
+				got = append(got, c.GetCommitSha()+":"+outcome)
 			}
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Fatalf("checks told = %v, want %v", got, tt.want)
+				t.Fatalf("outcomes told = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -157,14 +162,14 @@ func TestDiffTellsEachChecksLatestFinishedRunOnce(t *testing.T) {
 
 func TestDiffKeepsTheChecksItDidNotRead(t *testing.T) {
 	// Arrange
-	prev := anchor(snapshot{PR: openPR("h"), Checks: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}}, ChecksRead: true})
+	prev := anchor(snapshot{PR: openPR("h"), Checks: []remoteCheck{done(1, "test", "success")}, ChecksRead: true})
 
 	// Act
 	next, activity := diff(snapshot{PR: openPR("h2")}, prev, true)
 
 	// Assert
-	if len(activity) != 0 || next.Head != "h" || next.Checks["test"] != "1:success" {
-		t.Fatalf("next = %+v, activity %v; want the told checks kept as they were", next, activity)
+	if len(activity) != 0 || next.Head != "h" || next.ChecksOutcome != outcomePassed {
+		t.Fatalf("next = %+v, activity %v; want the told outcome kept as it was", next, activity)
 	}
 }
 

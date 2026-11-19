@@ -2,8 +2,13 @@ package prwatch
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
+
+	"agent-repld/internal/ghclient"
 )
 
 func TestAFullPageIsFollowedByTheNext(t *testing.T) {
@@ -76,5 +81,104 @@ func TestDecodePRRefusesAnUnknownState(t *testing.T) {
 	// Assert
 	if err == nil {
 		t.Fatal("decodePR = nil, want refused")
+	}
+}
+
+// configAnswer answers every LifecycleConfigAt call with DATA, counting them.
+func configAnswer(gh *fakeGH, data string, errs ...ghclient.GraphQLError) *int {
+	calls := 0
+	gh.graphql = func(string, map[string]any) (ghclient.GraphQLResponse, error) {
+		calls++
+		return ghclient.GraphQLResponse{Data: json.RawMessage(data), Errors: errs}, nil
+	}
+	return &calls
+}
+
+func blob(text string, truncated bool) string {
+	return mustJSON(map[string]any{"repository": map[string]any{"object": map[string]any{"__typename": "Blob", "text": text, "isTruncated": truncated}}})
+}
+
+func TestGateChecksReadsTheCommitsConfig(t *testing.T) {
+	tests := []struct {
+		name      string
+		data      string
+		errs      []ghclient.GraphQLError
+		wantGates map[string]bool
+		wantErr   string
+	}{
+		{name: "a commit with no config has no gates", data: `{"repository":{"object":null}}`, wantGates: map[string]bool{}},
+		{name: "a config with no pull_requests has no gates", data: blob("pre_deploy: {}\n", false), wantGates: map[string]bool{}},
+		{name: "a config names its gates", data: blob("pre_deploy: {}\npull_requests:\n  gate_checks: [a, b]\n", false), wantGates: map[string]bool{"a": true, "b": true}},
+		{name: "an unusable config is refused naming the file", data: blob("pull_requests: {}\n", false), wantErr: "o/r@h:.agent-repl/lifecycle.yaml is not a usable lifecycle config"},
+		{name: "a directory is refused", data: `{"repository":{"object":{"__typename":"Tree"}}}`, wantErr: "o/r@h:.agent-repl/lifecycle.yaml is a Tree, not a readable file"},
+		{name: "a truncated file is refused", data: blob("pre_deploy: {}\n", true), wantErr: "GitHub truncated o/r@h:.agent-repl/lifecycle.yaml"},
+		{name: "a nulled repository is its reported failure", data: `{"repository":null}`, errs: []ghclient.GraphQLError{{Type: "NOT_FOUND", Message: "gone", Path: []string{"repository"}}}, wantErr: "gone"},
+		{name: "an undecodable answer is refused", data: `[]`, wantErr: "decode the LifecycleConfigAt answer"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			gh := newGH()
+			configAnswer(gh, tt.data, tt.errs...)
+
+			// Act
+			gates, err := newReader(gh).gateChecks(context.Background(), "o", "r", "h")
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("gateChecks = %v, %v; want an error containing %q", gates, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !reflect.DeepEqual(gates, tt.wantGates) {
+				t.Fatalf("gateChecks = %v, %v; want %v", gates, err, tt.wantGates)
+			}
+		})
+	}
+}
+
+func TestGateChecksAsksAboutACommitOnce(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "a usable config", data: blob("pre_deploy: {}\n", false)},
+		{name: "an unusable config", data: blob("nonsense: 1\n", false)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			gh := newGH()
+			calls := configAnswer(gh, tt.data)
+			r := newReader(gh)
+			_, first := r.gateChecks(context.Background(), "o", "r", "h")
+
+			// Act
+			_, second := r.gateChecks(context.Background(), "o", "r", "h")
+
+			// Assert
+			if *calls != 1 || fmt.Sprint(first) != fmt.Sprint(second) {
+				t.Fatalf("%d calls, errors %v then %v; want one call answering the same", *calls, first, second)
+			}
+		})
+	}
+}
+
+func TestGateChecksAsksAgainAfterAFailedCall(t *testing.T) {
+	// Arrange
+	gh := newGH()
+	r := newReader(gh)
+	if _, err := r.gateChecks(context.Background(), "o", "r", "h"); err == nil {
+		t.Fatal("an unscripted call succeeded")
+	}
+	configAnswer(gh, `{"repository":{"object":null}}`)
+
+	// Act
+	gates, err := r.gateChecks(context.Background(), "o", "r", "h")
+
+	// Assert
+	if err != nil || len(gates) != 0 {
+		t.Fatalf("gateChecks = %v, %v; want the second call made and answered", gates, err)
 	}
 }

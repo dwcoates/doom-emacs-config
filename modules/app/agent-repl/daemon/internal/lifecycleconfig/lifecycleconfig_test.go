@@ -77,6 +77,16 @@ func TestParseAcceptsDeployChecks(t *testing.T) {
 	}
 }
 
+func TestParseAcceptsPullRequestGateChecks(t *testing.T) {
+	// Act
+	cfg, err := Parse("lifecycle.yaml", []byte("pre_deploy: {}\npull_requests:\n  gate_checks: [review-or-self-certified, label-gate]\n"))
+
+	// Assert
+	if got := cfg.GetPullRequests().GetGateChecks(); err != nil || len(got) != 2 || got[0] != "review-or-self-certified" || got[1] != "label-gate" {
+		t.Fatalf("Parse = (%v, %v), want both gate checks in order", got, err)
+	}
+}
+
 func TestParseAcceptsHookOnlyConfigs(t *testing.T) {
 	// Arrange: a repository with no local merge, a prompt deploy and a script
 	// post-deploy hook.

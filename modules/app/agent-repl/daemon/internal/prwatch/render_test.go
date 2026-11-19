@@ -7,9 +7,18 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
-func check(name, conclusion string) *agentreplv1.PullRequestActivity {
-	return &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_CheckFinished{CheckFinished: &agentreplv1.PullRequestActivityCheckFinished{
-		Name: name, Conclusion: conclusionProto(conclusion)}}}
+// concluded is the head's CI run on H reaching the outcome RUNS make.
+func concluded(t *testing.T, h string, runs ...remoteCheck) *agentreplv1.PullRequestActivity {
+	t.Helper()
+	_, _, c := diffOutcome("", "", h, runs, nil)
+	if c == nil {
+		t.Fatalf("runs %v reach no outcome", runs)
+	}
+	return &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_ChecksConcluded{ChecksConcluded: c}}
+}
+
+func done(id uint64, name, conclusion string) remoteCheck {
+	return remoteCheck{ID: id, Name: name, Completed: true, Conclusion: conclusion}
 }
 
 func TestSentencesOfSaysEachKindOfActivity(t *testing.T) {
@@ -33,7 +42,14 @@ func TestSentencesOfSaysEachKindOfActivity(t *testing.T) {
 			want: "Comment 4 was deleted."},
 		{name: "a close", activity: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_StateChanged{StateChanged: &agentreplv1.PullRequestActivityStateChanged{
 			State: stateProto(remotePR{})}}}, want: "The pull request was closed without merging."},
-		{name: "a failed check", activity: check("lint", "failure"), want: "Check `lint`: failed."},
+		{name: "a run that passed", activity: concluded(t, "0123456789abcdef", done(1, "a", "success"), done(2, "b", "skipped")),
+			want: "CI on head 0123456789ab passed: all 2 checks succeeded."},
+		{name: "a run of one check that passed", activity: concluded(t, "h", done(1, "a", "neutral")), want: "CI on head h passed: its one check succeeded."},
+		{name: "a run that failed", activity: concluded(t, "h", done(1, "lint", "failure"), done(2, "e2e", "timed_out"), done(3, "unit", "success")),
+			want: "CI on head h failed: `e2e` timed out, `lint` failed."},
+		{name: "a run with a check cancelled", activity: concluded(t, "h", done(1, "a", "cancelled")), want: "CI on head h failed: `a` was cancelled."},
+		{name: "a run with a check waiting on a person", activity: concluded(t, "h", done(1, "a", "action_required")), want: "CI on head h failed: `a` waits on a person's action."},
+		{name: "a run with a conclusion this schema does not name", activity: concluded(t, "h", done(1, "a", "startup_failure")), want: "CI on head h failed: `a` did not pass."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,17 +61,6 @@ func TestSentencesOfSaysEachKindOfActivity(t *testing.T) {
 				t.Fatalf("sentencesOf = %q, want %q", got, tt.want)
 			}
 		})
-	}
-}
-
-func TestSkippedChecksAreSaidInOneSentenceLast(t *testing.T) {
-	// Act
-	got := sentencesOf([]*agentreplv1.PullRequestActivity{check("a", "skipped"), check("b", "success"), check("c", "skipped")})
-
-	// Assert
-	want := []string{"Check `b`: passed.", "2 checks were skipped: `a`, `c`."}
-	if strings.Join(got, "|") != strings.Join(want, "|") {
-		t.Fatalf("sentencesOf = %q, want %q", got, want)
 	}
 }
 
@@ -98,9 +103,8 @@ func TestTheMergeQueueActivityIsSaid(t *testing.T) {
 			want: "The pull request's merge queue entry is now in a state this daemon does not name."},
 		{name: "removed by someone without a reason", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeQueueRemoved{MergeQueueRemoved: &agentreplv1.PullRequestActivityMergeQueueRemoved{
 			Actor: &agentreplv1.PullRequestActivityAuthor{Login: "dodge"}}}}, want: "The pull request was removed from the merge queue by @dodge."},
-		{name: "a merge group check", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeGroupCheckFinished{MergeGroupCheckFinished: &agentreplv1.PullRequestActivityCheckFinished{
-			Name: "ci", Conclusion: &agentreplv1.PullRequestCheckConclusion{Conclusion: &agentreplv1.PullRequestCheckConclusion_Success{Success: &agentreplv1.PullRequestCheckConclusionSuccess{}}}}}},
-			want: "Merge group check `ci`: passed."},
+		{name: "a merge group's run", a: &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeGroupChecksConcluded{MergeGroupChecksConcluded: concluded(t, "g", done(1, "ci", "failure")).GetChecksConcluded()}},
+			want: "CI on the merge group failed: `ci` failed."},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -127,4 +131,17 @@ func TestStatusWordsSayWhereAQueuedPullRequestStands(t *testing.T) {
 	if want := "It now stands open, at the head of the merge queue (of 2), merging next, mergeable, so the queue will merge it, its head at fedcba987654: u"; got != want {
 		t.Fatalf("statusWords = %q, want %q", got, want)
 	}
+}
+
+func TestAnOutcomeWithNoArmIsADefect(t *testing.T) {
+	// Arrange
+	defer func() {
+		// Assert
+		if recover() == nil {
+			t.Fatal("outcomeWords said an outcome with no arm")
+		}
+	}()
+
+	// Act
+	outcomeWords(&agentreplv1.PullRequestActivityChecksConcluded{CommitSha: "h"})
 }

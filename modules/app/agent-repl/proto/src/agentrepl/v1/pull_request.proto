@@ -80,12 +80,14 @@ enum PullRequestNoticeEvent {
   PULL_REQUEST_NOTICE_EVENT_REVIEW_COMMENT = 3;
   // The pull request merged, closed, reopened, or became ready for review.
   PULL_REQUEST_NOTICE_EVENT_STATE = 4;
-  // A check run on the pull request's head commit finished.
+  // The whole CI run on the pull request's head commit reached its outcome:
+  // it failed, or every check run finished and passed
+  // (PullRequestActivityChecksConcluded). Never told per check run.
   PULL_REQUEST_NOTICE_EVENT_CHECKS = 5;
   // The pull request joined, moved within, or was removed from its base
-  // branch's GitHub merge queue, its queue entry changed state, or a check
-  // run on its merge group commit finished. Its landing is told by STATE, as
-  // any merge is.
+  // branch's GitHub merge queue, its queue entry changed state, or the whole
+  // CI run on its merge group commit reached its outcome. Its landing is told
+  // by STATE, as any merge is.
   PULL_REQUEST_NOTICE_EVENT_MERGE_QUEUE = 6;
 }
 
@@ -280,6 +282,13 @@ message PullRequestNoticeEnded {}
 // Items the subscriber itself posted through CommentOnPullRequest are never
 // told back to it; items anyone else posted, the user included, are.
 message PullRequestActivity {
+  // Tags 7 and 12 told each finished check run of the head commit and of the
+  // merge group commit, one item per run; a pull request running dozens of
+  // checks was told dozens of items and never the run's outcome. The
+  // `checks_concluded` arms tell the outcome once instead.
+  reserved 7, 12;
+  reserved "check_finished", "merge_group_check_finished";
+
   oneof activity {
     // A conversation comment was posted.
     PullRequestActivityComment comment = 1;
@@ -293,9 +302,6 @@ message PullRequestActivity {
     PullRequestActivityDeleted deleted = 5;
     // The pull request changed state.
     PullRequestActivityStateChanged state_changed = 6;
-    // A check run on the head commit finished. Told in one line, since a
-    // pull request can run many.
-    PullRequestActivityCheckFinished check_finished = 7;
     // The pull request joined its base branch's merge queue.
     PullRequestActivityMergeQueueEntered merge_queue_entered = 8;
     // The pull request's place in the merge queue changed: entries ahead of
@@ -306,12 +312,15 @@ message PullRequestActivity {
     // The pull request was removed from the merge queue. A pull request the
     // queue merged is told by `state_changed` instead.
     PullRequestActivityMergeQueueRemoved merge_queue_removed = 11;
-    // A check run on the pull request's merge group commit (the commit the
-    // queue tests, on a `gh-readonly-queue/...` branch) finished. A separate
-    // arm from `check_finished` because the two run on different commits and
-    // only this one decides whether the queue merges or removes the pull
-    // request.
-    PullRequestActivityCheckFinished merge_group_check_finished = 12;
+    // The whole CI run on the pull request's head commit reached its
+    // outcome.
+    PullRequestActivityChecksConcluded checks_concluded = 13;
+    // The whole CI run on the pull request's merge group commit (the commit
+    // the queue tests, on a `gh-readonly-queue/...` branch) reached its
+    // outcome. A separate arm from `checks_concluded` because the two run on
+    // different commits and only this one decides whether the queue merges or
+    // removes the pull request.
+    PullRequestActivityChecksConcluded merge_group_checks_concluded = 14;
   }
 }
 
@@ -490,8 +499,50 @@ message PullRequestActivityStateChanged {
   optional PullRequestActivityAuthor actor = 2;
 }
 
-// A check run finished: its name and its result, and nothing else, so many
-// checks cost the agent's context a line each.
+// THE WHOLE CI RUN ON ONE COMMIT reached its outcome, told once per outcome
+// rather than once per check run.
+//
+// THE RUN IS THE CHECK RUNS GITHUB REPORTS FOR THE COMMIT, of each name the
+// latest (a re-run supersedes the run it repeats), less the repository's GATE
+// CHECKS (repoconfig.v1.PullRequestFollowing.gate_checks), which wait on a
+// person rather than on the code. It FAILED as soon as any of those runs
+// finished without passing, whether or not the others have finished; it
+// PASSED once every one of them finished and passed. A run with no check runs
+// has no outcome and is never told. Success, neutral and skipped pass; every
+// other conclusion fails.
+//
+// TOLD WHEN THE OUTCOME CHANGES. A further failure in a run already told
+// failing is not told again. A re-run of every failed check puts the run back
+// to undecided, so its next outcome is told whichever it is; so does a check
+// run registered after the run was told passing, which is how a workflow that
+// starts only once another finishes is told.
+message PullRequestActivityChecksConcluded {
+  // The commit the run is on: the head commit for `checks_concluded`, the
+  // merge group commit for `merge_group_checks_concluded`.
+  string commit_sha = 1;
+  // How the run ended. THE ARM IS THE OUTCOME.
+  oneof outcome {
+    // Every check run finished and passed.
+    PullRequestChecksPassed passed = 2;
+    // At least one check run finished without passing.
+    PullRequestChecksFailed failed = 3;
+  }
+}
+
+// The run passed.
+message PullRequestChecksPassed {
+  // How many check runs it counted, gate checks excluded.
+  uint32 check_count = 1;
+}
+
+// The run failed.
+message PullRequestChecksFailed {
+  // Each check run that finished without passing when the outcome was read,
+  // by name. Runs still in progress then are neither here nor told later.
+  repeated PullRequestActivityCheckFinished failed_checks = 1;
+}
+
+// A check run that finished: its name and its result, and nothing else.
 message PullRequestActivityCheckFinished {
   // The check run's name as GitHub shows it (`test (ubuntu-latest)`).
   string name = 1;

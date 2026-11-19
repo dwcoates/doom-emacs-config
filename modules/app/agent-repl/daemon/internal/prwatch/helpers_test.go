@@ -321,12 +321,15 @@ type gql struct {
 	defaultBranch string
 	// departures answers MergeQueueDepartures, as prFacts does.
 	departures map[uint32]string
+	// configs answers LifecycleConfigAt: each commit's
+	// `.agent-repl/lifecycle.yaml` text. A commit absent holds no file.
+	configs map[string]string
 	// fail fails every query of a name with its error.
 	fail map[string]error
 }
 
 func newGQL() *gql {
-	return &gql{prFacts: map[uint32]string{}, queues: map[string]string{}, defaultBranch: "main", departures: map[uint32]string{}, fail: map[string]error{}}
+	return &gql{prFacts: map[uint32]string{}, queues: map[string]string{}, defaultBranch: "main", departures: map[uint32]string{}, configs: map[string]string{}, fail: map[string]error{}}
 }
 
 // aliasNumber reads the pull request numbers a batched query asks.
@@ -357,6 +360,14 @@ func (g *gql) answer(query string, vars map[string]any) (ghclient.GraphQLRespons
 			repo["pr"+m[1]] = json.RawMessage(raw)
 		}
 		return ghclient.GraphQLResponse{Data: json.RawMessage(mustJSON(map[string]any{"repository": repo})), Errors: errs}, nil
+	case "LifecycleConfigAt":
+		expression, _ := vars["expression"].(string)
+		sha, _, _ := strings.Cut(expression, ":")
+		text, ok := g.configs[sha]
+		if !ok {
+			return ghclient.GraphQLResponse{Data: json.RawMessage(`{"repository":{"object":null}}`)}, nil
+		}
+		return ghclient.GraphQLResponse{Data: json.RawMessage(mustJSON(map[string]any{"repository": map[string]any{"object": map[string]any{"__typename": "Blob", "text": text, "isTruncated": false}}}))}, nil
 	case "MergeQueue":
 		branch, _ := vars["branch"].(string)
 		raw, ok := g.queues[branch]
@@ -372,6 +383,13 @@ func (g *gql) setFacts(n uint32, raw string) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.prFacts[n] = raw
+}
+
+// setConfig makes commit SHA hold TEXT as its lifecycle config.
+func (g *gql) setConfig(sha, text string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.configs[sha] = text
 }
 
 func (g *gql) setQueue(branch, raw string) {

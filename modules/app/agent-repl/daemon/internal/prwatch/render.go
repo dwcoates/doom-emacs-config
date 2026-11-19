@@ -12,24 +12,11 @@ import (
 // superseded by one saying every sentence since it was last told
 // (untoldnotice.Carried).
 
-// sentencesOf renders ACTIVITY as the sentences a notice says, in order. The
-// skipped checks among them are said in one sentence, after the others: a
-// pull request runs many, and a skip is rarely news.
+// sentencesOf renders ACTIVITY as the sentences a notice says, in order.
 func sentencesOf(activity []*agentreplv1.PullRequestActivity) []string {
-	var out, skipped []string
+	out := make([]string, 0, len(activity))
 	for _, a := range activity {
-		if c := a.GetCheckFinished(); c != nil && c.GetConclusion().GetSkipped() != nil {
-			skipped = append(skipped, "`"+c.GetName()+"`")
-			continue
-		}
 		out = append(out, activitySentence(a))
-	}
-	switch len(skipped) {
-	case 0:
-	case 1:
-		out = append(out, "Check "+skipped[0]+" was skipped.")
-	default:
-		out = append(out, fmt.Sprintf("%d checks were skipped: %s.", len(skipped), strings.Join(skipped, ", ")))
 	}
 	return out
 }
@@ -68,8 +55,8 @@ func activitySentence(a *agentreplv1.PullRequestActivity) string {
 		}
 	case *agentreplv1.PullRequestActivity_StateChanged:
 		return stateChangeWords(arm.StateChanged)
-	case *agentreplv1.PullRequestActivity_CheckFinished:
-		return fmt.Sprintf("Check `%s`: %s.", arm.CheckFinished.GetName(), conclusionWords(arm.CheckFinished.GetConclusion()))
+	case *agentreplv1.PullRequestActivity_ChecksConcluded:
+		return "CI on head " + short(arm.ChecksConcluded.GetCommitSha()) + " " + outcomeWords(arm.ChecksConcluded)
 	case *agentreplv1.PullRequestActivity_MergeQueueEntered:
 		e := arm.MergeQueueEntered
 		s := "The pull request joined the merge queue" + byWords(e.GetActor())
@@ -93,8 +80,8 @@ func activitySentence(a *agentreplv1.PullRequestActivity) string {
 			s += ": " + r.GetReason()
 		}
 		return s + "."
-	case *agentreplv1.PullRequestActivity_MergeGroupCheckFinished:
-		return fmt.Sprintf("Merge group check `%s`: %s.", arm.MergeGroupCheckFinished.GetName(), conclusionWords(arm.MergeGroupCheckFinished.GetConclusion()))
+	case *agentreplv1.PullRequestActivity_MergeGroupChecksConcluded:
+		return "CI on the merge group " + outcomeWords(arm.MergeGroupChecksConcluded)
 	}
 	panic(fmt.Sprintf("prwatch: activity %T has no words", a.GetActivity()))
 }
@@ -181,24 +168,38 @@ func stateChangeWords(c *agentreplv1.PullRequestActivityStateChanged) string {
 	panic(fmt.Sprintf("prwatch: state %T has no words", c.GetState().GetState()))
 }
 
+// outcomeWords finishes the one sentence a whole CI run's outcome is told
+// in: the count of a pass, or each check that did not pass, by name.
+func outcomeWords(c *agentreplv1.PullRequestActivityChecksConcluded) string {
+	switch o := c.GetOutcome().(type) {
+	case *agentreplv1.PullRequestActivityChecksConcluded_Passed:
+		if n := o.Passed.GetCheckCount(); n != 1 {
+			return fmt.Sprintf("passed: all %d checks succeeded.", n)
+		}
+		return "passed: its one check succeeded."
+	case *agentreplv1.PullRequestActivityChecksConcluded_Failed:
+		failed := make([]string, 0, len(o.Failed.GetFailedChecks()))
+		for _, f := range o.Failed.GetFailedChecks() {
+			failed = append(failed, "`"+f.GetName()+"` "+conclusionWords(f.GetConclusion()))
+		}
+		return "failed: " + strings.Join(failed, ", ") + "."
+	}
+	panic(fmt.Sprintf("prwatch: CI outcome %T has no words", c.GetOutcome()))
+}
+
+// conclusionWords says how a check run that did not pass finished.
 func conclusionWords(c *agentreplv1.PullRequestCheckConclusion) string {
 	switch c.GetConclusion().(type) {
-	case *agentreplv1.PullRequestCheckConclusion_Success:
-		return "passed"
 	case *agentreplv1.PullRequestCheckConclusion_Failure:
 		return "failed"
 	case *agentreplv1.PullRequestCheckConclusion_Cancelled:
-		return "cancelled"
+		return "was cancelled"
 	case *agentreplv1.PullRequestCheckConclusion_TimedOut:
 		return "timed out"
-	case *agentreplv1.PullRequestCheckConclusion_Skipped:
-		return "skipped"
-	case *agentreplv1.PullRequestCheckConclusion_Neutral:
-		return "finished neutral"
 	case *agentreplv1.PullRequestCheckConclusion_ActionRequired:
 		return "waits on a person's action"
 	}
-	return "finished"
+	return "did not pass"
 }
 
 // statusWords states the pull request as it stands, the line every notice
