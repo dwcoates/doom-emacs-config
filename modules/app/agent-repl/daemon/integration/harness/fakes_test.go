@@ -333,3 +333,29 @@ func TestLinkPromptsStagesReadOnlyPromptsOnAnotherFilesystem(t *testing.T) {
 		t.Fatalf("an in-place write into a staged prompt = %v, want it refused", err)
 	}
 }
+
+func TestFakeSpeechProgramsSpeakNothingAndReadTheBuiltInSpeakers(t *testing.T) {
+	cases := []struct {
+		name       string
+		fake       func(t testing.TB, dir string) *Recorder
+		args       []string
+		wantStdout string
+	}{
+		{name: "the audio-output reader prints the built-in speakers", fake: NewFakeAudioOutput, args: []string{"SPAudioDataType", "-json"}, wantStdout: FakeAudioOutputReport},
+		{name: "say prints nothing", fake: NewFakeSay, args: []string{"--", "hello"}, wantStdout: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			r := tc.fake(t, t.TempDir())
+
+			// Act
+			out, err := exec.Command(r.Path, tc.args...).Output()
+
+			// Assert
+			if err != nil || string(out) != tc.wantStdout {
+				t.Fatalf("ran %s: %q, %v, want %q", r.Path, out, err, tc.wantStdout)
+			}
+		})
+	}
+}

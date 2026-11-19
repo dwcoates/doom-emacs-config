@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shellword"
 	"agent-repld/internal/wsm"
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
 // opDesktopNotify is the operation the notifier's boot records carry.
@@ -71,6 +72,49 @@ func resolveChime(log dlog.Logger) (desktopnotify.Chime, error) {
 			}
 			return desktopnotify.NewChime(platform, override, exec.LookPath, desktopnotify.ExecRunner{})
 		})
+}
+
+// buildSpeech builds the speech every made banner is read aloud through when
+// the daemon's persistent wifi mode is on and a listening device is the audio
+// output: this GOOS's programs, each overridden by its environment variable
+// when set, run through the one exec Runner the banner program runs through.
+func buildSpeech(standing desktopnotify.WifiStanding) *desktopnotify.Speech {
+	return desktopnotify.NewSpeech(runtime.GOOS, speechPlatform(), desktopnotify.ExecRunner{}, standing)
+}
+
+// speechPlatform is this GOOS's speech programs with the environment's
+// overrides in place.
+func speechPlatform() desktopnotify.SpeechPlatform {
+	return desktopnotify.SpeechPlatformFor(runtime.GOOS).
+		WithOverrides(os.Getenv(desktopnotify.EnvSayCmd), os.Getenv(desktopnotify.EnvAudioOutputCmd))
+}
+
+// wifiStandingForwarder carries the persistent-wifi controller's published
+// standing to the banners' speech. The notifier is built before the
+// controller exists, so the controller's topic is bound late, exactly as the
+// click forwarder's server is.
+type wifiStandingForwarder struct {
+	mu     sync.RWMutex
+	target desktopnotify.WifiStanding
+}
+
+func (f *wifiStandingForwarder) bind(target desktopnotify.WifiStanding) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.target = target
+}
+
+// Latest answers the controller's last published standing. A banner is only
+// made once the daemon serves, after the controller is bound, so an unbound
+// forwarder is a broken boot order.
+func (f *wifiStandingForwarder) Latest() (*agentreplv1.PersistentWifiState, bool) {
+	f.mu.RLock()
+	target := f.target
+	f.mu.RUnlock()
+	if target == nil {
+		panic("agent-repld: a banner was read aloud before the persistent-wifi controller was bound")
+	}
+	return target.Latest()
 }
 
 // resolveNotifyProgram builds one of the notifier's programs for this GOOS,

@@ -40,6 +40,8 @@
 //	AGENT_REPL_BROWSER_CMD                the external browser launcher for OpenExternal
 //	AGENT_REPL_NOTIFIER_CMD               the desktop banner program (a recorder)
 //	AGENT_REPL_CHIME_CMD                  the banner sound player (a recorder)
+//	AGENT_REPL_SAY_CMD                    the banner speech program (a recorder)
+//	AGENT_REPL_AUDIO_OUTPUT_CMD           the audio-output reader (a recorder printing the built-in speakers)
 //	AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR  the fake pmset/networksetup/ipconfig/sudo the persistent-wifi controller runs
 //	AGENT_REPL_PERSISTENT_WIFI_HOTSPOT    the hotspot it joins (FakeHotspot)
 //	AGENT_REPL_PERSISTENT_WIFI_LID        the fake lid it hears (FakeLid)

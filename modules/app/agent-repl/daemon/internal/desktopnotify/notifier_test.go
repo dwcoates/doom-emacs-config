@@ -151,7 +151,7 @@ func newNotifierFixture(t *testing.T, workspaces Workspaces) notifierFixture {
 	t.Helper()
 	log := dlog.NewTestLogger()
 	f := notifierFixture{focus: NewFocus(log), backend: &fakeBackend{}, chime: &fakeChime{}, clicks: &fakeClicks{}, log: log}
-	f.notifier = New(Deps{Focus: f.focus, Backend: f.backend, Chime: f.chime, Clicks: f.clicks, Workspaces: workspaces, Log: log})
+	f.notifier = New(Deps{Focus: f.focus, Backend: f.backend, Chime: f.chime, Speech: quietSpeech(), Clicks: f.clicks, Workspaces: workspaces, Log: log})
 	return f
 }
 
@@ -404,7 +404,7 @@ func TestNotifierRecordsAMissingProgram(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	n := New(Deps{
-		Focus: NewFocus(log), BackendErr: errors.New("alerter is not installed"), Chime: &fakeChime{},
+		Focus: NewFocus(log), BackendErr: errors.New("alerter is not installed"), Chime: &fakeChime{}, Speech: quietSpeech(),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
@@ -523,7 +523,7 @@ func TestNotifierRingsNothingForABannerNotMade(t *testing.T) {
 			focus := NewFocus(log)
 			focus.Attach(tc.focused)
 			chime := &fakeChime{}
-			deps := Deps{Focus: focus, Chime: chime, Clicks: &fakeClicks{}, Workspaces: tc.workspaces, Log: log}
+			deps := Deps{Focus: focus, Chime: chime, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: tc.workspaces, Log: log}
 			if tc.noProgram {
 				deps.BackendErr = errors.New("terminal-notifier is not installed")
 			} else {
@@ -592,7 +592,7 @@ func TestNotifierRecordsAMissingChime(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	n := New(Deps{
-		Focus: NewFocus(log), Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"),
+		Focus: NewFocus(log), Backend: &fakeBackend{}, ChimeErr: errors.New("afplay is not installed"), Speech: quietSpeech(),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
@@ -650,11 +650,12 @@ func TestNewRefusesAHalfWiredNotifier(t *testing.T) {
 		name string
 		deps Deps
 	}{
-		{name: "no focus", deps: Deps{Backend: &fakeBackend{}, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
-		{name: "both backend and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, BackendErr: errors.New("x"), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
-		{name: "neither backend nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
-		{name: "both chime and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Chime: &fakeChime{}, ChimeErr: errors.New("x"), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
-		{name: "neither chime nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "no focus", deps: Deps{Backend: &fakeBackend{}, Chime: &fakeChime{}, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "both backend and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, BackendErr: errors.New("x"), Chime: &fakeChime{}, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "neither backend nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Chime: &fakeChime{}, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "both chime and error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Chime: &fakeChime{}, ChimeErr: errors.New("x"), Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "neither chime nor error", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
+		{name: "no speech", deps: Deps{Focus: NewFocus(dlog.NewTestLogger()), Backend: &fakeBackend{}, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: fakeWorkspaces{}, Log: dlog.NewTestLogger()}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -695,7 +696,7 @@ func TestNotifierPostAnswersItsDecision(t *testing.T) {
 			focus := NewFocus(log)
 			focus.Attach(tc.focused)
 			backend := &fakeBackend{}
-			deps := Deps{Focus: focus, Chime: &fakeChime{}, Clicks: &fakeClicks{}, Workspaces: named, Log: log}
+			deps := Deps{Focus: focus, Chime: &fakeChime{}, Speech: quietSpeech(), Clicks: &fakeClicks{}, Workspaces: named, Log: log}
 			if tc.noProgram {
 				deps.BackendErr = errors.New("terminal-notifier is not installed")
 			} else {
@@ -773,7 +774,7 @@ func TestNotifierNoProgramCauseAnswersTheBootCause(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestLogger()
 	n := New(Deps{
-		Focus: NewFocus(log), BackendErr: errors.New("terminal-notifier is not installed"), Chime: &fakeChime{},
+		Focus: NewFocus(log), BackendErr: errors.New("terminal-notifier is not installed"), Chime: &fakeChime{}, Speech: quietSpeech(),
 		Clicks: &fakeClicks{}, Workspaces: named, Log: log,
 	})
 
