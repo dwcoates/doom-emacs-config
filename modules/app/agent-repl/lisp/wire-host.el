@@ -2050,6 +2050,63 @@ one is a contract breach, never a reload to attempt."
   "Decode VALUE as the empty `DaemonDrainCancelled' — presence is the fact."
   (agent-repl-wire--decode-empty "DaemonDrainCancelled" value))
 
+;;;; ---- ReportRecencyReach ----
+
+(defun agent-repl-wire--encode-recency-reach-presses (message-name value)
+  "Encode VALUE `(:presses N)' as MESSAGE-NAME, N a positive integer."
+  (let ((presses (plist-get value :presses)))
+    (unless (and (integerp presses) (> presses 0))
+      (agent-repl-wire--fail message-name 'presses "expected a positive integer"))
+    (agent-repl-wire--encoded message-name (list (cons 'presses presses)))))
+
+(defun agent-repl-wire-encode-recency-reach (value)
+  "Encode VALUE as `RecencyReach': `(:workspace REF :direction D)'.
+D is `(:arm :older|:newer :value (:presses N))', the chord that reaches
+the workspace's tab in fewer presses and how many."
+  (unless (plist-member value :workspace)
+    (agent-repl-wire--fail "RecencyReach" 'workspace "required message field is absent"))
+  (agent-repl-wire--encoded
+   "RecencyReach"
+   (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
+         (agent-repl-wire--encode-oneof
+          "RecencyReach" 'direction (plist-get value :direction)
+          `((:older older ,(lambda (v) (agent-repl-wire--encode-recency-reach-presses "RecencyReachOlder" v)))
+            (:newer newer ,(lambda (v) (agent-repl-wire--encode-recency-reach-presses "RecencyReachNewer" v))))))))
+
+(defun agent-repl-wire-encode-report-recency-reach-request (value)
+  "Encode ReportRecencyReachRequest VALUE `(:reaches REACHES)'.
+REACHES is a list of `RecencyReach' plists, replacing the daemon's whole
+reach; nil reports that no tab has one."
+  (agent-repl-wire--encoded
+   "ReportRecencyReachRequest"
+   (list (cons 'reaches (agent-repl-wire--encode-repeated
+                         "ReportRecencyReachRequest" 'reaches (plist-get value :reaches)
+                         #'agent-repl-wire-encode-recency-reach)))))
+
+(defun agent-repl-wire-decode-report-recency-reach-error (value)
+  "Decode VALUE as `ReportRecencyReachError', a plist (:cause ONEOF)."
+  (let ((object (agent-repl-wire--object "ReportRecencyReachError" value)))
+    (agent-repl-wire--check-keys "ReportRecencyReachError" object '(noEmacsStream))
+    (agent-repl-wire--decoded
+     "ReportRecencyReachError"
+     (list :cause (agent-repl-wire--decode-oneof
+                   "ReportRecencyReachError" 'cause object
+                   `((noEmacsStream :no-emacs-stream
+                                    ,(lambda (v) (agent-repl-wire--decode-empty
+                                                  "ReportRecencyReachNoEmacsStream" v)))))))))
+
+(defun agent-repl-wire-decode-report-recency-reach-response (value)
+  "Decode VALUE as `ReportRecencyReachResponse'.  THE ARM IS THE OUTCOME.
+Success is empty; the error names its cause: no Emacs stream stands."
+  (let ((object (agent-repl-wire--object "ReportRecencyReachResponse" value)))
+    (agent-repl-wire--check-keys "ReportRecencyReachResponse" object '(success error))
+    (agent-repl-wire--decoded
+     "ReportRecencyReachResponse"
+     (agent-repl-wire--decode-oneof
+      "ReportRecencyReachResponse" 'result object
+      `((success :success ,(lambda (v) (agent-repl-wire--decode-empty "ReportRecencyReachSuccess" v)))
+        (error :error agent-repl-wire-decode-report-recency-reach-error))))))
+
 ;;;; ---- Workspace-mutation progress ------------------------------------
 
 (defun agent-repl-wire-decode-workspace-create-stage-deriving-name (value)

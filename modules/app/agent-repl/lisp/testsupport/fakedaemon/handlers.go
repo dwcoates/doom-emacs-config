@@ -357,6 +357,10 @@ func (s *fakeServer) ReportEditorFocus(ctx context.Context, req *connect.Request
 	return handleUnary[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse](ctx, s, "ReportEditorFocus", req.Msg)
 }
 
+func (s *fakeServer) ReportRecencyReach(ctx context.Context, req *connect.Request[v1.ReportRecencyReachRequest]) (*connect.Response[v1.ReportRecencyReachResponse], error) {
+	return handleUnary[v1.ReportRecencyReachRequest, v1.ReportRecencyReachResponse](ctx, s, "ReportRecencyReach", req.Msg)
+}
+
 func (s *fakeServer) WatchHostWorkspace(ctx context.Context, req *connect.Request[v1.WatchHostWorkspaceRequest], stream *connect.ServerStream[v1.WatchHostWorkspaceResponse]) error {
 	s.record(ctx, "WatchHostWorkspace", req.Msg)
 	if err := validateRequest(req.Msg); err != nil {

@@ -387,6 +387,16 @@ daemon\='s to know.")
 The daemon names the thread after the question, brings its session up and
 submits the question; the thread arrives through the roster push.")
 
+(agent-repl-rpc--defverb agent-repl-rpc-report-recency-reach
+  "ReportRecencyReach"
+  agent-repl-wire-encode-report-recency-reach-request
+  agent-repl-wire-decode-report-recency-reach-response
+  "Tell the daemon how few presses of the recency walk reach each nearby tab.
+The report replaces the daemon's whole reach, which the sidebar draws as
+its open rows' gutters.  It belongs to Emacs's WatchDaemon stream: with
+none standing it is refused, and the stream that comes back is reported
+to again.  Idempotent.")
+
 (agent-repl-rpc--defverb agent-repl-rpc-report-editor-focus
   "ReportEditorFocus"
   agent-repl-wire-encode-report-editor-focus-request

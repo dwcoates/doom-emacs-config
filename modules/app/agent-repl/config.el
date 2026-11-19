@@ -405,6 +405,9 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; the host view's update (host.el, above).
 (agent-repl--load-module "held-edit")
 (agent-repl--load-module "commands")
+;; The recency walk's reach, which the sidebar draws as its rows' gutters:
+;; it counts presses with commands.el's ring walk.
+(agent-repl--load-module "recency-reach")
 (agent-repl--load-module "session")
 (agent-repl--load-module "daemon")
 ;; The deferred-prompt queue: a prompt the user asked to deliver as its own

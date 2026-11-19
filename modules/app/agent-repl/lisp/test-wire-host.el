@@ -1624,6 +1624,68 @@ composer and vendor_info arms together."
                        #'string<)
                  (list "focused" "unfocused"))))
 
+;;;; ---- ReportRecencyReach ----
+
+(ert-deftest agent-repl-test-wire-host-report-recency-reach-encodes-each-direction ()
+  "Each reach names its workspace and its chord's presses."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize
+                    (agent-repl-wire-encode-report-recency-reach-request
+                     '(:reaches ((:workspace (:id "a" :dir "/w/a") :direction (:arm :older :value (:presses 1)))
+                                 (:workspace (:id "b" :dir "/w/b") :direction (:arm :newer :value (:presses 3))))))))
+                 (concat "{\"reaches\":[{\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"},\"older\":{\"presses\":1}},"
+                         "{\"workspace\":{\"id\":\"b\",\"dir\":\"/w/b\"},\"newer\":{\"presses\":3}}]}"))))
+
+(ert-deftest agent-repl-test-wire-host-report-recency-reach-encodes-no-reach ()
+  "A report reaching nothing states an empty list, replacing the daemon's reach."
+  (should (equal (agent-repl-test-wire-host--quiet
+                   (json-serialize (agent-repl-wire-encode-report-recency-reach-request '(:reaches nil))))
+                 "{\"reaches\":[]}")))
+
+(ert-deftest agent-repl-test-wire-host-recency-reach-without-workspace-is-refused ()
+  "A reach naming no workspace never leaves Emacs."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-recency-reach '(:direction (:arm :older :value (:presses 1))))
+                 '("RecencyReach" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-recency-reach-without-direction-is-refused ()
+  "A reach naming no chord never leaves Emacs."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-recency-reach '(:workspace (:id "a" :dir "/w/a")))
+                 '("RecencyReach" direction "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-recency-reach-of-zero-presses-is-refused ()
+  "A reach is at least one press."
+  (should (equal (agent-repl-test-wire-host--encode-breach
+                  #'agent-repl-wire-encode-recency-reach
+                  '(:workspace (:id "a" :dir "/w/a") :direction (:arm :newer :value (:presses 0))))
+                 '("RecencyReachNewer" presses "expected a positive integer"))))
+
+(ert-deftest agent-repl-test-wire-host-report-recency-reach-decodes-success ()
+  "A taken report answers the empty success."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-recency-reach-response "{\"success\":{}}")
+                 '(:arm :success :value nil))))
+
+(ert-deftest agent-repl-test-wire-host-report-recency-reach-decodes-no-emacs-stream ()
+  "The refusal names its cause: no Emacs stream stands."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-report-recency-reach-response "{\"error\":{\"noEmacsStream\":{}}}")
+                 '(:arm :error :value (:cause (:arm :no-emacs-stream :value nil))))))
+
+(ert-deftest agent-repl-test-wire-host-report-recency-reach-unknown-cause-is-refused ()
+  "An unmodeled refusal cause is refused rather than silently dropped."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-report-recency-reach-response "{\"error\":{\"busy\":{}}}")
+                 '("ReportRecencyReachError" busy "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-host-recency-reach-direction-arms-match-the-bindings ()
+  "The direction encoder's arm set is exactly what the frozen schema declares."
+  (should (equal (sort (agent-repl-test--generated-oneof-arms
+                        "agentrepl/v1/endpoint_report_recency_reach.pb.go" "RecencyReach")
+                       #'string<)
+                 (list "newer" "older"))))
+
 (ert-deftest agent-repl-test-wire-host-watch-daemon-request-without-a-client-is-refused ()
   "The client arm is REQUIRED: a request naming none never leaves Emacs."
   (should (equal (agent-repl-test-wire-host--encode-breach
