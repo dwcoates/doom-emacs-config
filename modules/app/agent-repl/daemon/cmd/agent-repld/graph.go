@@ -514,6 +514,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if p.Opts.footerMomentaryDwell > 0 {
 		footerOpts = append(footerOpts, footer.WithMomentaryDwell(p.Opts.footerMomentaryDwell))
 	}
+	footerOpts = append(footerOpts, footer.WithWorkspaceDir(workspaceDir))
 	footerResolver, err := footer.New(colors, p.Surfaces, footerOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the footer resolver: %w", err)

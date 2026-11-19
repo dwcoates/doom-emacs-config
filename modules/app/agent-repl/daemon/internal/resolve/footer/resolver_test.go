@@ -2,8 +2,11 @@ package footer
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -1417,5 +1420,65 @@ func TestARefusedSubmissionLeavesNoClock(t *testing.T) {
 	// Assert
 	if started, ended := clockSpan(t, h); started != nil || ended != nil {
 		t.Fatalf("clock = (%v, %v), want none: a refused submission ran nothing", started, ended)
+	}
+}
+
+func TestAnUnboundWorkspaceIsResolvedThroughTheRegistry(t *testing.T) {
+	tests := []struct {
+		name       string
+		resolve    func(ids.WorkspaceID) (string, error)
+		idLookup   dlog.WorkspaceIDLookup
+		wantErrors int
+		wantDir    string
+	}{
+		{name: "a registered workspace's directory binds it, with no violation",
+			resolve: func(ids.WorkspaceID) (string, error) { return "/tmp/ws-closed", nil }, wantDir: "/tmp/ws-closed"},
+		{name: "a directory since removed routes it centrally, with no violation",
+			resolve:  func(ids.WorkspaceID) (string, error) { return "/tmp/ws-gone", nil },
+			idLookup: func(string) (string, error) { return "", dlog.ErrWorkspaceDirGone }, wantDir: "/tmp/ws-gone"},
+		{name: "a workspace the registry cannot answer is still the violation",
+			resolve: func(ids.WorkspaceID) (string, error) { return "", errors.New("no such workspace") }, wantErrors: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			log := dlog.NewTestSurfaces()
+			if tt.idLookup != nil {
+				log.BindWorkspaceIDs(tt.idLookup)
+			}
+			r, err := newResolver(testColors(), log, WithClock(newFakeClock()), WithWorkspaceDir(tt.resolve))
+			if err != nil {
+				t.Fatalf("newResolver: %v", err)
+			}
+
+			// Act
+			r.OnLink("ws-unbound", shimclient.LinkConnected)
+
+			// Assert
+			if got := unboundErrors(log, "daemon.footer.unbound_workspace"); got != tt.wantErrors {
+				t.Fatalf("unbound-workspace ERROR records = %d, want %d", got, tt.wantErrors)
+			}
+			r.mu.Lock()
+			dir := r.states["ws-unbound"].dir
+			r.mu.Unlock()
+			if dir != tt.wantDir {
+				t.Fatalf("bound dir = %q, want %q", dir, tt.wantDir)
+			}
+		})
+	}
+}
+
+func TestARemovedDirectoryIsRoutedThroughWorkspaceUnlessGoneAlone(t *testing.T) {
+	// Arrange
+	b, err := os.ReadFile("resolver.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+
+	// Act, Assert: the shared helper is taken, and no hand-rolled branch on
+	// the removed directory stands beside it.
+	if !strings.Contains(src, "dlog.WorkspaceUnlessGone(") || strings.Contains(src, "dlog.ErrWorkspaceDirGone") {
+		t.Fatal("resolver.go does not route a removed directory through dlog.WorkspaceUnlessGone alone")
 	}
 }

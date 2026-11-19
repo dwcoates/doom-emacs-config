@@ -1209,3 +1209,16 @@ func clientInstant(raw string, now func() time.Time) (at time.Time, stamped bool
 	}
 	return parsed.Local(), false, nil
 }
+
+// WorkspaceUnlessGone resolves dir's workspace logger through s, as
+// Surfaces.Workspace does, EXCEPT that a directory since removed is ordinary:
+// a merged or nuked workspace keeps its row with its worktree removed, and its
+// records go to the central sink naming it (Surfaces.WorkspaceOrCentral). Any
+// other refusal is the caller's.
+func WorkspaceUnlessGone(s Surfaces, dir string) (Logger, error) {
+	log, err := s.Workspace(dir)
+	if errors.Is(err, ErrWorkspaceDirGone) {
+		return s.WorkspaceOrCentral(dir), nil
+	}
+	return log, err
+}
