@@ -2936,20 +2936,26 @@ is sent now (`agent-repl-send-held-now')."
 (declare-function company-complete-selection "company" ())
 (declare-function agent-repl--completing-read-under-ivy "core" (alist entry prompt table))
 
-(defun agent-repl-input-company-return ()
-  "Close company's popup, then run the composer's own `RET' binding.
-The binding is looked up under `RET' itself, never under the keys that
-invoked this command: in a graphical frame the Return key is the
-`<return>' event, which company's map binds directly, and only key
-reading translates it to `RET' -- so the composer, which binds `RET',
-has nothing under `<return>'."
-  (interactive)
+(defun agent-repl--input-company-run-composer-key (key)
+  "Close company's popup, then run the composer's own binding of KEY.
+THE ONE SHAPE of every composer key that company's popup would otherwise
+take.  The binding is looked up under KEY itself, never under the keys
+that invoked the command: in a graphical frame the Return key is the
+`<return>' event, which company's map binds directly, and only key reading
+translates it to `RET' -- so the composer, which binds `RET', has nothing
+under `<return>'."
   (company-abort)
-  (let ((cmd (key-binding (kbd "RET"))))
+  (let ((cmd (key-binding key)))
     (cl-assert (commandp cmd) nil
-               "composer RET resolves to no command after company-abort: %S" cmd)
+               "composer %s resolves to no command after company-abort: %S"
+               (key-description key) cmd)
     (setq this-command cmd)
     (call-interactively cmd)))
+
+(defun agent-repl-input-company-return ()
+  "Close company's popup, then run the composer's own `RET' binding."
+  (interactive)
+  (agent-repl--input-company-run-composer-key (kbd "RET")))
 
 (defun agent-repl--input-company-map (parent)
   "Return the composer's company active map, inheriting from PARENT."
