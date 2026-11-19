@@ -1753,6 +1753,8 @@ export function createFeedController(
         return opts.renderers.chessBoard(unit.value, rc);
       case "subagentResult":
         return opts.renderers.subagentResult(unit.value, rc);
+      case "fixGate":
+        return opts.renderers.fixGate(unit.value, rc);
       case "merge":
       case "subagent":
         throw new MalformedView(

@@ -2836,6 +2836,7 @@ describe("createFeedController: every activity unit reaches its own renderer", (
       { case: "subagentResult", value: {} },
       ".stub-subagentResult",
     ],
+    ["fixGate", { case: "fixGate", value: {} }, ".stub-fixGate"],
   ];
 
   it.each(UNITS)("draws the %s unit", (name, unit, mark) => {

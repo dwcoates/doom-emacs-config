@@ -799,6 +799,7 @@ const REGISTRY_KEYS: readonly (keyof RowRenderers)[] = [
   "findings",
   "chessBoard",
   "subagentResult",
+  "fixGate",
   "shell",
   "shellHead",
   "permission",

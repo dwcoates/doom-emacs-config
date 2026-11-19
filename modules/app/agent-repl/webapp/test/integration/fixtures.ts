@@ -572,6 +572,21 @@ export const subagentResultUnit = (
   },
 });
 
+/**
+ * A deploy mediator's fix at its gate — `FeedTurnActivity.fix_gate`: attempt 1
+ * of 3, its suites running, one suite reported so far.
+ */
+export const fixGateUnit = (): ActivityUnit => ({
+  case: "fixGate",
+  value: {
+    head: { label: { text: "testing the fix" }, attempt: 1, maxAttempts: 3 },
+    state: { case: "live", value: { startedAtMs: 1n } },
+    output: {
+      suites: [{ name: "go", state: { case: "running", value: { soFar: { case: "passing", value: {} } } }, output: [] }],
+    },
+  },
+});
+
 /** A chess board whose daemon-side state is STATE. */
 export const chessBoardUnit = (
   state:

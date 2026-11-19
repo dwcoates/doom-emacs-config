@@ -506,8 +506,8 @@ describe("the merge-styled head's shared parts (merge.ts, cards/fix-gate.ts)", (
   });
 
   it("is the one badge every merge head arm draws: the head's badges are mergeBadge's shape", () => {
-    for (const arm of [{ case: "update" as const }, { case: "success" as const }]) {
-      const badge = draw(mergeHead(arm)).querySelector(".merge-badge");
+    for (const msg of [mergeHead({ case: "update" }), mergeHead({ case: "success", endedAtMs: 61_000n, commit: "c" })]) {
+      const badge = draw(msg).querySelector(".merge-badge");
       expect(badge?.className.startsWith("merge-badge ")).toBe(true);
     }
   });

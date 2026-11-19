@@ -997,6 +997,7 @@ export function stubRenderers(overrides: Partial<RowRenderers> = {}): RowRendere
     simpleToolCall: stub("simpleToolCall"),
     hook: stub("hook"),
     skill: stub("skill"),
+    fixGate: stub("fixGate"),
     artifact: stub("artifact"),
     plan: stub("plan"),
     findings: stub("findings"),
