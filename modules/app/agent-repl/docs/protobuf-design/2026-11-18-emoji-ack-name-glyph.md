@@ -13,7 +13,7 @@ Design mode: autonomous.
   creates the work workspace with `-originator emoji-ack`, and the daemon
   records it (`workspace_originators`). That flag is the creation-time
   specification the owner asked for, so the intake needs no new flag. Evidence
-  tier: existing code (the script's `FORK_COMMAND`, `wsm.SetWorkspaceOriginator`).
+  tier: existing code (the script's `FORK_COMMAND`, the daemon's originator record).
 - Systems: the daemon (roster and topbar resolvers), the webapp (sidebar row,
   topbar name line), and the editor lisp (the roster decoder, the `SPC p p` /
   `SPC p P` switcher).
@@ -40,3 +40,21 @@ Design mode: autonomous.
   (the switcher) draws the glyph from the same row; one that uses the name as
   an identity (rename prefill, completion) keeps using `text` alone.
 - Sweep: nothing obviated.
+
+## Implementation consequences
+
+- The originator is now written in the registration's own transaction
+  (`wsm.RegisterFacts.Originator`), and `wsm.Workspace.EmojiAck` is derived
+  in the shared select list. The separate write after registration is gone,
+  so no roster publication can draw an emoji-ack row without its glyph.
+- One glyph decision in the daemon (`internal/resolve/nameglyph`), one drawing
+  in the webapp (`src/name-glyph.ts`), one drawing in Emacs
+  (`agent-repl-name-glyph-string` in `lisp/core.el`).
+- Size: the webapp draws the glyph at `1em` with `line-height: 1`. Emacs
+  scales it by the ratio of the text font's line height to the emoji font's,
+  read from the fonts Emacs actually picks (measured 2026-11-18: Menlo 13px is
+  15px high, Apple Color Emoji 13px is 21px, ratio 0.714). Unscaled, the emoji
+  made its line taller and looked larger than the name.
+- Not covered: the composer's workspace-name completion and the merge queue
+  rows draw names from other messages. The owner named the sidebar and the
+  switcher.
