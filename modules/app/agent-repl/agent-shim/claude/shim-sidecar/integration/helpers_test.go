@@ -1890,6 +1890,10 @@ func (f *fakeStore) ownerOfUnitLocked(unit string) *conversationv1.AgentId {
 	return nil
 }
 
+func (f *fakeStore) AwaitAgentByVendorTask(context.Context, *connect.Request[storev1.AwaitAgentByVendorTaskRequest]) (*connect.Response[storev1.AwaitAgentByVendorTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
+}
+
 func (f *fakeStore) GetAgentByVendorTask(context.Context, *connect.Request[storev1.GetAgentByVendorTaskRequest]) (*connect.Response[storev1.GetAgentByVendorTaskResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("the fake store serves only the sidecar's two verbs"))
 }

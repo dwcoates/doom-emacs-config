@@ -185,6 +185,10 @@ func (p *proxyStore) GetLiveWork(context.Context, *connect.Request[storev1.GetLi
 	return nil, p.unexpected("GetLiveWork")
 }
 
+func (p *proxyStore) AwaitAgentByVendorTask(context.Context, *connect.Request[storev1.AwaitAgentByVendorTaskRequest]) (*connect.Response[storev1.AwaitAgentByVendorTaskResponse], error) {
+	return nil, p.unexpected("AwaitAgentByVendorTask")
+}
+
 func (p *proxyStore) GetAgentByVendorTask(context.Context, *connect.Request[storev1.GetAgentByVendorTaskRequest]) (*connect.Response[storev1.GetAgentByVendorTaskResponse], error) {
 	return nil, p.unexpected("GetAgentByVendorTask")
 }
