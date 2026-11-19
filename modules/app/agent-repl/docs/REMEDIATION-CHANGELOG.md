@@ -1567,3 +1567,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-18 deploy-mediator (landed in queue bypass mode): A closed workspace's merge head is drawn without a footer invariant error, and an Emacs that quits before its instance is recorded is logged at INFO
 - 2026-11-18 deploy-mediator (landed in queue bypass mode): A handover drains its merges before yielding to the successor, so the successor's queue review no longer releases a waiting merge's rebase lease under it
 - 2026-11-19 merge-queue-stall-triage (landed in queue bypass mode): Emacs decodes an async merge's requester, so its roster takes pushes again: killed workspaces leave s-{ and s-}, and folded subsections are passed over (landed during a deploy check the mediator's failed compaction left undecided)
+- 2026-11-19 deploy-mediator (landed in queue bypass mode): Every headless vendor call now states its kind, and every call but the IPO outlook runs as pure inference with no tools.
