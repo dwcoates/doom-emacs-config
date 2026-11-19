@@ -39,11 +39,37 @@ import (
 // pretending the push happened — but nothing reaches these before `server.New`
 // returns, because nothing serves until then.
 
+// lateBound is the one collaborator a forwarder carries to a part of the
+// graph built after it: bound once that part exists, and read by every call
+// through the forwarder. What a call does while it is still unbound is each
+// forwarder's own (drop, answer none, refuse, record, or panic).
+type lateBound[T any] struct {
+	mu     sync.RWMutex
+	target T
+	set    bool
+}
+
+// bind installs the collaborator. The composition root calls it once, as soon
+// as the collaborator is built.
+func (b *lateBound[T]) bind(target T) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.target, b.set = target, true
+}
+
+// load answers the collaborator, and false while it is unbound.
+func (b *lateBound[T]) load() (T, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.target, b.set
+}
+
 // serverForwarder carries the rollout's and the drain's pushes to the server,
 // which is built after both of them.
 type serverForwarder struct {
-	mu     sync.RWMutex
-	target serverPushTarget
+	lateBound[serverPushTarget]
+	// droppedMu guards dropped.
+	droppedMu sync.Mutex
 	// dropped counts pushes that arrived before the server existed. It is a
 	// boot-order defect, and the count is what makes it visible.
 	dropped int
@@ -60,23 +86,13 @@ type serverPushTarget interface {
 	SeedFeedTextScale(scale float64)
 }
 
-// bind installs the real server. It is called once, immediately after
-// server.New returns and before anything is served.
-func (f *serverForwarder) bind(target serverPushTarget) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
-}
-
 // bound answers the target, false while the server does not exist yet.
 func (f *serverForwarder) bound() (serverPushTarget, bool) {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	if target == nil {
-		f.mu.Lock()
+	target, ok := f.load()
+	if !ok {
+		f.droppedMu.Lock()
 		f.dropped++
-		f.mu.Unlock()
+		f.droppedMu.Unlock()
 		return nil, false
 	}
 	return target, true
@@ -84,8 +100,8 @@ func (f *serverForwarder) bound() (serverPushTarget, bool) {
 
 // Dropped is how many pushes arrived before the server existed.
 func (f *serverForwarder) Dropped() int {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
+	f.droppedMu.Lock()
+	defer f.droppedMu.Unlock()
 	return f.dropped
 }
 
@@ -144,20 +160,11 @@ func (f *serverForwarder) SeedFeedTextScale(scale float64) {
 // relayForwarder carries the workspace verbs' host pushes to the server's
 // relay, which is built after the verbs.
 type relayForwarder struct {
-	mu     sync.RWMutex
-	target workspace.HostRelay
-}
-
-func (f *relayForwarder) bind(target workspace.HostRelay) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[workspace.HostRelay]
 }
 
 func (f *relayForwarder) relay() (workspace.HostRelay, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.target, f.target != nil
+	return f.load()
 }
 
 func (f *relayForwarder) OpenInEditor(ws ids.WorkspaceID, path string, line *uint32) {
@@ -199,20 +206,11 @@ func (f *relayForwarder) ReturnFeedToTail(ws ids.WorkspaceID) {
 // verbsForwarder carries a reference to the workspace verbs for the lifecycle
 // hooks the fleet is wired with before the verbs exist.
 type verbsForwarder struct {
-	mu     sync.RWMutex
-	target workspace.Verbs
-}
-
-func (f *verbsForwarder) bind(target workspace.Verbs) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[workspace.Verbs]
 }
 
 func (f *verbsForwarder) verbs() (workspace.Verbs, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.target, f.target != nil
+	return f.load()
 }
 
 // bound answers the workspace verbs for a call made through the forwarder. One
@@ -477,20 +475,11 @@ func (f *verbsForwarder) endSurfacing(ctx context.Context, ws ids.WorkspaceID) e
 // healthForwarder carries the session watcher's diagnostics verdict to the
 // health reporter, which is built after the fleet the watchers live in.
 type healthForwarder struct {
-	mu     sync.RWMutex
-	target health.Reporter
-}
-
-func (f *healthForwarder) bind(target health.Reporter) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[health.Reporter]
 }
 
 func (f *healthForwarder) reporter() (health.Reporter, bool) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	return f.target, f.target != nil
+	return f.load()
 }
 
 // historyForwarder is the feed resolver's history source, which is the session
@@ -576,22 +565,13 @@ func (h *historyForwarder) ResolvePeerDelivery(ctx context.Context, ws ids.Works
 // is a boot-order defect and fails loudly rather than forking a parent whose
 // deliveries nothing holds.
 type deliveryForwarder struct {
-	mu    sync.RWMutex
-	queue promptqueue.Queue
-}
-
-func (d *deliveryForwarder) bind(queue promptqueue.Queue) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	d.queue = queue
+	lateBound[promptqueue.Queue]
 }
 
 // Exclusively runs PERFORM while the queue delivers nothing to WS.
 func (d *deliveryForwarder) Exclusively(ctx context.Context, ws ids.WorkspaceID, what string, perform func(context.Context) error) error {
-	d.mu.RLock()
-	queue := d.queue
-	d.mu.RUnlock()
-	if queue == nil {
+	queue, ok := d.load()
+	if !ok {
 		return errors.New("agent-repld: a fork was made before the prompt queue was built")
 	}
 	return queue.Exclusively(ctx, ws, what, perform)
@@ -602,23 +582,14 @@ func (d *deliveryForwarder) Exclusively(ctx context.Context, ws ids.WorkspaceID,
 // footer. An edge before the queue is bound is a wiring defect, said at ERROR:
 // the prompts held after reconnect would wait for the next edge.
 type vendorServesForwarder struct {
-	mu    sync.RWMutex
-	queue promptqueue.Queue
-	log   dlog.Logger
-}
-
-func (f *vendorServesForwarder) bind(queue promptqueue.Queue) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.queue = queue
+	lateBound[promptqueue.Queue]
+	log dlog.Logger
 }
 
 // VendorServes tells the queue the workspace's vendor serves again.
 func (f *vendorServesForwarder) VendorServes(ws ids.WorkspaceID, was string) {
-	f.mu.RLock()
-	queue := f.queue
-	f.mu.RUnlock()
-	if queue == nil {
+	queue, ok := f.load()
+	if !ok {
 		f.log.Error("daemon.cmd.vendor_serves", "the vendor served again before the prompt queue was wired; its after-reconnect holds were not released", dlog.Context{
 			"workspace": string(ws), "vendor_block": was, "invariant_violation": "the queue is bound before any footer edge",
 		})
@@ -631,23 +602,14 @@ func (f *vendorServesForwarder) VendorServes(ws ids.WorkspaceID, was string) {
 // which is built after the footer because it takes the footer as its status
 // source.
 type statusChangedForwarder struct {
-	mu     sync.RWMutex
-	roster sidebar.Resolver
-	log    dlog.Logger
-}
-
-func (f *statusChangedForwarder) bind(roster sidebar.Resolver) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.roster = roster
+	lateBound[sidebar.Resolver]
+	log dlog.Logger
 }
 
 // StatusChanged tells the roster the workspace's footer status moved.
 func (f *statusChangedForwarder) StatusChanged(ws ids.WorkspaceID) {
-	f.mu.RLock()
-	roster := f.roster
-	f.mu.RUnlock()
-	if roster == nil {
+	roster, ok := f.load()
+	if !ok {
 		f.log.Error("daemon.cmd.status_changed", "the footer's status moved before the roster was wired; the row did not re-project it", dlog.Context{
 			"workspace": string(ws), "invariant_violation": "the roster is bound before any footer edge",
 		})
@@ -674,8 +636,7 @@ type mergeTarget interface {
 // forwarder is the same defect, and the drain has no error to answer it with,
 // so it panics.
 type mergeForwarder struct {
-	mu     sync.RWMutex
-	target mergeTarget
+	lateBound[mergeTarget]
 }
 
 var (
@@ -683,19 +644,12 @@ var (
 	_ drain.MergeSuspension = (*mergeForwarder)(nil)
 )
 
-func (f *mergeForwarder) bind(target mergeTarget) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
-}
-
 func (f *mergeForwarder) mover() (mergeTarget, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.target == nil {
+	target, ok := f.load()
+	if !ok {
 		return nil, errMergeMoverUnbound
 	}
-	return f.target, nil
+	return target, nil
 }
 
 func (f *mergeForwarder) SuspendForTransfer(ctx context.Context, ws ids.WorkspaceID) error {
@@ -742,10 +696,7 @@ func (f *mergeForwarder) Drain(ctx context.Context) {
 // front waiting on it is offered again. Before the orchestrator is bound no
 // merge exists to wait on a lease, so a change then concerns none.
 func (f *mergeForwarder) LeaseChanged(ws ids.WorkspaceID) {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	if target != nil {
+	if target, ok := f.load(); ok {
 		target.LeaseChanged(ws)
 	}
 }
@@ -753,10 +704,8 @@ func (f *mergeForwarder) LeaseChanged(ws ids.WorkspaceID) {
 // TakeRequestingTurn asks the orchestrator whether a turn asked for a merge.
 // Before the orchestrator is bound no merge was asked for, so none was.
 func (f *mergeForwarder) TakeRequestingTurn(ws ids.WorkspaceID, turn ids.TurnID) bool {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	return target != nil && target.TakeRequestingTurn(ws, turn)
+	target, ok := f.load()
+	return ok && target.TakeRequestingTurn(ws, turn)
 }
 
 // errMergeMoverUnbound is a merge move or drain asked before the orchestrator
@@ -768,23 +717,15 @@ var errMergeMoverUnbound = errors.New("agent-repld: the merge orchestrator is no
 // handler the service is made of. A detached merge reaching it before the
 // service is bound is a defect in the boot order, answered as an error.
 type detachedForwarder struct {
-	mu     sync.RWMutex
-	target *mergeworkspace.Service
-}
-
-func (f *detachedForwarder) bind(target *mergeworkspace.Service) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[*mergeworkspace.Service]
 }
 
 func (f *detachedForwarder) service() (*mergeworkspace.Service, error) {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.target == nil {
+	target, ok := f.load()
+	if !ok {
 		return nil, fmt.Errorf("agent-repld: a detached merge reached the merge orchestrator before the detached-merge service existed")
 	}
-	return f.target, nil
+	return target, nil
 }
 
 func (f *detachedForwarder) Fork(ctx context.Context, requester wsm.Workspace, origin wsm.MergeOrigin, name, base string) (wsm.Workspace, error) {
@@ -836,22 +777,13 @@ func (f *detachedForwarder) HandBack(ctx context.Context, requester ids.Workspac
 // the queue (workspacesubs): bound once the queue exists, and refusing,
 // loudly, a supersession that arrives before it.
 type holdsForwarder struct {
-	mu     sync.RWMutex
-	target promptqueue.Service
-}
-
-func (f *holdsForwarder) bind(target promptqueue.Service) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[promptqueue.Service]
 }
 
 // Supersede implements untoldnotice.Holds through the bound queue.
 func (f *holdsForwarder) Supersede(ctx context.Context, ws ids.WorkspaceID, turn ids.TurnID) (bool, error) {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	if target == nil {
+	target, ok := f.load()
+	if !ok {
 		return false, fmt.Errorf("agent-repld: a notice was superseded before the prompt queue existed")
 	}
 	return target.Supersede(ctx, ws, turn)
@@ -862,46 +794,29 @@ func (f *holdsForwarder) Supersede(ctx context.Context, ws ids.WorkspaceID, turn
 // taken up only once the server is bound (Prime, the takeover), so a reporter
 // asked for before then is a wiring defect.
 type createProgressForwarder struct {
-	mu     sync.RWMutex
-	target server.Server
-}
-
-func (f *createProgressForwarder) bind(target server.Server) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[server.Server]
 }
 
 // For answers OPID's reporter.
 func (f *createProgressForwarder) For(opID string) workspace.CreateProgress {
-	f.mu.RLock()
-	defer f.mu.RUnlock()
-	if f.target == nil {
+	target, ok := f.load()
+	if !ok {
 		panic("agent-repld: a held create's op was answered before the server was bound")
 	}
-	return f.target.CreateProgress(opID)
+	return target.CreateProgress(opID)
 }
 
 // queuedCreatesForwarder takes up the held creates through the workspace
 // verbs, which are built after the rollout controller that asks at its
 // takeover.
 type queuedCreatesForwarder struct {
-	mu     sync.RWMutex
-	target workspace.Verbs
-}
-
-func (f *queuedCreatesForwarder) bind(target workspace.Verbs) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[workspace.Verbs]
 }
 
 // RecoverQueuedCreates takes up the held creates.
 func (f *queuedCreatesForwarder) RecoverQueuedCreates(ctx context.Context) error {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	if target == nil {
+	target, ok := f.load()
+	if !ok {
 		return fmt.Errorf("agent-repld: the held creates were taken up before the workspace verbs existed")
 	}
 	return target.RecoverQueuedCreates(ctx)

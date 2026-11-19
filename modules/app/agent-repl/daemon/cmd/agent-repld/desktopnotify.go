@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
-	"sync"
 
 	"agent-repld/internal/desktopnotify"
 	"agent-repld/internal/dlog"
@@ -94,24 +93,15 @@ func speechPlatform() desktopnotify.SpeechPlatform {
 // controller exists, so the controller's topic is bound late, exactly as the
 // click forwarder's server is.
 type wifiStandingForwarder struct {
-	mu     sync.RWMutex
-	target desktopnotify.WifiStanding
-}
-
-func (f *wifiStandingForwarder) bind(target desktopnotify.WifiStanding) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[desktopnotify.WifiStanding]
 }
 
 // Latest answers the controller's last published standing. A banner is only
 // made once the daemon serves, after the controller is bound, so an unbound
 // forwarder is a broken boot order.
 func (f *wifiStandingForwarder) Latest() (*agentreplv1.PersistentWifiState, bool) {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	if target == nil {
+	target, ok := f.load()
+	if !ok {
 		panic("agent-repld: a banner was read aloud before the persistent-wifi controller was bound")
 	}
 	return target.Latest()
@@ -158,23 +148,14 @@ func (w bannerWorkspaces) Workspace(ctx context.Context, ws ids.WorkspaceID) (de
 // notifier is built before the server exists, so the server is bound late,
 // exactly as the host relay is.
 type clickForwarder struct {
-	mu     sync.RWMutex
-	target desktopnotify.ClickSink
-}
-
-func (f *clickForwarder) bind(target desktopnotify.ClickSink) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.target = target
+	lateBound[desktopnotify.ClickSink]
 }
 
 // NotificationClicked relays the click. A click can only follow a banner the
 // serving daemon posted, so an unbound forwarder is a broken boot order.
 func (f *clickForwarder) NotificationClicked(ws ids.WorkspaceID) {
-	f.mu.RLock()
-	target := f.target
-	f.mu.RUnlock()
-	if target == nil {
+	target, ok := f.load()
+	if !ok {
 		panic("agent-repld: a banner click arrived before the server was bound")
 	}
 	target.NotificationClicked(ws)
