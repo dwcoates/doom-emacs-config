@@ -655,6 +655,37 @@ message RosterRowAttention {}
 // never drawn as unread, and an unread one never as read.
 message RosterRowViewed {}
 
+// The VIEW DWELL: the editor is counting how long the user has viewed this
+// row's workspace, and when the count completes the row goes PARTIAL
+// (RosterRowViewed). The sidebar carries the row's NAME continuously from the
+// colour it draws now to the viewed grey over the dwell, so the name reaches
+// the grey exactly as the viewed marker arrives, instead of flipping to it
+// then. When the marker is withdrawn before the dwell completes, the name
+// returns to its unviewed colour at once.
+//
+// PRESENT ONLY WHERE THE DWELL WILL RECEDE THE NAME: the row is the selected
+// one, its `status` is a turn end (`done`, `interrupted` or `turn_failed`), its
+// last turn's result is unread, and the editor has reported a dwell counting
+// (agentrepl.v1.ReportViewDwell). A dwell the viewed marker would not follow
+// draws nothing, so the name never fades toward a grey it will not keep.
+//
+// WITHDRAWN on the push that ends the dwell, whichever way it ends: the
+// editor reports it viewed (the same push raises RosterRowViewed) or stopped,
+// the selection moves to another row, or the row's status changes. A status
+// change while the editor still views the workspace makes the editor count a
+// new dwell, so the marker returns with a fresh start.
+//
+// The client derives nothing from it but the name's place in the fade:
+// elapsed = now - started_at_ms, clamped to [0, length_ms].
+message RosterRowViewDwell {
+  // When the dwell started, epoch ms on the daemon's clock: the moment the
+  // daemon received the editor's report.
+  int64 started_at_ms = 1;
+  // How long the dwell lasts, in milliseconds, as the editor chose it. Always
+  // positive.
+  int64 length_ms = 2;
+}
+
 // The UNREAD-TURN-END marker of an `idle_async` row: the background outranks a
 // turn end whose result the user has NOT read yet. PRESENT exactly while the
 // row's `status` is `idle_async` and the last turn's result is unread; absent
@@ -2059,6 +2090,11 @@ message RosterRow {
   // The row's DISPLAY MODE: present = PARTIAL (the name recedes), absent =
   // FULL. See RosterRowViewed, which carries the mode's whole contract.
   optional RosterRowViewed viewed = 34;
+
+  // The row's VIEW DWELL: present while the editor counts the user's dwell on
+  // a row the dwell will draw PARTIAL, and absent otherwise. See
+  // RosterRowViewDwell, which carries its whole contract.
+  optional RosterRowViewDwell view_dwell = 75;
 
   // The row's UNREAD-TURN-END marker: present while the row is `idle_async`
   // over a turn end whose result is unread, naming that turn end, and absent
