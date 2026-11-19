@@ -3718,31 +3718,18 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
     (should (equal (list (agent-repl-test-input--notice) agent-repl-test-input--asked)
                    '("rollback: no prompt to roll back to" nil)))))
 
-(ert-deftest agent-repl-test-input-rollback-confirm-names-the-latest-prompt ()
-  "With nothing selected the question cancels the latest prompt, by excerpt."
+(ert-deftest agent-repl-test-input-rollback-confirm-latest-opens-on-the-files-sentence ()
+  "With nothing selected the question opens on the files sentence, naming no prompt."
   (agent-repl-test-input--with-rollback
       (agent-repl-test-input--plan-answer (agent-repl-test-input--plan)) nil nil
     ;; Act
     (agent-repl-rollback-keep-files)
     ;; Assert
-    (should (string-prefix-p "Cancel the latest prompt \"fix the bug\"."
-                             agent-repl-test-input--asked))))
+    (should (equal agent-repl-test-input--asked
+                   "Files are not restored (C-c M-RET restores them). Roll back? "))))
 
-(ert-deftest agent-repl-test-input-rollback-confirm-names-the-selected-prompt ()
-  "With a prompt selected the question rolls back to before it."
-  (agent-repl-test-input--with-rollback
-      (agent-repl-test-input--plan-answer
-       (agent-repl-test-input--plan
-        :target '(:chosen :selected :excerpt "add tests" :prompts-dropped 1)))
-      nil nil
-    ;; Act
-    (agent-repl-rollback-keep-files)
-    ;; Assert
-    (should (string-prefix-p "Roll back to before the selected prompt \"add tests\"."
-                             agent-repl-test-input--asked))))
-
-(ert-deftest agent-repl-test-input-rollback-confirm-counts-prompts-dropped ()
-  "More than one prompt dropped is counted in the question."
+(ert-deftest agent-repl-test-input-rollback-confirm-selected-opens-on-the-files-sentence ()
+  "With a prompt selected the question opens on the files sentence, naming no prompt."
   (agent-repl-test-input--with-rollback
       (agent-repl-test-input--plan-answer
        (agent-repl-test-input--plan
@@ -3751,7 +3738,57 @@ CONFIRM is what the y/n question answers; ROLL-BACK is RollBack's answer."
     ;; Act
     (agent-repl-rollback-keep-files)
     ;; Assert
-    (should (string-search "(3 prompts are dropped)" agent-repl-test-input--asked))))
+    (should (equal agent-repl-test-input--asked
+                   "Files are not restored (C-c M-RET restores them). Roll back? "))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-keep-arm-is-the-files-sentence-alone ()
+  "Keeping files, the question opens on its files sentence and ends on \"Roll back? \", with no excerpt."
+  (let ((asked (agent-repl--input-rollback-confirmation
+                (agent-repl-test-input--plan
+                 :target '(:chosen :selected :excerpt "add tests" :prompts-dropped 3)))))
+    (should (string-prefix-p "Files are not restored (C-c M-RET restores them)." asked))
+    (should-not (string-search "add tests" asked))
+    (should-not (string-search "Roll back to before" asked))
+    (should (string-suffix-p "Roll back? " asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-restore-arm-is-the-files-sentence-alone ()
+  "Restoring files, the question opens on its files sentence and ends on \"Roll back? \", with no excerpt."
+  (let ((asked (agent-repl--input-rollback-confirmation
+                (agent-repl-test-input--plan
+                 :target '(:chosen :named :excerpt "add tests" :prompts-dropped 3)
+                 :files '(:arm :restored :value (:cancel-detached nil))))))
+    (should (string-prefix-p "Files the agent's edit tools changed are restored; shell changes and git commits are not (C-c C-RET leaves files alone)."
+                             asked))
+    (should-not (string-search "add tests" asked))
+    (should-not (string-search "Roll back to before" asked))
+    (should (string-suffix-p "Roll back? " asked))))
+
+(ert-deftest agent-repl-test-input-rollback-confirm-side-effect-follows-the-files-sentence ()
+  "A side effect comes after the files sentence and before \"Roll back? \"."
+  (should (equal (substring-no-properties
+                  (agent-repl--input-rollback-confirmation
+                   (agent-repl-test-input--plan :interrupt t)))
+                 "Files are not restored (C-c M-RET restores them). The running turn will be interrupted. Roll back? ")))
+
+(ert-deftest agent-repl-test-input-rollback-extras-empty-without-side-effects ()
+  "A plan that destroys nothing more, and no resend, adds nothing."
+  (should (equal (agent-repl--input-rollback-extras (agent-repl-test-input--plan) nil) "")))
+
+(ert-deftest agent-repl-test-input-rollback-extras-lists-side-effects-then-resend ()
+  "Side effects come in order, each led by a space, the resend note last."
+  (should (equal (substring-no-properties
+                  (agent-repl--input-rollback-extras
+                   (agent-repl-test-input--plan :interrupt t :drop-queued '(:prompts 2))
+                   (agent-repl-test-input--resend-of "x")))
+                 " The running turn will be interrupted. 2 queued prompts will be dropped. The composer's words are sent in its place.")))
+
+(ert-deftest agent-repl-test-input-rollback-extras-side-effects-in-red-resend-not ()
+  "The side effects wear the `error' face and the resend note does not."
+  (let ((extras (agent-repl--input-rollback-extras
+                 (agent-repl-test-input--plan :interrupt t)
+                 (agent-repl-test-input--resend-of "x"))))
+    (should (eq (agent-repl-test-input--face-of extras "The running turn") 'error))
+    (should-not (agent-repl-test-input--face-of extras "The composer's words"))))
 
 (ert-deftest agent-repl-test-input-rollback-confirm-keep-names-the-other-key ()
   "Keeping files says so and names the key that restores them."
@@ -4181,7 +4218,7 @@ The candidates offered are kept in `agent-repl-test-input--offered'."
     ;; Assert
     (should (equal (plist-get (cadr (assq :plan agent-repl-test-input--rollback-calls)) :prompt)
                    '(:value "p1")))
-    (should (string-prefix-p "Roll back to before the chosen prompt \"older\""
+    (should (string-prefix-p "Files are not restored (C-c M-RET restores them)."
                              agent-repl-test-input--asked))
     (should (agent-repl-test-input--roll-back-sent))))
 
