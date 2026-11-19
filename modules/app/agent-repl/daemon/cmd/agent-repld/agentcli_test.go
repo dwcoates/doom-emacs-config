@@ -3655,6 +3655,37 @@ func TestMediationEscalatesWithItsFindingsWhenAsked(t *testing.T) {
 	}
 }
 
+func TestMediationApprovesPastTheGroupsItIgnoresWhenAsked(t *testing.T) {
+	tests := []struct {
+		name        string
+		args        []string
+		stdin       string
+		wantIgnored int
+	}{
+		{name: "an approval on its summary alone", args: []string{"mediation", "approve", "-summary", "clean"}},
+		{name: "an approval naming its ignored groups", args: []string{"mediation", "approve", "-problems", "-summary", "clean"}, stdin: aProblemJSON, wantIgnored: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+			f.stdin = tt.stdin
+
+			// Act
+			code := f.run(mergeQueueNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			a := only[*agentreplv1.UpdateMergeQueueRequest](t, f).GetMediation().GetApprove()
+			if a == nil || len(a.GetIgnored()) != tt.wantIgnored {
+				t.Fatalf("approve = %v, want %d ignored groups", a, tt.wantIgnored)
+			}
+		})
+	}
+}
+
 func TestMediationRefusesAMalformedCall(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -3670,6 +3701,7 @@ func TestMediationRefusesAMalformedCall(t *testing.T) {
 		{name: "a dispatch with an unknown field", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: `[{"statement":"s","evidence":["e"],"cause":"c"}]`, want: "as a JSON list"},
 		{name: "a dispatch of no problem", args: []string{"mediation", "dispatch", "-summary", "x"}, stdin: "[]", want: "at least one problem"},
 		{name: "a dispatch reading -problems", args: []string{"mediation", "dispatch", "-problems", "-summary", "x"}, stdin: aProblemJSON, want: "a dispatch always reads its problems"},
+		{name: "an approval whose ignored groups are not JSON", args: []string{"mediation", "approve", "-problems", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
 		{name: "an escalation whose problems are not JSON", args: []string{"mediation", "escalate", "-problems", "-summary", "x"}, stdin: "the reaper", want: "as a JSON list"},
 	}
 	for _, tt := range tests {

@@ -1131,6 +1131,10 @@ func TestUpdateMergeQueueHandsTheIntakesDecisionOn(t *testing.T) {
 		{name: "an approval", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{}}},
 			want: merge.Decision{Kind: merge.MediationApprove, Summary: "clean"}},
+		{name: "an approval naming its ignored groups", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{
+				Ignored: []*agentreplv1.DeployProblem{{Statement: "the reaper errors", Evidence: []string{"{record}"}}}}}},
+			want: merge.Decision{Kind: merge.MediationApprove, Summary: "clean", Problems: problems}},
 		{name: "an escalation", decision: &agentreplv1.UpdateMergeQueueMediation{Summary: "clean",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{}}},
 			want: merge.Decision{Kind: merge.MediationEscalate, Summary: "clean"}},
@@ -1264,6 +1268,9 @@ func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
 		{name: "an escalation's problem with no evidence", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Escalate{Escalate: &agentreplv1.UpdateMergeQueueMediationEscalate{
 				Problems: []*agentreplv1.DeployProblem{{Statement: "s"}}}}}},
+		{name: "an approval's ignored group with no evidence", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
+			Decision: &agentreplv1.UpdateMergeQueueMediation_Approve{Approve: &agentreplv1.UpdateMergeQueueMediationApprove{
+				Ignored: []*agentreplv1.DeployProblem{{Statement: "s"}}}}}},
 		{name: "a blank evidence record", requester: agent(), mediation: &agentreplv1.UpdateMergeQueueMediation{Summary: "x",
 			Decision: &agentreplv1.UpdateMergeQueueMediation_Dispatch{Dispatch: &agentreplv1.UpdateMergeQueueMediationDispatch{
 				Problems: []*agentreplv1.DeployProblem{{Statement: "s", Evidence: []string{" "}}}}}}},

@@ -199,6 +199,9 @@ export const EXEMPT_TOOLS: ReadonlySet<string> = new Set([
   "TaskList",
   // Deferred-tool discovery: bookkeeping about what the model MAY call.
   "ToolSearch",
+  // The agent-to-agent roster read: bookkeeping about which sessions the
+  // model MAY message. The message itself is modelled (`SendMessage`).
+  "ListAgents",
   // Not modelled by this contract at all.
   "NotebookEdit",
   "REPL",

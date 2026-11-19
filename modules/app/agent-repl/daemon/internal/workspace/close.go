@@ -196,7 +196,10 @@ func (v *verbs) takeSelfClose(ctx context.Context, log dlog.Logger, ws ids.Works
 	if !isCloseRefusal(err) {
 		return err
 	}
-	log.Warn(opClose, "the close the workspace asked for was refused when its turn ended; it stays open", dlog.Context{"cause": err.Error()})
+	// A REFUSED SELF-CLOSE IS AN ANSWER, NOT A FAULT (owner ruling,
+	// 2026-11-18): the refusal names a standing reason (an open pull request
+	// it owns, a main workspace), and the workspace is told it, so it is INFO.
+	log.Info(opClose, "the close the workspace asked for was refused when its turn ended; it stays open", dlog.Context{"cause": err.Error()})
 	v.tellSelfCloseRefused(ctx, log, ws, err)
 	return nil
 }

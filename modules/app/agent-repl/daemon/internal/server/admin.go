@@ -443,6 +443,8 @@ func clientLevel(record *agentreplv1.ClientLogRecord) string {
 func decisionOf(m *agentreplv1.UpdateMergeQueueMediation) merge.Decision {
 	d := merge.Decision{Kind: merge.MediationApprove, Summary: m.GetSummary()}
 	switch m.GetDecision().(type) {
+	case *agentreplv1.UpdateMergeQueueMediation_Approve:
+		d.Problems = problemsOf(m.GetApprove().GetIgnored())
 	case *agentreplv1.UpdateMergeQueueMediation_Escalate:
 		d.Kind, d.Problems = merge.MediationEscalate, problemsOf(m.GetEscalate().GetProblems())
 	case *agentreplv1.UpdateMergeQueueMediation_Dispatch:

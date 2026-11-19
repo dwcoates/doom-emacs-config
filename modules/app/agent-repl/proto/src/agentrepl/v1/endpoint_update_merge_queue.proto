@@ -185,8 +185,15 @@ message UpdateMergeQueueMediation {
   // escalation's banner reads it, and every decision is recorded with it.
   string summary = 3;
 }
-// The approval. No fields: the summary says what was checked.
-message UpdateMergeQueueMediationApprove {}
+// The approval. The summary says what was checked.
+message UpdateMergeQueueMediationApprove {
+  // The groups the mediator judged ignorable and approves past, each quoting
+  // at least one of its records: a one-off user-driven error, or a record of
+  // the mediator's probably-transient table. They do not count against the
+  // approval and are not taken on, so a group that keeps coming back is put
+  // to the mediator again. EMPTY when the window holds only groups taken on.
+  repeated DeployProblem ignored = 1;
+}
 // The escalation. The intake never talks to the user itself (owner ruling,
 // 2026-11-15): the daemon makes a visible escalation workspace whose prompt
 // is the summary and these findings with their evidence, and a desktop

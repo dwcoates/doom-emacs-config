@@ -939,9 +939,15 @@ func (*UpdateMergeQueueMediation_Escalate) isUpdateMergeQueueMediation_Decision(
 
 func (*UpdateMergeQueueMediation_Dispatch) isUpdateMergeQueueMediation_Decision() {}
 
-// The approval. No fields: the summary says what was checked.
+// The approval. The summary says what was checked.
 type UpdateMergeQueueMediationApprove struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The groups the mediator judged ignorable and approves past, each quoting
+	// at least one of its records: a one-off user-driven error, or a record of
+	// the mediator's probably-transient table. They do not count against the
+	// approval and are not taken on, so a group that keeps coming back is put
+	// to the mediator again. EMPTY when the window holds only groups taken on.
+	Ignored       []*DeployProblem `protobuf:"bytes,1,rep,name=ignored,proto3" json:"ignored,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -974,6 +980,13 @@ func (x *UpdateMergeQueueMediationApprove) ProtoReflect() protoreflect.Message {
 // Deprecated: Use UpdateMergeQueueMediationApprove.ProtoReflect.Descriptor instead.
 func (*UpdateMergeQueueMediationApprove) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *UpdateMergeQueueMediationApprove) GetIgnored() []*DeployProblem {
+	if x != nil {
+		return x.Ignored
+	}
+	return nil
 }
 
 // The escalation. The intake never talks to the user itself (owner ruling,
@@ -2240,8 +2253,9 @@ const file_agentrepl_v1_endpoint_update_merge_queue_proto_rawDesc = "" +
 	"\bdispatch\x18\x04 \x01(\v2/.agentrepl.v1.UpdateMergeQueueMediationDispatchH\x00R\bdispatch\x12\x18\n" +
 	"\asummary\x18\x03 \x01(\tR\asummaryB\n" +
 	"\n" +
-	"\bdecision\"\"\n" +
-	" UpdateMergeQueueMediationApprove\"\\\n" +
+	"\bdecision\"Y\n" +
+	" UpdateMergeQueueMediationApprove\x125\n" +
+	"\aignored\x18\x01 \x03(\v2\x1b.agentrepl.v1.DeployProblemR\aignored\"\\\n" +
 	"!UpdateMergeQueueMediationEscalate\x127\n" +
 	"\bproblems\x18\x01 \x03(\v2\x1b.agentrepl.v1.DeployProblemR\bproblems\"x\n" +
 	"!UpdateMergeQueueMediationDispatch\x127\n" +
@@ -2374,30 +2388,31 @@ var file_agentrepl_v1_endpoint_update_merge_queue_proto_depIdxs = []int32{
 	12, // 20: agentrepl.v1.UpdateMergeQueueMediation.approve:type_name -> agentrepl.v1.UpdateMergeQueueMediationApprove
 	13, // 21: agentrepl.v1.UpdateMergeQueueMediation.escalate:type_name -> agentrepl.v1.UpdateMergeQueueMediationEscalate
 	14, // 22: agentrepl.v1.UpdateMergeQueueMediation.dispatch:type_name -> agentrepl.v1.UpdateMergeQueueMediationDispatch
-	15, // 23: agentrepl.v1.UpdateMergeQueueMediationEscalate.problems:type_name -> agentrepl.v1.DeployProblem
-	15, // 24: agentrepl.v1.UpdateMergeQueueMediationDispatch.problems:type_name -> agentrepl.v1.DeployProblem
-	17, // 25: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
-	18, // 26: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
-	19, // 27: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
-	20, // 28: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
-	21, // 29: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
-	22, // 30: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
-	23, // 31: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
-	24, // 32: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
-	25, // 33: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
-	26, // 34: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
-	27, // 35: agentrepl.v1.UpdateMergeQueueError.not_mediator:type_name -> agentrepl.v1.UpdateMergeQueueNotMediator
-	28, // 36: agentrepl.v1.UpdateMergeQueueError.no_mediation_owed:type_name -> agentrepl.v1.UpdateMergeQueueNoMediationOwed
-	33, // 37: agentrepl.v1.UpdateMergeQueueError.remediation_bound_reached:type_name -> agentrepl.v1.UpdateMergeQueueRemediationBoundReached
-	31, // 38: agentrepl.v1.UpdateMergeQueueError.problems_unowned:type_name -> agentrepl.v1.UpdateMergeQueueProblemsUnowned
-	32, // 39: agentrepl.v1.UpdateMergeQueueError.problems_recurring:type_name -> agentrepl.v1.UpdateMergeQueueProblemsRecurring
-	29, // 40: agentrepl.v1.UpdateMergeQueueError.no_escalation_held:type_name -> agentrepl.v1.UpdateMergeQueueNoEscalationHeld
-	30, // 41: agentrepl.v1.UpdateMergeQueueError.no_repair_turn:type_name -> agentrepl.v1.UpdateMergeQueueNoRepairTurn
-	42, // [42:42] is the sub-list for method output_type
-	42, // [42:42] is the sub-list for method input_type
-	42, // [42:42] is the sub-list for extension type_name
-	42, // [42:42] is the sub-list for extension extendee
-	0,  // [0:42] is the sub-list for field type_name
+	15, // 23: agentrepl.v1.UpdateMergeQueueMediationApprove.ignored:type_name -> agentrepl.v1.DeployProblem
+	15, // 24: agentrepl.v1.UpdateMergeQueueMediationEscalate.problems:type_name -> agentrepl.v1.DeployProblem
+	15, // 25: agentrepl.v1.UpdateMergeQueueMediationDispatch.problems:type_name -> agentrepl.v1.DeployProblem
+	17, // 26: agentrepl.v1.UpdateMergeQueueResponse.success:type_name -> agentrepl.v1.UpdateMergeQueueSuccess
+	18, // 27: agentrepl.v1.UpdateMergeQueueResponse.error:type_name -> agentrepl.v1.UpdateMergeQueueError
+	19, // 28: agentrepl.v1.UpdateMergeQueueError.unknown_workspace:type_name -> agentrepl.v1.UpdateMergeQueueUnknownWorkspace
+	20, // 29: agentrepl.v1.UpdateMergeQueueError.workspace_ref_mismatch:type_name -> agentrepl.v1.UpdateMergeQueueWorkspaceRefMismatch
+	21, // 30: agentrepl.v1.UpdateMergeQueueError.transferring_away:type_name -> agentrepl.v1.UpdateMergeQueueTransferringAway
+	22, // 31: agentrepl.v1.UpdateMergeQueueError.not_yet_adopted:type_name -> agentrepl.v1.UpdateMergeQueueNotYetAdopted
+	23, // 32: agentrepl.v1.UpdateMergeQueueError.already_paused:type_name -> agentrepl.v1.UpdateMergeQueueAlreadyPaused
+	24, // 33: agentrepl.v1.UpdateMergeQueueError.not_paused:type_name -> agentrepl.v1.UpdateMergeQueueNotPaused
+	25, // 34: agentrepl.v1.UpdateMergeQueueError.no_such_queued_merge:type_name -> agentrepl.v1.UpdateMergeQueueNoSuchQueuedMerge
+	26, // 35: agentrepl.v1.UpdateMergeQueueError.unknown_repository:type_name -> agentrepl.v1.UpdateMergeQueueUnknownRepository
+	27, // 36: agentrepl.v1.UpdateMergeQueueError.not_mediator:type_name -> agentrepl.v1.UpdateMergeQueueNotMediator
+	28, // 37: agentrepl.v1.UpdateMergeQueueError.no_mediation_owed:type_name -> agentrepl.v1.UpdateMergeQueueNoMediationOwed
+	33, // 38: agentrepl.v1.UpdateMergeQueueError.remediation_bound_reached:type_name -> agentrepl.v1.UpdateMergeQueueRemediationBoundReached
+	31, // 39: agentrepl.v1.UpdateMergeQueueError.problems_unowned:type_name -> agentrepl.v1.UpdateMergeQueueProblemsUnowned
+	32, // 40: agentrepl.v1.UpdateMergeQueueError.problems_recurring:type_name -> agentrepl.v1.UpdateMergeQueueProblemsRecurring
+	29, // 41: agentrepl.v1.UpdateMergeQueueError.no_escalation_held:type_name -> agentrepl.v1.UpdateMergeQueueNoEscalationHeld
+	30, // 42: agentrepl.v1.UpdateMergeQueueError.no_repair_turn:type_name -> agentrepl.v1.UpdateMergeQueueNoRepairTurn
+	43, // [43:43] is the sub-list for method output_type
+	43, // [43:43] is the sub-list for method input_type
+	43, // [43:43] is the sub-list for extension type_name
+	43, // [43:43] is the sub-list for extension extendee
+	0,  // [0:43] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_update_merge_queue_proto_init() }

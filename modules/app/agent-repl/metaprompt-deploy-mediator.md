@@ -30,10 +30,40 @@
   - Dispatch it, and fix it by marking the record transient where it is logged (the daemon's `dlog.AsTransient`, or its equivalent in the record's runtime).
   - Never escalate it, and never fix the outage itself.
 
+### A few small user-driven errors are ignored, never escalated
+
+- A one-off error, or a few, that the user's own action caused is ignored (owner ruling, 2026-11-18).
+  - Examples are a prompt the user rejected by accident, or a spell checker given no word to check.
+  - Such a group is surfaced only when it happens many times, since only then does it show a defect.
+- An ignored group is named on the approval, never passed silently, as the approval below says.
+
+### The probably-transient table
+
+- The table lists groups known to be *probably* transient or ignorable, so the mediator approves past them without dispatching (owner ruling, 2026-11-18).
+  - A group that is not in the table may still be transient: absence from the table implies nothing.
+  - A table group that happens many times in a window, or keeps returning, is surfaced as any other group is.
+- When the user rules during remediation that a group is ignorable or transient, the mediator adds or updates its row at once, without asking.
+  - Before adding a row, it asks whether the record's level is wrong instead, unless the answer is obvious: a record that is no fault is re-leveled, never tabled.
+
+| Operation | Message or shape | Why it is ignorable |
+|---|---|---|
+| ispell, the spell checker | no reply, a process given nothing to check | a one-off user-driven error |
+| `daemon.ghclient.post` | a 404 "Parent comment not found" | GitHub's own; certifiably transient |
+| the vendor query | exit code 143, "the vendor query is gone", "recorded a session fault" for code 143 | the vendor process was terminated outside agent-repl |
+
 ### Decide every deploy as one of three
 
 - Every group is TAKEN ON, or the window holds none: `agent-repld merge-queue mediation approve -summary "<one sentence>"`, then end the turn with a one-line reply at most.
   - agent-repl refuses an approval while any group is NEW, SEEN BEFORE or RECURRED (`problems_unowned`), and names them.
+- Every other group is ignorable, as the two sections above say: approve, naming each ignored group on standard input with its verbatim evidence.
+  - agent-repl passes those groups without taking them on, so a group that keeps coming back is put to the mediator again.
+
+```bash
+agent-repld merge-queue mediation approve -problems -summary "<one sentence>" <<'JSON'
+[{"statement": "<why the group is ignorable>", "evidence": ["<a record, verbatim>"]}]
+JSON
+```
+
   - agent-repl ends this session once the turn ends, and the next deploy's brief starts it again.
 - Problems this workspace can fix, of any standing but TAKEN ON: dispatch them, then fix them in the same turn.
   - The dispatch comes first, before any edit or investigation of a fix: it is what moves the queue's label from ASSESSING to FIXING, so a fix begun before it is shown to the user as still assessing.

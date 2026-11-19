@@ -617,6 +617,7 @@ describe("disposition", () => {
 
   it("is EXEMPT for a built-in the contract deliberately does not carry", () => {
     expect(dispositionOf(TOOL_CONVERTERS, "TaskList").case).toBe("exempt");
+    expect(dispositionOf(TOOL_CONVERTERS, "ListAgents").case).toBe("exempt");
   });
 
   it("is ENGINE-OWNED for the ask the permission gate holds", () => {
