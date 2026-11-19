@@ -58,7 +58,10 @@ export interface JumpSite {
 /**
  * Select WORKSPACE from HOST, drawing a refusal inside HOST. REVEAL, when
  * given, is a row of the workspace's root feed its page brings on screen and
- * opens (`SelectInEditorRequest.reveal`).
+ * opens (`SelectInEditorRequest.reveal`). THE JUMP IS A LINK FOLLOWED FROM
+ * THIS PAGE, so the select names the page's own workspace as the one it was
+ * followed from (`SelectInEditorRequest.followed_from`), which its editor
+ * counts viewed.
  */
 export async function jumpToWorkspace(
   host: HTMLElement,
@@ -77,7 +80,7 @@ export async function jumpToWorkspace(
     response = await callUnary(
       ctx,
       "SelectInEditor",
-      (client) => client.selectInEditor(buildSelectInEditorRequest(workspace, reveal)),
+      (client) => client.selectInEditor(buildSelectInEditorRequest(workspace, reveal, ctx.workspace)),
       SelectInEditorResponseSchema,
     );
   } catch (err) {

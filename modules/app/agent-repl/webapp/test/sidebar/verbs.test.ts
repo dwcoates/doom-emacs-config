@@ -113,6 +113,15 @@ describe("the requests each verb is", () => {
     expect(buildSelectInEditorRequest(TARGET_WS, create(FeedIdSchema, { value: "bubble-1" })).reveal?.value).toBe("bubble-1");
   });
 
+  it("names no workspace SelectInEditor was followed from when none is given", () => {
+    expect(buildSelectInEditorRequest(TARGET_WS).followedFrom).toBeUndefined();
+  });
+
+  it("names the workspace SelectInEditor was followed from", () => {
+    const source = create(WorkspaceRefSchema, { id: "ws-3", dir: "/w/three" });
+    expect(buildSelectInEditorRequest(TARGET_WS, undefined, source).followedFrom).toEqual(source);
+  });
+
   it("addresses OpenWorkspace with the row's echoed identity", () => {
     expect(buildOpenWorkspaceRequest(TARGET_WS).workspace).toEqual(TARGET_WS);
   });
