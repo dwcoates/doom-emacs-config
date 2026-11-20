@@ -151,6 +151,25 @@ const unheldSettledRoundsDDL = `
 UPDATE merge_tab_intervals SET held_since = NULL WHERE held_since IS NOT NULL AND ended_at IS NOT NULL;
 `
 
+// settledRoundsUnheldDDL is the layout-174 addition: A SETTLED ROUND IS
+// NEVER HELD is the table's own rule rather than each writer's care. Two
+// triggers abort any insert or update that would leave a round both settled
+// and held, so a writer that settles a round without clearing its hold fails
+// loudly at its write rather than storing a row every ledger read refuses
+// (2026-11-17: the orphan sweep settled sidebar-roster-streams' held fixes
+// round and left its hold, and its next merge aborted on the decode). It
+// follows layout 170, which cleared every such row already stored. IT IS
+// ADDITIVE: no column changes, and the previous build's writers already
+// clear a round's hold as they settle it, so none of them meets the triggers.
+const settledRoundsUnheldDDL = `
+CREATE TRIGGER merge_tab_intervals_settled_unheld_insert BEFORE INSERT ON merge_tab_intervals
+WHEN NEW.ended_at IS NOT NULL AND NEW.held_since IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'merge_tab_intervals: a settled round is never held'); END;
+CREATE TRIGGER merge_tab_intervals_settled_unheld_update BEFORE UPDATE OF ended_at, held_since ON merge_tab_intervals
+WHEN NEW.ended_at IS NOT NULL AND NEW.held_since IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'merge_tab_intervals: a settled round is never held'); END;
+`
+
 // TabOutcomeRestarted is the outcome of a round a later step cut before it
 // settled (RecordTabInterval).
 const TabOutcomeRestarted = "restarted"
@@ -160,6 +179,8 @@ const TabOutcomeRestarted = "restarted"
 // `restarted` at the next round's start, and every live round of a ledger no
 // queued merge draws any more is settled at its own start, so the store holds
 // at most one live round per ledger, the current one.
+// It names no hold because it runs before layout 157 adds the column, so no
+// round it settles can be held.
 const settledLiveRoundsDDL = `
 UPDATE merge_tab_intervals SET outcome = 'restarted',
   ended_at = COALESCE((SELECT MIN(later.started_at) FROM merge_tab_intervals AS later
