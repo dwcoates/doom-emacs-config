@@ -863,7 +863,13 @@ export function drawHeadClock(
 }
 
 /**
- * A line wearing CLASSNAME whose click selects the workspace U is credited to
+ * The class every line credited to a workspace wears (`drawSubjectControl`):
+ * the lines the selected workspace's highlight is laid over (`queue-selection.ts`).
+ */
+export const MERGE_QUEUE_SUBJECT_CLASS = "sb-mq-subject";
+
+/**
+ * A line wearing CLASSNAME and MERGE_QUEUE_SUBJECT_CLASS whose click selects the workspace U is credited to
  * exactly as a row's click does, and, when U names one, opens its merge's
  * bubble in that workspace's feed (`SelectInEditorRequest.reveal`). It is selectable as a row's line is (`data-select`), never a
  * button.
@@ -871,7 +877,7 @@ export function drawHeadClock(
 function drawSubjectControl(u: RosterMergeQueueSubject, sc: SidebarContext, className: string, path: string): HTMLElement {
   const workspace = requireMessage(u.workspace, `${path}.workspace`);
   const control = document.createElement("div");
-  control.className = className;
+  control.className = `${className} ${MERGE_QUEUE_SUBJECT_CLASS}`;
   control.setAttribute("data-select", "");
   control.setAttribute("data-workspace", workspace.id);
   control.addEventListener("click", (event) => {

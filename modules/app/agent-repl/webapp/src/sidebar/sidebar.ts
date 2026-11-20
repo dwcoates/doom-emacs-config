@@ -64,6 +64,7 @@ import { createSelectionFade } from "./selection-fade.js";
 import { createFoldFade } from "./fold-fade.js";
 import { createRailScrollKeep } from "./scroll-keep.js";
 import { createSelectionScroll, RAIL_BODY_CLASS } from "./selection-scroll.js";
+import { createQueueSelectionScroll } from "./queue-selection.js";
 import type { RosterVersion, WorkspaceRoster } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
 /** What every mount answers with. */
@@ -239,6 +240,10 @@ function mountSidebarIn(
   // once per selection, after a draw has fitted the bands and whenever the
   // webhost moves the highlight ahead of the roster.
   const selectionScroll = createSelectionScroll();
+  // THE SELECTED WORKSPACE'S MERGES ARE HIGHLIGHTED IN THE MERGE QUEUE AND
+  // SCROLLED INTO ITS VIEW, then back once the selection leaves the queue
+  // (queue-selection.ts), on every draw and every `markShown`.
+  const queueSelection = createQueueSelectionScroll();
   // A REDRAW NEVER MOVES THE RAIL (scroll-keep.ts): every viewport is read
   // before a draw and put back once the bands are fitted.
   const scrollKeep = createRailScrollKeep();
@@ -516,6 +521,7 @@ function mountSidebarIn(
     scrollKeep.restore(body, chatShown ? "chat" : "workspaces");
     // Followed once the bands are fitted, so it scrolls the viewport they drew.
     selectionScroll.follow(body);
+    queueSelection.follow(body, shownAhead ?? current?.id ?? null);
     // Looked at once the viewports stand where they will, so a group's older
     // deploys are in view or not as the reader sees them.
     rail.deploysMore.check();
@@ -542,6 +548,7 @@ function mountSidebarIn(
       }
       rail.selectionFade.highlight(id);
       selectionScroll.follow(body);
+      queueSelection.follow(body, id);
       log.debug("the webhost showed a page; the rail highlights its row ahead of the roster", {
         operation: "sidebar.shown-ahead",
         context: { workspace: id, rows },

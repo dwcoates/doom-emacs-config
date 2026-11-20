@@ -70,6 +70,7 @@ import {
   queueHoverText,
   queueCount,
   queueLine,
+  MERGE_QUEUE_SUBJECT_CLASS,
 } from "../../src/sidebar/merge-queue-view.js";
 import { drawRosterMergeQueueSection } from "../../src/sidebar/roster.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
@@ -546,9 +547,9 @@ describe("drawRosterMergeQueue", () => {
     const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w3"), waiting: [waitingMerge("w1"), waitingMerge("w2")] });
     const body = drawRosterMergeQueue(queue, REPOSITORY, sc, "queue");
     expect([...body.children].map((el) => [el.className, el.getAttribute("data-workspace")])).toEqual([
-      [MERGE_QUEUE_HEAD_CLASS, "w3"],
-      [MERGE_QUEUE_WAITING_CLASS, "w1"],
-      [MERGE_QUEUE_WAITING_CLASS, "w2"],
+      [`${MERGE_QUEUE_HEAD_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w3"],
+      [`${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w1"],
+      [`${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w2"],
     ]);
   });
 
@@ -600,14 +601,34 @@ describe("drawRosterMergeQueue", () => {
       sc,
       "queue",
     );
-    const out = `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS}`;
+    const out = `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`;
     expect([...body.children].map((el) => [el.className, el.querySelector(".sb-mq-name")?.textContent])).toEqual([
-      [MERGE_QUEUE_HEAD_CLASS, "w1"],
+      [`${MERGE_QUEUE_HEAD_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w1"],
       [out, "w2"],
       [out, "w3"],
       [out, "w4"],
       [out, "w5"],
-      [MERGE_QUEUE_WAITING_CLASS, "w6"],
+      [`${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w6"],
+    ]);
+  });
+
+  it("marks every line credited to a workspace, of every kind, as a subject line the selection highlight is laid over", () => {
+    // Arrange
+    const { sc } = offQueueDaemon();
+    const queue = create(RosterRepoMergeQueueSchema, {
+      head: mergingHead("w1"),
+      fixingTests: fixingTestsMerge("w2", NOW),
+      resolvingConflicts: [resolvingConflictsMerge("w3", NOW)],
+      awaitingFixingTests: [awaitingFixingTestsMerge("w4", NOW)],
+      waiting: [waitingMerge("w5")],
+      github: [githubStanding("w6", 1, 2, NOW)],
+      offQueue: [offQueue("w7", "evicted")],
+    });
+    // Act
+    const body = drawRosterMergeQueue(queue, REPOSITORY, sc, "queue");
+    // Assert: every workspace line wears the class, and nothing else does.
+    expect([...body.querySelectorAll(`.${MERGE_QUEUE_SUBJECT_CLASS}`)].map((el) => el.getAttribute("data-workspace"))).toEqual([
+      "w1", "w2", "w3", "w4", "w5", "w6", "w7",
     ]);
   });
 

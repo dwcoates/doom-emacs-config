@@ -13,6 +13,7 @@ import {
   contextSpan,
   createSelectionScroll,
   RAIL_BODY_CLASS,
+  scrollLineAmong,
   scrollLineIntoBand,
   SELECTION_CONTEXT_ROWS,
 } from "../../src/sidebar/selection-scroll.js";
@@ -363,6 +364,55 @@ describe("scrollLineIntoBand keeps the selected row's neighbors in view", () => 
     const record = await forwardedRecord(capture, "sidebar.selection-scroll.unlisted");
     expect(record.level.case).toBe("error");
     expect(record.context).toMatchObject({ workspace: "ws-6", lines: 9 });
+  });
+});
+
+describe("scrollLineAmong", () => {
+  it("keeps the neighbors among the lines it is given, not the viewport's rows", () => {
+    // Arrange: only every other row counts as a line.
+    const b = band({ lines: 30, view: 7 });
+    const lines = Array.from({ length: 15 }, (_, i) => b.line(`ws-${i * 2}`));
+    // Act
+    const moved = scrollLineAmong(b.line("ws-20"), lines);
+    // Assert: ws-14, three lines above, is as far up as a 7-row view keeps beside ws-20.
+    expect(moved).toEqual({ from: 0, to: 14 * ROW });
+  });
+
+  it("leaves a line that shows whole with its neighbors where it is", () => {
+    // Arrange
+    const b = band({ lines: 10, view: 10 });
+    // Act
+    const moved = scrollLineAmong(b.line("ws-3"), [b.line("ws-2"), b.line("ws-3"), b.line("ws-4")]);
+    // Assert
+    expect([moved, b.region.scrollTop]).toEqual([null, 0]);
+  });
+
+  it("refuses a line not among the lines it is given, naming its workspace, logging it at ERROR and moving nothing", async () => {
+    // Arrange
+    const capture = captureLogRecords();
+    const b = band({ lines: 10, view: 3 });
+    const line = document.createElement("div");
+    line.setAttribute("data-workspace", "w-queue");
+    b.region.appendChild(line);
+    // Act
+    const act = (): unknown => scrollLineAmong(line, [b.line("ws-0")]);
+    // Assert
+    expect(act).toThrow(/not among its viewport's laid-out lines/);
+    expect(b.region.scrollTop).toBe(0);
+    const record = await forwardedRecord(capture, "sidebar.selection-scroll.unlisted");
+    expect(record.context).toMatchObject({ workspace: "w-queue", lines: 1 });
+  });
+
+  it("is the scroll a row's selection takes: scrollLineIntoBand moves as scrollLineAmong does over the band's laid-out rows", () => {
+    // Arrange: two identical bands.
+    const rows = band({ lines: 30, view: 7 });
+    const among = band({ lines: 30, view: 7 });
+    const lines = Array.from({ length: 30 }, (_, i) => among.line(`ws-${i}`));
+    // Act
+    const viaRow = scrollLineIntoBand(rows.line("ws-20"));
+    const viaAmong = scrollLineAmong(among.line("ws-20"), lines);
+    // Assert
+    expect(viaRow).toEqual(viaAmong);
   });
 });
 
