@@ -114,8 +114,16 @@ func ActivateArgv(app string) []string {
 	return []string{"-e", fmt.Sprintf("tell application %q to activate", app)}
 }
 
-// Open implements Opener.
-func (o *opener) Open(ctx context.Context, url, accountEmail string) error {
+// Open implements Opener: the open runs on a copy of the opener whose every
+// record goes through LOG, the caller's.
+func (o *opener) Open(ctx context.Context, log dlog.Logger, url, accountEmail string) error {
+	call := *o
+	call.log = log
+	return call.open(ctx, url, accountEmail)
+}
+
+// open is Open's work, recording through o.log.
+func (o *opener) open(ctx context.Context, url, accountEmail string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}

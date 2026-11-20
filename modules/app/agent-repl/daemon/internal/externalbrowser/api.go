@@ -59,7 +59,9 @@ type Opener interface {
 	// A configured launcher override skips the routing entirely: it names the
 	// whole launch. A Slack permalink on a configured subdomain is not a
 	// browser's at all: it opens in the Slack app, whatever the browser.
-	Open(ctx context.Context, url, accountEmail string) error
+	// Every record the open writes goes through LOG, the caller's logger, so
+	// a click's records are its workspace's.
+	Open(ctx context.Context, log dlog.Logger, url, accountEmail string) error
 }
 
 // Config assembles an Opener.

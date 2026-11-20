@@ -43,7 +43,7 @@ func (v *verbs) OpenExternal(ctx context.Context, ws ids.WorkspaceID, link strin
 	// fails the click: there is no default profile to send it to instead.
 	email, err := v.openExternalAccount(ctx, record)
 	if err == nil {
-		err = v.deps.Browser.Open(ctx, link, email)
+		err = v.deps.Browser.Open(ctx, log, link, email)
 	}
 	if err != nil {
 		// A launch that could not happen is a LANDED arm, not an internal

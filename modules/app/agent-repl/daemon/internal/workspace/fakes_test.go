@@ -3483,9 +3483,15 @@ type fakeBrowser struct {
 	// so a test can assert the verb routes by the session's account.
 	openedEmails []string
 	err          error
+	// recordThrough writes one record through every Open's logger, so a test
+	// can read which logger the verb handed it.
+	recordThrough bool
 }
 
-func (b *fakeBrowser) Open(_ context.Context, url, accountEmail string) error {
+func (b *fakeBrowser) Open(_ context.Context, log dlog.Logger, url, accountEmail string) error {
+	if b.recordThrough {
+		log.Info("fake.browser.open", "the fake browser was handed this logger", dlog.Context{"url": url})
+	}
 	if b.err != nil {
 		return b.err
 	}

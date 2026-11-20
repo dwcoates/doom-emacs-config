@@ -87,7 +87,7 @@ exit 0`)
 	o := newOpener(t, externalbrowser.Config{LauncherCmd: script})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com/page", "")
+	err := o.Open(context.Background(), o.log, "https://example.com/page", "")
 
 	// Assert.
 	if err != nil {
@@ -106,7 +106,7 @@ func TestOpenSurfacesANonZeroLauncherExit(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{LauncherCmd: script})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "")
+	err := o.Open(context.Background(), o.log, "https://example.com", "")
 
 	// Assert.
 	if err == nil {
@@ -119,7 +119,7 @@ func TestOpenSurfacesAMissingLauncher(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{LauncherCmd: filepath.Join(t.TempDir(), "not-installed")})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "")
+	err := o.Open(context.Background(), o.log, "https://example.com", "")
 
 	// Assert.
 	if err == nil {
@@ -138,7 +138,7 @@ exec tail -f /dev/null`)
 	o := newOpener(t, externalbrowser.Config{LauncherCmd: script, LaunchWindow: 20 * time.Millisecond})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "")
+	err := o.Open(context.Background(), o.log, "https://example.com", "")
 
 	// Assert.
 	if err != nil {
@@ -154,7 +154,7 @@ func TestOpenRefusesAnInvalidURLWithoutLaunching(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{LauncherCmd: script})
 
 	// Act.
-	err := o.Open(context.Background(), "file:///etc/passwd", "")
+	err := o.Open(context.Background(), o.log, "file:///etc/passwd", "")
 
 	// Assert.
 	if err == nil {
@@ -174,7 +174,7 @@ func TestOpenUsesTheEnvironmentLauncherWhenTheConfigNamesNone(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com/env", "")
+	err := o.Open(context.Background(), o.log, "https://example.com/env", "")
 
 	// Assert.
 	if err != nil {
@@ -192,7 +192,7 @@ func TestOpenHonorsACancelledContext(t *testing.T) {
 	cancel()
 
 	// Act.
-	err := o.Open(ctx, "https://example.com", "")
+	err := o.Open(ctx, o.log, "https://example.com", "")
 
 	// Assert.
 	if err == nil {
@@ -200,16 +200,25 @@ func TestOpenHonorsACancelledContext(t *testing.T) {
 	}
 }
 
+// testOpener is an opener and the logger a test hands its opens, the one
+// its records are captured on.
+type testOpener struct {
+	externalbrowser.Opener
+	log dlog.Logger
+}
+
 // newOpener builds an opener over cfg with a capturing logger.
-func newOpener(t *testing.T, cfg externalbrowser.Config) externalbrowser.Opener {
+func newOpener(t *testing.T, cfg externalbrowser.Config) testOpener {
 	t.Helper()
 	o, _ := newOpenerLogged(t, cfg)
 	return o
 }
 
 // newOpenerLogged builds an opener over cfg and hands back the capturing logger
-// too, for the branches whose whole point is the record they leave.
-func newOpenerLogged(t *testing.T, cfg externalbrowser.Config) (externalbrowser.Opener, *dlog.TestLogger) {
+// too, for the branches whose whole point is the record they leave. Its opens
+// record through that logger, as a workspace's click records through the
+// workspace's.
+func newOpenerLogged(t *testing.T, cfg externalbrowser.Config) (testOpener, *dlog.TestLogger) {
 	t.Helper()
 	logger := dlog.NewTestLogger()
 	cfg.Logger = logger
@@ -217,7 +226,7 @@ func newOpenerLogged(t *testing.T, cfg externalbrowser.Config) (externalbrowser.
 	if err != nil {
 		t.Fatalf("externalbrowser.New() = %v, want nil", err)
 	}
-	return o, logger
+	return testOpener{Opener: o, log: logger}, logger
 }
 
 // writeLocalState plants a Chrome Local State document and answers its path.
@@ -260,7 +269,7 @@ func TestOpenDefaultRoutesTheAccountToItsChromeProfile(t *testing.T) {
 			o := newOpener(t, cfg)
 
 			// Act.
-			if err := o.Open(context.Background(), "https://example.com/page", tc.email); err != nil {
+			if err := o.Open(context.Background(), o.log, "https://example.com/page", tc.email); err != nil {
 				t.Fatalf("Open() = %v, want nil", err)
 			}
 
@@ -282,7 +291,7 @@ func TestOpenDefaultWithNoAccountPassesNoProfileFlag(t *testing.T) {
 	o, logger := newOpenerLogged(t, cfg)
 
 	// Act.
-	if err := o.Open(context.Background(), "https://example.com/page", ""); err != nil {
+	if err := o.Open(context.Background(), o.log, "https://example.com/page", ""); err != nil {
 		t.Fatalf("Open() = %v, want nil", err)
 	}
 
@@ -324,7 +333,7 @@ func TestOpenDefaultFailsAnAccountItCannotRoute(t *testing.T) {
 			o, logger := newOpenerLogged(t, cfg)
 
 			// Act.
-			err := o.Open(context.Background(), "https://example.com/page", "stranger@example.com")
+			err := o.Open(context.Background(), o.log, "https://example.com/page", "stranger@example.com")
 
 			// Assert.
 			if err == nil || !strings.Contains(err.Error(), usersetup.Doc) {
@@ -351,7 +360,7 @@ func TestOpenOverriddenSkipsTheProfileRouting(t *testing.T) {
 	})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com/page", "stranger@example.com")
+	err := o.Open(context.Background(), o.log, "https://example.com/page", "stranger@example.com")
 
 	// Assert.
 	if err != nil {
@@ -430,7 +439,7 @@ func TestOpenDefaultRaisesTheBrowserBeforeHandingOverTheURL(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com/page", "")
+	err := o.Open(context.Background(), o.log, "https://example.com/page", "")
 
 	// Assert.
 	if err != nil {
@@ -451,7 +460,7 @@ func TestOpenDefaultSurfacesAFailedRaise(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "")
+	err := o.Open(context.Background(), o.log, "https://example.com", "")
 
 	// Assert.
 	if err == nil {
@@ -473,7 +482,7 @@ func TestOpenDefaultDoesNotHandOverAfterAFailedRaise(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{ActivateBin: activate, DefaultLauncherBin: launch})
 
 	// Act.
-	if err := o.Open(context.Background(), "https://example.com", ""); err == nil {
+	if err := o.Open(context.Background(), o.log, "https://example.com", ""); err == nil {
 		t.Fatal("Open() = nil error, want the failed raise surfaced")
 	}
 
@@ -496,7 +505,7 @@ func TestOpenDefaultSurfacesAFailedHandOff(t *testing.T) {
 	})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "work@example.com")
+	err := o.Open(context.Background(), o.log, "https://example.com", "work@example.com")
 
 	// Assert.
 	if err == nil {
@@ -518,7 +527,7 @@ func TestOpenDefaultSurfacesAnAbsentBrowser(t *testing.T) {
 	})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com", "")
+	err := o.Open(context.Background(), o.log, "https://example.com", "")
 
 	// Assert.
 	if err == nil {
@@ -548,7 +557,7 @@ exec tail -f /dev/null`)
 
 	// Act.
 	done := make(chan error, 1)
-	go func() { done <- o.Open(ctx, "https://example.com", "") }()
+	go func() { done <- o.Open(ctx, o.log, "https://example.com", "") }()
 	fifo, err := os.Open(started) //nolint:gosec // test-owned path
 	if err != nil {
 		t.Fatalf("open the fifo: %v", err)
@@ -591,7 +600,7 @@ func TestOpenHandsASlackPermalinkToTheSlackApp(t *testing.T) {
 	o, logger := newOpenerLogged(t, cfg)
 
 	// Act.
-	err := o.Open(context.Background(), "https://acme.slack.com/archives/C04FPU3L4JG/p1792730535549649", "a@example.com")
+	err := o.Open(context.Background(), o.log, "https://acme.slack.com/archives/C04FPU3L4JG/p1792730535549649", "a@example.com")
 
 	// Assert.
 	if err != nil {
@@ -616,7 +625,7 @@ func TestOpenSurfacesAFailedSlackLaunch(t *testing.T) {
 	o, logger := newOpenerLogged(t, cfg)
 
 	// Act.
-	err := o.Open(context.Background(), "https://acme.slack.com/archives/C04FPU3L4JG", "")
+	err := o.Open(context.Background(), o.log, "https://acme.slack.com/archives/C04FPU3L4JG", "")
 
 	// Assert.
 	if err == nil || !strings.Contains(err.Error(), "slack://channel?team=T0123ABCD&id=C04FPU3L4JG") {
@@ -639,7 +648,7 @@ func TestOpenSendsAnUnroutedSlackLinkToTheBrowser(t *testing.T) {
 	o, logger := newOpenerLogged(t, cfg)
 
 	// Act.
-	err := o.Open(context.Background(), "https://other.slack.com/archives/C04FPU3L4JG", "")
+	err := o.Open(context.Background(), o.log, "https://other.slack.com/archives/C04FPU3L4JG", "")
 
 	// Assert.
 	if err != nil {
@@ -664,4 +673,28 @@ func loggedBranch(records []dlog.Record, level, branch string) bool {
 		}
 	}
 	return false
+}
+
+func TestOpenRecordsThroughTheCallersLogger(t *testing.T) {
+	// Arrange: an opener built with its own logger, and a launcher that fails.
+	script := writeScript(t, t.TempDir(), "launcher", "exit 1")
+	o, own := newOpenerLogged(t, externalbrowser.Config{LauncherCmd: script})
+	caller := dlog.NewTestLogger()
+
+	// Act
+	err := o.Open(context.Background(), caller, "https://example.com/page", "")
+
+	// Assert: the failure is the caller's record, at ERROR, and none is the
+	// opener's own.
+	if err == nil {
+		t.Fatal("Open() = nil, want the launcher's failure")
+	}
+	if !loggedBranch(caller.Records(), dlog.LevelError, "override-launch-failed") {
+		t.Fatalf("caller's records = %v, want the failed launch at ERROR", caller.Records())
+	}
+	for _, r := range own.Records() {
+		if r.Operation == "daemon.externalbrowser.open" {
+			t.Fatalf("the opener's own logger recorded %+v; every record of an open is the caller's", r)
+		}
+	}
 }
