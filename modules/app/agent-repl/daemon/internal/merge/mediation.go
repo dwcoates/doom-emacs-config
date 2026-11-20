@@ -603,7 +603,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	}
 	brief, window, err := o.intakeBrief(ctx, q, m)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the intake's brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
+		o.briefFailed(ctx, q, m, "the intake's brief could not be composed", err, fields)
 		return
 	}
 	// A WINDOW WITH NO WARNING AND NO ERROR NEEDS NO MEDIATOR (owner ruling,
@@ -640,7 +640,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		told := brief
 		if m.Resumed {
 			if told, err = o.resumeBrief(m); err != nil {
-				o.deps.Log.Global().Error(opMediation, "the undecided intake's resuming brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
+				o.briefFailed(ctx, q, m, "the undecided intake's resuming brief could not be composed", err, fields)
 				return
 			}
 		}
@@ -659,6 +659,24 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	} else if owes(now, m.OwedAt) && now.Dispatched {
 		o.watchFixer(ctx, q, *now, fields)
 	}
+}
+
+// briefFailed settles a round of check M of queue Q whose brief could not be
+// composed, WHAT failing with ERR: the check is escalated to the user, naming
+// the cause (owner ruling, 2026-11-19). NOTHING RUNS SUCH A ROUND AGAIN on
+// its own, so a check left owed and only logged held its queue under the
+// rollout's label until the next deploy (2026-11-19: the brief read a table
+// its build's migration had not yet created, and the queue was held for
+// forty minutes with nothing shown). A round the daemon's exit or a handover
+// cut is no failure: the daemon that serves the queues next runs it again
+// (mediationFailed). A MEDIATOR ALREADY TOLD OF THE CHECK IS ONLY SHOWN, as
+// one that escalated in its own turn is (escalate): it may be mid-turn.
+func (o *orchestrator) briefFailed(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
+	if o.mediationFailed(ctx, fields, what+"; the check is escalated to the user", err) {
+		return
+	}
+	summary := fmt.Sprintf("the deploy check could not run: %s (%v); the queue waits for you", what, err)
+	o.holdEscalated(ctx, q, m, summary, nil, wsm.CheckWindow{}, m.Prompted(), fields)
 }
 
 // releaseQuiet releases check M of queue Q, whose WINDOW holds no warning and
@@ -845,7 +863,7 @@ func (o *orchestrator) resumeBrief(m wsm.Mediation) (string, error) {
 func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, fields dlog.Context) {
 	brief, err := o.resumeBrief(m)
 	if err != nil {
-		o.deps.Log.Global().Error(opMediation, "the undecided intake's resuming brief could not be composed; the queue stays held", withField(fields, "error", err.Error()))
+		o.briefFailed(ctx, q, m, "the undecided intake's resuming brief could not be composed", err, fields)
 		return
 	}
 	turn := wsm.NewTurnID()

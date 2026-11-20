@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"agent-repld/internal/dlog"
 )
 
 // reuseLog is a gate log whose run reused REUSED of UNITS.
@@ -87,7 +85,7 @@ func TestLastGateReuseBeforeReadsNoGateWhereNoneWasLogged(t *testing.T) {
 	}
 }
 
-func TestAGateLogDirectoryThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
+func TestAGateLogDirectoryThatCannotBeReadEscalatesTheCheck(t *testing.T) {
 	// Arrange: the logs directory is a file.
 	h := checked(t)
 	owe(t, h)
@@ -102,12 +100,7 @@ func TestAGateLogDirectoryThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if owedCheck(t, h) == nil || len(h.queue.submissions) != 0 {
-		t.Fatalf("submitted %d; want no brief and the check still owed", len(h.queue.submissions))
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake's brief could not be composed; the queue stays held"}); !ok {
-		t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
-	}
+	assertBriefFailureEscalated(t, h, "the intake's brief could not be composed", "")
 }
 
 func TestTheIntakesBriefNamesTheLastGatesLog(t *testing.T) {

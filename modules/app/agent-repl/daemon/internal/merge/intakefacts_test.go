@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
 )
 
@@ -140,7 +139,7 @@ func TestTheIntakesBriefStatesTheDeployAndNothingTheWindowHolds(t *testing.T) {
 	}
 }
 
-func TestAWindowThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
+func TestAWindowThatCannotBeReadEscalatesTheCheck(t *testing.T) {
 	// Arrange
 	h := checked(t)
 	owe(t, h)
@@ -150,12 +149,7 @@ func TestAWindowThatCannotBeReadKeepsTheQueueHeld(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if owedCheck(t, h) == nil || len(h.queue.submissions) != 0 {
-		t.Fatalf("submitted %d; want no brief and the check still owed", len(h.queue.submissions))
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake's brief could not be composed; the queue stays held"}); !ok {
-		t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
-	}
+	assertBriefFailureEscalated(t, h, "the intake's brief could not be composed", "logs.sh exited 2")
 }
 
 func TestDigestSitesGroupsTheWindowByLoggingSite(t *testing.T) {
@@ -243,7 +237,7 @@ func TestTheIntakesBriefNamesADigestItWroteOfTheWindow(t *testing.T) {
 	}
 }
 
-func TestADigestThatCannotBeWrittenKeepsTheQueueHeld(t *testing.T) {
+func TestADigestThatCannotBeWrittenEscalatesTheCheck(t *testing.T) {
 	// Arrange: the logs directory's place is taken by a file.
 	h := checked(t)
 	owe(t, h)
@@ -261,12 +255,7 @@ func TestADigestThatCannotBeWrittenKeepsTheQueueHeld(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	if owedCheck(t, h) == nil || len(h.queue.submissions) != 0 {
-		t.Fatalf("submitted %d; want no brief and the check still owed", len(h.queue.submissions))
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake's brief could not be composed; the queue stays held"}); !ok {
-		t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
-	}
+	assertBriefFailureEscalated(t, h, "the intake's brief could not be composed", "")
 }
 
 func TestAQuietWindowReleasesTheCheckWithoutTheMediator(t *testing.T) {

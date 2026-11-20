@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"testing"
@@ -522,5 +523,29 @@ func TestAnEscalationTheDaemonsExitCutIsRecordedAtInfo(t *testing.T) {
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
 		Message: "the escalated check was not told to the mediator; the queue stays held, and the next pass tells it again"}); !ok {
 		t.Fatalf("records = %v, want the held check recorded at INFO", h.logs.Records())
+	}
+}
+
+// assertBriefFailureEscalated asserts that a check whose brief could not be
+// composed, WHAT failing, was escalated: it is still owed and holds the
+// queue as an escalation naming WHAT and CAUSE, the user was notified, the
+// failure is recorded at ERROR, and the intake was never told of the deploy.
+func assertBriefFailureEscalated(t *testing.T, h *harness, what, cause string) {
+	t.Helper()
+	if heldEscalation(t, h) == "" {
+		t.Fatalf("check %+v, want its escalation told", owedCheck(t, h))
+	}
+	if brief := owedCheck(t, h).EscalationBrief; !strings.Contains(brief, "the deploy check could not run: "+what) || !strings.Contains(brief, cause) {
+		t.Fatalf("the escalation says %q, want it to name %q and its cause %q", brief, what, cause)
+	}
+	if !h.bannerRaised(desktopnotify.KindDeployMediated) {
+		t.Fatal("the user was not told the check could not run")
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: what + "; the check is escalated to the user"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["error"]), cause) {
+		t.Fatalf("records = %v, want the failed brief at ERROR with its cause %q", h.logs.Records(), cause)
+	}
+	if len(intakeTellings(h)) != 0 {
+		t.Fatalf("told the intake of the deploy %d times, want it never told", len(intakeTellings(h)))
 	}
 }
