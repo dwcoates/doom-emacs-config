@@ -897,15 +897,16 @@ describe("session facts with no message behind them", () => {
 
 describe("compaction, as the vendor does it", () => {
   test("!compact-auto produces compacting and then a compacted context_cut", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = watchSession(shim);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!compact-auto" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!compact-auto" }));
     const compacting = await watch.until(
       (frame) => sessionUpdate(frame).update.case === "compacting",
     );
@@ -930,14 +931,16 @@ describe("compaction, as the vendor does it", () => {
   });
 
   test("!compact-failed produces a compaction_failed context_cut and no boundary", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!compact-failed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!compact-failed" }));
     const cut = await agent.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const inner = watchAgentEntry(frame).entry?.entry;
@@ -954,7 +957,7 @@ describe("compaction, as the vendor does it", () => {
     if (failed?.case !== "compactionFailed") throw new Error("expected compaction_failed");
     expect(failed.value.error).not.toBe("");
     expect(
-      readTranscript(shim.dirs, started.vendorSessionId).some(
+      mine.transcript(started.vendorSessionId).some(
         (record) => record.type === "system" && record.subtype === "compact_boundary",
       ),
     ).toBe(false);
@@ -963,60 +966,64 @@ describe("compaction, as the vendor does it", () => {
 });
 
 describe("query death", () => {
+  /** What one query death left: the session's own push, and the open turn's terminal. */
+  interface Death {
+    readonly died: shimv1.WatchSessionResponse;
+    readonly terminal: shimv1.WatchAgentResponse;
+  }
+
+  const deaths = new Map<string, Promise<Death>>();
+
+  /**
+   * ONE DEATH, SEVERAL OBSERVERS. A query death ends its session, so each cause
+   * dies ONCE, on its own group shim ("query-death <prompt>"), watched on both
+   * streams opened before the turn; every case of that cause reads the act.
+   */
+  function queryDeath(prompt: "!query-eof" | "!query-fail"): Promise<Death> {
+    let death = deaths.get(prompt);
+    if (death === undefined) {
+      death = (async () => {
+        const { shim } = await groupSession(`query-death ${prompt}`);
+        const watch = watchSession(shim);
+        const agent = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
+        await agent.next();
+        await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: prompt }));
+        const died = await watch.until((frame) => sessionUpdate(frame).update.case === "queryDied");
+        const terminal = await agent.until((frame) => {
+          if (frame.frame.case !== "entry") return false;
+          const inner = watchAgentEntry(frame).entry?.entry;
+          return inner?.case === "agentFrame" && inner.value.result.case === "failure";
+        });
+        watch.close();
+        agent.close();
+        return { died, terminal };
+      })();
+      deaths.set(prompt, death);
+    }
+    return death;
+  }
+
   test("!query-eof reports query_died.unexpected_eof", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
+    const { died } = await queryDeath("!query-eof");
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-eof" }));
-    const died = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "queryDied" && update.update.value.cause.case === "unexpectedEof"
-      );
-    });
-
-    expect(sessionUpdate(died).update.case).toBe("queryDied");
-    watch.close();
+    const update = sessionUpdate(died);
+    expect(update.update.case === "queryDied" ? update.update.value.cause.case : update.update.case).toBe("unexpectedEof");
   });
 
   test("!query-fail reports query_died.iterator_failure", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
+    const { died } = await queryDeath("!query-fail");
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-fail" }));
-    const died = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "queryDied" && update.update.value.cause.case === "iteratorFailure"
-      );
-    });
-
-    expect(sessionUpdate(died).update.case).toBe("queryDied");
-    watch.close();
+    const update = sessionUpdate(died);
+    expect(update.update.case === "queryDied" ? update.update.value.cause.case : update.update.case).toBe("iteratorFailure");
   });
 
   test("a query death concludes the open WatchAgent turn with a failure terminal", async () => {
     // DUPLICATED ON PURPOSE: stream owners get their own failure, and a
     // consumer with no stream open still needs the session-level fact.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const agent = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await agent.next();
-
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!query-eof" }));
-    const terminal = await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      const inner = watchAgentEntry(frame).entry?.entry;
-      return inner?.case === "agentFrame" && inner.value.result.case === "failure";
-    });
+    const { terminal } = await queryDeath("!query-eof");
 
     const inner = watchAgentEntry(terminal).entry?.entry;
     expect(inner?.case).toBe("agentFrame");
-    agent.close();
   });
 
   // THE TERMINAL SAYS THE DEATH ITSELF. It reaches the daemon through the
@@ -1024,24 +1031,11 @@ describe("query death", () => {
   // them, and a replayed turn has only the terminal — so the terminal's own arm
   // must carry the death and its cause, not an execution_error stand-in.
   test.each([
-    { prompt: "!query-eof", cause: "unexpectedEof", thrown: undefined },
-    { prompt: "!query-fail", cause: "iteratorFailure", thrown: "fake vendor query died mid-turn" },
+    { prompt: "!query-eof" as const, cause: "unexpectedEof", thrown: undefined },
+    { prompt: "!query-fail" as const, cause: "iteratorFailure", thrown: "fake vendor query died mid-turn" },
   ])("$prompt concludes the turn with the query_died arm carrying $cause", async ({ prompt, cause, thrown }) => {
-    // Arrange
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const agent = openStream((options) =>
-      shim.clients.h1.watchAgent(watchAgentRequest(), options),
-    );
-    await agent.next();
-
-    // Act
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: prompt }));
-    const terminal = await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      const inner = watchAgentEntry(frame).entry?.entry;
-      return inner?.case === "agentFrame" && inner.value.result.case === "failure";
-    });
+    // Arrange, Act: the cause's one death.
+    const { terminal } = await queryDeath(prompt);
 
     // Assert
     const inner = watchAgentEntry(terminal).entry?.entry;
@@ -1054,20 +1048,57 @@ describe("query death", () => {
     expect(died?.cause.case).toBe(cause);
     const said = died?.cause.case === "iteratorFailure" ? died.cause.value.cause : undefined;
     expect(said).toBe(thrown);
-    agent.close();
   });
 });
 
 describe("the shim's own faults", () => {
+  // THE RECOVERY CASE RUNS FIRST on the group's session: it leaves the session
+  // healthy, where a fault is a change the next case can see pushed.
+  test("a recovered fault closes its degraded window", async () => {
+    // Diagnostics keep degraded WINDOWS since shim start, so a transient defect
+    // stays visible after recovery instead of vanishing.
+    // THE "converter-fault" GROUP: a fault taints the session's health, which
+    // the canonical session's health cases read.
+    const { shim } = await groupSession("converter-fault");
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
+    const watch = watchSession(shim);
+    await watch.next();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!fault-converter" }));
+    await watch.until((frame) => {
+      const update = sessionUpdate(frame);
+      return (
+        update.update.case === "diagnostics" && update.update.value.health.case === "unhealthy"
+      );
+    });
+
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!md" }));
+    const recovered = await watch.until((frame) => {
+      const update = sessionUpdate(frame);
+      return (
+        update.update.case === "diagnostics" &&
+        update.update.value.health.case === "healthy" &&
+        update.update.value.degradedWindows.some((window) => window.extent.case === "closed")
+      );
+    });
+
+    expect(sessionUpdate(recovered).update.case).toBe("diagnostics");
+    watch.close();
+  });
+
   test("!fault-converter surfaces a converter_defect fault on diagnostics", async () => {
     // A converter that could not convert is a PRODUCER DEFECT, reported rather
     // than swallowed: the alternative is silently wrong attribution.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    // THE "converter-fault" GROUP: a fault taints the session's health, which
+    // the canonical session's health cases read.
+    const { shim } = await groupSession("converter-fault");
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = watchSession(shim);
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!fault-converter" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!fault-converter" }));
     const faulted = await watch.until((frame) => {
       const update = sessionUpdate(frame);
       if (update.update.case !== "diagnostics") return false;
@@ -1079,35 +1110,6 @@ describe("the shim's own faults", () => {
     });
 
     expect(sessionUpdate(faulted).update.case).toBe("diagnostics");
-    watch.close();
-  });
-
-  test("a recovered fault closes its degraded window", async () => {
-    // Diagnostics keep degraded WINDOWS since shim start, so a transient defect
-    // stays visible after recovery instead of vanishing.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const watch = watchSession(shim);
-    await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!fault-converter" }));
-    await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "diagnostics" && update.update.value.health.case === "unhealthy"
-      );
-    });
-
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
-    const recovered = await watch.until((frame) => {
-      const update = sessionUpdate(frame);
-      return (
-        update.update.case === "diagnostics" &&
-        update.update.value.health.case === "healthy" &&
-        update.update.value.degradedWindows.some((window) => window.extent.case === "closed")
-      );
-    });
-
-    expect(sessionUpdate(recovered).update.case).toBe("diagnostics");
     watch.close();
   });
 });
