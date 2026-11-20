@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/scriptrunner"
 	"agent-repld/internal/testsclient"
 	"agent-repld/internal/wsm"
 )
@@ -31,7 +32,11 @@ type fakeTestService struct {
 	startErr, stopErr, watchErr error
 	// onStart, when set, is called with every started run's id.
 	onStart func(run string)
-	wg      sync.WaitGroup
+	// holds parks the play of a run started with a held label (heldRun)
+	// until the run is stopped or the test ends, so a hold names its run
+	// rather than whichever play reaches the runner first.
+	holds holdSet
+	wg    sync.WaitGroup
 }
 
 // fakeServiceRun is one run on the fake service.
@@ -68,18 +73,23 @@ func (s *fakeTestService) Start(_ context.Context, spec testsclient.Spec) (strin
 	run := &fakeServiceRun{changed: make(chan struct{}), cancel: cancel}
 	s.runs[id] = run
 	onStart := s.onStart
+	hold, held := s.holds.claim(spec.Label)
 	s.wg.Add(1)
 	s.mu.Unlock()
 	go func() {
 		defer s.wg.Done()
-		measured, err := s.runner.RunLinesMeasured(ctx, spec.Dir, spec.Argv, func(line string) {
-			s.mu.Lock()
-			defer s.mu.Unlock()
-			if run.end == nil {
-				run.lines = append(run.lines, line)
-				s.wake(run)
-			}
-		})
+		var measured scriptrunner.Run
+		var err error
+		if !held || hold.park(ctx) {
+			measured, err = s.runner.RunLinesMeasured(ctx, spec.Dir, spec.Argv, func(line string) {
+				s.mu.Lock()
+				defer s.mu.Unlock()
+				if run.end == nil {
+					run.lines = append(run.lines, line)
+					s.wake(run)
+				}
+			})
+		}
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		switch {
@@ -202,20 +212,16 @@ func serviceRecord(h *harness, level, message string) (dlog.Record, bool) {
 	return dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: level, Operation: "daemon.merge.tests", Message: message})
 }
 
-// holdOnce holds the harness runner's first run until the test ends or the
-// run is stopped, and lets every later run straight through.
-func holdOnce(t *testing.T, h *harness) (entered chan struct{}) {
-	entered, release := make(chan struct{}), make(chan struct{})
-	t.Cleanup(func() { close(release) })
-	var once sync.Once
-	h.runner.before = func() {
-		first := false
-		once.Do(func() { first = true })
-		if first {
-			close(entered)
-			<-release
-		}
-	}
+// deadGateLabel labels the run a daemon that died mid-gate left going.
+const deadGateLabel = "the dead daemon's gate"
+
+// heldRun parks the play of the next run started with LABEL until the run is
+// stopped or the test ends, answering when the play parked. THE HOLD NAMES ITS
+// RUN BY LABEL, never by which play reaches the runner first: under load a
+// later run's play can win that race, and a hold on it would hang the merge
+// that watches it.
+func heldRun(s *fakeTestService, label string) (entered chan struct{}) {
+	entered, _ = s.holds.arm(label)
 	return entered
 }
 
@@ -223,11 +229,19 @@ func holdOnce(t *testing.T, h *harness) (entered chan struct{}) {
 // died mid-gate left it, answering its id.
 func startedBefore(t *testing.T, h *harness) string {
 	t.Helper()
-	run, err := h.tests.Start(context.Background(), testsclient.Spec{Dir: h.sourceD, Argv: []string{"bash", h.script}, Label: "the dead daemon's gate"})
+	run, err := h.tests.Start(context.Background(), testsclient.Spec{Dir: h.sourceD, Argv: []string{"bash", h.script}, Label: deadGateLabel})
 	if err != nil {
 		t.Fatalf("starting the dead daemon's run: %v", err)
 	}
 	return run
+}
+
+// startedHeld starts the dead daemon's run as startedBefore does, its play
+// held until the run is stopped or the test ends, answering its id.
+func startedHeld(t *testing.T, h *harness) string {
+	t.Helper()
+	heldRun(h.tests, deadGateLabel)
+	return startedBefore(t, h)
 }
 
 // atTestsWithRun stands a record at tests round 1 naming RUN as its gate's.
@@ -248,6 +262,47 @@ func hostPauseCause(t *testing.T, c *chain) string {
 		t.Fatalf("pause = %+v, want the host's", pause)
 	}
 	return pause.By.Cause
+}
+
+// watchAsync watches run ID on S from its start, answering how it ended.
+func watchAsync(s *fakeTestService, id string) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		end, err := s.Watch(context.Background(), id, 0, func(uint64, string) {})
+		if err == nil && end.Stopped {
+			err = errors.New("stopped")
+		}
+		done <- err
+	}()
+	return done
+}
+
+func TestAHeldServiceRunHoldsOnlyTheRunItsLabelNames(t *testing.T) {
+	// Arrange: a held dead daemon's run, whose play may reach the runner
+	// after a later run's.
+	h := newHarness(t)
+	h.gatePasses("daemon")
+	entered := heldRun(h.tests, deadGateLabel)
+	held := startedBefore(t, h)
+
+	// Act: a later run, labeled otherwise, starts and is watched to its end.
+	later, err := h.tests.Start(context.Background(), testsclient.Spec{Dir: h.sourceD, Argv: []string{"bash", h.script}, Label: "a resumed gate"})
+	if err != nil {
+		t.Fatalf("starting the later run: %v", err)
+	}
+
+	// Assert: the later run plays through; the held one parks until stopped.
+	if err := receiveWithin(t, watchAsync(h.tests, later), "the later run ending"); err != nil {
+		t.Fatalf("the later run ended on %v, want its pass", err)
+	}
+	receiveWithin(t, entered, "the held run's play parking")
+	heldEnd := watchAsync(h.tests, held)
+	if err := h.tests.Stop(context.Background(), held); err != nil {
+		t.Fatalf("stopping the held run: %v", err)
+	}
+	if err := receiveWithin(t, heldEnd, "the held run ending"); err == nil || err.Error() != "stopped" {
+		t.Fatalf("the held run ended on %v, want stopped", err)
+	}
 }
 
 func TestAGateRecordsItsServiceRunBeforeItsMergeIsSuspended(t *testing.T) {
@@ -333,9 +388,8 @@ func TestAResumedGateWatchesItsRecordedRunRatherThanStartingOne(t *testing.T) {
 func TestAResumeOntoAMovedTargetStopsTheRecordedRun(t *testing.T) {
 	// Arrange: the dead daemon's gate run holds on the service.
 	h := newHarness(t)
-	holdOnce(t, h)
 	landsAfterResume(h)
-	run := startedBefore(t, h)
+	run := startedHeld(t, h)
 	interruptedAt(t, h, atTestsWithRun(run))
 	targetMovedWhileDown(h)
 
@@ -355,8 +409,7 @@ func TestAResumeOntoAMovedTargetStopsTheRecordedRun(t *testing.T) {
 func TestAResumeThatGivesUpBeforeItsGateStopsTheRecordedRun(t *testing.T) {
 	// Arrange: a rebase stands in the resumed merge's tree.
 	h := newHarness(t)
-	holdOnce(t, h)
-	run := startedBefore(t, h)
+	run := startedHeld(t, h)
 	interruptedAt(t, h, atTestsWithRun(run))
 	h.git.standing = true
 

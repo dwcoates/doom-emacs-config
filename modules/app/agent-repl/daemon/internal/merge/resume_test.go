@@ -117,7 +117,9 @@ func resume(t *testing.T, h *harness) {
 	if err := h.o.Recover(context.Background()); err != nil {
 		t.Fatalf("Recover: %v", err)
 	}
-	if err := h.admit(context.Background()); err != nil {
+	// THE PUMP IS BOUNDED, so a resumed merge that waits forever fails here,
+	// named, rather than at the unit's kill.
+	if err := receiveWithin(t, admitAsync(h, context.Background()), "the resumed merge's pump ending"); err != nil {
 		t.Logf("the resumed merge ended on: %v", err)
 	}
 }
