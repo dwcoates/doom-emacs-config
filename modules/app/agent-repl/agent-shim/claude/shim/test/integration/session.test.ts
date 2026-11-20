@@ -2268,11 +2268,26 @@ describe("a skill installed mid-session", () => {
     writeFileSync(join(dir, name, "SKILL.md"), `---\nname: ${name}\ndescription: the ${name} skill\n---\n`);
   }
 
+  let skillsShim: Promise<ShimHandle> | null = null;
+
+  /**
+   * The "skills" group's session, its account skills directory made before
+   * the session started: a skill installed here is stated on every watch, so
+   * these cases keep it off the canonical session.
+   */
+  function skillsSession(): Promise<ShimHandle> {
+    skillsShim ??= (async () => {
+      const shim = await groupShim("skills");
+      mkdirSync(join(shim.dirs.configDir, "skills"), { recursive: true });
+      sessionStarted(await shim.clients.h1.startSession(freshSession()));
+      return shim;
+    })();
+    return skillsShim;
+  }
+
   test("into the account's skills directory is stated as a stale skill set", async () => {
-    const shim = await spawnShim();
+    const shim = await skillsSession();
     shimOfTest = shim;
-    mkdirSync(join(shim.dirs.configDir, "skills"), { recursive: true });
-    await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
 
     installSkill(join(shim.dirs.configDir, "skills"), "agent-repl-workspaces");
@@ -2283,9 +2298,8 @@ describe("a skill installed mid-session", () => {
   });
 
   test("into a worktree skills directory that did not exist at the start is stated too", async () => {
-    const shim = await spawnShim();
+    const shim = await skillsSession();
     shimOfTest = shim;
-    await shim.clients.h1.startSession(freshSession());
     const watch = watchSession(shim);
 
     installSkill(join(shim.dirs.workspace, ".claude", "skills"), "repo-skill");
@@ -2331,9 +2345,23 @@ describe("SetSessionRemoteControl", () => {
     expect(refusal).toBe(Code.InvalidArgument);
   });
 
+  /**
+   * The "bridge" group's session, its bridge OFF when a case takes it: every
+   * case that turns it on turns it off again when it finishes.
+   */
+  async function bridgeSession(): Promise<CanonicalSession> {
+    const session = await groupSession("bridge");
+    onTestFinished(async () => {
+      const off = await session.shim.clients.h1.setSessionRemoteControl(
+        create(shimv1.SetSessionRemoteControlRequestSchema, { enabled: false }),
+      );
+      expect(answered(off)).toEqual({ enabled: false, bridgeSessionId: "" });
+    });
+    return session;
+  }
+
   test("turns the bridge on with no prompt sent, answering the bridge's claude.ai session id", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await bridgeSession();
 
     const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
@@ -2341,8 +2369,7 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("re-binds the bridge session a previous shim answered", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await bridgeSession();
 
     const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn({ reattachBridgeSessionId: "session_prev" }));
 
@@ -2350,9 +2377,8 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("asks the vendor to keep the claude.ai session listed past its process", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    const on = shim.log.record((record) => record.message === "fake vendor Remote Control ON");
+    const { shim } = await bridgeSession();
+    const on = since(shim).record((record) => record.message === "fake vendor Remote Control ON");
 
     await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
@@ -2360,8 +2386,7 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("turns the bridge off, answering it off", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await bridgeSession();
     await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
     const response = await shim.clients.h1.setSessionRemoteControl(
