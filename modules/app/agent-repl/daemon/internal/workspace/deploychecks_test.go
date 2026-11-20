@@ -11,7 +11,9 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/headless"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/promptqueue"
 	"agent-repld/internal/wsm"
 )
 
@@ -448,6 +450,49 @@ func TestAFamilyShowThatFailsIsRecordedAndChangesNothing(t *testing.T) {
 			rec, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opSetHidden, Message: tt.message})
 			if !ok || rec.Context["cause"] != "database is locked" {
 				t.Fatalf("records = %+v, want the failure recorded with its cause", f.log.logger.Records())
+			}
+		})
+	}
+}
+
+// TestCompactRequeuedMergeColdGate pins the owner request of 2026-11-20: a
+// requeued merge's cold gate is answered by a compaction of the whole
+// conversation with the gate's default summarizer, keeping the held prompts.
+func TestCompactRequeuedMergeColdGate(t *testing.T) {
+	tests := []struct {
+		name        string
+		gate        bool
+		wantResumes int
+	}{
+		{name: "a standing gate is answered by a compaction that keeps the held prompts", gate: true, wantResumes: 1},
+		{name: "a workspace with no gate standing is left as it is"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			if tt.gate {
+				served, _ := coldCompactMenu()
+				f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
+			}
+
+			// Act
+			err := f.verbs.CompactRequeuedMergeColdGate(context.Background(), "w1")
+
+			// Assert
+			if err != nil || len(f.fleet.resumes) != tt.wantResumes {
+				t.Fatalf("CompactRequeuedMergeColdGate = %v, %d resumes; want %d", err, len(f.fleet.resumes), tt.wantResumes)
+			}
+			if !tt.gate {
+				return
+			}
+			compact := f.fleet.resumes[0].Remediation.GetCompact()
+			if compact.GetModel().GetName() != headless.ModelHaiku || compact.GetScope() != conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL {
+				t.Fatalf("compact remediation = %v, want Haiku over the whole conversation", compact)
+			}
+			if len(f.queue.gateFates) != 1 || f.queue.gateFates[0] != promptqueue.GateKeep {
+				t.Fatalf("gate fates = %v, want the held prompts kept", f.queue.gateFates)
 			}
 		})
 	}

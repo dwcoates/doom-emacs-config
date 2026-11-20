@@ -784,10 +784,16 @@ type Deps struct {
 	// for.
 	Freeness Freeness
 	// AtColdGate reports whether the workspace's session is parked at its
-	// cold gate. A requeue of such a workspace's merge is refused
-	// (ArmColdGated): the gate takes a parked workspace's merge off its queue
-	// the moment it is raised, so the merge would leave again at once.
+	// cold gate. A requeue of such a workspace's merge goes in line skipped
+	// (wsm.SetMergeColdGated), and its gate is answered by a compaction at
+	// once (CompactColdGate).
 	AtColdGate func(ws ids.WorkspaceID) bool
+	// CompactColdGate answers the cold gate standing on the workspace by a
+	// compaction of its whole conversation with the gate's default
+	// summarizer, keeping the prompts held at the gate. The session it
+	// brings up retires the gate, which resumes the workspace's merge
+	// (ColdGateRetired). A workspace with no gate standing is left as it is.
+	CompactColdGate func(ctx context.Context, ws ids.WorkspaceID) error
 	// PauseAfterCapture is a TEST-ONLY seam: when set, a run blocks in it
 	// immediately after the displaced turn was captured, which is the one
 	// window a test cannot otherwise reach (the merge's own next submission,

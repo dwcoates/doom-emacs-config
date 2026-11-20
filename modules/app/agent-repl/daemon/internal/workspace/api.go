@@ -472,6 +472,10 @@ type Verbs interface {
 	// AnswerDeployCheckColdGate answers a cold gate standing on a standing
 	// deploy check with compact-and-resume at once.
 	AnswerDeployCheckColdGate(ctx context.Context, ws ids.WorkspaceID) error
+	// CompactRequeuedMergeColdGate answers the cold gate standing on a
+	// workspace whose merge was requeued, by a compaction that keeps the
+	// prompts held at the gate (deploychecks.go, answerColdGateByCompaction).
+	CompactRequeuedMergeColdGate(ctx context.Context, ws ids.WorkspaceID) error
 	// CompactDeployCheck compacts a standing deploy check's conversation by
 	// Haiku now, answering whether it had one to compact.
 	CompactDeployCheck(ctx context.Context, ws ids.WorkspaceID) (bool, error)

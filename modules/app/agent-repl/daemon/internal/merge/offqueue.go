@@ -36,8 +36,10 @@ const (
 	ArmVersionAlreadyRecorded = "version_already_recorded"
 	// ArmWorkspaceClosed refuses a requeue of a closed workspace's merge.
 	ArmWorkspaceClosed = "workspace_closed"
-	// ArmColdGated refuses a requeue of a merge whose workspace is parked at
-	// its cold gate: the gate would take it off its queue again at once.
+	// ArmColdGated is DEPRECATED and never answered (2026-11-20): it refused
+	// a requeue of a merge whose workspace is parked at its cold gate. Such
+	// a requeue now goes in line and answers the gate by a compaction
+	// (Requeue). It stays named because the protobuf still declares its arm.
 	ArmColdGated = "cold_gated"
 	// ArmNameOffQueue refuses an async request whose name a merge off its
 	// queue holds: that merge is requeued, never asked for again.
@@ -202,9 +204,16 @@ type Requeued struct {
 // workspace), branch and request, at the placement asked for. It refuses,
 // changing nothing, a merge that holds no request (unknown_merge), stands in
 // line (still_queued), landed (already_landed), belongs to a closed workspace
-// (workspace_closed), belongs to a workspace parked at its cold gate
-// (cold_gated), lands a branch that is gone (branch_gone), or whose
+// (workspace_closed), lands a branch that is gone (branch_gone), or whose
 // version increment is missing or misplaced.
+//
+// A WORKSPACE PARKED AT ITS COLD GATE IS REQUEUED AND ITS GATE ANSWERED BY A
+// COMPACTION (owner request, 2026-11-20): the merge goes in line skipped, as
+// every waiting merge at a cold gate stands (coldgate.go), and the gate is
+// answered at once by a compaction of the whole conversation with the gate's
+// default summarizer. The session that brings up retires the gate, and the
+// merge resumes at its place. It was refused before (cold_gated), which left
+// the user to answer the gate and press requeue again.
 func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, error) {
 	const op = "daemon.merge.requeue"
 	ws := req.Workspace
@@ -232,14 +241,6 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	}
 	branch := requestBranch(record, rec.Source)
 	fields["branch"] = branch
-	// A WORKSPACE PARKED AT ITS COLD GATE IS REFUSED (2026-11-17): the gate
-	// takes its merge off the queue the moment the merge is in line again,
-	// so a requeue would only be evicted at once, with nothing said.
-	if o.deps.AtColdGate(ws) {
-		refusal := refuse(ArmColdGated, ws, "the merge's workspace is parked at its cold gate; the user must answer the gate before its merge can be put back in line")
-		logRefusal(log, op, "refused a requeue of a workspace parked at its cold gate", withField(fields, "reason", refusal.Reason), refusal)
-		return Requeued{}, refusal
-	}
 	exists, err := o.deps.Git.BranchExists(ctx, record.Dir, branch)
 	if err != nil {
 		log.Error(op, "could not read whether the requeued merge's branch exists", withField(fields, "error", err.Error()))
@@ -304,11 +305,31 @@ func (o *orchestrator) Requeue(ctx context.Context, req Requeue) (Requeued, erro
 	delete(o.displaces, ws)
 	o.mu.Unlock()
 	log.Info(op, "put a merge that left its queue back on it, as itself", fields)
-	position, inLine, err := o.queueRequestAt(ctx, ws, repo)
+	// A MERGE WHOSE SESSION IS PARKED GOES IN LINE MARKED (queueRequestGated).
+	position, inLine, gated, err := o.queueRequestGated(ctx, ws, repo, true)
 	if err != nil {
 		return Requeued{}, err
 	}
+	fields["cold_gated"] = gated
+	if gated {
+		o.compactRequeuedColdGate(ctx, ws, fields)
+	}
 	return Requeued{Position: position, InLine: inLine}, nil
+}
+
+// compactRequeuedColdGate answers the cold gate of WS, whose merge was just
+// requeued skipped at it, by a compaction (Deps.CompactColdGate). An answer
+// that fails leaves the merge in line, skipped, and the gate standing for
+// the user, as any waiting merge at a cold gate stands: it is recorded at
+// ERROR and the requeue still succeeded.
+func (o *orchestrator) compactRequeuedColdGate(ctx context.Context, ws ids.WorkspaceID, fields dlog.Context) {
+	const op = "daemon.merge.requeue"
+	log := o.log(ctx, ws)
+	if err := o.deps.CompactColdGate(ctx, ws); err != nil {
+		log.Error(op, "the requeued merge's cold gate could not be answered by a compaction; the merge waits in line, skipped, until the gate is answered", withField(fields, "error", err.Error()))
+		return
+	}
+	log.Info(op, "the requeued merge's workspace was parked at its cold gate; the gate is answered by a compaction, and the merge resumes at its place once the session is up", fields)
 }
 
 // offQueueRecord answers RECORD's request off its queue, or the refusal that

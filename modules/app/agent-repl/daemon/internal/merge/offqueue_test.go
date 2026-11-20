@@ -218,10 +218,6 @@ func TestRequeueRefusals(t *testing.T) {
 			req: Requeue{Version: &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "another"}}, want: ArmVersionAlreadyRecorded},
 		{name: "a placement behind a merge not in line", arrange: func(t *testing.T, h *harness) { evicted(t, h) },
 			req: Requeue{PlaceBehind: "nobody"}, want: ArmPlacementBehindNotInLine},
-		{name: "a workspace parked at its cold gate", arrange: func(t *testing.T, h *harness) {
-			evicted(t, h)
-			h.coldGated = map[ids.WorkspaceID]bool{theWorkspace: true}
-		}, want: ArmColdGated},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -250,40 +246,65 @@ func TestRequeueRefusals(t *testing.T) {
 	}
 }
 
+// TestRequeueOfAWorkspaceParkedAtItsColdGate pins the owner request of
+// 2026-11-20: a requeue at a cold gate goes in line skipped and answers the
+// gate by a compaction, where it was refused cold_gated.
 func TestRequeueOfAWorkspaceParkedAtItsColdGate(t *testing.T) {
-	// Arrange: the merge was evicted and its session is parked at its gate.
-	h := newHarness(t)
-	rec := evicted(t, h)
-	h.mu.Lock()
-	h.coldGated = map[ids.WorkspaceID]bool{theWorkspace: true}
-	h.mu.Unlock()
-	branch := requestBranch(h.db.workspaces[theWorkspace], rec.Source)
+	tests := []struct {
+		name       string
+		gated      bool
+		compactErr error
+		wantMarked bool
+		wantAsked  int
+		wantRecord string
+		wantLevel  string
+	}{
+		{name: "a parked workspace's merge goes in line skipped and its gate is compacted", gated: true, wantMarked: true, wantAsked: 1,
+			wantLevel:  dlog.LevelInfo,
+			wantRecord: "the requeued merge's workspace was parked at its cold gate; the gate is answered by a compaction, and the merge resumes at its place once the session is up"},
+		{name: "a gate that cannot be compacted leaves the merge in line, skipped", gated: true, compactErr: errors.New("no session"), wantMarked: true, wantAsked: 1,
+			wantLevel:  dlog.LevelError,
+			wantRecord: "the requeued merge's cold gate could not be answered by a compaction; the merge waits in line, skipped, until the gate is answered"},
+		{name: "a workspace at no gate is requeued unmarked and nothing is compacted", gated: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the merge was evicted, and its session is parked or not.
+			h := newHarness(t)
+			evicted(t, h)
+			h.mu.Lock()
+			h.coldGated = map[ids.WorkspaceID]bool{theWorkspace: tt.gated}
+			h.compactGateErr = tt.compactErr
+			h.mu.Unlock()
 
-	// Act
-	_, err := h.o.Requeue(context.Background(), Requeue{Workspace: theWorkspace, By: RequestedByUser})
+			// Act
+			_, err := h.o.Requeue(context.Background(), Requeue{Workspace: theWorkspace, By: RequestedByUser})
 
-	// Assert: refused cold_gated, nothing in line, the record as it stood,
-	// and the refusal recorded once with the workspace, branch and reason.
-	refusal, refused := Refused(err)
-	if !refused || refusal.Arm != ArmColdGated {
-		t.Fatalf("Requeue = %v, want the cold_gated refusal", err)
-	}
-	if _, ok := h.entryOf(theWorkspace); ok {
-		t.Fatal("the refused requeue put the merge in line")
-	}
-	if after, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept || !reflect.DeepEqual(after, rec) {
-		t.Fatalf("the refusal changed the record: %+v -> %+v (kept %v)", rec, after, kept)
-	}
-	records := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.requeue",
-		Message: "refused a requeue of a workspace parked at its cold gate"})
-	if len(records) != 1 {
-		t.Fatalf("refusal records = %v, want exactly one", records)
-	}
-	want := map[string]any{"workspace": string(theWorkspace), "branch": branch, "reason": refusal.Reason}
-	for key, value := range want {
-		if records[0].Context[key] != value {
-			t.Fatalf("refusal record %s = %v, want %v (%v)", key, records[0].Context[key], value, records[0].Context)
-		}
+			// Assert
+			if err != nil {
+				t.Fatalf("Requeue = %v, want it accepted", err)
+			}
+			entry, ok := h.entryOf(theWorkspace)
+			if !ok || entry.ColdGated != tt.wantMarked || (tt.wantMarked && entry.State != wsm.MergeQueued) {
+				t.Fatalf("entry %+v (in line %v), want it in line with cold gate mark %v, waiting when marked", entry, ok, tt.wantMarked)
+			}
+			h.mu.Lock()
+			asked := len(h.gatesCompacted)
+			h.mu.Unlock()
+			if asked != tt.wantAsked {
+				t.Fatalf("asked to compact %d gates, want %d", asked, tt.wantAsked)
+			}
+			if tt.wantRecord == "" {
+				return
+			}
+			record, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: tt.wantLevel, Operation: "daemon.merge.requeue", Message: tt.wantRecord})
+			if !found || record.Context["workspace"] != string(theWorkspace) || record.Context["cold_gated"] != true {
+				t.Fatalf("records = %v, want %q with the workspace and its gate", h.logs.Records(), tt.wantRecord)
+			}
+			if tt.compactErr != nil && record.Context["error"] != tt.compactErr.Error() {
+				t.Fatalf("record context %v, want the cause %q", record.Context, tt.compactErr)
+			}
+		})
 	}
 }
 

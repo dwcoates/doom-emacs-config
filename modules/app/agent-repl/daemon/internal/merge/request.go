@@ -664,33 +664,58 @@ func (o *orchestrator) queueRequest(ctx context.Context, ws ids.WorkspaceID, rep
 // line, and false for the place when the daemon is draining: the request then
 // stays recorded, and joins the line at the next boot.
 func (o *orchestrator) queueRequestAt(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) (int, bool, error) {
+	position, inLine, _, err := o.queueRequestGated(ctx, ws, repo, false)
+	return position, inLine, err
+}
+
+// queueRequestGated is queueRequestAt that, when MARKATGATE, marks the merge
+// as standing at its workspace's cold gate in the same write of the line that
+// puts it there, answering whether it did (a requeue, Requeue). AN ENTRY IN
+// LINE UNMARKED IS ADMISSIBLE, so a merge whose session is parked would be
+// admitted between the two writes. The gate is read under the line lock,
+// which its retirement's unmark takes too (unmarkColdGated): a gate passed
+// meanwhile is either read as passed here, or unmarks after this.
+func (o *orchestrator) queueRequestGated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, markAtGate bool) (int, bool, bool, error) {
 	const op = "daemon.merge.request"
 	if o.isDraining() {
 		o.log(ctx, ws).Info(op, "the daemon is draining; the merge request stays recorded for the next boot",
 			dlog.Context{"workspace": string(ws)})
-		return 0, false, nil
+		return 0, false, false, nil
 	}
 	entry, found, err := o.requestOf(ctx, repo, ws)
 	if err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	if !found {
 		err := fmt.Errorf("merge: %s has no recorded request to put in line", ws)
 		o.log(ctx, ws).Error(op, "a merge to put in line has no recorded request", dlog.Context{
 			"workspace": string(ws), "repo": string(repo), "error": err.Error()})
-		return 0, false, err
+		return 0, false, false, err
 	}
 	// THE BUBBLE EXISTS FROM HERE: the ledger identity it is addressed by is
 	// minted as the merge takes its place, and written on its row with that
 	// place, so republishQueue can draw it -- and the next daemon to serve the
 	// workspace draws the same bubble.
 	ledger := o.mintLedger(ws)
-	position, err := o.deps.DB.QueueMerge(ctx, repo, ws, ledger)
+	position, gated := 0, false
+	queue := func() error {
+		var err error
+		if position, err = o.deps.DB.QueueMerge(ctx, repo, ws, ledger); err != nil || !markAtGate || !o.deps.AtColdGate(ws) {
+			return err
+		}
+		gated, err = o.deps.DB.SetMergeColdGated(ctx, repo, ws)
+		return err
+	}
+	if markAtGate {
+		err = o.lineWrite(repo, queue)
+	} else {
+		err = queue()
+	}
 	if err != nil {
 		o.mu.Lock()
 		delete(o.ledgerOf, ws)
 		o.mu.Unlock()
-		return 0, false, err
+		return 0, false, false, err
 	}
 	o.log(ctx, ws).Info(op, "put a merge in line; it is reported from here", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "position": position})
@@ -698,10 +723,10 @@ func (o *orchestrator) queueRequestAt(ctx context.Context, ws ids.WorkspaceID, r
 	// resolution (ended); nothing between raises one.
 	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry))
 	if err := o.republishQueue(ctx, repo); err != nil {
-		return 0, false, err
+		return 0, false, false, err
 	}
 	o.kick(repo)
-	return position, true, nil
+	return position, true, gated, nil
 }
 
 // requestOf answers WS's row in REPO's queue, false when it has none.
