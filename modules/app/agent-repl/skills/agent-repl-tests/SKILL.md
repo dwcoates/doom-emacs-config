@@ -411,6 +411,28 @@ section holds the rest.
   the race is in the product, the harness when the test read an intermediate
   state. Raising a bound, adding a retry, or rerunning is refused.
 
+## Log calls are sites, and their templates are kept stable
+
+Every log call in every runtime passes its helper a literal template with
+named placeholders (`"timed out connecting to shim {shim} after {elapsed}"`
+with the values named), and every record carries the call's `site` key and
+`template`. The rule's one home is `logging-contract.md` "Log sites"; what a
+test author needs from it:
+
+- A site's key is the first 12 hex of the sha256 of the runtime, the calling
+  function (in TypeScript, the logger's static scope) and the template. It is
+  the same for every record the call writes, whatever values they carry.
+- Change a template only when it is really necessary. Rewording a template,
+  or renaming or moving the function it is written in, gives its site a NEW
+  key, which detaches the site from its history: the production checks then
+  read it as a site that never fired before.
+- A test asserting a record matches on its operation and its rendered
+  message, as before; it may also assert its `Template` or `Site`.
+- Each runtime has a static scan test over every log call in its source. A
+  scan failure names the call: a placeholder its named values lack, two calls
+  in one function writing one template (give each its own wording), or two
+  colliding keys.
+
 ## The rules this builds on
 
 They are owned elsewhere; read them, do not restate them:
