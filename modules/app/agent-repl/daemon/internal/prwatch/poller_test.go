@@ -3,6 +3,7 @@ package prwatch
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -475,16 +476,15 @@ func TestRecordReadFailureRecordsWhatItCouldNotDo(t *testing.T) {
 	}
 }
 
-func TestAPullRequestsMergeTellsItsWorkspace(t *testing.T) {
+func TestAPullRequestsEndTellsItsWorkspace(t *testing.T) {
 	tests := []struct {
 		name   string
 		origin wsm.PullRequestOrigin
 		merged bool
-		want   int
 	}{
-		{name: "an owned link's merge is told", origin: wsm.PullRequestOriginOwnedLink, merged: true, want: 1},
-		{name: "a pull request closed unmerged is not", origin: wsm.PullRequestOriginOwnedLink, merged: false, want: 0},
-		{name: "a requested subscription's merge is told too, for the verb to judge ownership", origin: wsm.PullRequestOriginRequested, merged: true, want: 1},
+		{name: "an owned link's merge is told as a merge", origin: wsm.PullRequestOriginOwnedLink, merged: true},
+		{name: "a pull request closed unmerged is told as a close", origin: wsm.PullRequestOriginOwnedLink, merged: false},
+		{name: "a requested subscription's merge is told too, for the verb to judge ownership", origin: wsm.PullRequestOriginRequested, merged: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -497,17 +497,32 @@ func TestAPullRequestsMergeTellsItsWorkspace(t *testing.T) {
 			r.tick()
 
 			// Assert
-			if len(r.ownedMerged) != tt.want {
-				t.Fatalf("told %v, want %d", r.ownedMerged, tt.want)
+			want := []endTold{{ws: r.ws, merged: tt.merged}}
+			if !reflect.DeepEqual(r.ended, want) {
+				t.Fatalf("told %+v, want %+v", r.ended, want)
 			}
 		})
 	}
 }
 
-func TestAnOwnedMergeThatCannotBeActedOnIsRecorded(t *testing.T) {
+func TestAnOpenPullRequestTellsNoEnd(t *testing.T) {
 	// Arrange
 	r := newRig(t)
-	r.ownedMergedErr = errors.New("verbs not bound")
+	r.subscribeAs(t, wsm.PullRequestOriginOwnedLink, wsm.PullRequestEventState)
+
+	// Act
+	r.tick()
+
+	// Assert
+	if len(r.ended) != 0 {
+		t.Fatalf("told %+v, want no end for a pull request still open", r.ended)
+	}
+}
+
+func TestAnEndThatCannotBeActedOnIsRecorded(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.endedErr = errors.New("verbs not bound")
 	r.subscribeAs(t, wsm.PullRequestOriginOwnedLink, wsm.PullRequestEventState)
 	r.gh.set(pathPull(), pullJSON("closed", false, true, "head1"))
 
@@ -515,7 +530,7 @@ func TestAnOwnedMergeThatCannotBeActedOnIsRecorded(t *testing.T) {
 	r.tick()
 
 	// Assert
-	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not tell the workspace one of whose owned pull requests merged"}); !ok {
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not act on the end of the workspace's pull request"}); !ok {
 		t.Fatalf("records = %+v, want the failure at error", r.log.Records())
 	}
 }

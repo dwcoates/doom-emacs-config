@@ -45,6 +45,7 @@ import type {
   RosterRowDetailSummary,
   RosterRowName,
   RosterRowOneShot,
+  RosterRowOpenOwnedPullRequest,
   RosterRowOpening,
   RosterRowAsyncMerging,
   RosterRowMergePaused,
@@ -426,6 +427,17 @@ export function drawRosterRow(
 
   const when = requireMessage(u.when, `${path}.when`);
   const duration = drawRosterRowWhen(when, sc, `${path}.when`);
+  // AN OPEN OWNED PULL REQUEST INKS THE DURATION GREEN (owner request,
+  // 2026-11-19): the green the `ready` arm paints the rest of the row, in the
+  // open section only.
+  if (
+    place === "grouping" &&
+    !hidden &&
+    u.openOwnedPullRequest !== undefined &&
+    drawRosterRowOpenOwnedPullRequest(u.openOwnedPullRequest, `${path}.openOwnedPullRequest`)
+  ) {
+    duration.setAttribute("data-open-owned-pull-request", "");
+  }
   line.appendChild(duration);
   const target: VerbTarget = { sc, workspace, name, kind: "workspace" };
   const more = drawMenuControl(ws, target);
@@ -709,6 +721,17 @@ export function drawRosterRowReviving(u: RosterRowReviving, path: string): boole
  * all; `tones.rosterRowMark` decides on which arms its glyph is drawn.
  */
 export function drawRosterRowOneShot(u: RosterRowOneShot, path: string): boolean {
+  void u;
+  void path;
+  return true;
+}
+
+/**
+ * The OPEN-OWNED-PULL-REQUEST marker: the workspace owns a pull request still
+ * open. EMPTY -- presence is the fact -- so this answers `true` for a marker
+ * that is there at all; the open section inks the row's duration for it.
+ */
+export function drawRosterRowOpenOwnedPullRequest(u: RosterRowOpenOwnedPullRequest, path: string): boolean {
   void u;
   void path;
   return true;

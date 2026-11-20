@@ -376,7 +376,7 @@ func hasRepeat(urls []string) bool {
 func OwnedPullRequestsMerged(links []WorkspaceLink) (owns, merged bool) {
 	merged = true
 	for _, link := range links {
-		if !link.Owned || link.PullRequest == nil {
+		if !isOwnedPullRequest(link) {
 			continue
 		}
 		owns = true
@@ -385,4 +385,24 @@ func OwnedPullRequestsMerged(links []WorkspaceLink) (owns, merged bool) {
 		}
 	}
 	return owns, owns && merged
+}
+
+// OwnedPullRequestOpen reports whether LINKS hold a canonical owned pull
+// request that is still open: one the workspace follows whose subscription has
+// recorded no end (frontend.v1.RosterRowOpenOwnedPullRequest). A pull request
+// that merged or closed, or one no longer followed (its state cannot be
+// known), is not open.
+func OwnedPullRequestOpen(links []WorkspaceLink) bool {
+	for _, link := range links {
+		if isOwnedPullRequest(link) && link.Follow != nil && link.Follow.Ended == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// isOwnedPullRequest reports whether LINK is a canonical owned pull request:
+// an owned link naming a GitHub pull request.
+func isOwnedPullRequest(link WorkspaceLink) bool {
+	return link.Owned && link.PullRequest != nil
 }

@@ -238,6 +238,12 @@ type Resolver interface {
 	// prompt, first line only. Empty omits the line rather than drawing it
 	// blank.
 	SetSummary(ws ids.WorkspaceID, text string)
+	// SetOpenOwnedPullRequest installs whether the workspace owns a pull
+	// request that is still open (wsm.OwnedPullRequestOpen), which the row's
+	// open-owned-pull-request marker states. Its sole producer is the
+	// workspace verbs, at registration, on every ChangeWorkspaceLinks, and on
+	// every end of a followed pull request.
+	SetOpenOwnedPullRequest(ws ids.WorkspaceID, open bool)
 	// SetRepoDivergence installs a repository's latest ahead/behind measure
 	// (repodivergence), drawn as its section label's hover. A repository never
 	// measured is drawn pending.

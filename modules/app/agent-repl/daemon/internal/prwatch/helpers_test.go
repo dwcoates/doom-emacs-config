@@ -201,10 +201,10 @@ func (h *fakeHolds) Supersede(context.Context, ids.WorkspaceID, ids.TurnID) (boo
 
 // rig is one watcher over a real store, a scripted GitHub, and a script clock.
 type rig struct {
-	// ownedMerged is every workspace told one of its owned pull requests
-	// merged, and ownedMergedErr what the telling answers.
-	ownedMerged    []ids.WorkspaceID
-	ownedMergedErr error
+	// ended is every end a workspace was told of its followed pull
+	// requests, and endedErr what the telling answers.
+	ended    []endTold
+	endedErr error
 
 	w       *Watcher
 	db      wsm.DB
@@ -253,9 +253,9 @@ func newRig(t *testing.T) *rig {
 	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}}
 	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Notices: &briefprompttest.Meter{}, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
 		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Log: r.log,
-		OwnedMerged: func(_ context.Context, ws ids.WorkspaceID) error {
-			r.ownedMerged = append(r.ownedMerged, ws)
-			return r.ownedMergedErr
+		Ended: func(_ context.Context, ws ids.WorkspaceID, merged bool) error {
+			r.ended = append(r.ended, endTold{ws: ws, merged: merged})
+			return r.endedErr
 		}})
 	if err != nil {
 		t.Fatal(err)
@@ -462,4 +462,10 @@ func (r *rig) gqlCalls(name string) int {
 		}
 	}
 	return n
+}
+
+// endTold is one end the watcher told a workspace of.
+type endTold struct {
+	ws     ids.WorkspaceID
+	merged bool
 }

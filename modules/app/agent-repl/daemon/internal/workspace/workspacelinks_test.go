@@ -9,6 +9,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
@@ -78,6 +79,9 @@ func TestLinkVerbsRecordAndRepublish(t *testing.T) {
 			}
 			if !reflect.DeepEqual(f.topbarLinks, [][]topbar.Link{tt.wantTopbar}) {
 				t.Errorf("topbar links = %+v, want [%+v]", f.topbarLinks, tt.wantTopbar)
+			}
+			if want := []openOwnedTold{{WS: "w1", Open: false}}; !reflect.DeepEqual(f.sidebar.openOwned, want) {
+				t.Errorf("sidebar told %+v, want %+v alongside the topbar", f.sidebar.openOwned, want)
 			}
 			r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opChangeLinks})
 			if !ok || r.Message != tt.wantLine || r.Context["workspace"] != "w1" {
@@ -512,5 +516,122 @@ func TestAnOwnedLinkFollowedForItsMergeAloneShowsItsNarrowedEvents(t *testing.T)
 	// Assert
 	if sub == nil || len(sub.GetEvents()) != 2 {
 		t.Fatalf("subscription = %v, want the two narrowed events", sub)
+	}
+}
+
+func TestRepublishLinksTellsBothViews(t *testing.T) {
+	tests := []struct {
+		name     string
+		links    []wsm.WorkspaceLink
+		wantOpen bool
+	}{
+		{name: "an owned open pull request is open", links: []wsm.WorkspaceLink{ownedPullRequest(1, false)}, wantOpen: true},
+		{name: "a merged owned pull request is not", links: []wsm.WorkspaceLink{ownedPullRequest(1, true)}, wantOpen: false},
+		{name: "no links hold none", wantOpen: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": tt.links}
+
+			// Act.
+			err := f.verbs.RepublishLinks(context.Background(), "w1")
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("RepublishLinks: %v", err)
+			}
+			if want := []openOwnedTold{{WS: "w1", Open: tt.wantOpen}}; !reflect.DeepEqual(f.sidebar.openOwned, want) {
+				t.Errorf("sidebar told %+v, want %+v", f.sidebar.openOwned, want)
+			}
+			if len(f.topbarLinks) != 1 {
+				t.Errorf("topbar links = %+v, want one publication", f.topbarLinks)
+			}
+		})
+	}
+}
+
+func TestRepublishLinksSurfacesAnUnreadableLinkSet(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.linksReadErr = errFake
+
+	// Act.
+	err := f.verbs.RepublishLinks(context.Background(), "w1")
+
+	// Assert: surfaced, recorded with its cause, and nothing published.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("RepublishLinks = %v, want the read failure", err)
+	}
+	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRepublishLinks})
+	if !ok || r.Context["workspace"] != "w1" || r.Context["cause"] != errFake.Error() {
+		t.Errorf("record = %+v, want an ERROR naming the workspace and the cause", r)
+	}
+	if len(f.topbarLinks) != 0 || len(f.sidebar.openOwned) != 0 {
+		t.Errorf("topbar links = %v, sidebar told %v; want none published", f.topbarLinks, f.sidebar.openOwned)
+	}
+}
+
+func TestPullRequestEndedRepublishesAndTellsOnAMerge(t *testing.T) {
+	tests := []struct {
+		name     string
+		links    []wsm.WorkspaceLink
+		merged   bool
+		wantTold bool
+	}{
+		{name: "the last owned pull request's merge tells the workspace", links: []wsm.WorkspaceLink{ownedPullRequest(1, true)}, merged: true, wantTold: true},
+		{name: "a close without a merge tells the workspace nothing", links: []wsm.WorkspaceLink{ownedPullRequest(1, false)}, merged: false, wantTold: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := mergedNoticeFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": tt.links}
+
+			// Act.
+			err := f.verbs.PullRequestEnded(context.Background(), "w1", tt.merged)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("PullRequestEnded: %v", err)
+			}
+			if len(f.sidebar.openOwned) != 1 {
+				t.Errorf("sidebar told %+v, want one republication", f.sidebar.openOwned)
+			}
+			if f.db.closedFlags["w1"] {
+				t.Error("the workspace closed; its merged pull requests only tell it")
+			}
+			var told int
+			for _, sub := range f.queue.submissions {
+				if sub.WS == "w1" && sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE {
+					told++
+				}
+			}
+			if (told == 1) != tt.wantTold || told > 1 {
+				t.Errorf("notices = %d, want told %v once", told, tt.wantTold)
+			}
+		})
+	}
+}
+
+func TestPullRequestEndedTellsNothingWhenTheLinksCannotBeRead(t *testing.T) {
+	// Arrange.
+	f := mergedNoticeFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.linksReadErr = errFake
+
+	// Act.
+	err := f.verbs.PullRequestEnded(context.Background(), "w1", true)
+
+	// Assert.
+	if !errors.Is(err, errFake) {
+		t.Fatalf("PullRequestEnded = %v, want the read failure", err)
+	}
+	if len(f.queue.submissions) != 0 {
+		t.Errorf("submissions = %+v, want nothing told when the links cannot be read", f.queue.submissions)
 	}
 }

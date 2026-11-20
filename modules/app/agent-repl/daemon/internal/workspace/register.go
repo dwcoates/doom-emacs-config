@@ -632,7 +632,7 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		log.Error(opRegister, "could not read the workspace's links for its title", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
 		return fmt.Errorf("read the links of %q: %w", record.ID, err)
 	}
-	v.deps.Topbar.SetLinks(record.ID, ShownLinks(links))
+	v.publishLinks(record.ID, links)
 	log.Debug(opRegister, "installed the topbar's naming and account lines", dlog.Context{
 		"workspace": string(record.ID), "config_dir": configDir,
 	})

@@ -770,6 +770,23 @@ message RosterRowOneShot {
   reserved "armed", "failed";
 }
 
+// The OPEN-OWNED-PULL-REQUEST marker: the workspace owns a GitHub pull
+// request that is still open. Empty: presence is the fact.
+//
+// THE DAEMON DECIDES IT from the workspace's stored links: an OWNED link that
+// names a pull request the workspace follows, whose subscription has recorded
+// no end. A pull request that merged or closed, a reference link, and an owned
+// pull request the workspace no longer follows (whose state cannot be known)
+// raise nothing. The daemon recomputes it on every change of the links and on
+// every end of a followed pull request.
+//
+// DRAWN ON THE DURATION (owner request, 2026-11-19): in the open workspaces
+// section the row's when-column is inked the green the `ready` arm paints the
+// rest of the row (render-colors.json's `roster_status`), at full strength,
+// so a workspace with a pull request awaiting review stands apart. The bands
+// (Recently Merged, Hidden) draw nothing for it.
+message RosterRowOpenOwnedPullRequest {}
+
 // The ASYNC-MERGING marker: the workspace's OWN BRANCH is merging async, in a
 // hidden merge workspace forked from it. Empty: presence is the fact.
 //
@@ -2174,6 +2191,11 @@ message RosterRow {
   // in flight and its session runs a turn, so the arm is the turn's. See
   // RosterRowMergeTurn, which carries the marker's whole contract.
   optional RosterRowMergeTurn merge_turn = 74;
+
+  // The row's OPEN-OWNED-PULL-REQUEST marker: present while the workspace
+  // owns a pull request that is still open, absent otherwise. See
+  // RosterRowOpenOwnedPullRequest, which carries the marker's whole contract.
+  optional RosterRowOpenOwnedPullRequest open_owned_pull_request = 76;
 
   // The row's display name.
   RosterRowName name = 2;

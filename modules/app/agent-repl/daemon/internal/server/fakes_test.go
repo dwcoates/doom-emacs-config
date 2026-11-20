@@ -381,6 +381,10 @@ type fakeVerbs struct {
 	// catalogErr refuses it.
 	catalogChecked []string
 	catalogErr     error
+	// republished records every workspace RepublishLinks was asked to
+	// republish, and republishErr fails it.
+	republished  []ids.WorkspaceID
+	republishErr error
 	workspace.Verbs
 	// api answers the agent API's verbs.
 	api agentAPI

@@ -96,6 +96,11 @@ func (s *server) SubscribePullRequest(
 	if err != nil {
 		return nil, fail(log, rpc, err)
 	}
+	// A FOLLOW CHANGES WHAT THE ROW DRAWS: following an owned pull request
+	// again tells the sidebar it is open.
+	if err := s.deps.Verbs.RepublishLinks(ctx, subscriber.Record.ID); err != nil {
+		return nil, fail(log, rpc, err)
+	}
 	if replaced {
 		success.Taken = &agentreplv1.SubscribePullRequestSuccess_Resubscribed{Resubscribed: &agentreplv1.SubscribePullRequestSuccessResubscribed{Subscription: stored}}
 	} else {
@@ -126,6 +131,13 @@ func (s *server) UnsubscribePullRequest(
 	ended, err := s.deps.DB.UnsubscribePullRequest(ctx, subscriber.Record.ID, pr)
 	if err != nil {
 		return nil, fail(subscriber.Log, rpc, fmt.Errorf("end the subscription of %s to %s: %w", subscriber.Record.ID, pr, err))
+	}
+	// AN UNFOLLOW CHANGES WHAT THE ROW DRAWS: an owned pull request no longer
+	// followed cannot be known open.
+	if ended {
+		if err := s.deps.Verbs.RepublishLinks(ctx, subscriber.Record.ID); err != nil {
+			return nil, fail(subscriber.Log, rpc, err)
+		}
 	}
 	success := &agentreplv1.UnsubscribePullRequestSuccess{Ended: &agentreplv1.UnsubscribePullRequestSuccess_Unsubscribed{Unsubscribed: &agentreplv1.UnsubscribePullRequestSuccessUnsubscribed{}}}
 	if !ended {

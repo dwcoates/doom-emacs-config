@@ -1309,13 +1309,16 @@ func TestRegistrationHandsTheTitleTheRecordedShownLinks(t *testing.T) {
 	doc := wsm.WorkspaceLink{URL: "https://example.com/design", Label: "The design doc", Shown: true}
 	unshown := wsm.WorkspaceLink{URL: "https://example.com/old", Label: "An older draft"}
 	tests := []struct {
-		name  string
-		links []wsm.WorkspaceLink
-		want  [][]topbar.Link
+		name     string
+		links    []wsm.WorkspaceLink
+		want     [][]topbar.Link
+		wantOpen bool
 	}{
 		{name: "the recorded shown links are restored", links: []wsm.WorkspaceLink{doc, unshown},
 			want: [][]topbar.Link{{{Label: doc.Label, URL: doc.URL}}}},
 		{name: "a workspace with none is handed none", links: nil, want: [][]topbar.Link{nil}},
+		{name: "an owned open pull request tells the row it is open", links: []wsm.WorkspaceLink{ownedPullRequest(1, false)},
+			wantOpen: true, want: [][]topbar.Link{nil}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1332,6 +1335,9 @@ func TestRegistrationHandsTheTitleTheRecordedShownLinks(t *testing.T) {
 			// Assert.
 			if !reflect.DeepEqual(f.topbarLinks, tt.want) {
 				t.Fatalf("topbar links = %v, want %v", f.topbarLinks, tt.want)
+			}
+			if want := []openOwnedTold{{WS: "w1", Open: tt.wantOpen}}; !reflect.DeepEqual(f.sidebar.openOwned, want) {
+				t.Fatalf("sidebar told %+v, want %+v", f.sidebar.openOwned, want)
 			}
 		})
 	}
@@ -1350,8 +1356,8 @@ func TestRegistrationRefusesWhenTheLinksCannotBeRead(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "disk gone") {
 		t.Fatalf("Register = %v, want the links read failure", err)
 	}
-	if len(f.topbarLinks) != 0 {
-		t.Errorf("topbar links = %v, want none published", f.topbarLinks)
+	if len(f.topbarLinks) != 0 || len(f.sidebar.openOwned) != 0 {
+		t.Errorf("topbar links = %v, sidebar told %v; want none published", f.topbarLinks, f.sidebar.openOwned)
 	}
 	r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opRegister,
 		Message: "could not read the workspace's links for its title"})

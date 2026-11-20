@@ -187,6 +187,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOneShot` states it: set
 	// for a workspace created as a one-shot, for its whole life.
 	out.OneShot = oneShot(rec)
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOpenOwnedPullRequest`
+	// states it: set while the workspace owns a pull request still open.
+	if s.openOwnedPullRequest {
+		out.OpenOwnedPullRequest = &frontendv1.RosterRowOpenOwnedPullRequest{}
+	}
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOpening` states it: set
 	// while an open of the workspace is in flight, when the status is
 	// `inactive` and the row takes no click.

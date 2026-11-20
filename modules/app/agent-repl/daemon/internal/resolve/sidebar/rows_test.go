@@ -2210,3 +2210,55 @@ func TestARowsNameWearsTheGlyphExactlyForAnEmojiAckWorkspace(t *testing.T) {
 		})
 	}
 }
+
+// THE OPEN-OWNED-PULL-REQUEST MARKER IS PRESENCE ALONE
+// (frontend.v1.RosterRowOpenOwnedPullRequest): it stands exactly while the
+// verbs last said the workspace owns a pull request still open.
+func TestOpenOwnedPullRequestMarkerFollowsTheLastFact(t *testing.T) {
+	cases := []struct {
+		name  string
+		facts []bool
+		want  bool
+	}{
+		{name: "a workspace never told carries no marker", facts: nil, want: false},
+		{name: "a workspace told it owns an open pull request carries the marker", facts: []bool{true}, want: true},
+		{name: "a workspace whose pull request ended loses the marker", facts: []bool{true, false}, want: false},
+		{name: "a workspace told twice keeps the marker", facts: []bool{true, true}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := live(t, arrange(t, workspace(string(theWS), "one")))
+
+			// Act.
+			for _, open := range tc.facts {
+				r.SetOpenOwnedPullRequest(theWS, open)
+			}
+
+			// Assert.
+			if got := onlyRow(t, r).GetOpenOwnedPullRequest() != nil; got != tc.want {
+				t.Fatalf("open_owned_pull_request present = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// AN UNCHANGED FACT RENDERS NOTHING: telling the roster what it already holds
+// publishes no push, so the next push is the next real change.
+func TestOpenOwnedPullRequestUnchangedPublishesNothing(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+	ch := subscribe(t, r)
+	r.SetRegistry(registry(workspace(string(theWS), "one")))
+	<-ch
+
+	// Act: the unchanged fact, then a change that must still arrive.
+	r.SetOpenOwnedPullRequest(theWS, false)
+	r.SetSummary(theWS, "a change")
+
+	// Assert.
+	row := rowFor(repoRows(t, <-ch), string(theWS))
+	if got := row.GetDetail().GetSummary().GetText(); got != "a change" {
+		t.Fatalf("next delivery carried %q, want the change: the unchanged fact published a push", got)
+	}
+}

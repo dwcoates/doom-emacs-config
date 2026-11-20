@@ -329,14 +329,14 @@ func (f *verbsForwarder) carryOutSelfClose(ctx context.Context, ws ids.Workspace
 	return verbs.CarryOutSelfClose(ctx, ws)
 }
 
-// closeWhenOwnedPullRequestsMerged is an owned pull request's merge
-// (prwatch.Deps.OwnedMerged), whose watcher records a failure.
-func (f *verbsForwarder) closeWhenOwnedPullRequestsMerged(ctx context.Context, ws ids.WorkspaceID) error {
-	verbs, err := f.bound("an owned pull request merged")
+// pullRequestEnded is a followed pull request's end (prwatch.Deps.Ended),
+// whose watcher records a failure.
+func (f *verbsForwarder) pullRequestEnded(ctx context.Context, ws ids.WorkspaceID, merged bool) error {
+	verbs, err := f.bound("a followed pull request ended")
 	if err != nil {
 		return err
 	}
-	return verbs.TellOwnedPullRequestsMerged(ctx, ws)
+	return verbs.PullRequestEnded(ctx, ws, merged)
 }
 
 // letQueueThroughAfterBypassTurn is the turn-end edge's queue resume
