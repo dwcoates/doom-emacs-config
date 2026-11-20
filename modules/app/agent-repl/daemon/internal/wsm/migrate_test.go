@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -953,12 +954,22 @@ func TestEveryMigrationDeclaresItsKind(t *testing.T) {
 // swap is not raced.
 func markBreakingStepsAdditive(t *testing.T) {
 	t.Helper()
+	withStepKinds(t, func(_ int, m migration) MigrationKind {
+		if m.Kind == MigrationBreaking {
+			return MigrationAdditive
+		}
+		return m.Kind
+	})
+}
+
+// withStepKinds has every step of this build's list be the kind KIND
+// answers for it, by its index and itself, until the test ends.
+func withStepKinds(t *testing.T, kind func(i int, m migration) MigrationKind) {
+	t.Helper()
 	real := migrations
 	swapped := slices.Clone(real)
 	for i := range swapped {
-		if swapped[i].Kind == MigrationBreaking {
-			swapped[i].Kind = MigrationAdditive
-		}
+		swapped[i].Kind = kind(i, swapped[i])
 	}
 	migrations = swapped
 	t.Cleanup(func() { migrations = real })
@@ -1336,37 +1347,45 @@ func TestNoStepPastTheLastBreakingOneBreaks(t *testing.T) {
 	}
 }
 
-func TestSplitJoinable(t *testing.T) {
+func TestJoinable(t *testing.T) {
 	add := func(to int) migration { return migration{To: to, Name: "a", Kind: MigrationAdditive} }
 	con := func(to int) migration { return migration{To: to, Name: "c", Kind: MigrationContract} }
 	brk := func(to int) migration { return migration{To: to, Name: "b", Kind: MigrationBreaking} }
 	tests := []struct {
-		name          string
-		plan          []migration
-		wantAdditive  int
-		wantContracts int
-		wantRefusal   string
+		name        string
+		pending     []migration
+		wantJoin    []int
+		wantOwed    []int
+		wantRefusal string
 	}{
-		{name: "additive steps alone", plan: []migration{add(1), add(2)}, wantAdditive: 2},
-		{name: "additive steps then contracts", plan: []migration{add(1), con(2), con(3)}, wantAdditive: 1, wantContracts: 2},
-		{name: "contracts alone", plan: []migration{con(1)}, wantContracts: 1},
-		{name: "an additive step after a contract", plan: []migration{con(1), add(2)}, wantRefusal: "follows a contract step"},
-		{name: "a breaking step", plan: []migration{add(1), brk(2)}, wantRefusal: "is a breaking migration"},
+		{name: "additive steps alone are all joined", pending: []migration{add(1), add(2)}, wantJoin: []int{1, 2}},
+		{name: "contracts after the additive steps are owed", pending: []migration{add(1), con(2), con(3)}, wantJoin: []int{1}, wantOwed: []int{2, 3}},
+		{name: "contracts alone are all owed", pending: []migration{con(1)}, wantOwed: []int{1}},
+		{name: "an additive step after a contract is joined past it", pending: []migration{con(1), add(2), con(3), add(4)}, wantJoin: []int{2, 4}, wantOwed: []int{1, 3}},
+		{name: "a breaking step refuses the join", pending: []migration{add(1), brk(2)}, wantRefusal: "is a breaking migration"},
+		{name: "an unmarked step refuses the join", pending: []migration{{To: 1, Name: "u"}}, wantRefusal: "is a breaking migration"},
+	}
+	tos := func(steps []migration) []int {
+		var out []int
+		for _, m := range steps {
+			out = append(out, m.To)
+		}
+		return out
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			additive, contracts, refusal := splitJoinable(tt.plan)
+			join, owed, refusal := joinable(tt.pending)
 
 			// Assert
 			if tt.wantRefusal != "" {
-				if !strings.Contains(refusal, tt.wantRefusal) {
-					t.Fatalf("refusal = %q, want one saying %q", refusal, tt.wantRefusal)
+				if !strings.Contains(refusal, tt.wantRefusal) || join != nil || owed != nil {
+					t.Fatalf("joinable = (%v, %v, %q), want a refusal saying %q and no step", tos(join), tos(owed), refusal, tt.wantRefusal)
 				}
 				return
 			}
-			if refusal != "" || len(additive) != tt.wantAdditive || len(contracts) != tt.wantContracts {
-				t.Fatalf("splitJoinable = (%d, %d, %q), want (%d, %d, none)", len(additive), len(contracts), refusal, tt.wantAdditive, tt.wantContracts)
+			if refusal != "" || !slices.Equal(tos(join), tt.wantJoin) || !slices.Equal(tos(owed), tt.wantOwed) {
+				t.Fatalf("joinable = (%v, %v, %q), want (%v, %v, none)", tos(join), tos(owed), refusal, tt.wantJoin, tt.wantOwed)
 			}
 		})
 	}
@@ -1375,13 +1394,13 @@ func TestSplitJoinable(t *testing.T) {
 // markStepsContract has the last N steps of this build be contract steps.
 func markStepsContract(t *testing.T, n int) {
 	t.Helper()
-	real := migrations
-	swapped := slices.Clone(real)
-	for i := len(swapped) - n; i < len(swapped); i++ {
-		swapped[i].Kind = MigrationContract
-	}
-	migrations = swapped
-	t.Cleanup(func() { migrations = real })
+	first := len(migrations) - n
+	withStepKinds(t, func(i int, m migration) MigrationKind {
+		if i >= first {
+			return MigrationContract
+		}
+		return m.Kind
+	})
 }
 
 func TestAJoinLeavesTheContractStepsAndTheTakeoverAppliesThem(t *testing.T) {
@@ -1411,20 +1430,50 @@ func TestAJoinLeavesTheContractStepsAndTheTakeoverAppliesThem(t *testing.T) {
 	}
 }
 
-func TestAJoinRefusesAnAdditiveStepAfterAContract(t *testing.T) {
+// THE 2026-11-19 FAILURE, PINNED: an additive step after a contract step is
+// applied by the join, past the contract it owes, so the joined file holds
+// what the build reads while its incumbent still serves.
+func TestAJoinAppliesAnAdditiveStepPastAnOwedContract(t *testing.T) {
 	// Arrange: the second-to-last step is a contract, the last additive.
 	markStepsContract(t, 2)
-	migrations[len(migrations)-1].Kind = MigrationAdditive
+	markLastStepAdditive(t)
 	path := fixtureAt(t, LayoutVersion-2)
 
-	// Act
-	_, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
+	// Act: join, then serve alone.
+	joined, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenJoining: %v", err)
+	}
+	t.Cleanup(func() { joined.Close() })
+	afterJoin := rawStamp(t, path)
+	if err := joined.Promote(context.Background()); err != nil {
+		t.Fatalf("Promote: %v", err)
+	}
+	applyErr := joined.ApplyContracts(context.Background())
+	afterTakeover := rawStamp(t, path)
 
 	// Assert
-	var refusal *LayoutError
-	if !errors.As(err, &refusal) || !strings.Contains(refusal.Reason, "follows a contract step") {
-		t.Fatalf("OpenJoining = %v, want the additive step after a contract refused", err)
-	}
+	t.Run("the join runs the additive step and owes the contract", func(t *testing.T) {
+		if want := (layoutStamp{Version: LayoutVersion - 2, AdditiveThrough: LayoutVersion}); afterJoin != want {
+			t.Fatalf("the join left the file at %+v, want %+v", afterJoin, want)
+		}
+	})
+	t.Run("the takeover's copy is named for both numbers, apart from the join's", func(t *testing.T) {
+		var names []string
+		for _, copied := range backupsBeside(t, path) {
+			names = append(names, regexp.MustCompile(`\.layout[0-9a]+\.bak`).FindString(copied))
+		}
+		slices.Sort(names)
+		want := []string{fmt.Sprintf(".layout%d.bak", LayoutVersion-2), fmt.Sprintf(".layout%da%d.bak", LayoutVersion-2, LayoutVersion)}
+		if !slices.Equal(names, want) {
+			t.Fatalf("copies beside the file = %v, want %v", names, want)
+		}
+	})
+	t.Run("the takeover runs the owed contract and nothing is owed", func(t *testing.T) {
+		if want := (layoutStamp{Version: LayoutVersion, AdditiveThrough: LayoutVersion}); applyErr != nil || afterTakeover != want {
+			t.Fatalf("ApplyContracts = %v, file at %+v; want %+v", applyErr, afterTakeover, want)
+		}
+	})
 }
 
 func TestApplyContractsOnAReadOnlyHandleIsRefused(t *testing.T) {

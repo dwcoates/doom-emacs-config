@@ -215,3 +215,24 @@ func TestARefusedOpenPrunesNothing(t *testing.T) {
 		t.Fatalf("a refused open removed the copy: %v", err)
 	}
 }
+
+func TestMigrationCopyName(t *testing.T) {
+	tests := []struct {
+		name string
+		file string
+		want bool
+	}{
+		{name: "a copy of a file that owed nothing", file: "wsm.db.layout171.bak-2026-11-19", want: true},
+		{name: "a copy of a file that owed contract steps", file: "wsm.db.layout169a171.bak-2026-11-19", want: true},
+		{name: "another database's copy", file: "events.db.layout171.bak-2026-11-19"},
+		{name: "a copy with no layout", file: "wsm.db.layout.bak-2026-11-19"},
+		{name: "the database itself", file: "wsm.db"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := migrationCopyName("wsm.db").MatchString(tt.file); got != tt.want {
+				t.Fatalf("migrationCopyName matches %q = %v, want %v", tt.file, got, tt.want)
+			}
+		})
+	}
+}

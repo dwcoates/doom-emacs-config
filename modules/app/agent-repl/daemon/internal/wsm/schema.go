@@ -16,7 +16,8 @@ package wsm
 const schemaDDL = `
 CREATE TABLE layout (
   id      INTEGER PRIMARY KEY CHECK (id = 1),
-  version INTEGER NOT NULL
+  version INTEGER NOT NULL,
+  additive_through INTEGER
 );
 
 CREATE TABLE repositories (

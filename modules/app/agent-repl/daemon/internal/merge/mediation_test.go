@@ -1050,8 +1050,6 @@ func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
 				h.db.resumeMarkErr = errors.New("database is locked")
 				h.db.mu.Unlock()
 			}},
-		{name: "a resuming brief that cannot be composed", message: "the undecided intake's resuming brief could not be composed; the queue stays held",
-			arrange: func(h *harness) { delete(h.briefs, BriefDeployIntakeResumed) }},
 		{name: "a resuming brief that cannot be submitted", message: "the undecided intake's resuming brief could not be submitted; the queue stays held",
 			arrange: func(h *harness) {
 				h.queue.onSubmit = func(sub promptqueue.Submission) {
@@ -1085,6 +1083,83 @@ func TestAnUndecidedIntakeThatCannotBeResumedHoldsTheQueue(t *testing.T) {
 				t.Fatalf("records = %v, want %q at ERROR", h.logs.Records(), tt.message)
 			}
 		})
+	}
+}
+
+// A BRIEF THAT CANNOT BE COMPOSED ESCALATES ITS CHECK (owner ruling,
+// 2026-11-19): nothing runs the round again, so a check left owed and only
+// logged held its queue with nothing shown.
+func TestAResumingBriefThatCannotBeComposedEscalatesTheCheck(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{name: "as the undecided intake is resumed", arrange: func(t *testing.T, h *harness) {}},
+		{name: "as a resumed intake's turn is reattached", arrange: func(t *testing.T, h *harness) {
+			withMediator(t, h)
+			told(t, h, deployStarted, "turn-told")
+			if ok, err := h.db.MarkMediationResumed(context.Background(), mediationKey(h), deployStarted, "turn-resumed"); err != nil || !ok {
+				t.Fatalf("MarkMediationResumed = (%v, %v)", ok, err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			tt.arrange(t, h)
+			delete(h.briefs, BriefDeployIntakeResumed)
+
+			// Act
+			h.o.Mediate(context.Background())
+
+			// Assert
+			const what = "the undecided intake's resuming brief could not be composed"
+			if heldEscalation(t, h) == "" {
+				t.Fatalf("check %+v, want its escalation told", owedCheck(t, h))
+			}
+			if brief := owedCheck(t, h).EscalationBrief; !strings.Contains(brief, "the deploy check could not run: "+what) {
+				t.Fatalf("the escalation says %q, want it to name the brief that could not be composed", brief)
+			}
+			if !h.bannerRaised(desktopnotify.KindDeployMediated) {
+				t.Fatal("the user was not told the check could not run")
+			}
+			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: what + "; the check is escalated to the user"}); !ok {
+				t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
+			}
+			// THE MEDIATOR WAS TOLD OF THE CHECK ALREADY, so it is only
+			// shown: it may be mid-turn, and is sent no further brief.
+			if len(escalationBriefs(h)) != 0 || len(resumingBriefs(h)) != 0 {
+				t.Fatalf("submitted %d escalation and %d resuming briefs, want the told mediator only shown", len(escalationBriefs(h)), len(resumingBriefs(h)))
+			}
+		})
+	}
+}
+
+func TestABriefCutByTheDaemonsExitIsNotEscalated(t *testing.T) {
+	// Arrange: the daemon's exit stops the mediation, cutting the round
+	// while it reads the logs.
+	h := checked(t)
+	owe(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) {
+		h.o.stopMediation()
+		return nil, context.Canceled
+	}
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if m := owedCheck(t, h); m == nil || m.Escalated() {
+		t.Fatalf("check %+v, want it still owed and not escalated", m)
+	}
+	if h.bannerRaised(desktopnotify.KindDeployMediated) {
+		t.Fatal("the user was told of a round the daemon's exit cut")
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "the mediation was cut by the daemon's exit; the next boot's pass runs it again"}); !ok {
+		t.Fatalf("records = %v, want the cut round recorded at INFO", h.logs.Records())
 	}
 }
 

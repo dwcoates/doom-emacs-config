@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 
@@ -142,5 +143,29 @@ func TestRecordingAnIgnoredRecordKindRefusesAnIncompleteOne(t *testing.T) {
 				t.Fatalf("records = %+v, want the refusal recorded", log.Records())
 			}
 		})
+	}
+}
+
+func TestAJoiningDaemonReadsTheIgnoredRecordKindsWhileItsIncumbentStillServes(t *testing.T) {
+	// Arrange: the build ends at the step that creates the table, and the
+	// file stands one step behind it.
+	step := slices.IndexFunc(migrations, func(m migration) bool { return m.Name == "deploy_ignored_records" })
+	if step < 0 {
+		t.Fatal("no migration step is named deploy_ignored_records")
+	}
+	withSteps(t, slices.Clone(migrations[:step+1])...)
+	path := fixtureAt(t, LayoutVersion-1)
+
+	// Act: join beside the incumbent, and read before any contract step runs.
+	joined, err := OpenJoining(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("OpenJoining: %v", err)
+	}
+	t.Cleanup(func() { joined.Close() })
+	kinds, err := joined.IgnoredRecordKinds(context.Background())
+
+	// Assert
+	if err != nil || len(kinds) == 0 {
+		t.Fatalf("IgnoredRecordKinds on a joined handle = %d kind(s), %v; want the seeded kinds, read while the incumbent serves", len(kinds), err)
 	}
 }

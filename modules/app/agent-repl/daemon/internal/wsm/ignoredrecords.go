@@ -33,13 +33,11 @@ import (
 // gone parent comment, and every failure of the vendor query (owner ruling,
 // 2026-11-19: a vendor or a network problem, never agent-repl's).
 //
-// IT IS A CONTRACT STEP, though it only adds a table. It follows the contract
-// steps 169 and 170, and an additive step after a contract cannot be applied
-// while an incumbent still serves (splitJoinable), so it runs where they do:
-// on a fresh boot, or once the successor serves alone. The table is
-// therefore absent on a successor only during the one deploy that brings
-// layout 171, while its incumbent still runs; a deploy check in that span
-// cannot compose its brief and holds the queue until the incumbent exits.
+// IT IS AN ADDITIVE STEP: the build reads the table from its first deploy
+// check, which runs while an older daemon may still serve. Marked a contract
+// (as it first shipped, to follow the contract step 169), it was created
+// only once that daemon had ended, and the check before then could not
+// compose its brief (2026-11-19).
 const ignoredRecordsDDL = `
 CREATE TABLE deploy_ignored_records (
   operation        TEXT NOT NULL CHECK (operation <> ''),

@@ -35,9 +35,10 @@ import (
 const MigrationCopyRetention = 72 * time.Hour
 
 // migrationCopyName matches the basename copyAsideBeforeMigrating gives a
-// copy of base: `<base>.layout<N>.bak-<YYYY-MM-DD>`.
+// copy of base: `<base>.layout<N>.bak-<YYYY-MM-DD>`, or
+// `<base>.layout<N>a<M>.bak-<YYYY-MM-DD>` for a file that owed contract steps.
 func migrationCopyName(base string) *regexp.Regexp {
-	return regexp.MustCompile(`^` + regexp.QuoteMeta(base) + `\.layout[0-9]+\.bak-[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
+	return regexp.MustCompile(`^` + regexp.QuoteMeta(base) + `\.layout[0-9]+(a[0-9]+)?\.bak-[0-9]{4}-[0-9]{2}-[0-9]{2}$`)
 }
 
 // pruneMigrationCopies removes every pre-migration copy of the database at
