@@ -2041,7 +2041,10 @@ describe("observeScrollBox", () => {
     box.element.dispatchEvent(new Event("scroll"));
     // Assert
     const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
-    expect(record.context).toMatchObject({ from: 700, to: 600, returned_to: 1, ms_since_write: expect.any(Number) });
+    expect([record.context, typeof record.context?.ms_since_write]).toMatchObject([
+      { from: 700, to: 600, returned_to: 1 },
+      "number",
+    ]);
   });
 
   it("says the browser moved the box to none of its own writes", async () => {
