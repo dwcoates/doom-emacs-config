@@ -7,8 +7,8 @@ import (
 	"agent-repld/integration/harness"
 )
 
-// THE SHARED DEFAULT WORLD (AGENTS.md "A case may share an expensive fixture,
-// never a slice another case reads").
+// THE SHARED DEFAULT WORLD (AGENTS.md "Integration tests share one canonical
+// process, each case on its own slice").
 //
 // A World costs about 2.7s to build and tear down; a fresh workspace inside a
 // running one costs about 0.3s (docs/investigations/2026-10-14-test-shared-
