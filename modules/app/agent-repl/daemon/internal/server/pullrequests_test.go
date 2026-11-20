@@ -29,10 +29,10 @@ type fakePullRequests struct {
 	queueAnchorErr error
 	// run answers ReadRun, runErr fails it, runReads records each key asked,
 	// and wakes counts every Wake.
-	run      prwatch.Run
-	runErr   error
-	runReads []wsm.GithubWorkflowRunKey
-	wakes    int
+	run            prwatch.Run
+	runErr         error
+	runReads       []wsm.GithubWorkflowRunKey
+	wakes          int
 	anchoredQueues []string
 }
 

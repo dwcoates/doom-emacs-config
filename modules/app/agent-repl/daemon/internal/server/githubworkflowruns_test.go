@@ -55,8 +55,8 @@ func (d *fakeDB) OweGithubWorkflowRunCompletion(_ context.Context, c wsm.GithubW
 }
 
 var (
-	testRun     = wsm.GithubWorkflowRunKey{Owner: "ChessCom", Repo: "explanation-engine", RunID: 43771255095}
-	testRunURL  = "https://github.com/ChessCom/explanation-engine/actions/runs/43771255095"
+	testRun           = wsm.GithubWorkflowRunKey{Owner: "ChessCom", Repo: "explanation-engine", RunID: 43771255095}
+	testRunURL        = "https://github.com/ChessCom/explanation-engine/actions/runs/43771255095"
 	workflowRunReadAt = time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
 )
 

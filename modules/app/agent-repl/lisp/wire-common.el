@@ -844,9 +844,9 @@ workspace to repair a main checkout it could not fast-forward, and
 PULL_REQUEST_NOTICE its notice of a followed pull request's activity.
 GITHUB_MERGE_QUEUE_NOTICE is its notice of a followed GitHub merge queue's
 movement, and GITHUB_WORKFLOW_RUN_NOTICE its one notice that a GitHub
-Actions run a workspace waited on finished.  FINISH_HOOK is a finish-stage prompt hook the daemon sends a
-finishing
-workspace before its deploy is put in line.
+Actions run a workspace waited on finished.  FINISH_HOOK is a
+finish-stage prompt hook the daemon sends a finishing workspace before
+its deploy is put in line.
 None has an elisp spelling at all.")
 
 (defun agent-repl-wire-encode-prompt-origin (value)

@@ -192,7 +192,9 @@ func New(cfg Config) (Client, error) {
 		cfg.Binary = ghBinary
 	}
 	if cfg.Bound == nil {
-		cfg.Bound = func(ctx context.Context) (context.Context, context.CancelFunc) { return context.WithTimeout(ctx, CallBound) }
+		cfg.Bound = func(ctx context.Context) (context.Context, context.CancelFunc) {
+			return context.WithTimeout(ctx, CallBound)
+		}
 	}
 	if set := tokenVariablesSet(os.Environ()); len(set) > 0 {
 		cfg.Log.Info(opClient, "the daemon's environment carries a GitHub token variable; gh runs without it, as the user's keyring login",
