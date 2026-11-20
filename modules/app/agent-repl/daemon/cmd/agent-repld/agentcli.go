@@ -676,22 +676,60 @@ func deployHooks(pre, post *hookList) *agentreplv1.CreateWorkspaceDeployHooks {
 	return &agentreplv1.CreateWorkspaceDeployHooks{PreDeploy: pre.hooks, PostDeploy: post.hooks}
 }
 
-// placement reads a -placement flag: back, front, or behind=MERGE (directly
-// behind the merge the queue lists under that name). Nothing is defaulted.
-func placement(text string) (*agentreplv1.MergeQueuePlacement, error) {
+// placementWord is a -placement value read as its word: exactly one of its
+// fields is set.
+type placementWord struct {
+	// front and back are the bare words.
+	front, back bool
+	// behind is the merge named by behind=MERGE, as the queue lists it.
+	behind string
+	// index is the waiting place named by index=N, counted from 0.
+	index *uint32
+}
+
+// readPlacement reads a -placement value: back, front or behind=MERGE, and,
+// WITHINDEX, index=N. It is the one reading of the flag every verb that takes
+// it shares, so the words and their errors never drift between verbs.
+func readPlacement(text string, withIndex bool) (placementWord, error) {
 	if merge, behind := strings.CutPrefix(text, "behind="); behind {
 		if strings.TrimSpace(merge) == "" {
-			return nil, fmt.Errorf("-placement behind= names no merge")
+			return placementWord{}, fmt.Errorf("-placement behind= names no merge")
 		}
-		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: merge}}}, nil
+		return placementWord{behind: merge}, nil
+	}
+	if n, indexed := strings.CutPrefix(text, "index="); indexed && withIndex {
+		index, err := strconv.ParseUint(n, 10, 32)
+		if err != nil {
+			return placementWord{}, fmt.Errorf("-placement index= takes a waiting place counted from 0, not %q", n)
+		}
+		at := uint32(index)
+		return placementWord{index: &at}, nil
 	}
 	switch text {
 	case "back":
-		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}, nil
+		return placementWord{back: true}, nil
 	case "front":
-		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}, nil
+		return placementWord{front: true}, nil
 	}
-	return nil, fmt.Errorf("-placement is back, front or behind=MERGE, not %q", text)
+	if withIndex {
+		return placementWord{}, fmt.Errorf("-placement is front, back, behind=MERGE or index=N, not %q", text)
+	}
+	return placementWord{}, fmt.Errorf("-placement is back, front or behind=MERGE, not %q", text)
+}
+
+// placement reads a -placement flag: back, front, or behind=MERGE (directly
+// behind the merge the queue lists under that name). Nothing is defaulted.
+func placement(text string) (*agentreplv1.MergeQueuePlacement, error) {
+	word, err := readPlacement(text, false)
+	switch {
+	case err != nil:
+		return nil, err
+	case word.behind != "":
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: word.behind}}}, nil
+	case word.back:
+		return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}, nil
+	}
+	return &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}, nil
 }
 
 // versionIncrement reads -version-part and -changelog-line, nil when neither

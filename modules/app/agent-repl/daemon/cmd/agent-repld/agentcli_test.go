@@ -4459,3 +4459,64 @@ func TestEveryTimeFlagIsReadThroughWhenFlag(t *testing.T) {
 		t.Fatalf("parseWhen is called %d times (%d through whenFlag); want only whenFlag to call it", all-1, calls)
 	}
 }
+
+func TestReadPlacementReadsEachWord(t *testing.T) {
+	three := uint32(3)
+	tests := []struct {
+		name      string
+		text      string
+		withIndex bool
+		want      placementWord
+		wantErr   string
+	}{
+		{name: "front", text: "front", want: placementWord{front: true}},
+		{name: "back", text: "back", want: placementWord{back: true}},
+		{name: "behind a merge", text: "behind=two", want: placementWord{behind: "two"}},
+		{name: "behind no merge", text: "behind= ", wantErr: "-placement behind= names no merge"},
+		{name: "an index where indexed", text: "index=3", withIndex: true, want: placementWord{index: &three}},
+		{name: "an index that is no number", text: "index=x", withIndex: true, wantErr: `-placement index= takes a waiting place counted from 0, not "x"`},
+		{name: "a negative index", text: "index=-1", withIndex: true, wantErr: `-placement index= takes a waiting place counted from 0, not "-1"`},
+		{name: "an index where not indexed", text: "index=3", wantErr: `-placement is back, front or behind=MERGE, not "index=3"`},
+		{name: "an unknown word where indexed", text: "middle", withIndex: true, wantErr: `-placement is front, back, behind=MERGE or index=N, not "middle"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := readPlacement(tt.text, tt.withIndex)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || err.Error() != tt.wantErr {
+					t.Fatalf("readPlacement(%q) = %v, want %q", tt.text, err, tt.wantErr)
+				}
+				return
+			}
+			sameIndex := (got.index == nil) == (tt.want.index == nil) && (got.index == nil || *got.index == *tt.want.index)
+			if err != nil || got.front != tt.want.front || got.back != tt.want.back || got.behind != tt.want.behind || !sameIndex {
+				t.Fatalf("readPlacement(%q) = %+v, %v; want %+v", tt.text, got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestPlacementSpellsEachWordAsItsArm(t *testing.T) {
+	tests := []struct {
+		text string
+		want *agentreplv1.MergeQueuePlacement
+	}{
+		{text: "front", want: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Front{Front: &agentreplv1.MergeQueuePlacementFront{}}}},
+		{text: "back", want: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Back{Back: &agentreplv1.MergeQueuePlacementBack{}}}},
+		{text: "behind=two", want: &agentreplv1.MergeQueuePlacement{Place: &agentreplv1.MergeQueuePlacement_Behind{Behind: &agentreplv1.MergeQueuePlacementBehind{Merge: "two"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			// Act
+			got, err := placement(tt.text)
+
+			// Assert
+			if err != nil || !proto.Equal(got, tt.want) {
+				t.Fatalf("placement(%q) = %v, %v; want %v", tt.text, got, err, tt.want)
+			}
+		})
+	}
+}
