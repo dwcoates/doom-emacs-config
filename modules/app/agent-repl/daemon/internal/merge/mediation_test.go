@@ -463,7 +463,9 @@ func TestDecideMediation(t *testing.T) {
 		{name: "an escalation holds it and tells the user", from: "ws-fixer", decision: MediationEscalate, wantBanner: true, wantHeld: true},
 		{name: "a decision from any other workspace is refused", from: theWorkspace, decision: MediationApprove, wantArm: ArmNotMediator},
 		{name: "a decision on a deploy a fix was dispatched for is refused", from: "ws-fixer", dispatched: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
-		{name: "a decision on a deploy escalated already is refused", from: "ws-fixer", escalated: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
+		{name: "an approval of a deploy escalated already releases it, with no word from the user", from: "ws-fixer", escalated: true, decision: MediationApprove},
+		{name: "a dispatch on a deploy escalated already is refused", from: "ws-fixer", escalated: true, decision: MediationDispatch, wantArm: ArmNoMediationOwed},
+		{name: "a second escalation of a deploy escalated already is refused", from: "ws-fixer", escalated: true, decision: MediationEscalate, wantArm: ArmNoMediationOwed},
 		{name: "a decision on a deploy the mediator was not told of is refused", from: "ws-fixer", untold: true, decision: MediationApprove, wantArm: ArmNoMediationOwed},
 	}
 	for _, tt := range tests {
