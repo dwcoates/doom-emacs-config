@@ -1628,7 +1628,14 @@ How the daemon puts each component into service:
      place of the other (daemon/AGENTS.md, "A coalesced bounce runs every
      kind it was asked");
    - a stale Emacs is pushed `reload_elisp` (the whole module set in
-     `config.el` load order, then the heartbeat and timer re-arm check), and a
+     `config.el` load order, then the heartbeat and timer re-arm check). A
+     deploy that moves the daemon pushes none: its successor decides each
+     Emacs `WatchDaemon` stream AS IT CONNECTS
+     (`deploy.Deployer.ElispVerdict`), and the stream's first frame is the
+     verdict, `elisp_current` or `reload_elisp` alone, after which a stale
+     stream ends. Emacs accepts a link on `elisp_current` only, so it
+     reloads and dials again before any stream or call reaches a daemon
+     whose contract is newer than its elisp (`lisp/daemon-link.el`). And a
      stale webview `reload_webapp` naming the fresh build. Every page lives in
      Emacs's one host web view, so Emacs reloads the host once per build
      however many workspaces are told (`agent-repl-webhost-reload-onto`).
