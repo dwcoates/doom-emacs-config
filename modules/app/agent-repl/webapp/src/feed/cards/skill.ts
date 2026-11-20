@@ -28,6 +28,8 @@
  * row's `data-unit="skill"` so a skill's nested work keeps the teal card's
  * always-open, shared-cap, scrolled-not-clipped guarantees.
  */
+import { percentGradientColor, HUE_GREEN, HUE_RED, HUE_YELLOW, type PercentStop } from "../../percent-gradient.js";
+import { formatTokens } from "../../format.js";
 import { drawToolCardBadge, drawToolCardHead } from "./tool-head.js";
 import type {
   FeedSkill,
@@ -59,6 +61,33 @@ const OUTCOME_BADGES = {
 /** Every outcome this build draws, for the suite to hold to the schema. */
 export const SKILL_OUTCOME_ARMS: readonly string[] = Object.keys(OUTCOME_BADGES);
 
+/**
+ * Where the token badge's colors sit (owner, 2026-11-20): green from 0, yellow
+ * from 5k, red from 10k tokens, blended between stops as every pressure
+ * figure is.
+ */
+const TOKEN_STOPS: readonly PercentStop[] = [
+  { at: 0, hue: HUE_GREEN },
+  { at: 5_000, hue: HUE_YELLOW },
+  { at: 10_000, hue: HUE_RED },
+];
+
+/** Characters per token in the estimate: the usual rule of thumb for English prose. */
+const CHARS_PER_TOKEN = 4;
+
+/** The token count of a skill's document, estimated from its length. */
+export function estimateSkillTokens(markdown: string): number {
+  return Math.ceil(markdown.length / CHARS_PER_TOKEN);
+}
+
+/** The "<n> tokens" badge, its figure colored by how large the document is. */
+export function drawFeedSkillTokensBadge(markdown: string): HTMLElement {
+  const tokens = estimateSkillTokens(markdown);
+  const badge = drawToolCardBadge(`${formatTokens(tokens)} tokens`, ["skill-tokens"]);
+  badge.style.color = percentGradientColor(tokens, TOKEN_STOPS);
+  return badge;
+}
+
 /** The skill card. */
 export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
   const outcome = requireCase(u.outcome, `${PATH}.outcome`);
@@ -80,6 +109,10 @@ export function drawFeedSkill(u: FeedSkill, rc: RowContext): HTMLElement {
     drawToolCardHead({
       title: SKILL_TITLE,
       badge: drawFeedSkillBadge(outcome.case),
+      extraBadges:
+        outcome.case === "loaded"
+          ? [drawFeedSkillTokensBadge(requireMessage(outcome.value.document, `${PATH}.loaded.document`).markdown)]
+          : [],
       clock: u.clock,
       clockPath: `${PATH}.clock`,
       ticker: rc.ctx.ticker,

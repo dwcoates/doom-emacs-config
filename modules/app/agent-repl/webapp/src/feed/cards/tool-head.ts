@@ -57,6 +57,8 @@ export interface ToolCardHead {
   readonly title: string | HTMLElement;
   /** The status badge, in the card's own vocabulary. */
   readonly badge: HTMLElement;
+  /** Further badges, drawn right after the status badge. */
+  readonly extraBadges?: readonly HTMLElement[];
   /** The unit's clock; absent when the producer stated no start for it. */
   readonly clock: FeedToolCardClock | undefined;
   /** Where the clock sits in the view, for a malformed one's report. */
@@ -76,7 +78,7 @@ export function drawToolCardHead(parts: ToolCardHead): HTMLElement {
   head.setAttribute(TOOL_CARD_HEAD_ATTRIBUTE, "");
   const title = typeof parts.title === "string" ? drawToolName(parts.title) : parts.title;
   title.classList.add(TOOL_NAME_CLASS);
-  head.append(title, parts.badge);
+  head.append(title, parts.badge, ...(parts.extraBadges ?? []));
   const clock = drawStatedToolCardClock(parts.clock, parts.clockPath, parts.ticker);
   if (clock !== null) head.append(asHeadClock(clock));
   return head;

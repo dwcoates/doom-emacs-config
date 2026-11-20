@@ -6,8 +6,9 @@ import {
   FeedSkillSchema,
   type FeedSkill,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { percentGradientColor, HUE_GREEN, HUE_RED, HUE_YELLOW } from "../../../src/percent-gradient.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
-import { drawFeedSkill, SKILL_OUTCOME_ARMS, SKILL_TITLE } from "../../../src/feed/cards/skill.js";
+import { drawFeedSkill, estimateSkillTokens, SKILL_OUTCOME_ARMS, SKILL_TITLE } from "../../../src/feed/cards/skill.js";
 import { EXPANDED_CLASS, installClickExpand } from "../../../src/expand.js";
 import type { RowContext } from "../../../src/feed/renderers.js";
 import { harness, rowContext } from "../harness.js";
@@ -113,10 +114,10 @@ describe("drawFeedSkill", () => {
   });
 
   const states = [
-    { arm: "running", outcome: { case: "running", value: {} }, badge: "loading" },
-    { arm: "loaded", outcome: loaded("# doc"), badge: "loaded" },
-    { arm: "failed", outcome: { case: "failed", value: { text: "no such skill" } }, badge: "failed" },
-    { arm: "denied", outcome: { case: "denied", value: {} }, badge: "denied" },
+    { arm: "running", outcome: { case: "running", value: {} }, badges: ["loading"] },
+    { arm: "loaded", outcome: loaded("# doc"), badges: ["loaded", "2 tokens"] },
+    { arm: "failed", outcome: { case: "failed", value: { text: "no such skill" } }, badges: ["failed"] },
+    { arm: "denied", outcome: { case: "denied", value: {} }, badges: ["denied"] },
   ] as const;
 
   for (const c of states) {
@@ -128,7 +129,7 @@ describe("drawFeedSkill", () => {
     it(`badges the ${c.arm} arm beside the head's name`, () => {
       const el = drawFeedSkill(skill(c.outcome), rc());
       const head = el.querySelector(".tool-head") as HTMLElement;
-      expect([...head.children].map((child) => child.textContent)).toEqual([SKILL_TITLE, c.badge]);
+      expect([...head.children].map((child) => child.textContent)).toEqual([SKILL_TITLE, ...c.badges]);
     });
   }
 
@@ -434,6 +435,58 @@ describe("the head's clock", () => {
     const el = drawFeedSkill(u, rc());
 
     // Assert
-    expect(toolCardHeadParts(el)).toEqual([`title:${SKILL_TITLE}`, "badge:loaded", "clock:2s"]);
+    expect(toolCardHeadParts(el)).toEqual([`title:${SKILL_TITLE}`, "badge:loaded", "badge:3 tokens", "clock:2s"]);
+  });
+});
+
+describe("the skill card's token badge", () => {
+  /** The color a hue paints, as the DOM normalizes it. */
+  function hueColor(hue: number): string {
+    const probe = document.createElement("span");
+    probe.style.color = percentGradientColor(0, [{ at: 0, hue }]);
+    return probe.style.color;
+  }
+
+  /** The "<n> tokens" badge of a loaded card holding MARKDOWN. */
+  function tokensBadge(markdown: string): HTMLElement {
+    const el = drawFeedSkill(skill(loaded(markdown)), rc());
+    return el.querySelector(".tool-head .badge.skill-tokens") as HTMLElement;
+  }
+
+  it("sits right after the loaded badge", () => {
+    const el = drawFeedSkill(skill(loaded("# doc")), rc());
+    const badges = [...el.querySelectorAll(".tool-head .badge")].map((b) => b.textContent);
+    expect(badges).toEqual(["loaded", "2 tokens"]);
+  });
+
+  it("estimates a token per four characters, rounded up", () => {
+    expect(estimateSkillTokens("")).toBe(0);
+    expect(estimateSkillTokens("abcd")).toBe(1);
+    expect(estimateSkillTokens("abcde")).toBe(2);
+  });
+
+  it("formats the figure as the footer does", () => {
+    expect(tokensBadge("x".repeat(4 * 1_234)).textContent).toBe("1.2k tokens");
+  });
+
+  it("is green at zero", () => {
+    expect(tokensBadge("").style.color).toBe(hueColor(HUE_GREEN));
+  });
+
+  it("is yellow from 5k", () => {
+    expect(tokensBadge("x".repeat(4 * 5_000)).style.color).toBe(hueColor(HUE_YELLOW));
+  });
+
+  it("is red from 10k", () => {
+    expect(tokensBadge("x".repeat(4 * 10_000)).style.color).toBe(hueColor(HUE_RED));
+  });
+
+  it("blends between stops", () => {
+    expect(tokensBadge("x".repeat(4 * 2_500)).style.color).toBe(hueColor(100));
+  });
+
+  it("is absent from a running card", () => {
+    const el = drawFeedSkill(skill({ case: "running", value: {} }), rc());
+    expect(el.querySelector(".skill-tokens")).toBeNull();
   });
 });
