@@ -4,6 +4,7 @@ import (
 	"agent-repld/internal/h2cclient"
 	"agent-repld/internal/wssummary"
 	"agentrepl/logging/childgroup"
+	"agentrepl/testrun/testenv"
 	"context"
 	"errors"
 	"fmt"
@@ -492,6 +493,9 @@ type Daemon struct {
 	PrivateAddr string
 	// ProfileDir holds the fake shim's per-workspace startup profiles.
 	ProfileDir string
+	// exitProfileDir is where a profiling run's daemon and its shims write
+	// their whole-life CPU profiles (profile.go); "" outside a profiling run.
+	exitProfileDir string
 	// staleAddr is the predecessor's daemon.addr content a KeepStaleAddr start
 	// left standing, which awaitFile must not mistake for this daemon's.
 	staleAddr string
@@ -1024,6 +1028,13 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		env = append(env, daemonCov...)
 		env = append(env, nodeCov...)
 	}
+	// A PROFILING RUN PROFILES THE DAEMON'S WHOLE LIFE AND ITS SHIMS' (profile.go).
+	profileEnv, profileDir, err := testenv.ExitProfileEnvFor(os.Getenv, t.Name())
+	if err != nil {
+		t.Fatalf("harness: %v", err)
+	}
+	env = append(env, profileEnv...)
+	d.exitProfileDir = profileDir
 	// THE TEST BARRIER is served to this daemon alone (server.Deps.TestBarrier).
 	env = append(env, "AGENT_REPL_TEST_BARRIER=1")
 	env = append(env, opts.ExtraEnv...)
@@ -2171,6 +2182,11 @@ func RegisterOwingSummary(t testing.TB, d *Daemon, dir string) *workspacev1.Work
 		d.mu.Lock()
 		d.slice = append(d.slice, ref)
 		d.mu.Unlock()
+	}
+	if d.exitProfileDir != "" {
+		if err := recordProfiledWorkspace(d.exitProfileDir, ref.GetId(), t.Name()); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return ref
 }
