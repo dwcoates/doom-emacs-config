@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"os"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -286,5 +288,32 @@ func TestATurnsSpendBeforeTheBindingIsRecordedUnmetered(t *testing.T) {
 	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opMediationHook,
 		Message: "a turn ended before the merge queue was built; its spend is not metered"}); !ok {
 		t.Fatalf("records = %+v, want the unmetered turn recorded", log.Records())
+	}
+}
+
+func TestTheHooksOrchestratorIsUnboundUntilBound(t *testing.T) {
+	// Arrange
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	o := &mediationOrchestrator{}
+	before := h.orchestrator()
+
+	// Act
+	h.bind(o)
+
+	// Assert
+	if before != nil || h.orchestrator() != o {
+		t.Fatalf("orchestrator = %v before and %v after the binding, want nil then the bound one", before, h.orchestrator())
+	}
+}
+
+// TestEveryReadOfTheHooksBindingGoesThroughOrchestrator keeps one read of the
+// binding: an edge reading h.o by hand fails here.
+func TestEveryReadOfTheHooksBindingGoesThroughOrchestrator(t *testing.T) {
+	source, err := os.ReadFile("mediationhook.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(source), "return h.o\n"); n != 1 || strings.Count(string(source), ":= h.o\n") != 0 {
+		t.Fatalf("the binding is read %d times by return and some by assignment, want orchestrator alone", n)
 	}
 }

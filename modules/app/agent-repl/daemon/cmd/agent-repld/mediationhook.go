@@ -43,11 +43,18 @@ func (h *mediationHook) bind(o merge.Orchestrator) {
 }
 
 func (h *mediationHook) bound(edge string) merge.Orchestrator {
-	h.mu.RLock()
-	defer h.mu.RUnlock()
-	if h.o == nil {
+	o := h.orchestrator()
+	if o == nil {
 		h.log.Error(opMediationHook, "a deploy edge came before the merge queue was built; no mediation follows it", dlog.Context{"edge": edge})
 	}
+	return o
+}
+
+// orchestrator is the merge orchestrator bound, nil before the binding. It
+// is the one read of the binding.
+func (h *mediationHook) orchestrator() merge.Orchestrator {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
 	return h.o
 }
 
@@ -77,9 +84,7 @@ func (h *mediationHook) rounds() {
 // queue is built is no loss and no error: the queue's first pass reads every
 // turn's recorded close.
 func (h *mediationHook) turnEnded(ws ids.WorkspaceID) {
-	h.mu.RLock()
-	o := h.o
-	h.mu.RUnlock()
+	o := h.orchestrator()
 	if o == nil {
 		return
 	}
@@ -91,9 +96,7 @@ func (h *mediationHook) turnEnded(ws ids.WorkspaceID) {
 // (merge.Orchestrator.MediatorTurnSpent). A turn that ends before the merge
 // queue is built goes unmetered, which is recorded.
 func (h *mediationHook) turnSpent(ws ids.WorkspaceID, spent footer.TurnSpent) {
-	h.mu.RLock()
-	o := h.o
-	h.mu.RUnlock()
+	o := h.orchestrator()
 	if o == nil {
 		h.log.Info(opMediationHook, "a turn ended before the merge queue was built; its spend is not metered", dlog.Context{"workspace": string(ws), "turn": string(spent.Turn)})
 		return
