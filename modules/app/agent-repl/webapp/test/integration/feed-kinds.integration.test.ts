@@ -95,6 +95,7 @@ import {
   peerMessageRow,
   subagentResultUnit,
   fixGateUnit,
+  hotReloadUnit,
   subagentHandbackRow,
   mergeHandbackRow,
   removedRow,
@@ -216,6 +217,7 @@ describe("arm coverage", () => {
       "chessBoard",
       "subagentResult",
       "fixGate",
+      "hotReload",
     ]);
   });
 
@@ -831,6 +833,16 @@ describe("a deploy mediator's fix at its gate", () => {
     expect(row.querySelector(".fix-gate .merge-label")?.textContent).toBe("testing the fix");
     expect(row.querySelector(".fix-gate .fix-gate-run .merge-suites")).not.toBeNull();
     expect(row.querySelector(".fix-gate .merge-tabs")).toBeNull();
+  });
+});
+
+describe("a deploy's hot reload", () => {
+  it("draws the merge-styled head over one selectable row per service", async () => {
+    // Arrange / Act
+    const row = await drawRow(activityRow(hotReloadUnit()));
+    // Assert
+    expect(row.querySelector(".hot-reload .merge-label")?.textContent).toBe("hot-reloading");
+    expect([...row.querySelectorAll(".hot-reload-service")].map((el) => el.getAttribute("data-service"))).toEqual(["store", "shim"]);
   });
 });
 

@@ -1755,6 +1755,8 @@ export function createFeedController(
         return opts.renderers.subagentResult(unit.value, rc);
       case "fixGate":
         return opts.renderers.fixGate(unit.value, rc);
+      case "hotReload":
+        return opts.renderers.hotReload(unit.value, rc);
       case "merge":
       case "subagent":
         throw new MalformedView(
