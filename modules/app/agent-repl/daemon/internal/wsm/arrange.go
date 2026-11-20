@@ -414,96 +414,81 @@ func (s *store) placeWorkspaces(ctx context.Context, op string, ws []WorkspaceID
 		s.log.Error(op, "refused a malformed placement", withError(fields, err))
 		return err
 	}
-	var expanded bool
-	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		if byAgent {
 			if err := refuseMainFamilies(ctx, tx, ws); err != nil {
 				return err
 			}
 		}
-		var err error
-		expanded, err = placeFamilies(ctx, tx, ws, into, at, byAgent)
-		return err
+		return placeFamilies(ctx, tx, ws, into, at)
 	})
-	if err == nil && expanded {
-		s.log.Info(op, "expanded the collapsed subsection the workspaces were placed in", fields)
-	}
-	return err
 }
 
 // placeFamilies is PlaceWorkspaces inside TX: the one placement a drag, an
 // agent filing a workspace and an agent creating a subsection with its
 // members all write through.
 //
-// AN AGENT'S PLACEMENT IS NEVER HIDDEN BY ITS SUBSECTION'S FOLD (owner
-// request, 2026-10-31): with EXPAND, placing into a collapsed subsection
-// expands it (expandSubsection), answering whether it did. THE USER'S OWN DROP
-// KEEPS A FOLDED SUBSECTION FOLDED (owner request, 2026-11-13), so a drag
-// passes false. The repository's own fold is the user's alone and is left as
-// it is.
-func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor, expand bool) (bool, error) {
+// A PLACEMENT NEVER CHANGES ANY FOLD (owner request, 2026-11-20): a
+// workspace placed into a collapsed subsection, by a drag or by an agent
+// filing itself, leaves it collapsed, and an open one open. The repository's
+// own fold is left as it is too.
+func placeFamilies(ctx context.Context, tx *sql.Tx, ws []WorkspaceID, into *SubsectionID, at Anchor) error {
 	// A FAMILY MOVES WHOLE (familyRoot): each workspace named places
 	// its root, and so its every ancestor and descendant.
 	ws, err := familyRoots(ctx, tx, ws)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if at, err = rootAnchor(ctx, tx, at); err != nil {
-		return false, err
+		return err
 	}
 	var repo RepoID
 	for i, id := range ws {
 		var own RepoID
 		if err := scanWorkspaceRow(ctx, tx, id, "repo_id", &own); err != nil {
-			return false, err
+			return err
 		}
 		if i > 0 && own != repo {
-			return false, ErrOtherRepository
+			return ErrOtherRepository
 		}
 		repo = own
 	}
 	if into != nil {
 		sub, err := subsectionRow(ctx, tx, *into)
 		if err != nil {
-			return false, err
+			return err
 		}
 		if sub.Repo != repo {
-			return false, ErrOtherRepository
+			return ErrOtherRepository
 		}
 	}
 	if before, ok := at.(BeforeSubsection); ok {
 		if err := requireAnchorOfRepository(ctx, tx, before, repo); err != nil {
-			return false, err
+			return err
 		}
 	}
 	walk, err := readWalk(ctx, tx, repo)
 	if err != nil {
-		return false, err
+		return err
 	}
 	walk = walk.without(ws)
 	if into == nil {
 		i, err := walk.entryIndex(at)
 		if err != nil {
-			return false, err
+			return err
 		}
-		return false, writeWalk(ctx, tx, slices.Insert(walk, i, rootSteps(ws)...))
+		return writeWalk(ctx, tx, slices.Insert(walk, i, rootSteps(ws)...))
 	}
 	k := walk.subsectionIndex(*into)
 	members := walk[k].members
 	j := len(members)
 	if before, ok := at.(BeforeWorkspace); ok {
 		if j = slices.Index(members, before.ID); j < 0 {
-			return false, ErrAnchorElsewhere
+			return ErrAnchorElsewhere
 		}
 	}
 	walk[k].members = slices.Insert(slices.Clone(members), j, ws...)
-	if err := writeWalk(ctx, tx, walk); err != nil {
-		return false, err
-	}
-	if !expand {
-		return false, nil
-	}
-	return expandSubsection(ctx, tx, *into)
+	return writeWalk(ctx, tx, walk)
 }
 
 // MoveWorkspace moves workspace WS onto TARGET's tab in the arrangement's
@@ -529,8 +514,7 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 		s.log.Error(op, "refused a malformed move", withError(fields, err))
 		return err
 	}
-	var expanded bool
-	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
 		// Each tab stands for what the sidebar draws it as (standing).
 		ws, target, err := standingPair(ctx, tx, ws, target)
 		if err != nil {
@@ -575,21 +559,13 @@ func (s *store) MoveWorkspace(ctx context.Context, ws, target WorkspaceID) error
 		for k, step := range walk {
 			if step.sub != nil && slices.Contains(step.members, target) {
 				walk[k].members = moveBeside(append(slices.Clone(step.members), ws), ws, target, after)
-				if err := writeWalk(ctx, tx, walk); err != nil {
-					return err
-				}
-				// A moved workspace is never hidden by its subsection's fold,
-				// as a placed one is not (placeFamilies).
-				expanded, err = expandSubsection(ctx, tx, step.sub.ID)
-				return err
+				// A moved workspace leaves its subsection's fold as it is,
+				// as a placed one does (placeFamilies).
+				return writeWalk(ctx, tx, walk)
 			}
 		}
 		return fmt.Errorf("wsm: move workspace: root %s is in no entry of its repository's walk", target)
 	})
-	if err == nil && expanded {
-		s.log.Info(op, "expanded the collapsed subsection the workspace was moved into", fields)
-	}
-	return err
 }
 
 // moveBeside answers ORDER with ID taken out and put back just before TARGET,

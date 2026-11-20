@@ -102,8 +102,7 @@ func fileIntoNewAgentSubsection(ctx context.Context, tx *sql.Tx, sub *Subsection
 	if err := insertSubsection(ctx, tx, sub); err != nil {
 		return err
 	}
-	// A subsection just made is open, so the placement expands nothing.
-	if _, err := placeFamilies(ctx, tx, members, &sub.ID, AtEnd{}, true); err != nil {
+	if err := placeFamilies(ctx, tx, members, &sub.ID, AtEnd{}); err != nil {
 		return err
 	}
 	empty, err := listRows(ctx, tx, emptyAgentSubsectionsQuery+` AND id = ?`, scanSubsection, sub.ID)
