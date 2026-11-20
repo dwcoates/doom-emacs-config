@@ -1966,23 +1966,52 @@ describe("replies matched to their send by id", () => {
       .flatMap((request) => request.batch?.entries ?? [])
       .filter((entry) => toJsonString(storev1.StoreEntrySchema, entry).includes("PROMPT_ORIGIN_VENDOR_STARTED"));
 
-  /** Start t1, which queues a vendor turn, and wait for t1 to close. */
+  /** Start a turn that queues a vendor turn, and wait for it to close. */
   const queueAVendorTurn = async (shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> => {
-    const closed = turnClosed(shim, "t1");
-    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!queue-vendor-turn" })));
+    const queuing = uniqueTurn();
+    const closed = turnClosed(shim, queuing);
+    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: queuing, text: "!queue-vendor-turn" })));
     await closed;
   };
 
-  test("the vendor's own turn racing a StartTurn is served under its adopted id", async () => {
-    // Arrange
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await queueAVendorTurn(shim);
+  /** What the one race left, for its observers. */
+  interface Race {
+    readonly shim: ShimHandle;
+    /** The racing StartTurn's own turn id. */
+    readonly racing: string;
+    readonly vendorAnswer: storev1.StoreEntry;
+    readonly answer: storev1.StoreEntry;
+    readonly terminal: storev1.StoreEntry;
+  }
 
-    // Act
-    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "the racing prompt" })));
-    const vendorAnswer = await servedCarrying(shim, "A background task finished.");
-    await servedCarrying(shim, "echo: the racing prompt");
+  let race: Promise<Race> | null = null;
+
+  /**
+   * ONE RACE, SEVERAL OBSERVERS. Every case here performs the same act (a
+   * queued vendor turn, then a StartTurn racing it) and reads a different
+   * view of it, so the act runs once, on the "vendor-turn-race" group session.
+   */
+  function raced(): Promise<Race> {
+    race ??= (async () => {
+      const { shim } = await groupSession("vendor-turn-race");
+      await queueAVendorTurn(shim);
+      const racing = uniqueTurn();
+      const terminalOfRacing =
+        shim.store?.entryLanded((entry) => {
+          const frame = storedFrame(entry);
+          return entry.turn?.value === racing && frame?.result.case === "success";
+        }) ?? Promise.reject(new Error("this shim has no store"));
+      turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: racing, text: "the racing prompt" })));
+      const vendorAnswer = await servedCarrying(shim, "A background task finished.");
+      const answer = await servedCarrying(shim, "echo: the racing prompt");
+      return { shim, racing, vendorAnswer, answer, terminal: await terminalOfRacing };
+    })();
+    return race;
+  }
+
+  test("the vendor's own turn racing a StartTurn is served under its adopted id", async () => {
+    // Arrange, Act: the one race.
+    const { shim, vendorAnswer } = await raced();
 
     // Assert
     const adopted = vendorStartedRows(shim);
@@ -1990,33 +2019,18 @@ describe("replies matched to their send by id", () => {
   });
 
   test("the StartTurn racing the vendor's own turn is answered under its own turn id", async () => {
-    // Arrange
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await queueAVendorTurn(shim);
-
-    // Act
-    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "the racing prompt" })));
-    const answer = await servedCarrying(shim, "echo: the racing prompt");
+    // Arrange, Act: the one race.
+    const { racing, answer } = await raced();
 
     // Assert
-    expect(answer.turn?.value).toBe("t2");
+    expect(answer.turn?.value).toBe(racing);
   });
 
   test("the StartTurn racing the vendor's own turn ends on its own result, naming its own answer", async () => {
-    // Arrange
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await queueAVendorTurn(shim);
-    const terminalOfT2 = shim.store?.entryLanded((entry) => {
-      const frame = storedFrame(entry);
-      return entry.turn?.value === "t2" && frame?.result.case === "success";
-    });
-
-    // Act
-    turnStarted(await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "the racing prompt" })));
-    const answer = storedFrame(await servedCarrying(shim, "echo: the racing prompt"));
-    const terminal = storedFrame((await terminalOfT2) ?? create(storev1.StoreEntrySchema, {}));
+    // Arrange, Act: the one race.
+    const raceResult = await raced();
+    const answer = storedFrame(raceResult.answer);
+    const terminal = storedFrame(raceResult.terminal);
 
     // Assert
     const answerUnit =
