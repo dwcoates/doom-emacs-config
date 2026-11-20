@@ -11,7 +11,8 @@
  * unfolded when its tab is numbered (`tabUnfolded`): its parent's children are
  * expanded and no other fold hides it, or it is surfaced.
  */
-import type { RowKin } from "./row.js";
+import type { RowFamily, RowKin } from "./row.js";
+import { openKin } from "./entries.js";
 import { type OpenCount, openCountText, tabUnfolded } from "./open-count.js";
 
 /** A row shows its child count only when it has MORE children than this. */
@@ -26,15 +27,10 @@ export const CHILD_COUNT_CLASS = "sb-child-count";
  * unfolded. A child with no tab is malformed.
  */
 export function childCountOf(kin: RowKin, path: string): OpenCount {
-  const children = [
-    ...(kin.children ?? []).map((child, i) => ({ child, path: `${path}.children[${i}]` })),
-    ...(kin.repositoryBlocks ?? []).flatMap((block, b) =>
-      block.rows.map((child, i) => ({ child, path: `${path}.repositoryBlocks[${b}].rows[${i}]` })),
-    ),
-  ];
+  const children = openKin<RowFamily>(kin, path);
   return {
     workspaces: children.length,
-    unfolded: children.filter(({ child, path: childPath }) => tabUnfolded(child.tab, `${childPath}.tab`)).length,
+    unfolded: children.filter((child) => tabUnfolded(child.row.tab, `${child.path}.tab`)).length,
   };
 }
 

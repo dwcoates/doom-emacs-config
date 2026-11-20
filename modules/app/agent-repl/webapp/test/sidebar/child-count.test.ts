@@ -7,6 +7,8 @@ import { CHILD_COUNT_CLASS, CHILD_COUNT_THRESHOLD, childCountOf, drawChildCount 
 import type { RowFamily } from "../../src/sidebar/row.js";
 import { drawRosterFamily } from "../../src/sidebar/row.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { openKin } from "../../src/sidebar/entries.js";
+import { withRepositoryBlocks } from "../roster-families.js";
 import { appContext, openRow, row, sidebarContext } from "./harness.js";
 
 const NUMBERED = create(RosterOpenRowTabSchema, { tab: { case: "numbered", value: { number: 1 } } });
@@ -32,6 +34,13 @@ describe("childCountOf", () => {
 
     // Act / Assert
     expect(childCountOf({ children: children(1), repositoryBlocks: blocks }, "R")).toEqual({ workspaces: 3, unfolded: 1 });
+  });
+  it("counts exactly the rows openKin reads, the one walk of a row's kin", () => {
+    // Arrange
+    const open = withRepositoryBlocks(openRow(row({ id: "p", children: kids(2) })), [{ repo: "repo-2", rows: kids(3) }]);
+
+    // Act / Assert
+    expect(childCountOf(open, "R").workspaces).toBe(openKin(open, "R").length);
   });
   it("counts nothing for no kin", () => {
     expect(childCountOf({}, "R")).toEqual({ workspaces: 0, unfolded: 0 });

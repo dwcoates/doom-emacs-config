@@ -89,6 +89,10 @@ describe("openKin", () => {
     expect(ids(openKin(kin(), "r"))).toEqual(["o", "x", "y", "z"]);
   });
 
+  it("reads a drawn row's kin with neither children nor blocks as none", () => {
+    expect(openKin({}, "r")).toEqual([]);
+  });
+
   it("paths each block row under its block", () => {
     expect(openKin(kin(), "r").map((k) => k.path)).toEqual([
       "r.children[0]",
