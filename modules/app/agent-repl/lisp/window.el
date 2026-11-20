@@ -433,6 +433,20 @@ reconcile does not re-trigger itself on a height it cannot change."
     (unless (= before target)
       (/= before (agent-repl-window--apply-height input-win target ws)))))
 
+(defun agent-repl-window--unharden (win)
+  "Undo every lock `agent-repl-window--harden' can put on WIN, but its fringes.
+Lifts the dedication, the `window-size-fixed', `no-delete-other-windows'
+and `no-other-window' parameters, and the preserved width and height, so
+WIN takes another buffer, splits, resizes and deletes as a plain window.
+The one way a hardened panel window is given back to ordinary use."
+  (when (window-live-p win)
+    (set-window-dedicated-p win nil)
+    (set-window-parameter win 'window-size-fixed nil)
+    (set-window-parameter win 'no-delete-other-windows nil)
+    (set-window-parameter win 'no-other-window nil)
+    (window-preserve-size win t nil)
+    (window-preserve-size win nil nil)))
+
 ;;;; --- Deletion, or its structural substitute -----------------------------
 ;;
 ;; A frame's SOLE ordinary window and the minibuffer window cannot be
@@ -456,6 +470,21 @@ reconcile does not re-trigger itself on a height it cannot change."
 ;; that signal is the `strongly-dedicated-window' error seen right after a
 ;; merge.
 
+;; THE ONE DELETABILITY QUESTION.  `one-window-p' does not answer it: the
+;; sidebar is a side window on every frame (sidebar-view.el), so a frame
+;; whose main area holds ONE window is never `one-window-p', yet that window
+;; is the frame's main window and `delete-window' refuses it ("Attempt to
+;; delete main window").  Asked that way, a switch's stale-composer reclaim
+;; aborted its whole activation and left the composer alone on the frame
+;; with no webview (2026-11-20).
+
+(defun agent-repl-window--deletable-p (win)
+  "Non-nil when `delete-window' can delete WIN as an ordinary window.
+That is `window-deletable-p' answering t.  A frame's sole ordinary window,
+and its MAIN window while side windows stand beside it (the sidebar is
+one), answer otherwise, and `delete-window' signals on them."
+  (eq (window-deletable-p win) t))
+
 (defun agent-repl-window--delete-or-neutralize (win &optional fallback ws)
   "Delete WIN, or switch it to FALLBACK when WIN cannot be deleted.
 Returns `deleted' when WIN was deleted, `neutralized' when its buffer was
@@ -464,9 +493,9 @@ switched instead, and nil when WIN was not live to begin with.
 FALLBACK defaults to `doom-fallback-buffer'.  WS is used only for
 workspace-scoped diagnostics.
 
-Un-dedicates WIN and strips its `no-delete-other-windows' parameter
-first: a hardened agent-repl panel is STRONGLY dedicated, which blocks
-both the deletion and the buffer switch that stands in for it.
+Unhardens WIN first (`agent-repl-window--unharden'): a hardened
+agent-repl panel is STRONGLY dedicated, which blocks both the deletion
+and the buffer switch that stands in for it.
 
 The minibuffer window is never a valid target and is neutralized-by-doing
 nothing rather than touched — it holds no buffer a teardown owns.
@@ -479,9 +508,8 @@ rather than silently leaving a retired buffer on screen."
     (agent-repl--log-verbose ws "window--delete-or-neutralize: skip-minibuffer window=%S" win)
     nil)
    (t
-    (set-window-parameter win 'no-delete-other-windows nil)
-    (set-window-dedicated-p win nil)
-    (if (eq (window-deletable-p win) t)
+    (agent-repl-window--unharden win)
+    (if (agent-repl-window--deletable-p win)
         (progn
           (agent-repl--log ws "window--delete-or-neutralize: deleting window=%S buffer=%s"
                            win (agent-repl--safe-buffer-name (window-buffer win)))

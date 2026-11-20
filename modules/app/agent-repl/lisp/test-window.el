@@ -1111,6 +1111,90 @@ close."
                           :type 'error))
         (kill-buffer buf)))))
 
+;;;; ---- Deletability and unhardening ----
+
+(ert-deftest agent-repl-window-test-deletable-p-one-of-two-main-windows ()
+  "One of two main-area windows can be deleted."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((extra (split-window (selected-window))))
+      ;; Act / Assert
+      (should (agent-repl-window--deletable-p extra)))))
+
+(ert-deftest agent-repl-window-test-deletable-p-sole-window ()
+  "The frame's sole window cannot be deleted."
+  (agent-repl-window-test--with-temp-frame
+    ;; Act / Assert
+    (should-not (agent-repl-window--deletable-p (selected-window)))))
+
+(ert-deftest agent-repl-window-test-deletable-p-main-window-beside-side-window ()
+  "The sole main-area window beside a side window cannot be deleted.
+The sidebar is such a side window, so the frame is not `one-window-p',
+yet `delete-window' refuses the main window (\"Attempt to delete main
+window\") -- the case that aborted a switch's activation (2026-11-20)."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let* ((main (selected-window))
+           (side-buf (generate-new-buffer " *test-deletable-side*"))
+           (side (display-buffer-in-side-window side-buf '((side . left) (slot . 0)))))
+      (unwind-protect
+          (progn
+            (should (window-live-p side))
+            (should-not (one-window-p))
+            ;; Act / Assert
+            (should-not (agent-repl-window--deletable-p main))
+            (should-error (delete-window main)))
+        (when (window-live-p side) (delete-window side))
+        (kill-buffer side-buf)))))
+
+(ert-deftest agent-repl-window-test-unharden-lifts-every-lock ()
+  "Unhardening a window hardened by the full recipe leaves it plain."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((win (split-window (selected-window))))
+      (agent-repl-window--harden win :dedicate t :size-fix 'height
+                                 :delete-protect t :preserve-size t
+                                 :no-other-window t)
+      ;; Act
+      (agent-repl-window--unharden win)
+      ;; Assert
+      (should-not (window-dedicated-p win))
+      (should-not (window-parameter win 'window-size-fixed))
+      (should-not (window-parameter win 'no-delete-other-windows))
+      (should-not (window-parameter win 'no-other-window))
+      (should-not (window-preserved-size win t))
+      (should-not (window-preserved-size win nil)))))
+
+(ert-deftest agent-repl-window-test-unharden-ignores-a-dead-window ()
+  "Unhardening a deleted window does nothing and does not signal."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((win (split-window (selected-window))))
+      (delete-window win)
+      ;; Act / Assert
+      (should-not (agent-repl-window--unharden win)))))
+
+(ert-deftest agent-repl-window-test-delete-or-neutralize-asks-the-shared-helpers ()
+  "The teardown asks `--unharden' and `--deletable-p', never its own recipe.
+A hand-rolled check beside the helpers is how `one-window-p' came to be
+asked in their place."
+  (agent-repl-window-test--with-temp-frame
+    ;; Arrange
+    (let ((extra (split-window (selected-window)))
+          (unhardened nil)
+          (asked nil))
+      (cl-letf* ((real-unharden (symbol-function 'agent-repl-window--unharden))
+                 (real-deletable (symbol-function 'agent-repl-window--deletable-p))
+                 ((symbol-function 'agent-repl-window--unharden)
+                  (lambda (win) (push win unhardened) (funcall real-unharden win)))
+                 ((symbol-function 'agent-repl-window--deletable-p)
+                  (lambda (win) (push win asked) (funcall real-deletable win))))
+        ;; Act
+        (agent-repl-window--delete-or-neutralize extra))
+      ;; Assert
+      (should (equal unhardened (list extra)))
+      (should (equal asked (list extra))))))
+
 (ert-deftest agent-repl-window-test-delete-buffer-windows-switches-the-sole-window ()
   "Closing a panel that owns the frame's only window switches it, never errors."
   (agent-repl-window-test--with-temp-frame
