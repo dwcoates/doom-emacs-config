@@ -6,9 +6,10 @@
  * THE DAEMON DECIDES WHICH NAMES ARE LINKS. The page subscribes to its
  * mention targets (`WatchWorkspaceMentions`, frontend.v1.WorkspaceMentionTargets),
  * the very set the daemon serves this workspace's composer as the names it
- * completes, so a name the composer completes is always a link here. The
- * page never decides on its own that a word names a workspace; it only finds
- * the served names in what it drew.
+ * completes, so a name the composer completes is always a link here. It holds
+ * the workspaces that are not closed and those closed within the daemon's
+ * recent window. The page never decides on its own that a word names a
+ * workspace; it only finds the served names in what it drew.
  *
  * A MENTION IS A WHOLE OCCURRENCE of a served name anywhere in a mention
  * scope's text (`MENTION_TEXT_CLASS`: a response's prose, a prompt's text
@@ -25,9 +26,13 @@
  * after a response was written gains its links and a closed one loses them.
  * Re-linking first unwraps every mention, so it is idempotent.
  *
- * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectInEditor`, through the
- * feed's one jump (feed/merge/jump.ts), delegated from the feed's scroll zone
- * so a mention drawn after the install is handled too. A mention is an anchor
+ * THE CLICK IS A WORKSPACE SWITCH, through the feed's one jump
+ * (feed/merge/jump.ts), delegated from the feed's scroll zone so a mention
+ * drawn after the install is handled too. The target's standing, as the
+ * daemon served it, picks the jump: an open workspace is selected
+ * (`SelectInEditor`), and a recently closed one is reopened (`OpenWorkspace`)
+ * and then selected, as the sidebar's closed entries are. A mention looks the
+ * same either way. A mention is an anchor
  * with NO href, so neither the prose link router nor the navigation guard
  * (link.ts) ever takes its click.
  */
@@ -36,7 +41,7 @@ import {
   WatchWorkspaceMentionsResponseSchema,
   type WatchWorkspaceMentionsResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_mentions_pb";
-import type { WorkspaceMentionTargets } from "../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
+import type { WorkspaceMentionTarget, WorkspaceMentionTargets } from "../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
 import { WorkspaceRefSchema, type WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
@@ -48,7 +53,7 @@ import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { TREE_LABEL_CLASS, TREE_RAILS_CLASS } from "../metaprompt-tree.js";
-import { jumpToWorkspace, type JumpSite } from "./merge/jump.js";
+import { jumpToWorkspace, openAndJumpToWorkspace, type JumpSite } from "./merge/jump.js";
 
 /** The class every mention wears. */
 export const WORKSPACE_MENTION_CLASS = "workspace-mention";
@@ -73,10 +78,19 @@ const MENTION_JUMP: JumpSite = {
 /** A character a workspace name is made of: a plain-text mention has none on either side. */
 const NAME_CHAR = String.raw`[\p{L}\p{N}_-]`;
 
+/** Whether a served target is open or recently closed, the arm the daemon set. */
+type Standing = NonNullable<WorkspaceMentionTarget["standing"]["case"]>;
+
+/** One served target: the workspace a click reaches and how. */
+interface Target {
+  readonly workspace: WorkspaceRef;
+  readonly standing: Standing;
+}
+
 /** The served targets, by name and by workspace id. */
 interface Targets {
   readonly byName: ReadonlyMap<string, WorkspaceRef>;
-  readonly byId: ReadonlyMap<string, WorkspaceRef>;
+  readonly byId: ReadonlyMap<string, Target>;
   /** Every name in plain text, longest first so a longer name wins, or null for none. */
   readonly pattern: RegExp | null;
 }
@@ -87,22 +101,23 @@ const NO_TARGETS: Targets = { byName: new Map(), byId: new Map(), pattern: null 
 let current: Targets = NO_TARGETS;
 
 /**
- * The served TARGETS, read to the page's lookup. A target with no name or no
- * workspace, or a name served twice, is malformed: the daemon serves distinct
- * names only.
+ * The served TARGETS, read to the page's lookup. A target with no name, no
+ * workspace or no standing, or a name served twice, is malformed: the daemon
+ * serves distinct names only, each with its standing.
  */
 export function readMentionTargets(targets: WorkspaceMentionTargets): Targets {
   const byName = new Map<string, WorkspaceRef>();
-  const byId = new Map<string, WorkspaceRef>();
+  const byId = new Map<string, Target>();
   targets.targets.forEach((target, i) => {
     const path = `WorkspaceMentionTargets.targets[${i}]`;
     const name = requireMessage(target.name, `${path}.name`).text;
     const workspace = requireMessage(target.workspace, `${path}.workspace`);
+    const standing = requireCase(target.standing, `${path}.standing`).case as Standing;
     if (name === "") throw new MalformedView(`${path}.name.text`, "a mention target names nothing");
     if (workspace.id === "") throw new MalformedView(`${path}.workspace.id`, "a mention target names no workspace");
     if (byName.has(name)) throw new MalformedView(`${path}.name.text`, `the name ${JSON.stringify(name)} is served twice`);
     byName.set(name, workspace);
-    byId.set(workspace.id, workspace);
+    byId.set(workspace.id, { workspace, standing });
   });
   const names = [...byName.keys()].sort((a, b) => b.length - a.length).map(escapeRegExp);
   const pattern =
@@ -223,8 +238,10 @@ export function resetMentionTargets(): void {
 }
 
 /**
- * Switch to the workspace a click on a mention names. Delegated from ROOT, in
- * the capture phase so a bubble's own click affordances never see it.
+ * Switch to the workspace a click on a mention names, reopening it first when
+ * the daemon served it closed. Delegated from ROOT, in the capture phase so a
+ * bubble's own click affordances never see it. A refused or failed open or
+ * select is drawn at the mention and recorded once by the jump.
  */
 export function installWorkspaceMentionClicks(ctx: AppContext, root: HTMLElement): () => void {
   const onClick = (event: MouseEvent): void => {
@@ -237,22 +254,33 @@ export function installWorkspaceMentionClicks(ctx: AppContext, root: HTMLElement
     const id = mention.getAttribute(WORKSPACE_MENTION_ATTRIBUTE) ?? "";
     // A mention is only ever drawn from the current targets, and every push
     // re-links every drawn scope, so a drawn mention always names one.
-    const workspace = current.byId.get(id);
-    if (workspace === undefined) {
+    const target = current.byId.get(id);
+    if (target === undefined) {
       log.error("a drawn workspace mention names no current target", {
         operation: "feed.workspace-mention.stale",
         context: { workspace: id, targets: current.byId.size },
       });
       throw new Error(`a drawn workspace mention names ${JSON.stringify(id)}, which is no current target`);
     }
-    void guardMalformed(
-      ctx,
-      MENTION_JUMP.operation,
-      jumpToWorkspace(mention, ctx, create(WorkspaceRefSchema, { id: workspace.id, dir: workspace.dir }), MENTION_JUMP),
-    );
+    const workspace = create(WorkspaceRefSchema, { id: target.workspace.id, dir: target.workspace.dir });
+    void guardMalformed(ctx, MENTION_JUMP.operation, mentionJump(target.standing)(mention, ctx, workspace, MENTION_JUMP));
   };
   root.addEventListener("click", onClick, true);
   return () => root.removeEventListener("click", onClick, true);
+}
+
+/** The jump a click on a target of STANDING makes. */
+function mentionJump(standing: Standing): typeof jumpToWorkspace {
+  switch (standing) {
+    case "open":
+      return jumpToWorkspace;
+    case "closed":
+      return openAndJumpToWorkspace;
+    default: {
+      const other: string = standing;
+      return unreachableArm("WorkspaceMentionTarget.standing", other);
+    }
+  }
 }
 
 /**

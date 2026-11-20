@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -49,11 +50,58 @@ func mentionRoster(rows []*frontendv1.RosterOpenRow, hidden ...*frontendv1.Roste
 	}
 }
 
-// targetNames reads TARGETS back as "name=id" pairs, in order.
+// mentionNow is the instant every resolve in these tests runs at.
+var mentionNow = time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC)
+
+// closedRow is a row naming workspace ID as NAME, closed AGO before
+// mentionNow.
+func closedRow(id, name string, ago time.Duration) *frontendv1.RosterRow {
+	row := mentionRow(id, name).GetRow()
+	row.Closure = &frontendv1.RosterRowClosure{
+		AtMs: mentionNow.Add(-ago).UnixMilli(),
+		By:   &frontendv1.RosterRowClosure_User{User: &frontendv1.RosterRowClosureByUser{}},
+	}
+	return row
+}
+
+// closedRowIn is closedRow in REPOSITORY.
+func closedRowIn(id, name, repository string, ago time.Duration) *frontendv1.RosterRow {
+	row := closedRow(id, name, ago)
+	row.Repository = &frontendv1.RosterRowRepository{Name: repository}
+	return row
+}
+
+// withClosed is ROSTER with MERGED in its recently-merged band and CLOSED in
+// its closed list.
+func withClosed(roster *frontendv1.WorkspaceRoster, merged, closed []*frontendv1.RosterRow) *frontendv1.WorkspaceRoster {
+	var mergedRows []*frontendv1.RosterMergedRow
+	for _, row := range merged {
+		mergedRows = append(mergedRows, &frontendv1.RosterMergedRow{Row: row})
+	}
+	roster.RecentlyMerged = &frontendv1.RosterMergedSection{Groups: []*frontendv1.RosterMergedRepoGroup{
+		{MergedRows: &frontendv1.RosterMergedRows{Rows: mergedRows}},
+	}}
+	roster.Closed = &frontendv1.RosterClosedRows{}
+	for _, row := range closed {
+		roster.Closed.Rows = append(roster.Closed.Rows, &frontendv1.RosterClosedRow{Row: row})
+	}
+	return roster
+}
+
+// targetNames reads TARGETS back as "name=id" pairs, in order, a closed
+// target's suffixed " (closed)". A target with no standing fails the test.
 func targetNames(targets *frontendv1.WorkspaceMentionTargets) []string {
 	var out []string
 	for _, target := range targets.GetTargets() {
-		out = append(out, target.GetName().GetText()+"="+target.GetWorkspace().GetId())
+		pair := target.GetName().GetText() + "=" + target.GetWorkspace().GetId()
+		switch target.GetStanding().(type) {
+		case *frontendv1.WorkspaceMentionTarget_Open:
+		case *frontendv1.WorkspaceMentionTarget_Closed:
+			pair += " (closed)"
+		default:
+			panic("a mention target carries no standing: " + pair)
+		}
+		out = append(out, pair)
 	}
 	return out
 }
@@ -173,7 +221,101 @@ func TestMentionTargetsResolvesTheViewersSet(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act.
-			got := targetNames(mentionTargets(tc.roster, tc.viewer))
+			got := targetNames(mentionTargets(tc.roster, tc.viewer, mentionNow))
+
+			// Assert.
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("targets = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestMentionTargetsLinksRecentlyClosedWorkspaces pins the closed half of
+// the set: a workspace closed within RecentlyClosedMentionWindow is a closed
+// target, the window's edge included, and one closed earlier, or with no
+// close record, is none.
+func TestMentionTargetsLinksRecentlyClosedWorkspaces(t *testing.T) {
+	window := RecentlyClosedMentionWindow
+	open := func(rows ...*frontendv1.RosterOpenRow) *frontendv1.WorkspaceRoster { return mentionRoster(rows) }
+	unrecorded := mentionRow("u", "unrecorded").GetRow()
+	cases := []struct {
+		name   string
+		roster *frontendv1.WorkspaceRoster
+		want   []string
+	}{
+		{
+			name:   "an open workspace links as before",
+			roster: withClosed(open(mentionRow("a", "alpha")), nil, nil),
+			want:   []string{"alpha=a"},
+		},
+		{
+			name:   "a workspace closed within the window links as closed",
+			roster: withClosed(open(), nil, []*frontendv1.RosterRow{closedRow("c", "gone", window-time.Hour)}),
+			want:   []string{"gone=c (closed)"},
+		},
+		{
+			name:   "a merged workspace closed within the window links as closed",
+			roster: withClosed(open(), []*frontendv1.RosterRow{closedRow("m", "landed", time.Hour)}, nil),
+			want:   []string{"landed=m (closed)"},
+		},
+		{
+			name:   "a workspace closed exactly the window ago still links",
+			roster: withClosed(open(), nil, []*frontendv1.RosterRow{closedRow("c", "edge", window)}),
+			want:   []string{"edge=c (closed)"},
+		},
+		{
+			name:   "a workspace closed a millisecond past the window does not link",
+			roster: withClosed(open(), nil, []*frontendv1.RosterRow{closedRow("c", "stale", window+time.Millisecond)}),
+			want:   nil,
+		},
+		{
+			name:   "a workspace closed well beyond the window does not link",
+			roster: withClosed(open(), []*frontendv1.RosterRow{closedRow("m", "old", 2*window)}, nil),
+			want:   nil,
+		},
+		{
+			name:   "a closed workspace with no close record does not link",
+			roster: withClosed(open(), nil, []*frontendv1.RosterRow{unrecorded}),
+			want:   nil,
+		},
+		{
+			name:   "closed targets follow the open ones, merged before closed",
+			roster: withClosed(open(mentionRow("a", "alpha")), []*frontendv1.RosterRow{closedRow("m", "landed", time.Hour)}, []*frontendv1.RosterRow{closedRow("c", "gone", time.Hour)}),
+			want:   []string{"alpha=a", "landed=m (closed)", "gone=c (closed)"},
+		},
+		{
+			name:   "an open workspace's name wins over a closed one's",
+			roster: withClosed(open(mentionRow("a", "same")), nil, []*frontendv1.RosterRow{closedRow("c", "same", time.Hour)}),
+			want:   []string{"same=a"},
+		},
+		{
+			name:   "a name two closed workspaces share is no target",
+			roster: withClosed(open(), []*frontendv1.RosterRow{closedRow("m", "same", time.Hour)}, []*frontendv1.RosterRow{closedRow("c", "same", time.Hour)}),
+			want:   nil,
+		},
+		{
+			name: "a name two closed workspaces share names the one in the viewer's repository",
+			roster: withClosed(open(mentionRowIn("v", "viewer", "doom")), nil, []*frontendv1.RosterRow{
+				closedRowIn("c", "same", "doom", time.Hour), closedRowIn("d", "same", "other", time.Hour),
+			}),
+			want: []string{"same=c (closed)"},
+		},
+		{
+			name:   "a closed workspace sharing a hidden workspace's name is no target",
+			roster: withClosed(mentionRoster(nil, mentionRow("h", "same")), nil, []*frontendv1.RosterRow{closedRow("c", "same", time.Hour)}),
+			want:   []string{"same=h"},
+		},
+		{
+			name:   "the viewer's own closed workspace is no target",
+			roster: withClosed(open(), nil, []*frontendv1.RosterRow{closedRow("v", "viewer", time.Hour)}),
+			want:   nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := targetNames(mentionTargets(tc.roster, "v", mentionNow))
 
 			// Assert.
 			if !slices.Equal(got, tc.want) {
@@ -201,7 +343,7 @@ func TestMentionTargetsStateEachTargetsRepository(t *testing.T) {
 			roster := mentionRoster([]*frontendv1.RosterOpenRow{mentionRowIn("a", "alpha", tc.repository)})
 
 			// Act.
-			got := mentionTargets(roster, "v").GetTargets()
+			got := mentionTargets(roster, "v", mentionNow).GetTargets()
 
 			// Assert.
 			if len(got) != 1 {
@@ -218,7 +360,7 @@ func TestMentionTargetsStateEachTargetsRepository(t *testing.T) {
 // filter: the first set is a change, an equal set is not, a different one is.
 func TestMentionTargetsTrackerAnswersOnlyChanges(t *testing.T) {
 	// Arrange.
-	tracker := mentionTargetsTracker{viewer: "v"}
+	tracker := mentionTargetsTracker{viewer: "v", now: func() time.Time { return mentionNow }}
 	alpha := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha")})
 	beta := mentionRoster([]*frontendv1.RosterOpenRow{mentionRow("a", "alpha"), mentionRow("b", "beta")})
 
@@ -270,7 +412,7 @@ func mentionFrame(names ...string) *agentreplv1.WatchWorkspaceMentionsResponse {
 		rows = append(rows, mentionRow(name, name))
 	}
 	return &agentreplv1.WatchWorkspaceMentionsResponse{
-		Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: mentionTargets(mentionRoster(rows), "v")},
+		Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: mentionTargets(mentionRoster(rows), "v", mentionNow)},
 	}
 }
 

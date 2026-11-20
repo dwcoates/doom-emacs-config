@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -58,60 +59,96 @@ func (s *server) watchWorkspaceMentions(
 		},
 	}, func(roster *frontendRoster) *agentreplv1.WatchWorkspaceMentionsResponse {
 		return &agentreplv1.WatchWorkspaceMentionsResponse{
-			Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: mentionTargets(roster, viewer)},
+			Push: &agentreplv1.WatchWorkspaceMentionsResponse_Targets{Targets: mentionTargets(roster, viewer, s.now())},
 		}
 	})
 }
 
-// mentionTargets resolves VIEWER's workspace mention targets from ROSTER:
-// the one set the viewer's page links and the viewer's composer completes
-// (frontend.v1.WorkspaceMentionTargets), so the two cannot differ.
+// RecentlyClosedMentionWindow is how long after a workspace closes its name
+// still links (owner request, 2026-11-17): a workspace closed at or after
+// NOW less this window is a mention target, and a click on it reopens it.
+const RecentlyClosedMentionWindow = 5 * 24 * time.Hour
+
+// mentionTargets resolves VIEWER's workspace mention targets from ROSTER at
+// NOW: the one set the viewer's page links and the viewer's composer
+// completes (frontend.v1.WorkspaceMentionTargets), so the two cannot differ.
 //
-// Every workspace the roster carries that is not closed is a candidate: the
-// Open section's in its drawn order, then the hidden section's. A name only
-// one candidate carries names it. A name several carry names the one of them
-// in the viewer's own repository when exactly one is, and otherwise no one.
-// The viewer's own workspace is never a target, and a name it carries names
-// no other workspace either, so a word the reader's own workspace is called
-// never switches somewhere else.
-func mentionTargets(roster *frontendRoster, viewer string) *frontendv1.WorkspaceMentionTargets {
-	var rows []*frontendv1.RosterRow
+// Every workspace the roster carries that is not closed is a LIVE candidate:
+// the Open section's in its drawn order, then the hidden section's. Every
+// workspace closed within RecentlyClosedMentionWindow follows as a CLOSED
+// candidate: the recently merged, then the other closed, in the roster's
+// order; a closed row without a close record is none, since nothing vouches
+// for when it closed. A name only one candidate carries names it. A name
+// several carry names the one of them in the viewer's own repository when
+// exactly one is, and otherwise no one. A name a live candidate carries is
+// settled among the live ones alone, so a closed workspace whose name was
+// reused never costs the live one its link. The viewer's own workspace is
+// never a target, and a name it carries names no other workspace either, so
+// a word the reader's own workspace is called never switches somewhere else.
+func mentionTargets(roster *frontendRoster, viewer string, now time.Time) *frontendv1.WorkspaceMentionTargets {
+	var live, closed []*frontendv1.RosterRow
 	for _, open := range rosterwalk.OpenRows(roster) {
-		rows = append(rows, open.GetRow())
+		live = append(live, open.GetRow())
 	}
-	rows = append(rows, rosterwalk.HiddenRows(roster)...)
+	live = append(live, rosterwalk.HiddenRows(roster)...)
+	since := now.Add(-RecentlyClosedMentionWindow).UnixMilli()
+	for _, row := range append(rosterwalk.MergedRows(roster), rosterwalk.ClosedRows(roster)...) {
+		if row.Closure != nil && row.GetClosure().GetAtMs() >= since {
+			closed = append(closed, row)
+		}
+	}
 
 	viewerRepository := ""
-	byName := make(map[string][]*frontendv1.RosterRow, len(rows))
-	for _, row := range rows {
+	for _, row := range live {
 		if row.GetWorkspace().GetWorkspace().GetId() == viewer {
 			viewerRepository = row.GetRepository().GetName()
 		}
-		if name := row.GetName().GetText(); name != "" {
-			byName[name] = append(byName[name], row)
-		}
 	}
+	liveByName := rowsByName(live)
+	closedByName := rowsByName(closed)
 
 	targets := &frontendv1.WorkspaceMentionTargets{}
-	for _, row := range rows {
+	add := func(row *frontendv1.RosterRow, carriers []*frontendv1.RosterRow, standing func(*frontendv1.WorkspaceMentionTarget)) {
 		name := row.GetName().GetText()
-		if name == "" || mentionNamed(byName[name], viewerRepository) != row {
-			continue
-		}
 		ref := row.GetWorkspace().GetWorkspace()
-		if ref.GetId() == viewer {
-			continue
+		if name == "" || mentionNamed(carriers, viewerRepository) != row || ref.GetId() == viewer {
+			return
 		}
 		target := &frontendv1.WorkspaceMentionTarget{
 			Name:      &frontendv1.WorkspaceMentionName{Text: name},
 			Workspace: ref,
 		}
+		standing(target)
 		if repository := row.GetRepository().GetName(); repository != "" {
 			target.Repository = &frontendv1.WorkspaceMentionRepository{Name: repository}
 		}
 		targets.Targets = append(targets.Targets, target)
 	}
+	for _, row := range live {
+		add(row, liveByName[row.GetName().GetText()], func(t *frontendv1.WorkspaceMentionTarget) {
+			t.Standing = &frontendv1.WorkspaceMentionTarget_Open{Open: &frontendv1.WorkspaceMentionTargetOpen{}}
+		})
+	}
+	for _, row := range closed {
+		if len(liveByName[row.GetName().GetText()]) > 0 {
+			continue
+		}
+		add(row, closedByName[row.GetName().GetText()], func(t *frontendv1.WorkspaceMentionTarget) {
+			t.Standing = &frontendv1.WorkspaceMentionTarget_Closed{Closed: &frontendv1.WorkspaceMentionTargetClosed{}}
+		})
+	}
 	return targets
+}
+
+// rowsByName groups the named rows of ROWS by name, each group in ROWS's order.
+func rowsByName(rows []*frontendv1.RosterRow) map[string][]*frontendv1.RosterRow {
+	byName := make(map[string][]*frontendv1.RosterRow, len(rows))
+	for _, row := range rows {
+		if name := row.GetName().GetText(); name != "" {
+			byName[name] = append(byName[name], row)
+		}
+	}
+	return byName
 }
 
 // mentionNamed answers the row a name CARRIERS share names, or nil: the one
@@ -140,13 +177,15 @@ func mentionNamed(carriers []*frontendv1.RosterRow, viewerRepository string) *fr
 // every row change and nearly none of those change a target.
 type mentionTargetsTracker struct {
 	viewer string
-	last   *frontendv1.WorkspaceMentionTargets
+	// now is the clock the recently closed window is measured against.
+	now  func() time.Time
+	last *frontendv1.WorkspaceMentionTargets
 }
 
 // next resolves ROSTER's targets, and whether they differ from the last set
 // next answered (the first set always does).
 func (t *mentionTargetsTracker) next(roster *frontendRoster) (*frontendv1.WorkspaceMentionTargets, bool) {
-	set := mentionTargets(roster, t.viewer)
+	set := mentionTargets(roster, t.viewer, t.now())
 	if t.last != nil && proto.Equal(t.last, set) {
 		return set, false
 	}

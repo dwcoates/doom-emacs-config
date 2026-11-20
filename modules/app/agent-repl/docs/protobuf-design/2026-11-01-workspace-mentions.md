@@ -54,3 +54,39 @@ then the endpoint, then its view message.
   - A response written while a workspace was open loses its link once that
     workspace closes, and gains links for workspaces opened later: the page
     re-links every drawn tree on each push.
+
+### `frontend.v1.WorkspaceMentionTarget.standing` (2026-11-17)
+
+- **What**: the target gains a `standing` oneof: `WorkspaceMentionTargetOpen
+  open = 3` and `WorkspaceMentionTargetClosed closed = 4`, both empty. The set
+  now also holds workspaces closed within the last five days.
+- **Why**: the owner asked (2026-11-17) that a workspace closed in the last five
+  days links like an open one, and that clicking it reopens and selects it. The
+  page must know which click to make (`SelectInEditor` alone, or
+  `OpenWorkspace` then `SelectInEditor`), and it must not derive that itself,
+  so the daemon states it per target. A oneof rather than a bool: the arm is the
+  click's behavior, and a later per-standing prop (a close instant, say) lands
+  on its own arm.
+- **Assumptions**: the closed set is read from the roster's merged and closed
+  lists, after the open and hidden rows, (`rosterwalk.MergedRows`, `rosterwalk.ClosedRows`) with each row's
+  `frontend.v1.RosterRow.closure.at_ms` as the close instant; a row without a
+  close record is no target. The window is
+  `server.RecentlyClosedMentionWindow` in
+  `daemon/internal/server/workspace_mentions.go`; the boundary is inclusive (a
+  close exactly five days old still links).
+- **Why the alternatives lost**: an open name beats a closed one rather than
+  both dropping, because a closed workspace whose name was reused must not cost
+  the open one its link. A name only closed workspaces share is settled by
+  the same viewer-repository rule as any other shared name
+  (`workspace-mention-targets-one-set.md`).
+- **One set, two readers**: the closed targets are in the one set the host
+  stream also serves, so the Emacs composer completes them too.
+- **Consequences**:
+  - The window is evaluated on each roster publication, which is how the set is
+    already derived; the roster publishes on every row change, so a target
+    leaves the set at the first publication after it ages out rather than at
+    the exact instant. A click on a just-expired target still reopens it, which
+    is the click's intent.
+  - The webapp's one click handler (`webapp/src/feed/workspace-mentions.ts`)
+    switches on the arm: `jumpToWorkspace` for open,
+    `openAndJumpToWorkspace` for closed.

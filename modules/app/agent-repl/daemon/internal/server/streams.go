@@ -399,7 +399,7 @@ func (s *server) serveHost(
 	// this workspace's page links (mentionTargets), resolved from the roster
 	// topic, which replays the roster in force, and sent only when it changes.
 	rosters, ackRoster := s.deps.Sidebar.Topic().SubscribeStream(streamCtx)
-	targets := mentionTargetsTracker{viewer: string(ws)}
+	targets := mentionTargetsTracker{viewer: string(ws), now: s.now}
 	s.acceptStream(ctx, rpc)
 	log.Debug(rpc, "accepted a standing stream", nil)
 
