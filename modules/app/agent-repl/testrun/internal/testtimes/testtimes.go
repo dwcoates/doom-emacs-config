@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
@@ -40,6 +41,10 @@ const (
 
 // SeriesName is the gauge every test's time lands in, one sample per run.
 const SeriesName = "agentrepl_test_seconds"
+
+// CPUSeriesName is the gauge every test's CPU lands in, one sample per run,
+// labeled as SeriesName (AttributeCPU says how a test's share is measured).
+const CPUSeriesName = "agentrepl_test_cpu_seconds"
 
 // SuiteSeriesName is the gauge every suite's slot time lands in, one sample
 // per run.
@@ -89,6 +94,12 @@ type Test struct {
 	Name    string
 	Outcome string
 	Seconds float64
+	// Start is when the test's own clock started, where its runner says
+	// (zero where it does not); it ran from Start for Seconds.
+	Start time.Time
+	// CPU is the CPU seconds AttributeCPU gave the test, when HasCPU.
+	CPU    float64
+	HasCPU bool
 }
 
 // Suite is one suite's time in a run.
@@ -169,11 +180,57 @@ func (t Target) Enabled() bool { return t.Root != "" }
 // goOutcomes maps a go result word to its outcome.
 var goOutcomes = map[string]string{"PASS": Pass, "FAIL": Fail, "SKIP": Skip}
 
+// StartMarker opens the line a unit's runner writes as each test's clock
+// starts: "TESTRUN-TEST-START <unix seconds> <test name>". `testrun
+// exec-test` writes one at each `=== RUN` and `=== CONT` of a Go test binary
+// (gobuild.ExecTest), and the ERT driver one as each test starts
+// (testrun/ert/driver.el); a test's latest one before its result is its Start.
+const StartMarker = "TESTRUN-TEST-START"
+
+// startLine is a StartMarker line: its unix seconds and test name.
+var startLine = regexp.MustCompile(`^` + StartMarker + ` ([0-9]+(?:\.[0-9]+)?) (\S+)$`)
+
+// StartLine is the StartMarker line saying NAME's clock started AT.
+func StartLine(at time.Time, name string) string {
+	return fmt.Sprintf("%s %d.%09d %s", StartMarker, at.Unix(), at.Nanosecond(), name)
+}
+
+// startOf reads LINE as a StartMarker line: its test's name and start.
+func startOf(line string) (string, time.Time, bool, error) {
+	m := startLine.FindStringSubmatch(strings.TrimRight(line, "\r"))
+	if m == nil {
+		return "", time.Time{}, false, nil
+	}
+	whole, frac, _ := strings.Cut(m[1], ".")
+	sec, err := strconv.ParseInt(whole, 10, 64)
+	if err != nil {
+		return "", time.Time{}, false, fmt.Errorf("testtimes: unreadable start in %q: %w", line, err)
+	}
+	nanos := int64(0)
+	if frac != "" {
+		frac = (frac + "000000000")[:9]
+		if nanos, err = strconv.ParseInt(frac, 10, 64); err != nil {
+			return "", time.Time{}, false, fmt.Errorf("testtimes: unreadable start in %q: %w", line, err)
+		}
+	}
+	return m[2], time.Unix(sec, nanos), true, nil
+}
+
 // ParseGo reads every test and subtest result line of a `go test -v` run of
-// package PKG, each named "<PKG>.<TestName>[/<subtest>...]".
+// package PKG, each named "<PKG>.<TestName>[/<subtest>...]", and its Start
+// from the StartMarker lines `testrun exec-test` wrote.
 func ParseGo(suite, pkg string, out []byte) ([]Test, error) {
 	var tests []Test
+	starts := map[string]time.Time{}
 	for line := range strings.SplitSeq(string(out), "\n") {
+		name, at, ok, err := startOf(line)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			starts[name] = at
+			continue
+		}
 		m := gotest.ResultLine.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -182,7 +239,7 @@ func ParseGo(suite, pkg string, out []byte) ([]Test, error) {
 		if err != nil {
 			return nil, fmt.Errorf("testtimes: unreadable seconds in %q: %w", line, err)
 		}
-		tests = append(tests, Test{Suite: suite, Name: pkg + "." + m[2], Outcome: goOutcomes[m[1]], Seconds: secs})
+		tests = append(tests, Test{Suite: suite, Name: pkg + "." + m[2], Outcome: goOutcomes[m[1]], Seconds: secs, Start: starts[m[2]]})
 	}
 	return tests, nil
 }
@@ -194,10 +251,20 @@ var ertResultLine = regexp.MustCompile(`^\s*(passed|FAILED|skipped)\s+\d+/\d+\s+
 // ertOutcomes maps an ERT result word to its outcome.
 var ertOutcomes = map[string]string{"passed": Pass, "FAILED": Fail, "skipped": Skip}
 
-// ParseERT reads every test result line of an ERT batch run.
+// ParseERT reads every test result line of an ERT batch run, and its Start
+// from the StartMarker lines the driver wrote.
 func ParseERT(suite string, out []byte) ([]Test, error) {
 	var tests []Test
+	starts := map[string]time.Time{}
 	for line := range strings.SplitSeq(string(out), "\n") {
+		name, at, ok, err := startOf(line)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			starts[name] = at
+			continue
+		}
 		m := ertResultLine.FindStringSubmatch(line)
 		if m == nil {
 			continue
@@ -206,7 +273,7 @@ func ParseERT(suite string, out []byte) ([]Test, error) {
 		if err != nil {
 			return nil, fmt.Errorf("testtimes: unreadable seconds in %q: %w", line, err)
 		}
-		tests = append(tests, Test{Suite: suite, Name: m[2], Outcome: ertOutcomes[m[1]], Seconds: secs})
+		tests = append(tests, Test{Suite: suite, Name: m[2], Outcome: ertOutcomes[m[1]], Seconds: secs, Start: starts[m[2]]})
 	}
 	return tests, nil
 }
@@ -217,6 +284,9 @@ type vitestTest struct {
 	Name    string  `json:"name"`
 	State   string  `json:"state"`
 	Seconds float64 `json:"seconds"`
+	// Start is the unix seconds the test started at; absent for a test that
+	// never ran (skipped, todo).
+	Start float64 `json:"start"`
 }
 
 // vitestOutcomes maps a vitest task state to its outcome.
@@ -243,7 +313,13 @@ func ParseVitest(suite, path, dir string) ([]Test, error) {
 			return nil, fmt.Errorf("testtimes: %s holds %q in state %q taking %v seconds", path, r.Name, r.State, r.Seconds)
 		}
 		file := strings.TrimPrefix(strings.TrimPrefix(r.File, dir), "/")
-		tests = append(tests, Test{Suite: suite, Name: file + " > " + r.Name, Outcome: outcome, Seconds: r.Seconds})
+		var start time.Time
+		if r.Start > 0 {
+			// To the microsecond: vitest's own start is in milliseconds, and a
+			// float's nanoseconds of a unix instant are not exact.
+			start = time.UnixMicro(int64(math.Round(r.Start * 1e6)))
+		}
+		tests = append(tests, Test{Suite: suite, Name: file + " > " + r.Name, Outcome: outcome, Seconds: r.Seconds, Start: start})
 	}
 	return tests, nil
 }
@@ -272,8 +348,12 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 	ms := at.UnixMilli()
 	num := func(v float64) string { return strconv.FormatFloat(v, 'g', -1, 64) }
 	for _, t := range report.Tests {
-		fmt.Fprintf(&b, "%s{suite=\"%s\",test=\"%s\",outcome=\"%s\",trigger=\"%s\"} %s %d\n",
-			SeriesName, labelValue(t.Suite), labelValue(t.Name), t.Outcome, labelValue(trigger), num(t.Seconds), ms)
+		labels := fmt.Sprintf("suite=\"%s\",test=\"%s\",outcome=\"%s\",trigger=\"%s\"",
+			labelValue(t.Suite), labelValue(t.Name), t.Outcome, labelValue(trigger))
+		fmt.Fprintf(&b, "%s{%s} %s %d\n", SeriesName, labels, num(t.Seconds), ms)
+		if t.HasCPU {
+			fmt.Fprintf(&b, "%s{%s} %s %d\n", CPUSeriesName, labels, num(t.CPU), ms)
+		}
 	}
 	batching := labelValue(report.Batching)
 	for _, s := range report.Suites {

@@ -310,18 +310,27 @@ func ParseGoTestItems(out []byte, want []string) (map[string]float64, error) {
 
 var goTestNoise = regexp.MustCompile(`^(=== (RUN|PAUSE|CONT|NAME) |\s*--- PASS: |PASS$)`)
 
-// QuietGoTestOutput is a passing chunk's output without the -v bookkeeping
-// the item timings needed: the run log keeps what a passing `go test` would
-// have printed, and a failing chunk shows everything.
+// goTestStamp is a test's start stamp (testtimes.StartLine), which only the
+// test CPU attribution reads.
+var goTestStamp = regexp.MustCompile(`^` + testtimes.StartMarker + ` `)
+
+// QuietGoTestOutput is a chunk's output without what only the runner reads:
+// a passing chunk's without the -v bookkeeping the item timings needed, so the
+// run log keeps what a passing `go test` would have printed, and a failing
+// chunk's whole but for the tests' start stamps.
 func QuietGoTestOutput(out []byte, passed bool) []byte {
-	if !passed || len(out) == 0 {
+	if len(out) == 0 {
 		return out
+	}
+	noise := goTestNoise
+	if !passed {
+		noise = goTestStamp
 	}
 	// Split, never scanned: a line has no length limit here, so there is no
 	// failure to fall back from and no line can be lost.
 	var b bytes.Buffer
 	for line := range strings.SplitSeq(strings.TrimSuffix(string(out), "\n"), "\n") {
-		if !goTestNoise.MatchString(line) {
+		if !noise.MatchString(line) && !goTestStamp.MatchString(line) {
 			b.WriteString(line)
 			b.WriteByte('\n')
 		}

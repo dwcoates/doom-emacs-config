@@ -70,6 +70,9 @@ type Deps struct {
 	Metrics testtimes.Target
 	// PushTimes sends the run's report, stamped AT, to TARGET (testtimes.Push).
 	PushTimes func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error
+	// CPU measures each unit's CPU over time, for each test's share
+	// (cputime.Sampler); nil, as in a run that pushes nothing, measures none.
+	CPU run.UnitCPU
 }
 
 // Reuser is the run's pass-record seam (reuse.Runner).
@@ -329,7 +332,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		ev.PlannedOnly(len(p.Specs))
 		return 0
 	}
-	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, At: d.At, GoCache: d.GoCache, Log: log, Ended: ev.UnitEnded}
+	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, At: d.At, GoCache: d.GoCache, Log: log, Ended: ev.UnitEnded, CPU: d.CPU}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
 	end := d.Clock.Now()

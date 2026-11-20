@@ -25,7 +25,12 @@
 ;;   TESTRUN-ITEM <file> <seconds>
 ;;
 ;; which is that file's load time plus its tests' run time, the cost the
-;; planner splits the next run by.
+;; planner splits the next run by.  As each test starts it prints
+;;
+;;   TESTRUN-TEST-START <unix seconds> <test>
+;;
+;; which places the test in its chunk's CPU over time, for its share of it
+;; (testtimes.AttributeCPU).
 ;;
 ;; A test is "a file's own" by `ert-test-file-name'.  A loaded test whose file
 ;; is not on the roster at all would run in NO chunk, which is the silent hole
@@ -50,6 +55,10 @@ With NAMES, only those of them."
                  (and (agent-repl-testrun-ert--own-p file test)
                       (or (null names) (memq (ert-test-name test) names))))))
 
+(defun agent-repl-testrun-ert--stamp-start (test)
+  "Print the line saying TEST starts now (testtimes.StartLine)."
+  (message "TESTRUN-TEST-START %.6f %s" (float-time) (ert-test-name test)))
+
 (defun agent-repl-testrun-ert (dir chunk roster &optional names)
   "Run the ERT test files CHUNK from DIR, ordered and checked against ROSTER.
 NAMES is an alist of a CHUNK file to the tests of it to run; a file with
@@ -62,6 +71,7 @@ no entry runs whole."
       (startup-redirect-eln-cache eln-dir))
     (setq attempt-stack-overflow-recovery nil
           attempt-orderly-shutdown-on-fatal-signal nil)
+    (advice-add 'ert-run-test :before #'agent-repl-testrun-ert--stamp-start)
     (unwind-protect
         (let ((ordered (seq-filter (lambda (f) (member f chunk)) roster))
               (load-seconds nil)

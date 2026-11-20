@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/gotest"
@@ -751,8 +752,10 @@ func TestVitestChecksRunInThePackageOnTheCoresTheyUse(t *testing.T) {
 }
 
 func TestQuietGoTestOutput(t *testing.T) {
-	// Arrange
-	out := []byte("=== RUN   TestA\n=== PAUSE TestA\n=== CONT  TestA\n    a_test.go:3: a log line\n--- PASS: TestA (0.10s)\n    --- PASS: TestA/sub (0.00s)\nPASS\ncoverage: 50.0% of statements\n")
+	// Arrange: exec-test stamped each start.
+	stamp := testtimes.StartLine(time.Unix(1_800_000_000, 0), "TestA") + "\n"
+	bare := "=== RUN   TestA\n=== PAUSE TestA\n=== CONT  TestA\n    a_test.go:3: a log line\n--- PASS: TestA (0.10s)\n    --- PASS: TestA/sub (0.00s)\nPASS\ncoverage: 50.0% of statements\n"
+	out := []byte(stamp + "=== RUN   TestA\n=== PAUSE TestA\n" + stamp + bare[len("=== RUN   TestA\n=== PAUSE TestA\n"):])
 
 	// Act
 	quiet := QuietGoTestOutput(out, true)
@@ -762,8 +765,8 @@ func TestQuietGoTestOutput(t *testing.T) {
 	if want := "    a_test.go:3: a log line\ncoverage: 50.0% of statements\n"; string(quiet) != want {
 		t.Fatalf("a passing chunk shows %q, want %q", quiet, want)
 	}
-	if string(loud) != string(out) {
-		t.Fatal("a failing chunk's output was trimmed")
+	if string(loud) != bare {
+		t.Fatalf("a failing chunk shows %q, want all of it but the start stamps: %q", loud, bare)
 	}
 }
 

@@ -40,6 +40,7 @@ import (
 	"agentrepl/testrun/internal/cli"
 	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
+	"agentrepl/testrun/internal/cputime"
 	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/gobuild"
@@ -477,7 +478,23 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		readPower := func() (cores.HostPower, error) { return cores.ReadHostPower(power, power.EnergyMode) }
 		go (&cores.Governor{Pool: host.Pool, NumCPU: runtime.NumCPU(), Read: hostcpu.Read, Tests: testsCPU.Read, Power: readPower, Now: time.Now, Ticks: ticker.C, Log: log}).Run(governorCtx)
 	}
+	// EACH TEST'S CPU (cputime): measured only for a run that pushes its
+	// times, since every read scans the user's processes.
+	var unitCPU run.UnitCPU
+	if metricsTarget.Enabled() {
+		tagged, err := proctable.NewMarked(cputime.UnitEnv)
+		if err != nil {
+			log.Errorf("read the units' CPU for each test's share: %v", err)
+			return 1
+		}
+		cpuTicks := time.NewTicker(cputime.Every)
+		defer cpuTicks.Stop()
+		sampler := &cputime.Sampler{Read: (&cores.TestsCPU{Scan: tagged.Scan}).ReadByMark, Now: time.Now, Ticks: cpuTicks.C, Log: log, Pid: os.Getpid()}
+		go sampler.Run(governorCtx)
+		unitCPU = sampler
+	}
 	return cli.Run(ctx, cli.Deps{
+		CPU:         unitCPU,
 		Events:      emitter,
 		Reuse:       reuse.Runner{Deps: reuseDeps, Files: func() ([]string, error) { return reuse.ExecRepoFiles(reuseDeps.Repo) }},
 		Log:         log,
@@ -725,9 +742,12 @@ func execTestCmd(log *run.Log, argv []string) int {
 		log.Errorf("exec-test: usage: exec-test BINARY [ARGS...]")
 		return 2
 	}
-	err := gobuild.ExecTest(argv[0], argv[1:], os.Stdout, gobuild.SyscallExec)
-	log.Errorf("exec-test %s: %v", argv[0], err)
-	return 1
+	code, err := gobuild.ExecTest(argv[0], argv[1:], os.Stdout, os.Stderr, time.Now)
+	if err != nil {
+		log.Errorf("exec-test %s: %v", argv[0], err)
+		return 1
+	}
+	return code
 }
 
 // checkTestCmd is the unit of a package whose test files hold no test

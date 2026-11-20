@@ -34,11 +34,15 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"agentrepl/testrun/internal/outtail"
+	"agentrepl/testrun/internal/testtimes"
 )
 
 // Options is one module build.
@@ -321,18 +325,76 @@ func Check(bin string, out io.Writer) error {
 	return nil
 }
 
-// ExecTest is `testrun exec-test`: a test unit's command. It replaces itself
-// with the package's binary bin, given args, once Check says it built.
-func ExecTest(bin string, args []string, out io.Writer, exec func(string, []string, []string) error) error {
+// ExecTest is `testrun exec-test`: a test unit's command. Once Check says
+// bin built, it runs bin with args as its child, copying what it prints to
+// out through StampStarts, and answers its exit status: its exit code, or 128
+// plus the signal that killed it. Its standard error goes to stderr as is.
+//
+// IT RUNS THE BINARY RATHER THAN BECOMING IT, so it can stamp each test's
+// start (testtimes.StartLine) as the line announcing it arrives, which the
+// binary itself never says and each test's CPU share is read from
+// (testtimes.AttributeCPU). It is in the unit's process group, so the
+// runner's kill reaches it and the binary alike.
+func ExecTest(bin string, args []string, out, stderr io.Writer, now func() time.Time) (int, error) {
 	if err := Check(bin, out); err != nil {
-		return err
+		return 0, err
 	}
-	err := exec(bin, append([]string{bin}, args...), os.Environ())
-	return fmt.Errorf("gobuild: exec %s: %w", bin, err)
+	cmd := exec.Command(bin, args...)
+	cmd.Stderr = stderr
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return 0, fmt.Errorf("gobuild: pipe %s's output: %w", bin, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return 0, fmt.Errorf("gobuild: start %s: %w", bin, err)
+	}
+	copyErr := StampStarts(stdout, out, now)
+	waitErr := cmd.Wait()
+	if copyErr != nil {
+		return 0, fmt.Errorf("gobuild: copy %s's output: %w", bin, copyErr)
+	}
+	var exitErr *exec.ExitError
+	switch {
+	case waitErr == nil:
+		return 0, nil
+	case errors.As(waitErr, &exitErr):
+		if ws, ok := exitErr.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
+			return 128 + int(ws.Signal()), nil
+		}
+		return exitErr.ExitCode(), nil
+	default:
+		return 0, fmt.Errorf("gobuild: wait for %s: %w", bin, waitErr)
+	}
 }
 
-// SyscallExec is ExecTest's exec over the real kernel.
-func SyscallExec(path string, argv, env []string) error { return syscall.Exec(path, argv, env) }
+// startAnnounce is the line a `go test -v` binary prints as a test's clock
+// starts: at its run, and again at its continue after t.Parallel's pause.
+var startAnnounce = regexp.MustCompile(`^=== (?:RUN|CONT) +(\S+)`)
+
+// StampStarts copies IN to OUT line by line, writing before each line that
+// announces a test's start the StartLine stamping it with NOW.
+func StampStarts(in io.Reader, out io.Writer, now func() time.Time) error {
+	r := bufio.NewReader(in)
+	for {
+		line, err := r.ReadString('\n')
+		if line != "" {
+			if m := startAnnounce.FindStringSubmatch(line); m != nil {
+				if _, werr := io.WriteString(out, testtimes.StartLine(now(), m[1])+"\n"); werr != nil {
+					return werr
+				}
+			}
+			if _, werr := io.WriteString(out, line); werr != nil {
+				return werr
+			}
+		}
+		if errors.Is(err, io.EOF) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+	}
+}
 
 // ParseBuildArgs reads `testrun build-tests`' arguments:
 // -module DIR -bindir DIR [-tags T] [-cover] -- PACKAGE...

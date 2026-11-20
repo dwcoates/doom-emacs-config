@@ -8,6 +8,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+
+	"agentrepl/testrun/internal/testtimes"
 )
 
 // The ERT chunk driver (testrun/ert/driver.el) is run here the way an ERT
@@ -269,5 +272,30 @@ func TestERTDriverRefusesNamesOutsideTheirFile(t *testing.T) {
 				t.Fatalf("exit = %d, want 2 saying %q:\n%s", exit, tt.want, out)
 			}
 		})
+	}
+}
+
+func TestERTDriverStampsEveryTestsStartForItsCPUShare(t *testing.T) {
+	// Arrange
+	dir := ertFixture(t, map[string]string{"test-a.el": "(ert-deftest fixture-a-one () (should t))\n(ert-deftest fixture-a-two () (should t))\n"})
+	before := time.Now()
+
+	// Act
+	out, exit := runDriver(t, dir, []string{"test-helpers.el", "test-a.el"}, []string{"test-helpers.el", "test-a.el"})
+
+	// Assert: every result the runner reads has the start the driver wrote,
+	// taken while the chunk ran.
+	if exit != 0 {
+		t.Fatalf("exit = %d\n%s", exit, out)
+	}
+	tests, err := testtimes.ParseERT("ert", []byte(out))
+	if err != nil || len(tests) != 3 {
+		t.Fatalf("ParseERT = %+v, %v\n%s", tests, err, out)
+	}
+	after := time.Now()
+	for _, tt := range tests {
+		if tt.Start.Before(before.Add(-time.Millisecond)) || tt.Start.After(after) {
+			t.Fatalf("%s started %v, outside the chunk's run %v..%v\n%s", tt.Name, tt.Start, before, after, out)
+		}
 	}
 }

@@ -153,9 +153,23 @@ type Runner struct {
 	GoCache GoCache
 	Log     *Log
 	// Ended, when set, is told each unit's result as its verdict is
-	// reported, with the unit's whole output (nil for a unit that never
-	// started): a caller streaming the run's progress (events.Emitter).
+	// reported, with the unit's output as the run log shows it (Spec.Display;
+	// nil for a unit that never started): a caller streaming the run's
+	// progress (events.Emitter).
 	Ended func(res Result, output []byte)
+	// CPU, when set, tags each unit's process tree and answers the CPU it
+	// used over time, which each of the unit's tests is given its share of
+	// (testtimes.AttributeCPU). Nil measures no test's CPU.
+	CPU UnitCPU
+}
+
+// UnitCPU tags a unit's processes and answers what they used over time
+// (cputime.Sampler).
+type UnitCPU interface {
+	// Env is the environment entry that tags unit ID's process tree.
+	Env(id string) string
+	// Take answers unit ID's CPU intervals and forgets them.
+	Take(id string) []testtimes.CPUSlice
 }
 
 // GoCache keeps cmd/go's trim of the build cache every unit's go commands
@@ -296,6 +310,9 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 	}
 	start := func(s Spec, deadline time.Time) {
 		begin(s)
+		if r.CPU != nil {
+			s.Env = append(append([]string(nil), s.Env...), r.CPU.Env(s.ID))
+		}
 		out := &bytes.Buffer{}
 		p, err := r.Exec.Start(s, out)
 		if err != nil {
@@ -419,6 +436,17 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 			}
 			res.Tests = tests
 		}
+		if r.CPU != nil {
+			slices := r.CPU.Take(c.id)
+			if err := testtimes.AttributeCPU(res.Tests, slices, res.Usage.CPU, res.Start, res.End); err != nil {
+				r.Log.Errorf("unit %s (%s) reported tests whose CPU cannot be told apart (%d tests, %d CPU intervals, %.3fs CPU): %v", c.id, spec.Suite, len(res.Tests), len(slices), res.Usage.CPU, err)
+				if res.Outcome == Passed {
+					// As for the test timings: a passing unit that broke its
+					// timing contract fails.
+					res.Outcome, res.Exit = Failed, 1
+				}
+			}
+		}
 		if res.Outcome == Passed && spec.NamesTests && len(res.Tests) == 0 {
 			r.Log.Errorf("unit %s (%s) was narrowed to named tests and ran none of them; a selection that runs nothing fails", c.id, spec.Suite)
 			fmt.Fprintf(c.output, "\n%s unit %s ran NONE of the tests it was narrowed to: a selection that runs nothing fails.\n", Prefix, c.id)
@@ -434,7 +462,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 		}
 		r.Log.Block(shown)
 		r.reportUnit(res)
-		r.tellEnded(res, c.output.Bytes())
+		r.tellEnded(res, shown)
 		cancelled := q.Done(c.id, res.Outcome == Passed)
 		finishUnit(res)
 		for _, u := range cancelled {
