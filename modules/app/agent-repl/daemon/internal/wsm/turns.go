@@ -155,11 +155,11 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		if err != nil {
 			return err
 		}
-		n, err := res.RowsAffected()
+		touched, err := touchedRow(res)
 		if err != nil {
 			return err
 		}
-		if n == 0 {
+		if !touched {
 			return fmt.Errorf("wsm: turn %s belongs to another workspace than %s: %w", t.ID, t.Workspace, ErrTurnOfAnotherWorkspace)
 		}
 		// A recorded turn IS activity: stamp the workspace's last-activity edge
