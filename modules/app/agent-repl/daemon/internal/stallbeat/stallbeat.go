@@ -17,14 +17,21 @@
 // put 14 to 20 there, nearly every one of the window's 20 beats. Beat sets the
 // line at 8, twice the chance clustering.
 //
-// THE LINE STANDS ABOVE CHANCE, NOT AT A FIXED COUNT. A phase within
-// Tolerance spans 1/30 of the cycle, so a window's stalls land on any one
-// phase by chance alone in proportion to how many there are: a busy window of
-// 364 stalls put about 12 on every phase, and its busiest phase showed 19
-// with no beat behind it (2026-11-16, raised as sustained pressure). The
-// error is raised when a phase holds Beat MORE stalls than chance puts there
-// (ChanceOnPhase), which is Beat itself for the quiet windows it was measured
-// on.
+// THE LINE RISES WITH THE STALL COUNT. Those 4 were of about 20 stalls. A
+// window of 67 or 92 stalls with no beat behind them puts 7 to 10 on its
+// busiest phase by chance alone, so a fixed 8 raised on busy windows that had
+// no beat (2026-11-16 17:12 and 17:23: 8 of 67 and 8 of 92, at chance odds of
+// 1 in 5 and better than even), and a window of 364 put 19 on its busiest
+// phase (16:11). The line is therefore the larger of Beat and
+// the count chance reaches on some phase with odds below FalseAlarm
+// (chanceBound).
+//
+// EACH WEB VIEW IS ITS OWN PROCESS. The webhost's two documents, the host that
+// holds every workspace page and the sidebar, run in separate web content
+// processes, each with its own memory-pressure poll on its own phase: of
+// 9,857 sidebar stalls only 259 fell within 300ms of a host stall
+// (2026-11-16). One document's stalls are never counted against another's
+// beat, so the detector keeps a window per document.
 package stallbeat
 
 import (
@@ -49,16 +56,17 @@ const Window = 10 * time.Minute
 // Tolerance is how far from the beat's phase a stall still counts as on it.
 const Tolerance = 500 * time.Millisecond
 
-// Beat is how many stalls of one window on one phase, beyond what chance puts
-// there (ChanceOnPhase), raise the error.
+// Beat is the fewest stalls of one window on one phase that raise the error,
+// however few stalls the window holds.
 const Beat = 8
 
-// ChanceOnPhase answers how many of N stalls fall within Tolerance of any one
-// phase by chance alone, rounded to a whole stall: the share of Period that
-// Tolerance spans either side of a phase.
-func ChanceOnPhase(n int) int {
-	return int(math.Round(float64(n) * float64(2*Tolerance) / float64(Period)))
-}
+// FalseAlarm is the odds, per window, that stalls with no beat behind them
+// reach the line on some phase (chanceBound).
+const FalseAlarm = 1e-3
+
+// phases is how many distinct phases a stall's arc can stand on: arcs of
+// 2*Tolerance whose centers lie Tolerance apart cover every placement.
+const phases = int(Period / Tolerance)
 
 // Deps are the detector's collaborators, every one required.
 type Deps struct {
@@ -71,13 +79,18 @@ type stall struct {
 	blocked int64
 }
 
-// Detector watches the stalls the webhost reports.
+// clock is one web view's window of stalls and when its error was last raised.
+type clock struct {
+	stalls []stall
+	raised time.Time
+}
+
+// Detector watches the stalls the webhost reports, one window per document.
 type Detector struct {
 	log dlog.Logger
 
 	mu     sync.Mutex
-	stalls []stall
-	raised time.Time
+	clocks map[string]*clock
 }
 
 // New builds a detector.
@@ -85,38 +98,38 @@ func New(deps Deps) (*Detector, error) {
 	if deps.Log == nil {
 		return nil, errors.New("stallbeat: a logger is required")
 	}
-	return &Detector{log: deps.Log}, nil
+	return &Detector{log: deps.Log, clocks: map[string]*clock{}}, nil
 }
 
-// Observe takes one stall: the moment the webhost recorded it and how long the
-// main thread was blocked. It raises the error once per Window while Beat or
-// more of the window's stalls beyond chance's share (ChanceOnPhase) fall
-// within Tolerance of one phase of Period.
-func (d *Detector) Observe(at time.Time, blockedMS int64) {
+// Observe takes one stall: the web view DOCUMENT that recorded it, the moment
+// it did and how long that document's main thread was blocked. It raises the
+// error once per Window per document while the document's stalls on one phase
+// of Period, within Tolerance, reach the larger of Beat and chanceBound.
+func (d *Detector) Observe(document string, at time.Time, blockedMS int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	kept := d.stalls[:0]
-	for _, s := range d.stalls {
-		if at.Sub(s.at) < Window {
-			kept = append(kept, s)
-		}
+	c, ok := d.clocks[document]
+	if !ok {
+		c = &clock{}
+		d.clocks[document] = c
 	}
-	d.stalls = append(kept, stall{at: at, blocked: blockedMS})
-	if !d.raised.IsZero() && at.Sub(d.raised) < Window {
+	c.stalls = append(within(c.stalls, at), stall{at: at, blocked: blockedMS})
+	if !c.raised.IsZero() && at.Sub(c.raised) < Window {
 		return
 	}
-	phase, onBeat, blocked := bestBeat(d.stalls)
-	chance := ChanceOnPhase(len(d.stalls))
-	if onBeat < Beat+chance {
+	phase, onBeat, blocked := bestBeat(c.stalls)
+	byChance := chanceBound(len(c.stalls))
+	if onBeat < max(Beat, byChance) {
 		return
 	}
-	d.raised = at
+	c.raised = at
 	d.log.Error(op, fmt.Sprintf(
-		"%d of the last %s's %d web-process stalls fell on one phase of WebKit's %s memory-pressure cycle: the process is under sustained memory pressure",
-		onBeat, Window, len(d.stalls), Period), dlog.Context{
+		"%d of the last %s's %d %s web-process stalls fell on one phase of WebKit's %s memory-pressure cycle, where chance puts at most %d: the process is under sustained memory pressure",
+		onBeat, Window, len(c.stalls), document, Period, byChance-1), dlog.Context{
+		"document":           document,
 		"stalls_on_beat":     onBeat,
-		"stalls_in_window":   len(d.stalls),
-		"chance_on_phase":    chance,
+		"stalls_in_window":   len(c.stalls),
+		"stalls_by_chance":   byChance - 1,
 		"blocked_ms_on_beat": blocked,
 		"phase_ms":           phase.Milliseconds(),
 		"window_s":           int(Window.Seconds()),
@@ -124,18 +137,53 @@ func (d *Detector) Observe(at time.Time, blockedMS int64) {
 	})
 }
 
-// Recent answers how many stalls fell within Window before NOW and how long
-// they blocked in all, in milliseconds: the strain line of the rail's memory
-// popup (memorypopup). A stall older than Window is not counted, whether or
-// not a later Observe has pruned it yet.
+// within answers the STALLS still inside Window before AT, reusing their array.
+func within(stalls []stall, at time.Time) []stall {
+	kept := stalls[:0]
+	for _, s := range stalls {
+		if at.Sub(s.at) < Window {
+			kept = append(kept, s)
+		}
+	}
+	return kept
+}
+
+// chanceBound answers the fewest of N stalls with no beat behind them that
+// fall on one phase only with odds below FalseAlarm: the least k for which
+// phases times the chance that k or more of N uniform stalls land in one arc
+// of 2*Tolerance stays within FalseAlarm. Below it, a crowded phase is what a
+// busy window looks like by chance.
+func chanceBound(n int) int {
+	q := float64(2*Tolerance) / float64(Period)
+	pmf := make([]float64, n+1)
+	pmf[0] = math.Pow(1-q, float64(n))
+	for i := 0; i < n; i++ {
+		pmf[i+1] = pmf[i] * float64(n-i) / float64(i+1) * q / (1 - q)
+	}
+	tail := 0.0
+	for k := n; k >= 0; k-- {
+		tail += pmf[k]
+		if float64(phases)*tail > FalseAlarm {
+			return k + 1
+		}
+	}
+	return 0
+}
+
+// Recent answers how many stalls, of every document, fell within Window
+// before NOW and how long they blocked in all, in milliseconds: the strain
+// line of the rail's memory popup (memorypopup). A stall older than Window is
+// not counted, whether or not a later Observe has pruned it yet.
 func (d *Detector) Recent(now time.Time) (int, int64) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	count, blocked := 0, int64(0)
-	for _, s := range d.stalls {
-		if now.Sub(s.at) < Window {
-			count++
-			blocked += s.blocked
+	for _, c := range d.clocks {
+		for _, s := range c.stalls {
+			if now.Sub(s.at) < Window {
+				count++
+				blocked += s.blocked
+			}
 		}
 	}
 	return count, blocked

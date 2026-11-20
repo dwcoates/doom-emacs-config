@@ -43,7 +43,7 @@ func TestClientLogHandsOnlyAWebhostStallToTheStallBeat(t *testing.T) {
 		operation string
 		want      []observedStall
 	}{
-		{name: "a stall reaches the beat with its moment and duration", operation: "webhost.stall", want: []observedStall{{at: at, blockedMS: 412}}},
+		{name: "a stall reaches the beat with its document, moment and duration", operation: "webhost.stall", want: []observedStall{{document: "sidebar", at: at, blockedMS: 412}}},
 		{name: "any other webhost record does not", operation: "webhost.census"},
 	}
 	for _, tt := range tests {
@@ -52,13 +52,13 @@ func TestClientLogHandsOnlyAWebhostStallToTheStallBeat(t *testing.T) {
 			h := newHarness(t)
 
 			// Act
-			if _, err := h.Client.ClientLog(context.Background(), webhostRecord(t, tt.operation, stamp, map[string]any{"blocked_ms": 412})); err != nil {
+			if _, err := h.Client.ClientLog(context.Background(), webhostRecord(t, tt.operation, stamp, map[string]any{"blocked_ms": 412, "webhost_document": "sidebar"})); err != nil {
 				t.Fatalf("ClientLog: %v", err)
 			}
 
 			// Assert
 			got := h.StallBeat.stalls()
-			if len(got) != len(tt.want) || (len(got) == 1 && (!got[0].at.Equal(tt.want[0].at) || got[0].blockedMS != tt.want[0].blockedMS)) {
+			if len(got) != len(tt.want) || (len(got) == 1 && (got[0].document != tt.want[0].document || !got[0].at.Equal(tt.want[0].at) || got[0].blockedMS != tt.want[0].blockedMS)) {
 				t.Fatalf("observed %+v, want %+v", got, tt.want)
 			}
 		})
@@ -71,8 +71,9 @@ func TestClientLogRecordsAnUnreadableStallAndObservesNothing(t *testing.T) {
 		timestamp string
 		ctx       map[string]any
 	}{
-		{name: "a stall with no readable moment", timestamp: "not a time", ctx: map[string]any{"blocked_ms": 300}},
-		{name: "a stall with no blocked duration", timestamp: "2026-10-18T12:00:09.250000-04:00", ctx: map[string]any{}},
+		{name: "a stall with no readable moment", timestamp: "not a time", ctx: map[string]any{"blocked_ms": 300, "webhost_document": "host"}},
+		{name: "a stall with no blocked duration", timestamp: "2026-10-18T12:00:09.250000-04:00", ctx: map[string]any{"webhost_document": "host"}},
+		{name: "a stall naming no document", timestamp: "2026-10-18T12:00:09.250000-04:00", ctx: map[string]any{"blocked_ms": 300}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
