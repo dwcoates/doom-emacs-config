@@ -358,6 +358,14 @@ type Verbs interface {
 	// editor-global stream with nothing to deliver — including the EMPTY
 	// roster, which is a roster.
 	PublishRegistry(ctx context.Context) error
+	// RepublishRoster re-reads the registry and installs the roster from it,
+	// and does nothing else: no workspace's resolvers are bound again, no
+	// naming or account is published again, and no missing directory is
+	// settled. It is the republish for a component that changed one durable
+	// fact (a branch's commit count, a park, a cache lapse), whose cost must
+	// not grow with every workspace the registry holds, as PublishRegistry's
+	// walk does. CAUSE names what changed, as `changed` on the install's records.
+	RepublishRoster(ctx context.Context, cause string) error
 	// BindViews binds every registered workspace whose directory exists on
 	// every resolver that logs per workspace, and writes NOTHING. The boot
 	// calls it FIRST, before any reconciliation step can raise or close a

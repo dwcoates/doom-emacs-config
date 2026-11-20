@@ -3,6 +3,7 @@ package branchcommits
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -22,6 +23,9 @@ type fakeDB struct {
 	// mergedOnWrite answers the live write as refused, as the store does for
 	// a workspace that merged while it was counted.
 	mergedOnWrite bool
+	// forgetOnWrite forgets the workspace as its count is written, and the
+	// write finds no workspace, as a forget landing between them leaves it.
+	forgetOnWrite bool
 	writes        []uint32
 }
 
@@ -49,6 +53,12 @@ func (f *fakeDB) SetLiveCommitCount(ctx context.Context, _ wsm.WorkspaceID, coun
 	}
 	if f.writeErr != nil {
 		return false, f.writeErr
+	}
+	if f.forgetOnWrite {
+		for id := range f.records {
+			delete(f.records, id)
+		}
+		return false, fmt.Errorf("wsm: workspace %s: %w", theWorkspace, wsm.ErrNotFound)
 	}
 	if f.mergedOnWrite {
 		return false, nil
@@ -392,6 +402,28 @@ func TestARecountThatRacedItsTeardownIsNotAFault(t *testing.T) {
 				t.Fatalf("writes = %d, want none", got)
 			}
 		})
+	}
+}
+
+func TestARecountWhoseWorkspaceWasForgottenBeforeItsWriteIsNotAFault(t *testing.T) {
+	// Arrange: the count moved, and a forget lands before it is written.
+	h := newHarness(t, live())
+	h.db.forgetOnWrite = true
+
+	// Act
+	h.r.recount(context.Background(), theWorkspace)
+
+	// Assert: recorded at INFO as moved on, never as an error, and nothing is
+	// republished.
+	if _, ok := h.record("error", "could not record the branch's commit count"); ok {
+		t.Fatalf("a write that raced its workspace's forget was logged as an error: %v", h.log.Records())
+	}
+	rec, ok := h.record("info", "the workspace moved on before its branch's count was recorded; there is nothing left to record")
+	if !ok || rec.Context["moved_on"] != "forgotten" {
+		t.Fatalf("info record = %v (found %v), want moved_on=forgotten", rec.Context, ok)
+	}
+	if got := len(h.published); got != 0 {
+		t.Fatalf("republishes = %d, want none", got)
 	}
 }
 

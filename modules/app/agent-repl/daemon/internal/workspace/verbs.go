@@ -168,6 +168,19 @@ func (v *verbs) republishRegistry(ctx context.Context, log dlog.Logger, operatio
 	})
 }
 
+// RepublishRoster implements Verbs: republishRegistry, answering the read's
+// failure, which readRegistry recorded.
+func (v *verbs) RepublishRoster(ctx context.Context, cause string) error {
+	log := v.deps.Log.Global().With(dlog.Context{"changed": cause})
+	return v.installRegistry(ctx, log, opRepublishRoster, func(reg sidebar.Registry) {
+		v.deps.Sidebar.SetRegistry(reg)
+		logRepublished(log, opRepublishRoster, reg)
+	})
+}
+
+// opRepublishRoster is RepublishRoster's operation.
+const opRepublishRoster = "daemon.workspace.republish_roster"
+
 // installRegistry reads the roster's registry from WSM and hands it to
 // INSTALL. Every whole registry install goes through here. A read that fails
 // is recorded by readRegistry, installs nothing, and is returned.

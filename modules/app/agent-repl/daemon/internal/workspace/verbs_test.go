@@ -471,3 +471,52 @@ func TestARegistryInstallReturnsAFailedRead(t *testing.T) {
 		t.Fatalf("records = %v, want the failed read at error", f.log.logger.Records())
 	}
 }
+
+func TestRepublishRosterInstallsTheRegistryAndBindsNothing(t *testing.T) {
+	// Arrange: a registered workspace whose footer binding is forgotten, so a
+	// re-bind would show.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.footer.dirs = nil
+
+	// Act
+	err := f.verbs.RepublishRoster(context.Background(), "a branch was recounted")
+
+	// Assert: one roster, carrying the workspace, and no resolver bound again.
+	if err != nil {
+		t.Fatalf("RepublishRoster: %v", err)
+	}
+	if len(f.sidebar.registries) != 1 || len(f.sidebar.registries[0].Workspaces) != 1 {
+		t.Fatalf("roster republications = %+v, want one carrying w1", f.sidebar.registries)
+	}
+	if len(f.footer.dirs) != 0 {
+		t.Fatalf("footer bindings = %v, want none: a republish binds nothing", f.footer.dirs)
+	}
+}
+
+func TestRepublishRosterAnswersAndLogsAFailedRead(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.readArrangementErr = errors.New("store gone")
+
+	// Act
+	err := f.verbs.RepublishRoster(context.Background(), "a session was parked")
+
+	// Assert: the failure is answered, logged at ERROR under the cause, and
+	// no roster is installed.
+	if err == nil || !strings.Contains(err.Error(), "store gone") {
+		t.Fatalf("RepublishRoster = %v, want the read's failure", err)
+	}
+	logged := false
+	for _, r := range f.log.logger.Records() {
+		if r.Level == dlog.LevelError && r.Operation == "daemon.workspace.republish_roster" && r.Context["changed"] == "a session was parked" {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("records = %v, want the failed read at ERROR under the cause", f.log.logger.Records())
+	}
+	if len(f.sidebar.registries) != 0 {
+		t.Fatalf("roster republications = %d, want none", len(f.sidebar.registries))
+	}
+}

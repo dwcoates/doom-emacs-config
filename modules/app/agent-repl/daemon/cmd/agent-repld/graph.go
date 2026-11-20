@@ -868,7 +868,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Parked:          lateParkedKeepalive(p.Surfaces.Global(), func() (parkedKeepaliver, bool) { return fleet, fleet != nil }),
 		ColdGate:        func(ws ids.WorkspaceID) (*conversationv1.SessionCold, bool) { return fleet.StandingColdGate(ws) },
 		StandDowns:      standDownsFunc(func(ws ids.WorkspaceID) { drainController.StandDownWithheld(ws) }),
-		PublishRegistry: verbsRef.publishRegistry("a hidden workspace's cache lapse moved"),
+		PublishRegistry: verbsRef.republishRoster("a hidden workspace's cache lapse moved"),
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
 		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
@@ -1091,7 +1091,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	commitRecounter, err := branchcommits.New(branchcommits.Deps{
 		DB:              p.DB,
 		Git:             git,
-		PublishRegistry: verbsRef.publishRegistry("a branch was recounted"),
+		PublishRegistry: verbsRef.republishRoster("a branch was recounted"),
 		Log:             p.Surfaces,
 	})
 	if err != nil {
@@ -1430,7 +1430,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// The verbs own the roster's durable half and are built AFTER this
 		// controller, so the republish reads them out of the forwarder --
 		// exactly as the merge orchestrator's own roster republish does.
-		PublishRegistry: verbsRef.publishRegistry("a session was parked"),
+		PublishRegistry: verbsRef.republishRoster("a session was parked"),
 		// ONE PARK, ONE CALL, BOTH SESSION-SCOPED SURFACES. The footer's strip
 		// and the topbar's indicator each draw the shim link, and the roster
 		// promises they agree with it about the same link
