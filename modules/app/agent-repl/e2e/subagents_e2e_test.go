@@ -388,7 +388,7 @@ func testNestedSubagentHistoricalUsage(t *testing.T) {
 
 	// Assert: the record's usage figure is retained, whole, in the nested
 	// agent's own book: 100 input, 75 cache-written, 800 cache-read, 200 out.
-	usage := uhNestedBookUsage(t, w)
+	usage := uhNestedBookUsage(t, w, ws)
 	if got := usage.GetInputMisses().GetUnwritten(); got != 100 {
 		t.Errorf("usage.input_misses.unwritten = %d, want the record's input_tokens 100", got)
 	}
@@ -413,9 +413,11 @@ func testNestedSubagentHistoricalUsage(t *testing.T) {
 // agent's book carries, failing unless there is exactly one: the scenario
 // writes one `.meta.json` and one assistant record, and its book is keyed by
 // the spawning call's tool_use_id that file names.
-func uhNestedBookUsage(t *testing.T, w *stack.World) *conversationv1.TokenUsage {
+func uhNestedBookUsage(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef) *conversationv1.TokenUsage {
 	t.Helper()
-	metas, err := filepath.Glob(filepath.Join(w.DefaultConfigDir, "projects", "*", "*", "subagents", "agent-*.meta.json"))
+	// Only this workspace's conversations: the shared World's account root
+	// holds every other test's too.
+	metas, err := filepath.Glob(filepath.Join(harness.ProjectDir(w.DefaultConfigDir, ws.GetDir()), "*", "subagents", "agent-*.meta.json"))
 	if err != nil || len(metas) != 1 {
 		t.Fatalf("the nested agent's .meta.json files = %v (%v), want exactly one", metas, err)
 	}
