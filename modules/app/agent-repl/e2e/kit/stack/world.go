@@ -27,6 +27,7 @@ import (
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/testrun/testenv"
 
 	"connectrpc.com/connect"
 
@@ -1467,6 +1468,11 @@ func startService(t testing.TB, service, verb, bin string, args []string, lockDi
 		"AGENT_REPL_LOCK_DIR="+lockDir,
 	)
 	cmd.Env = append(cmd.Env, coverageEnv(t, coverageSystemOf(service))...)
+	// A PROFILING RUN PROFILES THE SERVICE'S WHOLE LIFE into the test's own
+	// directory (testenv.ExitProfile); the daemon and its shims are profiled by
+	// the daemon harness.
+	profileEnv, _ := testenv.ExitProfile(t)
+	cmd.Env = append(cmd.Env, profileEnv...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {
