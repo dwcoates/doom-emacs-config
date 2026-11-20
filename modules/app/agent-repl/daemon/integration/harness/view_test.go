@@ -518,3 +518,17 @@ func TestAViewOfADaemonWithNoGitWorldIsRefused(t *testing.T) {
 		t.Fatalf("completed=%v failures=%q, want the view refused", completed, viewTB.Failures())
 	}
 }
+
+func TestAViewsStreamsSettleAgainstTheView(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+
+	// Act
+	v := owner.View(t)
+
+	// Assert: a stream the view opens finds the view to settle against
+	// (Stream.settle), as an owner's finds its owner.
+	if got, _ := v.ctx.Value(daemonKey{}).(*Daemon); got != v {
+		t.Fatalf("the view's context carries %p, want the view %p", got, v)
+	}
+}

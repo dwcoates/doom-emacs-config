@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -69,7 +70,9 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	bindWorld(t, d.Git)
 	requireGrantedClock(t)
 	ctx, cancel := grantedclock.WithBound(v.watchRecords(t, d.fault.ctx), v.waitBound*runBudgetWaits)
-	v.ctx = ctx
+	// A stream the view opens settles against the view (Stream.settle), as
+	// an owner's does against its owner.
+	v.ctx = context.WithValue(ctx, daemonKey{}, &v)
 	// Registered first so it runs last: the sweeps below read the logs, and
 	// the budget must outlive them.
 	t.Cleanup(cancel)
