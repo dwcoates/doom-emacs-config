@@ -61,17 +61,22 @@ func TestGoTestArgs(t *testing.T) {
 		{
 			name: "a plain build",
 			o:    Options{Module: "/m", BinDir: "/b", Self: "/testrun", Packages: []string{".", "a"}},
-			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module /m -bindir /b", "-run", "^$", ".", "./a"},
+			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module /m -bindir /b", "-ldflags=-w", "-run", "^$", ".", "./a"},
+		},
+		{
+			name: "debug info keeps DWARF",
+			o:    Options{Module: "/m", BinDir: "/b", Self: "/testrun", DebugInfo: true, Packages: []string{"a"}},
+			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module /m -bindir /b", "-run", "^$", "./a"},
 		},
 		{
 			name: "tags and coverage",
 			o:    Options{Module: "/m", BinDir: "/b", Self: "/testrun", Tags: "integration", Cover: true, Packages: []string{"a"}},
-			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module /m -bindir /b", "-tags", "integration", "-cover", "-coverpkg=./...", "-run", "^$", "./a"},
+			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module /m -bindir /b", "-tags", "integration", "-cover", "-coverpkg=./...", "-ldflags=-w", "-run", "^$", "./a"},
 		},
 		{
 			name: "a path with a space is quoted for -exec",
 			o:    Options{Module: "/my mod", BinDir: "/b", Self: "/testrun", Packages: []string{"a"}},
-			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module '/my mod' -bindir /b", "-run", "^$", "./a"},
+			want: []string{"test", "-json", "-vet=off", "-count=1", "-exec", "/testrun stash-test -module '/my mod' -bindir /b", "-ldflags=-w", "-run", "^$", "./a"},
 		},
 	}
 	for _, tt := range tests {
@@ -82,6 +87,31 @@ func TestGoTestArgs(t *testing.T) {
 			// Assert
 			if err != nil || !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("GoTestArgs = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
+
+func TestLinkFlags(t *testing.T) {
+	tests := []struct {
+		name      string
+		debugInfo bool
+		extra     []string
+		want      []string
+	}{
+		{name: "a default link drops DWARF", want: []string{"-ldflags=-w"}},
+		{name: "extra flags follow -w in one argument", extra: []string{"-X a.b=/c", "-X d.e=/f"}, want: []string{"-ldflags=-w -X a.b=/c -X d.e=/f"}},
+		{name: "debug info with extra flags passes only them", debugInfo: true, extra: []string{"-X a.b=/c"}, want: []string{"-ldflags=-X a.b=/c"}},
+		{name: "debug info with no extra flags passes no -ldflags", debugInfo: true, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := LinkFlags(tt.debugInfo, tt.extra...)
+
+			// Assert
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("LinkFlags(%v, %q) = %q, want %q", tt.debugInfo, tt.extra, got, tt.want)
 			}
 		})
 	}
@@ -572,15 +602,23 @@ func TestStampStartsSurfacesAFailedWrite(t *testing.T) {
 }
 
 func TestParseBuildArgsRoundTripsArgs(t *testing.T) {
-	// Arrange
-	o := Options{Module: "/m", BinDir: "/b", Tags: "integration", Cover: true, Packages: []string{".", "a"}}
+	tests := []struct {
+		name string
+		o    Options
+	}{
+		{"tags and coverage", Options{Module: "/m", BinDir: "/b", Tags: "integration", Cover: true, Packages: []string{".", "a"}}},
+		{"debug info", Options{Module: "/m", BinDir: "/b", DebugInfo: true, Packages: []string{"a"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got, err := ParseBuildArgs(tt.o.Args())
 
-	// Act
-	got, err := ParseBuildArgs(o.Args())
-
-	// Assert
-	if err != nil || !reflect.DeepEqual(got, o) {
-		t.Fatalf("ParseBuildArgs(Args()) = %+v, %v; want %+v", got, err, o)
+			// Assert
+			if err != nil || !reflect.DeepEqual(got, tt.o) {
+				t.Fatalf("ParseBuildArgs(Args()) = %+v, %v; want %+v", got, err, tt.o)
+			}
+		})
 	}
 }
 

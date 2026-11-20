@@ -148,7 +148,7 @@ func moduleBuild(l Layout, suite, dir, tags string, cover bool) GoBuild {
 	}
 	return GoBuild{
 		ID: ModuleBuildID(suite, tags), Suite: suite,
-		Options: gobuild.Options{Module: dir, BinDir: filepath.Join(l.Work, "bin", pass), Tags: tags, Cover: cover, Self: l.Self},
+		Options: gobuild.Options{Module: dir, BinDir: filepath.Join(l.Work, "bin", pass), Tags: tags, Cover: cover, DebugInfo: l.DebugInfo, Self: l.Self},
 	}
 }
 

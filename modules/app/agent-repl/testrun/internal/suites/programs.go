@@ -3,8 +3,8 @@ package suites
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 
+	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/roster"
 )
@@ -54,13 +54,11 @@ func ProgramUnits(l Layout, needed []string, owner func(roster.Program) string) 
 // (e.g. an -overlay) go before the output.
 func ProgramBuild(l Layout, p roster.Program, extra ...string) ([]string, string, error) {
 	argv := []string{"go", "build", "-buildvcs=false"}
-	if len(p.Links) > 0 {
-		var links []string
-		for _, link := range p.Links {
-			links = append(links, "-X "+link.Var+"="+filepath.Join(l.ProgramsDir(), link.Program))
-		}
-		argv = append(argv, "-ldflags="+strings.Join(links, " "))
+	var links []string
+	for _, link := range p.Links {
+		links = append(links, "-X "+link.Var+"="+filepath.Join(l.ProgramsDir(), link.Program))
 	}
+	argv = append(argv, gobuild.LinkFlags(l.DebugInfo, links...)...)
 	dir := filepath.Join(l.Module, p.Module)
 	// A coverage run instruments every system it spawns, so the reach of its
 	// integration and e2e tiers counts; never a fake (roster.Fake).

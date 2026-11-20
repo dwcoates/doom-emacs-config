@@ -55,6 +55,9 @@ type Layout struct {
 	Self string
 	// Coverage adds expensive coverage instrumentation and report units.
 	Coverage bool
+	// DebugInfo links every test binary and program with its DWARF debug
+	// information, which the run otherwise drops (gobuild.LinkFlags).
+	DebugInfo bool
 }
 
 // Split is a splittable suite piece before the planner chunks it.

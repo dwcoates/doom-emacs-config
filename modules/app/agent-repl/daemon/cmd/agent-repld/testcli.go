@@ -40,6 +40,8 @@ import (
 //	-record                  append the timings (-every-suite alone)
 //	-remeasure               bound every unit as one never measured, so a
 //	                         unit that got slower passes and records its peak
+//	-debug-info              link test binaries and programs with their DWARF
+//	                         debug information, for a debugger (temporary)
 //	-runs N                  repeat the run N times, each its own run
 //	-stop-at-first-failure   stop repeating at the first failing run
 //	-cpu-load N              hold N busy loops for the run (with -as-user only)
@@ -91,6 +93,7 @@ func testRun(c *cliCall, args []string) int {
 	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
 	remeasure := fs.Bool("remeasure", false, "bound every unit as one never measured, so a unit that got slower passes and records its new peak")
+	debugInfo := fs.Bool("debug-info", false, "link test binaries and programs with their DWARF debug information, for a debugger (a temporary debugging measure)")
 	noReuse := fs.Bool("no-reuse", false, "run every selected unit, reusing no earlier pass (the user's alone: needs -as-user)")
 	ungoverned := fs.Bool("ungoverned", false, "run with no CPU governor, on every core (the user's alone: needs -as-user)")
 	runs := fs.Uint("runs", 1, "how many times the run repeats, each its own run")
@@ -144,6 +147,7 @@ func testRun(c *cliCall, args []string) int {
 		return c.usageFailed("%v", err)
 	}
 	run.Coverage, run.Record, run.Remeasure, run.NoReuse, run.PlanOnly = *coverage, *record, *remeasure, *noReuse, c.planOnly
+	run.DebugInfo = *debugInfo
 	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Ungoverned: *ungoverned}
 	if *worktree != "" {
 		req.Worktree = &agentreplv1.RunTestsWorktree{Dir: canonicalDir(root)}

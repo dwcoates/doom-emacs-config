@@ -165,11 +165,12 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		}
 	}
 	layout := suites.Layout{
-		Repo:     repoRoot(moduleRoot),
-		Module:   moduleRoot,
-		Work:     d.Work,
-		Self:     d.Self,
-		Coverage: a.Coverage,
+		Repo:      repoRoot(moduleRoot),
+		Module:    moduleRoot,
+		Work:      d.Work,
+		Self:      d.Self,
+		Coverage:  a.Coverage,
+		DebugInfo: a.DebugInfo,
 	}
 	csvPath := filepath.Join(moduleRoot, "test_time.csv")
 	if err := ValidateCSV(csvPath); err != nil {

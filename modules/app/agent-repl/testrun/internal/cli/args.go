@@ -53,6 +53,9 @@ type Args struct {
 	// Remeasure bounds every unit as one never measured
 	// (testrun.v1.TestRunRequest.remeasure).
 	Remeasure bool
+	// DebugInfo links every test binary and program with its DWARF debug
+	// information (testrun.v1.TestRunRequest.debug_info).
+	DebugInfo bool
 }
 
 // ReuseMode is how the run treats pass records. A --record run measures and a
@@ -174,6 +177,7 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 		return Args{}, errors.New("record needs --record-out: the path the run stages its timing rows at, for `testrun finish-record` to commit")
 	}
 	a.Remeasure = req.GetRemeasure()
+	a.DebugInfo = req.GetDebugInfo()
 	a.NoReuse = a.NoReuse || req.GetNoReuse()
 	a.PlanOnly = req.GetPlanOnly()
 	if !whole {

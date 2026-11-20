@@ -1463,6 +1463,10 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 		{name: "named suites with coverage", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("webapp")}, Coverage: true},
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"webapp"}, Coverage: true}},
 		{name: "a narrowed request stays targeted", req: harnessSelection(), want: targeted},
+		{name: "a debug-info whole suite keeps debug info", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("ert")}, DebugInfo: true},
+			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, DebugInfo: true}},
+		{name: "a debug-info narrowed request stays targeted and keeps debug info", req: withDebugInfo(harnessSelection()),
+			want: Args{Module: "/m", Selection: "/s.pb", Targeted: true, RecordOut: "/r", DebugInfo: true}},
 		{name: "a remeasuring whole suite remeasures", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("ert")}, Remeasure: true},
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, Remeasure: true}},
 		{name: "a remeasuring narrowed request stays targeted and remeasures", req: remeasured(harnessSelection()),
@@ -1486,6 +1490,11 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 // remeasured is req asking to remeasure.
 func remeasured(req *testrunv1.TestRunRequest) *testrunv1.TestRunRequest {
 	req.Remeasure = true
+	return req
+}
+
+func withDebugInfo(req *testrunv1.TestRunRequest) *testrunv1.TestRunRequest {
+	req.DebugInfo = true
 	return req
 }
 
