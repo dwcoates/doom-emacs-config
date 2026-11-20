@@ -92,6 +92,45 @@
     (cl-letf (((symbol-function 'agent-repl--live-ws-names) (lambda () '("a"))))
       (should-not (agent-repl--ws-holding :tok (list 'x))))))
 
+;;;; ---- Tests: ws-of-composer --------------------------------------------
+
+(ert-deftest agent-repl-test-ws-of-composer-answers-the-new-name-after-a-rename ()
+  "A renamed workspace's composer is found under the name it has now."
+  (agent-repl-test--with-clean-state
+    (let ((composer (generate-new-buffer " composer")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "old" :project-dir "/tmp/old/")
+            (agent-repl--ws-put "old" :input-buffer composer)
+            (agent-repl--ws-rename-state "old" "new" "/tmp/new/")
+            (should (equal (agent-repl--ws-of-composer composer) "new")))
+        (kill-buffer composer)))))
+
+(ert-deftest agent-repl-test-ws-of-composer-answers-nil-for-a-buffer-no-workspace-owns ()
+  "A buffer that is no live workspace's composer is owned by none."
+  (agent-repl-test--with-clean-state
+    (let ((composer (generate-new-buffer " composer"))
+          (other (generate-new-buffer " other")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "a" :project-dir "/tmp/a/")
+            (agent-repl--ws-put "a" :input-buffer composer)
+            (should-not (agent-repl--ws-of-composer other)))
+        (kill-buffer composer)
+        (kill-buffer other)))))
+
+(ert-deftest agent-repl-test-ws-of-composer-answers-nil-once-the-workspace-is-tombstoned ()
+  "A tombstoned workspace owns no composer, whatever buffer it held."
+  (agent-repl-test--with-clean-state
+    (let ((composer (generate-new-buffer " composer")))
+      (unwind-protect
+          (progn
+            (agent-repl--ws-put "a" :project-dir "/tmp/a/")
+            (agent-repl--ws-put "a" :input-buffer composer)
+            (agent-repl--ws-del "a")
+            (should-not (agent-repl--ws-of-composer composer)))
+        (kill-buffer composer)))))
+
 ;;;; ---- Tests: ws-rename-state -------------------------------------------
 
 (ert-deftest agent-repl-test-ws-rename-state-moves-complete-live-state ()
