@@ -174,12 +174,12 @@ var (
 
 // The suspensions of a merge stepping aside, one per reason.
 var (
-	suspendAsideForTests = suspension{op: opRemediate, cause: errAsideForTests,
+	suspendAsideForTests = suspension{headExit: HeadExitNeededFixes, op: opRemediate, cause: errAsideForTests,
 		moved:     "the merge's tests failed; it stepped aside to fix them out of line, and the next merge takes its place",
 		by:        "its step aside to fix its failing tests",
 		resumes:   "it returns to the line once its fixing turn ends, next after the merge being worked on and any merge back from fixing its tests before it",
 		gateRerun: "it runs its whole suite again once it heads the queue again"}
-	suspendAsideForConflicts = suspension{op: opRemediate, cause: errAsideForConflicts,
+	suspendAsideForConflicts = suspension{headExit: HeadExitNeededConflictResolution, op: opRemediate, cause: errAsideForConflicts,
 		moved:     "the merge's rebase conflicted; it stepped aside to resolve the conflicts out of line, and the next merge takes its place",
 		by:        "its step aside to resolve its rebase's conflicts",
 		resumes:   "it returns to the line once its resolving turn ends, behind the merge being worked on, every merge back from fixing its tests, and any merge back from resolving its conflicts before it",

@@ -356,7 +356,7 @@ func TestAGateWhosePathsReadIsCutByTheRunsEndRunsNothing(t *testing.T) {
 	h.git.changedErr = fmt.Errorf("git diff was cancelled: %w", context.Canceled)
 	round := r.openTab(context.Background(), TabTests)
 	h.o.mu.Lock()
-	h.o.running[h.repoKey()] = r
+	h.o.takeHeadLocked(r)
 	h.o.mu.Unlock()
 
 	// Act.
@@ -953,7 +953,7 @@ func TestAGateWhoseWorkspaceNameCannotBeReadRunsNothing(t *testing.T) {
 	h.git.changedErr = errors.New("git diff failed")
 	round := r.openTab(context.Background(), TabTests)
 	h.o.mu.Lock()
-	h.o.running[h.repoKey()] = r
+	h.o.takeHeadLocked(r)
 	h.o.mu.Unlock()
 	h.db.mu.Lock()
 	delete(h.db.workspaces, theWorkspace)

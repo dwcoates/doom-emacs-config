@@ -56,6 +56,9 @@ func TestMergeQueueSeriesAreServed(t *testing.T) {
 			want: []string{`agentrepl_merge_round_seconds_bucket{outcome="failed",round="fixes",le="300"} 1`}},
 		{name: "a merge's round count", observe: func(s *Surface) { s.ObserveMergeRounds("conflicts", "landed", 0) },
 			want: []string{`agentrepl_merge_rounds_bucket{outcome="landed",round="conflicts",le="0"} 1`}},
+		{name: "a stay at the head", observe: func(s *Surface) { s.ObserveMergeHead("needed_fixes", 90*time.Second) },
+			want: []string{`agentrepl_merge_head_seconds_bucket{exit="needed_fixes",le="120"} 1`,
+				`agentrepl_merge_head_seconds_bucket{exit="needed_fixes",le="60"} 0`}},
 		{name: "a queue change", observe: func(s *Surface) { s.CountQueueChange("dequeued", "evicted") },
 			want: []string{`agentrepl_merge_queue_changes_total{cause="evicted",change="dequeued"} 1`}},
 		{name: "a notice sent to a workspace", observe: func(s *Surface) { s.ObserveNotice("workspace-sibling-notice", 100) },
@@ -92,6 +95,7 @@ func TestTheOffSurfaceTimesNoMerge(t *testing.T) {
 	s.ObserveMergeRound("tests", "succeeded", time.Second)
 	s.ObserveMergeRounds("tests", "landed", 1)
 	s.CountQueueChange("enqueued", "")
+	s.ObserveMergeHead("landed", time.Second)
 	s.ObserveNotice("agent_sent", 1)
 	s.CountSuppressedNotice("workspace-child-notice")
 }

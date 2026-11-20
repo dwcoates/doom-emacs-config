@@ -45,6 +45,9 @@ const (
 	// QueueChangesName counts every change to a queue's line, by its kind
 	// and, for a merge leaving, its cause.
 	QueueChangesName = "agentrepl_merge_queue_changes_total"
+	// MergeHeadName is each stay of a merge at its queue's head, from taking
+	// the head to leaving it, by how it left.
+	MergeHeadName = "agentrepl_merge_head_seconds"
 )
 
 // roundCountBuckets span a clean merge's single round to a merge that
@@ -58,6 +61,7 @@ var mergeBuckets = []float64{0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600, 1
 // client_golang's own atomic add.
 type merges struct {
 	steps, spans, mediations, chainRedeploys, chainSpans, rounds, roundCounts *prometheus.HistogramVec
+	heads                                                                     *prometheus.HistogramVec
 	remediations, remediationGates                                            *prometheus.HistogramVec
 	inARow                                                                    prometheus.Gauge
 	changes                                                                   *prometheus.CounterVec
@@ -97,6 +101,9 @@ func newMerges() merges {
 		roundCounts: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name: MergeRoundsName, Help: "How many rounds of a repair tab kind a concluded merge took, by kind and how the merge ended.", Buckets: roundCountBuckets,
 		}, []string{"round", "outcome"}),
+		heads: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name: MergeHeadName, Help: "Each stay of a merge at its queue's head, by how it left the head.", Buckets: mergeBuckets,
+		}, []string{"exit"}),
 		changes: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: QueueChangesName, Help: "Changes to a merge queue's line, by kind and, for a merge leaving, its cause.",
 		}, []string{"change", "cause"}),
@@ -186,6 +193,14 @@ func (s *Surface) ObserveMergeRounds(kind, outcome string, n int) {
 		return
 	}
 	s.merges.roundCounts.WithLabelValues(kind, outcome).Observe(float64(n))
+}
+
+// ObserveMergeHead implements merge.Meter. The off surface records nothing.
+func (s *Surface) ObserveMergeHead(exit string, took time.Duration) {
+	if s == nil {
+		return
+	}
+	s.merges.heads.WithLabelValues(exit).Observe(took.Seconds())
 }
 
 // CountQueueChange implements merge.Meter. The off surface records nothing.

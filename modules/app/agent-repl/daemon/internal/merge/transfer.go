@@ -123,6 +123,9 @@ type suspension struct {
 	// next -- another daemon, or the next boot -- rather than to this
 	// daemon's own take-back (AdoptWorkspace).
 	handedOn bool
+	// headExit is how a run this suspension takes leaves its queue's head,
+	// the merge head metric's `exit` (Meter.ObserveMergeHead).
+	headExit string
 }
 
 // takenBack reports whether this daemon takes a merge the suspension took
@@ -130,17 +133,17 @@ type suspension struct {
 func (s suspension) takenBack() bool { return !s.handedOn }
 
 var (
-	suspendTransfer = suspension{op: "daemon.merge.transfer", cause: errHandedOver, handedOn: true,
+	suspendTransfer = suspension{headExit: HeadExitTransferred, op: "daemon.merge.transfer", cause: errHandedOver, handedOn: true,
 		moved:     "a merge is suspended at a stopping point for its workspace's transfer; the successor resumes it at the step it recorded",
 		by:        "its workspace's transfer",
 		resumes:   "the successor resumes it at the step it recorded",
 		gateRerun: "its run goes on on the test service, and the successor watches it again when it resumes the merge", keepsGateRun: true}
-	suspendPause = suspension{op: "daemon.merge.pause", cause: errPaused,
+	suspendPause = suspension{headExit: HeadExitPaused, op: "daemon.merge.pause", cause: errPaused,
 		moved:     "a merge is suspended for its queue's pause; it resumes at the step it recorded once the queue is resumed",
 		by:        "its queue's pause",
 		resumes:   "it stays suspended at the step it recorded until the queue is resumed",
 		gateRerun: "its run goes on on the test service, and the merge watches it again once the queue is resumed", keepsGateRun: true}
-	suspendRestart = suspension{op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
+	suspendRestart = suspension{headExit: HeadExitRestarted, op: "daemon.merge.restart", cause: errRestarting, stepBoundary: true,
 		moved:     "a merge is suspended at a stopping point for its workspace's restart; it resumes at the step it recorded once the restart finished",
 		by:        "its workspace's restart",
 		resumes:   "it resumes at the step it recorded once the restart finished",
@@ -149,14 +152,14 @@ var (
 	// (standingMoved): like a pause, this daemon takes the merge straight
 	// back, so a handover that does not finish leaves it here to go on, and
 	// the daemon that serves its workspace next resumes it.
-	suspendHandover = suspension{op: "daemon.merge.transfer", cause: errHandingOver,
+	suspendHandover = suspension{headExit: HeadExitHandover, op: "daemon.merge.transfer", cause: errHandingOver,
 		moved:     "a merge is suspended for the handover; the daemon that serves its workspace next resumes it at the step it recorded",
 		by:        "the handover",
 		resumes:   "the daemon that serves its workspace next resumes it at the step it recorded",
 		gateRerun: "its run goes on on the test service, and the merge watches it again when it is resumed after the handover", keepsGateRun: true}
 	// suspendExit is the daemon's exit (Drain). Its records are the drain's
 	// own, so it is never handed to suspendFor and says nothing on moving.
-	suspendExit = suspension{op: "daemon.merge.drain", cause: errDaemonExiting, handedOn: true,
+	suspendExit = suspension{headExit: HeadExitDaemonExit, op: "daemon.merge.drain", cause: errDaemonExiting, handedOn: true,
 		by:        "the daemon's exit",
 		resumes:   "the next boot resumes it at the step it recorded",
 		gateRerun: "its run goes on on the test service, and the next boot's merge watches it again", keepsGateRun: true}

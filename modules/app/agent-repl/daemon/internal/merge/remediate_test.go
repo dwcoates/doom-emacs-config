@@ -90,6 +90,16 @@ func TestAHeadWhoseSuiteFailsStepsAsideOutOfLine(t *testing.T) {
 	}
 }
 
+func TestAHeadThatStepsAsideToFixItsTestsLeavesTheHeadAsNeedingFixes(t *testing.T) {
+	// Arrange + Act
+	c := stepAsideScenario(t)
+
+	// Assert
+	if exits, _ := c.h.meter.headStays(); len(exits) == 0 || exits[0] != HeadExitNeededFixes {
+		t.Fatalf("head stays = %v, want the failed head's stay first, as needing fixes", exits)
+	}
+}
+
 func TestTheMergeBehindAFailedHeadTakesTheHeadAndLands(t *testing.T) {
 	// Arrange
 	c := stepAsideScenario(t)
@@ -796,6 +806,16 @@ func TestAHeadWhoseRebaseConflictsStepsAsideOutOfLine(t *testing.T) {
 	}
 }
 
+func TestAHeadThatStepsAsideToResolveConflictsLeavesTheHeadAsNeedingConflictResolution(t *testing.T) {
+	// Arrange + Act
+	c := conflictAsideScenario(t)
+
+	// Assert
+	if exits, _ := c.h.meter.headStays(); len(exits) == 0 || exits[0] != HeadExitNeededConflictResolution {
+		t.Fatalf("head stays = %v, want the conflicting head's stay first, as needing conflict resolution", exits)
+	}
+}
+
 func TestAConflictStepAsideIsShownAsRemediatingItsConflicts(t *testing.T) {
 	// Arrange
 	c := conflictAsideScenario(t)
@@ -1006,7 +1026,7 @@ func TestStepsAside(t *testing.T) {
 			r := h.o.newRun(ctx, cancel, h.repoKey(), "ws-a", 1)
 			if tc.head {
 				h.o.mu.Lock()
-				h.o.running[h.repoKey()] = r
+				h.o.takeHeadLocked(r)
 				h.o.mu.Unlock()
 			}
 			h.db.mu.Lock()

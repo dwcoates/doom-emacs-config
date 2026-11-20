@@ -848,7 +848,7 @@ func standChain(t *testing.T, h *harness, chain []ids.WorkspaceID, left ids.Work
 	// first member is the head running, which has read the repository's
 	// deploy config.
 	runs[0].target = deployTarget{cfg: concurrentThrough("deploy")}
-	h.o.running[h.repoKey()] = runs[0]
+	h.o.takeHeadLocked(runs[0])
 	return runs
 }
 
