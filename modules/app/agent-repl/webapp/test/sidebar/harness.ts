@@ -68,6 +68,7 @@ import type { RowReveal } from "../../src/sidebar/reveal.js";
 import { createSelectionFade } from "../../src/sidebar/selection-fade.js";
 import { createFoldFade } from "../../src/sidebar/fold-fade.js";
 import { rosterApps, type TestThread } from "../roster-apps.js";
+import type { PriorityArm } from "../../src/name-prefix.js";
 
 /** The webview's own workspace. */
 export const WORKSPACE = create(WorkspaceRefSchema, { id: "ws-self", dir: "/w/self" });
@@ -269,7 +270,7 @@ export function rosterStream(
 export function row(init: {
   id: string;
   name?: string;
-  /** The glyph the daemon puts before the name; omitted = the name wears none. */
+  /** The emoji-ack glyph the name's prefix wears; omitted = none. */
   glyph?: string;
   dir?: string;
   status?: MessageInitShape<typeof RosterRowSchema>["status"];
@@ -296,7 +297,8 @@ export function row(init: {
   openOwnedPullRequest?: boolean;
   /** The durable last-selected instant, epoch ms; omitted = never selected. */
   lastSelectedAtMs?: bigint;
-  priority?: string;
+  /** The priority icon the name's prefix wears; omitted = unprioritized. */
+  priority?: PriorityArm;
   /** The when-column's ARM; omitted = no turn running, as a live row with no turn draws. */
   when?: MessageInitShape<typeof RosterRowWhenSchema>["shown"];
   detail?: MessageInitShape<typeof RosterRowDetailSchema>;
@@ -304,7 +306,17 @@ export function row(init: {
 }): RosterRow {
   const built = create(RosterRowSchema, {
     workspace: { workspace: { id: init.id, dir: init.dir ?? `/w/${init.id}` } },
-    name: { text: init.name ?? init.id, ...(init.glyph === undefined ? {} : { glyph: { text: init.glyph } }) },
+    name: {
+      text: init.name ?? init.id,
+      ...(init.priority === undefined && init.glyph === undefined
+        ? {}
+        : {
+            prefix: {
+              ...(init.priority === undefined ? {} : { priority: { level: { case: init.priority, value: {} } } }),
+              ...(init.glyph === undefined ? {} : { emojiAck: { text: init.glyph } }),
+            },
+          }),
+    },
     status: init.status ?? { case: "ready", value: {} },
     current: { current: init.current ?? false },
     closed: { closed: init.closed ?? false },
@@ -322,7 +334,6 @@ export function row(init: {
     ...(init.mergeTurn === true ? { mergeTurn: {} } : {}),
     ...(init.openOwnedPullRequest === true ? { openOwnedPullRequest: {} } : {}),
     ...(init.lastSelectedAtMs === undefined ? {} : { lastSelected: { atMs: init.lastSelectedAtMs } }),
-    ...(init.priority === undefined ? {} : { priority: { label: init.priority } }),
   });
   return withFamily(built, init.children ?? []);
 }

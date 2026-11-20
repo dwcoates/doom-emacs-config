@@ -48,8 +48,8 @@ import { drawLinkIcon } from "./link-icon.js";
 import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
-import { drawNameGlyph } from "../name-glyph.js";
 import { toneClass, topbarTone } from "../vocab.js";
+import { drawNamePrefix } from "../name-prefix.js";
 import type { TopbarContext } from "./context.js";
 
 /** Mark an element as a reveal's anchor, so the layer's outside-click spares it. */
@@ -274,11 +274,12 @@ export function drawTitleLinkMenu(menu: TopbarTitleLinkMenu, tc: TopbarContext):
 
 /**
  * The workspace's name, drawn verbatim on the heading's second line, after
- * the glyph the daemon puts before it when the name wears one
- * (`name-glyph.ts`). The tooltip is the name alone.
+ * the marks the daemon puts before it (`name-prefix.ts`). The tooltip is the
+ * name alone.
  */
 export function drawTopbarWorkspaceName(u: TopbarWorkspaceName): HTMLElement {
   const line = drawHeadingLine("topbar-workspace-name", u.text);
-  if (u.glyph !== undefined) line.prepend(drawNameGlyph(u.glyph, "TopbarWorkspaceName.glyph"));
+  const prefix = drawNamePrefix(u.prefix, "TopbarWorkspaceName.prefix");
+  if (prefix !== undefined) line.prepend(prefix);
   return line;
 }

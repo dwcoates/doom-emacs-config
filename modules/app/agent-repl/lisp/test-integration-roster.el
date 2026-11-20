@@ -1322,10 +1322,10 @@ stale or global one."
 ;;;; ---- Paint: badges and glyphs through the render path ----
 
 (ert-deftest agent-repl-itest-roster-priority-badge-draws-before-the-name ()
-  "A row's priority badge label draws BEFORE the name in the tab-bar badge run.
-Fanout §8: \"Priority badge label draws before the name.\"
-`RosterRowPriorityBadge.label' is a plain wire string, not a nested text
-message — the fixture must set it that way."
+  "A row name's priority icon draws BEFORE the name in the tab-bar badge run.
+The icon rides the name's prefix (`RosterRowName.prefix', a
+`WorkspaceNamePrefix' whose `priority' arm is the level), whose label is
+the text under the picture."
   ;; Arrange.
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -1334,7 +1334,8 @@ message — the fixture must set it that way."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
                       "itest-badge" "itest-badge" 'ready
-                      '(priority . ((label . "P1")))))))
+                      '(name . ((text . "itest-badge")
+                                (prefix . ((priority . ((p1 . ())))))))))))
       (agent-repl-itest--wait-until
        (lambda ()
          (and (agent-repl--ws-known-p "itest-badge")
@@ -2034,9 +2035,9 @@ repository's rows do: in the tab order, out of the drawn order."
 
 ;; audit-3 #42
 (ert-deftest agent-repl-itest-roster-priority-badge-clears-when-the-row-drops-it ()
-  "A row that stops carrying `priority' loses its badge on the next push.
-sidebar.proto RosterRowPriorityBadge: \"UNSET = unprioritized (no badge)\"
--- a badge that never cleared would flag a workspace the resolver has
+  "A row whose name stops carrying a prefix loses its icon on the next push.
+workspace_name_prefix.proto: a name that wears no mark carries no prefix
+-- an icon that never cleared would flag a workspace the resolver has
 since deprioritized."
   (agent-repl-itest--with-fake-daemon daemon
     (agent-repl-itest-roster--with-subscription daemon
@@ -2044,7 +2045,8 @@ since deprioritized."
        daemon (agent-repl-itest-roster--roster
                (list (agent-repl-itest-roster--row
                       "itest-badge-clear" "itest-badge-clear" 'ready
-                      '(priority . ((label . "P1")))))))
+                      '(name . ((text . "itest-badge-clear")
+                                (prefix . ((priority . ((p1 . ())))))))))))
       (agent-repl-itest--wait-until
        (lambda ()
          (and (agent-repl--ws-known-p "itest-badge-clear")

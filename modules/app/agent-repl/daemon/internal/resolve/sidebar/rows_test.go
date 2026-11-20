@@ -14,6 +14,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/footer"
+	"agent-repld/internal/resolve/nameprefix"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -116,6 +117,48 @@ func TestRowCarriesTheDisplayName(t *testing.T) {
 	// Assert.
 	if got := onlyRow(t, r).GetName().GetText(); got != "the name" {
 		t.Fatalf("name = %q, want the display name", got)
+	}
+}
+
+func TestRowNameWearsTheSharedPrefix(t *testing.T) {
+	tests := []struct {
+		name  string
+		level wsm.Priority
+	}{
+		{name: "p05", level: wsm.PriorityP05},
+		{name: "p1", level: wsm.PriorityP1},
+		{name: "p2", level: wsm.PriorityP2},
+		{name: "p3", level: wsm.PriorityP3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+			ws := prioritized(workspace("w", "n"), tc.level)
+
+			// Act.
+			r.SetRegistry(registry(ws))
+
+			// Assert: the row's prefix IS the one decision, so the sidebar and
+			// the topbar cannot draw different marks.
+			got := onlyRow(t, r).GetName().GetPrefix()
+			if want := nameprefix.Of(ws); want == nil || !proto.Equal(got, want) {
+				t.Fatalf("prefix = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestRowNameOfAnUnprioritizedWorkspaceWearsNoPrefix(t *testing.T) {
+	// Arrange.
+	r, _ := newResolver(t)
+
+	// Act.
+	r.SetRegistry(registry(workspace("w", "n")))
+
+	// Assert: unset is no prefix, never an empty one.
+	if got := onlyRow(t, r).GetName().GetPrefix(); got != nil {
+		t.Fatalf("an unprioritized workspace's name wore a prefix: %v", got)
 	}
 }
 
@@ -2178,16 +2221,16 @@ func TestAMirroredArmsMoveIsLoggedAsTheRowsArmChange(t *testing.T) {
 	}
 }
 
-// THE NAME'S GLYPH IS THE DAEMON'S (frontend.v1.RosterRowNameGlyph): an
-// emoji-ack workspace's row wears the thumbs up before its name, every other
-// row none, and the name itself is the registry's slug either way.
+// THE EMOJI-ACK GLYPH IS THE DAEMON'S (frontend.v1.WorkspaceNamePrefix.emoji_ack):
+// an emoji-ack workspace's row wears the thumbs up in its name's prefix, every
+// other row none, and the name itself is the registry's slug either way.
 func TestARowsNameWearsTheGlyphExactlyForAnEmojiAckWorkspace(t *testing.T) {
 	cases := []struct {
 		name      string
 		emojiAck  bool
-		wantGlyph *frontendv1.RosterRowNameGlyph
+		wantGlyph *frontendv1.WorkspaceNameEmojiAck
 	}{
-		{name: "an emoji-ack workspace wears the thumbs up", emojiAck: true, wantGlyph: &frontendv1.RosterRowNameGlyph{Text: "👍"}},
+		{name: "an emoji-ack workspace wears the thumbs up", emojiAck: true, wantGlyph: &frontendv1.WorkspaceNameEmojiAck{Text: "👍"}},
 		{name: "any other workspace wears none", emojiAck: false, wantGlyph: nil},
 	}
 	for _, tc := range cases {
@@ -2204,8 +2247,8 @@ func TestARowsNameWearsTheGlyphExactlyForAnEmojiAckWorkspace(t *testing.T) {
 			if name.GetText() != "acked" {
 				t.Fatalf("name text = %q, want the registry name alone", name.GetText())
 			}
-			if !proto.Equal(name.GetGlyph(), tc.wantGlyph) {
-				t.Fatalf("name glyph = %v, want %v", name.GetGlyph(), tc.wantGlyph)
+			if !proto.Equal(name.GetPrefix().GetEmojiAck(), tc.wantGlyph) {
+				t.Fatalf("name's emoji-ack glyph = %v, want %v", name.GetPrefix().GetEmojiAck(), tc.wantGlyph)
 			}
 		})
 	}

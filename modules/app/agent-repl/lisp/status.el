@@ -19,6 +19,8 @@
 (declare-function agent-repl--error "core")
 (declare-function agent-repl--info "core")
 (declare-function agent-repl-count-noun "core" (n one &optional many))
+(declare-function agent-repl-display-width "core" (string))
+(declare-function agent-repl-name-glyph-height "core" (glyph &optional frame))
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
 (declare-function agent-repl--log-decision "core" (key decision ws fmt &rest args))
@@ -43,7 +45,7 @@
 (declare-function agent-repl-host-request-switch "host" (ws trigger))
 (declare-function agent-repl-roster-row-attention-p "roster")
 (declare-function agent-repl-roster-row-id "roster")
-(declare-function agent-repl-roster-row-priority-label "roster")
+(declare-function agent-repl-roster-row-name-prefix "roster" (row))
 (declare-function agent-repl-roster-row-status "roster")
 (declare-function agent-repl-roster-walk "roster")
 (declare-function agent-repl-roster-viewed-for-ws "roster" (ws))
@@ -61,13 +63,11 @@ This logging-boundary helper emits no record because doing so would recurse."
         current
       (list :agent-repl-central central-reason))))
 
-;;; Priority badge images
+;;; Priority levels
 ;;
-;; Each image is a small PNG loaded from the module's images/ directory and
-;; scaled to fit the tab-bar line height.  A workspace's `:priority' is
-;; whatever the daemon announced for it in `WorkspaceAvailable' (or what
-;; the user later set by hand); nothing derives one locally, so a tab
-;; showing an image is a tab whose priority the daemon actually knows.
+;; The priority icons themselves are drawn by `agent-repl-name-prefix-string'
+;; ("The name's prefix" below), from the level the roster row's name
+;; carries; nothing derives a priority locally.
 
 (defcustom agent-repl-priority-levels '("p05" "p1" "p2" "p3")
   "List of recognized priority level strings for workspace badges."
@@ -102,9 +102,6 @@ badge run do (owner ruling, 2026-09-13)."
 ;;
 ;; It was already vestigial for the tab: the tab reads the SSM-pushed
 ;; render state, while the decay mutated only the local `:agent-state'.
-
-(defvar agent-repl--priority-images nil
-  "Alist mapping priority strings (\"p05\" \"p1\" \"p2\" \"p3\") to Emacs image specs.")
 
 ;; !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 ;; !! DO NOT REMOVE `agent-repl--tabline-space-toggle' OR ITS USAGE   !!
@@ -230,30 +227,6 @@ clock-driven cache-buster, for the same row-wrap reason."
     (puthash frame (cons generation rendered)
              agent-repl--tabline-render-identities)
     (propertize (number-to-string generation) 'invisible t)))
-
-(defun agent-repl--load-priority-images ()
-  "Load priority badge PNGs from the module images/ directory.
-Populates `agent-repl--priority-images' with display-ready image specs."
-  (let* ((dir (file-name-directory (or load-file-name buffer-file-name)))
-         ;; `images/' sits at the module root; this file lives in `lisp/'.
-         (img-dir (expand-file-name "../images/" dir))
-         (names agent-repl-priority-levels)
-         (height (frame-char-height)))
-    (setq agent-repl--priority-images
-          (cl-loop for name in names
-                   for file = (expand-file-name (concat name ".png") img-dir)
-                   when (file-exists-p file)
-                   collect (cons name (create-image file 'png nil
-                                                    :height height
-                                                    :ascent 'center))))
-    (agent-repl--log '(:agent-repl-central "tab rendering and shared assets span workspaces") "load-priority-images: loaded=%d" (length agent-repl--priority-images))))
-
-(when (image-type-available-p 'png)
-  (agent-repl--load-priority-images))
-
-(defun agent-repl--priority-image (priority)
-  "Return the Emacs image spec for PRIORITY string, or nil."
-  (cdr (assoc priority agent-repl--priority-images)))
 
 (defun agent-repl--priority-rank (priority)
   "Return the sort rank for PRIORITY string; lower means higher precedence.
@@ -1408,6 +1381,92 @@ declares one.  On a text frame, the character itself, in that ink."
                      name (agent-repl-status-glyph-image-height frame) color frame))
       (if color (propertize char 'face (list :foreground color)) char))))
 
+;;; The name's prefix --------------------------------------------------------
+;;
+;; THE MARKS DRAWN BEFORE A WORKSPACE'S NAME (`frontend.v1.WorkspaceNamePrefix',
+;; decoded by `agent-repl-wire-decode-workspace-name-prefix' onto the roster
+;; row's name).  `agent-repl-name-prefix-string' is THE ONE DRAWING every
+;; Emacs list of workspace names uses: the tab bar's badge run and the
+;; `SPC p p' / `SPC p P' switcher.  The drawn order is the proto's field
+;; order, left to right:
+;;
+;;   1. the priority icon, the picture `images/<level>.png' the webapp's
+;;      sidebar and topbar draw too;
+;;   2. the emoji-ack glyph, the daemon's emoji drawn verbatim and scaled
+;;      to the name's own line height (`agent-repl-name-glyph-height').
+;;
+;; The two are independent: a name may wear either, both, or neither.
+
+(defconst agent-repl-status--priority-dir
+  ;; `images/' sits at the module root; this file lives in `lisp/'.
+  (expand-file-name "../images/"
+                    (file-name-directory (or load-file-name buffer-file-name)))
+  "The directory of the priority pictures, one PNG per level.")
+
+(defconst agent-repl-status--priority-labels
+  (let (labels)
+    (maphash (lambda (level label) (push (cons level label) labels))
+             (agent-repl-vocab-read "priority-labels.json" "labels"))
+    (nreverse labels))
+  "Each priority level and the label its icon stands for, as an alist.
+Read from the shared vocabulary (proto/vocab/priority-labels.json), the
+table the webapp's icons read too.  The label is the text under the
+icon\='s image, so a text frame, a search and a copy read the level the
+picture shows.")
+
+(defun agent-repl-status--priority-file (level)
+  "Return the path of priority LEVEL\='s picture, images/LEVEL.png.
+A missing file is a checkout this build ships broken, so it fails hard."
+  (let ((file (expand-file-name (concat level ".png") agent-repl-status--priority-dir)))
+    (unless (file-exists-p file)
+      (agent-repl-status--glyph-fail "elisp.status.priority-file: priority %S has no picture at %s"
+                                     level file))
+    file))
+
+(defun agent-repl-status--name-priority-string (level height frame)
+  "Return priority LEVEL\='s icon as drawn text, HEIGHT pixels tall on FRAME.
+On a graphic frame, the level\='s label displayed as its picture, centered
+on the text; on a text frame, the label itself.  A LEVEL with no label is
+one the decoder never yields, so it fails hard."
+  (let ((label (or (cdr (assoc level agent-repl-status--priority-labels))
+                   (agent-repl-status--glyph-fail
+                    "elisp.status.name-priority: priority %S is no level" level))))
+    (if (display-graphic-p frame)
+        (propertize label 'display
+                    (create-image (agent-repl-status--priority-file level) 'png nil
+                                  :height height :ascent 'center))
+      label)))
+
+(defun agent-repl-status--name-emoji-ack-string (glyph frame)
+  "Return GLYPH, an emoji-ack workspace\='s emoji, as drawn text on FRAME.
+Scaled by `agent-repl-name-glyph-height' so the emoji stands exactly as
+high as the name\='s own line; a frame with no fonts draws it unscaled.
+A GLYPH with no text is one the decoder refuses, so it fails hard."
+  (unless (and (stringp glyph) (not (string-empty-p glyph)))
+    (agent-repl-status--glyph-fail "elisp.status.name-emoji-ack: glyph %S carries no glyph" glyph))
+  (let ((scale (agent-repl-name-glyph-height glyph frame)))
+    (if scale (propertize glyph 'face (list :height scale)) glyph)))
+
+(defun agent-repl-name-prefix-string (prefix &optional height frame)
+  "Return PREFIX, the marks drawn before a workspace\='s name, as drawn text.
+PREFIX is a decoded `WorkspaceNamePrefix' (`:priority LEVEL :emoji-ack
+GLYPH').  Its marks
+are drawn in the proto\='s field order, parted by one space, with no space
+after the last: the caller parts the prefix from the name.  HEIGHT is the
+pixel height a picture draws at on FRAME, the line height of FRAME\='s
+text (`frame-char-height') when nil.  A PREFIX carrying no mark is one
+the decoder refuses, so it fails hard."
+  (let* ((frame (or frame (selected-frame)))
+         (height (or height (frame-char-height frame)))
+         (marks (delq nil
+                      (list (when-let ((level (plist-get prefix :priority)))
+                              (agent-repl-status--name-priority-string level height frame))
+                            (when-let ((glyph (plist-get prefix :emoji-ack)))
+                              (agent-repl-status--name-emoji-ack-string glyph frame))))))
+    (unless marks
+      (agent-repl-status--glyph-fail "elisp.status.name-prefix: prefix %S carries no mark" prefix))
+    (string-join marks " ")))
+
 ;;; The attention marker and its blink ---------------------------------------
 ;;
 ;; THE CANONICAL BLINK CADENCE is specified ONCE, on `frontend.v1'
@@ -1945,35 +2004,23 @@ themed frame and on the no-theme sandbox alike."
                 :foreground (agent-repl--tab-bar-legible-fg bg))
           'agent-repl-tab-unarmed)))
 
-(defun agent-repl--tab-priority-image-str (name)
-  "Return a propertized image string for workspace NAME's priority, or nil."
-  (when-let ((priority (agent-repl--ws-get name :priority)))
-    (when-let ((img (agent-repl--priority-image priority)))
-      (propertize " " 'display img))))
-
 (defun agent-repl--tab-badge-str (name arm)
   "Return the run drawn BEFORE NAME's `[N]' for ARM, or nil.
 
-Two things live there, in this order: the roster's PRIORITY BADGE label
-\(resolver-composed and drawn verbatim; ordering is already the
-resolver's and this is only the label) and the arm's glyph
-\(the merge pipeline's, a gate's emoji, the inactive question mark, or
-the attention marker).  Both are absent far more often than present, so
-the whole run is nil in the ordinary case and the tab is name and bracket
-alone.
-
-A BLANK PART IS NO PART.  A roster row can carry a priority label that is
-present but empty, and joining that into the run produced a run made of
-nothing but spaces — which the renderer then drew as an empty gap before
-the entry.  Blank parts are dropped, and a
-run left with no parts is nil."
+Two things live there, in this order: the PREFIX of the roster row's
+name (`agent-repl-name-prefix-string': the priority icon, drawn at the
+tab bar's glyph height) and the arm's glyph (the merge pipeline's, a
+gate's emoji, the inactive question mark, or the attention marker).
+Both are absent far more often than present, so the whole run is nil in
+the ordinary case and the tab is name and bracket alone."
   (let* ((row (and (fboundp 'agent-repl-roster-row-for-ws)
                    (agent-repl-roster-row-for-ws name)))
-         (badge (and row (agent-repl-roster-row-priority-label row)))
+         (prefix (and row (agent-repl-roster-row-name-prefix row)))
+         (prefix (and prefix (agent-repl-name-prefix-string
+                              prefix (agent-repl-status-glyph-image-height))))
          (glyph (agent-repl-status-tab-glyph name arm))
          (glyph (and glyph (agent-repl-status-tab-glyph-run arm glyph)))
-         (parts (seq-remove #'string-blank-p
-                            (delq nil (list badge glyph)))))
+         (parts (delq nil (list prefix glyph))))
     (when parts
       (string-join parts " "))))
 
@@ -2359,22 +2406,15 @@ The tab-bar packs entries against a column budget (see
 `agent-repl--tabline-recency-keep'), but physical line wrapping is decided in
 PIXELS.  Measuring an entry by its character `length' undercounts any
 entry carrying a `display' image: a priority badge is one space wide
-in characters but a whole glyph wide in pixels (see
-`agent-repl--tab-priority-image-str').  A row the packer believed fit
-could then overflow the frame in pixels and wrap to a second physical
-row — the `ns_change_tab_bar_height' livelock this whole subsystem
-exists to prevent.
+in characters but a whole glyph wide in pixels.  A row the packer
+believed fit could then overflow the frame in pixels and wrap to a
+second physical row — the `ns_change_tab_bar_height' livelock this whole
+subsystem exists to prevent.
 
-Entries with no `display' property are measured with `string-width'
-\(exact for mono and wide/CJK glyphs, and equal to `length' for plain
-ASCII, so pre-existing fit decisions are unchanged).  An entry that
-carries a `display' property is measured with `string-pixel-width'
-and converted to columns by dividing by `frame-char-width', rounded
-UP so the estimate never under-reserves.  Never returns less than 1."
-  (max 1
-       (if (text-property-not-all 0 (length entry) 'display nil entry)
-           (ceiling (string-pixel-width entry) (max 1 (frame-char-width)))
-         (string-width entry))))
+The measure is `agent-repl-display-width', the one every column budget
+uses: `string-width' for plain text, pixels rounded UP to columns for an
+entry carrying a `display' image.  Never returns less than 1."
+  (max 1 (agent-repl-display-width entry)))
 
 (defvar agent-repl--tabline-last-truncation nil
   "Last tab-line truncation signature written to the canonical log.

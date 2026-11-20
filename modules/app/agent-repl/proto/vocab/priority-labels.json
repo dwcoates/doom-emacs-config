@@ -1,0 +1,16 @@
+{
+  "_comment": [
+    "THE PRIORITY ICONS' LABELS: each frontend.v1.WorkspaceNamePriority arm",
+    "(the level, highest first) and the label its icon stands for. The label",
+    "is the icon's alt text and tooltip in the webapp (src/name-prefix.ts) and",
+    "the text under the icon's image in Emacs (lisp/status.el,",
+    "agent-repl-name-prefix-string), so a text frame, a search and a copy read",
+    "the level the picture (images/<level>.png) shows."
+  ],
+  "labels": {
+    "p05": "P0.5",
+    "p1": "P1",
+    "p2": "P2",
+    "p3": "P3"
+  }
+}

@@ -1535,28 +1535,6 @@ appended *after* the faced fill, not merged into it."
       (should (equal (agent-repl-test--tab-gap rendered "ws1") " "))
       (should (equal (substring-no-properties rendered) " [3] ws1       ")))))
 
-(ert-deftest agent-repl-test-tab-badge-str-drops-a-blank-priority-label ()
-  "A roster row whose priority label is blank contributes no badge run.
-A blank label used to join into a run of nothing but spaces, which the
-renderer then padded on both sides — the extra gap the owner saw."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
-             (lambda (_ws) '(:priority (:label "  "))))
-            ((symbol-function 'agent-repl-status-tab-glyph)
-             (lambda (&rest _) nil)))
-    ;; Act / Assert
-    (should-not (agent-repl--tab-badge-str "ws1" :ready))))
-
-(ert-deftest agent-repl-test-tab-badge-str-keeps-a-real-priority-label ()
-  "A non-blank priority label is still drawn."
-  ;; Arrange
-  (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
-             (lambda (_ws) '(:priority (:label "p1"))))
-            ((symbol-function 'agent-repl-status-tab-glyph)
-             (lambda (&rest _) nil)))
-    ;; Act / Assert
-    (should (equal (agent-repl--tab-badge-str "ws1" :ready) "p1"))))
-
 (ert-deftest agent-repl-test-render-tab-blank-badge-run-draws-one-space ()
   "A blank badge run reaching the renderer is treated as no badge at all."
   ;; Arrange
@@ -1848,28 +1826,6 @@ its bracket keeps the arm's color.  That is the exact path the illegible
 tab was reached by."
   ;; Arrange / Act / Assert
   (should (memq 'agent-repl-tab-unarmed (agent-repl--tab-face nil nil))))
-
-;;;; ---- Tests: tab-priority-image-str ----
-
-(ert-deftest agent-repl-test-tab-priority-image-str-no-image ()
-  "tab-priority-image-str should return nil when :priority is set but no image found."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :priority "nonexistent-priority")
-    (cl-letf (((symbol-function 'agent-repl--priority-image)
-               (lambda (_p) nil)))
-      (should-not (agent-repl--tab-priority-image-str "ws1")))))
-
-(ert-deftest agent-repl-test-tab-priority-image-str-with-image ()
-  "tab-priority-image-str should return a propertized string when image found."
-  (agent-repl-test--with-clean-state
-    (agent-repl--ws-put "ws1" :priority "high")
-    (let ((fake-image '(image :type png :data "fake")))
-      (cl-letf (((symbol-function 'agent-repl--priority-image)
-                 (lambda (_p) fake-image)))
-        (let ((result (agent-repl--tab-priority-image-str "ws1")))
-          (should result)
-          (should (stringp result))
-          (should (equal (get-text-property 0 'display result) fake-image)))))))
 
 ;;;; ---- Tests: render-tab-entry edge cases ----
 
@@ -2818,28 +2774,6 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
 
 ;;;; ---- Tests: per-workspace step ----
 
-;;;; ---- Tests: priority-image (moved from core.el) ----
-
-(ert-deftest agent-repl-test-priority-image-valid ()
-  "priority-image should return the image spec for a known priority."
-  (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
-    (should (equal (agent-repl--priority-image "p1") 'fake-image-spec))))
-
-(ert-deftest agent-repl-test-priority-image-unknown ()
-  "priority-image should return nil for an unknown priority."
-  (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
-    (should-not (agent-repl--priority-image "p99"))))
-
-(ert-deftest agent-repl-test-priority-image-nil-input ()
-  "priority-image should return nil for nil input."
-  (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
-    (should-not (agent-repl--priority-image nil))))
-
-(ert-deftest agent-repl-test-priority-image-empty-alist ()
-  "priority-image should return nil when the images alist is empty."
-  (let ((agent-repl--priority-images nil))
-    (should-not (agent-repl--priority-image "p1"))))
-
 ;;;; ---- Tests: priority-rank ----
 
 (ert-deftest agent-repl-test-priority-rank-p05-is-zero ()
@@ -2865,79 +2799,6 @@ Mocks the unguarded `-now' entrypoint; matches what production code calls."
   "priority-rank returns most-positive-fixnum for unrecognized priority."
   (let ((agent-repl-priority-levels '("p05" "p1" "p2" "p3")))
     (should (= (agent-repl--priority-rank "p99") most-positive-fixnum))))
-
-;;;; ---- Tests: load-priority-images (moved from core.el) ----
-
-(ert-deftest agent-repl-test-load-priority-images-all-present ()
-  "load-priority-images should populate alist when all PNGs exist."
-  (let ((tmpdir (make-temp-file "test-img-" t)))
-    (unwind-protect
-        (let ((img-dir (expand-file-name "images/" tmpdir)))
-          (make-directory img-dir t)
-          ;; Create fake PNG files
-          (dolist (name '("p05" "p1" "p2" "p3"))
-            (with-temp-file (expand-file-name (concat name ".png") img-dir)
-              (insert "fake-png")))
-          (let ((agent-repl--priority-images nil)
-                (load-file-name (expand-file-name "lisp/core.el" tmpdir)))
-            (cl-letf (((symbol-function 'create-image)
-                       (lambda (file _type &rest _args) (list 'image :file file)))
-                      ((symbol-function 'frame-char-height) (lambda () 16)))
-              (agent-repl--load-priority-images)
-              (should (= (length agent-repl--priority-images) 4))
-              (should (assoc "p1" agent-repl--priority-images))
-              (should (assoc "p05" agent-repl--priority-images)))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-load-priority-images-some-missing ()
-  "load-priority-images should skip missing PNG files."
-  (let ((tmpdir (make-temp-file "test-img-" t)))
-    (unwind-protect
-        (let ((img-dir (expand-file-name "images/" tmpdir)))
-          (make-directory img-dir t)
-          ;; Create only p1.png
-          (with-temp-file (expand-file-name "p1.png" img-dir)
-            (insert "fake-png"))
-          (let ((agent-repl--priority-images nil)
-                (load-file-name (expand-file-name "lisp/core.el" tmpdir)))
-            (cl-letf (((symbol-function 'create-image)
-                       (lambda (file _type &rest _args) (list 'image :file file)))
-                      ((symbol-function 'frame-char-height) (lambda () 16)))
-              (agent-repl--load-priority-images)
-              (should (= (length agent-repl--priority-images) 1))
-              (should (assoc "p1" agent-repl--priority-images)))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-load-priority-images-dir-missing ()
-  "load-priority-images should produce empty alist when images dir does not exist."
-  (let ((tmpdir (make-temp-file "test-img-" t)))
-    (unwind-protect
-        (let ((agent-repl--priority-images nil)
-              (load-file-name (expand-file-name "lisp/core.el" tmpdir)))
-          (cl-letf (((symbol-function 'create-image)
-                     (lambda (file _type &rest _args) (list 'image :file file)))
-                    ((symbol-function 'frame-char-height) (lambda () 16)))
-            (agent-repl--load-priority-images)
-            (should (null agent-repl--priority-images))))
-      (delete-directory tmpdir t))))
-
-(ert-deftest agent-repl-test-load-priority-images-buffer-file-fallback ()
-  "load-priority-images should use buffer-file-name when load-file-name is nil."
-  (let ((tmpdir (make-temp-file "test-img-" t)))
-    (unwind-protect
-        (let ((img-dir (expand-file-name "images/" tmpdir)))
-          (make-directory img-dir t)
-          (with-temp-file (expand-file-name "p1.png" img-dir)
-            (insert "fake-png"))
-          (let ((agent-repl--priority-images nil)
-                (load-file-name nil)
-                (buffer-file-name (expand-file-name "lisp/core.el" tmpdir)))
-            (cl-letf (((symbol-function 'create-image)
-                       (lambda (file _type &rest _args) (list 'image :file file)))
-                      ((symbol-function 'frame-char-height) (lambda () 16)))
-              (agent-repl--load-priority-images)
-              (should (= (length agent-repl--priority-images) 1)))))
-      (delete-directory tmpdir t))))
 
 ;; The Stop / SubagentStop tracking-helper tests (pending-subagents
 ;; get/incf/decf, stop-received get/set, fully-stopped-p, clear-stop-tracking)
@@ -3389,23 +3250,6 @@ paint the rightmost entry's background to the right edge."
                 '+workspace-tab-selected-face))
     (should (eq (get-text-property 2 'face joined)
                 '+workspace-tab-selected-face))))
-
-(ert-deftest agent-repl-test-priority-image-str-uses-the-stored-priority ()
-  "The tab renders the image for the `:priority' stored on the workspace.
-That value comes from the daemon's `WorkspaceAvailable' announcement (or
-an explicit `agent-repl-set-priority'); nothing derives one locally."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
-      (agent-repl--ws-put "ws1" :priority "p1")
-      (should (equal (get-text-property
-                      0 'display (agent-repl--tab-priority-image-str "ws1"))
-                     'fake-image-spec)))))
-
-(ert-deftest agent-repl-test-priority-image-str-nil-without-a-priority ()
-  "A workspace the daemon announced no priority for renders no image."
-  (agent-repl-test--with-clean-state
-    (let ((agent-repl--priority-images '(("p1" . fake-image-spec))))
-      (should-not (agent-repl--tab-priority-image-str "ws1")))))
 
 ;;;; ---- Tests: pack-width / center-width reserve room for terminator ----
 
@@ -4951,28 +4795,39 @@ bracket-only paint, which is the blessed treatment."
         ;; Act / Assert
         (should (eq (agent-repl--ws-bracket-state "alpha") :thinking))))))
 
-(ert-deftest agent-repl-test-status-the-badge-run-carries-the-priority-label ()
-  "The roster's priority badge label draws before the name."
+(ert-deftest agent-repl-test-status-the-badge-run-carries-the-names-prefix ()
+  "The roster row's name prefix, the priority icon, draws before the name."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
-               (lambda (_ws) '(:priority (:label "P1"))))
-              ((symbol-function 'agent-repl-roster-row-priority-label)
-               (lambda (row) (plist-get (plist-get row :priority) :label))))
+               (lambda (_ws) '(:name (:text "alpha" :prefix (:priority "p1")))))
+              ((symbol-function 'agent-repl-status-glyph-image-height) (lambda (&rest _) 15)))
       ;; Act / Assert
-      (should (equal (agent-repl--tab-badge-str "alpha" :thinking) "P1")))))
+      (should (equal (substring-no-properties (agent-repl--tab-badge-str "alpha" :thinking)) "P1")))))
 
-(ert-deftest agent-repl-test-status-the-badge-run-carries-the-glyph-after-the-label ()
-  "Priority first, then the arm's glyph."
+(ert-deftest agent-repl-test-status-the-badge-run-carries-the-glyph-after-the-prefix ()
+  "The name's prefix first, then the arm's glyph."
   ;; Arrange
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
-               (lambda (_ws) '(:priority (:label "P1"))))
-              ((symbol-function 'agent-repl-roster-row-priority-label)
-               (lambda (row) (plist-get (plist-get row :priority) :label))))
+               (lambda (_ws) '(:name (:text "alpha" :prefix (:priority "p1")))))
+              ((symbol-function 'agent-repl-status-glyph-image-height) (lambda (&rest _) 15)))
       ;; Act / Assert
       (should (equal (substring-no-properties (agent-repl--tab-badge-str "alpha" :merge-failed))
                      "P1 ≡")))))
+
+(ert-deftest agent-repl-test-status-the-badge-run-draws-the-prefix-at-the-glyph-height ()
+  "On a graphic frame the tab's priority icon is as tall as the tab's glyphs."
+  ;; Arrange
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-status--on-graphic-frame 15 2.0
+      (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+                 (lambda (_ws) '(:name (:text "alpha" :prefix (:priority "p2"))))))
+        ;; Act
+        (let ((image (get-text-property 0 'display (agent-repl--tab-badge-str "alpha" :thinking))))
+          ;; Assert
+          (should (equal (image-property image :file) (agent-repl-status--priority-file "p2")))
+          (should (= (image-property image :height) 15)))))))
 
 (ert-deftest agent-repl-test-status-the-badge-run-draws-the-glyph-as-its-image ()
   "On a graphic frame the badge run\='s glyph is the glyph\='s image."
@@ -4993,6 +4848,108 @@ bracket-only paint, which is the blessed treatment."
     (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws) (lambda (_ws) nil)))
       ;; Act / Assert
       (should (null (agent-repl--tab-badge-str "alpha" :thinking))))))
+
+;;;; ---- The name's prefix ----------------------------------------------
+
+(ert-deftest agent-repl-test-status-name-prefix-on-a-text-frame-is-the-label ()
+  "A text frame draws each priority icon as its level's label."
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    (dolist (case '(("p05" . "P0.5") ("p1" . "P1") ("p2" . "P2") ("p3" . "P3")))
+      (should (equal (agent-repl-name-prefix-string (list :priority (car case)) 15)
+                     (cdr case))))))
+
+(ert-deftest agent-repl-test-status-name-prefix-on-a-graphic-frame-is-the-picture ()
+  "A graphic frame displays the label as the level's own PNG, at HEIGHT."
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t)))
+    (let* ((drawn (agent-repl-name-prefix-string '(:priority "p05") 17))
+           (image (get-text-property 0 'display drawn)))
+      (should (equal (substring-no-properties drawn) "P0.5"))
+      (should (equal (image-property image :file)
+                     (expand-file-name "p05.png" agent-repl-status--priority-dir)))
+      (should (= (image-property image :height) 17)))))
+
+(ert-deftest agent-repl-test-status-name-prefix-height-defaults-to-the-text-line ()
+  "With no HEIGHT the picture is as tall as the frame's text line."
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) t))
+            ((symbol-function 'frame-char-height) (lambda (&rest _) 19)))
+    (should (= (image-property (get-text-property 0 'display (agent-repl-name-prefix-string '(:priority "p1")))
+                               :height)
+               19))))
+
+(ert-deftest agent-repl-test-status-name-prefix-ships-every-levels-picture ()
+  "Every level the label table names has its picture in images/."
+  (dolist (case agent-repl-status--priority-labels)
+    (should (file-exists-p (agent-repl-status--priority-file (car case))))))
+
+(ert-deftest agent-repl-test-status-priority-labels-are-the-shared-vocabulary ()
+  "The labels are proto/vocab/priority-labels.json's, never spelled in status.el."
+  (let ((vocab (agent-repl-vocab-read "priority-labels.json" "labels")))
+    (should (= (hash-table-count vocab) (length agent-repl-status--priority-labels)))
+    (dolist (cell agent-repl-status--priority-labels)
+      (should (equal (gethash (car cell) vocab) (cdr cell)))))
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "status.el" agent-repl-test-status--dir))
+    (should-not (search-forward "\"P0.5\"" nil t))))
+
+(ert-deftest agent-repl-test-status-name-prefix-draws-the-emoji-ack-glyph-at-the-measured-height ()
+  "The emoji-ack glyph is drawn verbatim, scaled to the name's own line."
+  (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) 0.5)))
+    (let ((drawn (agent-repl-name-prefix-string '(:emoji-ack "👍") 15)))
+      (should (equal (substring-no-properties drawn) "👍"))
+      (should (equal (get-text-property 0 'face drawn) '(:height 0.5))))))
+
+(ert-deftest agent-repl-test-status-name-prefix-emoji-ack-unscaled-without-fonts ()
+  "A frame with no fonts draws the emoji-ack glyph as it is."
+  (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) nil)))
+    (let ((drawn (agent-repl-name-prefix-string '(:emoji-ack "👍") 15)))
+      (should (equal drawn "👍"))
+      (should-not (get-text-property 0 'face drawn)))))
+
+(ert-deftest agent-repl-test-status-name-prefix-draws-the-priority-icon-then-the-glyph ()
+  "Both marks draw in the proto's field order, parted by one space."
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl-name-glyph-height) (lambda (&rest _) nil)))
+    (should (equal (agent-repl-name-prefix-string '(:priority "p3" :emoji-ack "👍") 15)
+                   "P3 👍"))))
+
+(ert-deftest agent-repl-test-status-name-prefix-empty-emoji-ack-fails-hard ()
+  "An emoji-ack glyph with no text is refused by the decoder, so drawing one fails."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+      (should-error (agent-repl-status--name-emoji-ack-string "" (selected-frame)))
+      (should (string-match-p "elisp.status.name-emoji-ack: glyph \"\" carries no glyph" (car logged))))))
+
+(ert-deftest agent-repl-test-status-the-badge-run-carries-the-emoji-ack-glyph ()
+  "The tab bar's badge run draws an emoji-ack workspace's glyph too."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl-roster-row-for-ws)
+               (lambda (_ws) '(:name (:text "alpha" :prefix (:priority nil :emoji-ack "👍")))))
+              ((symbol-function 'agent-repl-status-glyph-image-height) (lambda (&rest _) 15))
+              ((symbol-function 'agent-repl-name-glyph-height) (lambda (&rest _) nil)))
+      (should (equal (agent-repl--tab-badge-str "alpha" :thinking) "👍")))))
+
+(ert-deftest agent-repl-test-status-name-prefix-with-no-mark-fails-hard ()
+  "A prefix carrying no mark is refused by the decoder, so drawing one fails."
+  (let (logged)
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+      (should-error (agent-repl-name-prefix-string '(:priority nil) 15))
+      (should (string-match-p "elisp.status.name-prefix: prefix .* carries no mark" (car logged))))))
+
+(ert-deftest agent-repl-test-status-name-prefix-with-an-unknown-level-fails-hard ()
+  "A level outside the four is never decoded, so drawing one fails loudly."
+  (let (logged)
+    (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil))
+              ((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+      (should-error (agent-repl-name-prefix-string '(:priority "p9") 15))
+      (should (string-match-p "elisp.status.name-priority: priority \"p9\" is no level" (car logged))))))
+
+(ert-deftest agent-repl-test-status-name-prefix-missing-picture-fails-hard ()
+  "A level whose picture the checkout lacks fails at the file, logged."
+  (let (logged
+        (agent-repl-status--priority-dir (make-temp-file "agent-repl-no-pictures-" t)))
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into logged)))
+      (should-error (agent-repl-status--priority-file "p1"))
+      (should (string-match-p "elisp.status.priority-file: priority \"p1\" has no picture" (car logged))))))
 
 ;;;; ---- The heartbeat ---------------------------------------------------
 

@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/nameprefix"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
 )
@@ -1650,14 +1653,16 @@ func TestRegisterAllRepublishesTheRosterOnce(t *testing.T) {
 	}
 }
 
-func TestRegistrationStatesTheNamesGlyphOnTheNaming(t *testing.T) {
+func TestRegistrationStatesTheNamesPrefixOnTheNaming(t *testing.T) {
+	p1 := wsm.PriorityP1
 	tests := []struct {
-		name       string
-		originator string
-		want       string
+		name  string
+		facts wsm.RegisterFacts
+		want  wsm.Workspace
 	}{
-		{name: "an emoji-ack workspace's naming carries the thumbs up", originator: wsm.OriginatorEmojiAck, want: "👍"},
-		{name: "any other workspace's naming carries none", originator: "user_or_workspace", want: ""},
+		{name: "a prioritized workspace wears its icon", facts: wsm.RegisterFacts{Priority: &p1}, want: wsm.Workspace{Priority: &p1}},
+		{name: "an emoji-ack workspace wears the thumbs up", facts: wsm.RegisterFacts{Originator: wsm.OriginatorEmojiAck}, want: wsm.Workspace{EmojiAck: true}},
+		{name: "any other workspace wears none", facts: wsm.RegisterFacts{Originator: "user_or_workspace"}, want: wsm.Workspace{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1665,13 +1670,14 @@ func TestRegistrationStatesTheNamesGlyphOnTheNaming(t *testing.T) {
 			f := newFixture(t)
 
 			// Act.
-			if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, wsm.RegisterFacts{Originator: tt.originator}); err != nil {
+			if _, err := f.verbs.Register(context.Background(), f.git.mainWorktree, tt.facts); err != nil {
 				t.Fatalf("Register: %v", err)
 			}
 
-			// Assert.
-			if n := len(f.topbarNamings); n == 0 || f.topbarNamings[n-1].Glyph != tt.want {
-				t.Fatalf("namings = %+v, want the last carrying glyph %q", f.topbarNamings, tt.want)
+			// Assert: the one decision the sidebar row wears too.
+			want := nameprefix.Of(tt.want)
+			if n := len(f.topbarNamings); n == 0 || !proto.Equal(f.topbarNamings[n-1].NamePrefix, want) {
+				t.Fatalf("namings = %+v, want the last carrying prefix %v", f.topbarNamings, want)
 			}
 		})
 	}

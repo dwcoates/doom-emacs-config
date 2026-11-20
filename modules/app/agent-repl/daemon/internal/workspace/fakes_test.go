@@ -3884,6 +3884,8 @@ type fixture struct {
 	topbarNames []string
 	// topbarNamings is every naming the topbar seam was handed, in order.
 	topbarNamings []topbar.Naming
+	// topbarNamePrefixes is every name prefix the topbar seam was handed, in order.
+	topbarNamePrefixes []*frontendv1.WorkspaceNamePrefix
 	// effortReads is every config root whose settings were read; the read
 	// answers effortSettings and effortErr.
 	effortReads    []string
@@ -3985,7 +3987,7 @@ func newFixture(t *testing.T) *fixture {
 			return rec
 		},
 		DB: f.db, Derived: f.derived, Git: f.git, Creates: f.creates, Accounts: f.account, PullOwners: f.pullOwners, Queue: f.queue, TurnStops: f.queue, Merge: f.merge,
-		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
+		Rollout: f.rollout, Feed: f.feed, Footer: f.footer, Topbar: stubTopbar{picked: &f.topbarPicked, parked: &f.topbarParked, coldGates: &f.topbarColdGates, accounts: &f.topbarAccounts, loginDefaults: &f.topbarLoginDefaults, effortSettings: &f.topbarEffortSettings, warnings: &f.topbarWarnings, links: &f.topbarLinks, names: &f.topbarNames, namings: &f.topbarNamings, namePrefixes: &f.topbarNamePrefixes}, Browser: f.browser, HookRunner: f.hooks, Lifecycle: f.lifecycle, StateDir: f.stateDir, PullRequests: f.anchors,
 		Sidebar: f.sidebar, Host: f.host, Banners: f.banners, Sessions: f.fleet, Threads: f.threads, ColdGateAnswers: &f.gateAnswers, SettingsVisits: f.ensureVisits(), Drain: &f.visitDrain,
 		Headless:   f.headless,
 		Health:     f.health,
@@ -4204,6 +4206,9 @@ type stubTopbar struct {
 	remoteControl *[]bool
 	// namings records every naming installed, in order.
 	namings *[]topbar.Naming
+	// namePrefixes records every name prefix a priority change installed, in
+	// order; a nil entry is a cleared prefix.
+	namePrefixes *[]*frontendv1.WorkspaceNamePrefix
 	// window is the context window the strip answers; nil answers none and
 	// nil-panics, as every seam a test did not wire does.
 	window *int64
@@ -4241,6 +4246,11 @@ func (stubTopbar) SetWorkspaceDir(ids.WorkspaceID, string) error { return nil }
 func (s stubTopbar) SetNaming(_ ids.WorkspaceID, naming topbar.Naming) {
 	if s.namings != nil {
 		*s.namings = append(*s.namings, naming)
+	}
+}
+func (s stubTopbar) SetNamePrefix(_ ids.WorkspaceID, prefix *frontendv1.WorkspaceNamePrefix) {
+	if s.namePrefixes != nil {
+		*s.namePrefixes = append(*s.namePrefixes, prefix)
 	}
 }
 func (s stubTopbar) SetName(_ ids.WorkspaceID, name string) {

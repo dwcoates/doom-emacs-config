@@ -19,6 +19,7 @@ import {
 import { withRepositoryBlocks } from "../roster-families.js";
 import { liveElapsedClock, liveElapsedReading } from "../../src/elapsed-clock.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
+import { drawNamePrefix } from "../../src/name-prefix.js";
 import { heatColor } from "../../src/heat.js";
 import { rosterStatusColor, toneClass } from "../../src/vocab.js";
 import { HOVER_CLOSE_GRACE_MS, HOVER_OPEN_DELAY_MS } from "../../src/sidebar/row-hover.js";
@@ -57,7 +58,6 @@ import {
   drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
-import { drawNameGlyph } from "../../src/name-glyph.js";
 import { codeOf } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -160,22 +160,32 @@ describe("the row's identity and hooks", () => {
     expect(drawn.querySelector(".name")?.textContent).toBe("the rail");
   });
 
-  it("draws the name's glyph before the name, the name's text the slug alone", () => {
+  it("draws the emoji-ack glyph in the name's prefix, the name's text the slug alone", () => {
     // Act
-    const drawn = drawRosterRow(row({ id: "ws-1", name: "acked", glyph: "👍" }), sidebarContext(), "R");
+    const u = row({ id: "ws-1", name: "acked", glyph: "👍" });
+    const drawn = drawRosterRow(u, sidebarContext(), "R");
 
     // Assert
-    const glyph = drawn.querySelector(":scope > .row > .name-glyph");
-    expect([glyph?.outerHTML, glyph?.nextElementSibling?.classList.contains("name"), drawn.querySelector(".name")?.textContent]).toEqual([
-      drawNameGlyph({ text: "👍" }, "R.name.glyph").outerHTML,
+    const prefix = drawn.querySelector(":scope > .row > .name-prefix");
+    expect([prefix?.outerHTML, prefix?.nextElementSibling?.classList.contains("name"), drawn.querySelector(".name")?.textContent]).toEqual([
+      drawNamePrefix(u.name?.prefix, "R.name.prefix")?.outerHTML,
       true,
       "acked",
     ]);
   });
 
+  it("draws the priority icon, then the emoji-ack glyph, when the name wears both", () => {
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", name: "acked", priority: "p1", glyph: "👍" }), sidebarContext(), "R");
+
+    // Assert
+    const marks = [...(drawn.querySelector(".name-prefix")?.children ?? [])].map((mark) => mark.className);
+    expect(marks).toEqual(["name-priority", "name-emoji-ack"]);
+  });
+
   it("draws no glyph for a name that wears none", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", name: "plain" }), sidebarContext(), "R");
-    expect(drawn.querySelector(".name-glyph")).toBeNull();
+    expect(drawn.querySelector(".name-emoji-ack")).toBeNull();
   });
 
   it("offers exactly one SelectInEditor click target", () => {
@@ -447,20 +457,36 @@ describe("the attention marker", () => {
   });
 });
 
-describe("the priority badge", () => {
-  it("draws the resolver's composed label verbatim", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", priority: "P0.5" }), sidebarContext(), "R");
-    expect(drawn.querySelector(".sb-prio")?.textContent).toBe("P0.5");
+describe("the name's prefix", () => {
+  it("draws the priority icon immediately before the name", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", priority: "p05" }), sidebarContext(), "R");
+    const prefix = drawn.querySelector(".row > .name-prefix");
+    expect(prefix?.querySelector("img[data-priority='p05']")).not.toBeNull();
+    expect(prefix?.nextElementSibling?.classList.contains("name")).toBe(true);
   });
 
-  it("addresses the badge by that label", () => {
-    const drawn = drawRosterRow(row({ id: "ws-1", priority: "P1" }), sidebarContext(), "R");
-    expect(drawn.querySelector("[data-priority='P1']")).not.toBeNull();
+  it("draws the prefix through the one shared drawer", () => {
+    const u = row({ id: "ws-1", priority: "p1" });
+    const drawn = drawRosterRow(u, sidebarContext(), "R");
+    const shared = drawNamePrefix(u.name?.prefix, "R.name.prefix");
+    expect(drawn.querySelector(".name-prefix")?.outerHTML).toBe(shared?.outerHTML);
   });
 
-  it("draws no badge for an unprioritized workspace", () => {
+  it("keeps the icon out of the name's own text", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", name: "topic", priority: "p2" }), sidebarContext(), "R");
+    expect(drawn.querySelector(".name")?.textContent).toBe("topic");
+  });
+
+  it("draws no prefix for an unprioritized workspace", () => {
     const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
-    expect(drawn.querySelector(".sb-prio")).toBeNull();
+    expect(drawn.querySelector(".name-prefix")).toBeNull();
+  });
+
+  it("draws the priority icon before the stand-in's name too", () => {
+    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", priority: "p3" })), "R");
+    const prefix = standIn.querySelector(".row > .name-prefix");
+    expect(prefix?.querySelector("img[data-priority='p3']")).not.toBeNull();
+    expect(prefix?.nextElementSibling?.classList.contains("name")).toBe(true);
   });
 });
 
@@ -3254,13 +3280,13 @@ describe("drawRosterRowStandIn", () => {
     ]).toEqual(["ws-1", true, "alpha"]);
   });
 
-  it("draws the name's glyph before the name, as the row does", () => {
+  it("draws the name's emoji-ack glyph in its prefix before the name, as the row does", () => {
     // Act
     const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", name: "acked", glyph: "👍" })), "row");
 
     // Assert
     expect([...standIn.querySelector(":scope > .row")!.children].map((el) => [el.className, el.textContent])).toEqual([
-      ["name-glyph", "👍"],
+      ["name-prefix", "👍"],
       ["name", "acked"],
     ]);
   });

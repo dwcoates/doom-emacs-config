@@ -108,27 +108,69 @@ The repository the row's workspace belongs to, as its section is headed."
   (agent-repl-wire-roster--decode-repository-name "RosterRowRepository" value))
 
 (defun agent-repl-wire-decode-roster-row-name (value)
-  "Decode VALUE as `RosterRowName', a plist `(:text :glyph)'.
+  "Decode VALUE as `RosterRowName', a plist `(:text :prefix)'.
 Never an identity or a join key: names collide across repos.  `:text' is
-the registry's slug alone; `:glyph' is the glyph drawn before it
-\=(`agent-repl-wire-decode-roster-row-name-glyph'), nil when it wears none."
+the registry's slug alone; `:prefix' is the marks drawn before it
+\=(`agent-repl-wire-decode-workspace-name-prefix'), nil when it wears none."
   (let ((object (agent-repl-wire--object "RosterRowName" value)))
-    (agent-repl-wire--check-keys "RosterRowName" object '(text glyph))
+    (agent-repl-wire--check-keys "RosterRowName" object '(text prefix))
     (agent-repl-wire--decoded
      "RosterRowName"
      (list :text (agent-repl-wire--decode-string "RosterRowName" 'text object)
-           :glyph (agent-repl-wire--decode-optional-message
-                   "RosterRowName" 'glyph object
-                   #'agent-repl-wire-decode-roster-row-name-glyph)))))
+           :prefix (agent-repl-wire--decode-optional-message
+                    "RosterRowName" 'prefix object
+                    #'agent-repl-wire-decode-workspace-name-prefix)))))
 
-(defun agent-repl-wire-decode-roster-row-name-glyph (value)
-  "Decode VALUE as `RosterRowNameGlyph', a plist `(:text)'.
-The glyph the daemon draws before an emoji-ack workspace's name."
-  (let ((object (agent-repl-wire--object "RosterRowNameGlyph" value)))
-    (agent-repl-wire--check-keys "RosterRowNameGlyph" object '(text))
-    (agent-repl-wire--decoded
-     "RosterRowNameGlyph"
-     (list :text (agent-repl-wire--decode-string "RosterRowNameGlyph" 'text object)))))
+(defconst agent-repl-wire--workspace-name-priority-arms
+  (mapcar (lambda (level)
+            (list (intern level) level
+                  (lambda (value)
+                    (agent-repl-wire--decode-empty
+                     (concat "WorkspaceNamePriority" (upcase level)) value))))
+          '("p05" "p1" "p2" "p3"))
+  "The arms of `WorkspaceNamePriority.level', each decoded as its level string.
+The level string is the arm's own name, which is also the picture's file
+name (`images/<level>.png') and a member of `agent-repl-priority-levels'.")
+
+(defun agent-repl-wire-decode-workspace-name-priority (value)
+  "Decode VALUE as `WorkspaceNamePriority', its level string.
+The level is the set arm's name
+\(`agent-repl-wire--workspace-name-priority-arms')."
+  (let ((object (agent-repl-wire--object "WorkspaceNamePriority" value)))
+    (agent-repl-wire--check-keys "WorkspaceNamePriority" object '(p05 p1 p2 p3))
+    (plist-get (agent-repl-wire--decode-oneof
+                "WorkspaceNamePriority" "level" object
+                agent-repl-wire--workspace-name-priority-arms)
+               :arm)))
+
+(defun agent-repl-wire-decode-workspace-name-emoji-ack (value)
+  "Decode VALUE as `WorkspaceNameEmojiAck', its glyph text.
+The thumbs up the daemon puts before an emoji-ack workspace\='s name."
+  (let ((object (agent-repl-wire--object "WorkspaceNameEmojiAck" value)))
+    (agent-repl-wire--check-keys "WorkspaceNameEmojiAck" object '(text))
+    (agent-repl-wire--decode-string "WorkspaceNameEmojiAck" 'text object)))
+
+(defun agent-repl-wire-decode-workspace-name-prefix (value)
+  "Decode VALUE as `WorkspaceNamePrefix'.
+A plist `(:priority LEVEL :emoji-ack GLYPH)': the marks drawn before a
+workspace's name, in drawn order (the proto's field order).  LEVEL is the
+priority icon's level string (\"p05\" \"p1\" \"p2\" \"p3\"), nil when
+unprioritized; GLYPH is the emoji-ack glyph\='s text, nil for a workspace
+the emoji-ack system did not create.  A set prefix carrying no mark is
+malformed: the daemon leaves it unset instead."
+  (let ((object (agent-repl-wire--object "WorkspaceNamePrefix" value)))
+    (agent-repl-wire--check-keys "WorkspaceNamePrefix" object '(priority emojiAck))
+    (let ((priority (agent-repl-wire--decode-optional-message
+                     "WorkspaceNamePrefix" 'priority object
+                     #'agent-repl-wire-decode-workspace-name-priority))
+          (emoji-ack (agent-repl-wire--decode-optional-message
+                      "WorkspaceNamePrefix" 'emojiAck object
+                      #'agent-repl-wire-decode-workspace-name-emoji-ack)))
+      (unless (or priority emoji-ack)
+        (agent-repl-wire--fail "WorkspaceNamePrefix" 'priority
+                               "a set prefix carries at least one mark"))
+      (agent-repl-wire--decoded "WorkspaceNamePrefix"
+                                (list :priority priority :emoji-ack emoji-ack)))))
 
 (defun agent-repl-wire-decode-roster-row-current (value)
   "Decode VALUE as `RosterRowCurrent', a plist `(:current)'.
@@ -150,16 +192,6 @@ Closed is ORTHOGONAL to the lifecycle, which is why it is not a status arm."
      "RosterRowClosed"
      (list :closed (agent-repl-wire--decode-bool
                     "RosterRowClosed" 'closed object)))))
-
-(defun agent-repl-wire-decode-roster-row-priority-badge (value)
-  "Decode VALUE as `RosterRowPriorityBadge', a plist `(:label)'.
-The DRAWN label only — ordering is already the resolver's."
-  (let ((object (agent-repl-wire--object "RosterRowPriorityBadge" value)))
-    (agent-repl-wire--check-keys "RosterRowPriorityBadge" object '(label))
-    (agent-repl-wire--decoded
-     "RosterRowPriorityBadge"
-     (list :label (agent-repl-wire--decode-string
-                   "RosterRowPriorityBadge" 'label object)))))
 
 (defun agent-repl-wire-decode-roster-row-attention (value)
   "Decode VALUE as `RosterRowAttention' and return t.
@@ -853,13 +885,13 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
 (defun agent-repl-wire-decode-roster-row (value)
   "Decode VALUE as `RosterRow'.
-Returns `(:workspace W :attention A :priority P :viewed V
+Returns `(:workspace W :attention A :viewed V
 :view-dwell VD :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
 :merge-paused MP :merge-turn MT :open-owned-pull-request OP
@@ -882,9 +914,6 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :attention (agent-repl-wire--decode-optional-message
                        "RosterRow" 'attention object
                        #'agent-repl-wire-decode-roster-row-attention)
-           :priority (agent-repl-wire--decode-optional-message
-                      "RosterRow" 'priority object
-                      #'agent-repl-wire-decode-roster-row-priority-badge)
            :viewed (agent-repl-wire--decode-optional-message
                     "RosterRow" 'viewed object
                     #'agent-repl-wire-decode-roster-row-viewed)

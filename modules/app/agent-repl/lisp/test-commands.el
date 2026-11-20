@@ -596,7 +596,7 @@ when the daemon answered the register with REFUSAL, a decoded error."
 UPDATED-MS is its update recency (`RosterRowLastUpdated'), defaulting to
 AT-MS, or 0 when neither is given: every row states one."
   (list :workspace (list :workspace (list :id id :dir (concat "/tmp/" name)))
-        :attention nil :priority nil
+        :attention nil
         :last-selected (when at-ms (list :at-ms at-ms))
         :last-updated (list :at-ms (or updated-ms at-ms 0))
         :name (list :text name)
@@ -2903,12 +2903,60 @@ and `--switched' to the workspace whose switch was requested of the daemon."
                      `(space :align-to ,(+ 4 (string-width "a-longer-name")))))
       (should (string-match-p "2m ago" (nth 2 line))))))
 
-;;;; The name's glyph
+(defun agent-repl-test-commands--prioritized-row (name id level)
+  "Return a decoded roster row for NAME whose name wears priority LEVEL."
+  (let ((row (agent-repl-test-commands--row name id 1)))
+    (plist-put row :name (list :text name :prefix (list :priority level)))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-the-prefix-after-the-mark ()
+  "A prioritized name's icon is drawn after the mark, before the name."
+  ;; Arrange
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    (let* ((row (agent-repl-test-commands--prioritized-row "ws" "id-ws" "p1"))
+           (alist (list (cons "ws" (list :row row :section :repository :state :open))))
+           (affix (agent-repl--switch-affixation alist 0)))
+      ;; Act
+      (let ((line (car (funcall affix '("ws")))))
+        ;; Assert: the candidate stays the name alone.
+        (should (equal (nth 0 line) "ws"))
+        (should (equal (substring-no-properties (nth 1 line))
+                       (concat (agent-repl-status-roster-mark :ready) " P1 ")))))))
+
+(ert-deftest agent-repl-test-commands-switch-name-prefix-is-the-shared-drawing ()
+  "The switcher draws the prefix through `agent-repl-name-prefix-string'."
+  ;; Arrange
+  (let ((row (agent-repl-test-commands--prioritized-row "ws" "id-ws" "p2"))
+        drawn)
+    (cl-letf (((symbol-function 'agent-repl-name-prefix-string)
+               (lambda (prefix &rest _) (setq drawn prefix) "ICON")))
+      ;; Act / Assert
+      (should (equal (agent-repl--switch-name-prefix (list :row row)) "ICON "))
+      (should (equal drawn '(:priority "p2"))))))
+
+(ert-deftest agent-repl-test-commands-switch-name-prefix-of-a-plain-or-rowless-entry-is-empty ()
+  "A name wearing no prefix, or an entry with no row yet, draws none."
+  (should (equal (agent-repl--switch-name-prefix
+                  (list :row (agent-repl-test-commands--row "ws" "id-ws" 1)))
+                 ""))
+  (should (equal (agent-repl--switch-name-prefix (list :row nil)) "")))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-aligns-past-the-prefixed-name ()
+  "The columns align past the widest prefix and name together."
+  ;; Arrange
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil)))
+    (let* ((row (agent-repl-test-commands--prioritized-row "ws" "id-ws" "p05"))
+           (alist (list (cons "ws" (list :row row :section :repository :state :open))))
+           (affix (agent-repl--switch-affixation alist 0)))
+      ;; Act
+      (let ((columns (nth 2 (car (funcall affix '("ws"))))))
+        ;; Assert
+        (should (equal (get-text-property 0 'display columns)
+                       `(space :align-to ,(+ 4 (string-width "P0.5 ws")))))))))
 
 (defun agent-repl-test-commands--acked-row (name id)
-  "Return a decoded roster row for NAME whose name wears the thumbs up."
+  "Return a decoded roster row for NAME whose name wears the emoji-ack glyph."
   (let ((row (agent-repl-test-commands--row name id 1)))
-    (plist-put row :name (list :text name :glyph (list :text "👍")))))
+    (plist-put row :name (list :text name :prefix (list :emoji-ack "👍")))))
 
 (ert-deftest agent-repl-test-commands-switch-affixation-draws-the-glyph-before-the-name ()
   "An emoji-ack workspace's line draws its glyph after the mark, the
@@ -2922,10 +2970,10 @@ candidate staying the name alone."
       ;; Assert
       (should (equal (nth 0 line) "acked"))
       (should (equal (nth 1 line) (concat (agent-repl-status-roster-mark :ready) " "
-                                          (agent-repl-name-glyph-string "👍")))))))
+                                          (agent-repl-name-prefix-string '(:emoji-ack "👍")) " "))))))
 
 (ert-deftest agent-repl-test-commands-switch-affixation-draws-no-glyph-for-a-plain-name ()
-  "A workspace whose name wears no glyph draws its mark alone before it."
+  "A workspace whose name wears no prefix draws its mark alone before it."
   ;; Arrange
   (let* ((alist (list (cons "plain" (list :row (agent-repl-test-commands--row "plain" "id-p" 1)
                                           :section :repository :state :open))))
@@ -2935,26 +2983,20 @@ candidate staying the name alone."
       ;; Assert
       (should (equal (nth 1 line) (concat (agent-repl-status-roster-mark :ready) " "))))))
 
-(ert-deftest agent-repl-test-commands-switch-affixation-aligns-past-the-glyph-and-name ()
-  "The columns align past the widest glyph and name together."
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-both-marks-in-order ()
+  "A prioritized emoji-ack name draws the priority icon, then the glyph."
   ;; Arrange
-  (let* ((row (agent-repl-test-commands--acked-row "acked" "id-a"))
-         (alist (list (cons "acked" (list :row row :section :repository :state :open))
-                      (cons "plain" (list :row nil :section nil :state :open))))
-         (affix (agent-repl--switch-affixation alist 0)))
-    ;; Act
-    (let ((line (car (funcall affix '("plain")))))
-      ;; Assert
-      (should (equal (get-text-property 0 'display (nth 2 line))
-                     `(space :align-to ,(+ 4 (string-width (concat "👍 " "acked")))))))))
-
-;; EVERY EMACS LIST OF NAMES DRAWS THE GLYPH THROUGH THE ONE HELPER.
-(ert-deftest agent-repl-test-commands-switch-name-glyph-is-the-shared-drawing ()
-  "The switcher's glyph is `agent-repl-name-glyph-string''s drawing."
-  (let ((entry (list :row '(:name (:text "acked" :glyph (:text "👍"))))))
-    (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) 0.6)))
-      (should (equal-including-properties (agent-repl--switch-name-glyph entry)
-                                          (agent-repl-name-glyph-string "👍" 0.6))))))
+  (cl-letf (((symbol-function 'display-graphic-p) (lambda (&rest _) nil))
+            ((symbol-function 'agent-repl-name-glyph-height) (lambda (&rest _) nil)))
+    (let* ((row (agent-repl-test-commands--row "both" "id-b" 1))
+           (row (plist-put row :name (list :text "both" :prefix (list :priority "p1" :emoji-ack "👍"))))
+           (alist (list (cons "both" (list :row row :section :repository :state :open))))
+           (affix (agent-repl--switch-affixation alist 0)))
+      ;; Act
+      (let ((line (car (funcall affix '("both")))))
+        ;; Assert
+        (should (equal (substring-no-properties (nth 1 line))
+                       (concat (agent-repl-status-roster-mark :ready) " P1 👍 ")))))))
 
 (ert-deftest agent-repl-test-commands-switch-affixation-keeps-the-merged-purple ()
   "A merged row's state column keeps its purple over the annotation face."

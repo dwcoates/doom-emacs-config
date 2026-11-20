@@ -6,6 +6,10 @@ thumbs up emoji before its name wherever the name is drawn (the sidebar, the
 
 Design mode: autonomous.
 
+SUPERSEDED IN SHAPE (2026-11-19): the glyph now rides
+`frontend.v1.WorkspaceNamePrefix.emoji_ack`, beside the priority icon, as
+`2026-11-19-workspace-name-prefix.md` records. The decision below stands.
+
 ## Assumptions
 
 - The emoji-ack intake already states, at creation, that the workspace is an

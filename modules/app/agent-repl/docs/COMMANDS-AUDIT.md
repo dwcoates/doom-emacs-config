@@ -139,7 +139,7 @@ Findings are collected at the end, in "Audit findings".
 | `agent-repl-nuke-workspace` | Destroy the workspace, its worktree and its branch. | `SPC j X` | leader | leader |
 | `agent-repl-kill` | Kill the agent session and its view. | - | - | - |
 | `agent-repl-restart` | Hard restart the agent for the current workspace. | - | - | - |
-| `agent-repl-set-priority` | Set or clear the workspace's priority. | `SPC j m p` | leader | leader |
+| `agent-repl-set-priority` | Set or clear the workspace's priority. | `SPC j p` | leader | leader |
 | `agent-repl-bind-conversation` | Point the workspace at another conversation in its directory. | `SPC j c` | leader | leader |
 
 ## 10. Canned prompts: explain

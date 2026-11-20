@@ -1829,29 +1829,46 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    count: slightly smaller, in the muted grey, never shrunk away by a long name. */
 #ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--muted); flex: none; margin-left: 0.3em; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A NAME'S GLYPH (src/name-glyph.ts) is drawn a little smaller than the
-   name's own font size (owner requests, 2026-11-18: never larger; 2026-11-20:
-   a bit smaller): the emoji takes 0.85 of the line's em and no line height of
-   its own, so a row or a heading wearing one is exactly as tall as one
-   without. It never shrinks away beside a long name, and it keeps
-   the emoji's own colours, whatever ink the name beside it is drawn in. */
-.name-glyph {
+/* A NAME'S PREFIX (src/name-prefix.ts) stands right before the name, its
+   marks never taller than the name: each takes the line's em and no line
+   height of its own, so a row or a heading wearing one is exactly as tall as
+   one without. It never shrinks away beside a long name. */
+.name-prefix {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25em;
+  flex: none;
+  line-height: 1;
+  vertical-align: middle;
+  /* ONE WORD SPACE stands between the prefix and the name (owner request,
+     2026-11-20). */
+  --name-prefix-space: 0.25em;
+  margin-right: var(--name-prefix-space);
+}
+/* IN A SIDEBAR ROW the row's own gap also stands between the prefix and the
+   name, which drew them 0.45rem further apart than a space: the prefix takes
+   the gap back, so the space alone is left. */
+#ws-sidebar .row > .name-prefix {
+  margin-right: calc(var(--name-prefix-space) - var(--row-gap));
+}
+/* The priority icon is the picture the Emacs tab bar draws too
+   (images/<arm>.png), drawn one em high at its own aspect. */
+.name-prefix .name-priority {
+  display: block;
+  height: 1em;
+  width: auto;
+}
+/* The emoji-ack glyph is drawn a little smaller than the name's own font size
+   (owner requests, 2026-11-18: never larger; 2026-11-20: a bit smaller), and
+   keeps the emoji's own colours, whatever ink the name beside it is drawn in. */
+.name-prefix .name-emoji-ack {
   font-size: 0.85em;
   line-height: 1;
-  flex: none;
-  /* ONE WORD SPACE stands between the glyph and the name (owner request,
-     2026-11-20). */
-  --name-glyph-space: 0.25em;
-  margin-right: var(--name-glyph-space);
 }
-/* IN A SIDEBAR ROW the row's own gap also stands between the glyph and the
-   name, which drew them 0.45rem further apart than a space: the glyph takes
-   the gap back, so the space alone is left. */
-#ws-sidebar .row > .name-glyph {
-  margin-right: calc(var(--name-glyph-space) - var(--row-gap));
-  /* AND IT IS SIZED FROM THE STATUS MARK beside it, a quarter larger (owner
-     request, 2026-11-20: only slightly bigger than the status indicators to
-     its left), never from the name's font. */
+/* IN A SIDEBAR ROW the glyph is sized from the status mark beside it, a
+   quarter larger (owner request, 2026-11-20: only slightly bigger than the
+   status indicators to its left), never from the name's font. */
+#ws-sidebar .row > .name-prefix .name-emoji-ack {
   font-size: calc(var(--ws-mark-size) * 1.25);
 }
 /* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository
@@ -7082,7 +7099,7 @@ bubble-body.bubble-body { display: block; }
    `.repo-head`, `.task-head`, `.row`, `.st*`, `.kids`, `.detail` and the
    Recently Merged band above are reused as they stand. What follows is only
    what the new feature set adds — the two panes, the attention marker's
-   cadence, the priority badge, the verb menu and the two forms — plus the
+   cadence, the verb menu and the two forms — plus the
    handful of rules that key the status mark off the shared color vocabulary
    instead of a per-state hue. */
 
@@ -7340,18 +7357,6 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar .ws[data-blink="off"] .sb-attn { opacity: 0; }
 #ws-sidebar .ws[data-blink="on"] .sb-attn,
 #ws-sidebar .ws[data-blink="steady"] .sb-attn { opacity: 1; }
-
-/* The priority badge: the resolver's own label, drawn verbatim, in the quiet
-   pill treatment the rail already uses for its counts. */
-#ws-sidebar .sb-prio {
-  flex: 0 0 auto;
-  font-size: 0.62rem;
-  letter-spacing: 0.04em;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 0 0.4em;
-}
 
 /* The row's action control, quiet until the row is hovered. */
 #ws-sidebar .sb-more {

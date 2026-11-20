@@ -104,6 +104,7 @@ import { sentTo } from "../feed/addresses.js";
 import { drawnBodyOf } from "../held/drawn-body.js";
 import { plainProse, servedProse } from "../prose.js";
 import { rosterApps } from "../roster-apps.js";
+import type { PriorityArm } from "../../src/name-prefix.js";
 
 // ---------------------------------------------------------------------------
 // Arm enumeration
@@ -2550,7 +2551,8 @@ type RosterRowInit = {
   name?: string;
   status?: RosterStatusArm;
   attention?: boolean;
-  priority?: string;
+  /** The priority icon the name's prefix wears; omitted = unprioritized. */
+  priority?: PriorityArm;
   current?: boolean;
   closed?: boolean;
   detail?: boolean;
@@ -2576,8 +2578,10 @@ export function rosterRow(init?: RosterRowInit): RosterRow {
   const built = create(RosterRowSchema, {
     workspace: { workspace: workspaceRef(init?.id ?? WORKSPACE_ID) },
     attention: init?.attention ? {} : undefined,
-    priority: init?.priority ? { label: init.priority } : undefined,
-    name: { text: init?.name ?? "webapp-integration-suite" },
+    name: {
+      text: init?.name ?? "webapp-integration-suite",
+      prefix: init?.priority ? { priority: { level: { case: init.priority, value: {} } } } : undefined,
+    },
     status: { case: init?.status ?? "ready", value: {} } as RosterRow["status"],
     current: { current: init?.current ?? false },
     when: { shown: rosterRowWhen(init?.when ?? "noTurnRunning", init?.whenAtMs ?? 1_000n) },

@@ -205,46 +205,6 @@ func TestRosterOrdersChildrenTheSameWayWithinTheirParent(t *testing.T) {
 	}
 }
 
-func TestRosterComposesThePriorityBadgeLabel(t *testing.T) {
-	tests := []struct {
-		name string
-		ws   wsm.Workspace
-		want string
-	}{
-		{name: "p05", ws: prioritized(workspace("w", "n"), wsm.PriorityP05), want: "P0.5"},
-		{name: "p1", ws: prioritized(workspace("w", "n"), wsm.PriorityP1), want: "P1"},
-		{name: "p2", ws: prioritized(workspace("w", "n"), wsm.PriorityP2), want: "P2"},
-		{name: "p3", ws: prioritized(workspace("w", "n"), wsm.PriorityP3), want: "P3"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			// Arrange.
-			r, _ := newResolver(t)
-
-			// Act.
-			r.SetRegistry(registry(tc.ws))
-
-			// Assert.
-			if got := onlyRow(t, r).GetPriority().GetLabel(); got != tc.want {
-				t.Fatalf("badge = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestRosterDrawsNoBadgeForAnUnprioritizedWorkspace(t *testing.T) {
-	// Arrange.
-	r, _ := newResolver(t)
-
-	// Act.
-	r.SetRegistry(registry(workspace("w", "n")))
-
-	// Assert: unset is no badge, never an empty one.
-	if got := onlyRow(t, r).GetPriority(); got != nil {
-		t.Fatalf("an unprioritized workspace drew a badge: %v", got)
-	}
-}
-
 func TestRosterNeverReordersTheRegistrysSlice(t *testing.T) {
 	// Arrange.
 	r, _ := newResolver(t)

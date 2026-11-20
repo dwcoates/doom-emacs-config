@@ -1791,47 +1791,86 @@ func TestThePublishedParkCarriesTheNextKeepalive(t *testing.T) {
 	}
 }
 
-func TestTheWorkspaceNameWearsTheNamingsGlyph(t *testing.T) {
+func p1Prefix() *frontendv1.WorkspaceNamePrefix {
+	return &frontendv1.WorkspaceNamePrefix{Priority: &frontendv1.WorkspaceNamePriority{
+		Level: &frontendv1.WorkspaceNamePriority_P1{P1: &frontendv1.WorkspaceNamePriorityP1{}}}}
+}
+
+func emojiAckPrefix() *frontendv1.WorkspaceNamePrefix {
+	return &frontendv1.WorkspaceNamePrefix{EmojiAck: &frontendv1.WorkspaceNameEmojiAck{Text: "👍"}}
+}
+
+func TestTheNameWearsThePrefixTheNamingStated(t *testing.T) {
 	tests := []struct {
-		name      string
-		glyph     string
-		wantGlyph *frontendv1.TopbarWorkspaceNameGlyph
+		name   string
+		prefix *frontendv1.WorkspaceNamePrefix
 	}{
-		{name: "a naming with a glyph draws it before the name", glyph: "👍", wantGlyph: &frontendv1.TopbarWorkspaceNameGlyph{Text: "👍"}},
-		{name: "a naming with none draws the name alone", glyph: "", wantGlyph: nil},
+		{name: "a priority icon", prefix: p1Prefix()},
+		{name: "the emoji-ack glyph", prefix: emojiAckPrefix()},
+		{name: "no mark draws the name alone", prefix: nil},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
 			h := newHarness(t)
 			h.ready(t)
 
-			// Act
-			h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", Glyph: tt.glyph, ConfigDir: "/Users/dev/.claude"})
+			// Act.
+			h.r.SetNaming(testWS, Naming{Name: "topic", ConfigDir: "/Users/dev/.claude", NamePrefix: tc.prefix})
 
-			// Assert
+			// Assert.
 			name := h.view(t).GetWorkspaceName()
-			if name.GetText() != "fix-flaky-reconnect" {
+			if name.GetText() != "topic" {
 				t.Fatalf("workspace name = %q, want the registry name alone", name.GetText())
 			}
-			if !proto.Equal(name.GetGlyph(), tt.wantGlyph) {
-				t.Fatalf("workspace name glyph = %v, want %v", name.GetGlyph(), tt.wantGlyph)
+			if !proto.Equal(name.GetPrefix(), tc.prefix) {
+				t.Fatalf("prefix = %v, want %v", name.GetPrefix(), tc.prefix)
 			}
 		})
 	}
 }
 
-func TestSetNameKeepsTheNamesGlyph(t *testing.T) {
+func TestANamePrefixChangeIsPublishedAndKeepsTheName(t *testing.T) {
+	tests := []struct {
+		name   string
+		prefix *frontendv1.WorkspaceNamePrefix
+	}{
+		{name: "set", prefix: p1Prefix()},
+		{name: "cleared", prefix: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.ready(t)
+			h.r.SetNamePrefix(testWS, p1Prefix())
+
+			// Act.
+			h.r.SetNamePrefix(testWS, tc.prefix)
+
+			// Assert.
+			name := h.view(t).GetWorkspaceName()
+			if !proto.Equal(name.GetPrefix(), tc.prefix) {
+				t.Fatalf("prefix = %v, want %v", name.GetPrefix(), tc.prefix)
+			}
+			if name.GetText() != "fix-flaky-reconnect" {
+				t.Fatalf("name = %q, want the naming's name kept", name.GetText())
+			}
+		})
+	}
+}
+
+func TestSetNameKeepsTheNamesPrefix(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
 	h.ready(t)
-	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", Glyph: "👍", ConfigDir: "/Users/dev/.claude"})
+	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", NamePrefix: emojiAckPrefix(), ConfigDir: "/Users/dev/.claude"})
 
 	// Act
 	h.r.SetName(testWS, "renamed-workspace")
 
 	// Assert
-	if got := h.view(t).GetWorkspaceName().GetGlyph().GetText(); got != "👍" {
-		t.Fatalf("workspace name glyph = %q, want the thumbs up kept across the rename", got)
+	if got := h.view(t).GetWorkspaceName().GetPrefix(); !proto.Equal(got, emojiAckPrefix()) {
+		t.Fatalf("workspace name prefix = %v, want the thumbs up kept across the rename", got)
 	}
 }

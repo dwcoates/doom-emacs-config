@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/ctxend"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/nameprefix"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
@@ -491,7 +492,7 @@ func (v *verbs) RevealMergeWorkspace(ctx context.Context, ws ids.WorkspaceID) (b
 // SetPriority sets or clears the roster's priority. Setting one moves the
 // workspace to second-to-last within that priority (wsm's place.go).
 func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error {
-	_, log, err := v.owned(ctx, "SetWorkspacePriority", ws)
+	record, log, err := v.owned(ctx, "SetWorkspacePriority", ws)
 	if err != nil {
 		return err
 	}
@@ -501,6 +502,10 @@ func (v *verbs) SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Prio
 	}
 	log.Debug(opSetPriority, "recorded the priority", dlog.Context{"cleared": p == nil})
 	v.republishRegistry(ctx, log, opSetPriority)
+	// THE PRIORITY ICON IS A PREFIX OF THE NAME on every surface, so the
+	// topbar's name line takes the same prefix the roster row now wears.
+	record.Priority = p
+	v.deps.Topbar.SetNamePrefix(ws, nameprefix.Of(record))
 	return nil
 }
 
