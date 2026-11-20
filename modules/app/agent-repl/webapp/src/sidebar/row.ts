@@ -88,6 +88,7 @@ import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
 import { drawNameInk } from "./name-ink.js";
+import { drawNameGlyph } from "../name-glyph.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
 import type { Rect } from "../topbar/clamp.js";
 import { placeBeside, viewportOf } from "../placement.js";
@@ -330,6 +331,10 @@ export function drawRosterRow(
     line.appendChild(statusMark);
   }
 
+  // THE NAME'S GLYPH STANDS BEFORE IT (`name-glyph.ts`), its own element, so
+  // nothing drawn on the name below (tint, breath, ink, rename) touches it.
+  const glyph = drawRosterRowNameGlyph(u.name, `${path}.name`);
+  if (glyph !== undefined) line.appendChild(glyph);
   const label = document.createElement("span");
   label.className = "name";
   label.textContent = name;
@@ -459,6 +464,8 @@ export function drawRosterRowStandIn(family: RowFamily, familyPath: string): HTM
   ws.setAttribute(STAND_IN_ATTRIBUTE, "");
   const line = document.createElement("div");
   line.className = "row";
+  const glyph = drawRosterRowNameGlyph(u.name, `${path}.name`);
+  if (glyph !== undefined) line.appendChild(glyph);
   const label = document.createElement("span");
   label.className = "name";
   label.textContent = drawRosterRowName(requireMessage(u.name, `${path}.name`), `${path}.name`);
@@ -611,6 +618,15 @@ export function drawRosterRowWorkspace(u: RosterRowWorkspace, path: string): Wor
 export function drawRosterRowName(u: RosterRowName, path: string): string {
   void path;
   return u.text;
+}
+
+/**
+ * The glyph drawn before a row's name (`frontend.v1.RosterRowNameGlyph`), or
+ * undefined when the name wears none: presence is the fact.
+ */
+export function drawRosterRowNameGlyph(u: RosterRowName | undefined, path: string): HTMLElement | undefined {
+  if (u?.glyph === undefined) return undefined;
+  return drawNameGlyph(u.glyph, `${path}.glyph`);
 }
 
 /** The selected-workspace highlight, as the RESOLVER states it. */

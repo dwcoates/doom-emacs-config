@@ -454,6 +454,7 @@ func (v *verbs) create(ctx context.Context, spec CreateSpec) (_ wsm.Workspace, e
 		// registration and this create's return ever draws the row visible,
 		// unmarked or unsectioned.
 		Hidden: spec.Hidden || spec.Intake, Intake: spec.Intake, IntakeCard: spec.IntakeCard, Placement: spec.registerPlacement(),
+		Originator: spec.originator.String(),
 	})
 	if err != nil {
 		if refusal, ok := placementRefusal(global, err); ok {

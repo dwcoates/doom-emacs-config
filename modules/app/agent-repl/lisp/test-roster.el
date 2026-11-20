@@ -4243,3 +4243,11 @@ judged as any roster is."
     (should (equal (mapcar (lambda (row) (plist-get row :name)) (agent-repl-roster-threads)) '("b" "a")))
     (should (equal (agent-repl-roster-thread-workspace-name (car (agent-repl-roster-threads))) "chat/t2"))))
 
+
+(ert-deftest agent-repl-test-roster-row-name-glyph-is-the-daemons ()
+  "A row whose name wears a glyph answers it; one that wears none answers nil."
+  (should (equal (agent-repl-roster-row-name-glyph
+                  '(:name (:text "acked" :glyph (:text "👍"))))
+                 "👍"))
+  (should-not (agent-repl-roster-row-name-glyph '(:name (:text "plain" :glyph nil))))
+  (should-not (agent-repl-roster-row-name-glyph nil)))

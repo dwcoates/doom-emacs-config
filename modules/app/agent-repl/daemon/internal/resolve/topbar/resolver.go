@@ -287,7 +287,7 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 	}
 	return &frontendv1.TopbarView{
 		Title:                title(s),
-		WorkspaceName:        &frontendv1.TopbarWorkspaceName{Text: s.naming.Name},
+		WorkspaceName:        workspaceName(s.naming),
 		SessionLine:          &frontendv1.TopbarSessionLine{Text: r.sessionLine(s)},
 		ModelSelector:        modelSelector,
 		EffortSelector:       effortSelector(s),
@@ -632,7 +632,7 @@ func (r *resolver) McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView {
 // SetNaming installs the WSM-derived workspace name and session line.
 func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 	r.mutate(ws, "daemon.topbar.set_naming", "the topbar took the workspace naming",
-		dlog.Context{"name": naming.Name, "config_dir": naming.ConfigDir, "remote_control": naming.RemoteControl},
+		dlog.Context{"name": naming.Name, "glyph": naming.Glyph, "config_dir": naming.ConfigDir, "remote_control": naming.RemoteControl},
 		func(s *wsState) {
 			s.naming = naming
 			s.namingSet = true
@@ -1288,4 +1288,14 @@ func linkIcon(rawURL string) frontendv1.TopbarTitleLinkIcon {
 // hostIs reports whether host is domain or one of its subdomains.
 func hostIs(host, domain string) bool {
 	return host == domain || strings.HasSuffix(host, "."+domain)
+}
+
+// workspaceName is the topbar's name element: the registry name, and the
+// glyph drawn before it when the naming carries one.
+func workspaceName(naming Naming) *frontendv1.TopbarWorkspaceName {
+	name := &frontendv1.TopbarWorkspaceName{Text: naming.Name}
+	if naming.Glyph != "" {
+		name.Glyph = &frontendv1.TopbarWorkspaceNameGlyph{Text: naming.Glyph}
+	}
+	return name
 }

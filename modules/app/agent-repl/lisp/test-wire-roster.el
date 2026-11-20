@@ -78,7 +78,7 @@ status arm and whatever else the case is about."
                    :closure nil
                    :last-updated (:at-ms 1)
                    :availability (:arm :available :value nil)
-                   :name (:text "fix-flaky")
+                   :name (:text "fix-flaky" :glyph nil)
                    :repository nil
                    :status (:arm :ready :value nil)
                    :current (:current nil)
@@ -102,6 +102,20 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"ready\":{}" "\"repository\":{\"name\":\"doom\",\"dir\":\"/d\"}"))
                  '("RosterRowRepository" dir "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-names-glyph ()
+  "A row whose name carries `glyph' decodes it beside the name's text."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-name
+                  "{\"text\":\"acked\",\"glyph\":{\"text\":\"👍\"}}")
+                 '(:text "acked" :glyph (:text "👍")))))
+
+(ert-deftest agent-repl-test-wire-roster-row-name-glyph-refuses-an-extra-key ()
+  "An unknown field inside `RosterRowNameGlyph' is a breach naming that message."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-name
+                  "{\"text\":\"acked\",\"glyph\":{\"text\":\"👍\",\"size\":1}}")
+                 '("RosterRowNameGlyph" size "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
   "A row carrying `oneShot' decodes it as PRESENT."

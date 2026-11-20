@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/sourcescan"
 )
 
@@ -2500,5 +2501,85 @@ func TestOptionalWorkspaceIDIsTheOneOptionalIDRead(t *testing.T) {
 	// Assert
 	if len(sites) != 1 || sites[0] != "workspaces.go" {
 		t.Fatalf("a lone workspace id that may be absent is read at %v, want only optionalWorkspaceID in workspaces.go", sites)
+	}
+}
+
+func TestARegisteredWorkspaceIsEmojiAckExactlyWhenTheEmojiAckSystemCreatedIt(t *testing.T) {
+	tests := []struct {
+		name       string
+		originator string
+		want       bool
+	}{
+		{name: "the emoji-ack system", originator: "emoji_ack", want: true},
+		{name: "the user or a workspace", originator: "user_or_workspace", want: false},
+		{name: "nothing created it", originator: "", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			dir := t.TempDir()
+
+			// Act
+			registered, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
+				Name: "made", Branch: "made", ParentBranch: "master", RepoDir: dir, Originator: tt.originator,
+			})
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RegisterWorkspace: %v", err)
+			}
+			read, err := s.Workspace(context.Background(), registered.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if registered.EmojiAck != tt.want || read.EmojiAck != tt.want {
+				t.Fatalf("EmojiAck registered %v, read back %v; want %v", registered.EmojiAck, read.EmojiAck, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheStoredEmojiAckSpellingIsTheLifecycleConfigs(t *testing.T) {
+	// Arrange
+	want := lifecycleconfig.OriginatorEmojiAck.String()
+
+	// Act
+	got := OriginatorEmojiAck
+
+	// Assert
+	if got != want {
+		t.Fatalf("OriginatorEmojiAck = %q, want lifecycleconfig's %q", got, want)
+	}
+}
+
+func TestARegistrationWhoseOriginatorCannotBeRecordedRegistersNothing(t *testing.T) {
+	// Arrange: the originators table is replaced by one that refuses every
+	// row, so the insert's own transaction fails at the originator.
+	s, log := testStore(t)
+	corrupt(t, s, `DROP TABLE workspace_originators`)
+	corrupt(t, s, `CREATE TABLE workspace_originators (workspace_id TEXT PRIMARY KEY, originator TEXT NOT NULL CHECK (originator = 'never'))`)
+	dir := t.TempDir()
+
+	// Act
+	_, _, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
+		Name: "made", Branch: "made", ParentBranch: "master", RepoDir: dir, Originator: "emoji_ack",
+	})
+
+	// Assert
+	if err == nil {
+		t.Fatal("RegisterWorkspace = nil, want the originator's failure")
+	}
+	if n := scalar[int](t, s, `SELECT COUNT(*) FROM workspaces`); n != 0 {
+		t.Fatalf("workspaces = %d, want none: the failed registration wrote its row", n)
+	}
+	var logged bool
+	for _, r := range log.Records() {
+		if r.Level == "error" && r.Operation == "daemon.wsm.register_workspace" && r.Context["originator"] == "emoji_ack" {
+			logged = true
+		}
+	}
+	if !logged {
+		t.Fatalf("no error record under daemon.wsm.register_workspace naming the originator; got %+v", log.Records())
 	}
 }

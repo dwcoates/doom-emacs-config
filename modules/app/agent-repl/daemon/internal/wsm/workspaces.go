@@ -61,7 +61,17 @@ const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_
 	`(SELECT MAX(turns.started_at) FROM turns WHERE turns.workspace_id = workspaces.id AND turns.thread_question IS NOT NULL), ` +
 	mergeTurnStartedColumn + `, ` +
 	landsIntoColumn + `, children_folded, ` + keepaliveRunColumn + `, surfaced, ` +
-	`EXISTS (SELECT 1 FROM deploy_mediators WHERE deploy_mediators.workspace_id = workspaces.id)`
+	`EXISTS (SELECT 1 FROM deploy_mediators WHERE deploy_mediators.workspace_id = workspaces.id), ` +
+	emojiAckColumn
+
+// emojiAckColumn derives EmojiAck: whether the workspace's recorded originator
+// (workspace_originators, keyed by its primary key) is the Slack emoji-ack
+// reaction system, spelled as lifecycleconfig.OriginatorEmojiAck.String().
+const emojiAckColumn = `EXISTS (SELECT 1 FROM workspace_originators WHERE workspace_originators.workspace_id = workspaces.id AND workspace_originators.originator = '` + OriginatorEmojiAck + `')`
+
+// OriginatorEmojiAck is the stored spelling of the emoji-ack originator
+// (lifecycleconfig.OriginatorEmojiAck.String()), which emojiAckColumn matches.
+const OriginatorEmojiAck = "emoji_ack"
 
 // mergeTurnStartedColumn derives MergeTurnStartedAt: the newest start of the
 // workspace's turns that began at or before its own merge-queue entry was
@@ -120,7 +130,7 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		owedFrom      sql.NullInt64
 		landsInto     sql.NullString
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced, &ws.DeployMediator); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced, &ws.DeployMediator, &ws.EmojiAck); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -257,7 +267,7 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 		s.log.Error(op, "refused a workspace dir that cannot be normalized", withError(dlog.Context{"dir": dir}, err))
 		return Workspace{}, false, err
 	}
-	fields := dlog.Context{"dir": normalized, "requested_dir": dir}
+	fields := dlog.Context{"dir": normalized, "requested_dir": dir, "originator": facts.Originator}
 	// BOTH DIRECTORIES ARE CHECKED BEFORE ANYTHING IS READ OR WRITTEN: the
 	// workspace's own, and the repository it would mint on first sight. A
 	// workspace row already standing for a temporary directory is refused too
@@ -411,9 +421,10 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 				return err
 			}
 		}
-		// BORN HIDDEN, BORN AN INTAKE, BORN PLACED: written in this very
-		// transaction, so no read of the roster ever finds the row visible,
-		// unmarked or unsectioned (the flash an after-the-fact write left).
+		// BORN HIDDEN, BORN AN INTAKE, BORN PLACED, BORN WITH ITS ORIGINATOR:
+		// written in this very transaction, so no read of the roster ever
+		// finds the row visible, unmarked, unsectioned or without its name's
+		// glyph (the flash an after-the-fact write left).
 		if facts.Hidden || facts.Intake {
 			if err := updateWorkspaceColumns(ctx, tx, out.ID, hideColumns(true, out.CreatedAt)...); err != nil {
 				return err
@@ -427,6 +438,12 @@ func (s *store) RegisterWorkspace(ctx context.Context, dir string, facts Registe
 			if err := insertIntakeRow(ctx, tx, out.ID, out.CreatedAt, facts.IntakeCard); err != nil {
 				return err
 			}
+		}
+		if facts.Originator != "" {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_originators (workspace_id, originator) VALUES (?, ?)`, out.ID, facts.Originator); err != nil {
+				return err
+			}
+			out.EmojiAck = facts.Originator == OriginatorEmojiAck
 		}
 		if placed != nil {
 			if err := applyPlacement(ctx, tx, out.ID, *placed); err != nil {

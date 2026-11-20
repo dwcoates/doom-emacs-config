@@ -2790,6 +2790,59 @@ and `--switched' to the workspace whose switch was requested of the daemon."
                      `(space :align-to ,(+ 4 (string-width "a-longer-name")))))
       (should (string-match-p "2m ago" (nth 2 line))))))
 
+;;;; The name's glyph
+
+(defun agent-repl-test-commands--acked-row (name id)
+  "Return a decoded roster row for NAME whose name wears the thumbs up."
+  (let ((row (agent-repl-test-commands--row name id 1)))
+    (plist-put row :name (list :text name :glyph (list :text "👍")))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-the-glyph-before-the-name ()
+  "An emoji-ack workspace's line draws its glyph after the mark, the
+candidate staying the name alone."
+  ;; Arrange
+  (let* ((row (agent-repl-test-commands--acked-row "acked" "id-a"))
+         (alist (list (cons "acked" (list :row row :section :repository :state :open))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let ((line (car (funcall affix '("acked")))))
+      ;; Assert
+      (should (equal (nth 0 line) "acked"))
+      (should (equal (nth 1 line) (concat (agent-repl-status-roster-mark :ready) " "
+                                          (agent-repl-name-glyph-string "👍")))))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-draws-no-glyph-for-a-plain-name ()
+  "A workspace whose name wears no glyph draws its mark alone before it."
+  ;; Arrange
+  (let* ((alist (list (cons "plain" (list :row (agent-repl-test-commands--row "plain" "id-p" 1)
+                                          :section :repository :state :open))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let ((line (car (funcall affix '("plain")))))
+      ;; Assert
+      (should (equal (nth 1 line) (concat (agent-repl-status-roster-mark :ready) " "))))))
+
+(ert-deftest agent-repl-test-commands-switch-affixation-aligns-past-the-glyph-and-name ()
+  "The columns align past the widest glyph and name together."
+  ;; Arrange
+  (let* ((row (agent-repl-test-commands--acked-row "acked" "id-a"))
+         (alist (list (cons "acked" (list :row row :section :repository :state :open))
+                      (cons "plain" (list :row nil :section nil :state :open))))
+         (affix (agent-repl--switch-affixation alist 0)))
+    ;; Act
+    (let ((line (car (funcall affix '("plain")))))
+      ;; Assert
+      (should (equal (get-text-property 0 'display (nth 2 line))
+                     `(space :align-to ,(+ 4 (string-width (concat "👍 " "acked")))))))))
+
+;; EVERY EMACS LIST OF NAMES DRAWS THE GLYPH THROUGH THE ONE HELPER.
+(ert-deftest agent-repl-test-commands-switch-name-glyph-is-the-shared-drawing ()
+  "The switcher's glyph is `agent-repl-name-glyph-string''s drawing."
+  (let ((entry (list :row '(:name (:text "acked" :glyph (:text "👍"))))))
+    (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) 0.6)))
+      (should (equal-including-properties (agent-repl--switch-name-glyph entry)
+                                          (agent-repl-name-glyph-string "👍" 0.6))))))
+
 (ert-deftest agent-repl-test-commands-switch-affixation-keeps-the-merged-purple ()
   "A merged row's state column keeps its purple over the annotation face."
   ;; Arrange

@@ -54,6 +54,7 @@ import {
   drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
+import { drawNameGlyph } from "../../src/name-glyph.js";
 import { codeOf } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -154,6 +155,24 @@ describe("the row's identity and hooks", () => {
   it("draws the display name", () => {
     const drawn = drawRosterRow(row({ id: "ws-1", name: "the rail" }), sidebarContext(), "R");
     expect(drawn.querySelector(".name")?.textContent).toBe("the rail");
+  });
+
+  it("draws the name's glyph before the name, the name's text the slug alone", () => {
+    // Act
+    const drawn = drawRosterRow(row({ id: "ws-1", name: "acked", glyph: "👍" }), sidebarContext(), "R");
+
+    // Assert
+    const glyph = drawn.querySelector(":scope > .row > .name-glyph");
+    expect([glyph?.outerHTML, glyph?.nextElementSibling?.classList.contains("name"), drawn.querySelector(".name")?.textContent]).toEqual([
+      drawNameGlyph({ text: "👍" }, "R.name.glyph").outerHTML,
+      true,
+      "acked",
+    ]);
+  });
+
+  it("draws no glyph for a name that wears none", () => {
+    const drawn = drawRosterRow(row({ id: "ws-1", name: "plain" }), sidebarContext(), "R");
+    expect(drawn.querySelector(".name-glyph")).toBeNull();
   });
 
   it("offers exactly one SelectInEditor click target", () => {
@@ -3106,6 +3125,17 @@ describe("drawRosterRowStandIn", () => {
       standIn.hasAttribute(STAND_IN_ATTRIBUTE),
       standIn.querySelector(":scope > .row > .name")?.textContent,
     ]).toEqual(["ws-1", true, "alpha"]);
+  });
+
+  it("draws the name's glyph before the name, as the row does", () => {
+    // Act
+    const standIn = drawRosterRowStandIn(openRow(row({ id: "ws-1", name: "acked", glyph: "👍" })), "row");
+
+    // Assert
+    expect([...standIn.querySelector(":scope > .row")!.children].map((el) => [el.className, el.textContent])).toEqual([
+      ["name-glyph", "👍"],
+      ["name", "acked"],
+    ]);
   });
 
   it("draws nothing of the row but its line", () => {

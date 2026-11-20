@@ -47,6 +47,7 @@
 (declare-function agent-repl--log "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--now-unix-ms "agent-repl-core" ())
 (declare-function agent-repl-annotation-column "agent-repl-core" (names gap))
+(declare-function agent-repl-name-glyph-string "agent-repl-core" (glyph &optional height))
 (defvar agent-repl--color-merging-purple)
 (declare-function agent-repl--info "agent-repl-core" (ws fmt &rest args))
 (declare-function agent-repl--warn "agent-repl-core" (ws fmt &rest args))
@@ -111,6 +112,7 @@
 (declare-function agent-repl-roster-row-ref "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-closed-p "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-name "agent-repl-roster" (row))
+(declare-function agent-repl-roster-row-name-glyph "agent-repl-roster" (row))
 (declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
 (declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
@@ -1115,18 +1117,25 @@ ALIST is `agent-repl--switch-display-alist''s.  Each line is its status
 mark, the name, and four columns aligned past the longest name: the
 state, how long ago its last turn ended, how many commits its branch
 holds past its merge-base, and its summary (`agent-repl--switch-summary').
-The name is the candidate's visible part (`agent-repl--switch-visible-name').
-The columns take `completions-annotations' beneath any face a column
-states itself, so the merged label and the summary keep their purple
+The name is the candidate's visible part (`agent-repl--switch-visible-name'),
+after the glyph the daemon puts before it (`agent-repl--switch-name-glyph'),
+which rides the prefix so the candidate stays the name alone; the columns
+align past the widest glyph and name together.  The columns take
+`completions-annotations' beneath any face a column states itself, so the
+merged label and the summary keep their purple
 \(`agent-repl--switch-state-label')."
-  (let* ((names (mapcar (lambda (cell) (agent-repl--switch-visible-name (car cell))) alist))
+  (let* ((names (mapcar (lambda (cell)
+                          (concat (agent-repl--switch-name-glyph (cdr cell))
+                                  (agent-repl--switch-visible-name (car cell))))
+                        alist))
          (column (agent-repl-annotation-column names 4)))
     (lambda (candidates)
       (mapcar
        (lambda (candidate)
          (let ((entry (cdr (assoc candidate alist))))
            (list candidate
-                 (concat (agent-repl--switch-mark entry) " ")
+                 (concat (agent-repl--switch-mark entry) " "
+                         (agent-repl--switch-name-glyph entry))
                  (concat (propertize " " 'display `(space :align-to ,column))
                          (let ((columns (format "%-14s %-12s %-11s %s"
                                                 (agent-repl--switch-state-label entry)
@@ -1137,6 +1146,14 @@ states itself, so the merged label and the summary keep their purple
                                                    'completions-annotations t columns)
                            columns)))))
        candidates))))
+
+(defun agent-repl--switch-name-glyph (entry)
+  "Return the drawn glyph before ENTRY's name, or \"\" when it wears none.
+The roster row's `agent-repl-roster-row-name-glyph', drawn by
+`agent-repl-name-glyph-string' at the name's own height.  A live local
+workspace no push carries yet has no row, so it wears none."
+  (let ((glyph (agent-repl-roster-row-name-glyph (plist-get entry :row))))
+    (if glyph (agent-repl-name-glyph-string glyph) "")))
 
 (defun agent-repl--switch-table (alist now-ms &optional main)
   "Return the completion table offering ALIST's names with their columns.

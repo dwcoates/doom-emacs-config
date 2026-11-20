@@ -2361,6 +2361,23 @@ message RosterRowRepository {
 
 // A row's display name. Never an identity or a join key.
 message RosterRowName {
+  // The workspace's registry name, verbatim: always a slug, never carrying
+  // the glyph drawn before it.
+  string text = 1;
+  // The glyph drawn immediately before the name, at the name's own size.
+  // UNSET for a workspace whose name wears none.
+  optional RosterRowNameGlyph glyph = 2;
+}
+
+// The glyph a row draws before its name: a mark of how the workspace came to
+// be, which the name itself never carries, because a name is a slug every
+// verb resolves. THE DAEMON DECIDES IT: a workspace the Slack emoji-ack
+// reaction system created (agentrepl.v1.WorkspaceOriginator.emoji_ack) wears
+// a thumbs up, and every other workspace none. A client draws the text
+// verbatim, sized and aligned with the name's own text, and never derives a
+// glyph of its own.
+message RosterRowNameGlyph {
+  // The glyph, verbatim: one emoji.
   string text = 1;
 }
 

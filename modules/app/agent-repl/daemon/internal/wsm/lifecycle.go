@@ -37,27 +37,6 @@ CREATE TABLE merge_finish_progress (
 );
 `
 
-// SetWorkspaceOriginator records ORIGINATOR (its config spelling,
-// lifecycleconfig.Originator.String) as who created workspace ID. A workspace
-// is created once, so a second record for it is a caller's defect and is
-// refused.
-func (s *store) SetWorkspaceOriginator(ctx context.Context, id WorkspaceID, originator string) error {
-	const op = "daemon.wsm.set_workspace_originator"
-	fields := dlog.Context{"workspace": string(id), "originator": originator}
-	if originator == "" {
-		err := fmt.Errorf("wsm: originator of %s: an originator is named", id)
-		s.log.Error(op, "refused an originator its caller should never have made", withError(fields, err))
-		return err
-	}
-	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
-			return err
-		}
-		_, err := tx.ExecContext(ctx, `INSERT INTO workspace_originators (workspace_id, originator) VALUES (?, ?)`, id, originator)
-		return err
-	})
-}
-
 // WorkspaceOriginator answers who created workspace ID, false when nothing
 // recorded it: a workspace registered rather than created (a main worktree,
 // one Emacs announced) or created before originators were recorded.

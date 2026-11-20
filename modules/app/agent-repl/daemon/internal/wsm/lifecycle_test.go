@@ -7,20 +7,27 @@ import (
 )
 
 func TestWorkspaceOriginatorIsReadBack(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ws := testWorkspace(t, s)
-
-	// Act
-	err := s.SetWorkspaceOriginator(context.Background(), ws.ID, "emoji_ack")
-
-	// Assert
-	if err != nil {
-		t.Fatalf("SetWorkspaceOriginator: %v", err)
+	tests := []struct {
+		name       string
+		originator string
+	}{
+		{name: "the emoji-ack system", originator: "emoji_ack"},
+		{name: "the user or a workspace", originator: "user_or_workspace"},
 	}
-	got, found, err := s.WorkspaceOriginator(context.Background(), ws.ID)
-	if err != nil || !found || got != "emoji_ack" {
-		t.Fatalf("WorkspaceOriginator = %q, %v, %v; want the recorded originator", got, found, err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := registerWithOriginator(t, s, tt.originator)
+
+			// Act
+			got, found, err := s.WorkspaceOriginator(context.Background(), ws.ID)
+
+			// Assert
+			if err != nil || !found || got != tt.originator {
+				t.Fatalf("WorkspaceOriginator = %q, %v, %v; want %q", got, found, err, tt.originator)
+			}
+		})
 	}
 }
 
@@ -38,43 +45,18 @@ func TestWorkspaceOriginatorOfARegisteredWorkspaceIsNotFound(t *testing.T) {
 	}
 }
 
-func TestWorkspaceOriginatorRefusals(t *testing.T) {
-	tests := []struct {
-		name     string
-		act      func(s *store, ws WorkspaceID) error
-		notFound bool
-	}{
-		{name: "an originator naming none is a defect", act: func(s *store, ws WorkspaceID) error {
-			return s.SetWorkspaceOriginator(context.Background(), ws, "")
-		}},
-		{name: "a second originator is refused", act: func(s *store, ws WorkspaceID) error {
-			if err := s.SetWorkspaceOriginator(context.Background(), ws, "emoji_ack"); err != nil {
-				t.Fatalf("first SetWorkspaceOriginator: %v", err)
-			}
-			return s.SetWorkspaceOriginator(context.Background(), ws, "user_or_workspace")
-		}},
-		{name: "an originator of an unknown workspace is not found", act: func(s *store, _ WorkspaceID) error {
-			return s.SetWorkspaceOriginator(context.Background(), WorkspaceID("absent"), "emoji_ack")
-		}, notFound: true},
+// registerWithOriginator registers a fresh workspace born with ORIGINATOR
+// recorded (RegisterFacts.Originator), as a create registers one.
+func registerWithOriginator(t *testing.T, s *store, originator string) Workspace {
+	t.Helper()
+	dir := t.TempDir()
+	ws, created, err := s.RegisterWorkspace(context.Background(), dir, RegisterFacts{
+		Name: "made", Branch: "made", ParentBranch: "master", RepoDir: dir, Originator: originator,
+	})
+	if err != nil || !created {
+		t.Fatalf("RegisterWorkspace = %v, created %v; want a new workspace", err, created)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, _ := testStore(t)
-			ws := testWorkspace(t, s)
-
-			// Act
-			err := tt.act(s, ws.ID)
-
-			// Assert
-			if err == nil {
-				t.Fatal("err = nil, want a refusal")
-			}
-			if tt.notFound != errors.Is(err, ErrNotFound) {
-				t.Fatalf("err = %v, want not-found %v", err, tt.notFound)
-			}
-		})
-	}
+	return ws
 }
 
 const (

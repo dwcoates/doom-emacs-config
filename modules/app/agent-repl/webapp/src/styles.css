@@ -1772,6 +1772,17 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    count: slightly smaller, in the muted grey, never shrunk away by a long name. */
 #ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--muted); flex: none; margin-left: 0.3em; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A NAME'S GLYPH (src/name-glyph.ts) is drawn at the name's own font size,
+   never larger (owner request, 2026-11-18): the emoji takes the line's em and
+   no line height of its own, so a row or a heading wearing one is exactly as
+   tall as one without. It never shrinks away beside a long name, and it keeps
+   the emoji's own colours, whatever ink the name beside it is drawn in. */
+.name-glyph {
+  font-size: 1em;
+  line-height: 1;
+  flex: none;
+  margin-right: 0.3em;
+}
 /* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository
    headers' ink while unviewed, the muted grey once viewed (below), and a cold
    gate strikes the name in a still dimmer grey whether or not it was viewed

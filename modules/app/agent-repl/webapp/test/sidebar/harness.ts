@@ -269,6 +269,8 @@ export function rosterStream(
 export function row(init: {
   id: string;
   name?: string;
+  /** The glyph the daemon puts before the name; omitted = the name wears none. */
+  glyph?: string;
   dir?: string;
   status?: MessageInitShape<typeof RosterRowSchema>["status"];
   current?: boolean;
@@ -298,7 +300,7 @@ export function row(init: {
 }): RosterRow {
   const built = create(RosterRowSchema, {
     workspace: { workspace: { id: init.id, dir: init.dir ?? `/w/${init.id}` } },
-    name: { text: init.name ?? init.id },
+    name: { text: init.name ?? init.id, ...(init.glyph === undefined ? {} : { glyph: { text: init.glyph } }) },
     status: init.status ?? { case: "ready", value: {} },
     current: { current: init.current ?? false },
     closed: { closed: init.closed ?? false },

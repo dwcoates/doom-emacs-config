@@ -274,6 +274,12 @@ reach-through lives here once instead of at every reader."
   "Return ROW's display name text.  Never an identity."
   (plist-get (plist-get row :name) :text))
 
+(defun agent-repl-roster-row-name-glyph (row)
+  "Return the glyph ROW's name wears before it, or nil when it wears none.
+The daemon's `RosterRowNameGlyph': a thumbs up on an emoji-ack workspace.
+Never part of the name, which stays the slug every verb resolves."
+  (plist-get (plist-get (plist-get row :name) :glyph) :text))
+
 (defun agent-repl-roster-row-status (row)
   "Return ROW's status arm keyword — the set arm IS the status."
   (plist-get (plist-get row :status) :arm))

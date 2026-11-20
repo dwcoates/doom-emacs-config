@@ -965,9 +965,6 @@ type DB interface {
 	// WorkspaceSlackOrigin answers the Slack thread a workspace was created
 	// for, false when it was created for none.
 	WorkspaceSlackOrigin(ctx context.Context, id WorkspaceID) (string, bool, error)
-	// SetWorkspaceOriginator records who created a workspace, once, at its
-	// creation (lifecycle.go).
-	SetWorkspaceOriginator(ctx context.Context, id WorkspaceID, originator string) error
 	// WorkspaceOriginator answers who created a workspace, false when nothing
 	// recorded it.
 	WorkspaceOriginator(ctx context.Context, id WorkspaceID) (string, bool, error)

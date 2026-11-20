@@ -144,6 +144,11 @@ type Workspace struct {
 	// workspace, hidden or not (owner ruling, 2026-11-17), so a deploy's check
 	// never waits on a cold cache.
 	DeployMediator bool
+	// EmojiAck reports that the Slack emoji-ack reaction system created the
+	// workspace (its recorded originator, workspace_originators). READ-ONLY,
+	// derived in the shared select list, so the record and the originator can
+	// never disagree. A workspace with no recorded originator is not one.
+	EmojiAck bool
 	// Current reports whether the workspace is the user's selection
 	// (SetCurrent): the one they are looking at. At most one workspace is.
 	Current bool
@@ -435,6 +440,14 @@ type RegisterFacts struct {
 	// question's), written beside its intake_workspaces row in the insert's
 	// transaction (intake_cards). Set only with Intake.
 	IntakeCard *IntakeCard
+	// Originator records who created a MINTED workspace (its config spelling,
+	// lifecycleconfig.Originator.String) in the insert's own transaction
+	// (workspace_originators), so no read of the roster ever finds a created
+	// row without it: the name's emoji-ack glyph is drawn from the first
+	// publication on. Empty for a workspace nothing created (one Emacs
+	// announced); an announcement of an already-registered workspace ignores
+	// it.
+	Originator string
 	// Placement files a MINTED workspace into a subsection (or a new one) in
 	// the insert's own transaction. Refused for a child or a merge workspace
 	// (ErrPlacementOnChild, ErrPlacementOnMerge), for an unknown subsection

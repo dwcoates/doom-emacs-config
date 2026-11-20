@@ -1790,3 +1790,48 @@ func TestThePublishedParkCarriesTheNextKeepalive(t *testing.T) {
 		})
 	}
 }
+
+func TestTheWorkspaceNameWearsTheNamingsGlyph(t *testing.T) {
+	tests := []struct {
+		name      string
+		glyph     string
+		wantGlyph *frontendv1.TopbarWorkspaceNameGlyph
+	}{
+		{name: "a naming with a glyph draws it before the name", glyph: "👍", wantGlyph: &frontendv1.TopbarWorkspaceNameGlyph{Text: "👍"}},
+		{name: "a naming with none draws the name alone", glyph: "", wantGlyph: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", Glyph: tt.glyph, ConfigDir: "/Users/dev/.claude"})
+
+			// Assert
+			name := h.view(t).GetWorkspaceName()
+			if name.GetText() != "fix-flaky-reconnect" {
+				t.Fatalf("workspace name = %q, want the registry name alone", name.GetText())
+			}
+			if !proto.Equal(name.GetGlyph(), tt.wantGlyph) {
+				t.Fatalf("workspace name glyph = %v, want %v", name.GetGlyph(), tt.wantGlyph)
+			}
+		})
+	}
+}
+
+func TestSetNameKeepsTheNamesGlyph(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+	h.r.SetNaming(testWS, Naming{Name: "fix-flaky-reconnect", Glyph: "👍", ConfigDir: "/Users/dev/.claude"})
+
+	// Act
+	h.r.SetName(testWS, "renamed-workspace")
+
+	// Assert
+	if got := h.view(t).GetWorkspaceName().GetGlyph().GetText(); got != "👍" {
+		t.Fatalf("workspace name glyph = %q, want the thumbs up kept across the rename", got)
+	}
+}
