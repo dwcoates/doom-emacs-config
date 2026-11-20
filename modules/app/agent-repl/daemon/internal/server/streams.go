@@ -856,9 +856,7 @@ func (s *server) reloadOnly(
 	out streamSink[agentreplv1.WatchDaemonResponse],
 ) error {
 	s.acceptStream(ctx, "WatchDaemon")
-	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
-		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: verdict.ModuleRoot, Build: verdict.Fresh},
-	}}
+	push := reloadElispPush(verdict.ModuleRoot, verdict.Fresh)
 	fields := dlog.Context{
 		"stream": stream, "build": verdict.Fresh, "module_root": verdict.ModuleRoot,
 		"running": running, "trigger": deploy.ElispOnConnect,

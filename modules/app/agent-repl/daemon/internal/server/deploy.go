@@ -205,9 +205,7 @@ func (s *server) PushReloadElisp(streams []string, moduleRoot, build string) int
 	for _, id := range streams {
 		want[id] = true
 	}
-	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
-		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: moduleRoot, Build: build},
-	}}
+	push := reloadElispPush(moduleRoot, build)
 	return s.pushToEditors("daemon.server.reload_elisp", push,
 		func(w *daemonWatcher) bool { return want[w.id] },
 		func(w *daemonWatcher) {
@@ -217,6 +215,15 @@ func (s *server) PushReloadElisp(streams []string, moduleRoot, build string) int
 			})
 			w.elispBuild = build
 		})
+}
+
+// reloadElispPush is the reload_elisp frame naming the checkout MODULEROOT
+// and its elisp BUILD: the one shape both a deploy's push and a stale
+// stream's verdict send.
+func reloadElispPush(moduleRoot, build string) *agentreplv1.WatchDaemonResponse {
+	return &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
+		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: moduleRoot, Build: build},
+	}}
 }
 
 // pushToEditors hands PUSH to every Emacs WatchDaemon stream WANT names, on

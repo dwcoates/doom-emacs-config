@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -731,5 +733,47 @@ func TestWebStreamsTellTheHotReloadTheirBuilds(t *testing.T) {
 				t.Fatalf("told %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestReloadElispPushNamesTheRootAndTheBuild(t *testing.T) {
+	// Arrange / Act
+	push := reloadElispPush("/root", "fresh")
+
+	// Assert
+	if got := push.GetReloadElisp(); got.GetModuleRoot() != "/root" || got.GetBuild() != "fresh" {
+		t.Fatalf("push = %v, want reload_elisp{/root, fresh}", push)
+	}
+}
+
+func TestEveryReloadElispFrameIsBuiltByReloadElispPush(t *testing.T) {
+	// Arrange: the server's sources, but for the helper's own file.
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatalf("glob: %v", err)
+	}
+
+	// Act
+	var handRolled []string
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatalf("read %s: %v", file, err)
+		}
+		n := strings.Count(string(body), "WatchDaemonResponse_ReloadElisp{")
+		if file == "deploy.go" {
+			n-- // reloadElispPush itself
+		}
+		if n > 0 {
+			handRolled = append(handRolled, file)
+		}
+	}
+
+	// Assert
+	if len(handRolled) != 0 {
+		t.Fatalf("files building reload_elisp by hand: %v; use reloadElispPush", handRolled)
 	}
 }
