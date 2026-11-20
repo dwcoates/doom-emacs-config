@@ -950,9 +950,18 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		o.deps.Log.Global().Warn(opMediation, "refused a decision on a deploy a fix was dispatched for already", fields)
 		return refuse(ArmNoMediationOwed, ws, "a fix is dispatched for this deploy already; its deploy owes the next check")
 	}
-	if m.Escalated() {
+	// AN ESCALATED DEPLOY THE MEDIATOR FINDS HEALTHY IS APPROVED BY THE
+	// MEDIATOR (owner ruling, 2026-11-19): the checks are automatic, and a
+	// deploy that broke nothing is never left waiting on the user, whoever
+	// escalated it (the daemon's own escalation of an undecided turn held a
+	// healthy deploy until the user released it by hand). Only an approval
+	// ends an escalation here: a fix of one lands through the finish.
+	if m.Escalated() && d.Kind != MediationApprove {
 		o.deps.Log.Global().Warn(opMediation, "refused a decision on a deploy escalated already", fields)
-		return refuse(ArmNoMediationOwed, ws, "this deploy is escalated to the user already; the queue waits for them")
+		return refuse(ArmNoMediationOwed, ws, "this deploy is escalated already; approve it if it broke nothing, or fix it and finish")
+	}
+	if m.Escalated() {
+		o.deps.Log.Global().Info(opMediation, "the mediator approves a deploy that was escalated; its escalation ends with the approval", fields)
 	}
 	window, err := o.toldWindow(ctx, q.key, fields)
 	if err != nil {

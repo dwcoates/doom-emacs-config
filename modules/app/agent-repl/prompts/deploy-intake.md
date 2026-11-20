@@ -1,7 +1,7 @@
 <!-- used by: daemon internal/merge/mediation.go (intakeRound); placeholders: {{deploy_started}}, {{ending}}, {{window_started}}, {{repo_dir}}, {{version}}, {{gate_log}}, {{digest}} -->
 A deploy of `{{repo_dir}}` began at {{deploy_started}} ({{version}}). {{ending}} The merge queue lands nothing past it until you decide it.
 
-Your job: find out whether this deploy broke anything, fix what it broke, and decide the deploy. A problem that was there before this deploy is not yours to address: name it on the approval.
+Your job: find out whether this deploy broke anything, fix what it broke, and decide the deploy. A problem that was there before this deploy is not yours to address: name it on the approval. The decision is yours alone: you need no approval from the user, and a deploy that broke nothing is approved at once and never put before them.
 
 Investigate cheaply: start from the digest, and read whole records only for the sites that look like this deploy's doing.
 

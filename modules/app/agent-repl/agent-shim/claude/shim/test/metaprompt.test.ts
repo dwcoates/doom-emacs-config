@@ -256,6 +256,20 @@ describe("this repository's committed metaprompt", () => {
     expect(text).toContain("`approve`: the deploy broke nothing, or everything found is pre-existing, transient or ignorable");
   });
 
+  it("has the deploy mediator decide every deploy itself, never needing the user's approval", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-19: the checks are automatic; a healthy
+    // deploy is approved by the mediator and never surfaced to the user,
+    // even one whose check was escalated already.
+    expect(text).toContain("### The mediator decides every deploy itself, and NEVER needs the user's approval");
+    expect(text).toContain("No approval, confirmation or go-ahead from the user is needed for any of it, ever. NEVER ask for one, and NEVER wait for one.");
+    expect(text).toContain("It is NEVER surfaced to the user for approval, NEVER escalated, and NEVER left held for the user to release.");
+    expect(text).toContain("once the mediator finds that deploy broke nothing, it approves it itself");
+  });
+
   it("has the deploy mediator make a settled fix before the deploy, never offering it for after", () => {
     // Arrange
     const home = homeOnThisRepository();

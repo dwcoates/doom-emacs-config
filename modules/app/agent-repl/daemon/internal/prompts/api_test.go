@@ -742,8 +742,12 @@ func TestTheRoutingBriefPassesAMessageThroughOnAnyDoubt(t *testing.T) {
 func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
 	// Arrange
 	want := []string{
-		"settle the requirements with the user",
-		"wait for their ruling before changing anything",
+		// OWNER RULING, 2026-11-19: a deploy that broke nothing is approved
+		// by the mediator itself, escalated or not; the user settles only a
+		// problem the deploy caused whose fix is theirs to decide.
+		"If it broke nothing, or everything above was there before it, approve it now with `agent-repld merge-queue mediation approve`",
+		"you need no approval from the user for it, and you must not ask for one or wait for one",
+		"wait for their ruling on that fix",
 		"finish at once, without being asked: `agent-repld workspace finished here -version-part patch",
 		"Your finish does not join the merge queue",
 		"lands the branch directly on the main branch and deploys it",
