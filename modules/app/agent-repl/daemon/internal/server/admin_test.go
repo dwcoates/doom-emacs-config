@@ -1134,6 +1134,15 @@ func TestUpdateMergeQueueRecordsWhoAsked(t *testing.T) {
 			want: dlog.Context{"action": "evict", "requested_by": merge.RequestedByAgent.String(), "asker": "ws-asker", "target": ref().GetId()},
 		},
 		{
+			name:      "a workspace's agent moving a merge to the front",
+			requester: agent(),
+			action: func() *agentreplv1.UpdateMergeQueueRequest {
+				return &agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: &agentreplv1.UpdateMergeQueueMove{
+					Workspace: ref(), Place: &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}}}}
+			},
+			want: dlog.Context{"action": "move", "requested_by": merge.RequestedByAgent.String(), "asker": "ws-asker", "target": ref().GetId()},
+		},
+		{
 			name:      "the user pausing every queue",
 			requester: userRequester(),
 			action: func() *agentreplv1.UpdateMergeQueueRequest {
@@ -1439,6 +1448,130 @@ func TestUpdateMergeQueueRefusesAMalformedMediation(t *testing.T) {
 			// Assert.
 			if got := connectCode(t, err); got != connect.CodeInvalidArgument {
 				t.Fatalf("code = %v, want InvalidArgument", got)
+			}
+		})
+	}
+}
+
+// moveWith is a move arm request putting ref()'s merge on PLACE.
+func moveWith(place func(*agentreplv1.UpdateMergeQueueMove)) *agentreplv1.UpdateMergeQueueRequest {
+	move := &agentreplv1.UpdateMergeQueueMove{Workspace: ref()}
+	place(move)
+	return &agentreplv1.UpdateMergeQueueRequest{Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: move}}
+}
+
+// TestMovePutsTheNamedMergeOnItsPlace pins that each place of a move reaches
+// the orchestrator for the workspace it names, as the orchestrator's place.
+func TestMovePutsTheNamedMergeOnItsPlace(t *testing.T) {
+	tests := []struct {
+		name  string
+		place func(*agentreplv1.UpdateMergeQueueMove)
+		want  merge.MovePlace
+	}{
+		{name: "front", want: merge.MovePlace{Kind: wsm.MergePlaceFront}, place: func(m *agentreplv1.UpdateMergeQueueMove) {
+			m.Place = &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}
+		}},
+		{name: "back", want: merge.MovePlace{Kind: wsm.MergePlaceBack}, place: func(m *agentreplv1.UpdateMergeQueueMove) {
+			m.Place = &agentreplv1.UpdateMergeQueueMove_Back{Back: &agentreplv1.UpdateMergeQueueMoveBack{}}
+		}},
+		{name: "behind", want: merge.MovePlace{Kind: wsm.MergePlaceBehind, Behind: "two"}, place: func(m *agentreplv1.UpdateMergeQueueMove) {
+			m.Place = &agentreplv1.UpdateMergeQueueMove_Behind{Behind: &agentreplv1.UpdateMergeQueueMoveBehind{Merge: "two"}}
+		}},
+		{name: "index", want: merge.MovePlace{Kind: wsm.MergePlaceIndex, Index: 3}, place: func(m *agentreplv1.UpdateMergeQueueMove) {
+			m.Place = &agentreplv1.UpdateMergeQueueMove_Index{Index: &agentreplv1.UpdateMergeQueueMoveIndex{Index: 3}}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(moveWith(tt.place)))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+			if resp.Msg.GetSuccess() == nil {
+				t.Fatalf("result = %v, want success", resp.Msg.GetResult())
+			}
+			if want := []fakePlace{{ws: ids.WorkspaceID(ref().GetId()), place: tt.want}}; !slices.Equal(h.Merge.places, want) {
+				t.Fatalf("places = %v, want %v", h.Merge.places, want)
+			}
+		})
+	}
+}
+
+// TestMoveAnswersEachRefusalAsItsArm pins that every refusal of a move is
+// answered as its typed arm, carrying its evidence.
+func TestMoveAnswersEachRefusalAsItsArm(t *testing.T) {
+	tests := []struct {
+		name    string
+		refusal *merge.RefusalError
+		wantArm func(*agentreplv1.UpdateMergeQueueResponse) bool
+	}{
+		{name: "no waiting merge", refusal: &merge.RefusalError{Arm: merge.ArmNoSuchQueuedMerge, Reason: "nothing waiting"},
+			wantArm: func(r *agentreplv1.UpdateMergeQueueResponse) bool { return r.GetError().GetNoSuchQueuedMerge() != nil }},
+		{name: "behind a merge not in line", refusal: &merge.RefusalError{Arm: merge.ArmPlacementBehindNotInLine, Reason: "none", Fields: map[string]any{"behind": "nowhere"}},
+			wantArm: func(r *agentreplv1.UpdateMergeQueueResponse) bool {
+				return r.GetError().GetPlacementBehindNotInLine().GetBehind() == "nowhere"
+			}},
+		{name: "an index out of range", refusal: &merge.RefusalError{Arm: merge.ArmIndexOutOfRange, Reason: "past the end", Fields: map[string]any{"index": uint32(5), "waiting": uint32(2)}},
+			wantArm: func(r *agentreplv1.UpdateMergeQueueResponse) bool {
+				arm := r.GetError().GetIndexOutOfRange()
+				return arm.GetIndex() == 5 && arm.GetWaiting() == 2
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.Merge.moveErr = tt.refusal
+
+			// Act.
+			resp, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(moveWith(func(m *agentreplv1.UpdateMergeQueueMove) {
+				m.Place = &agentreplv1.UpdateMergeQueueMove_Back{Back: &agentreplv1.UpdateMergeQueueMoveBack{}}
+			})))
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("UpdateMergeQueue: %v", err)
+			}
+			if !tt.wantArm(resp.Msg) {
+				t.Fatalf("result = %v, want the %s arm", resp.Msg.GetResult(), tt.refusal.Arm)
+			}
+		})
+	}
+}
+
+// TestMoveMissingItsWorkspaceOrPlaceIsInvalid pins the validation of a move:
+// it names a workspace and a place, and a place behind names a merge.
+func TestMoveMissingItsWorkspaceOrPlaceIsInvalid(t *testing.T) {
+	tests := []struct {
+		name string
+		move *agentreplv1.UpdateMergeQueueMove
+	}{
+		{name: "no workspace", move: &agentreplv1.UpdateMergeQueueMove{Place: &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}}},
+		{name: "no place", move: &agentreplv1.UpdateMergeQueueMove{Workspace: ref()}},
+		{name: "behind no merge", move: &agentreplv1.UpdateMergeQueueMove{Workspace: ref(),
+			Place: &agentreplv1.UpdateMergeQueueMove_Behind{Behind: &agentreplv1.UpdateMergeQueueMoveBehind{Merge: " "}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+
+			// Act.
+			_, err := h.Client.UpdateMergeQueue(context.Background(), connect.NewRequest(&agentreplv1.UpdateMergeQueueRequest{
+				Requester: userRequester(), Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: tt.move}}))
+
+			// Assert.
+			if got := connect.CodeOf(err); got != connect.CodeInvalidArgument {
+				t.Fatalf("code = %v, want InvalidArgument", got)
+			}
+			if len(h.Merge.places) != 0 {
+				t.Fatalf("places = %v, want none", h.Merge.places)
 			}
 		})
 	}

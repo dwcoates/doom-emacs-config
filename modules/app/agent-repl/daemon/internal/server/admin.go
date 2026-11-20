@@ -147,6 +147,13 @@ func (s *server) UpdateMergeQueue(
 		return connect.NewResponse(resp), nil
 	}
 
+	if move := req.Msg.GetMove(); move != nil {
+		return s.actOnQueuedMerge(ctx, rpc, move.GetWorkspace(), resp, func(ws ids.WorkspaceID) error {
+			_, err := s.deps.Merge.Place(ctx, ws, movePlaceOf(move))
+			return err
+		})
+	}
+
 	var scope *merge.RepositoryScope
 	var err error
 	if pause := req.Msg.GetPause(); pause != nil {
@@ -229,6 +236,8 @@ func mergeQueueActionName(req *agentreplv1.UpdateMergeQueueRequest) string {
 		return "move_down"
 	case *agentreplv1.UpdateMergeQueueRequest_MoveTo:
 		return "move_to"
+	case *agentreplv1.UpdateMergeQueueRequest_Move:
+		return "move"
 	case *agentreplv1.UpdateMergeQueueRequest_Mediation:
 		return "mediation"
 	case *agentreplv1.UpdateMergeQueueRequest_ReleaseEscalation:
@@ -256,7 +265,26 @@ func mergeQueueTarget(req *agentreplv1.UpdateMergeQueueRequest) *workspacev1.Wor
 	if to := req.GetMoveTo(); to != nil {
 		return to.GetWorkspace()
 	}
+	if move := req.GetMove(); move != nil {
+		return move.GetWorkspace()
+	}
 	return nil
+}
+
+// movePlaceOf reads a move arm's place as the orchestrator's. Validation
+// refused an unset place before this.
+func movePlaceOf(move *agentreplv1.UpdateMergeQueueMove) merge.MovePlace {
+	switch place := move.GetPlace().(type) {
+	case *agentreplv1.UpdateMergeQueueMove_Front:
+		return merge.MovePlace{Kind: wsm.MergePlaceFront}
+	case *agentreplv1.UpdateMergeQueueMove_Back:
+		return merge.MovePlace{Kind: wsm.MergePlaceBack}
+	case *agentreplv1.UpdateMergeQueueMove_Behind:
+		return merge.MovePlace{Kind: wsm.MergePlaceBehind, Behind: place.Behind.GetMerge()}
+	case *agentreplv1.UpdateMergeQueueMove_Index:
+		return merge.MovePlace{Kind: wsm.MergePlaceIndex, Index: int(place.Index.GetIndex())}
+	}
+	panic(fmt.Sprintf("server: UpdateMergeQueueMove place %T past validation has no place", move.GetPlace()))
 }
 
 // moveToPlaceOf reads a move_to arm's place as the anchor it names and the

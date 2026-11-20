@@ -1316,6 +1316,7 @@ type fakeMerge struct {
 	pauser *merge.Pauser
 	// movesTo are the moves to a place asked of the queue, in order.
 	movesTo             []fakeMoveTo
+	places              []fakePlace
 	hardStopScope       *merge.RepositoryScope
 	hardStopped         bool
 	answerQueueOfferErr error
@@ -1527,6 +1528,16 @@ type fakeMoveTo struct {
 
 func (f *fakeMerge) MoveTo(_ context.Context, ws, anchor ids.WorkspaceID, side wsm.MergeSide) (bool, error) {
 	f.movesTo = append(f.movesTo, fakeMoveTo{ws: ws, anchor: anchor, side: side})
+	return f.moveErr == nil, f.moveErr
+}
+
+type fakePlace struct {
+	ws    ids.WorkspaceID
+	place merge.MovePlace
+}
+
+func (f *fakeMerge) Place(_ context.Context, ws ids.WorkspaceID, place merge.MovePlace) (bool, error) {
+	f.places = append(f.places, fakePlace{ws: ws, place: place})
 	return f.moveErr == nil, f.moveErr
 }
 
