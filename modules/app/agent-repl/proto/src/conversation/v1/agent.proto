@@ -309,6 +309,36 @@ message AgentFailure {
     // weaker account. `errors` above carries the producer's wording.
     SessionQueryDied query_died = 19;
   }
+
+  // AGENT-REPL RETRIES THIS FAILURE: the producer's own vendor-error retry
+  // (SessionVendorErrorRetry) decided, at this very terminal, that a retry
+  // follows it. UNSET when no retry follows: the failure is not one agent-repl
+  // retries, or its retry chain gave up here (its window ran out, or a usage
+  // wait ended), so this terminal is the failure that stands.
+  //
+  // STATED ON THE TERMINAL ITSELF, AND THAT IS THE POINT. The retry's schedule
+  // travels on the session stream, which has no ordering against the turn's
+  // own stream, and a replayed turn has only its terminal. A consumer that
+  // waited for the schedule to learn whether a failure is retried would draw
+  // the failure first and take it back after; the promise here is known the
+  // moment the terminal is. A consumer draws no failure for a terminal that
+  // carries it: the retry continues the work, and a retry that succeeds leaves
+  // nothing to report. Should the chain end later without its retry ever being
+  // made, the session states SessionVendorErrorRetryAbandoned naming this
+  // turn, and the failure is drawn then.
+  //
+  // Set only on a main agent's terminal: agent-repl retries no subagent.
+  optional AgentFailureRetryPromised retry_promised = 32;
+}
+
+// The retry agent-repl promised a failed turn (AgentFailure.retry_promised).
+// It names which retry follows rather than when: the instant, or the wait for
+// the network, is the session's schedule (SessionVendorErrorRetry), which
+// changes after the terminal is written.
+message AgentFailureRetryPromised {
+  // Which retry of the chain follows this failure, 1 for the first after the
+  // chain's first failure.
+  uint32 attempt = 1;
 }
 
 // An account-level block stopped the run.

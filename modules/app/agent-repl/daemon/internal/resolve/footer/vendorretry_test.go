@@ -8,6 +8,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/health"
 	"agent-repld/internal/sourcescan"
 )
 
@@ -360,5 +361,65 @@ func TestEveryUntimedRetryArmGoesThroughObserveUntimedRetry(t *testing.T) {
 	// Assert.
 	if nows != 1 || awaits != 1 || handNows != 0 || handAwaits != 0 {
 		t.Fatalf("untimed retry builds = %d/%d, hand-built = %d/%d, want every untimed arm through observeUntimedRetry", nows, awaits, handNows, handAwaits)
+	}
+}
+
+// vendorRetryAbandoned is the shim stating the retry promised to TURN was
+// abandoned.
+func vendorRetryAbandoned(turn, cause string) *conversationv1.SessionUpdate {
+	return &conversationv1.SessionUpdate{Update: &conversationv1.SessionUpdate_VendorErrorRetry{
+		VendorErrorRetry: &conversationv1.SessionVendorErrorRetry{
+			Stated: &conversationv1.SessionVendorErrorRetry_Abandoned{Abandoned: &conversationv1.SessionVendorErrorRetryAbandoned{
+				FailedTurn: &conversationv1.TurnId{Value: turn}, Cause: cause}},
+		},
+	}}
+}
+
+func TestAnAbandonedRetryTakesTheCountdownDown(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	connected(h)
+	overloadFailedTurn(h)
+	h.r.OnSessionUpdate(testWS, vendorRetryScheduled(1, instant.Add(30*time.Second), "Overloaded"))
+
+	// Act
+	h.r.OnSessionUpdate(testWS, vendorRetryAbandoned("turn-1", "the prompt queue is closed"))
+
+	// Assert: no retry is pending, so the failed turn's own sentence stands again.
+	if retryLine(t, h) != nil || vendorTurnLine(h, t) == nil {
+		t.Fatalf("activity = %q, want the failed turn's own line back", lineName(t, h))
+	}
+}
+
+func TestTheOfflineLineSaysWhetherARetryWaitsForTheNetwork(t *testing.T) {
+	tests := []struct {
+		name   string
+		stated *conversationv1.SessionUpdate
+		want   *frontendv1.FooterStatusActivityNetworkOfflineRetry
+	}{
+		{name: "the first retry waits for the network", stated: vendorRetryAwaitingNetwork(1, "ENOTFOUND"), want: &frontendv1.FooterStatusActivityNetworkOfflineRetry{Attempt: 1}},
+		{name: "a later retry waits for the network", stated: vendorRetryAwaitingNetwork(3, "ENOTFOUND"), want: &frontendv1.FooterStatusActivityNetworkOfflineRetry{Attempt: 3}},
+		{name: "a timed retry draws no clause", stated: vendorRetryScheduled(1, instant.Add(30*time.Second), "Overloaded"), want: nil},
+		{name: "a retry being made draws no clause", stated: vendorRetryAttempting(1, "ENOTFOUND"), want: nil},
+		{name: "no retry pending draws no clause", stated: vendorRetryUnscheduled(), want: nil},
+		{name: "an abandoned retry draws no clause", stated: vendorRetryAbandoned("turn-1", "the shim stood down"), want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			connected(h)
+			overloadFailedTurn(h)
+			h.r.OpenFault(testWS, faultOf(t, "net", health.KindNetworkUnreachable, false))
+
+			// Act
+			h.r.OnSessionUpdate(testWS, tt.stated)
+
+			// Assert
+			got := h.view(t).GetStrip().GetStatus().GetNetworkFault().GetActivity().GetSalient().GetOffline().GetRetry()
+			if (got == nil) != (tt.want == nil) || got.GetAttempt() != tt.want.GetAttempt() {
+				t.Fatalf("offline retry clause = %+v, want %+v", got, tt.want)
+			}
+		})
 	}
 }

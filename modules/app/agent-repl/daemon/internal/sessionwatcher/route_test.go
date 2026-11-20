@@ -1166,10 +1166,11 @@ func TestRouteSessionUpdateArms(t *testing.T) {
 			want:   []string{"footer.OnSessionUpdate"},
 		},
 		{
-			// The countdown, and the hold it lifts, are the footer's.
-			name:   "agent-repl's scheduled vendor-error retry is the footer's alone",
+			// The countdown, and the hold it lifts, are the footer's; an
+			// abandoned retry draws the failure the feed withheld.
+			name:   "agent-repl's vendor-error retry is the footer's, then the feed's",
 			update: vendorErrorRetryUpdate(),
-			want:   []string{"footer.OnSessionUpdate"},
+			want:   []string{"footer.OnSessionUpdate", "feed.OnSessionUpdate"},
 		},
 		{
 			name:   "a network-resume outcome is the footer's alone",

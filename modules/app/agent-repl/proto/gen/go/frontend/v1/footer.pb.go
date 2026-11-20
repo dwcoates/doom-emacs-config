@@ -19032,7 +19032,13 @@ func (*FooterStatusNetworkFaultSalient_Notification) isFooterStatusNetworkFaultS
 type FooterStatusActivityNetworkOffline struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Drawn verbatim. Never empty.
-	Text          string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	Text string `protobuf:"bytes,1,opt,name=text,proto3" json:"text,omitempty"`
+	// AGENT-REPL'S RETRY OF A FAILED TURN WAITS FOR THE NETWORK
+	// (conversation.v1.SessionVendorErrorRetryAwaitingNetwork): the line goes
+	// on to say the turn is retried when the network returns. UNSET when no
+	// retry waits. The feed draws no failure for a turn whose retry is pending,
+	// so this clause is where the failed turn is accounted for.
+	Retry         *FooterStatusActivityNetworkOfflineRetry `protobuf:"bytes,2,opt,name=retry,proto3,oneof" json:"retry,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -19072,6 +19078,59 @@ func (x *FooterStatusActivityNetworkOffline) GetText() string {
 		return x.Text
 	}
 	return ""
+}
+
+func (x *FooterStatusActivityNetworkOffline) GetRetry() *FooterStatusActivityNetworkOfflineRetry {
+	if x != nil {
+		return x.Retry
+	}
+	return nil
+}
+
+// The offline line's "retrying when the network returns" clause.
+type FooterStatusActivityNetworkOfflineRetry struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Which retry of the chain waits, 1 for the first after the failure.
+	Attempt       uint32 `protobuf:"varint,1,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FooterStatusActivityNetworkOfflineRetry) Reset() {
+	*x = FooterStatusActivityNetworkOfflineRetry{}
+	mi := &file_frontend_v1_footer_proto_msgTypes[285]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FooterStatusActivityNetworkOfflineRetry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FooterStatusActivityNetworkOfflineRetry) ProtoMessage() {}
+
+func (x *FooterStatusActivityNetworkOfflineRetry) ProtoReflect() protoreflect.Message {
+	mi := &file_frontend_v1_footer_proto_msgTypes[285]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FooterStatusActivityNetworkOfflineRetry.ProtoReflect.Descriptor instead.
+func (*FooterStatusActivityNetworkOfflineRetry) Descriptor() ([]byte, []int) {
+	return file_frontend_v1_footer_proto_rawDescGZIP(), []int{285}
+}
+
+func (x *FooterStatusActivityNetworkOfflineRetry) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
 }
 
 var File_frontend_v1_footer_proto protoreflect.FileDescriptor
@@ -20084,9 +20143,13 @@ const file_frontend_v1_footer_proto_rawDesc = "" +
 	"\aoffline\x18\x02 \x01(\v2/.frontend.v1.FooterStatusActivityNetworkOfflineH\x00R\aoffline\x12A\n" +
 	"\x06update\x18\x03 \x01(\v2'.frontend.v1.FooterStatusActivityUpdateH\x00R\x06update\x12S\n" +
 	"\fnotification\x18\x04 \x01(\v2-.frontend.v1.FooterStatusActivityNotificationH\x00R\fnotificationB\x06\n" +
-	"\x04kindJ\x04\b\x05\x10\x06R\x0econtext_budget\"8\n" +
+	"\x04kindJ\x04\b\x05\x10\x06R\x0econtext_budget\"\x93\x01\n" +
 	"\"FooterStatusActivityNetworkOffline\x12\x12\n" +
-	"\x04text\x18\x01 \x01(\tR\x04text*a\n" +
+	"\x04text\x18\x01 \x01(\tR\x04text\x12O\n" +
+	"\x05retry\x18\x02 \x01(\v24.frontend.v1.FooterStatusActivityNetworkOfflineRetryH\x00R\x05retry\x88\x01\x01B\b\n" +
+	"\x06_retry\"C\n" +
+	"'FooterStatusActivityNetworkOfflineRetry\x12\x18\n" +
+	"\aattempt\x18\x01 \x01(\rR\aattempt*a\n" +
 	"\x15FooterTransientWindow\x12'\n" +
 	"#FOOTER_TRANSIENT_WINDOW_UNSPECIFIED\x10\x00\x12\x1f\n" +
 	"\x1aFOOTER_TRANSIENT_WINDOW_MS\x10\x88'B(Z&agentrepl/proto/frontend/v1;frontendv1b\x06proto3"
@@ -20104,7 +20167,7 @@ func file_frontend_v1_footer_proto_rawDescGZIP() []byte {
 }
 
 var file_frontend_v1_footer_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 285)
+var file_frontend_v1_footer_proto_msgTypes = make([]protoimpl.MessageInfo, 286)
 var file_frontend_v1_footer_proto_goTypes = []any{
 	(FooterTransientWindow)(0),                            // 0: frontend.v1.FooterTransientWindow
 	(*FooterView)(nil),                                    // 1: frontend.v1.FooterView
@@ -20392,8 +20455,9 @@ var file_frontend_v1_footer_proto_goTypes = []any{
 	(*FooterStatusNetworkFaultActivity)(nil),              // 283: frontend.v1.FooterStatusNetworkFaultActivity
 	(*FooterStatusNetworkFaultSalient)(nil),               // 284: frontend.v1.FooterStatusNetworkFaultSalient
 	(*FooterStatusActivityNetworkOffline)(nil),            // 285: frontend.v1.FooterStatusActivityNetworkOffline
-	(*TokenHeat)(nil),                                     // 286: frontend.v1.TokenHeat
-	(*FeedId)(nil),                                        // 287: frontend.v1.FeedId
+	(*FooterStatusActivityNetworkOfflineRetry)(nil),       // 286: frontend.v1.FooterStatusActivityNetworkOfflineRetry
+	(*TokenHeat)(nil),                                     // 287: frontend.v1.TokenHeat
+	(*FeedId)(nil),                                        // 288: frontend.v1.FeedId
 }
 var file_frontend_v1_footer_proto_depIdxs = []int32{
 	2,   // 0: frontend.v1.FooterView.strip:type_name -> frontend.v1.FooterStrip
@@ -20676,7 +20740,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	200, // 277: frontend.v1.FooterTokensCell.input:type_name -> frontend.v1.FooterTokensCellInput
 	201, // 278: frontend.v1.FooterTokensCell.alarm:type_name -> frontend.v1.FooterTokensCellAlarm
 	202, // 279: frontend.v1.FooterTokensCell.verdict:type_name -> frontend.v1.FooterTokensCellVerdict
-	286, // 280: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
+	287, // 280: frontend.v1.FooterTokensCellInput.heat:type_name -> frontend.v1.TokenHeat
 	203, // 281: frontend.v1.FooterTokensCellVerdict.complete:type_name -> frontend.v1.FooterTokensCellVerdictComplete
 	204, // 282: frontend.v1.FooterTokensCellVerdict.incomplete:type_name -> frontend.v1.FooterTokensCellVerdictIncomplete
 	205, // 283: frontend.v1.FooterTokensCellVerdict.invalid:type_name -> frontend.v1.FooterTokensCellVerdictInvalid
@@ -20760,7 +20824,7 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	280, // 361: frontend.v1.FooterShellRow.runtime:type_name -> frontend.v1.FooterShellRowRuntime
 	275, // 362: frontend.v1.FooterShellRow.work:type_name -> frontend.v1.FooterWorkId
 	276, // 363: frontend.v1.FooterShellRow.jump:type_name -> frontend.v1.FooterJump
-	287, // 364: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
+	288, // 364: frontend.v1.FooterJump.entry:type_name -> frontend.v1.FeedId
 	277, // 365: frontend.v1.FooterJump.unresolved:type_name -> frontend.v1.FooterJumpUnresolved
 	278, // 366: frontend.v1.FooterJumpUnresolved.not_drawn:type_name -> frontend.v1.FooterJumpNotDrawn
 	282, // 367: frontend.v1.FooterStatusNetworkFault.offline:type_name -> frontend.v1.FooterSubStatusNetworkFaultOffline
@@ -20771,11 +20835,12 @@ var file_frontend_v1_footer_proto_depIdxs = []int32{
 	285, // 372: frontend.v1.FooterStatusNetworkFaultSalient.offline:type_name -> frontend.v1.FooterStatusActivityNetworkOffline
 	115, // 373: frontend.v1.FooterStatusNetworkFaultSalient.update:type_name -> frontend.v1.FooterStatusActivityUpdate
 	170, // 374: frontend.v1.FooterStatusNetworkFaultSalient.notification:type_name -> frontend.v1.FooterStatusActivityNotification
-	375, // [375:375] is the sub-list for method output_type
-	375, // [375:375] is the sub-list for method input_type
-	375, // [375:375] is the sub-list for extension type_name
-	375, // [375:375] is the sub-list for extension extendee
-	0,   // [0:375] is the sub-list for field type_name
+	286, // 375: frontend.v1.FooterStatusActivityNetworkOffline.retry:type_name -> frontend.v1.FooterStatusActivityNetworkOfflineRetry
+	376, // [376:376] is the sub-list for method output_type
+	376, // [376:376] is the sub-list for method input_type
+	376, // [376:376] is the sub-list for extension type_name
+	376, // [376:376] is the sub-list for extension extendee
+	0,   // [0:376] is the sub-list for field type_name
 }
 
 func init() { file_frontend_v1_footer_proto_init() }
@@ -21168,13 +21233,14 @@ func file_frontend_v1_footer_proto_init() {
 		(*FooterStatusNetworkFaultSalient_Update)(nil),
 		(*FooterStatusNetworkFaultSalient_Notification)(nil),
 	}
+	file_frontend_v1_footer_proto_msgTypes[284].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_frontend_v1_footer_proto_rawDesc), len(file_frontend_v1_footer_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   285,
+			NumMessages:   286,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

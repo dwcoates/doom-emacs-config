@@ -166,6 +166,10 @@ func projectScenario(t *testing.T, f *fixture, name string, rows []goldenRow) js
 
 	pointers := map[string]string{}
 	terminal := false
+	// retried is a main-agent failure agent-repl promised to retry
+	// (conversation.v1.AgentFailure.retry_promised): the feed withholds its
+	// errored row (resolve/feed/retriedfailure.go), so no row ends the turn.
+	retried := false
 	for _, r := range rows {
 		// THE STORE'S POINTER RULE: minted at a key's first write and kept
 		// across every later upsert of the key.
@@ -201,6 +205,7 @@ func projectScenario(t *testing.T, f *fixture, name string, rows []goldenRow) js
 			if agent == ids.mainBook {
 				agent, watch = mainAgent, ""
 				terminal = terminal || frame.GetSuccess() != nil || frame.GetFailure() != nil
+				retried = retried || frame.GetFailure().GetRetryPromised() != nil
 			}
 			if _, open := routed[watch]; !open {
 				// A SUBAGENT'S FRAMES ARE PUSHED ONCE ITS WATCH IS OPEN, so
@@ -226,7 +231,16 @@ func projectScenario(t *testing.T, f *fixture, name string, rows []goldenRow) js
 			awaitRouted(t, f, "a session update", updateRouted, updates)
 		}
 	}
-	if terminal {
+	switch {
+	case retried:
+		// A RETRIED FAILURE DRAWS NO ROW: the feed's record of withholding it
+		// is the turn's end, written by the same drawing that settles its
+		// prompt, so the page read after it holds every row the end touches.
+		f.d.AwaitLogRecord(harness.WorkspaceLogPath(f.repo.Dir, "daemon"), "the scenario turn's withheld failure",
+			func(r harness.LogRecord) bool {
+				return r.Operation == "daemon.feed.retried_failure_withheld" && r.Context["turn"] == turn
+			})
+	case terminal:
 		// THE TURN'S END IS DRAWN ONCE THE LIFECYCLE CLOSES IT, after the
 		// watcher's lock is released, so its row is awaited on its own.
 		f.awaitRowInFeed(nil, "the scenario turn's ended row", func(r *frontendv1.FeedRow) bool {

@@ -461,6 +461,14 @@ type wsState struct {
 	// each entry once.
 	liveEndings map[ids.TurnID]TurnEnding
 
+	// THE RETRIED FAILURES (retriedfailure.go). withheldEndings keeps each
+	// errored row whose failure agent-repl promised to retry, off the feed;
+	// abandonedRetries names each turn whose promised retry was abandoned, so
+	// its failure draws whichever of the terminal and the abandonment comes
+	// second.
+	withheldEndings  map[ids.TurnID]withheldEnding
+	abandonedRetries map[ids.TurnID]bool
+
 	// THE FRESH-INPUT ACCOUNTS (usage.go). unitAccount files each
 	// usage-carrying unit in its agent's account — the main agent's turn or a
 	// subagent's lifetime — and unitFresh is that unit's fresh input, replaced
@@ -844,6 +852,8 @@ func newWSState(ws ids.WorkspaceID, born time.Time) *wsState {
 		revisions:            map[string]string{},
 		revisionStates:       map[string]*frontendv1.FeedResponseRevision{},
 		liveEndings:          map[ids.TurnID]TurnEnding{},
+		withheldEndings:      map[ids.TurnID]withheldEnding{},
+		abandonedRetries:     map[ids.TurnID]bool{},
 		stalls:               map[string]*stallState{},
 		replayTail:           map[string]string{},
 
@@ -1111,7 +1121,7 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
 	if r.rolledBackRow(s, f, row) || r.withheldRollingBack(s, f, at, row, durable) || r.signedInRow(s, f, row) ||
-		r.reconnectedRow(s, f, row) || r.noticeFoldedIntoEnding(s, f, at, row) {
+		r.reconnectedRow(s, f, row) || r.noticeFoldedIntoEnding(s, f, at, row) || r.noticeFoldedIntoWithheld(s, f, at, row) {
 		return
 	}
 	id := row.GetId().GetValue()

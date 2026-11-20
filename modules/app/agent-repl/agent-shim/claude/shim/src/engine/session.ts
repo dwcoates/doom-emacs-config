@@ -237,6 +237,7 @@ import { NETWORK_RESUME_SOURCE, VENDOR_ERROR_RETRY_SOURCE, type ShimPromptDelive
 import {
   VendorErrorRetry,
   retryVendorErrorNowResponse,
+  stampRetryPromise,
   vendorErrorRetryUpdate,
   type RateLimitReading,
 } from "./vendor-error-retry.js";
@@ -2547,6 +2548,15 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       if (converterDefectThisMessage) {
         LOGGER.logVerbose({}, "this message was refused; the converter's window stays open");
       }
+      // THE RETRY IS DECIDED BEFORE THE TERMINAL IS WRITTEN, so the terminal
+      // itself states the retry it is promised (AgentFailure.retry_promised):
+      // the schedule rides the session stream, which no consumer can order
+      // against this one. The message's reach was read above, which is what
+      // the decision reads the network fault for.
+      if (output.turnEnded !== undefined && !attribution.keepalive) {
+        const promise = vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
+        if (promise !== undefined) stampRetryPromise(output.turnEnded.frame, promise);
+      }
       const entries = [...output.entries];
       noteForegroundUnits(entries);
       shellRunStarts.note(entries);
@@ -2567,8 +2577,9 @@ export function createEngine(deps: EngineDeps): SessionEngine {
       // the window closes only at the end of a turn that refused nothing.
       if (!converterDefectThisTurn) noteConverterHealthy();
       converterDefectThisTurn = false;
-      if (!attribution.keepalive) vendorErrorRetry.turnEnded(shimTurnOf(verdict.turn), output.turnEnded.frame);
-      else stateKeepaliveFailure(output.turnEnded.frame);
+      // A non-keep-alive terminal's retry was decided before it was written,
+      // above; a keep-alive's failure is stated here.
+      if (attribution.keepalive) stateKeepaliveFailure(output.turnEnded.frame);
       await endVendorTurn(verdict.turn);
     } finally {
       refreshVendorActivity("vendor_message");

@@ -38,55 +38,6 @@
           }
         }
       }
-    },
-    {
-      "id": {
-        "value": "${ROW_2}"
-      },
-      "order": {
-        "key": "${ORDER_2}"
-      },
-      "turn": {
-        "value": "${TURN}"
-      },
-      "turnEnded": {
-        "endedAtMs": "${NOW}",
-        "errored": {
-          "headline": {
-            "text": "rate limited by the vendor"
-          },
-          "marker": {
-            "detail": {
-              "text": "rate limited"
-            },
-            "label": {
-              "text": "vendor error"
-            },
-            "vendorFault": {
-              "expansion": {
-                "errorType": {
-                  "text": "rate_limited"
-                },
-                "message": {
-                  "text": "Rate limited; retry after 30 seconds."
-                },
-                "retryAt": {
-                  "atMs": "${NOW}"
-                },
-                "time": {
-                  "atMs": "${NOW}"
-                }
-              }
-            }
-          },
-          "message": {
-            "text": "Rate limited; retry after 30 seconds."
-          },
-          "rateLimited": {
-            "retryAfterMs": "549"
-          }
-        }
-      }
     }
   ],
   "warnings": []

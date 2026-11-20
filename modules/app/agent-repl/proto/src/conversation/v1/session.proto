@@ -431,7 +431,8 @@ message SessionVendorErrorRetry {
   // exclusive because a chain has at most one retry pending, and it is
   // either waiting for an instant, waiting for the network, or being made.
   // UNSET when no retry is pending: no failed turn is being retried, or the
-  // latest retry is running as a turn or was refused.
+  // latest retry is running as a turn. `abandoned` is the one arm that also
+  // states no retry is pending, and names the failure left standing.
   oneof stated {
     // The retry the shim makes at an instant: the cadence's next beat, or an
     // exhausted usage window's reset.
@@ -448,7 +449,28 @@ message SessionVendorErrorRetry {
     // network fault stands, so a consumer draws the network fault's own line
     // and no countdown.
     SessionVendorErrorRetryAwaitingNetwork awaiting_network = 3;
+    // The chain ended WITHOUT the retry its failed turn was promised
+    // (conversation.v1.AgentFailure.retry_promised): the retry prompt could not
+    // be delivered, or the shim stood down while the retry waited. No retry
+    // is pending, and the failed turn's failure stands. It stands until the
+    // next statement replaces it, and is restated on every WatchSession open
+    // like every other statement of this level.
+    SessionVendorErrorRetryAbandoned abandoned = 4;
   }
+}
+
+// A retry chain that ended before it made the retry its failed turn's
+// terminal promised. A chain that ends any other way states no abandonment:
+// a retry that ran answered the failure itself, a prompt submitted meanwhile
+// took the session over, and a failure decided at its terminal not to be
+// retried carries no promise.
+message SessionVendorErrorRetryAbandoned {
+  // The turn whose failure was promised the retry: the chain's latest failed
+  // turn, whose terminal carries AgentFailure.retry_promised. A consumer draws
+  // that turn's failure now.
+  TurnId failed_turn = 1;
+  // Why the retry was never made, in the shim's words.
+  string cause = 2;
 }
 
 // The retry being made now.
