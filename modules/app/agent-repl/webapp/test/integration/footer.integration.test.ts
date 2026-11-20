@@ -1226,6 +1226,7 @@ describe("the turn stop", () => {
       "mergeQueueOffered",
       "rolledBackUnanswered",
       "interruptedRevisions",
+      "turnStillRunning",
     ]);
   });
 });
@@ -1263,6 +1264,26 @@ describe("the agents panel's stop-all", () => {
     await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
     // Assert: the figure is the daemon's; counting the panel's rows would say 2.
     expect(harness.text('[data-stop-outcome="interruptedDetached"]')).toContain("4");
+  });
+
+  it("draws the turn still running when no agent was live", async () => {
+    // Arrange
+    await openAgents();
+    harness.fake.answer(
+      "interrupt",
+      create(InterruptResponseSchema, {
+        result: {
+          case: "success",
+          value: { outcome: { case: "turnStillRunning", value: { turn: { value: "t1" } } } },
+        },
+      }),
+    );
+    // Act
+    await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
+    // Assert
+    expect(harness.text('[data-stop-outcome="turnStillRunning"]')).toBe(
+      "no agents running; the turn is still running",
+    );
   });
 
   it("draws no refusal for an interrupted-detached answer", async () => {

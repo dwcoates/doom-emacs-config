@@ -165,7 +165,13 @@ export function harness(script: FooterScript = {}): Harness {
  * `interrupted_revisions` take COUNT).
  */
 export function interruptSuccess(
-  outcome: "interruptedTurn" | "interruptedDetached" | "interruptedRevisions" | "nothingRunning" | "mergeQueueOffered",
+  outcome:
+    | "interruptedTurn"
+    | "interruptedDetached"
+    | "interruptedRevisions"
+    | "nothingRunning"
+    | "mergeQueueOffered"
+    | "turnStillRunning",
   count = 0n,
 ): InterruptResponse {
   return create(InterruptResponseSchema, {
@@ -175,7 +181,9 @@ export function interruptSuccess(
         outcome:
           outcome === "interruptedDetached" || outcome === "interruptedRevisions"
             ? { case: outcome, value: { count } }
-            : { case: outcome, value: {} },
+            : outcome === "turnStillRunning"
+              ? { case: outcome, value: { turn: { value: "t1" } } }
+              : { case: outcome, value: {} },
       },
     },
   });

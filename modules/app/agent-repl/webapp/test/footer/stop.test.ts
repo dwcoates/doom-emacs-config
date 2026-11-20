@@ -117,6 +117,17 @@ describe("drawTurnStopControl", () => {
     expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe("nothing running");
   });
 
+  it("notes a fan-wide stop that found no agents while the turn runs, never as nothing running", async () => {
+    const h = harness({ interrupt: () => interruptSuccess("turnStillRunning") });
+    const control = allAgentsStop(h.ctx);
+    press(control);
+    await settle();
+    expect(control.querySelector(".refusal")).toBeNull();
+    expect(control.querySelector("[data-stop-outcome]")?.textContent).toBe(
+      "no agents running; the turn is still running",
+    );
+  });
+
   it("notes a stop that ended one response update", async () => {
     const h = harness({ interrupt: () => interruptSuccess("interruptedRevisions", 1n) });
     const control = turnStop(h.ctx);

@@ -147,6 +147,10 @@ function successNote(
     case "nothingRunning":
       el.textContent = "nothing was running";
       break;
+    case "turnStillRunning":
+      // This bubble's work had already ended, while the turn runs on.
+      el.textContent = "already stopped; the turn is still running";
+      break;
     default:
       unreachableArm("InterruptSuccess.outcome", armName(outcome));
   }

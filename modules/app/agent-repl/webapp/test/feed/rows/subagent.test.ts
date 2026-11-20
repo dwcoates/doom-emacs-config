@@ -385,6 +385,25 @@ describe("drawFeedSubagent: the stop control", () => {
     expect(el.querySelector(".refusal")).toBeNull();
   });
 
+  it("draws turn_still_running as the bubble already stopped while the turn runs on", async () => {
+    const h = harness({
+      interrupt: () =>
+        create(InterruptResponseSchema, {
+          result: {
+            case: "success",
+            value: { outcome: { case: "turnStillRunning", value: { turn: { value: "t1" } } } },
+          },
+        }),
+    });
+    const { el } = drawRow(subagentRow("b1", { detached: true }), h);
+    el.querySelector<HTMLElement>("[data-interrupt]")?.click();
+    await settle();
+    expect(el.querySelector(".refusal")).toBeNull();
+    expect(el.querySelector(".subagent-stop-outcome")?.textContent).toBe(
+      "already stopped; the turn is still running",
+    );
+  });
+
   it("clears the answer once it has been on screen long enough to read", async () => {
     const { el } = drawRow(subagentRow("b1", { detached: true }));
     document.body.append(el);
