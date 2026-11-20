@@ -2133,6 +2133,7 @@ func stepAsideFixture(t *testing.T) (*store, RepoKey, WorkspaceID, WorkspaceID, 
 	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
+	holdAsideLease(t, s, failed.ID, MergeAsideTests)
 	if _, err := s.StepAsideMerge(ctx, repo, failed.ID, MergeAsideTests); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
@@ -2177,7 +2178,7 @@ func TestReturnRemediatedMergePutsItAheadOfTheWaitingBehindTheWorkedOn(t *testin
 	s, repo, failed, next, waiting := stepAsideFixture(t)
 
 	// Act
-	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed, nil, nil); err != nil {
+	if _, err := returnRemediated(context.Background(), s, repo, failed, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2189,8 +2190,8 @@ func TestReturnRemediatedMergePutsItAheadOfTheWaitingBehindTheWorkedOn(t *testin
 	if len(got) != 3 || got[0].Workspace != next || got[1].Workspace != failed || got[2].Workspace != waiting {
 		t.Fatalf("queue = %+v, want the merge being worked on, the returned merge, then the waiting one", got)
 	}
-	if got[1].State != MergeAdmitted {
-		t.Fatalf("the returned merge is %s, want admitted (it resumes from its record)", got[1].State)
+	if got[1].State != MergeQueued {
+		t.Fatalf("the returned merge is %s, want waiting, as any merge in line", got[1].State)
 	}
 }
 
@@ -2205,6 +2206,7 @@ func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testin
 	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
+	holdAsideLease(t, s, failed.ID, MergeAsideTests)
 	if _, err := s.StepAsideMerge(ctx, repo, failed.ID, MergeAsideTests); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
@@ -2213,7 +2215,7 @@ func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testin
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, nil, nil); err != nil {
+	if _, err := returnRemediated(ctx, s, repo, failed.ID, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2240,12 +2242,13 @@ func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *t
 	if err := s.AdmitMerge(ctx, repo, failed.ID); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
+	holdAsideLease(t, s, failed.ID, MergeAsideTests)
 	if _, err := s.StepAsideMerge(ctx, repo, failed.ID, MergeAsideTests); err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, []WorkspaceID{next.ID}, nil); err != nil {
+	if _, err := returnRemediated(ctx, s, repo, failed.ID, []WorkspaceID{next.ID}); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2277,6 +2280,7 @@ func returnersFixture(t *testing.T, asides map[int]MergeAside, order []int) (*st
 		if err := s.AdmitMerge(ctx, repo, wss[i]); err != nil {
 			t.Fatalf("AdmitMerge: %v", err)
 		}
+		holdAsideLease(t, s, wss[i], asides[i])
 		if _, err := s.StepAsideMerge(ctx, repo, wss[i], asides[i]); err != nil {
 			t.Fatalf("StepAsideMerge: %v", err)
 		}
@@ -2284,7 +2288,7 @@ func returnersFixture(t *testing.T, asides map[int]MergeAside, order []int) (*st
 	return s, repo, wss
 }
 
-func TestReturnRemediatedMergeOrdersReturnersByRank(t *testing.T) {
+func TestReturnRemediatedMergePlacesEachReturnerAtTheFirstWaitingPlace(t *testing.T) {
 	tests := []struct {
 		name    string
 		asides  map[int]MergeAside
@@ -2298,19 +2302,19 @@ func TestReturnRemediatedMergeOrdersReturnersByRank(t *testing.T) {
 			want:    []int{2, 1, 0, 3, 4},
 		},
 		{
-			name:    "conflict returners keep the order they came back in",
+			name:    "a later conflict returner passes an earlier one",
 			asides:  map[int]MergeAside{0: MergeAsideConflicts, 1: MergeAsideConflicts},
 			returns: []int{1, 0},
-			want:    []int{2, 1, 0, 3, 4},
+			want:    []int{2, 0, 1, 3, 4},
 		},
 		{
-			name:    "test returners keep the order they came back in",
+			name:    "a later test returner placed at the front passes an earlier one",
 			asides:  map[int]MergeAside{0: MergeAsideTests, 1: MergeAsideTests},
 			returns: []int{1, 0},
-			want:    []int{2, 1, 0, 3, 4},
+			want:    []int{2, 0, 1, 3, 4},
 		},
 		{
-			name:    "a conflict returner stands behind an earlier test returner and ahead of the waiting line",
+			name:    "a conflict returner lands behind a test returner at the front and ahead of the waiting line",
 			asides:  map[int]MergeAside{0: MergeAsideTests, 1: MergeAsideConflicts},
 			returns: []int{0, 1},
 			want:    []int{2, 0, 1, 3, 4},
@@ -2328,7 +2332,7 @@ func TestReturnRemediatedMergeOrdersReturnersByRank(t *testing.T) {
 
 			// Act
 			for _, i := range tt.returns {
-				if err := s.ReturnRemediatedMerge(ctx, repo, wss[i], []WorkspaceID{wss[2]}, nil); err != nil {
+				if _, err := returnRemediated(ctx, s, repo, wss[i], []WorkspaceID{wss[2]}); err != nil {
 					t.Fatalf("ReturnRemediatedMerge: %v", err)
 				}
 			}
@@ -2363,7 +2367,7 @@ func TestReturnRemediatedMergeNeverPassesAnAdmittedMergeThatNeverSteppedAside(t 
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, wss[0], nil, nil); err != nil {
+	if _, err := returnRemediated(ctx, s, repo, wss[0], nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2385,7 +2389,7 @@ func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
 	queued(t, s, repo, ws.ID, instant)
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws.ID, nil, nil)
+	_, err := returnRemediated(context.Background(), s, repo, ws.ID, nil)
 
 	// Assert
 	if err == nil {
@@ -2421,6 +2425,7 @@ func (q *asideQueue) asideFromHead(t *testing.T, ws WorkspaceID, aside MergeAsid
 	if err := q.s.AdmitMerge(ctx, q.repo, ws); err != nil {
 		t.Fatalf("AdmitMerge: %v", err)
 	}
+	holdAsideLease(t, q.s, ws, aside)
 	slot, err := q.s.StepAsideMerge(ctx, q.repo, ws, aside)
 	if err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
@@ -2489,7 +2494,7 @@ func TestReturnRemediatedMergeGrantsTheReleasedSlotToTheFirstAwaitingIt(t *testi
 	}
 
 	// Act
-	if err := q.s.ReturnRemediatedMerge(context.Background(), q.repo, q.ws[0], nil, nil); err != nil {
+	if _, err := returnRemediated(context.Background(), q.s, q.repo, q.ws[0], nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2515,7 +2520,7 @@ func TestAWaitingMergeStepsAsideForItsBackgroundConflictAndReturnsWaiting(t *tes
 	if err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
-	if err := q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], []WorkspaceID{q.ws[0]}, nil); err != nil {
+	if _, err := returnRemediated(ctx, q.s, q.repo, q.ws[2], []WorkspaceID{q.ws[0]}); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2991,5 +2996,327 @@ func TestRepoKeyRefusalIsRecordedOnlyByTheHelper(t *testing.T) {
 	// Assert
 	if want := []string{"mergequeue.go"}; !slices.Equal(sites, want) {
 		t.Errorf("files recording %q = %v, want %v (only normalizedRepoKey records it)", message, sites, want)
+	}
+}
+
+// holdAsideLease gives WS the merge lease and the progress record its run
+// holds when it steps aside from the head for ASIDE, as the orchestrator's
+// run holds them: the record names the step it repairs at.
+func holdAsideLease(t *testing.T, s *store, ws WorkspaceID, aside MergeAside) LeaseID {
+	t.Helper()
+	lease, err := holdAsideLeaseErr(context.Background(), s, ws, aside)
+	if err != nil {
+		t.Fatalf("holding the merge lease of %s: %v", ws, err)
+	}
+	return lease
+}
+
+// holdAsideLeaseErr is holdAsideLease for a step that answers its error.
+func holdAsideLeaseErr(ctx context.Context, s *store, ws WorkspaceID, aside MergeAside) (LeaseID, error) {
+	step := "conflicts"
+	if aside == MergeAsideTests {
+		step = MergeStepFixes
+	}
+	held, err := s.AcquireLeaseAs(ctx, ws, NewLeaseID(), HolderMerge, PolicyHold)
+	if err != nil {
+		return "", err
+	}
+	doc := []byte(`{"step":"` + step + `"}`)
+	return held.ID, s.PutMergeProgress(ctx, MergeProgress{Workspace: ws, Lease: held.ID, UpdatedAt: instant, Document: doc})
+}
+
+// returnRemediated returns WS to REPO's line with the merge lease it holds,
+// none when it holds none, as the orchestrator does, carrying no resolved
+// rebase.
+func returnRemediated(ctx context.Context, s *store, repo RepoKey, ws WorkspaceID, workedOn []WorkspaceID) (MergeReturn, error) {
+	return returnRemediatedWith(ctx, s, repo, ws, workedOn, nil)
+}
+
+// returnRemediatedWith is returnRemediated carrying RESOLVED, the rebase the
+// merge's conflict repair worked on.
+func returnRemediatedWith(ctx context.Context, s *store, repo RepoKey, ws WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) (MergeReturn, error) {
+	lease, held, err := s.Lease(ctx, ws)
+	if err != nil {
+		return MergeReturn{}, err
+	}
+	var id LeaseID
+	if held && lease.Holder == HolderMerge {
+		id = lease.ID
+	}
+	return s.ReturnRemediatedMerge(ctx, repo, ws, id, workedOn, resolved)
+}
+
+// returnedFixture is a queue of a head being worked on (merge 1), a merge
+// back in line from fixing its tests (merge 0), and merges 2 and 3 waiting
+// behind it, in that order.
+func returnedFixture(t *testing.T) (*store, RepoKey, []WorkspaceID, MergeReturn) {
+	t.Helper()
+	s, repo, wss := returnersFixture(t, map[int]MergeAside{0: MergeAsideTests}, []int{0})
+	ctx := context.Background()
+	if err := s.AdmitMerge(ctx, repo, wss[1]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	placed, err := returnRemediated(ctx, s, repo, wss[0], []WorkspaceID{wss[1]})
+	if err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+	return s, repo, wss, placed
+}
+
+// queueIndexes answers REPO's queue as indexes into WSS, front first, -1
+// for a merge WSS does not name.
+func queueIndexes(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) []int {
+	t.Helper()
+	got, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	var order []int
+	for _, e := range got {
+		order = append(order, slices.Index(wss, e.Workspace))
+	}
+	return order
+}
+
+func TestReturnRemediatedMergeLandsATestReturnerAtTheFirstWaitingPlace(t *testing.T) {
+	// Arrange + Act
+	s, repo, wss, placed := returnedFixture(t)
+	ctx := context.Background()
+
+	// Assert
+	t.Run("it stands next after the merge being worked on", func(t *testing.T) {
+		if got, want := queueIndexes(t, s, repo, wss), []int{1, 0, 2, 3, 4}; !slices.Equal(got, want) {
+			t.Fatalf("queue order = %v, want %v", got, want)
+		}
+	})
+	t.Run("the return answers its place and the merge it stands behind", func(t *testing.T) {
+		if placed.Position != 2 || placed.Behind != wss[1] || placed.Lease == "" {
+			t.Fatalf("ReturnRemediatedMerge = %+v, want place 2 behind %s with its lease dropped", placed, wss[1])
+		}
+	})
+	t.Run("it waits as an ordinary merge, holding no lease", func(t *testing.T) {
+		got, err := s.MergeQueue(ctx, repo)
+		if err != nil {
+			t.Fatalf("MergeQueue: %v", err)
+		}
+		if got[1].State != MergeQueued || got[1].Source.Front || got[1].Aside != MergeAsideNone {
+			t.Fatalf("returned entry = %+v, want waiting, ordinary and with no aside", got[1])
+		}
+		if _, held, err := s.Lease(ctx, wss[0]); err != nil || held {
+			t.Fatalf("Lease = held %v, %v; want the merge lease dropped", held, err)
+		}
+	})
+	t.Run("its progress record stays for its resume", func(t *testing.T) {
+		record, found, err := s.MergeProgressOf(ctx, wss[0])
+		if err != nil || !found || record.Lease != placed.Lease {
+			t.Fatalf("MergeProgressOf = %+v, %v, %v; want the record under the dropped lease kept", record, found, err)
+		}
+	})
+}
+
+func TestAReturnerHoldsNoLeaseOnItsPlace(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID)
+		want []int
+	}{
+		{
+			name: "a later front placement goes ahead of it",
+			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
+				hotfix := testWorkspace(t, s).ID
+				front := MergeSource{Kind: MergeSourceOwnBranch, Front: true}
+				if err := s.RequestMerge(context.Background(), repo, hotfix, front, instant.Add(time.Hour)); err != nil {
+					t.Fatalf("RequestMerge: %v", err)
+				}
+				if _, err := s.QueueMerge(context.Background(), repo, hotfix, NewLeaseID()); err != nil {
+					t.Fatalf("QueueMerge: %v", err)
+				}
+			},
+			want: []int{1, -1, 0, 2, 3, 4},
+		},
+		{
+			name: "a user move up of the merge behind it passes it",
+			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
+				if moved, err := s.MoveMerge(context.Background(), repo, wss[2], MergeMoveUp); err != nil || !moved {
+					t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+				}
+			},
+			want: []int{1, 2, 0, 3, 4},
+		},
+		{
+			name: "a user drag of a later merge ahead of it passes it",
+			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
+				if moved, err := s.MoveMergeTo(context.Background(), repo, wss[3], wss[0], MergeSideAheadOf); err != nil || !moved {
+					t.Fatalf("MoveMergeTo = %v, %v; want moved", moved, err)
+				}
+			},
+			want: []int{1, 3, 0, 2, 4},
+		},
+		{
+			name: "a user prioritizing a later merge passes it",
+			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
+				if moved, err := s.PrioritizeMerge(context.Background(), repo, wss[4]); err != nil || !moved {
+					t.Fatalf("PrioritizeMerge = %v, %v; want moved", moved, err)
+				}
+			},
+			want: []int{1, 4, 0, 2, 3},
+		},
+		{
+			name: "the returner itself moves down like any waiting merge",
+			act: func(t *testing.T, s *store, repo RepoKey, wss []WorkspaceID) {
+				if moved, err := s.MoveMerge(context.Background(), repo, wss[0], MergeMoveDown); err != nil || !moved {
+					t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+				}
+			},
+			want: []int{1, 2, 0, 3, 4},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, repo, wss, _ := returnedFixture(t)
+
+			// Act
+			tt.act(t, s, repo, wss)
+
+			// Assert
+			if got := queueIndexes(t, s, repo, wss); !slices.Equal(got, tt.want) {
+				t.Fatalf("queue order = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAConflictReturnerPassesATestReturnerNoLongerAtTheFront(t *testing.T) {
+	// Arrange: merge 0 is back from its tests, then moved down behind merge
+	// 2; merge 3 steps aside for conflicts.
+	s, repo, wss, _ := returnedFixture(t)
+	ctx := context.Background()
+	if moved, err := s.MoveMerge(ctx, repo, wss[0], MergeMoveDown); err != nil || !moved {
+		t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+	}
+	if err := s.RemoveMergeQueueEntry(ctx, repo, wss[1], "landed"); err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+	if err := s.AdmitMerge(ctx, repo, wss[2]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	holdAsideLease(t, s, wss[2], MergeAsideConflicts)
+	if _, err := s.StepAsideMerge(ctx, repo, wss[2], MergeAsideConflicts); err != nil {
+		t.Fatalf("StepAsideMerge: %v", err)
+	}
+	if err := s.AdmitMerge(ctx, repo, wss[0]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+
+	// Act
+	if _, err := returnRemediated(ctx, s, repo, wss[2], []WorkspaceID{wss[0]}); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert: the test returner heads now, so the conflict returner takes the
+	// first waiting place ahead of merge 3.
+	if got, want := queueIndexes(t, s, repo, wss), []int{0, 2, 3, 4}; !slices.Equal(got, want) {
+		t.Fatalf("queue order = %v, want %v", got, want)
+	}
+}
+
+func TestAConflictReturnerTakesTheFrontMarkOfTheMergeItPasses(t *testing.T) {
+	// Arrange: merge 0 steps aside for conflicts; merge 2 is put at the
+	// front behind the head, merge 1.
+	s, repo, wss := returnersFixture(t, map[int]MergeAside{0: MergeAsideConflicts}, []int{0})
+	ctx := context.Background()
+	if err := s.AdmitMerge(ctx, repo, wss[1]); err != nil {
+		t.Fatalf("AdmitMerge: %v", err)
+	}
+	if moved, err := s.PrioritizeMerge(ctx, repo, wss[3]); err != nil || !moved {
+		t.Fatalf("PrioritizeMerge = %v, %v; want moved", moved, err)
+	}
+
+	// Act
+	if _, err := returnRemediated(ctx, s, repo, wss[0], []WorkspaceID{wss[1]}); err != nil {
+		t.Fatalf("ReturnRemediatedMerge: %v", err)
+	}
+
+	// Assert
+	got, err := s.MergeQueue(ctx, repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	if got[1].Workspace != wss[0] || !got[1].Source.Front {
+		t.Fatalf("queue = %+v, want the returner first among the waiting, marked front as the front merge it passed", got)
+	}
+}
+
+func TestReturnRemediatedMergeRefusesAWrongLease(t *testing.T) {
+	tests := []struct {
+		name  string
+		aside MergeAside
+		lease func(held LeaseID) LeaseID
+	}{
+		{name: "a merge back from the head with no lease named", aside: MergeAsideTests, lease: func(LeaseID) LeaseID { return "" }},
+		{name: "a merge back from the head naming a lease it does not hold", aside: MergeAsideConflicts, lease: func(LeaseID) LeaseID { return NewLeaseID() }},
+		{name: "a merge back from its waiting place naming a lease", aside: MergeAsideWaitingConflicts, lease: func(LeaseID) LeaseID { return NewLeaseID() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			q, _ := newAsideQueue(t, 3)
+			ctx := context.Background()
+			var held LeaseID
+			if tt.aside == MergeAsideWaitingConflicts {
+				if err := q.s.AdmitMerge(ctx, q.repo, q.ws[0]); err != nil {
+					t.Fatalf("AdmitMerge: %v", err)
+				}
+				if _, err := q.s.StepAsideMerge(ctx, q.repo, q.ws[2], tt.aside); err != nil {
+					t.Fatalf("StepAsideMerge: %v", err)
+				}
+			} else {
+				q.asideFromHead(t, q.ws[2], tt.aside)
+			}
+			before, err := q.s.MergeQueue(ctx, q.repo)
+			if err != nil {
+				t.Fatalf("MergeQueue: %v", err)
+			}
+
+			// Act
+			_, err = q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], tt.lease(held), nil, nil)
+
+			// Assert
+			if err == nil {
+				t.Fatal("ReturnRemediatedMerge = nil, want the wrong lease refused")
+			}
+			after, err := q.s.MergeQueue(ctx, q.repo)
+			if err != nil {
+				t.Fatalf("MergeQueue: %v", err)
+			}
+			if fmt.Sprint(after) != fmt.Sprint(before) {
+				t.Fatalf("queue after the refusal = %+v, want it unchanged from %+v", after, before)
+			}
+		})
+	}
+}
+
+func TestRemoveMergeQueueEntryDropsOnlyARecordNoLeaseHolds(t *testing.T) {
+	// Arrange: merge 0 waits back in line with its record and no lease;
+	// merge 1, the head, holds a lease and a record.
+	s, repo, wss, _ := returnedFixture(t)
+	ctx := context.Background()
+	headLease := holdAsideLease(t, s, wss[1], MergeAsideTests)
+
+	// Act
+	if err := s.RemoveMergeQueueEntry(ctx, repo, wss[0], "taken off"); err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+	if err := s.RemoveMergeQueueEntry(ctx, repo, wss[1], MergeLeftToReturn); err != nil {
+		t.Fatalf("RemoveMergeQueueEntry: %v", err)
+	}
+
+	// Assert
+	if _, found, err := s.MergeProgressOf(ctx, wss[0]); err != nil || found {
+		t.Fatalf("MergeProgressOf(returner) found %v, %v; want its unleased record gone with its entry", found, err)
+	}
+	if record, found, err := s.MergeProgressOf(ctx, wss[1]); err != nil || !found || record.Lease != headLease {
+		t.Fatalf("MergeProgressOf(head) = %+v, %v, %v; want the leased record kept", record, found, err)
 	}
 }

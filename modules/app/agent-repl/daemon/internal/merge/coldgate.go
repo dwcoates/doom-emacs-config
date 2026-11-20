@@ -149,7 +149,9 @@ func (o *orchestrator) coldGateRaised(ctx context.Context, ws ids.WorkspaceID) {
 		// still waiting, and is marked where it stands.
 		background := running && r.background
 		o.mu.Unlock()
-		if (running && !background) || away || pending {
+		// A MERGE BACK IN LINE FROM ITS REPAIR waits like any merge: its
+		// pending resume is no run, and it is marked where it stands.
+		if (running && !background) || away || (pending && entry.State != wsm.MergeQueued) {
 			taken = true
 			return nil
 		}

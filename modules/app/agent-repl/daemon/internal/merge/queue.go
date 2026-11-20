@@ -732,6 +732,18 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 		log.Error(op, "could not read the queue entry of a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
 		return err
 	}
+	// A MERGE BACK IN LINE FROM ITS REPAIR WAITS, holding no lease (wsm.
+	// ReturnRemediatedMerge): it ends as a waiting merge does, its record
+	// leaving with its entry (wsm.RemoveMergeQueueEntry), and a cause that
+	// requeues leaves it where it stands, marked (coldGateRaised).
+	if entry.State == wsm.MergeQueued {
+		if cause.requeues() {
+			putBack()
+			o.coldGateRaised(ctx, ws)
+			return nil
+		}
+		return o.dropQueued(ctx, ws, cause)
+	}
 	if cause.requeues() {
 		return o.requeuePendingResume(ctx, ws, repo, lease, doc, entry, cause, fields, putBack)
 	}
@@ -1497,6 +1509,15 @@ func (o *orchestrator) pumpOnce(ctx context.Context, repo wsm.RepoKey) (bool, er
 	return true, nil
 }
 
+// pendingResume reports whether WS's merge waits to resume from its record:
+// taken back by a restart or a handover, or back in line from its repair.
+func (o *orchestrator) pendingResume(ws ids.WorkspaceID) bool {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	_, pending := o.resumes[ws]
+	return pending
+}
+
 // backInLine reports whether WS's merge is back in line from an out-of-line
 // repair, waiting for the head with no run (drawBackInLine): its record says
 // so and no run of it stands in this daemon.
@@ -1721,9 +1742,21 @@ func (o *orchestrator) admitFront(ctx context.Context, repo wsm.RepoKey) (ids.Wo
 		o.releaseRepoLockIfIdle(ctx, repo)
 		return "", nil, false, err
 	}
+	// A MERGE BACK IN LINE FROM ITS REPAIR RESUMES FROM ITS RECORD: it waited
+	// at its place with no lease like any merge (wsm.ReturnRemediatedMerge),
+	// and the lease just taken under its ledger is the one its record names,
+	// so its start (start) takes the resume, never a fresh run.
 	o.mu.Lock()
-	o.headLeases[front.Workspace] = lease
+	_, resumes := o.resumes[front.Workspace]
+	if !resumes {
+		o.headLeases[front.Workspace] = lease
+	}
 	o.mu.Unlock()
+	if resumes {
+		o.deps.Queue.OnLeaseChanged(front.Workspace)
+		o.deps.Log.Global().Info(op, "a merge back in line from its repair heads the queue; it is admitted under its ledger and resumes from its record",
+			dlog.Context{"repo": string(repo), "workspace": string(front.Workspace), "lease": string(lease.ID)})
+	}
 	return front.Workspace, nil, true, nil
 }
 
@@ -1852,13 +1885,27 @@ func (o *orchestrator) resumeIn(ctx context.Context, repo wsm.RepoKey) (ids.Work
 	// A RESUME WITH NO ADMITTED QUEUE ENTRY is answered as before: its run
 	// reads the entry it lands and ends on the missing one, loudly. A merge
 	// remediating out of line is no such resume: it waits for its fixing
-	// turn, then returns admitted (remediate.go).
+	// turn, then returns waiting (remediate.go). Nor is a merge back in line
+	// from its repair: it waits at its place like any merge, and is admitted
+	// and resumed only once it heads the queue (admitFront).
+	waiting := waitingIn(entries)
 	for ws, doc := range o.resumes {
-		if doc.Repo == string(repo) && !o.isRemediatingLocked(ws) {
+		if doc.Repo == string(repo) && !o.isRemediatingLocked(ws) && !waiting[ws] {
 			return ws, true, nil
 		}
 	}
 	return "", false, nil
+}
+
+// waitingIn answers the workspaces of ENTRIES whose merges wait in line.
+func waitingIn(entries []wsm.MergeQueueEntry) map[ids.WorkspaceID]bool {
+	out := map[ids.WorkspaceID]bool{}
+	for _, entry := range entries {
+		if entry.State == wsm.MergeQueued {
+			out[entry.Workspace] = true
+		}
+	}
+	return out
 }
 
 // resumesOf answers the workspaces whose merges in REPO wait to resume.

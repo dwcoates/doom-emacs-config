@@ -642,13 +642,15 @@ type DB interface {
 	// (MergeRemediating), answering the slot it took: the repair's slot, or
 	// the place awaiting it.
 	StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID, aside MergeAside) (MergeSlot, error)
-	// ReturnRemediatedMerge puts a remediating merge back in line at the
-	// first waiting place, behind every merge the caller names as being
-	// worked on, waiting in line or not, releasing its repair slot to the
-	// next merge awaiting it. RESOLVED, when not nil, is the rebase the
-	// merge's own conflict repair worked on, recorded on its entry in the same
-	// write.
-	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) error
+	// ReturnRemediatedMerge puts a remediating merge back in line, waiting,
+	// at the first waiting place, behind every merge the caller names as
+	// being worked on, waiting in line or not, dropping LEASE (its merge
+	// lease, empty for a merge that stepped aside from its waiting place)
+	// and keeping its progress record, releasing its repair slot to the
+	// next merge awaiting it, and answers where it now stands. RESOLVED,
+	// when not nil, is the rebase the merge's own conflict repair worked on,
+	// recorded on its entry in the same write.
+	ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, workedOn []WorkspaceID, resolved *ResolvedRebase) (MergeReturn, error)
 	// ClearResolvedRebase retires the resolved rebase a merge's entry
 	// carries, answering whether it carried one.
 	ClearResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)

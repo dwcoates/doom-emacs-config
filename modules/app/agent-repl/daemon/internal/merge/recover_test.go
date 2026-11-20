@@ -2,6 +2,7 @@ package merge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1039,17 +1040,106 @@ func TestBothDisplacedPutBacksSubmitTheOneShape(t *testing.T) {
 	}
 }
 
-// TestEveryTakeBackOfARecordGoesThroughTakeBackResume pins the shape every
-// take-back of a record shares: it is stood as a resume and drawn by the one
-// helper, so no take-back hand-rolls a divergent draw.
+func TestARestartTakesAWaitingReturnerBackToResumeAtItsPlace(t *testing.T) {
+	// Arrange: the failed head came back in line, first, and the daemon
+	// restarts before it heads the queue.
+	c := returnedScenario(t)
+	c.h.restart(t)
+	c.wire(c.h.o)
+
+	// Act
+	if err := c.h.o.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+
+	// Assert
+	if !c.h.o.pendingResume(theWorkspace) {
+		t.Fatal("the waiting returner was not taken back to resume")
+	}
+	if entry, _ := c.entryOf(t, theWorkspace); entry.State != wsm.MergeQueued || c.lineOrder(t)[0] != theWorkspace {
+		t.Fatalf("returner = %+v, line %v; want it still waiting first", entry, c.lineOrder(t))
+	}
+}
+
+func TestRecoverBackInLineRefusesAWaitingMergesRecordItsReturnDidNotWrite(t *testing.T) {
+	const stray = "refusing the take-back: a waiting merge carries a record its return did not write"
+	tests := []struct {
+		name       string
+		backInLine bool
+		version    int
+		ledger     func(entry wsm.MergeQueueEntry) wsm.LeaseID
+		message    string
+		invariant  bool
+	}{
+		{name: "a record that is not back in line", version: progressVersion,
+			ledger: func(entry wsm.MergeQueueEntry) wsm.LeaseID { return entry.Ledger }, message: stray, invariant: true},
+		{name: "a record under another lease than the entry's ledger", backInLine: true, version: progressVersion,
+			ledger: func(wsm.MergeQueueEntry) wsm.LeaseID { return "another-lease" }, message: stray, invariant: true},
+		{name: "a record that will not decode", backInLine: true, version: progressVersion + 1,
+			ledger:  func(entry wsm.MergeQueueEntry) wsm.LeaseID { return entry.Ledger },
+			message: "refusing the take-back: a waiting merge's progress record will not decode"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			enqueue(t, h)
+			entry := entryIn(t, h, theWorkspace)
+			doc := progressDoc{Version: tt.version, Repo: string(h.repoKey()), Step: TabFixes, BackInLine: tt.backInLine,
+				Subject: subjectDoc{TargetDir: h.repoRoot}, Active: roundDoc{Kind: TabFixes, N: 1}}
+			encoded, err := json.Marshal(doc)
+			if err != nil {
+				t.Fatalf("json.Marshal: %v", err)
+			}
+			if err := h.db.PutMergeProgress(context.Background(), wsm.MergeProgress{Workspace: theWorkspace, Lease: tt.ledger(entry), UpdatedAt: time.Now(), Document: encoded}); err != nil {
+				t.Fatalf("PutMergeProgress: %v", err)
+			}
+
+			// Act
+			err = h.o.recoverBackInLine(context.Background(), h.repoKey(), entry)
+
+			// Assert
+			if err == nil {
+				t.Fatal("recoverBackInLine = nil, want the record refused")
+			}
+			rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.recover", Message: tt.message})
+			if !ok || rec.Context["workspace"] != string(theWorkspace) || (rec.Context["invariant_violation"] != nil) != tt.invariant {
+				t.Fatalf("ERROR record = %+v (found %v), want the workspace, the invariant named %v", rec, ok, tt.invariant)
+			}
+			if h.o.pendingResume(theWorkspace) {
+				t.Fatal("the refused record was taken back to resume")
+			}
+		})
+	}
+}
+
+func TestRecoverBackInLineTakesNothingOfAWaitingMergeWithNoRecord(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	enqueue(t, h)
+
+	// Act
+	err := h.o.recoverBackInLine(context.Background(), h.repoKey(), entryIn(t, h, theWorkspace))
+
+	// Assert
+	if err != nil || h.o.pendingResume(theWorkspace) {
+		t.Fatalf("recoverBackInLine = %v, pending %v; want an ordinary waiting merge left as it is", err, h.o.pendingResume(theWorkspace))
+	}
+}
+
+// TestEveryTakeBackOfARecordGoesThroughTakeBackResume pins the shape both
+// take-backs share: a merge resuming admitted (recoverResumable) and one
+// waiting back in line from its repair (recoverBackInLine) are stood as
+// resumes and drawn by the one helper, so neither hand-rolls a divergent
+// draw.
 func TestEveryTakeBackOfARecordGoesThroughTakeBackResume(t *testing.T) {
 	// Arrange + Act
 	calls := sourcescan.Sites(t, "o.takeBackResume(")
 	draws := sourcescan.Sites(t, "headWaiting, headRecover)")
 
 	// Assert
-	if !slices.Equal(calls, []string{"recover.go"}) {
-		t.Fatalf("takeBackResume is called at %v, want once, by the take-back in recover.go", calls)
+	if !slices.Equal(calls, []string{"recover.go", "recover.go"}) {
+		t.Fatalf("takeBackResume is called at %v, want once by each take-back in recover.go", calls)
 	}
 	if !slices.Equal(draws, []string{"recover.go"}) {
 		t.Fatalf("a taken-back merge is drawn waiting at %v, want only in takeBackResume", draws)
