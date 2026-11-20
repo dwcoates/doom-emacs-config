@@ -92,6 +92,9 @@ type Registry struct {
 	root  string
 	log   *recordlog.Logger
 	clock func() time.Time
+	// killGroup kills a run's process group (childgroup.KillGroup); a test
+	// stands in for it to leave a member alive.
+	killGroup func(pgid int) error
 
 	mu   sync.Mutex
 	live map[string]*run
@@ -123,7 +126,7 @@ func Open(root string, log *recordlog.Logger, clock func() time.Time) (*Registry
 		log.Error(op, "the run registry's root could not be made", recordlog.Context{"root": root, "cause": err.Error()})
 		return nil, err
 	}
-	r := &Registry{root: root, log: log, clock: clock, live: map[string]*run{}}
+	r := &Registry{root: root, log: log, clock: clock, killGroup: childgroup.KillGroup, live: map[string]*run{}}
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		log.Error(op, "the run registry's root could not be read", recordlog.Context{"root": root, "cause": err.Error()})
@@ -190,16 +193,25 @@ func (r *Registry) Start(spec Spec) (string, error) {
 	cmd.Dir = spec.Dir
 	cmd.Env = append(childgroup.ScrubRepositorySelectors(os.Environ()), spec.Env...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	pipe, err := cmd.StdoutPipe()
+	// THE RUN WRITES INTO A PIPE OF ITS OWN, not exec's StdoutPipe, so the
+	// leader's exit is read apart from the pipe's end (follow): a member of
+	// the group still holding the pipe never keeps the leader unreaped.
+	pipe, writeEnd, err := os.Pipe()
 	if err != nil {
 		_ = out.Close()
 		_ = os.RemoveAll(r.dir(id))
 		r.log.Error(op, "the run's output pipe could not be made", withCause(fields, err))
 		return "", &StorageError{err: err}
 	}
-	cmd.Stderr = cmd.Stdout
+	cmd.Stdout = writeEnd
+	cmd.Stderr = writeEnd
 	started := r.clock()
-	if err := cmd.Start(); err != nil {
+	err = cmd.Start()
+	// The child holds its own copy of the write end; this process's copy is
+	// closed, so the pipe ends once every member of the group has let go.
+	_ = writeEnd.Close()
+	if err != nil {
+		_ = pipe.Close()
 		_ = out.Close()
 		_ = os.RemoveAll(r.dir(id))
 		r.log.Warn(op, "the run's command could not be started", withCause(fields, err))
@@ -211,6 +223,7 @@ func (r *Registry) Start(spec Spec) (string, error) {
 		// life of the service, so it is not left running.
 		_ = childgroup.KillGroup(cmd.Process.Pid)
 		_ = cmd.Wait()
+		_ = pipe.Close()
 		_ = out.Close()
 		_ = os.RemoveAll(r.dir(id))
 		r.log.Error(op, "the run's record could not be written; the run was killed", withCause(fields, err))
@@ -227,8 +240,17 @@ func (r *Registry) Start(spec Spec) (string, error) {
 
 // follow copies the run's output into output.log line by line, waking every
 // watcher on each, and records the run's end once it exits.
-func (r *Registry) follow(live *run, cmd *exec.Cmd, pipe io.Reader, out *os.File, started time.Time, fields recordlog.Context) {
+//
+// A STOPPED RUN'S GROUP IS KILLED AGAIN ONCE ITS LEADER IS REAPED. Stop's kill
+// can land while the leader is mid-fork, and the child it was forking can join
+// the group after the kill read the group's members, holding the run's output
+// pipe open forever. A reaped leader has finished every fork it made, so a
+// kill of the group then reaches every member (reapLeader).
+func (r *Registry) follow(live *run, cmd *exec.Cmd, pipe *os.File, out *os.File, started time.Time, fields recordlog.Context) {
 	const op = "tests.runs.follow"
+	defer pipe.Close()
+	leader := make(chan error, 1)
+	go r.reapLeader(live, cmd, leader, fields)
 	reader := bufio.NewReader(pipe)
 	var writeErr error
 	for {
@@ -252,7 +274,7 @@ func (r *Registry) follow(live *run, cmd *exec.Cmd, pipe io.Reader, out *os.File
 			break
 		}
 	}
-	waitErr := cmd.Wait()
+	waitErr := <-leader
 	end := End{ExitCode: -1, Wall: r.clock().Sub(started)}
 	if state := cmd.ProcessState; state != nil {
 		end.ExitCode = state.ExitCode()
@@ -279,6 +301,25 @@ func (r *Registry) follow(live *run, cmd *exec.Cmd, pipe io.Reader, out *os.File
 	r.mu.Lock()
 	delete(r.live, live.id)
 	r.mu.Unlock()
+}
+
+// reapLeader waits for the run's leader to exit and hands Wait's answer to
+// LEADER. A run stopped by then has its group killed again: the leader's
+// forks have all finished, so no member the stop's kill missed is left
+// holding the output pipe (follow).
+func (r *Registry) reapLeader(live *run, cmd *exec.Cmd, leader chan<- error, fields recordlog.Context) {
+	const op = "tests.runs.reap"
+	err := cmd.Wait()
+	live.mu.Lock()
+	stopped := live.stopped
+	live.mu.Unlock()
+	if stopped {
+		if kerr := r.killGroup(live.pgid); kerr != nil && !errors.Is(kerr, os.ErrProcessDone) {
+			r.log.Error(op, "a stopped run's group could not be killed once its leader exited; a member left holds its output open",
+				withCause(recordlog.Context{"run": live.id, "label": fields["label"], "pgid": live.pgid}, kerr))
+		}
+	}
+	leader <- err
 }
 
 // wake applies CHANGE under the run's lock and wakes every watcher.
@@ -308,7 +349,7 @@ func (r *Registry) Stop(id string) error {
 	live.mu.Lock()
 	live.stopped = true
 	live.mu.Unlock()
-	if err := childgroup.KillGroup(live.pgid); err != nil && !errors.Is(err, os.ErrProcessDone) {
+	if err := r.killGroup(live.pgid); err != nil && !errors.Is(err, os.ErrProcessDone) {
 		r.log.Error(op, "the run's process group could not be killed", recordlog.Context{"run": id, "pgid": live.pgid, "cause": err.Error()})
 		return err
 	}
