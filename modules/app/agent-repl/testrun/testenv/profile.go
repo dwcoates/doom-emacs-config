@@ -14,6 +14,12 @@ import (
 // test that started them (ProfileDirFor). Unset, the run is not profiling.
 const ProfileDir = "AGENT_REPL_TEST_PROFILE_DIR"
 
+// ExitProfileEnv is the variable a production process (the daemon, a shim,
+// the store, the sidecar) reads at its start to profile its whole life into a
+// directory, writing the profile when it stops: proto/vocab/profile-session.json
+// `exit_profile_env`, which this package's test asserts it against.
+const ExitProfileEnv = "AGENT_REPL_EXIT_PROFILE_DIR"
+
 // unsafeName is every character a profile's file or directory name never
 // carries: a unit id's ':' and '/', a test path's '/', and anything a shell
 // or a profile viewer would read as something else.
@@ -49,4 +55,17 @@ func ProfileDirFor(getenv func(string) string, test string) (string, error) {
 		return "", fmt.Errorf("testenv: create the profiles directory of %s: %w", test, err)
 	}
 	return dir, nil
+}
+
+// ExitProfileEnvFor answers the environment a harness adds to the production
+// processes the test named TEST starts, so each profiles its whole life into
+// the test's profiles directory (ProfileDirFor): one ExitProfileEnv binding
+// under a profiling run, none outside one. The directory is answered beside
+// it, "" when there is none.
+func ExitProfileEnvFor(getenv func(string) string, test string) ([]string, string, error) {
+	dir, err := ProfileDirFor(getenv, test)
+	if err != nil || dir == "" {
+		return nil, "", err
+	}
+	return []string{ExitProfileEnv + "=" + dir}, dir, nil
 }

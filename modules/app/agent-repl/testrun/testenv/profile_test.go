@@ -1,8 +1,10 @@
 package testenv
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -86,6 +88,70 @@ func TestProfileDirFor(t *testing.T) {
 				if info, err := os.Stat(got); err != nil || !info.IsDir() {
 					t.Fatalf("the directory %s was not created: %v", got, err)
 				}
+			}
+		})
+	}
+}
+
+func TestExitProfileEnvIsTheSharedContracts(t *testing.T) {
+	// Arrange
+	raw, err := os.ReadFile("../../proto/vocab/profile-session.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vocab struct {
+		ExitProfileEnv string `json:"exit_profile_env"`
+	}
+	if err := json.Unmarshal(raw, &vocab); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	got := ExitProfileEnv
+
+	// Assert
+	if got != vocab.ExitProfileEnv {
+		t.Fatalf("ExitProfileEnv = %q, the vocabulary says %q", got, vocab.ExitProfileEnv)
+	}
+}
+
+func TestExitProfileEnvFor(t *testing.T) {
+	root := t.TempDir()
+	blocked := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name    string
+		env     string
+		wantEnv []string
+		wantDir string
+		wantErr string
+	}{
+		{name: "outside a profiling run the processes are not told", env: ""},
+		{name: "inside one they profile into the test's directory", env: root,
+			wantEnv: []string{ExitProfileEnv + "=" + filepath.Join(root, "TestA")}, wantDir: filepath.Join(root, "TestA")},
+		{name: "a directory that cannot be made fails", env: blocked, wantErr: "create the profiles directory of TestA"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			env, dir, err := ExitProfileEnvFor(func(k string) string {
+				if k == ProfileDir {
+					return tt.env
+				}
+				return ""
+			}, "TestA")
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil || !slices.Equal(env, tt.wantEnv) || dir != tt.wantDir {
+				t.Fatalf("ExitProfileEnvFor = %q, %q, %v; want %q, %q", env, dir, err, tt.wantEnv, tt.wantDir)
 			}
 		})
 	}
