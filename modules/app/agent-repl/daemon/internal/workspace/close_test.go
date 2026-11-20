@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/prompts"
 	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/sessionwatcher"
 	"agent-repld/internal/wsm"
@@ -304,23 +305,32 @@ func ownedPullRequest(number uint32, merged bool) wsm.WorkspaceLink {
 	return wsm.WorkspaceLink{URL: key.String(), Owned: true, PullRequest: &key, Follow: sub}
 }
 
-func TestCloseWhenOwnedPullRequestsMerged(t *testing.T) {
+// mergedNoticeFixture is a fixture whose merged-pull-requests brief is shipped.
+func mergedNoticeFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.briefs[BriefOwnedPullRequestsMerged] = prompts.Prompt{
+		Name: BriefOwnedPullRequestsMerged, Body: "merged: {{pull_requests}}", Placeholders: []string{"pull_requests"},
+	}
+	return f
+}
+
+func TestTellOwnedPullRequestsMerged(t *testing.T) {
 	tests := []struct {
-		name       string
-		links      []wsm.WorkspaceLink
-		turn       bool
-		wantClosed bool
-		wantMarked bool
+		name     string
+		links    []wsm.WorkspaceLink
+		turn     bool
+		wantTold bool
 	}{
-		{name: "a quiet workspace whose owned pull requests all merged closes", links: []wsm.WorkspaceLink{ownedPullRequest(1, true), ownedPullRequest(2, true)}, wantClosed: true},
-		{name: "a workspace with an owned pull request still open stays open", links: []wsm.WorkspaceLink{ownedPullRequest(1, true), ownedPullRequest(2, false)}},
-		{name: "a workspace that owns no pull request stays open"},
-		{name: "a workspace mid-turn closes when the turn ends", links: []wsm.WorkspaceLink{ownedPullRequest(1, true)}, turn: true, wantMarked: true},
+		{name: "a workspace whose owned pull requests all merged is told so", links: []wsm.WorkspaceLink{ownedPullRequest(1, true), ownedPullRequest(2, true)}, wantTold: true},
+		{name: "a workspace mid-turn is told so too, never closed", links: []wsm.WorkspaceLink{ownedPullRequest(1, true)}, turn: true, wantTold: true},
+		{name: "a workspace with an owned pull request still open is told nothing", links: []wsm.WorkspaceLink{ownedPullRequest(1, true), ownedPullRequest(2, false)}},
+		{name: "a workspace that owns no pull request is told nothing"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			f := newFixture(t)
+			f := mergedNoticeFixture(t)
 			f.workspace("w1", t.TempDir())
 			f.db.links = map[ids.WorkspaceID][]wsm.WorkspaceLink{"w1": tt.links}
 			if tt.turn {
@@ -329,41 +339,45 @@ func TestCloseWhenOwnedPullRequestsMerged(t *testing.T) {
 			}
 
 			// Act
-			err := f.verbs.CloseWhenOwnedPullRequestsMerged(context.Background(), "w1")
+			err := f.verbs.TellOwnedPullRequestsMerged(context.Background(), "w1")
 
 			// Assert
 			if err != nil {
-				t.Fatalf("CloseWhenOwnedPullRequestsMerged: %v", err)
+				t.Fatalf("TellOwnedPullRequestsMerged: %v", err)
 			}
-			if f.db.closedFlags["w1"] != tt.wantClosed {
-				t.Fatalf("closed = %v, want %v", f.db.closedFlags["w1"], tt.wantClosed)
+			if f.db.closedFlags["w1"] || f.db.workspaces["w1"].CloseWhenTurnEnds != nil {
+				t.Fatalf("closed %v, marked %v; want the workspace left open and unmarked", f.db.closedFlags["w1"], f.db.workspaces["w1"].CloseWhenTurnEnds != nil)
 			}
-			if tt.wantClosed {
-				if closures := f.db.closures["w1"]; len(closures) != 1 || closures[0].By != wsm.CloseByMerge {
-					t.Fatalf("closures = %+v, want one by the merge", closures)
+			var told []string
+			for _, sub := range f.queue.submissions {
+				if sub.WS == "w1" && sub.Origin == conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE {
+					told = append(told, submittedText(sub.Said))
 				}
 			}
-			if marked := f.db.workspaces["w1"].CloseWhenTurnEnds != nil; marked != tt.wantMarked {
-				t.Fatalf("marked to close at the turn's end = %v, want %v", marked, tt.wantMarked)
+			if (len(told) == 1) != tt.wantTold || len(told) > 1 {
+				t.Fatalf("notices = %q, want told %v once", told, tt.wantTold)
+			}
+			if tt.wantTold && !strings.Contains(told[0], tt.links[0].URL) {
+				t.Fatalf("notice = %q, want it to name the merged pull requests", told[0])
 			}
 		})
 	}
 }
 
-func TestCloseWhenOwnedPullRequestsMergedSurfacesAnUnreadableLinkSet(t *testing.T) {
+func TestTellOwnedPullRequestsMergedSurfacesAnUnreadableLinkSet(t *testing.T) {
 	// Arrange
-	f := newFixture(t)
+	f := mergedNoticeFixture(t)
 	f.workspace("w1", t.TempDir())
 	f.db.linksReadErr = errFake
 
 	// Act
-	err := f.verbs.CloseWhenOwnedPullRequestsMerged(context.Background(), "w1")
+	err := f.verbs.TellOwnedPullRequestsMerged(context.Background(), "w1")
 
 	// Assert
-	if !errors.Is(err, errFake) || f.db.closedFlags["w1"] {
-		t.Fatalf("err %v, closed %v; want the read's failure and the workspace open", err, f.db.closedFlags["w1"])
+	if !errors.Is(err, errFake) || len(f.queue.submissions) != 0 {
+		t.Fatalf("err %v, submissions %+v; want the read's failure and nothing told", err, f.queue.submissions)
 	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opClose, Message: "could not read the workspace's links; it is not closed for its merged pull requests"}); !ok {
+	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "error", Operation: opClose, Message: "could not read the workspace's links; it is not told its pull requests merged"}); !ok {
 		t.Fatalf("records = %+v, want the failure at error", f.log.logger.Records())
 	}
 }

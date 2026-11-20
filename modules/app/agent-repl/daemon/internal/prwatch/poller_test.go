@@ -515,7 +515,7 @@ func TestAnOwnedMergeThatCannotBeActedOnIsRecorded(t *testing.T) {
 	r.tick()
 
 	// Assert
-	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not judge closing the workspace one of whose owned pull requests merged"}); !ok {
+	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not tell the workspace one of whose owned pull requests merged"}); !ok {
 		t.Fatalf("records = %+v, want the failure at error", r.log.Records())
 	}
 }
