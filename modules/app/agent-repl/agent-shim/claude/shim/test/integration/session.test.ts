@@ -12,7 +12,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, onTestFinished, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { workspaceLockKey } from "../../src/locks.js";
 import { agentIdPath } from "../../src/engine/identity.js";
@@ -114,6 +114,23 @@ function startEofShim(): Promise<ShimHandle> {
  */
 function initAfterFirstTurnSession(): Promise<CanonicalSession> {
   return groupSession("init-after-first-turn", { env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+}
+
+/**
+ * The "session-settings" group's session, at its defaults (the default model,
+ * high effort, the default permission mode) when a case takes it: every case
+ * that moves a setting puts all three back when it finishes, the model first,
+ * since a model that takes no effort level refuses the effort's reset.
+ */
+async function settingsSession(): Promise<CanonicalSession> {
+  const session = await groupSession("session-settings");
+  onTestFinished(async () => {
+    const { clients } = session.shim;
+    setModelAccepted(await clients.h1.setSessionModel(create(shimv1.SetSessionModelRequestSchema, { model: modelNamed(DEFAULT_MODEL), coldThresholdTokens: 1_000_000n })));
+    expect(setEffortAccepted(await clients.h1.setSessionEffort(create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH })))).toBe(conversationv1.AgentEffortLevel.HIGH);
+    setPermissionModeAccepted(await clients.h1.setSessionPermissionMode(create(shimv1.SetSessionPermissionModeRequestSchema, { permissionMode: permissionMode("default") })));
+  });
+  return session;
 }
 
 let initFirstTurn: Promise<shimv1.StartTurnResponse> | null = null;
@@ -356,8 +373,7 @@ describe("SetSessionPermissionMode", () => {
   test("the new mode is pushed authoritatively on WatchSession", async () => {
     // AUTHORITATIVE EVEN WHEN THE CONSUMER ASKED: the daemon's own request is
     // not evidence the mode changed; the shim's push is.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "permissionModeChanged");
 
@@ -382,8 +398,7 @@ describe("SetSessionPermissionMode", () => {
 
 describe("SetSessionEffort", () => {
   test("with no turn open it succeeds carrying the level now in effect", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
 
     const response = await shim.clients.h1.setSessionEffort(
       create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
@@ -393,8 +408,7 @@ describe("SetSessionEffort", () => {
   });
 
   test("the vendor's applied level is pushed on WatchSession, and moves with a change", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     const watch = watchSession(shim);
     const effortOf = (frame: Parameters<typeof sessionUpdate>[0]): conversationv1.AgentEffortLevel | undefined => {
       const update = sessionUpdate(frame).update;
@@ -414,8 +428,7 @@ describe("SetSessionEffort", () => {
   });
 
   test("a model that takes no effort level answers not_supported", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     setModelAccepted(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
@@ -435,8 +448,7 @@ describe("SetSessionEffort", () => {
 
 describe("SetSessionModel", () => {
   test("with no turn open it succeeds and pushes model_changed", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "modelChanged");
 
@@ -470,9 +482,10 @@ describe("SetSessionModel", () => {
     // ONE MODEL PER TURN, a deliberate departure from the SDK's mid-turn
     // setModel: a turn that changed model halfway would have two models'
     // reasoning in one answer.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     let settled = false;
     const pending = shim.clients.h1
@@ -876,12 +889,13 @@ describe("session facts with no message behind them", () => {
   test("!model-fallback pushes model_changed for a model the shim did not ask for", async () => {
     // The vendor can serve a different model than the one requested; the change
     // is stated from the next assistant message's own `message.model`.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "modelChanged");
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!model-fallback" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!model-fallback" }));
     const changed = await watch.until((frame) => {
       const update = sessionUpdate(frame);
       return (
