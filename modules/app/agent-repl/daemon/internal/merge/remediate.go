@@ -487,18 +487,29 @@ func (o *orchestrator) waitThenReturn(ctx context.Context, ws ids.WorkspaceID, r
 // stood ahead of a merge the pump was already starting as the head, and the
 // chain then stood behind an entry it held no run for (2026-10-31,
 // TestTwoMergesOfARepositoryAlternateTheTestTurnAndTheirGatesNeverOverlap).
+//
+// A MERGE BACK FROM RESOLVING ITS OWN REBASE'S CONFLICTS carries that rebase
+// on its entry, written in the same store write (resolvedRebaseOf), so
+// whichever run takes it up next continues the rebase rather than aborting
+// it as a cut run's leftover (settleStandingRebase).
 func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey) error {
+	o.mu.Lock()
+	rem := o.remediating[ws]
+	o.mu.Unlock()
+	resolved := resolvedRebaseOf(rem)
 	if err := o.lineWrite(repo, func() error {
-		return o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo))
+		return o.deps.DB.ReturnRemediatedMerge(ctx, repo, ws, o.workedOn(repo), resolved)
 	}); err != nil {
 		return err
 	}
 	o.mu.Lock()
-	rem := o.remediating[ws]
 	delete(o.remediating, ws)
 	o.mu.Unlock()
-	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line, ahead of every merge of a lower return rank, and its repair slot passes on",
-		dlog.Context{"workspace": string(ws), "repo": string(repo)})
+	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "resolved_rebase": resolved != nil}
+	if resolved != nil {
+		fields["resolved_tip"], fields["resolved_turn"] = resolved.Tip, string(resolved.Turn)
+	}
+	o.log(ctx, ws).Info(opRemediate, "the merge's repair ended; it is back in line, ahead of every merge of a lower return rank, and its repair slot passes on", fields)
 	if rem != nil && !rem.waiting {
 		o.drawBackInLine(ctx, ws, repo, rem.doc)
 	}
@@ -508,6 +519,21 @@ func (o *orchestrator) returnRemediated(ctx context.Context, ws ids.WorkspaceID,
 	}
 	o.kick(repo)
 	return nil
+}
+
+// resolvedRebaseOf answers the rebase REM's conflict repair worked on: the
+// rebase its record names, standing in its worktree for the merge to
+// continue. A merge that stepped aside for its tests, a waiting merge's
+// conflict (whose rebase was aborted before it stepped aside) and a merge
+// with no remediation here carry none.
+func resolvedRebaseOf(rem *remediation) *wsm.ResolvedRebase {
+	if rem == nil || rem.waiting {
+		return nil
+	}
+	if why, err := asideReasonOf(rem.doc); err != nil || why != AsideForConflicts {
+		return nil
+	}
+	return &wsm.ResolvedRebase{Tip: rem.doc.Tip, BranchHead: rem.doc.BranchHead, Turn: ids.TurnID(rem.doc.Turn)}
 }
 
 // drawBackInLine settles the repairing tab of WS's bubble -- "fixing tests" or

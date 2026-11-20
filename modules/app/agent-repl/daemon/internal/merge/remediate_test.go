@@ -1248,3 +1248,96 @@ func TestReRegisteringAnUnarmedRemediationReplacesIt(t *testing.T) {
 		t.Fatalf("registration = %+v, want the second one", got)
 	}
 }
+
+func TestResolvedRebaseOf(t *testing.T) {
+	conflicts := progressDoc{Step: TabConflicts, Tip: "tip-1", BranchHead: "head-1", Turn: "turn-1"}
+	tests := []struct {
+		name string
+		rem  *remediation
+		want *wsm.ResolvedRebase
+	}{
+		{name: "a merge back from its conflicts carries the rebase its record names", rem: &remediation{doc: conflicts},
+			want: &wsm.ResolvedRebase{Tip: "tip-1", BranchHead: "head-1", Turn: "turn-1"}},
+		{name: "a merge back from fixing its tests carries none", rem: &remediation{doc: progressDoc{Step: TabFixes, Tip: "tip-1", Turn: "turn-1"}}},
+		{name: "a waiting merge's conflict carries none", rem: &remediation{waiting: true}},
+		{name: "no remediation carries none"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := resolvedRebaseOf(tc.rem)
+
+			// Assert
+			if (got == nil) != (tc.want == nil) || (got != nil && *got != *tc.want) {
+				t.Fatalf("resolvedRebaseOf = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAMergeBackFromItsConflictsCarriesTheRebaseItsRepairWorkedOn(t *testing.T) {
+	// Arrange
+	c := conflictAsideScenario(t)
+	stored, _, _ := c.h.db.MergeProgressOf(context.Background(), theWorkspace)
+	doc, err := decodeProgress(stored)
+	if err != nil {
+		t.Fatalf("decodeProgress: %v", err)
+	}
+
+	// Act
+	err = c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey())
+
+	// Assert
+	if err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	entry, _ := c.entryOf(t, theWorkspace)
+	want := wsm.ResolvedRebase{Tip: doc.Tip, BranchHead: doc.BranchHead, Turn: ids.TurnID(doc.Turn)}
+	if entry.Resolved == nil || *entry.Resolved != want || want.Tip == "" || want.BranchHead == "" || want.Turn == "" {
+		t.Fatalf("resolved = %+v, want %+v", entry.Resolved, want)
+	}
+	if !loggedLike(c.h, logLike{level: "info", op: opRemediate, text: "the merge's repair ended",
+		context: map[string]string{"resolved_tip": doc.Tip, "resolved_turn": doc.Turn}}) {
+		t.Fatal("the return record does not name the resolved rebase")
+	}
+}
+
+// TestARequeuedMergeBackFromItsConflictsContinuesItsResolvedRebase is the
+// 2026-11-20 livelock: a merge back in line from resolving its conflicts was
+// requeued (its record dropped) and started afresh on the same tip; it must
+// continue the rebase its repair resolved, never abort it and meet the same
+// conflict again.
+func TestARequeuedMergeBackFromItsConflictsContinuesItsResolvedRebase(t *testing.T) {
+	// Arrange: the head stepped aside for its conflict, returned, and was
+	// put back in line to start over, the target unmoved.
+	c := conflictAsideScenario(t)
+	if err := c.h.o.returnRemediated(context.Background(), theWorkspace, c.h.repoKey()); err != nil {
+		t.Fatalf("returnRemediated: %v", err)
+	}
+	if err := c.h.o.requeueAdmitted(context.Background(), "daemon.merge.resume", c.h.repoKey(), theWorkspace, requeueWhy{
+		unleased: "unleased", failed: "failed", done: "requeued to start over",
+	}); err != nil {
+		t.Fatalf("requeueAdmitted: %v", err)
+	}
+
+	// Act
+	c.drain(t)
+
+	// Assert
+	// THE REPAIR TURN IS THE TEST'S OWN return above: the start prompts no
+	// conflict again, since it continues the rebase that turn resolved.
+	if n := c.prompts(theWorkspace, conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR); n != 0 {
+		t.Fatalf("conflict prompts = %d, want none: the start continues the resolved rebase", n)
+	}
+	if got := c.steppedAsideFor(theWorkspace, AsideForConflicts); got != 1 {
+		t.Fatalf("conflict step aside records = %d, want 1", got)
+	}
+	if !loggedLike(c.h, logLike{level: "info", op: "daemon.merge.rebase", text: "it is continued, never started over",
+		context: map[string]string{"verdict": "continue_resolved"}}) {
+		t.Fatal("the continuation was not recorded")
+	}
+	got := c.git.landedOwn()
+	if len(got) != 2 || !slices.Equal(got[0], []string{"a1"}) || !slices.Equal(got[1], []string{"b1"}) {
+		t.Fatalf("landings brought %v, want a1 then b1", got)
+	}
+}

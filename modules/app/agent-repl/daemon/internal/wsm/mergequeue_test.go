@@ -2176,7 +2176,7 @@ func TestReturnRemediatedMergePutsItAheadOfTheWaitingBehindTheWorkedOn(t *testin
 	s, repo, failed, next, waiting := stepAsideFixture(t)
 
 	// Act
-	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed, nil); err != nil {
+	if err := s.ReturnRemediatedMerge(context.Background(), repo, failed, nil, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2212,7 +2212,7 @@ func TestReturnRemediatedMergeWithNobodyWaitingStandsBehindTheWorkedOn(t *testin
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, nil); err != nil {
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, nil, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2244,7 +2244,7 @@ func TestReturnRemediatedMergeStandsBehindAMergeNamedWorkedOnThatStillWaits(t *t
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, []WorkspaceID{next.ID}); err != nil {
+	if err := s.ReturnRemediatedMerge(ctx, repo, failed.ID, []WorkspaceID{next.ID}, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2327,7 +2327,7 @@ func TestReturnRemediatedMergeOrdersReturnersByRank(t *testing.T) {
 
 			// Act
 			for _, i := range tt.returns {
-				if err := s.ReturnRemediatedMerge(ctx, repo, wss[i], []WorkspaceID{wss[2]}); err != nil {
+				if err := s.ReturnRemediatedMerge(ctx, repo, wss[i], []WorkspaceID{wss[2]}, nil); err != nil {
 					t.Fatalf("ReturnRemediatedMerge: %v", err)
 				}
 			}
@@ -2362,7 +2362,7 @@ func TestReturnRemediatedMergeNeverPassesAnAdmittedMergeThatNeverSteppedAside(t 
 	}
 
 	// Act
-	if err := s.ReturnRemediatedMerge(ctx, repo, wss[0], nil); err != nil {
+	if err := s.ReturnRemediatedMerge(ctx, repo, wss[0], nil, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2384,7 +2384,7 @@ func TestReturnRemediatedMergeRefusesAMergeNotRemediating(t *testing.T) {
 	queued(t, s, repo, ws.ID, instant)
 
 	// Act
-	err := s.ReturnRemediatedMerge(context.Background(), repo, ws.ID, nil)
+	err := s.ReturnRemediatedMerge(context.Background(), repo, ws.ID, nil, nil)
 
 	// Assert
 	if err == nil {
@@ -2488,7 +2488,7 @@ func TestReturnRemediatedMergeGrantsTheReleasedSlotToTheFirstAwaitingIt(t *testi
 	}
 
 	// Act
-	if err := q.s.ReturnRemediatedMerge(context.Background(), q.repo, q.ws[0], nil); err != nil {
+	if err := q.s.ReturnRemediatedMerge(context.Background(), q.repo, q.ws[0], nil, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 
@@ -2514,7 +2514,7 @@ func TestAWaitingMergeStepsAsideForItsBackgroundConflictAndReturnsWaiting(t *tes
 	if err != nil {
 		t.Fatalf("StepAsideMerge: %v", err)
 	}
-	if err := q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], []WorkspaceID{q.ws[0]}); err != nil {
+	if err := q.s.ReturnRemediatedMerge(ctx, q.repo, q.ws[2], []WorkspaceID{q.ws[0]}, nil); err != nil {
 		t.Fatalf("ReturnRemediatedMerge: %v", err)
 	}
 

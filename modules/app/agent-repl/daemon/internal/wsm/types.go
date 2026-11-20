@@ -1547,6 +1547,10 @@ type MergeQueueEntry struct {
 	// stands, MergeLeftLanded once it landed, and any other cause when it
 	// left without landing.
 	WaitsOnLeft string
+	// Resolved is the rebase the merge's own conflict repair worked on, left
+	// standing in its worktree for the merge to continue
+	// (mergeresolvedrebase.go); nil when the merge has none.
+	Resolved *ResolvedRebase
 }
 
 // MergeLeftLanded is the removal cause of a merge that landed, the one cause

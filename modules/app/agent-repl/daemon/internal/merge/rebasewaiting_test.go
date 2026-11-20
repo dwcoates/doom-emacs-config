@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
@@ -680,5 +681,186 @@ func TestAbortStandingRebase(t *testing.T) {
 				t.Fatalf("no ERROR record %q: %+v", tt.wantError, h.logs.Records())
 			}
 		})
+	}
+}
+
+func TestDecideStandingRebase(t *testing.T) {
+	resolved := &wsm.ResolvedRebase{Tip: "tip-1", BranchHead: "head-1", Turn: "turn-1"}
+	tests := []struct {
+		name     string
+		standing bool
+		resolved *wsm.ResolvedRebase
+		tip      string
+		want     standingVerdict
+	}{
+		{name: "nothing standing rebases afresh", tip: "tip-1", want: noRebaseStanding},
+		{name: "nothing standing with a stale resolved rebase rebases afresh", resolved: resolved, tip: "tip-1", want: noRebaseStanding},
+		{name: "a rebase no repair of the merge's own worked on is a cut run's leftover", standing: true, tip: "tip-1", want: abortCutLeftover},
+		{name: "the merge's own resolved rebase on the same tip is continued", standing: true, resolved: resolved, tip: "tip-1", want: continueResolved},
+		{name: "the merge's own resolved rebase whose target moved is aborted", standing: true, resolved: resolved, tip: "tip-2", want: abortTargetMoved},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := decideStandingRebase(tc.standing, tc.resolved, tc.tip)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("decideStandingRebase = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// settleWorld is a run of the harness's queued merge whose worktree is /wt,
+// its entry carrying RESOLVED.
+func settleWorld(t *testing.T, resolved *wsm.ResolvedRebase) (*harness, *run) {
+	t.Helper()
+	h := newHarness(t)
+	enqueue(t, h)
+	h.db.carryResolved(t, h.repoKey(), theWorkspace, resolved)
+	r := ledgeredRun(t, h)
+	r.subject = subject{branch: "feature", dir: "/wt", targetDir: "/target"}
+	return h, r
+}
+
+// resolvedOf answers what the harness's entry records as resolved.
+func resolvedOf(t *testing.T, h *harness) *wsm.ResolvedRebase {
+	t.Helper()
+	h.db.mu.Lock()
+	defer h.db.mu.Unlock()
+	return h.db.queues[h.repoKey()][0].Resolved
+}
+
+func TestSettleStandingRebase(t *testing.T) {
+	resolvedOn := func(tip string) *wsm.ResolvedRebase {
+		return &wsm.ResolvedRebase{Tip: tip, BranchHead: "head-1", Turn: "turn-1"}
+	}
+	tests := []struct {
+		name         string
+		standing     bool
+		resolved     *wsm.ResolvedRebase
+		wantContinue bool
+		wantAbort    bool
+		wantKept     bool
+		wantVerdict  string
+		wantText     string
+	}{
+		{name: "the merge's own resolved rebase on the tip is continued and kept", standing: true, resolved: resolvedOn("tip-1"),
+			wantContinue: true, wantKept: true, wantVerdict: "continue_resolved", wantText: "it is continued, never started over"},
+		{name: "a cut run's leftover is aborted", standing: true,
+			wantAbort: true, wantVerdict: "abort_cut_leftover", wantText: "a rebase a cut run left standing for its turn was aborted"},
+		{name: "a resolved rebase whose target moved is aborted and cleared", standing: true, resolved: resolvedOn("tip-0"),
+			wantAbort: true, wantVerdict: "abort_target_moved", wantText: "the target moved since the merge's own conflict repair worked on the rebase"},
+		{name: "a resolved rebase no longer standing is cleared", resolved: resolvedOn("tip-1")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, r := settleWorld(t, tc.resolved)
+			h.git.leftStanding = tc.standing
+
+			// Act
+			got, err := r.settleStandingRebase(context.Background(), "tip-1")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("settleStandingRebase: %v", err)
+			}
+			if (got != nil) != tc.wantContinue || (tc.wantContinue && *got != *tc.resolved) {
+				t.Fatalf("settleStandingRebase = %+v, want continuing %v", got, tc.wantContinue)
+			}
+			h.git.mu.Lock()
+			aborted := slices.Contains(h.git.rebaseCommands, "abort")
+			h.git.mu.Unlock()
+			if aborted != tc.wantAbort {
+				t.Fatalf("aborted = %v, want %v", aborted, tc.wantAbort)
+			}
+			if kept := resolvedOf(t, h) != nil; kept != tc.wantKept {
+				t.Fatalf("the entry still carries its resolved rebase = %v, want %v", kept, tc.wantKept)
+			}
+			if tc.wantVerdict != "" && !loggedLike(h, logLike{level: "info", op: "daemon.merge.rebase", text: tc.wantText,
+				context: map[string]string{"verdict": tc.wantVerdict, "worktree": "/wt", "tip": "tip-1", "workspace": string(theWorkspace)}}) {
+				t.Fatalf("no INFO record of the %s decision with its context", tc.wantVerdict)
+			}
+		})
+	}
+}
+
+func TestSettleStandingRebaseFailures(t *testing.T) {
+	failure := errors.New("broke")
+	resolved := &wsm.ResolvedRebase{Tip: "tip-0", BranchHead: "head-1", Turn: "turn-1"}
+	tests := []struct {
+		name      string
+		arrange   func(h *harness)
+		wantText  string
+		wantKept  bool
+		wantAbort bool
+	}{
+		{name: "a rebase that cannot be read fails and changes nothing", arrange: func(h *harness) { h.git.standingErr = failure },
+			wantText: "reading whether a rebase stands", wantKept: true},
+		{name: "an entry that cannot be read fails and changes nothing", arrange: func(h *harness) { h.db.queueReadErr = failure },
+			wantText: "reading whether the merge's own repair resolved", wantKept: true},
+		{name: "a resolved rebase that cannot be cleared fails before any abort", arrange: func(h *harness) { h.db.clearResolvedErr = failure },
+			wantText: "clearing the resolved rebase", wantKept: true},
+		{name: "an abort that fails is surfaced", arrange: func(h *harness) { h.git.abortErr = failure },
+			wantText: "aborting the resolved rebase standing", wantAbort: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h, r := settleWorld(t, resolved)
+			h.git.leftStanding = true
+			tc.arrange(h)
+
+			// Act
+			got, err := r.settleStandingRebase(context.Background(), "tip-1")
+
+			// Assert
+			if got != nil || !errors.Is(err, failure) || !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("settleStandingRebase = %+v, %v, want the failure naming %q", got, err, tc.wantText)
+			}
+			h.db.mu.Lock()
+			h.db.queueReadErr = nil
+			h.db.mu.Unlock()
+			if kept := resolvedOf(t, h) != nil; kept != tc.wantKept {
+				t.Fatalf("the entry still carries its resolved rebase = %v, want %v", kept, tc.wantKept)
+			}
+			h.git.mu.Lock()
+			aborted := slices.Contains(h.git.rebaseCommands, "abort")
+			standing := h.git.leftStanding
+			h.git.mu.Unlock()
+			if aborted != tc.wantAbort || !standing {
+				t.Fatalf("aborted = %v, still standing = %v; want no abort, the rebase left as it stood", aborted, standing)
+			}
+		})
+	}
+}
+
+func TestAWaitingMergeKeepsTheRebaseItsOwnRepairResolvedOnTheTip(t *testing.T) {
+	// Arrange: C's worktree holds the rebase its own conflict repair worked
+	// on, onto the target's tip as it stands.
+	w := newWaitingWorld(t, "ws-c")
+	w.land(t)
+	w.awaitPass(t)
+	tip := w.git.ref("master")
+	dir := w.dirs["ws-c"]
+	w.git.cmu.Lock()
+	w.git.rebases[dir] = &chainRebase{branch: "b-ws-c", head: tip}
+	w.git.cmu.Unlock()
+	w.h.db.carryResolved(t, w.h.repoKey(), "ws-c", &wsm.ResolvedRebase{Tip: tip, BranchHead: "head-c", Turn: "turn-c"})
+
+	// Act
+	w.h.o.rebaseWaitingMember(context.Background(), w.h.repoKey(), w.entryOf(t, "ws-c"))
+
+	// Assert
+	if standing, _ := w.git.RebaseInProgress(context.Background(), dir); !standing {
+		t.Fatal("the waiting pass aborted the rebase C's own repair resolved")
+	}
+	if !w.recorded("info", "daemon.merge.rebase_waiting", "holds the rebase its own conflict repair worked on, on the target's tip; it keeps it this round") {
+		t.Fatal("keeping the resolved rebase was not recorded")
+	}
+	if got := w.entryOf(t, "ws-c").Resolved; got == nil {
+		t.Fatal("the waiting pass cleared the resolved rebase it kept")
 	}
 }

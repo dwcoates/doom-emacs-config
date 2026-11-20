@@ -59,6 +59,9 @@ type fakeDB struct {
 	// holdErr fails every round hold (HoldMergeRound).
 	holdErr error
 
+	// clearResolvedErr fails ClearResolvedRebase.
+	clearResolvedErr error
+
 	// progressHistory is every progress record written, in order.
 	progressHistory []wsm.MergeProgress
 
@@ -1300,9 +1303,42 @@ func (f *fakeDB) restampRepairsLocked(repo wsm.RepoKey) error {
 	return nil
 }
 
+// carryResolved records RESOLVED on WS's entry in REPO, as a return from
+// resolving its conflicts writes it.
+func (f *fakeDB) carryResolved(t *testing.T, repo wsm.RepoKey, ws ids.WorkspaceID, resolved *wsm.ResolvedRebase) {
+	t.Helper()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for i := range f.queues[repo] {
+		if f.queues[repo][i].Workspace == ws {
+			f.queues[repo][i].Resolved = resolved
+			return
+		}
+	}
+	t.Fatalf("%s has no queue entry to carry a resolved rebase", ws)
+}
+
+// ClearResolvedRebase retires the resolved rebase an entry carries, as the
+// durable queue does; clearErr fails it.
+func (f *fakeDB) ClearResolvedRebase(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.clearResolvedErr != nil {
+		return false, f.clearResolvedErr
+	}
+	for i := range f.queues[repo] {
+		if f.queues[repo][i].Workspace == id {
+			cleared := f.queues[repo][i].Resolved != nil
+			f.queues[repo][i].Resolved = nil
+			return cleared, nil
+		}
+	}
+	return false, fmt.Errorf("clear the resolved rebase of %s: %w", id, wsm.ErrNotFound)
+}
+
 // ReturnRemediatedMerge puts the remediating entry back, admitted, at the
-// first waiting place, as the durable queue does.
-func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID) error {
+// first waiting place, carrying RESOLVED, as the durable queue does.
+func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID, resolved *wsm.ResolvedRebase) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	queue := f.queues[repo]
@@ -1319,11 +1355,15 @@ func (f *fakeDB) ReturnRemediatedMerge(_ context.Context, repo wsm.RepoKey, id i
 		return fmt.Errorf("return %s while %s, not remediating", id, queue[at].State)
 	}
 	entry := queue[at]
+	if resolved != nil && entry.Aside != wsm.MergeAsideConflicts {
+		return fmt.Errorf("return %s from %s carrying a resolved rebase", id, entry.Aside)
+	}
 	entry.State, entry.Source.Front = wsm.MergeAdmitted, true
 	if entry.Aside == wsm.MergeAsideWaitingConflicts {
 		entry.State = wsm.MergeQueued
 	}
 	entry.Aside, entry.Slot, entry.SlotSince = wsm.MergeAsideNone, wsm.MergeSlotWaiting, time.Now()
+	entry.Resolved = resolved
 	rest := append(queue[:at:at], queue[at+1:]...)
 	place := len(rest)
 	for i, e := range rest {

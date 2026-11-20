@@ -382,8 +382,12 @@ func (r *run) untilCommitted(ctx context.Context, tip, targetBranch string, firs
 func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcome, error) {
 	const op = "daemon.merge.rebase"
 	dir, branch := r.subject.dir, r.subject.branch
-	if err := r.clearLeftoverRebase(ctx); err != nil {
+	resolved, err := r.settleStandingRebase(ctx, tip)
+	if err != nil {
 		return nil, err
+	}
+	if resolved != nil {
+		return r.continueResolved(ctx, tip, targetBranch, *resolved)
 	}
 	clean, err := r.git.IsClean(ctx, dir)
 	if err != nil {
@@ -462,6 +466,26 @@ func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcom
 		"workspace": string(r.ws), "branch": branch, "worktree": dir, "onto": tip, "commits": len(commits)})
 	step, err := r.git.StartRebase(ctx, dir, tip, shasOf(commits))
 	return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+}
+
+// continueResolved goes on with RESOLVED, the rebase onto TIP the merge's own
+// conflict repair worked on, which stands in the worktree: its commits are
+// what the branch, still at its head before the rebase, replays, its record
+// is written as any rebase's (recordRebase), and it goes on from where git
+// stopped it (resumeRebase) -- a conflict still unresolved is prompted again,
+// and the rest is continued.
+func (r *run) continueResolved(ctx context.Context, tip, targetBranch string, resolved wsm.ResolvedRebase) (*outcome, error) {
+	dir, branch := r.subject.dir, r.subject.branch
+	commits, err := r.git.CommitsBetween(ctx, dir, r.ownBase(tip), branch)
+	if err != nil {
+		return nil, fmt.Errorf("merge: listing what %s replays onto %s: %w", branch, short(tip), err)
+	}
+	p := &replay{round: r.openTab(ctx, TabRebasing), commits: commits, head: resolved.BranchHead}
+	r.rebasing.beginReplay(commits, p.round.started.UnixMilli())
+	if err := r.recordRebase(ctx, targetBranch, tip, resolved.BranchHead, commits); err != nil {
+		return nil, err
+	}
+	return r.resumeRebase(ctx, p, tip, targetBranch, resolved.BranchHead)
 }
 
 // recordRebase writes the record of a rebase of COMMITS onto TIP, the
