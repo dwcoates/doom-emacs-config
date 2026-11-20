@@ -15,6 +15,7 @@ import (
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
+	"agentrepl/testrun/testenv"
 )
 
 func write(t *testing.T, path, body string, mode os.FileMode) {
@@ -1603,5 +1604,41 @@ func TestLispNamesByFilePairsEachNamedFileWithItsNames(t *testing.T) {
 				t.Fatalf("lispNamesByFile = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// A GO CHUNK IS TOLD WHERE ITS HARNESSES COUNT LOG RECORDS
+// (testenv.LogRecordsOut), and its tests are given what they counted.
+func TestAGoChunksTestsAreGivenTheLogRecordsTheirHarnessCounted(t *testing.T) {
+	// Arrange
+	module := goPackageFixture(t, "func TestA(t *testing.T) {}\nfunc TestB(t *testing.T) {}\n")
+	counts := t.TempDir()
+	_, split, err := goPkg{Suite: "m", Module: module, Rel: "p", Bin: "/b", Self: "/testrun", After: "m:build", Counts: counts}.units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := split.Chunk("m:p#00", []string{"TestA", "TestB"})
+	out := ""
+	for _, kv := range chunk.Env {
+		if v, ok := strings.CutPrefix(kv, testenv.LogRecordsOut+"="); ok {
+			out = v
+		}
+	}
+	if out == "" || filepath.Dir(out) != counts {
+		t.Fatalf("chunk env = %q, want %s naming a file in %s", chunk.Env, testenv.LogRecordsOut, counts)
+	}
+	if err := testenv.CountLogRecords(func(string) string { return out }, "TestA", 5); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act
+	tests, err := chunk.Tests([]byte("--- PASS: TestA (0.10s)\n--- PASS: TestB (0.20s)\nPASS\n"), true)
+
+	// Assert
+	if err != nil || len(tests) != 2 {
+		t.Fatalf("Tests = %+v, %v; want two", tests, err)
+	}
+	if !tests[0].HasLogRecords || tests[0].LogRecords != 5 || tests[1].HasLogRecords {
+		t.Fatalf("tests = %+v, want TestA with its 5 records and TestB uncounted", tests)
 	}
 }

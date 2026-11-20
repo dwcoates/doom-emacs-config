@@ -46,6 +46,14 @@ const SeriesName = "agentrepl_test_seconds"
 // labeled as SeriesName (AttributeCPU says how a test's share is measured).
 const CPUSeriesName = "agentrepl_test_cpu_seconds"
 
+// ProcessesSeriesName is the gauge every test's share of the processes its
+// unit started lands in, beside its CPU (AttributeCPU).
+const ProcessesSeriesName = "agentrepl_test_processes_started"
+
+// LogRecordsSeriesName is the gauge every test's counted log records land in,
+// for the tests whose harness counts them (Test.LogRecords).
+const LogRecordsSeriesName = "agentrepl_test_log_records"
+
 // SuiteSeriesName is the gauge every suite's slot time lands in, one sample
 // per run.
 const SuiteSeriesName = "agentrepl_test_suite_seconds"
@@ -103,6 +111,11 @@ type Test struct {
 	// Processes is the test's share of the processes its unit's tree started
 	// (AttributeCPU), when HasCPU.
 	Processes float64
+	// LogRecords is the log records the test's harness counted its
+	// production processes writing (testenv.CountLogRecords), when
+	// HasLogRecords.
+	LogRecords    int
+	HasLogRecords bool
 }
 
 // Suite is one suite's time in a run.
@@ -179,6 +192,31 @@ func TakeTarget() (Target, error) {
 
 // Enabled reports whether the run pushes.
 func (t Target) Enabled() bool { return t.Root != "" }
+
+// WithLogRecords gives each of a Go package PKG's tests the log records its
+// harness counted (testenv.ReadLogRecords, by test name as `go test` names
+// it). A count naming no test the unit reported is an error: the harness and
+// the runner disagree about what ran.
+func WithLogRecords(tests []Test, pkg string, counts map[string]int) error {
+	byName := make(map[string]int, len(tests))
+	for i, t := range tests {
+		byName[t.Name] = i
+	}
+	var unknown []string
+	for name, n := range counts {
+		i, ok := byName[pkg+"."+name]
+		if !ok {
+			unknown = append(unknown, name)
+			continue
+		}
+		tests[i].LogRecords, tests[i].HasLogRecords = n, true
+	}
+	if len(unknown) > 0 {
+		sort.Strings(unknown)
+		return fmt.Errorf("testtimes: log records were counted for tests the unit did not report: %s", strings.Join(unknown, ", "))
+	}
+	return nil
+}
 
 // goOutcomes maps a go result word to its outcome.
 var goOutcomes = map[string]string{"PASS": Pass, "FAIL": Fail, "SKIP": Skip}
@@ -356,6 +394,10 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 		fmt.Fprintf(&b, "%s{%s} %s %d\n", SeriesName, labels, num(t.Seconds), ms)
 		if t.HasCPU {
 			fmt.Fprintf(&b, "%s{%s} %s %d\n", CPUSeriesName, labels, num(t.CPU), ms)
+			fmt.Fprintf(&b, "%s{%s} %s %d\n", ProcessesSeriesName, labels, num(t.Processes), ms)
+		}
+		if t.HasLogRecords {
+			fmt.Fprintf(&b, "%s{%s} %d %d\n", LogRecordsSeriesName, labels, t.LogRecords, ms)
 		}
 	}
 	batching := labelValue(report.Batching)

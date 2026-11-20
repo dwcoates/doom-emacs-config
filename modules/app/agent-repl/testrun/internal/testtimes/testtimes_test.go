@@ -277,7 +277,8 @@ func TestEncodeStampsEverySampleWithTheTriggerAndTheRunsEnd(t *testing.T) {
 	got := string(Encode(Report{
 		Tests: []Test{
 			{Suite: "webapp", Name: `a > says "hi"\n`, Outcome: Pass, Seconds: 0.5},
-			{Suite: "webapp", Name: "b", Outcome: Pass, Seconds: 2, CPU: 0.75, HasCPU: true},
+			{Suite: "webapp", Name: "b", Outcome: Pass, Seconds: 2, CPU: 0.75, HasCPU: true, Processes: 1.5},
+			{Suite: "daemon", Name: "c", Outcome: Pass, Seconds: 1, LogRecords: 42, HasLogRecords: true},
 		},
 		Suites:     []Suite{{Name: "webapp", Outcome: Pass, Seconds: 12}},
 		Units:      []Unit{{Suite: "webapp", ID: "webapp#00", Outcome: Fail, Wall: 3, CPU: 2.5, MaxRSSBytes: 1048576, BlockReads: 7, BlockWrites: 9}},
@@ -292,6 +293,9 @@ func TestEncodeStampsEverySampleWithTheTriggerAndTheRunsEnd(t *testing.T) {
 	want := `agentrepl_test_seconds{suite="webapp",test="a > says \"hi\"\\n",outcome="pass",trigger="merge_queue"} 0.5 1700000000123` + "\n" +
 		`agentrepl_test_seconds{suite="webapp",test="b",outcome="pass",trigger="merge_queue"} 2 1700000000123` + "\n" +
 		`agentrepl_test_cpu_seconds{suite="webapp",test="b",outcome="pass",trigger="merge_queue"} 0.75 1700000000123` + "\n" +
+		`agentrepl_test_processes_started{suite="webapp",test="b",outcome="pass",trigger="merge_queue"} 1.5 1700000000123` + "\n" +
+		`agentrepl_test_seconds{suite="daemon",test="c",outcome="pass",trigger="merge_queue"} 1 1700000000123` + "\n" +
+		`agentrepl_test_log_records{suite="daemon",test="c",outcome="pass",trigger="merge_queue"} 42 1700000000123` + "\n" +
 		`agentrepl_test_suite_seconds{suite="webapp",outcome="pass",trigger="merge_queue",batching="max48-min12"} 12 1700000000123` + "\n" +
 		`agentrepl_test_run_seconds` + run + ` 95.5 1700000000123` + "\n" +
 		`agentrepl_test_run_predicted_seconds` + run + ` 80 1700000000123` + "\n" +
@@ -341,5 +345,44 @@ func TestPushAnswersAStoreThatCannotBeReached(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "1 test, 0 suite and 0 unit records were not pushed") {
 		t.Fatalf("Push = %v, want the unpushed times named", err)
+	}
+}
+
+func TestWithLogRecords(t *testing.T) {
+	tests := []struct {
+		name    string
+		counts  map[string]int
+		want    map[string]int
+		wantErr string
+	}{
+		{name: "each counted test gets its records", counts: map[string]int{"TestA": 7, "TestA/sub": 2}, want: map[string]int{"internal/x.TestA": 7, "internal/x.TestA/sub": 2}},
+		{name: "no counts leave every test uncounted", counts: nil, want: map[string]int{}},
+		{name: "a count naming no reported test is refused", counts: map[string]int{"TestA": 1, "TestGone": 3}, wantErr: "did not report: TestGone"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			reported := []Test{{Name: "internal/x.TestA"}, {Name: "internal/x.TestA/sub"}, {Name: "internal/x.TestB"}}
+
+			// Act
+			err := WithLogRecords(reported, "internal/x", tt.counts)
+
+			// Assert
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("err = %v, want one containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, r := range reported {
+				want, counted := tt.want[r.Name]
+				if r.HasLogRecords != counted || r.LogRecords != want {
+					t.Fatalf("%s: records %d (counted %v), want %d (%v)", r.Name, r.LogRecords, r.HasLogRecords, want, counted)
+				}
+			}
+		})
 	}
 }

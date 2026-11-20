@@ -99,6 +99,9 @@ type goPkg struct {
 	Programs []string
 	// ProgramsDir is the run's programs directory (Layout.ProgramsDir).
 	ProgramsDir string
+	// Counts is where each chunk's harnesses append its tests' log record
+	// counts, one file a chunk (testenv.LogRecordsOut); "" counts none.
+	Counts string
 	// SpawnedCovDir, under coverage, is where the systems this package's
 	// tests spawn write their counters (testenv.Coverage): every chunk
 	// carries it, with the programs marked instrumented, so the reach of an
@@ -171,6 +174,11 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 		}
 		p.ChunkEnv = append(p.ChunkEnv, p.spawnedEnv()...)
 	}
+	if p.Counts != "" {
+		if err := os.MkdirAll(p.Counts, 0o755); err != nil {
+			return nil, nil, fmt.Errorf("suites: create %s: %w", p.Counts, err)
+		}
+	}
 	if p.CovDir != "" {
 		if err := os.MkdirAll(p.CovDir, 0o755); err != nil {
 			return nil, nil, fmt.Errorf("suites: create %s: %w", p.CovDir, err)
@@ -204,7 +212,22 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 		// A test binary runs in its package's directory, as `go test` runs it.
 		sp := spec(id, p.Suite, dir, argv, p.ChunkEnv...)
 		sp.Items = func(out []byte) (map[string]float64, error) { return ParseGoTestItems(out, items) }
-		sp.Tests = func(out []byte, _ bool) ([]testtimes.Test, error) { return testtimes.ParseGo(p.Suite, p.Rel, out) }
+		counts := ""
+		if p.Counts != "" {
+			counts = filepath.Join(p.Counts, unitTag(id)+".jsonl")
+			sp.Env = append(sp.Env, testenv.LogRecordsOut+"="+counts)
+		}
+		sp.Tests = func(out []byte, _ bool) ([]testtimes.Test, error) {
+			tests, err := testtimes.ParseGo(p.Suite, p.Rel, out)
+			if err != nil || counts == "" {
+				return tests, err
+			}
+			records, err := testenv.ReadLogRecords(counts)
+			if err != nil {
+				return nil, err
+			}
+			return tests, testtimes.WithLogRecords(tests, p.Rel, records)
+		}
 		sp.Display = QuietGoTestOutput
 		return sp
 	}

@@ -84,7 +84,7 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	// LOGS exactly as an owned daemon's does: the logs directory is the
 	// shared process's, so it holds other tests' records beside this one's,
 	// and each record names its workspace.
-	registerLogChecks(t, func() { keepFailureLogs(t, v.StateDir, v.stderrPath) }, v.assertNoUnexpectedWarnings, v.assertNoUnproducedRequiredWarnings)
+	registerLogChecks(t, func() { keepFailureLogs(t, v.StateDir, v.stderrPath) }, v.assertNoUnexpectedWarnings, v.assertNoUnproducedRequiredWarnings, v.countLogRecords)
 	// Registered after the sweeps, so it runs before them: they judge every
 	// record the retirement writes, as the test's own.
 	t.Cleanup(v.retireSlice)

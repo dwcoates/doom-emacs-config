@@ -159,6 +159,7 @@ func (b GoBuild) pkgOf(l Layout, s roster.Suite, rel string) goPkg {
 		Suite: s.Name, Module: b.Options.Module, Rel: rel, Tags: b.Options.Tags, Parallel: s.TestParallel[rel],
 		Bin: gobuild.BinPath(b.Options.BinDir, rel), Self: l.Self, After: b.ID,
 		Programs: s.Programs[rel], ProgramsDir: l.ProgramsDir(),
+		Counts: filepath.Join(l.Work, "log-records", s.Name),
 	}
 }
 
