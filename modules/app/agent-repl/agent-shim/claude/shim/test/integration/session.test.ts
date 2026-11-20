@@ -16,8 +16,8 @@ import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1 } from "../../src/proto.js";
 import { workspaceLockKey } from "../../src/locks.js";
 import { agentIdPath } from "../../src/engine/identity.js";
-import { cleanupShims, ITEST_BUILD_SHA, RESUMED_TWO_HOURS_LATER, spawnShim } from "../integration-support/harness.js";
-import { canonicalSession, endsTurn, groupShim, releaseShared, since, uniqueTurn } from "../integration-support/canonical.js";
+import { cleanupShims, ITEST_BUILD_SHA, RESUMED_TWO_HOURS_LATER, spawnShim, type ShimHandle } from "../integration-support/harness.js";
+import { canonicalSession, endsTurn, groupSession, groupShim, releaseShared, since, uniqueTurn, type CanonicalSession } from "../integration-support/canonical.js";
 import {
   awaitAgentEntry,
   freshSession,
@@ -86,6 +86,46 @@ import {
 // why at the case.
 afterEach(cleanupShims);
 afterAll(releaseShared);
+
+/**
+ * The "refused-control" group's session: a vendor that refuses every control
+ * call a case here asks about (setModel, the flag settings, the permission
+ * mode, Remote Control), each refusal a case of its own on the one session.
+ */
+function refusedControlSession(): Promise<CanonicalSession> {
+  return groupSession("refused-control", {
+    env: { AGENT_REPL_FAKE_REFUSE: "set_model,apply_flag_settings,set_permission_mode,remote_control" },
+  });
+}
+
+/**
+ * The "refuse-start-eof" group: a vendor whose stream ends before its init at
+ * every start, so each case's StartSession is refused and the shim stays
+ * inert for the next.
+ */
+function startEofShim(): Promise<ShimHandle> {
+  return groupShim("refuse-start-eof", { env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+}
+
+/**
+ * The "init-after-first-turn" group's session: a vendor that withholds its
+ * init until the first turn. Its one start and its one first turn are each
+ * ONE act several cases observe.
+ */
+function initAfterFirstTurnSession(): Promise<CanonicalSession> {
+  return groupSession("init-after-first-turn", { env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
+}
+
+let initFirstTurn: Promise<shimv1.StartTurnResponse> | null = null;
+
+/** The init-after-first-turn session's first turn, started once for its observers. */
+function initAfterFirstTurnFirstTurn(): Promise<shimv1.StartTurnResponse> {
+  initFirstTurn ??= (async () => {
+    const { shim } = await initAfterFirstTurnSession();
+    return shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!md" }));
+  })();
+  return initFirstTurn;
+}
 
 /** The `AgentContextCut` a page entry carries, when it carries one. */
 function contextCutOf(
@@ -1780,8 +1820,7 @@ describe("the vendor refusing a CONTROL call", () => {
   // shim that reported success would leave the daemon showing a model or a
   // mode the session is not actually in.
   test("SetSessionModel answers vendor_refused when the vendor rejects setModel", async () => {
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "set_model" } });
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await refusedControlSession();
 
     const response = await shim.clients.h1.setSessionModel(
       create(shimv1.SetSessionModelRequestSchema, {
@@ -1794,8 +1833,7 @@ describe("the vendor refusing a CONTROL call", () => {
   });
 
   test("SetSessionEffort answers vendor_refused when the vendor rejects the flag settings", async () => {
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "apply_flag_settings" } });
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await refusedControlSession();
 
     const response = await shim.clients.h1.setSessionEffort(
       create(shimv1.SetSessionEffortRequestSchema, { effort: conversationv1.AgentEffortLevel.HIGH }),
@@ -1805,8 +1843,7 @@ describe("the vendor refusing a CONTROL call", () => {
   });
 
   test("SetSessionPermissionMode answers vendor_refused when the vendor rejects it", async () => {
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "set_permission_mode" } });
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await refusedControlSession();
 
     const response = await shim.clients.h1.setSessionPermissionMode(
       create(shimv1.SetSessionPermissionModeRequestSchema, {
@@ -1869,7 +1906,7 @@ describe("the vendor refusing a CONTROL call", () => {
     // longer than the daemon's own bring-up bound, so the daemon answered
     // first and named the shim instead of the vendor. The bound is for
     // SILENCE; an ended stream is an answer.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+    const shim = await startEofShim();
 
     const response = await shim.clients.h1.startSession(freshSession());
 
@@ -1877,7 +1914,7 @@ describe("the vendor refusing a CONTROL call", () => {
   });
 
   test("a stream that ends before the init names the query's end as the reason", async () => {
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+    const shim = await startEofShim();
 
     const response = await shim.clients.h1.startSession(freshSession());
 
@@ -1914,7 +1951,7 @@ describe("the vendor refusing a CONTROL call", () => {
   test("a start the vendor ENDED leaves the shim alive for the retry", async () => {
     // The refusal is a session failure, not a process one: the daemon may fix
     // the condition and start again on the same warm shim.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "start-eof" } });
+    const shim = await startEofShim();
 
     await shim.clients.h1.startSession(freshSession());
 
@@ -1927,9 +1964,7 @@ describe("the vendor refusing a CONTROL call", () => {
     // while control requests are answered throughout. This is the whole reason
     // the start settles on a control round-trip instead — and with the old
     // contract this call sat out its bound and refused.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
-
-    const response = await shim.clients.h1.startSession(freshSession());
+    const { response } = await initAfterFirstTurnSession();
 
     expect(response.result.case).toBe("success");
   });
@@ -1937,9 +1972,7 @@ describe("the vendor refusing a CONTROL call", () => {
   test("a start with no init still carries the catalog the round-trip answered", async () => {
     // The round-trip's answer IS the catalog, so an opening that never saw an
     // init is not a degraded one: it states the same models a normal start does.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
-
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { started } = await initAfterFirstTurnSession();
 
     expect(started.modelCatalog.length).toBeGreaterThan(0);
   });
@@ -1947,12 +1980,9 @@ describe("the vendor refusing a CONTROL call", () => {
   test("the first turn brings the init, and runs as any other turn does", async () => {
     // AND THE SESSION IS REALLY LIVE. The init the first turn carries lands on
     // an already-started session, and the turn it rode in on serves normally.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { started } = await initAfterFirstTurnSession();
 
-    const prompt = turnStarted(
-      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" })),
-    );
+    const prompt = turnStarted(await initAfterFirstTurnFirstTurn());
 
     expect(prompt.agent?.value).toBe(started.vendorSessionId);
   });
@@ -1961,10 +1991,9 @@ describe("the vendor refusing a CONTROL call", () => {
     // AN ACTION NOBODY CAN SEE IS A LOGGING DEFECT. The init landing on an
     // already-started session is the moment the model, the mode and the agent
     // binary version become known, and nothing else in the log says so.
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_INIT_TIMING: "after-first-turn" } });
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await initAfterFirstTurnSession();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await initAfterFirstTurnFirstTurn();
     const record = await shim.log.record(
       (line) => line.context["after_start"] === true && line.message.includes("its init with the first turn"),
     );
@@ -2321,8 +2350,7 @@ describe("SetSessionRemoteControl", () => {
   });
 
   test("answers vendor_refused when the vendor refuses Remote Control", async () => {
-    const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "remote_control" } });
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await refusedControlSession();
 
     const response = await shim.clients.h1.setSessionRemoteControl(bridgeOn());
 
