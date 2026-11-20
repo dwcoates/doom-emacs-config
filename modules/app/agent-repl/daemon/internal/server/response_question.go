@@ -8,6 +8,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
@@ -28,7 +29,10 @@ const opResponseQuestion = "daemon.server.response_question"
 // each transition (HostWorkspaceResponseQuestion), and the prompt the user
 // sends while it stands is taken by it: handed, quoting the card, to an
 // ephemeral intake workspace created for it in the home repository, or to the
-// workspace already addressing that card's questions (submitQuestion).
+// workspace already addressing that card's questions (submitQuestion). A
+// workspace that is the deploy mediator or holds its queue's bypass mode
+// answers its own questions: the prompt goes to it directly
+// (questionStaysHere).
 
 // responseQuestions is every workspace's held question: the asked card's
 // row, ABSENT for none.
@@ -248,6 +252,47 @@ func (s *server) submitQuestion(
 		Outcome: &agentreplv1.SubmitPromptSuccess_QuestionSent{QuestionSent: &agentreplv1.SubmitPromptQuestionSent{Row: row, Recipient: recipient.Name}},
 	}}
 	return connect.NewResponse(resp), nil
+}
+
+// questionStaysHere reports whether a question asked in SUBJECT is answered
+// by SUBJECT itself, never by an intake workspace or any other: the deploy
+// mediator and the holder of its repository's queue bypass mode are standing
+// workspaces that act on their own repository directly, so the question
+// reaches the one the person is looking at.
+func (s *server) questionStaysHere(ctx context.Context, subject resolved) (bool, error) {
+	if subject.Record.DeployMediator {
+		return true, nil
+	}
+	standing, err := s.deps.DB.QueueBypass(ctx, subject.Record.ID)
+	if err != nil {
+		subject.Log.Error(opResponseQuestion, "could not read the workspace's queue bypass standing to route its question", dlog.WithCause(dlog.Context{"workspace": string(subject.Record.ID)}, err))
+		return false, fmt.Errorf("route a question of %s: read its queue bypass standing: %w", subject.Record.ID, err)
+	}
+	return standing.Holds, nil
+}
+
+// directQuestionSaid ends SUBJECT's question about ROW and answers the prompt
+// SubmitPrompt delivers to SUBJECT itself in place of the person's words: the
+// same quoted question an intake workspace would have been handed
+// (questionPrompt). A card gone since it was asked is refused as
+// submitQuestion refuses it.
+func (s *server) directQuestionSaid(subject resolved, req *agentreplv1.SubmitPromptRequest, row *frontendv1.FeedId) (*conversationv1.UserSaid, *refusal) {
+	ws := subject.Record.ID
+	s.publishQuestion(ws, nil)
+	s.questionChanged(subject.Log, ws, hostQuestionTaken)
+	card, ok := s.deps.Feed.CardText(ws, row)
+	if !ok {
+		r := submitRefusal(s.fill(refusal{
+			Arm:      "reference_response_unresolvable",
+			Reason:   fmt.Sprintf("the asked row %q is no longer a card on any of this workspace's feeds", row.GetValue()),
+			NotFound: true,
+		}))
+		return nil, &r
+	}
+	subject.Log.Info(opResponseQuestion, "the prompt asks about a card of a workspace that answers its own questions; it is delivered to that workspace", dlog.Context{
+		"row": row.GetValue(), "card": card.Arm,
+	})
+	return feed.SaidText(questionPrompt(card, s.saidText(subject.Log, "said", req.GetSaid()))), nil
 }
 
 // cardQuestionSend sends QUESTION, asked in REQ, to the workspace already
