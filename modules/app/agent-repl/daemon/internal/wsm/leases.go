@@ -69,6 +69,14 @@ func (s *store) AcquireLeaseAs(ctx context.Context, id WorkspaceID, lease LeaseI
 	}
 	var out Lease
 	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		// A WORKSPACE FORGOTTEN MEANWHILE IS ANSWERED, NOT FAILED: the store
+		// says in the same transaction that the workspace is gone
+		// (ErrNotFound), where the insert below would fail its foreign key, so
+		// a caller racing the forget (a shim bounce, 2026-11-20 e2e
+		// QueryEofEndsTheTurnAsQueryDied) states the end at its own level.
+		if err := requireWorkspaceRow(ctx, tx, id); err != nil {
+			return err
+		}
 		current, err := scanLease(tx.QueryRowContext(ctx, `SELECT `+leaseColumns+` FROM leases WHERE workspace_id = ?`, id))
 		switch {
 		case err == nil:
