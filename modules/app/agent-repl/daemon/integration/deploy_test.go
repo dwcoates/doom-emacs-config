@@ -98,44 +98,40 @@ func TestADeployPushesTheWebappReloadToAStaleWebview(t *testing.T) {
 	})
 }
 
-func TestADeployPushesTheElispReloadToAStaleEmacsAlone(t *testing.T) {
+func TestAnEmacsConnectingOnOlderElispIsPushedTheReloadAsItsVerdict(t *testing.T) {
 	t.Parallel()
-	// Arrange: an Emacs on older elisp holds the daemon stream, attached
-	// after the boot's own elisp reload ran (deploy.ReloadStaleElisp, once the
-	// daemon serves), so the reload this test sees is the deploy's.
+	// Arrange: the daemon serves, and only then does an Emacs on older elisp
+	// connect -- the order in which a successor's settle once missed it.
 	d := harness.StartDaemon(t, harness.Opts{})
-	d.AwaitLogRecord(d.RunLogPath(), "the boot's elisp reload ran", func(r harness.LogRecord) bool {
-		return r.Operation == "daemon.deploy.decide" && r.Message == "every connected Emacs runs the checkout's elisp"
-	})
 	ctx, cancel := context.WithCancel(d.Ctx())
 	defer cancel()
+
+	// Act
 	stream, err := d.Client().WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{
 		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{ElispBuild: "older-elisp", Focus: harness.UnfocusedEditor(), Instance: harness.EditorInstance()}},
 	}))
 	if err != nil {
 		t.Fatalf("WatchDaemon: %v", err)
 	}
-	d.AwaitLogRecord(d.RunLogPath(), "the stale Emacs's stream accepted", func(r harness.LogRecord) bool {
-		return r.Operation == "WatchDaemon" && r.Context["elisp_build"] == "older-elisp"
+
+	// Assert: the reload is the stream's one frame, and the stream ends.
+	if !stream.Receive() {
+		t.Fatalf("the stale Emacs's stream ended without its verdict: %v", stream.Err())
+	}
+	reload := stream.Msg().GetReloadElisp()
+	if reload == nil || reload.GetBuild() != harness.PinnedElispBuild || reload.GetModuleRoot() != harness.PinnedCheckout(t) {
+		t.Fatalf("first frame = %v, want reload_elisp naming the checkout's root and build", stream.Msg())
+	}
+	if stream.Receive() {
+		t.Fatalf("frame after the reload = %v, want the stream ended", stream.Msg())
+	}
+	if err := stream.Err(); err != nil {
+		t.Fatalf("the stale Emacs's stream ended with %v, want a clean end", err)
+	}
+	d.AwaitLogRecord(d.RunLogPath(), "the connect-time decision", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.deploy.decide" && r.Context["trigger"] == "connect" &&
+			r.Context["running"] == "older-elisp" && r.Context["fresh"] == harness.PinnedElispBuild
 	})
-
-	// Act
-	outcomes := deployOutcomes(t, d, false)
-
-	// Assert
-	elisp := outcomes[agentreplv1.DeployComponent_DEPLOY_COMPONENT_ELISP]
-	if elisp.GetReloadPushed().GetRecipients() != 1 || elisp.GetBuild() != harness.PinnedElispBuild {
-		t.Fatalf("elisp = %v, want the reload pushed to the one stale Emacs, naming the checkout's build", elisp)
-	}
-	for stream.Receive() {
-		if reload := stream.Msg().GetReloadElisp(); reload != nil {
-			if reload.GetBuild() != harness.PinnedElispBuild || reload.GetModuleRoot() != harness.PinnedCheckout(t) {
-				t.Fatalf("reload_elisp = %v, want the checkout's root and build", reload)
-			}
-			return
-		}
-	}
-	t.Fatalf("the stale Emacs's stream ended without the reload: %v", stream.Err())
 }
 
 // ---- the update line: a deploy's progress on the footer --------------------

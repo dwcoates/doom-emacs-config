@@ -284,41 +284,105 @@ func TestAMovingDaemonLeavesTheElispReloadToItsSuccessor(t *testing.T) {
 	if got := outcome(t, result, ComponentElisp); got.Kind != DeferredToSuccessor || len(h.clients.elispPushes) != 0 {
 		t.Fatalf("elisp = %+v, pushes %v; want the reload left to the successor", got, h.clients.elispPushes)
 	}
-	if !logged(h.log, "info", opDecide, "its successor pushes the elisp reload once it serves") {
+	if !logged(h.log, "info", opDecide, "its successor decides each Emacs's elisp as its stream connects") {
 		t.Fatalf("records = %+v, want the deferral recorded", h.log.Records())
 	}
 }
 
-func TestReloadStaleElispPushesTheReloadToEveryStaleEmacs(t *testing.T) {
-	// Arrange: the successor serves; one Emacs still runs older elisp.
+func TestElispVerdictDecidesAConnectingEmacsAgainstTheCheckout(t *testing.T) {
+	tests := []struct {
+		name      string
+		running   func(h *harness) string
+		wantStale bool
+		wantLog   string
+	}{
+		{name: "an Emacs on older elisp is stale", running: func(*harness) string { return "older" },
+			wantStale: true, wantLog: "an Emacs runs older elisp; it is pushed the reload"},
+		{name: "an Emacs on the checkout's elisp is current", running: func(h *harness) string { return h.elisp },
+			wantLog: "an Emacs runs the checkout's elisp"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			running := tt.running(h)
+
+			// Act
+			verdict, err := h.d.ElispVerdict("s1", running)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("ElispVerdict: %v", err)
+			}
+			want := ElispVerdict{Fresh: h.elisp, ModuleRoot: h.live.ModuleRoot, Stale: tt.wantStale}
+			if verdict != want {
+				t.Fatalf("verdict = %+v, want %+v", verdict, want)
+			}
+			assertElispDecisionLogged(t, h, tt.wantLog, dlog.Context{
+				"stream": "s1", "running": running, "fresh": h.elisp, "trigger": ElispOnConnect,
+			})
+		})
+	}
+}
+
+func TestElispVerdictOfAnUnreadableBuildIsAnErrorAndSaysWhy(t *testing.T) {
+	// Arrange: the module root names no elisp at all.
+	h := newHarness(t)
+	h.d.deps.Live.ModuleRoot = filepath.Join(t.TempDir(), "gone")
+
+	// Act
+	_, err := h.d.ElispVerdict("s1", "older")
+
+	// Assert
+	if err == nil {
+		t.Fatal("ElispVerdict = nil error, want the unreadable build refused")
+	}
+	recs := records(h.log, opDecide)
+	if len(recs) != 1 || recs[0].Level != "error" || !strings.Contains(recs[0].Message, "the checkout's elisp build could not be read") {
+		t.Fatalf("records = %+v, want the unreadable build alone at ERROR", recs)
+	}
+	for key, want := range map[string]any{"stream": "s1", "running": "older", "trigger": ElispOnConnect, "module_root": h.d.deps.Live.ModuleRoot} {
+		if recs[0].Context[key] != want {
+			t.Fatalf("context[%s] = %v, want %v (record %+v)", key, recs[0].Context[key], want, recs[0])
+		}
+	}
+}
+
+func TestADeployRecordsEachStandingEmacsDecisionWithItsTrigger(t *testing.T) {
+	// Arrange
 	h := newHarness(t)
 	h.clients.emacs = []EmacsClient{{ID: "current", Build: h.elisp}, {ID: "stale", Build: "older"}}
 
 	// Act
-	h.d.ReloadStaleElisp()
+	if _, err := h.d.Deploy(context.Background(), false); err != nil {
+		t.Fatalf("Deploy: %v", err)
+	}
 
 	// Assert
-	if len(h.clients.elispPushes) != 1 || len(h.clients.elispPushes[0]) != 1 || h.clients.elispPushes[0][0] != "stale" {
-		t.Fatalf("pushes = %v, want the stale stream alone", h.clients.elispPushes)
-	}
+	assertElispDecisionLogged(t, h, "an Emacs runs the checkout's elisp", dlog.Context{
+		"stream": "current", "running": h.elisp, "fresh": h.elisp, "trigger": ElispOnDeploy,
+	})
+	assertElispDecisionLogged(t, h, "an Emacs runs older elisp; it is pushed the reload", dlog.Context{
+		"stream": "stale", "running": "older", "fresh": h.elisp, "trigger": ElispOnDeploy,
+	})
 }
 
-func TestReloadStaleElispOfAnUnreadableBuildPushesNothingAndSaysWhy(t *testing.T) {
-	// Arrange: the module root names no elisp at all.
-	h := newHarness(t)
-	h.d.deps.Live.ModuleRoot = filepath.Join(t.TempDir(), "gone")
-	h.clients.emacs = []EmacsClient{{ID: "stale", Build: "older"}}
-
-	// Act
-	h.d.ReloadStaleElisp()
-
-	// Assert
-	if len(h.clients.elispPushes) != 0 {
-		t.Fatalf("pushes = %v, want none", h.clients.elispPushes)
+// assertElispDecisionLogged fails unless one INFO decision record carries
+// MESSAGE and every field of WANT.
+func assertElispDecisionLogged(t *testing.T, h *harness, message string, want dlog.Context) {
+	t.Helper()
+	for _, r := range records(h.log, opDecide) {
+		if r.Level != "info" || r.Message != message || r.Context["stream"] != want["stream"] {
+			continue
+		}
+		for key, value := range want {
+			if r.Context[key] != value {
+				t.Fatalf("context[%s] = %v, want %v (record %+v)", key, r.Context[key], value, r)
+			}
+		}
+		return
 	}
-	if !logged(h.log, "error", opDecide, "the checkout's elisp build could not be read") {
-		t.Fatalf("records = %+v, want the unreadable build at ERROR", h.log.Records())
-	}
+	t.Fatalf("records = %+v, want an INFO %q for stream %v", h.log.Records(), message, want["stream"])
 }
 
 func TestAStaleDaemonIsHandedOverAndItsSuccessorTakesTheRest(t *testing.T) {

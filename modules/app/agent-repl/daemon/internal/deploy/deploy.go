@@ -1157,45 +1157,86 @@ func (s serviceStaleness) stale(component Component, service, fresh string) bool
 // pushed before the daemon's move, so a restart that waited on busy turns left
 // the fresh elisp speaking to the old daemon: on 2026-11-15 the 0.443 roster
 // decoder refused every push of the 0.442 daemon for 8 minutes. A daemon that
-// moves leaves the reload to its successor (ReloadStaleElisp, run once it
-// serves); one that stays pushes it now.
+// moves leaves the reload to its successor, which decides each Emacs stream
+// as it connects (ElispVerdict); one that stays pushes it now.
 func (d *Deployer) elispAfter(rest []Outcome, fresh builds) Outcome {
 	if movesDaemon(Result{Outcomes: rest}) {
-		d.log.Info(opDecide, "the daemon moves to the fresh build; its successor pushes the elisp reload once it serves", dlog.Context{"fresh": fresh.elisp})
+		d.log.Info(opDecide, "the daemon moves to the fresh build; its successor decides each Emacs's elisp as its stream connects", dlog.Context{"fresh": fresh.elisp})
 		return Outcome{Component: ComponentElisp, Build: fresh.elisp, Kind: DeferredToSuccessor}
 	}
 	return d.elisp(fresh)
 }
 
-// ReloadStaleElisp pushes reload_elisp to every connected Emacs whose loaded
-// elisp is not this daemon's checkout's: the step a deploy that moved the
-// daemon left to it (elispAfter), run once this daemon serves every workspace
-// it took (rollout.Deps.ServingSettled). An elisp build that cannot be read is
-// recorded at ERROR and pushes nothing.
-func (d *Deployer) ReloadStaleElisp() {
-	build, err := buildid.Elisp(d.deps.Live.ModuleRoot)
-	if err != nil {
-		d.log.Error(opDecide, "the checkout's elisp build could not be read; no Emacs is pushed a reload", dlog.WithCause(dlog.Context{"module_root": d.deps.Live.ModuleRoot}, err))
-		return
-	}
-	d.elisp(builds{elisp: build})
+// The triggers of an elisp decision, recorded on every one (elispStale).
+const (
+	// ElispOnConnect is an Emacs WatchDaemon stream connecting.
+	ElispOnConnect = "connect"
+	// ElispOnDeploy is a deploy that changed the checkout without moving the
+	// daemon, deciding every Emacs stream already standing.
+	ElispOnDeploy = "deploy"
+)
+
+// ElispVerdict is one connecting Emacs stream's elisp decision.
+type ElispVerdict struct {
+	// Fresh is the checkout's elisp build the stream's was compared with.
+	Fresh string
+	// ModuleRoot is the checkout the fresh elisp is loaded from.
+	ModuleRoot string
+	// Stale is whether the stream runs other elisp than Fresh, and must
+	// reload before it is served anything else.
+	Stale bool
 }
 
-// elisp pushes reload_elisp to every Emacs whose loaded elisp is not the
-// checkout's.
+// ElispVerdict decides the Emacs WatchDaemon stream STREAM, which connects
+// running the elisp build RUNNING, against the checkout's elisp.
+//
+// THE DECISION IS CONNECTION-SCOPED. It was once made only when a successor
+// daemon settled, against whichever Emacs streams stood at that instant; on
+// 2026-11-20 Emacs reconnected 3s after the settle, was never pushed the
+// reload, and refused the new daemon's roster for 14 minutes. Deciding each
+// stream as it connects makes the order of the settle and the reconnect
+// irrelevant. A checkout whose elisp build cannot be read is an error,
+// recorded at ERROR: no stream can be proven current against it.
+func (d *Deployer) ElispVerdict(stream, running string) (ElispVerdict, error) {
+	fresh, err := buildid.Elisp(d.deps.Live.ModuleRoot)
+	if err != nil {
+		d.log.Error(opDecide, "the checkout's elisp build could not be read; the Emacs stream cannot be decided", dlog.WithCause(dlog.Context{
+			"stream": stream, "running": running, "module_root": d.deps.Live.ModuleRoot, "trigger": ElispOnConnect,
+		}, err))
+		return ElispVerdict{}, fmt.Errorf("deploy: read the checkout's elisp build: %w", err)
+	}
+	return ElispVerdict{
+		Fresh:      fresh,
+		ModuleRoot: d.deps.Live.ModuleRoot,
+		Stale:      d.elispStale(ElispOnConnect, stream, running, fresh),
+	}, nil
+}
+
+// elispStale is THE ONE elisp decision, which every path takes: whether the
+// Emacs stream STREAM, running RUNNING, runs other elisp than FRESH. Both
+// outcomes are recorded at INFO with the stream, both builds and TRIGGER.
+func (d *Deployer) elispStale(trigger, stream, running, fresh string) bool {
+	fields := dlog.Context{"stream": stream, "running": running, "fresh": fresh, "trigger": trigger}
+	if running != fresh {
+		d.log.Info(opDecide, "an Emacs runs older elisp; it is pushed the reload", fields)
+		return true
+	}
+	d.log.Info(opDecide, "an Emacs runs the checkout's elisp", fields)
+	return false
+}
+
+// elisp pushes reload_elisp to every standing Emacs stream whose loaded
+// elisp is not the checkout's: a deploy that does not move the daemon. The
+// daemon's contract did not change, so the streams keep serving.
 func (d *Deployer) elisp(fresh builds) Outcome {
 	out := Outcome{Component: ComponentElisp, Build: fresh.elisp, Kind: UpToDate}
 	var stale []string
 	for _, client := range d.deps.Clients.EmacsBuilds() {
-		if client.Build != fresh.elisp {
-			d.log.Info(opDecide, "an Emacs runs older elisp; pushing it the reload", dlog.Context{
-				"stream": client.ID, "running": client.Build, "fresh": fresh.elisp,
-			})
+		if d.elispStale(ElispOnDeploy, client.ID, client.Build, fresh.elisp) {
 			stale = append(stale, client.ID)
 		}
 	}
 	if len(stale) == 0 {
-		d.log.Debug(opDecide, "every connected Emacs runs the checkout's elisp", dlog.Context{"fresh": fresh.elisp})
 		d.deps.HotReload.ElispCurrent()
 		return out
 	}

@@ -1684,6 +1684,39 @@ type fakeDeployer struct {
 	// webappErr the failure of reading it.
 	webapp    string
 	webappErr error
+	// staleElisp names the elisp builds an Emacs stream's verdict finds
+	// stale, against the checkout build freshElisp; any other build is
+	// current. verdictErr, when set, is the verdict's failure.
+	staleElisp map[string]bool
+	verdictErr error
+	// verdicts are the Emacs streams decided, in order.
+	verdicts []string
+}
+
+// freshElisp is the checkout's elisp build a fake deployer's verdict names.
+const freshElisp = "elisp-fresh"
+
+// fakeModuleRoot is the checkout a fake deployer's stale verdict reloads from.
+const fakeModuleRoot = "/fake/agent-repl"
+
+func (f *fakeDeployer) ElispVerdict(stream, running string) (deploy.ElispVerdict, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.verdicts = append(f.verdicts, stream)
+	if f.verdictErr != nil {
+		return deploy.ElispVerdict{}, f.verdictErr
+	}
+	if f.staleElisp[running] {
+		return deploy.ElispVerdict{Fresh: freshElisp, ModuleRoot: fakeModuleRoot, Stale: true}, nil
+	}
+	return deploy.ElispVerdict{Fresh: running, ModuleRoot: fakeModuleRoot}, nil
+}
+
+// decided answers the Emacs streams a verdict was asked for so far.
+func (f *fakeDeployer) decided() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.verdicts...)
 }
 
 // fakeInstalledWebapp is the installed webapp build a fake deployer states

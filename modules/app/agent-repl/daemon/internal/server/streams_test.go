@@ -187,10 +187,7 @@ func TestWatchDaemonServesEveryClient(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}}}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
 
 	// Act.
 	h.Server.ShutdownAnnounced(&agentreplv1.DaemonShutdownAnnounced{MintedAtMs: 7})
@@ -216,10 +213,7 @@ func TestShutdownAnnouncedReachesAClientBeforeTheSurfaceCloses(t *testing.T) {
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}}}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
 	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 11})
 	if !stream.Receive() {
 		t.Fatalf("receive the schedule that proves the subscription: %v", stream.Err())
@@ -249,10 +243,7 @@ func TestShutdownAnnouncedDoesNotWaitOnAStreamThatHasGone(t *testing.T) {
 	log := dlog.NewTestLogger()
 	h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log, workspace: log} })
 	ctx, cancel := context.WithCancel(context.Background())
-	stream, dialErr := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}}}))
-	if dialErr != nil {
-		t.Fatalf("open the stream: %v", dialErr)
-	}
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
 	h.Server.DrainScheduled(&agentreplv1.DaemonDrainScheduled{AtMs: 11})
 	if !stream.Receive() {
 		t.Fatalf("receive the schedule that proves the subscription: %v", stream.Err())
@@ -564,10 +555,7 @@ func TestWatchDaemonReplaysTheDrainBannerBesideNotInsteadOfAProgressEvent(t *tes
 	// Act: a late subscriber replays each topic's latest.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}}}))
-	if err != nil {
-		t.Fatalf("open the stream: %v", err)
-	}
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
 
 	// Assert: among the replayed pushes, the drain schedule survived.
 	sawDrain := false
@@ -828,6 +816,123 @@ var emacsDaemonRequest = &agentreplv1.WatchDaemonRequest{
 	Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "elisp-test", Instance: testEditorInstance()}},
 }
 
+// dialEmacsDaemon opens an Emacs WatchDaemon stream and takes its first
+// frame, which must be the verdict that its elisp is current: every Emacs
+// stream's first frame is its verdict, so a test reading what follows reads
+// it from here.
+func dialEmacsDaemon(t *testing.T, h *harness, ctx context.Context, req *agentreplv1.WatchDaemonRequest) *connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse] {
+	t.Helper()
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(req))
+	if err != nil {
+		t.Fatalf("open the stream: %v", err)
+	}
+	if !stream.Receive() {
+		t.Fatalf("the stream ended before its verdict: %v", stream.Err())
+	}
+	if stream.Msg().GetElispCurrent() == nil {
+		t.Fatalf("first frame = %v, want the elisp_current verdict", stream.Msg())
+	}
+	return stream
+}
+
+func TestAnEmacsStreamOnTheCheckoutsElispIsToldSoFirst(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h.LoudFaults.Publish(standingFaults("f-1"))
+
+	// Act
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(emacsDaemonRequest))
+	if err != nil {
+		t.Fatalf("open the stream: %v", err)
+	}
+
+	// Assert: the verdict precedes even a replayed standing.
+	if !stream.Receive() {
+		t.Fatalf("the stream ended before its first frame: %v", stream.Err())
+	}
+	if got := stream.Msg().GetElispCurrent().GetBuild(); got != "elisp-test" {
+		t.Fatalf("first frame = %v, want elisp_current naming the matched build", stream.Msg())
+	}
+}
+
+func TestAnEmacsStreamOnOlderElispIsPushedOnlyTheReloadAndEnds(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Deployer.staleElisp = map[string]bool{"older": true}
+	h.LoudFaults.Publish(standingFaults("f-1"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(&agentreplv1.WatchDaemonRequest{
+		Client: &agentreplv1.WatchDaemonRequest_Emacs{Emacs: &agentreplv1.WatchDaemonEmacs{Focus: unfocusedEditor(), ElispBuild: "older", Instance: testEditorInstance()}},
+	}))
+	if err != nil {
+		t.Fatalf("open the stream: %v", err)
+	}
+	last, endErr := lastFrameBeforeEnd(stream)
+
+	// Assert: the reload was the one frame, and the stream ended cleanly.
+	if endErr != nil {
+		t.Fatalf("the stream ended with %v, want a clean end", endErr)
+	}
+	reload := last.GetReloadElisp()
+	if reload == nil || reload.GetBuild() != freshElisp || reload.GetModuleRoot() != fakeModuleRoot {
+		t.Fatalf("last frame = %v, want the reload to the checkout's build", last)
+	}
+	if got := h.Server.(*server).EmacsBuilds(); len(got) != 0 {
+		t.Fatalf("EmacsBuilds = %+v, want the stale stream gone", got)
+	}
+	rec, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.reload_elisp"})
+	if !ok {
+		t.Fatalf("records = %+v, want the verdict's reload at INFO", log.Records())
+	}
+	for key, want := range map[string]any{"running": "older", "build": freshElisp, "module_root": fakeModuleRoot, "trigger": "connect"} {
+		if rec.Context[key] != want {
+			t.Fatalf("context[%s] = %v, want %v (record %+v)", key, rec.Context[key], want, rec)
+		}
+	}
+}
+
+func TestAnEmacsStreamWhoseElispCannotBeDecidedIsRefused(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Deployer.verdictErr = errors.New("the checkout is unreadable")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(emacsDaemonRequest))
+	err = firstStreamErr(stream, err)
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("WatchDaemon = %v, want internal", err)
+	}
+	if got := h.Server.(*server).EmacsBuilds(); len(got) != 0 {
+		t.Fatalf("EmacsBuilds = %+v, want the refused stream gone", got)
+	}
+}
+
+func TestAWebviewStreamIsNeverGivenAnElispVerdict(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Act
+	stream := openDaemonStream(t, h, ctx, webviewWatch())
+
+	// Assert
+	_ = stream
+	if got := h.Deployer.decided(); len(got) != 0 {
+		t.Fatalf("verdicts = %v, want none for a webview", got)
+	}
+}
+
 func TestAnEmacsDaemonStreamIsToldTheStandingLoudFaults(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
@@ -858,17 +963,14 @@ func TestALateEmacsDaemonStreamIsToldWhatStands(t *testing.T) {
 	defer cancel()
 
 	// Act.
-	stream, err := h.Client.WatchDaemon(ctx, connect.NewRequest(emacsDaemonRequest))
-	if err != nil {
-		t.Fatalf("open the stream: %v", err)
-	}
+	stream := dialEmacsDaemon(t, h, ctx, emacsDaemonRequest)
 
 	// Assert.
 	if !stream.Receive() {
-		t.Fatalf("the stream ended before its first frame: %v", stream.Err())
+		t.Fatalf("the stream ended before its first frame after the verdict: %v", stream.Err())
 	}
 	if got := stream.Msg().GetFaultsStanding().GetFaults(); len(got) != 1 || got[0].GetFaultId() != "f-1" {
-		t.Fatalf("first frame = %v, want the standing faults replayed", stream.Msg())
+		t.Fatalf("first frame after the verdict = %v, want the standing faults replayed", stream.Msg())
 	}
 }
 

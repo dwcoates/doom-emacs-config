@@ -707,20 +707,46 @@ func (s *server) watchDaemon(
 	// shared: once registered, a deploy's reload may move it under s.mu.
 	reported := w.elispBuild
 	s.addDaemonWatcher(w)
-	// AN EMACS ATTACHING CAN CARRY A WEB VIEW HOST'S RELOAD that no stream
-	// stood to take before it (deploy/webhost.go): the push waits on this
-	// stream's own queue until its loop below sends it.
-	if w.emacs {
-		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeEmacsAttached)
-	}
 	// A DEPARTING STREAM IS A SATISFIED ONE: the announcer waits for delivery
 	// or for the stream to be gone, never for a client that has stopped
 	// listening.
 	defer s.removeDaemonWatcher(w)
+	var verdict *agentreplv1.WatchDaemonResponse
+	if w.emacs {
+		// THE ELISP IS DECIDED AS THE STREAM CONNECTS, after the stream is
+		// registered: a deploy that changed the checkout before the
+		// registration is read by the verdict, and one after it finds the
+		// stream among those it decides, so no change falls between them.
+		decided, err := s.deps.Deploy.ElispVerdict(w.id, reported)
+		if err != nil {
+			// The deployer recorded the unreadable checkout at ERROR.
+			return connect.NewError(connect.CodeInternal, err)
+		}
+		if decided.Stale {
+			return s.reloadOnly(ctx, w.id, reported, decided, out)
+		}
+		verdict = &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ElispCurrent{
+			ElispCurrent: &agentreplv1.DaemonElispCurrent{Build: decided.Fresh},
+		}}
+		// AN EMACS ATTACHING CAN CARRY A WEB VIEW HOST'S RELOAD that no
+		// stream stood to take before it (deploy/webhost.go): the push waits
+		// on this stream's own queue until its loop below sends it.
+		s.deps.Deploy.ReconcileWebhost(deploy.WebhostEdgeEmacsAttached)
+	}
 	s.acceptStream(ctx, "WatchDaemon")
 	s.log.Debug("WatchDaemon", "accepted a standing stream", dlog.Context{
 		"stream": w.id, "emacs": w.emacs, "elisp_build": reported,
 	})
+	// AN EMACS STREAM'S FIRST FRAME IS ITS VERDICT: Emacs accepts the link
+	// on it alone, so nothing else is written before it.
+	if verdict != nil {
+		if err := out.Send(verdict); err != nil {
+			s.log.Debug("WatchDaemon", "the standing stream's client went away before its verdict", dlog.Context{
+				"stream": w.id, "cause": err.Error(),
+			})
+			return nil
+		}
+	}
 
 	for {
 		var push *agentreplv1.WatchDaemonResponse
@@ -815,6 +841,34 @@ func (s *server) watchDaemon(
 			w.done()
 		}
 	}
+}
+
+// reloadOnly serves an Emacs stream that connected on older elisp than the
+// checkout's (VERDICT): its first and ONLY frame is reload_elisp, and the
+// stream then ends. A daemon whose contract is newer than the elisp the
+// editor runs never writes it anything that elisp may fail to decode: Emacs
+// accepts no link until a stream's verdict is elisp_current, so it reloads
+// and dials again, stating the build it loaded.
+func (s *server) reloadOnly(
+	ctx context.Context,
+	stream, running string,
+	verdict deploy.ElispVerdict,
+	out streamSink[agentreplv1.WatchDaemonResponse],
+) error {
+	s.acceptStream(ctx, "WatchDaemon")
+	push := &agentreplv1.WatchDaemonResponse{Push: &agentreplv1.WatchDaemonResponse_ReloadElisp{
+		ReloadElisp: &agentreplv1.DaemonReloadElisp{ModuleRoot: verdict.ModuleRoot, Build: verdict.Fresh},
+	}}
+	fields := dlog.Context{
+		"stream": stream, "build": verdict.Fresh, "module_root": verdict.ModuleRoot,
+		"running": running, "trigger": deploy.ElispOnConnect,
+	}
+	if err := out.Send(push); err != nil {
+		s.log.Info("daemon.server.reload_elisp", "the Emacs stream went away before its reload was written", dlog.WithCause(fields, err))
+		return nil
+	}
+	s.log.Info("daemon.server.reload_elisp", "pushed the elisp reload as the stream's verdict; the stream ends", fields)
+	return nil
 }
 
 // standingPush turns one receive from a standing topic only one kind of
