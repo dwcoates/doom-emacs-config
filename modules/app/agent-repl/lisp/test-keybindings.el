@@ -75,6 +75,17 @@
            (regexp-quote "\"R\"  #'agent-repl-send-hidden-keepalives")
            (agent-repl-test-keybindings--source))))
 
+(ert-deftest agent-repl-test-keybindings-spc-j-p-sets-the-priority ()
+  "`SPC j p' sets or clears the current workspace's priority."
+  (should (string-match-p
+           (regexp-quote "\"p\"   #'agent-repl-set-priority")
+           (agent-repl-test-keybindings--source))))
+
+(ert-deftest agent-repl-test-keybindings-spc-j-m-is-gone ()
+  "The priority moved off `SPC j m p', and nothing else lived under `SPC j m'."
+  (should-not (string-match-p (regexp-quote "(\"m\" . \"modify workspace\")")
+                              (agent-repl-test-keybindings--source))))
+
 (ert-deftest agent-repl-test-keybindings-spc-j-C-toggles-remote-control ()
   "`SPC j C' turns the current workspace's remote control over."
   (should (string-match-p

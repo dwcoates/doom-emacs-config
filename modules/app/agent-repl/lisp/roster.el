@@ -274,12 +274,6 @@ reach-through lives here once instead of at every reader."
   "Return ROW's display name text.  Never an identity."
   (plist-get (plist-get row :name) :text))
 
-(defun agent-repl-roster-row-name-glyph (row)
-  "Return the glyph ROW's name wears before it, or nil when it wears none.
-The daemon's `RosterRowNameGlyph': a thumbs up on an emoji-ack workspace.
-Never part of the name, which stays the slug every verb resolves."
-  (plist-get (plist-get (plist-get row :name) :glyph) :text))
-
 (defun agent-repl-roster-row-status (row)
   "Return ROW's status arm keyword — the set arm IS the status."
   (plist-get (plist-get row :status) :arm))
@@ -345,9 +339,11 @@ text the topbar draws over the workspace's name."
   "Return non-nil when ROW carries the attention marker."
   (and (plist-get row :attention) t))
 
-(defun agent-repl-roster-row-priority-label (row)
-  "Return ROW's priority badge label, or nil when it is unprioritized."
-  (plist-get (plist-get row :priority) :label))
+(defun agent-repl-roster-row-name-prefix (row)
+  "Return the marks ROW's name wears before it, or nil when it wears none.
+A decoded `WorkspaceNamePrefix' (`:priority LEVEL'), drawn by
+`agent-repl-name-prefix-string'."
+  (plist-get (plist-get row :name) :prefix))
 
 (defun agent-repl-roster-row-viewed-p (row)
   "Return non-nil when ROW carries the viewed (partial) marker."

@@ -61,7 +61,6 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row "\"ready\":{}"))
                  '(:workspace (:workspace (:id "ws-1" :dir "/w/1"))
                    :attention nil
-                   :priority nil
                    :viewed nil
                    :view-dwell nil
                    :idle-async-unread nil
@@ -80,7 +79,7 @@ status arm and whatever else the case is about."
                    :closure nil
                    :last-updated (:at-ms 1)
                    :availability (:arm :available :value nil)
-                   :name (:text "fix-flaky" :glyph nil)
+                   :name (:text "fix-flaky" :prefix nil)
                    :repository nil
                    :status (:arm :ready :value nil)
                    :current (:current nil)
@@ -105,19 +104,33 @@ status arm and whatever else the case is about."
                    "\"ready\":{}" "\"repository\":{\"name\":\"doom\",\"dir\":\"/d\"}"))
                  '("RosterRowRepository" dir "unknown field"))))
 
-(ert-deftest agent-repl-test-wire-roster-row-decodes-the-names-glyph ()
-  "A row whose name carries `glyph' decodes it beside the name's text."
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-names-emoji-ack-glyph ()
+  "A name whose prefix carries `emojiAck' decodes its glyph beside the name's text."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-row-name
-                  "{\"text\":\"acked\",\"glyph\":{\"text\":\"👍\"}}")
-                 '(:text "acked" :glyph (:text "👍")))))
+                  "{\"text\":\"acked\",\"prefix\":{\"emojiAck\":{\"text\":\"👍\"}}}")
+                 '(:text "acked" :prefix (:priority nil :emoji-ack "👍")))))
 
-(ert-deftest agent-repl-test-wire-roster-row-name-glyph-refuses-an-extra-key ()
-  "An unknown field inside `RosterRowNameGlyph' is a breach naming that message."
+(ert-deftest agent-repl-test-wire-roster-row-decodes-both-marks-of-the-prefix ()
+  "A prefix carrying both marks decodes the level and the glyph."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-workspace-name-prefix
+                  "{\"priority\":{\"p2\":{}},\"emojiAck\":{\"text\":\"👍\"}}")
+                 '(:priority "p2" :emoji-ack "👍"))))
+
+(ert-deftest agent-repl-test-wire-roster-name-emoji-ack-refuses-an-extra-key ()
+  "An unknown field inside `WorkspaceNameEmojiAck' is a breach naming that message."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-row-name
-                  "{\"text\":\"acked\",\"glyph\":{\"text\":\"👍\",\"size\":1}}")
-                 '("RosterRowNameGlyph" size "unknown field"))))
+                  "{\"text\":\"acked\",\"prefix\":{\"emojiAck\":{\"text\":\"👍\",\"size\":1}}}")
+                 '("WorkspaceNameEmojiAck" size "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-name-refuses-the-retired-glyph ()
+  "`RosterRowName.glyph' is folded into the prefix: a name carrying it is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row-name
+                  "{\"text\":\"acked\",\"glyph\":{\"text\":\"👍\"}}")
+                 '("RosterRowName" glyph "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-one-shot-mark ()
   "A row carrying `oneShot' decodes it as PRESENT."
@@ -588,22 +601,44 @@ reserved."
                             :attention)
                  t)))
 
-(ert-deftest agent-repl-test-wire-roster-row-absent-priority-is-unprioritized ()
-  "UNSET priority is unprioritized — no badge, never a \"P?\" placeholder."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-row
-                             (agent-repl-test-wire-roster--row "\"ready\":{}"))
-                            :priority)
-                 nil)))
+(ert-deftest agent-repl-test-wire-roster-name-without-a-prefix-wears-none ()
+  "An UNSET prefix is a name that wears no mark, never a placeholder."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-row-name "{\"text\":\"fix\"}")
+                 '(:text "fix" :prefix nil))))
 
-(ert-deftest agent-repl-test-wire-roster-row-present-priority-carries-its-label ()
-  "The priority badge is a resolver-composed label the client draws verbatim."
-  (should (equal (plist-get (agent-repl-test-wire-roster--decode
-                             #'agent-repl-wire-decode-roster-row
-                             (agent-repl-test-wire-roster--row
-                              "\"ready\":{}" "\"priority\":{\"label\":\"P0.5\"}"))
-                            :priority)
-                 '(:label "P0.5"))))
+(ert-deftest agent-repl-test-wire-roster-name-prefix-carries-each-priority-level ()
+  "Each `WorkspaceNamePriority' arm decodes as its level string."
+  (dolist (level '("p05" "p1" "p2" "p3"))
+    (should (equal (agent-repl-test-wire-roster--decode
+                    #'agent-repl-wire-decode-roster-row-name
+                    (format "{\"text\":\"fix\",\"prefix\":{\"priority\":{\"%s\":{}}}}" level))
+                   (list :text "fix" :prefix (list :priority level :emoji-ack nil))))))
+
+(ert-deftest agent-repl-test-wire-roster-name-prefix-with-no-mark-is-a-breach ()
+  "A set prefix carrying no mark is malformed: the daemon leaves it unset."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-name-prefix "{}")
+                 '("WorkspaceNamePrefix" priority "a set prefix carries at least one mark"))))
+
+(ert-deftest agent-repl-test-wire-roster-name-prefix-priority-with-no-level-is-a-breach ()
+  "A priority icon names its level."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-name-prefix "{\"priority\":{}}")
+                 '("WorkspaceNamePriority" "level" "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-roster-name-prefix-refuses-an-undeclared-level ()
+  "A level the contract does not declare is refused, never guessed at."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-workspace-name-prefix "{\"priority\":{\"p9\":{}}}")
+                 '("WorkspaceNamePriority" p9 "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-refuses-the-retired-priority-badge ()
+  "`RosterRow.priority' is reserved: a row carrying it is a breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row "\"ready\":{}" "\"priority\":{\"label\":\"P1\"}"))
+                 '("RosterRow" priority "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-without-a-workspace-is-a-breach ()
   "The row's join key is not optional."

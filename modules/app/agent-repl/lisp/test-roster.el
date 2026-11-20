@@ -216,6 +216,16 @@ whose calls are the observation."
   "Return the live roster-owned workspace names, in tab order."
   (agent-repl-roster-tab-order))
 
+(ert-deftest agent-repl-test-roster-row-name-prefix-reads-the-names-prefix ()
+  "The accessor answers the decoded prefix the row's name wears."
+  (should (equal (agent-repl-roster-row-name-prefix '(:name (:text "a" :prefix (:priority "p1"))))
+                 '(:priority "p1"))))
+
+(ert-deftest agent-repl-test-roster-row-name-prefix-of-a-plain-name-is-nil ()
+  "A name that wears no prefix answers nil, as does a row-less entry."
+  (should-not (agent-repl-roster-row-name-prefix '(:name (:text "a" :prefix nil))))
+  (should-not (agent-repl-roster-row-name-prefix nil)))
+
 (ert-deftest agent-repl-test-roster-push-binds-a-request-correlation-id ()
   "One inbound roster push carries one process-global request identity."
   ;; Arrange
@@ -4244,13 +4254,12 @@ judged as any roster is."
     (should (equal (agent-repl-roster-thread-workspace-name (car (agent-repl-roster-threads))) "chat/t2"))))
 
 
-(ert-deftest agent-repl-test-roster-row-name-glyph-is-the-daemons ()
-  "A row whose name wears a glyph answers it; one that wears none answers nil."
-  (should (equal (agent-repl-roster-row-name-glyph
-                  '(:name (:text "acked" :glyph (:text "👍"))))
-                 "👍"))
-  (should-not (agent-repl-roster-row-name-glyph '(:name (:text "plain" :glyph nil))))
-  (should-not (agent-repl-roster-row-name-glyph nil)))
+(ert-deftest agent-repl-test-roster-row-name-prefix-carries-the-emoji-ack-glyph ()
+  "A row whose name wears the emoji-ack glyph answers it in the prefix."
+  (should (equal (plist-get (agent-repl-roster-row-name-prefix
+                             '(:name (:text "acked" :prefix (:priority nil :emoji-ack "👍"))))
+                            :emoji-ack)
+                 "👍")))
 
 ;;;; ---- Families ----
 

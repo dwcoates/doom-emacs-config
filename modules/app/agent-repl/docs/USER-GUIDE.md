@@ -268,6 +268,22 @@ A rename changes the workspace's name and nothing else.
 - **Agents rename their own workspace, without asking, when its task has clearly moved away from its name.**
 - **The running session learns its new name only at its next start.**
 
+## A workspace's priority
+
+A priority marks a workspace P0.5, P1, P2 or P3, highest first.
+
+- **`SPC j p` sets or clears the current workspace's priority.**
+  - The sidebar's row menu offers the same choices under Priority.
+  - From a shell: `agent-repld workspace set WS -priority p1`, and `-priority none` clears it.
+- **The priority's icon is drawn right before the workspace's name, wherever the name is drawn:**
+  - the sidebar's row;
+  - the top bar's name line;
+  - the Emacs tab, before its `[N]`;
+  - the `SPC p p` and `SPC p P` switcher lines.
+- **Setting a priority moves the workspace to second-to-last among the open workspaces of that priority.**
+  - Clearing it leaves the workspace where it is.
+- **A workspace the Slack emoji-ack intake created also wears a thumbs up.** It is drawn right after the priority icon, in the same places.
+
 ## Sync and async merges
 
 - **A merge is a ONE-SHOT or ASYNC.**

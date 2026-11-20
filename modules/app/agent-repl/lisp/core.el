@@ -1416,7 +1416,6 @@ and logging its own resolution would recurse through the same boundary."
      . "the record reports that no workspace was supplied")
     ("elisp.webview-recovery." . "webview recovery spans workspaces")
     ("elisp.page-unload." . "a page-unload pass spans workspaces")
-    ("load-priority-images:" . "shared image loading is process-wide")
     ("ws-rewrite-source-back-refs:" . "source-reference migration spans workspaces")
     ("ws-put:" . "workspace registry validation can precede sink ownership")
     ("ws-persp-identity:" . "the record reports a non-workspace perspective")
@@ -3371,12 +3370,27 @@ ONE and MANY are as `agent-repl-plural-noun' takes them."
 
 ;;;; ---- User-facing copy: the annotation column ----
 
+(defun agent-repl-display-width (string)
+  "Return STRING's drawn width in character columns.
+A STRING carrying no `display' property is measured by `string-width'
+\(exact for mono and wide glyphs).  One carrying a `display' property (an
+image drawn in a character's place) is measured in pixels by
+`string-pixel-width' and converted to columns by `frame-char-width',
+rounded UP so the estimate never under-reserves: its characters say
+nothing about how wide the picture draws.  THE ONE MEASURE of drawn text
+every column budget uses, the tab bar's packer and the completion
+lists' annotation column alike."
+  (if (text-property-not-all 0 (length string) 'display nil string)
+      (ceiling (string-pixel-width string) (max 1 (frame-char-width)))
+    (string-width string)))
+
 (defun agent-repl-annotation-column (names gap)
   "Return the column a completion line's annotations start at.
-GAP columns past the widest of NAMES, measured by `string-width', so
-every line's annotations line up whatever names the list offers.  THE ONE
+GAP columns past the widest of NAMES, measured by
+`agent-repl-display-width', so every line's annotations line up whatever
+names the list offers, a name drawn after an image included.  THE ONE
 MEASURE every completion list that aligns a column past its names uses."
-  (+ gap (apply #'max 0 (mapcar #'string-width names))))
+  (+ gap (apply #'max 0 (mapcar #'agent-repl-display-width names))))
 
 (defun agent-repl-name-glyph-height (glyph &optional frame)
   "Return the face height GLYPH, a name's glyph, is drawn at in FRAME, or nil.
@@ -3397,18 +3411,6 @@ character cell, so it answers nil."
               (emoji-info (query-font emoji)))
           (/ (float (+ (aref text-info 4) (aref text-info 5)))
              (+ (aref emoji-info 4) (aref emoji-info 5))))))))
-
-(defun agent-repl-name-glyph-string (glyph &optional height)
-  "Return GLYPH, the daemon's glyph for a workspace name, as drawn text.
-HEIGHT is the face height it is drawn at, measured by
-`agent-repl-name-glyph-height' when nil; a frame with none draws GLYPH
-unscaled.  THE ONE DRAWING of a
-name's glyph every Emacs list of workspace names uses, followed by the
-space that parts it from the name."
-  (unless (and (stringp glyph) (not (string-empty-p glyph)))
-    (error "agent-repl: a name glyph carries its glyph, not %S" glyph))
-  (let ((scale (or height (agent-repl-name-glyph-height glyph))))
-    (concat (if scale (propertize glyph 'face (list :height scale)) glyph) " ")))
 
 ;;;; ---- Completion reads that tune ivy ----
 

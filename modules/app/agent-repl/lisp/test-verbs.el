@@ -91,7 +91,6 @@ A `:children' override is the row's family, recorded through
 `agent-repl-test--with-family': the shared row carries none."
   (let ((row (list :workspace (list :workspace (agent-repl-test-verbs--ref))
                    :attention nil
-                   :priority nil
                    :name (list :text "row-one")
                    :status (list :arm :ready :value nil)
                    :current (list :current nil)

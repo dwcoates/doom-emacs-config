@@ -299,6 +299,7 @@ structurally; see the commentary above."
        :desc "Toggle verbose to disk"              "V"   #'agent-repl-toggle-verbose-to-disk
        :desc "Kill workspace session (forced)"     "x"   #'agent-repl-kill-workspace
        :desc "NUKE workspace (deletes data)"       "X"   #'agent-repl-nuke-workspace
+       :desc "Set/clear workspace priority"       "p"   #'agent-repl-set-priority
        :desc "Workspace notes"                    "n"   #'agent-repl-notes-open
        :desc "Keep-alive to every hidden workspace" "R"  #'agent-repl-send-hidden-keepalives
        :desc "Reload agent-repl config"            "C-r" #'agent-repl-reload-config
@@ -322,8 +323,6 @@ structurally; see the commentary above."
         :desc "create PR"                              "P"     #'agent-repl-create-or-update-pr
         :desc "paste: create PR (no --self-certified)"  "C-p"   #'agent-repl-create-or-update-pr-no-self-certified-paste
         :desc "paste: create PR"                        "C-S-p" #'agent-repl-create-or-update-pr-paste)
-       (:prefix ("m" . "modify workspace")
-        :desc "Set/clear priority" "p" #'agent-repl-set-priority)
        ;; DAEMON ADMIN.  Not host-natured at all -- Emacs is merely today's
        ;; caller for the daemon's own drain and merge-queue controls.
        (:prefix ("a" . "daemon admin")

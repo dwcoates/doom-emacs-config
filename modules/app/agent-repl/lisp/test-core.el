@@ -7662,6 +7662,39 @@ goes through `agent-repl-plural-noun'."
   "A wide character counts its display width, not its length."
   (should (= (agent-repl-annotation-column '("日本") 1) 5)))
 
+(ert-deftest agent-repl-test-core-annotation-column-measures-an-image-in-pixels ()
+  "A name drawn after an image is as wide as the image draws, not its characters."
+  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 40))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 10)))
+    (should (= (agent-repl-annotation-column (list (propertize "P1" 'display "img")) 1) 5))))
+
+(ert-deftest agent-repl-test-core-display-width-of-plain-text-is-its-string-width ()
+  "Plain text measures by `string-width', wide glyphs included."
+  (should (= (agent-repl-display-width "日本a") 5)))
+
+(ert-deftest agent-repl-test-core-display-width-of-an-image-is-its-pixels-in-columns ()
+  "A string carrying a `display' image measures its pixels in columns."
+  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 40))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 10)))
+    (should (= (agent-repl-display-width (propertize " " 'display "img")) 4))))
+
+(ert-deftest agent-repl-test-core-display-width-rounds-pixels-up ()
+  "A pixel width short of a whole column rounds UP, never under-reserving."
+  (cl-letf (((symbol-function 'string-pixel-width) (lambda (&rest _) 41))
+            ((symbol-function 'frame-char-width) (lambda (&rest _) 10)))
+    (should (= (agent-repl-display-width (propertize " " 'display "img")) 5))))
+
+(ert-deftest agent-repl-test-core-display-width-is-the-tab-bars-measure ()
+  "The tab bar's packer measures its entries through `agent-repl-display-width'."
+  (with-temp-buffer
+    (insert-file-contents (expand-file-name "status.el" agent-repl-test-core--lisp-dir))
+    (goto-char (point-min))
+    (emacs-lisp-mode)
+    (should (search-forward "(defun agent-repl--tabline-entry-width (entry)" nil t))
+    (goto-char (match-beginning 0))
+    (should (search-forward "(agent-repl-display-width entry)"
+                            (save-excursion (forward-sexp 1) (point)) t))))
+
 (ert-deftest agent-repl-test-core-annotation-column-of-no-names-is-the-gap ()
   "No names, and the column is the gap alone."
   (should (= (agent-repl-annotation-column nil 4) 4)))
@@ -8019,31 +8052,6 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
     (should (string-prefix-p "elisp.core.sink-opened-after-workspace-ended:" (nth 2 (car logged))))))
 
 ;;;; ---- A name's glyph ----
-
-(ert-deftest agent-repl-test-core-name-glyph-string-draws-at-the-given-height ()
-  "The glyph is drawn at HEIGHT and parted from the name by one space."
-  (let ((drawn (agent-repl-name-glyph-string "👍" 0.7)))
-    (should (equal (substring-no-properties drawn) "👍 "))
-    (should (equal (get-text-property 0 'face drawn) '(:height 0.7)))
-    (should-not (get-text-property 1 'face drawn))))
-
-(ert-deftest agent-repl-test-core-name-glyph-string-measures-the-height ()
-  "With no HEIGHT the glyph is drawn at the frame's measured ratio."
-  (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) 0.5)))
-    (should (equal (get-text-property 0 'face (agent-repl-name-glyph-string "👍"))
-                   '(:height 0.5)))))
-
-(ert-deftest agent-repl-test-core-name-glyph-string-unscaled-without-fonts ()
-  "A frame with no fonts draws the glyph as it is."
-  (cl-letf (((symbol-function 'agent-repl-name-glyph-height) (lambda (_glyph &optional _frame) nil)))
-    (let ((drawn (agent-repl-name-glyph-string "👍")))
-      (should (equal drawn "👍 "))
-      (should-not (get-text-property 0 'face drawn)))))
-
-(ert-deftest agent-repl-test-core-name-glyph-string-refuses-no-glyph ()
-  "An empty glyph is a caller's defect and fails hard."
-  (should-error (agent-repl-name-glyph-string "" 1.0))
-  (should-error (agent-repl-name-glyph-string nil 1.0)))
 
 (ert-deftest agent-repl-test-core-name-glyph-height-is-the-ratio-of-the-fonts ()
   "The height is the text font's line height over the emoji font's."
