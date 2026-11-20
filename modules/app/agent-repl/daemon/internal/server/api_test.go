@@ -573,6 +573,7 @@ func TestNewRefusesMissingTimingDependencies(t *testing.T) {
 	}{
 		{"no rpc recorder", func(d *Deps) { d.RPCs = nil }, "an rpc recorder"},
 		{"no reconnect tracker", func(d *Deps) { d.Reconnects = nil }, "a reconnect tracker"},
+		{"no hot reload tracker", func(d *Deps) { d.HotReload = nil }, "the hot reload tracker"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

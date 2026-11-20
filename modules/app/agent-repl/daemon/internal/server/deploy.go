@@ -265,9 +265,19 @@ func (s *server) WebviewBuilds() map[ids.WorkspaceID][]string {
 	return out
 }
 
+// WebappReports is where the webapp builds the web streams report are told,
+// for the deploy's hot reload card (hotreload.Tracker).
+type WebappReports interface {
+	WebviewReported(ws ids.WorkspaceID, build string)
+	WebviewGone(ws ids.WorkspaceID)
+	WebhostReported(build string)
+}
+
 // holdWebBuild records one web stream's reported build for as long as the
-// stream stands, and answers the release.
+// stream stands, and answers the release. The hot reload is told the build,
+// and told when the workspace's last web stream closed.
 func (s *server) holdWebBuild(ws ids.WorkspaceID, build string) func() {
+	s.deps.HotReload.WebviewReported(ws, build)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.webStreamSeq++
@@ -278,10 +288,14 @@ func (s *server) holdWebBuild(ws ids.WorkspaceID, build string) func() {
 	s.webBuilds[ws][key] = build
 	return func() {
 		s.mu.Lock()
-		defer s.mu.Unlock()
 		delete(s.webBuilds[ws], key)
-		if len(s.webBuilds[ws]) == 0 {
+		gone := len(s.webBuilds[ws]) == 0
+		if gone {
 			delete(s.webBuilds, ws)
+		}
+		s.mu.Unlock()
+		if gone {
+			s.deps.HotReload.WebviewGone(ws)
 		}
 	}
 }
@@ -307,6 +321,7 @@ func (s *server) WebhostPages() []*agentreplv1.WebhostPage {
 // holdWebhostPage records what a web view host's page stream stated of
 // itself for as long as the stream stands, and answers the release.
 func (s *server) holdWebhostPage(page *agentreplv1.WebhostPage) func() {
+	s.deps.HotReload.WebhostReported(page.GetWebappBuild())
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.webStreamSeq++

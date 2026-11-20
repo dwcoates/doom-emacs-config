@@ -126,6 +126,7 @@ func (c *controller) beginRestart(ctx context.Context, ask Ask) (*handoverPlan, 
 	manifest.Forced = force
 	manifest.Deploy = true
 	manifest.DeployStartedAt = ask.DeployStartedAt
+	manifest.HotReload = ask.HotReload
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		c.log.Error(opHandover, "the intent manifest could not be written; the restart is abandoned before anything was announced",
 			dlog.WithCause(dlog.Merge(fields, dlog.Context{"workspaces": len(workspaces)}), err))

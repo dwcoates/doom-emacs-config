@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/restarttiming"
@@ -743,6 +744,7 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 	fields["installed_build"] = installed
 	if reported != "" && reported == installed {
 		c.log.Debug(opStaleness, "the shim runs the installed build", fields)
+		c.deps.HotReload.ShimJudged(ctx, ws, hotreload.ShimCurrent)
 		return check, nil
 	}
 	check.Stale = true
@@ -763,6 +765,7 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 		// served on the build it has.
 		check.Skipped = SkippedAlreadyBounced
 		c.log.Error(opStaleness, "the shim still reports the build it was already bounced for; not bouncing it again", fields)
+		c.deps.HotReload.ShimJudged(ctx, ws, hotreload.ShimStillStale)
 		return check, nil
 	}
 	c.log.Info(opStaleness, "the shim runs an older build than the installed one; bouncing it", fields)
@@ -784,7 +787,23 @@ func (c *controller) checkStale(ctx context.Context, ws ids.WorkspaceID, force b
 		return check, err
 	}
 	check.Bounce = decision
+	c.deps.HotReload.ShimJudged(ctx, ws, shimOutcome(decision))
 	return check, nil
+}
+
+// shimOutcome is what the bounce registry's DECISION for a stale shim means
+// for the hot reload: replaced now, or behind its turn or its detached work.
+func shimOutcome(decision bounce.Decision) hotreload.ShimOutcome {
+	switch {
+	case decision.Now:
+		return hotreload.ShimReplacing
+	case decision.TurnInFlight:
+		return hotreload.ShimWaitsForTurn
+	case decision.DetachedWork > 0:
+		return hotreload.ShimWaitsForWork
+	default:
+		return hotreload.ShimQueued
+	}
 }
 
 // staleTrigger names what asked for a staleness judgement; each judgement's
@@ -861,6 +880,9 @@ func (c *controller) settleStaleBounce(ws ids.WorkspaceID, err error) {
 		delete(c.bouncedStamp, ws)
 	}
 	c.unlock()
+	if err != nil {
+		c.deps.HotReload.ShimReplaceFailed(ws, err)
+	}
 	if err == nil {
 		c.judgeStaleAsync(ws, judgedForBounceSettled)
 	}

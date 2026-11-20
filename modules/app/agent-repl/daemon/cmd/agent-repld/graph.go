@@ -1283,7 +1283,15 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// THE DETACHED-MERGE SERVICE IS BUILT AFTER THE ROLLOUT AND THE DEPLOY,
 	// which pay the landing reports it owes; both reach it through this.
 	detachedRef := &detachedForwarder{}
+	// A DEPLOY'S HOT RELOAD is drawn in the deploy mediator's feed of the
+	// repository this daemon is deployed from (hotreload.Tracker). The
+	// deploy, the rollout and the server each tell it what they did.
+	hotReload, err := newHotReloadTracker(git, p.DB, feedResolver, paths.Checkout, log)
+	if err != nil {
+		return nil, err
+	}
 	rolloutController, err := rollout.New(rollout.Deps{
+		HotReload:               hotReload,
 		Creates:                 creates,
 		Restarts:                p.Metrics,
 		Reconnects:              p.Reconnects,
@@ -1396,6 +1404,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Restarts:   p.Metrics,
 		Windows:    p.Metrics,
 		Reconnects: p.Reconnects,
+		HotReload:  hotReload,
 	})
 	if err != nil {
 		return nil, err
@@ -2006,6 +2015,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Latencies:         p.Metrics,
 			RPCs:              p.Metrics,
 			Reconnects:        p.Reconnects,
+			HotReload:         hotReload,
 			WebappDist:        paths.WebappDist,
 			ImageOrigin:       images.Handler(),
 			ChessBoards:       chessBoards,

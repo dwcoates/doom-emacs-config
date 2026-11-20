@@ -427,3 +427,132 @@ func TestAnUntimedDeployTakeoverSaysWhy(t *testing.T) {
 	}
 	t.Fatalf("records = %+v, want the untimed deploy said", h.log.Records())
 }
+
+// ---- the deploy's hot reload ----
+
+// toldHas reports whether EVENTS holds EVENT.
+func toldHas(events []string, event string) bool {
+	for _, e := range events {
+		if e == event {
+			return true
+		}
+	}
+	return false
+}
+
+func TestASuccessorTakesTheDeploysHotReloadFromItsManifestOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	m := deployManifest
+	m.HotReload = []byte("card")
+
+	// Act
+	h.c.recordDeployTakeover(m)
+	h.c.recordDeployTakeover(m)
+
+	// Assert
+	if got := h.hotReload.told(); strings.Join(got, ",") != "resume:card" {
+		t.Fatalf("told %v, want the card resumed once", got)
+	}
+}
+
+func TestATakeoverFromADeployDrawsItsHotReloadThenJudgesItsShims(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	h.c.recordDeployTakeover(deployManifest)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	told := h.hotReload.told()
+	took, judged := indexOf(told, "took_over"), indexOf(told, "shims_judged")
+	if took < 0 || judged < took {
+		t.Fatalf("told %v, want took_over then shims_judged", told)
+	}
+}
+
+func TestATakeoverThatWasNoDeploysTellsTheHotReloadNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+
+	// Act
+	takeOver(h)
+
+	// Assert
+	if toldHas(h.hotReload.told(), "took_over") {
+		t.Fatalf("told %v, want no takeover told for no deploy", h.hotReload.told())
+	}
+}
+
+func TestAHandoverThatCannotFinishFailsItsHotReload(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.workspace(t)
+	failTransferUncleanly(h)
+
+	// Act
+	if _, err := h.c.HandOver(context.Background(), unforcedAsk); err != nil {
+		t.Fatalf("HandOver: %v", err)
+	}
+	h.registry.wait()
+	h.c.handoverDone.Wait()
+
+	// Assert
+	if got := h.hotReload.told(); !toldHas(got, "handover_failed:the daemon's handover could not finish: workspaces did not transfer") &&
+		!toldHas(got, "handover_failed:the daemon's handover could not finish: workspaces were reclaimed") {
+		t.Fatalf("told %v, want the handover's failure", got)
+	}
+}
+
+func TestTheManifestCarriesTheDeploysHotReload(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(t *testing.T, h *harness, ask Ask)
+	}{
+		{"a handover", func(t *testing.T, h *harness, ask Ask) {
+			if _, err := h.c.HandOver(context.Background(), ask); err != nil {
+				t.Fatalf("HandOver: %v", err)
+			}
+		}},
+		{"a restart", func(t *testing.T, h *harness, ask Ask) {
+			if _, err := h.c.Restart(context.Background(), ask); err != nil {
+				t.Fatalf("Restart: %v", err)
+			}
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.workspace(t)
+			ask := unforcedAsk
+			ask.HotReload = []byte("card")
+
+			// Act
+			tc.run(t, h, ask)
+
+			// Assert
+			m, found, err := ReadManifest(h.c.deps.IntentManifest)
+			if err != nil || !found || string(m.HotReload) != "card" {
+				t.Fatalf("manifest = (%+v, found %v, %v), want the card carried", m, found, err)
+			}
+		})
+	}
+}
+
+func TestNewRefusesAMissingHotReload(t *testing.T) {
+	// Arrange
+	deps := newHarness(t).c.deps
+	deps.HotReload = nil
+
+	// Act
+	_, err := New(deps)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "hot reload tracker is required") {
+		t.Fatalf("New = %v, want the missing hot reload refused", err)
+	}
+}

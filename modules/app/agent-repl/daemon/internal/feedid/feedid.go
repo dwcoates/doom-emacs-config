@@ -93,6 +93,9 @@ const (
 	// (frontend.v1.FeedFixGate), on the mediator's root feed. Keyed by the
 	// finish's start and the attempt.
 	KindFixGate RowKind = "fix_gate"
+	// KindHotReload is one deploy's hot reload (frontend.v1.FeedHotReload),
+	// on the deploy mediator's root feed. Keyed by the deploy's start.
+	KindHotReload RowKind = "hot_reload"
 )
 
 // AllRowKinds is every row kind, in declaration order. Decode accepts exactly
@@ -114,6 +117,7 @@ var AllRowKinds = []RowKind{
 	KindPeer,
 	KindIngress,
 	KindFixGate,
+	KindHotReload,
 }
 
 func knownKind(k RowKind) bool {

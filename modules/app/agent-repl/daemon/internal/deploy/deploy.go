@@ -40,6 +40,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/gitclient"
 	"agent-repld/internal/health"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/restarttiming"
@@ -214,6 +215,56 @@ type Services interface {
 // Clock is the deploy's view of time.
 type Clock = rollout.Clock
 
+// HotReload is where a deploy tells its hot reload as it happens: the card
+// the deploy mediator's feed draws (hotreload.Tracker). The deploy states
+// facts; the tracker resolves every word of the card.
+type HotReload interface {
+	Begin(ctx context.Context, started time.Time)
+	Built(fresh map[string]string)
+	InstallBegan()
+	ArtifactInstalled(service string, primary bool, previous string, replaced bool)
+	InstallEnded()
+	ServiceRestarting(service string)
+	ServiceRestarted(service string)
+	ServiceCurrent(service string)
+	DaemonCurrent()
+	DaemonMoving(ctx context.Context, words string, staleWebviews []ids.WorkspaceID)
+	Handoff() []byte
+	HandoverFailed(why string)
+	ShimsJudging()
+	ShimsJudged()
+	WebviewReloading(ctx context.Context, ws ids.WorkspaceID)
+	WebhostReloading()
+	WebappJudged()
+	ElispPushed(recipients int)
+	ElispCurrent()
+	Failed(err error)
+}
+
+// hotReloadService names component C as the hot reload's card names it.
+func hotReloadService(c Component) string {
+	switch c {
+	case ComponentStore:
+		return hotreload.ServiceStore
+	case ComponentSidecar:
+		return hotreload.ServiceSidecar
+	case ComponentZettel:
+		return hotreload.ServiceZettel
+	case ComponentTests:
+		return hotreload.ServiceTests
+	case ComponentDaemon:
+		return hotreload.ServiceDaemon
+	case ComponentShim:
+		return hotreload.ServiceShim
+	case ComponentWebapp:
+		return hotreload.ServiceWebapp
+	case ComponentElisp:
+		return hotreload.ServiceElisp
+	default:
+		panic(fmt.Sprintf("deploy: %q is no component the hot reload draws", c))
+	}
+}
+
 // Deps are a Deployer's collaborators.
 // OwedReports covers and pays the landing reports owed until a deploy has run
 // (mergeworkspace.Service).
@@ -286,7 +337,10 @@ type Deps struct {
 	// Reconnects is told each webview a reload is pushed to, so its return
 	// is timed. REQUIRED.
 	Reconnects *restarttiming.Reconnects
-	Log        dlog.Surfaces
+	// HotReload is told every step of every deploy, which the deploy
+	// mediator's feed draws as the deploy's hot reload. REQUIRED.
+	HotReload HotReload
+	Log       dlog.Surfaces
 }
 
 // Deployer runs deploys, one at a time.
@@ -335,6 +389,8 @@ func New(deps Deps) (*Deployer, error) {
 		return nil, errors.New("deploy: the progress sink is required")
 	case deps.Faults == nil:
 		return nil, errors.New("deploy: the fault recorder is required")
+	case deps.HotReload == nil:
+		return nil, errors.New("deploy: the hot reload tracker is required; every deploy draws its hot reload")
 	case deps.Reconnects == nil:
 		return nil, errors.New("deploy: the reconnect tracker is required; a reloaded webview's return is timed")
 	case deps.Restarts == nil:
@@ -426,11 +482,13 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	// reaches only its caller, and a landing's deploy has none. A handover
 	// whose successor would not start is the rollout's own fault.
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Building, Components: builtComponents})
+	d.deps.HotReload.Begin(ctx, began)
 	var rollback rolledBack
 	defer func() {
 		if err != nil {
 			d.progress(nil)
 			d.recordFailure(ctx, err, rollback)
+			d.deps.HotReload.Failed(err)
 		}
 	}()
 
@@ -479,11 +537,16 @@ func (d *Deployer) Deploy(ctx context.Context, force bool) (result Result, err e
 	}
 	d.timePhase(restarttiming.DeployBuild, began, nil)
 	d.log.Info(opDeploy, "built", dlog.Merge(fields, dlog.Context{"builds": fresh.fields()}))
+	d.deps.HotReload.Built(fresh.byService())
 	d.stepSucceeded(ctx, health.DeployStepBuild)
 
 	d.progress(&deployprogress.Progress{Phase: deployprogress.Installing})
 	installing := d.deps.Clock.Now()
+	d.deps.HotReload.InstallBegan()
 	err = d.install(ctx, Staged{Dir: staging}, fresh, nonce, prev)
+	if err == nil {
+		d.deps.HotReload.InstallEnded()
+	}
 	d.timePhase(restarttiming.DeployInstall, installing, err)
 	if err != nil {
 		d.log.Error(opDeploy, "the staged build could not be installed; nothing was restarted", dlog.WithCause(fields, err))
@@ -744,6 +807,19 @@ type builds struct {
 	wifi string
 }
 
+// byService answers each built service's fresh build, by the name the hot
+// reload's card gives it.
+func (b builds) byService() map[string]string {
+	out := map[string]string{
+		hotreload.ServiceShim: b.shim, hotreload.ServiceWebapp: b.webapp, hotreload.ServiceDaemon: b.daemon,
+		hotreload.ServiceStore: b.store, hotreload.ServiceSidecar: b.sidecar, hotreload.ServiceElisp: b.elisp,
+	}
+	for _, s := range Standalones {
+		out[hotReloadService(s.Component)] = b.standalone[s.Component]
+	}
+	return out
+}
+
 func (b builds) fields() dlog.Context {
 	out := dlog.Context{
 		"shim": b.shim, "webapp": b.webapp, "daemon": b.daemon,
@@ -811,6 +887,10 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 		// restamp installs only the stamps beside the artifact; nil for an
 		// artifact whose stamps live inside it (the webapp's tree).
 		restamp func() error
+		// rider is an artifact that rides with its component (shim-lock with
+		// the shim, the Wi-Fi helper with the daemon): the component's builds
+		// are named by its own artifact, never by a rider's.
+		rider bool
 	}
 	// livePaths lists an artifact's live path and the live side of its stamps.
 	livePaths := func(artifact string, stamps map[string]string) []string {
@@ -857,7 +937,7 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 		}, install: sidecarInstall, writes: sidecarWrites, restamp: sidecarRestamp},
 		{component: ComponentShim, name: sessionlock.HolderBinary, fresh: fresh.lock, installed: func() (string, error) {
 			return buildid.File(live.CacheBinPath(sessionlock.HolderBinary))
-		}, install: lockInstall, writes: lockWrites, restamp: lockRestamp},
+		}, install: lockInstall, writes: lockWrites, restamp: lockRestamp, rider: true},
 	}
 	for _, sv := range Standalones {
 		install, writes, restamp := cacheBin(sv.Service)
@@ -903,7 +983,7 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 					d.log.Info(opInstall, "no ask of the replaced Wi-Fi helper was waiting on the owner", fields)
 				}
 				return nil
-			}, writes: []string{live.WifiApp}, tree: true})
+			}, writes: []string{live.WifiApp}, tree: true, rider: true})
 	}
 	for _, a := range artifacts {
 		fields := dlog.Context{"artifact": a.name, "fresh": a.fresh}
@@ -922,6 +1002,7 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 				}
 			}
 			d.log.Debug(opInstall, "the installed artifact is already the fresh build; its stamps now name the fresh source", fields)
+			d.deps.HotReload.ArtifactInstalled(hotReloadService(a.component), !a.rider, installed, false)
 			continue
 		}
 		if err != nil {
@@ -944,6 +1025,11 @@ func (d *Deployer) install(ctx context.Context, s Staged, fresh builds, nonce st
 			return &InstallFailed{Component: a.component, Detail: err.Error()}
 		}
 		d.log.Info(opInstall, "installed the fresh build", fields)
+		previous := ""
+		if err == nil {
+			previous = installed
+		}
+		d.deps.HotReload.ArtifactInstalled(hotReloadService(a.component), !a.rider, previous, true)
 	}
 	return nil
 }
@@ -970,11 +1056,15 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		// A STORE RESTART ALWAYS RESTARTS THE SIDECAR: its socket is out while
 		// the store restarts, and a fresh pair is the known-good state.
 		prev.store = true
+		d.deps.HotReload.ServiceRestarting(hotreload.ServiceStore)
+		d.deps.HotReload.ServiceRestarting(hotreload.ServiceSidecar)
 		if err := d.deps.Services.RestartStore(ctx); err != nil {
 			d.log.Error(opDecide, "the store restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentStore)}, err))
 			return outcomes(), &ServiceRestartFailed{Component: ComponentStore, Detail: err.Error()}
 		}
 		store.Kind, sidecar.Kind = Restarted, Restarted
+		d.deps.HotReload.ServiceRestarted(hotreload.ServiceStore)
+		d.deps.HotReload.ServiceRestarted(hotreload.ServiceSidecar)
 		d.log.Info(opDecide, "restarted the store and the sidecar onto the fresh build", dlog.Context{
 			"store_build": fresh.store, "sidecar_build": fresh.sidecar,
 		})
@@ -982,26 +1072,35 @@ func (d *Deployer) services(ctx context.Context, fresh builds, prev *previous) (
 		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
 			Components: []deployprogress.Component{deployprogress.Sidecar}})
 		prev.sidecar = true
+		d.deps.HotReload.ServiceCurrent(hotreload.ServiceStore)
+		d.deps.HotReload.ServiceRestarting(hotreload.ServiceSidecar)
 		if err := d.deps.Services.RestartSidecar(ctx); err != nil {
 			d.log.Error(opDecide, "the sidecar restart failed", dlog.WithCause(dlog.Context{"component": string(ComponentSidecar)}, err))
 			return outcomes(), &ServiceRestartFailed{Component: ComponentSidecar, Detail: err.Error()}
 		}
 		sidecar.Kind = Restarted
+		d.deps.HotReload.ServiceRestarted(hotreload.ServiceSidecar)
 		d.log.Info(opDecide, "restarted the sidecar onto the fresh build", dlog.Context{"sidecar_build": fresh.sidecar})
+	default:
+		d.deps.HotReload.ServiceCurrent(hotreload.ServiceStore)
+		d.deps.HotReload.ServiceCurrent(hotreload.ServiceSidecar)
 	}
 	for i, sv := range Standalones {
 		build := fresh.standalone[sv.Component]
 		if !d.serviceStale(sv.Component, sv.Service, build) {
+			d.deps.HotReload.ServiceCurrent(hotReloadService(sv.Component))
 			continue
 		}
 		d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
 			Components: []deployprogress.Component{sv.Progress}})
 		prev.restartedStandalone(sv.Component)
+		d.deps.HotReload.ServiceRestarting(hotReloadService(sv.Component))
 		if err := d.deps.Services.RestartStandalone(ctx, sv); err != nil {
 			d.log.Error(opDecide, "the "+sv.Short+" restart failed", dlog.WithCause(dlog.Context{"component": string(sv.Component)}, err))
 			return outcomes(), &ServiceRestartFailed{Component: sv.Component, Detail: err.Error()}
 		}
 		standalone[i].Kind = Restarted
+		d.deps.HotReload.ServiceRestarted(hotReloadService(sv.Component))
 		d.log.Info(opDecide, "restarted "+sv.Display+" onto the fresh build", dlog.Context{string(sv.Component) + "_build": build})
 	}
 	return outcomes(), nil
@@ -1097,10 +1196,12 @@ func (d *Deployer) elisp(fresh builds) Outcome {
 	}
 	if len(stale) == 0 {
 		d.log.Debug(opDecide, "every connected Emacs runs the checkout's elisp", dlog.Context{"fresh": fresh.elisp})
+		d.deps.HotReload.ElispCurrent()
 		return out
 	}
 	out.Kind = ReloadPushed
 	out.Recipients = d.deps.Clients.PushReloadElisp(stale, d.deps.Live.ModuleRoot, fresh.elisp)
+	d.deps.HotReload.ElispPushed(out.Recipients)
 	return out
 }
 
@@ -1133,9 +1234,11 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 			d.log.Info(opDecide, "this daemon runs an older build whose state layout the fresh one changes by a breaking step; restarting it rather than handing over", fields)
 			d.progress(&deployprogress.Progress{Phase: deployprogress.RestartingServices,
 				Components: []deployprogress.Component{deployprogress.Daemon}, Draining: !force})
+			ask.HotReload = d.handOffHotReload(ctx, "restarting across a state layout change", fresh)
 			accepted, err := d.deps.Rollout.Restart(ctx, ask)
 			if err != nil {
 				d.log.Error(opDecide, "the restart was not accepted", dlog.WithCause(fields, err))
+				d.deps.HotReload.HandoverFailed("the daemon's restart was not accepted: " + err.Error())
 				return []Outcome{daemon}, err
 			}
 			daemon.Kind, daemon.Handover = RestartingAcrossLayout, accepted
@@ -1148,9 +1251,11 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		}
 		d.log.Info(opDecide, "this daemon runs an older build; handing over", fields)
 		d.progress(&deployprogress.Progress{Phase: deployprogress.HandingOver, Draining: !force})
+		ask.HotReload = d.handOffHotReload(ctx, "handing over every workspace", fresh)
 		accepted, err := d.deps.Rollout.HandOver(ctx, ask)
 		if err != nil {
 			d.log.Error(opDecide, "the handover was not accepted", dlog.WithCause(dlog.Context{"forced": force}, err))
+			d.deps.HotReload.HandoverFailed("the handover was not accepted: " + err.Error())
 			return []Outcome{daemon}, err
 		}
 		daemon.Kind, daemon.Handover = HandingOver, accepted
@@ -1161,11 +1266,30 @@ func (d *Deployer) daemonShimWebapp(ctx context.Context, staged Staged, fresh bu
 		}, nil
 	}
 	d.log.Debug(opDecide, "this daemon runs the fresh build", dlog.Context{"fresh": fresh.daemon})
+	d.deps.HotReload.DaemonCurrent()
 	shims, err := d.shims(ctx, fresh, force)
 	if err != nil {
 		return []Outcome{daemon}, err
 	}
 	return []Outcome{daemon, shims, d.webapp(fresh)}, nil
+}
+
+// handOffHotReload tells the hot reload that the daemon moves, with WORDS,
+// naming each workspace whose web view runs an older webapp than FRESH's, and
+// answers the card for the successor to go on drawing.
+func (d *Deployer) handOffHotReload(ctx context.Context, words string, fresh builds) []byte {
+	var stale []ids.WorkspaceID
+	for ws, running := range d.deps.Clients.WebviewBuilds() {
+		for _, build := range running {
+			if build != fresh.webapp {
+				stale = append(stale, ws)
+				break
+			}
+		}
+	}
+	sort.Slice(stale, func(i, j int) bool { return stale[i] < stale[j] })
+	d.deps.HotReload.DaemonMoving(ctx, words, stale)
+	return d.deps.HotReload.Handoff()
 }
 
 // restartsAcrossLayout decides whether a stale daemon is restarted rather
@@ -1199,6 +1323,10 @@ func (d *Deployer) restartsAcrossLayout(ctx context.Context, staged Staged, layo
 // bundle; each stale one goes to the bounce registry.
 func (d *Deployer) shims(ctx context.Context, fresh builds, force bool) (Outcome, error) {
 	out := Outcome{Component: ComponentShim, Build: fresh.shim, Kind: UpToDate}
+	// EACH JUDGEMENT IS TOLD TO THE HOT RELOAD BY THE ROLLOUT, which makes
+	// it (rollout.Deps.HotReload); the deploy tells only the bounds.
+	d.deps.HotReload.ShimsJudging()
+	defer d.deps.HotReload.ShimsJudged()
 	workspaces, err := d.deps.Workspaces(ctx)
 	if err != nil {
 		d.log.Error(opDecide, "could not list the workspaces whose shims are judged", dlog.WithCause(nil, err))
@@ -1242,6 +1370,7 @@ func (d *Deployer) webapp(fresh builds) Outcome {
 			continue
 		}
 		d.deps.Reconnects.Expect(restarttiming.ReconnectWebappReload, d.deps.Clock.Now(), restarttiming.ReconnectWeb, ws)
+		d.deps.HotReload.WebviewReloading(context.Background(), ws)
 		d.deps.Clients.PushReloadWebappBuild(ws, fresh.webapp)
 		out.Recipients++
 		d.log.Info(opDecide, "a webview runs an older webapp; pushed the reload", dlog.Context{
@@ -1251,7 +1380,12 @@ func (d *Deployer) webapp(fresh builds) Outcome {
 	// THE WEB VIEW HOST is no workspace's webview, and a handover no longer
 	// reloads it: its reload is the one reconcile every edge that can bring
 	// it onto the installed webapp runs (webhost.go), this deploy among them.
-	out.Recipients += d.ReconcileWebhost(WebhostEdgeDeploy)
+	webhost := d.ReconcileWebhost(WebhostEdgeDeploy)
+	if webhost > 0 {
+		d.deps.HotReload.WebhostReloading()
+	}
+	d.deps.HotReload.WebappJudged()
+	out.Recipients += webhost
 	if out.Recipients > 0 {
 		out.Kind = ReloadPushed
 	}

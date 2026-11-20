@@ -15,6 +15,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/health"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
@@ -1887,6 +1888,100 @@ func TestBounceShimAsksTheRegistryToHoldItBehindAMergeByReason(t *testing.T) {
 			}
 			if got := h.registry.requests[0].Req.WaitsBehindMerge; got != tc.want {
 				t.Fatalf("WaitsBehindMerge = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAStalenessJudgementTellsTheHotReload(t *testing.T) {
+	tests := []struct {
+		name     string
+		reported string
+		want     hotreload.ShimOutcome
+	}{
+		{"the installed build", "installed-build", hotreload.ShimCurrent},
+		{"an older build on a free workspace", "0ldbu1ld", hotreload.ShimReplacing},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			h.c.mu.Lock()
+			h.c.reported[ws] = tc.reported
+			h.c.mu.Unlock()
+			h.fleet.live[ws].Reap()
+
+			// Act
+			if _, err := h.c.CheckStaleness(context.Background(), ws, false); err != nil {
+				t.Fatalf("CheckStaleness: %v", err)
+			}
+			h.registry.wait()
+
+			// Assert
+			want := fmt.Sprintf("shim_judged:%s:%d", ws, tc.want)
+			if got := h.hotReload.told(); indexOf(got, want) < 0 {
+				t.Fatalf("told %v, want %s", got, want)
+			}
+		})
+	}
+}
+
+func TestAShimStillOnTheBuildItWasBouncedForTellsTheHotReload(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	h.c.mu.Lock()
+	h.c.bouncedStamp[ws] = "0ldbu1ld"
+	h.c.mu.Unlock()
+
+	// Act
+	if _, err := h.c.CheckStaleness(context.Background(), ws, false); err != nil {
+		t.Fatalf("CheckStaleness: %v", err)
+	}
+
+	// Assert
+	want := fmt.Sprintf("shim_judged:%s:%d", ws, hotreload.ShimStillStale)
+	if got := h.hotReload.told(); indexOf(got, want) < 0 {
+		t.Fatalf("told %v, want %s", got, want)
+	}
+}
+
+func TestAFailedStaleBounceTellsTheHotReload(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := staleReported(t, h)
+	h.c.claimStaleBounce(ws, "0ldbu1ld")
+
+	// Act
+	h.c.settleStaleBounce(ws, errFake)
+	h.c.staleChecks.Wait()
+
+	// Assert
+	if got := h.hotReload.told(); indexOf(got, "shim_replace_failed:"+string(ws)) < 0 {
+		t.Fatalf("told %v, want the failed replacement", got)
+	}
+}
+
+func TestShimOutcomeReadsTheRegistrysDecision(t *testing.T) {
+	tests := []struct {
+		name     string
+		decision bounce.Decision
+		want     hotreload.ShimOutcome
+	}{
+		{"now", bounce.Decision{Now: true}, hotreload.ShimReplacing},
+		{"behind a turn", bounce.Decision{TurnInFlight: true, DetachedWork: 2}, hotreload.ShimWaitsForTurn},
+		{"behind detached work", bounce.Decision{DetachedWork: 1}, hotreload.ShimWaitsForWork},
+		{"joined a pending bounce", bounce.Decision{AlreadyPending: true}, hotreload.ShimQueued},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := shimOutcome(tc.decision)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("shimOutcome = %d, want %d", got, tc.want)
 			}
 		})
 	}

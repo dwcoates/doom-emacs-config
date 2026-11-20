@@ -19,6 +19,7 @@ import (
 	"agent-repld/internal/bounce"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
@@ -1210,6 +1211,7 @@ type harness struct {
 	// does.
 	endLifetime  func()
 	progress     *fakeProgress
+	hotReload    *fakeHotReload
 	db           wsm.DB
 	clock        *fakeClock
 	spawner      *fakeSpawner
@@ -1358,6 +1360,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		lockErr:        make(map[string]error),
 		shimBuild:      "installed-build",
 		progress:       &fakeProgress{},
+		hotReload:      &fakeHotReload{},
 		startErr:       make(map[ids.WorkspaceID]error),
 		merges:         &fakeMerges{order: order},
 		queuedCreates:  &fakeQueuedCreates{},
@@ -1512,6 +1515,7 @@ func newHarnessOn(t *testing.T, onFile bool, adjust ...func(*Deps)) *harness {
 		Restarts:         h.restarts,
 		Reconnects:       restarttiming.NewReconnects(h.restarts, restarttiming.NoWindows{}, h.clock.Now),
 		Progress:         h.progress,
+		HotReload:        h.hotReload,
 		Log:              log,
 		Lifetime:         lifetime,
 	}
@@ -1821,4 +1825,41 @@ func (h *harness) awaitAdoptionEnded(t *testing.T, ws ids.WorkspaceID) {
 		t.Fatalf("no adoption run is armed for %s", ws)
 	}
 	<-ended
+}
+
+// fakeHotReload records what the rollout tells the deploy's hot reload card,
+// as "event" or "event:argument", in order.
+type fakeHotReload struct {
+	mu      sync.Mutex
+	events  []string
+	resumed [][]byte
+}
+
+func (f *fakeHotReload) record(event string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+}
+
+// told answers every recorded event, in order.
+func (f *fakeHotReload) told() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.events...)
+}
+
+func (f *fakeHotReload) Resume(handoff []byte) {
+	f.mu.Lock()
+	f.resumed = append(f.resumed, handoff)
+	f.mu.Unlock()
+	f.record("resume:" + string(handoff))
+}
+func (f *fakeHotReload) TookOver()                 { f.record("took_over") }
+func (f *fakeHotReload) HandoverFailed(why string) { f.record("handover_failed:" + why) }
+func (f *fakeHotReload) ShimsJudged()              { f.record("shims_judged") }
+func (f *fakeHotReload) ShimJudged(_ context.Context, ws ids.WorkspaceID, outcome hotreload.ShimOutcome) {
+	f.record(fmt.Sprintf("shim_judged:%s:%d", ws, outcome))
+}
+func (f *fakeHotReload) ShimReplaceFailed(ws ids.WorkspaceID, _ error) {
+	f.record("shim_replace_failed:" + string(ws))
 }

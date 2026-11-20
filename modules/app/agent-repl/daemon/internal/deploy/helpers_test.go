@@ -456,6 +456,7 @@ func (s *fakeServices) Calls() []string {
 
 // harness is one Deployer over a temp checkout, a temp cache-bin, and fakes.
 type harness struct {
+	hotReload *fakeHotReload
 	restarts  *restarttimingtest.Recorder
 	d         *Deployer
 	live      Live
@@ -652,6 +653,55 @@ func (f *fakeProgress) last() *deployprogress.Progress {
 	return f.stated[len(f.stated)-1]
 }
 
+// fakeHotReload records every report the deploy tells the hot reload, as
+// "event" or "event:argument", in order.
+type fakeHotReload struct {
+	mu     sync.Mutex
+	events []string
+}
+
+func (f *fakeHotReload) record(event string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.events = append(f.events, event)
+}
+
+// told answers every recorded event, in order.
+func (f *fakeHotReload) told() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.events...)
+}
+
+func (f *fakeHotReload) Begin(context.Context, time.Time) { f.record("begin") }
+func (f *fakeHotReload) Built(fresh map[string]string)    { f.record(fmt.Sprintf("built:%d", len(fresh))) }
+func (f *fakeHotReload) InstallBegan()                    { f.record("install_began") }
+func (f *fakeHotReload) InstallEnded()                    { f.record("install_ended") }
+func (f *fakeHotReload) ServiceRestarting(service string) { f.record("restarting:" + service) }
+func (f *fakeHotReload) ServiceRestarted(service string)  { f.record("restarted:" + service) }
+func (f *fakeHotReload) ServiceCurrent(service string)    { f.record("current:" + service) }
+func (f *fakeHotReload) DaemonCurrent()                   { f.record("daemon_current") }
+func (f *fakeHotReload) Handoff() []byte                  { f.record("handoff"); return []byte("card") }
+func (f *fakeHotReload) HandoverFailed(string)            { f.record("handover_failed") }
+func (f *fakeHotReload) ShimsJudging()                    { f.record("shims_judging") }
+func (f *fakeHotReload) ShimsJudged()                     { f.record("shims_judged") }
+func (f *fakeHotReload) WebhostReloading()                { f.record("webhost_reloading") }
+func (f *fakeHotReload) WebappJudged()                    { f.record("webapp_judged") }
+func (f *fakeHotReload) ElispPushed(recipients int) {
+	f.record(fmt.Sprintf("elisp_pushed:%d", recipients))
+}
+func (f *fakeHotReload) ElispCurrent() { f.record("elisp_current") }
+func (f *fakeHotReload) Failed(error)  { f.record("failed") }
+func (f *fakeHotReload) ArtifactInstalled(service string, primary bool, _ string, replaced bool) {
+	f.record(fmt.Sprintf("installed:%s:primary=%t:replaced=%t", service, primary, replaced))
+}
+func (f *fakeHotReload) DaemonMoving(_ context.Context, words string, stale []ids.WorkspaceID) {
+	f.record(fmt.Sprintf("daemon_moving:%s:%v", words, stale))
+}
+func (f *fakeHotReload) WebviewReloading(_ context.Context, ws ids.WorkspaceID) {
+	f.record("webview_reloading:" + string(ws))
+}
+
 // runningLayout is the state layout the harness's running daemon writes.
 const runningLayout = 11
 
@@ -700,6 +750,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		faults:        newFakeFaults(),
 		restarts:      &restarttimingtest.Recorder{},
 		wifiAsks:      &fakeWifiAsks{clock: newStepClock()},
+		hotReload:     &fakeHotReload{},
 	}
 	h.reports = &fakeReports{builder: h.builder}
 	// Both services run the FRESH build unless a test says otherwise.
@@ -741,6 +792,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		Deployed:      func() { h.deployed++ },
 		Restarts:      h.restarts,
 		Reconnects:    restarttiming.NewReconnects(h.restarts, restarttiming.NoWindows{}, time.Now),
+		HotReload:     h.hotReload,
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

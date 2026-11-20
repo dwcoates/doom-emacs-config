@@ -270,6 +270,11 @@ type Deps struct {
 	// Reconnects is told each host and webview stream that opens, so a
 	// restart that expected it times its return. REQUIRED.
 	Reconnects *restarttiming.Reconnects
+	// HotReload is told each webview and web view host page that attaches,
+	// with the webapp build it runs, and each workspace whose last webview
+	// closed: the deploy's hot reload card is drawn from them
+	// (hotreload.Tracker). REQUIRED.
+	HotReload WebappReports
 	// ChessBoards answers a feed chess board's square clicks
 	// (chessboard.Boards). REQUIRED, like every dependency.
 	ChessBoards ChessSquares
@@ -662,6 +667,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("an rpc recorder")
 	case deps.Reconnects == nil:
 		return nil, missing("a reconnect tracker")
+	case deps.HotReload == nil:
+		return nil, missing("the hot reload tracker")
 	case deps.Banners == nil:
 		return nil, missing("the desktop banners")
 	case deps.PersistentWifi == nil:

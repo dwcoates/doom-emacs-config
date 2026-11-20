@@ -9,12 +9,15 @@ import (
 	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/buildid"
 	"agent-repld/internal/deploy"
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/health"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/restarttiming/restarttimingtest"
@@ -173,6 +176,49 @@ func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 		Restarts:   &restarttimingtest.Recorder{},
 		Windows:    restarttiming.NoWindows{},
 		Reconnects: restarttiming.NewReconnects(&restarttimingtest.Recorder{}, restarttiming.NoWindows{}, time.Now),
+		HotReload:  testHotReload(t),
+	}
+}
+
+// testHotReload is a hot reload tracker over no deploy mediator: it draws no
+// card, and a deploy wired to it runs as any other.
+func testHotReload(t *testing.T) *hotreload.Tracker {
+	t.Helper()
+	tracker, err := hotreload.New(hotreload.Deps{
+		Feed:          hotReloadFeed{},
+		Mediator:      func(context.Context) (ids.WorkspaceID, bool, error) { return "", false, nil },
+		WorkspaceName: func(_ context.Context, ws ids.WorkspaceID) (string, error) { return string(ws), nil },
+		Now:           time.Now,
+		Log:           dlog.NewTestLogger(),
+	})
+	if err != nil {
+		t.Fatalf("hotreload.New: %v", err)
+	}
+	return tracker
+}
+
+// hotReloadFeed is a feed no card is ever drawn in.
+type hotReloadFeed struct{}
+
+func (hotReloadFeed) UpsertDurable(ids.WorkspaceID, feedid.Feed, *frontendv1.FeedRow) {
+	panic("a tracker with no deploy mediator drew a card")
+}
+
+func TestADeployerIsNotBuiltWithoutItsHotReloadTracker(t *testing.T) {
+	// Arrange
+	exe := filepath.Join(t.TempDir(), "agent-repld")
+	if err := os.WriteFile(exe, []byte("binary"), 0o755); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	p := deployerParamsFor(t, exe)
+	p.HotReload = nil
+
+	// Act
+	_, _, err := buildDeployer(context.Background(), p)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "hot reload tracker") {
+		t.Fatalf("buildDeployer = %v, want the missing hot reload tracker refused", err)
 	}
 }
 

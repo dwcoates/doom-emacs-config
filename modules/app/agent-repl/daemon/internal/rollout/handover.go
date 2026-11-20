@@ -342,6 +342,7 @@ func (c *controller) beginHandover(ctx context.Context, ask Ask) (*handoverPlan,
 	manifest.Forced = force
 	manifest.Deploy = true
 	manifest.DeployStartedAt = ask.DeployStartedAt
+	manifest.HotReload = ask.HotReload
 	if err := c.writeManifest(ctx, manifest); err != nil {
 		// THE ANNOUNCEMENT HAS GONE OUT, and there is no arm that retracts it:
 		// a client that dialed the successor sees it stop, and goes on being

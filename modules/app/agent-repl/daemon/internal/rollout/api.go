@@ -36,6 +36,7 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/drain"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rostermirror"
@@ -90,6 +91,20 @@ type Ask struct {
 	// manifest carries it to the successor, which times the whole deploy
 	// from it once it has taken over (restarttiming.DeployTotal).
 	DeployStartedAt time.Time
+	// HotReload is the deploy's hot reload card (hotreload.Tracker.Handoff),
+	// which the manifest carries to the successor so it goes on drawing it.
+	// Empty when the deploy draws no card.
+	HotReload []byte
+}
+
+// HotReload is the slice of the deploy's hot reload card the rollout tells.
+type HotReload interface {
+	Resume(handoff []byte)
+	TookOver()
+	HandoverFailed(why string)
+	ShimsJudged()
+	ShimJudged(ctx context.Context, ws ids.WorkspaceID, outcome hotreload.ShimOutcome)
+	ShimReplaceFailed(ws ids.WorkspaceID, err error)
 }
 
 // ErrNoDeployStart refuses a handover or restart asked without the instant
@@ -496,6 +511,11 @@ type Deps struct {
 	// takeover and its sessions' starts took (internal/restarttiming).
 	// runtimemetrics.Surface is the production one.
 	Restarts restarttiming.Recorder
+	// HotReload is the deploy's hot reload card (hotreload.Tracker): a
+	// successor takes the card its deploy handed over and draws it on once it
+	// has taken over, every shim judgement is told to it, and an incumbent
+	// whose rollout cannot finish fails it. Required.
+	HotReload HotReload
 	// Reconnects is told which workspaces' streams a handover being joined
 	// expects back, so each one's return is timed. REQUIRED.
 	Reconnects *restarttiming.Reconnects
@@ -880,6 +900,9 @@ func New(deps Deps) (Controller, error) {
 	}
 	if deps.Reconnects == nil {
 		return nil, errors.New("rollout: a reconnect tracker is required; a handover's returning streams are timed")
+	}
+	if deps.HotReload == nil {
+		return nil, errors.New("rollout: the hot reload tracker is required; the deploy's card is drawn across the handover")
 	}
 	if deps.Restarts == nil {
 		return nil, errors.New("rollout: a restart recorder is required; every shim replacement and transfer is timed")

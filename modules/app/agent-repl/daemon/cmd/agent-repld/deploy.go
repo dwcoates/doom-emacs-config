@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"time"
 
 	"agentrepl/logging/buildreport"
 	"agentrepl/logging/sockethold"
@@ -17,10 +19,12 @@ import (
 	"agent-repld/internal/deployprogress"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/holderensure"
+	"agent-repld/internal/hotreload"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/persistentwifi"
 	"agent-repld/internal/restarttiming"
 	"agent-repld/internal/rollout"
+	"agent-repld/internal/wsm"
 )
 
 // THE DAEMON'S OWN DEPLOY (internal/deploy), wired against the checkout this
@@ -95,6 +99,39 @@ type deployerParams struct {
 	Windows restarttiming.Windows
 	// Reconnects times each reloaded webview's return.
 	Reconnects *restarttiming.Reconnects
+	// HotReload draws each deploy's hot reload in the deploy mediator's feed.
+	HotReload *hotreload.Tracker
+}
+
+// hotReloadMediators is the slice of the state store the hot reload reads
+// the deploy mediator and the workspaces' names from.
+type hotReloadMediators interface {
+	DeployMediatorOf(ctx context.Context, repo wsm.RepoKey) (wsm.DeployMediator, bool, error)
+	Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error)
+}
+
+// newHotReloadTracker builds the deploy's hot reload tracker: its card is
+// drawn in FEED, for the deploy mediator of the repository CHECKOUT is in.
+func newHotReloadTracker(git interface {
+	CommonDir(ctx context.Context, dir string) (string, error)
+}, db hotReloadMediators, feed hotreload.Publisher, checkout string, log dlog.Logger) (*hotreload.Tracker, error) {
+	return hotreload.New(hotreload.Deps{
+		Feed: feed,
+		Mediator: func(ctx context.Context) (ids.WorkspaceID, bool, error) {
+			common, err := git.CommonDir(ctx, checkout)
+			if err != nil {
+				return "", false, fmt.Errorf("resolve the repository of %s: %w", checkout, err)
+			}
+			m, found, err := db.DeployMediatorOf(ctx, wsm.RepoKey(common))
+			return m.Workspace, found, err
+		},
+		WorkspaceName: func(ctx context.Context, ws ids.WorkspaceID) (string, error) {
+			record, err := db.Workspace(ctx, ws)
+			return record.Name, err
+		},
+		Now: time.Now,
+		Log: log,
+	})
 }
 
 // deployPaths are the host locations a deploy works against.
@@ -167,6 +204,9 @@ func serviceManagerFor(goos string, where deployPaths, p deployerParams) (deploy
 // buildDeployer also answers its service restarter, which the boot's bring-up
 // ensures the launchd services with.
 func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *deploy.Restarter, error) {
+	if p.HotReload == nil {
+		return nil, nil, errors.New("agent-repld: the deploy needs the hot reload tracker; every deploy draws its hot reload")
+	}
 	log := p.Surfaces.Global()
 	selfBuild, err := buildid.FileCached(p.SelfExe)
 	if err != nil {
@@ -184,6 +224,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		WifiInstalled: where.wifiApp,
 		Runner:        p.Runner,
 		Clock:         rollout.SystemClock{},
+		Observer:      p.HotReload,
 		Log:           log,
 		Restarts:      p.Restarts,
 	}
@@ -248,6 +289,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Progress:  p.Progress,
 		Faults:    p.Faults,
 		Deployed:  p.Deployed,
+		HotReload: p.HotReload,
 		Log:       p.Surfaces,
 	})
 	if err != nil {

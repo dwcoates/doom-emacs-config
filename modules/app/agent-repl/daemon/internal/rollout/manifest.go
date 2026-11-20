@@ -93,6 +93,10 @@ type Manifest struct {
 	// the successor times the whole deploy once it has taken over. Zero on a
 	// manifest an older daemon wrote, which is then not timed.
 	DeployStartedAt time.Time `json:"deploy_started_at,omitzero"`
+	// HotReload is the deploy's hot reload card (Ask.HotReload), which the
+	// successor goes on drawing once it has taken over. Empty when the deploy
+	// draws none, and on a manifest an older daemon wrote.
+	HotReload []byte `json:"hot_reload,omitempty"`
 	// Sessions is one record per session, in workspace order.
 	Sessions []ManifestSession `json:"sessions"`
 }
