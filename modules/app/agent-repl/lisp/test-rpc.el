@@ -704,6 +704,51 @@ missing here or there is a broken seam.")
       (should (agent-repl-test-rpc--logs-matching 'error "elisp\\.rpc\\.push-invalid"))
       (should (agent-repl-test-rpc--logs-matching 'error "bogus")))))
 
+(ert-deftest agent-repl-test-rpc-logged-body-carries-a-short-body-whole ()
+  "A body within the bound is printed whole."
+  ;; Act / Assert
+  (should (equal (agent-repl-rpc--logged-body '((bogus . 1))) "((bogus . 1))")))
+
+(ert-deftest agent-repl-test-rpc-logged-body-carries-a-body-at-the-bound-whole ()
+  "A body exactly as long as the bound is printed whole."
+  ;; Arrange: a string prints with its two quotes.
+  (let ((body (make-string (- agent-repl-rpc--logged-body-chars 2) ?x)))
+    ;; Act / Assert
+    (should (equal (agent-repl-rpc--logged-body body) (prin1-to-string body)))))
+
+(ert-deftest agent-repl-test-rpc-logged-body-cuts-a-long-body-and-says-how-much ()
+  "A body past the bound is cut there and names the characters left out."
+  ;; Arrange
+  (let* ((body (make-string (+ agent-repl-rpc--logged-body-chars 500) ?x))
+         ;; Act
+         (logged (agent-repl-rpc--logged-body body)))
+    ;; Assert
+    (should (string-prefix-p (substring (prin1-to-string body) 0 agent-repl-rpc--logged-body-chars)
+                             logged))
+    (should (string-suffix-p " [502 more characters not logged]" logged))
+    (should (< (length logged) (+ agent-repl-rpc--logged-body-chars 60)))))
+
+(ert-deftest agent-repl-test-rpc-logs-an-undecodable-push-with-a-bounded-body ()
+  "A dropped push far past the bound is recorded with only the head of its JSON."
+  ;; Arrange
+  (agent-repl-test-rpc--with-logs
+    (let ((transport-push nil)
+          (huge (list (cons 'bogus (make-string 200000 ?x)))))
+      (cl-letf (((symbol-function 'agent-repl-connect-stream)
+                 (lambda (_conn _method _json on-push _on-close &optional _on-open)
+                   (setq transport-push on-push) nil))
+                ((symbol-function 'agent-repl-wire-encode-watch-daemon-request) (lambda (_r) nil))
+                ((symbol-function 'agent-repl-wire-decode-watch-daemon-response)
+                 (lambda (_a) (signal 'agent-repl-wire-error (list "R" 'bogus 'unknown-field)))))
+        (agent-repl-rpc-watch-daemon nil #'ignore #'ignore)
+        ;; Act
+        (funcall transport-push huge))
+      ;; Assert
+      (let ((records (agent-repl-test-rpc--logs-matching 'error "elisp\\.rpc\\.push-invalid")))
+        (should (= (length records) 1))
+        (should (< (length (cdr (car records))) (+ agent-repl-rpc--logged-body-chars 1000)))
+        (should (string-match-p "more characters not logged" (cdr (car records))))))))
+
 (ert-deftest agent-repl-test-rpc-passes-the-close-vocabulary-through ()
   "ON-CLOSE receives connect.el's vocabulary unchanged: cancelled, ended, error."
   ;; Arrange

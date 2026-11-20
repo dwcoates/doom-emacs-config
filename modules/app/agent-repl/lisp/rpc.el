@@ -261,11 +261,30 @@ failure in its own stack, not in a callback."
                        method (plist-get decoded :arm))
       decoded)))
 
+(defconst agent-repl-rpc--logged-body-chars 4000
+  "How many characters of a dropped push's JSON its ERROR record carries.
+The breach itself names the message, field and reason; the body is there
+to show where in the push the field sat.  Written whole, a roster push is
+about 2 MB: on 2026-11-20 Emacs refused 179 of them, the warnings files
+grew by 363 MB, and the daemon's read of that deploy check's window
+outlived its 3 s bound.")
+
+(defun agent-repl-rpc--logged-body (alist)
+  "Return ALIST printed for a dropped push's record, as a string.
+A body longer than `agent-repl-rpc--logged-body-chars' is cut there and
+ends by saying how many characters were left out."
+  (let* ((text (prin1-to-string alist))
+         (over (- (length text) agent-repl-rpc--logged-body-chars)))
+    (if (<= over 0)
+        text
+      (format "%s [%d more characters not logged]"
+              (substring text 0 agent-repl-rpc--logged-body-chars) over))))
+
 (defun agent-repl-rpc--stream (conn method encoder decoder request on-push on-close
                                     &optional on-open)
   "Open server-streaming METHOD on CONN and decode each push.
 A push that fails to decode is logged at ERROR (`elisp.rpc.push-invalid')
-with the raw JSON in the context and DROPPED — the subscription survives,
+with the head of its JSON (`agent-repl-rpc--logged-body') and DROPPED — the subscription survives,
 because the daemon is the authority and the next push may well be sound.
 An ON-PUSH that itself signals is contained by connect.el at the filter
 boundary, which likewise keeps the stream open.
@@ -284,7 +303,7 @@ and so needs no codec."
            (funcall on-push (agent-repl-wire-call 'decode decoder alist))
          (error
           (agent-repl--error log-scope "elisp.rpc.push-invalid method=%S error=%S body=%S"
-                             method err alist))))
+                             method err (agent-repl-rpc--logged-body alist)))))
      (lambda (outcome)
        (agent-repl--info log-scope "elisp.rpc.stream-close method=%S outcome=%S" method (car outcome))
        (when on-close (funcall on-close outcome)))
