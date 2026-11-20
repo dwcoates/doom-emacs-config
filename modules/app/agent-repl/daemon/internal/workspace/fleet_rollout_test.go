@@ -397,6 +397,37 @@ func TestColdGateStandingAnswersTheRaisedGatesFacts(t *testing.T) {
 	}
 }
 
+func TestAtColdGate(t *testing.T) {
+	tests := []struct {
+		name  string
+		raise bool
+		want  bool
+	}{
+		{name: "a raised gate stands", raise: true, want: true},
+		{name: "no gate was raised", raise: false, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			if tt.raise {
+				if err := f.fleet.RaiseColdGate(context.Background(), ws.ID, &conversationv1.SessionCold{ContextTokens: 1}); err != nil {
+					t.Fatalf("RaiseColdGate: %v", err)
+				}
+			}
+
+			// Act.
+			got := f.fleet.AtColdGate(ws.ID)
+
+			// Assert.
+			if got != tt.want {
+				t.Fatalf("AtColdGate = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestColdGateStandingAnswersFalseWithNoGate(t *testing.T) {
 	// Arrange.
 	f := newFleetFixture(t)

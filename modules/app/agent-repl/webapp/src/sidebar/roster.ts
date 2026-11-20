@@ -58,7 +58,7 @@ import {
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { clone, equals } from "@bufbuild/protobuf";
 import { placeChildren } from "./children.js";
-import { queryAll } from "../dom.js";
+import { decorativeElement, queryAll } from "../dom.js";
 import { disposeKeyedRows, drawKeyedEntries, drawKeyedRows, patchKeyedRegions, remarkKeyedRows, type KeyedRows } from "./keyed-rows.js";
 import { repoEntries, repoSectionRegions, sectionOpenRows, sectionSubsections, unsectionedRows, type PathedOpenRow } from "./entries.js";
 import { log } from "../log.js";
@@ -106,6 +106,7 @@ import {
 } from "./deploys-fold.js";
 import { DEPLOYS_PAGE_CLASS, DEPLOYS_PAGE_SIZE, drawDeploysMoreSpinner } from "./deploys-more.js";
 import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
+import { coldGatedOf, sameColdGated, type ColdGated } from "./cold-gate-name.js";
 import {
   drawRosterRowDetailCommits,
   drawRosterRowWhenMerged,
@@ -199,7 +200,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   let open: DrawnSection<{ open: RosterOpenSection; count: string }, Drawn & { body: HTMLElement }> | null = null;
   let hidden: DrawnSection<RosterHiddenSection> | null = null;
   let merged: DrawnSection<RosterMergedSection> | null = null;
-  let mergeQueue: DrawnSection<RosterMergeQueueSection> | null = null;
+  let mergeQueue: DrawnSection<{ queue: RosterMergeQueueSection; coldGated: ColdGated }> | null = null;
 
   /** SECTION kept when WIRE equals what it was drawn from, else drawn anew by DRAW. */
   const keepOrDraw = <W, D extends Drawn>(
@@ -227,6 +228,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       const mergeQueueWire = requireMessage(u.mergeQueue, `${path}.merge_queue`);
       const hiddenWire = requireMessage(u.hidden, `${path}.hidden`);
       const openWire = requireMessage(u.open, `${path}.open`);
+      const coldGated = coldGatedOf(u.coldGates, `${path}.cold_gates`);
       const current =
         u.current === undefined
           ? null
@@ -341,11 +343,13 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         (scoped) => ({ element: drawRosterMergedSection(mergedWire, scoped, `${path}.recently_merged`) }),
         discarded,
       );
+      // THE QUEUE'S LINES READ THE STANDING COLD GATES (cold-gate-name.ts), so
+      // a gate raised or answered draws the section anew.
       mergeQueue = keepOrDraw(
         mergeQueue,
-        mergeQueueWire,
-        (a, b) => equals(RosterMergeQueueSectionSchema, a, b),
-        (scoped) => ({ element: drawRosterMergeQueueSection(mergeQueueWire, scoped, `${path}.merge_queue`) }),
+        { queue: mergeQueueWire, coldGated },
+        (a, b) => equals(RosterMergeQueueSectionSchema, a.queue, b.queue) && sameColdGated(a.coldGated, b.coldGated),
+        (scoped) => ({ element: drawRosterMergeQueueSection(mergeQueueWire, scoped, `${path}.merge_queue`, coldGated) }),
         discarded,
       );
       // A SECTION LEFT OUT OF THE RAIL (`HeadedBoxShape.leftOut`) is not
@@ -844,8 +848,9 @@ export function drawRosterMergeQueueSection(
   u: RosterMergeQueueSection,
   sc: SidebarContext,
   path: string,
+  coldGated: ColdGated,
 ): HTMLElement {
-  const groups = u.groups.map((group, index) => drawRosterMergeQueueRepoGroup(group, sc, `${path}.groups[${index}]`));
+  const groups = u.groups.map((group, index) => drawRosterMergeQueueRepoGroup(group, sc, `${path}.groups[${index}]`, coldGated));
   const total = u.groups.reduce(
     (sum, group, index) => sum + queueCount(requireMessage(group.queue, `${path}.groups[${index}].queue`)),
     0,
@@ -928,10 +933,7 @@ export const QUEUE_STATUS_TAIL_RULE_CLASS = "sb-mq-status-tail";
 
 /** The short rule a queue group's header draws after its deploy check status. */
 function drawQueueStatusTailRule(): HTMLElement {
-  const rule = document.createElement("span");
-  rule.className = QUEUE_STATUS_TAIL_RULE_CLASS;
-  rule.setAttribute("aria-hidden", "true");
-  return rule;
+  return decorativeElement("span", QUEUE_STATUS_TAIL_RULE_CLASS);
 }
 
 /** A Merge Queue heading's "(N)": the merges queued, drawn as the Open section's count is. */
@@ -949,14 +951,14 @@ export function drawQueueCount(count: number): HTMLElement {
  * header, or a click on its queue's merge glyph, pauses a running queue or
  * resumes a paused one (`merge-queue-view.ts`).
  */
-export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: SidebarContext, path: string): HTMLElement {
+export function drawRosterMergeQueueRepoGroup(u: RosterMergeQueueRepoGroup, sc: SidebarContext, path: string, coldGated: ColdGated): HTMLElement {
   const key = drawRosterRepoKey(requireMessage(u.key, `${path}.key`), `${path}.key`);
   const queuePath = `${path}.queue`;
   const queue = requireMessage(u.queue, queuePath);
   const header = requireMessage(u.header, `${path}.header`);
   const head = drawRosterMergedRepoGroupHeader(header, `${path}.header`);
   const name = requireMessage(header.label, `${path}.header.label`).text;
-  const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, { key, name }, sc, queuePath), sc);
+  const group = drawRepositoryGroup("merge-queue", key, head, drawRosterMergeQueue(queue, { key, name }, sc, queuePath, coldGated), sc);
   group.setAttribute(DEPLOYS_LINE_ATTRIBUTE, queueLine(queue));
   head.appendChild(drawQueueCount(queueCount(queue)));
   // THE DEPLOY CHECK'S STATUS STANDS AGAINST THE RIGHT MARGIN (owner request,

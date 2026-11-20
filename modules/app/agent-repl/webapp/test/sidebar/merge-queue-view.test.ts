@@ -31,7 +31,7 @@ import { formatAge, formatElapsed, formatTickedElapsed } from "../../src/duratio
 import { roundSuffix, STATE_GLYPHS } from "../../src/feed/merge/tab-strip.js";
 import { MERGE_GLYPH } from "../../src/merge-glyph.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { captureLogRecords, forwardedRecord } from "../log-capture.js";
+import { captureLogRecords, forwardedRecord, forwardedRecords, recordFor } from "../log-capture.js";
 import { UPDATE_MERGE_QUEUE_SENTENCES } from "../../src/rpc/merge-queue-refusal.js";
 import {
   drawCardLine,
@@ -56,6 +56,8 @@ import {
   MERGE_QUEUE_GITHUB_CLASS,
   MERGE_QUEUE_ASYNC_OF_CLASS,
   MERGE_QUEUE_OFF_QUEUE_CLASS,
+  MERGE_QUEUE_OFF_QUEUE_RULE_CLASS,
+  COLD_GATED_REQUEUE_TITLE,
   MERGE_QUEUE_HEAD_CLASS,
   MERGE_QUEUE_MEDIATION_CLASS,
   MERGE_QUEUE_NEEDS_YOU_CLASS,
@@ -73,6 +75,7 @@ import {
   MERGE_QUEUE_SUBJECT_CLASS,
 } from "../../src/sidebar/merge-queue-view.js";
 import { drawRosterMergeQueueSection } from "../../src/sidebar/roster.js";
+import { COLD_GATED_NAME_CLASS, NONE_COLD_GATED } from "../../src/sidebar/cold-gate-name.js";
 import { cascadedValue, inRail } from "../stylesheet.js";
 import { BUCKET_ATTRIBUTE } from "../../src/sidebar/subsections.js";
 import {
@@ -217,7 +220,7 @@ describe("the Merge Queue section's counts", () => {
       queueGroup({ id: "a", queue: { head: mergingHead("w1"), waiting: [waitingMerge("w2")] } }),
       queueGroup({ id: "b", queue: { head: mergingHead("w3"), waiting: [waitingMerge("w4"), waitingMerge("w5")] } }),
     ]);
-    return drawRosterMergeQueueSection(section, daemon().sc, "p");
+    return drawRosterMergeQueueSection(section, daemon().sc, "p", NONE_COLD_GATED);
   }
 
   it("shows the sum across repositories in the section header", () => {
@@ -404,7 +407,7 @@ describe("queueGlyphTitle", () => {
 describe("the queue's merge glyph", () => {
   /** A queue of HEAD drawn for REPOSITORY, paused by PAUSE. */
   function body(sc: ReturnType<typeof glyphDaemon>["sc"], pause?: ReturnType<typeof paused>): HTMLElement {
-    return drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), paused: pause }), REPOSITORY, sc, "queue");
+    return drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), paused: pause }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
   }
 
   it.each([
@@ -447,6 +450,7 @@ describe("the queue's merge glyph", () => {
       ]),
       sc,
       "p",
+      NONE_COLD_GATED,
     );
     const glyphs = [...section.querySelectorAll<HTMLElement>(`.${MERGE_QUEUE_GLYPH_CLASS}`)];
     glyphs[1]?.click();
@@ -460,7 +464,7 @@ describe("the queue's merge glyph", () => {
   it("asks what the header's double click asks", async () => {
     const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), paused: paused() });
     const byGlyph = glyphDaemon();
-    glyphIn(drawRosterMergeQueue(queue, REPOSITORY, byGlyph.sc, "queue")).click();
+    glyphIn(drawRosterMergeQueue(queue, REPOSITORY, byGlyph.sc, "queue", NONE_COLD_GATED)).click();
     const byHeader = glyphDaemon();
     const head = document.createElement("div");
     drawQueuedGroupHead(document.createElement("div"), head, queue, REPOSITORY.key, byHeader.sc, "queue");
@@ -495,7 +499,7 @@ describe("the queue's merge glyph", () => {
     { name: "only a merge remediating", queue: () => ({ fixingTests: fixingTestsMerge("w2", NOW) }) },
     { name: "only a GitHub merge queue standing", queue: () => ({ github: [githubStanding("w2", 3, 5, NOW)] }) },
   ])("is drawn on a line of its own for a queue holding $name", ({ queue }) => {
-    const drawn = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, queue()), REPOSITORY, glyphDaemon().sc, "queue");
+    const drawn = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, queue()), REPOSITORY, glyphDaemon().sc, "queue", NONE_COLD_GATED);
     const first = drawn.firstElementChild;
     expect([first?.className, first?.firstElementChild?.classList.contains(MERGE_QUEUE_GLYPH_CLASS)]).toEqual([
       `${MERGE_QUEUE_CARD_LINE_CLASS} ${MERGE_QUEUE_CONTROL_CLASS}`,
@@ -510,6 +514,7 @@ describe("the queue's merge glyph", () => {
       REPOSITORY,
       sc,
       "queue",
+      NONE_COLD_GATED,
     );
     glyphIn(drawn).click();
     await settled();
@@ -545,7 +550,7 @@ describe("drawRosterMergeQueue", () => {
   it("draws the head's card, then each waiting merge, front first", () => {
     const { sc } = daemon();
     const queue = create(RosterRepoMergeQueueSchema, { head: mergingHead("w3"), waiting: [waitingMerge("w1"), waitingMerge("w2")] });
-    const body = drawRosterMergeQueue(queue, REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(queue, REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect([...body.children].map((el) => [el.className, el.getAttribute("data-workspace")])).toEqual([
       [`${MERGE_QUEUE_HEAD_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w3"],
       [`${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`, "w1"],
@@ -566,6 +571,7 @@ describe("drawRosterMergeQueue", () => {
           REPOSITORY,
           sc,
           "queue",
+          NONE_COLD_GATED,
         ).children,
       ].map((el) => [el.getAttribute("data-workspace"), el.querySelector(`.${MERGE_QUEUE_POSITION_CLASS}`)?.textContent ?? null]);
     expect(draw(["w1", "w2", "w3"])).toEqual([["w0", null], ["wr", null], ["w1", "1"], ["w2", "2"], ["w3", "3"]]);
@@ -574,7 +580,7 @@ describe("drawRosterMergeQueue", () => {
 
   it("is a rows box no grouping drag arranges", () => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1") }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1") }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect([body.classList.contains("rows"), body.classList.contains(MERGE_QUEUE_CLASS), body.hasAttribute(BUCKET_ATTRIBUTE)]).toEqual([
       true,
       true,
@@ -584,7 +590,7 @@ describe("drawRosterMergeQueue", () => {
 
   it("refuses a queue with no head as a malformed view", () => {
     const { sc } = daemon();
-    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, {}), REPOSITORY, sc, "queue")).toThrow(MalformedView);
+    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, {}), REPOSITORY, sc, "queue", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it("draws the merges out of line between the head and the waiting merges: fixing tests, every merge resolving conflicts, then those awaiting fixing tests", () => {
@@ -600,6 +606,7 @@ describe("drawRosterMergeQueue", () => {
       REPOSITORY,
       sc,
       "queue",
+      NONE_COLD_GATED,
     );
     const out = `${MERGE_QUEUE_WAITING_CLASS} ${MERGE_QUEUE_REMEDIATING_CLASS} ${MERGE_QUEUE_SUBJECT_CLASS}`;
     expect([...body.children].map((el) => [el.className, el.querySelector(".sb-mq-name")?.textContent])).toEqual([
@@ -625,7 +632,7 @@ describe("drawRosterMergeQueue", () => {
       offQueue: [offQueue("w7", "evicted")],
     });
     // Act
-    const body = drawRosterMergeQueue(queue, REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(queue, REPOSITORY, sc, "queue", NONE_COLD_GATED);
     // Assert: every workspace line wears the class, and nothing else does.
     expect([...body.querySelectorAll(`.${MERGE_QUEUE_SUBJECT_CLASS}`)].map((el) => el.getAttribute("data-workspace"))).toEqual([
       "w1", "w2", "w3", "w4", "w5", "w6", "w7",
@@ -641,13 +648,14 @@ describe("drawRosterMergeQueue", () => {
       REPOSITORY,
       sc,
       "queue",
+      NONE_COLD_GATED,
     );
     expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_REMEDIATING_CLASS}`).length]).toEqual([null, 1]);
   });
 
   it("draws a queue holding only GitHub merge queue standings, with no head", () => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [githubStanding("w2", 3, 5, NOW)] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [githubStanding("w2", 3, 5, NOW)] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_GITHUB_CLASS}`).length]).toEqual([null, 1]);
   });
 
@@ -658,6 +666,7 @@ describe("drawRosterMergeQueue", () => {
       REPOSITORY,
       sc,
       "queue",
+      NONE_COLD_GATED,
     );
     expect([...body.children].map((el) => el.classList[0])).toEqual([MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_WAITING_CLASS, MERGE_QUEUE_GITHUB_CLASS]);
   });
@@ -665,7 +674,7 @@ describe("drawRosterMergeQueue", () => {
   it("draws a GitHub merge queue standing with its name, its place and how long it has stood there", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [githubStanding("w2", 3, 5, NOW - 4_000)] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [githubStanding("w2", 3, 5, NOW - 4_000)] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     const line = body.querySelector(`.${MERGE_QUEUE_GITHUB_CLASS}`);
     expect([
       line?.querySelector(".sb-mq-name")?.textContent,
@@ -677,12 +686,12 @@ describe("drawRosterMergeQueue", () => {
   it("refuses a GitHub merge queue standing with no place as a malformed view", () => {
     const { sc } = daemon();
     const placeless = create(RosterMergeQueueGithubEntrySchema, { subject: queueSubject("w2"), queuedAtMs: BigInt(NOW) });
-    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [placeless] }), REPOSITORY, sc, "queue")).toThrow(MalformedView);
+    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { github: [placeless] }), REPOSITORY, sc, "queue", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it("gives a GitHub merge queue standing no grip", () => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), github: [githubStanding("w2", 2, 2, NOW)] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), github: [githubStanding("w2", 2, 2, NOW)] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect(queueDrag(sc, body, body.querySelector(`.${MERGE_QUEUE_GITHUB_CLASS}`), new Map())).toBeNull();
   });
 
@@ -697,6 +706,7 @@ describe("drawRosterMergeQueue", () => {
       REPOSITORY,
       sc,
       "queue",
+      NONE_COLD_GATED,
     );
     const line = body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS}`)!;
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
@@ -713,7 +723,7 @@ describe("drawRosterMergeQueue", () => {
   ])("says the repair after the name of %s", (_name, slots, want) => {
     const { sc } = daemon();
 
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), ...slots }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), ...slots }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect(body.querySelector(`.${MERGE_QUEUE_REMEDIATING_CLASS} .${MERGE_QUEUE_REASON_CLASS}`)?.textContent).toBe(want);
   });
 
@@ -721,7 +731,7 @@ describe("drawRosterMergeQueue", () => {
     const { sc } = daemon();
     const subjectless = create(RosterMergeQueueFixingTestsSchema, { sinceMs: BigInt(NOW) });
     expect(() =>
-      drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), fixingTests: subjectless }), REPOSITORY, sc, "queue"),
+      drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), fixingTests: subjectless }), REPOSITORY, sc, "queue", NONE_COLD_GATED),
     ).toThrow(MalformedView);
   });
 
@@ -826,20 +836,20 @@ describe("drawQueueMediationLabel", () => {
 
   it("draws no row in the queue's body for the mediation", () => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { mediation: mediation(true), head: mergingHead("w1") }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { mediation: mediation(true), head: mergingHead("w1") }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect([...body.children].map((el) => el.getAttribute("data-workspace"))).toEqual(["w1"]);
   });
 
   it("draws the label in the repository's group header, after its count (owner request, 2026-11-16)", () => {
     const section = mergeQueueBand([queueGroup({ id: "a", queue: { head: mergingHead("w1"), mediation: mediation(true) } })]);
-    const head = drawRosterMergeQueueSection(section, daemon().sc, "p").querySelector(".merged-group-head");
+    const head = drawRosterMergeQueueSection(section, daemon().sc, "p", NONE_COLD_GATED).querySelector(".merged-group-head");
     const label = head?.querySelector(`.${MERGE_QUEUE_MEDIATION_CLASS}`);
     expect([label?.textContent, label?.previousElementSibling?.classList.contains("sb-open-count")]).toEqual(["assessing zettel health", true]);
   });
 
   it("draws a queue holding only the mediation with no head, only the glyph's line", () => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { mediation: mediation(false) }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { mediation: mediation(false) }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect([...body.children].map((el) => el.className)).toEqual([`${MERGE_QUEUE_CARD_LINE_CLASS} ${MERGE_QUEUE_CONTROL_CLASS}`]);
   });
 });
@@ -852,7 +862,7 @@ describe("dragging a waiting merge", () => {
     const rows = document.createElement("div");
     rows.className = "rows";
     const group = document.createElement("div");
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w0"), waiting: waiting.map((w) => waitingMerge(w)) }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w0"), waiting: waiting.map((w) => waitingMerge(w)) }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     group.appendChild(body);
     rows.appendChild(group);
     section.appendChild(rows);
@@ -911,26 +921,26 @@ describe("waitingMergeRef", () => {
 describe("drawRosterMergeQueueHead", () => {
   it("leads with the glyph it is given and the credited workspace's name", () => {
     const { sc } = daemon();
-    const card = drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { name: "one" }) }), undefined, glyph(), sc, "head");
+    const card = drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { name: "one" }) }), undefined, glyph(), sc, "head", NONE_COLD_GATED);
     expect([card.querySelector(".test-glyph")?.textContent, card.querySelector(".sb-mq-name")?.textContent]).toEqual([MERGE_GLYPH, "one"]);
   });
 
   it("says an async merge is async on hover", () => {
     const { sc } = daemon();
-    const card = drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { async: true }) }), undefined, glyph(), sc, "head");
+    const card = drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { async: true }) }), undefined, glyph(), sc, "head", NONE_COLD_GATED);
     expect(card.querySelector(".sb-mq-name")?.getAttribute("title")).toBe("async merge");
   });
 
   it("draws each stage in order", () => {
     const { sc } = daemon();
     const head = mergingHead("w1", { stages: [stage("queue", "succeeded"), stage("rebasing", "succeeded"), stage("tests", "live")] });
-    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head");
+    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED);
     expect([...card.querySelectorAll(".sb-mq-stage-label")].map((el) => el.textContent)).toEqual(["queue", "rebasing", "tests"]);
   });
 
   it("draws no stage strip before the merge has a stage", () => {
     const { sc } = daemon();
-    expect(drawRosterMergeQueueHead(mergingHead("w1"), undefined, glyph(), sc, "head").querySelector(".sb-mq-stages")).toBeNull();
+    expect(drawRosterMergeQueueHead(mergingHead("w1"), undefined, glyph(), sc, "head", NONE_COLD_GATED).querySelector(".sb-mq-stages")).toBeNull();
   });
 
   it.each([
@@ -951,14 +961,14 @@ describe("drawRosterMergeQueueHead", () => {
     },
   ])("draws no status line under $name: its card is its name line and its stages", ({ head, pause, want }) => {
     const { sc } = daemon();
-    expect([...drawRosterMergeQueueHead(head(), pause, glyph(), sc, "head").children].map((el) => el.className)).toEqual(want);
+    expect([...drawRosterMergeQueueHead(head(), pause, glyph(), sc, "head", NONE_COLD_GATED).children].map((el) => el.className)).toEqual(want);
   });
 
   it("stops a paused head's clock at the pause", () => {
     const ticker = fakeTicker(NOW);
     const sc = sidebarContext(appContext({}, ticker));
     const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))], headSinceMs: BigInt(NOW - 5_000) });
-    const card = drawRosterMergeQueueHead(head, paused({ atMs: NOW - 2_000 }), glyph(), sc, "head");
+    const card = drawRosterMergeQueueHead(head, paused({ atMs: NOW - 2_000 }), glyph(), sc, "head", NONE_COLD_GATED);
     ticker.tick(NOW + 60_000);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatElapsed(3_000));
   });
@@ -966,7 +976,7 @@ describe("drawRosterMergeQueueHead", () => {
   it("draws no clock for a pause whose instant was not recorded", () => {
     const { sc } = daemon();
     const head = mergingHead("w1", { stages: [stage("tests", "live", 1, BigInt(NOW - 5_000))] });
-    expect(drawRosterMergeQueueHead(head, create(RosterMergeQueuePausedSchema, {}), glyph(), sc, "head").querySelector(".sb-mq-clock")).toBeNull();
+    expect(drawRosterMergeQueueHead(head, create(RosterMergeQueuePausedSchema, {}), glyph(), sc, "head", NONE_COLD_GATED).querySelector(".sb-mq-clock")).toBeNull();
   });
 
   it.each([
@@ -976,7 +986,7 @@ describe("drawRosterMergeQueueHead", () => {
     const { sc } = daemon();
     const value = standing === "waiting" ? { queuedAtMs: 0n } : {};
     const head = create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1"), standing: { case: standing, value } as never });
-    expect(drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head").getAttribute("data-standing")).toBe(standing);
+    expect(drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED).getAttribute("data-standing")).toBe(standing);
   });
 
   it("ticks a merging head's clock from when it reached the head, not its first stage", () => {
@@ -986,7 +996,7 @@ describe("drawRosterMergeQueueHead", () => {
       stages: [stage("rebasing", "succeeded", 1, BigInt(NOW - 3 * 3_600_000)), stage("tests", "live", 1, BigInt(NOW - 1_000))],
       headSinceMs: BigInt(NOW - 5_000),
     });
-    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head");
+    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED);
     ticker.tick(NOW + 60_000);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(65_000));
   });
@@ -999,7 +1009,7 @@ describe("drawRosterMergeQueueHead", () => {
       headSinceMs: BigInt(NOW - 2_000),
       standing: { case: "waiting", value: { queuedAtMs: BigInt(NOW - 3 * 3_600_000) } },
     });
-    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head");
+    const card = drawRosterMergeQueueHead(head, undefined, glyph(), sc, "head", NONE_COLD_GATED);
     expect(card.querySelector(".sb-mq-clock")?.textContent).toBe(formatTickedElapsed(2_000));
   });
 
@@ -1023,12 +1033,12 @@ describe("drawHeadClock", () => {
 describe("drawRosterMergeQueueHead's refusals", () => {
   it("refuses a head with no standing as a malformed view", () => {
     const { sc } = daemon();
-    expect(() => drawRosterMergeQueueHead(create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1") }), undefined, glyph(), sc, "head")).toThrow(MalformedView);
+    expect(() => drawRosterMergeQueueHead(create(RosterMergeQueueHeadSchema, { subject: queueSubject("w1") }), undefined, glyph(), sc, "head", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it("refuses a head with no subject as a malformed view", () => {
     const { sc } = daemon();
-    expect(() => drawRosterMergeQueueHead(create(RosterMergeQueueHeadSchema, { standing: { case: "merging", value: {} } }), undefined, glyph(), sc, "head")).toThrow(
+    expect(() => drawRosterMergeQueueHead(create(RosterMergeQueueHeadSchema, { standing: { case: "merging", value: {} } }), undefined, glyph(), sc, "head", NONE_COLD_GATED)).toThrow(
       MalformedView,
     );
   });
@@ -1066,7 +1076,7 @@ describe("drawRosterMergeQueueStage", () => {
 describe("drawRosterMergeQueueWaiting", () => {
   it("draws its position, its name and how long it has waited", () => {
     const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), 1, sc, "w");
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1", { queuedAtMs: BigInt(NOW - 3_000), subject: queueSubject("w1", { name: "one" }) }), 1, sc, "w", NONE_COLD_GATED);
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
       ["sb-mq-position", "1"],
       ["sb-mq-name", "one"],
@@ -1081,6 +1091,7 @@ describe("drawRosterMergeQueueWaiting", () => {
       1,
       sc,
       "w",
+      NONE_COLD_GATED,
     );
     expect([...line.children].map((el) => [el.className, el.textContent])).toEqual([
       ["sb-mq-position", "1"],
@@ -1093,7 +1104,7 @@ describe("drawRosterMergeQueueWaiting", () => {
 
   it("notes nothing after a sync merge's name", () => {
     const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w");
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w", NONE_COLD_GATED);
     expect([line.querySelector(`.${MERGE_QUEUE_ASYNC_OF_CLASS}`), line.title]).toEqual([null, ""]);
   });
 
@@ -1102,12 +1113,12 @@ describe("drawRosterMergeQueueWaiting", () => {
     const subject = create(RosterMergeQueueSubjectSchema, {
       workspace: { id: "w1", dir: "/w/w1" }, name: "one", mode: { mode: { case: "async", value: {} } }, merge: { id: "w1" },
     });
-    expect(() => drawRosterMergeQueueWaiting(waitingMerge("w1", { subject }), 1, sc, "w")).toThrow(MalformedView);
+    expect(() => drawRosterMergeQueueWaiting(waitingMerge("w1", { subject }), 1, sc, "w", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it("draws no front mark on a waiting merge", () => {
     const { sc } = daemon();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w");
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w1"), 1, sc, "w", NONE_COLD_GATED);
     expect([...line.children].map((el) => el.className)).toEqual(["sb-mq-position", "sb-mq-name", "sb-mq-clock"]);
   });
 });
@@ -1140,7 +1151,7 @@ describe("a click on a merge in the queue", () => {
     ["a merge without one", undefined],
   ])("selects the credited workspace through the editor, for %s", async (_name, reveal) => {
     const { asked, sc } = selecting();
-    drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", reveal === undefined ? {} : { reveal }) }), undefined, glyph(), sc, "head").click();
+    drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", reveal === undefined ? {} : { reveal }) }), undefined, glyph(), sc, "head", NONE_COLD_GATED).click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id, "reveal" in r ? r.reveal?.value : undefined])).toEqual([
       ["agentrepl.v1.SelectInEditorRequest", "w1", reveal],
@@ -1150,19 +1161,19 @@ describe("a click on a merge in the queue", () => {
   // OWNER RULING: a select is idempotent, so its line never goes busy; a line
   // the roster keeps (its wire unchanged by the select) stays clickable.
   it.each([
-    ["the head card", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueHead(mergingHead("w1"), undefined, glyph(), sc, "head")],
+    ["the head card", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueHead(mergingHead("w1"), undefined, glyph(), sc, "head", NONE_COLD_GATED)],
     [
       "a repair slot's card",
       (sc: ReturnType<typeof selecting>["sc"]) =>
-        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { fixingTests: fixingTestsMerge("w2", NOW) }), REPOSITORY, sc, "queue").querySelector(
+        drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { fixingTests: fixingTestsMerge("w2", NOW) }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector(
           `.${MERGE_QUEUE_REMEDIATING_CLASS}`,
         ) as HTMLElement,
     ],
-    ["a waiting line", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueWaiting(waitingMerge("w3"), 1, sc, "w")],
+    ["a waiting line", (sc: ReturnType<typeof selecting>["sc"]) => drawRosterMergeQueueWaiting(waitingMerge("w3"), 1, sc, "w", NONE_COLD_GATED)],
     [
       "a head card opening its bubble",
       (sc: ReturnType<typeof selecting>["sc"]) =>
-        drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { reveal: "bubble-1" }) }), undefined, glyph(), sc, "head"),
+        drawRosterMergeQueueHead(mergingHead("w1", { subject: queueSubject("w1", { reveal: "bubble-1" }) }), undefined, glyph(), sc, "head", NONE_COLD_GATED),
     ],
   ])("leaves %s clickable after it selects", async (_name, draw) => {
     // Arrange
@@ -1181,7 +1192,7 @@ describe("a click on a merge in the queue", () => {
 
   it("never greys a line while its select is in flight", async () => {
     const { sc } = selecting();
-    const line = drawRosterMergeQueueWaiting(waitingMerge("w3"), 1, sc, "w");
+    const line = drawRosterMergeQueueWaiting(waitingMerge("w3"), 1, sc, "w", NONE_COLD_GATED);
     line.click();
     const busy = line.classList.contains("is-busy");
     await settled();
@@ -1190,7 +1201,7 @@ describe("a click on a merge in the queue", () => {
 
   it("selects as a row does when the merge has no bubble", async () => {
     const { asked, sc } = selecting();
-    drawRosterMergeQueueWaiting(waitingMerge("w2"), 1, sc, "w").click();
+    drawRosterMergeQueueWaiting(waitingMerge("w2"), 1, sc, "w", NONE_COLD_GATED).click();
     await settled();
     expect(asked.map((r) => [r.$typeName, r.workspace?.id])).toEqual([["agentrepl.v1.SelectInEditorRequest", "w2"]]);
   });
@@ -1198,7 +1209,7 @@ describe("a click on a merge in the queue", () => {
 
 describe("drawCardLine", () => {
   it("draws the glyph it is given, then the credited name", () => {
-    const line = drawCardLine(queueSubject("w1", { name: "one" }), glyph(), "subject");
+    const line = drawCardLine(queueSubject("w1", { name: "one" }), glyph(), "subject", NONE_COLD_GATED);
     expect([line.className, [...line.children].map((el) => [el.className, el.textContent])]).toEqual([
       MERGE_QUEUE_CARD_LINE_CLASS,
       [
@@ -1209,33 +1220,33 @@ describe("drawCardLine", () => {
   });
 
   it("refuses a subject that carries no mode as malformed", () => {
-    expect(() => drawCardLine(create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one" }), glyph(), "subject")).toThrow(MalformedView);
+    expect(() => drawCardLine(create(RosterMergeQueueSubjectSchema, { workspace: { id: "w1", dir: "/w/w1" }, name: "one" }), glyph(), "subject", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 
   it.each([
-    { name: "the head's card", card: () => drawRosterMergeQueueHead(mergingHead("w1"), undefined, glyph(), daemon().sc, "head") },
+    { name: "the head's card", card: () => drawRosterMergeQueueHead(mergingHead("w1"), undefined, glyph(), daemon().sc, "head", NONE_COLD_GATED) },
   ])("opens $name with the shared card line", ({ card }) => {
-    const shared = drawCardLine(queueSubject("w1"), glyph(), "subject");
+    const shared = drawCardLine(queueSubject("w1"), glyph(), "subject", NONE_COLD_GATED);
     const drawn = card().firstElementChild as HTMLElement;
     expect([...drawn.children].slice(0, 2).map((el) => el.outerHTML)).toEqual([...shared.children].map((el) => el.outerHTML));
   });
 });
 
-/** A merge of workspace ID off its queue for CAUSE, its controls naming MERGE. */
+/** A merge credited to workspace ID off its queue for CAUSE, standing as MERGE, which its controls name. */
 function offQueue(id: string, cause: string, merge = id) {
   return create(RosterMergeQueueOffQueueSchema, {
-    subject: queueSubject(id),
+    subject: queueSubject(id, { merge }),
     cause: { text: cause },
     requeue: { merge: { id: merge, dir: `/wt/${merge}` } },
     discard: { merge: { id: merge, dir: `/wt/${merge}` } },
   });
 }
 
-/** A context recording every RequeueMerge and DiscardMerge ask, answering each with success. */
+/** A context recording every RequeueMerge, DiscardMerge and select ask, answering each with success. */
 function offQueueDaemon() {
   const requeued: RequeueMergeRequest[] = [];
   const discarded: DiscardMergeRequest[] = [];
-  const selected: SelectWorkspaceRequest[] = [];
+  const selected: Array<SelectWorkspaceRequest | SelectInEditorRequest> = [];
   const sc = sidebarContext(
     appContext({
       requeueMerge: (request: RequeueMergeRequest) => {
@@ -1250,7 +1261,11 @@ function offQueueDaemon() {
         selected.push(request);
         return create(SelectWorkspaceResponseSchema, { result: { case: "success", value: {} } });
       },
-    } as never),
+      selectInEditor: (request: SelectInEditorRequest) => {
+        selected.push(request);
+        return create(SelectInEditorResponseSchema, { result: { case: "success", value: { route: { case: "relayed", value: {} } } } });
+      },
+    }),
   );
   return { sc, requeued, discarded, selected };
 }
@@ -1258,15 +1273,15 @@ function offQueueDaemon() {
 describe("drawRosterMergeQueueOffQueue", () => {
   it("draws a queue holding only merges off it, with no head, after everything in line", () => {
     const { sc } = offQueueDaemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     expect([body.querySelector(`.${MERGE_QUEUE_HEAD_CLASS}`), body.querySelectorAll(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`).length]).toEqual([null, 1]);
-    const full = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue");
-    expect([...full.children].map((el) => el.classList[0])).toEqual([MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_OFF_QUEUE_CLASS]);
+    const full = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
+    expect([...full.children].map((el) => el.classList[0])).toEqual([MERGE_QUEUE_HEAD_CLASS, MERGE_QUEUE_OFF_QUEUE_RULE_CLASS, MERGE_QUEUE_OFF_QUEUE_CLASS]);
   });
 
   it("draws the merge's name and why it left", () => {
     const { sc } = offQueueDaemon();
-    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue").querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
+    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w2", "evicted")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`);
     expect([line?.querySelector(".sb-mq-name")?.textContent, line?.querySelector(".sb-mq-off-queue-cause")?.textContent]).toEqual(["w2", "evicted"]);
   });
 
@@ -1274,14 +1289,14 @@ describe("drawRosterMergeQueueOffQueue", () => {
     const { sc } = offQueueDaemon();
     const off = offQueue("w2", "evicted");
     off.subject = queueSubject("w2", { name: "fix-it", async: true, requester: "triage" });
-    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue").querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
+    const line = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, sc, "queue", NONE_COLD_GATED).querySelector<HTMLElement>(`.${MERGE_QUEUE_OFF_QUEUE_CLASS}`)!;
     expect([...line.children].slice(0, 3).map((el) => el.textContent)).toEqual(["fix-it", "(async of triage)", "evicted"]);
     expect(line.title).toBe("(async of triage)");
   });
 
   it("requeues the merge's own workspace at the back, as the user, without selecting the line", async () => {
     const { sc, requeued, selected } = offQueueDaemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted", "w-merge")] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted", "w-merge")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     (body.querySelector('[data-verb="requeue"]') as HTMLElement).click();
     await settled();
     expect([requeued.map((r) => [r.workspace?.id, r.placement?.place.case, r.requester?.asker.case]), selected.length]).toEqual([[["w-merge", "back", "user"]], 0]);
@@ -1289,23 +1304,63 @@ describe("drawRosterMergeQueueOffQueue", () => {
 
   it("discards the merge's own workspace's request, as the user", async () => {
     const { sc, discarded } = offQueueDaemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted", "w-merge")] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted", "w-merge")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     (body.querySelector('[data-verb="discard"]') as HTMLElement).click();
     await settled();
     expect(discarded.map((r) => [r.workspace?.id, r.requester?.asker.case])).toEqual([["w-merge", "user"]]);
   });
 
+  // A MERGE WHOSE WORKSPACE STANDS AT ITS COLD GATE IS NOT REQUEUED (owner
+  // request, 2026-11-17): the gate evicted every such requeue at once.
+  it("selects a cold-gated merge's workspace in place of requeueing it", async () => {
+    const { sc, requeued, selected } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted")] }), REPOSITORY, sc, "queue", new Set(["w1"]));
+    (body.querySelector('[data-verb="requeue"]') as HTMLElement).click();
+    await settled();
+    expect([requeued.length, selected.map((r) => [r.$typeName, r.workspace?.id])]).toEqual([0, [["agentrepl.v1.SelectInEditorRequest", "w1"]]]);
+  });
+
+  it("records the cold-gated merge's select in place of a requeue", async () => {
+    const capture = captureLogRecords();
+    const { sc } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted")] }), REPOSITORY, sc, "queue", new Set(["w1"]));
+    (body.querySelector('[data-verb="requeue"]') as HTMLElement).click();
+    await settled();
+    const records = await forwardedRecords(capture);
+    expect([recordFor(records, "sidebar.merge-queue.cold-gate-select").context, records.some((r) => r.operation === "sidebar.merge-queue.requeue")]).toMatchObject([
+      { workspace: "w1" },
+      false,
+    ]);
+  });
+
+  it.each([
+    { name: "a cold-gated merge's", gated: ["w1"], want: COLD_GATED_REQUEUE_TITLE },
+    { name: "any other merge's", gated: ["w9"], want: "put this merge back in line, at the back" },
+  ])("titles $name requeue control for what its click does", ({ gated, want }) => {
+    const { sc } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted")] }), REPOSITORY, sc, "queue", new Set(gated));
+    expect((body.querySelector('[data-verb="requeue"]') as HTMLElement).title).toBe(want);
+  });
+
+  it("still requeues a merge whose workspace no cold gate stands on, while another's does", async () => {
+    const { sc, requeued, selected } = offQueueDaemon();
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted")] }), REPOSITORY, sc, "queue", new Set(["w9"]));
+    (body.querySelector('[data-verb="requeue"]') as HTMLElement).click();
+    await settled();
+    expect([requeued.map((r) => r.workspace?.id), selected.length]).toEqual([["w1"], 0]);
+  });
+
   it("refuses a merge off its queue with no requeue control as a malformed view", () => {
     const { sc } = offQueueDaemon();
     const broken = create(RosterMergeQueueOffQueueSchema, { subject: queueSubject("w2"), cause: { text: "evicted" }, discard: { merge: { id: "w2" } } });
-    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [broken] }), REPOSITORY, sc, "queue")).toThrow(MalformedView);
+    expect(() => drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [broken] }), REPOSITORY, sc, "queue", NONE_COLD_GATED)).toThrow(MalformedView);
   });
 });
 
 describe("a waiting merge's position numeral", () => {
   it("is drawn at its name's size", () => {
     const { sc } = daemon();
-    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), waiting: [waitingMerge("w2")] }), REPOSITORY, sc, "queue");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { head: mergingHead("w1"), waiting: [waitingMerge("w2")] }), REPOSITORY, sc, "queue", NONE_COLD_GATED);
     const [numeral, name] = inRail(body, (rail) => {
       const line = rail.querySelector(`.${MERGE_QUEUE_WAITING_CLASS}`);
       return [
@@ -1323,3 +1378,79 @@ function requireElement(el: Element | null | undefined): Element {
   if (el === null || el === undefined) throw new Error("the waiting line drew no such element");
   return el;
 }
+
+describe("a cold-gated merge's line", () => {
+  // EVERY KIND OF QUEUE LINE STRIKES A COLD-GATED MERGE'S NAME, keyed on the
+  // merge's own workspace (`RosterMergeQueueSubject.merge`).
+  it.each([
+    { kind: "the head", queue: () => ({ head: mergingHead("w1") }), line: `.${MERGE_QUEUE_HEAD_CLASS}` },
+    { kind: "a waiting merge", queue: () => ({ head: mergingHead("w0"), waiting: [waitingMerge("w1")] }), line: `.${MERGE_QUEUE_WAITING_CLASS}:not(.${MERGE_QUEUE_REMEDIATING_CLASS})` },
+    { kind: "a merge fixing tests", queue: () => ({ head: mergingHead("w0"), fixingTests: fixingTestsMerge("w1", NOW) }), line: `.${MERGE_QUEUE_REMEDIATING_CLASS}` },
+    { kind: "a GitHub standing", queue: () => ({ head: mergingHead("w0"), github: [githubStanding("w1", 1, 1, NOW)] }), line: `.${MERGE_QUEUE_GITHUB_CLASS}` },
+    { kind: "a merge off its queue", queue: () => ({ offQueue: [offQueue("w1", "evicted")] }), line: `.${MERGE_QUEUE_OFF_QUEUE_CLASS}` },
+  ])("draws $kind's name with the shared cold-gate class and no status icon", ({ queue, line }) => {
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, queue()), REPOSITORY, offQueueDaemon().sc, "queue", new Set(["w1"]));
+    const drawn = body.querySelector(line);
+    expect([
+      drawn?.querySelector(".sb-mq-name")?.classList.contains(COLD_GATED_NAME_CLASS),
+      drawn?.querySelector(".st, img, svg"),
+    ]).toEqual([true, null]);
+  });
+
+  it("leaves a merge unstruck while the gate stands only on its requester", () => {
+    const off = offQueue("requester", "evicted", "merge-ws");
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [off] }), REPOSITORY, offQueueDaemon().sc, "queue", new Set(["requester"]));
+    expect(body.querySelector(".sb-mq-name")?.classList.contains(COLD_GATED_NAME_CLASS)).toBe(false);
+  });
+
+  it("draws a cold-gated name struck and greyed in the rail", () => {
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, { offQueue: [offQueue("w1", "evicted")] }), REPOSITORY, offQueueDaemon().sc, "queue", new Set(["w1"]));
+    const painted = inRail(body, () => {
+      const name = requireElement(body.querySelector(".sb-mq-name"));
+      return [cascadedValue(name, "text-decoration"), cascadedValue(name, "color")];
+    });
+    expect(painted).toEqual(["line-through", "color-mix(in srgb, var(--muted) 55%, transparent)"]);
+  });
+});
+
+describe("the rule above a queue's merges off it", () => {
+  it.each([
+    { name: "merges waiting and off the queue", queue: () => ({ head: mergingHead("w0"), waiting: [waitingMerge("w1")], offQueue: [offQueue("w2", "evicted")] }), want: 1 },
+    { name: "only merges off the queue", queue: () => ({ offQueue: [offQueue("w2", "evicted")] }), want: 0 },
+    { name: "only merges in the queue", queue: () => ({ head: mergingHead("w0"), waiting: [waitingMerge("w1")] }), want: 0 },
+  ])("is drawn $want time(s) for $name", ({ queue, want }) => {
+    const body = drawRosterMergeQueue(create(RosterRepoMergeQueueSchema, queue()), REPOSITORY, offQueueDaemon().sc, "queue", NONE_COLD_GATED);
+    expect(body.querySelectorAll(`.${MERGE_QUEUE_OFF_QUEUE_RULE_CLASS}`).length).toBe(want);
+  });
+
+  it("stands between the last merge in the queue and the first off it", () => {
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, { head: mergingHead("w0"), waiting: [waitingMerge("w1")], offQueue: [offQueue("w2", "evicted")] }),
+      REPOSITORY,
+      offQueueDaemon().sc,
+      "queue",
+      NONE_COLD_GATED,
+    );
+    expect([...body.children].map((el) => el.classList[0])).toEqual([
+      MERGE_QUEUE_HEAD_CLASS,
+      MERGE_QUEUE_WAITING_CLASS,
+      MERGE_QUEUE_OFF_QUEUE_RULE_CLASS,
+      MERGE_QUEUE_OFF_QUEUE_CLASS,
+    ]);
+  });
+
+  it("is inset from both of the rail's margins", () => {
+    const body = drawRosterMergeQueue(
+      create(RosterRepoMergeQueueSchema, { head: mergingHead("w0"), offQueue: [offQueue("w2", "evicted")] }),
+      REPOSITORY,
+      offQueueDaemon().sc,
+      "queue",
+      NONE_COLD_GATED,
+    );
+    const margins = inRail(body, () => {
+      const rule = requireElement(body.querySelector(`.${MERGE_QUEUE_OFF_QUEUE_RULE_CLASS}`));
+      return [cascadedValue(rule, "margin-left"), cascadedValue(rule, "margin-right")];
+    });
+    expect(margins.every((m) => m !== "" && m !== "0px" && m !== "0")).toBe(true);
+  });
+});

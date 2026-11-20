@@ -48,7 +48,7 @@ import { log } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { contextPercentColor, contextSectionColor } from "./context-colors.js";
-import { queryAll } from "../dom.js";
+import { decorativeElement, queryAll } from "../dom.js";
 
 /**
  * The panel a submission answered with, drawn.
@@ -217,9 +217,7 @@ export function drawTodosPanelRow(u: TodosPanelRow, path: string): HTMLElement {
   row.setAttribute("data-row", "");
   row.setAttribute("data-todo-status", status.case);
 
-  const glyph = document.createElement("span");
-  glyph.className = "todo-glyph";
-  glyph.setAttribute("aria-hidden", "true");
+  const glyph = decorativeElement("span", "todo-glyph");
   switch (status.case) {
     case "pending":
       glyph.setAttribute("data-glyph", "pending");
@@ -514,9 +512,7 @@ export function drawContextSection(
 
   const summary = document.createElement("summary");
   summary.className = "context-section-summary";
-  const caret = document.createElement("span");
-  caret.className = "context-section-caret";
-  caret.setAttribute("aria-hidden", "true");
+  const caret = decorativeElement("span", "context-section-caret");
   caret.textContent = "▸";
   const label = document.createElement("span");
   label.className = "panel-row-label";

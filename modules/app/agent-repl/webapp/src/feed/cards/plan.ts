@@ -37,6 +37,7 @@ import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { drawOutcomeMarker } from "../marker.js";
 import { agenticBubble } from "./controls.js";
+import { decorativeElement } from "../../dom.js";
 
 const PATH = "FeedPlan";
 
@@ -164,10 +165,7 @@ export function drawFeedPlanFailed(u: FeedPlanFailed, rc: RowContext, path: stri
 
 /** The still-planning indicator. */
 function planningIndicator(): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "animated-ellipsis plan-planning";
-  el.setAttribute("aria-hidden", "true");
-  return el;
+  return decorativeElement("span", "animated-ellipsis plan-planning");
 }
 
 /** One of the three badges, by arm. */

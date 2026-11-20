@@ -75,7 +75,7 @@ import type {
   FooterWakeupRowWakeAt,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { placeChildren } from "../dom.js";
+import { decorativeElement, placeChildren } from "../dom.js";
 import { columnHeader, COLUMNS_ROW_CLASS } from "../columns.js";
 import { liveElapsedClock } from "../elapsed-clock.js";
 import { frameUndecodable } from "../failure/sink.js";
@@ -1268,10 +1268,8 @@ export function rowText(className: string, text: string): HTMLElement {
 
 /** A named glyph element, so the suite can target the glyph and not the text. */
 function glyph(name: string, character: string): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "footer-glyph";
+  const el = decorativeElement("span", "footer-glyph");
   el.setAttribute("data-glyph", name);
-  el.setAttribute("aria-hidden", "true");
   el.textContent = character;
   return el;
 }
@@ -1305,9 +1303,7 @@ export function rowFigures(...children: HTMLElement[]): HTMLElement {
 
 /** The jump affordance's caret. */
 function caret(): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "footer-row-caret";
-  el.setAttribute("aria-hidden", "true");
+  const el = decorativeElement("span", "footer-row-caret");
   el.textContent = "▸";
   return el;
 }

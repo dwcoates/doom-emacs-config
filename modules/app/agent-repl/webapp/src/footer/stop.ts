@@ -45,7 +45,7 @@ import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { INTERRUPT_OUTCOME_MS } from "../feed/stop-control.js";
 import { stopTicking, tick } from "../feed/ticking.js";
-import { queryAll } from "../dom.js";
+import { decorativeElement, queryAll } from "../dom.js";
 
 /** The stop glyph: a filled square, the one shape a stop control has. */
 export const STOP_GLYPH = "■";
@@ -165,9 +165,7 @@ function interruptControl(ctx: AppContext, spec: ControlSpec): HTMLElement {
   button.className = "footer-stop-button";
   button.setAttribute("data-interrupt", "");
   button.title = spec.title;
-  const glyph = document.createElement("span");
-  glyph.className = "footer-stop-glyph";
-  glyph.setAttribute("aria-hidden", "true");
+  const glyph = decorativeElement("span", "footer-stop-glyph");
   glyph.textContent = STOP_GLYPH;
   button.appendChild(glyph);
   button.appendChild(document.createTextNode(` ${spec.label}`));

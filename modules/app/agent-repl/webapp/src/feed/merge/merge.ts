@@ -57,6 +57,7 @@ import type {
   FeedMergeSuccess,
   FeedMergeUpdate,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { decorativeElement } from "../../dom.js";
 
 const PATH = "FeedMerge";
 
@@ -182,9 +183,7 @@ export function drawFeedMergeHead(head: FeedMergeHead): HTMLElement {
  * an icon this build has not learned would trade the substance for decoration.
  */
 export function drawFeedMergeGlyph(glyph: FeedMergeGlyph): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "merge-glyph";
-  el.setAttribute("aria-hidden", "true");
+  const el = decorativeElement("span", "merge-glyph");
   el.setAttribute("data-glyph", glyph.icon);
   const known = MERGE_GLYPH_NAMES[glyph.icon];
   if (known === undefined) {

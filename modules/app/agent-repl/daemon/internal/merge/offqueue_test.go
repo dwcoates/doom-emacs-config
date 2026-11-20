@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/sourcescan"
@@ -217,6 +218,10 @@ func TestRequeueRefusals(t *testing.T) {
 			req: Requeue{Version: &wsm.VersionIncrement{Part: semver.Patch, ChangelogLine: "another"}}, want: ArmVersionAlreadyRecorded},
 		{name: "a placement behind a merge not in line", arrange: func(t *testing.T, h *harness) { evicted(t, h) },
 			req: Requeue{PlaceBehind: "nobody"}, want: ArmPlacementBehindNotInLine},
+		{name: "a workspace parked at its cold gate", arrange: func(t *testing.T, h *harness) {
+			evicted(t, h)
+			h.coldGated = map[ids.WorkspaceID]bool{theWorkspace: true}
+		}, want: ArmColdGated},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -242,6 +247,43 @@ func TestRequeueRefusals(t *testing.T) {
 				t.Fatalf("the refusal was not recorded: %v", h.logs.Records())
 			}
 		})
+	}
+}
+
+func TestRequeueOfAWorkspaceParkedAtItsColdGate(t *testing.T) {
+	// Arrange: the merge was evicted and its session is parked at its gate.
+	h := newHarness(t)
+	rec := evicted(t, h)
+	h.mu.Lock()
+	h.coldGated = map[ids.WorkspaceID]bool{theWorkspace: true}
+	h.mu.Unlock()
+	branch := requestBranch(h.db.workspaces[theWorkspace], rec.Source)
+
+	// Act
+	_, err := h.o.Requeue(context.Background(), Requeue{Workspace: theWorkspace, By: RequestedByUser})
+
+	// Assert: refused cold_gated, nothing in line, the record as it stood,
+	// and the refusal recorded once with the workspace, branch and reason.
+	refusal, refused := Refused(err)
+	if !refused || refusal.Arm != ArmColdGated {
+		t.Fatalf("Requeue = %v, want the cold_gated refusal", err)
+	}
+	if _, ok := h.entryOf(theWorkspace); ok {
+		t.Fatal("the refused requeue put the merge in line")
+	}
+	if after, kept, _ := h.db.OffQueueMergeOf(context.Background(), theWorkspace); !kept || !reflect.DeepEqual(after, rec) {
+		t.Fatalf("the refusal changed the record: %+v -> %+v (kept %v)", rec, after, kept)
+	}
+	records := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: "daemon.merge.requeue",
+		Message: "refused a requeue of a workspace parked at its cold gate"})
+	if len(records) != 1 {
+		t.Fatalf("refusal records = %v, want exactly one", records)
+	}
+	want := map[string]any{"workspace": string(theWorkspace), "branch": branch, "reason": refusal.Reason}
+	for key, value := range want {
+		if records[0].Context[key] != value {
+			t.Fatalf("refusal record %s = %v, want %v (%v)", key, records[0].Context[key], value, records[0].Context)
+		}
 	}
 }
 

@@ -5412,7 +5412,7 @@ describe("the rail's marks", () => {
 
   it("strikes a cold-gated workspace's name and nothing else", () => {
     // Arrange / Act
-    const rule = declarationsOf('#ws-sidebar .ws[data-arm="coldGate"] > .row > .name');
+    const rule = declarationsOf("#ws-sidebar .ws > .row > .name.cold-gated");
 
     // Assert
     expect(rule).toMatch(/text-decoration:\s*line-through/);

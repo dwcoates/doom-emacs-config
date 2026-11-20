@@ -69,7 +69,7 @@ import { drawMarkdownOutput, isMarkdownOutput } from "./markdown-output.js";
 import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import type { RowContext } from "./context.js";
-import { queryAll } from "../../dom.js";
+import { queryAll, decorativeElement } from "../../dom.js";
 
 /**
  * How many diagnostics rows draw before the rest go behind a toggle.
@@ -354,9 +354,7 @@ export function drawFeedToolCallRunning(
   path: string,
 ): OutcomeParts {
   const badge = drawToolCardBadge("running…", ["run"]);
-  const spinner = document.createElement("span");
-  spinner.className = "tool-spinner";
-  spinner.setAttribute("aria-hidden", "true");
+  const spinner = decorativeElement("span", "tool-spinner");
   badge.prepend(spinner);
 
   if (u.lastProgress === undefined) {

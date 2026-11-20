@@ -83,10 +83,11 @@ import { heatColor } from "../heat.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { drawFooterStatusActivity, type ActivityDeps, type FooterActivity } from "./activity.js";
 import { CHIP_PANELS, type FooterChipPanel, type FooterPanel } from "./expanded.js";
-import { statusCellWord, statusWords, textLine } from "./parts.js";
+import { statusCellWord, textLine } from "./parts.js";
 import { activityDatumClass, statusArmClass, type ActivityDatum } from "./tones.js";
 import type { StopControls } from "./stop.js";
 import { countNoun } from "../count-noun.js";
+import { decorativeElement } from "../dom.js";
 
 /** The label the clock cell shows between turns. The baseline strip's own. */
 export const IDLE_CLOCK_LABEL = "--";
@@ -434,9 +435,9 @@ function statusParts(
         substatusRequired: false,
       };
     }
-    case "updating":
     // A FINAL RESPONSE BEING UPDATED declares no substatus oneof either: the
     // shimmering bubble shows which response, so the arm's word stands.
+    case "updating":
     case "starting":
       // A BOOTING SESSION declares no substatus oneof (owner ruling,
       // 2026-10-13: booting is an expected step, never a fault), so the arm's
@@ -805,10 +806,8 @@ function chip(panel: FooterChipPanel, glyph: string, count: string, deps: StripD
  * and the agents chip's waiting glyph are both drawn by it.
  */
 export function chipGlyph(name: string, character: string): HTMLElement {
-  const mark = document.createElement("span");
-  mark.className = "footer-chip-glyph";
+  const mark = decorativeElement("span", "footer-chip-glyph");
   mark.setAttribute("data-glyph", name);
-  mark.setAttribute("aria-hidden", "true");
   mark.textContent = character;
   return mark;
 }

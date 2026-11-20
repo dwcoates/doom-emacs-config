@@ -106,6 +106,7 @@ func TestRequeueMergeAnswersEachRefusalAsItsArm(t *testing.T) {
 		{arm: merge.ArmAlreadyLanded, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetAlreadyLanded() != nil }},
 		{arm: merge.ArmVersionAlreadyRecorded, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetVersionAlreadyRecorded() != nil }},
 		{arm: merge.ArmWorkspaceClosed, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetWorkspaceClosed() != nil }},
+		{arm: merge.ArmColdGated, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetColdGated() != nil }},
 		{arm: merge.ArmVersionIncrementRequired, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetVersionIncrementRequired() != nil }},
 		{arm: merge.ArmPlacementBehindNotInLine, want: func(e *agentreplv1.RequeueMergeError) bool { return e.GetPlacementBehindNotInLine() != nil }},
 	}

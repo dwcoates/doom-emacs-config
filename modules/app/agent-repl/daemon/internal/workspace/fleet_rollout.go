@@ -1117,6 +1117,17 @@ func (f *Fleet) ColdGateStanding(ws ids.WorkspaceID) (*conversationv1.SessionCol
 	return cold, cold != nil
 }
 
+// AtColdGate reports whether a cold gate stands on the workspace: its session
+// is parked on the gate's choice until the user answers it. The merge queue
+// refuses to put such a workspace's merge back in line (merge.Deps.AtColdGate),
+// since the gate would take it off again at once.
+func (f *Fleet) AtColdGate(ws ids.WorkspaceID) bool {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	_, gated := f.coldGates[ws]
+	return gated
+}
+
 // AdoptParked adopts a running shim whose session is PARKED AT ITS COLD GATE:
 // a handover's successor taking over a workspace whose gate the incumbent
 // served. The shim started no session -- it refused the resume `cold` before

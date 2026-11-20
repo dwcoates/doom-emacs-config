@@ -20,6 +20,19 @@ import { log } from "./log.js";
 export const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
+ * A DECORATIVE ELEMENT: a TAG wearing CLASS_NAME that a screen reader skips
+ * (`aria-hidden`), for a glyph, caret, rule or ink drawn beside the text that
+ * carries the meaning. Every such element is made here, so none can be made
+ * without hiding itself.
+ */
+export function decorativeElement(tag: "span" | "div", className: string): HTMLElement {
+  const el = document.createElement(tag);
+  el.className = className;
+  el.setAttribute("aria-hidden", "true");
+  return el;
+}
+
+/**
  * Innermost node at or above `start` that satisfies `match`, stopping
  * below `stop` — `stop` itself is never a candidate, and neither is
  * anything above it. Null when nothing between `start` and `stop`

@@ -88,6 +88,7 @@ import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.j
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
+import { markColdGatedName } from "./cold-gate-name.js";
 import { drawNameInk } from "./name-ink.js";
 import { drawNameGlyph } from "../name-glyph.js";
 import { guardMalformed, guardMalformedNow } from "../rpc/guard.js";
@@ -265,8 +266,8 @@ export function drawRosterRow(
   const mark = rosterRowMark(status.case, markers);
   const ws = document.createElement("div");
   // A HIDDEN ROW WEARS NO STATUS COLOR (owner request, 2026-10-13): its name
-  // takes the rail's plain text; `data-arm` still carries the arm, which is
-  // what draws a cold gate's strike.
+  // takes the rail's plain text; `data-arm` still carries the arm, and the
+  // name still draws a cold gate's strike.
   ws.className = `ws ${hidden ? toneClass("none") : mark.toneClass}`;
   ws.setAttribute("data-roster-row", workspace.id);
   ws.setAttribute("data-arm", status.case);
@@ -341,6 +342,8 @@ export function drawRosterRow(
   const label = document.createElement("span");
   label.className = "name";
   label.textContent = name;
+  // A COLD GATE STRIKES THE NAME, in every section (`cold-gate-name.ts`).
+  if (status.case === "coldGate") markColdGatedName(label);
   // THE DISPLAY MODE GREYS THE NAME ALONE: the dot keeps its tone. `viewed.ts`
   // decides it, from the wire's marker alone: the daemon resolves it with the
   // status it rides on.

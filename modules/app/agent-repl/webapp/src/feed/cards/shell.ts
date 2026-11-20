@@ -51,6 +51,7 @@ import { stopTicking } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import { drawDetachedWorkId } from "../work-id.js";
 import { drawStopControl, type StopSite } from "../stop-control.js";
+import { decorativeElement } from "../../dom.js";
 
 const PATH = "FeedShell";
 
@@ -208,9 +209,7 @@ export function drawFeedShellCommand(u: FeedShellCommand, path: string): HTMLEle
   });
   const el = document.createElement("span");
   el.className = "shell-command";
-  const chrome = document.createElement("span");
-  chrome.className = "shell-prompt";
-  chrome.setAttribute("aria-hidden", "true");
+  const chrome = decorativeElement("span", "shell-prompt");
   chrome.textContent = PROMPT_CHROME;
   const text = document.createElement("span");
   text.className = "shell-command-text";

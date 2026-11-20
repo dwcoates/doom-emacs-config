@@ -37,6 +37,7 @@ import {
 import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, type SidebarContext } from "./context.js";
 import { changeViews, type ViewPiece } from "./view-change.js";
 import { heightViewKey } from "./view.js";
+import { decorativeElement } from "../dom.js";
 
 /** The class of the grip drawn over a band section's rule. */
 export const RESIZE_HANDLE_CLASS = "sb-band-resize";
@@ -81,10 +82,7 @@ export function paintSectionHeight(section: HTMLElement, lines: number | null): 
  */
 export function drawSectionHeight(section: HTMLElement, foldKey: string, wire: number | null, sc: SidebarContext): void {
   paintSectionHeight(section, sc.view.track(heightViewKey(foldKey), wire, (lines) => paintSectionHeight(section, lines)));
-  const grip = document.createElement("div");
-  grip.className = RESIZE_HANDLE_CLASS;
-  grip.setAttribute("aria-hidden", "true");
-  section.prepend(grip);
+  section.prepend(decorativeElement("div", RESIZE_HANDLE_CLASS));
 }
 
 /** The four sections top to bottom, as the pane draws them. */

@@ -16,7 +16,7 @@
  */
 import type { RosterOpenRow, RosterOpenRowTab, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { openKin, repoEntries } from "./entries.js";
-import { queryAll } from "../dom.js";
+import { decorativeElement, queryAll } from "../dom.js";
 import { log } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
@@ -77,10 +77,7 @@ export function tabNumber(tab: RosterOpenRowTab | undefined, path: string): numb
 
 /** The empty slot a row draws its number into. */
 export function drawTabNumberSlot(): HTMLElement {
-  const slot = document.createElement("span");
-  slot.className = TAB_NUMBER_CLASS;
-  slot.setAttribute("aria-hidden", "true");
-  return slot;
+  return decorativeElement("span", TAB_NUMBER_CLASS);
 }
 
 /**

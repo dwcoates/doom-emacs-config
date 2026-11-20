@@ -783,6 +783,11 @@ type Deps struct {
 	// work ends only by its own per-task stop or a forced kill the user asked
 	// for.
 	Freeness Freeness
+	// AtColdGate reports whether the workspace's session is parked at its
+	// cold gate. A requeue of such a workspace's merge is refused
+	// (ArmColdGated): the gate takes a parked workspace's merge off its queue
+	// the moment it is raised, so the merge would leave again at once.
+	AtColdGate func(ws ids.WorkspaceID) bool
 	// PauseAfterCapture is a TEST-ONLY seam: when set, a run blocks in it
 	// immediately after the displaced turn was captured, which is the one
 	// window a test cannot otherwise reach (the merge's own next submission,
