@@ -13,9 +13,9 @@
  */
 import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, describe, expect, test } from "vitest";
 import { shimv1 } from "../../src/proto.js";
-import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { canonicalSession, endTurn, releaseShared, uniqueTurn } from "../integration-support/canonical.js";
 import {
   connectCode,
   freshSession,
@@ -25,16 +25,18 @@ import {
   watchAgentRequest,
   workId,
 } from "../integration-support/client.js";
-import { sessionStarted, sessionUpdate, watchAgentPage } from "../integration-support/expect.js";
+import { sessionStarted, sessionUpdate, startSessionCause, watchAgentPage } from "../integration-support/expect.js";
 import { rawBody, rawHeadH1, rawStreamOpenH2 } from "../integration-support/raw.js";
 
-afterEach(cleanupShims);
+// EVERY CASE HERE RUNS ON THE FILE'S ONE CANONICAL SHIM AND SESSION
+// (test/integration-support/canonical.ts): the transport contract holds
+// whatever else the shim is serving, so no case needs a shim of its own.
+afterAll(releaseShared);
 
 describe("both dialects over one socket", () => {
   test("Connect over HTTP/1.1 reaches the service", async () => {
-    const shim = await spawnShim();
-
-    const response = await shim.clients.h1.startSession(freshSession());
+    // The canonical session IS a StartSession over HTTP/1.1.
+    const { response } = await canonicalSession();
 
     expect(sessionStarted(response).vendorSessionId).not.toBe("");
   });
@@ -43,16 +45,18 @@ describe("both dialects over one socket", () => {
     // One socket, both HTTP versions: the listener sniffs the HTTP/2 preface
     // (`allowHTTP1` is a TLS-only option and does nothing on a cleartext h2
     // server, and a unix socket has no ALPN to negotiate with).
-    const shim = await spawnShim();
+    const { shim, started } = await canonicalSession();
 
     const response = await shim.clients.h2.startSession(freshSession());
 
-    expect(sessionStarted(response).vendorSessionId).not.toBe("");
+    // The SAME service: the session the HTTP/1.1 start opened answers this one
+    // as already started, naming that session.
+    expect(started.vendorSessionId).not.toBe("");
+    expect(startSessionCause(response)).toBe("alreadyStarted");
   });
 
   test("a stream works over h2c, where socketPath would have been ignored", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h2.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const watch = openStream((options) =>
       shim.clients.h2.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
@@ -69,8 +73,7 @@ describe("both dialects over one socket", () => {
     // to the client's accept list -- could never reach the client, and the
     // guard fired on EVERY healthy WatchSession and WatchAgent accept. An error
     // on the happy path is an error that teaches a reader to ignore errors.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const watch = openStream((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
@@ -88,7 +91,7 @@ describe("validation refuses before the engine", () => {
   test("an unset request oneof is InvalidArgument", async () => {
     // There is no legal response to an illegal request: answering "success:
     // false" would teach the caller its message was understood.
-    const shim = await spawnShim();
+    const { shim } = await canonicalSession();
 
     const code = await connectCode(
       shim.clients.h1.startSession(create(shimv1.StartSessionRequestSchema, {})),
@@ -98,7 +101,7 @@ describe("validation refuses before the engine", () => {
   });
 
   test("an UNSPECIFIED effort level is InvalidArgument", async () => {
-    const shim = await spawnShim();
+    const { shim } = await canonicalSession();
 
     const code = await connectCode(
       shim.clients.h1.setSessionEffort(create(shimv1.SetSessionEffortRequestSchema, {})),
@@ -108,7 +111,7 @@ describe("validation refuses before the engine", () => {
   });
 
   test("an unset UpdateAgent input is InvalidArgument", async () => {
-    const shim = await spawnShim();
+    const { shim } = await canonicalSession();
 
     const code = await connectCode(
       shim.clients.h1.updateAgent(create(shimv1.UpdateAgentRequestSchema, {})),
@@ -123,7 +126,7 @@ describe("the workflow trio (WORKFLOW IS KICKED)", () => {
     // Unimplemented and not an empty success: a caller receiving an empty
     // workflow cannot tell "no workflows" from "this shim does not do
     // workflows", and would draw the difference as an absence.
-    const shim = await spawnShim();
+    const { shim } = await canonicalSession();
 
     const code = await connectCode(
       shim.clients.h1.getWorkflow(
@@ -135,7 +138,7 @@ describe("the workflow trio (WORKFLOW IS KICKED)", () => {
   });
 
   test("StopWorkflow answers Unimplemented", async () => {
-    const shim = await spawnShim();
+    const { shim } = await canonicalSession();
 
     const code = await connectCode(
       shim.clients.h1.stopWorkflow(
@@ -147,7 +150,7 @@ describe("the workflow trio (WORKFLOW IS KICKED)", () => {
   });
 
   test("WatchWorkflow answers Unimplemented at the stream open", async () => {
-    const shim = await spawnShim();
+    const { shim } = await canonicalSession();
 
     const stream = openStream((options) =>
       shim.clients.h1.watchWorkflow(
@@ -177,8 +180,7 @@ describe("acceptance is observable before the first frame", () => {
   // response head ALONE decides acceptance, arriving complete and parseable
   // with no frame consulted.
   test("WatchSession's acceptance is decidable from the HTTP/1.1 head alone", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     // Resolving at all is half the claim: the helper never reads a body byte.
     const head = await rawHeadH1(
@@ -195,8 +197,7 @@ describe("acceptance is observable before the first frame", () => {
   });
 
   test("WatchSession's response headers precede the first data frame over h2c", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const observed = await rawStreamOpenH2(
       shim.dirs.listen,
@@ -213,8 +214,7 @@ describe("acceptance is observable before the first frame", () => {
   });
 
   test("WatchAgent's acceptance is decidable from the HTTP/1.1 head alone", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const head = await rawHeadH1(
       shim.dirs.listen,
@@ -227,8 +227,7 @@ describe("acceptance is observable before the first frame", () => {
   });
 
   test("WatchBash's acceptance is decidable from the HTTP/1.1 head alone", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const head = await rawHeadH1(
       shim.dirs.listen,
@@ -251,8 +250,7 @@ describe("a stream closed by the client ends nothing", () => {
   test("cancelling WatchSession leaves the session serving", async () => {
     // ATTACH ONLY: closing a watch ends nothing, which is what makes a
     // restarted daemon able to reattach without having killed anything.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
     const watch = openSessionUpdates((options) =>
       shim.clients.h1.watchSession(create(shimv1.WatchSessionRequestSchema, {}), options),
     );
@@ -279,8 +277,9 @@ describe("a stream closed by the client ends nothing", () => {
     // a reader that will never return from one that is merely slow. Nothing on
     // the client says whether the tail was cancelled, so the fake store's
     // open-tail ledger is the only place the fact is observable.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    // The tails a sibling left open on the shared store are not this case's.
+    const before = shim.store?.openTails() ?? [];
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
@@ -288,40 +287,43 @@ describe("a stream closed by the client ends nothing", () => {
     // Drive a turn so a row has actually travelled THROUGH the tail: an open
     // that had not yet reached the store would make the ledger empty for a
     // reason that has nothing to do with cancellation.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: uniqueTurn(), text: "!md" }));
     await watch.until((frame) => frame.frame.case === "entry");
     // THE TAIL'S OPEN IS AN EVENT, not a level. A row reaching this client says
     // the shim pulled from its tail; it does not say the store's own generator
     // has begun on the other side of the socket, so reading `openTails()` here
     // raced the store and read an empty ledger under load.
-    const token = await (shim.store?.tailOpened() ??
+    const token = await (shim.store?.tailOpened(before) ??
       Promise.reject(new Error("this shim has no store")));
-    expect(shim.store?.openTails()).toEqual([token]);
+    // This case's own tail; a sibling's watch on the shared session may hold
+    // a tail of its own.
+    expect(shim.store?.openTails()).toContain(token);
 
     watch.close();
 
     // The cancellation crosses a real socket, so the client returning and the
     // server's generator unwinding are two instants; this awaits the second.
     await shim.store?.tailClosed(token);
-    expect(shim.store?.openTails()).toEqual([]);
+    expect(shim.store?.openTails()).not.toContain(token);
   });
 
   test("cancelling WatchAgent mid-turn leaves the turn running", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const held = uniqueTurn();
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: held, text: "!hold" }));
 
     watch.close();
 
     // The turn is still open: a second StartTurn is refused for that reason.
     const second = await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t2", text: "another" }),
+      startTurnRequest({ turn: uniqueTurn(), text: "another" }),
     );
     expect(second.result.case).toBe("failure");
+    await endTurn(shim, held);
   });
 });
 
@@ -337,10 +339,9 @@ describe("many streams on one socket", () => {
     //
     // It only bites once a page grows past the compression threshold, which is
     // why it showed up as later streams failing while the first few worked.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
     // Grow the book so an opening page is comfortably over any threshold.
-    for (const turn of ["t1", "t2", "t3", "t4"]) {
+    for (const turn of [uniqueTurn(), uniqueTurn(), uniqueTurn(), uniqueTurn()]) {
       await shim.clients.h1.startTurn(startTurnRequest({ turn, text: "!md" }));
     }
 

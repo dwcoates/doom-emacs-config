@@ -1052,6 +1052,7 @@ Owner rulings, 2026-10-14 and 2026-11-20. An integration test tests the API cont
 - **One act, several observers.** Tests that perform the byte-identical act and each assert a different view of its result are one test. Its observations are separate named cases using `t.Errorf`, so each one reports even when another fails.
 - **Sequential walks are the exception.** A case may start from another's end state only when the sequence is itself the subject. The walk's head states which later steps an early fatal failure hides.
 - **Mutation evidence first.** Merging existing tests under this section lands only with `testrun redundancy`'s evidence that no killed mutant is lost.
+- **Each suite states its own mechanics in its AGENTS.md:** the shim's in `agent-shim/claude/shim/AGENTS.md` "Integration cases share the canonical shim".
 - **Wait bounds are measured under sharing.** A shared process is busier than a fresh one, so a bound is sized from the healthy time measured with its siblings running, per the metaprompt's timeout rule.
 - Why: the 2026-10-14 shared-setup audit (workspace `test-shared-setup`) measured an e2e test's `World` at about 2.7s of its 3.4s solo cost, while a fresh workspace in a running `World` costs 0.3-0.4s; the 2026-11-20 gate metrics (workspace `test-suite-duration-metrics`) put per-case daemons at 69% of the daemon suite's CPU.
 

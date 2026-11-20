@@ -1613,6 +1613,51 @@ describe("the open-tail ledger", () => {
     expect(token).toBe(success.watch?.value);
   });
 
+  it("tailOpened passes over an open tail it was told to except, answering the next one", async () => {
+    // Arrange: a sibling's tail is already open on the shared store.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    await write(client, pageLineEntry("b", "prompt:t1", "first"));
+    const sibling = await open(client, "a");
+    const siblingTail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: sibling.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await siblingTail.next();
+    const before = fake.openTails();
+    const own = await open(client, "b");
+    const opened = fake.tailOpened(before);
+
+    // Act.
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: own.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("b", "prompt:t2", "second"));
+    await tail.next();
+
+    // Assert.
+    expect(before).toEqual([sibling.watch?.value]);
+    expect(await opened).toBe(own.watch?.value);
+  });
+
+  it("tailOpened answers an already open tail that is not excepted", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a");
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Act.
+    const token = await fake.tailOpened(["some-other-tail"]);
+
+    // Assert.
+    expect(token).toBe(success.watch?.value);
+  });
+
   it("DROPS the entry once the client ABORTS the call", async () => {
     // A client that stops reading must CANCEL THE CALL, not merely stop pulling
     // its iterator: Connect's stream close drains the body, which on a standing

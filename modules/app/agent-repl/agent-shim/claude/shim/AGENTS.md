@@ -1906,6 +1906,38 @@ in atomically, never reinstalled through the link. `webapp/AGENTS.md`
   aid, not semantic coverage: audit critical branches and errors directly even
   when the ratio rises.
 
+### Integration cases share the canonical shim
+
+The rule is `modules/app/agent-repl/AGENTS.md` "Integration tests share one
+canonical process, each case on its own slice"; these are its mechanics in this
+suite (`test/integration-support/canonical.ts`).
+
+- **The canonical shim.** Each integration file has ONE shim and ONE session,
+  spawned on first use and torn down by the file's `afterAll(releaseShared)`.
+  A case takes it with `canonicalSession()` (the shim, the one `StartSession`
+  answer and its `SessionStarted`), or with `canonicalShimBeforeSession()` when
+  its subject is a refusal of a shim with no session; such cases come first in
+  their file, and one asked for after the session started throws.
+- **A case's slice is its turns** (a shim hosts one session, and the fake
+  vendor picks each turn's behavior from its prompt text), and everything a
+  turn makes: its runs, units, asks, rows and book entries. A case mints its
+  turn ids with `uniqueTurn()`, never a literal `"t1"`, asserts only on what its
+  own ids name (a whole-store or whole-transcript count is rewritten to its own
+  keys; `store.tailOpened(before)` passes over the tails siblings opened), and
+  ends any turn or work it leaves open (`endTurn`) before it returns.
+- **A case observing the session start** reads the canonical session's one
+  `StartSession` answer; a second start on the same shim answers
+  `alreadyStarted`.
+- **A group shim** serves every case of a file that needs the same spawn
+  precondition (an `AGENT_REPL_FAKE_*` environment, a store page size, a
+  session-wide mode its cases change): `groupShim(KEY, OPTIONS)`. A key always
+  names the same options; asking with others throws. A new case needing a
+  precondition joins the group that already names it.
+- **A fresh shim** (`spawnShim`) is only for a case whose subject is the shim's
+  or its session's own lifecycle: startup and its refusals, SIGTERM or SIGKILL
+  stand-down, resume of a prior process's directories (`reuse:`), lock and
+  socket contention. The case says which.
+
 ### Every run's temp files live under one root the run owns
 
 Both vitest configs run `test/run-tmp-root.ts` as their `globalSetup`: it makes

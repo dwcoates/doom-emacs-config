@@ -170,14 +170,16 @@ export interface FakeStore {
    */
   openTails(): readonly string[];
   /**
-   * The token of an OPEN tail, awaiting one if none is open yet.
+   * The token of an OPEN tail, awaiting one if none is open yet. A tail whose
+   * token is in EXCEPT is passed over: a case on a shared shim names the tails
+   * open before it opened its own, so only its own can answer.
    *
    * The tail's open crosses a socket too: a client that has already been served
    * a row is not proof its `WatchAgentSession` generator has begun on this
    * side, so {@link openTails} read as a level races the store. This is the
    * edge — the only sound way to assert on a tail that is expected to exist.
    */
-  tailOpened(): Promise<string>;
+  tailOpened(except?: readonly string[]): Promise<string>;
   /**
    * Resolves the moment the tail on `token` closes, or immediately if it is
    * already gone.
@@ -375,7 +377,7 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
   /** Whoever is waiting for a given tail to unwind — see {@link FakeStore.tailClosed}. */
   const tailClosedWaiters = new Map<string, Array<() => void>>();
   /** Whoever is waiting for ANY tail to open — see {@link FakeStore.tailOpened}. */
-  const tailOpenWaiters: Array<(token: string) => void> = [];
+  const tailOpenWaiters: Array<{ readonly except: readonly string[]; readonly resolve: (token: string) => void }> = [];
 
   /**
    * The refusal standing against one verb, if any.
@@ -844,7 +846,10 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
         // survives exactly as long as the subscription does, and a client that
         // walks away without cancelling leaves it behind for the test to see.
         openTailTokens.add(token);
-        for (const resolve of tailOpenWaiters.splice(0)) resolve(token);
+        for (const waiter of tailOpenWaiters.splice(0)) {
+          if (waiter.except.includes(token)) tailOpenWaiters.push(waiter);
+          else waiter.resolve(token);
+        }
         try {
           while (!state.closed && !context.signal.aborted) {
             const next = state.pending.shift();
@@ -1372,11 +1377,11 @@ export async function startFakeStore(socketPath: string, options: FakeStoreOptio
     writeBatches: () => [...writeVerdicts],
     shellRunClaims: () => [...runClaims],
     openTails: () => [...openTailTokens],
-    tailOpened: async () => {
-      const already = [...openTailTokens][0];
+    tailOpened: async (except = []) => {
+      const already = [...openTailTokens].find((token) => !except.includes(token));
       if (already !== undefined) return already;
       return new Promise<string>((resolve) => {
-        tailOpenWaiters.push(resolve);
+        tailOpenWaiters.push({ except, resolve });
       });
     },
     tailClosed: async (token) => {
