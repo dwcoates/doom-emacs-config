@@ -5753,23 +5753,27 @@ afresh."
     (agent-repl-test-host--subscribe "ws-1")
     (should-not (agent-repl-host-standing-ask "ws-1"))))
 
-;; A `not_yet_adopted' re-registration onto the incumbent that FAILS after
-;; the successor was promoted: the promotion edge has already run, so the
-;; walk goes at once onto the live daemon (2026-11-06, `main
-;; (explanation-engine)' severed 20 minutes).
+;; A re-registration onto the incumbent that FAILS after the successor was
+;; promoted: the promotion edge has already run, so the walk goes at once
+;; onto the live daemon (2026-11-06, `main (explanation-engine)' severed 20
+;; minutes, then by a `not_yet_adopted' re-registration; that refusal now
+;; adopts instead, and every walk that registers, a lost stream's here,
+;; keeps the rule).
 
 (defmacro agent-repl-test-host--with-incumbent-register-held (&rest body)
   "Run BODY after WS ws-1\='s re-registration on the incumbent is sent, unanswered.
-Binds `live', the connection to the daemon serving Emacs after the walk
-began, which the stubbed `agent-repl-link-live' answers."
+The incumbent is the primary link when the refusal arrives, as it is when a
+walk begins.  Binds `live', the connection to the daemon serving Emacs after
+the walk began, which BODY makes the stubbed links answer."
   (declare (indent 0))
   `(agent-repl-test-host--with-harness
      (agent-repl-test-host--with-serving-conns
        (agent-repl-test-host--with-dir
          (let ((live (agent-repl-connect-open "127.0.0.1:9100")))
            (agent-repl-test-host--subscribe "ws-1")
+           (setq agent-repl-test-host--live (agent-repl-connect-open "127.0.0.1:9000"))
            (setq agent-repl-test-host--register-answer '(:held))
-           (agent-repl-host-handle-refusal "ws-1" agent-repl-test-host--served-elsewhere)
+           (agent-repl-host--reattach "ws-1" agent-repl-test-host--live :register "stream-lost")
            (setq agent-repl-test-host--register-answer
                  (list :response (list :arm :success
                                        :value (list :workspace (agent-repl-test-host--ref)))))
@@ -5812,7 +5816,7 @@ began, which the stubbed `agent-repl-link-live' answers."
     (agent-repl-test-host--fail-held-register)
     ;; Assert
     (should (agent-repl-test-host--logged-p
-             :info "elisp.host.reattach-after-promotion ws=ws-1 trigger=not-yet-adopted promotions=0..1"))))
+             :info "elisp.host.reattach-after-promotion ws=ws-1 trigger=stream-lost promotions=0..1"))))
 
 (ert-deftest agent-repl-test-host-register-failed-with-no-promotion-only-arms-the-edges ()
   "A walk that failed with no promotion since it began waits for its edges."
@@ -5825,7 +5829,7 @@ began, which the stubbed `agent-repl-link-live' answers."
     ;; Assert
     (should (null (agent-repl-test-host--calls-to "RegisterWorkspace" live)))
     (should (agent-repl-test-host--logged-p
-             :info "elisp.host.reattach-armed ws=ws-1 trigger=not-yet-adopted edges=link-up,promotion,select"))))
+             :info "elisp.host.reattach-armed ws=ws-1 trigger=stream-lost edges=link-up,promotion,select"))))
 
 (ert-deftest agent-repl-test-host-register-failed-after-a-promotion-with-no-link-awaits-it ()
   "With no live daemon after the promotion, the walk waits for the link-up edge."
