@@ -10,6 +10,7 @@ import "workspace/v1/workspace.proto";
 import "frontend/v1/feed.proto";
 import "agentrepl/v1/rollback.proto";
 import "conversation/v1/user.proto";
+import "conversation/v1/turn.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -21,7 +22,9 @@ message InterruptRequest {
     // A detached bubble's work, by the bubble row's FeedId exactly as the
     // feed served it (the daemon decodes it and issues the task stop).
     frontend.v1.FeedId detached = 3;
-    // EVERY live detached agent at once — the fan-wide stop.
+    // EVERY live detached agent and shell at once — the fan-wide stop. It
+    // stops detached work only, NEVER the turn: the `turn` target stops the
+    // turn (and, with confirm_agents, its detached agents too).
     InterruptAllAgents all_agents = 4;
     // An AGENTIC merge tab's work (pick, pre-prompt, conflicts, fixes,
     // post-prompt), by the tab row's FeedId exactly as the feed served it. It
@@ -74,6 +77,10 @@ message InterruptTurn {
 // EMPTY: the prompt is the latest one a rollback can reach, and files are
 // always kept, so there is nothing for the client to choose.
 message InterruptTurnRollBackUnanswered {}
+// The fan-wide stop of every live detached agent and shell. DELIBERATELY
+// EMPTY: it names the whole live set, so there is nothing to choose. A turn
+// in flight runs on; a stop that finds no detached work while a turn runs
+// answers `turn_still_running`, never `nothing_running`.
 message InterruptAllAgents {}
 
 // THE ARM IS THE OUTCOME.
@@ -95,7 +102,8 @@ message InterruptSuccess {
     InterruptedTurn interrupted_turn = 1;
     // The detached work was stopped.
     InterruptedDetached interrupted_detached = 2;
-    // Nothing was running.
+    // Nothing was running: the workspace has neither a turn in flight nor
+    // any live detached work.
     InterruptNothingRunning nothing_running = 3;
     // Nothing was running, and the workspace's own SYNC merge is in the
     // queue: the interrupt is about that merge, so it raised the merge-queue
@@ -114,6 +122,11 @@ message InterruptSuccess {
     // those revisions, touching nothing else (InterruptTurn): a turn in
     // flight runs on, and the next press stops it.
     InterruptedRevisions interrupted_revisions = 6;
+    // A stop of detached work (the `detached` or `all_agents` target) found
+    // none of it running, while the workspace's turn IS running. The turn was
+    // left untouched, since those targets never stop it; the `turn` target
+    // is the stop that does.
+    InterruptTurnStillRunning turn_still_running = 7;
   }
 }
 // The turn was interrupted.
@@ -166,7 +179,19 @@ message InterruptedRevisions {
   // another arm.
   int64 count = 1;
 }
-// The stop found the session quiet. A turn stop that finds nothing running is
+// A detached-work stop that reached no detached work while the workspace's
+// turn runs on. It exists so that `nothing_running` stays a true statement
+// about the whole workspace: a caller (an agent reading another workspace's
+// answer, or a footer note) that is told "nothing running" concludes the
+// workspace is idle, and a running turn makes that false.
+message InterruptTurnStillRunning {
+  // The turn in flight, as the daemon's prompt queue names it: the session's
+  // open turn, or the accepted turn the status surfaces show while the
+  // session is still coming up. A caller stops it with the `turn` target.
+  conversation.v1.TurnId turn = 1;
+}
+// The stop found the session quiet: no turn in flight and no live detached
+// work. A turn stop that finds nothing running is
 // the SECOND PRESS of the stop key: the turn it would stop already ended (the
 // first press stopped it, or it concluded on its own), so the key moves on to
 // rolling the latest prompt back. A first press whose prompt had nothing after
