@@ -102,6 +102,14 @@ func Seen(h wsm.HeldPrompt) bool {
 	return !promptorigin.DaemonNoticeNamed(h.Origin)
 }
 
+// Drawn reports whether the held section shows the hold as a card the user
+// can release or drop: it stands (no tombstone) and is Seen. The workspace's
+// close and forget are blocked by exactly these, never by a notice drawn
+// nowhere, which the user could neither see nor drop.
+func Drawn(h wsm.HeldPrompt) bool {
+	return h.Tombstone == nil && Seen(h)
+}
+
 // InLine reports whether a hold stands in the line the queue judges, folds
 // and delivers by. It must stand (no tombstone) and be Seen, and it must not
 // be a prompt kept at a cold gate's answer (wsm.HoldColdGateAnswered): only

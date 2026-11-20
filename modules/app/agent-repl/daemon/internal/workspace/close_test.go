@@ -112,6 +112,32 @@ func TestCloseRefusesHeldPrompts(t *testing.T) {
 	}
 }
 
+func TestCloseIsNotBlockedByHoldsTheHeldSectionDoesNotDraw(t *testing.T) {
+	tests := []struct {
+		name string
+		hold wsm.HeldPrompt
+	}{
+		{name: "a workspace notice to the agent", hold: wsm.HeldPrompt{Workspace: "w1", Turn: "t1", Origin: "PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE"}},
+		{name: "a retired prompt", hold: wsm.HeldPrompt{Workspace: "w1", Turn: "t1", Tombstone: &wsm.Tombstone{Kind: "dropped"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: the only hold is one the user can neither see nor drop.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.db.held["w1"] = []wsm.HeldPrompt{tt.hold}
+
+			// Act.
+			err := f.verbs.Close(context.Background(), "w1", wsm.CloseByUser)
+
+			// Assert.
+			if err != nil {
+				t.Fatalf("Close = %v, want the close allowed", err)
+			}
+		})
+	}
+}
+
 func TestCloseIsAllowedWithAStandingColdGate(t *testing.T) {
 	// Arrange: a standing cold gate holds no undelivered user intent, so it
 	// deliberately does NOT block a close.
