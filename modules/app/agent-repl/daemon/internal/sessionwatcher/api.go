@@ -21,6 +21,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/proflabel"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -877,8 +878,11 @@ type OpenTurn struct {
 }
 
 // Start builds and starts one workspace's watcher against its shim client.
-func Start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, session Session, sinks Sinks, log dlog.Logger) (Watcher, error) {
-	return start(ctx, ws, client, session, sinks, log)
+// Every goroutine the watcher runs is labeled by its workspace
+// (internal/proflabel), so a CPU profile splits by workspace.
+func Start(ctx context.Context, ws ids.WorkspaceID, client shimclient.Client, session Session, sinks Sinks, log dlog.Logger) (w Watcher, err error) {
+	proflabel.Do(ctx, ws, func(ctx context.Context) { w, err = start(ctx, ws, client, session, sinks, log) })
+	return w, err
 }
 
 // AdoptedTurn is a turn the shim adopted, as its prompt row announced it.

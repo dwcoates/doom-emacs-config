@@ -13,6 +13,10 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	workspacev1 "agentrepl/proto/workspace/v1"
+
+	"agent-repld/internal/ids"
+	"agent-repld/internal/proflabel"
 )
 
 func TestRepresentativeRPCHandlersRecordRequestBoundaries(t *testing.T) {
@@ -373,6 +377,52 @@ func TestRecordAbandoned(t *testing.T) {
 				if rec.Context[key] != want {
 					t.Fatalf("context[%s] = %v, want %v", key, rec.Context[key], want)
 				}
+			}
+		})
+	}
+}
+
+// THE HANDLER'S WORK IS LABELED BY ITS WORKSPACE (internal/proflabel), in
+// both shared boundaries, so a CPU profile of the daemon splits by workspace;
+// a request for no workspace runs unlabeled.
+func TestTheBoundaryLabelsItsHandlerByTheRequestsWorkspace(t *testing.T) {
+	tests := []struct {
+		name      string
+		workspace *workspacev1.WorkspaceRef
+		want      ids.WorkspaceID
+		labeled   bool
+	}{
+		{name: "a request for a workspace", workspace: ref(), want: testWorkspaceID, labeled: true},
+		{name: "a request for none", workspace: nil, labeled: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			s := &requestLoggingServer{server: h.Server.(*server)}
+			req := connect.NewRequest(&agentreplv1.OpenWorkspaceRequest{Workspace: tt.workspace})
+			req.Header().Set(ForwardedHeader, "1")
+			var unary, stream ids.WorkspaceID
+			var unaryLabeled, streamLabeled bool
+
+			// Act
+			_, unaryErr := serveUnary(s, context.Background(), "OpenWorkspace", req,
+				func(ctx context.Context, _ *connect.Request[agentreplv1.OpenWorkspaceRequest]) (*connect.Response[agentreplv1.OpenWorkspaceResponse], error) {
+					unary, unaryLabeled = proflabel.Of(ctx)
+					return connect.NewResponse(&agentreplv1.OpenWorkspaceResponse{}), nil
+				})
+			streamErr := serveStream(s, context.Background(), "OpenWorkspace", req, nil,
+				func(ctx context.Context, _ *connect.Request[agentreplv1.OpenWorkspaceRequest], _ *connect.ServerStream[agentreplv1.OpenWorkspaceResponse]) error {
+					stream, streamLabeled = proflabel.Of(ctx)
+					return nil
+				})
+
+			// Assert
+			if unaryErr != nil || streamErr != nil {
+				t.Fatalf("errors = %v, %v", unaryErr, streamErr)
+			}
+			if unary != tt.want || unaryLabeled != tt.labeled || stream != tt.want || streamLabeled != tt.labeled {
+				t.Fatalf("unary %q (%v), stream %q (%v); want %q (%v) in both", unary, unaryLabeled, stream, streamLabeled, tt.want, tt.labeled)
 			}
 		})
 	}

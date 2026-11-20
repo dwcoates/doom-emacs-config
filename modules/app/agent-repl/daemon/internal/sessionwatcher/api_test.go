@@ -428,3 +428,19 @@ func TestEveryViewFindsASubagentNewToTheSetThroughAgentsNewSince(t *testing.T) {
 		t.Fatalf("AgentsNewSince is called from %v, want %v", sites, want)
 	}
 }
+
+// A WATCHER'S WORK IS LABELED BY ITS WORKSPACE (internal/proflabel): the
+// session watch it opens runs on its goroutines, under the label Start set.
+func TestStartLabelsTheWatchersWorkByItsWorkspace(t *testing.T) {
+	// Arrange / Act
+	h := startHarness(t, Session{}, nil)
+	h.session = h.client.nextSessionOpen(t)
+
+	// Assert
+	h.client.mu.Lock()
+	label, labeled := h.client.sessionLabel, h.client.sessionLabeled
+	h.client.mu.Unlock()
+	if !labeled || label != "ws-1" {
+		t.Fatalf("the session watch ran labeled %q (%v), want the watcher's workspace ws-1", label, labeled)
+	}
+}

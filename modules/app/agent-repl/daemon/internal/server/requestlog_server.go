@@ -11,6 +11,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/proflabel"
 )
 
 // requestLoggingServer owns the transport boundary around every generated RPC
@@ -66,7 +67,10 @@ func serveUnary[Req, Resp any](
 	}
 	phase = "handler"
 	defer boundary.enter()(&err)
-	return handle(ctx, req)
+	// THE HANDLER'S WORK IS LABELED BY ITS WORKSPACE (internal/proflabel), so
+	// a CPU profile splits by workspace.
+	proflabel.Do(ctx, ids.WorkspaceID(boundary.workspace), func(ctx context.Context) { resp, err = handle(ctx, req) })
+	return resp, err
 }
 
 // recordAbandoned records, at INFO, a unary rpc whose caller left before it
@@ -143,7 +147,8 @@ func serveStream[Req, Resp any](
 			ctx = withAcceptHook(ctx, accepted)
 		}
 	}
-	return handle(ctx, req, stream)
+	proflabel.Do(ctx, ids.WorkspaceID(boundary.workspace), func(ctx context.Context) { err = handle(ctx, req, stream) })
+	return err
 }
 
 func (s *requestLoggingServer) SubmitPrompt(
