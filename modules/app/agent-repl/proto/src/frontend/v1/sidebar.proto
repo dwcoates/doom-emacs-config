@@ -926,15 +926,16 @@ message RosterRepositoryView {
   // One section per repository, in the repositories' stored order
   // (agentrepl.v1.ArrangeSidebar). Clients do not re-sort.
   repeated RosterRepoSection sections = 1;
-  // How many rows the open-workspaces section lists (RosterOpenCount).
-  // Always set.
+  // How many rows the open-workspaces section lists, and how many of them no
+  // fold hides (RosterOpenCount). Always set.
   RosterOpenCount open_count = 2;
 }
 
 // The open-workspaces section: the heading over the repository sections,
 // drawn like the hidden and recently-merged sections' (fold toggle and label),
 // with RosterRepositoryView.open_count beside the label whether the section
-// is folded or not (owner request, 2026-10-13).
+// is folded or not (owner request, 2026-10-13), drawn
+// "(unfolded/workspaces)" (owner request, 2026-11-19).
 message RosterOpenSection {
   RosterLabel label = 1;
   // WHETHER THE SECTION IS FOLDED. DAEMON-HELD (UpdateSidebarView), so every
@@ -964,13 +965,34 @@ message RosterOpenSectionExpanded {}
 // A collapsed open-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterOpenSectionCollapsed {}
 
-// How many rows the open-workspaces section lists: every open row of every
-// repository section, nested family rows included. It is
-// the sum of the repository sections' counts
-// (RosterSectionCount), so it is the number a person arrives at by counting
-// every entry, a folded section's included.
+// AN OPEN-SECTION COUNT: how many rows a part of the Open section lists, and
+// how many of them are not folded. It is the count of the Open section's
+// heading (RosterRepositoryView.open_count), of every repository section's
+// header and of every subsection's (RosterOpenHeader). Every count in the
+// Open section is drawn "(unfolded/workspaces)" (owner request, 2026-11-19).
+//
+// The Open heading's is the sum of the repository sections' counts, so it is
+// the number a person arrives at by counting every entry, a folded section's
+// included.
 message RosterOpenCount {
+  // Every open row the part lists, nested family rows included, folded or
+  // not.
   uint32 workspaces = 1;
+  // The rows among `workspaces` whose tab is numbered
+  // (RosterOpenRowTabNumbered): no fold hides them (their repository's,
+  // their subsection's or an ancestor's `children_fold`), or one does and
+  // they are surfaced (RosterOpenRow.surfaced). The Open section's own fold
+  // folds sidebar rows only, never a tab, so it moves no count. Never more
+  // than `workspaces`.
+  uint32 unfolded = 2;
+}
+
+// A header inside the Open section, as a repository section and a subsection
+// draw it: the label and the Open-section count beside it.
+message RosterOpenHeader {
+  RosterLabel label = 1;
+  // The rows the part lists and how many of them are not folded. Always set.
+  RosterOpenCount count = 2;
 }
 
 // One repository's section: identity, header, rows.
@@ -978,8 +1000,9 @@ message RosterRepoSection {
   // The repository's stable identity — the fold key and the join key; a
   // section can be relabelled without becoming a different section.
   RosterRepoKey key = 1;
-  // The header box: label and fold toggle.
-  RosterSectionHeader header = 2;
+  // The header box: label and the count of every entry's rows. Wire
+  // compatible with the RosterSectionHeader it was until 2026-11-19.
+  RosterOpenHeader header = 2;
   // `rows` (field 3) is RETIRED and reserved: rows of every state shared one
   // type. `open_rows` (field 8) and `subsections` (field 7) are RETIRED and
   // reserved: they carried the unsectioned rows and the subsections as two
@@ -1534,8 +1557,8 @@ message RosterSubsection {
     RosterSubsectionNamed named = 7;
   }
   // The header box: the user's name for it, and the count of the rows it
-  // shows (RosterSectionCount, counted as a repository section's is).
-  RosterSectionHeader header = 2;
+  // lists (RosterOpenCount, counted as a repository section's is).
+  RosterOpenHeader header = 2;
   // `rows` (field 3) is RETIRED and reserved, as RosterRepoSection's is.
   reserved 3;
   reserved "rows";
@@ -1972,23 +1995,25 @@ message RosterHiddenSectionSized {
   uint32 lines = 1;
 }
 
-// A section header as repos and the merged section draw it.
-// The fold it toggles is the SECTION's (RosterRepoSection.fold,
-// RosterMergedSection.fold), never an element of the header.
+// A section header as the sections outside the Open section draw it (the
+// Backlog, Merge Queue and Recently Merged sections). The fold it toggles is
+// the SECTION's (RosterHiddenSection.fold, RosterMergedSection.fold), never an
+// element of the header. A header inside the Open section is a
+// RosterOpenHeader.
 message RosterSectionHeader {
   RosterLabel label = 1;
   // How many workspaces the section SHOWS UNFOLDED, drawn as "(N)" beside the
   // label while the section is FOLDED (owner request, 2026-10-08: the folded
   // count equals the rows the unfolded section shows). The client shows or
-  // hides this resolved value by the section's fold; it never counts a
-  // repository's rows itself. Set on every header but the Merge Queue
+  // hides this resolved value by the section's fold; it never counts the
+  // section's rows itself. Set on every header but the Merge Queue
   // section's, which carries none (RosterMergedSection.header).
   RosterSectionCount count = 2;
 }
 
-// A section's workspace count. A repository section's is every open row of
-// its rows regions, nested family rows included. A merge queue group's is the
-// merges in its line. Drawn smaller than the label, in the label's own color.
+// A section's workspace count outside the Open section: the Backlog's is
+// every hidden row, nested family rows included. Drawn smaller than the
+// label, in the label's own color.
 message RosterSectionCount {
   uint32 workspaces = 1;
 }

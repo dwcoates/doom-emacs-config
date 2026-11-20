@@ -10,6 +10,7 @@ import {
   RosterLabelSchema,
   RosterRepoDivergenceSchema,
   RosterSectionHeaderSchema,
+  RosterOpenHeaderSchema,
   RosterRepoSectionSchema,
   WorkspaceRosterSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
@@ -498,7 +499,7 @@ describe("drawHeadedSection", () => {
 
   it("draws the header's label and folded count", () => {
     const section = draw(wire({ rows: [row({ id: "ws-1" })] }), sidebarContext(), "p", SHAPE);
-    expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual(["Head", "(1)"]);
+    expect([section.querySelector(".sb-label")?.textContent, section.querySelector(".sb-count")?.textContent]).toEqual(["Head", "(1/1)"]);
   });
 
 
@@ -574,7 +575,7 @@ describe("drawHeadedSection", () => {
 
   it("still refuses a malformed header in a left-out box", () => {
     const bare = wire();
-    bare.header = create(RosterSectionHeaderSchema, { label: { text: "Head" } });
+    bare.header = create(RosterOpenHeaderSchema, { label: { text: "Head" } });
     expect(() =>
       draw(bare, sidebarContext(), "p", { ...SHAPE, leftOut: { when: () => true, attribute: "data-test-empty" } }),
     ).toThrow(MalformedView);
@@ -866,12 +867,12 @@ describe("a section's folded count", () => {
   const countOf = (drawn: HTMLElement, selector: string): HTMLElement =>
     pane(drawn).querySelector(`${selector} .sb-count`) as HTMLElement;
 
-  it("draws the daemon's count as (N) in a repository header", () => {
+  it("draws the daemon's count as (U/N) in a repository header", () => {
     const drawn = drawWorkspaceRoster(
-      roster({ repos: [repoSection({ id: "repo-1", count: 7, collapsed: true })] }),
+      roster({ repos: [repoSection({ id: "repo-1", count: 7, unfolded: 0, collapsed: true })] }),
       sidebarContext(),
     );
-    expect(countOf(drawn, ".repo-section").textContent).toBe("(7)");
+    expect(countOf(drawn, ".repo-section").textContent).toBe("(0/7)");
   });
 
   it("draws the count the daemon resolved, not the rows it can see", () => {
@@ -879,7 +880,7 @@ describe("a section's folded count", () => {
       roster({ repos: [repoSection({ id: "repo-1", rows: [], count: 4, collapsed: true })] }),
       sidebarContext(),
     );
-    expect(countOf(drawn, ".repo-section").textContent).toBe("(4)");
+    expect(countOf(drawn, ".repo-section").textContent).toBe("(4/4)");
   });
 
   it("places the count between the label and the add control", () => {
@@ -1781,7 +1782,12 @@ describe("the open workspaces section", () => {
 
   it("draws the daemon's count beside the label", () => {
     const drawn = drawWorkspaceRoster(MANY(), sidebarContext());
-    expect(openCount(drawn).textContent).toBe("(3)");
+    expect(openCount(drawn).textContent).toBe("(3/3)");
+  });
+
+  it("draws the daemon's unfolded rows over every row", () => {
+    const drawn = drawWorkspaceRoster(roster({ repos: [repoSection({ id: "repo-1" })], openCount: 3, openUnfolded: 1 }), sidebarContext());
+    expect(openCount(drawn).textContent).toBe("(1/3)");
   });
 
   it.each([false, true])("shows its count with the section folded=%s", (collapsed) => {
@@ -2369,7 +2375,19 @@ describe("the roster drawer: a push redraws only what it changed", () => {
     const drawn = drawer.draw(roster({ repos: [ticking("a")], openCount: 2 }));
 
     // Assert
-    expect([repoElement(drawn, "a"), drawn.querySelector(`.${OPEN_COUNT_CLASS}`)?.textContent]).toEqual([before, "(2)"]);
+    expect([repoElement(drawn, "a"), drawn.querySelector(`.${OPEN_COUNT_CLASS}`)?.textContent]).toEqual([before, "(2/2)"]);
+  });
+
+  it("repaints the open section's heading when only its unfolded count changes", () => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const before = drawer.draw(roster({ repos: [ticking("a")], openCount: 2, openUnfolded: 2 })).querySelector(`.${OPEN_SECTION_CLASS}`);
+
+    // Act
+    const drawn = drawer.draw(roster({ repos: [ticking("a")], openCount: 2, openUnfolded: 1 }));
+
+    // Assert
+    expect([drawn.querySelector(`.${OPEN_SECTION_CLASS}`) === before, drawn.querySelector(`.${OPEN_COUNT_CLASS}`)?.textContent]).toEqual([true, "(1/2)"]);
   });
 
   it("keeps the open section's own box, and so its scroll position, when only its count changes", () => {

@@ -30,3 +30,6 @@ func SetOnQueued(r Resolver, hook func(depth int)) { r.(*resolver).onQueued = ho
 
 // OwnMergeDrawn exposes ownMergeDrawn to the external test package.
 var OwnMergeDrawn = ownMergeDrawn
+
+// OpenCount exposes openCount, the one count every Open-section count is.
+var OpenCount = openCount

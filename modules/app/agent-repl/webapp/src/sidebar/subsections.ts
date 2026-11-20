@@ -64,6 +64,7 @@ import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawRosterSectionFold, foldOnClick, sectionFold, trackDaemonFold } from "./section-fold.js";
 import { pressToDrag, type DragSpec } from "../drag.js";
 import { REPOSITORY_BLOCK_ATTRIBUTE, REPOSITORY_BLOCK_CLASS, REPOSITORY_DIVIDER_CLASS } from "./row.js";
+import { drawRosterOpenCount, openCountText } from "./open-count.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
@@ -162,7 +163,7 @@ export function drawRosterSubsection(
   const bucket = subsectionBucket(u, path);
   const header = requireMessage(u.header, `${path}.header`);
   const name = requireMessage(header.label, `${path}.header.label`).text;
-  const count = requireMessage(header.count, `${path}.header.count`).workspaces;
+  const count = openCountText(drawRosterOpenCount(requireMessage(header.count, `${path}.header.count`), `${path}.header.count`));
   const element = document.createElement("div");
   element.className = SUBSECTION_CLASS;
   stampBucket(element, bucket);
@@ -174,7 +175,7 @@ export function drawRosterSubsection(
   label.textContent = name;
   const shown = document.createElement("span");
   shown.className = "sb-count";
-  shown.textContent = `(${count})`;
+  shown.textContent = count;
   if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
   const id = bucket.id;
   const foldKey = subsectionFoldKey(id);

@@ -2,6 +2,7 @@ package sidebar_test
 
 import (
 	"agentrepl/protohelpers/rosterwalk"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -996,6 +997,165 @@ func TestTheOpenCountIsTheSumOfTheSectionCounts(t *testing.T) {
 	if got := view.GetOpenCount().GetWorkspaces(); got != sum || got != 2 {
 		t.Fatalf("open count = %d, want the sections' sum %d (2)", got, sum)
 	}
+}
+
+func TestTheOpenCountsUnfoldedIsTheSumOfTheSectionsUnfolded(t *testing.T) {
+	// Arrange: a folded repository section's rows are listed but folded.
+	r, _ := newResolver(t)
+	reg := twoRepoRegistry(workspace("w1", "one"), func() wsm.Workspace {
+		ws := workspace("w2", "two")
+		ws.Repo = otherRepo.ID
+		return ws
+	}())
+	reg.Repositories[1].Folded = true
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	view := latest(t, r).GetRepository()
+	var sum uint32
+	for _, section := range view.GetSections() {
+		sum += section.GetHeader().GetCount().GetUnfolded()
+	}
+	if got := view.GetOpenCount().GetUnfolded(); got != sum || got != 1 {
+		t.Fatalf("open unfolded = %d, want the sections' sum %d (1)", got, sum)
+	}
+}
+
+func TestTheOpenSectionsOwnFoldMovesNoCount(t *testing.T) {
+	// Arrange: the Open section folds sidebar rows only, never a tab.
+	r, _ := newResolver(t)
+	reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+	reg.View.OpenFolded = true
+
+	// Act.
+	r.SetRegistry(reg)
+
+	// Assert.
+	count := latest(t, r).GetRepository().GetOpenCount()
+	if count.GetWorkspaces() != 2 || count.GetUnfolded() != 2 {
+		t.Fatalf("open count = %v, want 2 unfolded of 2", count)
+	}
+}
+
+func TestAnOpenHeadersUnfoldedCountsTheRowsNoFoldHides(t *testing.T) {
+	sub := subsection("sub", "sub", 1)
+	child := func(id, name string, parent ids.WorkspaceID) wsm.Workspace {
+		ws := workspace(id, name)
+		ws.Parent = &parent
+		return ws
+	}
+	tests := []struct {
+		name string
+		reg  func() sidebar.Registry
+		// wantRepo and wantSub are "unfolded/workspaces"; wantSub is empty
+		// for a section with no subsection.
+		wantRepo string
+		wantSub  string
+	}{
+		{
+			name:     "no fold",
+			reg:      func() sidebar.Registry { return registry(workspace("w1", "one"), workspace("w2", "two")) },
+			wantRepo: "2/2",
+		},
+		{
+			name: "a folded repository",
+			reg: func() sidebar.Registry {
+				reg := registry(workspace("w1", "one"), workspace("w2", "two"))
+				reg.Repositories[0].Folded = true
+				return reg
+			},
+			wantRepo: "0/2",
+		},
+		{
+			name: "a folded subsection",
+			reg: func() sidebar.Registry {
+				folded := sub
+				folded.Folded = true
+				reg := registry(in(workspace("w1", "one"), folded), workspace("w2", "two"))
+				reg.Subsections = []wsm.Subsection{folded}
+				return reg
+			},
+			wantRepo: "1/2",
+			wantSub:  "0/1",
+		},
+		{
+			name: "an expanded subsection",
+			reg: func() sidebar.Registry {
+				reg := registry(in(workspace("w1", "one"), sub), workspace("w2", "two"))
+				reg.Subsections = []wsm.Subsection{sub}
+				return reg
+			},
+			wantRepo: "2/2",
+			wantSub:  "1/1",
+		},
+		{
+			name: "a parent's folded children",
+			reg: func() sidebar.Registry {
+				parent := workspace("w-p", "parent")
+				parent.ChildrenFolded = true
+				return registry(parent, child("w-a", "a", parent.ID), child("w-b", "b", parent.ID))
+			},
+			wantRepo: "1/3",
+		},
+		{
+			name: "a surfaced child of a folded parent",
+			reg: func() sidebar.Registry {
+				parent := workspace("w-p", "parent")
+				parent.ChildrenFolded = true
+				return surfacedIn(registry(parent, child("w-a", "a", parent.ID), child("w-b", "b", parent.ID)), "w-a")
+			},
+			wantRepo: "2/3",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			r, _ := newResolver(t)
+
+			// Act.
+			r.SetRegistry(tt.reg())
+
+			// Assert.
+			section := latest(t, r).GetRepository().GetSections()[0]
+			if got := countText(section.GetHeader().GetCount()); got != tt.wantRepo {
+				t.Errorf("repository count = %s, want %s", got, tt.wantRepo)
+			}
+			subs := rosterwalk.Subsections(section)
+			if tt.wantSub == "" {
+				if len(subs) != 0 {
+					t.Fatalf("subsections = %d, want none", len(subs))
+				}
+				return
+			}
+			if len(subs) != 1 {
+				t.Fatalf("subsections = %d, want 1", len(subs))
+			}
+			if got := countText(subs[0].GetHeader().GetCount()); got != tt.wantSub {
+				t.Errorf("subsection count = %s, want %s", got, tt.wantSub)
+			}
+		})
+	}
+}
+
+// countText is COUNT as "unfolded/workspaces".
+func countText(count *frontendv1.RosterOpenCount) string {
+	return fmt.Sprintf("%d/%d", count.GetUnfolded(), count.GetWorkspaces())
+}
+
+func TestOpenCountPanicsOnARowWithNoTabArm(t *testing.T) {
+	// Arrange: a row the resolver never numbered.
+	row := &frontendv1.RosterOpenRow{Tab: &frontendv1.RosterOpenRowTab{}}
+
+	// Act.
+	defer func() {
+		// Assert.
+		if recover() == nil {
+			t.Fatal("openCount counted a row with no tab arm, want a panic")
+		}
+	}()
+	sidebar.OpenCount([]*frontendv1.RosterOpenRow{row})
 }
 
 // collapseArms is SECTION's own collapse arm, then each subsection's, as

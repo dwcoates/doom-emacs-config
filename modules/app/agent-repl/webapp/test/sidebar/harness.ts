@@ -330,6 +330,8 @@ export function repoSection(init: {
   collapsed?: boolean;
   /** The daemon-resolved folded count; the row count unless said. */
   count?: number;
+  /** The daemon-resolved count of rows no fold hides; the count unless said. */
+  unfolded?: number;
   /** The label hover's measurement; pending unless said. */
   divergence?: MessageInitShape<typeof RosterRepoSectionSchema>["divergence"];
   /** Whether the expanded section holds the current workspace; not unless said. */
@@ -338,7 +340,16 @@ export function repoSection(init: {
    * The repository's subsections, in order; none unless said. Each stands
    * just before the row BEFORE names, or after every row unless said.
    */
-  subsections?: Array<{ id: string; label?: string; rows?: RosterRow[]; collapsed?: boolean; holdsCurrent?: boolean; before?: string }>;
+  subsections?: Array<{
+    id: string;
+    label?: string;
+    rows?: RosterRow[];
+    collapsed?: boolean;
+    holdsCurrent?: boolean;
+    before?: string;
+    /** The daemon-resolved count of rows no fold hides; every row unless said. */
+    unfolded?: number;
+  }>;
 }): RosterRepoSection {
   const rows = init.rows ?? [];
   const entries = rowEntries(rows);
@@ -348,7 +359,10 @@ export function repoSection(init: {
         case: "subsection",
         value: {
           kind: { case: "named", value: { key: { subsectionId: sub.id } } },
-          header: { label: { text: sub.label ?? sub.id }, count: { workspaces: sub.rows?.length ?? 0 } },
+          header: {
+            label: { text: sub.label ?? sub.id },
+            count: { workspaces: sub.rows?.length ?? 0, unfolded: sub.unfolded ?? sub.rows?.length ?? 0 },
+          },
           openRows: { rows: (sub.rows ?? []).map(openRow) },
           fold: sectionFold(sub.collapsed, sub.holdsCurrent),
         },
@@ -360,7 +374,10 @@ export function repoSection(init: {
   }
   return create(RosterRepoSectionSchema, {
     key: { repository: { id: init.id, dir: `/repo/${init.id}` } },
-    header: { label: { text: init.label ?? init.id }, count: { workspaces: init.count ?? rows.length } },
+    header: {
+      label: { text: init.label ?? init.id },
+      count: { workspaces: init.count ?? rows.length, unfolded: init.unfolded ?? init.count ?? rows.length },
+    },
     fold: sectionFold(init.collapsed, init.holdsCurrent),
     divergence: init.divergence ?? { state: { case: "pending", value: {} } },
     entries,
@@ -503,6 +520,8 @@ export function roster(init: {
   open?: RosterOpenSection;
   /** The daemon-resolved open count; unless said, the sum of the sections' counts. */
   openCount?: number;
+  /** The daemon-resolved open count's unfolded rows; unless said, the sum of the sections'. */
+  openUnfolded?: number;
   current?: string;
   /** The daemon-resolved agent-repl version; omitted = unset. */
   version?: string;
@@ -518,12 +537,13 @@ export function roster(init: {
 } = {}): WorkspaceRoster {
   const repos = init.repos ?? [];
   const counted = repos.reduce((sum, section) => sum + (section.header?.count?.workspaces ?? 0), 0);
+  const unfolded = repos.reduce((sum, section) => sum + (section.header?.count?.unfolded ?? 0), 0);
   numberTabs(
     repos.map(sectionTabRegions),
     init.tabs?.filter((tab) => (tab.drawn ?? "drawn") === "drawn").map((tab) => tab.id),
   );
   return create(WorkspaceRosterSchema, {
-    repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted } },
+    repository: { sections: repos, openCount: { workspaces: init.openCount ?? counted, unfolded: init.openUnfolded ?? init.openCount ?? unfolded } },
     open: init.open ?? openSection(),
     recentlyMerged: init.merged ?? mergedSection(),
     mergeQueue: init.mergeQueue ?? mergeQueueBand(),
