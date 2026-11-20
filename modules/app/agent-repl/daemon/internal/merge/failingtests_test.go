@@ -387,8 +387,37 @@ func TestRenderListsEachGroupsCommandAndTests(t *testing.T) {
 	text := found.render("/logs/x.log")
 
 	// Assert.
-	if !strings.Contains(text, "## daemon\n\nrun: "+TestRunCommand+" -go '/p=TestA,TestB'\n- TestA\n- TestB\n") {
+	if !strings.Contains(text, "suite daemon:\n\nrun: "+TestRunCommand+" -go '/p=TestA,TestB'\n- TestA\n- TestB\n") {
 		t.Fatalf("text = %q, want the group's command then its tests", text)
+	}
+}
+
+func TestRenderWritesNoMarkdownHeading(t *testing.T) {
+	flags := func(names []string) []string { return []string{selectionFlag("go", "/p", names)} }
+	tests := []struct {
+		name  string
+		found failingTests
+	}{
+		{name: "a run with a failing group", found: failingTests{suites: []*failingSuite{{name: "daemon", groups: []*failingGroup{{flags: flags, names: []string{"TestA"}, shown: []string{"TestA"}}}}}}},
+		{name: "a run with a unit whose tests could not be named", found: failingTests{suites: []*failingSuite{{name: "daemon", unnamed: []string{"daemon:vet"}}}}},
+		{name: "a run with no failure attributed to a suite", found: failingTests{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act.
+			text := tt.found.render("/logs/x.log")
+
+			// Assert: the brief carries the text inline, and the feed draws
+			// a line that opens with `#` as a heading.
+			for _, line := range strings.Split(text, "\n") {
+				if strings.HasPrefix(strings.TrimSpace(line), "#") {
+					t.Fatalf("line %q opens with #, want plain text; whole text %q", line, text)
+				}
+			}
+			if !strings.HasPrefix(text, "The failing tests of the merge queue's last test gate run.\nThe whole run is archived at /logs/x.log.\n") {
+				t.Fatalf("text = %q, want it to open by naming the run and its archive", text)
+			}
+		})
 	}
 }
 
