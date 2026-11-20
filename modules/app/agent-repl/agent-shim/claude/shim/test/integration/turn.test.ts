@@ -2300,49 +2300,54 @@ describe("RollBackSession", () => {
   const rollBack = rollBackSessionRequestFor;
 
   test("the vendor files each prompt under its turn id's derived uuid", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
 
-    await wholeTurn(shim, "t1", "!md");
+    await wholeTurn(shim, t1, "!md");
 
-    expect(userPrompts(readTranscript(shim.dirs, started.vendorSessionId)).map((record) => record.uuid)).toEqual([
-      promptVendorUuid("t1"),
+    expect(userPrompts(mine.transcript(started.vendorSessionId)).map((record) => record.uuid)).toEqual([
+      promptVendorUuid(t1),
     ]);
   });
 
   test("a landed rollback resumes the conversation at the dropped prompt's parent", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    await wholeTurn(shim, "t1", "!md");
-    await wholeTurn(shim, "t2", "!md");
+    // THE "rollback" GROUP: a landed rollback rewinds the session's own
+    // conversation, which no case on the canonical session expects.
+    const { shim, started } = await groupSession("rollback");
+    const [t1, t2, t3Turn] = [uniqueTurn(), uniqueTurn(), uniqueTurn()];
+    await wholeTurn(shim, t1, "!md");
+    await wholeTurn(shim, t2, "!md");
     const forkPoint = readTranscript(shim.dirs, started.vendorSessionId).find(
-      (record) => record.uuid === promptVendorUuid("t2"),
+      (record) => record.uuid === promptVendorUuid(t2),
     )?.parentUuid;
 
-    const response = await shim.clients.h1.rollBackSession(rollBack("t2", ["t2"], "keep"));
-    await wholeTurn(shim, "t3", "!md");
+    const response = await shim.clients.h1.rollBackSession(rollBack(t2, [t2], "keep"));
+    await wholeTurn(shim, t3Turn, "!md");
 
-    const t3 = readTranscript(shim.dirs, started.vendorSessionId).find((record) => record.uuid === promptVendorUuid("t3"));
+    const t3 = readTranscript(shim.dirs, started.vendorSessionId).find((record) => record.uuid === promptVendorUuid(t3Turn));
     expect({ result: response.result.case, parent: t3?.parentUuid }).toEqual({ result: "success", parent: forkPoint });
   });
 
   test("a prompt the caller did not name after the cut refuses unseen_prompt", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await wholeTurn(shim, "t1", "!md");
-    await wholeTurn(shim, "t2", "!md");
-    await wholeTurn(shim, "t3", "!md");
+    // On the "rollback" group; refused, so the session is left as it was.
+    const { shim } = await groupSession("rollback");
+    const [t1, t2, t3] = [uniqueTurn(), uniqueTurn(), uniqueTurn()];
+    await wholeTurn(shim, t1, "!md");
+    await wholeTurn(shim, t2, "!md");
+    await wholeTurn(shim, t3, "!md");
 
-    const response = await shim.clients.h1.rollBackSession(rollBack("t2", ["t2"], "keep"));
+    const response = await shim.clients.h1.rollBackSession(rollBack(t2, [t2], "keep"));
 
     expect(
       response.result.case === "failure" && response.result.value.cause.case === "unseenPrompt"
         ? response.result.value.cause.value.vendorPromptUuid
         : response.result.case,
-    ).toBe(promptVendorUuid("t3"));
+    ).toBe(promptVendorUuid(t3));
   });
 
   test("a shim restarted before the next prompt resumes at the rollback's cut", async () => {
+    // ITS OWN SHIMS: the subject is a resume of a killed process's cut.
     const first = await spawnShim();
     const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
     await wholeTurn(first, "t1", "!md");
@@ -2363,6 +2368,7 @@ describe("RollBackSession", () => {
   });
 
   test("files the vendor cannot restore refuse files_not_restorable", async () => {
+    // ITS OWN SHIM: the only case needing a vendor that refuses to rewind files.
     const shim = await spawnShim({ env: { AGENT_REPL_FAKE_REFUSE: "rewind_files" } });
     await shim.clients.h1.startSession(freshSession());
     await wholeTurn(shim, "t1", "!md");
