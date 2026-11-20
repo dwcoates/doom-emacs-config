@@ -455,20 +455,29 @@ func (r *run) rebaseOnce(ctx context.Context, tip, targetBranch string) (*outcom
 	r.rebasing.Lines = append(r.rebasing.Lines, replaying)
 	r.rebasing.reachCommit(0, r.o.nowMS())
 	r.publishReplay()
-	// THE REBASE'S RECORD NAMES THE TIP, THE COMMITS AND THE BRANCH'S HEAD
-	// BEFORE IT: a resume reads where git stopped against exactly these.
-	if err := r.checkpoint(ctx, TabRebasing, func(d *progressDoc) {
-		d.TargetBranch, d.Tip, d.BranchHead = targetBranch, tip, head
-		d.Commits, d.Replayed = toCommitDocs(commits), 0
-		d.Turn, d.ConflictFiles, d.FixAttempt, d.FailingSuites, d.Head, d.MergeCommit = "", nil, 0, nil, "", ""
-		d.FailingArchive, d.FailingTail = "", ""
-	}); err != nil {
+	if err := r.recordRebase(ctx, targetBranch, tip, head, commits); err != nil {
 		return nil, err
 	}
 	r.o.log(ctx, r.ws).Info(op, "rebasing the branch onto the target's tip", dlog.Context{
 		"workspace": string(r.ws), "branch": branch, "worktree": dir, "onto": tip, "commits": len(commits)})
 	step, err := r.git.StartRebase(ctx, dir, tip, shasOf(commits))
 	return r.replayLoop(ctx, p, step, err, tip, targetBranch)
+}
+
+// recordRebase writes the record of a rebase of COMMITS onto TIP, the
+// target TARGETBRANCH's tip, from the branch's HEAD, before the rebase's
+// first command: every rebase's one record, whose every earlier step's facts
+// it clears.
+//
+// THE REBASE'S RECORD NAMES THE TIP, THE COMMITS AND THE BRANCH'S HEAD
+// BEFORE IT: a resume reads where git stopped against exactly these.
+func (r *run) recordRebase(ctx context.Context, targetBranch, tip, head string, commits []gitclient.Commit) error {
+	return r.checkpoint(ctx, TabRebasing, func(d *progressDoc) {
+		d.TargetBranch, d.Tip, d.BranchHead = targetBranch, tip, head
+		d.Commits, d.Replayed = toCommitDocs(commits), 0
+		d.Turn, d.ConflictFiles, d.FixAttempt, d.FailingSuites, d.Head, d.MergeCommit = "", nil, 0, nil, "", ""
+		d.FailingArchive, d.FailingTail = "", ""
+	})
 }
 
 // shasOf answers the shas of commits, in order: what a rebase replays.
