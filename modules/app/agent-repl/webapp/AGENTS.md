@@ -707,13 +707,15 @@ hand any more:
   clicked ENTRY still, wherever its top sits: the innermost feed row holding
   the click (`entryOf`), not merely its root row, since a root row can be a
   group (a run of final responses) whose other entries change height on the
-  click, and its root row once a redraw takes the entry away. THE ONE EXCEPTION (owner
-  requests, 2026-10-17): the reader's fold of a ROOT bubble whose row is the
-  feed's last row that draws a box parks the feed at its tail
-  (`TailFollow.lastBubbleFolded`): under `lastBubbleExpanded` once the open
-  succeeds, so the sub-feed opening below the reader is followed into view,
-  and under `lastBubbleCollapsed` once the collapse has hidden the sub-feed,
-  so the space it left below is filled. THE BOX'S OWN CLAMP CANNOT
+  click, and its root row once a redraw takes the entry away. The fold of the
+  feed's LAST bubble is no exception (owner ruling, 2026-11-20, superseding
+  the `lastBubbleExpanded`/`lastBubbleCollapsed` parks of 2026-10-17) save
+  for ONE exception of the same ruling: a click in the feed's last drawn row
+  WHILE THE FOLLOW STANDS takes no hold, and the follow stands
+  (`TailFollow.followsLastRowClick`, INFO `scroll.last-row-click-followed`),
+  so an expansion is followed down to the new bottom and a collapse leaves
+  no blank tail. Off the tail, the last bubble's click holds the view as any
+  click does. THE BOX'S OWN CLAMP CANNOT
   MOVE A HELD VIEW: content shrinking below it, or the box growing under it
   (the gate dock hiding), would make the box clamp `scrollTop` upward, so the
   scroll floor (`ScrollFloor`, `scrollFloor`) holds the box's scrollable

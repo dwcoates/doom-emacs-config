@@ -122,10 +122,6 @@ export function atTail(box: ScrollPosition): boolean {
  *   path (`sidebar/selection-edge.ts`); the feed parks at its tail and
  *   follows (owner ruling, 2026-10-02). Returning to Emacs from another
  *   application is not a switch and moves nothing.
- * - `lastBubbleExpanded`, `lastBubbleCollapsed`: the reader's click expanded
- *   or collapsed the bubble of the feed's LAST root row; the feed parks at its
- *   tail and follows, so the opening sub-feed is brought into view, or the
- *   space the closing one leaves is filled (`TailFollow.lastBubbleFolded`).
  * - `tailJumped`: the reader pressed the feed's jump-to-tail control
  *   (`feed/jump-to-tail.ts`, shown while the reader is more than a page above
  *   the tail); the feed parks at its tail and follows, and the reader has
@@ -168,8 +164,6 @@ export const SCROLL_CAUSES = [
   "replaceRestore",
   "rolledBack",
   "workspaceSelected",
-  "lastBubbleExpanded",
-  "lastBubbleCollapsed",
   "tailJumped",
   "prependCompensation",
   "latestVisible",
@@ -181,25 +175,33 @@ export const SCROLL_CAUSES = [
 export type ScrollCause = (typeof SCROLL_CAUSES)[number];
 
 /**
- * The causes that latch the follow. All but `latestVisible` also land the feed
- * at its tail; `latestVisible` latches where the view already stands, which
- * is at the tail.
+ * THE CAUSES THAT LAND THE FEED AT ITS TAIL, whatever the position: explicit
+ * acts, not auto-scroll. Everything else only maintains a tail the view
+ * already stands at (owner rulings, 2026-11-20, which retired the last
+ * bubble's fold and the dismissed selection from this set).
  */
-type ParkCause =
-  | "promptSent"
-  | "promptHeld"
-  | "initialPlacement"
-  | "replaceRestore"
-  | "rolledBack"
-  | "workspaceSelected"
-  | "lastBubbleExpanded"
-  | "lastBubbleCollapsed"
-  | "tailJumped"
-  | "latestVisible";
+export const TAIL_LANDING_CAUSES = [
+  "promptSent",
+  "promptHeld",
+  "workspaceSelected",
+  "rolledBack",
+  "tailJumped",
+  "initialPlacement",
+  "replaceRestore",
+] as const satisfies readonly ScrollCause[];
+
+/** A cause that lands the feed at its tail (`TAIL_LANDING_CAUSES`). */
+type TailLanding = (typeof TAIL_LANDING_CAUSES)[number];
+
+/**
+ * The causes that latch the follow: every tail landing, and `latestVisible`,
+ * which latches where the view already stands, at the tail.
+ */
+type ParkCause = TailLanding | "latestVisible";
 
 /** A named cause that supersedes the reader's click hold (`supersedeClick`). */
 type ClickSupersede =
-  | Exclude<ParkCause, "latestVisible">
+  | TailLanding
   | "selectionMoved"
   | "detachedWorkSelected"
   | "entryJumped"
@@ -769,9 +771,52 @@ export class TailFollow {
    * This is the CLICK, not the expansion. A jump that expands an entry
    * centers it (`entryJumped`), and a selection stepped from Emacs centers its
    * row (`selectionMoved`).
+   *
+   * THE ONE EXCEPTION (owner ruling, 2026-11-20): a click in the feed's LAST
+   * drawn row while the follow stands takes no hold, and the follow stands.
+   * Its growth is followed down to the new bottom by the ordinary `follow`,
+   * and its shrink is kept at the tail by the same pin, so neither an
+   * expansion opening below the view nor a blank tail under a collapse is
+   * left. Exactly that one condition decides it (`followsLastRowClick`); a
+   * click anywhere else, or on the last row off the tail, holds the view.
    */
   readerClicked(target: Element): void {
+    if (this.followsLastRowClick(target)) return;
     this.holdUnderClick(target, "click");
+  }
+
+  /**
+   * Whether the reader's click on TARGET leaves the follow standing: the
+   * follow stands, and TARGET lies in the feed's last drawn row. Recorded at
+   * INFO when it does, with the row and the direction of the fold the click
+   * is about to make, read off the nearest `data-expanded` holder.
+   */
+  private followsLastRowClick(target: Element): boolean {
+    if (!this.isFollowing()) return false;
+    const row = this.rootRowOf(target);
+    if (row === null || row !== this.lastDrawnRow()) return false;
+    // The press that began the click is no gesture on the box, as under a hold.
+    this.touched = false;
+    const expanded = target.closest("[data-expanded]")?.getAttribute("data-expanded");
+    log.info("the reader clicked the last bubble while following; the follow stands", {
+      operation: "scroll.last-row-click-followed",
+      context: {
+        row: rowName(row),
+        fold: expanded === "true" ? "collapse" : expanded === "false" ? "expand" : "none",
+        at: this.box.scrollTop,
+        cause: this.cause ?? "none",
+      },
+    });
+    return true;
+  }
+
+  /** The feed's last root row that draws a box, or null with no rows to read. */
+  private lastDrawnRow(): Element | null {
+    if (this.rows === null) return null;
+    const rows = this.rows;
+    let node = rows.host.lastElementChild;
+    while (node !== null && rows.edges(node) === null) node = node.previousElementSibling;
+    return node;
   }
 
   /**
@@ -787,41 +832,6 @@ export class TailFollow {
     this.selectionActive = selected;
     this.heldOffReported = false;
     this.holdUnderClick(row, selected ? "selection-click" : "deselection-click");
-  }
-
-  /**
-   * THE CLICKS THAT MOVE THE FEED (owner requests, 2026-10-17): the reader
-   * expanded or collapsed the bubble BUBBLE of a ROOT row, as CAUSE names.
-   * When that row is the feed's last row, the feed parks at its tail and
-   * follows it: an expansion brings the sub-feed opening below the reader into
-   * view as it draws, and a collapse fills the space the closed sub-feed left
-   * below it. Any other bubble's fold leaves the view the click held
-   * (`readerClicked`).
-   */
-  lastBubbleFolded(bubble: Element, cause: "lastBubbleExpanded" | "lastBubbleCollapsed"): void {
-    const row = this.rootRowOf(bubble);
-    const last = this.lastDrawnRow();
-    if (row === null || row !== last) {
-      log.debug("a folded bubble is not the feed's last row; the view holds", {
-        operation: "scroll.bubble-folded-held",
-        context: {
-          cause,
-          row: row === null ? "none" : rowName(row),
-          last: last === null ? "none" : rowName(last),
-        },
-      });
-      return;
-    }
-    this.parkSuperseding(cause);
-  }
-
-  /** The feed's last root row that draws a box, or null with no rows to read. */
-  private lastDrawnRow(): Element | null {
-    if (this.rows === null) return null;
-    const rows = this.rows;
-    let node = rows.host.lastElementChild;
-    while (node !== null && rows.edges(node) === null) node = node.previousElementSibling;
-    return node;
   }
 
   /** THE ONE CLICK HOLD behind `readerClicked` and `selectionClicked`. */
@@ -952,7 +962,7 @@ export class TailFollow {
    * hold, then the feed lands at its tail and follows. Every parking method
    * goes through here.
    */
-  private parkSuperseding(cause: Exclude<ParkCause, "latestVisible">): void {
+  private parkSuperseding(cause: TailLanding): void {
     this.supersedeClick(cause);
     this.park(cause);
   }
