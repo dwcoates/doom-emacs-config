@@ -15,10 +15,10 @@
  * That is not a workaround: the refusal must be legible to whoever spawned the
  * process, and the only channel that always exists is stderr.
  */
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { workspaceLockKey } from "../../src/locks.js";
 import { shimv1 } from "../../src/proto.js";
 import { create } from "@bufbuild/protobuf";
@@ -32,6 +32,7 @@ import {
   spawnShim,
 } from "../integration-support/harness.js";
 import { parseRecords } from "../integration-support/log.js";
+import { currentTestName, PROFILE_DIR_ENV, profileName } from "../integration-support/profile.js";
 import {
   connectCode,
   freshSession,
@@ -451,6 +452,28 @@ describe("signals", () => {
       (record) => record.context.outcome === "graceful_stand_down_complete",
     );
     expect(stoodDown.context.exit_code).toBe(0);
+  });
+
+  test("under a profiling run, SIGTERM writes the shim's whole-life profile into its test's directory", async () => {
+    // A profiling test run names the unit's profiles directory; the harness
+    // hands each shim its test's own (integration-support/profile.ts).
+    const root = mkdtempSync(path.join(os.tmpdir(), "shim-profiles-"));
+    vi.stubEnv(PROFILE_DIR_ENV, root);
+    try {
+      const shim = await spawnShim();
+
+      const exit = await shim.standDown();
+
+      expect(exit.code).toBe(0);
+      const profile = path.join(root, profileName(currentTestName()), `shim-${shim.child.pid}.cpuprofile`);
+      const written = await shim.log.record((record) => record.operation === "shim.profiling.exit_stopped");
+      expect(written.context.files).toEqual([profile]);
+      const parsed = JSON.parse(readFileSync(profile, "utf8")) as { nodes: unknown[] };
+      expect(parsed.nodes.length).toBeGreaterThan(0);
+    } finally {
+      vi.unstubAllEnvs();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

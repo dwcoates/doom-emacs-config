@@ -41,6 +41,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { startFakeStore, type FakeStore } from "../fakes/store-server.js";
+import { currentTestName, shimProfileEnv } from "./profile.js";
 import { LogTail, MergedRecords, StreamRecords, type RecordSink } from "./log.js";
 import { createShimClients, type ShimClients } from "./client.js";
 
@@ -291,7 +292,9 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
     // of magnitude of margin before a batch could exhaust.
     AGENT_REPL_FAKE_STORE_BACKOFF_MS: "5,20,80,300",
   };
-  for (const [key, value] of Object.entries(options.env ?? {})) {
+  // A PROFILING RUN PROFILES EVERY SHIM'S WHOLE LIFE into its test's
+  // directory (profile.ts); a test's own env still wins.
+  for (const [key, value] of Object.entries({ ...shimProfileEnv(process.env, currentTestName()), ...options.env })) {
     if (value === undefined) delete env[key];
     else env[key] = value;
   }
@@ -424,7 +427,7 @@ export async function runShim(
   env: Readonly<Record<string, string | undefined>> = {},
 ): Promise<{ readonly exit: ShimExit; readonly stdout: string; readonly stderr: string }> {
   const childEnv: NodeJS.ProcessEnv = { ...process.env, AGENT_REPL_FORBID_VENDOR_CALLS: "1" };
-  for (const [key, value] of Object.entries(env)) {
+  for (const [key, value] of Object.entries({ ...shimProfileEnv(process.env, currentTestName()), ...env })) {
     if (value === undefined) delete childEnv[key];
     else childEnv[key] = value;
   }
