@@ -17,8 +17,9 @@ Read `ARCHITECTURE.md` first: the package map, the seams, the conventions.
   daemon subprocess against a fake shim.v1 server, fake git repos and a temp
   state root; the fake shim binary is `integration/fakeshim`).
 - **EVERY TEST IN THE INTEGRATION SUITE CALLS `t.Parallel()`, and a new one
-  must too.** The suite's fixture is per-test and shares nothing: each test
-  gets its own `t.TempDir()` root, its own short socket root under `/tmp`, its
+  must too.** A case shares the daemon its test process starts and owns its
+  slice of it ("The integration suite's canonical daemon", below); a case
+  that starts a daemon of its own gets its own `t.TempDir()` root, its own short socket root under `/tmp`, its
   own `StateDir`, `LockDir` and config roots, an ephemeral loopback port, its
   own fake `git` first on `PATH`, and its own fake-git world keyed on its own
   `*testing.T`. The package globals (`daemonBinary`, `fakeshimBinary`,
@@ -226,6 +227,51 @@ e2e tests per sandbox run read that as a severed shim link.
 Do not "fix" a peer's reset by retrying past it: connect-go's streaming request
 body is a pipe that cannot be replayed, and a request that contradicts its own
 length must not be sent at all.
+
+### The integration suite's canonical daemon
+
+The rule is `modules/app/agent-repl/AGENTS.md`, "Integration tests share one
+canonical process, each case on its own slice"; these are this suite's
+mechanics (`integration/shareddaemon_test.go`).
+
+- **A case takes its daemon from one of three helpers**, each a
+  `harness.Daemon.View` of the one daemon its test process starts on the first
+  ask: `newCanonical(t)` (a fresh repository and opened workspace),
+  `newCanonicalRegistered(t)` (registered, no session), or `canonicalView(t)`
+  for a case that registers its slice itself (`harness.Register` through the
+  view claims what it registers).
+- **A case's slice is its own repositories and workspaces and everything they
+  own**: their sessions and fake shims, feeds, holds, links, per-workspace
+  logs, and their repositories' merge queues. An identifier the case mints is
+  its slice's too: a turn id is unique across the daemon (the turns table's
+  key, `wsm.ErrTurnOfAnotherWorkspace`), so a fixed literal carries the
+  workspace id (`"turn-vendor-started-" + f.ws.GetId()`), and so does a URL a
+  shared stub records (the browser launcher's).
+- **The view retires its slice when the case ends** (`retireSlice`,
+  `integration/harness/view.go`): KillWorkspace, ForgetWorkspace, and any held
+  prompts a forget is blocked by dropped first, before the case's sweep. The
+  daemon therefore holds only the running cases' workspaces; one that kept
+  every finished case's cost more CPU than a daemon per case.
+- **A case that changes state the whole daemon owns joins its group**:
+  `newInGroup(t, group)` or `newRegisteredInGroup(t, group)`, one daemon per
+  `daemonGroup`, its cases running one at a time. The groups are
+  `groupShutdownSchedule` (a shutdown schedule holds every workspace's
+  intake), `groupBrowserLauncher` (a case makes the one launcher stub fail)
+  and `groupAccountUsage` (a rate-limit event moves the one account's usage,
+  and a refusal blocks it). A new precondition is a new `daemonGroup`
+  constant, never a daemon for one case.
+- **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is
+  only for a case whose subject is the daemon's own lifecycle**: startup,
+  restart, handover, crash, shutdown, or a boot-time option or environment
+  (`harness.Opts` other than the default). Its fixture line says so.
+- **Not yet shared: a case asserting through the idle barrier**
+  (`ExpectNoPush`, `ExpectNoPushMatching`, `ExpectFileUnchanged`,
+  `Daemon.AwaitIdle`). The barrier waits for the WHOLE daemon to be idle, which
+  a shared daemon running other cases rarely is; those cases keep their own
+  daemon until the barrier is scoped to a workspace.
+- Measured (2026-11-20, the same 146 cases): 68.3 CPU-s with a daemon per
+  case, 47.4 CPU-s shared; summed unit wall rose from 11.6s to 18.7s, the
+  accepted cost.
 
 ## Command line (binding spellings; Go's flag package accepts one or two dashes)
 
