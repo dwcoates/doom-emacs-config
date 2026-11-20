@@ -6702,7 +6702,7 @@ func (*RosterMergeQueueModeSync) Descriptor() ([]byte, []int) {
 type RosterMergeQueueModeAsync struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// REQUIRED. The requester the merge runs for, drawn after the merge's name
-	// as a quieter "(async of <name>)", so an async merge reads as whose it is
+	// as a quieter "(<name>)", so an async merge reads as whose it is
 	// and a click's landing on the requester is expected.
 	Requester     *RosterMergeQueueModeAsyncRequester `protobuf:"bytes,1,opt,name=requester,proto3" json:"requester,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -6746,7 +6746,7 @@ func (x *RosterMergeQueueModeAsync) GetRequester() *RosterMergeQueueModeAsyncReq
 	return nil
 }
 
-// The requester an async merge runs for, drawn "(async of <name>)": cut with
+// The requester an async merge runs for, drawn "(<name>)": cut with
 // an ellipsis when the line is short of room, its whole text on a hover of
 // the line.
 type RosterMergeQueueModeAsyncRequester struct {

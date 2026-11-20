@@ -692,7 +692,7 @@ export function drawRosterMergeQueueWaiting(
   numeral.textContent = `${position}`;
   const name = drawSubjectName(subject, `${path}.subject`, coldGated);
   line.append(numeral, name);
-  appendAsyncOf(line, name, subject, `${path}.subject`);
+  appendAsyncOf(line, name, subject, sc, `${path}.subject`);
   line.appendChild(drawClock(sc, waitingClockStartMs(u.clock, `${path}.clock`)));
   return line;
 }
@@ -767,7 +767,7 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
   const label = drawQueueLabel(cause.text, "sb-mq-off-queue-cause", "why this merge left the queue");
   const name = drawSubjectName(subject, `${path}.subject`, coldGated);
   line.append(name);
-  appendAsyncOf(line, name, subject, `${path}.subject`);
+  appendAsyncOf(line, name, subject, sc, `${path}.subject`);
   line.append(label);
   line.appendChild(
     coldGated.has(requeue.id)
@@ -843,31 +843,47 @@ export function githubPlaceText(u: RosterMergeQueueGithubPlace): string {
   return `#${u.place} of ${u.total}`;
 }
 
-/** The class of an async merge's "(async of <requester>)" note. */
+/** The class of an async merge's "(<requester>)" note. */
 export const MERGE_QUEUE_ASYNC_OF_CLASS = "sb-mq-async-of";
 
-/** An async merge's note as drawn: "(async of <requester>)". */
+/** The class of the requester's name inside an async merge's note, which selects the requester. */
+export const MERGE_QUEUE_ASYNC_OF_LINK_CLASS = "sb-mq-async-of-link";
+
+/** An async merge's note as drawn: "(<requester>)". */
 export function asyncOfText(requester: string): string {
-  return `(async of ${requester})`;
+  return `(${requester})`;
 }
 
 /**
- * Appends to LINE, for an async merge, the quieter "(async of <requester>)"
- * note after its name (owner request, 2026-11-18): a click on the line lands
- * on the requester, so the line says whose merge it is. The note is cut with
+ * Appends to LINE, for an async merge, the quieter "(<requester>)" note after
+ * its name (owner request, 2026-11-18): the line says whose merge it is, and a
+ * click on the requester's name selects that workspace alone, where a click
+ * elsewhere on the line also opens the merge's bubble in its feed. The note is cut with
  * an ellipsis when the line is short of room, and the line's hover shows it
  * whole. NAME is the line's name, drawn by drawSubjectName. A sync merge's
  * line gains nothing.
  */
-function appendAsyncOf(line: HTMLElement, name: HTMLElement, u: RosterMergeQueueSubject, path: string): void {
+function appendAsyncOf(line: HTMLElement, name: HTMLElement, u: RosterMergeQueueSubject, sc: SidebarContext, path: string): void {
   const mode = requireCase(requireMessage(u.mode, `${path}.mode`).mode, `${path}.mode.mode`);
   if (mode.case !== "async") return;
   const requester = requireMessage(mode.value.requester, `${path}.mode.async.requester`);
   const note = document.createElement("span");
   note.className = MERGE_QUEUE_ASYNC_OF_CLASS;
-  note.textContent = asyncOfText(requester.name);
+  // THE SUBJECT'S WORKSPACE IS THE REQUESTER (see RosterMergeQueueSubject.workspace).
+  const workspace = requireMessage(u.workspace, `${path}.workspace`);
+  const link = document.createElement("span");
+  link.className = MERGE_QUEUE_ASYNC_OF_LINK_CLASS;
+  link.textContent = requester.name;
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    // THE SAME SELECT AS A ROW'S CLICK (`selectWorkspace`), without the
+    // line's reveal: the click names the requester, not the merge.
+    void guardMalformed(sc.ctx, "sidebar.merge-queue.requester-select", selectWorkspace(link, sc, workspace));
+  });
+  note.append("(", link, ")");
   line.appendChild(note);
-  line.title = note.textContent;
+  line.title = asyncOfText(requester.name);
   // The name's own "async merge" hover would hide the line's on the name.
   name.removeAttribute("title");
 }

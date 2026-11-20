@@ -3538,7 +3538,7 @@ export const RosterMergeQueueModeSyncSchema: GenMessage<RosterMergeQueueModeSync
 export type RosterMergeQueueModeAsync = Message<"frontend.v1.RosterMergeQueueModeAsync"> & {
   /**
    * REQUIRED. The requester the merge runs for, drawn after the merge's name
-   * as a quieter "(async of <name>)", so an async merge reads as whose it is
+   * as a quieter "(<name>)", so an async merge reads as whose it is
    * and a click's landing on the requester is expected.
    *
    * @generated from field: frontend.v1.RosterMergeQueueModeAsyncRequester requester = 1;
@@ -3554,7 +3554,7 @@ export const RosterMergeQueueModeAsyncSchema: GenMessage<RosterMergeQueueModeAsy
   messageDesc(file_frontend_v1_sidebar, 105);
 
 /**
- * The requester an async merge runs for, drawn "(async of <name>)": cut with
+ * The requester an async merge runs for, drawn "(<name>)": cut with
  * an ellipsis when the line is short of room, its whole text on a hover of
  * the line.
  *
