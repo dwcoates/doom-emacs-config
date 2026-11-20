@@ -15,7 +15,7 @@ import { create } from "@bufbuild/protobuf";
 import { Code } from "@connectrpc/connect";
 import { afterAll, describe, expect, test } from "vitest";
 import { shimv1 } from "../../src/proto.js";
-import { canonicalSession, endTurn, releaseShared, uniqueTurn } from "../integration-support/canonical.js";
+import { canonicalSession, endsTurn, releaseShared, uniqueTurn } from "../integration-support/canonical.js";
 import {
   connectCode,
   freshSession,
@@ -315,6 +315,7 @@ describe("a stream closed by the client ends nothing", () => {
     await watch.next();
     const held = uniqueTurn();
     await shim.clients.h1.startTurn(startTurnRequest({ turn: held, text: "!hold" }));
+    endsTurn(shim, held);
 
     watch.close();
 
@@ -323,7 +324,6 @@ describe("a stream closed by the client ends nothing", () => {
       startTurnRequest({ turn: uniqueTurn(), text: "another" }),
     );
     expect(second.result.case).toBe("failure");
-    await endTurn(shim, held);
   });
 });
 
