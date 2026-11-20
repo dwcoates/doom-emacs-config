@@ -8,14 +8,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 func TestACompletedForegroundBashDrawsOneSucceededToolCardAndNoDetachedShell(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-bash-foreground", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const line = "pwd; ls | head"

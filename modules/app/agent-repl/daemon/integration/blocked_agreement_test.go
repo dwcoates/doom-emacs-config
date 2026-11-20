@@ -7,8 +7,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // TestRosterAndFooterAgreeOnBlocked is the executable form of the owner's
@@ -82,7 +80,7 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange: one opened workspace, watched on both surfaces.
-			f := newOpened(t, harness.Opts{})
+			f := newCanonical(t)
 			footer := f.d.WatchFooter(f.ws)
 			roster := f.d.WatchRoster()
 
@@ -141,7 +139,7 @@ func TestRosterAndFooterAgreeOnBlocked(t *testing.T) {
 func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn whose call the vendor is retrying.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	f.submit("go", "k-api-retry-recovers", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -179,7 +177,7 @@ func TestRosterLeavesApiRetryingWithTheFooterWhenTheVendorAnswers(t *testing.T) 
 func TestRosterAndFooterAgreeOnAnOpenQuestion(t *testing.T) {
 	t.Parallel()
 	// Arrange: a running turn, watched on both surfaces.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	f.submit("go", "k-open-question", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

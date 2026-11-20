@@ -910,7 +910,7 @@ func planRows(page *frontendv1.FeedPage) []*frontendv1.FeedRow {
 func TestAPlanEpisodeIsOneRowOnTheOpenedPage(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-plan-one-row", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
 	// Act: enter, exit with the plan, then the turn concludes.
@@ -935,7 +935,7 @@ func TestAPlanEpisodeIsOneRowOnTheOpenedPage(t *testing.T) {
 func TestAPlanBubbleStaysPlannedWhenTheEnterIsDeliveredAgainAfterTheExit(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-plan-late-enter", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	for _, frame := range append(planEnterFrames("plan-enter"), planExitFrames("plan-exit", "1. do it")...) {
@@ -1508,7 +1508,7 @@ func TestARateLimitedTerminalCarriesTheVendorsStatedWaitAndNoneWhenUnstated(t *t
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			f := newOpened(t, harness.Opts{})
+			f := newCanonical(t)
 			f.submit("go", "k-429", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 			tail := f.watchRootFeed()
 

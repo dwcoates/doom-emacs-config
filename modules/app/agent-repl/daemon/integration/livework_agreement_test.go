@@ -7,8 +7,6 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // TestRosterAndFooterAgreeOnBackgroundWork is the executable form of the
@@ -28,7 +26,7 @@ func TestRosterAndFooterAgreeOnBackgroundWork(t *testing.T) {
 	t.Parallel()
 
 	// Arrange: one opened workspace, watched on both surfaces, quiet.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	roster := f.d.WatchRoster()
 	rowIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.RosterPush) bool {

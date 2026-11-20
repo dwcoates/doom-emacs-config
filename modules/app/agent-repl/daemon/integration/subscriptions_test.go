@@ -296,10 +296,19 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 			t.Parallel()
 			var d *harness.Daemon
 			var ws *workspacev1.WorkspaceRef
-			if k.PerWorkspace {
-				f := newRegistered(t, harness.Opts{})
+			switch {
+			case k.Name == "WatchTopbar":
+				// It reads the login's model catalog at its default: never
+				// served.
+				f := newRegisteredInGroup(t, groupUnservedCatalog)
 				d, ws = f.d, f.ws
-			} else {
+			case k.PerWorkspace:
+				f := newCanonicalRegistered(t)
+				d, ws = f.d, f.ws
+			default:
+				// A fresh daemon: the subject is what a daemon-wide stream
+				// carries straight after the boot, before anything is
+				// published (the daemon's own lifecycle).
 				d = newDaemon(t, harness.Opts{})
 			}
 

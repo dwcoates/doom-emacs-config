@@ -99,7 +99,7 @@ func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T)
 func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 	t.Parallel()
 	// Arrange: a shim that withholds its opening diagnostics.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{DelayDiagnostics: true})
 	host := f.d.WatchHost(f.ws)
 
@@ -152,7 +152,7 @@ func TestReadinessGatesOnTheFirstHealthyDiagnostics(t *testing.T) {
 func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.health.session", "daemon.shimclient.exit", "daemon.shimclient.spawn",
 		"daemon.workspace.bring_up", "daemon.workspace.restart")
@@ -836,7 +836,7 @@ func TestAccountSwitchPortsTheTranscriptAcrossADaemonBoot(t *testing.T) {
 func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// A DELIBERATE TEARDOWN DECLARES NOTHING, and the sweep at cleanup is what
 	// proves it. A kill asks the shim for exactly what then happens: it ends
 	// its standing streams and exits, and every side that observes that reads
@@ -947,7 +947,7 @@ func TestNukeWorkspaceRemovesTheWorktreeAndBranchAndTheRow(t *testing.T) {
 func TestRestartWorkspaceForcedInterruptsFirst(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
@@ -1241,7 +1241,7 @@ func TestCloseWorkspaceWithAHeldPromptRefuses(t *testing.T) {
 func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, the shim death the stand-down drives, the shim link it severs.
 	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
@@ -1273,7 +1273,7 @@ func TestRestartWorkspaceReapsTheOldShimBeforeResumingOnTheNew(t *testing.T) {
 func TestRestartWorkspaceForcedContinuesTheInterruptedTurnWithoutResubmittingIt(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a graceful stand-down the fake shim ends by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWorkspaceRestartWarnings()
 	f.shim.ExpectStartSession()
@@ -1899,7 +1899,7 @@ func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.
 	t.Parallel()
 	// Arrange
 	const shimDetail = "the vendor SDK threw before its first message"
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.open",
 		"daemon.health.session", "daemon.shimclient.exit", "daemon.shimclient.redial", "daemon.shimclient.spawn")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartFailed: shimDetail})
@@ -1959,7 +1959,7 @@ func TestARetriedVendorStartDeliversThePromptHeldWhileItRetried(t *testing.T) {
 func TestTheStartAfterARejectedVendorStartReusesItsShim(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.restart")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartRejectTimes: 1, VendorStartFailDetail: "invalid api key"})
 	if resp, err := f.startRaw(); err != nil || resp.GetError().GetRelaunchFailed() == nil {
@@ -1986,7 +1986,7 @@ func TestTheStartAfterARejectedVendorStartReusesItsShim(t *testing.T) {
 func TestARestartBringsUpAWorkspaceWhoseVendorWasRejected(t *testing.T) {
 	t.Parallel()
 	// Arrange: the vendor refuses the start, so the workspace has no session.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.d.ExpectWarnings("daemon.workspace.bring_up", "daemon.workspace.restart",
 		"daemon.health.session", "daemon.shimclient.exit", "daemon.shimclient.redial", "daemon.shimclient.spawn")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{VendorStartFailed: "invalid api key"})
@@ -2223,7 +2223,7 @@ func TestAParkedWorkspacesFooterIsIdleAndTheIndicatorReportsNoFault(t *testing.T
 func TestAPromptRevivesAWorkspaceWhoseShimWasKilled(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of the shim death this test drives, the link it severs, and the bring-up the revival runs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",

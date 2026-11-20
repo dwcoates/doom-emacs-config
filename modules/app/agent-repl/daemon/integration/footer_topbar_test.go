@@ -242,7 +242,7 @@ func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 func TestFooterCronsChipCountsACreatedJobForAReaderOpenedAfterTheTurnEnded(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-cron-create", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	feed := f.watchRootFeed()
 
@@ -458,7 +458,7 @@ func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 func TestFooterWeeklyAllowanceDrawnFromASevenDayWarningCarriesItsVerdictAndFigureAndNoSalientLine(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
@@ -655,7 +655,7 @@ func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testi
 func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_session", "daemon.shimclient.redial")

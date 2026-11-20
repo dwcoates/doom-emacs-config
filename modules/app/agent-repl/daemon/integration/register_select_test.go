@@ -110,8 +110,9 @@ func TestRegisterWorkspaceRefusesANonWorktree(t *testing.T) {
 
 func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 	t.Parallel()
+	// It changes the daemon's one selection.
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newRegisteredInGroup(t, groupSelection)
 	// A SELECT STARTS NO SHIM (owner ruling, 2026-10-28), so the window below
 	// is the re-selection's alone.
 	f.selectWorkspace()
@@ -305,7 +306,7 @@ func TestSelectingAnotherWorkspaceLeavesTheFirstsAttentionMarkerSet(t *testing.T
 func TestRegisteringAClosedWorkspaceReopensIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace, closed.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace on a quiet workspace = error %v, want a success", err)
 	}

@@ -28,7 +28,7 @@ func rateLimitVerdict(rejected bool) *conversationv1.SessionUpdate {
 func TestAPromptDuringAUsageLimitIsHeldAfterReconnectAndDeliveredWhenTheVendorServes(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose vendor refuses the session.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
 	f.shim.PushSessionUpdate(rateLimitVerdict(true))
@@ -66,7 +66,7 @@ func TestAPromptDuringAUsageLimitIsHeldAfterReconnectAndDeliveredWhenTheVendorSe
 func TestASubmissionWhileHeldAndIdleTriesTheOldestHeldPromptNow(t *testing.T) {
 	t.Parallel()
 	// Arrange: one prompt held after reconnect under a standing usage limit.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
 	f.shim.PushSessionUpdate(rateLimitVerdict(true))

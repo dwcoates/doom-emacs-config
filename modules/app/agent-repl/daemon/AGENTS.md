@@ -258,7 +258,10 @@ mechanics (`integration/shareddaemon_test.go`).
   `groupShutdownSchedule` (a shutdown schedule holds every workspace's
   intake), `groupBrowserLauncher` (a case makes the one launcher stub fail)
   and `groupAccountUsage` (a rate-limit event moves the one account's usage,
-  and a refusal blocks it). A new precondition is a new `daemonGroup`
+  and a refusal blocks it), `groupSelection` (the selected workspace is one
+  per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
+  catalog its login last served; no case of it starts a session). A new
+  precondition is a new `daemonGroup`
   constant, never a daemon for one case.
 - **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is
   only for a case whose subject is the daemon's own lifecycle**: startup,

@@ -178,7 +178,7 @@ func footerUpdated(v *frontendv1.FooterView) *frontendv1.FooterActivityTransient
 func TestADeployShowsItsPhasesOnTheFooterAndAnnouncesUpdated(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil

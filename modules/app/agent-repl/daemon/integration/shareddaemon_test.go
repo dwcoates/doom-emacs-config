@@ -95,6 +95,14 @@ const (
 	// a rate-limit event: every workspace spends as the daemon's one
 	// account, whose allowances (and a refusal's block) are the account's.
 	groupAccountUsage daemonGroup = "the account's usage"
+	// groupSelection is the daemon whose selected workspace a case changes:
+	// the selection is one per daemon, and every roster says which it is.
+	groupSelection daemonGroup = "the selected workspace"
+	// groupUnservedCatalog is the daemon whose login has never served a model
+	// catalog: a workspace with no shim draws the catalog its login last
+	// served, and every case's workspace signs in as the daemon's one login.
+	// No case of the group starts a session.
+	groupUnservedCatalog daemonGroup = "a login that never served a model catalog"
 )
 
 var (

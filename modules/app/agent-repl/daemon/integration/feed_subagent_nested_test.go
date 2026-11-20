@@ -8,8 +8,6 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"agent-repld/integration/harness"
-
 	"google.golang.org/protobuf/proto"
 )
 
@@ -24,7 +22,7 @@ func TestASyncSubagentIsOneSettledBubbleOnTheRootFeedAndItsNestedActivityLivesOn
 	// Arrange: the frames the shim files for a synchronous Agent spawn: the
 	// spawn and its settle on the MAIN agent's book, the subagent's own
 	// activity on the created agent's.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-subagent-nested", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const sub = "sub-nested-1"

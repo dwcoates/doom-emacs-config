@@ -7,14 +7,12 @@ import (
 
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 func TestAQueryThatDiesWithAnAskOpenDrawsTheAskDeniedAndTheTurnErrored(t *testing.T) {
 	t.Parallel()
 	// Arrange: the death's own records are the fault under test.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
 	f.submit("go", "k-querydied-mid-ask", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()

@@ -199,7 +199,7 @@ func TestCreateWorkspaceWithAParentNestsTheChildAndTargetsTheParentsWorktreeOnMe
 func TestCreateWorkspaceForkMakesTheVendorsForkAndResumesIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a parent with a minted vendor session.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	if req := f.shim.ExpectStartSession(); req.GetFresh() == nil {
 		t.Fatalf("the parent's StartSession = %v, want fresh", req)
 	}

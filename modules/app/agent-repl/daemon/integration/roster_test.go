@@ -43,7 +43,7 @@ func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
 func TestRosterStatusFollowsTheSessionLifecycle(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	roster := f.d.WatchRoster()
 	statusIs := func(pred func(*frontendv1.RosterRow) bool) func(*frontendv1.RosterPush) bool {
 		return func(r *frontendv1.RosterPush) bool {
@@ -479,7 +479,7 @@ func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.
 func TestClearingAPriorityRemovesTheNamesIcon(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	roster := f.d.WatchRoster()
 	setPriority(t, f.d, f.ws, &agentreplv1.WorkspacePriority{
 		Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}},
@@ -501,8 +501,9 @@ func TestClearingAPriorityRemovesTheNamesIcon(t *testing.T) {
 
 func TestAttentionMarkerIsSetOnNotificationAndClearedOnSelect(t *testing.T) {
 	t.Parallel()
+	// It changes the daemon's one selection.
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupSelection)
 	roster := f.d.WatchRoster()
 
 	// Act: a permission request is a host notification.
@@ -530,7 +531,7 @@ func TestAttentionMarkerIsSetOnNotificationAndClearedOnSelect(t *testing.T) {
 func TestAttentionMarkerIsClearedWhenTheLastAskSettles(t *testing.T) {
 	t.Parallel()
 	// Arrange: an open ask has raised the marker.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	roster := f.d.WatchRoster()
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Permission{Permission: openPermission("perm-settle", "act-settle")},
@@ -590,7 +591,7 @@ func TestClosedWorkspaceDrawsClosedAndNukedLeavesTheRoster(t *testing.T) {
 func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	// The sweep covers every test; the declared records are evidence of a bring-up the test blocks or kills, the shim death the test drives.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.shimclient.exit", "daemon.shimclient.spawn",
 		"daemon.workspace.bring_up", "daemon.workspace.restart")
@@ -659,7 +660,7 @@ func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
 func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	roster := f.d.WatchRoster()
 	awaitRoster(t, f.d, roster, "ready before the clear", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
@@ -689,7 +690,7 @@ func TestRosterRowIsClearingWhileAClearRuns(t *testing.T) {
 func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	roster := f.d.WatchRoster()
 	awaitRoster(t, f.d, roster, "ready before the compact", func(r *frontendv1.RosterPush) bool {
 		row := rosterRow(r, f.ws.GetId())
@@ -723,7 +724,7 @@ func TestRosterRowIsCompactingWhileACompactRuns(t *testing.T) {
 func TestRosterRowIsTurnDiedWhenTheQueryDiesUnderATurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of the died query the test feeds.
 	// A death under a turn also draws the turn's terminal row in the feed.
 	f.d.ExpectWarnings("daemon.sessionwatcher.query_died", "daemon.feed.query_died")
@@ -846,7 +847,7 @@ func TestRosterBringUpWalkIsMonotoneFromAColdSubmit(t *testing.T) {
 	t.Parallel()
 	// Arrange: registered, never opened, the roster watched from before the
 	// prompt so every push of the walk is on the stream.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	roster := f.d.WatchRoster()
 	awaitRoster(t, f.d, roster, "the registered row", func(r *frontendv1.RosterPush) bool {
 		return rosterRow(r, f.ws.GetId()) != nil
