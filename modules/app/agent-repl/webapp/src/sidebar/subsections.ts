@@ -144,6 +144,9 @@ export function requireDrawnBucket(drawn: HTMLElement, wire: Bucket, path: strin
 /** The attribute a repository section states its repository's id on. */
 export const REPOSITORY_ATTRIBUTE = "data-repository";
 
+/** The attribute a subsection's count wears when it counts no workspaces. */
+export const ZERO_COUNT_ATTRIBUTE = "data-zero";
+
 /** One subsection as drawn: its element and its rows list. */
 export interface DrawnSubsection {
   element: HTMLElement;
@@ -163,7 +166,7 @@ export function drawRosterSubsection(
   const bucket = subsectionBucket(u, path);
   const header = requireMessage(u.header, `${path}.header`);
   const name = requireMessage(header.label, `${path}.header.label`).text;
-  const count = openCountText(drawRosterOpenCount(requireMessage(header.count, `${path}.header.count`), `${path}.header.count`));
+  const count = drawRosterOpenCount(requireMessage(header.count, `${path}.header.count`), `${path}.header.count`);
   const element = document.createElement("div");
   element.className = SUBSECTION_CLASS;
   stampBucket(element, bucket);
@@ -175,7 +178,8 @@ export function drawRosterSubsection(
   label.textContent = name;
   const shown = document.createElement("span");
   shown.className = "sb-count";
-  shown.textContent = count;
+  shown.textContent = openCountText(count);
+  if (count.workspaces === 0) shown.setAttribute(ZERO_COUNT_ATTRIBUTE, "");
   if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
   const id = bucket.id;
   const foldKey = subsectionFoldKey(id);

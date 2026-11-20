@@ -1243,10 +1243,15 @@ body {
 #ws-sidebar .sb-subsection-head .sb-count { font-size: 0.85em; }
 /* A SUBSECTION'S NAME WEARS THE REPOSITORY NAMES' INK (owner request,
    2026-10-30, superseding the canonical orange it wore earlier that day):
-   --repo-head-expanded open, --repo-head-collapsed folded, as a repository's
-   name does. Its count keeps the header's own colour. */
+   --repo-head-expanded open, --repo-head-collapsed folded or empty, as a
+   repository's name does (an empty one greys as a folded one, owner request,
+   2026-11-18). A count of no workspaces keeps the header's own colour, and
+   any other count wears the open name's ink, folded, empty or open (owner
+   request, 2026-11-18; src/sidebar/subsections.ts ZERO_COUNT_ATTRIBUTE). */
 #ws-sidebar .sb-subsection-label { color: var(--repo-head-expanded); }
-#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label { color: var(--repo-head-collapsed); }
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head .sb-subsection-label,
+#ws-sidebar .sb-subsection[data-empty] > .sb-subsection-head .sb-subsection-label { color: var(--repo-head-collapsed); }
+#ws-sidebar .sb-subsection-head .sb-count:not([data-zero]) { color: var(--repo-head-expanded); }
 #ws-sidebar .sb-subsection-delete {
   margin-left: auto;
   border: 0;
@@ -1260,9 +1265,10 @@ body {
 #ws-sidebar:not(.sb-hover-suspended) .sb-subsection-delete:hover { color: var(--fg); }
 /* A COLLAPSED SUBSECTION (its header's click, src/sidebar/subsections.ts) shows its
    header alone: its rows are hidden, and its header greys as a collapsed
-   repository's does. */
+   repository's does. An empty subsection's header greys the same way. */
 #ws-sidebar .sb-subsection.folded > .rows:not(:has(.surfaced)) { display: none; }
-#ws-sidebar .sb-subsection.folded > .sb-subsection-head { color: var(--repo-head-collapsed); }
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head,
+#ws-sidebar .sb-subsection[data-empty] > .sb-subsection-head { color: var(--repo-head-collapsed); }
 /* SUBSECTIONS WITH NOTHING UNDER THEM STAND CLOSE TOGETHER (owner request,
    2026-11-13): a subsection that is folded or empty shows its header alone,
    so between its header and the next subsection's header, and between the

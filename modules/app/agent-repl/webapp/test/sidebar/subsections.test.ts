@@ -12,6 +12,7 @@ import {
   sameBucket,
   showsNoRows,
   stampBucket,
+  ZERO_COUNT_ATTRIBUTE,
 } from "../../src/sidebar/subsections.js";
 import {
   SetWorkspaceOneShotResponseSchema,
@@ -217,6 +218,25 @@ describe("a repository's subsections", () => {
       sidebarContext(),
     );
     expect(pane.querySelector(".sb-subsection")?.hasAttribute("data-empty")).toBe(false);
+  });
+
+  it("mark the count of a subsection with no workspaces zero", () => {
+    // Arrange / Act
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1" }] })] }), sidebarContext());
+
+    // Assert
+    expect(pane.querySelector(".sb-subsection .sb-count")?.hasAttribute(ZERO_COUNT_ATTRIBUTE)).toBe(true);
+  });
+
+  it("do not mark the count of a subsection with workspaces zero", () => {
+    // Arrange / Act
+    const pane = mount(
+      roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1", rows: [row({ id: "ws-1" })] }] })] }),
+      sidebarContext(),
+    );
+
+    // Assert
+    expect(pane.querySelector(".sb-subsection .sb-count")?.hasAttribute(ZERO_COUNT_ATTRIBUTE)).toBe(false);
   });
 
   it("delete through the header's remove control", async () => {
