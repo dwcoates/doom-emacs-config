@@ -1120,8 +1120,9 @@ holds past its merge-base, and its summary (`agent-repl--switch-summary').
 The name is the candidate's visible part (`agent-repl--switch-visible-name'),
 after the glyph the daemon puts before it (`agent-repl--switch-name-glyph'),
 which rides the prefix so the candidate stays the name alone; the columns
-align past the widest glyph and name together.  The columns take `completions-annotations' beneath any face a column
-states itself, so the merged label and the summary keep their purple
+align past the widest glyph and name together.  The columns take
+`completions-annotations' beneath any face a column states itself, so the
+merged label and the summary keep their purple
 \(`agent-repl--switch-state-label')."
   (let* ((names (mapcar (lambda (cell)
                           (concat (agent-repl--switch-name-glyph (cdr cell))
