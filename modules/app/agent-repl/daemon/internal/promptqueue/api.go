@@ -845,6 +845,13 @@ type TurnStops interface {
 	// is in flight or nothing waits on it, which is when the turn (if any) is
 	// already the session's own to kill.
 	WithdrawRevivalTurn(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// RevivalTurn answers, without retiring it, the accepted turn the status
+	// surfaces show while WS's session is still coming up: the turn a
+	// WithdrawRevivalTurn would withdraw. It reports false when no revival is
+	// in flight or nothing waits on it. A stop of detached work asks it, so
+	// that a workspace whose session is not up yet is not answered "nothing
+	// running" while its accepted turn stands.
+	RevivalTurn(ctx context.Context, ws ids.WorkspaceID) (ids.TurnID, bool, error)
 	// AwaitTurnStarted returns once no call that opens TURN on WS stands: the
 	// shim has the turn, or its start failed. A kill for the turn waits on it,
 	// so the kill can never reach the shim ahead of the start and find no
