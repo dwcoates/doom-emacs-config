@@ -1013,6 +1013,40 @@ func TestAnswerColdGateClearsTheActWhenTheAnswerLands(t *testing.T) {
 	}
 }
 
+// A RE-OPEN WHOSE SHIM WAS TAKEN FROM IT (a kill, a handover) is no failed
+// re-open: the workspace left this daemon's hands mid-start.
+func TestAnswerColdGateWhoseReopenLostItsShimIsNoFault(t *testing.T) {
+	// Arrange.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	standingGate(f)
+	f.fleet.resumeErr = fmt.Errorf("start session for %q: %w", "w1", ErrShimTaken)
+
+	// Act.
+	err := f.verbs.AnswerColdGate(context.Background(), "w1", payAnswer())
+
+	// Assert: accepted, no fault, no gate stood again, and an INFO record
+	// naming why rather than an ERROR.
+	if err != nil {
+		t.Fatalf("AnswerColdGate = %v, want the answer accepted", err)
+	}
+	if len(f.health.opened) != 0 || len(f.cards.reraised) != 0 {
+		t.Fatalf("faults = %v, gates stood again = %v; want neither", f.health.opened, f.cards.reraised)
+	}
+	sawInfo := false
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == opColdGate && r.Level == dlog.LevelError {
+			t.Fatalf("an ERROR was recorded for a re-open whose shim was taken: %+v", r)
+		}
+		if r.Operation == opColdGate && r.Level == dlog.LevelInfo && strings.Contains(r.Message, "taken from it") {
+			sawInfo = true
+		}
+	}
+	if !sawInfo {
+		t.Fatalf("records = %v, want the taken shim recorded at INFO", f.log.logger.Records())
+	}
+}
+
 func TestAnswerColdGateClearsTheActWhenTheReopenFails(t *testing.T) {
 	// Arrange.
 	f := newFixture(t)

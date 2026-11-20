@@ -360,6 +360,15 @@ func (v *verbs) coldGateSettled(ctx context.Context, log dlog.Logger, ws ids.Wor
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
 		log.Info(opColdGate, "the answered cold gate's re-open was abandoned as the daemon stood down",
 			dlog.Context{"choice": choice, "cause": err.Error()})
+	case errors.Is(err, ErrShimTaken):
+		// A RE-OPEN WHOSE SHIM WAS TAKEN FROM IT (a handover's transfer, or a
+		// kill) ended because the workspace left this daemon's hands, as a
+		// restart counts it (startNotAgentReplFault): no fault, and no gate
+		// stood again for a workspace killed or served elsewhere.
+		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerAbandoned)
+		v.deps.Footer.SetColdGateAnswer(ws, nil)
+		log.Info(opColdGate, "the answered cold gate's re-open ended when its shim was taken from it (handed to a successor, or stopped)",
+			dlog.Context{"choice": choice, "cause": err.Error()})
 	default:
 		v.deps.ColdGateAnswers.CountColdGateAnswer(ws, choice, GateAnswerFailed)
 		v.deps.Footer.SetColdGateAnswer(ws, nil)
