@@ -45,7 +45,7 @@ unchanged).
 
 ## Where the state comes from (no contract change)
 
-- `wsm.pull_request_states` (layout 171) holds one state per pull request,
+- `wsm.pull_request_states` (layout 175) holds one state per pull request,
   whoever links it, apart from the subscriptions: a reference link is
   followed for its state but never told about the pull request's activity.
 - The watcher records the state on every successful subscription read, and
@@ -55,7 +55,7 @@ unchanged).
   undone.
 - A changed state redraws every open workspace linking it
   (`prwatch.Deps.LinksRedrawn`, `workspace.Verbs.RedrawLinks`).
-- Backfill: the layout-171 rewrite fills the pull request columns of links
+- Backfill: the layout-175 rewrite fills the pull request columns of links
   stored before layout 96 (22 on the owner's store) from their urls, and
   seeds the merged or closed state of every pull request an ended
   subscription saw end. Every other linked pull request is read on the first
