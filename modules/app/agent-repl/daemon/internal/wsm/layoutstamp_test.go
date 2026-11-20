@@ -385,7 +385,7 @@ func TestTheContractRemovalGuardRecognizesWhatIsNoRemoval(t *testing.T) {
 	}{
 		{"DROP TABLE deploy_problems", true},
 		{"drop index some_index", true},
-		{"ALTER TABLE merge_queue_repos DROP COLUMN mediation_intake", true},
+		{"alter table merge_queue_repos drop column mediation_intake", true},
 		{"DELETE FROM deploy_remediation_finishes", true},
 		{"CREATE TABLE deploy_ignored_records (operation TEXT)", false},
 		{"ALTER TABLE merge_queue_repos ADD COLUMN told INTEGER", false},
