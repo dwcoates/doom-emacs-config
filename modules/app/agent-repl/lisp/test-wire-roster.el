@@ -2519,7 +2519,8 @@ its place and since it joined."
   "Where the head stands is never unset on the wire."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-merge-queue-head
-                  (format "{\"subject\":%s}" agent-repl-test-wire-roster--subject))
+                  (format "{\"subject\":%s,\"clock\":{\"active\":{\"activeSinceMs\":\"1\"}}}"
+                          agent-repl-test-wire-roster--subject))
                  '("RosterMergeQueueHead" standing "oneof is unset"))))
 
 (ert-deftest agent-repl-test-wire-roster-a-merge-queue-subject-without-mode-is-a-breach ()
