@@ -300,7 +300,7 @@ Consequences, accepted:
 
 ```text
 agent-repld workspace   create | prompt | set | merge | close | open | status | subscribe
-agent-repld merge-queue status | dequeue | move-up | move-down | pause | resume
+agent-repld merge-queue status | dequeue | move-up | move-down | move | pause | resume
                         disable-racing | enable-racing | subscribe
 agent-repld editor      eval
 agent-repld runtime     deploy | bounce | health | rollouts hold | rollouts release

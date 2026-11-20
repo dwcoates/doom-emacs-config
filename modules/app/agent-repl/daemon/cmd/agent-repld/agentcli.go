@@ -224,6 +224,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"dequeue":            {usage: "dequeue MERGE|here", run: queueDequeue},
 		"move-up":            {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":          {usage: "move-down MERGE|here", run: queueMove(false)},
+		"move":               {usage: "move MERGE|here -placement front|back|behind=MERGE|index=N", run: queueMoveTo},
 		"requeue":            {usage: "requeue MERGE|here [-placement back|front|behind=MERGE] [-version-part minor|patch -changelog-line TEXT] [-model M]", run: queueRequeue},
 		"discard":            {usage: "discard MERGE|here", run: queueDiscard},
 		"pause":              {usage: "pause -repository here|DIR|all [-hard] [-to-land]", run: queuePause(true)},
@@ -2717,6 +2718,47 @@ func queueMove(up bool) func(c *cliCall, args []string) int {
 		}
 		return c.updateMergeQueue(named, req)
 	}
+}
+
+// queueMoveTo puts a waiting merge on any place of its queue in one call:
+// the head of the waiting line, its back, directly behind a merge in line, or
+// a waiting place counted from 0.
+func queueMoveTo(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	place := fs.String("placement", "", "front, back, behind=MERGE or index=N")
+	ref, rest, ok := c.queuedArg(fs, stateDir, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(rest) != 0 {
+		return c.usageFailed("nothing but the merge is positional")
+	}
+	move, err := movePlacement(ref, *place)
+	if err != nil {
+		return c.usageFailed("%v", err)
+	}
+	return c.updateMergeQueue(&agentreplv1.UpdateMergeQueueRequest{Action: &agentreplv1.UpdateMergeQueueRequest_Move{Move: move}})
+}
+
+// movePlacement reads a move's -placement as the move of REF's merge. Nothing
+// is defaulted.
+func movePlacement(ref *workspacev1.WorkspaceRef, text string) (*agentreplv1.UpdateMergeQueueMove, error) {
+	word, err := readPlacement(text, true)
+	if err != nil {
+		return nil, err
+	}
+	move := &agentreplv1.UpdateMergeQueueMove{Workspace: ref}
+	switch {
+	case word.behind != "":
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Behind{Behind: &agentreplv1.UpdateMergeQueueMoveBehind{Merge: word.behind}}
+	case word.index != nil:
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Index{Index: &agentreplv1.UpdateMergeQueueMoveIndex{Index: *word.index}}
+	case word.back:
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Back{Back: &agentreplv1.UpdateMergeQueueMoveBack{}}
+	default:
+		move.Place = &agentreplv1.UpdateMergeQueueMove_Front{Front: &agentreplv1.UpdateMergeQueueMoveFront{}}
+	}
+	return move, nil
 }
 
 func queuePause(pause bool) func(c *cliCall, args []string) int {
