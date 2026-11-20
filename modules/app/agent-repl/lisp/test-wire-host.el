@@ -587,16 +587,16 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
 ;;;; ---- The mention targets push ----
 
 (ert-deftest agent-repl-test-wire-host-mention-targets-decode-each-target ()
-  "The mention targets push decodes each target's name, workspace and repository, in order."
+  "The mention targets push decodes each target's name, workspace, standing and repository, in order."
   (should (equal (plist-get (agent-repl-test-wire-host--decode
                              #'agent-repl-wire-decode-watch-host-workspace-response
                              (concat "{\"mentionTargets\":{\"targets\":["
                                      "{\"name\":{\"text\":\"beta\"},\"workspace\":{\"id\":\"b\",\"dir\":\"/w/b\"},"
-                                     "\"repository\":{\"name\":\"doom\"}},"
-                                     "{\"name\":{\"text\":\"alpha\"},\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"}}]}}"))
+                                     "\"open\":{},\"repository\":{\"name\":\"doom\"}},"
+                                     "{\"name\":{\"text\":\"alpha\"},\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"},\"closed\":{}}]}}"))
                             :value)
-                 '((:name "beta" :workspace (:id "b" :dir "/w/b") :repository "doom")
-                   (:name "alpha" :workspace (:id "a" :dir "/w/a") :repository nil)))))
+                 '((:name "beta" :workspace (:id "b" :dir "/w/b") :standing (:arm :open :value nil) :repository "doom")
+                   (:name "alpha" :workspace (:id "a" :dir "/w/a") :standing (:arm :closed :value nil) :repository nil)))))
 
 (ert-deftest agent-repl-test-wire-host-mention-targets-absent-list-is-empty ()
   "A set with no targets decodes to the empty list, protojson's omitted field."
@@ -611,8 +611,8 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-workspace-mention-targets
                   (concat "{\"targets\":["
-                          "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"}},"
-                          "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"2\",\"dir\":\"/w/2\"}}]}"))
+                          "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"},\"open\":{}},"
+                          "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"2\",\"dir\":\"/w/2\"},\"open\":{}}]}"))
                  '("WorkspaceMentionTargets" targets "the name \"a\" is served twice"))))
 
 (ert-deftest agent-repl-test-wire-host-mention-target-without-a-name-is-a-breach ()
@@ -628,6 +628,20 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                   #'agent-repl-wire-decode-workspace-mention-target
                   "{\"name\":{\"text\":\"a\"}}")
                  '("WorkspaceMentionTarget" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-mention-target-without-a-standing-is-a-breach ()
+  "A target stating neither open nor closed is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-mention-target
+                  "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"}}")
+                 '("WorkspaceMentionTarget" standing "oneof is unset"))))
+
+(ert-deftest agent-repl-test-wire-host-mention-target-both-standings-is-a-breach ()
+  "A target stating both open and closed is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-mention-target
+                  "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"},\"open\":{},\"closed\":{}}")
+                 '("WorkspaceMentionTarget" standing "oneof has more than one arm set"))))
 
 (ert-deftest agent-repl-test-wire-host-mention-target-an-unknown-field-is-a-breach ()
   "A field the target does not declare is a contract breach."

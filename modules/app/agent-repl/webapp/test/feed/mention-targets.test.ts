@@ -1,7 +1,8 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { readMentionTargets } from "../../src/feed/workspace-mentions.js";
+import { filesUnder } from "../files-under.js";
 import { closedTarget, mentionTargets, openTarget } from "./mention-targets.js";
 
 describe("mention-targets", () => {
@@ -31,11 +32,10 @@ describe("mention-targets", () => {
     const root = join(__dirname, "..");
     // Spelled in two pieces so this file does not match its own search.
     const schema = ["WorkspaceMentionTargets", "Schema"].join("");
-    const files = (readdirSync(root, { recursive: true }) as string[]).filter((f) => /\.tsx?$/.test(f));
     // ACT
-    const handRolled = files.filter(
-      (f) => !allowed.has(relative(root, join(root, f))) && readFileSync(join(root, f), "utf8").includes(schema),
-    );
+    const handRolled = filesUnder(root, [".ts", ".tsx"])
+      .map((full) => relative(root, full))
+      .filter((f) => !allowed.has(f) && readFileSync(join(root, f), "utf8").includes(schema));
     // ASSERT
     expect(handRolled).toEqual([]);
   });

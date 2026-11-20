@@ -744,18 +744,25 @@ without their slash, WORKSPACES as the roster names them."
 
 (defun agent-repl-wire-decode-workspace-mention-target (value)
   "Decode VALUE as `WorkspaceMentionTarget', a target plist.
-The plist is (:name NAME :workspace WORKSPACE :repository REPOSITORY).
-NAME is the name string, WORKSPACE its `WorkspaceRef' plist, and REPOSITORY
-the repository's name string, or nil when the daemon stated none."
+The plist is (:name NAME :workspace WORKSPACE :standing STANDING
+:repository REPOSITORY).  NAME is the name string, WORKSPACE its
+`WorkspaceRef' plist, STANDING the oneof `(:arm ARM :value nil)' whose ARM
+is `:open' or `:closed' (closed within the daemon's recent window; never
+unset), and REPOSITORY the repository's name string, or nil when the daemon
+stated none."
   (let* ((message "WorkspaceMentionTarget")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys "WorkspaceMentionTarget" object '(name workspace repository))
+    (agent-repl-wire--check-keys "WorkspaceMentionTarget" object '(name workspace open closed repository))
     (agent-repl-wire--decoded
      message
      (list :name (agent-repl-wire--decode-message
                   message 'name object #'agent-repl-wire-decode-workspace-mention-name)
            :workspace (agent-repl-wire--decode-message
                        message 'workspace object #'agent-repl-wire-decode-workspace-ref)
+           :standing (agent-repl-wire--decode-oneof
+                      message 'standing object
+                      `((open :open ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceMentionTargetOpen" v)))
+                        (closed :closed ,(lambda (v) (agent-repl-wire--decode-empty "WorkspaceMentionTargetClosed" v)))))
            :repository (agent-repl-wire--decode-optional-message
                         message 'repository object
                         #'agent-repl-wire-decode-workspace-mention-repository)))))
