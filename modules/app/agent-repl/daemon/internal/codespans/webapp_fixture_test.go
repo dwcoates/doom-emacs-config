@@ -16,9 +16,11 @@ import (
 // the inline code it is marked with, and the links and code the renderer must
 // draw; the fixture file adds what the feed draws for it (Unmark of Markup),
 // regenerated with `go test ./internal/codespans -run WebappFixture -update`.
+// Both live in this package's testdata, which its tests may read; the webapp's
+// test imports the fixture from here (webapp/test/markdown.test.ts).
 const (
-	webappInputsPath  = "../../../webapp/test/fixtures/link-code-inputs.json"
-	webappFixturePath = "../../../webapp/test/fixtures/link-code.json"
+	webappInputsPath  = "testdata/link-code-inputs.json"
+	webappFixturePath = "testdata/link-code.json"
 )
 
 var update = flag.Bool("update", false, "rewrite the webapp's link-code fixture from its inputs")

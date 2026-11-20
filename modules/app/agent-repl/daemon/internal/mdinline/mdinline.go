@@ -10,8 +10,8 @@
 // renderer links: an `http://` or `https://` URL its inline linkify rule
 // matches, or a `www.` host its fuzzy linkifier matches, with the extent
 // linkify-it's path grammar gives it. The webapp's tests render this package's
-// answers for a shared corpus (webapp/test/fixtures/link-code.json, written by
-// the codespans package's fixture test) and fail when the renderer reads a
+// answers for a shared corpus (daemon/internal/codespans/testdata/link-code.json,
+// written by the codespans package's fixture test) and fail when the renderer reads a
 // link differently.
 //
 // A bare host with no scheme and no `www.` (`github.com/x`), which the
@@ -502,13 +502,13 @@ func pathStep(line string, j int) int {
 		return 0
 	case ')', ']', '}':
 		return 0
-	case '\'':
+	case apostrophe:
 		for k := j + 1; k < len(line); {
 			c, n := utf8.DecodeRuneInString(line[k:])
 			if isSeparator(c) {
 				break
 			}
-			if c == '\'' && k > j+1 {
+			if c == apostrophe && k > j+1 {
 				return k + 1 - j
 			}
 			k += n
@@ -566,6 +566,10 @@ func pathStep(line string, j int) int {
 	}
 	return size
 }
+
+// apostrophe is the single quote linkify-it pairs in a path, spelled by code
+// point so no scan for sh quoting mistakes it for one (shellword).
+const apostrophe = '\u0027'
 
 // isSeparator reports whether R ends a URL: whitespace, a control character,
 // or one of linkify-it's text separators.

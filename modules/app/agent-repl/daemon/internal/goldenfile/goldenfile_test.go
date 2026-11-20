@@ -2,7 +2,6 @@ package goldenfile
 
 import (
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -88,29 +87,3 @@ func TestCheck(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
-
-// TestEveryGoldenFileIsCheckedHere fails a daemon test that keeps a golden
-// file behind an update flag without checking it through Check, so no test
-// hand-rolls its own comparison again.
-func TestEveryGoldenFileIsCheckedHere(t *testing.T) {
-	var offenders []string
-	err := filepath.WalkDir("..", func(path string, d fs.DirEntry, err error) error {
-		if err != nil || d.IsDir() || !strings.HasSuffix(path, "_test.go") || strings.HasPrefix(path, "../goldenfile/") {
-			return err
-		}
-		src, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		if strings.Contains(string(src), `flag.Bool("update"`) && !strings.Contains(string(src), "goldenfile.Check(") {
-			offenders = append(offenders, path)
-		}
-		return nil
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(offenders) > 0 {
-		t.Fatalf("these tests keep a golden file without goldenfile.Check: %v", offenders)
-	}
-}

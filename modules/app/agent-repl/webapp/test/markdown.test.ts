@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { codeBlockHtml } from "../src/code-block.js";
 import { escapeHtml } from "../src/highlight.js";
 import { inline, LEAD_CLASS, renderMarkdown, setInlineMarkdown } from "../src/markdown.js";
-import linkCode from "./fixtures/link-code.json";
+import linkCode from "../../daemon/internal/codespans/testdata/link-code.json";
 
 describe("renderMarkdown blocks", () => {
   it("renders headings at their level", () => {
@@ -573,7 +573,7 @@ describe("a link is never drawn as code", () => {
 // marks a prompt's inline code only outside links (codespans.Markup), by its
 // own reading of where a link is (daemon/internal/mdinline). This renderer is
 // the authority on that, so each corpus text the daemon drew
-// (test/fixtures/link-code.json, written by the daemon's codespans package)
+// (daemon/internal/codespans/testdata/link-code.json, written by its tests)
 // must render with exactly its links, each href clean, no code in any link,
 // and its code spans beside them.
 describe("the daemon's drawn links render whole", () => {
