@@ -574,6 +574,8 @@ func TestTheMediatorApprovesACheckThatCouldNotRun(t *testing.T) {
 		t.Fatalf("check %+v, want it escalated and never prompted", m)
 	}
 
+	asked := h.o.deps.Now()
+
 	// Act
 	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "it broke nothing"})
 
@@ -583,5 +585,42 @@ func TestTheMediatorApprovesACheckThatCouldNotRun(t *testing.T) {
 	}
 	if m := owedCheck(t, h); m != nil {
 		t.Fatalf("check %+v, want it released", m)
+	} // THE NEXT CHECK'S WINDOW STARTS AT THE APPROVAL, never where the last
+	// readable check ended: the records this check could not read are behind it.
+	through, found, err := h.db.CheckedThrough(context.Background(), mediationKey(h))
+	if err != nil || !found || through.Before(asked) {
+		t.Fatalf("CheckedThrough = (%v, %v, %v), want the checks read through the approval, asked at %v", through, found, err, asked)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
+		Message: "the mediator approved a check that could not run; its window is recorded as read, and the next check's starts here"}); !ok {
+		t.Fatalf("records = %v, want the window recorded as read", h.logs.Records())
+	}
+}
+
+// TestAnApprovalOfACheckThatCouldNotRunFailsWhenItsWindowCannotBeRecorded
+// pins the error path: the approval is not recorded and the check stays owed.
+func TestAnApprovalOfACheckThatCouldNotRunFailsWhenItsWindowCannotBeRecorded(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, errors.New("logs.sh exited 2") }
+	h.o.Mediate(context.Background())
+	h.db.windowErr = errors.New("disk gone")
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "it broke nothing"})
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "disk gone") {
+		t.Fatalf("DecideMediation = %v, want the failed record surfaced", err)
+	}
+	if m := owedCheck(t, h); m == nil || !m.Escalated() {
+		t.Fatalf("check %+v, want it still owed and escalated", m)
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: "the window of a check that could not run could not be recorded as read; the approval is not recorded and the queue stays held"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["error"]), "disk gone") {
+		t.Fatalf("records = %v, want the failure at ERROR with its cause", h.logs.Records())
 	}
 }

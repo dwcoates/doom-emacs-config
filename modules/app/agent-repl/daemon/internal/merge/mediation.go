@@ -995,6 +995,17 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		o.holdEscalated(ctx, q, m, d.Summary, d.Problems, window, true, fields)
 		return nil
 	}
+	// A CHECK THAT COULD NOT RUN IS READ THROUGH ITS APPROVAL: its window was
+	// never recorded, so the next check's window would start where the last
+	// recorded one ended and hold everything this one could not read. On
+	// 2026-11-20 that was 363 MB of records, and every check after the first
+	// that could not read them failed the same way. The mediator looked at
+	// the deploy itself, so the window is recorded as read up to now.
+	if !m.Prompted() {
+		if err := o.recordUnreadWindow(ctx, q, m, fields); err != nil {
+			return err
+		}
+	}
 	// A DECISION RACING A NEWER DEPLOY RELEASES NOTHING: the replacement
 	// counted that check's end, and the newer one is still owed.
 	released, err := o.releaseCheck(ctx, q.key, m, MediationApproved)
@@ -1145,6 +1156,26 @@ func (o *orchestrator) republishMediation(ctx context.Context, repo wsm.RepoKey)
 	if err := o.republishQueue(ctx, repo); err != nil {
 		o.deps.Log.Global().Error(opMediation, "could not republish the queue whose check changed", dlog.Context{"repo": string(repo), "error": err.Error()})
 	}
+}
+
+// recordUnreadWindow records the window of check M of queue Q, whose brief
+// could not be composed, as read from where the last check read to through
+// now, holding no groups: the mediator approved the deploy from its own
+// reading of it. The next check's window then starts here.
+func (o *orchestrator) recordUnreadWindow(ctx context.Context, q checkedQueue, m wsm.Mediation, fields dlog.Context) error {
+	since, err := o.windowStart(ctx, q.key, m)
+	if err != nil {
+		o.deps.Log.Global().Error(opMediation, "could not read where the window of a check that could not run starts; the approval is not recorded and the queue stays held", withField(fields, "error", err.Error()))
+		return err
+	}
+	window := wsm.CheckWindow{Start: since, Through: o.deps.Now()}
+	fields = withField(withField(fields, "window_started", window.Start.UTC().Format(time.RFC3339Nano)), "window_through", window.Through.UTC().Format(time.RFC3339Nano))
+	if _, err := o.deps.DB.RecordMediationWindow(ctx, q.key, m.OwedAt, window); err != nil {
+		o.deps.Log.Global().Error(opMediation, "the window of a check that could not run could not be recorded as read; the approval is not recorded and the queue stays held", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Log.Global().Info(opMediation, "the mediator approved a check that could not run; its window is recorded as read, and the next check's starts here", fields)
+	return nil
 }
 
 // toldWindow is the window the intake of REPO's owed check was told, empty
