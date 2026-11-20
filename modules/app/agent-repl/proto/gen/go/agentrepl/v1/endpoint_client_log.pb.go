@@ -220,7 +220,17 @@ type ClientLogRecord struct {
 	//
 	//	*ClientLogRecord_Webapp
 	//	*ClientLogRecord_Sidecar
-	Runtime       isClientLogRecord_Runtime `protobuf_oneof:"runtime"`
+	Runtime isClientLogRecord_Runtime `protobuf_oneof:"runtime"`
+	// The key of the log call that wrote the record: 12 lowercase hex, which
+	// the client derives from its runtime, the call's scope and its template
+	// (logging-contract.md "Log sites"). Required: a record with no site, or
+	// one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
+	// record the production checks cannot count is a record they miss.
+	Site string `protobuf:"bytes,12,opt,name=site,proto3" json:"site,omitempty"`
+	// The call's unrendered message, its placeholders ({name}) unfilled: the
+	// site's summary. Required (a blank one is malformed). `message` is this
+	// template rendered from the record's context.
+	Template      string `protobuf:"bytes,13,opt,name=template,proto3" json:"template,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -358,6 +368,20 @@ func (x *ClientLogRecord) GetSidecar() *ClientLogRuntimeSidecar {
 	return nil
 }
 
+func (x *ClientLogRecord) GetSite() string {
+	if x != nil {
+		return x.Site
+	}
+	return ""
+}
+
+func (x *ClientLogRecord) GetTemplate() string {
+	if x != nil {
+		return x.Template
+	}
+	return ""
+}
+
 type isClientLogRecord_Level interface {
 	isClientLogRecord_Level()
 }
@@ -474,150 +498,6 @@ func (*ClientLogRuntimeSidecar) Descriptor() ([]byte, []int) {
 	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{4}
 }
 
-type ClientLogLevelDebug struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ClientLogLevelDebug) Reset() {
-	*x = ClientLogLevelDebug{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ClientLogLevelDebug) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ClientLogLevelDebug) ProtoMessage() {}
-
-func (x *ClientLogLevelDebug) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ClientLogLevelDebug.ProtoReflect.Descriptor instead.
-func (*ClientLogLevelDebug) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{5}
-}
-
-type ClientLogLevelInfo struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ClientLogLevelInfo) Reset() {
-	*x = ClientLogLevelInfo{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ClientLogLevelInfo) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ClientLogLevelInfo) ProtoMessage() {}
-
-func (x *ClientLogLevelInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ClientLogLevelInfo.ProtoReflect.Descriptor instead.
-func (*ClientLogLevelInfo) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{6}
-}
-
-type ClientLogLevelWarn struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ClientLogLevelWarn) Reset() {
-	*x = ClientLogLevelWarn{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ClientLogLevelWarn) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ClientLogLevelWarn) ProtoMessage() {}
-
-func (x *ClientLogLevelWarn) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ClientLogLevelWarn.ProtoReflect.Descriptor instead.
-func (*ClientLogLevelWarn) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{7}
-}
-
-type ClientLogLevelError struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ClientLogLevelError) Reset() {
-	*x = ClientLogLevelError{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[8]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ClientLogLevelError) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ClientLogLevelError) ProtoMessage() {}
-
-func (x *ClientLogLevelError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[8]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ClientLogLevelError.ProtoReflect.Descriptor instead.
-func (*ClientLogLevelError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{8}
-}
-
 // THE ARM IS THE OUTCOME.
 type ClientLogResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -632,7 +512,7 @@ type ClientLogResponse struct {
 
 func (x *ClientLogResponse) Reset() {
 	*x = ClientLogResponse{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -644,7 +524,7 @@ func (x *ClientLogResponse) String() string {
 func (*ClientLogResponse) ProtoMessage() {}
 
 func (x *ClientLogResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[9]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -657,7 +537,7 @@ func (x *ClientLogResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientLogResponse.ProtoReflect.Descriptor instead.
 func (*ClientLogResponse) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{9}
+	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ClientLogResponse) GetResult() isClientLogResponse_Result {
@@ -710,7 +590,7 @@ type ClientLogSuccess struct {
 
 func (x *ClientLogSuccess) Reset() {
 	*x = ClientLogSuccess{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -722,7 +602,7 @@ func (x *ClientLogSuccess) String() string {
 func (*ClientLogSuccess) ProtoMessage() {}
 
 func (x *ClientLogSuccess) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[10]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -735,7 +615,7 @@ func (x *ClientLogSuccess) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientLogSuccess.ProtoReflect.Descriptor instead.
 func (*ClientLogSuccess) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{10}
+	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{6}
 }
 
 // Arms derived from the daemon's refusal sites.
@@ -752,7 +632,7 @@ type ClientLogError struct {
 
 func (x *ClientLogError) Reset() {
 	*x = ClientLogError{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -764,7 +644,7 @@ func (x *ClientLogError) String() string {
 func (*ClientLogError) ProtoMessage() {}
 
 func (x *ClientLogError) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[11]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -777,7 +657,7 @@ func (x *ClientLogError) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientLogError.ProtoReflect.Descriptor instead.
 func (*ClientLogError) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{11}
+	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ClientLogError) GetCause() isClientLogError_Cause {
@@ -820,7 +700,7 @@ type ClientLogUnknownWorkspace struct {
 
 func (x *ClientLogUnknownWorkspace) Reset() {
 	*x = ClientLogUnknownWorkspace{}
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -832,7 +712,7 @@ func (x *ClientLogUnknownWorkspace) String() string {
 func (*ClientLogUnknownWorkspace) ProtoMessage() {}
 
 func (x *ClientLogUnknownWorkspace) ProtoReflect() protoreflect.Message {
-	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[12]
+	mi := &file_agentrepl_v1_endpoint_client_log_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -845,20 +725,20 @@ func (x *ClientLogUnknownWorkspace) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ClientLogUnknownWorkspace.ProtoReflect.Descriptor instead.
 func (*ClientLogUnknownWorkspace) Descriptor() ([]byte, []int) {
-	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{12}
+	return file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP(), []int{8}
 }
 
 var File_agentrepl_v1_endpoint_client_log_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"\n" +
-	"&agentrepl/v1/endpoint_client_log.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1cgoogle/protobuf/struct.proto\"\xcb\x01\n" +
+	"&agentrepl/v1/endpoint_client_log.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\x1a\x1cgoogle/protobuf/struct.proto\x1a\x1cagentrepl/v1/log_level.proto\"\xcb\x01\n" +
 	"\x10ClientLogRequest\x12:\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefH\x00R\tworkspace\x12:\n" +
 	"\awebhost\x18\x03 \x01(\v2\x1e.agentrepl.v1.ClientLogWebhostH\x00R\awebhost\x125\n" +
 	"\x06record\x18\x02 \x01(\v2\x1d.agentrepl.v1.ClientLogRecordR\x06recordB\b\n" +
 	"\x06source\"\x12\n" +
-	"\x10ClientLogWebhost\"\xb1\x04\n" +
+	"\x10ClientLogWebhost\"\xe1\x04\n" +
 	"\x0fClientLogRecord\x129\n" +
 	"\x05debug\x18\x01 \x01(\v2!.agentrepl.v1.ClientLogLevelDebugH\x00R\x05debug\x126\n" +
 	"\x04info\x18\x02 \x01(\v2 .agentrepl.v1.ClientLogLevelInfoH\x00R\x04info\x126\n" +
@@ -871,15 +751,13 @@ const file_agentrepl_v1_endpoint_client_log_proto_rawDesc = "" +
 	"\averbose\x18\t \x01(\bR\averbose\x12>\n" +
 	"\x06webapp\x18\n" +
 	" \x01(\v2$.agentrepl.v1.ClientLogRuntimeWebappH\x01R\x06webapp\x12A\n" +
-	"\asidecar\x18\v \x01(\v2%.agentrepl.v1.ClientLogRuntimeSidecarH\x01R\asidecarB\a\n" +
+	"\asidecar\x18\v \x01(\v2%.agentrepl.v1.ClientLogRuntimeSidecarH\x01R\asidecar\x12\x12\n" +
+	"\x04site\x18\f \x01(\tR\x04site\x12\x1a\n" +
+	"\btemplate\x18\r \x01(\tR\btemplateB\a\n" +
 	"\x05levelB\t\n" +
 	"\aruntime\"\x18\n" +
 	"\x16ClientLogRuntimeWebapp\"\x19\n" +
-	"\x17ClientLogRuntimeSidecar\"\x15\n" +
-	"\x13ClientLogLevelDebug\"\x14\n" +
-	"\x12ClientLogLevelInfo\"\x14\n" +
-	"\x12ClientLogLevelWarn\"\x15\n" +
-	"\x13ClientLogLevelError\"\x8f\x01\n" +
+	"\x17ClientLogRuntimeSidecar\"\x8f\x01\n" +
 	"\x11ClientLogResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.agentrepl.v1.ClientLogSuccessH\x00R\asuccess\x124\n" +
 	"\x05error\x18\x02 \x01(\v2\x1c.agentrepl.v1.ClientLogErrorH\x00R\x05errorB\b\n" +
@@ -902,38 +780,38 @@ func file_agentrepl_v1_endpoint_client_log_proto_rawDescGZIP() []byte {
 	return file_agentrepl_v1_endpoint_client_log_proto_rawDescData
 }
 
-var file_agentrepl_v1_endpoint_client_log_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_agentrepl_v1_endpoint_client_log_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_agentrepl_v1_endpoint_client_log_proto_goTypes = []any{
 	(*ClientLogRequest)(nil),          // 0: agentrepl.v1.ClientLogRequest
 	(*ClientLogWebhost)(nil),          // 1: agentrepl.v1.ClientLogWebhost
 	(*ClientLogRecord)(nil),           // 2: agentrepl.v1.ClientLogRecord
 	(*ClientLogRuntimeWebapp)(nil),    // 3: agentrepl.v1.ClientLogRuntimeWebapp
 	(*ClientLogRuntimeSidecar)(nil),   // 4: agentrepl.v1.ClientLogRuntimeSidecar
-	(*ClientLogLevelDebug)(nil),       // 5: agentrepl.v1.ClientLogLevelDebug
-	(*ClientLogLevelInfo)(nil),        // 6: agentrepl.v1.ClientLogLevelInfo
-	(*ClientLogLevelWarn)(nil),        // 7: agentrepl.v1.ClientLogLevelWarn
-	(*ClientLogLevelError)(nil),       // 8: agentrepl.v1.ClientLogLevelError
-	(*ClientLogResponse)(nil),         // 9: agentrepl.v1.ClientLogResponse
-	(*ClientLogSuccess)(nil),          // 10: agentrepl.v1.ClientLogSuccess
-	(*ClientLogError)(nil),            // 11: agentrepl.v1.ClientLogError
-	(*ClientLogUnknownWorkspace)(nil), // 12: agentrepl.v1.ClientLogUnknownWorkspace
-	(*v1.WorkspaceRef)(nil),           // 13: workspace.v1.WorkspaceRef
+	(*ClientLogResponse)(nil),         // 5: agentrepl.v1.ClientLogResponse
+	(*ClientLogSuccess)(nil),          // 6: agentrepl.v1.ClientLogSuccess
+	(*ClientLogError)(nil),            // 7: agentrepl.v1.ClientLogError
+	(*ClientLogUnknownWorkspace)(nil), // 8: agentrepl.v1.ClientLogUnknownWorkspace
+	(*v1.WorkspaceRef)(nil),           // 9: workspace.v1.WorkspaceRef
+	(*ClientLogLevelDebug)(nil),       // 10: agentrepl.v1.ClientLogLevelDebug
+	(*ClientLogLevelInfo)(nil),        // 11: agentrepl.v1.ClientLogLevelInfo
+	(*ClientLogLevelWarn)(nil),        // 12: agentrepl.v1.ClientLogLevelWarn
+	(*ClientLogLevelError)(nil),       // 13: agentrepl.v1.ClientLogLevelError
 	(*structpb.Struct)(nil),           // 14: google.protobuf.Struct
 }
 var file_agentrepl_v1_endpoint_client_log_proto_depIdxs = []int32{
-	13, // 0: agentrepl.v1.ClientLogRequest.workspace:type_name -> workspace.v1.WorkspaceRef
+	9,  // 0: agentrepl.v1.ClientLogRequest.workspace:type_name -> workspace.v1.WorkspaceRef
 	1,  // 1: agentrepl.v1.ClientLogRequest.webhost:type_name -> agentrepl.v1.ClientLogWebhost
 	2,  // 2: agentrepl.v1.ClientLogRequest.record:type_name -> agentrepl.v1.ClientLogRecord
-	5,  // 3: agentrepl.v1.ClientLogRecord.debug:type_name -> agentrepl.v1.ClientLogLevelDebug
-	6,  // 4: agentrepl.v1.ClientLogRecord.info:type_name -> agentrepl.v1.ClientLogLevelInfo
-	7,  // 5: agentrepl.v1.ClientLogRecord.warn:type_name -> agentrepl.v1.ClientLogLevelWarn
-	8,  // 6: agentrepl.v1.ClientLogRecord.error:type_name -> agentrepl.v1.ClientLogLevelError
+	10, // 3: agentrepl.v1.ClientLogRecord.debug:type_name -> agentrepl.v1.ClientLogLevelDebug
+	11, // 4: agentrepl.v1.ClientLogRecord.info:type_name -> agentrepl.v1.ClientLogLevelInfo
+	12, // 5: agentrepl.v1.ClientLogRecord.warn:type_name -> agentrepl.v1.ClientLogLevelWarn
+	13, // 6: agentrepl.v1.ClientLogRecord.error:type_name -> agentrepl.v1.ClientLogLevelError
 	14, // 7: agentrepl.v1.ClientLogRecord.context:type_name -> google.protobuf.Struct
 	3,  // 8: agentrepl.v1.ClientLogRecord.webapp:type_name -> agentrepl.v1.ClientLogRuntimeWebapp
 	4,  // 9: agentrepl.v1.ClientLogRecord.sidecar:type_name -> agentrepl.v1.ClientLogRuntimeSidecar
-	10, // 10: agentrepl.v1.ClientLogResponse.success:type_name -> agentrepl.v1.ClientLogSuccess
-	11, // 11: agentrepl.v1.ClientLogResponse.error:type_name -> agentrepl.v1.ClientLogError
-	12, // 12: agentrepl.v1.ClientLogError.unknown_workspace:type_name -> agentrepl.v1.ClientLogUnknownWorkspace
+	6,  // 10: agentrepl.v1.ClientLogResponse.success:type_name -> agentrepl.v1.ClientLogSuccess
+	7,  // 11: agentrepl.v1.ClientLogResponse.error:type_name -> agentrepl.v1.ClientLogError
+	8,  // 12: agentrepl.v1.ClientLogError.unknown_workspace:type_name -> agentrepl.v1.ClientLogUnknownWorkspace
 	13, // [13:13] is the sub-list for method output_type
 	13, // [13:13] is the sub-list for method input_type
 	13, // [13:13] is the sub-list for extension type_name
@@ -946,6 +824,7 @@ func file_agentrepl_v1_endpoint_client_log_proto_init() {
 	if File_agentrepl_v1_endpoint_client_log_proto != nil {
 		return
 	}
+	file_agentrepl_v1_log_level_proto_init()
 	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[0].OneofWrappers = []any{
 		(*ClientLogRequest_Workspace)(nil),
 		(*ClientLogRequest_Webhost)(nil),
@@ -958,11 +837,11 @@ func file_agentrepl_v1_endpoint_client_log_proto_init() {
 		(*ClientLogRecord_Webapp)(nil),
 		(*ClientLogRecord_Sidecar)(nil),
 	}
-	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[9].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[5].OneofWrappers = []any{
 		(*ClientLogResponse_Success)(nil),
 		(*ClientLogResponse_Error)(nil),
 	}
-	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[11].OneofWrappers = []any{
+	file_agentrepl_v1_endpoint_client_log_proto_msgTypes[7].OneofWrappers = []any{
 		(*ClientLogError_UnknownWorkspace)(nil),
 	}
 	type x struct{}
@@ -971,7 +850,7 @@ func file_agentrepl_v1_endpoint_client_log_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_agentrepl_v1_endpoint_client_log_proto_rawDesc), len(file_agentrepl_v1_endpoint_client_log_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

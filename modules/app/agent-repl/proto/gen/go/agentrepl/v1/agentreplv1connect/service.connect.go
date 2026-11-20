@@ -413,6 +413,8 @@ const (
 	// AgentReplRecordDirectLandingProcedure is the fully-qualified name of the AgentRepl's
 	// RecordDirectLanding RPC.
 	AgentReplRecordDirectLandingProcedure = "/agentrepl.v1.AgentRepl/RecordDirectLanding"
+	// AgentReplListLogSitesProcedure is the fully-qualified name of the AgentRepl's ListLogSites RPC.
+	AgentReplListLogSitesProcedure = "/agentrepl.v1.AgentRepl/ListLogSites"
 	// AgentReplFindWorkspacesProcedure is the fully-qualified name of the AgentRepl's FindWorkspaces
 	// RPC.
 	AgentReplFindWorkspacesProcedure = "/agentrepl.v1.AgentRepl/FindWorkspaces"
@@ -631,6 +633,7 @@ var (
 	agentReplGetMergeQueueStatusMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("GetMergeQueueStatus")
 	agentReplListMergeLandingsMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("ListMergeLandings")
 	agentReplRecordDirectLandingMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("RecordDirectLanding")
+	agentReplListLogSitesMethodDescriptor                       = agentReplServiceDescriptor.Methods().ByName("ListLogSites")
 	agentReplFindWorkspacesMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("FindWorkspaces")
 	agentReplLocateWorkspaceMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("LocateWorkspace")
 	agentReplSubscribeWorkspaceMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SubscribeWorkspace")
@@ -1102,6 +1105,11 @@ type AgentReplClient interface {
 	// daemon records under the path its own state names. See
 	// endpoint_record_direct_landing.proto.
 	RecordDirectLanding(context.Context, *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error)
+	// Every log site that fired in a window of time, across every runtime, with
+	// how often it fired and one record it wrote, read from the daemon's
+	// per-deploy tallies rather than the logs. `agent-repld logs sites`
+	// answers it. See endpoint_list_log_sites.proto.
+	ListLogSites(context.Context, *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
 	// activity window, standing, text and whether the sidebar draws them, each
 	// with its name, summary and, when drawn, its roster section and live
@@ -2048,6 +2056,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplRecordDirectLandingMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		listLogSites: connect.NewClient[v1.ListLogSitesRequest, v1.ListLogSitesResponse](
+			httpClient,
+			baseURL+AgentReplListLogSitesProcedure,
+			connect.WithSchema(agentReplListLogSitesMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		findWorkspaces: connect.NewClient[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse](
 			httpClient,
 			baseURL+AgentReplFindWorkspacesProcedure,
@@ -2358,6 +2373,7 @@ type agentReplClient struct {
 	getMergeQueueStatus                *connect.Client[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse]
 	listMergeLandings                  *connect.Client[v1.ListMergeLandingsRequest, v1.ListMergeLandingsResponse]
 	recordDirectLanding                *connect.Client[v1.RecordDirectLandingRequest, v1.RecordDirectLandingResponse]
+	listLogSites                       *connect.Client[v1.ListLogSitesRequest, v1.ListLogSitesResponse]
 	findWorkspaces                     *connect.Client[v1.FindWorkspacesRequest, v1.FindWorkspacesResponse]
 	locateWorkspace                    *connect.Client[v1.LocateWorkspaceRequest, v1.LocateWorkspaceResponse]
 	subscribeWorkspace                 *connect.Client[v1.SubscribeWorkspaceRequest, v1.SubscribeWorkspaceResponse]
@@ -3072,6 +3088,11 @@ func (c *agentReplClient) RecordDirectLanding(ctx context.Context, req *connect.
 	return c.recordDirectLanding.CallUnary(ctx, req)
 }
 
+// ListLogSites calls agentrepl.v1.AgentRepl.ListLogSites.
+func (c *agentReplClient) ListLogSites(ctx context.Context, req *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error) {
+	return c.listLogSites.CallUnary(ctx, req)
+}
+
 // FindWorkspaces calls agentrepl.v1.AgentRepl.FindWorkspaces.
 func (c *agentReplClient) FindWorkspaces(ctx context.Context, req *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {
 	return c.findWorkspaces.CallUnary(ctx, req)
@@ -3650,6 +3671,11 @@ type AgentReplHandler interface {
 	// daemon records under the path its own state names. See
 	// endpoint_record_direct_landing.proto.
 	RecordDirectLanding(context.Context, *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error)
+	// Every log site that fired in a window of time, across every runtime, with
+	// how often it fired and one record it wrote, read from the daemon's
+	// per-deploy tallies rather than the logs. `agent-repld logs sites`
+	// answers it. See endpoint_list_log_sites.proto.
+	ListLogSites(context.Context, *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error)
 	// The registry's agent workspaces, open or closed, narrowed by repository,
 	// activity window, standing, text and whether the sidebar draws them, each
 	// with its name, summary and, when drawn, its roster section and live
@@ -4592,6 +4618,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplRecordDirectLandingMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplListLogSitesHandler := connect.NewUnaryHandler(
+		AgentReplListLogSitesProcedure,
+		svc.ListLogSites,
+		connect.WithSchema(agentReplListLogSitesMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplFindWorkspacesHandler := connect.NewUnaryHandler(
 		AgentReplFindWorkspacesProcedure,
 		svc.FindWorkspaces,
@@ -5036,6 +5069,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplListMergeLandingsHandler.ServeHTTP(w, r)
 		case AgentReplRecordDirectLandingProcedure:
 			agentReplRecordDirectLandingHandler.ServeHTTP(w, r)
+		case AgentReplListLogSitesProcedure:
+			agentReplListLogSitesHandler.ServeHTTP(w, r)
 		case AgentReplFindWorkspacesProcedure:
 			agentReplFindWorkspacesHandler.ServeHTTP(w, r)
 		case AgentReplLocateWorkspaceProcedure:
@@ -5645,6 +5680,10 @@ func (UnimplementedAgentReplHandler) ListMergeLandings(context.Context, *connect
 
 func (UnimplementedAgentReplHandler) RecordDirectLanding(context.Context, *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.RecordDirectLanding is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListLogSites(context.Context, *connect.Request[v1.ListLogSitesRequest]) (*connect.Response[v1.ListLogSitesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListLogSites is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FindWorkspaces(context.Context, *connect.Request[v1.FindWorkspacesRequest]) (*connect.Response[v1.FindWorkspacesResponse], error) {

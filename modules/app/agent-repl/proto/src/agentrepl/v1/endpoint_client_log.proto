@@ -11,6 +11,7 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "google/protobuf/struct.proto";
+import "agentrepl/v1/log_level.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -83,13 +84,19 @@ message ClientLogRecord {
     ClientLogRuntimeWebapp webapp = 10;
     ClientLogRuntimeSidecar sidecar = 11;
   }
+  // The key of the log call that wrote the record: 12 lowercase hex, which
+  // the client derives from its runtime, the call's scope and its template
+  // (logging-contract.md "Log sites"). Required: a record with no site, or
+  // one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
+  // record the production checks cannot count is a record they miss.
+  string site = 12;
+  // The call's unrendered message, its placeholders ({name}) unfilled: the
+  // site's summary. Required (a blank one is malformed). `message` is this
+  // template rendered from the record's context.
+  string template = 13;
 }
 message ClientLogRuntimeWebapp {}
 message ClientLogRuntimeSidecar {}
-message ClientLogLevelDebug {}
-message ClientLogLevelInfo {}
-message ClientLogLevelWarn {}
-message ClientLogLevelError {}
 
 // THE ARM IS THE OUTCOME.
 message ClientLogResponse {

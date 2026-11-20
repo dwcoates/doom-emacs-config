@@ -1,0 +1,19 @@
+// log_level.proto — a record's level, as the endpoints that carry log
+// records name it: the arms ClientLogRecord.level is written with and
+// ListLogSites answers and filters by. Shared because more than one endpoint
+// needs it.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// The debug level: the ordinary path, recorded only inside a level window.
+message ClientLogLevelDebug {}
+// The info level: a notable but unexceptional milestone.
+message ClientLogLevelInfo {}
+// The warn level: a warning, which the deploy and production checks read.
+message ClientLogLevelWarn {}
+// The error level: a failure, recorded once by the layer that owns it.
+message ClientLogLevelError {}

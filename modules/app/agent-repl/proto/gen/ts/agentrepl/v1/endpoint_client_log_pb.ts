@@ -14,13 +14,15 @@ import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
 import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
+import type { ClientLogLevelDebug, ClientLogLevelError, ClientLogLevelInfo, ClientLogLevelWarn } from "./log_level_pb";
+import { file_agentrepl_v1_log_level } from "./log_level_pb";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_client_log.proto.
  */
 export const file_agentrepl_v1_endpoint_client_log: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxIq8BChBDbGllbnRMb2dSZXF1ZXN0Ei8KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIxCgd3ZWJob3N0GAMgASgLMh4uYWdlbnRyZXBsLnYxLkNsaWVudExvZ1dlYmhvc3RIABItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkQggKBnNvdXJjZSISChBDbGllbnRMb2dXZWJob3N0ItUDCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAgSNgoGd2ViYXBwGAogASgLMiQuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVXZWJhcHBIARI4CgdzaWRlY2FyGAsgASgLMiUuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVTaWRlY2FySAFCBwoFbGV2ZWxCCQoHcnVudGltZSIYChZDbGllbnRMb2dSdW50aW1lV2ViYXBwIhkKF0NsaWVudExvZ1J1bnRpbWVTaWRlY2FyIhUKE0NsaWVudExvZ0xldmVsRGVidWciFAoSQ2xpZW50TG9nTGV2ZWxJbmZvIhQKEkNsaWVudExvZ0xldmVsV2FybiIVChNDbGllbnRMb2dMZXZlbEVycm9yIn8KEUNsaWVudExvZ1Jlc3BvbnNlEjEKB3N1Y2Nlc3MYASABKAsyHi5hZ2VudHJlcGwudjEuQ2xpZW50TG9nU3VjY2Vzc0gAEi0KBWVycm9yGAIgASgLMhwuYWdlbnRyZXBsLnYxLkNsaWVudExvZ0Vycm9ySABCCAoGcmVzdWx0IhIKEENsaWVudExvZ1N1Y2Nlc3MiXwoOQ2xpZW50TG9nRXJyb3ISRAoRdW5rbm93bl93b3Jrc3BhY2UYASABKAsyJy5hZ2VudHJlcGwudjEuQ2xpZW50TG9nVW5rbm93bldvcmtzcGFjZUgAQgcKBWNhdXNlIhsKGUNsaWVudExvZ1Vua25vd25Xb3Jrc3BhY2VCKlooYWdlbnRyZXBsL3Byb3RvL2FnZW50cmVwbC92MTthZ2VudHJlcGx2MWIGcHJvdG8z", [file_workspace_v1_workspace, file_google_protobuf_struct]);
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfY2xpZW50X2xvZy5wcm90bxIMYWdlbnRyZXBsLnYxIq8BChBDbGllbnRMb2dSZXF1ZXN0Ei8KCXdvcmtzcGFjZRgBIAEoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWZIABIxCgd3ZWJob3N0GAMgASgLMh4uYWdlbnRyZXBsLnYxLkNsaWVudExvZ1dlYmhvc3RIABItCgZyZWNvcmQYAiABKAsyHS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nUmVjb3JkQggKBnNvdXJjZSISChBDbGllbnRMb2dXZWJob3N0IvUDCg9DbGllbnRMb2dSZWNvcmQSMgoFZGVidWcYASABKAsyIS5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxEZWJ1Z0gAEjAKBGluZm8YAiABKAsyIC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nTGV2ZWxJbmZvSAASMAoEd2FybhgDIAEoCzIgLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbFdhcm5IABIyCgVlcnJvchgEIAEoCzIhLmFnZW50cmVwbC52MS5DbGllbnRMb2dMZXZlbEVycm9ySAASEQoJb3BlcmF0aW9uGAUgASgJEg8KB21lc3NhZ2UYBiABKAkSKAoHY29udGV4dBgHIAEoCzIXLmdvb2dsZS5wcm90b2J1Zi5TdHJ1Y3QSEQoJdGltZXN0YW1wGAggASgJEg8KB3ZlcmJvc2UYCSABKAgSNgoGd2ViYXBwGAogASgLMiQuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVXZWJhcHBIARI4CgdzaWRlY2FyGAsgASgLMiUuYWdlbnRyZXBsLnYxLkNsaWVudExvZ1J1bnRpbWVTaWRlY2FySAESDAoEc2l0ZRgMIAEoCRIQCgh0ZW1wbGF0ZRgNIAEoCUIHCgVsZXZlbEIJCgdydW50aW1lIhgKFkNsaWVudExvZ1J1bnRpbWVXZWJhcHAiGQoXQ2xpZW50TG9nUnVudGltZVNpZGVjYXIifwoRQ2xpZW50TG9nUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5DbGllbnRMb2dTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQ2xpZW50TG9nRXJyb3JIAEIICgZyZXN1bHQiEgoQQ2xpZW50TG9nU3VjY2VzcyJfCg5DbGllbnRMb2dFcnJvchJEChF1bmtub3duX3dvcmtzcGFjZRgBIAEoCzInLmFnZW50cmVwbC52MS5DbGllbnRMb2dVbmtub3duV29ya3NwYWNlSABCBwoFY2F1c2UiGwoZQ2xpZW50TG9nVW5rbm93bldvcmtzcGFjZUIqWihhZ2VudHJlcGwvcHJvdG8vYWdlbnRyZXBsL3YxO2FnZW50cmVwbHYxYgZwcm90bzM", [file_workspace_v1_workspace, file_google_protobuf_struct, file_agentrepl_v1_log_level]);
 
 /**
  * One forwarded record and the sink it is filed in.
@@ -200,6 +202,26 @@ export type ClientLogRecord = Message<"agentrepl.v1.ClientLogRecord"> & {
     value: ClientLogRuntimeSidecar;
     case: "sidecar";
   } | { case: undefined; value?: undefined };
+
+  /**
+   * The key of the log call that wrote the record: 12 lowercase hex, which
+   * the client derives from its runtime, the call's scope and its template
+   * (logging-contract.md "Log sites"). Required: a record with no site, or
+   * one not 12 lowercase hex, is malformed (Connect InvalidArgument), since a
+   * record the production checks cannot count is a record they miss.
+   *
+   * @generated from field: string site = 12;
+   */
+  site: string;
+
+  /**
+   * The call's unrendered message, its placeholders ({name}) unfilled: the
+   * site's summary. Required (a blank one is malformed). `message` is this
+   * template rendered from the record's context.
+   *
+   * @generated from field: string template = 13;
+   */
+  template: string;
 };
 
 /**
@@ -236,58 +258,6 @@ export const ClientLogRuntimeSidecarSchema: GenMessage<ClientLogRuntimeSidecar> 
   messageDesc(file_agentrepl_v1_endpoint_client_log, 4);
 
 /**
- * @generated from message agentrepl.v1.ClientLogLevelDebug
- */
-export type ClientLogLevelDebug = Message<"agentrepl.v1.ClientLogLevelDebug"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ClientLogLevelDebug.
- * Use `create(ClientLogLevelDebugSchema)` to create a new message.
- */
-export const ClientLogLevelDebugSchema: GenMessage<ClientLogLevelDebug> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 5);
-
-/**
- * @generated from message agentrepl.v1.ClientLogLevelInfo
- */
-export type ClientLogLevelInfo = Message<"agentrepl.v1.ClientLogLevelInfo"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ClientLogLevelInfo.
- * Use `create(ClientLogLevelInfoSchema)` to create a new message.
- */
-export const ClientLogLevelInfoSchema: GenMessage<ClientLogLevelInfo> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 6);
-
-/**
- * @generated from message agentrepl.v1.ClientLogLevelWarn
- */
-export type ClientLogLevelWarn = Message<"agentrepl.v1.ClientLogLevelWarn"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ClientLogLevelWarn.
- * Use `create(ClientLogLevelWarnSchema)` to create a new message.
- */
-export const ClientLogLevelWarnSchema: GenMessage<ClientLogLevelWarn> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 7);
-
-/**
- * @generated from message agentrepl.v1.ClientLogLevelError
- */
-export type ClientLogLevelError = Message<"agentrepl.v1.ClientLogLevelError"> & {
-};
-
-/**
- * Describes the message agentrepl.v1.ClientLogLevelError.
- * Use `create(ClientLogLevelErrorSchema)` to create a new message.
- */
-export const ClientLogLevelErrorSchema: GenMessage<ClientLogLevelError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 8);
-
-/**
  * THE ARM IS THE OUTCOME.
  *
  * @generated from message agentrepl.v1.ClientLogResponse
@@ -316,7 +286,7 @@ export type ClientLogResponse = Message<"agentrepl.v1.ClientLogResponse"> & {
  * Use `create(ClientLogResponseSchema)` to create a new message.
  */
 export const ClientLogResponseSchema: GenMessage<ClientLogResponse> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 9);
+  messageDesc(file_agentrepl_v1_endpoint_client_log, 5);
 
 /**
  * Written.
@@ -331,7 +301,7 @@ export type ClientLogSuccess = Message<"agentrepl.v1.ClientLogSuccess"> & {
  * Use `create(ClientLogSuccessSchema)` to create a new message.
  */
 export const ClientLogSuccessSchema: GenMessage<ClientLogSuccess> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 10);
+  messageDesc(file_agentrepl_v1_endpoint_client_log, 6);
 
 /**
  * Arms derived from the daemon's refusal sites.
@@ -364,7 +334,7 @@ export type ClientLogError = Message<"agentrepl.v1.ClientLogError"> & {
  * Use `create(ClientLogErrorSchema)` to create a new message.
  */
 export const ClientLogErrorSchema: GenMessage<ClientLogError> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 11);
+  messageDesc(file_agentrepl_v1_endpoint_client_log, 7);
 
 /**
  * @generated from message agentrepl.v1.ClientLogUnknownWorkspace
@@ -377,5 +347,5 @@ export type ClientLogUnknownWorkspace = Message<"agentrepl.v1.ClientLogUnknownWo
  * Use `create(ClientLogUnknownWorkspaceSchema)` to create a new message.
  */
 export const ClientLogUnknownWorkspaceSchema: GenMessage<ClientLogUnknownWorkspace> = /*@__PURE__*/
-  messageDesc(file_agentrepl_v1_endpoint_client_log, 12);
+  messageDesc(file_agentrepl_v1_endpoint_client_log, 8);
 

@@ -1,0 +1,190 @@
+// endpoint_list_log_sites.proto — ListLogSites: every log site that fired in
+// a window of time, across every runtime, each with how often it fired, when
+// it first and last did, and one record it wrote. AGENT API section. A pull,
+// answered inside the caller's turn, for an agent asking what the system
+// logged and what is new (`agent-repld logs sites -since WHEN`), and the read
+// the production checks compare deploys with.
+//
+// A LOG SITE is one log call in source, named by its key: the first 12 hex of
+// the sha256 of its runtime, the function the call is written in, and its
+// template (logging-contract.md "Log sites"). Every record one call writes
+// carries the same key, whatever values it renders, so counting by key counts
+// what fired, not how many ways its values varied.
+//
+// THE ANSWER IS READ FROM THE DAEMON'S STORE, NEVER FROM THE LOGS. The daemon
+// tallies every record of every sink into (deploy, site, level, hour) rows as
+// it is written and before any log file is pruned, so a window answers the
+// same whether or not its log files still exist. Each row is credited to the
+// deploy serving when its records were written. A window is therefore read at
+// HOUR granularity: an hour the window only partly covers is counted whole,
+// and the answer states the hours it covered (ListLogSitesSuccess.covered).
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "google/protobuf/struct.proto";
+import "agentrepl/v1/log_level.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+// Which sites to answer: those that wrote at least one record in the window,
+// at or above the level asked for.
+message ListLogSitesRequest {
+  // The window of time the sites fired in.
+  ListLogSitesWindow window = 1;
+  // Only records at this level or above (debug < info < warn < error).
+  // UNSET = every level.
+  optional ListLogSitesMinimumLevel minimum_level = 2;
+}
+
+// A window of time, as unix milliseconds. A window whose end precedes its
+// start is malformed (Connect InvalidArgument).
+message ListLogSitesWindow {
+  // The window's start. Required: an open-ended past would read every row the
+  // store keeps, which no caller means.
+  int64 since_ms = 1;
+  // The window's end. UNSET = now.
+  optional int64 until_ms = 2;
+}
+
+// The lowest level answered. THE ARM IS THE LEVEL, as a record's is
+// (ClientLogRecord.level).
+message ListLogSitesMinimumLevel {
+  // The level, debug through error.
+  oneof level {
+    // Every record.
+    ClientLogLevelDebug debug = 1;
+    // Info, warn and error records.
+    ClientLogLevelInfo info = 2;
+    // Warn and error records.
+    ClientLogLevelWarn warn = 3;
+    // Error records only.
+    ClientLogLevelError error = 4;
+  }
+}
+
+// THE ARM IS THE OUTCOME.
+message ListLogSitesResponse {
+  oneof result {
+    ListLogSitesSuccess success = 1;
+    ListLogSitesError error = 2;
+  }
+}
+
+// The sites that fired, errors first, then by how often each fired, the most
+// first. A window in which nothing fired answers no sites: that is an answer,
+// not a failure.
+message ListLogSitesSuccess {
+  // Every site that fired in the window, one entry per site and level.
+  repeated LogSite sites = 1;
+  // The hours the answer covers: the window widened outward to whole hours,
+  // and narrowed to the rows the store still keeps.
+  ListLogSitesCovered covered = 2;
+}
+
+// The span the answer was read over. THE ARM IS WHETHER THE WHOLE WINDOW WAS
+// READ: the store keeps the rows of its most recent deploys only, so a window
+// reaching further back is read from where its rows begin, and says so.
+message ListLogSitesCovered {
+  oneof extent {
+    // The whole window was read.
+    ListLogSitesCoveredWhole whole = 1;
+    // The window began before the oldest row the store keeps: the answer
+    // covers only from that row's hour on.
+    ListLogSitesCoveredPartial partial = 2;
+  }
+}
+
+// The whole window was read, over these hours.
+message ListLogSitesCoveredWhole {
+  // The first covered hour's start, unix milliseconds.
+  int64 since_ms = 1;
+  // The last covered hour's end, unix milliseconds.
+  int64 until_ms = 2;
+}
+
+// Only the window's later part was read: what fired before since_ms is not
+// answered, because the store no longer keeps it.
+message ListLogSitesCoveredPartial {
+  // The oldest kept row's hour start, unix milliseconds: where the answer
+  // begins.
+  int64 since_ms = 1;
+  // The last covered hour's end, unix milliseconds.
+  int64 until_ms = 2;
+}
+
+// One log site at one level, as it fired in the window.
+message LogSite {
+  // The site's key: 12 lowercase hex characters.
+  string key = 1;
+  // The call's unrendered message, its placeholders ({name}) unfilled. It is
+  // the site's summary: what the call reports, without any one record's
+  // values.
+  string template = 2;
+  // The runtime whose call it is: daemon, shim, emacs, webapp, sidecar,
+  // store, or a standalone service's own name (logging-contract.md
+  // "JSONL schema").
+  string runtime = 3;
+  // The level the site wrote at. A site that logs at several levels (a helper
+  // forwarding its caller's message at a level it chooses) answers one entry
+  // per level.
+  LogSiteLevel level = 4;
+  // The operation of the site's latest record in the window.
+  string operation = 5;
+  // How many records the site wrote in the covered hours.
+  uint64 count = 6;
+  // When the site first wrote in the covered hours, unix milliseconds.
+  int64 first_seen_ms = 7;
+  // When the site last wrote in the covered hours, unix milliseconds.
+  int64 last_seen_ms = 8;
+  // The site's latest record in the covered hours.
+  LogSiteSample sample = 9;
+}
+
+// The level a site wrote at. THE ARM IS THE LEVEL.
+message LogSiteLevel {
+  oneof level {
+    // Debug records.
+    ClientLogLevelDebug debug = 1;
+    // Info records.
+    ClientLogLevelInfo info = 2;
+    // Warn records.
+    ClientLogLevelWarn warn = 3;
+    // Error records.
+    ClientLogLevelError error = 4;
+  }
+}
+
+// One record a site wrote, as its sink holds it.
+message LogSiteSample {
+  // When the record was written, unix milliseconds.
+  int64 at_ms = 1;
+  // The record's rendered message.
+  string message = 2;
+  // The workspace the record belongs to. UNSET = a central record.
+  optional string workspace_id = 3;
+  // The record's context, as its call composed it.
+  //
+  // UNTYPED BY EXCEPTION, as ClientLogRecord.context is: a record's context
+  // is whatever its call site had in hand, so no schema exists ahead of the
+  // sites. Nothing routes on it; it is shown to the reader verbatim.
+  google.protobuf.Struct context = 4;
+}
+
+// Why no answer could be given.
+message ListLogSitesError {
+  oneof cause {
+    // The whole window lies before the oldest row the store keeps, so what
+    // fired in it is no longer known. Distinct from a window in which nothing
+    // fired, which is a success with no sites.
+    ListLogSitesUnrecordedWindow unrecorded_window = 1;
+  }
+}
+
+// The window is older than every kept row.
+message ListLogSitesUnrecordedWindow {
+  // The oldest kept row's hour start, unix milliseconds: the earliest window
+  // start the store can answer.
+  int64 oldest_since_ms = 1;
+}
