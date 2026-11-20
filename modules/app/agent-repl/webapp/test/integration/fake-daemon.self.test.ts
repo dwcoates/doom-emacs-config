@@ -163,6 +163,28 @@ describe("scripted answers", () => {
     expect(recovered.result.case).toBe("success");
   });
 
+  it("serves the default again once the script is reset", async () => {
+    // Arrange: a scripted refusal and a queued transport failure.
+    fake.answer(
+      "submitPrompt",
+      create(SubmitPromptResponseSchema, {
+        result: { case: "error", value: { reason: { case: "merging", value: {} } } },
+      }),
+    );
+    fake.failNext("daemonHealth", "the daemon is down");
+    // Act
+    fake.resetScripts();
+    const submitted = await client.submitPrompt({
+      workspace: workspaceRef(),
+      said: userSaid(),
+      idempotencyKey: "k",
+      origin: WEBAPP_ORIGIN,
+    });
+    const health = await client.daemonHealth({});
+    // Assert
+    expect([submitted.result.case, health.result.case]).toEqual(["success", "success"]);
+  });
+
   it("refuses a submission whose origin is unspecified", async () => {
     // Arrange / Act: `origin` omitted entirely, which proto3 sends as 0.
     const failed = await client

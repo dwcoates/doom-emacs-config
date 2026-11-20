@@ -37,6 +37,8 @@ type fakeExec struct {
 	widths    map[string]int
 	killed    []string
 	onStart   func(id string)
+	// envs is each started unit's own environment.
+	envs map[string][]string
 }
 
 type fakeProc struct {
@@ -63,6 +65,10 @@ func (e *fakeExec) Start(spec Spec, out *bytes.Buffer) (Process, error) {
 		e.widths = map[string]int{}
 	}
 	e.widths[spec.ID] = spec.Width()
+	if e.envs == nil {
+		e.envs = map[string][]string{}
+	}
+	e.envs[spec.ID] = spec.Env
 	e.width += spec.Width()
 	e.peakWidth = max(e.peakWidth, e.width)
 	e.mu.Unlock()
@@ -997,6 +1003,25 @@ func TestRunTellsItsObserverEveryUnitThatEnded(t *testing.T) {
 	}
 }
 
+func TestRunTellsItsObserverAUnitsOutputAsTheRunLogShowsIt(t *testing.T) {
+	// Arrange: a failing unit whose display drops its stamp lines.
+	s := spec("daemon#00", "daemon")
+	s.Display = func(out []byte, passed bool) []byte { return bytes.ReplaceAll(out, []byte("STAMP\n"), nil) }
+	r, _, _ := newRunner(1, &fakeExec{scripts: map[string]script{"daemon#00": {exit: 1, output: "STAMP\n--- FAIL: TestA\n"}}})
+	var told string
+	r.Ended = func(_ Result, output []byte) { told = string(output) }
+
+	// Act
+	if _, _, err := r.Run(context.Background(), []Spec{s}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	if told != "--- FAIL: TestA\n" {
+		t.Fatalf("observer was told %q, want the displayed output", told)
+	}
+}
+
 func TestRunKillsAUnitAtItsTimeLimitAndFailsIt(t *testing.T) {
 	// Arrange: a unit that runs until it is killed.
 	e := &fakeExec{scripts: map[string]script{"hang": {output: "started\n", hold: make(chan struct{})}}}
@@ -1280,5 +1305,110 @@ func TestRunFailsANamedChunkThatRanNoneOfItsTests(t *testing.T) {
 				t.Fatalf("error logged %v, want %v:\n%s", logged, tt.wantError, errOut)
 			}
 		})
+	}
+}
+
+// fakeUnitCPU tags each unit "TAG=<id>" and answers its scripted intervals.
+type fakeUnitCPU struct {
+	mu     sync.Mutex
+	slices map[string][]testtimes.CPUSlice
+	taken  []string
+}
+
+func (f *fakeUnitCPU) Env(id string) string { return "TAG=" + id }
+
+func (f *fakeUnitCPU) Take(id string) []testtimes.CPUSlice {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.taken = append(f.taken, id)
+	return f.slices[id]
+}
+
+func TestRunTagsEachUnitAndGivesItsTestsTheirShareOfItsCPU(t *testing.T) {
+	// Arrange: two tests side by side across one interval holding all the
+	// unit used.
+	t0 := time.Unix(1_800_000_000, 0)
+	s := spec("daemon#00", "daemon")
+	s.Env = []string{"OWN=1"}
+	s.Tests = func([]byte, bool) ([]testtimes.Test, error) {
+		return []testtimes.Test{{Name: "a", Start: t0, Seconds: 1}, {Name: "b", Start: t0, Seconds: 1}}, nil
+	}
+	e := &fakeExec{scripts: map[string]script{"daemon#00": {usage: Usage{CPU: 3}}}}
+	cpu := &fakeUnitCPU{slices: map[string][]testtimes.CPUSlice{"daemon#00": {{From: t0, To: t0.Add(time.Second), CPU: 3}}}}
+	r, _, _ := newRunner(1, e)
+	r.CPU = cpu
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"OWN=1", "TAG=daemon#00"}; !slices.Equal(e.envs["daemon#00"], want) {
+		t.Fatalf("the unit's environment = %v, want %v", e.envs["daemon#00"], want)
+	}
+	if !slices.Equal(cpu.taken, []string{"daemon#00"}) {
+		t.Fatalf("taken = %v, want the unit's intervals taken once", cpu.taken)
+	}
+	for _, tt := range results[0].Tests {
+		if !tt.HasCPU || tt.CPU != 1.5 {
+			t.Fatalf("test %s: CPU %v (has %v), want 1.5", tt.Name, tt.CPU, tt.HasCPU)
+		}
+	}
+	if results[0].Outcome != Passed {
+		t.Fatalf("outcome = %v, want passed", results[0].Outcome)
+	}
+}
+
+func TestRunFailsAPassingUnitWhoseTestsCPUCannotBeToldApart(t *testing.T) {
+	// Arrange: one test says its start, another that took time does not.
+	s := spec("daemon#00", "daemon")
+	s.Tests = func([]byte, bool) ([]testtimes.Test, error) {
+		return []testtimes.Test{{Name: "a", Start: time.Unix(1_800_000_000, 0), Seconds: 1}, {Name: "b", Seconds: 1}}, nil
+	}
+	r, _, errOut := newRunner(1, &fakeExec{scripts: map[string]script{"daemon#00": {usage: Usage{CPU: 2}}}})
+	r.CPU = &fakeUnitCPU{}
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if results[0].Outcome != Failed || results[0].Exit != 1 {
+		t.Fatalf("outcome = %v exit %d, want failed with 1", results[0].Outcome, results[0].Exit)
+	}
+	for _, tt := range results[0].Tests {
+		if tt.HasCPU {
+			t.Fatalf("test %s was given CPU after the refusal", tt.Name)
+		}
+	}
+	for _, part := range []string{"ERROR", "unit daemon#00 (daemon)", "cannot be told apart", "2 tests", "2.000s CPU"} {
+		if !strings.Contains(errOut.String(), part) {
+			t.Fatalf("log %q does not say %q", errOut.String(), part)
+		}
+	}
+}
+
+func TestRunWithoutCPUTagsNoUnitAndGivesNoTestCPU(t *testing.T) {
+	// Arrange
+	s := spec("daemon#00", "daemon")
+	s.Tests = func([]byte, bool) ([]testtimes.Test, error) {
+		return []testtimes.Test{{Name: "a", Seconds: 1}}, nil
+	}
+	e := &fakeExec{scripts: map[string]script{"daemon#00": {usage: Usage{CPU: 2}}}}
+	r, _, _ := newRunner(1, e)
+
+	// Act
+	results, _, err := r.Run(context.Background(), []Spec{s})
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(e.envs["daemon#00"]) != 0 || results[0].Tests[0].HasCPU {
+		t.Fatalf("env %v, test CPU %v; want no tag and no CPU", e.envs["daemon#00"], results[0].Tests[0].HasCPU)
 	}
 }

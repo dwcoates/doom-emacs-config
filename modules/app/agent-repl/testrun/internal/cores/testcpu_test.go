@@ -112,3 +112,91 @@ func TestTestsCPUSurfacesAFailedScan(t *testing.T) {
 		t.Fatalf("Read() = %v; want the scan's failure", err)
 	}
 }
+
+// marked is proc carrying MARK.
+func marked(mark string, pid, ppid int, own, children float64) proctable.Usage {
+	p := proc(pid, ppid, own, children)
+	p.Mark = mark
+	return p
+}
+
+func TestTestsCPUReadByMarkSplitsEachIntervalByMark(t *testing.T) {
+	cases := []struct {
+		name  string
+		scans [][]proctable.Usage
+		want  []map[string]float64
+	}{
+		{
+			name:  "the first read takes the baseline and answers nothing",
+			scans: [][]proctable.Usage{{marked("a", 10, 1, 5, 0)}},
+			want:  []map[string]float64{{}},
+		},
+		{
+			name: "each mark adds what its own processes used since the last read",
+			scans: [][]proctable.Usage{
+				{marked("a", 10, 1, 1, 0), marked("b", 20, 1, 2, 0)},
+				{marked("a", 10, 1, 1.5, 0), marked("b", 20, 1, 4, 0)},
+			},
+			want: []map[string]float64{{}, {"a": 0.5, "b": 2}},
+		},
+		{
+			name: "a child reaped by its marked parent is counted once, under its own mark",
+			scans: [][]proctable.Usage{
+				{marked("a", 10, 1, 1, 0)},
+				{marked("a", 10, 1, 1, 0), marked("a", 11, 10, 2, 0)},
+				{marked("a", 10, 1, 1, 2.5)},
+			},
+			want: []map[string]float64{{}, {"a": 2}, {"a": 0.5}},
+		},
+		{
+			name: "a new process adds all it used to its mark",
+			scans: [][]proctable.Usage{
+				{marked("a", 10, 1, 1, 0)},
+				{marked("a", 10, 1, 1, 0), marked("b", 30, 1, 0.75, 0.25)},
+			},
+			want: []map[string]float64{{}, {"a": 0, "b": 1}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			i := 0
+			a := &TestsCPU{Scan: func() ([]proctable.Usage, error) {
+				s := tc.scans[i]
+				i++
+				return s, nil
+			}}
+
+			for read, want := range tc.want {
+				// Act
+				got, err := a.ReadByMark()
+
+				// Assert
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(got) != len(want) {
+					t.Fatalf("read %d: ReadByMark() = %v; want %v", read, got, want)
+				}
+				for mark, w := range want {
+					if math.Abs(got[mark]-w) > 1e-9 {
+						t.Fatalf("read %d: ReadByMark() = %v; want %v", read, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTestsCPUReadByMarkSurfacesAFailedScan(t *testing.T) {
+	// Arrange
+	a := &TestsCPU{Scan: func() ([]proctable.Usage, error) { return nil, errors.New("proc_info answered EIO") }}
+
+	// Act
+	_, err := a.ReadByMark()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "proc_info answered EIO") {
+		t.Fatalf("ReadByMark() = %v; want the scan's failure", err)
+	}
+}

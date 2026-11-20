@@ -15,7 +15,7 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
 - A scenario's body is one `scenario(t, steps...)` call (`scenario_test.go`, over `kit/scenario`).
   - The scenario runs in parallel with the other scenarios.
   - Its steps run in order, each a function `testXxx(t *testing.T)` reported as the case `Scenario/Xxx`.
-  - A step builds or takes its own world and owns its own workspaces, under the shared-fixture rule in `modules/app/agent-repl/AGENTS.md`.
+  - A step builds or takes its own world and owns its own workspaces, under `modules/app/agent-repl/AGENTS.md` "Integration tests share one canonical process, each case on its own slice".
 - `TestEveryStepRunsInExactlyOneScenario` and `TestEveryWorldBuildingTestIsAScenario` (`kit/scans/inventory_unit_test.go`) fail a step no scenario lists and a world-building test outside a scenario.
 - Every scenario and every step names the seam it proves on a line of its own in its doc comment: `Seam: <family>` for a family of `testdata/scenario-goldens` (whose wiring test it is), or `Seam: <producer> -> <consumer>, <what crosses>` (`modules/app/agent-repl/AGENTS.md`, "An e2e test proves a seam between real systems, and nothing else"). `TestEveryScenarioAndStepNamesItsSeam` fails one that names none or a line in neither form; `seamClaims` (`kit/scans/inventory_test.go`) is the one reader of the line, the scenario matrix's included. Exempt, with why, is the one scenario in `seamExempt`: `TestHarness` (the harness's own World machinery).
 - A step reruns alone by its path: `-go e2e=TestTurns/ContextUsage`.

@@ -10,8 +10,8 @@ import (
 )
 
 // SUITE IS THE TEST A WHOLE SUITE PROCESS IS. A fixture that outlives any one
-// test (AGENTS.md "A case may share an expensive fixture, never a slice
-// another case reads") is built and owned by it: its temp dirs live under the
+// test (AGENTS.md "Integration tests share one canonical process, each case
+// on its own slice") is built and owned by it: its temp dirs live under the
 // run root, its cleanups run after the last test and before the run root is
 // removed, and anything it fails turns the process's exit code red.
 //

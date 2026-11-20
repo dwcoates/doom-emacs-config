@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, or the test runner and its CPU governor. Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
+description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, reviewing, assessing, auditing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, or the test runner and its CPU governor. Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -208,7 +208,7 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
 
 - A new top-level e2e test is only for an entirely new, large feature, and it is itself a scenario (`scenario(t, steps...)` in `e2e/scenarios_test.go`).
 - Any other e2e coverage is a new step inside the existing scenario whose subject it extends: a `testXxx(t *testing.T)` function in the file of its subject, listed in that scenario's `scenario(...)` call.
-- A step still takes the world the shared-fixture rule allows (`SharedWorld` when it may share; its own `NewWorld` when it changes the fixture or reads a fixture-wide view), per `modules/app/agent-repl/AGENTS.md` "A case may share an expensive fixture, never a slice another case reads".
+- A step takes its world per `modules/app/agent-repl/AGENTS.md` "Integration tests share one canonical process, each case on its own slice".
 - Why (owner ruling, 2026-10-31): the merge gate runs every e2e test side by side under the host's 35% CPU cap; tests that pass alone failed there waiting on a CPU inside their 5-6s bounds (in the 72h before 2026-10-31, `TestEmacsTabsRehydrateFromTheRosterOnConnect` failed 8 gate runs and `TestEmacsKillCloseLeavesTheTabOrderAlone` 6, across unrelated merges). Scenarios cap the concurrent worlds at the number of scenarios. The owner accepted "god tests" for this.
 - Layout and how a step reruns: `e2e/AGENTS.md`, "Every world-building test is a step of a scenario".
 
@@ -293,11 +293,14 @@ to every harness, fake and fixture a test uses, in every language.
   built ONCE per test process (`TestMain`, `sync.Once`, `testenv.ProgramOr`,
   `harness.Suite()`, a vitest `globalSetup`) and each case takes its own
   slice of it: a hard link, a key prefix, a fresh workspace, a fresh buffer.
-- One of our own systems that IS the subject (the daemon in a daemon test, a
-  shim in a shim test) may be started per case; a second start in one case
-  needs a reason the case states (a restart, a handover, a crash).
-- What a case may share is ruled by AGENTS.md "A case may share an expensive
-  fixture, never a slice another case reads".
+- Our own service under test runs as ONE canonical process per test process
+  that every integration case shares on its own slice. A case starts its own
+  only for the two reasons AGENTS.md "Integration tests share one canonical process, each case on its own slice" names: process-wide modal state (a group
+  process shared by every case needing that precondition) and the process's
+  own lifecycle (a fresh one). Starting the service per case is the most
+  expensive pitfall measured (2026-11-20: per-case daemons were 69% of the
+  daemon suite's CPU per merge gate); pitfall 19.
+- What a case may share is ruled by AGENTS.md "Integration tests share one canonical process, each case on its own slice".
 
 ### Finding and fixing a flake
 
@@ -385,7 +388,7 @@ coverage impact (always none).
 
 11. **A fixture that costs more than the test it serves, built per test.**
     - Evidence (2026-10-14, solo, steady state): an e2e `World` costs about 2.7s wall to build and tear down, a fresh workspace inside a running one 0.30-0.41s; three tests on three Worlds took 7.80s and 1.33 CPU-s, on one World 2.36s and 0.72 CPU-s. A daemon-integration `newOpened` fixture costs 0.14s, which is not worth sharing (docs/investigations/2026-10-14-test-shared-setup-lzb.md).
-    - Fix: share the fixture, never a slice of it: `SharedWorld(t)` (e2e) builds one default World per test process, owned by `harness.Suite()`, and each test takes a `harness.Daemon.View` with its own sweep over the workspaces it registered. The rule is AGENTS.md "A case may share an expensive fixture, never a slice another case reads".
+    - Fix: share the fixture, never a slice of it: `SharedWorld(t)` (e2e) builds one default World per test process, owned by `harness.Suite()`, and each test takes a `harness.Daemon.View` with its own sweep over the workspaces it registered. The rule is AGENTS.md "Integration tests share one canonical process, each case on its own slice".
     - Coverage impact: none; every test keeps its own case, workspace and failure.
 
 12. **Too many e2e worlds at once in the gate.**
@@ -425,11 +428,16 @@ coverage impact (always none).
     - Fix: land a latch only after a run of the whole suite under it, and fix each record it finds at the source; declare one (`ExpectWarnings`) only when the test provokes it on purpose.
     - Coverage impact: none; the latch adds failures, never removes them.
 
+19. **A service process started per integration case.**
+    - Evidence (2026-11-20): the merge-queue gate metrics over the 29 merges put the daemon suite at about 920 CPU-s per gate, 637 of it (69%) in daemon:integration units whose ~546 top-level tests nearly each start their own daemon; daemon:integration[integration]#01 used 5.5 CPU-s per wall second.
+    - Fix: one canonical process per test process, per AGENTS.md "Integration tests share one canonical process, each case on its own slice"; conversion under way per suite (daemon, webapp, shim).
+    - Coverage impact: none; every case keeps its name and assertions, scoped to its own slice.
+
 ## Changes that LOOK faster and are refused
 
 - Skipping a test, or moving it behind a flag nobody sets: coverage loss.
 - Weakening an assertion (checking less of the result, matching a prefix): coverage loss.
-- Sharing state that more than one case READS or CHANGES: hides order-dependent failures. Sharing an expensive fixture in which every case owns its own slice is allowed, under AGENTS.md "A case may share an expensive fixture, never a slice another case reads".
+- In a UNIT test, sharing state that more than one case reads or changes: hides order-dependent failures. Integration cases share the canonical process and assert only on their own slice, per AGENTS.md "Integration tests share one canonical process, each case on its own slice".
 - Raising a timeout instead of fixing the wait: hides the race and makes every failure slower.
 - Replacing one of our own systems with a mock outside the owner-approved list above: loses integration coverage.
 

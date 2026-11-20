@@ -138,6 +138,12 @@ export interface SpawnShimOptions {
    * spawn expected to REFUSE to start sets it false and awaits `exited`.
    */
   readonly awaitServing?: boolean;
+  /**
+   * The shim outlives the test that spawned it: a canonical or group shim
+   * (test/integration-support/canonical.ts) that several cases share. It is
+   * torn down by {@link cleanupSharedShims}, never by {@link cleanupShims}.
+   */
+  readonly shared?: boolean;
 }
 
 /** One spawned shim, and everything a test needs to interrogate it. */
@@ -164,6 +170,9 @@ export interface ShimHandle {
 
 /** Every handle spawned in the current test, torn down by {@link cleanupShims}. */
 const live: ShimHandle[] = [];
+
+/** Every shared handle, torn down by {@link cleanupSharedShims}. */
+const sharedLive: ShimHandle[] = [];
 
 /**
  * The environment of a shim that resumes a conversation TWO HOURS after its
@@ -346,7 +355,7 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
       return exited;
     },
   };
-  live.push(handle);
+  (options.shared === true ? sharedLive : live).push(handle);
 
   if (options.awaitServing !== false) {
     // The listener's own record, written the moment it is accepting. Racing it
@@ -379,25 +388,34 @@ export async function spawnShim(options: SpawnShimOptions = {}): Promise<ShimHan
  * call {@link ShimHandle.standDown} themselves and have already awaited it.
  */
 export async function cleanupShims(): Promise<void> {
-  const handles = live.splice(0);
-  await Promise.all(
-    handles.map(async (handle) => {
-      handle.log.close();
-      if (handle.child.exitCode === null && handle.child.signalCode === null) {
-        handle.child.kill("SIGKILL");
-        await handle.exited;
-      }
-      await handle.store?.close();
-      // AGENT_REPL_ITEST_KEEP leaves the temp tree in place so a failing run's
-      // shim log can be read afterwards. Never set in CI: the trees are large
-      // and one per spawn.
-      if (process.env.AGENT_REPL_ITEST_KEEP === "1") {
-        process.stderr.write(`itest: kept ${handle.dirs.root}\n`);
-        return;
-      }
-      rmSync(handle.dirs.root, { recursive: true, force: true });
-    }),
-  );
+  await Promise.all(live.splice(0).map(teardown));
+}
+
+/**
+ * Tear every SHARED shim down (a canonical or group shim, {@link
+ * SpawnShimOptions.shared}), as {@link cleanupShims} tears down a test's own:
+ * the file's `afterAll`.
+ */
+export async function cleanupSharedShims(): Promise<void> {
+  await Promise.all(sharedLive.splice(0).map(teardown));
+}
+
+/** SIGKILL one handle if it still runs, close its store and remove its tree. */
+async function teardown(handle: ShimHandle): Promise<void> {
+  handle.log.close();
+  if (handle.child.exitCode === null && handle.child.signalCode === null) {
+    handle.child.kill("SIGKILL");
+    await handle.exited;
+  }
+  await handle.store?.close();
+  // AGENT_REPL_ITEST_KEEP leaves the temp tree in place so a failing run's
+  // shim log can be read afterwards. Never set in CI: the trees are large
+  // and one per spawn.
+  if (process.env.AGENT_REPL_ITEST_KEEP === "1") {
+    process.stderr.write(`itest: kept ${handle.dirs.root}\n`);
+    return;
+  }
+  rmSync(handle.dirs.root, { recursive: true, force: true });
 }
 
 /** Run the shim bundle to completion with the given argv, capturing its output. */

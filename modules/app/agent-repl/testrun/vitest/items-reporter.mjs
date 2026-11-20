@@ -12,7 +12,9 @@
 // It also writes every individual test's time, for the metrics store
 // (testrun/internal/testtimes), to the path in AGENT_REPL_TESTRUN_TESTS:
 // [{ "file", "name" (its suites and its own name, joined by " > "), "state"
-// (pass, fail, skip or todo), "seconds" }, ...].
+// (pass, fail, skip or todo), "seconds", "start" (the unix seconds it started
+// at, 0 for a test that never ran) }, ...]. The start places the test in its
+// chunk's CPU over time, for its share (testtimes.AttributeCPU).
 
 import { writeFileSync } from "node:fs";
 
@@ -25,7 +27,13 @@ function collectTests(file, tasks, path, out) {
       continue;
     }
     const state = task.result?.state ?? task.mode;
-    out.push({ file, name: name.join(" > "), state, seconds: (task.result?.duration ?? 0) / 1000 });
+    out.push({
+      file,
+      name: name.join(" > "),
+      state,
+      seconds: (task.result?.duration ?? 0) / 1000,
+      start: (task.result?.startTime ?? 0) / 1000,
+    });
   }
 }
 

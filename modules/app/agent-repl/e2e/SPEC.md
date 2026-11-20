@@ -297,11 +297,9 @@ a view of it (`harness.Daemon.View`): its own failures, run budget and
 warning sweep, over the fresh workspaces it registers (`World.NewWorkspace`).
 A World costs about 2.7s to build and tear down; a workspace inside a
 running one about 0.3s (docs/investigations/2026-10-14-test-shared-setup-lzb.md).
-A test keeps `NewWorld` when it stops, restarts, deploys or relaunches any
-process, needs other `WorldOpts`, asserts a view spanning the daemon or the
-account, or must declare a warning no workspace carries
-(`modules/app/agent-repl/AGENTS.md`, "A case may share an expensive fixture,
-never a slice another case reads").
+Which tests keep `NewWorld` instead is ruled by
+`modules/app/agent-repl/AGENTS.md`, "Integration tests share one canonical
+process, each case on its own slice".
 
 `AGENT_REPL_FORBID_VENDOR_CALLS=1` in EVERY spawned process's environment —
 daemon, sidecar, store, and (inherited) shim — with no exception. This is

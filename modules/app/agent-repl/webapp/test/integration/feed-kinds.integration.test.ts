@@ -38,7 +38,7 @@ import {
   FeedMergeFoldSchema,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
-import { HARNESS_EPOCH_MS, bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, chipFailureArms, sharedMount, startHarness, type Harness } from "./harness";
 import { FoldMergeBubbleResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_fold_merge_bubble_pb";
 import { ROOT_FEED } from "./fake-daemon";
 import {
@@ -135,8 +135,15 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP. A case about what a row draws takes its slice of
+ * it (`drawRow`); a case that arranges the daemon before boot, or whose page
+ * state is its subject, mounts its own with `startHarness` and stops it.
+ */
+const shared = sharedMount();
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 /**
@@ -156,8 +163,7 @@ async function hoveredUsageLine(row: HTMLElement): Promise<string> {
 }
 
 async function drawRow(row: FeedRow): Promise<HTMLElement> {
-  harness = await startHarness();
-  await harness.fake.awaitStream("watchFeed");
+  harness = await shared();
   harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, row);
   await harness.settle();
   await harness.finishTypeOuts();

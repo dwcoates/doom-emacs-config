@@ -8,7 +8,11 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
+
+	"agentrepl/testrun/internal/testtimes"
 )
 
 func write(t *testing.T, path, body string) {
@@ -362,45 +366,161 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func TestExecTestReplacesItselfWithTheBuiltBinary(t *testing.T) {
-	// Arrange
+// script writes an executable shell script standing in for a test binary.
+func script(t *testing.T, body string) string {
+	t.Helper()
 	bin := filepath.Join(t.TempDir(), "_.test")
-	write(t, bin, "binary")
-	var gotPath string
-	var gotArgv []string
-	exec := func(path string, argv, _ []string) error {
-		gotPath, gotArgv = path, argv
-		return errors.New("exec refused")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\n"+body), 0o755); err != nil {
+		t.Fatal(err)
 	}
+	return bin
+}
+
+// stampedAt is a clock answering T0 plus one second per read.
+func stampedAt() (func() time.Time, time.Time) {
+	t0 := time.Unix(1_800_000_000, 0)
+	n := 0
+	return func() time.Time { n++; return t0.Add(time.Duration(n) * time.Second) }, t0
+}
+
+func TestExecTestRunsTheBinaryAndStampsEachTestsStart(t *testing.T) {
+	// Arrange
+	bin := script(t, `echo "args: $*"
+echo "=== RUN   TestA"
+echo "=== PAUSE TestA"
+echo "=== CONT  TestA"
+echo "on stderr" >&2
+echo "--- PASS: TestA (0.00s)"
+exit 3
+`)
+	now, t0 := stampedAt()
+	var out, errOut bytes.Buffer
 
 	// Act
-	err := ExecTest(bin, []string{"-test.v"}, &bytes.Buffer{}, exec)
+	code, err := ExecTest(bin, []string{"-test.v", "-test.run=^TestA$"}, &out, &errOut, now)
 
 	// Assert
-	if gotPath != bin || !reflect.DeepEqual(gotArgv, []string{bin, "-test.v"}) {
-		t.Fatalf("exec(%s, %v), want the binary with its arguments", gotPath, gotArgv)
+	if err != nil || code != 3 {
+		t.Fatalf("ExecTest = %d, %v; want the binary's exit 3", code, err)
 	}
-	if err == nil || !strings.Contains(err.Error(), "exec refused") {
-		t.Fatalf("ExecTest = %v, want the failed exec surfaced", err)
+	want := "args: -test.v -test.run=^TestA$\n" +
+		testtimes.StartLine(t0.Add(time.Second), "TestA") + "\n=== RUN   TestA\n=== PAUSE TestA\n" +
+		testtimes.StartLine(t0.Add(2*time.Second), "TestA") + "\n=== CONT  TestA\n--- PASS: TestA (0.00s)\n"
+	if out.String() != want {
+		t.Fatalf("output =\n%s\nwant\n%s", out.String(), want)
+	}
+	if errOut.String() != "on stderr\n" {
+		t.Fatalf("stderr = %q, want the binary's own", errOut.String())
 	}
 }
 
-func TestExecTestOfAPackageThatDidNotCompileNeverExecs(t *testing.T) {
+func TestExecTestAnswersASignalledBinaryAs128PlusItsSignal(t *testing.T) {
 	// Arrange
-	bin := filepath.Join(t.TempDir(), "_.test")
-	write(t, FailurePath(bin), "a.go:1: bad\n")
-	exec := func(string, []string, []string) error {
-		t.Fatal("exec ran for a package that did not compile")
-		return nil
+	bin := script(t, "kill -TERM $$\n")
+	now, _ := stampedAt()
+
+	// Act
+	code, err := ExecTest(bin, nil, &bytes.Buffer{}, &bytes.Buffer{}, now)
+
+	// Assert
+	if err != nil || code != 128+int(syscall.SIGTERM) {
+		t.Fatalf("ExecTest = %d, %v; want %d", code, err, 128+int(syscall.SIGTERM))
 	}
+}
+
+func TestExecTestSurfacesABinaryThatCannotStart(t *testing.T) {
+	// Arrange: built, but not executable.
+	bin := filepath.Join(t.TempDir(), "_.test")
+	write(t, bin, "binary")
+	now, _ := stampedAt()
+
+	// Act
+	_, err := ExecTest(bin, nil, &bytes.Buffer{}, &bytes.Buffer{}, now)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "gobuild: start "+bin) {
+		t.Fatalf("ExecTest = %v, want the failed start surfaced", err)
+	}
+}
+
+func TestExecTestOfAPackageThatDidNotCompileNeverRuns(t *testing.T) {
+	// Arrange: the binary would leave a mark if it ran.
+	dir := t.TempDir()
+	ran := filepath.Join(dir, "ran")
+	bin := script(t, "touch "+ran+"\n")
+	write(t, FailurePath(bin), "a.go:1: bad\n")
+	now, _ := stampedAt()
 	var out bytes.Buffer
 
 	// Act
-	err := ExecTest(bin, nil, &out, exec)
+	_, err := ExecTest(bin, nil, &out, &bytes.Buffer{}, now)
 
 	// Assert
 	if !errors.Is(err, ErrDidNotCompile) || out.String() != "a.go:1: bad\n" {
 		t.Fatalf("ExecTest = %v printing %q, want the compiler output and ErrDidNotCompile", err, out.String())
+	}
+	if _, statErr := os.Stat(ran); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("the binary ran for a package that did not compile (stat: %v)", statErr)
+	}
+}
+
+func TestStampStarts(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want func(t0 time.Time) string
+	}{
+		{
+			name: "a run and a continue are stamped, nothing else is",
+			in:   "=== RUN   TestA/sub\n=== PAUSE TestA/sub\n=== NAME  TestA\n=== CONT  TestA/sub\nlog\n",
+			want: func(t0 time.Time) string {
+				return testtimes.StartLine(t0.Add(time.Second), "TestA/sub") + "\n=== RUN   TestA/sub\n=== PAUSE TestA/sub\n=== NAME  TestA\n" +
+					testtimes.StartLine(t0.Add(2*time.Second), "TestA/sub") + "\n=== CONT  TestA/sub\nlog\n"
+			},
+		},
+		{
+			name: "an unterminated last line is copied as it is",
+			in:   "ok tail",
+			want: func(time.Time) string { return "ok tail" },
+		},
+		{
+			name: "a line merely mentioning a run is not stamped",
+			in:   "  === RUN   TestA\n",
+			want: func(time.Time) string { return "  === RUN   TestA\n" },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			now, t0 := stampedAt()
+			var out bytes.Buffer
+
+			// Act
+			err := StampStarts(strings.NewReader(tc.in), &out, now)
+
+			// Assert
+			if err != nil || out.String() != tc.want(t0) {
+				t.Fatalf("StampStarts = %v, wrote %q; want %q", err, out.String(), tc.want(t0))
+			}
+		})
+	}
+}
+
+// failingWriter refuses every write.
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("disk full") }
+
+func TestStampStartsSurfacesAFailedWrite(t *testing.T) {
+	// Arrange
+	now, _ := stampedAt()
+
+	// Act
+	err := StampStarts(strings.NewReader("=== RUN   TestA\n"), failingWriter{}, now)
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "disk full") {
+		t.Fatalf("StampStarts = %v, want the failed write surfaced", err)
 	}
 }
 

@@ -100,7 +100,7 @@ Owner rule, 2026-10-14. A table test runs the cases that reach distinct behavior
   - a 5040-row unit walk reaching 44 distinct outcomes;
   - per-arm e2e and integration tables re-proving mappings that ms unit tables already pin.
 - This rule decides only how many cases a table runs. Which tier a test belongs at is the tier rule's question ("A test lives at the cheapest tier that can prove it").
-- Whether cases may share one expensive fixture is the shared-setup rule's question ("A case may share an expensive fixture, never a slice another case reads").
+- Which service process a case runs against is "Integration tests share one canonical process, each case on its own slice".
 - Removing a row from an existing table follows the coverage rule in `skills/agent-repl-tests/SKILL.md`: the remaining rows must kill every mutant the removed one killed.
 
 ## Elisp layout
@@ -1035,19 +1035,26 @@ the primary's address once the successor is reaped. Those two are the only
 sanctioned reasons to pay a spawn; `test-integration-fixture.el` pins the
 isolation guarantee that makes the sharing safe.
 
-### A case may share an expensive fixture, never a slice another case reads
+### Integration tests share one canonical process, each case on its own slice
 
-Owner rule, 2026-10-14. A fixture that costs more than the cases it serves (an e2e `World`, a merge-queue fixture, a Doom boot) may be built once and shared by several cases, on these conditions:
+Owner rulings, 2026-10-14 and 2026-11-20. An integration test tests the API contract of a running service, and a contract holds whatever else the service is doing. So integration tests run against ONE canonical service process (a daemon, an e2e `World`, a shim and its store) per test process, built once (`harness.Suite()`, `TestMain`, `sync.Once`, a vitest `globalSetup`), and each case takes its own slice of it. Starting the service per case is refused: in the 29 merges to 2026-11-20 the daemon's integration tests, nearly each starting its own daemon, were 69% of the daemon suite's CPU per gate.
 
-- **Each case owns its slice.** It opens its own workspace (so its own session, shim, feed and per-workspace logs), fresh, and asserts only on that slice.
-- **Fixture-wide views keep their own fixture.** A case that asserts on a view spanning the fixture (roster, sidebar, daemon stream, account usage or allowances, counts across workspaces, a log not scoped to its workspace) keeps its own fixture.
-- **Warning declarations are scoped to the case's workspace, never fixture-wide.** A case that must declare a warning the harness can only declare fixture-wide, or a record with no workspace, keeps its own fixture.
-- **A case that changes the fixture keeps its own.** That means stopping, restarting, deploying or relaunching the daemon, store or sidecar, or needing different fixture options or env. Two cases share only a fixture built with identical options.
-- **Each case is its own named case**, run in parallel with its siblings where the product allows; an e2e case is a step of a scenario, and the steps of one scenario run in order (`e2e/AGENTS.md`, "Every world-building test is a step of a scenario"). `t.Fatalf` ends only that case. The shared fixture's own failure fails every case that shares it, and that is reported once, as the fixture's.
+- **Everything expensive to start is a service under this section.** Not only our own service processes but every dependency a test pays to initialize: a language runtime or test framework process (node and a vitest worker, a batch Emacs, a Go test binary's process), an environment (jsdom, a Doom boot, Xvfb), a module graph's import and transform, the app under test mounted and settled. Each is started once per test process (or once per group, below), shared on the same terms, and started fresh only for a case whose subject is its own initialization.
+- **Each case owns its slice and asserts only on it.** It opens its own repository and workspace (so its own session, shim, feed and per-workspace logs), fresh. An assertion on a process-wide count ("the roster has 3 rows", every warning of the daemon) is refused; assert on the slice ("my workspace is in the roster").
+- **A case another case broke has found a production defect.** No other caller may break a contract, so the fix is in production, never re-isolating the case. Sharing finds what isolated cases cannot: state leaking between slices, and races between callers.
+- **State a repository, workspace or session owns is a slice**, never a reason to leave: the merge queue and its pause, a repository's deploy hold, a feed, a workspace's links. Their cases share the canonical process.
+- **Leaving the canonical process needs a reason written at the case, and only two exist:**
+  1. The case CHANGES state the whole process owns, with no narrower owner (the login, a hold on every repository's deploys, the model catalog), so its correct effect changes what other cases' contracts promise. It joins the GROUP process for that precondition: one process per process-wide precondition, shared by every case that needs it, which those cases read and never change; a case that toggles it runs serially within its group. A case only READING such state at its default stays canonical.
+  2. The case's subject is the process's own lifecycle: startup, restart, handover, crash, shutdown, boot-time options or environment. It gets a FRESH process, and a second start in one case states its reason (a restart, a handover, a crash).
+- **A case that leaves the canonical process still never starts one alone.** Starting a process per case is the failure mode this section exists to remove, and it hides behind "each case needs a fresh one". Before leaving, find the slice inside one process each case could own: a repository, a workspace, a session, a turn (a shim hosts one session, so its cases' slices are their turns), a key. A case that still cannot share the canonical process shares one with every case that needs the same precondition (a spawn option, an environment, a fake's mode, an injected fault): one process per precondition, its cases each on their own slice, never one per case. Related cases (all the cases of one feature or one fixture option) are the group to look for first. Only a case whose subject is the process's own lifecycle gets a process to itself.
+- **Warning declarations are scoped to the case's workspace.** A warning the harness can only declare process-wide, or a record with no workspace, is a harness gap to close, not a reason to leave.
+- **Each case is its own named case**, run in parallel with its siblings where the product allows; an e2e case is a step of a scenario, and the steps of one scenario run in order (`e2e/AGENTS.md`, "Every world-building test is a step of a scenario"). `t.Fatalf` ends only that case. The shared process's own failure fails every case that shares it, reported once, as the process's, by its fault latch.
 - **One act, several observers.** Tests that perform the byte-identical act and each assert a different view of its result are one test. Its observations are separate named cases using `t.Errorf`, so each one reports even when another fails.
 - **Sequential walks are the exception.** A case may start from another's end state only when the sequence is itself the subject. The walk's head states which later steps an early fatal failure hides.
 - **Mutation evidence first.** Merging existing tests under this section lands only with `testrun redundancy`'s evidence that no killed mutant is lost.
-- Why: the 2026-10-14 shared-setup audit (workspace `test-shared-setup`) measured an e2e test's `World` at about 2.7s of its 3.4s solo cost, while a fresh workspace in a running `World` costs 0.3-0.4s.
+- **Each suite states its own mechanics in its AGENTS.md:** the shim's in `agent-shim/claude/shim/AGENTS.md` "Integration cases share the canonical shim".
+- **Wait bounds are measured under sharing.** A shared process is busier than a fresh one, so a bound is sized from the healthy time measured with its siblings running, per the metaprompt's timeout rule.
+- Why: the 2026-10-14 shared-setup audit (workspace `test-shared-setup`) measured an e2e test's `World` at about 2.7s of its 3.4s solo cost, while a fresh workspace in a running `World` costs 0.3-0.4s; the 2026-11-20 gate metrics (workspace `test-suite-duration-metrics`) put per-case daemons at 69% of the daemon suite's CPU.
 
 ### A fixture workspace directory is process-private and swept per scenario
 

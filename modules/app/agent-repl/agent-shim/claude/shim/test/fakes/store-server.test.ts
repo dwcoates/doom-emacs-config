@@ -48,7 +48,9 @@ const agentId = (value: string): conversationv1.AgentId =>
 function pageLineEntry(book: string, upsertKey: string, text: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
     plane: streamPlane(),
-    writeId: `w-${upsertKey}-${text}`,
+    // THE BOOK IS PART OF THE WRITE ID: two books written the same key and
+    // text are two writes, never one write's retry the store dedupes.
+    writeId: `w-${book}-${upsertKey}-${text}`,
     upsertKey,
     entry: {
       case: "agentUpdate",
@@ -274,7 +276,9 @@ async function open(
             : { case: "knownThrough", value: opening },
     }),
   );
-  if (response.result.case !== "success") throw new Error("fake store refused an open");
+  if (response.result.case !== "success") {
+    throw new Error(`fake store refused an open: ${JSON.stringify(response.result)}`);
+  }
   return response.result.value;
 }
 
@@ -1608,6 +1612,51 @@ describe("the open-tail ledger", () => {
 
     // Act.
     const token = await fake.tailOpened();
+
+    // Assert.
+    expect(token).toBe(success.watch?.value);
+  });
+
+  it("tailOpened passes over an open tail it was told to except, answering the next one", async () => {
+    // Arrange: a sibling's tail is already open on the shared store.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    await write(client, pageLineEntry("b", "prompt:t1", "first"));
+    const sibling = await open(client, "a");
+    const siblingTail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: sibling.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await siblingTail.next();
+    const before = fake.openTails();
+    const own = await open(client, "b");
+    const opened = fake.tailOpened(before);
+
+    // Act.
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: own.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("b", "prompt:t2", "second"));
+    await tail.next();
+
+    // Assert.
+    expect(before).toEqual([sibling.watch?.value]);
+    expect(await opened).toBe(own.watch?.value);
+  });
+
+  it("tailOpened answers an already open tail that is not excepted", async () => {
+    // Arrange.
+    const { store: fake, client } = await store();
+    await write(client, pageLineEntry("a", "prompt:t1", "first"));
+    const success = await open(client, "a");
+    const tail = client.watchAgentSession(
+      create(storev1.WatchAgentSessionRequestSchema, { watch: success.watch }),
+    )[Symbol.asyncIterator]();
+    await write(client, pageLineEntry("a", "prompt:t2", "second"));
+    await tail.next();
+
+    // Act.
+    const token = await fake.tailOpened(["some-other-tail"]);
 
     // Assert.
     expect(token).toBe(success.watch?.value);

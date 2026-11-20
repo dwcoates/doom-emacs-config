@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agentrepl/testrun/internal/testtimes"
 )
@@ -75,9 +76,9 @@ func TestItemsReporterWritesEveryTestsTime(t *testing.T) {
 	target := filepath.Join(t.TempDir(), "items.json")
 	tests := filepath.Join(t.TempDir(), "tests.json")
 	files := `[{filepath: "/p/a.test.ts", tasks: [
-	  {type: "test", name: "top", result: {state: "pass", duration: 12}},
+	  {type: "test", name: "top", result: {state: "pass", duration: 12, startTime: 1800000000250}},
 	  {type: "suite", name: "outer", tasks: [{type: "suite", name: "inner", tasks: [
-	    {type: "test", name: "deep", result: {state: "fail", duration: 1500}}]}]},
+	    {type: "test", name: "deep", result: {state: "fail", duration: 1500, startTime: 1800000001000}}]}]},
 	  {type: "test", name: "later", mode: "skip"}
 	]}]`
 
@@ -90,15 +91,15 @@ func TestItemsReporterWritesEveryTestsTime(t *testing.T) {
 	}
 	got, err := testtimes.ParseVitest("webapp", tests, "/p")
 	want := []testtimes.Test{
-		{Suite: "webapp", Name: "a.test.ts > top", Outcome: testtimes.Pass, Seconds: 0.012},
-		{Suite: "webapp", Name: "a.test.ts > outer > inner > deep", Outcome: testtimes.Fail, Seconds: 1.5},
+		{Suite: "webapp", Name: "a.test.ts > top", Outcome: testtimes.Pass, Seconds: 0.012, Start: time.Unix(1_800_000_000, 250_000_000)},
+		{Suite: "webapp", Name: "a.test.ts > outer > inner > deep", Outcome: testtimes.Fail, Seconds: 1.5, Start: time.Unix(1_800_000_001, 0)},
 		{Suite: "webapp", Name: "a.test.ts > later", Outcome: testtimes.Skip, Seconds: 0},
 	}
 	if err != nil || len(got) != len(want) {
 		t.Fatalf("ParseVitest = %+v, %v", got, err)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if got[i].Name != want[i].Name || got[i].Outcome != want[i].Outcome || got[i].Seconds != want[i].Seconds || !got[i].Start.Equal(want[i].Start) {
 			t.Fatalf("test %d = %+v, want %+v", i, got[i], want[i])
 		}
 	}
