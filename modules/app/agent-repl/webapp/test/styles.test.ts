@@ -19,6 +19,7 @@
  * (owner request, 2026-10-23: a drag highlighted every row between pickup and
  * drop; src/drag.ts). The class comes off at the drop.
  */
+import { FOLDED_CLASS } from "../src/sidebar/folded-class.js";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -49,7 +50,7 @@ import { INTERIM_CAP_LINES, THINKING_CAP_LINES } from "../src/feed/cards/respons
 import { cascadedValue, cascadedValueIn, inDocument, inRail, installStylesheet, isOwnRule, keyframesOf, mediaBlocksOf, rulesOf, type CssRule } from "./stylesheet.js";
 import { withoutBlockComments } from "./source-text.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "../src/sidebar/band-fit.js";
-import { DEPLOYS_GROUP_CLASS, DEPLOYS_GROUP_FOLDED_CLASS } from "../src/sidebar/deploys-fold.js";
+import { DEPLOYS_GROUP_CLASS } from "../src/sidebar/deploys-fold.js";
 import { MERGED_GROUP_HEAD_CLASS } from "../src/sidebar/roster.js";
 import { ENTRY_LABEL_CLASS, ENTRY_PATH_CLASS, LABEL_LINK_CLASS } from "../src/feed/entries.js";
 import { TREE_LABEL_CLASS } from "../src/metaprompt-tree.js";
@@ -6403,6 +6404,29 @@ describe("the repository's subsections and the drag", () => {
     expect([/position:\s*fixed/.test(ghost), /pointer-events:\s*none/.test(ghost)]).toEqual([true, true]);
   });
 
+  it("tucks the drag's copy in one row-indent step over a subsection that shows no rows", () => {
+    expect(declarationsOf(".drag-ghost.drag-ghost-into")).toMatch(/transform:\s*translateX\(0\.9rem\) scale\(0\.94\)/);
+  });
+
+  it("slides the drag's copy into its tucked pose only when motion is welcome", () => {
+    const welcome = mediaBlocksOf("prefers-reduced-motion: no-preference").map((block) => block.body).join("\n");
+    const sliding = (css: string): string[] =>
+      rulesOf(css)
+        .filter((rule) => rule.selectors.includes(".drag-ghost") && /transition/.test(rule.declarations))
+        .map((rule) => rule.declarations.trim());
+    // Every rule that slides the copy is one the welcome blocks hold.
+    expect([sliding(welcome).some((d) => /transition:\s*transform 160ms ease-out/.test(d)), sliding(stylesheet)]).toEqual([true, sliding(welcome)]);
+  });
+
+  it("glows a subsection's header once, inward, as a row is drawn going inside it", () => {
+    const welcome = mediaBlocksOf("prefers-reduced-motion: no-preference").map((block) => block.body).join("\n");
+    const head = rulesOf(welcome).find((rule) => rule.selectors.includes("#ws-sidebar .sb-subsection.drop-into > .sb-subsection-head"));
+    expect([head?.declarations.match(/animation:\s*([^;]+);/)?.[1]?.trim(), /inset/.test(keyframesOf("sb-drop-into"))]).toEqual([
+      "sb-drop-into 450ms ease-out 1",
+      true,
+    ]);
+  });
+
   it("dims the dragged item's slot", () => {
     expect(declarationsOf(".drag-slot")).toMatch(/opacity:\s*0\.35/);
   });
@@ -7028,7 +7052,7 @@ describe("a band header's hover box, folded or open", () => {
     for (const cls of [MERGE_QUEUE_SECTION_CLASS, MERGED_SECTION_CLASS, HIDDEN_SECTION_CLASS]) {
       const section = document.createElement("div");
       section.className = `repo ${cls}`;
-      if (cls === band && folded) section.classList.add(DEPLOYS_GROUP_FOLDED_CLASS);
+      if (cls === band && folded) section.classList.add(FOLDED_CLASS);
       const head = document.createElement("div");
       head.className = "repo-head";
       const rows = document.createElement("div");

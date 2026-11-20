@@ -30,7 +30,9 @@
  *     repository's lists: the section's list, where
  *     it may stand just above a subsection, and each subsection's rows. Over
  *     a subsection (its header or its rows) it lands in that subsection,
- *     which lights up (`DROP_TARGET_CLASS`) while it would;
+ *     which lights up (`DROP_TARGET_CLASS`) while it would. A folded or
+ *     empty subsection shows none of its rows, so over one the drag also
+ *     draws the row going inside it (`DragSpec.intoUnseen`, `drag.ts`);
  *   - a subsection, by its header, among its repository's rows and
  *     subsections: dropped onto a row's line it stands just above that row;
  *   - a repository block (a parent's children of one other repository), by
@@ -48,6 +50,7 @@
  * rail's layer (`ArrangeContext.layer`), not in a drawing a push replaces,
  * so a status change elsewhere cannot throw away what is being typed.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import { CONTROL_SELECTOR, createControl, type Control } from "../control.js";
 import type { RosterOpenRows, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -332,6 +335,7 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
     itemsOf: entryItems,
     zoneOf: (l) => subsectionOf(l) ?? l,
     targetOf: subsectionOf,
+    intoUnseen: showsNoRows,
     dropped: (l, before) => {
       const bucket = bucketOf(l);
       void sendArrangement(sc, sc.arrange.status, {
@@ -443,6 +447,15 @@ function subsectionOf(list: HTMLElement): HTMLElement | null {
   const sub = list.parentElement;
   if (sub === null || !isSubsection(sub)) throw new Error("invariant: a subsection's rows list sits in its subsection");
   return sub;
+}
+
+/**
+ * Whether subsection SUB shows none of its rows: folded, or drawn empty
+ * (`EMPTY_SUBSECTION_ATTRIBUTE`), as the drag found it when it lifted.
+ */
+export function showsNoRows(sub: HTMLElement): boolean {
+  if (!isSubsection(sub)) throw new Error("invariant: a row drag's target is a subsection");
+  return sub.classList.contains(FOLDED_CLASS) || sub.hasAttribute(EMPTY_SUBSECTION_ATTRIBUTE);
 }
 
 /** A press on a repository section's header drags it among the repositories. */

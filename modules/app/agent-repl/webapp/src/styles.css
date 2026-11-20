@@ -1302,6 +1302,31 @@ body {
   border-radius: 6px;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
 }
+/* INTO A SUBSECTION THAT SHOWS NO ROWS (owner request, 2026-11-18): over a
+   folded or empty subsection the slot stands where nothing is drawn, so the
+   copy following the pointer tucks in one row-indent step, a little smaller
+   and fainter, to say the row goes INSIDE the subsection rather than above or
+   below it (src/drag.ts DROP_INTO_CLASS). The subsection's header takes one
+   soft inward glow as the copy tucks in. Reduced motion keeps the tucked
+   pose and drops both the slide and the glow. */
+.drag-ghost.drag-ghost-into {
+  transform: translateX(0.9rem) scale(0.94);
+  opacity: 0.7;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .drag-ghost {
+    transform-origin: left center;
+    transition: transform 160ms ease-out, opacity 160ms ease-out;
+  }
+  #ws-sidebar .sb-subsection.drop-into > .sb-subsection-head {
+    animation: sb-drop-into 450ms ease-out 1;
+  }
+}
+@keyframes sb-drop-into {
+  from { box-shadow: inset 0.9rem 0 0.6rem -0.6rem transparent; }
+  45% { box-shadow: inset 0.9rem 0 0.6rem -0.6rem color-mix(in srgb, var(--fg) 22%, transparent); }
+  to { box-shadow: inset 0.9rem 0 0.6rem -0.6rem transparent; }
+}
 html.dragging, html.dragging * { cursor: grabbing !important; }
 /* A DRAG SELECTS NO TEXT (owner request, 2026-10-23: dragging an item in the
    rail highlighted every row between pickup and drop). WebKit extends a press's

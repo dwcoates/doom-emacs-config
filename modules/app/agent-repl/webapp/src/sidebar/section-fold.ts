@@ -8,6 +8,7 @@
  * folds through here, so no two of them can disagree on how a fold is asked
  * for or painted.
  */
+import { FOLDED_CLASS } from "./folded-class.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewFoldSectionSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import type { SidebarContext } from "./context.js";
@@ -74,7 +75,7 @@ function flashCurrentRow(section: HTMLElement): void {
  */
 export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTarget): FoldGesture {
   return (section, control) => {
-    const collapse = !section.classList.contains("folded");
+    const collapse = !section.classList.contains(FOLDED_CLASS);
     if (collapse && section.hasAttribute(HOLDS_CURRENT_ATTRIBUTE)) {
       log.debug("the section holds the current workspace; its fold gesture asks nothing", {
         operation: "sidebar.fold.holds-current",
@@ -112,7 +113,7 @@ export function sectionFold(sc: SidebarContext, foldKey: string, target: FoldTar
  */
 export function trackDaemonFold(section: HTMLElement, foldKey: string, wireFolded: boolean, sc: SidebarContext): void {
   const folded = sc.view.track(foldViewKey(foldKey), wireFolded, (value) => paintSectionFold(section, value));
-  section.classList.toggle("folded", folded);
+  section.classList.toggle(FOLDED_CLASS, folded);
 }
 
 /**
@@ -127,7 +128,7 @@ export function trackDaemonFold(section: HTMLElement, foldKey: string, wireFolde
 export function foldOnClick(header: HTMLElement, section: HTMLElement, gesture: FoldGesture): void {
   header.setAttribute(FOLD_CONTROL_ATTRIBUTE, "");
   header.addEventListener("click", () => gesture(section, header));
-  paintFoldControl(header, section.classList.contains("folded"));
+  paintFoldControl(header, section.classList.contains(FOLDED_CLASS));
 }
 
 /**
@@ -239,7 +240,7 @@ export function installFocusFold(host: HTMLElement, sc: SidebarContext, focus: F
   return focus.onLeft((why) => {
     for (const shape of FOCUS_FOLDED_SECTIONS) {
       for (const section of queryAll<HTMLElement>(host, `.sb-pane > .${shape.className}`)) {
-        if (section.hidden || section.classList.contains("folded")) continue;
+        if (section.hidden || section.classList.contains(FOLDED_CLASS)) continue;
         const control = section.querySelector<HTMLElement>(`:scope > [${FOLD_CONTROL_ATTRIBUTE}]`);
         if (control === null) {
           log.error("a section cannot fold itself as the focus leaves: it is drawn without its fold control", {

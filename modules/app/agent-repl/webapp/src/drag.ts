@@ -22,6 +22,14 @@
  * `DROP_TARGET_CLASS` while the slot stands in it, so a row dragged over a
  * subsection lights the subsection it would join.
  *
+ * A DROP INTO WHAT SHOWS NONE OF ITS ITEMS IS TOLD APART (owner request,
+ * 2026-11-18). Over a folded or empty subsection the slot stands in a rows
+ * list that is hidden or was empty, so the slot alone cannot say whether the
+ * item goes inside the target or beside it. A target the spec calls unseen
+ * inside (`DragSpec.intoUnseen`) also wears `DROP_INTO_CLASS`, and the copy
+ * following the pointer wears `DRAG_GHOST_INTO_CLASS`, which the stylesheet
+ * draws as the copy tucking in one indent step, smaller and fainter.
+ *
  * THE DRAWING IS HELD FROM THE MOMENT THE ITEM LIFTS (`DragHost.hold`, the
  * shared `hold.ts`), because a push redraws what the item was drawn in, and
  * the slot with it. A drop that changes nothing, or a cancelled drag, lets the
@@ -73,6 +81,12 @@ export const DRAGGING_CLASS = "dragging";
 /** The class a list's target wears while the slot stands in that list; see the file comment. */
 export const DROP_TARGET_CLASS = "drop-target";
 
+/** The class a lit target wears when its items are not shown; see the file comment. */
+export const DROP_INTO_CLASS = "drop-into";
+
+/** The class the copy wears while its target shows none of its items; see the file comment. */
+export const DRAG_GHOST_INTO_CLASS = "drag-ghost-into";
+
 /** The attribute a drawn box wears once a drag has rearranged it; see the file comment. */
 export const REARRANGED_ATTRIBUTE = "data-rearranged";
 
@@ -109,6 +123,12 @@ export interface DragSpec {
   dressGhost?: (ghost: HTMLElement, item: HTMLElement) => void;
   /** What lights up while the slot stands in LIST; nothing when unsaid or null. */
   targetOf?: (list: HTMLElement) => HTMLElement | null;
+  /**
+   * Whether TARGET, a list's target (`targetOf`), shows none of the items a
+   * drop would stand among, so the drop is drawn as going inside it; never
+   * when unsaid. Read as the target lights.
+   */
+  intoUnseen?: (target: HTMLElement) => boolean;
   /**
    * The item was dropped into LIST just before BEFORE (null: after every
    * item there), somewhere other than where it started.
@@ -241,13 +261,17 @@ function lift(arrange: DragHost, spec: DragSpec, down: PointerEvent): Lifted {
 
   const zoneOf = spec.zoneOf ?? ((list: HTMLElement) => list);
   let lit: HTMLElement | null = null;
-  const light = (list: HTMLElement): void => {
-    const target = spec.targetOf?.(list) ?? null;
+  /** Light TARGET, and nothing else, as where the item would land; null lights nothing. */
+  const mark = (target: HTMLElement | null): void => {
     if (target === lit) return;
-    lit?.classList.remove(DROP_TARGET_CLASS);
+    lit?.classList.remove(DROP_TARGET_CLASS, DROP_INTO_CLASS);
+    const into = target !== null && (spec.intoUnseen?.(target) ?? false);
     target?.classList.add(DROP_TARGET_CLASS);
+    target?.classList.toggle(DROP_INTO_CLASS, into);
+    ghost.classList.toggle(DRAG_GHOST_INTO_CLASS, into);
     lit = target;
   };
+  const light = (list: HTMLElement): void => mark(spec.targetOf?.(list) ?? null);
 
   const place = (y: number): void => {
     const list = listAt(lists, y, zoneOf);
@@ -264,8 +288,7 @@ function lift(arrange: DragHost, spec: DragSpec, down: PointerEvent): Lifted {
 
   const finish = (): void => {
     lifting = false;
-    lit?.classList.remove(DROP_TARGET_CLASS);
-    lit = null;
+    mark(null);
     ghost.remove();
     item.classList.remove(DRAG_SLOT_CLASS);
     arrange.layer.ownerDocument.documentElement.classList.remove(DRAGGING_CLASS);

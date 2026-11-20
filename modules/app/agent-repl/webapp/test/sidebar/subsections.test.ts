@@ -10,13 +10,21 @@ import {
   bucketOf,
   familyTop,
   sameBucket,
+  showsNoRows,
   stampBucket,
 } from "../../src/sidebar/subsections.js";
 import {
   SetWorkspaceOneShotResponseSchema,
   type SetWorkspaceOneShotRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_one_shot_pb";
-import { DRAG_GHOST_CLASS, DRAG_SLOT_CLASS, DROP_TARGET_CLASS, REARRANGED_ATTRIBUTE } from "../../src/drag.js";
+import {
+  DRAG_GHOST_CLASS,
+  DRAG_GHOST_INTO_CLASS,
+  DRAG_SLOT_CLASS,
+  DROP_INTO_CLASS,
+  DROP_TARGET_CLASS,
+  REARRANGED_ATTRIBUTE,
+} from "../../src/drag.js";
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
 import { queryAll } from "../../src/dom.js";
@@ -452,6 +460,74 @@ describe("dragging a workspace row", () => {
     expect([overTheRows, overTheHeader, backOverTheRows, overItsRows, lit()]).toEqual([false, true, false, true, false]);
   });
 
+  /**
+   * Drag row a over subsection foo, drawn with ROWS and COLLAPSED, to Y
+   * (foo's header at 20), and read whether foo and the copy say the row goes
+   * inside it; the row is still held.
+   */
+  function overFoo(rows: ReturnType<typeof row>[], collapsed: boolean, y = 25): { into: boolean; tucked: boolean; foo: HTMLElement } {
+    const { sc } = arranged();
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", rows: [row({ id: "a" })], subsections: [{ id: "foo", rows, collapsed }] })] }), sc);
+    layOut(sectionList(pane), 0);
+    const foo = pane.querySelector("[data-subsection='foo']") as HTMLElement;
+    pointer("pointerdown", rowLine(pane, "a"), 10);
+    pointer("pointermove", window, y);
+    const ghost = sc.arrange.layer.querySelector(`.${DRAG_GHOST_CLASS}`);
+    return { into: foo.classList.contains(DROP_INTO_CLASS), tucked: ghost?.classList.contains(DRAG_GHOST_INTO_CLASS) ?? false, foo };
+  }
+
+  it("draws the row going inside a folded subsection it is over", () => {
+    // Arrange / Act
+    const { into, tucked } = overFoo([row({ id: "x" })], true);
+    pointer("pointerup", window, 25);
+
+    // Assert
+    expect([into, tucked]).toEqual([true, true]);
+  });
+
+  it("draws the row going inside an empty subsection it is over", () => {
+    // Arrange / Act
+    const { into, tucked } = overFoo([], false);
+    pointer("pointerup", window, 25);
+
+    // Assert
+    expect([into, tucked]).toEqual([true, true]);
+  });
+
+  it("does not draw the row going inside an open subsection that shows its rows", () => {
+    // Arrange / Act
+    const { into, tucked } = overFoo([row({ id: "x" })], false);
+    pointer("pointerup", window, 25);
+
+    // Assert
+    expect([into, tucked]).toEqual([false, false]);
+  });
+
+  it("stops drawing the row going inside once it leaves the subsection", () => {
+    // Arrange
+    const { foo } = overFoo([], true);
+
+    // Act -- back over row a's own place, above foo.
+    pointer("pointermove", window, 5);
+    const ghost = document.querySelector(`.${DRAG_GHOST_CLASS}`);
+    const after = [foo.classList.contains(DROP_INTO_CLASS), ghost?.classList.contains(DRAG_GHOST_INTO_CLASS)];
+    pointer("pointerup", window, 5);
+
+    // Assert
+    expect(after).toEqual([false, false]);
+  });
+
+  it("leaves no going-inside mark on the subsection once the row is dropped", () => {
+    // Arrange
+    const { foo } = overFoo([], true);
+
+    // Act
+    pointer("pointerup", window, 25);
+
+    // Assert
+    expect([foo.classList.contains(DROP_INTO_CLASS), foo.classList.contains(DROP_TARGET_CLASS)]).toEqual([false, false]);
+  });
+
   it("indents the slot under the subsection it would join", () => {
     // Arrange
     const { sc } = arranged();
@@ -821,6 +897,33 @@ describe("a nested row", () => {
         ? [change.value.workspace?.id, change.value.into.case === "subsection" ? change.value.into.value.id : null]
         : null,
     ).toEqual(["a", "foo"]);
+  });
+});
+
+describe("showsNoRows", () => {
+  /** A subsection drawn with ROWS and COLLAPSED. */
+  function drawnFoo(rows: ReturnType<typeof row>[], collapsed: boolean): HTMLElement {
+    const { sc } = arranged();
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "foo", rows, collapsed }] })] }), sc);
+    return pane.querySelector("[data-subsection='foo']") as HTMLElement;
+  }
+
+  it.each([
+    { name: "a folded subsection with rows", rows: [row({ id: "x" })], collapsed: true, want: true },
+    { name: "an open empty subsection", rows: [], collapsed: false, want: true },
+    { name: "a folded empty subsection", rows: [], collapsed: true, want: true },
+    { name: "an open subsection with rows", rows: [row({ id: "x" })], collapsed: false, want: false },
+  ])("answers $want for $name", ({ rows, collapsed, want }) => {
+    // Arrange
+    const foo = drawnFoo(rows, collapsed);
+
+    // Act / Assert
+    expect(showsNoRows(foo)).toBe(want);
+  });
+
+  it("throws for an element that is no subsection", () => {
+    // Arrange / Act / Assert
+    expect(() => showsNoRows(document.createElement("div"))).toThrow("invariant: a row drag's target is a subsection");
   });
 });
 

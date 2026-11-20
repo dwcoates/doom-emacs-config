@@ -244,10 +244,10 @@ export function glyphName(arm: RosterStatusCase): string {
  */
 export function armMotion(arm: RosterStatusCase): MarkMotion {
   switch (arm) {
+    // A SILENT VENDOR (`vendorSilent`) still breathes (owner ruling,
+    // 2026-11-08): the turn is still trying, though its dot is inked blue.
     case "submitting":
     case "thinking":
-    // A SILENT VENDOR still breathes (owner ruling, 2026-11-08): the turn is
-    // still trying, though its dot is inked blue.
     case "vendorSilent":
     case "clearing":
     case "compacting":

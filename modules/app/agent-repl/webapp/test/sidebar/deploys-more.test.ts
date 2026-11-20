@@ -4,10 +4,10 @@
  * 2026-11-08): scrolling to the group's end shows ten more at a time, and
  * scrolling back above a page lets it go.
  */
+import { FOLDED_CLASS } from "../../src/sidebar/folded-class.js";
 import { describe, expect, it } from "vitest";
 import {
   DEPLOYS_GROUP_CLASS,
-  DEPLOYS_GROUP_FOLDED_CLASS,
   DEPLOYS_REPOSITORY_ATTRIBUTE,
   DEPLOYS_SECTION_ATTRIBUTE,
 } from "../../src/sidebar/deploys-fold.js";
@@ -205,7 +205,7 @@ describe("createDeploysMore", () => {
       const more = createDeploysMore(root, noop);
       more.more(group);
       more.more(group);
-      group.classList.add(DEPLOYS_GROUP_FOLDED_CLASS);
+      group.classList.add(FOLDED_CLASS);
       more.check();
       expect(hiddenFlags(pages)).toEqual([true, true]);
     });
