@@ -1037,8 +1037,13 @@ type CreateWorkspaceAsyncMerge struct {
 	// merge_version_increment.proto for which merges must, may, and must not
 	// carry one (`version_increment_required`, `version_increment_unexpected`).
 	VersionIncrement *MergeWorkspaceVersionIncrement `protobuf:"bytes,10,opt,name=version_increment,json=versionIncrement,proto3,oneof" json:"version_increment,omitempty"`
-	unknownFields    protoimpl.UnknownFields
-	sizeCache        protoimpl.SizeCache
+	// Profile the merge's test gate (testrun.v1.TestRunRequest.profile): every
+	// unit the gate runs, and the production processes its tests start, write
+	// CPU profiles beside the gate's run log. Off by default; a gate profiles
+	// only when its merge asks.
+	ProfileGate   bool `protobuf:"varint,12,opt,name=profile_gate,json=profileGate,proto3" json:"profile_gate,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateWorkspaceAsyncMerge) Reset() {
@@ -1139,6 +1144,13 @@ func (x *CreateWorkspaceAsyncMerge) GetVersionIncrement() *MergeWorkspaceVersion
 		return x.VersionIncrement
 	}
 	return nil
+}
+
+func (x *CreateWorkspaceAsyncMerge) GetProfileGate() bool {
+	if x != nil {
+		return x.ProfileGate
+	}
+	return false
 }
 
 // The branch an async merge lands, and who made it. The maker matters
@@ -5691,7 +5703,7 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"self_mergeR\aopen_prR\btopology\"Y\n" +
 	"\x1dCreateWorkspaceOneShotContext\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\"\x1f\n" +
-	"\x1dCreateWorkspaceUngatedConsent\"\xdc\x05\n" +
+	"\x1dCreateWorkspaceUngatedConsent\"\xff\x05\n" +
 	"\x19CreateWorkspaceAsyncMerge\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12E\n" +
 	"\x06source\x18\x02 \x01(\v2-.agentrepl.v1.CreateWorkspaceAsyncMergeSourceR\x06source\x12E\n" +
@@ -5704,7 +5716,8 @@ const file_agentrepl_v1_endpoint_create_workspace_proto_rawDesc = "" +
 	"\fdeploy_hooks\x18\v \x01(\v2(.agentrepl.v1.CreateWorkspaceDeployHooksH\x02R\vdeployHooks\x88\x01\x01\x12?\n" +
 	"\tplacement\x18\t \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacement\x12^\n" +
 	"\x11version_increment\x18\n" +
-	" \x01(\v2,.agentrepl.v1.MergeWorkspaceVersionIncrementH\x03R\x10versionIncrement\x88\x01\x01B\x0e\n" +
+	" \x01(\v2,.agentrepl.v1.MergeWorkspaceVersionIncrementH\x03R\x10versionIncrement\x88\x01\x01\x12!\n" +
+	"\fprofile_gate\x18\f \x01(\bR\vprofileGateB\x0e\n" +
 	"\f_instructionB\x0e\n" +
 	"\f_close_afterB\x0f\n" +
 	"\r_deploy_hooksB\x14\n" +

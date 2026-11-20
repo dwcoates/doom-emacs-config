@@ -396,6 +396,11 @@ message CreateWorkspaceAsyncMerge {
   // merge_version_increment.proto for which merges must, may, and must not
   // carry one (`version_increment_required`, `version_increment_unexpected`).
   optional MergeWorkspaceVersionIncrement version_increment = 10;
+  // Profile the merge's test gate (testrun.v1.TestRunRequest.profile): every
+  // unit the gate runs, and the production processes its tests start, write
+  // CPU profiles beside the gate's run log. Off by default; a gate profiles
+  // only when its merge asks.
+  bool profile_gate = 12;
 }
 
 // The branch an async merge lands, and who made it. The maker matters

@@ -84,7 +84,11 @@ type FinishWorkspaceRequest struct {
 	// queue, refused as invalid without it. A deploy remediation or
 	// escalation's finish never joins the queue (FinishWorkspaceSuccess
 	// .landing_directly), so it names none, and one it names is not read.
-	Placement     *MergeQueuePlacement `protobuf:"bytes,4,opt,name=placement,proto3" json:"placement,omitempty"`
+	Placement *MergeQueuePlacement `protobuf:"bytes,4,opt,name=placement,proto3" json:"placement,omitempty"`
+	// Profile the deploy's test gate (testrun.v1.TestRunRequest.profile), as
+	// CreateWorkspaceAsyncMerge.profile_gate does. Off by default. A finish
+	// that lands directly runs no gate, so it is not read there.
+	ProfileGate   bool `protobuf:"varint,5,opt,name=profile_gate,json=profileGate,proto3" json:"profile_gate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -145,6 +149,13 @@ func (x *FinishWorkspaceRequest) GetPlacement() *MergeQueuePlacement {
 		return x.Placement
 	}
 	return nil
+}
+
+func (x *FinishWorkspaceRequest) GetProfileGate() bool {
+	if x != nil {
+		return x.ProfileGate
+	}
+	return false
 }
 
 // THE ARM IS THE OUTCOME.
@@ -1220,12 +1231,13 @@ var File_agentrepl_v1_endpoint_finish_workspace_proto protoreflect.FileDescripto
 
 const file_agentrepl_v1_endpoint_finish_workspace_proto_rawDesc = "" +
 	"\n" +
-	",agentrepl/v1/endpoint_finish_workspace.proto\x12\fagentrepl.v1\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xc9\x02\n" +
+	",agentrepl/v1/endpoint_finish_workspace.proto\x12\fagentrepl.v1\x1a+agentrepl/v1/lifecycle_config_refusal.proto\x1a\x19agentrepl/v1/family.proto\x1a%agentrepl/v1/merge_queue_status.proto\x1a*agentrepl/v1/merge_version_increment.proto\x1a%agentrepl/v1/workspace_topology.proto\x1a\x1cworkspace/v1/workspace.proto\"\xec\x02\n" +
 	"\x16FinishWorkspaceRequest\x128\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1a.workspace.v1.WorkspaceRefR\tworkspace\x12>\n" +
 	"\trequester\x18\x02 \x01(\v2 .agentrepl.v1.WorkspaceRequesterR\trequester\x12^\n" +
 	"\x11version_increment\x18\x03 \x01(\v2,.agentrepl.v1.MergeWorkspaceVersionIncrementH\x00R\x10versionIncrement\x88\x01\x01\x12?\n" +
-	"\tplacement\x18\x04 \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacementB\x14\n" +
+	"\tplacement\x18\x04 \x01(\v2!.agentrepl.v1.MergeQueuePlacementR\tplacement\x12!\n" +
+	"\fprofile_gate\x18\x05 \x01(\bR\vprofileGateB\x14\n" +
 	"\x12_version_increment\"\xa1\x01\n" +
 	"\x17FinishWorkspaceResponse\x12@\n" +
 	"\asuccess\x18\x01 \x01(\v2$.agentrepl.v1.FinishWorkspaceSuccessH\x00R\asuccess\x12:\n" +
