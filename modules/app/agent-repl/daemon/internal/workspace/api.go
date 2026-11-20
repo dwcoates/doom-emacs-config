@@ -490,6 +490,9 @@ type Verbs interface {
 	// CompactDeployCheck compacts a standing deploy check's conversation by
 	// Haiku now, answering whether it had one to compact.
 	CompactDeployCheck(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// DeployCheckContextTokens answers the tokens of context a deploy check's
+	// conversation holds now (topbar.Resolver.ContextTokens).
+	DeployCheckContextTokens(ws ids.WorkspaceID) int64
 	// RefreshDeployCheck brings a standing fixer's worktree to its parent's
 	// tip before a new brief.
 	RefreshDeployCheck(ctx context.Context, ws ids.WorkspaceID) error

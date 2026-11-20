@@ -210,16 +210,15 @@ func approvedChecks(t *testing.T, h *harness, n int) {
 	}
 }
 
-func TestAQuietRunAfterWorkCompactsTheMediator(t *testing.T) {
+func TestAQuietCheckCompactsTheMediatorOnlyPastItsBound(t *testing.T) {
 	tests := []struct {
-		name  string
-		work  bool
-		quiet int
-		want  []ids.WorkspaceID
+		name   string
+		tokens int64
+		want   []ids.WorkspaceID
 	}{
-		{name: "three quiet checks after work compact the mediator", work: true, quiet: 3, want: []ids.WorkspaceID{"ws-fixer"}},
-		{name: "two quiet checks after work compact nothing yet", work: true, quiet: 2},
-		{name: "quiet checks with no work before compact nothing", quiet: 3},
+		{name: "a context past the bound is compacted", tokens: QuietCheckCompactionTokens + 1, want: []ids.WorkspaceID{"ws-fixer"}},
+		{name: "a context at the bound is left warm", tokens: QuietCheckCompactionTokens},
+		{name: "an empty context is left warm"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,20 +226,35 @@ func TestAQuietRunAfterWorkCompactsTheMediator(t *testing.T) {
 			h := checked(t)
 			owe(t, h)
 			mediatorIn(t, h, "ws-fixer", false)
-			if tt.work {
-				if err := h.db.NoteDeployCheckWork(context.Background(), mediationKey(h)); err != nil {
-					t.Fatal(err)
-				}
-			}
+			h.checks.contextTokens = tt.tokens
 
 			// Act
-			approvedChecks(t, h, tt.quiet)
+			approvedChecks(t, h, 1)
 
 			// Assert
 			if !slices.Equal(h.checks.compacted, tt.want) {
 				t.Fatalf("compacted %v, want %v", h.checks.compacted, tt.want)
 			}
 		})
+	}
+}
+
+func TestAQuietCheckThatCannotReadTheContextCompactsNothing(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	mediatorIn(t, h, "ws-fixer", false)
+	h.checks.contextErr = errors.New("verbs unbound")
+
+	// Act
+	approvedChecks(t, h, 1)
+
+	// Assert
+	if len(h.checks.compacted) != 0 {
+		t.Fatalf("compacted %v, want none", h.checks.compacted)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "could not read the deploy mediator's context; it is not compacted"}); !ok {
+		t.Fatalf("records = %v, want the failed read at ERROR", h.logs.Records())
 	}
 }
 

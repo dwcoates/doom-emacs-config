@@ -145,6 +145,40 @@ func TestARemediationFinishGatesLandsDirectlyAndDeploys(t *testing.T) {
 	}
 }
 
+func TestARemediationsDeployCompactsTheMediatorWhateverItsContext(t *testing.T) {
+	// Arrange: a context far under the quiet check's bound.
+	h := finishing(t)
+	h.checks.contextTokens = 1
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FinishRemediation: %v", err)
+	}
+	if !slices.Equal(h.checks.compacted, []ids.WorkspaceID{"ws-fixer"}) {
+		t.Fatalf("compacted %v, want the mediator compacted as its deploy starts", h.checks.compacted)
+	}
+}
+
+func TestARemediationThatDoesNotDeployCompactsNothing(t *testing.T) {
+	// Arrange: the gate fails, so nothing lands or deploys.
+	h := finishing(t)
+	h.runner.runs = []scriptedRun{{Output: "FAIL", Code: 1}}
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FinishRemediation: %v", err)
+	}
+	if len(h.checks.compacted) != 0 {
+		t.Fatalf("compacted %v, want none before a deploy starts", h.checks.compacted)
+	}
+}
+
 func TestARemediationFinishSendsTheWorkspaceBackToWork(t *testing.T) {
 	tests := []struct {
 		name       string

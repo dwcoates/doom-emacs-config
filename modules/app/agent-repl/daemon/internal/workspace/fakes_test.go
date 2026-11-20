@@ -4184,6 +4184,8 @@ func (f *fixture) workspaceInRepo(t *testing.T, id ids.WorkspaceID, repoDir stri
 // call, so a test that does call one nil-panics rather than passing quietly.
 type stubTopbar struct {
 	topbar.Resolver
+	// contextTokens is each workspace's context chip figure; nil states none.
+	contextTokens map[ids.WorkspaceID]int64
 	// signIns records every workspace a sign-in was requested for; nil
 	// watches none.
 	signIns *[]ids.WorkspaceID
@@ -4222,6 +4224,10 @@ func (s stubTopbar) SetColdGate(_ ids.WorkspaceID, gate topbar.ColdGate) {
 	if s.coldGates != nil {
 		*s.coldGates = append(*s.coldGates, gate)
 	}
+}
+
+func (s stubTopbar) ContextTokens(ws ids.WorkspaceID) int64 {
+	return s.contextTokens[ws]
 }
 
 func (s stubTopbar) ContextWindow(ids.WorkspaceID) int64 {

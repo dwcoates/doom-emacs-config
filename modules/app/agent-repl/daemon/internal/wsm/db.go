@@ -779,11 +779,6 @@ type DB interface {
 	// MediatorRepoOf answers the queue whose deploy mediator WS is, and
 	// whether it is one (deploystanding.go).
 	MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bool, error)
-	// NoteDeployCheckWork restarts a queue's quiet run and arms its compaction.
-	NoteDeployCheckWork(ctx context.Context, repo RepoKey) error
-	// NoteQuietDeployCheck counts a quiet check, answering whether the
-	// mediator compacts now.
-	NoteQuietDeployCheck(ctx context.Context, repo RepoKey) (bool, error)
 	// RecordMediationEnding records how the checked deploy ended on its check.
 	RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error)
 	// OweCompaction records that a workspace's next start compacts its conversation.

@@ -529,8 +529,8 @@ func (o *orchestrator) releaseCheck(ctx context.Context, repo wsm.RepoKey, m wsm
 	}
 	o.endChain(ctx, repo, m, outcome)
 	// A CHECK RELEASED WITH NOTHING TO FIX IS QUIET: approved, or a deploy
-	// that changed nothing. Its count is what compacts the standing
-	// workspaces after their work (noteQuietCheck).
+	// that changed nothing. It compacts the mediator only past
+	// QuietCheckCompactionTokens (noteQuietCheck).
 	if outcome == MediationApproved || outcome == MediationUnchanged || outcome == MediationQuiet {
 		o.noteQuietCheck(ctx, repo, dlog.Context{"repo": string(repo), "outcome": outcome})
 	}
@@ -1315,7 +1315,6 @@ func (o *orchestrator) holdBrief(ctx context.Context, q checkedQueue, m wsm.Medi
 		o.deps.Log.Global().Info(opMediation, "the check was replaced, released or escalated already; it is not escalated again", fields)
 		return
 	}
-	o.noteCheckWork(ctx, q.key, fields)
 	o.republishMediation(ctx, q.key)
 	o.tellEscalation(ctx, q, m, brief, window, said, fields)
 }

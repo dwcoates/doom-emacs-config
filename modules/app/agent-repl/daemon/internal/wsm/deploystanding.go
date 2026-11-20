@@ -110,10 +110,16 @@ ALTER TABLE merge_queue_repos DROP COLUMN mediation_remediation;
 ALTER TABLE merge_queue_repos DROP COLUMN mediation_escalation;
 `
 
-// QuietChecksBeforeCompaction is how many checks in a row must end with no
-// dispatch and no escalation before an armed queue's mediator is compacted
-// (owner ruling, 2026-11-17: "a period of three consecutive merges").
-const QuietChecksBeforeCompaction = 3
+// retiredQuietCompactionDDL is the layout-178 contract: the quiet-run counter
+// and the compaction arming (deployStandingDDL), which no build from layout
+// 178 on reads. The deploy mediator is compacted when a remediation's deploy
+// starts, and after a check that approved with nothing to fix only when its
+// context passed merge.QuietCheckCompactionTokens, so no count of checks or
+// arming is kept.
+const retiredQuietCompactionDDL = `
+ALTER TABLE merge_queue_repos DROP COLUMN deploy_quiet_checks;
+ALTER TABLE merge_queue_repos DROP COLUMN deploy_compaction_armed;
+`
 
 // DeployMediator is a queue's deploy mediator.
 type DeployMediator struct {
@@ -217,56 +223,6 @@ func (s *store) MarkMediatorBriefed(ctx context.Context, repo RepoKey) error {
 		}
 		return nil
 	})
-}
-
-// NoteDeployCheckWork records that a check of REPO dispatched a fix or was
-// escalated: the quiet run starts over, and the mediator owes a
-// compaction once a quiet run completes.
-func (s *store) NoteDeployCheckWork(ctx context.Context, repo RepoKey) error {
-	repo, err := normalizeRepoKey(repo)
-	if err != nil {
-		s.log.Error("daemon.wsm.note_deploy_check_work", "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return err
-	}
-	const op = "daemon.wsm.note_deploy_check_work"
-	return s.write(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context, tx *sql.Tx) error {
-		return updateQueueRow(ctx, tx, repo,
-			`UPDATE merge_queue_repos SET deploy_quiet_checks = 0, deploy_compaction_armed = 1 WHERE repo_key = ?`)
-	})
-}
-
-// NoteQuietDeployCheck records that a check of REPO ended with no dispatch
-// and no escalation, answering whether the quiet run just completed on an
-// armed queue: the caller then compacts its mediator, and the
-// queue is disarmed until a dispatch or an escalation arms it again.
-func (s *store) NoteQuietDeployCheck(ctx context.Context, repo RepoKey) (bool, error) {
-	repo, err := normalizeRepoKey(repo)
-	if err != nil {
-		s.log.Error("daemon.wsm.note_quiet_deploy_check", "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
-		return false, err
-	}
-	const op = "daemon.wsm.note_quiet_deploy_check"
-	var compact bool
-	err = s.write(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context, tx *sql.Tx) error {
-		var quiet int
-		var armed bool
-		err := tx.QueryRowContext(ctx,
-			`UPDATE merge_queue_repos SET deploy_quiet_checks = deploy_quiet_checks + 1 WHERE repo_key = ?
-			 RETURNING deploy_quiet_checks, deploy_compaction_armed`, string(repo)).Scan(&quiet, &armed)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("wsm: no merge queue %s to note a quiet deploy check on", repo)
-		}
-		if err != nil {
-			return err
-		}
-		if !armed || quiet < QuietChecksBeforeCompaction {
-			return nil
-		}
-		compact = true
-		_, err = tx.ExecContext(ctx, `UPDATE merge_queue_repos SET deploy_quiet_checks = 0, deploy_compaction_armed = 0 WHERE repo_key = ?`, string(repo))
-		return err
-	})
-	return compact, err
 }
 
 // updateQueueRow runs QUERY, whose one argument is REPO, against REPO's

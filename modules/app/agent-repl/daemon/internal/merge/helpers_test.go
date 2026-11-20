@@ -459,14 +459,6 @@ func (f *fakeDB) RecordMediationEnding(ctx context.Context, repo wsm.RepoKey, ow
 	return f.checks.RecordMediationEnding(ctx, repo, owed, ending)
 }
 
-func (f *fakeDB) NoteDeployCheckWork(ctx context.Context, repo wsm.RepoKey) error {
-	return f.checks.NoteDeployCheckWork(ctx, repo)
-}
-
-func (f *fakeDB) NoteQuietDeployCheck(ctx context.Context, repo wsm.RepoKey) (bool, error) {
-	return f.checks.NoteQuietDeployCheck(ctx, repo)
-}
-
 // aFixerTurn is a fixer's brief for a dispatch a test records by hand.
 var aFixerTurn = wsm.FixerTurn{ID: "turn-fixer", Brief: "fix the deploy's problems", Origin: 1}
 
@@ -4936,6 +4928,10 @@ type fakeDeployChecks struct {
 	// refreshErr and compactErr fail them.
 	refreshed, compacted   []ids.WorkspaceID
 	refreshErr, compactErr error
+	// contextTokens is the context every deploy check workspace holds.
+	contextTokens int64
+	// contextErr fails every ContextTokens.
+	contextErr error
 	// createCtxErrs records each check workspace's creation context error.
 	createCtxErrs []error
 	// efforts records each effort set, "ROLE:WS", and
@@ -5005,6 +5001,12 @@ func (f *fakeDeployChecks) Compact(_ context.Context, ws ids.WorkspaceID) (bool,
 	defer f.mu.Unlock()
 	f.compacted = append(f.compacted, ws)
 	return f.compactErr == nil, f.compactErr
+}
+
+func (f *fakeDeployChecks) ContextTokens(ids.WorkspaceID) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.contextTokens, f.contextErr
 }
 
 func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {

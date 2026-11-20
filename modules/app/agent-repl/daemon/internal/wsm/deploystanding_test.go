@@ -154,92 +154,6 @@ func TestMediatorRepoOf(t *testing.T) {
 	}
 }
 
-// quietRun notes N quiet checks of REPO, answering each one's compaction.
-func quietRun(t *testing.T, s *store, repo RepoKey, n int) []bool {
-	t.Helper()
-	var out []bool
-	for range n {
-		compact, err := s.NoteQuietDeployCheck(context.Background(), repo)
-		if err != nil {
-			t.Fatalf("NoteQuietDeployCheck: %v", err)
-		}
-		out = append(out, compact)
-	}
-	return out
-}
-
-func TestTheQuietRunCompactsOnlyAfterWork(t *testing.T) {
-	tests := []struct {
-		name  string
-		armed bool
-		want  []bool
-	}{
-		{name: "a queue no check worked on never compacts", want: []bool{false, false, false, false}},
-		{name: "a dispatch or escalation compacts at the third quiet check, once", armed: true, want: []bool{false, false, true, false}},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Arrange
-			s, repo := owingQueue(t)
-			if tt.armed {
-				if err := s.NoteDeployCheckWork(context.Background(), repo); err != nil {
-					t.Fatal(err)
-				}
-			}
-
-			// Act
-			got := quietRun(t, s, repo, 4)
-
-			// Assert
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %v, want %v", got, tt.want)
-			}
-			for i := range got {
-				if got[i] != tt.want[i] {
-					t.Fatalf("got %v, want %v", got, tt.want)
-				}
-			}
-		})
-	}
-}
-
-func TestWorkMidRunStartsTheQuietRunOver(t *testing.T) {
-	// Arrange
-	s, repo := owingQueue(t)
-	ctx := context.Background()
-	if err := s.NoteDeployCheckWork(ctx, repo); err != nil {
-		t.Fatal(err)
-	}
-	quietRun(t, s, repo, 2)
-
-	// Act
-	if err := s.NoteDeployCheckWork(ctx, repo); err != nil {
-		t.Fatal(err)
-	}
-	got := quietRun(t, s, repo, 3)
-
-	// Assert
-	if got[0] || got[1] || !got[2] {
-		t.Fatalf("got %v, want the run counted afresh to its third", got)
-	}
-}
-
-func TestTheQuietRunRefusesAQueueWithNoRow(t *testing.T) {
-	// Arrange
-	s, _ := testStore(t)
-	ctx := context.Background()
-	repo := RepoKey(t.TempDir())
-
-	// Act
-	_, quietErr := s.NoteQuietDeployCheck(ctx, repo)
-	workErr := s.NoteDeployCheckWork(ctx, repo)
-
-	// Assert
-	if quietErr == nil || workErr == nil {
-		t.Fatalf("NoteQuietDeployCheck = %v, NoteDeployCheckWork = %v; want both refused", quietErr, workErr)
-	}
-}
-
 func TestOweCompaction(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -415,6 +329,34 @@ func TestTheRetiredDeployChecksContractDropsTheirShapes(t *testing.T) {
 			// Assert
 			if got := rawScalar[int](t, path, tt.query); got != 0 {
 				t.Fatalf("%s = %d, want it dropped", tt.query, got)
+			}
+		})
+	}
+}
+
+func TestTheQuietCompactionContractDropsItsColumns(t *testing.T) {
+	tests := []struct {
+		name   string
+		column string
+	}{
+		{name: "the quiet run's counter", column: "deploy_quiet_checks"},
+		{name: "the compaction's arming", column: "deploy_compaction_armed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			path := fixtureAt(t, 177)
+			query := `SELECT count(*) FROM pragma_table_info('merge_queue_repos') WHERE name = '` + tt.column + `'`
+			if got := rawScalar[int](t, path, query); got != 1 {
+				t.Fatalf("%s before the contract = %d, want 1", tt.column, got)
+			}
+
+			// Act
+			execRaw(t, path, retiredQuietCompactionDDL)
+
+			// Assert
+			if got := rawScalar[int](t, path, query); got != 0 {
+				t.Fatalf("%s after the contract = %d, want 0", tt.column, got)
 			}
 		})
 	}

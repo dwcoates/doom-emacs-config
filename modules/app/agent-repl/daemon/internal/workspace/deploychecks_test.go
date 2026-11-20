@@ -506,3 +506,30 @@ func TestACreateInTheReservedNamespaceIsRefused(t *testing.T) {
 		})
 	}
 }
+
+func TestDeployCheckContextTokensAreTheContextChipsFigure(t *testing.T) {
+	tests := []struct {
+		name   string
+		tokens map[ids.WorkspaceID]int64
+		want   int64
+	}{
+		{name: "a conversation holding context answers its figure", tokens: map[ids.WorkspaceID]int64{"w1": 250_000}, want: 250_000},
+		{name: "a conversation with none answers zero"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			v := f.verbs.(*verbs)
+			v.deps.Topbar = stubTopbar{contextTokens: tt.tokens}
+
+			// Act
+			got := v.DeployCheckContextTokens("w1")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("DeployCheckContextTokens = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}

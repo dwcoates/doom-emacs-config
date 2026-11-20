@@ -864,6 +864,9 @@ type DeployCheckWorkspaces interface {
 	// Compact compacts a standing deploy check's conversation by Haiku now,
 	// answering whether it had one to compact.
 	Compact(ctx context.Context, ws ids.WorkspaceID) (bool, error)
+	// ContextTokens answers the tokens of context a deploy check workspace's
+	// conversation holds now, 0 when it states none.
+	ContextTokens(ws ids.WorkspaceID) (int64, error)
 }
 
 // Meter records the merge queue's metrics. Each call is an atomic add and
