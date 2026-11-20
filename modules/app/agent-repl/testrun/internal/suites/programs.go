@@ -43,7 +43,7 @@ func ProgramUnits(l Layout, needed []string, owner func(roster.Program) string) 
 		if err != nil {
 			return nil, err
 		}
-		specs = append(specs, spec(ProgramUnitID(p.Name), owner(p), dir, argv))
+		specs = append(specs, pinnedBuild(spec(ProgramUnitID(p.Name), owner(p), dir, argv)))
 	}
 	return specs, nil
 }

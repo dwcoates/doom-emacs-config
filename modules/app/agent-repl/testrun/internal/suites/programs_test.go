@@ -224,3 +224,27 @@ func ldflagsOf(argv []string) []string {
 	}
 	return flags
 }
+
+// TestEveryProgramUnitIsAPinnedBuild pins that a roster program's build unit
+// takes its width and pins from pinnedBuild, as a module build's does, so no
+// build unit holds fewer slots than the cores its go command uses.
+func TestEveryProgramUnitIsAPinnedBuild(t *testing.T) {
+	// Arrange
+	var names []string
+	for _, p := range roster.Programs {
+		names = append(names, p.Name)
+	}
+
+	// Act
+	specs, err := ProgramUnits(Layout{Module: "/m", Work: "/w"}, names, func(p roster.Program) string { return p.Owner })
+
+	// Assert
+	if err != nil || len(specs) != len(names) {
+		t.Fatalf("specs = %v, %v", specs, err)
+	}
+	for _, sp := range specs {
+		if want := pinnedBuild(sp); sp.Slots != want.Slots || !reflect.DeepEqual(sp.Env, want.Env) {
+			t.Errorf("%s holds %d slots pinned by %v, want pinnedBuild's %d pinned by %v", sp.ID, sp.Slots, sp.Env, want.Slots, want.Env)
+		}
+	}
+}
