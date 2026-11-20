@@ -365,6 +365,9 @@ section holds the rest.
 - **shim** (`agent-shim/claude/shim`): a case takes the file's shim with `canonicalSession()` (`test/integration-support/canonical.ts`); a shim hosts ONE session, so a case's slice is its turns.
   - Mint ids with `uniqueTurn()`, hand every one to `endsTurn`, and read the store, log and transcript through `since(...)`; a shared precondition is a `groupShim`/`groupSession` key.
   - The rest: `agent-shim/claude/shim/AGENTS.md`, "Integration cases share the canonical shim".
+- **ERT integration (`lisp/test-integration-helpers.el`)**: a scenario takes the shared fake daemon through `agent-repl-itest--with-fake-daemon`; there is ONE fake daemon per batch Emacs process, started on the first scenario and reaped at exit, and `agent-repl-itest--begin-scenario` resets it on the way IN (two `/_fake/reset`s around the subscriber drain, the state root swept, the address re-published), so a case's slice is the whole fake for its own run, since ERT runs one test at a time.
+  - Newcomers get wrong: production's process-global tables (workspaces, host names, prompt queue, selection slot, timers, log targets) are let-bound per scenario inside the macro, so a new process-global table a feature adds must join that binding list or it leaks between scenarios; only a case whose subject is a daemon's own lifecycle (a bounce, a second daemon, a cold start) starts another, through `agent-repl-itest--with-second-daemon` or `agent-repl-itest--with-cold-start`.
+  - The rest: `modules/app/agent-repl/AGENTS.md`, "ONE fake daemon serves a whole suite run".
 
 ### Finding and fixing a flake
 
