@@ -948,6 +948,7 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 	pre, post := hookFlags(fs)
 	part := fs.String("version-part", "", "minor or patch, for a merge onto agent-repl's master")
 	line := fs.String("changelog-line", "", "the version tag's changelog line")
+	profileGate := fs.Bool("profile-gate", false, "profile the merge's test gate: every unit and the production processes its tests start write CPU profiles beside the gate's run log")
 	positionals, ok := c.parse(fs, args)
 	if !ok {
 		return exitFailure
@@ -970,7 +971,7 @@ func workspaceAsyncMerge(c *cliCall, args []string) int {
 		return c.usageFailed("%v", err)
 	}
 	async := &agentreplv1.CreateWorkspaceAsyncMerge{Name: *name, Placement: where, CleanupWorktree: *cleanup, CompactAfter: *compact,
-		DeployHooks: deployHooks(pre, post), VersionIncrement: version}
+		DeployHooks: deployHooks(pre, post), VersionIncrement: version, ProfileGate: *profileGate}
 	switch *target {
 	case "primary":
 		async.Target = &agentreplv1.CreateWorkspaceAsyncMergeTarget{Target: &agentreplv1.CreateWorkspaceAsyncMergeTarget_Primary{Primary: &agentreplv1.CreateWorkspaceAsyncMergeTargetPrimary{}}}
@@ -1457,6 +1458,7 @@ func workspaceFinished(c *cliCall, args []string) int {
 	place := fs.String("placement", "", "back, front or behind=MERGE; a finish through the merge queue names one, a direct landing none")
 	part := fs.String("version-part", "", "minor or patch, for a deploy onto a versioned repository's main branch")
 	line := fs.String("changelog-line", "", "the version tag's changelog line")
+	profileGate := fs.Bool("profile-gate", false, "profile the deploy's test gate: every unit and the production processes its tests start write CPU profiles beside the gate's run log")
 	asUser := fs.Bool("as-user", false, "the user asks, not the calling workspace")
 	named, ref, rest, ok := c.namedWorkspaceArg(fs, stateDir, args)
 	if !ok {
@@ -1484,7 +1486,7 @@ func workspaceFinished(c *cliCall, args []string) int {
 		return exitFailure
 	}
 	resp, err := c.client.FinishWorkspace(c.ctx, connect.NewRequest(&agentreplv1.FinishWorkspaceRequest{Workspace: ref, Requester: requester,
-		Placement: where, VersionIncrement: version}))
+		Placement: where, VersionIncrement: version, ProfileGate: *profileGate}))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.FinishWorkspaceResponse) (string, error) {
 		return describeFinishRefusal(named, msg.GetError())
 	})

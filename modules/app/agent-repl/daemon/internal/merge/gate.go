@@ -115,6 +115,15 @@ func (r *run) gate(ctx context.Context, round tabRound, tip, head string) (verdi
 	if !selection.Full {
 		argv = append(argv, "--suites", strings.Join(selection.Suites, ","))
 	}
+	// A GATE PROFILES ONLY WHEN ITS MERGE ASKED (wsm.MergeSource.ProfileGate):
+	// every unit it runs writes its CPU profiles, and those of the production
+	// processes its tests start, into the profiles directory beside the run's
+	// log, which the run's output names (testrun.v1.TestRunRequest.profile).
+	if r.source.ProfileGate {
+		argv = append(argv, "--profile")
+		r.o.log(ctx, r.ws).Info(op, "the merge's test gate profiles its units, as its merge asked", dlog.Context{
+			"workspace": string(r.ws), "round": round.n})
+	}
 	result, err := g.run(ctx, dir, argv, selection.Suites)
 	if err != nil {
 		// A GATE THE DAEMON'S OWN EXIT STOPPED FROM STARTING IS NOT THE HOST'S
