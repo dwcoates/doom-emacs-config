@@ -682,7 +682,9 @@ hand any more:
   `isFeedBackground` in src/feed/background-click.ts is the one hit test: the
   scroll box, its direct children, or a root row's `.feed-item` wrapper) is
   what clears it — by sending the daemon `SelectResponse` CLEAR, never locally;
-  the daemon's cleared push parks through `selectionCleared`. A follow
+  the daemon's cleared push ends the selection where the view stands
+  (`selectionEnded`, owner ruling 2026-11-20, superseding its return to the
+  tail), so the follow restarts only at the tail. A follow
   ends on any upward movement of the reader's, and on a downward one that
   stops short of the tail. The reader's own wheel
   redirect and

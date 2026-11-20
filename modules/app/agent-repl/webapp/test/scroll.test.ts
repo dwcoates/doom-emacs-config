@@ -443,7 +443,6 @@ describe("TailFollow's parking causes", () => {
     ["a replace restore", (tail) => tail.replaceRestore(), "replaceRestore"],
     ["a rolled-back row's removal", (tail) => tail.rolledBack(), "rolledBack"],
     ["a switch to this workspace", (tail) => tail.workspaceSelected(), "workspaceSelected"],
-    ["a cleared selection", (tail) => tail.selectionCleared(), "selectionMoved"],
     ["the jump-to-tail control", (tail) => tail.jumpToTail(), "tailJumped"],
   ];
 
@@ -1539,23 +1538,38 @@ describe("TailFollow's at-tail latch", () => {
     expect(held.length).toBe(1);
   });
 
-  it("parks at the tail when the active selection clears", () => {
-    // Arrange
+  it("leaves a reader scrolled up where they are when the selection is dismissed", () => {
+    // Arrange — owner ruling, 2026-11-20: a dismissal no longer returns to
+    // the tail. 50px above it, the latest entry in sight.
     const l = withLatest(100);
     l.tail.selectionMoved(null);
     l.box.scrollTop = 650;
     l.gesture();
     // Act
-    l.tail.selectionCleared();
+    l.tail.selectionEnded();
     // Assert
-    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 1000]);
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([false, 650]);
+  });
+
+  it("resumes the follow when the selection is dismissed at the tail", () => {
+    // Arrange
+    const l = withLatest(100);
+    l.tail.selectionMoved(null);
+    l.box.scrollTop = 690;
+    l.gesture();
+    // Act
+    l.tail.selectionEnded();
+    l.append(100);
+    l.tail.follow();
+    // Assert
+    expect([l.tail.isFollowing(), l.box.scrollTop]).toEqual([true, 1100]);
   });
 
   it("applies again once the selection has cleared", () => {
     // Arrange
     const l = withLatest(100);
     l.tail.selectionMoved(null);
-    l.tail.selectionCleared();
+    l.tail.selectionEnded();
     l.box.scrollTop = 100;
     l.gesture();
     // Act
@@ -2049,7 +2063,6 @@ describe("TailFollow leaves a reader scrolling up in control", () => {
   const parks: Array<[string, (s: Streaming) => void]> = [
     ["promptSent", (s) => s.tail.promptSent()],
     ["promptHeld", (s) => s.tail.promptHeld()],
-    ["selectionMoved", (s) => s.tail.selectionCleared()],
     ["initialPlacement", (s) => s.tail.initialPlacement()],
     ["replaceRestore", (s) => s.tail.replaceRestore()],
     ["rolledBack", (s) => s.tail.rolledBack()],

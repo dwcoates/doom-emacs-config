@@ -1078,9 +1078,10 @@ export function createFeedController(
    *    marks one row and clears the rest, and `none` clears them all;
    *  - while a row is selected the follow is released, so new rows append
    *    without pulling the viewport off the selection. When the selection
-   *    ends the feed either returns to its tail (`return_to_tail`: the reader
-   *    dismissed it, `selectionCleared`), stays where the reader has it
-   *    (`stay`: the row left the viewport, `selectionEnded`), or holds still
+   *    ends the feed either stays where the reader has it (`return_to_tail`:
+   *    the reader dismissed it, and `stay`: the row left the viewport, both
+   *    `selectionEnded`, owner ruling 2026-11-20 superseding the dismissal's
+   *    return to the tail), or holds still
    *    under the bubble the reader clicked to deselect (`hold`,
    *    `selectionClicked`);
    *  - a newly selected row moves the viewport as its arm's `viewport` says:
@@ -1131,8 +1132,6 @@ export function createFeedController(
         expandSelected(null);
         switch (viewport.case) {
           case "returnToTail":
-            opts.scroll?.tail.selectionCleared();
-            return;
           case "stay":
             opts.scroll?.tail.selectionEnded();
             return;

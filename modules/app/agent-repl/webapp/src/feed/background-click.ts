@@ -8,9 +8,9 @@
  * clicks the feed's background: that click asks the DAEMON to clear the
  * selection (`SelectFeedRow` with the `clear` move, the move double-escape
  * sends), because the daemon owns the selection. Nothing is cleared here. The
- * daemon's `none.return_to_tail` push then reaches `applySelection`, which parks
- * at the tail through the existing named cause (`selectionCleared`), and the
- * follow resumes.
+ * daemon's `none.return_to_tail` push then reaches `applySelection`, which
+ * ends the selection where the view stands (`selectionEnded`; owner ruling,
+ * 2026-11-20): the follow resumes once the view stands at the tail.
  *
  * A REFUSED OR FAILED CLEAR is filed and logged by `selectFeedRow`.
  */

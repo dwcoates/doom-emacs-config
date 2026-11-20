@@ -2866,22 +2866,25 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
     m.feed.dispose();
   });
 
-  it("parks at the tail on the daemon's cleared push", async () => {
-    // Arrange
+  it("leaves the view where it stands on the daemon's cleared push", async () => {
+    // Arrange — owner ruling, 2026-11-20: a dismissal no longer returns to
+    // the tail.
     const m = await selected();
+    const before = m.scroll.scrollTop;
     clickBackground(m.host);
     await settle();
     // Act
     m.channel.push(pushSelection({ none: "returnToTail" }));
     await settle();
     // Assert
-    expect(m.scroll.scrollTop).toBe(2000);
+    expect(m.scroll.scrollTop).toBe(before);
     m.feed.dispose();
   });
 
-  it("follows later content after the daemon's cleared push", async () => {
+  it("does not pull a reader above the tail down to later content after the daemon's cleared push", async () => {
     // Arrange
     const m = await selected();
+    const before = m.scroll.scrollTop;
     clickBackground(m.host);
     await settle();
     m.channel.push(pushSelection({ none: "returnToTail" }));
@@ -2891,7 +2894,7 @@ describe("mountFeed: a click on the feed background ends the selection", () => {
     m.channel.push(push(responseRow("r2")));
     await settle();
     // Assert
-    expect(m.scroll.scrollTop).toBe(2400);
+    expect(m.scroll.scrollTop).toBe(before);
     m.feed.dispose();
   });
 

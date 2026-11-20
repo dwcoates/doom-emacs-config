@@ -2098,7 +2098,6 @@ describe("createFeedController: the feed selection", () => {
     const tail = {
       isFollowing: () => false,
       follow: () => undefined,
-      selectionCleared: () => acts.push("selectionCleared"),
       selectionEnded: () => acts.push("selectionEnded"),
       selectionMoved: (target: CenterTarget | null) => {
         acts.push("selectionMoved");
@@ -2252,7 +2251,7 @@ describe("createFeedController: the feed selection", () => {
     expect(acts).toEqual(["selectionMoved"]);
   });
 
-  it("returns to the bottom when the selection is dismissed (return_to_tail)", () => {
+  it("ends a dismissed selection where the view stands (return_to_tail), as a selection whose row left the viewport", () => {
     // Arrange
     const { controller, acts } = selecting();
     controller.upsert(responseRow("r1"));
@@ -2261,7 +2260,7 @@ describe("createFeedController: the feed selection", () => {
     // Act
     controller.applySelection(selectionOf({ none: "returnToTail" }));
     // Assert
-    expect(acts).toEqual(["selectionCleared"]);
+    expect(acts).toEqual(["selectionEnded"]);
   });
 
   it("does not move the feed when an empty selection is restated", () => {

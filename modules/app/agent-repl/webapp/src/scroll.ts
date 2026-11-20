@@ -92,8 +92,9 @@ export function atTail(box: ScrollPosition): boolean {
  *   card already drawn, or its removal, moves nothing.
  * - `selectionMoved`: the reader stepped the feed selection (a final
  *   response or a prompt) by keybinding from Emacs; the selected row is
- *   centered, and a dismissed selection returns to the tail. A selection that
- *   ended because its row left the viewport moves nothing (`selectionEnded`),
+ *   centered. A selection that ends moves nothing, whether the reader
+ *   dismissed it or its row left the viewport (`selectionEnded`; owner ruling,
+ *   2026-11-20, superseding the dismissed selection's return to the tail),
  *   and neither does one the reader's click made or ended (`selectionClicked`,
  *   THE READER'S CLICK NEVER MOVES THE FEED below).
  * - `detachedWorkSelected`: the reader picked a detached-work item in the
@@ -187,7 +188,6 @@ export type ScrollCause = (typeof SCROLL_CAUSES)[number];
 type ParkCause =
   | "promptSent"
   | "promptHeld"
-  | "selectionMoved"
   | "initialPlacement"
   | "replaceRestore"
   | "rolledBack"
@@ -200,7 +200,7 @@ type ParkCause =
 /** A named cause that supersedes the reader's click hold (`supersedeClick`). */
 type ClickSupersede =
   | Exclude<ParkCause, "latestVisible">
-  | "selectionCleared"
+  | "selectionMoved"
   | "detachedWorkSelected"
   | "entryJumped"
   | "composerEntryRevealed";
@@ -445,8 +445,9 @@ export function heldRowName(row: Element | null): string {
  *
  * AN ACTIVE REPLY SELECTION HOLDS THE LATEST-VISIBLE LATCH OFF: `selectionMoved`
  * released the tail so streaming rows cannot pull the reader off the selected
- * response, and seeing the latest entry does not undo that. Clearing the
- * selection parks (`selectionCleared`) as it always has.
+ * response, and standing at the tail does not undo that. Ending the
+ * selection moves nothing (`selectionEnded`), and the follow restarts only by
+ * the at-tail latch.
  *
  * WHY THE READER MUST HAVE DONE SOMETHING. The box writes its own position too
  * -- `scrollTop` cannot sit past the end of the scrollable range, so content
@@ -639,17 +640,12 @@ export class TailFollow {
     this.parkSuperseding("workspaceSelected");
   }
 
-  /** The reader cleared the selection: return to the tail and follow. */
-  selectionCleared(): void {
-    this.supersedeClick("selectionCleared");
-    this.selectionActive = false;
-    this.park("selectionMoved");
-  }
-
   /**
-   * The selection ended because its row left the viewport: move nothing, and
-   * stop holding the at-tail latch off, so the follow starts again only once
-   * the view stands at the tail (at once, when it already does).
+   * The selection ended, the reader having dismissed it or its row having
+   * left the viewport: move nothing, and stop holding the at-tail latch off,
+   * so the follow starts again only once the view stands at the tail (at
+   * once, when it already does). A dismissal no longer returns to the tail
+   * (owner ruling, 2026-11-20).
    */
   selectionEnded(): void {
     this.selectionActive = false;
@@ -954,8 +950,7 @@ export class TailFollow {
   /**
    * THE ONE PARK A NAMED CAUSE MAKES: the cause supersedes the reader's click
    * hold, then the feed lands at its tail and follows. Every parking method
-   * goes through here but `selectionCleared`, which names itself to the hold
-   * and ends the selection between the two.
+   * goes through here.
    */
   private parkSuperseding(cause: Exclude<ParkCause, "latestVisible">): void {
     this.supersedeClick(cause);
