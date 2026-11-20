@@ -109,21 +109,34 @@ func (d *Daemon) retireSlice() {
 	slice := append([]*workspacev1.WorkspaceRef(nil), d.slice...)
 	d.mu.Unlock()
 	for i := len(slice) - 1; i >= 0; i-- {
-		ws := slice[i]
-		kill, err := d.Client().KillWorkspace(d.ctx, connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ws}))
-		if err != nil {
-			d.t.Errorf("harness: retire %s from the shared daemon: KillWorkspace = error %v", ws.GetDir(), err)
-			continue
-		}
-		if kill.Msg.GetError().GetUnknownWorkspace() != nil {
-			continue
-		}
-		if kill.Msg.GetSuccess() == nil {
-			d.t.Errorf("harness: retire %s from the shared daemon: KillWorkspace = %v, want a success", ws.GetDir(), kill.Msg)
-			continue
-		}
-		d.forgetRetired(ws, true)
+		d.retire(slice[i], true)
 	}
+}
+
+// retire kills and forgets one workspace of the slice. A workspace with open
+// children (a fork, a create the case made through the daemon) has them
+// retired first, as the kill names them, and is killed again once.
+func (d *Daemon) retire(ws *workspacev1.WorkspaceRef, childrenFirst bool) {
+	d.t.Helper()
+	kill, err := d.Client().KillWorkspace(d.ctx, connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		d.t.Errorf("harness: retire %s from the shared daemon: KillWorkspace = error %v", ws.GetDir(), err)
+		return
+	}
+	switch {
+	case kill.Msg.GetError().GetUnknownWorkspace() != nil:
+		return
+	case childrenFirst && kill.Msg.GetError().GetHasOpenChildren() != nil:
+		for _, child := range kill.Msg.GetError().GetHasOpenChildren().GetChildren() {
+			d.retire(child, true)
+		}
+		d.retire(ws, false)
+		return
+	case kill.Msg.GetSuccess() == nil:
+		d.t.Errorf("harness: retire %s from the shared daemon: KillWorkspace = %v, want a success", ws.GetDir(), kill.Msg)
+		return
+	}
+	d.forgetRetired(ws, true)
 }
 
 // forgetRetired forgets a killed workspace of the slice. A forget blocked by

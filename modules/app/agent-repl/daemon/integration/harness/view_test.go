@@ -623,13 +623,29 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 			wantCalls: []string{"kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
 		},
 		{
+			name: "a workspace's open children are retired before it",
+			kill: func() func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
+				refused := false
+				return func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
+					if id == "w2" && !refused {
+						refused = true
+						return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
+							Cause: &agentreplv1.KillWorkspaceError_HasOpenChildren{HasOpenChildren: &agentreplv1.WorkspaceHasOpenChildren{
+								Children: []*workspacev1.WorkspaceRef{{Id: "c1"}}}}}}}, nil
+					}
+					return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Success{Success: &agentreplv1.KillWorkspaceSuccess{}}}, nil
+				}
+			}(),
+			wantCalls: []string{"kill w2", "kill c1", "forget c1", "kill w2", "forget w2", "kill w1", "forget w1"},
+		},
+		{
 			name: "a refused kill fails the test and forgets nothing",
 			kill: func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
 				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
-					Cause: &agentreplv1.KillWorkspaceError_HasOpenChildren{HasOpenChildren: &agentreplv1.WorkspaceHasOpenChildren{}}}}}, nil
+					Cause: &agentreplv1.KillWorkspaceError_TransferringAway{TransferringAway: &agentreplv1.KillWorkspaceTransferringAway{}}}}}, nil
 			},
 			wantCalls: []string{"kill w2", "kill w1"},
-			wantFail:  "KillWorkspace = error:{has_open_children",
+			wantFail:  "KillWorkspace = error:{transferring_away",
 		},
 		{
 			name: "a kill that cannot be asked fails the test",
