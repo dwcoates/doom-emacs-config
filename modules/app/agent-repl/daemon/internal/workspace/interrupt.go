@@ -488,11 +488,5 @@ func (v *verbs) shimOutcome(log dlog.Logger, running Running, rpc string, fields
 // withArm adds a shim refusal's arm to a record's context without mutating the
 // caller's map.
 func withArm(fields dlog.Context, refusal *ShimRefusal) dlog.Context {
-	out := make(dlog.Context, len(fields)+2)
-	for k, val := range fields {
-		out[k] = val
-	}
-	out["shim_arm"] = refusal.Arm
-	out["shim_detail"] = refusal.Detail
-	return out
+	return dlog.Merge(fields, dlog.Context{"shim_arm": refusal.Arm, "shim_detail": refusal.Detail})
 }
