@@ -242,6 +242,20 @@ describe("this repository's committed metaprompt", () => {
     expect(text).not.toContain("merge-queue-stall-triage");
   });
 
+  it("has the deploy mediator address only what the deploy broke, and approve past what was there before", () => {
+    // Arrange
+    const home = homeOnThisRepository();
+    // Act
+    const text = readLandingSection("deploy_mediator", home);
+    // Assert — owner ruling 2026-11-19: every fix is a landing whose own
+    // deploy surfaces the next old warning, so a pre-existing problem is
+    // named on the approval and never remediated by the mediator.
+    expect(text).toContain("### Only what this deploy broke is addressed, never anything that was there before");
+    expect(text).toContain("A pre-existing problem is never dispatched, never fixed and never escalated by the deploy mediator.");
+    expect(text).toContain("A deploy whose findings are all pre-existing is approved.");
+    expect(text).toContain("`approve`: the deploy broke nothing, or everything found is pre-existing, transient or ignorable");
+  });
+
   it("has the deploy mediator make a settled fix before the deploy, never offering it for after", () => {
     // Arrange
     const home = homeOnThisRepository();
