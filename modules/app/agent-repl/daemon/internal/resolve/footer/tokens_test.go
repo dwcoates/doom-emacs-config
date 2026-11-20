@@ -1,6 +1,8 @@
 package footer
 
 import (
+	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -8,6 +10,7 @@ import (
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/shimclient"
 	"agent-repld/internal/wsm"
 )
@@ -1310,5 +1313,74 @@ func TestTheFirstReadingOfATurnWithNoBaselineIsRecorded(t *testing.T) {
 	// Assert
 	if !hasLevel(h.log.Records(), dlog.LevelInfo, "daemon.footer.context_baseline_taken") {
 		t.Fatalf("records = %+v, want INFO daemon.footer.context_baseline_taken", h.log.Records())
+	}
+}
+
+// spentRecorder records every turn spend the footer tells.
+type spentRecorder struct {
+	mu   sync.Mutex
+	told []TurnSpent
+}
+
+func (r *spentRecorder) record(ws ids.WorkspaceID, spent TurnSpent) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ws != testWS {
+		panic("footer: a turn spend told for " + string(ws))
+	}
+	r.told = append(r.told, spent)
+}
+
+func TestAMainTurnsEndTellsWhatEveryAgentOfTheTurnSpent(t *testing.T) {
+	// Arrange: the main agent and an in-turn subagent each spend.
+	spent := &spentRecorder{}
+	h := newHarness(t, WithTurnSpent(spent.record))
+	connected(h)
+	turn := testTurnID
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", usage(90_000, 18_000, 200, 500, 100)))
+	h.r.OnActivity(testWS, mainAgent, subagentStart("spawn-1", detachedAgent.GetValue(), "Explore", ""))
+	h.r.OnActivity(testWS, detachedAgent, responseFrame("sub-1", "success", usage(1_000, 0, 300, 40, 0)))
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	want := []TurnSpent{{Turn: turn, StartedAt: instant, FreshInput: 18_500, CacheRead: 91_000, Output: 540}}
+	if !slices.Equal(spent.told, want) {
+		t.Fatalf("told %+v, want %+v", spent.told, want)
+	}
+}
+
+func TestOnlyAMainTurnsEndTellsWhatItSpent(t *testing.T) {
+	// Arrange
+	spent := &spentRecorder{}
+	h := newHarness(t, WithTurnSpent(spent.record))
+	connected(h)
+	h.r.SetTurn(testWS, &TurnStarted{At: instant})
+	h.r.OnActivity(testWS, mainAgent, responseFrame("unit-1", "success", usage(0, 100, 0, 0, 0)))
+
+	// Act: a subagent's terminal carries no turn.
+	h.r.OnAgentTerminal(testWS, detachedAgent, nil, completed(), nil)
+
+	// Assert
+	if len(spent.told) != 0 {
+		t.Fatalf("told %+v, want nothing before the main turn ends", spent.told)
+	}
+}
+
+func TestATurnWhoseStartWasNotSeenIsToldWithNoStart(t *testing.T) {
+	// Arrange: the turn began under an earlier daemon.
+	spent := &spentRecorder{}
+	h := newHarness(t, WithTurnSpent(spent.record))
+	connected(h)
+	turn := testTurnID
+
+	// Act
+	h.r.OnAgentTerminal(testWS, mainAgent, &turn, completed(), nil)
+
+	// Assert
+	if len(spent.told) != 1 || !spent.told[0].StartedAt.IsZero() || spent.told[0].Turn != turn {
+		t.Fatalf("told %+v, want the turn told once with no start", spent.told)
 	}
 }

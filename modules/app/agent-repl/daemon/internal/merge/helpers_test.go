@@ -112,6 +112,11 @@ type fakeDB struct {
 	mediatorRecordErr error
 	mediationErr      error
 	dispatchErr       error
+	// mediatorRepoErr fails MediatorRepoOf.
+	mediatorRepoErr error
+	// onRelease, when set, runs before each check's release, as a newer
+	// deploy racing it does.
+	onRelease func()
 	// windowErr fails RecordMediationWindow when set.
 	windowErr            error
 	remediationFinishErr error
@@ -393,6 +398,12 @@ func (f *fakeDB) EscalateMediation(ctx context.Context, repo wsm.RepoKey, owed t
 }
 
 func (f *fakeDB) ReleaseMediation(ctx context.Context, repo wsm.RepoKey, owed time.Time) (bool, error) {
+	f.mu.Lock()
+	hook := f.onRelease
+	f.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return f.checks.ReleaseMediation(ctx, repo, owed)
 }
 
@@ -411,6 +422,12 @@ func (f *fakeDB) DeployMediatorOf(ctx context.Context, repo wsm.RepoKey) (wsm.De
 }
 
 func (f *fakeDB) MediatorRepoOf(ctx context.Context, ws ids.WorkspaceID) (wsm.RepoKey, bool, error) {
+	f.mu.Lock()
+	err := f.mediatorRepoErr
+	f.mu.Unlock()
+	if err != nil {
+		return "", false, err
+	}
 	return f.checks.MediatorRepoOf(ctx, ws)
 }
 
@@ -4591,6 +4608,9 @@ type fakeMeter struct {
 	// headTook their durations.
 	heads    []string
 	headTook []time.Duration
+	// compactionTook is each recorded mediator compaction's duration, in
+	// order.
+	compactionTook []time.Duration
 }
 
 func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
@@ -4666,6 +4686,25 @@ func (f *fakeMeter) CountQueueChange(change, cause string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, "change:"+change+":"+cause)
+}
+
+func (f *fakeMeter) ObserveMediatorTurnTokens(phase, kind string, tokens uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, fmt.Sprintf("mediator_tokens:%s:%s:%d", phase, kind, tokens))
+}
+
+func (f *fakeMeter) ObserveMediatorCompaction(outcome string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "mediator_compaction:"+outcome)
+	f.compactionTook = append(f.compactionTook, took)
+}
+
+func (f *fakeMeter) CountMediatorRun(outcome string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.got = append(f.got, "mediator_run:"+outcome)
 }
 
 // timed answers every duration the orchestrator recorded, in order: all of

@@ -501,6 +501,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// status edge. The roster is built after the footer (it takes the footer
 	// as its status source), so the edge rides a forwarder bound once it is.
 	statusChanged := &statusChangedForwarder{log: log}
+	// A DEPLOY'S EDGES REACH THE DEPLOY MEDIATION: its start owes a
+	// mediation, and its end (here or in a successor) runs the rounds. Every
+	// main turn's spend reaches it too, which meters the mediator's turns.
+	mediation := &mediationHook{ctx: ctx, now: time.Now, log: log}
 	// THE LID-CLOSED QUIET STATE STOPS EVERY VIEW NOBODY CAN SEE (viewquiet):
 	// one gate, moved by the persistent-wifi controller, followed by the four
 	// view resolvers.
@@ -511,6 +515,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		footer.WithStatusChanged(statusChanged.StatusChanged),
 		footer.WithAccountUsages(usages),
 		footer.WithAccountUsageSink(accountUsageSink(p.DB)),
+		footer.WithTurnSpent(mediation.turnSpent),
 	}
 	if p.Opts.footerMomentaryDwell > 0 {
 		footerOpts = append(footerOpts, footer.WithMomentaryDwell(p.Opts.footerMomentaryDwell))
@@ -520,9 +525,6 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the footer resolver: %w", err)
 	}
-	// A DEPLOY'S EDGES REACH THE DEPLOY MEDIATION: its start owes a
-	// mediation, and its end (here or in a successor) runs the rounds.
-	mediation := &mediationHook{ctx: ctx, now: time.Now, log: log}
 	deployEdges := deployprogress.NewEdges(footerResolver, mediation.began, mediation.ended)
 	// THE DAEMON'S WORKSPACE WARNINGS AND ERRORS REACH THE STRIP through ONE
 	// tee at dlog's workspace-logger emit point, never a hook beside a call

@@ -118,6 +118,10 @@ type orchestrator struct {
 	// way stands at (remediationsurface.go): the finish's share of what the
 	// surfaces draw, so a mediator whose finish runs is drawn at that work.
 	finishing map[ids.WorkspaceID]finishSurface
+	// runEnds is the end of each queue's last deploy mediator run in this
+	// process, by its canonical key (mediatormetrics.go): the phase the turn
+	// that ended it is metered in.
+	runEnds map[string]runEnd
 	// running is the run HOLDING each repository's slot: the HEAD, the one
 	// merge that may move the target. A second admission for one repository
 	// is impossible in this process as well as across processes (the

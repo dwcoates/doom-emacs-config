@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -83,6 +84,21 @@ func (h *mediationHook) turnEnded(ws ids.WorkspaceID) {
 		return
 	}
 	inflight.Go(func() { o.FixerTurnEnded(h.ctx, ws) })
+}
+
+// turnSpent meters, off the caller's goroutine, what WS's turn that just
+// ended spent when WS is a deploy mediator
+// (merge.Orchestrator.MediatorTurnSpent). A turn that ends before the merge
+// queue is built goes unmetered, which is recorded.
+func (h *mediationHook) turnSpent(ws ids.WorkspaceID, spent footer.TurnSpent) {
+	h.mu.RLock()
+	o := h.o
+	h.mu.RUnlock()
+	if o == nil {
+		h.log.Info(opMediationHook, "a turn ended before the merge queue was built; its spend is not metered", dlog.Context{"workspace": string(ws), "turn": string(spent.Turn)})
+		return
+	}
+	inflight.Go(func() { o.MediatorTurnSpent(h.ctx, ws, spent) })
 }
 
 // ended runs the rounds of every mediation owed, off the caller's goroutine.

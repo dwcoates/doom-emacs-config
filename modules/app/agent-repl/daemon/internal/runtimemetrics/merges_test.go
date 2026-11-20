@@ -66,6 +66,14 @@ func TestMergeQueueSeriesAreServed(t *testing.T) {
 				`agentrepl_workspace_notice_bytes_bucket{notice="workspace-sibling-notice",le="64"} 0`}},
 		{name: "a notice suppressed", observe: func(s *Surface) { s.CountSuppressedNotice("workspace-sibling-notice") },
 			want: []string{`agentrepl_workspace_notices_suppressed_total{notice="workspace-sibling-notice"} 1`}},
+		{name: "a deploy mediator's turn tokens", observe: func(s *Surface) { s.ObserveMediatorTurnTokens("assessing", "output", 3000) },
+			want: []string{`agentrepl_deploy_mediator_turn_tokens_bucket{kind="output",phase="assessing",le="4000"} 1`,
+				`agentrepl_deploy_mediator_turn_tokens_bucket{kind="output",phase="assessing",le="2000"} 0`}},
+		{name: "a deploy mediator's compaction", observe: func(s *Surface) { s.ObserveMediatorCompaction("compacted", 40*time.Second) },
+			want: []string{`agentrepl_deploy_mediator_compaction_seconds_bucket{outcome="compacted",le="60"} 1`,
+				`agentrepl_deploy_mediator_compaction_seconds_bucket{outcome="compacted",le="30"} 0`}},
+		{name: "a deploy mediator's run", observe: func(s *Surface) { s.CountMediatorRun("finished_remediation") },
+			want: []string{`agentrepl_deploy_mediator_runs_total{outcome="finished_remediation"} 1`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

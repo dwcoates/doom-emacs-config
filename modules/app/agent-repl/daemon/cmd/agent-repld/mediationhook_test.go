@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/merge"
+	"agent-repld/internal/resolve/footer"
 	"agent-repld/internal/wsm"
 )
 
@@ -243,5 +244,47 @@ func TestATurnsEndBeforeTheBindingIsNoError(t *testing.T) {
 	// Assert: the queue's first pass reads every turn's close.
 	if records := log.Records(); len(records) != 0 {
 		t.Fatalf("records = %+v, want none", records)
+	}
+}
+
+// spentTurns is a mediationOrchestrator that records the turn spends it is
+// told.
+type spentTurns struct {
+	mediationOrchestrator
+	spent chan footer.TurnSpent
+}
+
+func (o *spentTurns) MediatorTurnSpent(_ context.Context, _ ids.WorkspaceID, spent footer.TurnSpent) {
+	o.spent <- spent
+}
+
+func TestATurnsSpendReachesTheBoundOrchestrator(t *testing.T) {
+	// Arrange
+	o := &spentTurns{spent: make(chan footer.TurnSpent, 1)}
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: dlog.NewTestLogger()}
+	h.bind(o)
+	want := footer.TurnSpent{Turn: "turn-1", FreshInput: 10, CacheRead: 20, Output: 30}
+
+	// Act
+	h.turnSpent("ws-fixer", want)
+
+	// Assert
+	if got := <-o.spent; got != want {
+		t.Fatalf("told %+v, want %+v", got, want)
+	}
+}
+
+func TestATurnsSpendBeforeTheBindingIsRecordedUnmetered(t *testing.T) {
+	// Arrange
+	log := dlog.NewTestLogger()
+	h := &mediationHook{ctx: context.Background(), now: time.Now, log: log}
+
+	// Act
+	h.turnSpent("ws-fixer", footer.TurnSpent{Turn: "turn-1"})
+
+	// Assert
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: opMediationHook,
+		Message: "a turn ended before the merge queue was built; its spend is not metered"}); !ok {
+		t.Fatalf("records = %+v, want the unmetered turn recorded", log.Records())
 	}
 }

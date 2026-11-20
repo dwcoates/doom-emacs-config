@@ -546,6 +546,7 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 		return finishMoved(err, moved, f, wsm.RemediationDeploying)
 	}
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateLanded, f.GateRounds)
+	o.endMediatorRun(f.Repo, finishPhase(f), finishRunEnd(f))
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation landed directly on the main branch; it deploys", withField(withField(fields, "head", after), "paths", len(paths)))
 	f.Step, f.StepAt = wsm.RemediationDeploying, o.deps.Now()
 	o.republishMediation(ctx, f.Repo)

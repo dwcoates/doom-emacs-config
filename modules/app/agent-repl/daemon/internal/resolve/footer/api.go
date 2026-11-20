@@ -589,6 +589,31 @@ type options struct {
 	// workspaceDir resolves a workspace the footer was never bound to
 	// (WithWorkspaceDir); nil resolves none.
 	workspaceDir func(ws ids.WorkspaceID) (string, error)
+	// turnSpent is told what each main turn spent at its end
+	// (WithTurnSpent); nil tells no one.
+	turnSpent func(ws ids.WorkspaceID, spent TurnSpent)
+}
+
+// TurnSpent is what one main turn of a workspace spent, as the footer's token
+// accounting tallied it at the turn's terminal: every agent the turn ran,
+// subagents included.
+type TurnSpent struct {
+	// Turn is the turn that ended.
+	Turn ids.TurnID
+	// StartedAt is when the turn was accepted; zero when the footer never
+	// saw it start (it began under an earlier daemon).
+	StartedAt time.Time
+	// FreshInput is the input the prompt cache did not serve, cache writes
+	// included; CacheRead the input it served; Output every generated
+	// token, thinking included.
+	FreshInput, CacheRead, Output uint64
+}
+
+// WithTurnSpent sets who is told, off the resolver's lock, what each main
+// turn spent once its terminal settles the turn's token accounting. The
+// deploy mediator's metrics are (merge.Orchestrator.MediatorTurnSpent).
+func WithTurnSpent(fn func(ws ids.WorkspaceID, spent TurnSpent)) Option {
+	return func(o *options) { o.turnSpent = fn }
 }
 
 // WithWorkspaceDir sets how the footer resolves the directory of a workspace
