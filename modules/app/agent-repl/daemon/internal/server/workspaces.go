@@ -1359,6 +1359,43 @@ func (s *server) MarkWorkspaceViewed(
 	return connect.NewResponse(resp), nil
 }
 
+// ReportViewDwell records that the editor started, or stopped, counting the
+// user's dwell on this workspace, so the roster recedes the row's name over
+// the dwell rather than at its end. It is the editor's verb, like
+// MarkWorkspaceViewed: dwell is an editor fact.
+func (s *server) ReportViewDwell(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportViewDwellRequest],
+) (*connect.Response[agentreplv1.ReportViewDwellResponse], error) {
+	const rpc = "ReportViewDwell"
+	if err := validateReportViewDwellRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.ReportViewDwellResponse{}
+	subject, cerr, done := s.subjectFor(ctx, rpc, req.Msg.GetWorkspace(), resp)
+	if done {
+		return answer(resp, cerr)
+	}
+	var err error
+	switch dwell := req.Msg.GetDwell().(type) {
+	case *agentreplv1.ReportViewDwellRequest_Counting:
+		err = s.deps.Verbs.StartViewDwell(ctx, subject.Record.ID, time.Duration(dwell.Counting.GetLengthMs())*time.Millisecond)
+	case *agentreplv1.ReportViewDwellRequest_Stopped:
+		err = s.deps.Verbs.StopViewDwell(ctx, subject.Record.ID)
+	default:
+		// validateReportViewDwellRequest refused an unset arm, and this build
+		// knows every arm the request declares.
+		panic(fmt.Sprintf("ReportViewDwell: unhandled dwell arm %T", dwell))
+	}
+	if err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	resp.Result = &agentreplv1.ReportViewDwellResponse_Success{
+		Success: &agentreplv1.ReportViewDwellSuccess{},
+	}
+	return connect.NewResponse(resp), nil
+}
+
 // SetWorkspacePriority sets or clears the roster's ordering priority. An unset
 // priority is the CLEAR spelling.
 func (s *server) SetWorkspacePriority(

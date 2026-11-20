@@ -1083,6 +1083,133 @@ func TestRowCarriesNoViewedMarkerUntilTheEditorReportsOne(t *testing.T) {
 	}
 }
 
+// dwellDone arranges the view-dwell cases: theWS finished a turn whose result
+// is unread, beside a second workspace the selection can move to.
+func dwellDone(t *testing.T) sidebarResolver {
+	t.Helper()
+	r := live(t, arrange(t, workspace(string(theWS), "one"), workspace("w2", "two")))
+	r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+	r.SetTurnEnded(theWS, wsm.CloseCompleted)
+	if got := statusName(rowFor(rosterwalk.AllRows(latest(t, r)), string(theWS))); got != "done" {
+		t.Fatalf("status = %q, want done — the arrangement did not finish the turn", got)
+	}
+	return r
+}
+
+func TestRowCarriesTheViewDwellOnlyWhileItWillRecedeTheName(t *testing.T) {
+	const length = 5 * time.Second
+	cases := []struct {
+		name string
+		act  func(r sidebarResolver)
+		want *frontendv1.RosterRowViewDwell
+	}{
+		{
+			name: "a dwell on the selected unread done row is drawn from the roster's clock",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetViewDwell(theWS, length)
+			},
+			want: &frontendv1.RosterRowViewDwell{StartedAtMs: epoch.UnixMilli(), LengthMs: length.Milliseconds()},
+		},
+		{
+			name: "a dwell reported before the selection lands is drawn once it does",
+			act: func(r sidebarResolver) {
+				r.SetViewDwell(theWS, length)
+				r.SetSelected(theWS)
+			},
+			want: &frontendv1.RosterRowViewDwell{StartedAtMs: epoch.UnixMilli(), LengthMs: length.Milliseconds()},
+		},
+		{
+			name: "a dwell on a row that is not selected is not drawn",
+			act: func(r sidebarResolver) {
+				r.SetSelected("w2")
+				r.SetViewDwell(theWS, length)
+			},
+		},
+		{
+			name: "the viewed report ends the dwell",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetViewDwell(theWS, length)
+				r.SetViewed(theWS)
+			},
+		},
+		{
+			name: "a stop ends the dwell",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetViewDwell(theWS, length)
+				r.StopViewDwell(theWS)
+			},
+		},
+		{
+			name: "the selection leaving the row ends the dwell for good",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetViewDwell(theWS, length)
+				r.SetSelected("w2")
+				r.SetSelected(theWS)
+			},
+		},
+		{
+			name: "a status change ends the dwell",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetViewDwell(theWS, length)
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetTurnEnded(theWS, wsm.CloseCompleted)
+			},
+		},
+		{
+			name: "a dwell on a row that is not on a turn-end arm is not drawn",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetTurn(theWS, &footer.TurnStarted{At: epoch, Act: footer.ActPrompt})
+				r.SetViewDwell(theWS, length)
+			},
+		},
+		{
+			name: "a later dwell replaces the standing one",
+			act: func(r sidebarResolver) {
+				r.SetSelected(theWS)
+				r.SetViewDwell(theWS, length)
+				r.SetViewDwell(theWS, time.Second)
+			},
+			want: &frontendv1.RosterRowViewDwell{StartedAtMs: epoch.UnixMilli(), LengthMs: time.Second.Milliseconds()},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			r := dwellDone(t)
+
+			// Act.
+			tc.act(r)
+
+			// Assert.
+			got := rowFor(rosterwalk.AllRows(latest(t, r)), string(theWS)).GetViewDwell()
+			if (got == nil) != (tc.want == nil) || (got != nil && (got.GetStartedAtMs() != tc.want.GetStartedAtMs() || got.GetLengthMs() != tc.want.GetLengthMs())) {
+				t.Fatalf("view_dwell = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAStoppedDwellOnARowWithoutOneChangesNothing(t *testing.T) {
+	// Arrange.
+	r := dwellDone(t)
+	r.SetSelected(theWS)
+	before := r.Revision()
+
+	// Act.
+	r.StopViewDwell(theWS)
+
+	// Assert: nothing changed, so nothing was published.
+	if got := r.Revision(); got != before {
+		t.Fatalf("revision = %d, want %d: a stop with no dwell must publish nothing", got, before)
+	}
+}
+
 func TestViewedReportDrawsADoneRowPartial(t *testing.T) {
 	// Arrange.
 	r := finished(t, arrange(t))

@@ -18,6 +18,25 @@
  */
 import { log } from "./log.js";
 
+/**
+ * Place a ONE-SHOT animation on ELEMENT: its length LENGTH-MS in
+ * LENGTH-PROPERTY, and minus ELAPSED-MS, the time it has already run, in
+ * DELAY-PROPERTY, both custom properties the element's stylesheet rule reads.
+ * A fresh element starts its animation at its draw, so the negative delay
+ * lands it where the clock says it has got to, and every redraw rejoins it
+ * there. The delay is whole milliseconds, and none run reads `0ms`.
+ */
+export function placeOneShot(
+  element: HTMLElement,
+  lengthProperty: string,
+  lengthMs: number,
+  delayProperty: string,
+  elapsedMs: number,
+): void {
+  element.style.setProperty(lengthProperty, `${lengthMs}ms`);
+  element.style.setProperty(delayProperty, `${-Math.round(elapsedMs)}ms`);
+}
+
 /** Where on an element an animation runs. */
 export type AnimationPart = "" | "::before" | "::after";
 

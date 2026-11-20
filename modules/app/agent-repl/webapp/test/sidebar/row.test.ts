@@ -2481,6 +2481,40 @@ describe("the row's display mode", () => {
     expect(name.classList.contains("viewed")).toBe(false);
   });
 
+  it("recedes the NAME over the view dwell from where the dwell has got to", () => {
+    // Arrange: two of five seconds already dwelt.
+    const viewDwell = { startedAtMs: BigInt(NOW - 2_000), lengthMs: 5_000n };
+
+    // Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} }, viewDwell }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+    expect([
+      name.classList.contains("viewing"),
+      name.style.getPropertyValue("--name-view-dwell"),
+      name.style.getPropertyValue("--name-view-dwell-delay"),
+      name.querySelectorAll(":scope > .name-ink").length,
+    ]).toEqual([true, "5000ms", "-2000ms", 1]);
+  });
+
+  it("draws no view dwell on a row that carries none", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", status: { case: "done", value: {} } }), sidebarContext(), "R");
+
+    // Assert.
+    const name = drawn.querySelector<HTMLElement>(":scope > .row > .name")!;
+    expect([name.classList.contains("viewing"), name.querySelectorAll(":scope > .name-ink").length]).toEqual([false, 0]);
+  });
+
+  it("refuses a view dwell on a row already viewed", () => {
+    // Arrange.
+    const bad = row({ id: "ws-1", status: { case: "done", value: {} }, viewed: true, viewDwell: { startedAtMs: BigInt(NOW), lengthMs: 5_000n } });
+
+    // Act, Assert.
+    expect(() => drawRosterRow(bad, sidebarContext(), "R")).toThrow(MalformedView);
+  });
+
   it("marks the whole row PARTIAL for the hook contract", () => {
     // Arrange, Act.
     const drawn = drawRosterRow(row({ id: "ws-1", viewed: true }), sidebarContext(), "R");

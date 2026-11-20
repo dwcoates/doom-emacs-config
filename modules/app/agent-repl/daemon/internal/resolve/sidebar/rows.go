@@ -90,6 +90,10 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	wasViewed := s.lastArmSeen && s.viewedOn(s.lastArm)
 	previousArm, armChanged := s.noteArm(armName)
 	if armChanged {
+		// A STATUS CHANGE ENDS THE DWELL: the row's name returns to its
+		// unviewed colour, and an editor still viewing the workspace counts a
+		// fresh dwell against the new status.
+		s.dwell = nil
 		r.logArmChange(rec.ID, armName, previousArm, rc.causeOf(rec.ID))
 		r.noteStatusChange(rec.ID, s, !mirrored)
 		if departureArm(armName) {
@@ -161,6 +165,9 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if viewed {
 		out.Viewed = &frontendv1.RosterRowViewed{}
 	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowViewDwell` states it:
+	// set while the editor's dwell will recede the selected row's name.
+	out.ViewDwell = s.viewDwellOn(armName, current)
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowIdleAsyncUnread` states
 	// it: set while the row is idle_async over an unread turn end, resolved from
 	// the same read fact as the viewed marker above.

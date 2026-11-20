@@ -2055,6 +2055,8 @@ describe("the reviving shimmer's stylesheet contract", () => {
     "#ws-sidebar .row .name.reviving > .name-ink::before",
     "#ws-sidebar .row .name.breathes.reviving > .name-ink::before",
     "#ws-sidebar .row .name.breathes.reviving > .name-ink::after",
+    "#ws-sidebar .row .name.viewing.reviving > .name-ink::before",
+    "#ws-sidebar .row .name.viewing.reviving > .name-ink::after",
   ])("moves %s back on the band's own timing", (selector) => {
     // Arrange / Act
     const decls = rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))?.declarations ?? "";
@@ -2074,7 +2076,7 @@ describe("the reviving shimmer's stylesheet contract", () => {
     const inside = mediaBodies("prefers-reduced-motion: no-preference").reduce((n, body) => n + shimmer(body), 0);
 
     // Assert
-    expect([shimmer(stylesheet), inside]).toEqual([inside, 5]);
+    expect([shimmer(stylesheet), inside]).toEqual([inside, 7]);
   });
 
   it("leaves nothing of the shimmer to undo under prefers-reduced-motion: reduce", () => {
@@ -5240,6 +5242,48 @@ describe("the rail's search toggle", () => {
       "#ws-sidebar .sb-search-btn.active",
     ]);
     expect(rule?.declarations).toMatch(/opacity:\s*1\b/);
+  });
+});
+
+describe("the view dwell's crossfade", () => {
+  it.each([
+    ["the grey copy fades in", "#ws-sidebar .row .name.viewing > .name-ink::after", "name-view-dwell-in"],
+    ["the name's own copy fades out", "#ws-sidebar .row .name.viewing > .name-ink::before", "name-view-dwell-out"],
+    ["a reviving name's grey copy fades in", "#ws-sidebar .row .name.viewing.reviving > .name-ink::after", "name-view-dwell-in"],
+    ["a reviving name's own copy fades out", "#ws-sidebar .row .name.viewing.reviving > .name-ink::before", "name-view-dwell-out"],
+  ])("%s once over the dwell, holding its last frame", (_copy, selector, keyframes) => {
+    // Arrange / Act
+    const decls = rulesOf(stylesheet).find((rule) => isOwnRule(rule, selector))?.declarations ?? "";
+
+    // Assert
+    expect(decls).toContain(`${keyframes} var(--name-view-dwell) linear var(--name-view-dwell-delay, 0s) 1 both`);
+  });
+
+  it("draws the grey copy in the viewed grey, added to the name's own copy", () => {
+    // Arrange / Act
+    const decls = ownDeclarationsOf("#ws-sidebar .row .name.viewing > .name-ink::after") ?? "";
+
+    // Assert
+    expect([/display:\s*block/.test(decls), /color:\s*var\(--muted\)/.test(decls), /mix-blend-mode:\s*plus-lighter/.test(decls)]).toEqual([true, true, true]);
+  });
+
+  it("hides a receding name's own text while its copies draw it", () => {
+    // Arrange / Act
+    const rule = rulesOf(stylesheet).find((r) => r.selectors.includes("#ws-sidebar .row .name.viewing"))?.declarations ?? "";
+
+    // Assert
+    expect([/-webkit-text-fill-color:\s*transparent/.test(rule), /text-decoration-color:\s*transparent/.test(rule)]).toEqual([true, true]);
+  });
+
+  it.each([
+    ["name-view-dwell-in", "0", "1"],
+    ["name-view-dwell-out", "1", "0"],
+  ])("runs %s from opacity %s to %s", (name, from, to) => {
+    // Arrange / Act
+    const body = keyframesOf(name);
+
+    // Assert
+    expect([new RegExp(`from\\s*\\{\\s*opacity:\\s*${from};`).test(body), new RegExp(`to\\s*\\{\\s*opacity:\\s*${to};`).test(body)]).toEqual([true, true]);
   });
 });
 

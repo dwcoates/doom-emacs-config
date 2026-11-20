@@ -568,6 +568,14 @@ type Verbs interface {
 	// touches no durable record — the mode is a view fact, not a workspace
 	// fact.
 	MarkViewed(ctx context.Context, ws ids.WorkspaceID) error
+	// StartViewDwell records that the editor started counting a dwell of
+	// LENGTH on this workspace, so the roster recedes its row's name over the
+	// dwell (frontend.v1.RosterRowViewDwell). LENGTH is positive; the server
+	// refuses any other before calling. Touches no durable record.
+	StartViewDwell(ctx context.Context, ws ids.WorkspaceID, length time.Duration) error
+	// StopViewDwell records that the editor stopped counting this
+	// workspace's dwell before it completed. Idempotent.
+	StopViewDwell(ctx context.Context, ws ids.WorkspaceID) error
 	// SetPriority sets or clears the roster priority badge.
 	SetPriority(ctx context.Context, ws ids.WorkspaceID, p *wsm.Priority) error
 	// SetLink stores a link under its label and ownership, or relabels a

@@ -454,6 +454,8 @@ type fakeVerbs struct {
 	// verb, so the handler's own resolution is what a test asserts.
 	markViewed    []ids.WorkspaceID
 	markViewedErr error
+	viewDwells    []viewDwellCall
+	viewDwellErr  error
 	// hiddenSets records every SetWorkspaceHidden the verb received;
 	// setHiddenErr is what it answers.
 	hiddenSets   []hiddenSet
@@ -940,6 +942,24 @@ func (f *fakeVerbs) UpdateTask(_ context.Context, _ ids.TaskID, change wsm.TaskC
 func (f *fakeVerbs) MarkViewed(_ context.Context, ws ids.WorkspaceID) error {
 	f.markViewed = append(f.markViewed, ws)
 	return f.markViewedErr
+}
+
+func (f *fakeVerbs) StartViewDwell(_ context.Context, ws ids.WorkspaceID, length time.Duration) error {
+	f.viewDwells = append(f.viewDwells, viewDwellCall{ws: ws, length: length})
+	return f.viewDwellErr
+}
+
+func (f *fakeVerbs) StopViewDwell(_ context.Context, ws ids.WorkspaceID) error {
+	f.viewDwells = append(f.viewDwells, viewDwellCall{ws: ws, stopped: true})
+	return f.viewDwellErr
+}
+
+// viewDwellCall is one dwell report the fake verbs took: a start of LENGTH, or
+// a stop.
+type viewDwellCall struct {
+	ws      ids.WorkspaceID
+	length  time.Duration
+	stopped bool
 }
 
 // agentAPI is what the fake verbs answer, and record, for the agent API's

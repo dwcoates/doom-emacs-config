@@ -1,0 +1,108 @@
+// endpoint_report_view_dwell.proto — ReportViewDwell: the editor has started,
+// or stopped, counting how long the user has viewed this workspace. HOST
+// section.
+//
+// Emacs is the only sender, because dwell is an editor fact: it is the only
+// process that knows the workspace's panels are on screen and how long the
+// user has stood in front of them, and it alone chooses the dwell's length.
+// MarkWorkspaceViewed is the dwell's VERDICT, sent once the count completes;
+// this verb is the count's PROGRESS, so the webapp sidebar can carry the row's
+// name continuously from its unviewed colour to the viewed grey over exactly
+// the dwell (frontend.v1.RosterRowViewDwell) instead of flipping when the
+// verdict lands.
+//
+// ONE REPORT IN FLIGHT PER WORKSPACE. Two reports for one workspace sent
+// concurrently could be served out of order, and a stop served after the
+// count that followed it would end a dwell that is still running. So the
+// editor sends a workspace's next report only once the previous one is
+// answered, and sends its latest state then: the daemon serves a
+// workspace's reports in the order the editor decided them.
+//
+// IDEMPOTENT: a counting report replaces the workspace's standing dwell, and a
+// stopped report for a workspace with no dwell is a success that changes
+// nothing.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message ReportViewDwellRequest {
+  // The workspace whose dwell this reports.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // What the editor's dwell on the workspace now is. The set arm IS the
+  // report; an unset oneof is a malformed request (Connect InvalidArgument).
+  oneof dwell {
+    // The editor has just started counting a dwell on the workspace.
+    ReportViewDwellCounting counting = 2;
+    // The editor has stopped counting the workspace's dwell before it
+    // completed: the user left the workspace or closed its panels, or the
+    // count no longer applies.
+    ReportViewDwellStopped stopped = 3;
+  }
+}
+
+// The editor started counting a dwell, as of the moment the daemon receives
+// this report: the daemon stamps the dwell's start on its own clock, the clock
+// every roster row's instants are on, so the editor sends no instant of its
+// own. A dwell that completes is reported by MarkWorkspaceViewed, which ends
+// it; one that does not is reported stopped.
+message ReportViewDwellCounting {
+  // How long the user must keep viewing the workspace before the editor
+  // reports it viewed, in milliseconds. Always positive: the editor's own
+  // threshold for this dwell, which this contract does not fix.
+  int64 length_ms = 1;
+}
+
+// The editor stopped counting the workspace's dwell without reporting it
+// viewed. The row's name returns to its unviewed colour at once.
+message ReportViewDwellStopped {}
+
+// THE ARM IS THE OUTCOME.
+message ReportViewDwellResponse {
+  oneof result {
+    ReportViewDwellSuccess success = 1;
+    ReportViewDwellError error = 2;
+  }
+}
+// Recorded; the roster stream carries the row's dwell marker whenever the
+// dwell will recede the row's name.
+message ReportViewDwellSuccess {}
+// Arms derived from the daemon's refusal sites, exactly MarkWorkspaceViewed's:
+// this verb resolves the same subject through the same guard.
+// Validation failures (unset field, blank string) are Connect InvalidArgument, never an arm.
+message ReportViewDwellError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    ReportViewDwellUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    ReportViewDwellWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    ReportViewDwellTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    ReportViewDwellNotYetAdopted not_yet_adopted = 4;
+  }
+}
+// The workspace id is not in the daemon's registry.
+message ReportViewDwellUnknownWorkspace {}
+// The echoed dir disagrees with the registry's dir for this id.
+message ReportViewDwellWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+// This daemon released the workspace to a successor.
+message ReportViewDwellTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+// A joining daemon has not finished adopting this workspace yet.
+message ReportViewDwellNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it: the handover's incumbent. UNSET when no live
+  // daemon serves the workspace (a takeover after the incumbent died), in
+  // which case the client waits for the adoption.
+  optional string address = 1;
+}

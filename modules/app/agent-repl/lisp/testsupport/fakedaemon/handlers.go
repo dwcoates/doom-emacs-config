@@ -349,6 +349,10 @@ func (s *fakeServer) MarkWorkspaceViewed(ctx context.Context, req *connect.Reque
 	return handleUnary[v1.MarkWorkspaceViewedRequest, v1.MarkWorkspaceViewedResponse](ctx, s, "MarkWorkspaceViewed", req.Msg)
 }
 
+func (s *fakeServer) ReportViewDwell(ctx context.Context, req *connect.Request[v1.ReportViewDwellRequest]) (*connect.Response[v1.ReportViewDwellResponse], error) {
+	return handleUnary[v1.ReportViewDwellRequest, v1.ReportViewDwellResponse](ctx, s, "ReportViewDwell", req.Msg)
+}
+
 func (s *fakeServer) ReportEditorFocus(ctx context.Context, req *connect.Request[v1.ReportEditorFocusRequest]) (*connect.Response[v1.ReportEditorFocusResponse], error) {
 	return handleUnary[v1.ReportEditorFocusRequest, v1.ReportEditorFocusResponse](ctx, s, "ReportEditorFocus", req.Msg)
 }

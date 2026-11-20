@@ -119,6 +119,11 @@ type wsState struct {
 	// resolver knows: what it seeded from, or last reported through the result
 	// sink. A render whose result differs reports it (resolver.row).
 	persisted *wsm.TurnResult
+	// dwell is the editor's view dwell counting on this workspace, nil when
+	// none is (SetViewDwell). It is drawn only while it will recede the
+	// row's name (viewDwellOn), and ended by a viewed report, a stop, the
+	// selection leaving the workspace or a status change.
+	dwell *viewDwell
 	// reviving reports a revival of this workspace's parked session in
 	// flight (SetReviving). It is a marker beside the status, never an arm:
 	// it neither changes the arm nor clears the viewed marker.
@@ -347,6 +352,29 @@ func (s *wsState) noteArm(arm string) (string, bool) {
 	s.lastArm = arm
 	s.lastArmSeen = true
 	return previous, changed
+}
+
+// viewDwell is one dwell the editor is counting: when the roster took the
+// report, and how long the editor counts.
+type viewDwell struct {
+	startedAt time.Time
+	length    time.Duration
+}
+
+// viewDwellOn answers the row's view-dwell marker on arm, nil when it draws
+// none. It is DERIVED like viewedOn: the marker stands exactly while a dwell
+// counts on the selected row and its completion would draw the row PARTIAL,
+// which is a turn-end arm with the result still unread. A dwell the viewed
+// marker would not follow is never drawn, so the name never fades toward a
+// grey it will not keep.
+func (s *wsState) viewDwellOn(arm string, selected bool) *frontendv1.RosterRowViewDwell {
+	if s.dwell == nil || !selected || !isTurnEndArm(arm) || s.result != resultUnread {
+		return nil
+	}
+	return &frontendv1.RosterRowViewDwell{
+		StartedAtMs: s.dwell.startedAt.UnixMilli(),
+		LengthMs:    s.dwell.length.Milliseconds(),
+	}
 }
 
 // viewedOn reports whether a row on arm draws the viewed (PARTIAL) marker. It
