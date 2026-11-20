@@ -48,7 +48,7 @@ func cacheLapse(at time.Time, gatedTokens uint64) *conversationv1.SessionUpdate 
 // no cadence to wait on, and the hide is recorded before its call answers.
 func hiddenAndHeld(t *testing.T) *fixture {
 	t.Helper()
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupHiddenKeepalives)
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	hide(t, f.d, f.ws)
 	return f
@@ -163,7 +163,7 @@ func TestTheKeepalivesAnswerMovesTheHiddenRowsCountdown(t *testing.T) {
 // before its call answers.
 func closedAndLastRound(t *testing.T) *fixture {
 	t.Helper()
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupHiddenKeepalives)
 	f.d.AwaitShimLoggedRequest(f.repo.Dir, harness.RPCStartSession, &shimv1.StartSessionRequest{})
 	if _, err := f.d.Client().CloseWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.CloseWorkspaceRequest{Requester: harness.User(), Workspace: f.ws})); err != nil {
 		t.Fatalf("CloseWorkspace = error %v", err)

@@ -3,6 +3,7 @@
 package integration
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -34,7 +35,18 @@ type retargetFamily struct {
 // newRetargetFamily creates a parent workspace and a child of it.
 func newRetargetFamily(t *testing.T, opts harness.Opts, repo *harness.Repo) *retargetFamily {
 	t.Helper()
-	d := newDaemon(t, opts)
+	// The default options share the canonical daemon; any other is a
+	// boot-time option, which starts its own.
+	var d *harness.Daemon
+	if reflect.ValueOf(opts).IsZero() {
+		d = canonicalView(t)
+	} else {
+		d = newDaemon(t, opts)
+	}
+	// A nil repo is minted here, after the daemon, in its git world.
+	if repo == nil {
+		repo = harness.NewRepo(t)
+	}
 	repository := createRepositoryRef(t, d, repo)
 	create := func(parent *workspacev1.WorkspaceRef) *workspacev1.WorkspaceRef {
 		req := &agentreplv1.CreateWorkspaceRequest{

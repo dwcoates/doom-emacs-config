@@ -702,9 +702,10 @@ func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 // merge lease that stays open for the assertions.
 func promptMergeFixture(t *testing.T) (*fixture, *harness.Repo, string) {
 	t.Helper()
+	// The view comes first: the repository is minted in its daemon's git world.
+	d := canonicalView(t)
 	selfRepo := harness.NewRepo(t)
 	selfRepo.DeploysAsAgentRepl()
-	d := harness.StartDaemon(t, harness.Opts{})
 	// The workspace is CREATED, never merely registered: a merge runs off the
 	// creation job's recorded geometry and a registered worktree has none, so
 	// a registered one is refused before any lease is ever taken.

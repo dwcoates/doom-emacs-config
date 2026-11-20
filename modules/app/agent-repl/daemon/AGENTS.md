@@ -260,7 +260,9 @@ mechanics (`integration/shareddaemon_test.go`).
   and `groupAccountUsage` (a rate-limit event moves the one account's usage,
   and a refusal blocks it), `groupSelection` (the selected workspace is one
   per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
-  catalog its login last served; no case of it starts a session). A new
+  catalog its login last served; no case of it starts a session) and
+  `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
+  the daemon). A new
   precondition is a new `daemonGroup`
   constant, never a daemon for one case.
 - **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is

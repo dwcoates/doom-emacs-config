@@ -103,6 +103,10 @@ const (
 	// served, and every case's workspace signs in as the daemon's one login.
 	// No case of the group starts a session.
 	groupUnservedCatalog daemonGroup = "a login that never served a model catalog"
+	// groupHiddenKeepalives is the daemon whose hidden workspaces a case
+	// keeps alive: SendHiddenKeepalives asks every hidden shim of the
+	// daemon, so one case's send reaches every other's.
+	groupHiddenKeepalives daemonGroup = "the hidden workspaces' keep-alives"
 )
 
 var (
