@@ -174,6 +174,7 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 		sp := spec(id, s.Name, dir, append(argv, items...), env...)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
+		sp.Profiler = run.NodeProfiler
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
@@ -245,6 +246,7 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		sp := spec(id, s.Name, dir, append(argv, items...), env...)
 		sp.Items = func([]byte) (map[string]float64, error) { return ParseVitestItems(itemsOut, dir, items) }
 		sp.Tests = func([]byte, bool) ([]testtimes.Test, error) { return testtimes.ParseVitest(s.Name, testsOut, dir) }
+		sp.Profiler = run.NodeProfiler
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }

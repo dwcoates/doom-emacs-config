@@ -56,6 +56,10 @@ type Args struct {
 	// DebugInfo links every test binary and program with its DWARF debug
 	// information (testrun.v1.TestRunRequest.debug_info).
 	DebugInfo bool
+	// Profile (--profile) profiles every unit that runs, into the profiles
+	// directory beside the run's log (testrun.v1.TestRunRequest.profile,
+	// internal/profile).
+	Profile bool
 }
 
 // ReuseMode is how the run treats pass records. A --record run measures and a
@@ -107,6 +111,8 @@ func ParseArgs(argv []string) (Args, error) {
 			a.EventsFD = fd
 		case arg == "--no-reuse":
 			a.NoReuse = true
+		case arg == "--profile":
+			a.Profile = true
 		case arg == "--module":
 			if i+1 >= len(argv) {
 				return Args{}, errors.New("--module needs a directory")
@@ -130,7 +136,7 @@ func ParseArgs(argv []string) (Args, error) {
 			}
 			a.Selected = append(a.Selected, sel...)
 		default:
-			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, --no-reuse, --suites <list>, --selection <path> or --events-fd <n>", arg)
+			return Args{}, fmt.Errorf("unknown argument '%s', expected --record, --record-out, --coverage, --no-reuse, --profile, --suites <list>, --selection <path> or --events-fd <n>", arg)
 		}
 	}
 	if a.Module == "" {
@@ -146,6 +152,9 @@ func ParseArgs(argv []string) (Args, error) {
 		// suite's unit time, so a coverage run's figures are not comparable
 		// with the canonical history's.
 		return Args{}, errors.New("--record and --coverage cannot be combined: coverage instrumentation changes the suite timings --record keeps")
+	}
+	if err := a.profileAlone(); err != nil {
+		return Args{}, err
 	}
 	if err := a.coverageOnlyNamed(); err != nil {
 		return Args{}, err
@@ -175,9 +184,14 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 		return Args{}, errors.New("record keeps the whole roster's timings: the request's one selection must be every_suite")
 	case req.GetRecord() && a.RecordOut == "":
 		return Args{}, errors.New("record needs --record-out: the path the run stages its timing rows at, for `testrun finish-record` to commit")
+	case req.GetProfile() && req.GetCoverage():
+		return Args{}, errProfileWithCoverage
+	case req.GetProfile() && req.GetRecord():
+		return Args{}, errProfileWithRecord
 	}
 	a.Remeasure = req.GetRemeasure()
 	a.DebugInfo = req.GetDebugInfo()
+	a.Profile = a.Profile || req.GetProfile()
 	a.NoReuse = a.NoReuse || req.GetNoReuse()
 	a.PlanOnly = req.GetPlanOnly()
 	if !whole {
@@ -186,10 +200,32 @@ func (a Args) WithRequest(req *testrunv1.TestRunRequest) (Args, error) {
 	a.Selection, a.Targeted = "", false
 	a.Selected = names
 	a.Coverage, a.Record = req.GetCoverage(), req.GetRecord()
+	if err := a.profileAlone(); err != nil {
+		return Args{}, err
+	}
 	if err := a.coverageOnlyNamed(); err != nil {
 		return Args{}, err
 	}
 	return a, nil
+}
+
+// errProfileWithCoverage refuses a profile of a coverage run: the profile
+// would measure the instrumentation.
+var errProfileWithCoverage = errors.New("profile and coverage cannot be combined: a profile of an instrumented run measures the instrumentation")
+
+// errProfileWithRecord refuses a profile of a recording run: the profiler's
+// overhead would land in the canonical timings.
+var errProfileWithRecord = errors.New("profile and record cannot be combined: the profiler's overhead would skew the timings record keeps")
+
+// profileAlone refuses --profile beside --coverage or --record.
+func (a Args) profileAlone() error {
+	switch {
+	case a.Profile && a.Coverage:
+		return errProfileWithCoverage
+	case a.Profile && a.Record:
+		return errProfileWithRecord
+	}
+	return nil
 }
 
 // FinishRecordArgs is a parsed `testrun finish-record` command line.

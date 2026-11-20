@@ -235,6 +235,7 @@ func (p goPkg) units() (*run.Spec, *Split, error) {
 			return tests, testtimes.WithLogRecords(tests, p.Rel, records)
 		}
 		sp.Display = QuietGoTestOutput
+		sp.Profiler = run.GoTestProfiler
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }

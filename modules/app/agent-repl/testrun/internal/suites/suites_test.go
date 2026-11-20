@@ -1687,3 +1687,46 @@ func TestEveryVitestConfigReportsOnlyLoadedFilesInACoverageChunk(t *testing.T) {
 		}
 	}
 }
+
+// EVERY TEST PROCESS SAYS HOW A PROFILING RUN PROFILES IT (internal/profile):
+// a Go chunk is its test binary, a vitest batch is node, a check is neither.
+func TestEveryChunkNamesItsProfiler(t *testing.T) {
+	dir := t.TempDir()
+	l := Layout{Module: dir, Work: t.TempDir()}
+	goModule := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
+	_, goSplit, err := goPkg{Suite: "m", Module: goModule, Rel: "p", Bin: "/b", Self: "/testrun", After: "m:build"}.units()
+	if err != nil {
+		t.Fatal(err)
+	}
+	units, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	integration, err := vitestIntegrationSplits(l, roster.Suite{Name: "webapp", IntegrationConfig: "c.ts"}, dir, soloBatches([]string{"test/a.integration.test.ts"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	typecheck := slices.IndexFunc(units.Atomic, func(s run.Spec) bool { return s.ID == "webapp:typecheck" })
+	tests := []struct {
+		name string
+		spec run.Spec
+		want run.Profiler
+	}{
+		{name: "a Go chunk is its test binary", spec: goSplit.Chunk("m:p#00", []string{"TestA"}), want: run.GoTestProfiler},
+		{name: "a named Go chunk too", spec: goSplit.Named("m:p#01", []string{"TestA"}, nil), want: run.GoTestProfiler},
+		{name: "a vitest batch is node", spec: units.Splits[0].Chunk("webapp#00", []string{"src/a.test.ts"}), want: run.NodeProfiler},
+		{name: "a vitest integration batch is node", spec: integration[0].Chunk(integration[0].Group+"#00", []string{"test/a.integration.test.ts"}), want: run.NodeProfiler},
+		{name: "a check is not profiled itself", spec: units.Atomic[typecheck], want: run.NoProfiler},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.spec.Profiler
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("%s's Profiler = %d, want %d", tt.spec.ID, got, tt.want)
+			}
+		})
+	}
+}

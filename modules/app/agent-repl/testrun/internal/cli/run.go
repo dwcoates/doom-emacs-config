@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"agentrepl/testrun/internal/events"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/plan"
+	"agentrepl/testrun/internal/profile"
 	"agentrepl/testrun/internal/protofile"
 	"agentrepl/testrun/internal/ramdisk"
 	"agentrepl/testrun/internal/reuse"
@@ -323,6 +325,19 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	log.Infof("plan: %d units on %d core slots, predicted %.1fs; chunks: %s",
 		len(p.Specs), d.Slots, p.Makespan, strings.Join(chunkNote, " "))
 
+	// A PROFILING RUN'S UNITS ARE INSTRUMENTED BEFORE IT STATES ITS PLAN, so
+	// a run that cannot profile aborts as one that never planned. A plan-only
+	// run runs nothing, so it makes no profiles directory.
+	var profileDir string
+	if a.Profile && !a.PlanOnly {
+		if profileDir, err = profile.Dir(d.RunLog); err != nil {
+			return abort("the run cannot profile: %v", err)
+		}
+		if p.Specs, err = profile.Apply(p.Specs, profileDir, os.Getenv); err != nil {
+			return abort("the run cannot profile: %v", err)
+		}
+		log.Infof("profile: every unit's profiles land in %s, one directory per unit", profileDir)
+	}
 	ev.Planned(p.Specs, d.RunLog)
 	if a.PlanOnly {
 		// A PLAN-ONLY RUN ENDS AT ITS PLAN (testrun.v1.TestRunRequest.plan_only):
@@ -330,7 +345,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		// that could not be planned fails it as it fails a real run.
 		log.Infof("plan only: %d units planned, none run", len(p.Specs))
 		if len(unbuilt) > 0 {
-			ev.Ended(nil, len(unbuilt), nil)
+			ev.Ended(nil, len(unbuilt), nil, "")
 			return 1
 		}
 		ev.PlannedOnly(len(p.Specs))
@@ -343,7 +358,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	if runErr != nil {
 		log.Errorf("the run was interrupted: %v", runErr)
 		// The units it never ran are failures of the run, so it ended failed.
-		ev.Ended(results, len(unbuilt)+1, nil)
+		ev.Ended(results, len(unbuilt)+1, nil, profileDir)
 		return 130
 	}
 	// THE RUN'S END IS STATED ONLY ONCE IT IS DECIDED. Every check after the
@@ -363,7 +378,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 	if runFailure != "" {
 		runFailures = []string{runFailure}
 	}
-	ev.Ended(results, len(unbuilt), runFailures)
+	ev.Ended(results, len(unbuilt), runFailures, profileDir)
 	return code
 }
 

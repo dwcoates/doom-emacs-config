@@ -106,8 +106,9 @@ func testResultOf(t testtimes.Test) *testrunv1.TestRunTestResult {
 // could not even be planned, and the run's own failures apart from any unit's
 // (runFailures, each for a person). A run with a failure of its own ended
 // failed though every unit passed, so the ended state always agrees with the
-// run's exit status.
-func (e *Emitter) Ended(results []run.Result, unplannable int, runFailures []string) {
+// run's exit status. A profiling run names its profiles directory
+// (profileDir); any other run passes "".
+func (e *Emitter) Ended(results []run.Result, unplannable int, runFailures []string, profileDir string) {
 	var passed, failed, cancelled int32
 	for _, r := range results {
 		switch r.Outcome {
@@ -120,7 +121,7 @@ func (e *Emitter) Ended(results []run.Result, unplannable int, runFailures []str
 		}
 	}
 	failed += int32(unplannable)
-	ended := &testrunv1.TestRunEnded{}
+	ended := &testrunv1.TestRunEnded{ProfileDir: profileDir}
 	if failed+cancelled == 0 && len(runFailures) == 0 {
 		ended.Outcome = &testrunv1.TestRunEnded_Passed{Passed: &testrunv1.TestRunEndedPassed{PassedUnits: passed}}
 	} else {

@@ -52,7 +52,25 @@ type Spec struct {
 	// multi-file ERT selection handed the names to the wrong file and passed
 	// on zero tests).
 	NamesTests bool
+	// Profiler is how a profiling run profiles the unit's own process
+	// (internal/profile). NoProfiler profiles only the production processes
+	// its tests start, which every unit of a profiling run is told the
+	// directory of.
+	Profiler Profiler
 }
+
+// Profiler is how a unit's own process writes a CPU profile.
+type Profiler int
+
+const (
+	// NoProfiler is a unit whose own process is not profiled.
+	NoProfiler Profiler = iota
+	// GoTestProfiler is a Go test binary: `-test.cpuprofile`.
+	GoTestProfiler
+	// NodeProfiler is node and every node process it starts (vitest's
+	// workers): `--cpu-prof` through NODE_OPTIONS.
+	NodeProfiler
+)
 
 // Usage is what a unit's process and its reaped descendants used, as the
 // kernel's wait accounting reports it.
