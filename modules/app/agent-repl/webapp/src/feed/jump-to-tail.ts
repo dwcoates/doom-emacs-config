@@ -16,7 +16,7 @@
  */
 import { createControl } from "../control.js";
 import { log } from "../log.js";
-import type { ScrollPosition, TailFollow } from "../scroll.js";
+import { tailGap, type ScrollPosition, type TailFollow } from "../scroll.js";
 
 /** The class the control wears. */
 export const JUMP_TO_TAIL_CLASS = "feed-jump-to-tail";
@@ -37,7 +37,7 @@ const LABEL = "Jump to the latest";
  * the view is taller than the view itself.
  */
 export function fartherThanAPage(box: ScrollPosition): boolean {
-  return box.scrollHeight - box.scrollTop - box.clientHeight > box.clientHeight;
+  return tailGap(box) > box.clientHeight;
 }
 
 /**
@@ -63,7 +63,7 @@ export function mountJumpToTail(slot: HTMLElement, tail: TailFollow): () => void
       operation: "feed.jump-to-tail-shown",
       context: {
         shown: next,
-        below_view: box.scrollHeight - box.scrollTop - box.clientHeight,
+        below_view: tailGap(box),
         client_height: box.clientHeight,
       },
     });

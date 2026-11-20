@@ -14,6 +14,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   SCROLL_CAUSES,
   TAIL_LANDING_CAUSES,
+  tailGap,
+  atTail as viewAtTail,
   armedWheelAction,
   bubbleNodeRevealed,
   collapseClicked,
@@ -443,6 +445,43 @@ describe("SCROLL_CAUSES", () => {
  * THE CAUSES THAT LAND THE FEED AT ITS TAIL (owner rulings, 2026-11-20):
  * exactly these seven, so a new one cannot slip in unnoticed.
  */
+describe("tailGap", () => {
+  it("is the content below the view's bottom", () => {
+    // Arrange + Act + Assert
+    expect(tailGap({ scrollTop: 600, scrollHeight: 1000, clientHeight: 300 })).toBe(100);
+  });
+
+  it("is zero at the tail", () => {
+    // Arrange + Act + Assert
+    expect(tailGap({ scrollTop: 700, scrollHeight: 1000, clientHeight: 300 })).toBe(0);
+  });
+
+  it("is the one gap arithmetic: no other source module computes the gap below the view by hand", () => {
+    // Arrange
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-assertion -- eslint resolves import.meta.glob through vite/client and reads the assertion as a no-op; tsc, whose program has no vite/client, does not, and rejects the raw result as `unknown` without it.
+    const sources = import.meta.glob(["../src/**/*.ts"], { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    const gap = /scrollHeight\s*-\s*\w+\.(scrollTop\s*-\s*\w+\.clientHeight|clientHeight\s*-\s*\w+\.scrollTop)\b/;
+    // Act
+    const handRolled = Object.entries(sources)
+      .filter(([, text]) => gap.test(text.replace(/export function tailGap[\s\S]*?\n}\n/, "")))
+      .map(([path]) => path);
+    // Assert
+    expect(handRolled).toEqual([]);
+  });
+});
+
+describe("atTail (imported as viewAtTail beside the fixture of that name)", () => {
+  it("is true within PIN_PX of the tail", () => {
+    // Arrange + Act + Assert
+    expect(viewAtTail({ scrollTop: 661, scrollHeight: 1000, clientHeight: 300 })).toBe(true);
+  });
+
+  it("is false at PIN_PX or farther above the tail", () => {
+    // Arrange + Act + Assert
+    expect(viewAtTail({ scrollTop: 660, scrollHeight: 1000, clientHeight: 300 })).toBe(false);
+  });
+});
+
 describe("TAIL_LANDING_CAUSES", () => {
   it("is exactly the seven explicit acts that land the feed at its tail", () => {
     // Arrange + Act + Assert

@@ -2280,7 +2280,7 @@ function pinToNewest(content: HTMLElement): boolean {
   }
   const delta =
     box === content
-      ? box.scrollHeight - box.clientHeight - box.scrollTop
+      ? tailGap(box)
       : content.getBoundingClientRect().bottom - (box.getBoundingClientRect().top + box.clientTop + box.clientHeight);
   box.scrollTop += delta;
   log.debug("an opened merge tab's output shows its newest page", {
