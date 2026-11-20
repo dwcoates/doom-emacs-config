@@ -285,6 +285,8 @@ func TestFoldRefuses(t *testing.T) {
 			name: "an agent's prompt into the user's",
 			arrange: func(t *testing.T, h *harness) (string, string) {
 				queuedPrompts(t, h, [2]string{"t1", "the user's words"})
+				// A JOIN THE VENDOR WOULD NOT TAKE leaves the agent's prompt held.
+				h.watcher.refuseJoins = true
 				if _, err := h.q.Submit(context.Background(), agentSubmission("t2", "an agent's words")); err != nil {
 					t.Fatalf("Submit(t2): %v", err)
 				}

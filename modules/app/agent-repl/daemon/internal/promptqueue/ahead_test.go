@@ -251,30 +251,30 @@ func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
 }
 
 func TestAPromptIsNotCoalescedIntoAnotherAuthorsPrompt(t *testing.T) {
-	// Arrange: the user's prompt is queued, and an agent's prompt is ruled to
-	// interrupt it.
+	// Arrange: an agent's prompt the vendor would not take into the running
+	// turn stands queued, and the user's prompt is ruled to interrupt it.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
-	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+	h.watcher.refuseJoins = true
+	if _, err := h.q.Submit(context.Background(), agentSubmission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
 	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
 
 	// Act
-	if _, err := h.q.Submit(context.Background(), agentSubmission("later", "do it the other way")); err != nil {
+	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
 
-	// Assert: both stand, each as it was, and the agent's waits its turn.
+	// Assert: both stand, each as it was, and the user's waits its turn.
 	standing, err := h.db.HeldPrompts(context.Background(), theWorkspace)
 	if err != nil || len(standing) != 2 || standing[0].Coalesced || saidText(standing[0].Said) != "an earlier question" {
 		t.Fatalf("standing = (%+v, %v), want both prompts standing apart", standing, err)
 	}
 	if got := verdictOf(t, h, "later"); got.Arm != wsm.ArmHoldForTurnEnd {
-		t.Fatalf("verdict = %v, want the agent's prompt waiting its turn", got.Arm)
+		t.Fatalf("verdict = %v, want the user's prompt waiting its turn", got.Arm)
 	}
 	if !logged(h.log.Records(), "info", opClassify, "the prompt ahead has another author, so the prompt is not folded into it and waits its turn") {
 		t.Fatalf("records = %+v, want the refused fold said at info", h.log.Records())

@@ -98,7 +98,7 @@ func behindJoinNeverClassified(log dlog.Logger, held ids.TurnID, joining joining
 // takes them in, and joins under the delivery lock: a turn end pops under it,
 // so the running turn's end cannot deliver this prompt a second time while it
 // is being sent to join that turn.
-func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, log dlog.Logger) {
+func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.TurnID, epoch uint64, c wsm.Classification, cause joinCause, log dlog.Logger) {
 	d := q.lockDelivery(sub.WS)
 	defer d.unlock()
 	state := d.state
@@ -109,7 +109,7 @@ func (q *queue) settleJoin(ctx context.Context, sub Submission, running ids.Turn
 	}
 	q.record(ctx, sub, c, log)
 	state.verdicts.Unlock()
-	q.joinLocked(ctx, d, sub, running, joinJudged, log)
+	q.joinLocked(ctx, d, sub, running, cause, log)
 }
 
 // joinCause is why a prompt is sent to join the running turn.
@@ -125,6 +125,9 @@ const (
 	// joinReleased is the user's release of one held prompt (Release): it
 	// joins at once, beside any already waiting.
 	joinReleased
+	// joinAgentSent is an agent's prompt to this workspace (agentjoin.go): it
+	// joins at once, beside any already waiting, and is never judged.
+	joinAgentSent
 )
 
 // joinLocked sends SUB to join RUNNING, for CAUSE. The caller holds the
@@ -286,6 +289,8 @@ func (c joinCause) String() string {
 		return "flushed"
 	case joinReleased:
 		return "released"
+	case joinAgentSent:
+		return "agent_sent"
 	default:
 		return fmt.Sprintf("join_cause(%d)", int(c))
 	}

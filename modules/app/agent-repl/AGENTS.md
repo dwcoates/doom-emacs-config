@@ -2921,6 +2921,13 @@ exactly ONE of three domains, named for whose services are failing.
   held prompts are popped in order and classified THEN, each against what is
   ahead of it, and delivered per the verdict
   (`daemon/internal/promptqueue/vendorblock.go`).
+- **An agent's prompt to a workspace is never classified and never held for
+  the running turn's end** (owner ruling, 2026-11-14). A prompt another
+  workspace's agent sent while a turn runs is sent to join that turn at once,
+  beside any already joining, and interrupts nothing
+  (`daemon/internal/promptqueue/agentjoin.go`). It waits only where any joining
+  prompt does (a turn the vendor started, an open ask, a bounce drain, an edit,
+  a running context cut) or when sent deferred.
 - **A turn the vendor failed is retried by agent-repl, and a prompt sent
   meanwhile is the retry** (owner ruling, 2026-10-20). The vendor runs with
   its own API retries off (`CLAUDE_CODE_MAX_RETRIES=0`); the shim retries a
