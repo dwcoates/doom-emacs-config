@@ -26,7 +26,7 @@ import {
   FooterTokensCellVerdictSchema,
 } from "../../../proto/gen/ts/frontend/v1/footer_pb";
 
-import { bootColdOnce, startHarness, type Harness } from "./harness";
+import { bootColdOnce, sharedMount, startHarness, type Harness } from "./harness";
 import { panelStorageKey } from "../../src/footer/footer";
 import {
   assertVocabCoversArms,
@@ -70,16 +70,45 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP. A case about what a footer view draws pushes its
+ * whole view onto it (`withFooter`), as the daemon pushes every footer change;
+ * a case that arranges more than the footer before boot mounts its own.
+ */
+const shared = sharedMount({ endCase: closeOpenPanel });
+
+/**
+ * Close the panel a case left open, as a reader does: the control that opened
+ * it, clicked again (the tokens cell for the tokens sheet, a chip otherwise).
+ */
+async function closeOpenPanel(app: Harness): Promise<void> {
+  const open = app.$(".footer-expanded[data-panel]")?.dataset.panel;
+  if (open === undefined) return;
+  await app.click(open === "tokens" ? ".footer-tokens" : `.footer-chip[data-chip="${open}"]`);
+}
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 /** Boot with one footer view already scripted. */
 /** A failed deploy's fault activity, as the daemon composes it. */
 const FAILED_DEPLOY = { kind: "deploy_failed", detail: "build webapp: error TS2322" };
 
-async function withFooter(init: Parameters<typeof footerView>[0]): Promise<Harness> {
+/**
+ * Boot a FRESH app with one footer view scripted: only for a case whose
+ * subject is what the page's own boot does (the panel it re-opens from a
+ * stored preference), which a shared mount booted before the case cannot show.
+ */
+async function withFreshFooter(init: Parameters<typeof footerView>[0]): Promise<Harness> {
   harness = await startHarness({ arrange: (fake) => fake.setFooter(WORKSPACE_ID, footerView(init)) });
+  return harness;
+}
+
+async function withFooter(init: Parameters<typeof footerView>[0]): Promise<Harness> {
+  harness = await shared();
+  harness.fake.setFooter(WORKSPACE_ID, footerView(init));
+  await harness.settle();
   return harness;
 }
 
@@ -1250,8 +1279,9 @@ describe("the agents panel's stop-all", () => {
     );
     // Act
     await harness.click('.footer-expanded[data-panel="agents"] [data-interrupt]');
-    // Assert
-    expect(harness.refusalArms()).toEqual([]);
+    // Assert: on the agents panel, where its stop's answer is drawn (the page
+    // is shared, and another case's stop may stand answered elsewhere on it).
+    expect(harness.$$('.footer-expanded[data-panel="agents"] .refusal[data-arm]')).toEqual([]);
   });
 
   // THE PUSH THE STOP CAUSED MUST NOT ERASE THE STOP'S ANSWER. The footer draws
@@ -1347,37 +1377,41 @@ describe("the remembered panel", () => {
   });
 
   it("re-opens the stored panel on a fresh mount", async () => {
+    // A FRESH MOUNT: the subject is what the page's own boot reads from storage.
     // Arrange: what a reload looks like — the preference is all that survives.
     window.localStorage.setItem(panelStorageKey(WORKSPACE_ID), "crons");
     // Act
-    await withFooter({ status: "idle" });
+    await withFreshFooter({ status: "idle" });
     // Assert
     expect(harness.$('.footer-expanded[data-panel="crons"]')).not.toBeNull();
   });
 
   it("opens no panel on a fresh mount with nothing stored", async () => {
+    // A FRESH MOUNT: the subject is what the page's own boot reads from storage.
     // Arrange / Act
-    await withFooter({ status: "idle" });
+    await withFreshFooter({ status: "idle" });
     // Assert
     expect(harness.$(".footer-expanded[data-panel]")).toBeNull();
   });
 
   it("discards a stored value that is not a panel name", async () => {
+    // A FRESH MOUNT: the subject is what the page's own boot reads from storage.
     // Arrange: an older bundle's spelling, or a hand-edited entry.
     window.localStorage.setItem(panelStorageKey(WORKSPACE_ID), "not-a-panel");
     // Act
-    await withFooter({ status: "idle" });
+    await withFreshFooter({ status: "idle" });
     // Assert
     expect(harness.$(".footer-expanded[data-panel]")).toBeNull();
   });
 
   it("still draws the strip when reading storage throws", async () => {
+    // A FRESH MOUNT: the subject is what the page's own boot reads from storage.
     // Arrange: a webview with site data disabled throws on the accessor.
     vi.spyOn(window.localStorage, "getItem").mockImplementation(() => {
       throw new Error("site data is disabled");
     });
     // Act
-    await withFooter({ status: "idle" });
+    await withFreshFooter({ status: "idle" });
     // Assert
     expect(harness.$(".footer-status")).not.toBeNull();
   });
