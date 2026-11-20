@@ -2768,7 +2768,7 @@ whose arm is `:public-channel' or `:private-channel'; PURPOSE is nil when
 the channel states none."
   (let* ((message "SlackChannel")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object
+    (agent-repl-wire--check-keys "SlackChannel" object
                                  '(id name publicChannel privateChannel purpose))
     (let ((name (agent-repl-wire--decode-string message 'name object)))
       (when (string-empty-p name)
@@ -2787,7 +2787,7 @@ the channel states none."
   "Decode VALUE as `ListSlackChannelsListed', a plist (:channels LIST)."
   (let* ((message "ListSlackChannelsListed")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(channels))
+    (agent-repl-wire--check-keys "ListSlackChannelsListed" object '(channels))
     (agent-repl-wire--decoded
      message
      (list :channels (agent-repl-wire--decode-repeated
@@ -2803,7 +2803,7 @@ The daemon's first read of the channels has not answered yet."
 PENDING IS AN ANSWER: it arrives inside success, never as an error."
   (let* ((message "ListSlackChannelsSuccess")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(listed pending))
+    (agent-repl-wire--check-keys "ListSlackChannelsSuccess" object '(listed pending))
     (agent-repl-wire--decoded
      message
      (agent-repl-wire--decode-oneof
@@ -2815,7 +2815,7 @@ PENDING IS AN ANSWER: it arrives inside success, never as an error."
   "Decode VALUE as `ListSlackChannelsReadFailed', a plist (:detail TEXT)."
   (let* ((message "ListSlackChannelsReadFailed")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(detail))
+    (agent-repl-wire--check-keys "ListSlackChannelsReadFailed" object '(detail))
     (agent-repl-wire--decoded
      message
      (list :detail (agent-repl-wire--decode-string message 'detail object)))))
@@ -2825,7 +2825,7 @@ PENDING IS AN ANSWER: it arrives inside success, never as an error."
 THE ARM IS THE CAUSE, so an unset cause is a contract breach."
   (let* ((message "ListSlackChannelsError")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(readFailed))
+    (agent-repl-wire--check-keys "ListSlackChannelsError" object '(readFailed))
     (agent-repl-wire--decoded
      message
      (list :cause
@@ -2837,7 +2837,7 @@ THE ARM IS THE CAUSE, so an unset cause is a contract breach."
   "Decode VALUE as `ListSlackChannelsResponse'.  THE ARM IS THE OUTCOME."
   (let* ((message "ListSlackChannelsResponse")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(success error))
+    (agent-repl-wire--check-keys "ListSlackChannelsResponse" object '(success error))
     (agent-repl-wire--decoded
      message
      (agent-repl-wire--decode-oneof

@@ -26,6 +26,7 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 )
 
 // opRead is the operation of every record about a read of the channels.
@@ -102,7 +103,7 @@ func (d *Directory) Response() *agentreplv1.ListSlackChannelsResponse {
 	defer d.mu.Unlock()
 	if d.dueLocked() {
 		d.reading = true
-		go d.read()
+		inflight.Go(d.read)
 	}
 	switch {
 	case d.listed:
