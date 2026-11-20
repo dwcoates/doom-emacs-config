@@ -32,6 +32,7 @@ import (
 	"sort"
 	"strings"
 
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/gobuild"
 )
 
@@ -93,20 +94,13 @@ func GoVetArgs(o Options) ([]string, error) {
 // other than zero is no error: a package vet could not analyze exits it 1.
 type GoVet func(dir string, args []string) (stderr []byte, exitedZero bool, err error)
 
-// Exec is GoVet over the real go command.
+// Exec is GoVet over the real go command. A package vet could not analyze
+// exits go vet 1; Vet judges which from its output.
 func Exec(dir string, args []string) ([]byte, bool, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		// A package vet could not analyze exits go vet 1; Vet judges which
-		// from its output.
-		return stderr.Bytes(), false, nil
-	}
-	return stderr.Bytes(), err == nil, err
+	_, stderr, exitedZero, err := command.Verdict(cmd)
+	return stderr, exitedZero, err
 }
 
 // Result is what one module vet found.

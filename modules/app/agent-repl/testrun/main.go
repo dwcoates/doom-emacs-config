@@ -15,7 +15,6 @@
 package main
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -38,6 +37,7 @@ import (
 	"agentrepl/logging/hostpower"
 
 	"agentrepl/testrun/internal/cli"
+	"agentrepl/testrun/internal/command"
 	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/cover"
 	"agentrepl/testrun/internal/cputime"
@@ -729,21 +729,15 @@ func buildTestsCmd(log *run.Log, argv []string) int {
 	return 0
 }
 
-// execGoTest is gobuild.GoTest over the real go command.
+// execGoTest is gobuild.GoTest over the real go command. A package that did
+// not compile exits go test 1; the -json stream says which, and
+// gobuild.Build judges the rest.
 func execGoTest(dir string, args, env []string) ([]byte, []byte, error) {
 	cmd := exec.Command("go", args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
-	var exit *exec.ExitError
-	if errors.As(err, &exit) {
-		// A package that did not compile exits go test 1; the -json stream
-		// says which, and gobuild.Build judges the rest.
-		err = nil
-	}
-	return stdout.Bytes(), stderr.Bytes(), err
+	stdout, stderr, _, err := command.Verdict(cmd)
+	return stdout, stderr, err
 }
 
 // stashTestCmd is the module build's -exec (gobuild.Stash): `testrun
