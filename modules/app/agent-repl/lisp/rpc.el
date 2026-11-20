@@ -284,8 +284,9 @@ ends by saying how many characters were left out."
                                     &optional on-open)
   "Open server-streaming METHOD on CONN and decode each push.
 A push that fails to decode is logged at ERROR (`elisp.rpc.push-invalid')
-with the head of its JSON (`agent-repl-rpc--logged-body') and DROPPED — the subscription survives,
-because the daemon is the authority and the next push may well be sound.
+with the head of its JSON (`agent-repl-rpc--logged-body') and DROPPED —
+the subscription survives, because the daemon is the authority and the
+next push may well be sound.
 An ON-PUSH that itself signals is contained by connect.el at the filter
 boundary, which likewise keeps the stream open.
 ON-OPEN, when given, is handed through UNTOUCHED: it is the transport's
