@@ -114,6 +114,13 @@ func (d rosterQueueDB) MoveMergeTo(ctx context.Context, repo wsm.RepoKey, id, an
 	return moved, d.republishedIf(ctx, repo, moved, err)
 }
 
+// PlaceMerge moves a waiting merge to a place in its queue and republishes
+// its repository's queue when it moved.
+func (d rosterQueueDB) PlaceMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID, place wsm.MergePlace) (bool, error) {
+	moved, err := d.DB.PlaceMerge(ctx, repo, id, place)
+	return moved, d.republishedIf(ctx, repo, moved, err)
+}
+
 // PrioritizeMerge moves a waiting merge to the front of the waiting and
 // republishes its repository's queue when it moved.
 func (d rosterQueueDB) PrioritizeMerge(ctx context.Context, repo wsm.RepoKey, id wsm.WorkspaceID) (bool, error) {

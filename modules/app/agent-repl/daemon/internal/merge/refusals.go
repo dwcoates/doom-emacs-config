@@ -91,6 +91,10 @@ const (
 	// ArmPlacementBehindNotInLine refuses a merge asked to go behind a merge
 	// that does not stand in its queue.
 	ArmPlacementBehindNotInLine = "placement_behind_not_in_line"
+	// ArmIndexOutOfRange refuses a move to a waiting place past the last one
+	// (UpdateMergeQueueError.index_out_of_range). Its `index` and `waiting`
+	// fields name the place asked for and how many merges wait.
+	ArmIndexOutOfRange = "index_out_of_range"
 	// ArmNoBranchCheckedOut refuses a merge of a workspace's own branch whose
 	// worktree has a detached HEAD (MergeWorkspaceError.no_branch_checked_out).
 	// Its `dir` field names the worktree.

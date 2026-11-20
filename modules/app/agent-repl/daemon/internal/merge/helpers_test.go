@@ -1247,6 +1247,80 @@ func (f *fakeDB) MoveMergeTo(_ context.Context, repo wsm.RepoKey, id, anchor ids
 	return true, nil
 }
 
+// PlaceMerge puts a waiting entry on a place among the waiting entries,
+// taking its new place's front mark and refusing as the durable queue does.
+func (f *fakeDB) PlaceMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, place wsm.MergePlace) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.moveErr != nil {
+		return false, f.moveErr
+	}
+	queue := f.queues[repo]
+	state := func(ws ids.WorkspaceID) (wsm.MergeQueueState, bool) {
+		for _, entry := range queue {
+			if entry.Workspace == ws {
+				return entry.State, true
+			}
+		}
+		return 0, false
+	}
+	own, found := state(id)
+	if !found {
+		return false, fmt.Errorf("no queue entry for %s: %w", id, wsm.ErrNotFound)
+	}
+	if own != wsm.MergeQueued {
+		return false, fmt.Errorf("%s stands %s: %w", id, own, wsm.ErrMergeNotWaiting)
+	}
+	var slots []int
+	var waiting, rest []wsm.MergeQueueEntry
+	from := 0
+	for i, entry := range queue {
+		if entry.State != wsm.MergeQueued {
+			continue
+		}
+		slots = append(slots, i)
+		if entry.Workspace == id {
+			from = len(waiting)
+		} else {
+			rest = append(rest, entry)
+		}
+		waiting = append(waiting, entry)
+	}
+	target := 0
+	switch place.Kind {
+	case wsm.MergePlaceBack:
+		target = len(waiting) - 1
+	case wsm.MergePlaceIndex:
+		if place.Index >= len(waiting) {
+			return false, &wsm.MergePlaceOutOfRangeError{Index: place.Index, Waiting: len(waiting)}
+		}
+		target = place.Index
+	case wsm.MergePlaceBehind:
+		anchorState, found := state(place.Anchor)
+		switch {
+		case place.Anchor == id:
+			target = from
+		case found && anchorState == wsm.MergeAdmitted:
+			target = 0
+		case found && anchorState == wsm.MergeQueued:
+			target = slices.IndexFunc(rest, func(e wsm.MergeQueueEntry) bool { return e.Workspace == place.Anchor }) + 1
+		default:
+			return false, fmt.Errorf("%s is not in line: %w", place.Anchor, wsm.ErrAnchorNotInLine)
+		}
+	}
+	if target == from {
+		return false, nil
+	}
+	moved := waiting[from]
+	moved.Source.Front = target == 0 || rest[target-1].Source.Front
+	order := slices.Insert(rest, target, moved)
+	for i, slot := range slots {
+		queue[slot] = order[i]
+	}
+	f.renumber(repo)
+	return true, nil
+}
+
 // PrioritizeMerge moves a waiting entry ahead of every other waiting entry,
 // marked front, exactly as the durable queue re-sequences it.
 func (f *fakeDB) PrioritizeMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
