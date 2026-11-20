@@ -10,8 +10,8 @@
 // renderer links: an `http://` or `https://` URL its inline linkify rule
 // matches, or a `www.` host its fuzzy linkifier matches, with the extent
 // linkify-it's path grammar gives it. The webapp's tests render this package's
-// answers for a shared corpus (daemon/internal/codespans/testdata/link-code.json,
-// written by the codespans package's fixture test) and fail when the renderer reads a
+// answers for a shared corpus (webapp/test/fixtures/link-code.json, written by
+// the prose package's link-code fixture test) and fail when the renderer reads a
 // link differently.
 //
 // A bare host with no scheme and no `www.` (`github.com/x`), which the

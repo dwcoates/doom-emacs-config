@@ -1,12 +1,12 @@
-package codespans
+package prose
 
 import (
 	"bytes"
 	"encoding/json"
-	"flag"
 	"os"
 	"testing"
 
+	"agent-repld/internal/codespans"
 	"agent-repld/internal/goldenfile"
 )
 
@@ -15,20 +15,20 @@ import (
 // whole, with a clean href and no code in it: the inputs file lists each text,
 // the inline code it is marked with, and the links and code the renderer must
 // draw; the fixture file adds what the feed draws for it (Unmark of Markup),
-// regenerated with `go test ./internal/codespans -run WebappFixture -update`.
-// Both live in this package's testdata, which its tests may read; the webapp's
-// test imports the fixture from here (webapp/test/markdown.test.ts).
+// regenerated with `go test ./internal/prose -run LinkCodeFixture -update`.
+//
+// IT LIVES IN THIS PACKAGE, NOT IN codespans, because this is the one daemon
+// package whose tests read and write the webapp's fixtures (the test roster's
+// declared inputs), as its own parsed-prose fixture does.
 const (
-	webappInputsPath  = "testdata/link-code-inputs.json"
-	webappFixturePath = "testdata/link-code.json"
+	linkCodeInputsPath  = "../../../webapp/test/fixtures/link-code-inputs.json"
+	linkCodeFixturePath = "../../../webapp/test/fixtures/link-code.json"
 )
 
-var update = flag.Bool("update", false, "rewrite the webapp's link-code fixture from its inputs")
-
-// webappEntry is one corpus text: the markdown, the spans it is marked with,
+// linkCodeEntry is one corpus text: the markdown, the spans it is marked with,
 // the hrefs and code texts the renderer must draw, and (in the fixture only)
 // what the feed draws for it.
-type webappEntry struct {
+type linkCodeEntry struct {
 	Markdown string   `json:"markdown"`
 	Spans    []string `json:"spans,omitempty"`
 	Hrefs    []string `json:"hrefs"`
@@ -36,18 +36,18 @@ type webappEntry struct {
 	Drawn    string   `json:"drawn,omitempty"`
 }
 
-func webappFixture(t *testing.T) []byte {
+func linkCodeFixture(t *testing.T) []byte {
 	t.Helper()
-	raw, err := os.ReadFile(webappInputsPath)
+	raw, err := os.ReadFile(linkCodeInputsPath)
 	if err != nil {
-		t.Fatalf("read %s: %v", webappInputsPath, err)
+		t.Fatalf("read %s: %v", linkCodeInputsPath, err)
 	}
-	var entries []webappEntry
+	var entries []linkCodeEntry
 	if err := json.Unmarshal(raw, &entries); err != nil {
-		t.Fatalf("decode %s: %v", webappInputsPath, err)
+		t.Fatalf("decode %s: %v", linkCodeInputsPath, err)
 	}
 	for i := range entries {
-		entries[i].Drawn = Unmark(Markup(entries[i].Markdown, entries[i].Spans))
+		entries[i].Drawn = codespans.Unmark(codespans.Markup(entries[i].Markdown, entries[i].Spans))
 	}
 	// HTML escaping off keeps an autolink's angle brackets readable.
 	var out bytes.Buffer
@@ -60,6 +60,6 @@ func webappFixture(t *testing.T) []byte {
 	return out.Bytes()
 }
 
-func TestWebappFixtureIsTheFeedsDrawingOfEveryInput(t *testing.T) {
-	goldenfile.Check(t, webappFixturePath, webappFixture(t), *update)
+func TestLinkCodeFixtureIsTheFeedsDrawingOfEveryInput(t *testing.T) {
+	goldenfile.Check(t, linkCodeFixturePath, linkCodeFixture(t), *update)
 }
