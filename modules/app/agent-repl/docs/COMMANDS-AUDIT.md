@@ -96,6 +96,8 @@ Findings are collected at the end, in "Audit findings".
 | --- | --- | --- | --- | --- |
 | `agent-repl-switch-left` | Switch to the tab on the left, wrapping. | `s-{`, remap of `+workspace/switch-left` | global, numerals map | works |
 | `agent-repl-switch-right` | Switch to the tab on the right, wrapping. | `s-}`, remap of `+workspace/switch-right` | global, numerals map | works |
+| `agent-repl-switch-aunt-previous` | Switch to the parent's previous sibling, else the workspace's own previous sibling, never wrapping. | `M-s-{` | global | works |
+| `agent-repl-switch-aunt-next` | Switch to the parent's next sibling, else the workspace's own next sibling, never wrapping. | `M-s-}` | global | works |
 | `agent-repl-switch-older` | Switch to the tab viewed before the current one, wrapping, without recording a view. | `s-[` | global | works |
 | `agent-repl-switch-newer` | Switch back toward the most recently viewed tab, wrapping, without recording a view. | `s-]` | global | works |
 | `agent-repl-switch-to-workspace-1` .. `-9` (generated) | Switch to tab slot N. | `M-1`..`M-9`, `s-1`..`s-9`, remap of `+workspace/switch-to-N` | numerals map (evil intercept) | works |

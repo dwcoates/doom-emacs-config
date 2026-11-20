@@ -174,6 +174,10 @@ the module."
 (map! "M-s-[" #'agent-repl-switch-working-left
       "M-s-]" #'agent-repl-switch-working-right)
 
+;; The sidebar's family: the previous / next aunt, else sibling.
+(map! "M-s-{" #'agent-repl-switch-aunt-previous
+      "M-s-}" #'agent-repl-switch-aunt-next)
+
 ;; The same steps over the SELECTION HISTORY rather than the bar: `s-[' goes
 ;; to the workspace viewed before, and again to the one before that; `s-]'
 ;; walks back toward the most recent.  A step records no view, so the

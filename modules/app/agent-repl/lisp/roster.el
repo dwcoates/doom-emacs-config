@@ -1228,6 +1228,52 @@ The sidebar paints the same number beside NAME's row
 \(`agent-repl-roster--tab-numbers')."
   (cdr (assoc name agent-repl-roster--tab-numbers)))
 
+;;;; ---- Families ---------------------------------------------------------
+
+(defun agent-repl-roster--sibling-groups (roster)
+  "Return ROSTER's Open section as sibling groups, `(PARENT-ID . IDS)' pairs.
+Each repository section's top-level rows are one group whose PARENT-ID is
+nil (`agent-repl-roster-section-rows', its subsections' rows included), and
+every open row's family (`agent-repl-roster-row-kin') is a group under that
+row's id.  IDS are in drawn order.  The hidden section is no family: a
+hidden workspace is no stop of any walk."
+  (let ((groups nil))
+    (cl-labels ((walk (rows parent)
+                  (when rows
+                    (push (cons parent (mapcar (lambda (wrapped)
+                                                 (agent-repl-roster-row-id (plist-get wrapped :row)))
+                                               rows))
+                          groups)
+                    (dolist (wrapped rows)
+                      (walk (agent-repl-roster-row-kin wrapped)
+                            (agent-repl-roster-row-id (plist-get wrapped :row)))))))
+      (dolist (section (plist-get (plist-get roster :repository) :sections))
+        (walk (agent-repl-roster-section-rows section) nil)))
+    (nreverse groups)))
+
+(defun agent-repl-roster-family-of (name &optional roster)
+  "Return tab NAME's family in ROSTER as tab names, or nil when it has none.
+The answer is `(:parent PARENT :siblings SIBLINGS :aunts AUNTS)': PARENT is
+the row NAME is nested under, nil for a top-level row; SIBLINGS is NAME's
+sibling group, NAME included, and AUNTS is PARENT's, PARENT included (nil
+when PARENT is nil), each in drawn order (`agent-repl-roster--sibling-groups').
+A top-level row's siblings are the other top-level rows of its repository,
+the same family `agent-repl-workspace-move' moves within.  Ids are named by
+the last reconcile's tabs (`agent-repl-roster--walked'), so a row with no
+tab is left out.  ROSTER defaults to `agent-repl-roster-view'."
+  (let* ((id (cdr (assoc name agent-repl-roster--walked)))
+         (groups (agent-repl-roster--sibling-groups (or roster agent-repl-roster-view)))
+         (named (lambda (ids)
+                  (delq nil (mapcar (lambda (each) (car (rassoc each agent-repl-roster--walked)))
+                                    ids))))
+         (own (and id (seq-find (lambda (group) (member id (cdr group))) groups))))
+    (when own
+      (let* ((parent (car own))
+             (above (and parent (seq-find (lambda (group) (member parent (cdr group))) groups))))
+        (list :parent (and parent (car (rassoc parent agent-repl-roster--walked)))
+              :siblings (funcall named (cdr own))
+              :aunts (and above (funcall named (cdr above))))))))
+
 (defun agent-repl-roster-drawn-tab-numbers (names)
   "Return the number the bar paints on each of the drawn tabs NAMES, in order.
 The daemon's number (`agent-repl-roster-tab-number-of') once a roster has

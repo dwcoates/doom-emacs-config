@@ -4251,3 +4251,68 @@ judged as any roster is."
                  "👍"))
   (should-not (agent-repl-roster-row-name-glyph '(:name (:text "plain" :glyph nil))))
   (should-not (agent-repl-roster-row-name-glyph nil)))
+
+;;;; ---- Families ----
+
+(defun agent-repl-test-roster--family-roster ()
+  "Return a roster: top-level p, q (in a subsection) and r; p holds c1, c2; c1 holds g.
+Each row's tab name is its id, upcased, so a reader that confused the two fails."
+  (let ((row (lambda (id &rest children)
+               (agent-repl-test-roster--row id (upcase id) :ready :children children))))
+    (agent-repl-test-roster--roster
+     :sections (list (agent-repl-test-roster--with-subsections
+                      (agent-repl-test-roster--section
+                       "repo" (list (funcall row "p" (funcall row "c1" (funcall row "g"))
+                                             (funcall row "c2"))))
+                      (list (funcall row "q") (funcall row "r")))))))
+
+(defmacro agent-repl-test-roster--with-family-tabs (&rest body)
+  "Run BODY with the family roster's tabs walked, each named by its upcased id."
+  (declare (indent 0))
+  `(let ((agent-repl-roster--walked
+          (mapcar (lambda (id) (cons (upcase id) id)) '("p" "c1" "g" "c2" "q" "r"))))
+     ,@body))
+
+(ert-deftest agent-repl-test-roster-sibling-groups-nest-each-family-under-its-parent ()
+  "A section's top-level rows, its subsections' included, are one group; each family is one more."
+  ;; Act
+  (let ((groups (agent-repl-roster--sibling-groups (agent-repl-test-roster--family-roster))))
+    ;; Assert
+    (should (equal groups '((nil "p" "q" "r") ("p" "c1" "c2") ("c1" "g"))))))
+
+(ert-deftest agent-repl-test-roster-family-of-a-child-names-its-parent-siblings-and-aunts ()
+  "A child's family is its parent, its sibling group and its parent's, as tab names."
+  (agent-repl-test-roster--with-family-tabs
+    ;; Act
+    (let ((family (agent-repl-roster-family-of "G" (agent-repl-test-roster--family-roster))))
+      ;; Assert
+      (should (equal family '(:parent "C1" :siblings ("G") :aunts ("C1" "C2")))))))
+
+(ert-deftest agent-repl-test-roster-family-of-a-top-level-row-has-no-parent-or-aunts ()
+  "A top-level row's siblings are its repository's top-level rows, and it has no aunts."
+  (agent-repl-test-roster--with-family-tabs
+    ;; Act
+    (let ((family (agent-repl-roster-family-of "Q" (agent-repl-test-roster--family-roster))))
+      ;; Assert
+      (should (equal family '(:parent nil :siblings ("P" "Q" "R") :aunts nil))))))
+
+(ert-deftest agent-repl-test-roster-family-of-a-name-with-no-tab-is-nil ()
+  "A name the walk gave no tab has no family."
+  (agent-repl-test-roster--with-family-tabs
+    ;; Act / Assert
+    (should-not (agent-repl-roster-family-of "elsewhere" (agent-repl-test-roster--family-roster)))))
+
+(ert-deftest agent-repl-test-roster-family-of-leaves-out-rows-with-no-tab ()
+  "A sibling the walk gave no tab is left out of the group."
+  (let ((agent-repl-roster--walked '(("P" . "p") ("C1" . "c1") ("Q" . "q"))))
+    ;; Act
+    (let ((family (agent-repl-roster-family-of "C1" (agent-repl-test-roster--family-roster))))
+      ;; Assert
+      (should (equal family '(:parent "P" :siblings ("C1") :aunts ("P" "Q")))))))
+
+(ert-deftest agent-repl-test-roster-family-of-reads-the-accepted-roster-by-default ()
+  "With no roster given, the family is read off `agent-repl-roster-view'."
+  (agent-repl-test-roster--with-family-tabs
+    (let ((agent-repl-roster-view (agent-repl-test-roster--family-roster)))
+      ;; Act / Assert
+      (should (equal (plist-get (agent-repl-roster-family-of "C2") :parent) "P")))))

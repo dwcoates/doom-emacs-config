@@ -978,6 +978,10 @@ The top bar's phone chip, on the left after the account and just left of the wif
 - **Picking a workspace that is not open here opens it first.**
   - A merged workspace opens too, to revise what it landed (see "Reopening a merged workspace").
 - **`s-{` and `s-}` step to the tab left or right of the current one, wrapping.**
+- **`M-s-{` and `M-s-}` step to the previous or next aunt, the sibling before or after this workspace's parent.**
+  - With no aunt that way, they step to this workspace's own previous or next sibling instead.
+  - A top-level workspace has no parent, so it steps to its sibling, the top-level workspace before or after it in its repository.
+  - Neither wraps at the ends.
 - **`s-[` and `s-]` step through the tabs in the order you last viewed them.**
   - `s-[` goes to the workspace you viewed before this one, and pressed again to the one before that.
   - `s-]` goes back toward the one you viewed most recently.
