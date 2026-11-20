@@ -27,10 +27,16 @@ import (
 // (a replay draws terminals from history pages): whichever comes second
 // draws the row. A chain that gives up at a failure promises that failure
 // nothing, so its row draws as any failure's does.
+//
+// THE TURN'S VENDOR NOTICES ARE WITHHELD WITH IT. A notice and the fault it
+// reports are one card (notice.go), so a notice of a turn whose failure is
+// withheld folds into the withheld row, whichever arrives first: drawn on
+// its own, it would report the retried failure the ruling keeps off the feed.
 
 const (
 	opRetriedFailureWithheld = "daemon.feed.retried_failure_withheld"
 	opRetryAbandoned         = "daemon.feed.retry_abandoned"
+	opNoticeFoldedIntoHeld   = "daemon.feed.notice_folded_into_withheld_failure"
 )
 
 // withheldEnding is a retried failure's errored row, kept with the placement
@@ -49,6 +55,10 @@ func (s *wsState) retriedFailure(turn ids.TurnID, failure *conversationv1.AgentF
 // withholdRetriedFailure keeps the errored ROW of TURN, placed at AT, off the
 // feed while its promised retry stands.
 func (r *resolver) withholdRetriedFailure(s *wsState, turn ids.TurnID, at placement, row *frontendv1.FeedRow, failure *conversationv1.AgentFailure) {
+	// THE NOTICES ALREADY DRAWN fold into the withheld row and leave the feed.
+	for _, notice := range r.foldNoticesIntoEnding(s, r.feed(s, at.feed), row.GetId().GetValue(), row) {
+		r.retire(s, at.feed, notice)
+	}
 	s.withheldEndings[turn] = withheldEnding{at: at, row: row}
 	r.logger(s.id).Info(opRetriedFailureWithheld,
 		"the turn failed on a failure agent-repl retries; its errored row is withheld while the retry stands",
@@ -85,4 +95,27 @@ func (r *resolver) observeVendorErrorRetry(s *wsState, stated *conversationv1.Se
 	r.logger(s.id).Info(opRetryAbandoned,
 		"agent-repl abandoned a promised retry; the failed turn's withheld errored row was drawn",
 		dlog.Context{"turn": string(turn), "cause": abandoned.GetCause(), "row": withheld.row.GetId().GetValue()})
+}
+
+// noticeFoldedIntoWithheld takes a notice ROW of a turn whose failure is
+// withheld: its words fold into the withheld row, and the notice is drawn
+// nowhere (retired, had an earlier draw placed it). It reports whether ROW
+// was taken that way.
+func (r *resolver) noticeFoldedIntoWithheld(s *wsState, f *feedState, at placement, row *frontendv1.FeedRow) bool {
+	text, ok := noticeText(row)
+	turn := ids.TurnID(row.GetTurn().GetValue())
+	if !ok || turn == "" {
+		return false
+	}
+	withheld, held := s.withheldEndings[turn]
+	if !held || r.feed(s, withheld.at.feed).key != f.key {
+		return false
+	}
+	added, why := foldNotice(faultEndingMarker(withheld.row), text)
+	id := row.GetId().GetValue()
+	r.retire(s, at.feed, id)
+	r.logger(s.id).Info(opNoticeFoldedIntoHeld,
+		"a vendor notice of a turn whose retried failure is withheld was folded into the withheld row instead of being drawn",
+		dlog.Context{"feed": f.key, "turn": string(turn), "notice_row": id, "added": added, "not_added_because": why})
+	return true
 }

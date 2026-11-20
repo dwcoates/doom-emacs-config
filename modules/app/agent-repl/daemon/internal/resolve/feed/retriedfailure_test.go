@@ -197,3 +197,71 @@ func TestAScheduleThatAbandonsNothingDrawsNoRow(t *testing.T) {
 		t.Fatal("a statement that abandons nothing drew the withheld failure")
 	}
 }
+
+func TestANoticeDrawnBeforeARetriedFailureLeavesTheFeedWithIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+	h.notice("unit-1", "Rate limited; retry after 30 seconds.", "t1")
+
+	// Act
+	h.terminal("t1", nil, promised(rateLimited(), 1))
+
+	// Assert
+	if h.noticeRowDrawn("unit-1") {
+		t.Fatal("the notice of a retried failure is still drawn")
+	}
+}
+
+func TestANoticeArrivingAfterARetriedFailureIsNeverDrawn(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.deliverPrompt("t1", "question")
+	h.terminal("t1", nil, promised(rateLimited(), 1))
+
+	// Act
+	h.notice("unit-1", "Rate limited; retry after 30 seconds.", "t1")
+
+	// Assert
+	if h.noticeRowDrawn("unit-1") {
+		t.Fatal("a late notice of a retried failure was drawn")
+	}
+	if !h.hasRecord("info", opNoticeFoldedIntoHeld) {
+		t.Fatalf("records = %+v, want the fold into the withheld failure recorded at INFO", h.records())
+	}
+}
+
+func TestAnAbandonedRetryDrawsTheNoticesItsFailureWithheld(t *testing.T) {
+	cases := []struct {
+		name    string
+		arrange func(h *harness)
+	}{
+		{name: "a notice before the terminal", arrange: func(h *harness) {
+			h.notice("unit-1", "Rate limited; retry after 30 seconds.", "t1")
+			h.terminal("t1", nil, promised(rateLimited(), 1))
+		}},
+		{name: "a notice after the terminal", arrange: func(h *harness) {
+			h.terminal("t1", nil, promised(rateLimited(), 1))
+			h.notice("unit-1", "Rate limited; retry after 30 seconds.", "t1")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.deliverPrompt("t1", "question")
+			tc.arrange(h)
+
+			// Act
+			h.abandonRetry("t1")
+
+			// Assert
+			if got := noticeTexts(h.markerOf("t1")); len(got) != 1 || got[0] != "Rate limited; retry after 30 seconds." {
+				t.Fatalf("notices = %q, want the withheld notice's words on the drawn card", got)
+			}
+			if h.noticeRowDrawn("unit-1") {
+				t.Fatal("the notice was drawn as its own row beside the card")
+			}
+		})
+	}
+}

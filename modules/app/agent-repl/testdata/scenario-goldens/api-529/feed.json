@@ -38,55 +38,6 @@
           }
         }
       }
-    },
-    {
-      "id": {
-        "value": "${ROW_2}"
-      },
-      "order": {
-        "key": "${ORDER_2}"
-      },
-      "turn": {
-        "value": "${TURN}"
-      },
-      "turnEnded": {
-        "endedAtMs": "${NOW}",
-        "errored": {
-          "headline": {
-            "text": "the vendor API is overloaded"
-          },
-          "marker": {
-            "detail": {
-              "text": "overloaded"
-            },
-            "label": {
-              "text": "vendor error"
-            },
-            "vendorFault": {
-              "expansion": {
-                "errorType": {
-                  "text": "overloaded"
-                },
-                "message": {
-                  "text": "The API is overloaded."
-                },
-                "retryAt": {
-                  "atMs": "${NOW}"
-                },
-                "time": {
-                  "atMs": "${NOW}"
-                }
-              }
-            }
-          },
-          "message": {
-            "text": "The API is overloaded."
-          },
-          "overloaded": {
-            "retryAfterMs": "549"
-          }
-        }
-      }
     }
   ],
   "warnings": []

@@ -38,50 +38,6 @@
           }
         }
       }
-    },
-    {
-      "id": {
-        "value": "${ROW_2}"
-      },
-      "order": {
-        "key": "${ORDER_2}"
-      },
-      "turn": {
-        "value": "${TURN}"
-      },
-      "turnEnded": {
-        "endedAtMs": "${NOW}",
-        "errored": {
-          "headline": {
-            "text": "the vendor API hit its own internal error"
-          },
-          "internal": {},
-          "marker": {
-            "detail": {
-              "text": "internal"
-            },
-            "label": {
-              "text": "vendor error"
-            },
-            "vendorFault": {
-              "expansion": {
-                "errorType": {
-                  "text": "internal"
-                },
-                "message": {
-                  "text": "The service raised."
-                },
-                "time": {
-                  "atMs": "${NOW}"
-                }
-              }
-            }
-          },
-          "message": {
-            "text": "The service raised."
-          }
-        }
-      }
     }
   ],
   "warnings": []

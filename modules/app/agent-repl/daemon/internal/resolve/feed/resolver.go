@@ -1121,7 +1121,7 @@ func (r *resolver) outputPlacement(s *wsState, turn *ids.TurnID) placement {
 func (r *resolver) upsert(s *wsState, at placement, row *frontendv1.FeedRow, durable bool) {
 	f := r.feed(s, at.feed)
 	if r.rolledBackRow(s, f, row) || r.withheldRollingBack(s, f, at, row, durable) || r.signedInRow(s, f, row) ||
-		r.reconnectedRow(s, f, row) || r.noticeFoldedIntoEnding(s, f, at, row) {
+		r.reconnectedRow(s, f, row) || r.noticeFoldedIntoEnding(s, f, at, row) || r.noticeFoldedIntoWithheld(s, f, at, row) {
 		return
 	}
 	id := row.GetId().GetValue()
