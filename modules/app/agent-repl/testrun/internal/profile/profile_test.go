@@ -20,8 +20,7 @@ func TestDir(t *testing.T) {
 	tests := []struct {
 		name, log, want, wantErr string
 	}{
-		{name: "beside the log, its extension replaced", log: "/logs/run-1.log", want: "/logs/run-1.profiles"},
-		{name: "a log with no extension gets the suffix", log: "/logs/run-1", want: "/logs/run-1.profiles"},
+		{name: "beside the log, in the log's directory", log: "/logs/run-1/test-all.log", want: "/logs/run-1/profiles"},
 		{name: "a run with no log cannot profile", log: "", wantErr: "has none"},
 	}
 	for _, tt := range tests {

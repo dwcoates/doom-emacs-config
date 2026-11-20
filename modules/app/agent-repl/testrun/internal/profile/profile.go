@@ -25,15 +25,16 @@ import (
 // unit's directory.
 const GoProfile = "test.cpu.pprof"
 
-// Dir is the profiles directory of the run whose log is RUNLOG: beside the
-// log, its name with ".profiles" for the log's extension. A run with no log
-// (testrun started directly) has nowhere a reader would look, so it cannot
-// profile.
+// Dir is the profiles directory of the run whose log is RUNLOG: <log
+// dir>/profiles, beside the log as the run's failure artifacts are
+// (cli.RunArtifactsEnv), so they live and are pruned with the run's log. A
+// run with no log (testrun started directly) has nowhere a reader would look,
+// so it cannot profile.
 func Dir(runLog string) (string, error) {
 	if runLog == "" {
 		return "", fmt.Errorf("profile: a profiling run puts its profiles beside its log, and this run has none (testrun was started directly)")
 	}
-	return strings.TrimSuffix(runLog, filepath.Ext(runLog)) + ".profiles", nil
+	return filepath.Join(filepath.Dir(runLog), "profiles"), nil
 }
 
 // Apply answers SPECS each made to write its profiles into its own directory

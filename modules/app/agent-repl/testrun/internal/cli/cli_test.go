@@ -1810,8 +1810,8 @@ func TestRunAProfilingRunGivesEveryUnitItsDirectoryAndNamesItWhenItEnds(t *testi
 	var stream bytes.Buffer
 	h.deps.Events = events.New(&stream, h.deps.Log)
 	logs := t.TempDir()
-	h.deps.RunLog = filepath.Join(logs, "run-1.log")
-	wantDir := filepath.Join(logs, "run-1.profiles")
+	h.deps.RunLog = filepath.Join(logs, "test-all.log")
+	wantDir := filepath.Join(logs, "profiles")
 
 	// Act
 	code := h.run(t, "--suites", "store", "--profile")
@@ -1858,10 +1858,10 @@ func TestRunARunThatDoesNotProfileLeavesItsUnitsAlone(t *testing.T) {
 func TestRunAProfilingRunThatCannotProfileAbortsBeforeItPlans(t *testing.T) {
 	blocked := func(t *testing.T) string {
 		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "run-1.profiles"), nil, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "profiles"), nil, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		return filepath.Join(dir, "run-1.log")
+		return filepath.Join(dir, "test-all.log")
 	}
 	cases := []struct {
 		name       string
