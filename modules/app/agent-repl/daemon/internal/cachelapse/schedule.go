@@ -148,11 +148,12 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 			dlog.Context{"dir": record.Dir, "cause": err.Error()})
 		return beatPlan{}, false
 	}
-	// A WORKSPACE IN A MERGE QUEUE IS ALWAYS KEPT WARM (owner ruling,
-	// 2026-10-26): its entry can wait for hours, and the merge's prompts run
-	// on its session, so neither a hide nor a close lets its cache lapse
-	// while the entry stands.
-	queued, err := bringup.MergeQueued(ctx, k.deps.DB, record)
+	// A WORKSPACE IN A MERGE QUEUE IS KEPT WARM (owner rulings, 2026-10-26
+	// and 2026-11-11): its entry can wait for hours, and the merge's prompts
+	// run on its session, so neither a hide nor a close lets its cache lapse
+	// while the entry stands, for QueuedIdleFactor idle cutoffs
+	// (bringup.IdleCutoff, read below).
+	queuedAt, queued, err := bringup.MergeQueuedAt(ctx, k.deps.DB, record)
 	if err != nil {
 		k.undelivered(ctx, log, opDrive, ws, time.Time{}, "reading whether the workspace has a merge queued", "could not read whether the workspace has a merge queued; its keep-alive is not armed", nil, err)
 		return beatPlan{}, false
@@ -216,7 +217,7 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	if engaged.IsZero() {
 		engaged = session.StartedAt
 	}
-	if k.deps.IdleCutoff > 0 && !queued && engaged.Add(k.deps.IdleCutoff).Before(plan.due) {
+	if k.deps.IdleCutoff > 0 && bringup.IdleHorizon(k.deps.IdleCutoff, engaged, queuedAt, queued).Before(plan.due) {
 		return none("it will be idle past the cutoff before the beat is due, and the idle sweep puts it to sleep")
 	}
 	k.owesAgain(ctx, log, record)

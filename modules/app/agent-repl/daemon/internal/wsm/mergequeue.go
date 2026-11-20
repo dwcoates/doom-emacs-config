@@ -1058,10 +1058,11 @@ func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id Workspa
 }
 
 // dropMergeLease deletes LEASE, workspace ID's merge lease, and that lease's
-// progress record in TX: the half of an admitted merge's end that keeps "a
-// merge lease stands with exactly one queue entry". A lease that is not ID's
-// merge lease is refused and deletes nothing. The caller disowns the lease
-// once TX commits.
+// progress record in TX: the half of a merge's end that keeps "a merge lease
+// stands with exactly one queue entry" when its entry leaves or goes back in
+// line (DropAdmittedMerge, RequeueColdGatedMerge). A lease that is not ID's
+// merge lease is refused and deletes nothing. The caller
+// disowns the lease once TX commits.
 func dropMergeLease(ctx context.Context, tx *sql.Tx, id WorkspaceID, lease LeaseID) error {
 	res, err := tx.ExecContext(ctx, `DELETE FROM leases WHERE id = ? AND workspace_id = ? AND holder = ?`, lease, id, int(HolderMerge))
 	if err != nil {
@@ -1118,7 +1119,7 @@ func (s *store) AllMergeQueues(ctx context.Context) (map[RepoKey][]MergeQueueEnt
 // mergeQueueColumns are the merge_queue columns every queue read selects, in
 // the order scanMergeQueue scans them: the one list, so a read cannot select
 // columns its scan does not expect.
-const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, waits_on, waits_on_name, waits_on_left, ` + requestColumns
+const mergeQueueColumns = `repo_key, workspace_id, state, enqueued_at, ledger_id, source_front, source_behind, pick_started_at, pick_turn, slot, slot_since, aside, waits_on, waits_on_name, waits_on_left, cold_gated, ` + requestColumns
 
 // scanMergeQueue is the one queue-decoding path, so both readers reject an
 // undeclared state identically and number positions the same way. TAIL is the
@@ -1149,7 +1150,7 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 			waitsLeft sql.NullString
 			req       requestScan
 		)
-		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &waitsOn, &waitsName, &waitsLeft}, req.targets()...)...); err != nil {
+		if err := rows.Scan(append([]any{&entry.Repo, &entry.Workspace, &state, &enqueued, &ledger, &front, &behind, &picked, &pickTurn, &slot, &slotSince, &aside, &waitsOn, &waitsName, &waitsLeft, &entry.ColdGated}, req.targets()...)...); err != nil {
 			return nil, err
 		}
 		row := fmt.Sprintf("%s/%s", entry.Repo, entry.Workspace)

@@ -4049,6 +4049,60 @@ func TestARaisedColdGateTellsTheQueueTheSessionWentCold(t *testing.T) {
 	}
 }
 
+func TestARetiredColdGateTellsTheQueueWhetherOrNotARecordStood(t *testing.T) {
+	tests := []struct {
+		name     string
+		recorded bool
+	}{
+		{name: "a recorded gate", recorded: true},
+		{name: "a gate whose record was never written", recorded: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFleetFixture(t)
+			ws := f.workspace("ws-cold-queued")
+			if tt.recorded {
+				f.db.gates[ws.ID] = recordedGate()
+			}
+			var told []ids.WorkspaceID
+			f.fleet.deps.ColdGateRetired = func(w ids.WorkspaceID) { told = append(told, w) }
+
+			// Act
+			err := f.fleet.retireRecordedGate(context.Background(), ws.ID, "a session came up")
+
+			// Assert
+			if err != nil {
+				t.Fatalf("retireRecordedGate: %v", err)
+			}
+			if len(told) != 1 || told[0] != ws.ID {
+				t.Fatalf("told = %v, want the workspace told once", told)
+			}
+		})
+	}
+}
+
+func TestARetirementThatCannotBeWrittenTellsTheQueueNothing(t *testing.T) {
+	// Arrange
+	f := newFleetFixture(t)
+	ws := f.workspace("ws-cold-queued")
+	f.db.gates[ws.ID] = recordedGate()
+	f.db.setGateErr = errFake
+	var told []ids.WorkspaceID
+	f.fleet.deps.ColdGateRetired = func(w ids.WorkspaceID) { told = append(told, w) }
+
+	// Act
+	err := f.fleet.retireRecordedGate(context.Background(), ws.ID, "a session came up")
+
+	// Assert
+	if err == nil {
+		t.Fatal("retireRecordedGate over a failed write succeeded")
+	}
+	if len(told) != 0 {
+		t.Fatalf("told = %v over a failed retirement, want nobody told", told)
+	}
+}
+
 // ---- the gate's compact-and-resume button follows the held prompts ----
 
 // lastGateStanding answers the standing gate the last synthesized row drew.

@@ -454,6 +454,15 @@ const (
 	// CauseAgentGaveUp is the merge's own agent giving it up from a repair
 	// turn the queue gave it (GiveUp).
 	CauseAgentGaveUp AbandonCause = "gave_up"
+	// CauseColdGate is a merge being worked on whose workspace's session
+	// parked at its cold gate. It is NO END of the merge: it ends the run and
+	// its bubble, and puts the merge back at its place in line, skipped until
+	// the gate is passed (coldgate.go, requeues).
+	CauseColdGate AbandonCause = "cold_gate"
+	// CauseHiddenAtColdGate is the user hiding a workspace whose merge stood
+	// at its cold gate: hiding passes the gate without an answer, and takes
+	// the merge off its queue.
+	CauseHiddenAtColdGate AbandonCause = "hidden_at_cold_gate"
 )
 
 // The causes a queue entry leaves its queue for that are NOT abandonments:
@@ -486,12 +495,14 @@ const (
 // abandonSummaries is the resolved sentence each cause draws as the bubble's
 // collapsed line, exactly as `FeedMergeFailed.summary` is drawn.
 var abandonSummaries = map[AbandonCause]string{
-	CauseUserDrop:        "the operator evicted this merge from the queue",
-	CauseUserDequeue:     "the user released this merge's queue slot",
-	CauseWorkspaceClosed: "the workspace was closed while this merge was waiting in the queue",
-	CauseDaemonShutdown:  "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
-	CauseAheadDidNotLand: "the merge this one was placed behind left the queue without landing",
-	CauseAgentGaveUp:     "the merge's own agent gave it up",
+	CauseUserDrop:         "the operator evicted this merge from the queue",
+	CauseUserDequeue:      "the user released this merge's queue slot",
+	CauseWorkspaceClosed:  "the workspace was closed while this merge was waiting in the queue",
+	CauseDaemonShutdown:   "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back",
+	CauseAheadDidNotLand:  "the merge this one was placed behind left the queue without landing",
+	CauseAgentGaveUp:      "the merge's own agent gave it up",
+	CauseColdGate:         "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed",
+	CauseHiddenAtColdGate: "the workspace was hidden at its cold gate while this merge was waiting in the queue",
 }
 
 // runningSummaries are the resolved sentences of a merge abandoned AFTER it
@@ -500,10 +511,12 @@ var abandonSummaries = map[AbandonCause]string{
 // ran (2026-09-28: "a merge left the queue without running" was logged for one
 // that had run three repair rounds).
 var runningSummaries = map[AbandonCause]string{
-	CauseUserDrop:        "the operator evicted this merge while it was running",
-	CauseUserDequeue:     "the user took this merge out of the queue while it was running",
-	CauseWorkspaceClosed: "the workspace was closed while this merge was running",
-	CauseAgentGaveUp:     "the merge's own agent gave it up from its repair turn",
+	CauseUserDrop:         "the operator evicted this merge while it was running",
+	CauseUserDequeue:      "the user took this merge out of the queue while it was running",
+	CauseWorkspaceClosed:  "the workspace was closed while this merge was running",
+	CauseAgentGaveUp:      "the merge's own agent gave it up from its repair turn",
+	CauseColdGate:         "the workspace's session parked at its cold gate while this merge was running; it waits at its place in line until the gate is passed, and runs again from its start",
+	CauseHiddenAtColdGate: "the workspace was hidden at its cold gate while this merge was running",
 }
 
 // releases reports whether C is a RELEASE the user or the operator asked for
@@ -511,7 +524,13 @@ var runningSummaries = map[AbandonCause]string{
 // ending (its workspace closing, the daemon shutting down). A released merge's
 // bubble is closed (closeReleasedBubble).
 func (c AbandonCause) releases() bool {
-	return c == CauseUserDrop || c == CauseUserDequeue
+	return c == CauseUserDrop || c == CauseUserDequeue || c == CauseHiddenAtColdGate
+}
+
+// requeues reports whether C puts the merge back at its place in line rather
+// than ending it (CauseColdGate): its run and its bubble end, its entry stays.
+func (c AbandonCause) requeues() bool {
+	return c == CauseColdGate
 }
 
 // summaryRunning resolves the sentence of a merge abandoned while it ran.
@@ -701,6 +720,9 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 		log.Error(op, "could not read the queue entry of a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
 		return err
 	}
+	if cause.requeues() {
+		return o.requeuePendingResume(ctx, ws, repo, lease, doc, entry, cause, fields, putBack)
+	}
 	if err := o.deps.DB.DropAdmittedMerge(ctx, repo, ws, lease, string(cause)); err != nil {
 		putBack()
 		log.Error(op, "could not drop a merge taken back for its resume; it is left to resume", withField(fields, "error", err.Error()))
@@ -716,6 +738,38 @@ func (o *orchestrator) dropPendingResume(ctx context.Context, ws ids.WorkspaceID
 	log.Info(op, "dropped a merge a restart took back before it resumed: its entry, its lease and its progress record together", fields)
 	o.publishAbandonedWith(ctx, ws, lease, entry, cause, summary)
 	o.clearOffer(ws)
+	if err := o.republishQueue(ctx, repo); err != nil {
+		return err
+	}
+	o.kick(repo)
+	return nil
+}
+
+// requeuePendingResume puts a merge a restart took back, and that has not
+// resumed, back at its place in line under CAUSE (AbandonCause.requeues):
+// its merge lease and progress record go and its entry waits, marked, in ONE
+// store transaction (wsm.RequeueColdGatedMerge), its scratch trees are swept,
+// and its bubble ends, closed, for the new bubble it stands under from here.
+// A write that fails changed nothing: the merge is put back to resume.
+func (o *orchestrator) requeuePendingResume(ctx context.Context, ws ids.WorkspaceID, repo wsm.RepoKey, lease ids.LeaseID, doc progressDoc,
+	entry wsm.MergeQueueEntry, cause AbandonCause, fields dlog.Context, putBack func()) error {
+	const op = "daemon.merge.drop_pending_resume"
+	log := o.log(ctx, ws)
+	ledger := ids.LeaseID(wsm.NewLeaseID())
+	if err := o.lineWrite(repo, func() error {
+		return o.deps.DB.RequeueColdGatedMerge(ctx, repo, ws, lease, ledger)
+	}); err != nil {
+		putBack()
+		log.Error(op, "could not put a merge taken back for its resume back at its place in line; it is left to resume", withField(fields, "error", err.Error()))
+		return err
+	}
+	o.deps.Queue.OnLeaseChanged(ws)
+	o.sweepTrees(ctx, ws, doc.Subject.TargetDir, lease, true)
+	o.mu.Lock()
+	o.ledgerOf[ws] = ledger
+	o.mu.Unlock()
+	log.Info(op, "put a merge a restart took back before it resumed back at its place in line: its lease and progress record go, its entry waits", withField(fields, "ledger", string(ledger)))
+	o.endAbandonedBubble(ctx, ws, lease, entry, cause, o.abandonedSentence(ws, cause, true))
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return err
 	}
@@ -773,6 +827,13 @@ func (o *orchestrator) dropQueued(ctx context.Context, ws ids.WorkspaceID, cause
 	repo, err := o.queueOf(ctx, ws)
 	if err != nil {
 		return err
+	}
+	// A MERGE WAITING IN LINE IS NOT ENDED BY A CAUSE THAT REQUEUES it: the
+	// take-back that found it waiting leaves it where it stands, and the
+	// gate's raise marks it (coldGateRaised).
+	if cause.requeues() {
+		o.coldGateRaised(ctx, ws)
+		return nil
 	}
 	o.withdrawRequest(ws)
 	entry, err := o.takeOffQueue(ctx, repo, ws, cause)
@@ -1207,6 +1268,23 @@ func inLine(stored []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
 		entries = append(entries, entry)
 	}
 	return entries
+}
+
+// admissible answers LINE less the merges whose workspace stands at its cold
+// gate (wsm.MergeQueueEntry.ColdGated): each keeps its place in line, and
+// the queue skips it, so it is never admitted, never joins a chain, and is
+// no merge for another to yield to. It is THE ONE FILTER every admission
+// decision reads the line through (mergecoldgate.go). Positions are left as
+// LINE numbered them, its place in line.
+func admissible(line []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
+	out := make([]wsm.MergeQueueEntry, 0, len(line))
+	for _, entry := range line {
+		if entry.ColdGated {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return out
 }
 
 // outOfLine answers the merges of a repository's stored queue remediating out
@@ -1793,7 +1871,7 @@ func startsOverBehind(entries []wsm.MergeQueueEntry, resuming map[ids.WorkspaceI
 	var behind []ids.WorkspaceID
 	for _, entry := range entries {
 		switch {
-		case entry.State == wsm.MergeQueued && waiting == "" && !entry.HeldBehind() && !entry.AheadFailed() && servedHere(entry.Workspace):
+		case entry.State == wsm.MergeQueued && waiting == "" && !entry.ColdGated && !entry.HeldBehind() && !entry.AheadFailed() && servedHere(entry.Workspace):
 			waiting = entry.Workspace
 		case entry.State == wsm.MergeAdmitted && resuming[entry.Workspace]:
 			if waiting == "" {
@@ -1827,14 +1905,14 @@ type passedOver struct {
 	reason passReason
 }
 
-// nextInLine answers the first entry of a queue that is waiting in line and
-// whose workspace SERVEDHERE says this daemon serves, and every merge waiting
+// nextInLine answers the first entry of a queue that is waiting in line, not
+// standing at its cold gate (admissible), and whose workspace SERVEDHERE says this daemon serves, and every merge waiting
 // ahead of it that it passed over, with why: a requested merge is in nobody's
 // line, an admitted one is already running, and a merge whose merge ahead
 // failed is failed before this runs (failBehind).
 func nextInLine(entries []wsm.MergeQueueEntry, servedHere func(ids.WorkspaceID) bool) (wsm.MergeQueueEntry, bool, []passedOver) {
 	var passed []passedOver
-	for _, entry := range entries {
+	for _, entry := range admissible(entries) {
 		if entry.State != wsm.MergeQueued || entry.AheadFailed() {
 			continue
 		}

@@ -101,7 +101,7 @@ func (o *orchestrator) rebaseWaitingPass(ctx context.Context, repo wsm.RepoKey) 
 		o.deps.Log.Global().Info(op, "the queue is held (paused, or a handover is in flight); its waiting merges are not rebased", dlog.Context{"repo": string(repo)})
 		return
 	}
-	line := inLine(stored)
+	line := admissible(inLine(stored))
 	if len(line) <= 1 {
 		return
 	}

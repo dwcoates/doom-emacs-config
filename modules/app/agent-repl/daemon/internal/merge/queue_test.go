@@ -334,6 +334,8 @@ func TestEveryAbandonCauseResolvesItsOwnSentence(t *testing.T) {
 		{"user dequeue", CauseUserDequeue, "the user released this merge's queue slot"},
 		{"workspace closed", CauseWorkspaceClosed, "the workspace was closed while this merge was waiting in the queue"},
 		{"daemon shutdown", CauseDaemonShutdown, "the daemon shut down while this merge was waiting in the queue, and the restart could not put it back"},
+		{"cold gate", CauseColdGate, "the workspace's session parked at its cold gate; the merge waits at its place in line until the gate is passed"},
+		{"hidden at the cold gate", CauseHiddenAtColdGate, "the workspace was hidden at its cold gate while this merge was waiting in the queue"},
 	}
 	seen := map[string]AbandonCause{}
 	for _, tt := range tests {

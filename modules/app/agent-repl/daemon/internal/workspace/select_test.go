@@ -1138,6 +1138,52 @@ func TestSetHiddenTellsTheCacheKeeper(t *testing.T) {
 	}
 }
 
+func TestSetHiddenTellsTheMergeQueueOfAHideOnly(t *testing.T) {
+	tests := []struct {
+		name   string
+		hidden bool
+		want   []ids.WorkspaceID
+	}{
+		{name: "a hide is told", hidden: true, want: []ids.WorkspaceID{"w1"}},
+		{name: "a show is not", hidden: false, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act
+			if err := f.verbs.SetHidden(context.Background(), "w1", tt.hidden); err != nil {
+				t.Fatalf("SetHidden: %v", err)
+			}
+
+			// Assert
+			if !slices.Equal(f.merge.hidden, tt.want) {
+				t.Fatalf("the merge queue was told of hides %v, want %v", f.merge.hidden, tt.want)
+			}
+		})
+	}
+}
+
+func TestAFailedHideTellsTheMergeQueueNothing(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	f.db.setHiddenErr = errFake
+
+	// Act
+	err := f.verbs.SetHidden(context.Background(), "w1", true)
+
+	// Assert
+	if err == nil {
+		t.Fatal("SetHidden over a failed write succeeded")
+	}
+	if len(f.merge.hidden) != 0 {
+		t.Fatalf("the merge queue was told of hides %v over a failed write, want none", f.merge.hidden)
+	}
+}
+
 // TestHidingStandsNothingDownAtOnce pins the owner's request of 2026-10-13: a
 // hidden workspace's cache is left to lapse, and the cache keeper stands its
 // session down only when it does.

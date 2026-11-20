@@ -820,10 +820,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// fleet, whose watchers report every ask edge into it, and handed to the
 	// merge orchestrator built below.
 	mergeAsks := merge.NewAsks()
-	// THE COLD GATE EJECTS A QUEUED MERGE (owner ruling, 2026-10-13). The
-	// fleet is built before the merge orchestrator, so the eviction is bound
-	// once the orchestrator exists.
-	var ejectCold func(ids.WorkspaceID)
+	// THE COLD GATE KEEPS A QUEUED MERGE AT ITS PLACE, SKIPPED (owner ruling,
+	// 2026-11-11). The fleet is built before the merge orchestrator, so the
+	// gate's edges reach it once it exists.
+	var coldGates merge.Orchestrator
 
 	// THE HIDDEN WORKSPACES' CACHE KEEPER, fed by the fleet's watchers (a held
 	// shim's projected lapse), the lifecycle sink (a session coming up) and
@@ -981,9 +981,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			shimLoading(feedResolver, sidebarResolver, ws, step)
 		},
 		SessionsUp: lifecycle.SessionUp,
-		// OFF THE BRING-UP'S GOROUTINE: the merge being ejected may itself be
-		// what is bringing the session up (its repair's ensureSession), and
-		// the eviction waits for that run to stop.
+		// THE GATE'S EDGES REACH THE MERGE QUEUE, which applies them in order
+		// off the bring-up's goroutine: the merge put back at its place may
+		// itself be what is bringing the session up (its repair's
+		// ensureSession), and putting it back waits for that run to stop.
 		// A HIDDEN OR CLOSED WORKSPACE PARKED AT ITS GATE takes the gate's
 		// lapse (cachelapse.Keeper.ColdGateRaised).
 		// A PROMPT TYPED ON claude.ai INTO A PARKED WORKSPACE answers its
@@ -996,8 +997,8 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			if judged {
 				edges.ColdGated(ws)
 			}
-			if eject := ejectCold; eject != nil {
-				inflight.Go(func() { eject(ws) })
+			if queue := coldGates; queue != nil {
+				queue.ColdGateRaised(ws)
 			}
 			// A GATE ON A STANDING DEPLOY CHECK IS ANSWERED AT ONCE, off the
 			// raise (owner ruling, 2026-11-17): no deploy check waits on one.
@@ -1006,6 +1007,11 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 					log.Error("daemon.workspace.deploy_checks", "the cold gate on a standing deploy check could not be answered", dlog.Context{"workspace": string(ws), "cause": err.Error()})
 				}
 			})
+		},
+		ColdGateRetired: func(ws ids.WorkspaceID) {
+			if queue := coldGates; queue != nil {
+				queue.ColdGateRetired(ws)
+			}
 		},
 		SocketPath:   func(ws ids.WorkspaceID) string { return p.Layout.ShimSocket(string(ws)) },
 		StoreSocket:  p.Opts.storeSocket,
@@ -1504,18 +1510,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	// every other log the daemon writes.
 	p.Surfaces.RetainDirectory(merge.LogsDir(p.Layout.Dir()), merge.IsLog)
 	mergeMover.bind(mergeOrchestrator)
-	ejectCold = func(ws ids.WorkspaceID) {
-		const op = "daemon.merge.cold_gate"
-		err := mergeOrchestrator.Evict(context.Background(), ws)
-		if refusal, ok := merge.Refused(err); ok && refusal.Arm == merge.ArmNoSuchQueuedMerge {
-			return
-		}
-		if err != nil {
-			log.Error(op, "could not take the merge of a workspace whose session parked at its cold gate off the queue", dlog.Context{"workspace": string(ws), "error": err.Error()})
-			return
-		}
-		log.Info(op, "the session parked at its cold gate; its merge leaves the queue", dlog.Context{"workspace": string(ws)})
-	}
+	coldGates = mergeOrchestrator
 
 	// ---- health, login, the verbs ----
 

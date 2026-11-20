@@ -70,7 +70,7 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 	string(CauseAheadDidNotLand): func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_AheadDidNotLand{AheadDidNotLand: &agentreplv1.MergeQueueStatusOffQueueCauseAheadDidNotLand{}}}
 	},
-	causeHiddenAtColdGate: func() *agentreplv1.MergeQueueStatusOffQueueCause {
+	string(CauseHiddenAtColdGate): func() *agentreplv1.MergeQueueStatusOffQueueCause {
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_HiddenAtColdGate{HiddenAtColdGate: &agentreplv1.MergeQueueStatusOffQueueCauseHiddenAtColdGate{}}}
 	},
 	string(CauseAgentGaveUp): func() *agentreplv1.MergeQueueStatusOffQueueCause {
@@ -80,10 +80,6 @@ var offQueueCauses = map[string]func() *agentreplv1.MergeQueueStatusOffQueueCaus
 		return &agentreplv1.MergeQueueStatusOffQueueCause{Cause: &agentreplv1.MergeQueueStatusOffQueueCause_Adopted{Adopted: &agentreplv1.MergeQueueStatusOffQueueCauseAdopted{}}}
 	},
 }
-
-// causeHiddenAtColdGate is the cause a merge leaves its queue for when its
-// workspace is hidden at its cold gate, as the cold-gate queue spells it.
-const causeHiddenAtColdGate = "hidden_at_cold_gate"
 
 // offQueueWords is the sidebar's one word for every merge off its queue
 // (frontend.v1.RosterMergeQueueOffQueueCause), whatever its cause (owner

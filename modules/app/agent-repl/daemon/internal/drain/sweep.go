@@ -8,6 +8,7 @@ import (
 
 	shimv1 "agentrepl/proto/shim/v1"
 
+	"agent-repld/internal/bringup"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/shimlife"
@@ -47,6 +48,16 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 	var parked []ids.WorkspaceID
 	for _, ws := range workspaces {
 		fields := dlog.Context{"workspace": string(ws.ID), "cutoff": c.deps.IdleCutoff.String()}
+		// A QUEUED MERGE KEEPS ITS SESSION WARM FOR LONGER (owner rulings,
+		// 2026-10-13, 2026-10-26 and 2026-11-11): the merge's prompts run on
+		// that session, and a long queue holds an entry for hours, so it is
+		// kept warm for QueuedIdleFactor cutoffs from when it last engaged or
+		// joined its queue (bringup.IdleHorizon); past them it parks like any
+		// other session, and its merge waits at its cold gate, skipped.
+		enqueued, queuedHere := queued[ws.ID]
+		if queuedHere {
+			fields["queued_at"] = enqueued.Format(time.RFC3339)
+		}
 		// EVERY RECORD BELOW IS WORKSPACE-BOUND and goes to that workspace's
 		// own sink whenever the workspace can host one. A workspace whose
 		// directory is a scratch path or has been deleted still gets swept:
@@ -59,15 +70,6 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 			log.Debug(opSweep, "the workspace has no session to park", fields)
 			continue
 		}
-		// A QUEUED MERGE KEEPS ITS SESSION WARM FOR AS LONG AS IT STANDS IN
-		// LINE (owner rulings, 2026-10-13 and 2026-10-26): the merge's prompts
-		// run on that session, and a long queue holds an entry for hours, so
-		// no idle cutoff parks it while its entry stands.
-		if enqueued, ok := queued[ws.ID]; ok {
-			log.Debug(opSweep, "the workspace has a merge queued; its session is kept warm",
-				dlog.Merge(fields, dlog.Context{"queued_at": enqueued.Format(time.RFC3339)}))
-			continue
-		}
 		idle := now.Sub(session.LastEngagementAt)
 		fields["idle"] = idle.String()
 		// A SESSION ALREADY PARKED STAYS AS IT IS. There is one park, so a park
@@ -78,7 +80,7 @@ func (c *controller) Sweep(ctx context.Context, now time.Time) ([]ids.WorkspaceI
 				dlog.Merge(fields, dlog.Context{"terminal_kind": session.Terminal.Kind}))
 			continue
 		}
-		if idle < c.deps.IdleCutoff {
+		if now.Before(bringup.IdleHorizon(c.deps.IdleCutoff, session.LastEngagementAt, enqueued, queuedHere)) {
 			log.Debug(opSweep, "the session was engaged inside the cutoff", fields)
 			continue
 		}

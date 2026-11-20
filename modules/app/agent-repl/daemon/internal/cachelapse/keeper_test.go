@@ -39,7 +39,9 @@ type fakeDB struct {
 	keepaliveErr error
 	// queued are the workspaces with an entry standing in a merge queue;
 	// queuesErr fails the queues' read.
-	queued    []ids.WorkspaceID
+	queued []ids.WorkspaceID
+	// queuedAt is when every queued entry joined its queue.
+	queuedAt  time.Time
 	queuesErr error
 	// sessions are the session records by workspace; sessionErr fails the read.
 	sessions   map[ids.WorkspaceID]wsm.Session
@@ -153,7 +155,7 @@ func (f *fakeDB) AllMergeQueues(context.Context) (map[wsm.RepoKey][]wsm.MergeQue
 	}
 	entries := make([]wsm.MergeQueueEntry, len(f.queued))
 	for i, ws := range f.queued {
-		entries[i] = wsm.MergeQueueEntry{Workspace: ws}
+		entries[i] = wsm.MergeQueueEntry{Workspace: ws, EnqueuedAt: f.queuedAt}
 	}
 	return map[wsm.RepoKey][]wsm.MergeQueueEntry{"/repo/.git": entries}, nil
 }

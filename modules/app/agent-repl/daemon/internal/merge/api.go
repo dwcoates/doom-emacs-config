@@ -223,6 +223,18 @@ type Orchestrator interface {
 	// running one is ended through the one release path. It is a no-op for a
 	// workspace with no merge.
 	OnWorkspaceClosed(ctx context.Context, ws ids.WorkspaceID)
+	// ColdGateRaised is told WS's session parked at its cold gate: its merge
+	// keeps its place in line and is skipped until the gate is passed, and a
+	// merge being worked on is put back at its place (coldgate.go). It
+	// returns at once; the edges of every gate are applied in the order they
+	// were told.
+	ColdGateRaised(ws ids.WorkspaceID)
+	// ColdGateRetired is told WS's recorded cold gate was retired (a session
+	// came up): its merge resumes at its place in line.
+	ColdGateRetired(ws ids.WorkspaceID)
+	// OnHidden is told WS was hidden: a merge standing at its cold gate
+	// leaves its queue (CauseHiddenAtColdGate). It returns at once.
+	OnHidden(ws ids.WorkspaceID)
 	// RevealMergeWorkspace draws a hidden async merge workspace in the tab bar
 	// and the sidebar from now on, naming CAUSE in its record, and restates the
 	// requester's bubble head with its switch. It is a no-op for a workspace

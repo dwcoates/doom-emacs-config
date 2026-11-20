@@ -161,6 +161,12 @@ type orchestrator struct {
 	// and the requests waiting for their turn to end. Nothing in production
 	// waits on it; a test does, so nothing it started outlives the test.
 	live sync.WaitGroup
+	// coldMu guards the cold gate's edges waiting to be applied, in the order
+	// they happened, and whether their one worker runs (coldgate.go). It is
+	// its own lock, never taken with mu.
+	coldMu       sync.Mutex
+	coldEdges    []coldGateEdge
+	coldApplying bool
 	// events serializes the queue's reported changes (subscriptions.go). It
 	// is its own lock, never taken with mu.
 	events *queueEvents

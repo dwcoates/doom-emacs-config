@@ -147,6 +147,11 @@ type fakeDB struct {
 	ledger  map[ids.WorkspaceID][]wsm.MergeLedgerEntry
 	queues  map[wsm.RepoKey][]wsm.MergeQueueEntry
 	paused  map[wsm.RepoKey]bool
+	// coldGates are the recorded cold gates, by workspace; coldGateReadErr
+	// fails their read, and coldGateErr fails every cold-gate mark write.
+	coldGates       map[ids.WorkspaceID]wsm.ColdGateRecord
+	coldGateReadErr error
+	coldGateErr     error
 	// pauses are the records SetMergeQueuePaused wrote, by repository.
 	pauses map[wsm.RepoKey]*wsm.MergeQueuePause
 	// allQueuesErr fails AllMergeQueues, the read a workspace's take-back
@@ -1509,6 +1514,113 @@ func (f *fakeDB) DiscardOffQueueMerge(_ context.Context, id ids.WorkspaceID) err
 	}
 	delete(f.offQueue, id)
 	return nil
+}
+
+// SetMergeColdGated marks a waiting entry at its cold gate, as the durable
+// queue does.
+func (f *fakeDB) SetMergeColdGated(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.coldGateErr != nil {
+		return false, f.coldGateErr
+	}
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace != id {
+			continue
+		}
+		if entry.State != wsm.MergeQueued {
+			return false, fmt.Errorf("mark %s at its cold gate while %s, not waiting", id, entry.State)
+		}
+		if entry.ColdGated {
+			return false, nil
+		}
+		f.queues[repo][i].ColdGated = true
+		return true, nil
+	}
+	return false, fmt.Errorf("mark %s at its cold gate: %w", id, wsm.ErrNotFound)
+}
+
+// ClearMergeColdGated retires an entry's cold-gate mark, putting an entry
+// ahead of the merges worked on right behind the last of them, as the durable
+// queue does.
+func (f *fakeDB) ClearMergeColdGated(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, workedOn []ids.WorkspaceID) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.coldGateErr != nil {
+		return false, f.coldGateErr
+	}
+	queue := f.queues[repo]
+	at, last := -1, -1
+	for i, entry := range queue {
+		if entry.Workspace == id {
+			at = i
+		}
+		if slices.Contains(workedOn, entry.Workspace) {
+			last = i
+		}
+	}
+	if at < 0 {
+		return false, fmt.Errorf("unmark %s: %w", id, wsm.ErrNotFound)
+	}
+	if !queue[at].ColdGated {
+		return false, nil
+	}
+	entry := queue[at]
+	entry.ColdGated = false
+	queue[at] = entry
+	if last > at {
+		rest := append(queue[:at:at], queue[at+1:]...)
+		f.queues[repo] = append(rest[:last:last], append([]wsm.MergeQueueEntry{entry}, rest[last:]...)...)
+		f.renumber(repo)
+	}
+	return true, nil
+}
+
+// RequeueColdGatedMerge puts an admitted entry back where it stands, waiting
+// and marked under LEDGER, with LEASE and its progress when one is named, as
+// the durable queue does.
+func (f *fakeDB) RequeueColdGatedMerge(_ context.Context, repo wsm.RepoKey, id ids.WorkspaceID, lease, ledger wsm.LeaseID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.coldGateErr != nil {
+		return f.coldGateErr
+	}
+	at := -1
+	for i, entry := range f.queues[repo] {
+		if entry.Workspace == id && entry.State == wsm.MergeAdmitted {
+			at = i
+		}
+	}
+	if at < 0 {
+		return fmt.Errorf("requeue %s at its cold gate: %w", id, wsm.ErrNotFound)
+	}
+	if lease != "" {
+		if held, ok := f.leases[id]; !ok || held.ID != lease || held.Holder != wsm.HolderMerge {
+			return fmt.Errorf("requeue %s at its cold gate with lease %s: %w", id, lease, wsm.ErrNotFound)
+		}
+		delete(f.leases, id)
+		f.releasedLeases = append(f.releasedLeases, lease)
+		for ws, p := range f.progress {
+			if p.Lease == lease {
+				delete(f.progress, ws)
+			}
+		}
+	}
+	f.queues[repo][at].State = wsm.MergeQueued
+	f.queues[repo][at].ColdGated = true
+	f.queues[repo][at].Ledger = ledger
+	return nil
+}
+
+// ColdGate answers a workspace's recorded cold gate (coldGates).
+func (f *fakeDB) ColdGate(_ context.Context, id ids.WorkspaceID) (wsm.ColdGateRecord, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.coldGateReadErr != nil {
+		return wsm.ColdGateRecord{}, false, f.coldGateReadErr
+	}
+	rec, ok := f.coldGates[id]
+	return rec, ok, nil
 }
 
 // ReturnAdmittedMerge puts an admitted entry back in line where it stands.

@@ -654,6 +654,19 @@ type DB interface {
 	// ReturnAdmittedMerge puts an admitted merge with no run back in line at
 	// its own place, waiting, under its ledger identity.
 	ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error
+	// SetMergeColdGated marks a waiting merge's workspace as standing at its
+	// cold gate, so the queue skips it at its place, answering whether the
+	// mark changed (mergecoldgate.go).
+	SetMergeColdGated(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)
+	// ClearMergeColdGated retires a merge's cold-gate mark once its gate was
+	// passed, putting it behind every merge the caller names as being worked
+	// on when it stands ahead of one, answering whether the mark changed.
+	ClearMergeColdGated(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID) (bool, error)
+	// RequeueColdGatedMerge puts an admitted merge whose workspace parked at
+	// its cold gate back in line at its own place, waiting and marked, under
+	// a new ledger identity; a merge lease it still holds goes in the same
+	// transaction, with that lease's progress record.
+	RequeueColdGatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease, ledger LeaseID) error
 	// RemoveMergeQueueEntry takes one entry off its queue with the cause it
 	// left for, through the one transition (leaveQueueInTx): a landing ends
 	// its request, any other cause keeps it off the queue.

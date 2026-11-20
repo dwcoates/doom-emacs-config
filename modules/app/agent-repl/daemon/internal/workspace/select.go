@@ -271,6 +271,9 @@ func (v *verbs) SetHidden(ctx context.Context, ws ids.WorkspaceID, hidden bool) 
 	if !hidden {
 		return nil
 	}
+	// HIDING PASSES A STANDING COLD GATE WITHOUT AN ANSWER (owner ruling,
+	// 2026-11-11): a merge kept at its place at the gate leaves its queue.
+	v.deps.Merge.OnHidden(ws)
 	return v.landAfterHiding(ctx, log, ws)
 }
 
