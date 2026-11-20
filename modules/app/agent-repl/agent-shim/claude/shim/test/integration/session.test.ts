@@ -1130,9 +1130,10 @@ describe("the shim's own faults", () => {
 
 describe("Hibernate", () => {
   test("a turn in flight refuses turn_in_flight", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     const response = await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {}));
 
@@ -1143,15 +1144,19 @@ describe("Hibernate", () => {
     // THE OWNER'S RULING (2026-09-20). Hibernation stops the shim to free its
     // memory and does nothing else, so the directive is single-phase again:
     // one ask, one ack, and a transcript exactly as the conversation left it.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // THE "hibernate" GROUP: a hibernation stands the vendor down, which no
+    // case on the canonical session expects.
+    const { shim, started } = await groupSession("hibernate");
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
 
     hibernateAcked(
       await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
-    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+    const boundaries = mine.transcript(started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
     expect(boundaries).toHaveLength(0);
@@ -1163,9 +1168,13 @@ describe("Hibernate", () => {
     // not end in a stand-down could buy a whole vendor summary turn: thirteen
     // boundaries and thirteen blocks of continuation notes in one morning. A
     // directive that asks the vendor for nothing cannot repeat anything.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    // THE "hibernate" GROUP: a hibernation stands the vendor down, which no
+    // case on the canonical session expects.
+    const { shim, started } = await groupSession("hibernate");
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     hibernateAcked(
       await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
@@ -1174,7 +1183,7 @@ describe("Hibernate", () => {
       await shim.clients.h1.hibernate(create(shimv1.HibernateRequestSchema, {})),
     );
 
-    const boundaries = readTranscript(shim.dirs, started.vendorSessionId).filter(
+    const boundaries = mine.transcript(started.vendorSessionId).filter(
       (record) => record.type === "system" && record.subtype === "compact_boundary",
     );
     expect(boundaries).toHaveLength(0);
@@ -1185,6 +1194,7 @@ describe("Hibernate", () => {
     // KillSession. While Hibernate ran a throwaway compaction query, the
     // teardown awaited THAT query's loop and never returned. It runs no query
     // at all now, and this is the assertion that keeps the pair settling.
+    // ITS OWN SHIM: the subject is the KillSession that ends the process.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
     await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
@@ -1209,6 +1219,7 @@ describe("Hibernate", () => {
 
 describe("KillSession", () => {
   test("an idle session ends idle and the process exits 0", async () => {
+    // ITS OWN SHIM: the subject is the KillSession that ends the process.
     const shim = await spawnShim();
     await shim.clients.h1.startSession(freshSession());
 
@@ -1224,13 +1235,14 @@ describe("KillSession", () => {
   test("live detached work refuses, NAMING the work", async () => {
     // Both outcomes name the work so the daemon can tell the user what forcing
     // would destroy.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await agent.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await agent.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const inner = watchAgentEntry(frame).entry?.entry;
@@ -1254,26 +1266,34 @@ describe("KillSession", () => {
   test("a live refusal is recorded at INFO, naming each live item and its kind", async () => {
     // Arrange: a detached shell is live (2026-10-14: a refusal over "1 live
     // item(s)" the daemon read as free, with no record of which item it was).
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const mine = since(shim);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const agent = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    await awaitAgentEntry(agent, (entry) => entryFrame(entry)?.result.case === "detachedWork");
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
+    const announced = await awaitAgentEntry(
+      agent,
+      (entry) => entry.turn?.value === t1 && entryFrame(entry)?.result.case === "detachedWork",
+    );
     agent.close();
+    const announcedFrame = entryFrame(announced);
+    const run = announcedFrame?.result.case === "detachedWork" ? (announcedFrame.result.value.work?.value ?? "") : "";
 
     // Act
     await shim.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: false }));
 
-    // Assert
-    const refusal = await shim.log.record(
+    // Assert: THIS CASE'S OWN LIVE ITEM, among the live runs its siblings on
+    // the shared session left.
+    const refusal = await mine.record(
       (record) => record.message === "refused KillSession because the session is live and force was not set",
     );
     expect(refusal.level).toBe("info");
     const items = refusal.context.live_items as { task_type: string; tool_use_id: string }[];
-    expect(items.map((item) => item.task_type)).toEqual(["local_bash"]);
-    expect(items[0]?.tool_use_id).not.toBe("");
+    expect(run).not.toBe("");
+    expect(items.filter((item) => item.tool_use_id === run).map((item) => item.task_type)).toEqual(["local_bash"]);
   });
 
   test("force ends it, naming the stopped work", async () => {
