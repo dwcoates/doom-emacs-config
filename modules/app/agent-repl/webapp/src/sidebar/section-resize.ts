@@ -251,8 +251,9 @@ export function installSectionResize(
       refit();
     };
     const end = (commit: boolean): void => {
-      grip.removeEventListener("pointermove", move);
-      grip.removeEventListener("pointerup", up);
+      doc.removeEventListener("pointermove", move);
+      doc.removeEventListener("pointerup", up);
+      doc.removeEventListener("pointercancel", lost);
       grip.removeEventListener("lostpointercapture", lost);
       doc.removeEventListener("keydown", key, true);
       doc.documentElement.classList.remove(DRAGGING_CLASS, RESIZING_CLASS);
@@ -283,8 +284,11 @@ export function installSectionResize(
       e.preventDefault();
       end(false);
     };
-    grip.addEventListener("pointermove", move);
-    grip.addEventListener("pointerup", up);
+    // On the document, not the grip: a re-render that detaches the grip mid-drag
+    // would strand listeners on it and leave RESIZING_CLASS's cursor stuck.
+    doc.addEventListener("pointermove", move);
+    doc.addEventListener("pointerup", up);
+    doc.addEventListener("pointercancel", lost);
     grip.addEventListener("lostpointercapture", lost);
     doc.addEventListener("keydown", key, true);
     dragging = () => end(false);
