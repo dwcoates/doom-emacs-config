@@ -203,6 +203,31 @@ func TestInterruptAnswersTheDetachedCount(t *testing.T) {
 	}
 }
 
+// TestInterruptAnswersTheTurnStillRunningNamingTheTurn pins that a fan-wide
+// stop which reached no detached work while a turn runs answers
+// turn_still_running with the turn, never nothing_running.
+func TestInterruptAnswersTheTurnStillRunningNamingTheTurn(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	turn := ids.TurnID("t-busy")
+	h.Verbs.interruptOutcome = workspace.InterruptOutcome{TurnStillRunning: &turn}
+
+	// Act.
+	resp, err := h.Client.Interrupt(context.Background(),
+		connect.NewRequest(&agentreplv1.InterruptRequest{
+			Workspace: ref(),
+			Target:    &agentreplv1.InterruptRequest_AllAgents{AllAgents: &agentreplv1.InterruptAllAgents{}},
+		}))
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Interrupt: %v", err)
+	}
+	if got := resp.Msg.GetSuccess().GetTurnStillRunning().GetTurn().GetValue(); got != "t-busy" {
+		t.Fatalf("result = %v, want turn_still_running naming t-busy", resp.Msg.GetResult())
+	}
+}
+
 // TestInterruptRaisesTheConfirmChallenge pins the unconfirmed turn interrupt
 // with live detached agents: the user is asked once, with the count.
 func TestInterruptRaisesTheConfirmChallenge(t *testing.T) {

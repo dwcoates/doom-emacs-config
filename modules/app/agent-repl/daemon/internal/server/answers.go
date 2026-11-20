@@ -227,6 +227,15 @@ func (s *server) Interrupt(
 		// THE ROLLED-BACK PROMPT'S SELECTION ENDS WITH IT: its row is gone.
 		s.endSelection(subject.Log, subject.Record.ID, unanswered.row, returnToTail(), "rolled_back")
 		success.Outcome = rolledBackUnanswered(unanswered.said)
+	case outcome.TurnStillRunning != nil:
+		// A STOP OF DETACHED WORK THAT REACHED NONE WHILE THE TURN RUNS: the
+		// answer names the turn, so the caller never reads a busy workspace
+		// as idle and knows the turn stop is the one that ends it.
+		success.Outcome = &agentreplv1.InterruptSuccess_TurnStillRunning{
+			TurnStillRunning: &agentreplv1.InterruptTurnStillRunning{
+				Turn: &conversationv1.TurnId{Value: string(*outcome.TurnStillRunning)},
+			},
+		}
 	case outcome.Turn:
 		interrupted := &agentreplv1.InterruptedTurn{}
 		if outcome.RollbackRefused != nil {
@@ -245,7 +254,7 @@ func (s *server) Interrupt(
 		}
 	}
 	subject.Log.Debug("daemon.server.interrupt", "answered what the interrupt stopped",
-		dlog.Context{"nothing_running": outcome.NothingRunning, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount,
+		dlog.Context{"nothing_running": outcome.NothingRunning, "turn_still_running": outcome.TurnStillRunning != nil, "merge_queue_offered": outcome.MergeQueueOffered, "detached": outcome.DetachedCount,
 			"rolled_back": outcome.RolledBack, "rollback_refused": outcome.RollbackRefused != nil})
 	return interruptSucceeded(resp, success)
 }

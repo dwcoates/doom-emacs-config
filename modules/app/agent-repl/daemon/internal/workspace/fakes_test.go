@@ -2242,6 +2242,11 @@ type fakeQueue struct {
 	withdraws   []ids.WorkspaceID
 	withdrawn   bool
 	withdrawErr error
+	// revivalTurn, revivalWaiting and revivalErr are what RevivalTurn
+	// answers: the accepted turn waiting on a bring-up, if any.
+	revivalTurn    ids.TurnID
+	revivalWaiting bool
+	revivalErr     error
 	// startAwaits records every AwaitTurnStarted call's turn, in order;
 	// startAwaitErr is what each answers, and onStartAwait runs as each is
 	// made.
@@ -2268,6 +2273,11 @@ func (q *fakeQueue) ColdGateAnswered(_ context.Context, _ ids.WorkspaceID, fate 
 func (q *fakeQueue) WithdrawRevivalTurn(_ context.Context, ws ids.WorkspaceID) (bool, error) {
 	q.withdraws = append(q.withdraws, ws)
 	return q.withdrawn, q.withdrawErr
+}
+
+// RevivalTurn answers the scripted accepted turn waiting on a bring-up.
+func (q *fakeQueue) RevivalTurn(_ context.Context, _ ids.WorkspaceID) (ids.TurnID, bool, error) {
+	return q.revivalTurn, q.revivalWaiting, q.revivalErr
 }
 
 // AwaitTurnStarted records the call and answers the scripted outcome.
