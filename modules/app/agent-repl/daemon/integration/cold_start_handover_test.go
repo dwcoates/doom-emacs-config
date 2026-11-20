@@ -93,7 +93,7 @@ func TestAColdStartedDaemonHandsOverTheSessionsItBroughtUp(t *testing.T) {
 			}
 			watchesBefore := shim.Count(harness.RPCWatchSession)
 			host := cold.WatchHost(f.ws)
-			harness.AwaitNext(t, cold.Ctx(), host, "the fresh host push")
+			harness.AwaitHostView(t, cold.Ctx(), host, "the fresh host push")
 			daemonStream := cold.WatchDaemonStream()
 
 			// Act: the cold daemon hands over.

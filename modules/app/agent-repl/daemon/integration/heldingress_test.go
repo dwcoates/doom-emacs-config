@@ -194,7 +194,7 @@ func TestDuringAHandoverOnlyTheServingDaemonIngestsAHeldPrompt(t *testing.T) {
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	if first := f.submit("first", "k-handover-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); first.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt(first) = %v, want the turn accepted", first)
 	}

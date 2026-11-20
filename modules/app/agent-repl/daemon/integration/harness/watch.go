@@ -117,6 +117,20 @@ func endCause(ctx context.Context) string {
 	return ""
 }
 
+// HostView reports whether a host push is the `host` view, not one of the
+// stream's other standing arms (the mention targets, sent beside it on every
+// subscription in no fixed order) or an event.
+func HostView(r *agentreplv1.WatchHostWorkspaceResponse) bool {
+	return r.GetHost() != nil
+}
+
+// AwaitHostView waits on HOST for its next `host` view (HostView), passing
+// over every other arm, and answers it.
+func AwaitHostView(t testing.TB, ctx context.Context, host *Stream[*agentreplv1.WatchHostWorkspaceResponse], what string) *agentreplv1.WatchHostWorkspaceResponse {
+	t.Helper()
+	return AwaitView(t, ctx, host, what, HostView)
+}
+
 // SessionServes reports whether a host push states the workspace's session
 // serves: live, its shim attached and its composer open. A remediated cold
 // re-open is wired a moment after the shim takes it, and a prompt submitted

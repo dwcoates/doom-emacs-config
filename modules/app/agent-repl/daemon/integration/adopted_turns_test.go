@@ -258,7 +258,7 @@ func TestAForcedHandoversAdoptionReconcilesItsOpenTurn(t *testing.T) {
 			f.shim.ExpectStartSession()
 			host := d.WatchHost(f.ws)
 			f.web = d.WatchWeb(f.ws)
-			harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+			harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 			turn := openTurnOn(t, f, "k-handover")
 			daemonStream := d.WatchDaemonStream()
 

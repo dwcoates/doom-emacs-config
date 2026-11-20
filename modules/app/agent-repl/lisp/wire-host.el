@@ -740,7 +740,7 @@ NAME is the name string, WORKSPACE its `WorkspaceRef' plist, and REPOSITORY
 the repository's name string, or nil when the daemon stated none."
   (let* ((message "WorkspaceMentionTarget")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(name workspace repository))
+    (agent-repl-wire--check-keys "WorkspaceMentionTarget" object '(name workspace repository))
     (agent-repl-wire--decoded
      message
      (list :name (agent-repl-wire--decode-message
@@ -758,7 +758,7 @@ order.  A name served twice is a contract breach: the daemon serves
 distinct names only."
   (let* ((message "WorkspaceMentionTargets")
          (object (agent-repl-wire--object message value)))
-    (agent-repl-wire--check-keys message object '(targets))
+    (agent-repl-wire--check-keys "WorkspaceMentionTargets" object '(targets))
     (let ((targets (agent-repl-wire--decode-repeated
                     message 'targets object #'agent-repl-wire-decode-workspace-mention-target))
           (seen (make-hash-table :test 'equal)))

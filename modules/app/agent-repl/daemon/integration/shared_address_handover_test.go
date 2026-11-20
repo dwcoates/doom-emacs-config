@@ -39,7 +39,7 @@ func TestAHandoverOnASharedAddressIsReachedOnlyThroughThatAddress(t *testing.T) 
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	daemonStream := d.WatchDaemonStream()
 	shared := drainDial(holder.Address)
 
