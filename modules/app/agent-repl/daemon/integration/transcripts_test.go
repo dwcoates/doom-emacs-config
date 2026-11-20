@@ -41,7 +41,7 @@ func listTranscripts(f *fixture) *agentreplv1.ListWorkspaceTranscriptsResponse {
 // process that owns the transcripts rather than only the verb layer's fake.
 func TestListWorkspaceTranscriptsReachesTheShimAndRelaysItsAnswer(t *testing.T) {
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	opening := "explain hash tables"
 	answerTranscripts(f, &shimv1.Transcript{
 		VendorSessionId: "conversation-a", Opening: &opening, Prompts: 3,
@@ -68,7 +68,7 @@ func TestListWorkspaceTranscriptsReachesTheShimAndRelaysItsAnswer(t *testing.T) 
 func TestListWorkspaceTranscriptsLetsTheDAEMONSRecordDecideWhatIsCurrent(t *testing.T) {
 	// Arrange: an opened workspace already records its own conversation, and
 	// the shim claims a DIFFERENT one is the bound one.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	answerTranscripts(f, &shimv1.Transcript{
 		VendorSessionId: "not-the-recorded-one", Bound: &shimv1.TranscriptBound{},
 	})

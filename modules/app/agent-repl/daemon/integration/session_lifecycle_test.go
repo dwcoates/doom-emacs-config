@@ -45,7 +45,7 @@ func (f *fixture) startRaw() (*agentreplv1.RestartWorkspaceResponse, error) {
 func TestOpenWorkspaceSpawnsTheFakeShimWithTheContractedArgvAndEnv(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	info := f.shim.Info()
 
 	// Assert: argv.
@@ -215,7 +215,7 @@ func TestFakeShimExitingDuringBringUpEndsBringUpImmediately(t *testing.T) {
 func TestAWorkspaceOpenReplaysItsFirstPageOnce(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.shim.ExpectStartSession()
 
 	// Act: two turns, each run to its end.
@@ -243,7 +243,7 @@ func TestReopeningAWorkspaceWithAPriorSessionResumesItsVendorSession(t *testing.
 	t.Parallel()
 	// Arrange: open once to mint a vendor session, then kill it so the
 	// workspace's session record carries a vendor id with no live shim.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -279,7 +279,7 @@ func TestAMissingTranscriptRecordsTheAbandonedConversation(t *testing.T) {
 	// what makes the vanished transcript an abandonment of real history rather
 	// than the ordinary state of an id bounced before it ever spoke, and it is
 	// the whole reason this bring-up is loud.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the missing transcript the test stages, the abandoned conversation the classifier records, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.account.find_transcript", "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
@@ -315,7 +315,7 @@ func TestAMissingTranscriptForAConversationThatNeverSpokeIsOrdinary(t *testing.T
 	// coming up fresh loses nothing — this is the ordinary state of a
 	// stale-build relaunch bounce, and it must be recorded as such rather than
 	// warned about.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a session fault the test opens, the shim death the test drives, the shim link the test severs. daemon.workspace.bring_up is DELIBERATELY ABSENT: this bring-up must produce no warning of its own.
 	f.d.ExpectWarnings("daemon.sessionwatcher.reopen", "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.watch_agent",
@@ -344,7 +344,7 @@ func TestAMissingTranscriptForAConversationThatNeverSpokeIsOrdinary(t *testing.T
 func TestStartSessionResumeColdStandsAGateBlockingReopenUntilAnswered(t *testing.T) {
 	t.Parallel()
 	// Arrange: kill to get a resumable session, then script the resume as cold.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -527,7 +527,7 @@ func TestAPromptHeldAtTheColdGateIsSentByCompactAndResume(t *testing.T) {
 func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -596,7 +596,7 @@ func TestAnswerColdGateCompactEchoesExactly(t *testing.T) {
 func TestACompactionsProgressReachesTheFooterWithNoWarning(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act: the compaction states a running phase on the session stream.
@@ -630,7 +630,7 @@ func TestACompactionsProgressReachesTheFooterWithNoWarning(t *testing.T) {
 func TestAnswerColdGateRefusesAScopeTheMenuNeverServed(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -754,7 +754,7 @@ func TestHostVendorClaudeConfigDirIsTheRoutedRootForAMultiRepoWorkspace(t *testi
 func TestTheHostsVendorConversationIsUnchangedByATurn(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace whose host names its conversation.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.shim.ExpectStartSession()
 	f.shim.PushHealthy()
 	named := func(r *agentreplv1.WatchHostWorkspaceResponse) bool {
@@ -893,7 +893,7 @@ func TestKillWorkspaceForceKillsTheSessionAndReapsTheShim(t *testing.T) {
 func TestCloseWorkspaceBlockedCarriesTheQuietChecksEvidence(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.workspace.close")
 	f.shim.ExpectStartSession()
 	f.submit("do the thing", "k-close-evidence", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1404,7 +1404,7 @@ func TestSessionStartedRestoredLiveWorkRoutesToTheRootFeed(t *testing.T) {
 	// Arrange: a registered-but-unopened workspace whose profile states one
 	// already-live detached shell, so OpenWorkspace's SessionStarted carries
 	// it as restored live work.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	work := detachedShell("restored-shell-1", "sleep 100")
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
 		LiveWork: harness.EncodeLiveWork(t, work),
@@ -1436,7 +1436,7 @@ func TestSessionStartedDetachedOriginLiveWorkWithNoKindIsAnErrorAndSkipped(t *te
 	// (AgentDetachedWork.kind); one without it is malformed, and
 	// internal/sessionwatcher/route.go's resolveDetachedLocked refuses it at
 	// ERROR before any view takes it.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.d.ExpectWarnings("daemon.sessionwatcher.detached_kind_unknown")
 	unknown := &conversationv1.AgentDetachedWork{
 		Work: &conversationv1.DetachedWorkId{Value: "restored-detached-1"},
@@ -1463,7 +1463,7 @@ func TestSessionStartedDetachedOriginLiveWorkWithNoKindIsAnErrorAndSkipped(t *te
 func TestAnswerColdGateClearEchoesExactly(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -1766,7 +1766,7 @@ func TestAnAnsweredGateWhoseReopenFailsStandsAgain(t *testing.T) {
 	t.Parallel()
 	// Arrange: stand a cold gate, whose shim is stood down, and script the
 	// shim its answer spawns to refuse the remediated resume.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a KillSession the fake shim answers by exiting, a bring-up the test blocks or kills, a session fault the test opens, the shim death the test drives, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.shimclient.redial", "daemon.sessionwatcher.reopen", "daemon.health.open_fault", "daemon.sessionwatcher.link_fault",
 		"daemon.sessionwatcher.watch_agent", "daemon.sessionwatcher.watch_session",
@@ -1826,7 +1826,7 @@ func TestAnAnsweredGateWhoseReopenFailsStandsAgain(t *testing.T) {
 func TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn appears open, but the shim itself reports no session.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the long task", "k-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
 	f.shim.Answer(harness.RPCKillTurn, &shimv1.KillTurnResponse{
@@ -1864,7 +1864,7 @@ func TestInterruptTurnAgainstAShimReportingNoSessionAnswersNoSession(t *testing.
 func TestInterruptTurnWithATransportFailureAnswersShimRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a turn kill the test fails.
 	f.d.ExpectWarnings("daemon.shimclient.kill_turn", "daemon.workspace.interrupt")
 	f.submit("start the long task", "k-running", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
@@ -1928,7 +1928,7 @@ func TestAVendorStartFailureIsRelayedByNameAndNeverEscapesAsInternal(t *testing.
 func TestARetriedVendorStartDeliversThePromptHeldWhileItRetried(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.d.WriteShimProfile(f.repo.Dir, harness.ShimProfile{
 		VendorStartFailTimes:  2,
 		VendorStartFailDetail: "supportedModels did not answer in 3s",

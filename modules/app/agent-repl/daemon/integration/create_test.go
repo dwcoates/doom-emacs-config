@@ -532,7 +532,7 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 	// closeBlocker: `running.Turn != nil` is checked FIRST and answers
 	// "turn_in_flight"; this test's own branch is reached only once that is
 	// nil AND live work remains, answering "live_work" instead).
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.workspace.close")
 	footer := f.d.WatchFooter(f.ws)
 	pushDetachedShell(f.shim, "work-close-1", "sleep 100")

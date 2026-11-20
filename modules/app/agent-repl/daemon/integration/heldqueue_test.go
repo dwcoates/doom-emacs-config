@@ -33,7 +33,7 @@ func TestTheOwnersWorkedExampleOfTheHeldQueue(t *testing.T) {
 	t.Parallel()
 
 	// Arrange: the first prompt runs.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// A FAILURE QUOTES THE QUEUE'S OWN ACCOUNT. This test once timed out
 	// waiting for the join's StartTurn (35s, a full-suite run, 2026-10-06; 1
 	// in ~60 under load, 0 in 400 alone), and the record of what the queue
@@ -104,8 +104,10 @@ func TestSendNowOnAPromptHeldBehindAnAgentStartedTurnDeliversIt(t *testing.T) {
 	t.Parallel()
 
 	// Arrange: the vendor starts a turn; a prompt is held behind it.
-	f := newOpened(t, harness.Opts{})
-	const vendorTurn = "turn-vendor-started"
+	f := newCanonical(t)
+	// A turn id is unique across the daemon (the turns table's key), so the
+	// vendor's is the workspace's own, as a vendor's UUID is.
+	vendorTurn := "turn-vendor-started-" + f.ws.GetId()
 	holds := f.d.WatchHolds(f.ws)
 	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
 		Id:     &conversationv1.TurnId{Value: vendorTurn},
@@ -170,7 +172,7 @@ func joinedTurn(t *testing.T, f *fixture) (running, joining string) {
 func TestAFoldedJoinRunsNoTurnOfItsOwn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	running, joining := joinedTurn(t, f)
 
@@ -199,7 +201,7 @@ func TestAFoldedJoinRunsNoTurnOfItsOwn(t *testing.T) {
 func TestAnUnfoldedJoinRunsAsTheNextTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	running, joining := joinedTurn(t, f)
 
 	// Act: the running turn ends, and the joining prompt opens its own turn.

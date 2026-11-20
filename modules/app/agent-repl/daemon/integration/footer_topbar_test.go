@@ -44,7 +44,7 @@ func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
 func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act: force a push by starting a turn.
@@ -72,7 +72,7 @@ func TestFooterExpandedPanelsArrivePopulatedOnEveryPush(t *testing.T) {
 func TestFooterStatusTreeFollowsIdleWorkingDone(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "idle.ready before any turn", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle().GetReady() != nil
@@ -154,7 +154,7 @@ func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testin
 	t.Parallel()
 	// Arrange: one API response whose usage is stamped on the FIRST unit
 	// only, per the envelope contract.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-tok-dup", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
@@ -202,7 +202,7 @@ func TestFooterTokensPanelUsageIsNotDoubleCountedAcrossAResponsesUnits(t *testin
 func TestFooterLiveWorkChipsReflectEachKindsCount(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act: one live subagent, one live shell.
@@ -279,7 +279,7 @@ func TestFooterCronsChipCountsACreatedJobForAReaderOpenedAfterTheTurnEnded(t *te
 func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)
 
@@ -303,7 +303,7 @@ func TestFooterMonitorRowJumpsToTheMonitorsToolCallCard(t *testing.T) {
 func TestFooterChecklistGainsNoRowForATaskNobodyNamed(t *testing.T) {
 	t.Parallel()
 	// Arrange: one real task.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftTaskActivity("task-1", "t-1", "Land the converter", false)))
 	awaitFooter(t, f, footer, "the checklist with its one named task", func(v *frontendv1.FooterView) bool {
@@ -377,7 +377,7 @@ func ftSubagentSettled(unit, created string) *conversationv1.AgentActivity {
 func TestFooterAgentsChipRetiresADetachedRunOnItsOwnStream(t *testing.T) {
 	t.Parallel()
 	// Arrange: one spawn, detached under its own handle.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
@@ -400,7 +400,7 @@ func TestFooterAgentsChipRetiresADetachedRunOnItsOwnStream(t *testing.T) {
 func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
@@ -424,7 +424,8 @@ func TestFooterAgentsChipRetiresADetachedRunSettledOnTheCallersStream(t *testing
 func TestFooterAllowanceDrawnFromARateLimitEvent(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// It moves the account's usage with a rate-limit event.
+	f := newInGroup(t, groupAccountUsage)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "idle before any rate-limit event", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
@@ -576,7 +577,7 @@ func TestWatchWebWorkspaceOpensWithTheOpenedWorkspacesSessionIdentity(t *testing
 	// show, and the one the whole landing exists for: the identity the page
 	// stamps its forwarded log records with is the session the daemon is
 	// actually operating, not an empty placeholder.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	web := f.d.WatchWeb(f.ws)
 
 	// Assert.
@@ -596,7 +597,7 @@ func TestWatchWebWorkspaceOpensWithTheOpenedWorkspacesSessionIdentity(t *testing
 func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "idle before scheduling a wakeup", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
@@ -620,7 +621,7 @@ func TestFooterWakeupShowsOnlyWhenNothingElseStands(t *testing.T) {
 func TestFooterApiErrorMidTurnDrawsRetryingEvidenceWithoutEndingTheTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.submit("go", "k-api-error", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	awaitFooter(t, f, footer, "thinking before the mid-turn error", func(v *frontendv1.FooterView) bool {
@@ -777,7 +778,7 @@ func TestTopbarWorkspaceNameIsTheWorkspacesNameAndTheTitleIsAbsentUntilASummary(
 func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T) {
 	t.Parallel()
 	// Arrange / Act
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Assert: the fake's default StartSession answer serves the fixed
@@ -831,7 +832,7 @@ func TestTopbarModelSelectorCarriesTheLoginsDefaultAndMakeDefaultMovesIt(t *test
 func TestTopbarContextChipReflectsTheContextUsagePush(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 
 	// Act
@@ -870,7 +871,7 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 	// Arrange: a turn whose single usage-carrying unit fixes the session
 	// breakdown's basis at a round 1000 tokens (100 uncached input + 900
 	// cache read), so each row's share_permille is an exact, checkable figure.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	f.submit("go", "k-breakdown-shares", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 
@@ -903,7 +904,7 @@ func TestTopbarContextBreakdownRowsCarrySharePermilleAndEmphasized(t *testing.T)
 func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens.
 	f.d.ExpectWarnings("daemon.health.open_fault")
 	topbar := f.d.WatchTopbar(f.ws)
@@ -947,7 +948,7 @@ func TestTopbarWarningForASessionFaultIsRetractedOnTheNextHealthyPush(t *testing
 func TestTopbarTwoSessionFaultsDrawTwoWarningsNewestFirst(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared record is evidence of the session faults the test pushes.
 	f.d.ExpectWarnings("daemon.health.open_fault")
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1113,7 +1114,7 @@ func ftBreakTheWebHop(f *fixture) {
 func TestFooterAwaitsAPageNotYetConnected(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.open()
 	footer := f.d.WatchFooter(f.ws)
 
@@ -1129,7 +1130,7 @@ func TestFooterAwaitsAPageNotYetConnected(t *testing.T) {
 func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 	t.Parallel()
 	// Arrange: a page that connected and went away.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	footer := f.d.WatchFooter(f.ws)
@@ -1150,7 +1151,7 @@ func TestFooterBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 	t.Parallel()
 	// Arrange: every hop up.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	awaitFooter(t, f, footer, "idle with every hop live", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
@@ -1168,7 +1169,7 @@ func TestFooterReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1186,7 +1187,7 @@ func TestTopbarIsNotConnectedWhileTheWebHopIsDown(t *testing.T) {
 func TestTopbarIsConnectedWhileAPageIsAwaited(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.open()
 	topbar := f.d.WatchTopbar(f.ws)
 
@@ -1202,7 +1203,7 @@ func TestTopbarIsConnectedWhileAPageIsAwaited(t *testing.T) {
 func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 	t.Parallel()
 	// Arrange: a page that connected and went away.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	f.open()
 	f.host = f.d.WatchHost(f.ws)
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1223,7 +1224,7 @@ func TestTopbarBecomesConnectedWhenTheWebHopComesUp(t *testing.T) {
 func TestTopbarReturnsToNotConnectedWhenTheWebHopGoesAway(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the connected indicator", func(v *frontendv1.TopbarView) bool {
 		return v.GetConnectivity().GetTitle() == "connected to the session"
@@ -1262,7 +1263,7 @@ func ftHookStart(id, name string) *conversationv1.AgentFrame {
 func TestFooterANewerTransientReplacesAnOlderOne(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-1", "first-hook"))
 	awaitFooter(t, f, footer, "the first hook's transient", func(v *frontendv1.FooterView) bool {
@@ -1287,7 +1288,7 @@ func TestFooterANewerTransientReplacesAnOlderOne(t *testing.T) {
 func TestFooterAPushNotificationStandsOverALiveTransient(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, ftHookStart("hook-1", "a-hook"))
 	awaitFooter(t, f, footer, "the hook's transient", func(v *frontendv1.FooterView) bool {
@@ -1317,7 +1318,8 @@ func TestFooterAPushNotificationStandsOverALiveTransient(t *testing.T) {
 func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	// It moves the account's usage with a rate-limit event.
+	f := newInGroup(t, groupAccountUsage)
 	footer := f.d.WatchFooter(f.ws)
 
 	// Act: an unremarkable weekly figure, on an allowed verdict.
@@ -1341,7 +1343,7 @@ func TestFooterTheEnduringLineStandsWithNoTransient(t *testing.T) {
 func TestFooterANetworkResumeWaitKeepsTheAgentsRowAndMarksTheChip(t *testing.T) {
 	t.Parallel()
 	// Arrange: a detached run that has ended.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, ftSubagentSpawn("toolu-1", "toolu-1", "sweep the tree")))
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, movedSubagent("toolu-1")))
@@ -1415,7 +1417,7 @@ var ftFeedItemDerivedLine = regexp.MustCompile(`[✅❌] [^"]* (finished|failed|
 func TestFooterComposesNoLineFromAFeedItemThatLanded(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	type swept struct {
 		working    int

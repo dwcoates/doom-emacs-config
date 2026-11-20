@@ -171,7 +171,7 @@ func holdsOperation(records []harness.LogRecord, operation string) bool {
 func TestARequiredWarningCountsAsStaleUntilItIsProduced(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.health.open_fault")
 	f.shim.ExpectStartSession()
 	f.d.RequireWarnings("daemon.shimclient.exit")

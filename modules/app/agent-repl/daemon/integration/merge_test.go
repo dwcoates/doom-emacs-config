@@ -41,7 +41,7 @@ func TestFinishWorkspaceOnAWorkspaceWithoutLayoutFactsIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange: a workspace registered directly, never created, so it carries
 	// no creation job.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	// The sweep covers every test; the declared records are evidence of a refusal the test provokes.
 	f.d.ExpectWarnings("daemon.merge.enqueue")
 

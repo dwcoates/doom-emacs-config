@@ -107,7 +107,8 @@ func TestATriedPromptTheVendorBlocksIsCutAndHeldAgainInItsPlace(t *testing.T) {
 	t.Parallel()
 	// Arrange: the first prompt held under a usage limit, then tried now by a
 	// second send.
-	f := newOpened(t, harness.Opts{})
+	// It moves the account's usage with a rate-limit event.
+	f := newInGroup(t, groupAccountUsage)
 	footer := f.d.WatchFooter(f.ws)
 	holds := f.d.WatchHolds(f.ws)
 	f.shim.PushSessionUpdate(rateLimitVerdict(true))

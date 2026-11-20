@@ -53,6 +53,13 @@ type subscriptionScenario struct {
 	// invariant is per topic, and the replay order BETWEEN topics is not part
 	// of it. Nil is a single-topic stream: every frame is the driven topic's.
 	ofTopic func(msg proto.Message) bool
+	// group, when set, is the daemon group the driver changes the
+	// precondition of (shareddaemon_test.go); unset runs on the canonical
+	// daemon.
+	group daemonGroup
+	// same compares two views of the case's own slice; nil is proto.Equal,
+	// for a view the case's slice owns whole.
+	same func(t *testing.T, f *fixture, a, b proto.Message) bool
 }
 
 // subscriptionScenarioFor answers the lightweight two-step driver for one
@@ -138,10 +145,27 @@ func subscriptionScenarioFor(name string) (subscriptionScenario, bool) {
 			isSecond: func(msg proto.Message) bool {
 				return ws3 != nil && rosterRow(msg.(*frontendv1.WorkspaceRoster), ws3.GetId()) != nil
 			},
+			// The roster spans every case's workspaces; the case owns its own
+			// rows, which are the views it compares.
+			same: func(t *testing.T, f *fixture, a, b proto.Message) bool {
+				for _, ws := range []*workspacev1.WorkspaceRef{f.ws, ws2, ws3} {
+					if ws == nil {
+						continue
+					}
+					ra, rb := rosterRow(a.(*frontendv1.WorkspaceRoster), ws.GetId()), rosterRow(b.(*frontendv1.WorkspaceRoster), ws.GetId())
+					if !proto.Equal(ra, rb) {
+						t.Logf("the row of %s differs: %v against %v", ws.GetId(), ra, rb)
+						return false
+					}
+				}
+				return true
+			},
 		}, true
 
 	case "WatchDaemon":
 		return subscriptionScenario{
+			// A shutdown schedule holds every workspace's intake.
+			group: groupShutdownSchedule,
 			drive1: func(t *testing.T, f *fixture) {
 				_, err := f.d.Client().UpdateShutdownSchedule(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 					Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
@@ -199,7 +223,10 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 
 			// Arrange: a workspace already opened, a witness attached before
 			// anything is driven.
-			f := newOpened(t, harness.Opts{})
+			f := newCanonical(t)
+			if scenario.group != "" {
+				f = newInGroup(t, scenario.group)
+			}
 			var ws *workspacev1.WorkspaceRef
 			if k.PerWorkspace {
 				ws = f.ws
@@ -222,7 +249,11 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 				ofTopic = func(proto.Message) bool { return true }
 			}
 			gotFirst := harness.AwaitView(t, f.d.Ctx(), late, k.Name+": the late subscriber's first push", ofTopic)
-			if !proto.Equal(gotFirst, first) {
+			same := scenario.same
+			if same == nil {
+				same = func(_ *testing.T, _ *fixture, a, b proto.Message) bool { return proto.Equal(a, b) }
+			}
+			if !same(t, f, gotFirst, first) {
 				t.Fatalf("%s: late subscriber's first push = %v, want the last-published view %v", k.Name, gotFirst, first)
 			}
 
@@ -236,7 +267,7 @@ func TestSubscriptionInvariantAcrossWatchKinds(t *testing.T) {
 			// hold tray's `classifying` before its verdict), and every one of
 			// them is a real push the late subscriber is entitled to.
 			gotSecond := harness.AwaitView(t, f.d.Ctx(), late, k.Name+": the late subscriber's further view", scenario.isSecond)
-			if !proto.Equal(gotSecond, second) {
+			if !same(t, f, gotSecond, second) {
 				t.Fatalf("%s: late subscriber's further view = %v, want the further-published view %v", k.Name, gotSecond, second)
 			}
 		})
@@ -393,7 +424,7 @@ func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *t
 func TestARegisteredWorkspacesRootFeedOpensWithTheEmptyHeldSection(t *testing.T) {
 	t.Parallel()
 	// Arrange: registered, never opened.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	holds := f.d.WatchHolds(f.ws)
@@ -418,7 +449,7 @@ func TestARegisteredWorkspacesRootFeedOpensWithTheEmptyHeldSection(t *testing.T)
 func TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotOpened(t *testing.T) {
 	t.Parallel()
 	// Arrange: registered, never opened -- no session exists for it at all.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	host := f.d.WatchHost(f.ws)

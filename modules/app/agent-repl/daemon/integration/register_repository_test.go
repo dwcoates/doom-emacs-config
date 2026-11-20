@@ -85,7 +85,7 @@ func TestRegisterRepositorySaysWhenItAlreadyHadTheRepository(t *testing.T) {
 func TestRegisterRepositoryAdoptsARepositoryAWorkspaceAlreadyMinted(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	msg := registerRepository(t, f.d, filepath.Join(f.repo.Dir, "README.md"))
@@ -156,7 +156,7 @@ func TestRegisterRepositoryRegistersTheMainWorktreeAsAWorkspace(t *testing.T) {
 func TestRegisterRepositoryAdoptsTheWorkspaceAlreadyRegisteredForTheMainWorktree(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	success := registerRepository(t, f.d, filepath.Join(f.repo.Dir, "README.md")).GetSuccess()

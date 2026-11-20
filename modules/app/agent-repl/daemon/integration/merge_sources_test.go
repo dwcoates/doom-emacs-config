@@ -375,7 +375,7 @@ func TestNoMergeFactReachesAnyClientBeforeTheRequestingTurnEnds(t *testing.T) {
 func TestOpenInEditorRelaysAWorkspaceFileOntoTheHostStream(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	line := uint32(12)
 
 	// Act.
@@ -400,7 +400,7 @@ func TestOpenInEditorRelaysAWorkspaceFileOntoTheHostStream(t *testing.T) {
 func TestOpenInEditorRefusesAWorkspaceFileEscapingTheWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.workspace.open_in_editor", "OpenInEditor")
 
 	// Act.
