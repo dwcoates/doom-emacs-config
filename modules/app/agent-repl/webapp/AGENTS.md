@@ -943,6 +943,52 @@ reviewer would accept, and unused ones fail the run.
   (unset oneof, unset required field, unknown arm), every refusal arm drawn at
   its call site, every tick and every format.
 
+### Integration cases share one mounted app
+
+The canonical process of `test/integration/` is the app itself, mounted and
+settled under jsdom against its fake daemon: booting it is ~45ms of a case's
+~55ms (gate metrics, 2026-11-20). The rule is `../AGENTS.md` "Integration
+tests share one canonical process, each case on its own slice"; this is how
+this suite applies it.
+
+- **One mount per FILE.** `const shared = sharedMount(options)` at a file's
+  top level mounts the app in a `beforeAll`; a case takes it with
+  `harness = await shared()`. Per file, not per worker: the integration setup
+  resets the page and the clock before each file
+  (`test/setup-shared-integration.ts`), and the run is un-isolated.
+- **A case's slice** (`beginCase` in `harness.ts`) is its own TURN: every row
+  it pushes is re-keyed to a turn of its own and removed through
+  `FeedRow.removed` when it ends, so the next case starts on an empty feed.
+  The fake daemon's recorded calls and its script (`answer`, `refuse`,
+  `failNext`, injected fields) start empty per case, and the clock starts
+  back at `HARNESS_EPOCH_MS` on the page ticker's beat, as on a fresh mount.
+- **Chrome is pushed, not booted.** A case about the footer, topbar or rail
+  pushes its whole view onto the shared mount (`setFooter`, `setTopbar`,
+  `setRoster`), as the daemon pushes every change. Page-wide UI state a case
+  changes through a control (an open panel, menu or reveal, the roster's
+  rows) is undone through the page's own controls by the file's
+  `endCase` (`sharedMount({ endCase })`): `closeOpenPanel` in footer,
+  `closeTopbarMenus` in topbar, `undoSiteChrome` in refusals, `emptyRoster`
+  in sidebar. A new case that leaves such state adds its undo there.
+- **An assertion on the whole page** (`refusalArms()`, every row) is scoped
+  to the case's own slice (its control's wrapper, its panel, its rows).
+- **A FRESH mount** (`startHarness`, a `withFresh*` helper) only where the
+  case's subject is the page's own boot or lifecycle, or it leaves state on
+  the whole page nothing on the page can undo, each with a comment saying
+  which:
+  - what the boot reads (stored panel and rail preferences, storage that
+    throws);
+  - the arms that move the page (`transferring_away`, `not_yet_adopted`:
+    `PAGE_LIFECYCLE_ARMS` in refusals), adoption, the login terminal;
+  - a provoked malformed frame or client failure, which stays on the page.
+  A fresh mount displaces the file's shared one (one document holds one
+  page) and the next shared case mounts it again, so a file runs its fresh
+  cases together where it can (refusals runs them last in each site's
+  block).
+- Measured alone, CPU before and after (2026-11-20): feed-kinds 25.7 to
+  10.2 CPU-s, footer 22.7 to 8.3, refusals 24.7 to 19.6, topbar 13.3 to 8.2,
+  sidebar 10.7 to 9.5, feed-routing 8.4 to 8.1.
+
 ### Wait/timeout bounds
 
 Every wait bound in both suites is set to roughly 3x the slowest healthy

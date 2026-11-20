@@ -307,6 +307,9 @@ to every harness, fake and fixture a test uses, in every language.
 - **Daemon integration (`daemon/integration`)**: a case takes the canonical daemon with `newCanonical(t)`, `newCanonicalRegistered(t)` or `canonicalView(t)`; its slice is its own repository and workspace, and an id it mints (a turn id, a URL a stub records) carries its workspace id, since a turn id is unique across the daemon.
   - A case that changes daemon-wide state takes its group with `newInGroup(t, group)`; only a case whose subject is the daemon's own lifecycle starts a fresh daemon; a view's idle barrier (`ExpectNoPush`, `ExpectFileUnchanged`) waits only for its own workspaces' work.
   - The rest: `daemon/AGENTS.md`, "The integration suite's canonical daemon".
+- **webapp integration** (`webapp/test/integration/`): `const shared = sharedMount(options)` at a file's top, then `harness = await shared()` in a case; a case's slice is its own turn (its rows, removed at its end) and its own fake-daemon script and calls.
+  - The mount is per FILE, not per worker, because the setup resets the page before each file; chrome (footer, topbar, rail) is pushed onto it, and what a case opens through a control is undone by the file's `endCase`.
+  - The rest: `webapp/AGENTS.md`, "Integration cases share one mounted app".
 
 ### Finding and fixing a flake
 
