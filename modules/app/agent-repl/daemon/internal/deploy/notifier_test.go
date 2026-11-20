@@ -200,6 +200,7 @@ func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 		restartErr        error
 		notLoaded         bool
 		definitionWritten bool
+		defineErr         error
 		wantRestart       bool
 		wantStart         bool
 		wantErr           string
@@ -212,8 +213,9 @@ func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 			wantErr: "no such label", wantRecord: "the notifier app restart failed"},
 		{name: "an unloaded service whose definition is installed is started, not restarted",
 			notLoaded: true, definitionWritten: true, wantStart: true},
-		{name: "an unloaded service with no definition names the installer", notLoaded: true,
-			wantErr: "re-run .claude/install.sh", wantRecord: "a service is not loaded and its definition is missing"},
+		{name: "an unloaded service with no definition has it written, then is started", notLoaded: true, wantStart: true},
+		{name: "a definition that cannot be written is the error", notLoaded: true, defineErr: errors.New("no entry"),
+			wantErr: "no entry", wantRecord: "a service's definition could not be written from its requirements entry"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -226,6 +228,15 @@ func TestRestartNotifierRegistersThenRestartsTheService(t *testing.T) {
 			services := &restartRecorder{err: tc.restartErr, loaded: !tc.notLoaded, dir: dir}
 			var registered []string
 			r := &Restarter{Services: services, Log: log, NotifierApp: "/Apps/Zettel.app",
+				// Define writes the definition from its requirements entry, as
+				// bin/requirements.sh define-service does.
+				Define: func(_ context.Context, label string) error {
+					if tc.defineErr != nil {
+						return tc.defineErr
+					}
+					writeFile(t, filepath.Join(dir, label+".plist"), "<plist/>")
+					return nil
+				},
 				RegisterApp: func(_ context.Context, bundle string) error {
 					registered = append(registered, bundle)
 					return tc.registerErr
