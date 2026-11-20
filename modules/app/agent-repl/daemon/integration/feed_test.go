@@ -92,7 +92,7 @@ func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T)
 func TestAFeedTextScaleFrameIsNotARowOnTheFeedTail(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	tail := f.watchRootFeed()
 
 	// Act: nudge the daemon-global zoom, which pushes a FeedTextScale frame to
@@ -1583,7 +1583,7 @@ func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 func TestArtifactListDrawsNothing(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-artifactlist", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -2013,7 +2013,7 @@ func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashTail(t *testing.T) {
 func TestADetachedBashTailPastTheCapIsRefusedAndLogged(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// subagent.go logs daemon.feed.spool_over_cap at ERROR on the refusal.
 	f.d.ExpectWarnings("daemon.feed.spool_over_cap")
 	f.submit("go", "k-spoolovercap", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)

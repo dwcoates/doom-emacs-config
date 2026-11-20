@@ -24,7 +24,7 @@ import (
 func TestFooterPushesAreWholeViewsDeduplicated(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	footer := f.d.WatchFooter(f.ws)
 	first := awaitFooter(t, f, footer, "the footer after readiness", func(v *frontendv1.FooterView) bool {
 		return v.GetStrip().GetStatus().GetIdle() != nil
@@ -504,7 +504,7 @@ func TestFooterWeeklyAllowanceDrawnFromASevenDayWarningCarriesItsVerdictAndFigur
 func TestDenyAndContinueKeepsTheFooterThinkingUntilTheFakesOwnTerminal(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-deny-continue", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	footer := f.d.WatchFooter(f.ws)

@@ -474,7 +474,7 @@ func TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotO
 func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	usage := &conversationv1.SessionUpdate{
 		Update: &conversationv1.SessionUpdate_ContextUsage{ContextUsage: &conversationv1.SessionContextUsage{
@@ -507,7 +507,7 @@ func TestTopbarIdenticalContextUsagePushProducesNoSecondPush(t *testing.T) {
 func TestHostStreamIdenticalRepublishedViewProducesNoSecondPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	witness := f.d.WatchHost(f.ws)
 	harness.AwaitHostView(t, f.d.Ctx(), witness, "the witness's initial host push")
 
