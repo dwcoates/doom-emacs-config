@@ -272,8 +272,8 @@ They stand over the fake tree's text: `1.1 - yes', `1 🔧 Fixed', `2.1 - no'.")
 (ert-deftest agent-repl-test-prompt-entries-mark-draws-a-label-answering-nothing-as-a-warning ()
   "A label the daemon says answers nothing wears the unanswered face."
   (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
-    (setq agent-repl-prompt-entries--ws "ws-1")
-    (cl-letf (((symbol-function 'agent-repl-host-unanswered-entries) (lambda (_ws) '("2.1"))))
+    (cl-letf (((symbol-function 'agent-repl--ws-of-composer) (lambda (_buffer) "ws-1"))
+              ((symbol-function 'agent-repl-host-unanswered-entries) (lambda (ws) (and (equal ws "ws-1") '("2.1")))))
       ;; Act
       (agent-repl-prompt-entries-mark))
     ;; Assert
@@ -343,11 +343,10 @@ They stand over the fake tree's text: `1.1 - yes', `1 🔧 Fixed', `2.1 - no'.")
           (agent-repl-prompt-entries-enable "ws-1")
           ;; Assert
           (should (equal (list agent-repl-prompt-entries--parser
-                               agent-repl-prompt-entries--ws
                                (car (memq #'agent-repl-prompt-entries--on-change after-change-functions))
                                (car (memq #'agent-repl-prompt-entries--report post-command-hook))
                                marked)
-                         (list '(parser tldr_prompt) "ws-1" #'agent-repl-prompt-entries--on-change
+                         (list '(parser tldr_prompt) #'agent-repl-prompt-entries--on-change
                                #'agent-repl-prompt-entries--report 1)))
           (insert "x")
           (should (= marked 2)))))))
@@ -378,9 +377,9 @@ of every rung."
   (declare (indent 0))
   `(let ((sent nil) (answer nil) (fail nil) (logs nil))
      (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
-       (setq agent-repl-prompt-entries--ws "ws-1"
-             agent-repl-prompt-entries--serial (agent-repl-serial-create))
-       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
+       (setq agent-repl-prompt-entries--serial (agent-repl-serial-create))
+       (cl-letf (((symbol-function 'agent-repl--ws-of-composer) (lambda (_buffer) "ws-1"))
+                 ((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
                  ((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) 'conn))
                  ((symbol-function 'agent-repl-rpc-report-composer-entries)
                   (lambda (_conn request &rest keys)
@@ -494,6 +493,32 @@ of every rung."
     (should (= (length sent) 1))
     (should (cl-some (lambda (m) (string-match-p "report-skipped ws=ws-1 ref=nil" m)) logs))))
 
+(ert-deftest agent-repl-test-prompt-entries-a-renamed-workspaces-composer-reports-under-its-new-name ()
+  "After a rename the composer reports with the ref the new name holds."
+  (agent-repl-test--with-clean-state
+    (let ((owner (symbol-function 'agent-repl--ws-of-composer)))
+      (agent-repl-test-prompt-entries--reporting
+        ;; Arrange: the composer's workspace is renamed after the composer was enabled.
+        (agent-repl--ws-put "old" :project-dir "/tmp/old/")
+        (agent-repl--ws-put "old" :input-buffer (current-buffer))
+        (agent-repl--ws-rename-state "old" "new" "/tmp/new/")
+        (goto-char 2)
+        ;; Act: the real owner lookup, and a host that knows only the new name.
+        (cl-letf (((symbol-function 'agent-repl--ws-of-composer) owner)
+                  ((symbol-function 'agent-repl-host-ref)
+                   (lambda (ws) (and (equal ws "new") '(:id "id-new" :dir "/tmp/new")))))
+          (agent-repl-prompt-entries--report))
+        ;; Assert
+        (should (equal (plist-get (car sent) :workspace) '(:id "id-new" :dir "/tmp/new")))))))
+
+(ert-deftest agent-repl-test-prompt-entries-a-composer-no-workspace-owns-reports-nothing ()
+  "A composer no live workspace owns sends no report."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test-prompt-entries--reporting
+      (cl-letf (((symbol-function 'agent-repl--ws-of-composer) (lambda (_buffer) nil)))
+        (agent-repl-prompt-entries--report))
+      (should-not sent))))
+
 ;;;; ---- Opening a line beside an entry ----
 
 (defmacro agent-repl-test-prompt-entries--opening (answer &rest body)
@@ -504,8 +529,8 @@ ANSWER is a response plist, or (:signal ERR) to signal it.  Binds
   (declare (indent 1))
   `(let ((asked nil) (logs nil) (inserting nil))
      (agent-repl-test-prompt-entries--with-tree agent-repl-test-prompt-entries--headings
-       (setq agent-repl-prompt-entries--ws "ws-1")
-       (cl-letf (((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
+       (cl-letf (((symbol-function 'agent-repl--ws-of-composer) (lambda (_buffer) "ws-1"))
+                 ((symbol-function 'agent-repl-host-ref) (lambda (_ws) '(:id "ws-1" :dir "/w")))
                  ((symbol-function 'agent-repl-host-conn-or-primary) (lambda (_ws) 'conn))
                  ((symbol-function 'agent-repl-rpc-find-entry-neighbor-sync)
                   (lambda (_conn request &optional _timeout)

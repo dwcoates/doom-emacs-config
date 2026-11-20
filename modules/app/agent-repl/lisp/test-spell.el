@@ -356,7 +356,6 @@ ispell state is bound afresh, so a case never leaks it."
             (should (equal (getenv "DICPATH") dir))
             (should (local-variable-p 'ispell-local-dictionary))
             (should (equal ispell-local-dictionary "en_US-scowl80"))
-            (should (equal agent-repl--spell-ws "ws"))
             (should (eq flyspell-generic-check-word-predicate #'agent-repl--spell-check-word-p))
             (should (assq 'flyspell-mode minor-mode-overriding-map-alist))
             (should (memq #'agent-repl--spell-on-change after-change-functions))
@@ -583,6 +582,15 @@ The global queue is bound afresh, and a timer it arms is cancelled after."
   (should (equal (agent-repl--spell-misspelled-words "& wrold 1 0: world\n\n& wrold 1 0: world\n")
                  '("wrold"))))
 
+(ert-deftest agent-repl-test-spell-ws-names-the-composers-workspace-after-a-rename ()
+  "A renamed workspace's composer spellchecks under the name it has now."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-temp-buffer " *test-spell-composer*"
+      (agent-repl--ws-put "old" :project-dir "/tmp/old/")
+      (agent-repl--ws-put "old" :input-buffer (current-buffer))
+      (agent-repl--ws-rename-state "old" "new" "/tmp/new/")
+      (should (equal (agent-repl--spell-ws) "new")))))
+
 (ert-deftest agent-repl-test-spell-misspelled-words-of-a-clean-answer-is-nil ()
   "An answer with nothing misspelled names nothing."
   (should-not (agent-repl--spell-misspelled-words "@(#) banner\n\n\n")))
@@ -592,9 +600,10 @@ The global queue is bound afresh, and a timer it arms is cancelled after."
 Binds `answer' to the sent check's callback, `span' to its markers, and
 `marks' to a function returning the highlighted words, in buffer order."
   (declare (indent 1))
-  `(agent-repl-test-spell--queueing
+  `(agent-repl-test--with-clean-state
+    (agent-repl-test-spell--queueing
      (setq-local flyspell-mode t)
-     (setq-local agent-repl--spell-ws "ws-a")
+     (agent-repl--ws-put "ws-a" :input-buffer (current-buffer))
      (setq-local ispell-local-dictionary "en_US-scowl80")
      (let ((ispell-current-dictionary "en_US-scowl80")
            (ispell-local-dictionary-alist
@@ -609,7 +618,7 @@ Binds `answer' to the sent check's callback, `span' to its markers, and
                                 (sort (seq-filter #'flyspell-overlay-p
                                                   (overlays-in (point-min) (point-max)))
                                       (lambda (a b) (< (overlay-start a) (overlay-start b))))))))
-           ,@body)))))
+           ,@body))))))
 
 (ert-deftest agent-repl-test-spell-an-answer-highlights-each-misspelled-word ()
   "Every prose occurrence of a word hunspell names is highlighted."

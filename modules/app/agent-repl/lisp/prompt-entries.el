@@ -41,6 +41,7 @@
 (declare-function agent-repl--log "core" (ws fmt &rest args))
 (declare-function agent-repl--warn "core" (ws fmt &rest args))
 (declare-function agent-repl-host-ref "host" (ws))
+(declare-function agent-repl--ws-of-composer "workspace" (buffer))
 (declare-function agent-repl-host-conn-or-primary "host" (ws))
 (declare-function agent-repl-host-unanswered-entries "host" (ws))
 (declare-function agent-repl--input-flash "input" (ws text))
@@ -188,8 +189,11 @@ and nothing waiting is called."
   "How many text edits this composer has had, only ever rising.
 Reported with the entries, so the webapp can tell the person typed.")
 
-(defvar-local agent-repl-prompt-entries--ws nil
-  "The workspace this composer is, once marking is enabled.")
+(defun agent-repl-prompt-entries--ws ()
+  "The workspace the current composer is, or nil when no live one owns it.
+Asked each time, never captured at enable: a captured name goes stale when
+the workspace is renamed (`agent-repl--ws-of-composer')."
+  (agent-repl--ws-of-composer (current-buffer)))
 
 (defvar-local agent-repl-prompt-entries--serial nil
   "This composer's report serializer (`agent-repl-serial-send'), once enabled.")
@@ -209,7 +213,6 @@ and so does reporting them to the daemon after each command
            (with-current-buffer buf
              (setq agent-repl-prompt-entries--parser
                    (treesit-parser-create agent-repl-prompt-entries--language)
-                   agent-repl-prompt-entries--ws ws
                    agent-repl-prompt-entries--serial (agent-repl-serial-create))
              (add-hook 'after-change-functions #'agent-repl-prompt-entries--on-change nil t)
              (add-hook 'post-command-hook #'agent-repl-prompt-entries--report nil t)
@@ -262,8 +265,8 @@ A label the daemon says answers nothing (`agent-repl-host-unanswered-entries')
 wears `agent-repl-prompt-entry-unanswered'; every other label
 `agent-repl-prompt-entry-label'."
   (when agent-repl-prompt-entries--parser
-    (let ((unanswered (and agent-repl-prompt-entries--ws
-                           (agent-repl-host-unanswered-entries agent-repl-prompt-entries--ws))))
+    (let ((unanswered (when-let* ((ws (agent-repl-prompt-entries--ws)))
+                         (agent-repl-host-unanswered-entries ws))))
       (remove-overlays (point-min) (point-max) 'agent-repl-prompt-entry t)
       (dolist (entry (agent-repl-prompt-entries--entries))
         (let ((ov (make-overlay (nth 1 entry) (nth 2 entry))))
@@ -299,7 +302,7 @@ An `agent-repl-host-update-functions' entry."
   "Report the composer's entries to the daemon when they moved since last sent.
 The composer's `post-command-hook' entry.  While a report is in flight the
 new one is owed, and sent once that one is answered."
-  (when (and agent-repl-prompt-entries--parser agent-repl-prompt-entries--ws)
+  (when (and agent-repl-prompt-entries--parser (agent-repl-prompt-entries--ws))
     (let* ((entries (agent-repl-prompt-entries--entries))
            (state (list (mapcar #'car entries) (agent-repl-prompt-entries--entry-at-point entries)
                         agent-repl-prompt-entries--edits)))
@@ -314,7 +317,7 @@ new one is owed, and sent once that one is answered."
   "Send STATE, (LABELS AT EDITS), as this composer's report; then call DONE.
 With no daemon-minted ref or no connection nothing is sent and nothing is
 marked reported, so the next command tries again."
-  (let* ((ws agent-repl-prompt-entries--ws)
+  (let* ((ws (agent-repl-prompt-entries--ws))
          (buf (current-buffer))
          (ref (agent-repl-host-ref ws))
          (conn (agent-repl-host-conn-or-primary ws)))
@@ -366,7 +369,7 @@ command sends it again; DONE ends the report."
 WAY is `:next', `:previous' or `:following' (EntryNeighborDirection).
 Nil, with the reason logged, when the composer is not reporting, no ref or
 connection stands, the daemon refused, or it never answered."
-  (let* ((ws agent-repl-prompt-entries--ws)
+  (let* ((ws (agent-repl-prompt-entries--ws))
          (ref (and ws (agent-repl-host-ref ws)))
          (conn (and ws (agent-repl-host-conn-or-primary ws))))
     (if (not (and ref conn))
@@ -428,8 +431,9 @@ to the end of that entry's line, in insert mode."
           (goto-char existing)
           (end-of-line)
           (evil-insert-state)
-          (agent-repl--log agent-repl-prompt-entries--ws "elisp.prompt-entries.open-existing ws=%s label=%s neighbor=%s at=%d"
-                           agent-repl-prompt-entries--ws label neighbor existing))
+          (let ((ws (agent-repl-prompt-entries--ws)))
+            (agent-repl--log ws "elisp.prompt-entries.open-existing ws=%s label=%s neighbor=%s at=%d"
+                             ws label neighbor existing)))
       (if next (evil-open-below 1) (evil-open-above 1))
       (when neighbor (insert (agent-repl-prompt-entries-opening neighbor))))))
 
@@ -464,7 +468,7 @@ ACT runs with both.  Off an entry line the command is refused; with no
 label that way the composer flashes NONE, a format of the entry's label.
 KIND names the command in its records (`step', `sibling'), which carry
 WAY, a direction keyword."
-  (let* ((ws agent-repl-prompt-entries--ws)
+  (let* ((ws (agent-repl-prompt-entries--ws))
          (label (agent-repl-prompt-entries--label-at-point))
          (to (and label (funcall target label))))
     (cond
@@ -485,8 +489,9 @@ A first sibling has none above: nothing opens, and the composer says so."
      (lambda (label) (agent-repl-prompt-entries--sibling label (if next 1 -1)))
      "%s is the first sibling"
      (lambda (label sibling)
-       (agent-repl--info agent-repl-prompt-entries--ws "elisp.prompt-entries.sibling ws=%s label=%s way=%s sibling=%s"
-                         agent-repl-prompt-entries--ws label way sibling)
+       (let ((ws (agent-repl-prompt-entries--ws)))
+         (agent-repl--info ws "elisp.prompt-entries.sibling ws=%s label=%s way=%s sibling=%s"
+                           ws label way sibling))
        (agent-repl-prompt-entries--open-on label sibling next)))))
 
 (defun agent-repl-prompt-entries-open-sibling-above ()
@@ -543,8 +548,9 @@ format of the label."
    none
    (lambda (label to)
      (agent-repl-prompt-entries--relabel label to)
-     (agent-repl--info agent-repl-prompt-entries--ws "elisp.prompt-entries.stepped ws=%s label=%s way=%s to=%s"
-                       agent-repl-prompt-entries--ws label way to))))
+     (let ((ws (agent-repl-prompt-entries--ws)))
+       (agent-repl--info ws "elisp.prompt-entries.stepped ws=%s label=%s way=%s to=%s"
+                         ws label way to)))))
 
 (defun agent-repl-prompt-entries-step-on ()
   "Relabel point's entry to answer the node read after its own.
