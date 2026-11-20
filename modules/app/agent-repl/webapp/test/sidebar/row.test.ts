@@ -30,6 +30,8 @@ import {
   type BandReturn,
   drawRosterRowStandIn,
   appendRowKids,
+  KIDS_CLASS,
+  kidsBoxOf,
   STAND_IN_ATTRIBUTE,
   drawRosterRowOneShot,
   drawRosterRowAsyncMerging,
@@ -1029,7 +1031,7 @@ describe("the family", () => {
 
   it("marks a surfaced child and none of its siblings", () => {
     const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" }), row({ id: "ws-3" })] }));
-    family.children[1]!.surfaced = true;
+    family.children[1].surfaced = true;
     const drawn = drawRosterFamily(family, sidebarContext(), "R");
     expect(drawn.querySelector("[data-roster-row='ws-3']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(true);
     expect(drawn.querySelector("[data-roster-row='ws-2']")!.classList.contains(SURFACED_ROW_CLASS)).toBe(false);
@@ -1040,7 +1042,7 @@ describe("the family", () => {
     const applied: Array<[string, boolean]> = [];
     const sc = { ...sidebarContext(), foldFade: { apply: (id: string, _row: HTMLElement, surfaced: boolean) => applied.push([id, surfaced]) } };
     const family = openRow(row({ id: "ws-1", children: [row({ id: "ws-2" })] }));
-    family.children[0]!.surfaced = true;
+    family.children[0].surfaced = true;
 
     // Act
     drawRosterFamily(family, sc, "R");
@@ -1208,6 +1210,59 @@ describe("pathedFamilies", () => {
 
     // Assert
     expect(body.includes("pathedFamilies(")).toBe(true);
+  });
+});
+
+describe("kidsBoxOf", () => {
+  it("answers the box of nested rows a row holds", () => {
+    // Arrange
+    const ws = document.createElement("div");
+    const kids = document.createElement("div");
+    kids.className = KIDS_CLASS;
+    ws.appendChild(kids);
+
+    // Act / Assert
+    expect([kidsBoxOf(ws), ws.children.length]).toEqual([kids, 1]);
+  });
+
+  it("appends an empty box to a row that holds none", () => {
+    // Arrange
+    const ws = document.createElement("div");
+    ws.appendChild(document.createElement("span"));
+
+    // Act
+    const kids = kidsBoxOf(ws);
+
+    // Assert
+    expect([kids.className, kids.children.length, ws.lastElementChild === kids]).toEqual([KIDS_CLASS, 0, true]);
+  });
+
+  it("refuses a row holding two boxes", () => {
+    // Arrange
+    const ws = document.createElement("div");
+    for (let i = 0; i < 2; i++) {
+      const kids = document.createElement("div");
+      kids.className = KIDS_CLASS;
+      ws.appendChild(kids);
+    }
+
+    // Act / Assert
+    expect(() => kidsBoxOf(ws)).toThrow(/invariant/);
+  });
+
+  it.each([
+    ["row.ts", "appendRowKids"],
+    ["subsections.ts", "nestLists"],
+  ])("is how %s finds or makes a row's box", (file, fn) => {
+    // Arrange
+    const source = codeOf(readFileSync(join(__dirname, "..", "..", "src", "sidebar", file), "utf8"));
+    const start = source.indexOf(`function ${fn}(`);
+
+    // Act
+    const body = source.slice(start, source.indexOf("\n}\n", start));
+
+    // Assert
+    expect([start >= 0, body.includes("kidsBoxOf"), body.includes("createElement")]).toEqual([true, true, false]);
   });
 });
 
@@ -3319,7 +3374,7 @@ describe("appendRowKids", () => {
     const source = readFileSync(join(__dirname, "../../src/sidebar/row.ts"), "utf8");
 
     // Act
-    const handRolled = source.match(/kids\.className = "kids"/g) ?? [];
+    const handRolled = source.match(/kids\.className = /g) ?? [];
 
     // Assert
     expect(handRolled).toHaveLength(1);

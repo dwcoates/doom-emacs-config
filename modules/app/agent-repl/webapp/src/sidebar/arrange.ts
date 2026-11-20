@@ -84,14 +84,30 @@ export async function sendArrangement(sc: SidebarContext, control: HTMLElement, 
     operation: "sidebar.arrange.send",
     context: { change: change?.case },
   });
-  return sendHeld(sc, control, {
+  return sendHeld<ArrangeSidebarResponse>(sc, control, {
     rpc: "ArrangeSidebar",
     call: (client) => client.arrangeSidebar(buildArrangeSidebarRequest(change)),
     schema: ArrangeSidebarResponseSchema,
     refusalText: (cause) => arrangeSidebarRefusal(cause as never),
-    revision: (response: ArrangeSidebarResponse) =>
-      response.result.case === "success" ? response.result.value.rosterRevision : null,
+    revision: successRevision,
   });
+}
+
+/** A held verb's response whose success names the roster revision carrying its change. */
+export interface RevisionedResponse {
+  result:
+    | { case: "success"; value: { rosterRevision: bigint } }
+    | { case: "error"; value: unknown }
+    | { case: undefined; value?: undefined };
+}
+
+/**
+ * The roster revision RESPONSE's success names, null for a refusal: THE ONE
+ * reading of `roster_revision` every held verb whose success carries one
+ * hands `sendHeld`.
+ */
+export function successRevision(response: RevisionedResponse): bigint | null {
+  return response.result.case === "success" ? response.result.value.rosterRevision : null;
 }
 
 /**

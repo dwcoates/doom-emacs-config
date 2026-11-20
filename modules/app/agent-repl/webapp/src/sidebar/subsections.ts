@@ -42,7 +42,12 @@
  *     a subsection (its header or its rows) it lands in that subsection,
  *     which lights up (`DROP_TARGET_CLASS`) while it would. A folded or
  *     empty subsection shows none of its rows, so over one the drag also
- *     draws the row going inside it (`DragSpec.intoUnseen`, `drag.ts`);
+ *     draws the row going inside it (`DragSpec.intoUnseen`, `drag.ts`).
+ *     Over the middle of another row's line it lands among that row's
+ *     children, and the row lights up the same way: the drop makes the
+ *     dragged workspace that row's child (`nest.ts`). The line's top and
+ *     bottom quarters still place it before or after the row, as a drop
+ *     between rows does;
  *   - a subsection, by its header, among its repository's rows and
  *     subsections: dropped onto a row's line it stands just above that row;
  *   - a repository block (a parent's children of one other repository), by
@@ -68,7 +73,7 @@ import { BREATHES_CLASS, NAME_INK_CLASS, drawNameInk } from "./name-ink.js";
 import { NAME_STEADY_CLASS } from "./name-tint.js";
 import { armWorks, rosterArmMark } from "./tones.js";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { queryAll } from "../dom.js";
+import { childrenMatching, queryAll } from "../dom.js";
 import { EMPTY_SUBSECTION_ATTRIBUTE, OPEN_REGION_CLASS } from "./band-fit.js";
 import { requireMessage } from "../rpc/strict.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
@@ -76,8 +81,15 @@ import { sendArrangement } from "./arrange.js";
 import { openNamePopup } from "./name-popup.js";
 import { subsectionFoldKey, type SidebarContext } from "./context.js";
 import { drawRosterSectionFold, foldOnClick, sectionFold, trackDaemonFold } from "./section-fold.js";
-import { pressToDrag, type DragSpec } from "../drag.js";
-import { REPOSITORY_BLOCK_ATTRIBUTE, REPOSITORY_BLOCK_CLASS, REPOSITORY_DIVIDER_CLASS } from "./row.js";
+import { pressToDrag, type DragSpec, type Zone } from "../drag.js";
+import { sendNest } from "./nest.js";
+import {
+  KIDS_CLASS,
+  kidsBoxOf,
+  REPOSITORY_BLOCK_ATTRIBUTE,
+  REPOSITORY_BLOCK_CLASS,
+  REPOSITORY_DIVIDER_CLASS,
+} from "./row.js";
 import { drawRosterOpenCount, openCountText } from "./open-count.js";
 
 /** The class of one subsection. */
@@ -375,8 +387,10 @@ function subsectionDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs):
 
 /**
  * A press on a top-level row's line drags it among its repository's lists:
- * the section's list (its rows in no subsection and its subsections) and
- * each subsection's rows, the subsection it is over lit as the one it joins.
+ * the section's list (its rows in no subsection and its subsections), each
+ * subsection's rows, the subsection it is over lit as the one it joins, and
+ * every other row's children (`nestLists`), the row it is over lit as the
+ * parent it joins.
  */
 function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSpec | null {
   const line = target.closest<HTMLElement>(".row");
@@ -395,12 +409,16 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
     item: row,
     box: section,
     scroller: openRegion(section),
-    lists: () => queryAll<HTMLElement>(section, BUCKET_LIST_SELECTOR),
-    itemsOf: entryItems,
-    zoneOf: (l) => subsectionOf(l) ?? l,
-    targetOf: subsectionOf,
-    intoUnseen: showsNoRows,
+    lists: () => [...queryAll<HTMLElement>(section, BUCKET_LIST_SELECTOR), ...nestLists(section, row)],
+    itemsOf: (l) => (isNestList(l) ? nestItems(l) : entryItems(l)),
+    zoneOf: (l) => (isNestList(l) ? nestZone(l, row) : (subsectionOf(l) ?? l).getBoundingClientRect()),
+    targetOf: (l) => (isNestList(l) ? nestParent(l) : subsectionOf(l)),
+    intoUnseen: (target) => !isNestTarget(target) && showsNoRows(target),
     dropped: (l, before) => {
+      if (isNestList(l)) {
+        void sendNest(sc, sc.arrange.status, workspace, refs.workspace(rowId(nestParent(l))));
+        return;
+      }
       const bucket = bucketOf(l);
       void sendArrangement(sc, sc.arrange.status, {
         case: "placeWorkspace",
@@ -417,6 +435,64 @@ function rowDrag(sc: SidebarContext, target: Element, refs: ArrangeRefs): DragSp
       });
     },
   };
+}
+
+/**
+ * The lists a row ITEM dragged in SECTION nests through: the box of nested
+ * rows of every other row there, outside ITEM's own family, made empty for a
+ * row that has none (`kidsBoxOf`). An empty box draws nothing, and the drag
+ * marks SECTION for a redraw from its wire (`REARRANGED_ATTRIBUTE`), so one
+ * the drop did not fill never outlives the next push.
+ */
+function nestLists(section: HTMLElement, item: HTMLElement): HTMLElement[] {
+  return queryAll<HTMLElement>(section, "[data-roster-row]")
+    .filter((ws) => !item.contains(ws))
+    .map(kidsBoxOf);
+}
+
+/** Whether LIST is a row's box of nested rows rather than a bucket's list. */
+function isNestList(list: HTMLElement): boolean {
+  return list.classList.contains(KIDS_CLASS);
+}
+
+/**
+ * Whether TARGET, a row drag's lit target, is a row a drop would nest under
+ * rather than a subsection. A nest drop's slot stands in the row's own box
+ * of nested rows, under its line, so it is never drawn going inside unseen.
+ */
+function isNestTarget(target: HTMLElement): boolean {
+  return target.hasAttribute("data-roster-row");
+}
+
+/** The row whose nested rows KIDS is: the parent a drop there joins. */
+function nestParent(kids: HTMLElement): HTMLElement {
+  const ws = kids.parentElement;
+  if (ws === null || !ws.hasAttribute("data-roster-row")) throw new Error("invariant: a box of nested rows sits in its row");
+  return ws;
+}
+
+/** A box of nested rows' entries, in order: its rows and its repository blocks. */
+function nestItems(kids: HTMLElement): HTMLElement[] {
+  return [...kids.children].filter(
+    (el): el is HTMLElement => el.hasAttribute("data-roster-row") || el.classList.contains(REPOSITORY_BLOCK_CLASS),
+  );
+}
+
+/**
+ * The span KIDS claims while ITEM is dragged: the middle half of its row's
+ * line, so the line's top and bottom quarters still place ITEM before or
+ * after the row. ONCE ITEM STANDS THERE the span reaches down to ITEM's
+ * slot: the slot's arrival below the line moves the rows above it when ITEM
+ * came from above, and the pointer, now over the slot, still nests rather
+ * than throwing the slot back out.
+ */
+function nestZone(kids: HTMLElement, item: HTMLElement): Zone {
+  const line = childrenMatching<HTMLElement>(nestParent(kids), ".row")[0];
+  if (line === undefined) throw new Error("invariant: a row draws its line");
+  const box = line.getBoundingClientRect();
+  const quarter = (box.bottom - box.top) / 4;
+  const bottom = item.parentElement === kids ? item.getBoundingClientRect().bottom : box.bottom - quarter;
+  return { top: box.top + quarter, bottom };
 }
 
 /**

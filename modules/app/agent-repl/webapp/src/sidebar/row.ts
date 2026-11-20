@@ -119,7 +119,7 @@ import {
   runVerb,
   type VerbTarget,
 } from "./verbs.js";
-import { queryAll } from "../dom.js";
+import { childrenMatching, queryAll } from "../dom.js";
 
 /**
  * ONE ROW OF A LIST AND ITS FAMILY, as each list of the roster spells it: an
@@ -527,13 +527,29 @@ export function appendRowKids(
   const children = kin.children ?? [];
   const blocks = kin.repositoryBlocks ?? [];
   if (children.length === 0 && blocks.length === 0) return;
-  const kids = document.createElement("div");
-  kids.className = "kids";
+  const kids = kidsBoxOf(ws);
   for (const child of pathedFamilies(children, `${familyPath}.children`)) kids.appendChild(draw(child.family, child.path));
   blocks.forEach((block, b) =>
     kids.appendChild(drawRosterOpenRowRepositoryBlock(block, `${familyPath}.repositoryBlocks[${b}]`, draw, selectMain)),
   );
+}
+
+/** The class of a row's box of nested rows (`appendRowKids`). */
+export const KIDS_CLASS = "kids";
+
+/**
+ * WS's box of nested rows: the one it holds, or an empty one appended when it
+ * holds none. An empty box draws nothing, so a drag can make one to stand its
+ * slot in when the row it is dropped onto has no children yet (`subsections.ts`).
+ */
+export function kidsBoxOf(ws: HTMLElement): HTMLElement {
+  const held = childrenMatching<HTMLElement>(ws, `.${KIDS_CLASS}`);
+  if (held.length > 1) throw new Error("invariant: a row holds at most one box of nested rows");
+  if (held[0] !== undefined) return held[0];
+  const kids = document.createElement("div");
+  kids.className = KIDS_CLASS;
   ws.appendChild(kids);
+  return kids;
 }
 
 /**

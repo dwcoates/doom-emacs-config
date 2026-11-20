@@ -906,6 +906,10 @@ The top bar's phone chip, on the left after the account and just left of the wif
 - **Drag a workspace's row to move it.**
   - Drop it among the repository's own rows, just above a subsection included, or into any of its subsections, an empty one included.
   - While the row is over a subsection, the subsection lights up: dropping there files the workspace into it.
+  - Drop it on the middle of another workspace's row to make it that workspace's child.
+    - The row it would join lights up the same way, and the dragged row stands among that row's children.
+    - The top and bottom edges of a row's line still place the dragged row just above or below it.
+    - The new child's agent is told its new parent, and its work still lands where it landed before.
   - A workspace's whole family moves with it.
     - Dragging a parent takes its children, and dragging a child takes its parent and the rest of the family.
 - **Drag a subsection's header to move it among the repository's rows and subsections.**

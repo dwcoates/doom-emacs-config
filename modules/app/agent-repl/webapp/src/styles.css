@@ -1294,8 +1294,11 @@ body {
 .drag-slot { opacity: 0.35; outline: 1px dashed var(--border); outline-offset: -1px; }
 /* THE SUBSECTION A DRAGGED ROW WOULD JOIN lights up, subtly, while the row
    is over it (owner request, 2026-10-20): the rail's lifted grey, half
-   strength, behind its header and rows. */
-#ws-sidebar .sb-subsection.drop-target {
+   strength, behind its header and rows. THE ROW A DRAGGED ROW WOULD BECOME A
+   CHILD OF lights up the same way, behind its line and its children
+   (src/sidebar/subsections.ts). */
+#ws-sidebar .sb-subsection.drop-target,
+#ws-sidebar .ws.drop-target {
   background-color: color-mix(in srgb, var(--card) 50%, transparent);
   border-radius: 4px;
 }

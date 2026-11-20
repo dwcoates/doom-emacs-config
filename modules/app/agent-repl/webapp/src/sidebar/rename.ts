@@ -11,7 +11,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_name_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { unreachableArm } from "../rpc/strict.js";
-import { sendHeld } from "./arrange.js";
+import { sendHeld, successRevision } from "./arrange.js";
 import type { SidebarContext } from "./context.js";
 import { openNamePopup } from "./name-popup.js";
 import type { CauseOf } from "./verbs.js";
@@ -42,13 +42,12 @@ export function renameOnDoubleClick(label: HTMLElement, sc: SidebarContext, work
 
 /** Send the rename of WORKSPACE to NAME, saying a refusal at CONTROL. */
 function renameWorkspace(sc: SidebarContext, control: HTMLElement, workspace: WorkspaceRef, name: string): Promise<boolean> {
-  return sendHeld(sc, control, {
+  return sendHeld<SetWorkspaceNameResponse>(sc, control, {
     rpc: "SetWorkspaceName",
     call: (client) => client.setWorkspaceName({ workspace, name }),
     schema: SetWorkspaceNameResponseSchema,
     refusalText: (cause) => setWorkspaceNameRefusal(cause as CauseOf<SetWorkspaceNameError>),
-    revision: (response: SetWorkspaceNameResponse) =>
-      response.result.case === "success" ? response.result.value.rosterRevision : null,
+    revision: successRevision,
   });
 }
 
