@@ -63,6 +63,7 @@ status arm and whatever else the case is about."
                    :attention nil
                    :priority nil
                    :viewed nil
+                   :view-dwell nil
                    :idle-async-unread nil
                    :reviving nil
                    :detached-live nil
