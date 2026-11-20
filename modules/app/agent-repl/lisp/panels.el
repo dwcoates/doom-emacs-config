@@ -29,6 +29,7 @@
 (declare-function agent-repl-host-state "host" (ws))
 (declare-function agent-repl--input-restore-unsent "input" (ws))
 (declare-function agent-repl--info "core")
+(declare-function agent-repl--call-recording-error "core" (ws operation fn))
 (declare-function agent-repl--kill-cause-str "core")
 (declare-function agent-repl--log "core")
 (declare-function agent-repl--log-verbose "core")
@@ -1024,7 +1025,9 @@ which activation it was."
                         (if agent-repl--switch-activation-scheduled-at
                             (round (* 1000 (- (float-time) agent-repl--switch-activation-scheduled-at)))
                           "unknown"))
-      (agent-repl--on-workspace-switch ws))))
+      (agent-repl--call-recording-error
+       log-ws "elisp.panels.switch-activation"
+       (lambda () (agent-repl--on-workspace-switch ws))))))
 
 (defun agent-repl--capture-switch-trigger ()
   "Record `agent-repl--switch-trigger' for the activation happening now."
@@ -1326,20 +1329,23 @@ left to refresh."
     (agent-repl--with-log-context
      scope nil
      (lambda ()
-       (if (active-minibuffer-window)
-           ;; Skip reconciliation while a minibuffer is active (e.g. the
-           ;; `SPC p p' picker).  The window configuration is transient — the
-           ;; picker's own window churn is what fired this debounced idle
-           ;; timer — so reconciling now would rearrange windows under the open
-           ;; picker (and sweep the undeletable minibuffer window).  Closing the
-           ;; minibuffer changes the window configuration again, re-firing this
-           ;; hook to reconcile the settled layout.
-           (agent-repl--log-verbose log-ws
-                                    "on-window-change: minibuffer active — deferring reconcile")
-         (agent-repl--log-verbose log-ws "on-window-change")
-         (agent-repl--sync-panels)
-         (agent-repl-window--ensure-layout)
-         (agent-repl-window-focus-input-when-panels-alone))))))
+       (agent-repl--call-recording-error
+        scope "elisp.panels.on-window-change"
+        (lambda ()
+          (if (active-minibuffer-window)
+              ;; Skip reconciliation while a minibuffer is active (e.g. the
+              ;; `SPC p p' picker).  The window configuration is transient — the
+              ;; picker's own window churn is what fired this debounced idle
+              ;; timer — so reconciling now would rearrange windows under the open
+              ;; picker (and sweep the undeletable minibuffer window).  Closing the
+              ;; minibuffer changes the window configuration again, re-firing this
+              ;; hook to reconcile the settled layout.
+              (agent-repl--log-verbose log-ws
+                                       "on-window-change: minibuffer active — deferring reconcile")
+            (agent-repl--log-verbose log-ws "on-window-change")
+            (agent-repl--sync-panels)
+            (agent-repl-window--ensure-layout)
+            (agent-repl-window-focus-input-when-panels-alone))))))))
 
 (defmacro agent-repl--deferred (timer-var fn)
   "Return a lambda that debounces calls to FN via TIMER-VAR.
