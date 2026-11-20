@@ -651,6 +651,25 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 			wantCalls: []string{"find", "kill w2", "forget w2", "kill c1", "forget c1", "forget w2", "kill w1", "forget w1"},
 		},
 		{
+			name: "a main worktree's repository mates are retired before it is forgotten",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w1": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_MainWorktree{MainWorktree: &agentreplv1.ForgetWorkspaceMainWorktree{OtherWorkspaces: 1}}})}},
+			found: func(d1, d2 string) []*agentreplv1.FoundWorkspace {
+				return []*agentreplv1.FoundWorkspace{
+					{Workspace: &workspacev1.WorkspaceRef{Id: "w1", Dir: d1}, Repository: &workspacev1.RepositoryRef{Dir: d1}},
+					{Workspace: &workspacev1.WorkspaceRef{Id: "m1"}, Repository: &workspacev1.RepositoryRef{Dir: d1}},
+					{Workspace: &workspacev1.WorkspaceRef{Id: "x1"}, Repository: &workspacev1.RepositoryRef{Dir: d2 + "-elsewhere"}},
+				}
+			},
+			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1", "find", "kill m1", "forget m1", "forget w1"},
+		},
+		{
+			name: "a workspace's closed children are retired before it is forgotten",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_HasChildren{HasChildren: &agentreplv1.ForgetWorkspaceHasChildren{Children: []string{"c1"}}}})}},
+			wantCalls: []string{"kill w2", "forget w2", "kill c1", "forget c1", "forget w2", "kill w1", "forget w1"},
+		},
+		{
 			name: "a workspace's open children are retired before it",
 			kill: func() func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
 				refused := false
