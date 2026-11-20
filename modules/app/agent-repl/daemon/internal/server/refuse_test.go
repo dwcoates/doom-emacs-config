@@ -1051,6 +1051,7 @@ func TestSetArmFillsTheInvalidNameArmAndItsRule(t *testing.T) {
 	}{
 		{name: "the slug rule", rule: workspace.NameRuleSlug, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetSlug() != nil }},
 		{name: "the prefix rule", rule: workspace.NameRulePrefix, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetPrefix() != nil }},
+		{name: "the reserved namespace rule", rule: workspace.NameRuleReserved, set: func(m *agentreplv1.CreateWorkspaceInvalidName) bool { return m.GetReserved() != nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

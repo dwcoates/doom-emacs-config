@@ -703,17 +703,20 @@ at commit H while no workspace that has not landed holds it."
   (list (list 'slug :slug
               (agent-repl-wire-verbs--empty-arm "CreateWorkspaceInvalidNameSlug"))
         (list 'prefix :prefix
-              (agent-repl-wire-verbs--empty-arm "CreateWorkspaceInvalidNamePrefix")))
+              (agent-repl-wire-verbs--empty-arm "CreateWorkspaceInvalidNamePrefix"))
+        (list 'reserved :reserved
+              (agent-repl-wire-verbs--empty-arm "CreateWorkspaceInvalidNameReserved")))
   "The `rule' oneof arms of CreateWorkspaceInvalidName, as decode-oneof arms.")
 
 (defun agent-repl-wire-decode-create-workspace-invalid-name (json)
   "Decode CreateWorkspaceInvalidName from JSON into (:name N :component C :rule R).
 N is the supplied name, trimmed; C is the `/'-separated component that
 broke its rule, empty when that component is empty; R is `:slug' when
-the last component is not a slug and `:prefix' when an earlier one is
-not a prefix."
+the last component is not a slug, `:prefix' when an earlier one is
+not a prefix, and `:reserved' when the name lies in the daemon's own
+`agent-repl' branch namespace."
   (let ((message "CreateWorkspaceInvalidName"))
-    (agent-repl-wire-verbs--check-keys message json '(name component slug prefix))
+    (agent-repl-wire-verbs--check-keys message json '(name component slug prefix reserved))
     (list :name (agent-repl-wire-verbs--decode-string message 'name json)
           :component (agent-repl-wire-verbs--decode-string message 'component json)
           :rule (plist-get (agent-repl-wire-verbs--decode-oneof

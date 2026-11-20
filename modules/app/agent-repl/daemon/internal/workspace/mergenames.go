@@ -122,6 +122,12 @@ func (v *verbs) ClaimMergeName(ctx context.Context, repoDir, name string) (strin
 	log := v.deps.Log.Global()
 	branch := suppliedBranch(name)
 	fields := dlog.Context{"name": name, "branch": branch, "repo_dir": repoDir}
+	// THE DAEMON'S OWN NAMESPACE IS NEVER AN ASYNC MERGE'S (InReservedNamespace):
+	// a name there is answered taken, so only the daemon makes a branch there.
+	if InReservedNamespace(branch) {
+		log.Info(opNaming, "an async merge's name lies in the daemon's reserved branch namespace", dlog.Merge(fields, dlog.Context{"namespace": ReservedNamespace}))
+		return branch, nil, true, nil
+	}
 	v.names.mu.Lock()
 	defer v.names.mu.Unlock()
 	taken, err := v.takenLocked(ctx, "")

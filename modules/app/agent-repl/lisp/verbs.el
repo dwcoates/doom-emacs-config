@@ -1550,7 +1550,9 @@ name that keeps it."
               (:prefix (if (string-empty-p component)
                            "it has an empty part between slashes"
                          (format "its prefix %S must be letters and digits joined by single . _ or -"
-                                 component)))))))
+                                 component)))
+              (:reserved (format "its first part %S is the branch namespace agent-repl keeps for its own workspaces"
+                                 component))))))
 
 (defun agent-repl-verbs--create-policy-refusal-sentence (missing)
   "Word a `one_shot_policy_missing\=' refusal whose fields are MISSING.
