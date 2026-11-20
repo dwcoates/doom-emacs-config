@@ -1,0 +1,73 @@
+// endpoint_pass_cold_gate.proto — PassColdGate: a workspace's agent passes
+// ANOTHER workspace's cold gate. AGENT API section.
+//
+// THE ONE WAY AN AGENT PASSES A COLD GATE IS A HAIKU COMPACTION OF ALL THE
+// CONTEXT (owner ruling, 2026-11-18). The request names no choice, so paying
+// the cold read and clearing the context are unrepresentable here: they stay
+// the user's, answered on the gate card (AnswerColdGate). The daemon answers
+// the standing gate exactly as the card's `compact` button would with the
+// Haiku summarizer and the `all` scope, so the prompts held at the gate stay
+// held for the user to send, and the re-open's progress and outcome are the
+// footer's, as for any answered gate.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/workspace_topology.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message PassColdGateRequest {
+  // The workspace parked at the cold gate.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // The workspace whose agent passes the gate, filled by `agent-repld`'s
+  // command line from its working directory. REQUIRED: only a workspace
+  // asks, never the user, who answers the gate card instead.
+  WorkspaceRequesterWorkspace requester = 2;
+}
+
+// THE ARM IS THE OUTCOME.
+message PassColdGateResponse {
+  oneof result {
+    PassColdGateSuccess success = 1;
+    PassColdGateError error = 2;
+  }
+}
+// Taken: the gate is spent and its row retired, and the Haiku compaction runs
+// before the session re-opens. Empty on purpose: the compaction's progress and
+// outcome are the footer's.
+message PassColdGateSuccess {}
+message PassColdGateError {
+  oneof cause {
+    // The workspace id is not in the daemon's registry.
+    PassColdGateUnknownWorkspace unknown_workspace = 1;
+    // The echoed dir disagrees with the registry's dir for this id.
+    PassColdGateWorkspaceRefMismatch workspace_ref_mismatch = 2;
+    // This daemon released the workspace to a successor; dial `address`.
+    PassColdGateTransferringAway transferring_away = 3;
+    // A joining daemon has not finished adopting this workspace yet.
+    PassColdGateNotYetAdopted not_yet_adopted = 4;
+    // No cold gate is standing for this workspace.
+    PassColdGateNoColdGate no_cold_gate = 5;
+    // The gate offered no Haiku compaction of all the context.
+    PassColdGateUnservedRemediation unserved_remediation = 6;
+  }
+}
+message PassColdGateUnknownWorkspace {}
+message PassColdGateWorkspaceRefMismatch {
+  // The dir the registry holds for this id.
+  string registry_dir = 1;
+}
+message PassColdGateTransferringAway {
+  // The successor's `127.0.0.1:<port>`, so a lagging client dials it.
+  string address = 1;
+}
+message PassColdGateNotYetAdopted {
+  // The `127.0.0.1:<port>` of the daemon that serves this workspace until the
+  // joining daemon adopts it. UNSET when no live daemon serves it.
+  optional string address = 1;
+}
+message PassColdGateNoColdGate {}
+message PassColdGateUnservedRemediation {}

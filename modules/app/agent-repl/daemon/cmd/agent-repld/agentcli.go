@@ -209,7 +209,7 @@ var cliNouns = map[string]map[string]cliCommand{
 		"gh-queue-unsubscribe":   {usage: "gh-queue-unsubscribe WS -queue OWNER/REPO@BRANCH", run: workspaceGithubQueueUnsubscribe},
 		"gh-queue-subscriptions": {usage: "gh-queue-subscriptions WS", run: workspaceGithubQueueSubscriptions},
 		"notify":                 {usage: "notify WS TEXT", run: workspaceNotify},
-		"gate":                   {usage: "gate WS pay|clear|compact|compact-and-resume [-model M -scope all|prompts|responses]", run: workspaceGate},
+		"pass-gate":              {usage: "pass-gate WS", run: workspacePassGate},
 		"subsections":            {usage: "subsections WS", run: workspaceSubsections},
 		"place":                  {usage: "place WS... -subsection NAME|-new-subsection NAME", run: workspacePlace},
 	},
@@ -494,11 +494,20 @@ func (c *cliCall) requester(asUser bool) (*agentreplv1.WorkspaceRequester, bool)
 	if asUser {
 		return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_User{User: &agentreplv1.WorkspaceRequesterUser{}}}, true
 	}
+	asker, ok := c.callingRequester()
+	if !ok {
+		return nil, false
+	}
+	return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_Workspace{Workspace: asker}}, true
+}
+
+// callingRequester answers the calling workspace as the workspace that asks.
+func (c *cliCall) callingRequester() (*agentreplv1.WorkspaceRequesterWorkspace, bool) {
 	ref, ok := c.calling()
 	if !ok {
 		return nil, false
 	}
-	return &agentreplv1.WorkspaceRequester{Asker: &agentreplv1.WorkspaceRequester_Workspace{Workspace: &agentreplv1.WorkspaceRequesterWorkspace{Workspace: ref}}}, true
+	return &agentreplv1.WorkspaceRequesterWorkspace{Workspace: ref}, true
 }
 
 // repository answers the repository NAME names: `here` (the calling
@@ -2104,72 +2113,25 @@ func workspaceNotify(c *cliCall, args []string) int {
 	return answer(c, resp, err)
 }
 
-// compactScopes are the -scope spellings.
-var compactScopes = map[string]conversationv1.SessionCompactScope{
-	"all":       conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL,
-	"prompts":   conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_PROMPTS,
-	"responses": conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_RESPONSES,
-}
-
-func workspaceGate(c *cliCall, args []string) int {
+// workspacePassGate passes WS's standing cold gate by a Haiku compaction of
+// all its context, the one way an agent passes a gate
+// (endpoint_pass_cold_gate.proto): the verb takes no answer, so it can never
+// pay the cold read or clear the context.
+func workspacePassGate(c *cliCall, args []string) int {
 	fs, stateDir := c.flags()
-	model := fs.String("model", "", "the summarizer, for a compaction")
-	scope := fs.String("scope", "", "all, prompts or responses, for a compaction")
 	ref, rest, ok := c.workspaceArg(fs, stateDir, args)
 	if !ok {
 		return exitFailure
 	}
-	if len(rest) != 1 {
-		return c.usageFailed("the command names the gate's answer")
+	if len(rest) != 0 {
+		return c.usageFailed("the command takes no answer: a gate is passed only by a Haiku compaction of all its context")
 	}
-	req := &agentreplv1.AnswerColdGateRequest{Workspace: ref}
-	compaction := func() (*agentreplv1.AnswerColdGateCompact, bool) {
-		level, known := compactScopes[*scope]
-		if *model == "" || !known {
-			c.usageFailed("a compaction names its -model and its -scope")
-			return nil, false
-		}
-		return &agentreplv1.AnswerColdGateCompact{Model: &conversationv1.AgentModel{Name: *model}, Scope: level}, true
-	}
-	switch rest[0] {
-	case "pay":
-		req.Choice = &agentreplv1.AnswerColdGateRequest_Pay{Pay: &agentreplv1.AnswerColdGatePay{}}
-	case "clear":
-		req.Choice = &agentreplv1.AnswerColdGateRequest_Clear{Clear: &agentreplv1.AnswerColdGateClear{}}
-	case "compact":
-		compact, ok := compaction()
-		if !ok {
-			return exitFailure
-		}
-		req.Choice = &agentreplv1.AnswerColdGateRequest_Compact{Compact: compact}
-	case "compact-and-resume":
-		compact, ok := compaction()
-		if !ok {
-			return exitFailure
-		}
-		req.Choice = &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: compact}
-	default:
-		return c.usageFailed("the gate is answered pay, clear, compact or compact-and-resume, not %q", rest[0])
-	}
-	status, err := c.client.GetWorkspaceStatus(c.ctx, connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref}))
-	if err != nil {
-		c.failed("read the workspace's status: %v", err)
+	asker, ok := c.callingRequester()
+	if !ok {
 		return exitFailure
 	}
-	gate := status.Msg.GetSuccess().GetStatus().GetStanding().GetOpen().GetActivity().GetColdGate().GetGate()
-	if gate == nil {
-		// THE STANDING, AS THE CLI PRINTS EVERY ANSWER: compact protojson,
-		// never a Go struct dump of the whole response.
-		standing, err := protojson.Marshal(status.Msg.GetSuccess().GetStatus().GetStanding())
-		if err != nil {
-			c.failed("no cold gate stands on the workspace, and its standing could not be printed: %v", err)
-			return exitRefused
-		}
-		c.failed("no cold gate stands on the workspace; it stands %s", standing)
-		return exitRefused
-	}
-	req.Gate = gate
-	resp, err := c.client.AnswerColdGate(c.ctx, connect.NewRequest(req))
+	req := &agentreplv1.PassColdGateRequest{Workspace: ref, Requester: asker}
+	resp, err := c.client.PassColdGate(c.ctx, connect.NewRequest(req))
 	return answer(c, resp, err)
 }
 

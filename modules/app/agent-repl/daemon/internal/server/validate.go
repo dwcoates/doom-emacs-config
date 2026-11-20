@@ -495,6 +495,18 @@ func validateAnswerColdGateRequest(req *agentreplv1.AnswerColdGateRequest) *conn
 	return nil
 }
 
+// validatePassColdGateRequest is PassColdGateRequest's base function: the
+// gated workspace and the workspace whose agent passes its gate.
+func validatePassColdGateRequest(req *agentreplv1.PassColdGateRequest) *connect.Error {
+	if err := validateWorkspaceRef("workspace", req.GetWorkspace()); err != nil {
+		return err
+	}
+	if req.GetRequester() == nil {
+		return invalid("requester", "the workspace passing the gate is required")
+	}
+	return validateWorkspaceRef("requester.workspace", req.GetRequester().GetWorkspace())
+}
+
 // validateAnswerColdGateCompact is the payload both compact arms share, at
 // FIELD: a summarizer and a scope, neither defaulted.
 func validateAnswerColdGateCompact(field string, compact *agentreplv1.AnswerColdGateCompact) *connect.Error {

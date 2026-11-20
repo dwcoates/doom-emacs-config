@@ -711,6 +711,10 @@ type Verbs interface {
 	// The choice also decides the prompts held at the gate (gatefate.go in the
 	// prompt queue), settled before the session is brought back.
 	AnswerColdGate(ctx context.Context, ws ids.WorkspaceID, answer *agentreplv1.AnswerColdGateRequest) error
+	// PassColdGate is another workspace's agent passing WS's standing cold
+	// gate: answered compact by the default summarizer (Haiku, all the
+	// context), the one answer an agent may give (answers.go).
+	PassColdGate(ctx context.Context, ws ids.WorkspaceID) error
 	// SetModel switches the session's model through the QUEUE's session-act
 	// path, so it cannot overtake a queued prompt.
 	SetModel(ctx context.Context, ws ids.WorkspaceID, model string) error

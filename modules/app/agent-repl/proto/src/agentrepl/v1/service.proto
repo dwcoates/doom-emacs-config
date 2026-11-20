@@ -72,6 +72,7 @@ import "agentrepl/v1/endpoint_report_view_dwell.proto";
 import "agentrepl/v1/endpoint_move_workspace.proto";
 import "agentrepl/v1/endpoint_nuke_workspace.proto";
 import "agentrepl/v1/endpoint_notify_workspace.proto";
+import "agentrepl/v1/endpoint_pass_cold_gate.proto";
 import "agentrepl/v1/endpoint_open_external.proto";
 import "agentrepl/v1/endpoint_open_feed.proto";
 import "agentrepl/v1/endpoint_open_feed_image.proto";
@@ -827,6 +828,10 @@ service AgentRepl {
   // Post a desktop banner attributed to a workspace, whose click brings Emacs
   // forward and selects that workspace. See endpoint_notify_workspace.proto.
   rpc NotifyWorkspace(NotifyWorkspaceRequest) returns (NotifyWorkspaceResponse);
+  // Pass another workspace's cold gate by a Haiku compaction of all its
+  // context, the one way an agent passes a gate: paying and clearing stay the
+  // user's (AnswerColdGate). See endpoint_pass_cold_gate.proto.
+  rpc PassColdGate(PassColdGateRequest) returns (PassColdGateResponse);
   // Run the named tests from one workspace's worktree, streaming what the run
   // reports; the daemon is the one runner of tests on the host. See
   // endpoint_run_tests.proto.

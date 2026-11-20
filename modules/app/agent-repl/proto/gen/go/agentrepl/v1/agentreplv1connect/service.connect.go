@@ -450,6 +450,8 @@ const (
 	// AgentReplNotifyWorkspaceProcedure is the fully-qualified name of the AgentRepl's NotifyWorkspace
 	// RPC.
 	AgentReplNotifyWorkspaceProcedure = "/agentrepl.v1.AgentRepl/NotifyWorkspace"
+	// AgentReplPassColdGateProcedure is the fully-qualified name of the AgentRepl's PassColdGate RPC.
+	AgentReplPassColdGateProcedure = "/agentrepl.v1.AgentRepl/PassColdGate"
 	// AgentReplRunTestsProcedure is the fully-qualified name of the AgentRepl's RunTests RPC.
 	AgentReplRunTestsProcedure = "/agentrepl.v1.AgentRepl/RunTests"
 	// AgentReplRunRedundancyProcedure is the fully-qualified name of the AgentRepl's RunRedundancy RPC.
@@ -615,6 +617,7 @@ var (
 	agentReplUnsubscribeGithubMergeQueueMethodDescriptor       = agentReplServiceDescriptor.Methods().ByName("UnsubscribeGithubMergeQueue")
 	agentReplListGithubMergeQueueSubscriptionsMethodDescriptor = agentReplServiceDescriptor.Methods().ByName("ListGithubMergeQueueSubscriptions")
 	agentReplNotifyWorkspaceMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("NotifyWorkspace")
+	agentReplPassColdGateMethodDescriptor                      = agentReplServiceDescriptor.Methods().ByName("PassColdGate")
 	agentReplRunTestsMethodDescriptor                          = agentReplServiceDescriptor.Methods().ByName("RunTests")
 	agentReplRunRedundancyMethodDescriptor                     = agentReplServiceDescriptor.Methods().ByName("RunRedundancy")
 	agentReplEvaluateInEditorMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("EvaluateInEditor")
@@ -1106,6 +1109,10 @@ type AgentReplClient interface {
 	// Post a desktop banner attributed to a workspace, whose click brings Emacs
 	// forward and selects that workspace. See endpoint_notify_workspace.proto.
 	NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error)
+	// Pass another workspace's cold gate by a Haiku compaction of all its
+	// context, the one way an agent passes a gate: paying and clearing stay the
+	// user's (AnswerColdGate). See endpoint_pass_cold_gate.proto.
+	PassColdGate(context.Context, *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -2053,6 +2060,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithSchema(agentReplNotifyWorkspaceMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
+		passColdGate: connect.NewClient[v1.PassColdGateRequest, v1.PassColdGateResponse](
+			httpClient,
+			baseURL+AgentReplPassColdGateProcedure,
+			connect.WithSchema(agentReplPassColdGateMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
 		runTests: connect.NewClient[v1.RunTestsRequest, v1.RunTestsResponse](
 			httpClient,
 			baseURL+AgentReplRunTestsProcedure,
@@ -2232,6 +2245,7 @@ type agentReplClient struct {
 	unsubscribeGithubMergeQueue       *connect.Client[v1.UnsubscribeGithubMergeQueueRequest, v1.UnsubscribeGithubMergeQueueResponse]
 	listGithubMergeQueueSubscriptions *connect.Client[v1.ListGithubMergeQueueSubscriptionsRequest, v1.ListGithubMergeQueueSubscriptionsResponse]
 	notifyWorkspace                   *connect.Client[v1.NotifyWorkspaceRequest, v1.NotifyWorkspaceResponse]
+	passColdGate                      *connect.Client[v1.PassColdGateRequest, v1.PassColdGateResponse]
 	runTests                          *connect.Client[v1.RunTestsRequest, v1.RunTestsResponse]
 	runRedundancy                     *connect.Client[v1.RunRedundancyRequest, v1.RunRedundancyResponse]
 	evaluateInEditor                  *connect.Client[v1.EvaluateInEditorRequest, v1.EvaluateInEditorResponse]
@@ -2988,6 +3002,11 @@ func (c *agentReplClient) NotifyWorkspace(ctx context.Context, req *connect.Requ
 	return c.notifyWorkspace.CallUnary(ctx, req)
 }
 
+// PassColdGate calls agentrepl.v1.AgentRepl.PassColdGate.
+func (c *agentReplClient) PassColdGate(ctx context.Context, req *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error) {
+	return c.passColdGate.CallUnary(ctx, req)
+}
+
 // RunTests calls agentrepl.v1.AgentRepl.RunTests.
 func (c *agentReplClient) RunTests(ctx context.Context, req *connect.Request[v1.RunTestsRequest]) (*connect.ServerStreamForClient[v1.RunTestsResponse], error) {
 	return c.runTests.CallServerStream(ctx, req)
@@ -3493,6 +3512,10 @@ type AgentReplHandler interface {
 	// Post a desktop banner attributed to a workspace, whose click brings Emacs
 	// forward and selects that workspace. See endpoint_notify_workspace.proto.
 	NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error)
+	// Pass another workspace's cold gate by a Haiku compaction of all its
+	// context, the one way an agent passes a gate: paying and clearing stay the
+	// user's (AnswerColdGate). See endpoint_pass_cold_gate.proto.
+	PassColdGate(context.Context, *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error)
 	// Run the named tests from one workspace's worktree, streaming what the run
 	// reports; the daemon is the one runner of tests on the host. See
 	// endpoint_run_tests.proto.
@@ -4436,6 +4459,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithSchema(agentReplNotifyWorkspaceMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplPassColdGateHandler := connect.NewUnaryHandler(
+		AgentReplPassColdGateProcedure,
+		svc.PassColdGate,
+		connect.WithSchema(agentReplPassColdGateMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplRunTestsHandler := connect.NewServerStreamHandler(
 		AgentReplRunTestsProcedure,
 		svc.RunTests,
@@ -4762,6 +4791,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplListGithubMergeQueueSubscriptionsHandler.ServeHTTP(w, r)
 		case AgentReplNotifyWorkspaceProcedure:
 			agentReplNotifyWorkspaceHandler.ServeHTTP(w, r)
+		case AgentReplPassColdGateProcedure:
+			agentReplPassColdGateHandler.ServeHTTP(w, r)
 		case AgentReplRunTestsProcedure:
 			agentReplRunTestsHandler.ServeHTTP(w, r)
 		case AgentReplRunRedundancyProcedure:
@@ -5377,6 +5408,10 @@ func (UnimplementedAgentReplHandler) ListGithubMergeQueueSubscriptions(context.C
 
 func (UnimplementedAgentReplHandler) NotifyWorkspace(context.Context, *connect.Request[v1.NotifyWorkspaceRequest]) (*connect.Response[v1.NotifyWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.NotifyWorkspace is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) PassColdGate(context.Context, *connect.Request[v1.PassColdGateRequest]) (*connect.Response[v1.PassColdGateResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.PassColdGate is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) RunTests(context.Context, *connect.Request[v1.RunTestsRequest], *connect.ServerStream[v1.RunTestsResponse]) error {

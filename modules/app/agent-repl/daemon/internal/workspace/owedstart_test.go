@@ -3,10 +3,13 @@ package workspace
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -39,6 +42,33 @@ func TestDefaultSummarizerIsTheColdGatesFirstChoice(t *testing.T) {
 	// Assert.
 	if !proto.Equal(got, &conversationv1.SessionColdCompact{Model: served.Models[0], Scope: served.Scopes[0]}) || !proto.Equal(got, wantSummarizer) {
 		t.Fatalf("defaultSummarizer() = %v, want the gate menu's first model and scope (%v)", got, wantSummarizer)
+	}
+}
+
+func TestDefaultSummarizerAnswerIsTheDefaultSummarizersCompaction(t *testing.T) {
+	// Act.
+	got := defaultSummarizerAnswer()
+
+	// Assert.
+	want := &agentreplv1.AnswerColdGateCompact{Model: wantSummarizer.GetModel(), Scope: wantSummarizer.GetScope()}
+	if !proto.Equal(got, want) {
+		t.Fatalf("defaultSummarizerAnswer() = %v, want %v", got, want)
+	}
+}
+
+func TestEveryGateAnswerTheDaemonChoosesUsesTheDefaultSummarizerAnswer(t *testing.T) {
+	// Arrange.
+	for _, file := range []string{"deploychecks.go", "answers.go"} {
+		body, err := os.ReadFile(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// Assert: the gate answers the daemon makes on its own build their
+		// compaction through one helper, never by hand.
+		if !strings.Contains(string(body), "defaultSummarizerAnswer()") || strings.Contains(string(body), "&agentreplv1.AnswerColdGateCompact{") {
+			t.Fatalf("%s builds a gate's compaction by hand; it must use defaultSummarizerAnswer()", file)
+		}
 	}
 }
 

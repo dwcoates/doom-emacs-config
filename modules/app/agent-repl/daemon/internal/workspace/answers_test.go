@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"google.golang.org/protobuf/proto"
+
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 
@@ -1490,5 +1492,62 @@ func TestAnswerColdGateWhoseColdMarkFailsIsRefusedAndStandsTheGateAgain(t *testi
 		Level: "info", Operation: opColdGate, Message: "the cache could not be marked cold; the answer is refused"})
 	if !ok || r.Context["cause"] != "store unreachable" || r.Context["choice"] != footer.ChoiceClear || r.Context["gate_stands_again"] != true {
 		t.Fatalf("records = %+v, want the refused answer recorded with its cause", f.log.logger.Records())
+	}
+}
+
+func TestPassColdGateCompactsAllTheContextByHaiku(t *testing.T) {
+	// Arrange: a gate served the daemon's own compact menu.
+	f := newFixture(t)
+	f.workspace("w1", t.TempDir())
+	served, _ := coldCompactMenu()
+	f.cards.coldGate = &ServedColdGate{VendorSessionID: "vendor-1", Compact: served}
+
+	// Act.
+	err := f.verbs.PassColdGate(context.Background(), "w1")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("PassColdGate: %v", err)
+	}
+	if len(f.fleet.resumes) != 1 || !proto.Equal(f.fleet.resumes[0].Remediation.GetCompact(), wantSummarizer) {
+		t.Fatalf("resumes = %+v, want one re-open compacting all the context by Haiku", f.fleet.resumes)
+	}
+	if got := f.queue.gateFates; len(got) != 1 || got[0] != promptqueue.GateKeep {
+		t.Fatalf("fates = %v, want the held prompts kept for the user", got)
+	}
+}
+
+func TestPassColdGateIsRefused(t *testing.T) {
+	tests := []struct {
+		name string
+		gate *ServedColdGate
+		arm  string
+	}{
+		{name: "no gate stands", arm: ArmNoColdGate},
+		{name: "the gate offers no Haiku compaction", arm: ArmUnservedRemediation, gate: &ServedColdGate{
+			VendorSessionID: "vendor-1",
+			Compact: &ServedColdGateCompact{
+				Models: []*conversationv1.AgentModel{{Name: "opus"}},
+				Scopes: []conversationv1.SessionCompactScope{conversationv1.SessionCompactScope_SESSION_COMPACT_SCOPE_ALL},
+			},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+			f.cards.coldGate = tt.gate
+
+			// Act.
+			err := f.verbs.PassColdGate(context.Background(), "w1")
+
+			// Assert.
+			asRefusal(t, err, tt.arm)
+			if f.cards.coldGatesCleared != 0 || len(f.fleet.resumes) != 0 {
+				t.Fatalf("gates spent = %d, re-opens = %d; want the gate left standing and nothing re-opened",
+					f.cards.coldGatesCleared, len(f.fleet.resumes))
+			}
+		})
 	}
 }

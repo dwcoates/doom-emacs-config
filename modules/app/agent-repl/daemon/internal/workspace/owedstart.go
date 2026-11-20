@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	shimv1 "agentrepl/proto/shim/v1"
 
@@ -96,6 +97,14 @@ func (f *Fleet) settleOwedStartWork(ctx context.Context, log dlog.Logger, ws ids
 func defaultSummarizer() *conversationv1.SessionColdCompact {
 	served, _ := coldCompactMenu()
 	return &conversationv1.SessionColdCompact{Model: served.Models[0], Scope: served.Scopes[0]}
+}
+
+// defaultSummarizerAnswer is a gate answer's compact payload for the default
+// summarizer (defaultSummarizer): the one compaction the daemon chooses on a
+// gate's behalf, whoever it answers for.
+func defaultSummarizerAnswer() *agentreplv1.AnswerColdGateCompact {
+	summarizer := defaultSummarizer()
+	return &agentreplv1.AnswerColdGateCompact{Model: summarizer.GetModel(), Scope: summarizer.GetScope()}
 }
 
 // compactionFailure answers the shim's account when ERR is a start that

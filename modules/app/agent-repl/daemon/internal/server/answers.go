@@ -456,3 +456,31 @@ func (s *server) AnswerColdGate(
 	}
 	return connect.NewResponse(resp), nil
 }
+
+// PassColdGate is a workspace's agent passing another workspace's standing
+// cold gate, the one way it may: a Haiku compaction of all the context. The
+// request carries no choice, so an agent can neither pay nor clear.
+func (s *server) PassColdGate(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.PassColdGateRequest],
+) (*connect.Response[agentreplv1.PassColdGateResponse], error) {
+	const rpc = "PassColdGate"
+	if err := validatePassColdGateRequest(req.Msg); err != nil {
+		return nil, err
+	}
+	resp := &agentreplv1.PassColdGateResponse{}
+	subject, r, err := s.resolveRef(ctx, rpc, req.Msg.GetWorkspace())
+	if err != nil {
+		return nil, failResolution(s.log, rpc, err)
+	}
+	if r != nil {
+		return answer(resp, s.refuse(s.log, rpc, resp, *r))
+	}
+	if err := s.deps.Verbs.PassColdGate(ctx, subject.Record.ID); err != nil {
+		return answer(resp, s.answerRefusal(subject.Log, rpc, resp, err, nil))
+	}
+	subject.Log.Info("daemon.server.pass_cold_gate", "a workspace passed the cold gate by compacting all the context by Haiku",
+		dlog.Context{"requester": req.Msg.GetRequester().GetWorkspace().GetId()})
+	resp.Result = &agentreplv1.PassColdGateResponse_Success{Success: &agentreplv1.PassColdGateSuccess{}}
+	return connect.NewResponse(resp), nil
+}
