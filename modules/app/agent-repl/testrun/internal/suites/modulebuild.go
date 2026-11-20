@@ -67,14 +67,17 @@ func pinnedBuild(sp run.Spec) run.Spec {
 	return sp
 }
 
-// Finish places each of u's module builds over exactly the packages whose
-// units u still holds, replacing any build unit placed before; a build none
-// of whose packages remain is dropped. Every step that drops units from a
-// suite (a selection's narrowing, per-package reuse) ends with Finish.
+// Finish places each of u's module builds and vets over exactly the packages
+// whose units u still holds, replacing any build or vet unit placed before;
+// one none of whose packages remain is dropped. Every step that drops units
+// from a suite (a selection's narrowing, per-package reuse) ends with Finish.
 func (u Units) Finish() Units {
 	ids := map[string]bool{}
 	for _, b := range u.GoBuilds {
 		ids[b.ID] = true
+	}
+	for _, v := range u.GoVets {
+		ids[v.ID] = true
 	}
 	present := map[string]bool{}
 	var atomic []run.Spec
@@ -85,34 +88,49 @@ func (u Units) Finish() Units {
 		atomic = append(atomic, a)
 		present[a.ID] = true
 	}
-	var builds []run.Spec
+	var placed []run.Spec
 	for _, b := range u.GoBuilds {
-		seen := map[string]bool{}
-		var rels []string
-		add := func(rel string) {
-			if !seen[rel] {
-				seen[rel] = true
-				rels = append(rels, rel)
-			}
-		}
-		for unit, rel := range b.Needs {
-			if present[unit] {
-				add(rel)
-			}
-		}
+		var built []string
 		for _, sp := range u.Splits {
 			if rel, ok := b.Builds(sp); ok {
-				add(rel)
+				built = append(built, rel)
 			}
 		}
-		if len(rels) == 0 {
-			continue
+		if rels := packagesOf(b.Needs, present, built...); len(rels) > 0 {
+			placed = append(placed, b.Spec(rels))
 		}
-		sort.Strings(rels)
-		builds = append(builds, b.Spec(rels))
 	}
-	u.Atomic = append(atomic, builds...)
+	for _, v := range u.GoVets {
+		if rels := packagesOf(v.Needs, present); len(rels) > 0 {
+			placed = append(placed, v.Spec(rels))
+		}
+	}
+	u.Atomic = append(atomic, placed...)
 	return u
+}
+
+// packagesOf is the packages a module build or vet serves: those of needs
+// (an atomic unit's ID to its package) whose unit is present, and more,
+// each once and sorted.
+func packagesOf(needs map[string]string, present map[string]bool, more ...string) []string {
+	seen := map[string]bool{}
+	var rels []string
+	add := func(rel string) {
+		if !seen[rel] {
+			seen[rel] = true
+			rels = append(rels, rel)
+		}
+	}
+	for unit, rel := range needs {
+		if present[unit] {
+			add(rel)
+		}
+	}
+	for _, rel := range more {
+		add(rel)
+	}
+	sort.Strings(rels)
+	return rels
 }
 
 // need records that the atomic unit runs package rel's binary.

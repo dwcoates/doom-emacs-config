@@ -436,8 +436,9 @@ func (r Resolved) Narrow(s roster.Suite, u suites.Units) (suites.Units, error) {
 			out.Programs = append(out.Programs, p)
 		}
 	}
-	// A module build kept for the named packages builds only them.
-	out.GoBuilds = u.GoBuilds
+	// A module build kept for the named packages builds only them; a vet is
+	// kept only for the packages whose check units were named.
+	out.GoBuilds, out.GoVets = u.GoBuilds, u.GoVets
 	return out.Finish(), nil
 }
 

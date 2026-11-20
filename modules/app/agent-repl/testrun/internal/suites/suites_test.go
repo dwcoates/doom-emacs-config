@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"regexp"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -924,14 +925,13 @@ func TestParseGoTestItemsReadsPastALineLongerThanAnyScanBuffer(t *testing.T) {
 	}
 }
 
-func TestEveryGoModuleKindIsVetted(t *testing.T) {
-	// Arrange: the same module built as an ordinary Go module and as the e2e
-	// suite; each must carry exactly goVet's unit, since a compiled test
-	// binary vets nothing.
+func TestTheE2EModuleIsVettedWhole(t *testing.T) {
+	// Arrange: the e2e suite must carry exactly goVet's unit, since a
+	// compiled test binary vets nothing. A GoModule suite vets each package
+	// by its own check instead (TestAModulePassVetsEachPackageByItsOwnCheck).
 	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
 	build := map[string]func(Layout, roster.Suite, string, []string) (Units, error){
-		"go module": goModuleUnitsForPackages,
-		"e2e":       e2eUnitsForPackages,
+		"e2e": e2eUnitsForPackages,
 	}
 	for kind, units := range build {
 		t.Run(kind, func(t *testing.T) {
@@ -972,8 +972,10 @@ func TestGoVetTaggedRunsTheSameAnalyzersUnderItsTag(t *testing.T) {
 
 func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
 	build := map[string]func(Layout, roster.Suite, string, []string) (Units, error){
-		"go module": goModuleUnitsForPackages,
-		"e2e":       e2eUnitsForPackages,
+		"go module": func(l Layout, s roster.Suite, dir string, pkgs []string) (Units, error) {
+			return goModuleUnitsForPackages(l, s, dir, pkgs)
+		},
+		"e2e": e2eUnitsForPackages,
 	}
 	for kind, units := range build {
 		t.Run(kind, func(t *testing.T) {
@@ -994,6 +996,7 @@ func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
 					got = append(got, a.ID)
 				}
 			}
+			sort.Strings(got)
 			if want := []string{"m:vet", "m:vet[perf]", "m:vet[realtest]"}; !reflect.DeepEqual(got, want) {
 				t.Fatalf("vet units = %v, want %v", got, want)
 			}
@@ -1001,10 +1004,10 @@ func TestEveryVetTagGetsItsOwnVetUnit(t *testing.T) {
 	}
 }
 
-func TestTheIntegrationVetSharesGoVetTagged(t *testing.T) {
+func TestTheIntegrationPassVetsEachPackageUnderItsTag(t *testing.T) {
 	// Arrange
 	module := goPackageFixture(t, "func TestA(t *testing.T) {}\n")
-	l := Layout{Module: module, Work: t.TempDir()}
+	l := Layout{Module: module, Work: t.TempDir(), Self: "/testrun"}
 	s := roster.Suite{Name: "m", IntegrationTags: "integration", IntegrationPackages: "./p"}
 
 	// Act
@@ -1014,9 +1017,16 @@ func TestTheIntegrationVetSharesGoVetTagged(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := goVetTagged("m", module, "integration", "./p")
-	if len(u.Atomic) == 0 || !reflect.DeepEqual(u.Atomic[0].Argv, want.Argv) || u.Atomic[0].ID != want.ID {
-		t.Fatalf("integration vet = %+v, want %+v", u.Atomic, want)
+	v := moduleVet(l, "m", module, "integration")
+	byID := map[string]run.Spec{}
+	for _, a := range u.Atomic {
+		byID[a.ID] = a
+	}
+	if vet, ok := byID["m:vet[integration]"]; !ok || !reflect.DeepEqual(vet.Argv, v.Spec([]string{"p"}).Argv) {
+		t.Fatalf("integration vet = %+v, want %v", vet, v.Spec([]string{"p"}).Argv)
+	}
+	if check, ok := byID["m:p[integration]:vet"]; !ok || !reflect.DeepEqual(check.Deps, []string{"m:vet[integration]"}) {
+		t.Fatalf("p's integration vet check = %+v, want one waiting for the pass's vet", check)
 	}
 }
 
@@ -1065,12 +1075,13 @@ func TestParseGoList(t *testing.T) {
 	tests := []struct {
 		name    string
 		out     string
-		want    []string
+		want    goPackages
 		wantErr string
 	}{
-		{name: "packages relative and sorted", out: "/m/z\n/m\n\n/m/a/b\n", want: []string{".", "a/b", "z"}},
-		{name: "nothing tested", out: "\n", want: nil},
-		{name: "a package outside the module fails", out: "/m/a\n/elsewhere\n", wantErr: "/elsewhere is not under /m"},
+		{name: "packages relative and sorted", out: "/m/z\ttested\n/m\ttested\n\n/m/a/b\ttested\n", want: goPackages{Tested: []string{".", "a/b", "z"}}},
+		{name: "untested packages apart", out: "/m/q\n/m/a\ttested\n/m/b\n", want: goPackages{Tested: []string{"a"}, Untested: []string{"b", "q"}}},
+		{name: "nothing listed", out: "\n", want: goPackages{}},
+		{name: "a package outside the module fails", out: "/m/a\ttested\n/elsewhere\n", wantErr: "/elsewhere is not under /m"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

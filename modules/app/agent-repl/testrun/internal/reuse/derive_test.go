@@ -58,6 +58,47 @@ func TestDeriveANeverReusedSuiteIsOneUnkeyedUnit(t *testing.T) {
 	}
 }
 
+func TestDeriveGoGivesEachPackageItsOwnVetCheck(t *testing.T) {
+	// Arrange: the root package is tested; x has no test files, so its vet
+	// check is its whole unit.
+	f := newFixture(t)
+	write(t, f.d.Repo, fixtureModule+"/lock/x/x.go", "package x")
+	lockDir := filepath.Join(f.d.Module, "lock")
+	f.d.GoList = func(dir, tags string, tests bool, patterns ...string) ([]GoPackage, error) {
+		pkgs, err := fakeGoList(dir, tags, tests, patterns...)
+		if dir == lockDir {
+			pkgs = append(pkgs, GoPackage{ImportPath: "lock/x", Dir: filepath.Join(lockDir, "x"), Module: &GoModule{GoMod: filepath.Join(lockDir, "go.mod")}})
+		}
+		return pkgs, err
+	}
+	u := suites.Units{
+		Atomic: []run.Spec{spec("lock:build"), spec("lock:.:vet"), spec("lock:x:vet"), spec("lock:vet")},
+		Splits: []suites.Split{{Group: "lock:.", Suite: "lock", Package: ".", Chunk: func(id string, _ []string) run.Spec { return spec(id) }}},
+		GoVets: []suites.GoVet{{ID: "lock:vet", Suite: "lock"}},
+	}
+
+	// Act
+	su, err := Derive(f.d, lockSuite, u, false)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := unitsByName(su)
+	if !slices.Equal(byName["."].Specs, []string{"lock:.", "lock:.:vet"}) {
+		t.Errorf("the tested package's specs = %v, want its split and its vet check", byName["."].Specs)
+	}
+	if !slices.Equal(byName["x"].Specs, []string{"lock:x:vet"}) || !byName["x"].Set.Contains(fixtureModule+"/lock/x/x.go") {
+		t.Errorf("the untested package's unit = %+v, want its vet check over its own files", byName["x"])
+	}
+	if _, ok := byName["vet"]; ok {
+		t.Error("the module pass's vet is a unit; want it infra")
+	}
+	if !slices.Equal(su.Infra, []string{"lock:build", "lock:vet"}) {
+		t.Errorf("infra = %v, want the module build and vet", su.Infra)
+	}
+}
+
 func TestDeriveGoCutsAModuleIntoPackagesVetsAndInfra(t *testing.T) {
 	// Arrange
 	f := newFixture(t)

@@ -45,6 +45,7 @@ import (
 	"agentrepl/testrun/internal/gitinfo"
 	"agentrepl/testrun/internal/gobuild"
 	"agentrepl/testrun/internal/gocache"
+	"agentrepl/testrun/internal/govet"
 	"agentrepl/testrun/internal/history"
 	"agentrepl/testrun/internal/life"
 	"agentrepl/testrun/internal/proctable"
@@ -99,6 +100,10 @@ func main() {
 		os.Exit(execTestCmd(log, os.Args[2:]))
 	case "check-test":
 		os.Exit(checkTestCmd(log, os.Args[2:]))
+	case "vet-module":
+		os.Exit(vetModuleCmd(log, os.Args[2:]))
+	case "vet-check":
+		os.Exit(vetCheckCmd(log, os.Args[2:]))
 	case "redundancy":
 		os.Exit(redundancyCmd(log, os.Args[2:]))
 	case "coverage-baseline":
@@ -786,6 +791,40 @@ func checkTestCmd(log *run.Log, argv []string) int {
 	}
 	if err := gobuild.Check(argv[0], os.Stdout); err != nil {
 		log.Errorf("check-test %s: %v", argv[0], err)
+		return 1
+	}
+	return 0
+}
+
+// vetModuleCmd is `testrun vet-module`: one module pass's vet, each
+// package's verdict written for its check unit (internal/govet).
+func vetModuleCmd(log *run.Log, argv []string) int {
+	o, err := govet.ParseArgs(argv)
+	if err != nil {
+		log.Errorf("vet-module: %v", err)
+		return 2
+	}
+	res, err := govet.Vet(o, govet.Exec)
+	if err != nil {
+		log.Errorf("vet-module of %d packages in %s: %v", len(o.Packages), o.Module, err)
+		return 1
+	}
+	log.Infof("vet-module: %d of %d packages passed vet in %s", len(res.Passed), len(o.Packages), o.Module)
+	for _, rel := range slices.Sorted(maps.Keys(res.Failed)) {
+		log.Errorf("vet-module: %s did not pass vet; its vet unit fails with:\n%s", rel, res.Failed[rel])
+	}
+	return 0
+}
+
+// vetCheckCmd is `testrun vet-check RESULT`: a package's vet unit, failing
+// with the package's findings when it did not pass the module's vet.
+func vetCheckCmd(log *run.Log, argv []string) int {
+	if len(argv) != 1 {
+		log.Errorf("vet-check: usage: vet-check RESULT, got %q", argv)
+		return 2
+	}
+	if err := govet.Check(argv[0], os.Stdout); err != nil {
+		log.Errorf("vet-check %s: %v", argv[0], err)
 		return 1
 	}
 	return 0

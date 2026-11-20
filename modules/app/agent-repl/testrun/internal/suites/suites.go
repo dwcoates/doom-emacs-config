@@ -107,6 +107,9 @@ type Units struct {
 	// GoBuilds are a Go suite's module builds, already placed in Atomic over
 	// the packages Atomic and Splits run (Finish).
 	GoBuilds []GoBuild
+	// GoVets are a Go suite's module vets, already placed in Atomic over the
+	// packages whose check units Atomic holds (Finish).
+	GoVets []GoVet
 }
 
 // Build turns one suite into units.

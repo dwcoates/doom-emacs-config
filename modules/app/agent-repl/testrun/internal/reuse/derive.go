@@ -228,8 +228,10 @@ func runnerPackages(d Deps) ([]GoPackage, error) {
 // its path and, under a tagged pass, its tags: "internal/foo",
 // "integration[integration]". Its inputs are every package its test binary
 // links, by the Go tool's own listing (`go list -deps -test`), and the
-// programs its tests start. Each vet pass is a unit over the whole module's
-// listing; the module builds are infra.
+// programs its tests start, and its vet check reads its verdict from the
+// pass's vet; a package without test files is a unit of its vet check alone,
+// over the package's own graph. The module builds and vets are infra; a
+// VetTags vet is a unit over the whole module's listing.
 
 // goGroupUnit is the unit name of a Go package's chunk group
 // ("<suite>:<rel>[<tags>]"), its package and its tags.
@@ -273,11 +275,28 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 		b.own(name, sp.Group)
 		pkgs[name] = pkg{sp.Package, sp.Tags}
 	}
+	moduleVets := map[string]bool{}
+	for _, v := range u.GoVets {
+		moduleVets[v.ID] = true
+	}
 	for _, a := range u.Atomic {
 		id := a.ID
 		switch {
 		case id == suites.ModuleBuildID(s.Name, "") || strings.HasPrefix(id, s.Name+":build["):
 			b.infra = append(b.infra, id)
+		case moduleVets[id]:
+			// A module pass's vet serves its packages' check units, as its
+			// build serves their test units.
+			b.infra = append(b.infra, id)
+		case strings.HasSuffix(id, ":vet") && id != s.Name+":vet":
+			// A package's vet check is its own unit's: the package's test
+			// binary graph is everything vet reads to analyze it.
+			name, rel, tags, err := goGroupUnit(s.Name, strings.TrimSuffix(id, ":vet"))
+			if err != nil {
+				return nil, nil, err
+			}
+			b.own(name, id)
+			pkgs[name] = pkg{rel, tags}
 		case id == s.Name+":vet":
 			b.own("vet", id)
 			vets["vet"] = ""
@@ -351,6 +370,11 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 			return nil, nil, err
 		}
 		main := gobuild.ImportPath(modulePath, p.rel) + ".test"
+		if _, tested := byPath[main]; !tested {
+			// A package without test files is only vetted: vet reads the
+			// package and what it imports.
+			main = gobuild.ImportPath(modulePath, p.rel)
+		}
 		if err := addTestBinary(d, set, byPath, main); err != nil {
 			return nil, nil, fmt.Errorf("reuse: %s tests %s: %w", s.Name, name, err)
 		}
@@ -363,8 +387,9 @@ func deriveGo(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error) 
 	return b.list(), b.infra, nil
 }
 
-// addTestBinary places the test binary main ("<import path>.test") and every
-// package it links, by the listing byPath.
+// addTestBinary places main, a test binary ("<import path>.test") or an
+// untested package ("<import path>"), and every package it depends on, by the
+// listing byPath.
 func addTestBinary(d Deps, set *InputSet, byPath map[string]GoPackage, main string) error {
 	m, ok := byPath[main]
 	if !ok {
