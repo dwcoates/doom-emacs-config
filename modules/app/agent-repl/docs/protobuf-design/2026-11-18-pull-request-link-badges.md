@@ -54,7 +54,7 @@ unchanged).
   which never change again. Closed ones stay read, since a close can be
   undone.
 - A changed state redraws every open workspace linking it
-  (`prwatch.Deps.LinksRedrawn`, `workspace.Verbs.RedrawLinks`).
+  (`prwatch.Deps.LinksRedrawn`, `workspace.Verbs.RepublishLinks`).
 - Backfill: the layout-175 rewrite fills the pull request columns of links
   stored before layout 96 (22 on the owner's store) from their urls, and
   seeds the merged or closed state of every pull request an ended
