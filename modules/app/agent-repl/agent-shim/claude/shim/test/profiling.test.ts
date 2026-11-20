@@ -7,8 +7,10 @@ import {
   disarm,
   recordProfilingEvent,
   RuntimeProfiler,
+  startExitProfile,
   type InspectorPort,
   type ProfilingEvent,
+  type SyncInspectorPort,
 } from "../src/profiling.js";
 import { LevelWindow, WINDOW_SECONDS } from "../../../logging/ts/level-window.js";
 
@@ -439,3 +441,130 @@ describe("recordProfilingEvent: a session's log level", () => {
   });
 });
 
+
+/** A same-thread inspector whose answers the test scripts: METHOD's error, or no answer at all. */
+function scriptedInspector(script: { fail?: string; silent?: string }): SyncInspectorPort & { disconnected: boolean } {
+  const port = {
+    disconnected: false,
+    connect: () => undefined,
+    post: (method: string, callback: (err: Error | null, result?: unknown) => void) => {
+      if (method === script.silent) return;
+      if (method === script.fail) {
+        callback(new Error(`${method} refused`));
+        return;
+      }
+      callback(null, method === "Profiler.stop" ? { profile: { nodes: [], startTime: 0, endTime: 1 } } : {});
+    },
+    disconnect: () => {
+      port.disconnected = true;
+    },
+  };
+  return port;
+}
+
+describe("startExitProfile", () => {
+  it("profiles the whole life and writes a Chrome-readable profile at exit", () => {
+    // Arrange
+    const { log, records } = captureLog();
+    let exitHandler: (() => void) | undefined;
+    const dir = join(root, "unit", "TestX");
+
+    // Act
+    const started = startExitProfile(log, { dir, pid: 77, onExit: (h) => (exitHandler = h) });
+    exitHandler?.();
+
+    // Assert
+    const path = join(dir, "shim-77.cpuprofile");
+    expect(started).toBe(true);
+    expect(records.map((r) => [r.level, r.fields.operation, r.fields.files])).toEqual([
+      ["info", "shim.profiling.exit_started", [path]],
+      ["info", "shim.profiling.exit_stopped", [path]],
+    ]);
+    const profile = JSON.parse(readFileSync(path, "utf8")) as { nodes: unknown[]; startTime: number; endTime: number };
+    expect(profile.nodes.length).toBeGreaterThan(0);
+    expect(profile.endTime).toBeGreaterThanOrEqual(profile.startTime);
+  });
+
+  it.each([
+    { name: "an inspector that refuses to start", script: { fail: "Profiler.start" }, cause: "Profiler.start refused" },
+    { name: "an inspector that does not answer at once", script: { silent: "Profiler.enable" }, cause: "did not answer Profiler.enable at once" },
+  ])("records $name and runs on unprofiled", ({ script, cause }) => {
+    // Arrange
+    const { log, records } = captureLog();
+    const port = scriptedInspector(script);
+    let exitHandlers = 0;
+
+    // Act
+    const started = startExitProfile(log, { dir: root, pid: 77, onExit: () => (exitHandlers += 1), inspector: () => port });
+
+    // Assert
+    expect(started).toBe(false);
+    expect(exitHandlers).toBe(0);
+    expect(port.disconnected).toBe(true);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ level: "error", message: "the shim's whole-life profile could not start" });
+    expect(records[0].fields).toMatchObject({ operation: "shim.profiling.failed", reason: "exit_profile", files: [join(root, "shim-77.cpuprofile")] });
+    expect(String(records[0].fields.cause)).toContain(cause);
+  });
+
+  it("records a directory it cannot make", () => {
+    // Arrange
+    const { log, records } = captureLog();
+    const file = join(root, "a-file");
+    writeFileSync(file, "");
+
+    // Act
+    const started = startExitProfile(log, { dir: join(file, "sub"), pid: 77, onExit: () => undefined, inspector: () => scriptedInspector({}) });
+
+    // Assert
+    expect(started).toBe(false);
+    expect(records.map((r) => [r.level, r.fields.operation, r.fields.reason])).toEqual([["error", "shim.profiling.failed", "exit_profile"]]);
+  });
+
+  it("records a profile it cannot write at exit, and nothing written", () => {
+    // Arrange
+    const { log, records } = captureLog();
+    let exitHandler: (() => void) | undefined;
+    const port = scriptedInspector({ fail: "Profiler.stop" });
+
+    // Act
+    startExitProfile(log, { dir: root, pid: 77, onExit: (h) => (exitHandler = h), inspector: () => port });
+    exitHandler?.();
+
+    // Assert
+    expect(records.map((r) => [r.level, r.fields.operation])).toEqual([
+      ["info", "shim.profiling.exit_started"],
+      ["error", "shim.profiling.failed"],
+    ]);
+    expect(records[1].message).toBe("the shim's whole-life profile could not be written");
+    expect(String(records[1].fields.cause)).toContain("Profiler.stop refused");
+    expect(existsSync(join(root, "shim-77.cpuprofile"))).toBe(false);
+    expect(port.disconnected).toBe(true);
+  });
+});
+
+describe("armRuntimeProfiling: a whole-life profile", () => {
+  it("profiles the whole life instead of arming a session", () => {
+    // Arrange
+    const { log, records } = captureLog();
+    const dir = join(root, "whole-life");
+    let signalHandlers = 0;
+
+    // Act
+    const p = armRuntimeProfiling(log, {
+      env: { AGENT_REPL_PROFILE_ROOT: root, AGENT_REPL_EXIT_PROFILE_DIR: dir },
+      home: "/unused",
+      pid: 77,
+      onSignal: () => (signalHandlers += 1),
+      onExit: () => undefined,
+      level,
+      exitInspector: () => scriptedInspector({}),
+    });
+
+    // Assert
+    expect(p).toBeUndefined();
+    expect(signalHandlers).toBe(0);
+    expect(existsSync(join(root, "armed"))).toBe(false);
+    expect(records.map((r) => r.fields.operation)).toEqual(["shim.profiling.exit_started"]);
+  });
+});

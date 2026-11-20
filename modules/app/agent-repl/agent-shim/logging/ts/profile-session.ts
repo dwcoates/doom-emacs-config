@@ -30,6 +30,13 @@ export const MAX_SECONDS = 1800;
  * the profile stops. Absent, levels are left as they are.
  */
 export const LOG_LEVEL_FILE = "log-level";
+/**
+ * The environment variable naming a directory a runtime profiles its whole
+ * life into: set at its start, it starts a CPU profile at once and writes it as
+ * `<runtime>-<pid>.cpuprofile` when it exits, and is not armed for a session.
+ * A profiling test run sets it on every production process it starts.
+ */
+export const EXIT_PROFILE_ENV = "AGENT_REPL_EXIT_PROFILE_DIR";
 
 const SESSION = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 

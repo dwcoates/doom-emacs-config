@@ -13,10 +13,11 @@
  * session before standing a shim down to keep its profile.
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { Session as SyncSession } from "node:inspector";
 import { Session } from "node:inspector/promises";
 import { join } from "node:path";
 
-import { ACTIVE_FILE, ARMED_DIR, LOG_LEVEL_FILE, MAX_SECONDS, profilesRoot, validSession } from "../../../logging/ts/profile-session.js";
+import { ACTIVE_FILE, ARMED_DIR, EXIT_PROFILE_ENV, LOG_LEVEL_FILE, MAX_SECONDS, profilesRoot, validSession } from "../../../logging/ts/profile-session.js";
 import { parseWindowLevel, WINDOW_SECONDS, type LevelExpiry, type WindowLevel } from "../../../logging/ts/level-window.js";
 
 /** What a reconcile did. */
@@ -282,6 +283,85 @@ export function disarm(marker: string, log: ProfilingLogger): void {
   }
 }
 
+/**
+ * The part of node's callback inspector session a whole-life profile drives.
+ * A session on the process's own thread answers every post before `post`
+ * returns, which is what lets the profile be written in an exit handler, where
+ * nothing asynchronous runs.
+ */
+export interface SyncInspectorPort {
+  connect(): void;
+  post(method: string, callback: (err: Error | null, result?: unknown) => void): void;
+  disconnect(): void;
+}
+
+/** What a whole-life profile needs from the process. */
+export interface ExitProfileDeps {
+  /** The directory the profile is written into (EXIT_PROFILE_ENV). */
+  dir: string;
+  pid: number;
+  onExit: (handler: () => void) => void;
+  /** A fresh same-thread inspector session; the default is node's own. */
+  inspector?: () => SyncInspectorPort;
+}
+
+/** Posts METHOD and answers its result, which a same-thread session gives at once. */
+function postNow(port: SyncInspectorPort, method: string): unknown {
+  let answered = false;
+  let failure: Error | null = null;
+  let result: unknown;
+  port.post(method, (err, res) => {
+    answered = true;
+    failure = err;
+    result = res;
+  });
+  if (!answered) throw new Error(`profiling: the inspector did not answer ${method} at once`);
+  if (failure) throw failure;
+  return result;
+}
+
+/**
+ * Starts the shim's WHOLE-LIFE CPU profile (EXIT_PROFILE_ENV): profiling
+ * begins at once, and the exit handler writes `shim-<pid>.cpuprofile` into
+ * DIR. Every step is recorded: started and written at info, a failure at error
+ * with its cause. Answers whether the profile started; a shim whose profile
+ * could not start runs on unprofiled.
+ */
+export function startExitProfile(log: ProfilingLogger, deps: ExitProfileDeps): boolean {
+  const path = join(deps.dir, `shim-${deps.pid}.cpuprofile`);
+  const port = (deps.inspector ?? (() => new SyncSession()))();
+  try {
+    mkdirSync(deps.dir, { recursive: true });
+    port.connect();
+    postNow(port, "Profiler.enable");
+    postNow(port, "Profiler.start");
+  } catch (err) {
+    port.disconnect();
+    log.error(
+      { operation: "shim.profiling.failed", reason: "exit_profile", files: [path], cause: (err as Error).message },
+      "the shim's whole-life profile could not start",
+    );
+    return false;
+  }
+  log.info({ operation: "shim.profiling.exit_started", files: [path] }, "the shim profiles its whole life and writes the profile when it exits");
+  deps.onExit(() => {
+    try {
+      const stopped = postNow(port, "Profiler.stop") as { profile: unknown };
+      writeFileSync(path, JSON.stringify(stopped.profile));
+    } catch (err) {
+      log.error(
+        { operation: "shim.profiling.failed", reason: "exit_profile", files: [path], cause: (err as Error).message },
+        "the shim's whole-life profile could not be written",
+      );
+      return;
+    } finally {
+      port.disconnect();
+    }
+    log.info({ operation: "shim.profiling.exit_stopped", reason: "exit", files: [path] }, "the shim exited and wrote its whole-life profile");
+  });
+  return true;
+}
+
 /** What arming needs from the process; the defaults are the real process. */
 export interface ArmDeps {
   env: Readonly<Record<string, string | undefined>>;
@@ -291,6 +371,8 @@ export interface ArmDeps {
   onExit: (handler: () => void) => void;
   /** The shim's live log threshold (log.ts, logLevelWindow). */
   level: LevelWindowPort;
+  /** The whole-life profile's inspector (ExitProfileDeps.inspector); the default is node's own. */
+  exitInspector?: () => SyncInspectorPort;
 }
 
 /**
@@ -298,8 +380,16 @@ export interface ArmDeps {
  * SIGWINCH, and removes the marker as the process exits. A shim that cannot
  * arm records why at error and runs on unprofiled; profiling is never a
  * reason to refuse a session.
+ *
+ * A shim started with EXIT_PROFILE_ENV set profiles its whole life instead
+ * (startExitProfile) and arms no session: V8 runs one CPU profile at a time.
  */
 export function armRuntimeProfiling(log: ProfilingLogger, deps: ArmDeps): RuntimeProfiler | undefined {
+  const exitDir = deps.env[EXIT_PROFILE_ENV];
+  if (exitDir) {
+    startExitProfile(log, { dir: exitDir, pid: deps.pid, onExit: deps.onExit, inspector: deps.exitInspector });
+    return undefined;
+  }
   let profiler: RuntimeProfiler;
   let marker: string;
   try {
