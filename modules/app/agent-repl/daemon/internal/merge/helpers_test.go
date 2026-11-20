@@ -109,9 +109,11 @@ type fakeDB struct {
 	// endingErr fails RecordMediationEnding.
 	endingErr error
 	// mediatorRecordErr fails RecordDeployMediator.
-	mediatorRecordErr    error
-	mediationErr         error
-	dispatchErr          error
+	mediatorRecordErr error
+	mediationErr      error
+	dispatchErr       error
+	// windowErr fails RecordMediationWindow when set.
+	windowErr            error
 	remediationFinishErr error
 	// remediationFinishesErr fails RemediationFinishes.
 	remediationFinishesErr error
@@ -503,6 +505,12 @@ func (f *fakeDB) CheckedThrough(ctx context.Context, repo wsm.RepoKey) (time.Tim
 }
 
 func (f *fakeDB) RecordMediationWindow(ctx context.Context, repo wsm.RepoKey, owed time.Time, w wsm.CheckWindow) (bool, error) {
+	f.mu.Lock()
+	err := f.windowErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
 	return f.checks.RecordMediationWindow(ctx, repo, owed, w)
 }
 
