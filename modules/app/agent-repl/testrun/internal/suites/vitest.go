@@ -185,7 +185,9 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 			return Units{}, fmt.Errorf("suites: create %s: %w", d, err)
 		}
 	}
-	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{"npm", "run", "typecheck"})
+	// The typecheck is incremental, seeded from the host's newest passing
+	// typecheck of the package (internal/typecheck).
+	typecheck := spec(s.Name+":typecheck", s.Name, dir, []string{l.Self, "typecheck", "-name", s.Name, "--", "npm", "run", "typecheck"})
 	// tsc cannot be pinned to one core: its compiler thread and node's GC and
 	// worker threads measured 1.5-1.75 cores on average across four full
 	// runs (webapp and shim alike), so the unit holds the two slots it uses.

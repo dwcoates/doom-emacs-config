@@ -723,14 +723,14 @@ func TestVitestChecksRunInThePackageOnTheCoresTheyUse(t *testing.T) {
 		argv  string
 		width int
 	}{
-		{id: "webapp:typecheck", argv: "npm run typecheck", width: TypecheckSlots},
+		{id: "webapp:typecheck", argv: "/testrun typecheck -name webapp -- npm run typecheck", width: TypecheckSlots},
 		{id: "webapp:knip", argv: "npm run knip", width: KnipSlots},
 	}
 	for _, tt := range tests {
 		t.Run(tt.id, func(t *testing.T) {
 			// Arrange
 			dir := t.TempDir()
-			l := Layout{Module: dir, Work: t.TempDir()}
+			l := Layout{Module: dir, Work: t.TempDir(), Self: "/testrun"}
 
 			// Act
 			u, err := vitestUnitsForBatches(l, roster.Suite{Name: "webapp"}, dir, soloBatches([]string{"src/a.test.ts"}))

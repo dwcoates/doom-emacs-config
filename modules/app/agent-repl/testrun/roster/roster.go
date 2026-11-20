@@ -332,6 +332,8 @@ var Suites = []Suite{
 			"gofunc":                            {"e2e/"},
 			"internal/redundancy/gomeasure":     {"daemon/", "e2e/", "agent-shim/logging/go/", "proto/gen/go/", "proto/helpers/go/", "tree-sitter-tldr/"},
 			"internal/redundancy/vitestmeasure": {"webapp"},
+			// Its test reads every typechecked package's script and ignores.
+			"internal/typecheck": {"webapp/package.json", "webapp/.gitignore", "agent-shim/claude/shim/package.json", "agent-shim/claude/shim/.gitignore"},
 		},
 		Never: map[string]string{
 			"internal/reuse":   "its tests apply seatbelt profiles themselves, and the kernel refuses a sandbox inside another",
@@ -420,7 +422,7 @@ var Suites = []Suite{
 			// that rebuilt a stale dist after keying the suite refused to
 			// record its green pass ("its inputs changed while it ran",
 			// 2026-10-16).
-			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/"},
+			Generated: []string{"webapp/node_modules/", "webapp/.vite-cache/", "webapp/dist/", "webapp/.typecheck-cache/"},
 			Units:     webappUnitInputs}},
 	// The shim's integration files spawn its bundle and its lock helper
 	// (dist/main.js, dist/shim-lock): `pretest:integration` builds both, as
@@ -436,7 +438,7 @@ var Suites = []Suite{
 			"bin/ensure-deps.sh", "bin/lib-node-store.sh", "bin/background.sh", "bin/require-background.mjs",
 			// The capture script's tests run the fake git, which builds its model.
 			"bin/fake-git.sh", "bin/fake-git.go",
-		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/"},
+		}, Generated: []string{"agent-shim/claude/shim/node_modules/", "agent-shim/claude/shim/dist/", "agent-shim/claude/shim/.typecheck-cache/"},
 			Units: shimUnitInputs}},
 	{Name: "proto", Kind: Script, Path: "proto/scripts/test-validate.sh",
 		NeverReused: "its isolation check walks the webapp's whole tree, its installed node_modules and build output included"},

@@ -61,6 +61,7 @@ import (
 	"agentrepl/testrun/internal/seats"
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
+	"agentrepl/testrun/internal/typecheck"
 	"agentrepl/testrun/reap"
 	"agentrepl/testrun/roster"
 	"agentrepl/testrun/seatwait"
@@ -104,6 +105,8 @@ func main() {
 		os.Exit(vetModuleCmd(log, os.Args[2:]))
 	case "vet-check":
 		os.Exit(vetCheckCmd(log, os.Args[2:]))
+	case "typecheck":
+		os.Exit(typecheckCmd(log, os.Args[2:]))
 	case "redundancy":
 		os.Exit(redundancyCmd(log, os.Args[2:]))
 	case "coverage-baseline":
@@ -825,6 +828,37 @@ func vetCheckCmd(log *run.Log, argv []string) int {
 	}
 	if err := govet.Check(argv[0], os.Stdout); err != nil {
 		log.Errorf("vet-check %s: %v", argv[0], err)
+		return 1
+	}
+	return 0
+}
+
+// typecheckCmd is `testrun typecheck -name SUITE -- COMMAND...`: the
+// TypeScript package in the working directory's typecheck, COMMAND, run
+// incrementally from the host's seed (internal/typecheck).
+func typecheckCmd(log *run.Log, argv []string) int {
+	if len(argv) < 4 || argv[0] != "-name" || argv[2] != "--" {
+		log.Errorf("typecheck: usage: typecheck -name SUITE -- COMMAND..., got %q", argv)
+		return 2
+	}
+	name, command := argv[1], argv[3:]
+	pkgDir, err := os.Getwd()
+	if err != nil {
+		log.Errorf("typecheck %s: read the working directory: %v", name, err)
+		return 1
+	}
+	seeds, err := typecheck.DefaultSeedDir()
+	if err != nil {
+		log.Errorf("typecheck %s: %v", name, err)
+		return 1
+	}
+	runCommand := func() error {
+		cmd := exec.Command(command[0], command[1:]...)
+		cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
+		return cmd.Run()
+	}
+	if err := typecheck.Run(pkgDir, name, seeds, runCommand, log); err != nil {
+		log.Errorf("%v", err)
 		return 1
 	}
 	return 0

@@ -20,7 +20,7 @@
     "prelint": "npm run ensure-deps",
     "lint": "eslint .",
     "pretypecheck": "npm run ensure-deps",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit false --declaration --emitDeclarationOnly --outDir .typecheck-cache/declarations --incremental --tsBuildInfoFile .typecheck-cache/tsbuildinfo",
     "knip": "knip --no-progress",
     "presmoke": "../../../bin/background.sh npm run ensure-deps",
     "smoke": "../../../bin/background.sh node scripts/run-smoke.mjs",
