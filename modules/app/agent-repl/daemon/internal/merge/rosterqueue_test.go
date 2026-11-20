@@ -823,3 +823,34 @@ func TestAPauseByAWorkspaceTheRegistryCannotReadIsRefusedAndPausesNothing(t *tes
 		t.Fatalf("record = %+v (%v), want the asker and the cause at ERROR", rec, ok)
 	}
 }
+
+func TestTheRosterQueueOrderIsRecordedAtInfoOnlyWhenItChanges(t *testing.T) {
+	const message = "the roster was told a new merge queue order: the line head first, the waiting merges numbered by their place after it"
+	// Arrange: two merges in line, their order already published.
+	h := twoInLine(t)
+	ctx := context.Background()
+	h.o.publishRosterQueue(ctx, h.repoKey())
+	before := countRecords(h, "info", "daemon.merge.roster_queue", message)
+
+	// Act
+	h.o.publishRosterQueue(ctx, h.repoKey())
+	unchanged := countRecords(h, "info", "daemon.merge.roster_queue", message)
+	if moved, err := h.o.deps.DB.MoveMerge(ctx, h.repoKey(), "ws-2", wsm.MergeMoveUp); err != nil || !moved {
+		t.Fatalf("MoveMerge = %v, %v; want moved", moved, err)
+	}
+
+	// Assert
+	if before == 0 || unchanged != before {
+		t.Fatalf("order records = %d then %d, want one for the first order and none for the same order again", before, unchanged)
+	}
+	var last dlog.Record
+	n := 0
+	for _, rec := range h.logs.Records() {
+		if rec.Level == "info" && rec.Operation == "daemon.merge.roster_queue" && rec.Message == message {
+			last, n = rec, n+1
+		}
+	}
+	if n != before+1 || fmtAny(last.Context["line"]) != fmtAny([]string{"ws-2", string(theWorkspace)}) {
+		t.Fatalf("after the move: %d records, the last %+v; want one more, naming ws-2 first", n, last)
+	}
+}

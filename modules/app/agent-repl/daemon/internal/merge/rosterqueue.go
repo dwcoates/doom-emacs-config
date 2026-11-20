@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -151,6 +152,38 @@ func (d rosterQueueDB) republishedIf(ctx context.Context, repo wsm.RepoKey, chan
 // after the queue read once that write committed.
 type rosterQueuePublisher struct {
 	mu sync.Mutex
+	// orders is the order each repository's queue was last published in
+	// (publishedOrder), so a change of it is recorded once, at INFO.
+	orders map[wsm.RepoKey]publishedOrder
+}
+
+// publishedOrder is a queue's order as the roster is told it: the merges in
+// line, head first, and the merges out of line, in the order they stepped
+// aside. The roster numbers the waiting merges by their place in Line.
+type publishedOrder struct {
+	line, remediating []string
+}
+
+// noteOrder records, at INFO, REPO's queue order as QUEUE publishes it when
+// it differs from the order last published, so which order the sidebar drew
+// is read from the logs (2026-11-20: the owner saw a waiting merge numbered
+// first that the queue did not run next, and no record said what the
+// sidebar was told). The caller holds the publisher's lock.
+func (o *orchestrator) noteOrder(repo wsm.RepoKey, queue sidebar.MergeQueue) {
+	now := publishedOrder{line: ids.Strings(queue.LineWorkspaces())}
+	for _, entry := range queue.Remediating {
+		now.remediating = append(now.remediating, string(entry.Workspace))
+	}
+	before, published := o.rosterQueue.orders[repo]
+	if published && slices.Equal(before.line, now.line) && slices.Equal(before.remediating, now.remediating) {
+		return
+	}
+	if o.rosterQueue.orders == nil {
+		o.rosterQueue.orders = map[wsm.RepoKey]publishedOrder{}
+	}
+	o.rosterQueue.orders[repo] = now
+	o.deps.Log.Global().Info("daemon.merge.roster_queue", "the roster was told a new merge queue order: the line head first, the waiting merges numbered by their place after it",
+		dlog.Context{"repo": string(repo), "line": now.line, "remediating": now.remediating})
 }
 
 // publishRosterQueue reads REPO's queue and its pause and tells the roster
@@ -234,6 +267,7 @@ func (o *orchestrator) publishRosterQueue(ctx context.Context, repo wsm.RepoKey)
 	queue.Mediation = mediation
 	fields := dlog.Context{"repo": string(repo), "entries": len(entries), "line": ids.Strings(queue.LineWorkspaces()), "paused": pause != nil, "requesters": ids.Strings(requesters)}
 	o.deps.Log.Global().Debug(op, "told the roster the merge queue", fields)
+	o.noteOrder(repo, queue)
 	o.deps.Sidebar.SetMergeQueue(repo, queue)
 	// EVERY QUEUE WRITE MAY MOVE A MERGE OFF ITS QUEUE OR BACK (an exit, a
 	// requeue), so the merges off their queues are republished with it.
