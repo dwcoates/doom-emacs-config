@@ -54,8 +54,8 @@ type AbandonedRound struct {
 // lease before it removes its entry, so no merge in flight ever stands as a
 // lease with no entry.
 //
-// A ROUND IT SETTLES IS NO LONGER HELD: settling clears the hold in the same
-// write, as every settling writer does (HoldMergeRound). A suspended merge's
+// A ROUND IT SETTLES IS NO LONGER HELD: the sweep settles through settleLiveRounds,
+// which clears the hold in the same write (HoldMergeRound). A suspended merge's
 // abandoned round once kept its hold, and every read of its ledger refused it
 // as settled and held (2026-11-18, eight rounds, a merge failed on each read).
 func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (OrphanedMergeState, error) {
@@ -89,13 +89,11 @@ func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (Orph
 		// held fixes round was settled by no record at all).
 		out.ClosedRounds, err = listRows(ctx, tx, `SELECT i.lease_id, l.workspace_id, i.round, i.kind, i.held_since
 			FROM merge_tab_intervals AS i JOIN merge_ledger AS l ON l.lease_id = i.lease_id
-			WHERE i.ended_at IS NULL AND `+orphanedRound+` ORDER BY i.lease_id, i.round, i.kind`, scanAbandonedRound)
+			WHERE i.ended_at IS NULL AND `+orphanedRound("i.lease_id")+` ORDER BY i.lease_id, i.round, i.kind`, scanAbandonedRound)
 		if err != nil {
 			return err
 		}
-		// A SETTLED ROUND IS NEVER HELD: the hold goes in the same write.
-		_, err = tx.ExecContext(ctx, `UPDATE merge_tab_intervals AS i SET ended_at = ?, outcome = 'abandoned', held_since = NULL
-			WHERE i.ended_at IS NULL AND `+orphanedRound, at.UnixNano())
+		_, err = settleLiveRounds(ctx, tx, "abandoned", sqlExpr{`?`, []any{at.UnixNano()}}, sqlExpr{orphanedRound("lease_id"), nil})
 		return err
 	})
 	if err != nil {
@@ -107,10 +105,12 @@ func (s *store) SweepOrphanedMergeState(ctx context.Context, at time.Time) (Orph
 	return out, nil
 }
 
-// orphanedRound is the condition on a ledger round `i` that no queue entry
-// and no progress record names its lease.
-const orphanedRound = `i.lease_id NOT IN (SELECT ledger_id FROM merge_queue WHERE ledger_id IS NOT NULL AND ledger_id != '')
-			  AND i.lease_id NOT IN (SELECT lease_id FROM merge_progress)`
+// orphanedRound is the condition that no queue entry and no progress record
+// names the ledger LEASE, the round's lease column as the query spells it.
+func orphanedRound(lease string) string {
+	return lease + ` NOT IN (SELECT ledger_id FROM merge_queue WHERE ledger_id IS NOT NULL AND ledger_id != '')
+			  AND ` + lease + ` NOT IN (SELECT lease_id FROM merge_progress)`
+}
 
 // scanAbandonedRound reads one row of the sweep's round query.
 func scanAbandonedRound(rows interface{ Scan(...any) error }) (AbandonedRound, error) {

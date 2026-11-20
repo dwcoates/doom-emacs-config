@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestOpenMergeLedgerRecordsTheLease(t *testing.T) {
@@ -678,5 +681,116 @@ func TestTheMigrationRepairsAStoredSettledAndHeldRoundThenRefusesAnother(t *test
 	}
 	if _, err := handle.(*store).db().Exec(`UPDATE merge_tab_intervals SET held_since = 4 WHERE lease_id = ?`, lease); err == nil {
 		t.Fatal("the migrated file took a hold on a settled round, want layout 174's trigger to refuse it")
+	}
+}
+
+func TestSettleLiveRounds(t *testing.T) {
+	// Each case seeds one ledger's rounds as (kind, ended_at, held_since), 0
+	// meaning NULL, and settles the live rounds WHERE picks.
+	type round struct {
+		kind    string
+		ended   int64
+		held    int64
+		outcome string
+	}
+	tests := []struct {
+		name      string
+		seed      []round
+		where     sqlExpr
+		want      []round
+		wantCount int64
+	}{
+		{
+			name:      "a held live round is settled and its hold cleared",
+			seed:      []round{{kind: "conflicts", held: 150}},
+			where:     sqlExpr{`1`, nil},
+			want:      []round{{kind: "conflicts", ended: 900, outcome: "abandoned"}},
+			wantCount: 1,
+		},
+		{
+			name:      "a running live round is settled",
+			seed:      []round{{kind: "tests"}},
+			where:     sqlExpr{`1`, nil},
+			want:      []round{{kind: "tests", ended: 900, outcome: "abandoned"}},
+			wantCount: 1,
+		},
+		{
+			name:      "a settled round is left as it was settled",
+			seed:      []round{{kind: "tests", ended: 300, outcome: "passed"}},
+			where:     sqlExpr{`1`, nil},
+			want:      []round{{kind: "tests", ended: 300, outcome: "passed"}},
+			wantCount: 0,
+		},
+		{
+			name:      "a live round WHERE does not pick keeps running and held",
+			seed:      []round{{kind: "conflicts", held: 150}, {kind: "tests"}},
+			where:     sqlExpr{`kind = ?`, []any{"tests"}},
+			want:      []round{{kind: "conflicts", held: 150}, {kind: "tests", ended: 900, outcome: "abandoned"}},
+			wantCount: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			corrupt(t, s, `INSERT INTO merge_ledger (lease_id, workspace_id, opened_at) VALUES ('ledger-a', ?, 1)`, ws.ID)
+			for _, r := range tt.seed {
+				corrupt(t, s, `INSERT INTO merge_tab_intervals (lease_id, round, kind, started_at, ended_at, outcome, held_since) VALUES ('ledger-a', 1, ?, 100, NULLIF(?, 0), ?, NULLIF(?, 0))`, r.kind, r.ended, r.outcome, r.held)
+			}
+			tx, err := s.db().BeginTx(context.Background(), nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			// Act
+			got, err := settleLiveRounds(context.Background(), tx, "abandoned", sqlExpr{`?`, []any{900}}, tt.where)
+			if cerr := tx.Commit(); err == nil {
+				err = cerr
+			}
+
+			// Assert
+			if err != nil || got != tt.wantCount {
+				t.Fatalf("settleLiveRounds = (%d, %v), want %d settled", got, err, tt.wantCount)
+			}
+			for _, w := range tt.want {
+				var r round
+				if err := s.db().QueryRow(`SELECT kind, COALESCE(ended_at, 0), COALESCE(held_since, 0), outcome FROM merge_tab_intervals WHERE lease_id = 'ledger-a' AND kind = ?`, w.kind).Scan(&r.kind, &r.ended, &r.held, &r.outcome); err != nil {
+					t.Fatal(err)
+				}
+				if r != w {
+					t.Errorf("round %+v, want %+v", r, w)
+				}
+			}
+		})
+	}
+}
+
+// TestEveryWriteThatSettlesARoundGoesThroughSettleLiveRounds pins that the
+// package's one UPDATE writing a round's end is settleLiveRounds', beside the
+// layout-155 step, which shipped before rounds had holds: a hand-rolled
+// settling UPDATE could leave a round settled and held.
+func TestEveryWriteThatSettlesARoundGoesThroughSettleLiveRounds(t *testing.T) {
+	// Arrange
+	update := regexp.MustCompile(`(?s)UPDATE merge_tab_intervals(?: AS \w+)? SET (.*?)WHERE`)
+
+	// Act
+	var settling []string
+	for _, f := range sourcescan.Production(t) {
+		for _, m := range update.FindAllSubmatch(f.Source, -1) {
+			if strings.Contains(string(m[1]), "ended_at") {
+				settling = append(settling, f.Name+": "+strings.Join(strings.Fields(string(m[1])), " "))
+			}
+		}
+	}
+
+	// Assert
+	slices.Sort(settling)
+	want := []string{
+		"mergeledger.go: ended_at = `+ended.text+`, outcome = ?, held_since = NULL",
+		"mergeledger.go: outcome = 'restarted', ended_at = COALESCE((SELECT MIN(later.started_at) FROM merge_tab_intervals AS later",
+	}
+	if !slices.Equal(settling, want) {
+		t.Fatalf("the UPDATEs that settle a round are\n%s\nwant only settleLiveRounds' and the layout-155 step's:\n%s", strings.Join(settling, "\n"), strings.Join(want, "\n"))
 	}
 }

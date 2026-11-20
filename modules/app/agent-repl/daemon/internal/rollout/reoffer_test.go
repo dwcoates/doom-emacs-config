@@ -81,9 +81,11 @@ func TestAHostCallAdoptsOnceTheTransferCarriedNoPage(t *testing.T) {
 }
 
 func TestACarryFromAnotherDaemonIsNotFollowed(t *testing.T) {
-	// Arrange
+	// Arrange: the adoption is held, so it cannot finish before the host's
+	// cancelled wait and answer it "adopted" (the merge gate, 2026-11-20).
 	h := newHarness(t)
 	ws, _ := h.workspace(t)
+	holdAdoption(t, h)
 	arm(t, h, ws, Participants{Host: true, Web: true})
 	carryParticipants(t, h, ws, ids.InstanceID("daemon-someone-else"), Participants{Host: true})
 

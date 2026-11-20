@@ -63,16 +63,13 @@ func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval T
 			return err
 		}
 		if interval.EndedAt == nil {
-			res, err := tx.ExecContext(ctx,
-				`UPDATE merge_tab_intervals SET ended_at = MAX(started_at, ?), outcome = ?, held_since = NULL
-				 WHERE lease_id = ? AND ended_at IS NULL AND NOT (round = ? AND kind = ?)`,
-				nanos(interval.StartedAt), TabOutcomeRestarted, lease, interval.Round, interval.Kind)
+			cut, err := settleLiveRounds(ctx, tx, TabOutcomeRestarted,
+				sqlExpr{`MAX(started_at, ?)`, []any{nanos(interval.StartedAt)}},
+				sqlExpr{`lease_id = ? AND NOT (round = ? AND kind = ?)`, []any{lease, interval.Round, interval.Kind}})
 			if err != nil {
 				return err
 			}
-			if cut, err := res.RowsAffected(); err != nil {
-				return err
-			} else if cut > 0 {
+			if cut > 0 {
 				s.log.Info(op, "a round opened while another stood live; the one left live is settled as cut in the same write", dlog.Merge(fields, dlog.Context{"cut": cut}))
 			}
 		}
@@ -84,6 +81,29 @@ func (s *store) RecordTabInterval(ctx context.Context, lease LeaseID, interval T
 			lease, interval.Round, interval.Kind, nanos(interval.StartedAt), nullNanos(interval.EndedAt), interval.Outcome)
 		return err
 	})
+}
+
+// sqlExpr is one SQL expression and the arguments its placeholders take.
+type sqlExpr struct {
+	text string
+	args []any
+}
+
+// settleLiveRounds settles every live round of merge_tab_intervals WHERE
+// picks, ending it at ENDED with OUTCOME, and answers how many it settled. It
+// is the ONE write that settles a round: a settled round is never held, so it
+// clears the round's hold in the same statement, and no settling write can
+// leave a round settled and held (2026-11-17: the orphan sweep settled a held
+// round by its own UPDATE, kept the hold, and MergeLedger refused the row).
+func settleLiveRounds(ctx context.Context, tx *sql.Tx, outcome string, ended, where sqlExpr) (int64, error) {
+	args := append(append(append([]any{}, ended.args...), outcome), where.args...)
+	res, err := tx.ExecContext(ctx,
+		`UPDATE merge_tab_intervals SET ended_at = `+ended.text+`, outcome = ?, held_since = NULL
+		 WHERE ended_at IS NULL AND (`+where.text+`)`, args...)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // HoldMergeRound marks the live round of LEASE's ledger HELD since AT, or

@@ -1881,12 +1881,17 @@ func TestAHandoverAdoptionClaimsOnTheJoiningReadOnlyHandle(t *testing.T) {
 	// Arrange: the incumbent has released the transferred workspace, and this
 	// successor still holds the read-only handle it joined with.
 	h := newFileHarness(t)
-	first, _ := joinedWithOneOfTwo(t, h)
+	// THE INCUMBENT SERVES THE WORKSPACE UNTIL ITS RELEASE, as in a handover:
+	// every adoption then waits on that release before it claims. Served by
+	// this daemon instead, an adoption the joined rendezvous started read
+	// "already owns" before the release, claimed nothing, and the release
+	// left the workspace served by no daemon (2026-11-20 merge gate).
+	first, _ := joinedWithOneOfTwoServedBy(t, h, previousInstance)
 	// THE HANDLE IS SWAPPED BEFORE THE RELEASE: the joined rendezvous waits on
 	// the release, so an adoption may start the instant it lands, and a swap
 	// after it raced that adoption's promote and claim onto two handles.
 	h.joiningHandle(t)
-	if err := h.db.ReleaseServing(context.Background(), first, selfInstance); err != nil {
+	if err := h.db.ReleaseServing(context.Background(), first, previousInstance); err != nil {
 		t.Fatalf("ReleaseServing: %v", err)
 	}
 
