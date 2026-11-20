@@ -55,6 +55,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "conversation/v1/api.proto";
+import "frontend/v1/workspace_name_prefix.proto";
 
 option go_package = "agentrepl/proto/frontend/v1;frontendv1";
 
@@ -527,22 +528,13 @@ enum TopbarTitleLinkIcon {
 // styled its own way (bold, and larger than the summary), apart from the
 // summary above it.
 message TopbarWorkspaceName {
-  // The workspace's registry name, verbatim: always a slug, never carrying
-  // the glyph drawn before it.
+  // The workspace's registry name, verbatim: always a slug, never carrying a
+  // mark drawn before it.
   string text = 1;
-  // The glyph drawn immediately before the name, at the name's own size.
-  // UNSET for a workspace whose name wears none.
-  optional TopbarWorkspaceNameGlyph glyph = 2;
-}
-
-// The glyph the topbar draws before the workspace's name: a mark of how the
-// workspace came to be, which the name itself never carries. THE DAEMON
-// DECIDES IT, as it decides the sidebar row's (frontend.v1.RosterRowNameGlyph):
-// a workspace the Slack emoji-ack reaction system created wears a thumbs up,
-// and every other workspace none. Drawn verbatim at the name's own size.
-message TopbarWorkspaceNameGlyph {
-  // The glyph, verbatim: one emoji.
-  string text = 1;
+  // The marks drawn immediately before the name, the same prefix the
+  // workspace's sidebar row wears (frontend.v1.RosterRowName.prefix), at the
+  // name's own size. UNSET for a name that wears no mark.
+  optional WorkspaceNamePrefix prefix = 2;
 }
 
 // The session identity line, shown in the hover/expanded state.

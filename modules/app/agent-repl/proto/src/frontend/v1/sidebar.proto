@@ -49,6 +49,7 @@ syntax = "proto3";
 package frontend.v1;
 
 import "frontend/v1/feed.proto";
+import "frontend/v1/workspace_name_prefix.proto";
 import "workspace/v1/workspace.proto";
 import "zettel/v1/zettel.proto";
 
@@ -633,11 +634,6 @@ message RosterMergedRow {
   RosterRow row = 1;
 }
 
-
-// The priority badge's drawn label.
-message RosterRowPriorityBadge {
-  string label = 1;
-}
 
 // The attention marker. Empty: presence is the fact.
 //
@@ -2133,10 +2129,12 @@ message RosterRow {
   // defect rather than a stale view.
   optional RosterRowAttention attention = 32;
 
-  // The workspace's PRIORITY BADGE, resolver-composed ("P0.5", "P1", …).
-  // UNSET = unprioritized (no badge). Ordering is already the resolver's;
-  // this is only the drawn label.
-  optional RosterRowPriorityBadge priority = 33;
+  // Field 33 was the PRIORITY BADGE (RosterRowPriorityBadge, a text label
+  // drawn after the name). The priority is now an icon drawn BEFORE the name,
+  // in the name's own prefix (RosterRowName.prefix,
+  // frontend.v1.WorkspaceNamePrefix.priority).
+  reserved 33;
+  reserved "priority";
 
   // The row's DISPLAY MODE: present = PARTIAL (the name recedes), absent =
   // FULL. See RosterRowViewed, which carries the mode's whole contract.
@@ -2478,24 +2476,14 @@ message RosterRowRepository {
 
 // A row's display name. Never an identity or a join key.
 message RosterRowName {
-  // The workspace's registry name, verbatim: always a slug, never carrying
-  // the glyph drawn before it.
+  // The workspace's registry name, verbatim: always a slug, never carrying a
+  // mark drawn before it.
   string text = 1;
-  // The glyph drawn immediately before the name, at the name's own size.
-  // UNSET for a workspace whose name wears none.
-  optional RosterRowNameGlyph glyph = 2;
-}
-
-// The glyph a row draws before its name: a mark of how the workspace came to
-// be, which the name itself never carries, because a name is a slug every
-// verb resolves. THE DAEMON DECIDES IT: a workspace the Slack emoji-ack
-// reaction system created (agentrepl.v1.WorkspaceOriginator.emoji_ack) wears
-// a thumbs up, and every other workspace none. A client draws the text
-// verbatim, sized and aligned with the name's own text, and never derives a
-// glyph of its own.
-message RosterRowNameGlyph {
-  // The glyph, verbatim: one emoji.
-  string text = 1;
+  // The marks drawn immediately before the name (the priority icon, then the
+  // emoji-ack glyph), resolved by the daemon and drawn through each client's
+  // one prefix helper (frontend.v1.WorkspaceNamePrefix carries the order and
+  // the contract). UNSET for a name that wears no mark.
+  optional WorkspaceNamePrefix prefix = 2;
 }
 
 // When the user last selected the workspace, in epoch MILLISECONDS: the

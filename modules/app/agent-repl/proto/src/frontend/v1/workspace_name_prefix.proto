@@ -1,0 +1,88 @@
+// workspace_name_prefix.proto — the marks drawn immediately BEFORE a
+// workspace's name, wherever a client draws that name: the sidebar's row
+// (frontend.v1.RosterRowName.prefix), the topbar's name line
+// (frontend.v1.TopbarWorkspaceName.prefix), and every Emacs surface that
+// reads the roster row (the tab bar, the SPC p p / SPC p P switcher).
+//
+// ONE MESSAGE FOR EVERY SURFACE. The prefix is resolved once in the daemon
+// (agent-repld internal/resolve/nameprefix), drawn by one helper per client
+// (the webapp's src/name-prefix.ts, the editor's
+// `agent-repl-name-prefix-string' in lisp/status.el), and every surface that
+// draws a workspace's name draws its prefix through that helper. A new mark is
+// one new field here and one new branch in each of those helpers, never a
+// second per-surface message.
+//
+// THE DRAWN ORDER IS THE FIELD ORDER, left to right, and the order is fixed:
+//
+//   1. the priority icon (priority, field 1);
+//   2. the emoji-ack glyph (emoji_ack, field 2), to the right of the priority
+//      icon (owner request, 2026-11-19).
+//
+// The two are independent: a workspace may wear either, both, or neither.
+// The emoji-ack glyph first landed as a glyph message of each name element
+// (design record docs/protobuf-design/2026-11-18-emoji-ack-name-glyph.md);
+// it lives here now, so both marks are decided, ordered and drawn as one.
+//
+// A name that wears no mark carries NO prefix at all: the field is UNSET,
+// never set empty. A set prefix carrying no mark is a malformed view.
+//
+// A mark is never part of the name's text: the name is a slug every verb
+// resolves (rename, workspace prompt NAME, the branch and worktree directory),
+// so a mark is a drawn thing beside it.
+
+syntax = "proto3";
+
+package frontend.v1;
+
+option go_package = "agentrepl/proto/frontend/v1;frontendv1";
+
+// The marks drawn before a workspace's name, in field order (the file
+// comment holds the drawn order).
+message WorkspaceNamePrefix {
+  // The workspace's priority icon, drawn FIRST (leftmost). UNSET for an
+  // unprioritized workspace.
+  optional WorkspaceNamePriority priority = 1;
+  // The emoji-ack glyph, drawn right after the priority icon. UNSET for a
+  // workspace the Slack emoji-ack reaction system did not create.
+  optional WorkspaceNameEmojiAck emoji_ack = 2;
+}
+
+// The glyph an emoji-ack workspace's name wears: a mark of how the workspace
+// came to be. THE DAEMON DECIDES IT: a workspace the Slack emoji-ack reaction
+// system created (agentrepl.v1.WorkspaceOriginator.emoji_ack) wears a thumbs
+// up, and every other workspace none. A client draws the text verbatim at the
+// name's own size, and never derives a glyph of its own.
+message WorkspaceNameEmojiAck {
+  // The glyph, verbatim: one emoji.
+  string text = 1;
+}
+
+// The priority icon. THE ARM IS THE LEVEL, highest first, mirroring
+// agentrepl.v1.WorkspacePriority. Each client draws the arm as the picture of
+// the same name (images/p05.png, images/p1.png, images/p2.png,
+// images/p3.png), the one set of pictures the webapp and Emacs share, at the
+// height of the name's own line.
+message WorkspaceNamePriority {
+  oneof level {
+    WorkspaceNamePriorityP05 p05 = 1;
+    WorkspaceNamePriorityP1 p1 = 2;
+    WorkspaceNamePriorityP2 p2 = 3;
+    WorkspaceNamePriorityP3 p3 = 4;
+  }
+}
+
+// Priority 0.5, the highest.
+message WorkspaceNamePriorityP05 {
+}
+
+// Priority 1.
+message WorkspaceNamePriorityP1 {
+}
+
+// Priority 2.
+message WorkspaceNamePriorityP2 {
+}
+
+// Priority 3, the lowest.
+message WorkspaceNamePriorityP3 {
+}
