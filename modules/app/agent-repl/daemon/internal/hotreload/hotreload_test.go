@@ -9,6 +9,7 @@ import (
 	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -937,5 +938,20 @@ func TestHandoverEndsWithNoCardDoNothing(t *testing.T) {
 	// Assert
 	if f.feed.drawn() != 0 {
 		t.Fatalf("drew %d cards with none tracked", f.feed.drawn())
+	}
+}
+
+func TestAHotReloadRowIsARootCardRow(t *testing.T) {
+	// Arrange
+	card := &frontendv1.FeedHotReload{}
+
+	// Act
+	row := Row("mediator", 7, card)
+
+	// Assert
+	want := feedid.RootCardRow("mediator", feedid.RowKey{Kind: feedid.KindHotReload, ID: "7"},
+		&frontendv1.FeedTurnActivity{Unit: &frontendv1.FeedTurnActivity_HotReload{HotReload: card}})
+	if !proto.Equal(row, want) {
+		t.Fatalf("row = %v, want the shared root card row %v", row, want)
 	}
 }

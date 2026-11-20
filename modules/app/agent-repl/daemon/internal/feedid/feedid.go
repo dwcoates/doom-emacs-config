@@ -275,6 +275,18 @@ func Encode(ref Ref) *frontendv1.FeedId {
 	return id
 }
 
+// RootCardRow is a daemon-synthesized card on WS's root feed as its row:
+// addressed by KEY, carrying ACTIVITY. The one shape of every card the daemon
+// draws in a workspace's root feed outside any turn (a deploy mediator's fix
+// at its gate, a deploy's hot reload). An unaddressable KEY is a caller's bug.
+func RootCardRow(ws WorkspaceID, key RowKey, activity *frontendv1.FeedTurnActivity) *frontendv1.FeedRow {
+	id := Encode(Ref{WS: ws, Feed: Feed{Root: true}, Row: key})
+	if id == nil {
+		panic(fmt.Sprintf("feedid: a root card row of %q cannot be addressed by %+v", ws, key))
+	}
+	return &frontendv1.FeedRow{Id: id, Row: &frontendv1.FeedRow_Activity{Activity: activity}}
+}
+
 // Decode parses a FeedId back into its Ref. An id from a different scheme
 // version, or one that does not round-trip, is an error the caller surfaces as
 // a NotFound refusal rather than guessing.

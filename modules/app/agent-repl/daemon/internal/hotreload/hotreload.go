@@ -855,14 +855,7 @@ func (t *Tracker) publishLocked() {
 
 // Row is a deploy's card as its feed row, keyed by the deploy's start.
 func Row(ws ids.WorkspaceID, startedMS int64, card *frontendv1.FeedHotReload) *frontendv1.FeedRow {
-	return &frontendv1.FeedRow{
-		Id: feedid.Encode(feedid.Ref{
-			WS:   ws,
-			Feed: feedid.Feed{Root: true},
-			Row:  feedid.RowKey{Kind: feedid.KindHotReload, ID: strconv.FormatInt(startedMS, 10)},
-		}),
-		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
-			Unit: &frontendv1.FeedTurnActivity_HotReload{HotReload: card},
-		}},
-	}
+	return feedid.RootCardRow(ws,
+		feedid.RowKey{Kind: feedid.KindHotReload, ID: strconv.FormatInt(startedMS, 10)},
+		&frontendv1.FeedTurnActivity{Unit: &frontendv1.FeedTurnActivity_HotReload{HotReload: card}})
 }

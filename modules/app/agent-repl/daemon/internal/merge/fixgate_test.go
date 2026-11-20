@@ -7,13 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
 	"google.golang.org/protobuf/proto"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/wsm"
 )
 
 // fixGateCards answers every FeedFixGate WS's feed was drawn, in order, with
@@ -232,5 +235,21 @@ func TestEveryGatesLogIsNamedByOneShape(t *testing.T) {
 	}
 	if !IsLog(filepath.Base(merge.path)) || !IsLog(filepath.Base(mediator.path)) || mediator.token != "def456/3" {
 		t.Fatalf("merge %+v, mediator %+v; want logs the retention pass knows, tokens key/round", merge, mediator)
+	}
+}
+
+func TestAFixGateRowIsARootCardRow(t *testing.T) {
+	// Arrange
+	f := wsm.RemediationFinish{Workspace: "mediator", StartedAt: time.UnixMilli(5)}
+	card := &frontendv1.FeedFixGate{}
+
+	// Act
+	row := fixGateRow(f, 2, card)
+
+	// Assert
+	want := feedid.RootCardRow("mediator", feedid.RowKey{Kind: feedid.KindFixGate, ID: "5-2"},
+		&frontendv1.FeedTurnActivity{Unit: &frontendv1.FeedTurnActivity_FixGate{FixGate: card}})
+	if !proto.Equal(row, want) {
+		t.Fatalf("row = %v, want the shared root card row %v", row, want)
 	}
 }

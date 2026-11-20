@@ -113,16 +113,9 @@ func (g *fixGateRun) publish(card *frontendv1.FeedFixGate, written bool) {
 // IS KEYED BY THE FINISH AND THE ATTEMPT, so a later chain's first attempt
 // never overwrites an earlier chain's card.
 func fixGateRow(f wsm.RemediationFinish, attempt int, card *frontendv1.FeedFixGate) *frontendv1.FeedRow {
-	return &frontendv1.FeedRow{
-		Id: feedid.Encode(feedid.Ref{
-			WS:   f.Workspace,
-			Feed: feedid.Feed{Root: true},
-			Row:  feedid.RowKey{Kind: feedid.KindFixGate, ID: fmt.Sprintf("%d-%d", f.StartedAt.UnixMilli(), attempt)},
-		}),
-		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
-			Unit: &frontendv1.FeedTurnActivity_FixGate{FixGate: card},
-		}},
-	}
+	return feedid.RootCardRow(f.Workspace,
+		feedid.RowKey{Kind: feedid.KindFixGate, ID: fmt.Sprintf("%d-%d", f.StartedAt.UnixMilli(), attempt)},
+		&frontendv1.FeedTurnActivity{Unit: &frontendv1.FeedTurnActivity_FixGate{FixGate: card}})
 }
 
 // fixGateLogPath resolves deploy mediator WS's own gate log for ROUND, or
