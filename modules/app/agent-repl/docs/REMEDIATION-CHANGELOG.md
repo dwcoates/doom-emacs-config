@@ -1583,3 +1583,4 @@ commit and docs/REALTEST-JUDGEMENT-CALLS.md hold that.
 - 2026-11-20 deploy-mediator (landed in queue bypass mode): A deploy check that could not read its window no longer makes every later check fail: the mediator's approval of it records the window as read
 - 2026-11-20 deploy-mediator (landed in queue bypass mode): On AC power in High Power Mode the test CPU governor now holds the tests to an average of 50% of the host and the host to 55% (was 55% and 70%), so a merge gate leaves more of the machine to the owner's own work
 - 2026-11-20 merge-queue-stall-triage (landed in queue bypass mode): Merge gates record each test's CPU, and the shim and webapp integration tests now share their service processes, cutting their files' CPU 53-67%.
+- 2026-11-20 merge-queue-stall-triage (landed in queue bypass mode): The daemon no longer re-publishes every workspace's naming on each turn end, and 146 daemon integration tests share one daemon, cutting their CPU 31%.
