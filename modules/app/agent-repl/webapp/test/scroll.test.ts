@@ -1980,6 +1980,85 @@ describe("observeScrollBox", () => {
     });
   });
 
+  it("names the change still undelivered when a follow inside its task finds the move", async () => {
+    // Arrange — a standing follow, an old delivered change.
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const stamp = document.createElement("span");
+    stamp.className = "merge-clock";
+    box.content.append(stamp);
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    stamp.textContent = "3s";
+    await Promise.resolve();
+    const capture = captureLogRecords("info");
+    // Act — in ONE task: a render changes the content, the box moves, the render's follow runs.
+    const card = document.createElement("article");
+    card.className = "feed-item";
+    box.content.append(card);
+    box.element.scrollTop = 684;
+    tail.follow();
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({
+      from: 700,
+      to: 684,
+      detected_by: "follow",
+      mutated: ["main"],
+      undelivered: true,
+    });
+  });
+
+  it.each([
+    { name: "a scroll event", act: (el: HTMLElement) => el.dispatchEvent(new Event("scroll")), want: "scroll" },
+    { name: "a read of the follow", act: (_el: HTMLElement, tail: TailFollow) => tail.isFollowing(), want: "read" },
+  ])("names $name as what found the move", async ({ act, want }) => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    box.element.scrollTop = 684;
+    act(box.element, tail);
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({ detected_by: want });
+  });
+
+  it("says how many of its own writes ago the box stood where the browser moved it", async () => {
+    // Arrange — parked at 600, then (content grown) at 700.
+    const box = scrollBox({ scrollHeight: 900, clientHeight: 300, scrollTop: 600 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    box.contentGrows(100);
+    tail.follow();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act — the browser takes the box back to the earlier placement.
+    box.element.scrollTop = 600;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({ from: 700, to: 600, returned_to: 1, ms_since_write: expect.any(Number) });
+  });
+
+  it("says the browser moved the box to none of its own writes", async () => {
+    // Arrange
+    const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
+    const tail = new TailFollow(box.element);
+    tail.initialPlacement();
+    observeScrollBox(box.element, tail);
+    const capture = captureLogRecords("info");
+    // Act
+    box.element.scrollTop = 650;
+    box.element.dispatchEvent(new Event("scroll"));
+    // Assert
+    const record = await forwardedRecord(capture, "scroll.feed-moved-uncaused");
+    expect(record.context).toMatchObject({ returned_to: null });
+  });
+
   it("says no change was witnessed when the content never changed", async () => {
     // Arrange
     const box = scrollBox({ scrollHeight: 1000, clientHeight: 300, scrollTop: 700 });
@@ -3817,6 +3896,44 @@ describe("MoveWitness", () => {
     witness.mutated([el("span", "new")]);
     // Assert
     expect(witness.report()).toMatchObject({ mutated: ["span.new"], frames_since_mutation: 0 });
+  });
+
+  it("reports a delivered change as delivered", () => {
+    // Arrange
+    const { witness } = witnessAt();
+    // Act
+    witness.mutated([el("span", "q-when")]);
+    // Assert
+    expect(witness.report()?.undelivered).toBe(false);
+  });
+
+  it("reports the reporting task's own undelivered change as the last one", () => {
+    // Arrange
+    const { witness, advance, frame } = witnessAt();
+    witness.mutated([el("span", "merge-clock")]);
+    advance(886);
+    frame();
+    frame();
+    // Act
+    const report = witness.report([el("article", "feed-item"), el("div", "feed-group")]);
+    // Assert
+    expect(report).toMatchObject({
+      mutated: ["article.feed-item", "div.feed-group"],
+      mutations: 2,
+      undelivered: true,
+      ms_since_mutation: 0,
+      frames_since_mutation: 0,
+    });
+  });
+
+  it("keeps the last delivered change when nothing is pending", () => {
+    // Arrange
+    const { witness } = witnessAt();
+    witness.mutated([el("span", "merge-clock")]);
+    // Act
+    const report = witness.report([]);
+    // Assert
+    expect(report).toMatchObject({ mutated: ["span.merge-clock"], undelivered: false });
   });
 
   it("hands out a copy its caller cannot alter", () => {
