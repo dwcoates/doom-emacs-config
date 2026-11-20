@@ -520,6 +520,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		Pid:         os.Getpid(),
 		RunLog:      os.Getenv(ramdisk.EnvRunLog),
 		Metrics:     metricsTarget,
+		Roster:      roster.Lookup,
 		PushTimes: func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error {
 			return testtimes.Push(ctx, http.DefaultClient, target, report, at)
 		},

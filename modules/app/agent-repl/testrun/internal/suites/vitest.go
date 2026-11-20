@@ -261,7 +261,7 @@ func vitestBatches(s roster.Suite, dir string, files []string, prefix string) ([
 		}
 		areas[f] = prefix + a
 	}
-	return BatchFiles(files, func(f string) string { return areas[f] }, neverReused(s), prefix+PooledArea), nil
+	return BatchFiles(files, func(f string) string { return areas[f] }, neverReused(s), prefix+PooledArea, s.Batching()), nil
 }
 
 // neverReused answers whether the roster names a file as a unit it never

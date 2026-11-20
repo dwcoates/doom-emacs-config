@@ -48,10 +48,30 @@ const (
 	RunsWhenNamed
 )
 
+// Batching is how a vitest or ERT suite's test files are cut into batches,
+// each one reuse unit run in one process (suites.BatchFiles): an area of more
+// than Max files is cut into batches of at most Max, and an area of fewer than
+// Min files is pooled with the suite's other small areas. A larger batch pays
+// fewer process starts; a smaller one reruns fewer files after a change to one.
+type Batching struct {
+	Max, Min int
+}
+
+// DefaultBatching is the batching of a suite that declares none: a vitest
+// process costs about 12s beyond its tests (2026-11-12), so a batch holds
+// enough files to repay it.
+var DefaultBatching = Batching{Max: 48, Min: 12}
+
+// Label names the batching for the test-time series ("max48-min12").
+func (b Batching) Label() string { return fmt.Sprintf("max%d-min%d", b.Max, b.Min) }
+
 // Suite is one roster entry.
 type Suite struct {
 	Name string
 	Kind Kind
+	// Batch is a vitest or ERT suite's own batching, measured for that suite;
+	// nil is DefaultBatching. Any other kind declares none (Check).
+	Batch *Batching
 	// Path is relative to the agent-repl module root: the script for a Script
 	// suite (or, when it starts with "/", relative to the repository root),
 	// the module or package directory otherwise.
@@ -829,6 +849,14 @@ func Check(suites []Suite) error {
 		case s.Reuse != nil && s.NeverReused != "":
 			errs = append(errs, fmt.Errorf("roster: %s declares both Reuse and NeverReused", s.Name))
 		}
+		if b := s.Batch; b != nil {
+			switch {
+			case !s.Batched():
+				errs = append(errs, fmt.Errorf("roster: %s declares a Batch, but only a vitest or ERT suite's files are batched", s.Name))
+			case b.Max < 1 || b.Min < 1 || b.Min > b.Max:
+				errs = append(errs, fmt.Errorf("roster: %s declares Batch max %d min %d: both must be at least 1, and min no more than max", s.Name, b.Max, b.Min))
+			}
+		}
 		if s.Reuse == nil {
 			continue
 		}
@@ -848,6 +876,17 @@ func Check(suites []Suite) error {
 	}
 	return errors.Join(errs...)
 }
+
+// Batching is the suite's batching: its own, or DefaultBatching.
+func (s Suite) Batching() Batching {
+	if s.Batch != nil {
+		return *s.Batch
+	}
+	return DefaultBatching
+}
+
+// Batched reports whether the suite's files are cut into batches.
+func (s Suite) Batched() bool { return s.Kind == Vitest || s.Kind == ERT }
 
 // Resolve turns a roster path into an absolute one: a path starting with "/"
 // is relative to the repository root REPO, any other to the agent-repl module

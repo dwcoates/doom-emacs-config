@@ -11,6 +11,10 @@ import (
 	"agentrepl/testrun/roster"
 )
 
+// sizes is the batching the cases batch under: the default, so the sizes the
+// roster's suites take when they declare none are the ones pinned.
+var sizes = roster.DefaultBatching
+
 // byDir is an areaOf that answers a file's first directory.
 func byDir(f string) string {
 	dir, _, _ := strings.Cut(f, "/")
@@ -36,10 +40,10 @@ func names(batches []FileBatch) []string {
 
 func TestBatchFilesKeepsAnAreaOfEnoughFilesAsOneBatch(t *testing.T) {
 	// Arrange
-	files := numbered("sidebar", BatchMin)
+	files := numbered("sidebar", sizes.Min)
 
 	// Act
-	got := BatchFiles(files, byDir, nil, PooledArea)
+	got := BatchFiles(files, byDir, nil, PooledArea, sizes)
 
 	// Assert
 	if len(got) != 1 || got[0].Name != "sidebar" || !slices.Equal(got[0].Files, files) {
@@ -49,10 +53,10 @@ func TestBatchFilesKeepsAnAreaOfEnoughFilesAsOneBatch(t *testing.T) {
 
 func TestBatchFilesCutsAnAreaTooLargeIntoNearEqualNumberedBatches(t *testing.T) {
 	// Arrange
-	files := numbered("feed", 2*BatchMax+1)
+	files := numbered("feed", 2*sizes.Max+1)
 
 	// Act
-	got := BatchFiles(files, byDir, nil, PooledArea)
+	got := BatchFiles(files, byDir, nil, PooledArea, sizes)
 
 	// Assert
 	if want := []string{"feed.1", "feed.2", "feed.3"}; !slices.Equal(names(got), want) {
@@ -60,8 +64,8 @@ func TestBatchFilesCutsAnAreaTooLargeIntoNearEqualNumberedBatches(t *testing.T) 
 	}
 	var all []string
 	for _, b := range got {
-		if len(b.Files) > BatchMax || len(b.Files) < (2*BatchMax+1)/3 {
-			t.Errorf("%s holds %d files, want at most %d and near an equal share", b.Name, len(b.Files), BatchMax)
+		if len(b.Files) > sizes.Max || len(b.Files) < (2*sizes.Max+1)/3 {
+			t.Errorf("%s holds %d files, want at most %d and near an equal share", b.Name, len(b.Files), sizes.Max)
 		}
 		all = append(all, b.Files...)
 	}
@@ -72,27 +76,27 @@ func TestBatchFilesCutsAnAreaTooLargeIntoNearEqualNumberedBatches(t *testing.T) 
 
 func TestBatchFilesPoolsAreasTooSmallForABatchOfTheirOwn(t *testing.T) {
 	// Arrange: two small areas and one large enough.
-	files := append(append(numbered("login", 1), numbered("held", BatchMin-1)...), numbered("sidebar", BatchMin)...)
+	files := append(append(numbered("login", 1), numbered("held", sizes.Min-1)...), numbered("sidebar", sizes.Min)...)
 
 	// Act
-	got := BatchFiles(files, byDir, nil, PooledArea)
+	got := BatchFiles(files, byDir, nil, PooledArea, sizes)
 
 	// Assert
 	if want := []string{PooledArea, "sidebar"}; !slices.Equal(names(got), want) {
 		t.Fatalf("batches = %v, want %v", names(got), want)
 	}
-	if len(got[0].Files) != BatchMin {
+	if len(got[0].Files) != sizes.Min {
 		t.Fatalf("the pooled batch holds %v, want both small areas' files", got[0].Files)
 	}
 }
 
 func TestBatchFilesGivesAFileItsSuiteNeverReusesABatchOfItsOwn(t *testing.T) {
 	// Arrange
-	files := numbered("sidebar", BatchMin+1)
+	files := numbered("sidebar", sizes.Min+1)
 	never := files[2]
 
 	// Act
-	got := BatchFiles(files, byDir, func(f string) bool { return f == never }, PooledArea)
+	got := BatchFiles(files, byDir, func(f string) bool { return f == never }, PooledArea, sizes)
 
 	// Assert
 	i := slices.IndexFunc(got, func(b FileBatch) bool { return b.Name == never })
@@ -108,12 +112,12 @@ func TestBatchFilesGivesAFileItsSuiteNeverReusesABatchOfItsOwn(t *testing.T) {
 
 func TestBatchFilesAnswersTheSameBatchesWhateverTheFilesOrder(t *testing.T) {
 	// Arrange
-	files := append(numbered("feed", BatchMax+3), numbered("sidebar", BatchMin)...)
+	files := append(numbered("feed", sizes.Max+3), numbered("sidebar", sizes.Min)...)
 	reversed := slices.Clone(files)
 	slices.Reverse(reversed)
 
 	// Act
-	a, b := BatchFiles(files, byDir, nil, PooledArea), BatchFiles(reversed, byDir, nil, PooledArea)
+	a, b := BatchFiles(files, byDir, nil, PooledArea, sizes), BatchFiles(reversed, byDir, nil, PooledArea, sizes)
 
 	// Assert
 	if fmt.Sprint(a) != fmt.Sprint(b) {
@@ -123,7 +127,7 @@ func TestBatchFilesAnswersTheSameBatchesWhateverTheFilesOrder(t *testing.T) {
 
 func TestBatchFilesOfNoFilesIsNoBatch(t *testing.T) {
 	// Act
-	got := BatchFiles(nil, byDir, nil, PooledArea)
+	got := BatchFiles(nil, byDir, nil, PooledArea, sizes)
 
 	// Assert
 	if len(got) != 0 {
@@ -205,7 +209,7 @@ func TestERTAreaIsTheModuleFamily(t *testing.T) {
 func TestVitestBatchesPrefixEveryAreaAndKeepANeverReusedFileAlone(t *testing.T) {
 	// Arrange
 	dir := t.TempDir()
-	files := numbered("test/feed", BatchMin)
+	files := numbered("test/feed", sizes.Min)
 	for _, f := range files {
 		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(f)), 0o755); err != nil {
 			t.Fatal(err)
@@ -228,12 +232,59 @@ func TestVitestBatchesPrefixEveryAreaAndKeepANeverReusedFileAlone(t *testing.T) 
 	}
 }
 
-func TestBatchingLabelNamesTheBatchSizesInForce(t *testing.T) {
+func TestBatchFilesCutsBySuitesOwnSizes(t *testing.T) {
+	// Arrange: a suite of its own sizes, max 4 and min 3.
+	own := roster.Batching{Max: 4, Min: 3}
+	files := append(append(numbered("feed", 9), numbered("held", 2)...), numbered("sidebar", 3)...)
+
 	// Act
-	got := BatchingLabel()
+	got := BatchFiles(files, byDir, nil, PooledArea, own)
+
+	// Assert: feed's 9 cut into three of 3, held's 2 pooled, sidebar's 3 kept.
+	if want := []string{"feed.1", "feed.2", "feed.3", "pooled", "sidebar"}; !slices.Equal(names(got), want) {
+		t.Fatalf("batches = %v, want %v", names(got), want)
+	}
+}
+
+func TestBatchingLabelNamesEveryBatchedSuitesSizesInRosterOrder(t *testing.T) {
+	// Arrange
+	suites := []roster.Suite{
+		{Name: "ert", Kind: roster.ERT},
+		{Name: "daemon", Kind: roster.GoModule},
+		{Name: "webapp", Kind: roster.Vitest, Batch: &roster.Batching{Max: 30, Min: 8}},
+	}
+
+	// Act
+	got := BatchingLabel(suites)
 
 	// Assert
-	if want := fmt.Sprintf("max%d-min%d", BatchMax, BatchMin); got != want {
+	if want := "ert=max48-min12,webapp=max30-min8"; got != want {
 		t.Fatalf("BatchingLabel = %q, want %q", got, want)
+	}
+}
+
+func TestVitestBatchesCutBySuitesOwnBatching(t *testing.T) {
+	// Arrange: five feed files in a suite whose batches hold at most two.
+	dir := t.TempDir()
+	files := numbered("test/feed", 5)
+	for _, f := range files {
+		if err := os.MkdirAll(filepath.Join(dir, filepath.Dir(f)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, f), []byte("import \"../../src/feed/a\";\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s := roster.Suite{Name: "webapp", Kind: roster.Vitest, Reuse: &roster.Reuse{}, Batch: &roster.Batching{Max: 2, Min: 1}}
+
+	// Act
+	got, err := vitestBatches(s, dir, files, "")
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"feed.1", "feed.2", "feed.3"}; !slices.Equal(names(got), want) {
+		t.Fatalf("batches = %v, want %v", names(got), want)
 	}
 }

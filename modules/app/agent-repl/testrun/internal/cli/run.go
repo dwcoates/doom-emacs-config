@@ -68,6 +68,9 @@ type Deps struct {
 	// Metrics is where the run pushes every test's time when it ends, and
 	// what ran it; the zero Target pushes nothing (testtimes.TakeTarget).
 	Metrics testtimes.Target
+	// Roster finds a suite by name (roster.Lookup): the push labels each
+	// suite's series with its own batching.
+	Roster func(name string) (roster.Suite, bool)
 	// PushTimes sends the run's report, stamped AT, to TARGET (testtimes.Push).
 	PushTimes func(ctx context.Context, target testtimes.Target, report testtimes.Report, at time.Time) error
 	// CPU measures each unit's CPU over time, for each test's share
@@ -475,7 +478,7 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 		return nil
 	}
 	end := rt.end
-	report := testtimes.Report{Batching: suites.BatchingLabel()}
+	report := testtimes.Report{Batching: suites.BatchingLabel(roster.Suites)}
 	outcome := testtimes.Pass
 	for _, s := range suiteResults {
 		if s.Outcome != run.Passed {
@@ -484,7 +487,7 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 	}
 	report.Run = &testtimes.Run{Seconds: rt.end.Sub(rt.start).Seconds(), PredictedSeconds: rt.predicted, Outcome: outcome}
 	for _, v := range rt.verdicts {
-		report.SuiteUnits = append(report.SuiteUnits, testtimes.SuiteUnits{Suite: v.Suite.Name, Run: len(v.Units) - v.Reused(), Reused: v.Reused()})
+		report.SuiteUnits = append(report.SuiteUnits, testtimes.SuiteUnits{Suite: v.Suite.Name, Run: len(v.Units) - v.Reused(), Reused: v.Reused(), Batching: suiteBatching(d.Roster, v.Suite.Name)})
 	}
 	for _, r := range results {
 		report.Tests = append(report.Tests, r.Tests...)
@@ -498,7 +501,7 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 		})
 	}
 	for _, s := range suiteResults {
-		report.Suites = append(report.Suites, testtimes.Suite{Name: s.Name, Outcome: suiteOutcomes[s.Outcome], Seconds: s.UnitSeconds})
+		report.Suites = append(report.Suites, testtimes.Suite{Name: s.Name, Outcome: suiteOutcomes[s.Outcome], Seconds: s.UnitSeconds, Batching: suiteBatching(d.Roster, s.Name)})
 	}
 	if err := d.PushTimes(ctx, d.Metrics, report, end); err != nil {
 		return err
@@ -506,6 +509,21 @@ func pushTimes(ctx context.Context, d Deps, results []run.Result, suiteResults [
 	d.Log.Infof("metrics: pushed %d test, %d suite and %d unit records, the run's %.1fs and %d suites' unit counts (trigger %s, batching %s)",
 		len(report.Tests), len(report.Suites), len(report.Units), report.Run.Seconds, len(report.SuiteUnits), d.Metrics.Trigger, report.Batching)
 	return nil
+}
+
+// suiteBatching is the batching label of the roster suite NAME, found by
+// lookup: its own batch sizes, or testtimes.Unbatched for a suite whose files
+// are not batched. A name the roster does not hold is a run that planned a
+// suite it has no entry for, which is a broken invariant.
+func suiteBatching(lookup func(string) (roster.Suite, bool), name string) string {
+	s, ok := lookup(name)
+	if !ok {
+		panic(fmt.Sprintf("cli: the run reported suite %q, which the roster does not hold", name))
+	}
+	if !s.Batched() {
+		return testtimes.Unbatched
+	}
+	return s.Batching().Label()
 }
 
 func partition(rs []run.SuiteResult) (passed, failed []run.SuiteResult) {

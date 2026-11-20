@@ -509,6 +509,7 @@ func newHarness(t *testing.T, exits map[string]int, buildErr map[string]error) h
 		Slots:       4,
 		Cores:       freeCores{},
 		HistoryPath: filepath.Join(root, "history.json"),
+		Roster:      roster.Lookup,
 		Build: func(_ suites.Layout, s roster.Suite) (suites.Units, error) {
 			if err := buildErr[s.Name]; err != nil {
 				return suites.Units{}, err
@@ -1113,6 +1114,7 @@ func TestAPushLeavesOutACancelledUnit(t *testing.T) {
 	d := Deps{
 		Log:     &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}},
 		Metrics: testtimes.Target{Root: "/m", Trigger: "merge_queue"},
+		Roster:  fakeRoster,
 		PushTimes: func(_ context.Context, _ testtimes.Target, report testtimes.Report, _ time.Time) error {
 			got = report
 			return nil
@@ -1126,6 +1128,34 @@ func TestAPushLeavesOutACancelledUnit(t *testing.T) {
 	if err != nil || len(got.Units) != 1 || got.Units[0].ID != "a" || got.Units[0].Outcome != testtimes.Fail || got.Units[0].Wall != 1 {
 		t.Fatalf("pushTimes = %v, units %+v; want only the failed unit, with its wall time", err, got.Units)
 	}
+}
+
+// fakeRoster finds the suites a push test names: a vitest suite under its own
+// batching, and every other name as an unbatched Go module.
+func fakeRoster(name string) (roster.Suite, bool) {
+	if name == "webapp" {
+		return roster.Suite{Name: name, Kind: roster.Vitest, Batch: &roster.Batching{Max: 30, Min: 8}}, true
+	}
+	return roster.Suite{Name: name, Kind: roster.GoModule}, true
+}
+
+func TestAPushPanicsOnASuiteTheRosterDoesNotHold(t *testing.T) {
+	// Arrange
+	d := Deps{
+		Log:       &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}},
+		Metrics:   testtimes.Target{Root: "/m", Trigger: "merge_queue"},
+		Roster:    func(string) (roster.Suite, bool) { return roster.Suite{}, false },
+		PushTimes: func(context.Context, testtimes.Target, testtimes.Report, time.Time) error { return nil },
+	}
+	defer func() {
+		// Assert
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), `the run reported suite "ghost", which the roster does not hold`) {
+			t.Fatalf("recovered %v, want the unrostered suite named", r)
+		}
+	}()
+
+	// Act
+	_ = pushTimes(context.Background(), d, nil, []run.SuiteResult{{Name: "ghost", Outcome: run.Passed}}, runTimes{})
 }
 
 func TestAPushReportsTheWholeRunAndEachSuitesUnitsUnderItsBatching(t *testing.T) {
@@ -1151,6 +1181,7 @@ func TestAPushReportsTheWholeRunAndEachSuitesUnitsUnderItsBatching(t *testing.T)
 			d := Deps{
 				Log:     &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}},
 				Metrics: testtimes.Target{Root: "/m", Trigger: "merge_queue"},
+				Roster:  fakeRoster,
 				PushTimes: func(_ context.Context, _ testtimes.Target, report testtimes.Report, _ time.Time) error {
 					got = report
 					return nil
@@ -1165,11 +1196,16 @@ func TestAPushReportsTheWholeRunAndEachSuitesUnitsUnderItsBatching(t *testing.T)
 			if err != nil || got.Run == nil || got.Run.Seconds != 90 || got.Run.PredictedSeconds != 75 || got.Run.Outcome != tt.wantOutcome {
 				t.Fatalf("pushTimes = %v, run %+v; want 90s against a 75s plan, %s", err, got.Run, tt.wantOutcome)
 			}
-			if len(got.SuiteUnits) != 1 || got.SuiteUnits[0] != (testtimes.SuiteUnits{Suite: "webapp", Run: 2, Reused: 1}) {
-				t.Fatalf("suite units = %+v, want webapp's 2 run and 1 reused", got.SuiteUnits)
+			if len(got.SuiteUnits) != 1 || got.SuiteUnits[0] != (testtimes.SuiteUnits{Suite: "webapp", Run: 2, Reused: 1, Batching: "max30-min8"}) {
+				t.Fatalf("suite units = %+v, want webapp's 2 run and 1 reused under its own batching", got.SuiteUnits)
 			}
-			if got.Batching != suites.BatchingLabel() {
-				t.Fatalf("batching = %q, want %q", got.Batching, suites.BatchingLabel())
+			for _, s := range got.Suites {
+				if s.Batching != testtimes.Unbatched {
+					t.Fatalf("suite %s batching = %q, want %q for a suite whose files are not batched", s.Name, s.Batching, testtimes.Unbatched)
+				}
+			}
+			if got.Batching != suites.BatchingLabel(roster.Suites) {
+				t.Fatalf("batching = %q, want %q", got.Batching, suites.BatchingLabel(roster.Suites))
 			}
 		})
 	}

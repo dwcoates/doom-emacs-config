@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"agentrepl/testrun/internal/run"
+	"agentrepl/testrun/roster"
 )
 
 // FILES RUN IN BATCHES. A vitest or ERT suite's test files are cut into
@@ -24,26 +25,25 @@ import (
 // A BATCH HOLDS FILES THAT READ THE SAME CODE, so a change reruns only the
 // batches that read it: each file belongs to an AREA (what it tests: a vitest
 // file's most imported source directory, an ERT file's module family), an area
-// too large is cut into BatchMax-file batches, and areas too small to be worth
-// a process are pooled. A file its suite never reuses (roster Reuse.Never) is a
+// too large is cut into batches of at most its suite's Max files, and areas
+// too small to be worth a process are pooled (roster.Batching, each suite its
+// own). A file its suite never reuses (roster Reuse.Never) is a
 // batch of its own, named by the file, so it does not take its batch-mates'
 // reuse with it.
 
-// BatchMax is the most files a batch holds; BatchMin is the fewest an area
-// keeps as batches of its own before it is pooled with other small areas.
-// A vitest process costs about 12s beyond its tests (transform, collect,
-// setup, environment; 2026-11-12), so a batch must hold enough files to repay
-// it: at 24 and 4 the webapp suite ran 28 processes and its batches spent 47%
-// of their time outside their tests.
-const (
-	BatchMax = 48
-	BatchMin = 12
-)
-
-// BatchingLabel names the batch sizes in force, for the test-time series a
-// run pushes (testtimes.Report.Batching), so runs under different sizes
-// compare: "max48-min12".
-func BatchingLabel() string { return fmt.Sprintf("max%d-min%d", BatchMax, BatchMin) }
+// BatchingLabel names every batched suite's batch sizes, for the run-wide
+// test-time series a run pushes (testtimes.Report.Batching), so runs under
+// different sizes compare: "ert=max48-min12,shim=max48-min12,webapp=...",
+// in roster order. Each suite's own series carry that suite's alone.
+func BatchingLabel(suites []roster.Suite) string {
+	var parts []string
+	for _, s := range suites {
+		if s.Batched() {
+			parts = append(parts, s.Name+"="+s.Batching().Label())
+		}
+	}
+	return strings.Join(parts, ",")
+}
 
 // PooledArea names the batches small areas are pooled into, opened by the
 // suite's area prefix where it has one.
@@ -60,7 +60,7 @@ type FileBatch struct {
 // answer depends only on files and their areas, so a batch keeps its name and
 // members until a file is added, removed or moves area. Batches are answered
 // sorted by name.
-func BatchFiles(files []string, areaOf func(string) string, solo func(string) bool, pool string) []FileBatch {
+func BatchFiles(files []string, areaOf func(string) string, solo func(string) bool, pool string, sizes roster.Batching) []FileBatch {
 	areas := map[string][]string{}
 	var out []FileBatch
 	for _, f := range files {
@@ -80,24 +80,24 @@ func BatchFiles(files []string, areaOf func(string) string, solo func(string) bo
 	for _, a := range names {
 		members := areas[a]
 		sort.Strings(members)
-		if len(members) < BatchMin {
+		if len(members) < sizes.Min {
 			pooled = append(pooled, members...)
 			continue
 		}
-		out = append(out, cut(a, members)...)
+		out = append(out, cut(a, members, sizes.Max)...)
 	}
-	out = append(out, cut(pool, pooled)...)
+	out = append(out, cut(pool, pooled, sizes.Max)...)
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
 }
 
-// cut is members as batches of at most BatchMax files: area itself when one
-// batch holds them, otherwise "area.1", "area.2", ... of near-equal size.
-func cut(area string, members []string) []FileBatch {
+// cut is members as batches of at most max files: area itself when one batch
+// holds them, otherwise "area.1", "area.2", ... of near-equal size.
+func cut(area string, members []string, max int) []FileBatch {
 	if len(members) == 0 {
 		return nil
 	}
-	n := (len(members) + BatchMax - 1) / BatchMax
+	n := (len(members) + max - 1) / max
 	if n == 1 {
 		return []FileBatch{{Name: area, Files: members}}
 	}
