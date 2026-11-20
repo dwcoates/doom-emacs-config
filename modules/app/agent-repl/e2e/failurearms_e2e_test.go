@@ -6,7 +6,8 @@
 // daemon/integration/scenariogoldens_test.go). What stays here is the one
 // test that wires the seam end to end -- a real prompt through SubmitPrompt,
 // answered by the real (--fake) shim against a named fake-SDK scenario --
-// and asserts a SPECIFIC typed arm of `frontend.v1 FeedTurnEndedErrored.error`.
+// and asserts what the feed and the footer draw for a failure agent-repl
+// retries.
 //
 // UNGROUNDED FAKES. Per agent-shim/claude/shim/AGENTS.md and
 // testdata/captures/MANIFEST.md, NONE of the scenarios driven here is backed
@@ -28,7 +29,6 @@ import (
 
 	"agentrepl/e2e/kit/stack"
 	frontendv1 "agentrepl/proto/frontend/v1"
-	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 // ---------------------------------------------------------------------------
@@ -45,73 +45,58 @@ import (
 // since the vendor retries its request, so it is declared nowhere.
 var faApiErrorWarnings = []string{"daemon.feed.api_error"}
 
-// faDriveErrored drives one named failure scenario to completion and answers
-// the turn's FeedTurnEndedErrored, failing loudly if the turn ended on any
-// other outcome. The headline is checked here for every arm because Landing 8
-// (PROTO-CHANGES.md) makes it unconditional: `FeedTurnEndedErrored.headline`
-// is the client's whole account of what the arm means.
-func faDriveErrored(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRef, scenario string) *frontendv1.FeedTurnEndedErrored {
-	t.Helper()
-	turn := stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, scenario)
-	row := stack.AwaitTurnEnded(t, w, ws, turn)
-	ended := row.GetTurnEnded()
-	if ended == nil {
-		t.Fatalf("row for turn %s has no TurnEnded: %v", turn.GetValue(), row)
-	}
-	errored := ended.GetErrored()
-	if errored == nil {
-		t.Fatalf("FeedTurnEnded.Outcome = %v, want Errored for !%s", ended, scenario)
-	}
-	if errored.GetHeadline().GetText() == "" {
-		t.Fatalf("FeedTurnEndedErrored.Headline.Text is empty for !%s, want a daemon-composed sentence: %v", scenario, errored)
-	}
-	return errored
-}
-
 // ---------------------------------------------------------------------------
 // The twelve AgentFailure.api_request_failed sub-arms
 // ---------------------------------------------------------------------------
 
-// testApiRateLimitedCarriesTheVendorWait pins the ONE api arm with a field of
-// its own: feed.proto:878-880 gives `FeedTurnErrorRateLimited` a
-// `retry_after_ms` that "the client counts down from", UNSET meaning the
-// vendor "said nothing, which is different from 'retry now'". `!api-429`'s
-// fake states a wait — `rateLimits: { retryAfterSeconds: 30 }` on the
-// `system:api_error` record and `retry_delay_ms: 549` on the `api_retry`
-// message — so the drawn arm must carry a wait rather than leaving the field
-// unset.
+// testARetriedRateLimitDrawsNoErrorRowAndTheFooterCountsDown wires the
+// owner's ruling of 2026-11-15 end to end: a failure agent-repl retries draws
+// no error row while its retry waits, and the footer says the retry is
+// pending. `!api-429`'s fake fails the turn on a passing rate limit (no
+// exhausted allowance), which the shim retries on its 30-second cadence, so
+// the turn's terminal carries conversation.v1.AgentFailure.retry_promised and
+// the feed withholds its `FeedTurnEndedErrored` (resolve/feed/retriedfailure.go)
+// together with the vendor's own notice of the failure.
 //
-// THE JOIN IS MADE. convert/terminals.ts now states the opposite of what it
-// once did — "The retry delay travels the same way: the vendor states it on
-// `api_retry` (`retry_delay_ms`), and `ApiRateLimited.retry_after_ms` is the
-// field the client counts down from, so the join IS made rather than
-// dropped" — so the exact millisecond count the fake stated is asserted, not
-// merely its presence. This shape is the fake's declaration, not a capture.
+// THE PROMPT ROW'S SETTLING IS THE TURN'S END HERE: the feed settles the
+// turn's prompt in the same drawing that withholds the error row, so a page
+// read once the prompt has settled holds every row the terminal drew.
+//
+// The rate-limited card's `retry_after_ms` join (the vendor's 549ms) is
+// pinned by the shim's golden (testdata/scenario-goldens/api-429/frames.json)
+// and by the daemon's unit tests of the card a chain that gives up draws.
 //
 // Seam: turn-failure
-func testApiRateLimitedCarriesTheVendorWait(t *testing.T) {
+func testARetriedRateLimitDrawsNoErrorRowAndTheFooterCountsDown(t *testing.T) {
 	// Arrange
 	w := stack.SharedWorld(t)
 	w.ExpectWarnings(faApiErrorWarnings...)
 	ws := w.NewWorkspace(t)
+	footer := w.WatchFooter(ws)
+	defer footer.Close()
 
 	// Act
-	errored := faDriveErrored(t, w, ws, "api-429")
+	turn := stack.SubmitPrompt(t, w, ws, "!api-429")
+	stack.AwaitFeedRow(t, w, ws, "the retried turn's settled prompt", func(row *frontendv1.FeedRow) bool {
+		return row.GetTurn().GetValue() == turn.GetValue() && row.GetUserPrompt() != nil && !row.GetUserPrompt().GetWorking()
+	})
 
 	// Assert
-	limited := errored.GetRateLimited()
-	if limited == nil {
-		t.Fatalf("FeedTurnEndedErrored.Error = %T, want RateLimited", errored.GetError())
+	for _, row := range openFeedPage(t, w, ws) {
+		if row.GetTurn().GetValue() != turn.GetValue() {
+			continue
+		}
+		if row.GetTurnEnded() != nil {
+			t.Fatalf("the retried turn drew its ending %v, want no row while its retry waits", row.GetTurnEnded())
+		}
+		if row.GetActivity().GetResponse().GetNotice() != nil {
+			t.Fatalf("the retried turn drew a vendor notice %v, want it withheld with the failure", row)
+		}
 	}
-	if limited.RetryAfterMs == nil {
-		t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs is UNSET, want the vendor's stated wait: %v", limited)
-	}
-	// The fake states `retry_delay_ms: 549` on its `api_retry` message
-	// (fake/scenarios/failures.ts apiErrorScenario), and fold.ts rounds that
-	// number through unchanged, so 549 is the whole of the wait the client
-	// counts down from.
-	const wantMs = 549
-	if got := limited.GetRetryAfterMs(); got != wantMs {
-		t.Fatalf("FeedTurnErrorRateLimited.RetryAfterMs = %d, want the vendor's stated %d", got, wantMs)
+	view := pfAwaitView(t, w, footer.Stream, "the footer counting down to the retry", func(v *frontendv1.FooterView) bool {
+		return v.GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying().GetNextAttempt() != nil
+	})
+	if status := view.GetStrip().GetStatus().GetVendorFault().GetActivity().GetSalient().GetRetrying().GetStatus(); status == "" {
+		t.Fatalf("the retrying line names no failure, want the vendor's words: %v", view.GetStrip().GetStatus())
 	}
 }
