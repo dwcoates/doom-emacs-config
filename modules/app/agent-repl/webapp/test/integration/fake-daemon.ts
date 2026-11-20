@@ -354,6 +354,13 @@ export interface FakeDaemon {
   refuse(rpc: RpcName, arm: string): void;
   /** Every arm `refuse` accepts for `rpc`, read off the descriptor. */
   refusalArms(rpc: RpcName): string[];
+  /**
+   * Forget every scripted answer and refusal, queued transport failure, and
+   * injected unknown or unset field: every rpc serves its default again. A
+   * case on a shared mount starts its own script from here (harness.ts
+   * `sharedMount`).
+   */
+  resetScripts(): void;
   /** Put an unknown field on the next response or push of `rpc`. */
   injectUnknown(rpc: RpcName): void;
   /**
@@ -2029,6 +2036,12 @@ export function createFakeDaemon(): FakeDaemon {
     },
     refusalArms(rpc) {
       return refusalArmsOf(rpc);
+    },
+    resetScripts() {
+      scripted.clear();
+      failures.clear();
+      unknowns.clear();
+      unsets.clear();
     },
     injectUnknown(rpc) {
       unknowns.add(rpc);

@@ -359,3 +359,42 @@ describe("a shared mount", () => {
     expect([app === first, app.row("again-row") !== null]).toEqual([false, true]);
   });
 });
+
+/**
+ * WHAT A SHARED MOUNT'S CASE END UNDOES, and what a displacing fresh mount
+ * keeps. A WALK: each case reads what the case before it left.
+ */
+describe("a shared mount's case ends", () => {
+  let undone = 0;
+  const shared = sharedMount({
+    endCase: async () => {
+      undone += 1;
+    },
+  });
+
+  it("runs the file's undo when a case that took the mount ends", async () => {
+    // Arrange / Act
+    await shared();
+
+    // Assert: not yet: the case has not ended.
+    expect(undone).toBe(0);
+  });
+
+  it("has run it once the case before ended", () => {
+    // Assert: the case before took the mount and ended.
+    expect(undone).toBe(1);
+  });
+
+  it("keeps the storage a fresh mount's case arranged when the fresh mount displaces it", async () => {
+    // Arrange: the shared mount stands, and the case arranges what its fresh
+    // boot will read.
+    await shared();
+    window.localStorage.setItem("harness-self-arranged", "kept");
+
+    // Act
+    harness = await startHarness();
+
+    // Assert
+    expect(window.localStorage.getItem("harness-self-arranged")).toBe("kept");
+  });
+});

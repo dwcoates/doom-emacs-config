@@ -530,7 +530,17 @@ export interface SharedMount {
   owns(h: Harness): boolean;
 }
 
-export function sharedMount(options: HarnessOptions = {}): SharedMount {
+/** A shared mount's options: a fresh mount's, and what each case's end undoes. */
+export interface SharedMountOptions extends HarnessOptions {
+  /**
+   * Undo, through the page's own controls, the page-wide state a case of
+   * this file may leave changed (an open footer panel), so the next case
+   * starts as on a fresh mount. Runs first at every case's end.
+   */
+  endCase?: (app: Harness) => Promise<void>;
+}
+
+export function sharedMount(options: SharedMountOptions = {}): SharedMount {
   let shared: Harness | undefined;
   let slice: CaseSlice | undefined;
   let phase: TickerPhase | undefined;
@@ -542,7 +552,14 @@ export function sharedMount(options: HarnessOptions = {}): SharedMount {
     displaceShared = async () => {
       displaceShared = undefined;
       shared = undefined;
+      // The case's slice went with the page: nothing of it is left to end.
+      slice = undefined;
+      // THE STORAGE IS THE DISPLACING CASE'S: every slice clears its own at
+      // its end, so what stands now is what the case arranged for its fresh
+      // boot to read, which the shared page's stop must not wipe.
+      const arranged = Object.entries({ ...window.localStorage });
       await app.stop();
+      for (const [key, value] of arranged) window.localStorage.setItem(key, value);
     };
     return app;
   };
@@ -559,7 +576,7 @@ export function sharedMount(options: HarnessOptions = {}): SharedMount {
   });
   const mount = async (): Promise<Harness> => {
     const app = shared ?? (await boot());
-    if (slice === undefined && phase !== undefined) slice = await beginCase(app, phase);
+    if (slice === undefined && phase !== undefined) slice = await beginCase(app, phase, options.endCase);
     return app;
   };
   return Object.assign(mount, { owns: (h: Harness) => h === shared });
@@ -622,16 +639,21 @@ let caseSerial = 0;
  * - The page clock is put back at the fixtures' epoch, at the same point of
  *   the page ticker's beat a fresh mount starts at (`tickerPhase`), so a
  *   case's relative times and count-ups read as they would on a fresh mount.
- * - The daemon's recorded calls are the case's own: they are cleared as the
- *   case begins, so `fake.calls`, `fake.nextCall` and `fake.log` answer only
- *   what the case caused.
+ * - The daemon's recorded calls and its script are the case's own: both are
+ *   cleared as the case begins, so `fake.calls`, `fake.nextCall` and
+ *   `fake.log` answer only what the case caused, and every rpc serves its
+ *   default until the case scripts it.
  * - At its end, every row it pushed is removed through the daemon's own
  *   removal (`FeedRow.removed`, as production retires a row), so the next case
  *   starts on an empty feed and every settle serializes only its own rows; and
  *   the page-local preferences and own-turn claims are cleared, as `stop()`
  *   clears them for a fresh mount.
  */
-async function beginCase(app: Harness, phase: TickerPhase): Promise<CaseSlice> {
+async function beginCase(
+  app: Harness,
+  phase: TickerPhase,
+  endCase?: (app: Harness) => Promise<void>,
+): Promise<CaseSlice> {
   caseSerial += 1;
   const suffix = `@case${caseSerial}`;
   const pushed = new Map<string, { workspace: string; feed: FeedKey; id: string; turn: string }>();
@@ -646,9 +668,11 @@ async function beginCase(app: Harness, phase: TickerPhase): Promise<CaseSlice> {
     pushRow(workspace, feed, row);
   };
   app.fake.clearCalls();
+  app.fake.resetScripts();
   await phase.startCase();
   return {
     async end() {
+      await endCase?.(app);
       for (const own of pushed.values()) {
         pushRow(own.workspace, own.feed, removedRow({ id: feedId(own.id), turn: turnId(own.turn) }));
       }
