@@ -58,6 +58,15 @@
  *     it instead, and with none, it lies under the pane at the rail's foot.
  *     So the last Deploys group, open or folded, always stands off the rule
  *     below it by the same gap.
+ *   - A SECTION SIZED BY HAND KEEPS ITS LINES (owner request, 2026-11-11:
+ *     the rules between the sections are dragged; section-resize.ts). The
+ *     daemon holds each band's height (`frontend.v1.RosterHiddenSection.height`
+ *     and its siblings), stated on the section as `BAND_SIZED_ATTRIBUTE`. A
+ *     sized band shows its lines, or every line it holds when it holds fewer,
+ *     whatever its share above would give it; a band nobody sized keeps the
+ *     share above, and the Open section fills what the bands leave. A rail too
+ *     short for them shrinks the bands nobody sized first, then the sized ones,
+ *     each lowest first (`sizeSectionLines`).
  *   - A LINE CUT AT THE FOOT FADES OUT (owner request, 2026-10-19). While the
  *     stretched viewport has more below its edge, the section is marked
  *     `BAND_MORE_ATTRIBUTE` and the stylesheet fades the viewport's last
@@ -126,6 +135,12 @@ export const BAND_STRETCHED_ATTRIBUTE = "data-band-stretched";
 
 /** The attribute marking a section whose viewport has rows below its edge. */
 export const BAND_MORE_ATTRIBUTE = "data-band-more";
+
+/**
+ * The attribute a band section sized by hand states its lines on
+ * (section-resize.ts): absent while the section is fitted.
+ */
+export const BAND_SIZED_ATTRIBUTE = "data-band-sized";
 
 /** The attribute a merged row states its merged instant (epoch ms) on. */
 export const MERGED_AT_ATTRIBUTE = "data-merged-at";
@@ -295,6 +310,80 @@ export function allocateSectionLines(room: number, stops: SectionStops): BandLin
     while (m < totalM && fits(o, m + 1, h)) m += 1;
     return { merged: m, hidden: h };
   }
+}
+
+/** The bands' lines a sized section asks for: a count per band, or null for a band fitted by its share. */
+export interface BandSizes {
+  queue: number | null;
+  merged: number | null;
+  hidden: number | null;
+}
+
+/** The three bands, top to bottom, as `SectionLines` and `BandSizes` name them. */
+const BANDS = ["queue", "merged", "hidden"] as const;
+
+/** The stops of every section, top to bottom, as `sizeSectionLines` is handed them. */
+export interface AllSectionStops {
+  open: BandStops;
+  queue: BandStops;
+  merged: BandStops;
+  hidden: BandStops;
+}
+
+/**
+ * Split ROOM pixels between the four sections when SIZES sizes a band (see
+ * the module note): a sized band shows its lines, capped at the lines it
+ * holds, a band nobody sized the lines FITTED (the share
+ * `allocateSectionLines` gave it), and the Open section fills what the bands
+ * leave. A rail too short for the bands shrinks the unsized ones first, then
+ * the sized ones, each lowest first; room the Open section leaves grows the
+ * unsized bands, top first, as far as their lines fit.
+ */
+export function sizeSectionLines(room: number, stops: AllSectionStops, sizes: BandSizes, fitted: SectionLines): SectionLines {
+  assertStops(stops.open, "open");
+  for (const band of BANDS) {
+    assertStops(stops[band], band);
+    const size = sizes[band];
+    if (size !== null && (!Number.isInteger(size) || size < 0)) {
+      throw new RangeError(`band fit: a ${band} sized to ${size} lines`);
+    }
+  }
+  const total = (band: keyof AllSectionStops): number => stops[band].length - 1;
+  const lines: SectionLines = { ...fitted, open: 0 };
+  for (const band of BANDS) {
+    const size = sizes[band];
+    lines[band] = Math.min(size ?? fitted[band], total(band));
+  }
+  const used = (l: SectionLines): number => stops.open[l.open] + BANDS.reduce((sum, band) => sum + stops[band][l[band]], 0);
+  const fits = (l: SectionLines): boolean => used(l) <= room;
+  const unsized = BANDS.filter((band) => sizes[band] === null);
+  const sized = BANDS.filter((band) => sizes[band] !== null);
+  for (const band of [...[...unsized].reverse(), ...[...sized].reverse()]) {
+    while (!fits(lines) && lines[band] > 0) lines[band] -= 1;
+  }
+  while (lines.open < total("open") && fits({ ...lines, open: lines.open + 1 })) lines.open += 1;
+  for (const band of unsized) {
+    while (lines[band] < total(band) && fits({ ...lines, [band]: lines[band] + 1 })) lines[band] += 1;
+  }
+  return lines;
+}
+
+/**
+ * The lines SECTION was sized to (`BAND_SIZED_ATTRIBUTE`), or null for a
+ * fitted one. A stated count that is no whole number is a drawing defect.
+ */
+export function bandSize(section: HTMLElement | null): number | null {
+  const stated = section?.getAttribute(BAND_SIZED_ATTRIBUTE) ?? null;
+  if (stated === null) return null;
+  const lines = Number(stated);
+  if (!Number.isInteger(lines) || lines < 0) {
+    log.error("a sidebar band cannot be fitted: its sized height is no line count", {
+      operation: "sidebar.band-fit.malformed-size",
+      context: { band: section?.className ?? null, sized: stated },
+    });
+    throw new RangeError(`band fit: a band sized to '${stated}' lines`);
+  }
+  return lines;
 }
 
 /** A computed length, which a laid-out element always reports in px. */
@@ -597,7 +686,21 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     mergedFloor: floor,
   });
   const split = splitLines(allocated.merged, queueTotal);
-  const lines: SectionLines = { open: allocated.open, queue: split.queue, merged: split.merged, hidden: allocated.hidden };
+  const shared: SectionLines = { open: allocated.open, queue: split.queue, merged: split.merged, hidden: allocated.hidden };
+  const sizes: BandSizes = {
+    queue: bandSize(queueSection?.section ?? null),
+    merged: bandSize(mergedSection?.section ?? null),
+    hidden: bandSize(hiddenSection?.section ?? null),
+  };
+  const lines =
+    sizes.queue === null && sizes.merged === null && sizes.hidden === null
+      ? shared
+      : sizeSectionLines(
+          room,
+          { open: open?.stops ?? [0], queue: queue?.stops ?? [0], merged: merged?.stops ?? [0], hidden: hidden?.stops ?? [0] },
+          sizes,
+          shared,
+        );
   const sized = [
     [open, lines.open],
     [queue, lines.queue],
@@ -609,6 +712,7 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   const stretch = Math.max(0, room - used);
   const stretched = stretchedEntry(sized, lowestDrawnSection(pane));
   sized.forEach(([m, n], i) => sizeBand(m.band, m.stops, n, i === stretched ? stretch : null));
+  for (const [m, n] of sized) fitted.set(m.band.section, { stops: m.stops, lines: n });
   bands.forEach((band, i) => restoreScroll(band, tops[i]));
   const context = {
     room,
@@ -622,6 +726,9 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
     merged_today: mergedToday,
     merged_floor: mergedFloor,
     merged_shown: lines.merged,
+    queue_sized: sizes.queue,
+    merged_sized: sizes.merged,
+    hidden_sized: sizes.hidden,
     stretch,
   };
   const fittedRoom = measureRoom(scroller, pane, bands);
@@ -634,6 +741,24 @@ export function fitBands(scroller: HTMLElement, pane: HTMLElement, nowMs: number
   }
   log.debug("fitted the sidebar bands", { operation: "sidebar.band-fit", context });
   return lines;
+}
+
+/** What the last fit measured of one section: its stops and the whole lines it shows. */
+export interface FittedSection {
+  stops: readonly number[];
+  lines: number;
+}
+
+/** Every section's last fit, by its box (a section drawn anew has none until it is fitted). */
+const fitted = new WeakMap<HTMLElement, FittedSection>();
+
+/**
+ * What the last fit measured of SECTION, which a drag of the rules beside it
+ * sizes against (section-resize.ts), or null when no fit has sized it (it is
+ * folded, or not laid out yet).
+ */
+export function fittedSection(section: HTMLElement): FittedSection | null {
+  return fitted.get(section) ?? null;
 }
 
 /** Fit the sections of every pane in SCROLLER at NOW_MS (the shown one lays out; the other is left). */

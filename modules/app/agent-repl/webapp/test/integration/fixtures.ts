@@ -2635,11 +2635,13 @@ export function roster(init?: {
       header: { label: { text: "Hidden" }, count: { workspaces: (init?.hidden ?? []).length } },
       hiddenRows: { rows: (init?.hidden ?? []).map(hiddenRow) },
       fold: { case: "expanded", value: {} },
+      height: { case: "fitted", value: {} },
     },
     mergeQueue: {
       header: { label: { text: "Merge Queue" } },
       groups: [],
       fold: { case: "expanded", value: {} },
+      height: { case: "fitted", value: {} },
     },
     recentlyMerged: {
       header: { label: { text: "Recently Merged" } },
@@ -2653,6 +2655,7 @@ export function roster(init?: {
         },
       ],
       fold: init?.mergedCollapsed === false ? { case: "expanded", value: {} } : { case: "collapsed", value: {} },
+      height: { case: "fitted", value: {} },
     },
     closed: {},
     ...rosterApps(),

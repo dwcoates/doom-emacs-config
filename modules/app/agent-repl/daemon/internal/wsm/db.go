@@ -511,6 +511,8 @@ type DB interface {
 	// SetOpenSectionFolded records whether the open-workspaces section is
 	// collapsed.
 	SetOpenSectionFolded(ctx context.Context, folded bool) error
+	// SetSectionHeights records the band section heights in one write.
+	SetSectionHeights(ctx context.Context, changes []SectionHeightChange) error
 	// SidebarView loads the sidebar's view state that belongs to no row, or
 	// DefaultSidebarView when nobody has changed it.
 	SidebarView(ctx context.Context) (SidebarView, error)

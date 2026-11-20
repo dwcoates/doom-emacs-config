@@ -1760,6 +1760,16 @@ message RosterMergedSection {
     // The merged rows are hidden; the header stays.
     RosterMergedSectionCollapsed collapsed = 4;
   }
+  // THE SECTION'S HEIGHT. DAEMON-HELD (agentrepl.v1.UpdateSidebarView's
+  // size_sections), so every page draws the same sections, set by dragging
+  // the rule above or below the section. Never sized by anyone, it is
+  // FITTED. Never unset on the wire.
+  oneof height {
+    // The page fits the Recently Merged section by its share of the rail (band-fit.ts).
+    RosterMergedSectionFitted fitted = 10;
+    // The Recently Merged section shows the number of lines the user dragged it to.
+    RosterMergedSectionSized sized = 11;
+  }
 }
 
 // An expanded Recently Merged band. DELIBERATELY EMPTY: the arm is the fact.
@@ -1767,6 +1777,19 @@ message RosterMergedSectionExpanded {}
 
 // A collapsed Recently Merged band. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergedSectionCollapsed {}
+
+// A Recently Merged section the page fits by its share of the rail. DELIBERATELY EMPTY: the
+// arm is the fact.
+message RosterMergedSectionFitted {}
+
+// A Recently Merged section sized by hand: its viewport shows this many of its first lines
+// (a row, a folded header, a queue's card), or every line it holds when it
+// holds fewer. A rail too short for every sized section shrinks them, the
+// lowest first, before the Open section shows a line fewer than none.
+message RosterMergedSectionSized {
+  // How many lines the viewport shows; 0 shows the header alone.
+  uint32 lines = 1;
+}
 
 // ONE REPOSITORY inside the Recently Merged band: its header and its merged
 // workspaces.
@@ -1840,6 +1863,16 @@ message RosterMergeQueueSection {
     // The queues are hidden; the header stays.
     RosterMergeQueueSectionCollapsed collapsed = 4;
   }
+  // THE SECTION'S HEIGHT. DAEMON-HELD (agentrepl.v1.UpdateSidebarView's
+  // size_sections), so every page draws the same sections, set by dragging
+  // the rule above or below the section. Never sized by anyone, it is
+  // FITTED. Never unset on the wire.
+  oneof height {
+    // The page fits the Merge Queue section by its share of the rail (band-fit.ts).
+    RosterMergeQueueSectionFitted fitted = 5;
+    // The Merge Queue section shows the number of lines the user dragged it to.
+    RosterMergeQueueSectionSized sized = 6;
+  }
 }
 
 // An expanded Merge Queue section. DELIBERATELY EMPTY: the arm is the fact.
@@ -1847,6 +1880,19 @@ message RosterMergeQueueSectionExpanded {}
 
 // A collapsed Merge Queue section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterMergeQueueSectionCollapsed {}
+
+// A Merge Queue section the page fits by its share of the rail. DELIBERATELY EMPTY: the
+// arm is the fact.
+message RosterMergeQueueSectionFitted {}
+
+// A Merge Queue section sized by hand: its viewport shows this many of its first lines
+// (a row, a folded header, a queue's card), or every line it holds when it
+// holds fewer. A rail too short for every sized section shrinks them, the
+// lowest first, before the Open section shows a line fewer than none.
+message RosterMergeQueueSectionSized {
+  // How many lines the viewport shows; 0 shows the header alone.
+  uint32 lines = 1;
+}
 
 // ONE REPOSITORY inside the Merge Queue section: its header and its queue.
 //
@@ -1895,6 +1941,16 @@ message RosterHiddenSection {
     // The hidden rows are folded away; the header and its count stay.
     RosterHiddenSectionCollapsed collapsed = 4;
   }
+  // THE SECTION'S HEIGHT. DAEMON-HELD (agentrepl.v1.UpdateSidebarView's
+  // size_sections), so every page draws the same sections, set by dragging
+  // the rule above or below the section. Never sized by anyone, it is
+  // FITTED. Never unset on the wire.
+  oneof height {
+    // The page fits the Hidden Workspaces section by its share of the rail (band-fit.ts).
+    RosterHiddenSectionFitted fitted = 6;
+    // The Hidden Workspaces section shows the number of lines the user dragged it to.
+    RosterHiddenSectionSized sized = 7;
+  }
 }
 
 // An expanded hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
@@ -1902,6 +1958,19 @@ message RosterHiddenSectionExpanded {}
 
 // A collapsed hidden-workspaces section. DELIBERATELY EMPTY: the arm is the fact.
 message RosterHiddenSectionCollapsed {}
+
+// A Hidden Workspaces section the page fits by its share of the rail. DELIBERATELY EMPTY: the
+// arm is the fact.
+message RosterHiddenSectionFitted {}
+
+// A Hidden Workspaces section sized by hand: its viewport shows this many of its first lines
+// (a row, a folded header, a queue's card), or every line it holds when it
+// holds fewer. A rail too short for every sized section shrinks them, the
+// lowest first, before the Open section shows a line fewer than none.
+message RosterHiddenSectionSized {
+  // How many lines the viewport shows; 0 shows the header alone.
+  uint32 lines = 1;
+}
 
 // A section header as repos and the merged section draw it.
 // The fold it toggles is the SECTION's (RosterRepoSection.fold,

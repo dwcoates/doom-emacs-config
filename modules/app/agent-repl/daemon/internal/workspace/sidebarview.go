@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/wsm"
 )
 
 // The operations UpdateSidebarView's records carry, one per change.
@@ -13,6 +14,7 @@ const (
 	opFoldMergeQueueSection = "daemon.workspace.fold_merge_queue_section"
 	opFoldHiddenSection     = "daemon.workspace.fold_hidden_section"
 	opFoldOpenSection       = "daemon.workspace.fold_open_section"
+	opSizeSections          = "daemon.workspace.size_sections"
 )
 
 // FoldMergedSection records whether the Recently Merged section is
@@ -41,6 +43,14 @@ func (v *verbs) FoldHiddenSection(ctx context.Context, folded bool) error {
 // roster carries exactly one open section.
 func (v *verbs) FoldOpenSection(ctx context.Context, folded bool) error {
 	return v.foldSingletonSection(ctx, opFoldOpenSection, "open section", v.deps.DB.SetOpenSectionFolded, folded)
+}
+
+// SizeSections records the heights of the band sections CHANGES names, in
+// one write, then republishes the roster to every page. There is nothing to
+// refuse: the roster carries exactly one of each band section.
+func (v *verbs) SizeSections(ctx context.Context, changes []wsm.SectionHeightChange) error {
+	return v.recordView(ctx, opSizeSections, "the band sections' heights", wsm.SectionHeightFields(changes),
+		func(ctx context.Context) error { return v.deps.DB.SetSectionHeights(ctx, changes) })
 }
 
 // foldSingletonSection records the fold of a section the roster carries

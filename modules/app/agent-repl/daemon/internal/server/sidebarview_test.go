@@ -397,3 +397,139 @@ func TestUpdateSidebarViewRefusesAWorkspaceChildrenFoldWithNoId(t *testing.T) {
 		t.Fatalf("verb calls = %v, want none for a malformed request", h.Verbs.arrangements)
 	}
 }
+
+func sizeChange(sizes ...*agentreplv1.SidebarViewSectionSize) *agentreplv1.UpdateSidebarViewRequest {
+	return &agentreplv1.UpdateSidebarViewRequest{
+		Change: &agentreplv1.UpdateSidebarViewRequest_SizeSections{SizeSections: &agentreplv1.SidebarViewSizeSections{Sizes: sizes}},
+	}
+}
+
+func sizedLines(n uint32) *agentreplv1.SidebarViewSectionSize_Lines {
+	return &agentreplv1.SidebarViewSectionSize_Lines{Lines: &agentreplv1.SidebarViewSectionLines{Lines: n}}
+}
+
+func fittedHeight() *agentreplv1.SidebarViewSectionSize_Fitted {
+	return &agentreplv1.SidebarViewSectionSize_Fitted{Fitted: &agentreplv1.SidebarViewSectionFitted{}}
+}
+
+func sizeQueue() *agentreplv1.SidebarViewSectionSize_MergeQueue {
+	return &agentreplv1.SidebarViewSectionSize_MergeQueue{MergeQueue: &agentreplv1.SidebarViewMergeQueue{}}
+}
+
+func sizeMerged() *agentreplv1.SidebarViewSectionSize_RecentlyMerged {
+	return &agentreplv1.SidebarViewSectionSize_RecentlyMerged{RecentlyMerged: &agentreplv1.SidebarViewRecentlyMerged{}}
+}
+
+func sizeHidden() *agentreplv1.SidebarViewSectionSize_Hidden {
+	return &agentreplv1.SidebarViewSectionSize_Hidden{Hidden: &agentreplv1.SidebarViewHidden{}}
+}
+
+func TestUpdateSidebarViewHandsTheSectionSizesToTheVerb(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.UpdateSidebarViewRequest
+		want []wsm.SectionHeightChange
+	}{
+		{
+			name: "the merge queue section sized",
+			req:  sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeQueue(), Height: sizedLines(6)}),
+			want: []wsm.SectionHeightChange{{Section: wsm.BandMergeQueue, Height: wsm.SizedHeight(6)}},
+		},
+		{
+			name: "two bands sized in one request, in order",
+			req: sizeChange(
+				&agentreplv1.SidebarViewSectionSize{Section: sizeMerged(), Height: sizedLines(0)},
+				&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: sizedLines(9)},
+			),
+			want: []wsm.SectionHeightChange{
+				{Section: wsm.BandMerged, Height: wsm.SizedHeight(0)},
+				{Section: wsm.BandHidden, Height: wsm.SizedHeight(9)},
+			},
+		},
+		{
+			name: "a section fitted again",
+			req:  sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: fittedHeight()}),
+			want: []wsm.SectionHeightChange{{Section: wsm.BandHidden, Height: wsm.FittedHeight()}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+
+			// Act
+			sent(t, h, tt.req)
+
+			// Assert
+			if len(h.Verbs.sectionSizes) != 1 {
+				t.Fatalf("size calls = %d, want one", len(h.Verbs.sectionSizes))
+			}
+			got := h.Verbs.sectionSizes[0]
+			if len(got) != len(tt.want) {
+				t.Fatalf("sizes = %+v, want %+v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Fatalf("sizes = %+v, want %+v", got, tt.want)
+				}
+			}
+		})
+	}
+}
+
+func TestValidateUpdateSidebarViewRequestRefusesAnIncompleteSize(t *testing.T) {
+	tests := []struct {
+		name string
+		req  *agentreplv1.UpdateSidebarViewRequest
+	}{
+		{"no size at all", sizeChange()},
+		{"a size with no section arm", sizeChange(&agentreplv1.SidebarViewSectionSize{Height: sizedLines(1)})},
+		{"a size with no height arm", sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeQueue()})},
+		{"a section sized twice", sizeChange(
+			&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: sizedLines(1)},
+			&agentreplv1.SidebarViewSectionSize{Section: sizeHidden(), Height: fittedHeight()},
+		)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			err := validateUpdateSidebarViewRequest(tt.req)
+
+			// Assert
+			if err == nil || err.Code() != connect.CodeInvalidArgument {
+				t.Fatalf("validate = %v, want InvalidArgument", err)
+			}
+		})
+	}
+}
+
+func TestUpdateSidebarViewRefusesAnInvalidSizeBeforeTheVerb(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(sizeChange()))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Fatalf("UpdateSidebarView = %v, want InvalidArgument", err)
+	}
+	if len(h.Verbs.sectionSizes) != 0 {
+		t.Fatalf("size calls = %+v, want none for an invalid request", h.Verbs.sectionSizes)
+	}
+}
+
+func TestUpdateSidebarViewFailsASizeVerbError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.Verbs.sectionSizeErr = errors.New("disk I/O error")
+
+	// Act
+	_, err := h.Client.UpdateSidebarView(context.Background(), connect.NewRequest(
+		sizeChange(&agentreplv1.SidebarViewSectionSize{Section: sizeQueue(), Height: sizedLines(3)})))
+
+	// Assert
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("UpdateSidebarView = %v, want an internal failure", err)
+	}
+}

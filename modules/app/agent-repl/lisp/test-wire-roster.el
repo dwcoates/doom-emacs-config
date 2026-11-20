@@ -2494,3 +2494,31 @@ its place and since it joined."
                    "\"threads\":{[^}]*},\"rows\":\\[\\]}," ""
                    agent-repl-test-wire-roster--roster-json t t))
                  '("WorkspaceRoster" threads "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-roster-a-sized-hidden-section-decodes-without-its-height ()
+  "Emacs lists the height arms, so a sized section decodes, and draws nothing from them."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-hidden-section
+                  (concat "{\"header\":{\"label\":{\"text\":\"Hidden Workspaces\"},\"count\":{\"workspaces\":1}},"
+                          "\"hiddenRows\":{\"rows\":[]},\"collapsed\":{},\"sized\":{\"lines\":4}}"))
+                 '(:header (:label (:text "Hidden Workspaces") :count (:workspaces 1))
+                   :hidden-rows (:rows nil)
+                   :fold (:arm :collapsed :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-a-fitted-merge-queue-section-decodes-without-its-height ()
+  "The Merge Queue section lists the fitted arm too."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-merge-queue-section
+                   "{\"header\":{\"label\":{}},\"groups\":[],\"collapsed\":{},\"fitted\":{}}")
+                  :fold)
+                 '(:arm :collapsed :value nil))))
+
+(ert-deftest agent-repl-test-wire-roster-a-sized-merged-section-decodes-without-its-height ()
+  "The Recently Merged section lists the sized arm too."
+  (should (equal (plist-get
+                  (agent-repl-test-wire-roster--decode
+                   #'agent-repl-wire-decode-roster-merged-section
+                   "{\"header\":{\"label\":{}},\"groups\":[],\"collapsed\":{},\"sized\":{\"lines\":3}}")
+                  :fold)
+                 '(:arm :collapsed :value nil))))

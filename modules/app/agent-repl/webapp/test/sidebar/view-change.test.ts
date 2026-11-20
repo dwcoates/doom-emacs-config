@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import {
+  type UpdateSidebarViewRequestSchema,
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewRequest,
   type UpdateSidebarViewResponse,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { changeView, updateSidebarViewRefusal } from "../../src/sidebar/view-change.js";
+import { changeView, changeViews, updateSidebarViewRefusal } from "../../src/sidebar/view-change.js";
 import { MERGED_FOLD_KEY } from "../../src/sidebar/context.js";
-import { foldViewKey } from "../../src/sidebar/view.js";
+import { foldViewKey, heightViewKey } from "../../src/sidebar/view.js";
+import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import { appContext, sidebarContext } from "./harness.js";
 
 const OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
@@ -94,6 +96,60 @@ describe("changeView", () => {
     sc.view.track(KEY, false, (v) => painted.push(v));
     await changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
     expect(painted).toEqual([true, false]);
+  });
+});
+
+/** Size the Recently Merged and Hidden sections: the change every changeViews case asks for. */
+const SIZE_TWO: MessageInitShape<typeof UpdateSidebarViewRequestSchema>["change"] = {
+  case: "sizeSections",
+  value: {
+    sizes: [
+      { section: { case: "recentlyMerged", value: {} }, height: { case: "lines", value: { lines: 2 } } },
+      { section: { case: "hidden", value: {} }, height: { case: "lines", value: { lines: 5 } } },
+    ],
+  },
+};
+const MERGED_HEIGHT = heightViewKey("merged");
+const HIDDEN_HEIGHT = heightViewKey("hidden");
+
+describe("changeViews", () => {
+  it("paints every piece before the daemon answers", () => {
+    const { sc } = daemon(() => OK);
+    const painted: Array<number | null> = [];
+    sc.view.track(MERGED_HEIGHT, null, (v) => painted.push(v));
+    sc.view.track(HIDDEN_HEIGHT, null, (v) => painted.push(v));
+    void changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: HIDDEN_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
+    expect(painted).toEqual([2, 5]);
+  });
+
+  it("asks for every piece in one request", async () => {
+    const { asked, sc } = daemon(() => OK);
+    sc.view.track(MERGED_HEIGHT, null, () => undefined);
+    sc.view.track(HIDDEN_HEIGHT, null, () => undefined);
+    await changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: HIDDEN_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
+    expect(asked.map((r) => r.change.case)).toEqual(["sizeSections"]);
+  });
+
+  it("repaints every piece from the wire when the daemon refuses", async () => {
+    const { sc } = daemon(() =>
+      create(UpdateSidebarViewResponseSchema, {
+        result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
+      }),
+    );
+    const painted: Array<number | null> = [];
+    sc.view.track(MERGED_HEIGHT, null, (v) => painted.push(v));
+    sc.view.track(HIDDEN_HEIGHT, 3, (v) => painted.push(v));
+    const took = await changeViews(sc, { pieces: [{ key: MERGED_HEIGHT, value: 2 }, { key: HIDDEN_HEIGHT, value: 5 }], control: document.createElement("button"), change: SIZE_TWO });
+    expect([took, painted]).toEqual([false, [2, 5, null, 3]]);
+  });
+
+  it("is the path changeView takes, its record naming the one piece", async () => {
+    const { sc } = daemon(() => OK);
+    sc.view.track(KEY, false, () => undefined);
+    const capture = captureLogRecords("debug");
+    await changeView(sc, { key: KEY, value: true, control: document.createElement("button"), change: COLLAPSE_MERGED });
+    const record = await forwardedRecord(capture, "sidebar.view.change");
+    expect(record.context).toMatchObject({ pieces: `${KEY}=true`, change: "foldSection" });
   });
 });
 
