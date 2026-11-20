@@ -40,17 +40,14 @@ func runTestCLI(t *testing.T, daemon *testRunsDaemon, args ...string) (int, stri
 	server := httptest.NewServer(handler)
 	t.Cleanup(server.Close)
 	var out, errOut bytes.Buffer
-	deps := cliDeps{
+	deps := atCaller(cliDeps{
 		address: func(string) (string, error) { return server.URL, nil },
 		// The command's options are kept, so a dry run's interceptor stops
 		// what it would stop against a real daemon.
 		client: func(_ string, options ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, server.URL, options...)
 		},
-		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
-		getwd:   func() (string, error) { return "/wt/caller/src", nil },
-		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
-	}
+	})
 	code := runNoun(context.Background(), testNoun, args, deps, &out, &errOut)
 	return code, out.String(), errOut.String()
 }
@@ -123,15 +120,12 @@ func runTestCLIAcrossHandover(t *testing.T, incumbent, successor *testRunsDaemon
 	}
 	incumbent.frames = []*agentreplv1.RunTestsResponse{handedOverFrame(servers["successor"].URL)}
 	var out, errOut bytes.Buffer
-	deps := cliDeps{
+	deps := atCaller(cliDeps{
 		address: func(string) (string, error) { return servers["incumbent"].URL, nil },
 		client: func(address string, _ ...connect.ClientOption) agentreplv1connect.AgentReplClient {
 			return agentreplv1connect.NewAgentReplClient(http.DefaultClient, address)
 		},
-		locate:  locateOver(cliRow("ws-caller", "/wt/caller", "caller")),
-		getwd:   func() (string, error) { return "/wt/caller/src", nil },
-		mintKey: func(prefix string) (string, error) { return prefix + "-1", nil },
-	}
+	})
 	code := runNoun(context.Background(), testNoun, args, deps, &out, &errOut)
 	return code, out.String(), errOut.String()
 }

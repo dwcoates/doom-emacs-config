@@ -33,6 +33,7 @@ import (
 	"agent-repld/internal/prompthandler"
 	"agent-repld/internal/prwatch"
 	"agent-repld/internal/resolve/feed"
+	"agent-repld/internal/shimclient"
 	"agent-repld/internal/stateroot"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/workspacesubs"
@@ -97,6 +98,13 @@ type cliDeps struct {
 	// locate answers the workspaces a LocateWorkspace request names.
 	locate func(ctx context.Context, client agentreplv1connect.AgentReplClient, req *agentreplv1.LocateWorkspaceRequest) ([]*workspacev1.WorkspaceRef, error)
 	getwd  func() (string, error)
+	// getenv reads the command's environment: the session's
+	// AGENT_REPL_WORKSPACE_DIR, which names the workspace `here` is when the
+	// working directory is in no workspace's own worktree.
+	getenv func(string) string
+	// isWorktreeRoot reports whether a directory is the root of a git
+	// worktree, which the caller's own worktree is found by.
+	isWorktreeRoot func(dir string) (bool, error)
 	// mintKey mints an idempotency key.
 	mintKey func(prefix string) (string, error)
 	// now is the current instant, which a relative time flag counts back from.
@@ -116,13 +124,15 @@ func productionCLIDeps() cliDeps {
 			}
 			return servingAddress(layout)
 		},
-		client:  newDaemonClient,
-		roster:  readRoster,
-		locate:  locateWorkspaces,
-		getwd:   os.Getwd,
-		mintKey: prompthandler.MintKey,
-		now:     time.Now,
-		stdin:   os.Stdin,
+		client:         newDaemonClient,
+		roster:         readRoster,
+		locate:         locateWorkspaces,
+		getwd:          os.Getwd,
+		getenv:         os.Getenv,
+		isWorktreeRoot: isWorktreeRoot,
+		mintKey:        prompthandler.MintKey,
+		now:            time.Now,
+		stdin:          os.Stdin,
 	}
 }
 
@@ -356,10 +366,10 @@ func (c *cliCall) readRoster() (*frontendv1.WorkspaceRoster, bool) {
 	return roster, true
 }
 
-// calling answers the calling workspace's ref: the workspace whose worktree
-// contains the working directory.
+// calling answers the calling workspace's ref: the workspace whose own
+// worktree holds the working directory, else the one the session names.
 func (c *cliCall) calling() (*workspacev1.WorkspaceRef, bool) {
-	ref, cwd, ok := c.callingRef()
+	ref, cwd, ok := c.callingRef(false)
 	if ok && ref == nil {
 		return nil, c.failed("%s is inside no workspace the daemon serves; run this from a workspace, or pass -as-user when the user asks", cwd)
 	}
@@ -367,34 +377,82 @@ func (c *cliCall) calling() (*workspacev1.WorkspaceRef, bool) {
 }
 
 // callerIfAny answers the calling workspace's ref as calling does, and nil
-// when the working directory is inside no workspace the daemon serves: a
-// read that marks the caller's own record (FindWorkspacesRequest.caller)
-// answers for a caller outside every worktree too.
+// when the caller is no workspace's: a read that marks the caller's own
+// record (FindWorkspacesRequest.caller) answers for a caller outside every
+// worktree too, and for one in a nested worktree whose session names none.
 func (c *cliCall) callerIfAny() (*workspacev1.WorkspaceRef, bool) {
-	ref, _, ok := c.callingRef()
+	ref, _, ok := c.callingRef(true)
 	return ref, ok
 }
 
-// callingRef answers the ref of the workspace whose worktree contains the
-// working directory, nil when none does, with that directory. The registry
-// answers (locate), so a hidden merge workspace's own worktree is its caller's.
-func (c *cliCall) callingRef() (*workspacev1.WorkspaceRef, string, bool) {
+// callingRef answers the calling workspace's ref, nil when the caller is no
+// workspace's, with the working directory. The registry answers (locate), so
+// a hidden merge workspace's own worktree is its caller's.
+//
+// THE CALLER IS THE WORKSPACE WHOSE OWN WORKTREE IT RUNS IN, never one whose
+// directory merely contains it: a subagent in a separate git worktree nested
+// under the main checkout (an Agent-tool worktree) once paused the merge
+// queue as the main checkout's workspace (2026-11-13). Such a caller is the
+// workspace its session names (AGENT_REPL_WORKSPACE_DIR, which the daemon
+// stamps on every shim), noted so the attribution is never silent; with no
+// session it is refused, naming the worktree, unless NESTEDISNONE answers it
+// as no workspace's.
+func (c *cliCall) callingRef(nestedIsNone bool) (*workspacev1.WorkspaceRef, string, bool) {
 	cwd, err := c.deps.getwd()
 	if err != nil {
 		return nil, "", c.failed("read the working directory: %v", err)
 	}
-	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{
-		Containing: &agentreplv1.LocateWorkspaceContaining{Dir: canonicalDir(cwd)}}})
-	if !ok {
+	worktree, err := worktreeRoot(canonicalDir(cwd), c.deps.isWorktreeRoot)
+	if err != nil {
+		return nil, cwd, c.failed("%v", err)
+	}
+	if worktree != "" {
+		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: worktree}}}, "are at "+worktree)
+		if !ok || ref != nil {
+			return ref, cwd, ok
+		}
+	}
+	if sessionDir := c.deps.getenv(shimclient.EnvWorkspaceDir); sessionDir != "" {
+		sessionDir = canonicalDir(sessionDir)
+		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: sessionDir}}}, "are at "+sessionDir)
+		switch {
+		case !ok:
+			return nil, cwd, false
+		case ref == nil:
+			return nil, cwd, c.failed("%v", &unservedSessionError{dir: sessionDir})
+		}
+		c.noted("%s is in no workspace's own worktree, so here is this session's workspace at %s (from %s)", cwd, ref.GetDir(), shimclient.EnvWorkspaceDir)
+		return ref, cwd, true
+	}
+	if worktree == "" {
+		return nil, cwd, true
+	}
+	enclosing, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Containing{
+		Containing: &agentreplv1.LocateWorkspaceContaining{Dir: worktree}}}, "contain "+worktree)
+	switch {
+	case !ok:
 		return nil, cwd, false
+	case enclosing == nil || nestedIsNone:
+		return nil, cwd, true
+	}
+	return nil, cwd, c.failed("%v", &nestedWorktreeError{worktree: worktree, enclosing: enclosing})
+}
+
+// locateOne answers the one workspace REQ locates, nil when none is, and
+// refuses more than one, saying how many workspaces MATCHED ("are at DIR"):
+// every resolution of one workspace refuses an ambiguous answer the same way.
+func (c *cliCall) locateOne(req *agentreplv1.LocateWorkspaceRequest, matched string) (*workspacev1.WorkspaceRef, bool) {
+	refs, ok := c.locate(req)
+	if !ok {
+		return nil, false
 	}
 	switch len(refs) {
 	case 0:
-		return nil, cwd, true
+		return nil, true
 	case 1:
-		return refs[0], cwd, true
+		return refs[0], true
 	}
-	return nil, cwd, c.failed("the daemon located %d workspaces containing %s, where a directory lies in at most one", len(refs), cwd)
+	return nil, c.failed("%d workspaces %s", len(refs), matched)
 }
 
 // named answers the workspace NAME names: `here`, a directory, or a name,
@@ -406,29 +464,18 @@ func (c *cliCall) named(name string) (*workspacev1.WorkspaceRef, bool) {
 	}
 	if strings.Contains(name, "/") {
 		dir := canonicalDir(name)
-		refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}})
-		if !ok {
-			return nil, false
-		}
-		switch len(refs) {
-		case 0:
+		ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_At{At: &agentreplv1.LocateWorkspaceAt{Dir: dir}}}, "are at "+dir)
+		if ok && ref == nil {
 			return nil, c.failed("the daemon holds no workspace at %s", dir)
-		case 1:
-			return refs[0], true
 		}
-		return nil, c.failed("%d workspaces are at %s", len(refs), dir)
+		return ref, ok
 	}
-	refs, ok := c.locate(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: name}}})
-	if !ok {
-		return nil, false
-	}
-	switch len(refs) {
-	case 0:
+	ref, ok := c.locateOne(&agentreplv1.LocateWorkspaceRequest{By: &agentreplv1.LocateWorkspaceRequest_Named{Named: &agentreplv1.LocateWorkspaceNamed{Name: name}}},
+		fmt.Sprintf("are named %q; name one by its directory", name))
+	if ok && ref == nil {
 		return nil, c.failed("the daemon holds no workspace named %q", name)
-	case 1:
-		return refs[0], true
 	}
-	return nil, c.failed("%d workspaces are named %q; name one by its directory", len(refs), name)
+	return ref, ok
 }
 
 // locate asks the daemon which workspaces REQ names, failing the call when

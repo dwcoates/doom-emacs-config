@@ -180,7 +180,9 @@ env `AGENT_REPL_STORE_SOCKET` beats the default
 env = the daemon's OWN environment passed through (never an allowlist) with
 `CLAUDE_CONFIG_DIR=<account root>`, `AGENT_REPL_OWNED=1`,
 `AGENT_REPL_STATE_DIR`, `SHIM_BUILD_SHA`, `AGENT_REPL_SESSION_ID=<HostSessionId.value>`
-(log correlation only) set/overridden, and in tests
+(log correlation only), `AGENT_REPL_WORKSPACE_DIR=<workspace dir>` (which
+workspace `agent-repld ... here` names when its caller runs in a separate
+worktree nested under a workspace's directory) set/overridden, and in tests
 `AGENT_REPL_FORBID_VENDOR_CALLS=1` (which also forces `--fake` onto the argv);
 cwd is the workspace dir; fd 3 is the
 already-open shim log sink (never a pipe to the daemon's stderr). Process

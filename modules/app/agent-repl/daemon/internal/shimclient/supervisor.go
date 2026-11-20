@@ -32,6 +32,12 @@ const (
 	// LOG CORRELATION only. Session facts still travel exclusively in
 	// StartSession.
 	EnvSessionID = "AGENT_REPL_SESSION_ID"
+	// EnvWorkspaceDir is AGENT_REPL_WORKSPACE_DIR: the directory of the
+	// workspace the shim serves. The shim's vendor session, every command it
+	// runs and every subagent it starts inherit it, so `agent-repld ... here`
+	// run from a separate worktree nested under some workspace's directory
+	// (an Agent-tool worktree) still names the workspace that asked.
+	EnvWorkspaceDir = "AGENT_REPL_WORKSPACE_DIR"
 )
 
 // shimLogFD is the descriptor the shim writes its own log to: fd 3, the
@@ -690,6 +696,7 @@ func spawnEnv(spec Spec, contracts envc.Contracts) []string {
 		{EnvConfigDir, spec.ConfigDir},
 		{envc.EnvOwned, "1"},
 		{EnvShimBuildSHA, spec.ShimBuildSHA},
+		{EnvWorkspaceDir, spec.WorkspaceDir},
 	}
 	if stateDir := stateDirFor(spec, contracts); stateDir != "" {
 		overrides = append(overrides, [2]string{envc.EnvStateDir, stateDir})
