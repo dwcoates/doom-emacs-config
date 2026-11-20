@@ -31,10 +31,10 @@ func TestWorkspaceContextUsage(t *testing.T) {
 			return errors.Join(s.PutWorkspaceContextUsage(ctx, ws, readingOf(1, 200_000)), s.PutWorkspaceContextUsage(ctx, ws, readingOf(2, 1_000_000)))
 		}, want: ContextUsageRecord{Usage: readingOf(2, 1_000_000)}, wantFound: true},
 		{name: "a cut retires the reading", put: func(ctx context.Context, s *store, ws WorkspaceID) error {
-			return errors.Join(s.PutWorkspaceContextUsage(ctx, ws, readingOf(1, 200_000)), s.PutWorkspaceContextCut(ctx, ws))
+			return errors.Join(s.PutWorkspaceContextUsage(ctx, ws, readingOf(1, 200_000)), s.PutWorkspaceContextCut(ctx, ws, 0))
 		}, want: ContextUsageRecord{Cut: true}, wantFound: true},
 		{name: "a fresh reading retires the cut", put: func(ctx context.Context, s *store, ws WorkspaceID) error {
-			return errors.Join(s.PutWorkspaceContextCut(ctx, ws), s.PutWorkspaceContextUsage(ctx, ws, readingOf(3, 200_000)))
+			return errors.Join(s.PutWorkspaceContextCut(ctx, ws, 0), s.PutWorkspaceContextUsage(ctx, ws, readingOf(3, 200_000)))
 		}, want: ContextUsageRecord{Usage: readingOf(3, 200_000)}, wantFound: true},
 	}
 	for _, tt := range tests {
@@ -155,5 +155,66 @@ func TestTheMigrationAddsTheContextUsageTable(t *testing.T) {
 	// Assert
 	if got := scalar[int](t, handle.(*store), `SELECT count(*) FROM workspace_context_usage`); got != 0 {
 		t.Fatalf("%d migrated rows, want none", got)
+	}
+}
+
+func TestTheBankedContextRidesTheCutAndSurvivesReadings(t *testing.T) {
+	tests := []struct {
+		name       string
+		put        func(context.Context, *store, WorkspaceID) error
+		wantBanked int64
+		wantCut    bool
+	}{
+		{name: "a fresh row banks nothing", put: func(ctx context.Context, s *store, ws WorkspaceID) error {
+			return s.PutWorkspaceContextUsage(ctx, ws, readingOf(1, 200_000))
+		}},
+		{name: "a cut stores what it banked", put: func(ctx context.Context, s *store, ws WorkspaceID) error {
+			return s.PutWorkspaceContextCut(ctx, ws, 800_000)
+		}, wantBanked: 800_000, wantCut: true},
+		{name: "a later cut replaces the bank with the new running sum", put: func(ctx context.Context, s *store, ws WorkspaceID) error {
+			return errors.Join(s.PutWorkspaceContextCut(ctx, ws, 800_000), s.PutWorkspaceContextCut(ctx, ws, 1_300_000))
+		}, wantBanked: 1_300_000, wantCut: true},
+		{name: "a fresh reading after a cut leaves the bank standing", put: func(ctx context.Context, s *store, ws WorkspaceID) error {
+			return errors.Join(s.PutWorkspaceContextCut(ctx, ws, 800_000), s.PutWorkspaceContextUsage(ctx, ws, readingOf(5, 200_000)))
+		}, wantBanked: 800_000},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s).ID
+			if err := tt.put(context.Background(), s, ws); err != nil {
+				t.Fatalf("put: %v", err)
+			}
+
+			// Act
+			got, found, err := s.WorkspaceContextUsage(context.Background(), ws)
+
+			// Assert
+			if err != nil || !found || got.BankedTokens != tt.wantBanked || got.Cut != tt.wantCut {
+				t.Fatalf("WorkspaceContextUsage = %+v, %v, %v; want banked %d cut %v", got, found, err, tt.wantBanked, tt.wantCut)
+			}
+		})
+	}
+}
+
+func TestANegativeBankedContextIsRefused(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s).ID
+
+	// Act
+	err := s.PutWorkspaceContextCut(context.Background(), ws, -1)
+
+	// Assert
+	if err == nil {
+		t.Fatal("PutWorkspaceContextCut(-1) = nil, want a refusal")
+	}
+	if n := scalar[int](t, s, `SELECT count(*) FROM workspace_context_usage`); n != 0 {
+		t.Fatalf("%d rows after the refusal, want none", n)
+	}
+	records := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: "daemon.wsm.put_workspace_context_cut"})
+	if len(records) != 1 || records[0].Context["workspace"] != string(ws) {
+		t.Fatalf("records = %+v, want one ERROR naming the workspace", log.Records())
 	}
 }

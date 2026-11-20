@@ -1932,3 +1932,92 @@ func TestSetNameKeepsTheNamesPrefix(t *testing.T) {
 		t.Fatalf("workspace name prefix = %v, want the thumbs up kept across the rename", got)
 	}
 }
+
+func TestTheTotalSessionContextIsTheLiveContextBeforeAnyCut(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.ready(t)
+
+	// Assert
+	if got := h.view(t).GetContext().GetSessionTotalText(); got != "142.3k" {
+		t.Fatalf("session total = %q, want the live context with nothing banked", got)
+	}
+}
+
+func TestTheTotalSessionContextSumsTheContextEveryCutDiscarded(t *testing.T) {
+	tests := []struct {
+		name      string
+		cuts      []*conversationv1.ContextCut
+		wantTotal string
+		wantChip  string
+	}{
+		{name: "a clear banks the discarded context and the next reading adds to it", cuts: []*conversationv1.ContextCut{clearedCut()}, wantTotal: "182.3k", wantChip: "40k"},
+		{name: "a completed compaction banks it the same way", cuts: []*conversationv1.ContextCut{compactedCut()}, wantTotal: "182.3k", wantChip: "40k"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.ready(t)
+
+			// Act
+			for _, cut := range tt.cuts {
+				h.r.OnContextCut(testWS, cutAgent, cut)
+			}
+			h.r.OnSessionUpdate(testWS, contextUsage(40_000, 200_000, 20, "claude-opus-5"))
+
+			// Assert
+			chip := h.view(t).GetContext()
+			if chip.GetSessionTotalText() != tt.wantTotal || chip.GetText() != tt.wantChip {
+				t.Fatalf("chip %q total %q, want %q total %q", chip.GetText(), chip.GetSessionTotalText(), tt.wantChip, tt.wantTotal)
+			}
+		})
+	}
+}
+
+func TestAFailedCompactionBanksNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnContextCut(testWS, cutAgent, compactionFailedCut())
+	h.r.OnSessionUpdate(testWS, contextUsage(40_000, 200_000, 20, "claude-opus-5"))
+
+	// Assert
+	if got := h.view(t).GetContext().GetSessionTotalText(); got != "40k" {
+		t.Fatalf("session total = %q, want only the live context, nothing banked", got)
+	}
+}
+
+func TestTheTotalSessionContextNeverShrinksOnACut(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+
+	// Assert: the chip says unknown, the total still states what was held.
+	chip := h.view(t).GetContext()
+	if chip.GetText() != contextUnknownText || chip.GetSessionTotalText() != "142.3k" {
+		t.Fatalf("chip %q total %q, want the dash and the banked 142.3k", chip.GetText(), chip.GetSessionTotalText())
+	}
+}
+
+func TestTwoCutsWithNoReadingBetweenBankTheContextOnce(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.ready(t)
+
+	// Act
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+
+	// Assert
+	if got := h.view(t).GetContext().GetSessionTotalText(); got != "142.3k" {
+		t.Fatalf("session total = %q, want the context banked once", got)
+	}
+}

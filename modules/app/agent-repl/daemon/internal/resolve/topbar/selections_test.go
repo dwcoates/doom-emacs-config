@@ -101,11 +101,14 @@ func (f *fakeSelections) putContext(id ids.WorkspaceID, rec wsm.ContextUsageReco
 }
 
 func (f *fakeSelections) PutWorkspaceContextUsage(_ context.Context, id ids.WorkspaceID, usage *conversationv1.SessionContextUsage) error {
-	return f.putContext(id, wsm.ContextUsageRecord{Usage: usage})
+	f.mu.Lock()
+	banked := f.contexts[id].BankedTokens
+	f.mu.Unlock()
+	return f.putContext(id, wsm.ContextUsageRecord{Usage: usage, BankedTokens: banked})
 }
 
-func (f *fakeSelections) PutWorkspaceContextCut(_ context.Context, id ids.WorkspaceID) error {
-	return f.putContext(id, wsm.ContextUsageRecord{Cut: true})
+func (f *fakeSelections) PutWorkspaceContextCut(_ context.Context, id ids.WorkspaceID, banked int64) error {
+	return f.putContext(id, wsm.ContextUsageRecord{Cut: true, BankedTokens: banked})
 }
 
 func keptOption(name string) *conversationv1.ModelOption {
@@ -485,5 +488,56 @@ func TestEverySelectionsErrorGoesThroughTheHelper(t *testing.T) {
 	// Assert: the only direct record is the helper's own.
 	if direct != 1 || strings.Count(string(src), "r.selectionsError(ws, ") < 3 {
 		t.Fatalf("selections.go has %d direct opSelections records, want only selectionsError's", direct)
+	}
+}
+
+func TestACutKeepsTheBankedContextInTheStore(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	h := newHarness(t, WithSelectionStore(store))
+	h.ready(t)
+
+	// Act
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+	h.r.OnSessionUpdate(testWS, contextUsage(40_000, 200_000, 20, "claude-opus-5"))
+	h.r.OnContextCut(testWS, cutAgent, compactedCut())
+
+	// Assert
+	if got := store.contexts[testWS]; !got.Cut || got.BankedTokens != 182_300 {
+		t.Fatalf("stored = %+v, want a cut with 142,300 + 40,000 banked", got)
+	}
+}
+
+func TestTheRememberedBankIsDrawnInTheTotalSessionContext(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	store.contexts[testWS] = wsm.ContextUsageRecord{Usage: keptReading(500_000, 1_000_000), BankedTokens: 800_000}
+	h := newHarness(t, WithSelectionStore(store))
+	h.r.SetNaming(testWS, Naming{Name: "w", ConfigDir: "/Users/dev/.claude"})
+
+	// Act
+	h.r.SetAccount(testWS, testAccount("dev@example.com"))
+
+	// Assert
+	chip := h.view(t).GetContext()
+	if chip.GetText() != "500k" || chip.GetSessionTotalText() != "1.3M" {
+		t.Fatalf("chip %q total %q, want 500k and 1.3M", chip.GetText(), chip.GetSessionTotalText())
+	}
+}
+
+func TestAFailedBankKeepIsAnError(t *testing.T) {
+	// Arrange
+	store := newFakeSelections()
+	h := newHarness(t, WithSelectionStore(store))
+	h.ready(t)
+	store.writeErr = errors.New("disk full")
+
+	// Act
+	h.r.OnContextCut(testWS, cutAgent, clearedCut())
+
+	// Assert
+	records := dlog.FilterRecords(h.log.Records(), dlog.RecordQuery{Level: dlog.LevelError, Operation: opSelections})
+	if len(records) != 1 || records[0].Context["control"] != "context_cut" || records[0].Context["cause"] != "disk full" {
+		t.Fatalf("records = %+v, want one ERROR naming the cut and its cause", h.log.Records())
 	}
 }

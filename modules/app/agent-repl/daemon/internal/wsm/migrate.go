@@ -338,6 +338,8 @@ var migrations = []migration{
 	// merge_queue_clock: each entry's active or waiting clock (MergeClock).
 	// IT IS ADDITIVE: see mergeQueueClockDDL.
 	{To: 180, Name: "merge_queue_clock", Kind: MigrationAdditive, DDL: mergeQueueClockDDL},
+	// IT IS ADDITIVE: see sessionContextBankDDL.
+	{To: 181, Name: "session_context_bank", Kind: MigrationAdditive, DDL: sessionContextBankDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes

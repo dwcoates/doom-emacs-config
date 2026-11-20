@@ -2502,6 +2502,7 @@ export function topbarView(init?: TopbarInit): TopbarView {
     context: {
       text: init?.contextText ?? "184k",
       windowFill: init?.windowFill ?? 0,
+      sessionTotalText: "1.3m",
       breakdown:
         init?.breakdown === false
           ? undefined

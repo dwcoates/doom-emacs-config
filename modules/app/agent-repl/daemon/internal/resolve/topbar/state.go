@@ -262,6 +262,12 @@ type wsState struct {
 	// states the count is unknown rather than a stale figure or a fabricated 0.
 	contextCut bool
 
+	// bankedTokens is the context every earlier cut discarded, summed: each
+	// completed cut adds the reading it removed (OnContextCut). The chip's
+	// total session context is this plus the live context, so a cut never
+	// shrinks it.
+	bankedTokens int64
+
 	// counted is every unit whose usage has been folded into the session
 	// totals, with what it reported.
 	counted map[string]usageFingerprint

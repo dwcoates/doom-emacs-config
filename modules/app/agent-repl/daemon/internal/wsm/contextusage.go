@@ -33,6 +33,18 @@ CREATE TABLE workspace_context_usage (
 );
 `
 
+// sessionContextBankDDL is the layout-181 addition: TOTAL SESSION CONTEXT,
+// the context the workspace's sessions held before the last cut, summed over
+// every cut (each /clear or completed compaction banks the context it
+// discards). It lives on the row of the fact it accompanies, so a cut writes
+// the discarded reading's retirement and its banking in ONE statement and a
+// crash between the two is unrepresentable. IT IS ADDITIVE: the column takes
+// 0 on every row the previous build writes, which is a session that has cut
+// nothing banked.
+const sessionContextBankDDL = `
+ALTER TABLE workspace_context_usage ADD COLUMN banked_tokens INTEGER NOT NULL DEFAULT 0 CHECK (banked_tokens >= 0);
+`
+
 // ContextUsageRecord is a workspace's last-known context fact: Usage is the
 // last reading, or Cut reports a cut has discarded it with no fresh reading
 // since. Exactly one holds.
@@ -41,6 +53,9 @@ type ContextUsageRecord struct {
 	Usage *conversationv1.SessionContextUsage
 	// Cut reports a context cut stands with no fresh reading.
 	Cut bool
+	// BankedTokens is the context every earlier cut discarded, summed: the
+	// part of the workspace's total session context the live context is not.
+	BankedTokens int64
 }
 
 // WorkspaceContextUsage answers workspace ID's last-known context fact, false
@@ -53,7 +68,7 @@ func (s *store) WorkspaceContextUsage(ctx context.Context, id WorkspaceID) (Cont
 		var blob []byte
 		var cut bool
 		err := s.q(ctx).QueryRowContext(ctx,
-			`SELECT usage, cut FROM workspace_context_usage WHERE workspace_id = ?`, id).Scan(&blob, &cut)
+			`SELECT usage, cut, banked_tokens FROM workspace_context_usage WHERE workspace_id = ?`, id).Scan(&blob, &cut, &out.BankedTokens)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return nil
@@ -88,22 +103,39 @@ func (s *store) PutWorkspaceContextUsage(ctx context.Context, id WorkspaceID, us
 	if err != nil {
 		return fmt.Errorf("wsm: encode the context reading of %s: %w", id, err)
 	}
-	return s.putContextUsage(ctx, op, fields, id, blob, false)
+	return s.putContextUsage(ctx, op, fields, id, blob, false, nil)
 }
 
 // PutWorkspaceContextCut records that a cut discarded workspace ID's last
 // reading, so a revived workspace states the count is unknown until a fresh
-// reading arrives.
-func (s *store) PutWorkspaceContextCut(ctx context.Context, id WorkspaceID) error {
-	return s.putContextUsage(ctx, "daemon.wsm.put_workspace_context_cut", dlog.Context{"workspace": string(id)}, id, nil, true)
+// reading arrives, and records BANKED as the context every cut so far has
+// discarded, in the same write. A negative BANKED is a bug in the caller,
+// refused loudly.
+func (s *store) PutWorkspaceContextCut(ctx context.Context, id WorkspaceID, banked int64) error {
+	const op = "daemon.wsm.put_workspace_context_cut"
+	fields := dlog.Context{"workspace": string(id), "banked_tokens": banked}
+	if banked < 0 {
+		err := fmt.Errorf("wsm: a workspace's banked context is not negative (workspace %s, %d)", id, banked)
+		s.log.Error(op, "refused a negative banked context", withError(fields, err))
+		return err
+	}
+	return s.putContextUsage(ctx, op, fields, id, nil, true, &banked)
 }
 
-// putContextUsage replaces workspace ID's context fact with BLOB and CUT.
-func (s *store) putContextUsage(ctx context.Context, op string, fields dlog.Context, id WorkspaceID, blob []byte, cut bool) error {
+// putContextUsage replaces workspace ID's context fact with BLOB and CUT. A
+// non-nil BANKED replaces the banked context too; nil leaves it as it stands
+// (a fresh row starts at 0).
+func (s *store) putContextUsage(ctx context.Context, op string, fields dlog.Context, id WorkspaceID, blob []byte, cut bool, banked *int64) error {
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		var bankedValue int64
+		if banked != nil {
+			bankedValue = *banked
+		}
 		_, err := tx.ExecContext(ctx,
-			`INSERT INTO workspace_context_usage (workspace_id, usage, cut) VALUES (?, ?, ?)
-			 ON CONFLICT(workspace_id) DO UPDATE SET usage = excluded.usage, cut = excluded.cut`, id, blob, cut)
+			`INSERT INTO workspace_context_usage (workspace_id, usage, cut, banked_tokens) VALUES (?, ?, ?, ?)
+			 ON CONFLICT(workspace_id) DO UPDATE SET usage = excluded.usage, cut = excluded.cut,
+			   banked_tokens = CASE WHEN ? THEN excluded.banked_tokens ELSE banked_tokens END`,
+			id, blob, cut, bankedValue, banked != nil)
 		return err
 	})
 }

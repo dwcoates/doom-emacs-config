@@ -373,6 +373,14 @@ message TopbarContextChip {
   // wears the color a 40% allowance wears. Never outside [0, 1]; the daemon
   // clamps.
   double window_fill = 3;
+  // TOTAL SESSION CONTEXT, daemon-formatted ("1.3m"): the chip's own figure
+  // summed across every context cut the session has made. Each /clear or
+  // completed compaction BANKS the context it discards, so a session that
+  // held 800k, was cleared, and then held 500k states 1.3m here while `text`
+  // states the 500k. It never shrinks on a cut, is kept in wsm so a restart
+  // does not lose it, and is the first row of the dropdown the chip opens.
+  // ALWAYS SET: a workspace that has held no context states "0".
+  string session_total_text = 4;
 }
 
 // Which Claude account the session spends as, resolved by the daemon from
