@@ -10,9 +10,10 @@
  */
 import { create, toJsonString } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { canonicalSession, endsTurn, releaseShared, since, uniqueTurn } from "../integration-support/canonical.js";
 import { detachGate } from "../integration-support/detach-gate.js";
 import {
   agentId,
@@ -49,7 +50,12 @@ import { promptText, readTranscript, userPrompts } from "../integration-support/
 import { promptVendorUuid } from "../../src/convert/ids.js";
 import { rollBackSessionRequestFor } from "../service/requests.js";
 
+// THE CASES HERE SHARE SHIMS (agent-shim/claude/shim/AGENTS.md "Integration
+// cases share the canonical shim"): every case whose subject is its own turns
+// runs on the file's canonical session, on its own turn ids, ending what it
+// leaves open. The cases that still spawn their own say why at the case.
 afterEach(cleanupShims);
+afterAll(releaseShared);
 
 /** Pull the WatchAgent stream until the turn's terminal frame arrives. */
 async function untilTerminal(
@@ -73,8 +79,7 @@ describe("StartTurn", () => {
   test("the answer echoes the turn id, the said and the origin", async () => {
     // ECHO TOKENS: every one of these is the daemon's own value coming back, so
     // a mismatch means the shim adopted something it minted itself.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const response = await shim.clients.h1.startTurn(
       startTurnRequest({
@@ -96,11 +101,12 @@ describe("StartTurn", () => {
   test("prompt.agent is the MAIN AgentId — the WatchAgent address", async () => {
     // The main AgentId is the conversation's ORIGINAL vendor session id, and it
     // is what a consumer addresses the turn's stream by.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
 
     const prompt = turnStarted(
-      await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" })),
+      await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" })),
     );
 
     expect(prompt.agent?.value).toBe(started.vendorSessionId);
@@ -180,18 +186,20 @@ describe("StartTurn", () => {
   test("the page carries terminal frames AS ENTRIES", async () => {
     // The feed's stop notice has no other source: a terminal that were not an
     // entry would vanish on repaint.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(watch);
     watch.close();
 
     const response = await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t2", text: "!md" }),
+      startTurnRequest({ turn: t2, text: "!md" }),
     );
 
     if (response.result.case !== "success") throw new Error("StartTurn refused");
@@ -206,18 +214,20 @@ describe("StartTurn", () => {
   test("the page replays NO start frames", async () => {
     // A settled frame carries the start's facts by the upsert rule, so a
     // replayed start would draw a second, permanently-running copy of the unit.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!read" }));
     await untilTerminal(watch);
     watch.close();
 
     const response = await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t2", text: "!md" }),
+      startTurnRequest({ turn: t2, text: "!md" }),
     );
 
     if (response.result.case !== "success") throw new Error("StartTurn refused");
@@ -235,43 +245,47 @@ describe("StartTurn", () => {
   });
 
   test("the page carries prompts as user_prompt entries", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(watch);
     watch.close();
 
     const response = await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t2", text: "!md" }),
+      startTurnRequest({ turn: t2, text: "!md" }),
     );
 
     if (response.result.case !== "success") throw new Error("StartTurn refused");
     const prompts = (response.result.value.page?.entries ?? [])
       .map(entryPrompt)
       .filter((p): p is conversationv1.AgentPrompt => p !== null);
-    expect(prompts.map((p) => p.id?.value)).toContain("t1");
+    expect(prompts.map((p) => p.id?.value)).toContain(t1);
   });
 
   test("R15: the AgentPrompt row is written BEFORE any activity row", async () => {
     // The shim's AgentPrompt row is the ONE served prompt, and it is durably
     // acked before the turn's first activity frame — otherwise a feed can paint
     // an answer above the question it answers.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(watch);
 
-    const keys = writtenKeys(shim.store?.writes() ?? []);
-    const promptAt = keys.indexOf("prompt:t1");
+    const keys = writtenKeys(mine.writes());
+    const promptAt = keys.indexOf(`prompt:${t1}`);
     const firstActivityAt = keys.findIndex((key) => key.startsWith("activity:"));
     expect(promptAt).toBeGreaterThanOrEqual(0);
     expect(firstActivityAt).toBeGreaterThan(promptAt);
@@ -281,12 +295,14 @@ describe("StartTurn", () => {
   test("a second StartTurn while one is open is refused turn_already_open", async () => {
     // ONE TURN IN FLIGHT, STRUCTURALLY: a second is a daemon fault, refused,
     // never queued. The vendor's queue is never ours.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     const second = await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t2", text: "!md" }),
+      startTurnRequest({ turn: t2, text: "!md" }),
     );
 
     expect(startTurnKind(second)).toBe("turnAlreadyOpen");
@@ -431,14 +447,15 @@ const STOP_TAXONOMY: readonly StopRow[] = [
 
 describe("the turn-stop taxonomy", () => {
   test.each(STOP_TAXONOMY)("$prompt reaches its declared terminal", async (row) => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: row.prompt }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: row.prompt }));
     if (row.needsStop === true) {
       // The park is armed before the frame that announces it, so waiting for
       // any entry is enough to know the interrupt has something to land on.
@@ -470,18 +487,20 @@ describe("the turn-stop taxonomy", () => {
     // stream carries the terminal alone. A converter that raised the evidence
     // into a terminal would end turns that recovered; one that read the
     // terminal as evidence would draw a failed turn as still running.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!api-429" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!api-429" }));
     const terminal = await untilTerminal(watch);
 
     // The EVIDENCE, on the plane that has it.
-    const records = readTranscript(shim.dirs, started.vendorSessionId);
+    const records = mine.transcript(started.vendorSessionId);
     expect(records.filter((record) => record.subtype === "api_error").length).toBe(1);
     // The TERMINAL, on this one, carrying the same classification.
     const frame = entryFrame(terminal);
@@ -512,15 +531,16 @@ describe("a refusal with no fallback", () => {
     // `model_refusal_no_fallback` record, converted to a settled response whose
     // failure reason is `refused`, ahead of the turn's `model_error` end.
     // Arrange.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
     // Act.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!refusal-no-fallback" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!refusal-no-fallback" }));
     const terminal = await untilTerminal(watch);
 
     // Assert.
@@ -594,15 +614,16 @@ describe("WatchAgent", () => {
 
   test("a tailed entry carries the place the shim observed it at", async () => {
     // Arrange.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
     // Act.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     const first = watchAgentEntry(await watch.next());
     watch.close();
 
@@ -630,14 +651,15 @@ describe("WatchAgent", () => {
   test("a streamed response's update frames are DELTAS, never cumulative", async () => {
     // `AgentResponseUpdate.new_markdown` is a delta and the accumulator is the
     // daemon's; a cumulative update would have every consumer double the text.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(watch);
 
     const deltas: string[] = [];
@@ -664,14 +686,15 @@ describe("WatchAgent", () => {
   test("the response's terminal carries the WHOLE prose", async () => {
     // Terminals carry wholes and self-correct: a consumer that dropped a delta
     // still ends up with the right text.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(watch);
 
     const settled = watch.frames().flatMap((frame) => {
@@ -707,14 +730,15 @@ describe("WatchAgent", () => {
   test("usage rides EXACTLY ONE unit per API response", async () => {
     // Usage rides the AgentActivity ENVELOPE on the first-block unit; absence
     // means "not the carrying unit", never "free".
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "hello there" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "hello there" }));
     await untilTerminal(watch);
 
     const withUsage = watch.frames().filter((frame) => {
@@ -761,13 +785,14 @@ describe("WatchAgent", () => {
   test("known_through serves ONLY newer entries", async () => {
     // The caller's own high-water mark: the store remembers nothing about what
     // it served, so catch-up is the caller's statement, not the store's memory.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const first = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await first.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     const terminal = await untilTerminal(first);
     const highWater = terminal.at?.value ?? "";
     first.close();
@@ -800,13 +825,14 @@ describe("WatchAgent", () => {
   test("tail_only opens on an EMPTY page at the floor", async () => {
     // Opening a watch replays no history: the daemon loads pages only when a
     // reader asks for them.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const first = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await first.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(first);
     first.close();
 
@@ -823,13 +849,15 @@ describe("WatchAgent", () => {
   test("a tail_only watch carries only what is written after it opened", async () => {
     // The tail begins after the newest entry as of the open, so the next turn
     // reaches it and none of the turn before.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const first = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await first.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     await untilTerminal(first);
     first.close();
     const earlier = new Set(
@@ -843,7 +871,7 @@ describe("WatchAgent", () => {
     );
     await tailOnly.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!md" }));
     await untilTerminal(tailOnly);
 
     const tailed = tailOnly
@@ -858,11 +886,12 @@ describe("WatchAgent", () => {
   test("StartTurn with tail_only answers an EMPTY opening page", async () => {
     // The same opening on the one-call submit-and-paint: the prompt is
     // delivered, and the page carries none of the book.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
 
     const response = await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t1", text: "!md", tailOnly: true }),
+      startTurnRequest({ turn: t1, text: "!md", tailOnly: true }),
     );
 
     if (response.result.case !== "success") throw new Error("StartTurn refused");
@@ -872,13 +901,14 @@ describe("WatchAgent", () => {
   test("a reattach with known_through misses nothing and doubles nothing", async () => {
     // The daemon restart case: the connection dies mid-turn and the replacement
     // reattaches with its own mark.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const before = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await before.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     const seen = watchAgentEntry(await before.next());
     const mark = seen.at?.value ?? "";
     // The connection dies mid-turn.
@@ -960,8 +990,9 @@ describe("WatchAgent", () => {
     // rows. The failure this guards is a shared cursor or a shared write pump —
     // one consumer going away mid-turn would then stop the other's frames, and
     // the surviving surface would freeze with no error to explain it.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const first = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
@@ -971,7 +1002,7 @@ describe("WatchAgent", () => {
     await first.next();
     await second.next();
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!read" }));
     // Both are tailing; one dies partway through the burst.
     await first.next();
     await second.next();
@@ -990,8 +1021,7 @@ describe("WatchAgent", () => {
     // pinned rather than left as "some throw", because a store outage, a
     // cancelled call and an id nobody minted all reach a caller as an
     // exception and only the code tells them apart.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const stream = openStream((options) =>
       shim.clients.h1.watchAgent(
@@ -1012,13 +1042,14 @@ describe("WatchAgent", () => {
 
 describe("UpdateAgent", () => {
   test("stop on the main agent during a held turn interrupts it", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     const response = await shim.clients.h1.updateAgent(stopAgent());
     const terminal = await untilTerminal(watch);
@@ -1036,8 +1067,7 @@ describe("UpdateAgent", () => {
   });
 
   test("stop with nothing running is refused nothing_running", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const response = await shim.clients.h1.updateAgent(stopAgent());
 
@@ -1047,13 +1077,14 @@ describe("UpdateAgent", () => {
   test("a prompt to an existing subagent is refused not_deliverable", async () => {
     // THE PINNED SDK HAS NO ROUTE to prompt an existing subagent, and the
     // nearest landed arm (nothing_running) would have lied about why.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!subagent" }));
     const spawned = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1084,8 +1115,7 @@ describe("UpdateAgent", () => {
   });
 
   test("an answer with no open ask is refused no_open_ask", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const response = await shim.clients.h1.updateAgent(
       create(shimv1.UpdateAgentRequestSchema, {
@@ -1118,8 +1148,7 @@ describe("UpdateAgent", () => {
   });
 
   test("an unknown target agent is refused unknown_agent", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const response = await shim.clients.h1.updateAgent(stopAgent(agentId("no-such-agent")));
 
@@ -1129,16 +1158,17 @@ describe("UpdateAgent", () => {
 
 describe("KillTurn", () => {
   test("with nothing spawned it ends agent_only and the stream concludes interrupted", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     const response = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: false }),
     );
     const terminal = await untilTerminal(watch);
 
@@ -1153,17 +1183,18 @@ describe("KillTurn", () => {
   });
 
   test("the interrupted terminal records the caller's commanded_by verbatim", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, {
-        turn: turnId("t1"),
+        turn: turnId(t1),
         force: false,
         commandedBy: create(conversationv1.AgentInterruptedByUserSchema, {
           command: { case: "interjection", value: create(conversationv1.AgentInterruptedByUserInterjectionSchema, {}) },
@@ -1187,13 +1218,14 @@ describe("KillTurn", () => {
     // records the stop as a bare `[Request interrupted by user]` line and
     // nothing else — so the card went on drawing a running shell inside a turn
     // that had ended. Found by the F42 playbook photographing `!bash-hold`.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-hold" }));
     // The call must be GENUINELY OPEN before the stop, or there is nothing for
     // it to cut and the test would pass on an empty claim.
     await watch.until((frame) => {
@@ -1209,7 +1241,7 @@ describe("KillTurn", () => {
     });
 
     await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: false }),
     );
 
     const cut = await watch.until((frame) => {
@@ -1245,13 +1277,14 @@ describe("KillTurn", () => {
   // had spawned background work; now it interrupts the turn and the agent the
   // turn spawned runs on.
   test("unforced, it interrupts a turn beside its own live background agent and the agent runs on", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-detached-hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!subagent-detached-hold" }));
     const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
@@ -1261,7 +1294,7 @@ describe("KillTurn", () => {
     const subagent = detached.result.value.work?.value ?? "";
 
     const response = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: false }),
     );
     const terminal = await untilTerminal(watch);
 
@@ -1277,13 +1310,14 @@ describe("KillTurn", () => {
   });
 
   test("force ends it, naming the stopped work", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
@@ -1295,7 +1329,7 @@ describe("KillTurn", () => {
     const run = detached.result.value.work?.value ?? "";
 
     const response = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: true }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: true }),
     );
 
     const killed = turnKilled(response);
@@ -1307,9 +1341,10 @@ describe("KillTurn", () => {
   });
 
   test("a TurnId that is not the open turn is refused not_the_open_turn", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
 
     const response = await shim.clients.h1.killTurn(
       create(shimv1.KillTurnRequestSchema, { turn: turnId("some-other-turn"), force: false }),
@@ -1319,11 +1354,12 @@ describe("KillTurn", () => {
   });
 
   test("with no turn open it is refused no_turn_open", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
 
     const response = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: false }),
     );
 
     expect(killTurnCause(response)).toBe("noTurnOpen");
@@ -2001,13 +2037,15 @@ describe("scope, arms and ordering the verbs owe", () => {
     // the turn's OWN spawn set. t1 left a shell running; t2 is killed while it
     // holds; a kill that reached across turns would destroy work the user never
     // asked to stop and that nothing in the response named.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       return entryFrame(watchAgentEntry(frame))?.result.case === "detachedWork";
@@ -2016,10 +2054,10 @@ describe("scope, arms and ordering the verbs owe", () => {
     if (detached?.result.case !== "detachedWork") throw new Error("expected the run's announcement");
     const run = detached.result.value.work?.value ?? "";
     await untilTerminal(watch);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!hold" }));
 
     const response = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t2"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t2), force: false }),
     );
 
     // t2 had nothing of its own, so it ends agent_only rather than refusing.
@@ -2036,14 +2074,16 @@ describe("scope, arms and ordering the verbs owe", () => {
   // took down every background agent earlier turns had spawned, because the
   // vendor's interrupt fails closed unless the per-task stop is declared.
   test("an unforced KillTurn spares a background agent an EARLIER turn spawned", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
     await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t1", text: "!subagent-detached-utterance" }),
+      startTurnRequest({ turn: t1, text: "!subagent-detached-utterance" }),
     );
     const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
@@ -2053,10 +2093,10 @@ describe("scope, arms and ordering the verbs owe", () => {
     if (detached?.result.case !== "detachedWork") throw new Error("expected the agent's announcement");
     const subagent = detached.result.value.work?.value ?? "";
     await untilTerminal(watch);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!hold" }));
 
     const response = await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t2"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t2), force: false }),
     );
     await untilTerminal(watch);
 
@@ -2073,14 +2113,15 @@ describe("scope, arms and ordering the verbs owe", () => {
     // `task_notification{stopped}` is what settles it. The terminal is a page
     // line of the SPAWNING agent's book, by the flatness rule — a subagent's
     // work is never nested in its spawn, and its unit lives where the spawn is.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const watch = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await watch.next();
     await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t1", text: "!subagent-detached-live" }),
+      startTurnRequest({ turn: t1, text: "!subagent-detached-live" }),
     );
     const announced = await watch.until((frame) => {
       if (frame.frame.case !== "entry") return false;
@@ -2169,13 +2210,15 @@ describe("scope, arms and ordering the verbs owe", () => {
     // time the consumer's answer lands. It is refused with the arm that says
     // there is nothing to answer — and it must not crash the shim, which is the
     // half a refusal arm alone does not state.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const stream = openStream((options) =>
       shim.clients.h1.watchAgent(watchAgentRequest(), options),
     );
     await stream.next();
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!perm-hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!perm-hold" }));
     const ask = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -2189,7 +2232,7 @@ describe("scope, arms and ordering the verbs owe", () => {
     }
     const askId = agentFrame.result.value.update.value.id?.value ?? "";
     await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: false }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: false }),
     );
     await untilTerminal(stream);
 
@@ -2200,7 +2243,7 @@ describe("scope, arms and ordering the verbs owe", () => {
     expect(updateAgentKind(response)).toBe("noOpenAsk");
     // AND THE SHIM IS STILL THERE: a further round trip resolves, which a
     // process that had crashed on the late answer could not do.
-    const after = await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    const after = await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!md" }));
     expect(after.result.case).toBe("success");
     stream.close();
   });
@@ -2351,35 +2394,39 @@ describe("StartTurn of an agent's prompt", () => {
   };
 
   test("a sender of this session's class is accepted, and its turn runs to its own terminal", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
     const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
     await watch.next();
 
-    const prompt = turnStarted(await shim.clients.h1.startTurn(fromAgent("t-agent", "auto")));
+    const turn = uniqueTurn("t-agent");
+    endsTurn(shim, turn);
+    const prompt = turnStarted(await shim.clients.h1.startTurn(fromAgent(turn, "auto")));
     const terminal = await untilTerminal(watch);
 
     expect([prompt.origin, entryFrame(terminal)?.result.case]).toEqual([conversationv1.PromptOrigin.AGENT_SENT, "success"]);
   });
 
   test("the vendor files the prompt as a peer message from agent-repl", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
     const watch = openStream((options) => shim.clients.h1.watchAgent(watchAgentRequest(), options));
     await watch.next();
 
-    await shim.clients.h1.startTurn(fromAgent("t-agent", "auto"));
+    const turn = uniqueTurn("t-agent");
+    endsTurn(shim, turn);
+    await shim.clients.h1.startTurn(fromAgent(turn, "auto"));
     await untilTerminal(watch);
 
-    const record = readTranscript(shim.dirs, started.vendorSessionId).find((line) => line.uuid === promptVendorUuid("t-agent"));
+    const record = mine.transcript(started.vendorSessionId).find((line) => line.uuid === promptVendorUuid(turn));
     expect(record?.origin).toMatchObject({ kind: "peer", from: "agent-repl:parser-fix", fromMode: "prompting" });
   });
 
   test("a sender whose class is not this session's is refused vendor_refused, not left to stall", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
-    const response = await shim.clients.h1.startTurn(fromAgent("t-agent", "bypass"));
+    // Refused, so the turn never opens and there is nothing to end.
+    const turn = uniqueTurn("t-agent");
+    const response = await shim.clients.h1.startTurn(fromAgent(turn, "bypass"));
 
     expect(startTurnKind(response)).toBe("vendorRefused");
   });

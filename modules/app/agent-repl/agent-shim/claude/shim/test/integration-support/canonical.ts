@@ -141,6 +141,7 @@ export async function endTurn(shim: ShimHandle, turn: string): Promise<void> {
   if (response.result.case !== "success" && response.result.value?.cause.case !== "noTurnOpen") {
     throw new Error(`endTurn: KillTurn of ${turn} was refused: ${JSON.stringify(response.result.value)}`);
   }
+
   await shim.store.entryLanded((entry) => {
     if (entry.turn?.value !== turn) return false;
     const line = pageLineOf(entry);
@@ -154,8 +155,30 @@ export async function endTurn(shim: ShimHandle, turn: string): Promise<void> {
  * failed ({@link endTurn}), so a failing case never leaves the shared session
  * with a turn open for its siblings to be refused on.
  */
-export function endsTurn(shim: ShimHandle, turn: string): void {
-  onTestFinished(() => endTurn(shim, turn));
+export function endsTurn(shim: ShimHandle, ...turns: string[]): void {
+  onTestFinished(async () => {
+    // AT MOST ONE OF A CASE'S TURNS IS OPEN, and a later one opened only once
+    // the earlier ended (or was refused), so they are ended newest first: the
+    // open one is killed, and every other is found already ended.
+    for (const turn of [...turns].reverse()) {
+      if (!(await turnEnded(shim, turn))) await endTurn(shim, turn);
+    }
+  });
+}
+
+/**
+ * Whether TURN's terminal already landed in SHIM's store, or TURN never
+ * opened (no prompt row of it landed), so there is nothing of it to end.
+ */
+async function turnEnded(shim: ShimHandle, turn: string): Promise<boolean> {
+  const landed = shim.store?.writeBatches().filter((batch) => batch.accepted).flatMap((batch) => batch.request.batch?.entries ?? []) ?? [];
+  const mine = landed.filter((entry) => entry.turn?.value === turn);
+  if (mine.length === 0) return true;
+  return mine.some((entry) => {
+    const line = pageLineOf(entry);
+    const frame = line?.agentItem?.item.case === "agentFrame" ? line.agentItem.item.value : undefined;
+    return frame?.result.case === "success" || frame?.result.case === "failure";
+  });
 }
 
 /** Tear down every shared shim of the file and forget them: its `afterAll`. */
