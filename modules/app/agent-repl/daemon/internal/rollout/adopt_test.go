@@ -2943,3 +2943,45 @@ func recordWith(log interface{ Records() []dlog.Record }, operation, message str
 	_, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Operation: operation, Message: message})
 	return ok
 }
+
+// promoteProbeDB answers what PROBE reads at the takeover's promotion of the
+// state handle: the first step after joining mode ends.
+type promoteProbeDB struct {
+	wsm.DB
+	probe func()
+}
+
+func (d *promoteProbeDB) Promote(ctx context.Context) error {
+	d.probe()
+	return d.DB.Promote(ctx)
+}
+
+func TestTheIncumbentIsNamedAtEveryMomentOfATakeoverAnElderOutlives(t *testing.T) {
+	tests := []struct {
+		name   string
+		elders func(d *Deps)
+		want   string
+	}{
+		{name: "an elder still runs", elders: withElder(make(chan struct{})), want: "127.0.0.1:7788"},
+		{name: "no elder runs", elders: func(d *Deps) { d.LiveElders = func() ([]string, error) { return nil, nil } }, want: ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the address is read the moment joining mode has ended.
+			var h *harness
+			var atPromotion string
+			h = newHarness(t, tc.elders, func(d *Deps) {
+				d.IncumbentAddress = "127.0.0.1:7788"
+				d.DB = &promoteProbeDB{DB: d.DB, probe: func() { atPromotion = h.c.IncumbentAddress() }}
+			})
+
+			// Act
+			takeOver(h)
+
+			// Assert
+			if atPromotion != tc.want {
+				t.Fatalf("IncumbentAddress at the takeover's promotion = %q, want %q", atPromotion, tc.want)
+			}
+		})
+	}
+}

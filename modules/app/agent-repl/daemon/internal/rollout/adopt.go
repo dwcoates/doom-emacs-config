@@ -1278,8 +1278,18 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// it yields, so it is here to arm from; arming is additive, so the
 	// watcher's later arm adds nothing.
 	c.armFromManifestBeforeTakeover(fields)
+	// THE ELDERS ARE READ BEFORE JOINING MODE ENDS, and recorded in the same
+	// critical section that ends it. IncumbentAddress answers the incumbent
+	// while either holds, so recording the elders only after joining mode
+	// ended left a moment with neither, in which the incumbent still served
+	// and a not_yet_adopted named no address to act on it at (merge gate
+	// 2026-11-19, TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous).
+	elders := c.probeElders(fields)
 	c.mu.Lock()
 	was := c.joiningMode
+	if was && len(elders) > 0 {
+		c.eldersRunning = true
+	}
 	c.joiningMode = false
 	if !was {
 		owned := c.takeoverOwned
@@ -1314,8 +1324,8 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	// 2026-11-16): the outgoing daemon yields at the end of its transfer pass
 	// and keeps its holdouts until each is free. What only the last daemon
 	// may do waits for every one of them to end (afterElders).
-	elders := c.liveElders(fields)
 	if len(elders) == 0 {
+		c.closeEldersGone()
 		c.lastDaemonsDuties(promoted, &c.stragglerAdoptions, fields)
 	} else {
 		c.log.Info(opAdopt, "older daemons still serve workspaces busy on them; this daemon takes over now, and does what only the last daemon may once they have ended",
@@ -1350,27 +1360,19 @@ func (c *controller) becomeIncumbent(fields dlog.Context) {
 	}
 }
 
-// liveElders answers the daemons older than this one still running, nil
+// probeElders answers the daemons older than this one still running, nil
 // when none does or none is wired. A probe that fails is recorded and read
 // as no elders: the life locks are the only record of them, and the takeover
 // then runs as it always has.
-func (c *controller) liveElders(fields dlog.Context) []string {
+func (c *controller) probeElders(fields dlog.Context) []string {
 	if c.deps.LiveElders == nil {
-		c.closeEldersGone()
 		return nil
 	}
 	elders, err := c.deps.LiveElders()
 	if err != nil {
 		c.log.Error(opAdopt, "could not read which older daemons still run; the takeover runs as if none did", dlog.WithCause(fields, err))
-		elders = nil
-	}
-	if len(elders) == 0 {
-		c.closeEldersGone()
 		return nil
 	}
-	c.mu.Lock()
-	c.eldersRunning = true
-	c.unlock()
 	return elders
 }
 
