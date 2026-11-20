@@ -1095,7 +1095,7 @@ body {
 #ws-sidebar .sb-mq-waiting,
 #ws-sidebar .sb-mq-github,
 #ws-sidebar .sb-mq-off-queue {
-  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) 0.9rem;
+  padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) 0.9rem;
   cursor: pointer;
   min-width: 0;
 }
@@ -1387,6 +1387,9 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    built out of it (Recently Merged's --merged-row-h), so the two never drift.
    Halved from 0.28rem so the rows sit closer (owner request, 2026-10-19). */
 #ws-sidebar { --row-pad-y: 0.14rem; }
+/* ONE RIGHT PADDING for a row's line and a merge queue line, which an open
+   row's out-of-flow ⋯ stands at too, so their right edges never drift. */
+#ws-sidebar { --row-pad-right: 0.7rem; }
 /* THE ROW INDENT (owner request, 2026-10-20): a nested row -- a child
    workspace, or a row in a subsection -- indents only its status mark and
    name. Its tab number, its gutter bar and its highlight start at the
@@ -1404,7 +1407,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
      row's parts do (the name's glyph, below) can take it back exactly. */
   --row-gap: 0.45rem;
   gap: var(--row-gap);
-  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));
+  padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) calc(0.9rem + var(--row-indent));
   border-radius: 5px;
   cursor: pointer;
   min-width: 0;
@@ -7349,6 +7352,18 @@ bubble-body.bubble-body { display: block; }
 #ws-sidebar:not(.sb-hover-suspended) .row:hover .sb-more,
 #ws-sidebar .sb-more:focus-visible { opacity: 1; }
 #ws-sidebar:not(.sb-hover-suspended) .sb-more:hover { color: var(--fg); }
+/* AN OPEN ROW'S DURATION STANDS AT THE ROW'S RIGHT PADDING (owner request,
+   2026-11-19), as a merge queue line's clock does: the quiet control takes no
+   room on the line, and a hovered row draws it in the duration's place. */
+#ws-sidebar .ws:not(.receded) > .row { position: relative; }
+#ws-sidebar .ws:not(.receded) > .row > .sb-more {
+  position: absolute;
+  right: var(--row-pad-right);
+  top: 50%;
+  transform: translateY(-50%);
+}
+#ws-sidebar:not(.sb-hover-suspended) .ws:not(.receded) > .row:hover > .when,
+#ws-sidebar .ws:not(.receded) > .row:has(> .sb-more:focus-visible) > .when { visibility: hidden; }
 
 /* THE VERB MENU stands beside its row in the detail panel's card (see the
    panel's rule); its entries reach the card's edges, their words on the

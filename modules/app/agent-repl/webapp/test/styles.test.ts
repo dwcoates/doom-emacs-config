@@ -5510,10 +5510,16 @@ describe("the repository header's add control", () => {
     const headRight = /padding-right:\s*([^;]+);/.exec(head)?.[1].trim();
     const rowParts = /padding:\s*([^;]+)/.exec(row)?.[1].trim().split(/\s+/) ?? [];
     const rowRight = rowParts.length >= 2 ? rowParts[1] : undefined;
+    // The row's side is the rail's one right padding token; the header states
+    // the token's value, since jsdom would drop its padding longhands after a var().
+    const token = /^var\((--[\w-]+)\)$/.exec(rowRight ?? "")?.[1];
+    const tokenValue = rulesOf(stylesheet)
+      .filter((rule) => rule.selectors.includes("#ws-sidebar"))
+      .map((rule) => new RegExp(`${token}:\\s*([^;]+);`).exec(rule.declarations)?.[1])
+      .find((value) => value !== undefined);
 
     // Assert
-    expect(headRight).toBeDefined();
-    expect(headRight).toBe(rowRight);
+    expect([headRight, token, tokenValue]).toEqual(["0.7rem", "--row-pad-right", "0.7rem"]);
   });
 });
 
@@ -6532,7 +6538,7 @@ describe("the row indent", () => {
   });
 
   it("pads a row's line by its indent", () => {
-    expect(declarationsOf("#ws-sidebar .row")).toMatch(/padding:\s*var\(--row-pad-y\) 0\.7rem var\(--row-pad-y\) calc\(0\.9rem \+ var\(--row-indent\)\)/);
+    expect(declarationsOf("#ws-sidebar .row")).toMatch(/padding:\s*var\(--row-pad-y\) var\(--row-pad-right\) var\(--row-pad-y\) calc\(0\.9rem \+ var\(--row-indent\)\)/);
   });
 
   it("pulls the tab number back to one column and hands the indent to the mark", () => {

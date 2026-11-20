@@ -1643,7 +1643,11 @@ describe("recently merged rows", () => {
   });
 
   it("pads every rail row with the shared vertical padding", () => {
-    expect(css).toContain("  padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));");
+    expect(css).toContain("  padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) calc(0.9rem + var(--row-indent));");
+  });
+
+  it("declares the one rail row right padding", () => {
+    expect(css).toContain("#ws-sidebar { --row-pad-right: 0.7rem; }");
   });
 
   it("builds a merged row's height out of the shared vertical padding", () => {
