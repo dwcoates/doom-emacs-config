@@ -3475,3 +3475,31 @@ func TestEveryBehindRefusalSharesOneShape(t *testing.T) {
 		})
 	}
 }
+
+// TestFakeReorderWaitingMovesOnlyWaitingEntries pins the fake store's one
+// reorder, which its MoveMerge, MoveMergeTo, PlaceMerge and PrioritizeMerge
+// share: only waiting entries change places, as in the durable queue.
+func TestFakeReorderWaitingMovesOnlyWaitingEntries(t *testing.T) {
+	// Arrange: the running merge, a waiting one, a request and the moved one.
+	h := newHarness(t)
+	repo := h.repoKey()
+	h.db.queues[repo] = []wsm.MergeQueueEntry{
+		{Workspace: "ws-r", State: wsm.MergeAdmitted}, {Workspace: "ws-a", State: wsm.MergeQueued},
+		{Workspace: "ws-p", State: wsm.MergeRequested}, {Workspace: "ws-m", State: wsm.MergeQueued},
+	}
+
+	// Act.
+	moved := h.db.reorderWaiting(repo, "ws-m", 0, true)
+
+	// Assert.
+	var order []wsm.WorkspaceID
+	for _, entry := range h.db.queues[repo] {
+		order = append(order, entry.Workspace)
+	}
+	if want := []wsm.WorkspaceID{"ws-r", "ws-m", "ws-p", "ws-a"}; !moved || !slices.Equal(order, want) {
+		t.Fatalf("reorderWaiting = %v, queue %v; want moved, %v", moved, order, want)
+	}
+	if !h.db.queues[repo][1].Source.Front {
+		t.Fatal("the moved entry did not take the front mark")
+	}
+}
