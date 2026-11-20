@@ -2055,6 +2055,27 @@ opens are OpenTabs streams."
                   "{\"reloadElisp\":{\"moduleRoot\":\"/r/\",\"build\":\"b\",\"partial\":true}}")
                  '("DaemonReloadElisp" partial "unknown field"))))
 
+(ert-deftest agent-repl-test-wire-host-elisp-current-decodes-its-build ()
+  "The stream's current verdict carries the checkout's build it matched."
+  (should (equal (agent-repl-test-wire-host--decode
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"elispCurrent\":{\"build\":\"b1\"}}")
+                 '(:arm :elisp-current :value (:build "b1")))))
+
+(ert-deftest agent-repl-test-wire-host-elisp-current-without-a-build-is-a-breach ()
+  "The build is REQUIRED: a verdict naming no build accepts nothing."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"elispCurrent\":{}}")
+                 '("DaemonElispCurrent" build "required string is empty"))))
+
+(ert-deftest agent-repl-test-wire-host-elisp-current-unknown-field-is-refused ()
+  "A field the verdict does not declare is refused, never guessed at."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-watch-daemon-response
+                  "{\"elispCurrent\":{\"build\":\"b\",\"partial\":true}}")
+                 '("DaemonElispCurrent" partial "unknown field"))))
+
 (ert-deftest agent-repl-test-wire-host-shutdown-announced-carries-the-successor ()
   "A handover announcement carries the address Emacs dual-attaches to."
   (should (equal (agent-repl-test-wire-host--decode
