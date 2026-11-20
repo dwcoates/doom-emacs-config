@@ -55,6 +55,10 @@ const (
 	// EditorStart is one editor process's startup, each milestone timed by
 	// the editor from its own process start and reported to the daemon.
 	EditorStart Restart = "editor_start"
+	// DeployBuildStep is ONE step of a deploy's build, by the step it is:
+	// the protobufs, a build-frontend target (a service), or the Wi-Fi
+	// helper. A deploy's whole build is the deploy's own build phase.
+	DeployBuildStep Restart = "deploy_build"
 )
 
 // Outcome is how the timed restart or phase ended, the `outcome` label.
@@ -340,6 +344,12 @@ func OfSessionStart(ws ids.WorkspaceID, p SessionPhase, kind SessionKind, outcom
 // editor's process start.
 func OfEditorStart(m EditorMilestone, daemon EditorDaemon, d time.Duration) Observation {
 	return observation(EditorStart, string(m), string(daemon), OK, "", d)
+}
+
+// OfBuildStep is one step of a deploy's build. step is the build step's
+// name, from the deploy builder's closed set (deploy.ScriptBuilder's steps).
+func OfBuildStep(step string, outcome Outcome, d time.Duration) Observation {
+	return observation(DeployBuildStep, step, "", outcome, "", d)
 }
 
 // Recorder records restart observations. runtimemetrics.Surface is the

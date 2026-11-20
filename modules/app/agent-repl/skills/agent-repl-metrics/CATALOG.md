@@ -73,6 +73,7 @@ for metrics that show where restart time goes and when it regressed):
 |---|---|---|---|
 | `deploy` | `build`, `install`, `restart_services`, `decide`, `total` | | the deploying daemon |
 | `deploy` | `handover`, `total` of a deploy that moved the daemon | | the successor, from the instants the intent manifest carries (judgement call 10) |
+| `deploy_build` | each build step by name: `proto`, a build-frontend target (`shim`, `webapp`, `daemon`, `store`, `sidecar`, `zettel`, `tests`, `lock`), `wifi`, or `build` for a harness's one-command override; `outcome` `failed` for the step that stopped the build | | `deploy.ScriptBuilder`, per step (added 2026-11-20); the deploy's whole build is `deploy`'s `build` |
 | `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
 | `workspace_start` | `start`, `wake` | `boot`, `takeover` | the bring-up, per workspace |
@@ -88,6 +89,7 @@ Not built, each recorded with its reason:
   the webapp (`docs/protobuf-design/runtime-metrics.md`, entry 8) and
   `workspace_open` is measured by the daemon (judgement call 16).
 - Vendor bytes: no shim counts them (judgement call 6).
-- An elisp reload is not timed: Emacs keeps its streams across it, so
-  there is nothing to come back (judgement call 9). Emacs's own launch is
-  timed as `editor_start` (judgement call 17).
+- An elisp reload is not a restart: Emacs keeps its streams across it, so
+  there is nothing to come back (judgement call 9). How long a deploy's
+  pushed reload takes is the `elisp_reload` latency, and Emacs's own launch
+  is timed as `editor_start` (judgement call 17).

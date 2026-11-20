@@ -183,6 +183,7 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 		Runner:        p.Runner,
 		Clock:         rollout.SystemClock{},
 		Log:           log,
+		Restarts:      p.Restarts,
 	}
 	services, err := serviceManagerFor(runtime.GOOS, where, p)
 	if err != nil {

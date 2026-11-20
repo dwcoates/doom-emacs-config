@@ -10,6 +10,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/outputtext"
 	"agent-repld/internal/persistentwifi"
+	"agent-repld/internal/restarttiming"
 )
 
 const opBuild = "daemon.deploy.build"
@@ -66,6 +67,8 @@ type ScriptBuilder struct {
 	Runner        Runner
 	Clock         Clock
 	Log           dlog.Logger
+	// Restarts records how long each build step took, by its name.
+	Restarts restarttiming.Recorder
 }
 
 // buildStep is one command of a build.
@@ -86,9 +89,11 @@ func (b *ScriptBuilder) Build(ctx context.Context, staging string) error {
 	for _, step := range steps {
 		fields := dlog.Context{"step": step.name, "argv": step.argv, "log": logPath}
 		b.Log.Info(opBuild, "building", fields)
+		began := b.Clock.Now()
 		out, code, err := b.Runner.Run(ctx, b.ModuleRoot, step.argv)
+		b.Restarts.ObserveRestart(restarttiming.OfBuildStep(step.name, restarttiming.OutcomeOf(stepErr(code, err)), b.Clock.Now().Sub(began)))
 		archive.WriteString("==== " + step.name + ": " + strings.Join(step.argv, " ") + "\n" + out + "\n")
-		if err == nil && code == 0 {
+		if stepErr(code, err) == nil {
 			b.Log.Debug(opBuild, "the step built", fields)
 			continue
 		}
@@ -130,6 +135,18 @@ func (b *ScriptBuilder) steps(staging string) []buildStep {
 		})
 	}
 	return steps
+}
+
+// stepErr answers a step's failure: the error that kept it from running, or
+// its non-zero exit.
+func stepErr(code int, err error) error {
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("exit status %d", code)
+	}
+	return nil
 }
 
 // archive writes a build's output. A failure to archive is loud but does not
