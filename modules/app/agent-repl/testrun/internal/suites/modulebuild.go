@@ -53,7 +53,15 @@ func ModuleBuildID(suite, tags string) string {
 func (b GoBuild) Spec(rels []string) run.Spec {
 	o := b.Options
 	o.Packages = rels
-	sp := spec(b.ID, b.Suite, o.Module, append([]string{o.Self, "build-tests"}, o.Args()...))
+	return pinnedBuild(spec(b.ID, b.Suite, o.Module, append([]string{o.Self, "build-tests"}, o.Args()...)))
+}
+
+// pinnedBuild holds a unit whose go command builds and links (a module's
+// test binaries, a roster program) to BuildSlots, pinned there by
+// WidePinnedEnv. MEASURED (merge gates of 2026-11-20): a program build held
+// to one slot used 1.17-1.45 cores, the go command compiling one package at
+// a time while its compiler and linker ran on both of their GOMAXPROCS.
+func pinnedBuild(sp run.Spec) run.Spec {
 	sp.Env = WidePinnedEnv(BuildSlots)
 	sp.Slots = BuildSlots
 	return sp
