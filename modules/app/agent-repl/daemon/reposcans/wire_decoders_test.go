@@ -163,6 +163,96 @@ func TestEveryEmacsDecoderListsExactlyItsMessagesFields(t *testing.T) {
 	}
 }
 
+// rosterRowOwnKeys matches the literal list of RosterRow's own fields in
+// agent-repl-wire--roster-row-keys, and rosterRowArms the status arm table
+// whose keys the list appends (wire-roster.el).
+var (
+	rosterRowOwnKeys = regexp.MustCompile(`\(defconst agent-repl-wire--roster-row-keys\s+\(append '\(([^)]*)\)\s+\(mapcar #'car agent-repl-wire-roster-row-status-arms\)\)`)
+	rosterRowArms    = regexp.MustCompile(`(?s)\(defconst agent-repl-wire-roster-row-status-arms\s+'\((.*?)\)\s+"`)
+	rosterRowArmKey  = regexp.MustCompile(`\((\w+)\s+:`)
+)
+
+// rosterRowKeys answers the keys SOURCE's RosterRow decoder lets through:
+// the row's own fields and every status arm's key. It fails when either
+// definition no longer has the shape this test reads.
+func rosterRowKeys(t *testing.T, source string) []string {
+	t.Helper()
+	own := rosterRowOwnKeys.FindStringSubmatch(source)
+	arms := rosterRowArms.FindStringSubmatch(source)
+	if own == nil || arms == nil {
+		t.Fatalf("wire-roster.el no longer defines agent-repl-wire--roster-row-keys as a literal list appended to the status arms' keys; teach this test its new shape")
+	}
+	keys := strings.Fields(own[1])
+	for _, arm := range rosterRowArmKey.FindAllStringSubmatch(arms[1], -1) {
+		keys = append(keys, arm[1])
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// TestTheRosterRowDecoderListsExactlyItsMessagesFields reads the one key
+// check whose list is built in code and rides every roster push. On
+// 2026-11-20 the row gained `open_owned_pull_request`, the list lacked it,
+// and Emacs refused every roster until the decoder was taught the field:
+// the literal scan above passes a computed list over.
+func TestTheRosterRowDecoderListsExactlyItsMessagesFields(t *testing.T) {
+	// Arrange
+	source, err := os.ReadFile(filepath.Join(moduleRootDir(t), "lisp", "wire-roster.el"))
+	if err != nil {
+		t.Fatalf("read wire-roster.el: %v", err)
+	}
+	var want []string
+	for _, m := range schema()["RosterRow"] {
+		if m.ParentFile().Package() == "frontend.v1" {
+			want = jsonNames(m)
+		}
+	}
+	if want == nil {
+		t.Fatalf("the schema has no frontend.v1.RosterRow")
+	}
+
+	// Act
+	got := rosterRowKeys(t, string(source))
+
+	// Assert
+	if !slices.Equal(got, want) {
+		t.Fatalf("wire-roster.el's RosterRow decoder does not list exactly its fields:\n  lists   %v\n  message %v", got, want)
+	}
+}
+
+func TestRosterRowKeysReadsTheOwnFieldsAndEveryStatusArm(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		want   []string
+	}{
+		{
+			name: "own fields and arms, sorted",
+			source: `(defconst agent-repl-wire-roster-row-status-arms
+  '((thinking :thinking decode-thinking)
+    (vendorSilent :vendor-silent
+                  decode-vendor-silent))
+  "Arms.")
+(defconst agent-repl-wire--roster-row-keys
+  (append '(workspace name)
+          (mapcar #'car agent-repl-wire-roster-row-status-arms))
+  "Keys.")`,
+			want: []string{"name", "thinking", "vendorSilent", "workspace"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := rosterRowKeys(t, tc.source)
+
+			// Assert
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("rosterRowKeys = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestEveryNarrowingNamesAFieldItsMessageHas(t *testing.T) {
 	// Arrange
 	messages := schema()

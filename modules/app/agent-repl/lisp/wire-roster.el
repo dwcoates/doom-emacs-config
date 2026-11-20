@@ -286,6 +286,19 @@ unknown fields, and refusing this one would drop every roster push."
   (agent-repl-wire--decode-empty "RosterRowMergeTurn" value)
   t)
 
+(defun agent-repl-wire-decode-roster-row-open-owned-pull-request (value)
+  "Decode VALUE as `RosterRowOpenOwnedPullRequest' and return t.
+The OPEN-OWNED-PULL-REQUEST marker: the workspace owns a pull request
+that is still open.  EMPTY, and PRESENCE IS THE FACT, as for the markers
+above.
+
+EMACS DECODES IT AND DRAWS NOTHING FROM IT.  The marker inks green the
+duration of the webapp sidebar\='s open row (owner request, 2026-11-19).
+It is decoded because the codec refuses unknown fields, and refusing this
+one dropped every roster push (deploy of 2026-11-20 06:29Z)."
+  (agent-repl-wire--decode-empty "RosterRowOpenOwnedPullRequest" value)
+  t)
+
 (defun agent-repl-wire-decode-roster-row-opening (value)
   "Decode VALUE as `RosterRowOpening' and return t.
 The OPENING marker: the editor is opening this workspace, whose status
@@ -840,7 +853,7 @@ unknown field by the row's key check."
    "RosterRow" 'status value agent-repl-wire-roster-row-status-arms))
 
 (defconst agent-repl-wire--roster-row-keys
-  (append '(workspace attention priority viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
+  (append '(workspace attention priority viewed viewDwell idleAsyncUnread reviving detachedLive oneShot opening asyncMerging mergePaused mergeTurn openOwnedPullRequest lastSelected lastTurnEnded lastTurnBoundary lastTurnStarted closure lastUpdated availability name repository current when detail closed)
           (mapcar #'car agent-repl-wire-roster-row-status-arms))
   "Every key `RosterRow' may carry: its own fields plus the 22 status arms.")
 
@@ -849,7 +862,8 @@ unknown field by the row's key check."
 Returns `(:workspace W :attention A :priority P :viewed V
 :view-dwell VD :idle-async-unread IU :reviving R
 :detached-live DL :one-shot OS :opening O :async-merging AM
-:merge-paused MP :merge-turn MT :last-selected L :last-turn-ended LT
+:merge-paused MP :merge-turn MT :open-owned-pull-request OP
+:last-selected L :last-turn-ended LT
 :last-turn-boundary LB :last-turn-started LS :closure CL
 :last-updated LU
 :availability AV
@@ -901,6 +915,10 @@ nests its rows in its own row type (`RosterOpenRow', `RosterHiddenRow')."
            :merge-turn (agent-repl-wire--decode-optional-message
                         "RosterRow" 'mergeTurn object
                         #'agent-repl-wire-decode-roster-row-merge-turn)
+           :open-owned-pull-request
+           (agent-repl-wire--decode-optional-message
+            "RosterRow" 'openOwnedPullRequest object
+            #'agent-repl-wire-decode-roster-row-open-owned-pull-request)
            :last-selected (agent-repl-wire--decode-optional-message
                            "RosterRow" 'lastSelected object
                            #'agent-repl-wire-decode-roster-row-last-selected)
