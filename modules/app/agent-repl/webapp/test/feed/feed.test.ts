@@ -2573,9 +2573,17 @@ describe("createFeedTail", () => {
     document.body.replaceChildren();
   });
 
-  /** The page's scroll zone: a 300px viewport over the feed's rows, one row at TOP. */
-  function zone(top: number) {
+  /**
+   * The page's scroll zone: a 300px viewport over 1000px of the feed's rows,
+   * scrolled to SCROLLTOP, one row at TOP.
+   */
+  function zone(top: number, scrollTop = 700) {
     const box = document.createElement("div");
+    Object.defineProperties(box, {
+      scrollHeight: { configurable: true, get: () => 1000 },
+      clientHeight: { configurable: true, get: () => 300 },
+      scrollTop: { configurable: true, writable: true, value: scrollTop },
+    });
     const host = document.createElement("main");
     const row = document.createElement("div");
     row.className = "feed-item";
@@ -2597,7 +2605,7 @@ describe("createFeedTail", () => {
     expect(box.lastElementChild?.className).toBe(SCROLL_FLOOR_CLASS);
   });
 
-  it("latches the follow when the column's latest entry is in view", () => {
+  it("latches the follow when the view stands at the tail", () => {
     // Arrange
     const { box, host } = zone(100);
     const tail = createFeedTail(box, host);
@@ -2607,9 +2615,10 @@ describe("createFeedTail", () => {
     expect(tail.isFollowing()).toBe(true);
   });
 
-  it("does not latch the follow when the column's latest entry is out of view", () => {
-    // Arrange
-    const { box, host } = zone(900);
+  it("does not latch the follow when the view stands above the tail, the latest entry in view", () => {
+    // Arrange — 50px above the tail (700), beyond PIN_PX (owner ruling,
+    // 2026-11-20: seeing the latest entry no longer latches).
+    const { box, host } = zone(100, 650);
     const tail = createFeedTail(box, host);
     // Act
     tail.onScroll();
