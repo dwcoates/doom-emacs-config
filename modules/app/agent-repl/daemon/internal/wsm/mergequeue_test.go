@@ -1635,9 +1635,9 @@ func TestPrioritizeMergePlacesTheMerge(t *testing.T) {
 			wantMoved: true,
 		},
 		{
-			name:      "past a request standing between",
+			name:      "past a request standing between, which keeps its place",
 			steps:     []moveStep{{"a", "queued"}, {"p", "requested"}, {"m", "queued"}},
-			wantOrder: []string{"m", "a", "p"},
+			wantOrder: []string{"m", "p", "a"},
 			wantMoved: true,
 		},
 		{
@@ -3314,5 +3314,163 @@ func TestRemoveMergeQueueEntryDropsOnlyARecordNoLeaseHolds(t *testing.T) {
 	}
 	if record, found, err := s.MergeProgressOf(ctx, wss[1]); err != nil || !found || record.Lease != headLease {
 		t.Fatalf("MergeProgressOf(head) = %+v, %v, %v; want the leased record kept", record, found, err)
+	}
+}
+
+// reorderWaitingOf runs reorderWaiting on the queue's waiting line in one
+// queue write, answering whether the order changed.
+func reorderWaitingOf(t *testing.T, s *store, repo RepoKey, id WorkspaceID, target int, front bool) bool {
+	t.Helper()
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		t.Fatalf("normalizeRepoKey: %v", err)
+	}
+	var moved bool
+	err = s.writeQueue(context.Background(), "test.reorder_waiting", dlog.Context{}, key, func(ctx context.Context, tx *sql.Tx) error {
+		waiting, err := waitingInLine(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		moved, err = reorderWaiting(ctx, tx, key, waiting, id, target, front)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("reorderWaiting: %v", err)
+	}
+	return moved
+}
+
+// frontMarkOf answers the front mark of ID's queue entry.
+func frontMarkOf(t *testing.T, s *store, repo RepoKey, id WorkspaceID) bool {
+	t.Helper()
+	entries, err := s.MergeQueue(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("MergeQueue: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.Workspace == id {
+			return entry.Source.Front
+		}
+	}
+	t.Fatalf("no queue entry for %s", id)
+	return false
+}
+
+func TestReorderWaitingPutsTheMergeOnItsWaitingPlace(t *testing.T) {
+	// Each case puts "m" on a waiting place of r (admitted), a, p (requested), b, m.
+	tests := []struct {
+		name      string
+		target    int
+		wantOrder []string
+		wantMoved bool
+	}{
+		{name: "the head of the waiting line", target: 0, wantOrder: []string{"r", "m", "p", "a", "b"}, wantMoved: true},
+		{name: "a middle place", target: 1, wantOrder: []string{"r", "a", "p", "m", "b"}, wantMoved: true},
+		{name: "its own place", target: 2, wantOrder: []string{"r", "a", "p", "b", "m"}, wantMoved: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, []moveStep{{"r", "admitted"}, {"a", "queued"}, {"p", "requested"}, {"b", "queued"}, {"m", "queued"}})
+
+			// Act
+			moved := reorderWaitingOf(t, s, repo, named["m"], tt.target, false)
+
+			// Assert
+			if moved != tt.wantMoved {
+				t.Fatalf("moved = %v, want %v", moved, tt.wantMoved)
+			}
+			if got := lettersOf(t, s, repo, named); !slices.Equal(got, tt.wantOrder) {
+				t.Fatalf("queue = %v, want %v", got, tt.wantOrder)
+			}
+		})
+	}
+}
+
+func TestReorderWaitingSetsTheFrontMarkOnlyWhenTheOrderChanges(t *testing.T) {
+	tests := []struct {
+		name      string
+		target    int
+		wantFront bool
+	}{
+		{name: "a move marks the merge as asked", target: 0, wantFront: true},
+		{name: "a merge left on its place keeps its mark", target: 1, wantFront: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, []moveStep{{"a", "queued"}, {"m", "queued"}})
+
+			// Act
+			reorderWaitingOf(t, s, repo, named["m"], tt.target, true)
+
+			// Assert
+			if got := frontMarkOf(t, s, repo, named["m"]); got != tt.wantFront {
+				t.Fatalf("m's front mark = %v, want %v", got, tt.wantFront)
+			}
+		})
+	}
+}
+
+func TestReorderWaitingPanicsOnAPlaceOutsideTheWaitingLine(t *testing.T) {
+	for _, target := range []int{-1, 2} {
+		t.Run(fmt.Sprintf("place %d", target), func(t *testing.T) {
+			// Arrange: the place is checked before the transaction is touched.
+			waiting := []waitingRow{{workspace: "a", seq: 1}, {workspace: "m", seq: 2}}
+			defer func() {
+				// Assert
+				if recover() == nil {
+					t.Fatalf("reorderWaiting(%d) did not panic", target)
+				}
+			}()
+
+			// Act
+			_, _ = reorderWaiting(context.Background(), nil, "", waiting, "m", target, false)
+		})
+	}
+}
+
+// TestEveryWaitingReorderPassesOnlyWaitingMerges pins that every store verb
+// that moves a waiting merge reorders through reorderWaiting: each moves "m"
+// to the head of r (admitted), a, p (requested), m, and each leaves the
+// admitted merge and the request on their places.
+func TestEveryWaitingReorderPassesOnlyWaitingMerges(t *testing.T) {
+	tests := []struct {
+		name string
+		move func(s *store, repo RepoKey, named map[string]WorkspaceID) (bool, error)
+	}{
+		{name: "MoveMerge", move: func(s *store, repo RepoKey, named map[string]WorkspaceID) (bool, error) {
+			outcome, err := s.MoveMerge(context.Background(), repo, named["m"], MergeMoveUp)
+			return outcome.Moved(), err
+		}},
+		{name: "MoveMergeTo", move: func(s *store, repo RepoKey, named map[string]WorkspaceID) (bool, error) {
+			return s.MoveMergeTo(context.Background(), repo, named["m"], named["a"], MergeSideAheadOf)
+		}},
+		{name: "PrioritizeMerge", move: func(s *store, repo RepoKey, named map[string]WorkspaceID) (bool, error) {
+			return s.PrioritizeMerge(context.Background(), repo, named["m"])
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, []moveStep{{"r", "admitted"}, {"a", "queued"}, {"p", "requested"}, {"m", "queued"}})
+
+			// Act
+			moved, err := tt.move(s, repo, named)
+
+			// Assert
+			if err != nil || !moved {
+				t.Fatalf("move = %v, %v; want moved", moved, err)
+			}
+			if got, want := lettersOf(t, s, repo, named), []string{"r", "m", "p", "a"}; !slices.Equal(got, want) {
+				t.Fatalf("queue = %v, want %v", got, want)
+			}
+		})
 	}
 }
