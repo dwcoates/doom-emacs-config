@@ -168,8 +168,8 @@ func (o *orchestrator) resumeRemediationFinishes(ctx context.Context) {
 
 // startRemediationFinish runs finish F from the step it stands at, inside
 // the mediation's lifetime, unless a run of it is already going here. A
-// finish just accepted (STANDBY) first stands its workspace by.
-func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, standBy bool) {
+// finish just accepted (ACCEPTED) first waits for the turn that finished.
+func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, accepted bool) {
 	life, leave, entered := o.enterMediation()
 	if !entered {
 		o.deps.Log.Global().Info(opRemediationFinish, mediationNotRun, dlog.Context{"workspace": string(f.Workspace)})
@@ -193,8 +193,8 @@ func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, standBy b
 			delete(o.remediationRuns, f.Workspace)
 			o.mu.Unlock()
 		}()
-		if standBy {
-			o.standFinishedBy(life, f)
+		if accepted {
+			o.awaitFinishingTurn(life, f)
 		}
 		o.runRemediationFinish(life, f)
 	}
@@ -205,36 +205,30 @@ func (o *orchestrator) startRemediationFinish(f wsm.RemediationFinish, standBy b
 	inflight.Go(run)
 }
 
-// standFinishedBy stands the workspace of finish F by and republishes its
-// queue. THE WORKSPACE STANDS BY ONCE THE TURN THAT FINISHED ENDS (owner
-// ruling, 2026-11-17, replacing 2026-11-16's stand-by at once): it leaves the working rows for its repository's
-// `TESTING ZETTEL FIXES` label. CTX IS THE MEDIATION'S LIFETIME, NEVER THE
-// FINISH REQUEST'S: the session the stand-by ends is the one that sent the
-// request, so ending it cancels the request's context mid-stand-by. A
-// stand-by that fails is recorded and the finish goes on: the fix still
-// lands, with the workspace still drawn.
-func (o *orchestrator) standFinishedBy(ctx context.Context, f wsm.RemediationFinish) {
-	// THE STAND-BY WAITS FOR THE TURN THAT FINISHED, never cuts it (owner
-	// ruling, 2026-11-17): a finish command cut mid-run is saved in the
-	// transcript as "User rejected tool use", which the fixer then read as
-	// the user's rejection of its own finish.
+// awaitFinishingTurn waits for the turn that finished F to end before its
+// gate runs, then republishes its queue: the gate reads the worktree the
+// turn worked in. THE TURN IS NEVER CUT (owner ruling, 2026-11-17): a finish
+// command cut mid-run is saved in the transcript as "User rejected tool use",
+// which the mediator then read as the user's rejection of its own finish.
+// ITS SESSION RUNS ON (owner ruling, 2026-11-20): the mediator stands in
+// remote control for good, and ending its session after a finish severed the
+// user's connection to it. CTX IS THE MEDIATION'S LIFETIME, NEVER THE FINISH
+// REQUEST'S. An await that fails is recorded and the finish goes on: the fix
+// still lands.
+func (o *orchestrator) awaitFinishingTurn(ctx context.Context, f wsm.RemediationFinish) {
+	defer o.republishMediation(ctx, f.Repo)
+	fields := dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo)}
 	open, err := o.deps.DB.OpenTurns(ctx, f.Workspace)
 	if err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace's open turns could not be read; it does not stand by", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "error": err.Error()})
-		o.republishMediation(ctx, f.Repo)
+		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace's open turns could not be read; its gate runs without waiting for them", withField(fields, "error", err.Error()))
 		return
 	}
 	for _, turn := range open {
 		if _, err := o.deps.AwaitTurnEnd(ctx, f.Workspace, turn.ID); err != nil {
-			o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace's turn could not be awaited; it does not stand by", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "turn": string(turn.ID), "error": err.Error()})
-			o.republishMediation(ctx, f.Repo)
+			o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace's turn could not be awaited; its gate runs without waiting for it", withField(withField(fields, "turn", string(turn.ID)), "error", err.Error()))
 			return
 		}
 	}
-	if err := o.deps.DeployChecks.StandBy(ctx, f.Workspace); err != nil {
-		o.deps.Log.Global().Error(opRemediationFinish, "the finished workspace could not stand by; its session runs on and it stays among the working rows", dlog.Context{"workspace": string(f.Workspace), "repo": string(f.Repo), "error": err.Error()})
-	}
-	o.republishMediation(ctx, f.Repo)
 }
 
 // runRemediationFinish carries finish F on from its step to the deploy.

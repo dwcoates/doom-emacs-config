@@ -851,12 +851,6 @@ type DeployCheckWorkspaces interface {
 	// CloseSelf closes a deploy check workspace, at its running turn's end
 	// when one runs, answering whether it waits for that end.
 	CloseSelf(ctx context.Context, ws ids.WorkspaceID) (bool, error)
-	// StopNow ends a deploy check workspace at once, its session killed
-	// mid-turn: a chain's end never lets its intake's turn run on.
-	StopNow(ctx context.Context, ws ids.WorkspaceID) error
-	// StandBy ends the session of a remediation or escalation whose finish
-	// was accepted, keeping it open and in sight until its fix deploys.
-	StandBy(ctx context.Context, ws ids.WorkspaceID) error
 	// Resume shows a hidden deploy check workspace again: the mediator
 	// stands in sight for good, so any hide of it is undone.
 	Resume(ctx context.Context, ws ids.WorkspaceID) error

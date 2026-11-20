@@ -116,7 +116,7 @@ type orchestrator struct {
 	github map[ids.WorkspaceID]GithubDeployment
 	// finishing is the step each deploy mediator whose direct finish is under
 	// way stands at (remediationsurface.go): the finish's share of what the
-	// surfaces draw, so a mediator standing by is drawn at work, never dead.
+	// surfaces draw, so a mediator whose finish runs is drawn at that work.
 	finishing map[ids.WorkspaceID]finishSurface
 	// running is the run HOLDING each repository's slot: the HEAD, the one
 	// merge that may move the target. A second admission for one repository

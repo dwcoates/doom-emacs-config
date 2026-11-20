@@ -140,54 +140,6 @@ func TestADeployMediatorWhoseEffortCannotBeSetIsRecorded(t *testing.T) {
 	}
 }
 
-func TestAStoppedDeployCheckWorkspaceIsKilledAndLeftOpen(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
-
-	// Act
-	err := f.verbs.(*verbs).StopDeployCheck(context.Background(), ws)
-
-	// Assert
-	if err != nil || len(f.shim.killedSession) != 1 || !f.shim.killedSession[0] {
-		t.Fatalf("StopDeployCheck = %v, kills %v; want one forced kill", err, f.shim.killedSession)
-	}
-	if closures := f.db.closures[ws]; len(closures) != 0 || f.db.closedFlags[ws] {
-		t.Fatalf("close records = %+v, want the standing workspace left open", closures)
-	}
-	if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: "info", Operation: opDeployChecks,
-		Message: "stopped the deploy check workspace's session after its turn ended; the workspace stays open"}); !ok {
-		t.Fatalf("records = %+v, want the stop recorded", f.log.logger.Records())
-	}
-}
-
-func TestStoppingAnUnknownDeployCheckWorkspaceKillsNothing(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-
-	// Act
-	err := f.verbs.(*verbs).StopDeployCheck(context.Background(), "no-such-workspace")
-
-	// Assert
-	if err == nil || len(f.shim.killedSession) != 0 {
-		t.Fatalf("StopDeployCheck = %v, kills %v; want a refusal and no kill", err, f.shim.killedSession)
-	}
-}
-
-func TestAFinishedDeployCheckWorkspaceStandsByInSightAndOpen(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	ws := f.workspace("w1", t.TempDir()).ID
-
-	// Act
-	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws)
-
-	// Assert
-	if err != nil || len(f.shim.killedSession) != 1 || f.db.workspaces[ws].Hidden || f.db.closedFlags[ws] {
-		t.Fatalf("StandByDeployCheck = %v, kills %v, record %+v; want its session killed, in sight and still open", err, f.shim.killedSession, f.db.workspaces[ws])
-	}
-}
-
 func TestCompactDeployCheck(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -309,7 +261,8 @@ func TestAResumedDeployCheckWorkspaceIsShownAgain(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
 	ws := f.workspace("w1", t.TempDir()).ID
-	if err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), ws); err != nil {
+	// An earlier build hid it.
+	if _, err := f.db.HideFamily(context.Background(), ws, time.Unix(0, 0)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -391,20 +344,6 @@ func fixerWithChild(t *testing.T, f *fixture) (fixer, child ids.WorkspaceID) {
 	record.Parent = &fixer
 	f.db.workspaces[record.ID] = record
 	return fixer, record.ID
-}
-
-func TestStandingTheFixerByLeavesItAndTheWorkspacesItMadeInSight(t *testing.T) {
-	// Arrange
-	f := newFixture(t)
-	fixer, child := fixerWithChild(t, f)
-
-	// Act
-	err := f.verbs.(*verbs).StandByDeployCheck(context.Background(), fixer)
-
-	// Assert
-	if err != nil || f.db.workspaces[fixer].Hidden || f.db.workspaces[child].Hidden || len(f.shim.killedSession) != 1 {
-		t.Fatalf("StandByDeployCheck = %v, fixer hidden %v, child hidden %v, kills %v; want both in sight and one kill", err, f.db.workspaces[fixer].Hidden, f.db.workspaces[child].Hidden, f.shim.killedSession)
-	}
 }
 
 func TestResumingTheFixerShowsTheWorkspacesHiddenWithIt(t *testing.T) {

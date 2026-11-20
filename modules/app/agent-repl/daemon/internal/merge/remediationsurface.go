@@ -10,12 +10,11 @@ import (
 )
 
 // THE MEDIATOR'S FINISH IS DRAWN AS A MERGE (owner ruling, 2026-11-17). A
-// deploy mediator whose direct finish gates, lands or deploys stands by with
-// its session ended, which the footer drew as the `agent_repl_fault · dead`
-// fault. Its finish is surfaced as merge facts instead: "testing fix" while it
-// gates and lands, "deploying fix" while it deploys, and nothing once it is
-// sent back to fixing, deployed or ended, when the mediator's own session
-// arms stand again.
+// deploy mediator whose direct finish gates, lands or deploys is drawn at
+// that work, never idle: its finish is surfaced as merge facts, "testing fix"
+// while it gates and lands, "deploying fix" while it deploys, and nothing
+// once it is sent back to fixing, deployed or ended, when the mediator's own
+// session arms stand again.
 
 // finishSurface is a finish under way as the surfaces draw it: its step, and
 // the queue it lands in, so a queue's restatement touches only its own.

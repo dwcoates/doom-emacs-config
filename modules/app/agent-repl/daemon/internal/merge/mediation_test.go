@@ -255,14 +255,14 @@ func TestEachDeployOfTheChainIsToldToTheOneStandingIntake(t *testing.T) {
 	// Act
 	h.o.Mediate(context.Background())
 
-	// Assert: one mediator made and told of each deploy; its approval ends
-	// its session, and its dispatch leaves it running to fix.
+	// Assert: one mediator made and told of each deploy, its session never
+	// ended and nothing closed.
 	made := h.checks.made
 	if len(intakeTellings(h)) != 2 || !slices.Equal(made, []string{mediatorName}) {
 		t.Fatalf("mediator told %d times, made %v; want the one mediator told of each deploy", len(intakeTellings(h)), made)
 	}
-	if !slices.Equal(h.checks.stopped, []ids.WorkspaceID{"ws-fixer"}) || len(h.checks.closed) != 0 {
-		t.Fatalf("stopped %v, closed %v; want only the approval to end the mediator's session, and nothing closed", h.checks.stopped, h.checks.closed)
+	if len(h.stoppedSessions) != 0 || len(h.checks.closed) != 0 {
+		t.Fatalf("stopped %v, closed %v; want the mediator's session left running, and nothing closed", h.stoppedSessions, h.checks.closed)
 	}
 }
 
@@ -304,8 +304,8 @@ func TestATurnThatDecidesNothingTwiceEscalatesAndHoldsTheQueue(t *testing.T) {
 		Message: "the intake's turn ended deciding nothing again after it was resumed to decide; the intake failed, and the check is escalated to the user"}); !ok {
 		t.Fatalf("records = %v, want the undecided check at ERROR", h.logs.Records())
 	}
-	if len(h.checks.stopped) != 0 {
-		t.Fatalf("stopped %v, want the mediator left to settle the escalation with the user", h.checks.stopped)
+	if len(h.stoppedSessions) != 0 {
+		t.Fatalf("stopped %v, want the mediator left to settle the escalation with the user", h.stoppedSessions)
 	}
 }
 
@@ -509,8 +509,8 @@ func TestDecideMediation(t *testing.T) {
 			if tt.wantHeld && heldEscalation(t, h) != "ws-fixer" {
 				t.Fatalf("check %+v, want it held by the escalation", owedCheck(t, h))
 			}
-			if len(h.checks.stopped) != 0 {
-				t.Fatalf("stopped %v, want the intake left to end the turn that decided", h.checks.stopped)
+			if len(h.stoppedSessions) != 0 {
+				t.Fatalf("stopped %v, want the mediator's session left running", h.stoppedSessions)
 			}
 		})
 	}
@@ -699,8 +699,8 @@ func TestACheckNoIntakeDecidesIsReleased(t *testing.T) {
 			if m := owedCheck(t, h); (m == nil) != tt.wantReleased {
 				t.Fatalf("still owed %+v, want released %v", m, tt.wantReleased)
 			}
-			if len(h.checks.stopped) != 0 {
-				t.Fatalf("stopped %v, want the intake never cut: its session ends with its turn", h.checks.stopped)
+			if len(h.stoppedSessions) != 0 {
+				t.Fatalf("stopped %v, want the mediator's session never ended", h.stoppedSessions)
 			}
 		})
 	}
@@ -725,37 +725,15 @@ func TestAChainThatEndsForgetsWhatItsRemediationsLanded(t *testing.T) {
 	}
 }
 
-func TestAnIntakeThatCannotBeStoppedAtItsTurnsEndIsRecorded(t *testing.T) {
-	// Arrange
-	h := checked(t)
-	owe(t, h)
-	decideInTurn(t, h, Decision{Kind: MediationApprove, Summary: "clean"})
-	h.checks.stopErr = errors.New("still busy")
-
-	// Act
-	h.o.Mediate(context.Background())
-
-	// Assert
-	if owedCheck(t, h) != nil {
-		t.Fatalf("check %+v, want the approval to release the queue regardless", owedCheck(t, h))
-	}
-	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: "the intake decided but its session could not be ended"}); !ok {
-		t.Fatalf("records = %v, want the failed stop at ERROR", h.logs.Records())
-	}
-}
-
-// TestOnlyAnApprovalEndsTheMediatorsSessionWhenItsTurnEnds covers the
-// owner's 2026-11-17 rulings: the session ends once the turn that decided
-// ended, with the decision already recorded, never mid-run; and the
-// mediator fixes what it dispatched and settles what it escalated, so those
-// leave its session running.
-func TestOnlyAnApprovalEndsTheMediatorsSessionWhenItsTurnEnds(t *testing.T) {
+// TestNoDecisionEndsTheMediatorsSessionWhenItsTurnEnds covers the owner's
+// 2026-11-20 ruling: the mediator stands in remote control for good, so the
+// daemon never ends its session, whatever its turn decided.
+func TestNoDecisionEndsTheMediatorsSessionWhenItsTurnEnds(t *testing.T) {
 	tests := []struct {
-		name        string
-		decision    Decision
-		wantStopped []ids.WorkspaceID
+		name     string
+		decision Decision
 	}{
-		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "clean"}, wantStopped: []ids.WorkspaceID{"ws-fixer"}},
+		{name: "an approval", decision: Decision{Kind: MediationApprove, Summary: "clean"}},
 		{name: "a dispatch", decision: Decision{Kind: MediationDispatch, Summary: "broken", Problems: aProblem}},
 		{name: "an escalation", decision: Decision{Kind: MediationEscalate, Summary: "yours"}},
 	}
@@ -765,14 +743,13 @@ func TestOnlyAnApprovalEndsTheMediatorsSessionWhenItsTurnEnds(t *testing.T) {
 			h := checked(t)
 			owe(t, h)
 			decideInTurn(t, h, tt.decision)
-			decided := decidedAtStop(t, h)
 
 			// Act
 			h.o.Mediate(context.Background())
 
 			// Assert
-			if !slices.Equal(h.checks.stopped, tt.wantStopped) || len(h.checks.closed) != 0 || (len(tt.wantStopped) > 0 && !*decided) {
-				t.Fatalf("stopped %v, decided at the stop %v, closed %v; want stopped %v after the decision, never closed", h.checks.stopped, *decided, h.checks.closed, tt.wantStopped)
+			if len(h.stoppedSessions) != 0 || len(h.checks.closed) != 0 {
+				t.Fatalf("stopped %v, closed %v; want the mediator's session left running and the workspace open", h.stoppedSessions, h.checks.closed)
 			}
 		})
 	}
@@ -1344,8 +1321,8 @@ func TestReleaseCheckEndsTheChainOfOnlyACheckItReleased(t *testing.T) {
 			if err != nil || released != tt.wantReleased {
 				t.Fatalf("releaseCheck = (%v, %v), want %v", released, err, tt.wantReleased)
 			}
-			if len(h.checks.stopped) != 0 {
-				t.Fatalf("stopped %v, want the intake never cut: its session ends with its turn", h.checks.stopped)
+			if len(h.stoppedSessions) != 0 {
+				t.Fatalf("stopped %v, want the mediator's session never ended", h.stoppedSessions)
 			}
 			if stillOwed := owedCheck(t, h) != nil; stillOwed == tt.wantReleased {
 				t.Fatalf("still owed %v, want %v", stillOwed, !tt.wantReleased)
@@ -1370,8 +1347,8 @@ func TestAnAwaitCutByTheIntakesOwnDecisionIsNoFailure(t *testing.T) {
 		wantLevel string
 		message   string
 	}{
-		{name: "a decision released the check, then stopped the intake", decide: true, wantLevel: "info",
-			message: "the intake's turn ended with its session, which its own decision stopped; the check is decided"},
+		{name: "a decision released the check before the await failed", decide: true, wantLevel: "info",
+			message: "the intake's turn could not be awaited after its check was decided; the check is decided"},
 		{name: "the session ended with the check still owed", wantLevel: "error",
 			message: "the intake's turn could not be awaited; the queue stays held until the next round"},
 	}

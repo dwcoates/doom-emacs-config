@@ -90,46 +90,6 @@ func (v *verbs) SetDeployMediatorEffort(ctx context.Context, ws wsm.WorkspaceID)
 	return nil
 }
 
-// StopDeployCheck implements Verbs: ends deploy check workspace WS's
-// session. The merge queue calls it once the intake's deciding turn ENDED
-// (owner ruling, 2026-11-17, replacing 2026-11-16's cut mid-turn): a cut
-// decision command was saved as "User rejected tool use", which the intake
-// then read as the user's rejection.
-//
-// THE WORKSPACE STAYS OPEN: a standing intake takes every check of its
-// repository (owner ruling, 2026-11-17), its conversation kept, and the next
-// check's brief starts its session again.
-func (v *verbs) StopDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
-	_, log, err := v.owned(ctx, "StopDeployCheck", ws)
-	if err != nil {
-		return err
-	}
-	if _, err := v.endSession(ctx, log, ws); err != nil {
-		return fmt.Errorf("stop the deploy check %s: %w", ws, err)
-	}
-	log.Info(opDeployChecks, "stopped the deploy check workspace's session after its turn ended; the workspace stays open", nil)
-	return nil
-}
-
-// StandByDeployCheck implements Verbs: a fixer whose finish the daemon
-// accepted has its session ended, once the turn that finished ended
-// (merge.orchestrator.standFinishedBy awaits it). IT STAYS IN SIGHT (owner
-// ruling, 2026-11-19, replacing 2026-11-17's hide): the mediator stands in
-// its repository's section for good, so its gate, landing and deploy are
-// watched where it stands. It stays open and warm
-// (wsm.Workspace.DeployMediator), and its next brief brings its session up.
-func (v *verbs) StandByDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
-	_, log, err := v.owned(ctx, "StandByDeployCheck", ws)
-	if err != nil {
-		return err
-	}
-	if _, err := v.endSession(ctx, log, ws); err != nil {
-		return fmt.Errorf("stand the deploy check %s by: %w", ws, err)
-	}
-	log.Info(opDeployChecks, "the finished deploy check workspace stands by: its session ended, in sight and open for its next brief", nil)
-	return nil
-}
-
 // CompactDeployCheck implements Verbs: compacts standing deploy check WS's
 // conversation by the cold gate's summarizer (Haiku) NOW, answering whether
 // it did (owner ruling, 2026-11-17): the compaction is owed to the session's
@@ -241,9 +201,8 @@ func (v *verbs) RefreshDeployCheck(ctx context.Context, ws wsm.WorkspaceID) erro
 	return v.advanceToParent(ctx, log, record, opDeployChecks, "refresh", "standing deploy fixer")
 }
 
-// ResumeDeployCheck implements Verbs: shows standing-by deploy check
-// workspace WS again, for the brief that sends it back to work; the brief's
-// prompt brings its session up.
+// ResumeDeployCheck implements Verbs: shows hidden deploy check workspace WS
+// again, for the brief that sends it back to work.
 func (v *verbs) ResumeDeployCheck(ctx context.Context, ws wsm.WorkspaceID) error {
 	_, log, err := v.owned(ctx, "ResumeDeployCheck", ws)
 	if err != nil {

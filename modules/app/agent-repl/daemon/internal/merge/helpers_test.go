@@ -4889,27 +4889,16 @@ type fakeDeployChecks struct {
 	// and closeErr fail them.
 	reopened, closed    []ids.WorkspaceID
 	reopenErr, closeErr error
-	// stopped records each deploy check stopped at once; stopErr fails it.
-	stopped []ids.WorkspaceID
-	stopErr error
-	// stoodBy and resumed record each finish's stand-by and each return to
-	// work; standByErr fails a stand-by.
-	stoodBy, resumed []ids.WorkspaceID
-	standByErr       error
+	// resumed records each return to work.
+	resumed []ids.WorkspaceID
 	// resumeErr fails every Resume.
 	resumeErr error
 	// refreshed and compacted record each fixer refresh and each compaction;
 	// refreshErr and compactErr fail them.
 	refreshed, compacted   []ids.WorkspaceID
 	refreshErr, compactErr error
-	// onStopNow runs inside each stop, as ending the stopped session does.
-	onStopNow func()
 	// createCtxErrs records each check workspace's creation context error.
 	createCtxErrs []error
-	// onStandBy runs inside each stand-by, as ending the finishing session
-	// does; standByCtxErrs records the stand-by context's error after it.
-	onStandBy      func()
-	standByCtxErrs []error
 	// efforts records each effort set, "ROLE:WS", and
 	// whether the role was recorded then; effortErr fails one.
 	efforts   []string
@@ -4965,17 +4954,6 @@ func (f *fakeDeployChecks) Reopen(_ context.Context, ws ids.WorkspaceID) error {
 	return f.reopenErr
 }
 
-func (f *fakeDeployChecks) StandBy(ctx context.Context, ws ids.WorkspaceID) error {
-	if f.onStandBy != nil {
-		f.onStandBy()
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.stoodBy = append(f.stoodBy, ws)
-	f.standByCtxErrs = append(f.standByCtxErrs, ctx.Err())
-	return f.standByErr
-}
-
 func (f *fakeDeployChecks) Refresh(_ context.Context, ws ids.WorkspaceID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -4995,16 +4973,6 @@ func (f *fakeDeployChecks) Resume(_ context.Context, ws ids.WorkspaceID) error {
 	defer f.mu.Unlock()
 	f.resumed = append(f.resumed, ws)
 	return f.resumeErr
-}
-
-func (f *fakeDeployChecks) StopNow(_ context.Context, ws ids.WorkspaceID) error {
-	if f.onStopNow != nil {
-		f.onStopNow()
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.stopped = append(f.stopped, ws)
-	return f.stopErr
 }
 
 func (f *fakeDeployChecks) CloseSelf(_ context.Context, ws ids.WorkspaceID) (bool, error) {
