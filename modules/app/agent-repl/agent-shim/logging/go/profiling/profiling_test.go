@@ -22,6 +22,7 @@ type sessionFixture struct {
 	Signal       string `json:"signal"`
 	MaxSeconds   int    `json:"max_seconds"`
 	LogLevelFile string `json:"log_level_file"`
+	ExitEnv      string `json:"exit_profile_env"`
 	Sessions     []struct {
 		ID    string `json:"id"`
 		Valid bool   `json:"valid"`
@@ -148,6 +149,9 @@ func TestTheContractMatchesTheSharedFixture(t *testing.T) {
 	}
 	if f.LogLevelFile != LogLevelFile {
 		t.Fatalf("LogLevelFile = %q, fixture %q", LogLevelFile, f.LogLevelFile)
+	}
+	if f.ExitEnv != ExitProfileEnvironment {
+		t.Fatalf("ExitProfileEnvironment = %q, fixture %q", ExitProfileEnvironment, f.ExitEnv)
 	}
 	if f.ArmedDir != ArmedDir {
 		t.Fatalf("ArmedDir = %q, fixture %q", ArmedDir, f.ArmedDir)

@@ -39,8 +39,16 @@
     "that level as a log level window (proto/vocab/log-level-window.json) for",
     "the longest a window may last, and closes it when its profile stops; the",
     "window reverts by itself at its end either way. An unreadable or unknown",
-    "level is a failed reconcile, recorded at error, and the profile still runs."
+    "level is a failed reconcile, recorded at error, and the profile still runs.",
+    "",
+    "A RUNTIME MAY PROFILE ITS WHOLE LIFE. Started with <exit_profile_env> naming",
+    "a directory, a runtime starts a CPU profile at once and writes it into that",
+    "directory when it stops: <runtime>-<pid>.cpu.pprof (Go) or",
+    "<runtime>-<pid>.cpuprofile (the shim). It is then not armed for a session.",
+    "A profiling test run sets it on every production process its harnesses",
+    "start, so a test's profile includes the daemon, store, sidecar and shims."
   ],
+  "exit_profile_env": "AGENT_REPL_EXIT_PROFILE_DIR",
   "log_level_file": "log-level",
   "root_env": "AGENT_REPL_PROFILE_ROOT",
   "default_root": "~/.cache/agent-repl/profiles",

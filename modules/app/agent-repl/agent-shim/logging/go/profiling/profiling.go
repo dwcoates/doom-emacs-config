@@ -96,6 +96,10 @@ const (
 	LevelOpened EventKind = "level_opened"
 	// LevelClosed is that window closed by the profile's stop.
 	LevelClosed EventKind = "level_closed"
+	// ExitStarted is a whole-life profile (ExitProfileEnvironment) started.
+	ExitStarted EventKind = "exit_started"
+	// ExitStopped is a whole-life profile written as its runtime stopped.
+	ExitStopped EventKind = "exit_stopped"
 )
 
 // Event is one thing a reconcile did, for the runtime to record in its own

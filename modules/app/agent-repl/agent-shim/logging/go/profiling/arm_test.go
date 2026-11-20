@@ -97,6 +97,10 @@ func TestDescribe(t *testing.T) {
 			want: Description{"profiling.level_opened", "info", "the profiling session raised the store's log level for its window", []Field{{"session", "s1"}, {"level", "debug"}, {"until", int64(1000300)}}}},
 		{name: "a level window closed names the runtime", event: Event{Kind: LevelClosed, Session: "s1", Level: "debug", Reason: "session_closed", Until: until},
 			want: Description{"profiling.level_closed", "info", "the profiling session's log level window closed; the store is back at info", []Field{{"session", "s1"}, {"level", "debug"}, {"reason", "session_closed"}, {"until", int64(1000300)}}}},
+		{name: "a whole-life start names its runtime and file", event: Event{Kind: ExitStarted, Files: []string{"/p/store-7.cpu.pprof"}},
+			want: Description{"profiling.exit_started", "info", "the store profiles its whole life and writes the profile when it stops", []Field{{"files", []string{"/p/store-7.cpu.pprof"}}}}},
+		{name: "a whole-life stop names its reason and file", event: Event{Kind: ExitStopped, Reason: "exit", Files: []string{"/p/store-7.cpu.pprof"}},
+			want: Description{"profiling.exit_stopped", "info", "the store stopped and wrote its whole-life profile", []Field{{"reason", "exit"}, {"files", []string{"/p/store-7.cpu.pprof"}}}}},
 		{name: "a failure is error with its cause", event: Event{Kind: Failed, Session: "s1", Reason: "start", Err: errors.New("boom")},
 			want: Description{"profiling.failed", "error", "runtime profiling could not do what the session asked", []Field{{"session", "s1"}, {"reason", "start"}, {"cause", "boom"}}}},
 	}

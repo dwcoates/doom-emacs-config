@@ -11,7 +11,18 @@ import (
 // runs Watch on its own goroutine. Off, it costs that one parked goroutine.
 // The returned stop ends any running profile and waits for the watcher to
 // leave.
+//
+// A runtime started with ExitProfileEnvironment set profiles its whole life
+// into that directory instead (StartExitProfile), and the returned stop
+// writes the profile.
 func Arm(runtime string, level LevelWindow, events func(Event), getenv func(string) string, home func() (string, error)) (func(), error) {
+	if dir := getenv(ExitProfileEnvironment); dir != "" {
+		stop, err := StartExitProfile(runtime, dir, events)
+		if err != nil {
+			return nil, fmt.Errorf("start the whole-life profile: %w", err)
+		}
+		return stop, nil
+	}
 	dir, err := home()
 	if err != nil && getenv(RootEnvironment) == "" {
 		return nil, fmt.Errorf("the profiles root needs a home directory: %w", err)
@@ -66,6 +77,12 @@ func Describe(runtime string, e Event) Description {
 	case LevelClosed:
 		return Description{"profiling.level_closed", "info", "the profiling session's log level window closed; the " + runtime + " is back at info",
 			[]Field{session, {"level", e.Level}, {"reason", e.Reason}, {"until", e.Until.Unix()}}}
+	case ExitStarted:
+		return Description{"profiling.exit_started", "info", "the " + runtime + " profiles its whole life and writes the profile when it stops",
+			[]Field{{"files", e.Files}}}
+	case ExitStopped:
+		return Description{"profiling.exit_stopped", "info", "the " + runtime + " stopped and wrote its whole-life profile",
+			[]Field{{"reason", e.Reason}, {"files", e.Files}}}
 	case Failed:
 		return Description{"profiling.failed", "error", "runtime profiling could not do what the session asked",
 			[]Field{session, {"reason", e.Reason}, {"cause", fmt.Sprint(e.Err)}}}
