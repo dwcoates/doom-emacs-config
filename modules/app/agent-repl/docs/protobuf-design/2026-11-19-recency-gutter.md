@@ -3,7 +3,7 @@
 The owner asked for every tab the recency walk (`s-[` older, `s-]` newer) can
 reach to wear a colored gutter bar on its Open-section row, left of its tab
 number: canonical orange when `s-[` reaches it in fewer presses, canonical
-purple when `s-]` does, at most the six nearest each way, and the fewer
+purple when `s-]` does, at most the two nearest each way, and the fewer
 presses the closer to the full color.
 
 ## Assumptions (autonomous design)
@@ -43,3 +43,6 @@ presses the closer to the full color.
 - Why: the gutter is one drawn box per row, so one element message; the arm is
   the color family, the count the shade. The shade itself is presentation the
   webapp maps from the count.
+
+- Amended 2026-11-20 (owner request): two per direction, not six, and two
+  shades: full at one press, the former sixth-press strength (27%) at two.

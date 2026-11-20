@@ -51,7 +51,7 @@ const (
 type ReportRecencyReachRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Every tab the walk reaches soonest, in no particular order: at most the
-	// six nearest in each direction. A workspace appears at most once (a
+	// two nearest in each direction. A workspace appears at most once (a
 	// second entry for one is Connect InvalidArgument). EMPTY = no tab has a
 	// reach (a bar with no other tab).
 	Reaches       []*RecencyReach `protobuf:"bytes,1,rep,name=reaches,proto3" json:"reaches,omitempty"`

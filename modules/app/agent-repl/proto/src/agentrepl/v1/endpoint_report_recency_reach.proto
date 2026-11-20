@@ -34,7 +34,7 @@ option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 message ReportRecencyReachRequest {
   // Every tab the walk reaches soonest, in no particular order: at most the
-  // six nearest in each direction. A workspace appears at most once (a
+  // two nearest in each direction. A workspace appears at most once (a
   // second entry for one is Connect InvalidArgument). EMPTY = no tab has a
   // reach (a bar with no other tab).
   repeated RecencyReach reaches = 1;
