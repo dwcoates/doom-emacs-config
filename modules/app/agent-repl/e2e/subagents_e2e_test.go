@@ -363,7 +363,7 @@ func testSubagentDetached(t *testing.T) {
 // Seam: vendor transcript -> sidecar -> daemon, a nested subagent's file-plane-only historical usage
 func testNestedSubagentHistoricalUsage(t *testing.T) {
 	// Arrange.
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 
 	// Act.
@@ -573,7 +573,7 @@ func testSubagentDetachedSurvivesAnInterjection(t *testing.T) {
 // Seam: shim -> daemon, a detached agent's responses interleaved with the main agent's blocks, each on its own feed
 func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 	// Arrange.
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	const (
 		thinking   = "Answering while the sweep runs."

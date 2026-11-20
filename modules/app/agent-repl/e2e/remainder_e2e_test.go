@@ -143,12 +143,12 @@ import (
 // writers once.
 // ---------------------------------------------------------------------------
 
-// rmNewWorkspace builds one World and registers a fresh fake repository
-// (harness.NewRepo — the scripted fake git, never the real binary) as its
-// workspace.
+// rmNewWorkspace takes the shared World and registers a fresh fake
+// repository (harness.NewRepo — the scripted fake git, never the real binary)
+// as its workspace.
 func rmNewWorkspace(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef) {
 	t.Helper()
-	w := stack.NewWorld(t, stack.WorldOpts{})
+	w := stack.SharedWorld(t)
 	ws := w.NewWorkspace(t)
 	return w, ws
 }

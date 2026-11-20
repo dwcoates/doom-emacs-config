@@ -65,11 +65,14 @@ const (
 	stopReplayMessage = "fake vendor replays a task STOPPED by the rewind and answers it in a turn of its OWN before the next send"
 )
 
-// keepaliveWorld is a world whose shims beat their keep-alive fast enough to
-// observe, with one registered workspace.
+// keepaliveWorld is the keep-alive GROUP world (stack.GroupWorld): one World
+// whose shims beat their keep-alive fast enough to observe, shared by every
+// step that needs that interval, each on a fresh registered workspace of its
+// own. A daemon option is the group's precondition, never a reason for a
+// World per step.
 func keepaliveWorld(t *testing.T) (*stack.World, *workspacev1.WorkspaceRef, string) {
 	t.Helper()
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.GroupWorld(t, "keepalive", stack.WorldOpts{DaemonOpts: harness.Opts{
 		KeepaliveInterval: keepaliveTestInterval,
 	}})
 	repo, ws := w.NewRepoWorkspace(t)
