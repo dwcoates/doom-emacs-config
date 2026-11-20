@@ -304,12 +304,18 @@ to every harness, fake and fixture a test uses, in every language.
 
 ### Sharing by suite
 
+Each suite's entry names how a new test takes the shared process; its AGENTS.md
+section holds the rest.
+
 - **Daemon integration (`daemon/integration`)**: a case takes the canonical daemon with `newCanonical(t)`, `newCanonicalRegistered(t)` or `canonicalView(t)`; its slice is its own repository and workspace, and an id it mints (a turn id, a URL a stub records) carries its workspace id, since a turn id is unique across the daemon.
   - A case that changes daemon-wide state takes its group with `newInGroup(t, group)`; only a case whose subject is the daemon's own lifecycle starts a fresh daemon; a view's idle barrier (`ExpectNoPush`, `ExpectFileUnchanged`) waits only for its own workspaces' work.
   - The rest: `daemon/AGENTS.md`, "The integration suite's canonical daemon".
 - **webapp integration** (`webapp/test/integration/`): `const shared = sharedMount(options)` at a file's top, then `harness = await shared()` in a case; a case's slice is its own turn (its rows, removed at its end) and its own fake-daemon script and calls.
   - The mount is per FILE, not per worker, because the setup resets the page before each file; chrome (footer, topbar, rail) is pushed onto it, and what a case opens through a control is undone by the file's `endCase`.
   - The rest: `webapp/AGENTS.md`, "Integration cases share one mounted app".
+- **shim** (`agent-shim/claude/shim`): a case takes the file's shim with `canonicalSession()` (`test/integration-support/canonical.ts`); a shim hosts ONE session, so a case's slice is its turns.
+  - Mint ids with `uniqueTurn()`, hand every one to `endsTurn`, and read the store, log and transcript through `since(...)`; a shared precondition is a `groupShim`/`groupSession` key.
+  - The rest: `agent-shim/claude/shim/AGENTS.md`, "Integration cases share the canonical shim".
 
 ### Finding and fixing a flake
 

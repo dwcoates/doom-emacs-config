@@ -1914,29 +1914,46 @@ suite (`test/integration-support/canonical.ts`).
 
 - **The canonical shim.** Each integration file has ONE shim and ONE session,
   spawned on first use and torn down by the file's `afterAll(releaseShared)`.
-  A case takes it with `canonicalSession()` (the shim, the one `StartSession`
-  answer and its `SessionStarted`), or with `canonicalShimBeforeSession()` when
-  its subject is a refusal of a shim with no session; such cases come first in
-  their file, and one asked for after the session started throws.
-- **A case's slice is its turns** (a shim hosts one session, and the fake
-  vendor picks each turn's behavior from its prompt text), and everything a
-  turn makes: its runs, units, asks, rows and book entries. A case mints its
-  turn ids with `uniqueTurn()`, never a literal `"t1"`, asserts only on what its
-  own ids name (a whole-store or whole-transcript count is rewritten to its own
-  keys; `store.tailOpened(before)` passes over the tails siblings opened), and
-  ends any turn or work it leaves open (`endTurn`) before it returns.
-- **A case observing the session start** reads the canonical session's one
-  `StartSession` answer; a second start on the same shim answers
-  `alreadyStarted`.
-- **A group shim** serves every case of a file that needs the same spawn
-  precondition (an `AGENT_REPL_FAKE_*` environment, a store page size, a
-  session-wide mode its cases change): `groupShim(KEY, OPTIONS)`. A key always
-  names the same options; asking with others throws. A new case needing a
-  precondition joins the group that already names it.
-- **A fresh shim** (`spawnShim`) is only for a case whose subject is the shim's
-  or its session's own lifecycle: startup and its refusals, SIGTERM or SIGKILL
-  stand-down, resume of a prior process's directories (`reuse:`), lock and
-  socket contention. The case says which.
+  A case takes it with `canonicalSession()`: the shim, the one `StartSession`
+  answer (`response`) and its `SessionStarted` (`started`).
+- **A case's slice is its turns**, because a shim hosts exactly one session and
+  the fake vendor picks each turn's behavior from its prompt text, and
+  everything a turn makes: its runs, units, asks, rows and book entries.
+  - Turn ids come from `uniqueTurn()`, never a literal `"t1"`: a turn id is
+    started once per session.
+  - Every turn a case starts is handed to `endsTurn(shim, ...turns)` right
+    after it is minted. When the case finishes, pass or fail, the open one is
+    killed and the case waits for its terminal row to land, so no sibling
+    starts on a held turn or reads this case's late rows. A turn that is
+    refused and never opens is not handed over.
+  - What a case reads of the shared store, log and transcript is its own
+    slice: `since(shim, [vendorSessionId])` marks them before the case acts
+    and answers only what came after (`writes`, `writeBatches`, `records`,
+    `record`, `transcript`, `unserved`, `landed`). Spools are filtered to the
+    task ids that did not exist before the case, and `store.tailOpened(before)`
+    passes over the tails siblings opened.
+- **A start observer** reads the canonical session's one `StartSession`
+  answer. A case whose subject needs the session untouched (nothing yet in the
+  transcript, GetLiveWork read once) sits in its file's first describe.
+- **A group shim** serves every case of a file that needs the same
+  precondition: `groupShim(KEY, OPTIONS)`, or `groupSession(KEY, OPTIONS)` with
+  its one session. A key always names the same options. A new case needing a
+  precondition joins the group that names it. The groups so far:
+  - `no-session` (session.test.ts): a shim no case starts a session on, for
+    every refusal of a shim with no session.
+  - `store-outage` (record.test.ts): the outage cases, one after another, each
+    recovering the store and waiting for its held rows to land before it
+    returns.
+  - `rotation` (record.test.ts): ONE `!rotate`, after one ordinary turn, which
+    every rotation case observes (`rotation()`).
+  - `permission-mode` (gate.test.ts): the cases that move the session's
+    permission mode, each restoring the default when it finishes.
+- **A fresh shim** (`spawnShim`) is only for a case whose subject is the
+  shim's or its session's own lifecycle (startup and its refusals, SIGTERM or
+  SIGKILL stand-down, a forced KillSession, a query that dies, a resume of a
+  prior process's directories with `reuse:`, lock and socket contention), or
+  whose work outlives its turn in a way no case can end by id (a live subagent
+  whose adopted vendor turn stays open). The case says which.
 
 ### Every run's temp files live under one root the run owns
 
