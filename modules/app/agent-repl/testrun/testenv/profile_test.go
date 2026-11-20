@@ -2,6 +2,7 @@ package testenv
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -154,5 +155,50 @@ func TestExitProfileEnvFor(t *testing.T) {
 				t.Fatalf("ExitProfileEnvFor = %q, %q, %v; want %q, %q", env, dir, err, tt.wantEnv, tt.wantDir)
 			}
 		})
+	}
+}
+
+func TestExitProfileReadsTheProcesssEnvironment(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	t.Setenv(ProfileDir, root)
+
+	// Act
+	env, dir := ExitProfile(t)
+
+	// Assert
+	want := filepath.Join(root, ProfileName(t.Name()))
+	if dir != want || !slices.Equal(env, []string{ExitProfileEnv + "=" + want}) {
+		t.Fatalf("ExitProfile = %q, %q; want the test's own directory %s", env, dir, want)
+	}
+}
+
+// fatalTB records a Fatalf instead of ending the test.
+type fatalTB struct {
+	testing.TB
+	name, fatal string
+}
+
+func (f *fatalTB) Helper()      {}
+func (f *fatalTB) Name() string { return f.name }
+func (f *fatalTB) Fatalf(format string, args ...any) {
+	f.fatal = fmt.Sprintf(format, args...)
+}
+
+func TestExitProfileFailsTheTestWhoseDirectoryCannotBeMade(t *testing.T) {
+	// Arrange
+	blocked := filepath.Join(t.TempDir(), "a-file")
+	if err := os.WriteFile(blocked, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(ProfileDir, blocked)
+	tb := &fatalTB{name: "TestB"}
+
+	// Act
+	ExitProfile(tb)
+
+	// Assert
+	if !strings.Contains(tb.fatal, "create the profiles directory of TestB") {
+		t.Fatalf("Fatalf = %q, want the directory's failure", tb.fatal)
 	}
 }

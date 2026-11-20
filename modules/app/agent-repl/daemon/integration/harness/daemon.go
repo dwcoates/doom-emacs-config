@@ -1029,10 +1029,7 @@ func StartDaemon(t testing.TB, opts Opts) *Daemon {
 		env = append(env, nodeCov...)
 	}
 	// A PROFILING RUN PROFILES THE DAEMON'S WHOLE LIFE AND ITS SHIMS' (profile.go).
-	profileEnv, profileDir, err := testenv.ExitProfileEnvFor(os.Getenv, t.Name())
-	if err != nil {
-		t.Fatalf("harness: %v", err)
-	}
+	profileEnv, profileDir := testenv.ExitProfile(t)
 	env = append(env, profileEnv...)
 	d.exitProfileDir = profileDir
 	// THE TEST BARRIER is served to this daemon alone (server.Deps.TestBarrier).

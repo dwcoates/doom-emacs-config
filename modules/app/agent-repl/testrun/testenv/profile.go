@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"testing"
 )
 
 // ProfileDir names the directory a profiling run (testrun.v1.TestRunRequest
@@ -68,4 +69,16 @@ func ExitProfileEnvFor(getenv func(string) string, test string) ([]string, strin
 		return nil, "", err
 	}
 	return []string{ExitProfileEnv + "=" + dir}, dir, nil
+}
+
+// ExitProfile is ExitProfileEnvFor for the test T, read from this process's
+// environment, failing T when the directory cannot be made: the one call
+// every harness makes before it starts a production process.
+func ExitProfile(t testing.TB) (env []string, dir string) {
+	t.Helper()
+	env, dir, err := ExitProfileEnvFor(os.Getenv, t.Name())
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	return env, dir
 }
