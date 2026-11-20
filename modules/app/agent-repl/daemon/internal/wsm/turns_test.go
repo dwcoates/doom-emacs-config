@@ -113,6 +113,53 @@ func TestPutTurnRecordsTheDisplacedCapture(t *testing.T) {
 	}
 }
 
+func TestPutTurnRefusesATurnIdAnotherWorkspaceHolds(t *testing.T) {
+	// Arrange: one workspace's turn stands open.
+	s, log := testStore(t)
+	owner, other := testWorkspace(t, s), testWorkspace(t, s)
+	id := NewTurnID()
+	if err := s.PutTurn(context.Background(), Turn{ID: id, Workspace: owner.ID, Text: "the owner's", Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn(owner): %v", err)
+	}
+
+	// Act: another workspace puts a turn under the same id.
+	err := s.PutTurn(context.Background(), Turn{ID: id, Workspace: other.ID, Text: "another's", Origin: "emacs", StartedAt: instant})
+
+	// Assert: refused and logged, and the turn is still the owner's, unchanged.
+	if !errors.Is(err, ErrTurnOfAnotherWorkspace) {
+		t.Fatalf("PutTurn(other) = %v, want ErrTurnOfAnotherWorkspace", err)
+	}
+	if !loggedOperation(log, "daemon.wsm.put_turn", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	owned, err := s.OpenTurns(context.Background(), owner.ID)
+	if err != nil || len(owned) != 1 || owned[0].Text != "the owner's" {
+		t.Fatalf("the owner's open turns = %+v, %v; want its turn unchanged", owned, err)
+	}
+	if moved, err := s.OpenTurns(context.Background(), other.ID); err != nil || len(moved) != 0 {
+		t.Fatalf("the other workspace's open turns = %+v, %v; want none", moved, err)
+	}
+}
+
+func TestPutTurnUpdatesTheSameWorkspacesTurn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	id := NewTurnID()
+	if err := s.PutTurn(context.Background(), Turn{ID: id, Workspace: ws.ID, Text: "first", Origin: "emacs", StartedAt: instant}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+
+	// Act
+	err := s.PutTurn(context.Background(), Turn{ID: id, Workspace: ws.ID, Text: "second", Origin: "emacs", StartedAt: instant})
+
+	// Assert
+	got, readErr := s.OpenTurns(context.Background(), ws.ID)
+	if err != nil || readErr != nil || len(got) != 1 || got[0].Text != "second" {
+		t.Fatalf("re-put = %v; open turns = %+v, %v; want the one turn updated", err, got, readErr)
+	}
+}
+
 func TestPutTurnRefusesAHalfWrittenClose(t *testing.T) {
 	// Arrange
 	s, log := testStore(t)

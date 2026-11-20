@@ -139,16 +139,28 @@ func (s *store) PutTurn(ctx context.Context, t Turn) error {
 		return err
 	}
 	return s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx,
+		// A TURN NEVER CHANGES WORKSPACE. Its id is the table's key, unique
+		// across the daemon, so a re-put updates only the workspace's own row;
+		// a put naming another workspace's turn changes nothing and is refused,
+		// rather than moving the turn out from under its workspace.
+		res, err := tx.ExecContext(ctx,
 			`INSERT INTO turns (id, workspace_id, text, origin, address, mirror, displaced, started_at, closed_at, close_kind, sent_by, thread_question, thread_parent)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
-			   workspace_id = excluded.workspace_id, text = excluded.text, origin = excluded.origin,
+			   text = excluded.text, origin = excluded.origin,
 			   address = excluded.address, mirror = excluded.mirror, displaced = excluded.displaced, started_at = excluded.started_at,
-			   sent_by = excluded.sent_by, thread_question = excluded.thread_question, thread_parent = excluded.thread_parent`,
+			   sent_by = excluded.sent_by, thread_question = excluded.thread_question, thread_parent = excluded.thread_parent
+			 WHERE turns.workspace_id = excluded.workspace_id`,
 			t.ID, t.Workspace, t.Text, t.Origin, address, mirror, t.Displaced, nanos(t.StartedAt), sentByColumn(t.SentBy), questionText, questionParent)
 		if err != nil {
 			return err
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if n == 0 {
+			return fmt.Errorf("wsm: turn %s belongs to another workspace than %s: %w", t.ID, t.Workspace, ErrTurnOfAnotherWorkspace)
 		}
 		// A recorded turn IS activity: stamp the workspace's last-activity edge
 		// in the same transaction so it advances with the turn, never at
