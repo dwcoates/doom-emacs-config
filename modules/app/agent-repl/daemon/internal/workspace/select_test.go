@@ -11,8 +11,11 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/resolve/nameprefix"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/wsm"
 )
@@ -180,6 +183,35 @@ func TestSetPriorityRepublishesTheRoster(t *testing.T) {
 	// Assert.
 	if len(f.sidebar.registries) != 1 {
 		t.Fatalf("roster republications = %d, want exactly one", len(f.sidebar.registries))
+	}
+}
+
+func TestSetPriorityHandsTheTopbarTheNamesPrefix(t *testing.T) {
+	p2 := wsm.PriorityP2
+	tests := []struct {
+		name     string
+		priority *wsm.Priority
+	}{
+		{name: "set", priority: &p2},
+		{name: "cleared", priority: nil},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the topbar's name wears the priority icon too.
+			f := newFixture(t)
+			f.workspace("w1", t.TempDir())
+
+			// Act.
+			if err := f.verbs.SetPriority(context.Background(), "w1", tc.priority); err != nil {
+				t.Fatalf("SetPriority: %v", err)
+			}
+
+			// Assert: the one decision, over the record with its new priority.
+			want := nameprefix.Of(wsm.Workspace{Priority: tc.priority})
+			if len(f.topbarNamePrefixes) != 1 || !proto.Equal(f.topbarNamePrefixes[0], want) {
+				t.Fatalf("topbar name prefixes = %v, want exactly [%v]", f.topbarNamePrefixes, want)
+			}
+		})
 	}
 }
 

@@ -287,7 +287,7 @@ func (r *resolver) render(ws ids.WorkspaceID, s *wsState) (*frontendv1.TopbarVie
 	}
 	return &frontendv1.TopbarView{
 		Title:                title(s),
-		WorkspaceName:        workspaceName(s.naming),
+		WorkspaceName:        &frontendv1.TopbarWorkspaceName{Text: s.naming.Name, Prefix: s.naming.NamePrefix},
 		SessionLine:          &frontendv1.TopbarSessionLine{Text: r.sessionLine(s)},
 		ModelSelector:        modelSelector,
 		EffortSelector:       effortSelector(s),
@@ -632,7 +632,7 @@ func (r *resolver) McpPanel(ws ids.WorkspaceID) *frontendv1.McpPanelView {
 // SetNaming installs the WSM-derived workspace name and session line.
 func (r *resolver) SetNaming(ws ids.WorkspaceID, naming Naming) {
 	r.mutate(ws, "daemon.topbar.set_naming", "the topbar took the workspace naming",
-		dlog.Context{"name": naming.Name, "glyph": naming.Glyph, "config_dir": naming.ConfigDir, "remote_control": naming.RemoteControl},
+		dlog.Context{"name": naming.Name, "prefixed": naming.NamePrefix != nil, "config_dir": naming.ConfigDir, "remote_control": naming.RemoteControl},
 		func(s *wsState) {
 			s.naming = naming
 			s.namingSet = true
@@ -646,6 +646,16 @@ func (r *resolver) SetName(ws ids.WorkspaceID, name string) {
 		dlog.Context{"name": name},
 		func(s *wsState) {
 			s.naming.Name = name
+		})
+}
+
+// SetNamePrefix replaces the marks drawn before the workspace name a priority
+// change moved. The name and the session line stay.
+func (r *resolver) SetNamePrefix(ws ids.WorkspaceID, prefix *frontendv1.WorkspaceNamePrefix) {
+	r.mutate(ws, "daemon.topbar.set_name_prefix", "the topbar took the marks drawn before the workspace's name",
+		dlog.Context{"prefixed": prefix != nil},
+		func(s *wsState) {
+			s.naming.NamePrefix = prefix
 		})
 }
 
@@ -1288,14 +1298,4 @@ func linkIcon(rawURL string) frontendv1.TopbarTitleLinkIcon {
 // hostIs reports whether host is domain or one of its subdomains.
 func hostIs(host, domain string) bool {
 	return host == domain || strings.HasSuffix(host, "."+domain)
-}
-
-// workspaceName is the topbar's name element: the registry name, and the
-// glyph drawn before it when the naming carries one.
-func workspaceName(naming Naming) *frontendv1.TopbarWorkspaceName {
-	name := &frontendv1.TopbarWorkspaceName{Text: naming.Name}
-	if naming.Glyph != "" {
-		name.Glyph = &frontendv1.TopbarWorkspaceNameGlyph{Text: naming.Glyph}
-	}
-	return name
 }

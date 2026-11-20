@@ -10,7 +10,7 @@ import (
 
 	"agent-repld/internal/account"
 	"agent-repld/internal/dlog"
-	"agent-repld/internal/resolve/nameglyph"
+	"agent-repld/internal/resolve/nameprefix"
 	"agent-repld/internal/resolve/sidebar"
 	"agent-repld/internal/resolve/topbar"
 	"agent-repld/internal/wsm"
@@ -617,10 +617,9 @@ func (v *verbs) publishNaming(ctx context.Context, log dlog.Logger, record wsm.W
 		log.Error(opRegister, "could not read the workspace's queue bypass standing for its topbar", dlog.WithCause(dlog.Context{"workspace": string(record.ID)}, err))
 		return err
 	}
-	glyph, _ := nameglyph.Of(record)
 	v.deps.Topbar.SetNaming(record.ID, topbar.Naming{
 		Name:          record.Name,
-		Glyph:         glyph,
+		NamePrefix:    nameprefix.Of(record),
 		ConfigDir:     configDir,
 		RemoteControl: remote.On,
 		QueueBypass:   bypass,

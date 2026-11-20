@@ -125,9 +125,9 @@ func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
 	})
 
 	// Assert.
-	awaitRoster(t, d, roster, "the bar a, b, c with b's badge", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, d, roster, "the bar a, b, c with b's name wearing the p05 icon", func(r *frontendv1.WorkspaceRoster) bool {
 		return sameOrder(tabBarIDs(r), []string{a.GetId(), b.GetId(), c.GetId()}) &&
-			rosterRow(r, b.GetId()).GetPriority().GetLabel() != ""
+			rosterRow(r, b.GetId()).GetName().GetPrefix().GetPriority().GetP05() != nil
 	})
 }
 
@@ -476,7 +476,7 @@ func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.
 	}
 }
 
-func TestClearingAPriorityRemovesTheBadge(t *testing.T) {
+func TestClearingAPriorityRemovesTheNamesIcon(t *testing.T) {
 	t.Parallel()
 	// Arrange
 	f := newRegistered(t, harness.Opts{})
@@ -484,18 +484,18 @@ func TestClearingAPriorityRemovesTheBadge(t *testing.T) {
 	setPriority(t, f.d, f.ws, &agentreplv1.WorkspacePriority{
 		Level: &agentreplv1.WorkspacePriority_P1{P1: &agentreplv1.WorkspacePriorityP1{}},
 	})
-	awaitRoster(t, f.d, roster, "the badge", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the name's p1 icon", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetPriority() != nil
+		return row != nil && row.GetName().GetPrefix().GetPriority().GetP1() != nil
 	})
 
 	// Act
 	setPriority(t, f.d, f.ws, nil)
 
 	// Assert
-	awaitRoster(t, f.d, roster, "the badge removed", func(r *frontendv1.WorkspaceRoster) bool {
+	awaitRoster(t, f.d, roster, "the name's prefix removed", func(r *frontendv1.WorkspaceRoster) bool {
 		row := rosterRow(r, f.ws.GetId())
-		return row != nil && row.GetPriority() == nil
+		return row != nil && row.GetName().GetPrefix() == nil
 	})
 }
 

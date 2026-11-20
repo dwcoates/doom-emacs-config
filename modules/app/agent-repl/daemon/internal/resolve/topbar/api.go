@@ -80,9 +80,10 @@ type Naming struct {
 	// line beneath the summary (TopbarWorkspaceName). It is never composed
 	// into the title.
 	Name string
-	// Glyph is the glyph drawn before the name (TopbarWorkspaceName.glyph),
-	// resolved by nameglyph.Of; empty when the name wears none.
-	Glyph string
+	// NamePrefix is the marks drawn before the name (TopbarWorkspaceName.prefix),
+	// decided by nameprefix.Of, the one decision the sidebar row wears too. Nil
+	// when the name wears none.
+	NamePrefix *frontendv1.WorkspaceNamePrefix
 	// ConfigDir is the account root this session spends from — the middle
 	// field of the session line. A daemon fact (the repo-under-root rule
 	// determines it), so it rides the naming rather than any vendor frame.
@@ -195,6 +196,11 @@ type Resolver interface {
 	// (TopbarWorkspaceName), leaving the session line's config dir as it is.
 	// Its sole producer is the workspace verbs, on every SetWorkspaceName.
 	SetName(ws ids.WorkspaceID, name string)
+	// SetNamePrefix replaces the marks drawn before the workspace name
+	// (TopbarWorkspaceName.prefix), leaving the rest of the naming as it is;
+	// nil draws none. Its sole producer is the workspace verbs, on every
+	// SetWorkspacePriority.
+	SetNamePrefix(ws ids.WorkspaceID, prefix *frontendv1.WorkspaceNamePrefix)
 	// SetRemoteControl replaces the workspace's remote-control mode the chip
 	// draws (TopbarRemoteControl), leaving the rest of the naming as it is.
 	// Its sole producer is the fleet, on every UpdateRemoteControlMode.

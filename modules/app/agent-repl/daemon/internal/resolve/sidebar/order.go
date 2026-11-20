@@ -5,40 +5,8 @@ import (
 	"sort"
 	"time"
 
-	frontendv1 "agentrepl/proto/frontend/v1"
-
 	"agent-repld/internal/wsm"
 )
-
-// priorityLabel is the badge's drawn label, and the empty string when the
-// workspace is unprioritized — which draws NO badge rather than an empty one.
-func priorityLabel(p *wsm.Priority) string {
-	if p == nil {
-		return ""
-	}
-	switch *p {
-	case wsm.PriorityP05:
-		return "P0.5"
-	case wsm.PriorityP1:
-		return "P1"
-	case wsm.PriorityP2:
-		return "P2"
-	case wsm.PriorityP3:
-		return "P3"
-	default:
-		return ""
-	}
-}
-
-// priorityBadge composes the badge, or nil when the workspace is
-// unprioritized. Priority only picks a workspace's landing place; this is only the label.
-func priorityBadge(p *wsm.Priority) *frontendv1.RosterRowPriorityBadge {
-	label := priorityLabel(p)
-	if label == "" {
-		return nil
-	}
-	return &frontendv1.RosterRowPriorityBadge{Label: label}
-}
 
 // sortWorkspaces puts workspaces in ROSTER ORDER, which every client — the
 // Emacs tab bar included — follows strictly and never re-sorts: ascending
