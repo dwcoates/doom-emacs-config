@@ -30,7 +30,7 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange: a metaprompt-wrapped span the drawn row must strip, while the
 	// full text still travels to the shim unchanged.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	visible := "fix the flaky reconnect test"
 	full := visible + "\n<!--agent-repl:meta-->extra injected context<!--/agent-repl:meta-->"
@@ -72,7 +72,7 @@ func TestSubmitPromptOnAnIdleSessionMintsATurnIdAndStartsTheTurn(t *testing.T) {
 func TestARetryOfAnUndeliveredSubmissionIsDeliveredNotRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.promptqueue.deliver", "daemon.shimclient.start_turn", "SubmitPrompt")
 	f.shim.AnswerFailure(harness.RPCStartTurn, "the vendor never took the turn")
 	if err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{
@@ -126,7 +126,7 @@ func TestARetryOfAnUndeliveredSubmissionRestartsTheSameTurn(t *testing.T) {
 func TestSubmitPromptWithOriginUnspecifiedIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act: internal/server/validate.go refuses PROMPT_ORIGIN_UNSPECIFIED
 	// before the request ever resolves a workspace, so this is a pure
@@ -165,7 +165,7 @@ func promptHeldEntry(tray *frontendv1.FeedHeld, turn *conversationv1.TurnId) *fr
 func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn in flight (StartTurn accepted, no terminal frame yet).
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	holds := f.d.WatchHolds(f.ws)
@@ -205,7 +205,7 @@ func TestAHeldPromptShowsClassifyingThenAVerdictFromTheFakeHeuristic(t *testing.
 func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunningTurn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	resp1 := f.submit("start the long task", "k-running", origin)
 	turn1 := resp1.GetSuccess().GetTurn().GetTurn()
 	f.shim.ExpectStartTurn()
@@ -254,7 +254,7 @@ func TestAPromptBeginningWithStopTakesTheFastPathToInterjectAndInterruptsTheRunn
 func TestAnInterjectionDeliversThePromptWhileTheTurnsDetachedWorkRunsOn(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the long task", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
@@ -283,7 +283,7 @@ func TestAnInterjectionDeliversThePromptWhileTheTurnsDetachedWorkRunsOn(t *testi
 func TestHeldForTurnEndPromptsDeliverFifoAfterTheTurnEnds(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 
@@ -505,7 +505,7 @@ func TestUpdateHeldPromptDropRemovesTheEntryDurablyAcrossADaemonRestart(t *testi
 func TestUpdateHeldPromptReleaseDeliversNow(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	resp2 := f.submit("a prompt to release", "k-release", origin)
@@ -642,7 +642,7 @@ func TestACorruptedHeldPromptRowFailsBootLoudlyWithExactlyOneRestoreError(t *tes
 func TestAFailedInterjectRevertsToHoldForTurnEndAndFifoOrder(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// internal/promptqueue/classify.go's stripJump logs the refused interject
 	// at WARN under opInterject, and the refused shim call is recorded by the
 	// client that made it — the refusal IS the scenario.
@@ -762,7 +762,7 @@ func TestPromptsHeldBeforeAMergeLeaseStayHeld(t *testing.T) {
 func TestSubmitPromptToASubagentBubbleDeliversViaUpdateAgentPrompt(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, detachedWorkFrame(mainAgent, detachedSubagent("work-1", "sub-1", "reviewing the diff")))
 	row := awaitRow(t, f, feed, "the subagent bubble row", func(r *frontendv1.FeedRow) bool {
@@ -794,7 +794,7 @@ func TestSubmitPromptToASubagentBubbleDeliversViaUpdateAgentPrompt(t *testing.T)
 func TestASecondSubmitWhileATurnRunsOnTheSameAgentThroughTheBubblePathAnswersTheDaemonFaultRefusal(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The queue records the shim's refusal of the delivery it attempted; the
 	// refusal is an ANSWER to the caller and the record is its evidence.
 	f.d.ExpectWarnings("daemon.promptqueue.deliver")
@@ -1036,7 +1036,7 @@ func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t
 		t.Run(cmd, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			f := newOpened(t, harness.Opts{})
+			f := newCanonical(t)
 			feed := f.watchRootFeed()
 
 			// Act
@@ -1077,7 +1077,7 @@ func TestClearAndCompactGoThroughTheQueueAsSessionActsAndProduceASeparationRow(t
 func TestModelWithAnArgumentSubmitsTheModelChange(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	resp := f.submit("/model sonnet", "k-model", origin)
@@ -1106,7 +1106,7 @@ func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
 	// success.command_refused{command:"/model"}, mirrored like any other
 	// recognized-but-unsupported command -- never command_acted, and there is
 	// no second, "absorbed" outcome this daemon actually produces.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 
 	// Act
@@ -1365,7 +1365,7 @@ func TestResendingInterruptWithConfirmAgentsStopsThem(t *testing.T) {
 func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	pushDetachedShell(f.shim, "work-1", "sleep 5")
@@ -1403,7 +1403,7 @@ func TestInterruptTurnWithOnlyADetachedShellNeedsNoConfirmation(t *testing.T) {
 func TestInterruptDetachedStopsTheNamedWorkAndAnUnknownFeedIdAnswersNotDetachedWork(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	pushDetachedShell(f.shim, "work-1", "sleep 5")
 	// THE HEAD'S OWN FeedId IS THE HANDLE. It addresses the bubble's sub-feed,
@@ -1528,7 +1528,7 @@ func TestInterruptAllAgentsStopsEveryLiveShellBesideTheAgents(t *testing.T) {
 func TestAnAnswerTheShimRefusesUnknownAgentIsRefusedByItsUnlandedArm(t *testing.T) {
 	t.Parallel()
 	// Arrange: an open ask, and a shim that no longer knows its agent.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.refusal.unlanded_arm")
 	feed := f.watchRootFeed()
 	f.shim.AwaitAgentWatch()
@@ -1668,7 +1668,7 @@ func promptOpenQuestion(id, question string, options ...string) *conversationv1.
 func TestAnswerQuestionEchoesServedTextsAndLabels(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
 		Update: &conversationv1.AgentUpdate_Question{Question: promptOpenQuestion("q-1", "Pick one", "A", "B")},
@@ -1703,7 +1703,7 @@ func TestAnswerQuestionWhenNoAskIsStandingAnswersAskNotStanding(t *testing.T) {
 	t.Parallel()
 	// Arrange: no question was ever posed, so the named feed row addresses
 	// nothing standing.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act: an undecodable FeedId takes the server's own askIDFrom path
 	// (internal/server/answers.go), never reaching workspace.refuse -- no
@@ -1972,7 +1972,7 @@ func TestADeferredPromptSurvivesAWorkspaceRestartAndRunsAsItsOwnTurn(t *testing.
 func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
 	t.Parallel()
 	// Arrange: a first prompt, its turn ended, then selected.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	f.submit("the first prompt", "k-first", origin)
 	f.shim.ExpectStartTurn()
@@ -2025,7 +2025,7 @@ func TestAReplyToASelectedPromptCarriesItsQuoteAsItsOwnBlock(t *testing.T) {
 func TestAnAgentSentPromptIsDrawnUnderTheSendingWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
 	feed := f.watchRootFeed()
 
@@ -2061,7 +2061,7 @@ func TestAnAgentSentPromptIsDrawnUnderTheSendingWorkspace(t *testing.T) {
 func TestAnAgentSentPromptsStartTurnNamesItsSender(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	sender := harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix"))
 
 	// Act
@@ -2085,7 +2085,7 @@ func TestAnAgentSentPromptsStartTurnNamesItsSender(t *testing.T) {
 func TestAUsersPromptsStartTurnNamesNoSender(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	f.submit("please review the parser", "k-user-no-sender", origin)
@@ -2099,7 +2099,7 @@ func TestAUsersPromptsStartTurnNamesNoSender(t *testing.T) {
 func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	resp := f.submitRaw(&agentreplv1.SubmitPromptRequest{
@@ -2116,7 +2116,7 @@ func TestAnAgentSentPromptFromNoOtherWorkspaceIsRefused(t *testing.T) {
 func TestAnAgentSentPromptIsDrawnInTheSendersFeedUnderTheRecipient(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	sender := &fixture{d: f.d, repo: f.repo, ws: harness.Register(t, f.d, worktreeOf(t, f.repo, "parser-fix")), t: t}
 	feed := sender.watchRootFeed()
 

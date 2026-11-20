@@ -260,6 +260,13 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 			c.log.Info(opRelaunch, "a merge took the workspace before the restart hold; the unforced bounce waits for the merge to release it", dlog.WithCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)
 			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: a merge holds the workspace: %w", ws, bounce.ErrDeferredBehindLease)
+		} else if errors.Is(err, wsm.ErrNotFound) {
+			// THE WORKSPACE WAS FORGOTTEN DURING ITS BOUNCE: nothing is left to
+			// replace, so the bounce ends unregistered, an outcome and never a
+			// failure (bounce.OutcomeOf), and the prelaunch is retired.
+			c.log.Info(opRelaunch, "the workspace was forgotten before the restart hold; nothing is left to relaunch", dlog.WithCause(fields, err))
+			c.retirePrelaunch(ctx, fresh, reason, fields)
+			return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: the workspace is gone: %w", ws, bounce.ErrUnregistered)
 		} else if err != nil {
 			c.log.Error(opRelaunch, "could not take the restart-pending hold", dlog.WithCause(fields, err))
 			c.retirePrelaunch(ctx, fresh, reason, fields)

@@ -1345,7 +1345,7 @@ func TestAdoptWebWorkspaceRefusesNoTransferAnnouncedOnAPlainBootLoggedAtInfo(t *
 	t.Parallel()
 	// Arrange: an ordinary opened workspace; no handover was ever announced on
 	// this daemon.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	resp, err := f.d.Client().AdoptWebWorkspace(f.d.Ctx(), connect.NewRequest(&agentreplv1.AdoptWebWorkspaceRequest{Workspace: f.ws}))

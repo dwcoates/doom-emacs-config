@@ -1,15 +1,19 @@
 package harness
 
 import (
+	"context"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/integration/grantedclock"
+
+	"connectrpc.com/connect"
 )
 
 // A VIEW IS ONE TEST'S DAEMON OVER A PROCESS THE TEST DOES NOT OWN.
@@ -69,7 +73,9 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	bindWorld(t, d.Git)
 	requireGrantedClock(t)
 	ctx, cancel := grantedclock.WithBound(v.watchRecords(t, d.fault.ctx), v.waitBound*runBudgetWaits)
-	v.ctx = ctx
+	// A stream the view opens settles against the view (Stream.settle), as
+	// an owner's does against its owner.
+	v.ctx = context.WithValue(ctx, daemonKey{}, &v)
 	// Registered first so it runs last: the sweeps below read the logs, and
 	// the budget must outlive them.
 	t.Cleanup(cancel)
@@ -79,7 +85,87 @@ func (d *Daemon) View(t testing.TB) *Daemon {
 	// shared process's, so it holds other tests' records beside this one's,
 	// and each record names its workspace.
 	registerLogChecks(t, func() { keepFailureLogs(t, v.StateDir, v.stderrPath) }, v.assertNoUnexpectedWarnings, v.assertNoUnproducedRequiredWarnings)
+	// Registered after the sweeps, so it runs before them: they judge every
+	// record the retirement writes, as the test's own.
+	t.Cleanup(v.retireSlice)
 	return &v
+}
+
+// retireSlice takes every workspace the view registered out of the shared
+// process when its test ends, latest first (a repository's main worktree is
+// forgotten last, taking the repository with it): KillWorkspace, which
+// closes it and ends its session whatever it was doing, then
+// ForgetWorkspace, which removes its record. A workspace the test itself
+// already removed is gone, which is what the retirement wants.
+//
+// A CASE'S SLICE ENDS WITH THE CASE. A shared process that kept every
+// finished case's workspace held the whole suite's by its end, and its
+// roster, recomputed whole on every change, cost more CPU than a fresh
+// process per case (2026-11-20, batch 1 of the canonical daemon: 83.5 CPU-s
+// against 68.3).
+func (d *Daemon) retireSlice() {
+	d.t.Helper()
+	d.mu.Lock()
+	slice := append([]*workspacev1.WorkspaceRef(nil), d.slice...)
+	d.mu.Unlock()
+	for i := len(slice) - 1; i >= 0; i-- {
+		ws := slice[i]
+		kill, err := d.Client().KillWorkspace(d.ctx, connect.NewRequest(&agentreplv1.KillWorkspaceRequest{Workspace: ws}))
+		if err != nil {
+			d.t.Errorf("harness: retire %s from the shared daemon: KillWorkspace = error %v", ws.GetDir(), err)
+			continue
+		}
+		if kill.Msg.GetError().GetUnknownWorkspace() != nil {
+			continue
+		}
+		if kill.Msg.GetSuccess() == nil {
+			d.t.Errorf("harness: retire %s from the shared daemon: KillWorkspace = %v, want a success", ws.GetDir(), kill.Msg)
+			continue
+		}
+		d.forgetRetired(ws, true)
+	}
+}
+
+// forgetRetired forgets a killed workspace of the slice. A forget blocked by
+// held prompts (undelivered user intent the kill does not touch) drops them
+// and forgets again, once.
+func (d *Daemon) forgetRetired(ws *workspacev1.WorkspaceRef, dropHeld bool) {
+	d.t.Helper()
+	forget, err := d.Client().ForgetWorkspace(d.ctx, connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ws}))
+	if err != nil {
+		d.t.Errorf("harness: retire %s from the shared daemon: ForgetWorkspace = error %v", ws.GetDir(), err)
+		return
+	}
+	switch {
+	case forget.Msg.GetSuccess() != nil, forget.Msg.GetError().GetUnknownWorkspace() != nil:
+	case dropHeld && forget.Msg.GetError().GetBlocked().GetHeldPrompts() > 0:
+		d.dropHeld(ws)
+		d.forgetRetired(ws, false)
+	default:
+		d.t.Errorf("harness: retire %s from the shared daemon: ForgetWorkspace = %v, want a success", ws.GetDir(), forget.Msg)
+	}
+}
+
+// dropHeld drops every prompt the workspace's held section holds.
+func (d *Daemon) dropHeld(ws *workspacev1.WorkspaceRef) {
+	d.t.Helper()
+	resp, err := d.Client().OpenFeed(d.ctx, connect.NewRequest(&agentreplv1.OpenFeedRequest{Workspace: ws}))
+	if err != nil || resp.Msg.GetSuccess() == nil {
+		d.t.Errorf("harness: retire %s from the shared daemon: OpenFeed for its held section = (%v, %v)", ws.GetDir(), resp, err)
+		return
+	}
+	for _, item := range resp.Msg.GetSuccess().GetHeld().GetItems() {
+		prompt := item.GetPrompt()
+		if prompt == nil {
+			continue
+		}
+		drop, err := d.Client().UpdateHeldPrompt(d.ctx, connect.NewRequest(&agentreplv1.UpdateHeldPromptRequest{
+			Workspace: ws, Turn: prompt.GetTurn(), Action: &agentreplv1.UpdateHeldPromptRequest_Drop{Drop: &agentreplv1.UpdateHeldPromptDrop{}},
+		}))
+		if err != nil || drop.Msg.GetSuccess() == nil {
+			d.t.Errorf("harness: retire %s from the shared daemon: drop held prompt %s = (%v, %v)", ws.GetDir(), prompt.GetTurn().GetValue(), drop, err)
+		}
+	}
 }
 
 // refuseOnView fails a view's test that asks to end the shared process.

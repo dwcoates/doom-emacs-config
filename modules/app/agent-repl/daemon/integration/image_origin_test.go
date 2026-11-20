@@ -12,8 +12,6 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // THE ATTACHED IMAGE IS DRAWN, AND ITS BYTES ARE SERVED BY THE DAEMON.
@@ -90,7 +88,7 @@ func submitWithAttachment(t *testing.T, f *fixture, path string) *frontendv1.Fee
 func TestTheDrawnImageSourceServesTheAttachedBytes(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	path := writeAttachment(t)
 	image := submitWithAttachment(t, f, path)
 

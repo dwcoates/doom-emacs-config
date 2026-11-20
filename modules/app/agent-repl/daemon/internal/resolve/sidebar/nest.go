@@ -32,6 +32,11 @@ type forest struct {
 // A recorded parent that cycles is ill-formed and unreachable through ordinary
 // creation; it is recorded loudly and resolved by leaving the row at the top
 // level rather than dropping it.
+//
+// Its records are the section render's, on LOG, and name each row's workspace
+// as `row_workspace`, never the reserved `workspace_id`: a render runs on one
+// workspace's logger, and a record naming another workspace there would claim
+// to be that workspace's.
 func nest(in []wsm.Workspace, log dlog.Logger) forest {
 	ordered := sortWorkspaces(in)
 
@@ -43,16 +48,16 @@ func nest(in []wsm.Workspace, log dlog.Logger) forest {
 		switch {
 		case !nested:
 			log.Debug("daemon.sidebar.nest", "a workspace renders at the section's top level",
-				dlog.Context{"workspace_id": string(ws.ID), "recorded_parent": recordedParent(ws)})
+				dlog.Context{"row_workspace": string(ws.ID), "recorded_parent": recordedParent(ws)})
 			out.roots = append(out.roots, ws)
 		case cycles(ws.ID, parent):
 			log.Warn("daemon.sidebar.nest",
 				"a recorded parent chain cycles; the workspace renders at the top level rather than vanishing",
-				dlog.Context{"workspace_id": string(ws.ID), "recorded_parent": recordedParent(ws)})
+				dlog.Context{"row_workspace": string(ws.ID), "recorded_parent": recordedParent(ws)})
 			out.roots = append(out.roots, ws)
 		default:
 			log.Debug("daemon.sidebar.nest", "a workspace nests under the workspace it merges into",
-				dlog.Context{"workspace_id": string(ws.ID), "parent_id": string(p)})
+				dlog.Context{"row_workspace": string(ws.ID), "parent_id": string(p)})
 			out.children[p] = append(out.children[p], ws)
 		}
 	}

@@ -95,7 +95,7 @@ func assertIngressEmpty(t *testing.T, stateDir string) {
 func TestIngestedHeldPromptsWaitBehindTheRunningTurnInOrderInTheHeldTray(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 	holds := f.d.WatchHolds(f.ws)

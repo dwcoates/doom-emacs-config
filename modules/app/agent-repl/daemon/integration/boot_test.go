@@ -321,7 +321,7 @@ func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 func TestCloseWorkspaceRemovesTheLogSinkSymlink(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	link := harness.WorkspaceLogPath(f.repo.Dir, "daemon")
 	if _, err := os.Lstat(link); err != nil {
 		t.Fatalf("stat the workspace's daemon.log symlink before Close: %v", err)

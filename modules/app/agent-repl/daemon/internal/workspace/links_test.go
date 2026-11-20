@@ -33,6 +33,35 @@ func TestOpenExternalOpensAnAbsoluteUrl(t *testing.T) {
 	}
 }
 
+func TestOpenExternalHandsTheBrowserTheWorkspacesLogger(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	dir := t.TempDir()
+	f.workspace("w1", dir)
+	f.browser.recordThrough = true
+
+	// Act
+	if err := f.verbs.OpenExternal(context.Background(), "w1", "https://example.invalid/x"); err != nil {
+		t.Fatalf("OpenExternal: %v", err)
+	}
+
+	// Assert: the browser's record is the workspace's, named by its
+	// canonical directory.
+	canonical, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range f.log.logger.Records() {
+		if r.Operation == "fake.browser.open" {
+			if r.Context["dir"] != canonical {
+				t.Fatalf("the browser's record = %+v, want it on the workspace's logger (dir %s)", r, dir)
+			}
+			return
+		}
+	}
+	t.Fatalf("the browser wrote no record through the logger it was handed: %v", f.log.logger.Records())
+}
+
 // TestOpenExternalRoutesByTheSessionAccount pins that a link opens in the SAME
 // Chrome window — personal or work — the session's account signs in as: the
 // verb reads the account in force and hands the browser its email.

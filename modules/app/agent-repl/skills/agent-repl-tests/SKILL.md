@@ -302,6 +302,12 @@ to every harness, fake and fixture a test uses, in every language.
   daemon suite's CPU per merge gate); pitfall 19.
 - What a case may share is ruled by AGENTS.md "Integration tests share one canonical process, each case on its own slice".
 
+### Sharing by suite
+
+- **Daemon integration (`daemon/integration`)**: a case takes the canonical daemon with `newCanonical(t)`, `newCanonicalRegistered(t)` or `canonicalView(t)`; its slice is its own repository and workspace, and an id it mints (a turn id, a URL a stub records) carries its workspace id, since a turn id is unique across the daemon.
+  - A case that changes daemon-wide state takes its group with `newInGroup(t, group)`; only a case whose subject is the daemon's own lifecycle starts a fresh daemon, and an idle-barrier assertion (`ExpectNoPush`, `ExpectFileUnchanged`) cannot share yet.
+  - The rest: `daemon/AGENTS.md`, "The integration suite's canonical daemon".
+
 ### Finding and fixing a flake
 
 - Gate history is the first evidence: every gate archive is under

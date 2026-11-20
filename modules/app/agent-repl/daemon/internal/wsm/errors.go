@@ -25,6 +25,12 @@ var ErrSessionDeleted = errors.New("wsm: session was deleted and refuses resurre
 // here rather than persisted to fail every later compose forever.
 var ErrSessionIdentityMissing = errors.New("wsm: a session record carries no host session id")
 
+// ErrTurnOfAnotherWorkspace refuses a turn record whose id another
+// workspace's turn already holds. A turn id is unique across the daemon (the
+// turns table's key) and a turn never changes workspace, so the put changes
+// nothing rather than moving the turn out from under its workspace.
+var ErrTurnOfAnotherWorkspace = errors.New("wsm: the turn id is another workspace's turn")
+
 // ErrTombstoned is returned when a retired held prompt is written to. A
 // tombstoned hold never resurrects.
 var ErrTombstoned = errors.New("wsm: held prompt is tombstoned")

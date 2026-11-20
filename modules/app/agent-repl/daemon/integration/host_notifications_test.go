@@ -294,7 +294,7 @@ func TestAClickedBannerAsksEmacsToSelectTheWorkspace(t *testing.T) {
 	}
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.Notifier.SetStdout("default")
 	f.submit("go", "k-clicked", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 

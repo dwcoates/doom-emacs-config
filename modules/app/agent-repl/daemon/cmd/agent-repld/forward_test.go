@@ -507,6 +507,59 @@ func TestVerbsForwarderPublishRegistryBeforeTheVerbsIsAnError(t *testing.T) {
 	}
 }
 
+// rosterVerbs is a workspace.Verbs whose only live method is the light
+// roster republish.
+type rosterVerbs struct {
+	workspace.Verbs
+	causes []string
+	err    error
+}
+
+func (v *rosterVerbs) RepublishRoster(_ context.Context, cause string) error {
+	v.causes = append(v.causes, cause)
+	return v.err
+}
+
+func TestVerbsForwarderRepublishRosterReachesTheBoundVerbsNamingItsCause(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "a republish that succeeds", err: nil},
+		{name: "a republish that fails", err: errors.New("roster unreadable")},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			target := &rosterVerbs{err: tc.err}
+			f := &verbsForwarder{}
+			republish := f.republishRoster("a branch was recounted")
+			f.bind(target)
+
+			// Act.
+			err := republish(context.Background())
+
+			// Assert.
+			if len(target.causes) != 1 || target.causes[0] != "a branch was recounted" || !errors.Is(err, tc.err) {
+				t.Fatalf("causes = %v, err = %v; want one call naming the cause, answering %v", target.causes, err, tc.err)
+			}
+		})
+	}
+}
+
+func TestVerbsForwarderRepublishRosterBeforeTheVerbsIsAnError(t *testing.T) {
+	// Arrange.
+	f := &verbsForwarder{}
+
+	// Act.
+	err := f.republishRoster("a session was parked")(context.Background())
+
+	// Assert.
+	if err == nil || err.Error() != "agent-repld: a session was parked before the workspace verbs existed" {
+		t.Fatalf("err = %v, want the wiring defect named", err)
+	}
+}
+
 // TestEveryEarlyRegistryRepublishGoesThroughTheForwarder pins the shared
 // shape: a component built before the verbs republishes the roster through
 // verbsForwarder.publishRegistry, never a hand-rolled closure of its own.

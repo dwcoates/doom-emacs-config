@@ -203,7 +203,7 @@ func TestPerWorkspaceRpcRefusesAnUnknownWorkspace(t *testing.T) {
 func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	// workspace_ref_mismatch is a LANDED CloseWorkspaceError arm too, answered
 	// in band at DEBUG — never the daemon.refusal.unlanded_arm WARN this path
 	// was originally written against.
@@ -228,7 +228,7 @@ func TestPerWorkspaceRpcRefusesARefWhoseDirDisagrees(t *testing.T) {
 func TestSubmitPromptWithoutSaidIsInvalidArgument(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	err := f.submitExpectingError(&agentreplv1.SubmitPromptRequest{

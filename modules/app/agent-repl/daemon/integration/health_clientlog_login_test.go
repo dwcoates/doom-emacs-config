@@ -213,7 +213,7 @@ func TestADaemonRestartDoesNotReopenAClosedPromptsDirFault(t *testing.T) {
 func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// A shim-reported fault IS a fault: the health reporter opens it and
 	// answers unhealthy, and each is recorded loudly by design. The routing to
 	// the topbar is the only DEBUG half of this.
@@ -256,7 +256,7 @@ func TestSessionHealthRelaysAnUnhealthyDiagnosticsPush(t *testing.T) {
 func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// A lost link is EVIDENCE, recorded loudly: the watcher says so, the
 	// health reporter opens the fault, and SessionHealth answers unhealthy.
 	// daemon.shimclient.redial is the adopted-death witness doing its job: the
@@ -316,7 +316,7 @@ func TestSessionHealthAfterTheShimExitsReportsShimDied(t *testing.T) {
 func TestALinkSeveredUnderALiveShimIsReportedUntilItServesAgain(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of a session fault the test opens, the shim link the test severs.
 	f.d.ExpectWarnings("daemon.health.open_fault", "daemon.health.session",
 		"daemon.sessionwatcher.link_fault", "daemon.sessionwatcher.reopen",
@@ -371,7 +371,7 @@ func TestSessionHealthOfAnUnknownWorkspaceIsRefused(t *testing.T) {
 func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	sentTimestamp := "2026-09-10T16:34:56.789Z"
 	instant, err := time.Parse(time.RFC3339, sentTimestamp)
 	if err != nil {
@@ -426,7 +426,7 @@ func TestClientLogWritesARecordIntoTheWebappSink(t *testing.T) {
 func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	sentTimestamp := "2026-09-10T16:34:56.789Z"
 	instant, err := time.Parse(time.RFC3339, sentTimestamp)
 	if err != nil {
@@ -476,7 +476,7 @@ func TestClientLogWritesASidecarRecordIntoTheSidecarSink(t *testing.T) {
 func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
@@ -507,7 +507,7 @@ func TestClientLogAtWarnLandsAtWarnInTheWebappSink(t *testing.T) {
 func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	resp, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
@@ -540,7 +540,7 @@ func TestClientLogAtErrorLandsAtErrorInTheWebappSink(t *testing.T) {
 func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	_, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
@@ -821,8 +821,10 @@ func TestASubmitPromptRequiringClassificationUnderNoFakeIsHeldForTurnEnd(t *test
 func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
-	const url = "https://example.invalid/report"
+	f := newCanonicalRegistered(t)
+	// The launcher is the daemon's one stub, so the case's own link is the
+	// one only it opens.
+	url := "https://example.invalid/report/" + f.ws.GetId()
 
 	// Act
 	if _, err := f.d.Client().OpenExternal(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenExternalRequest{
@@ -833,12 +835,14 @@ func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 	}
 
 	// Assert
-	invocations := f.d.Browser.Invocations()
+	var invocations []harness.Invocation
+	for _, inv := range f.d.Browser.Invocations() {
+		if loginArgvHas(inv.Argv, url) {
+			invocations = append(invocations, inv)
+		}
+	}
 	if len(invocations) != 1 {
 		t.Fatalf("the browser launcher ran %d times, want exactly once: %+v", len(invocations), invocations)
-	}
-	if !loginArgvHas(invocations[0].Argv, url) {
-		t.Fatalf("the launcher argv = %v, want it to carry %q", invocations[0].Argv, url)
 	}
 }
 
@@ -848,7 +852,7 @@ func TestOpenExternalInvokesTheConfiguredLauncher(t *testing.T) {
 func TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	// internal/workspace/links.go's OpenExternal refuses an unparseable url
 	// under ArmUnservedAnswer ("unserved_answer"), which is not a field
 	// OpenExternalError carries: the arm the contract landed
@@ -877,7 +881,8 @@ func TestOpenExternalWithAnUnparseableUrlAnswersInvalidUrl(t *testing.T) {
 func TestOpenExternalWithAFailingLauncherAnswersLaunchFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	// It makes the daemon's one browser launcher fail.
+	f := newRegisteredInGroup(t, groupBrowserLauncher)
 	// A launcher that will not run is recorded at ERROR under the verb's own
 	// operation and then ANSWERED as launch_failed{detail}.
 	f.d.RequireWarnings("daemon.workspace.open_external", "daemon.externalbrowser.open")

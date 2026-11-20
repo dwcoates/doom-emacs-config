@@ -35,7 +35,7 @@ func toggleRemoteControl(t *testing.T, f *fixture) bool {
 // run in sequence.
 func TestRemoteControlIsPutInForceAndTurnedOverThroughTheShim(t *testing.T) {
 	t.Parallel()
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 
 	t.Run("the bring-up puts a main worktree's default on in force", func(t *testing.T) {

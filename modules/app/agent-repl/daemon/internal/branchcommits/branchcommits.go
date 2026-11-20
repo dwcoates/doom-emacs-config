@@ -209,6 +209,14 @@ func (r *Recounter) recount(ctx context.Context, ws ids.WorkspaceID) {
 	applied, err := r.deps.DB.SetLiveCommitCount(settle, ws, count)
 	if err != nil {
 		fields["error"] = err.Error()
+		// A WORKSPACE THAT MOVED ON WHILE ITS COUNT WAS WRITTEN has nothing
+		// to record, as one that moved on while its count ran (above): a
+		// forget can land between the count and its write.
+		if why := r.movedOn(ctx, ws, record.Dir); why != "" {
+			fields["moved_on"] = why
+			log.Info(opRecount, "the workspace moved on before its branch's count was recorded; there is nothing left to record", fields)
+			return
+		}
 		log.Error(opRecount, "could not record the branch's commit count", fields)
 		return
 	}

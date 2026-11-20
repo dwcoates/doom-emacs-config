@@ -562,6 +562,9 @@ type Daemon struct {
 	// owns; claims are the workspace directory forms the view answers for.
 	view   bool
 	claims map[string]bool
+	// slice is every workspace a view registered, in order, which its
+	// cleanup retires from the shared process (retireSlice, view.go).
+	slice []*workspacev1.WorkspaceRef
 
 	// daemonProc is the PROCESS's state, as opposed to one test's: its
 	// command, its client, its exit and the locks that order them. Every
@@ -2132,6 +2135,9 @@ func RegisterOwingSummary(t testing.TB, d *Daemon, dir string) *workspacev1.Work
 		if ref.GetDir() != dir {
 			d.Claim(ref.GetDir())
 		}
+		d.mu.Lock()
+		d.slice = append(d.slice, ref)
+		d.mu.Unlock()
 	}
 	return ref
 }

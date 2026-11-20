@@ -27,7 +27,7 @@ func TestAHungShellsConclusionFreesTheWorkspace(t *testing.T) {
 	t.Parallel()
 
 	// Arrange: a shell whose WatchBash the shim never answers.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The sweep covers every test; the declared records are evidence of the
 	// session stream the test severs (so the shim re-announces) and the
 	// conclusion the daemon missed and reconciles.
@@ -67,7 +67,7 @@ func TestAShellWhoseRowsAreAllTheSidecarsIsRetiredAtItsSpoolsTerminal(t *testing
 	t.Parallel()
 
 	// Arrange: an announced shell whose watch opens with no `start`.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.shim.ExpectStartSession()
 	f.shim.AwaitBash("work-claimed-1")
 	pushDetachedShell(f.shim, "work-claimed-1", "npm test")

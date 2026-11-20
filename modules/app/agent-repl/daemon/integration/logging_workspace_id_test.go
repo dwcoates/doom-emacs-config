@@ -17,7 +17,7 @@ import (
 func TestAWorkspacesDaemonAndShimRecordsCarryTheSameWorkspaceID(t *testing.T) {
 	t.Parallel()
 	// Arrange: an opened workspace, so both runtimes have written records.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	want := f.ws.GetId()
 
 	// Act: wait until each runtime has attributed at least one record, then

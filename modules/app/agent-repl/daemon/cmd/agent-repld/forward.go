@@ -291,6 +291,19 @@ func (f *verbsForwarder) publishRegistry(what string) func(context.Context) erro
 	}
 }
 
+// republishRoster is publishRegistry's light form (workspace.Verbs.
+// RepublishRoster), for a component that changed one durable fact and whose
+// republish must cost what that fact costs, not a walk of every workspace.
+func (f *verbsForwarder) republishRoster(what string) func(context.Context) error {
+	return func(ctx context.Context) error {
+		verbs, err := f.bound(what)
+		if err != nil {
+			return err
+		}
+		return verbs.RepublishRoster(ctx, what)
+	}
+}
+
 // ClaimMergeName is the merge orchestrator's name check (merge.Names), read
 // out of the verbs, which are built after the orchestrator. One asked for
 // before they are bound is a wiring defect, answered as an error.

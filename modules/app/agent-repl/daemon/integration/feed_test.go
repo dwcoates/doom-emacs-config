@@ -23,7 +23,7 @@ import (
 func TestWatchFeedTailsExactlyAfterTheOpenedPageWithNoGapOrOverlap(t *testing.T) {
 	t.Parallel()
 	// Arrange: one row lands before the feed is ever opened.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-seam", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[0])
 	f.shim.PushAgentFrame(mainAgent, feedResponseFrames("resp-1", "first")[1])
@@ -145,7 +145,7 @@ func TestGetFeedPageFirstThenNextWalksOlderPages(t *testing.T) {
 	// Arrange: push MORE than one page's worth of rows off harness.FeedPageSize
 	// — the daemon's own feed.DefaultPageSize, not a guessed number — so a
 	// second page provably exists regardless of what the page size is.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-walk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const n = harness.FeedPageSize + walkPageMargin
@@ -200,7 +200,7 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 	t.Parallel()
 	// Arrange: spawn a subagent and push MORE than one page of its own work,
 	// plus a distinguishable row that lands only on the ROOT feed.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-subwalk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
@@ -273,7 +273,7 @@ func TestGetFeedPageWalkOnASubagentBubbleFeedIdPagesTheSubFeedNotTheRoot(t *test
 func TestGetFeedPageWithAnUndecodableFeedIdAnswersFeedUndecodable(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	resp, err := f.d.Client().GetFeedPage(f.d.Ctx(), connect.NewRequest(&agentreplv1.GetFeedPageRequest{
@@ -295,7 +295,7 @@ func TestGetFeedPageWithAnotherWorkspacesBubbleFeedIdAnswersFeedNotInWorkspace(t
 	t.Parallel()
 	// Arrange: a second, independent workspace on the same daemon, with its
 	// own subagent bubble.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	other := secondWorkspaceOn(t, f.d)
 	other.submit("go", "k-otherwalk", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	otherTail := other.watchRootFeed()
@@ -327,7 +327,7 @@ func TestGetFeedPageWithAnotherWorkspacesBubbleFeedIdAnswersFeedNotInWorkspace(t
 func TestGetFeedPageAtStartAndAFurtherNextRepeatsTheWholeFeed(t *testing.T) {
 	t.Parallel()
 	// Arrange: walk all the way to the feed's start.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-atstart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const n = harness.FeedPageSize + walkPageMargin
@@ -417,7 +417,7 @@ func TestGetFeedPageFirstAfterNextReservesTheNewestPage(t *testing.T) {
 	t.Parallel()
 	// Arrange: walk one page older, so the reader's position is no longer the
 	// newest page.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-firstafter", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const n = harness.FeedPageSize + walkPageMargin
@@ -461,7 +461,7 @@ func TestAWalkContinuesOnAnyConnection(t *testing.T) {
 	// Arrange: a walk begun on connection A (owner's report, 2026-10-03: a
 	// webview spreads its requests over several connections, so an `older`
 	// click arrived on a connection the walk was not keyed by and was refused).
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-anyconn", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const n = harness.FeedPageSize + walkPageMargin
@@ -494,7 +494,7 @@ func TestAWalkContinuesOnAnyConnection(t *testing.T) {
 func TestTwoOpeningsWalkIndependently(t *testing.T) {
 	t.Parallel()
 	// Arrange: two readers (two webviews) each open the feed.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-twowalks", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	const n = harness.FeedPageSize + walkPageMargin
@@ -543,7 +543,7 @@ func TestTwoOpeningsWalkIndependently(t *testing.T) {
 func TestReadToolCardDrawsCodeOutputWithPaintSpansAndOmittedForAHeadCut(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-read", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -588,7 +588,7 @@ func TestReadToolCardDrawsCodeOutputWithPaintSpansAndOmittedForAHeadCut(t *testi
 func TestWriteToolCardDrawsDiffLines(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-write", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -624,7 +624,7 @@ func TestWriteToolCardDrawsDiffLines(t *testing.T) {
 func TestDiagnosticsBeforeTheirWriteCardProduceNoWarning(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-diagnostics-before-write", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -672,7 +672,7 @@ func TestDiagnosticsBeforeTheirWriteCardProduceNoWarning(t *testing.T) {
 func TestGlobToolCardDrawsLinesOutput(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-glob", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -707,7 +707,7 @@ func TestGlobToolCardDrawsLinesOutput(t *testing.T) {
 func TestAProgressFrameRepushesRunningLastProgress(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-progress", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
@@ -741,7 +741,7 @@ func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
 	// `failure` terminal with NO content, because nothing ran. The permission
 	// id IS the gated unit's AgentActivityId, which is what joins the two.
 	const unit = "gated-bash"
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-denied", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
@@ -802,7 +802,7 @@ func TestADeniedPermissionDrawsTheToolCardAsDenied(t *testing.T) {
 func TestPlanModeEnterThenExitCoalesceOntoOneFeedId(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-plan", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -970,7 +970,7 @@ func TestAPlanBubbleStaysPlannedWhenTheEnterIsDeliveredAgainAfterTheExit(t *test
 func TestWorktreeExitDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-wt-exit", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -1024,7 +1024,7 @@ func TestWorktreeExitDrawsASeparationDividerWithNoTokenDelta(t *testing.T) {
 func TestAClearDrawsOnlyItsBarThenTheFollowUpPromptOnTheRealPath(t *testing.T) {
 	t.Parallel()
 	// Arrange: a /clear run as a directive turn.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	cutResp := f.submit("/clear", "k-clear-realpath", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	clearTurn := cutResp.GetSuccess().GetTurn().GetTurn()
 	if clearTurn.GetValue() == "" {
@@ -1134,7 +1134,7 @@ func TestPermissionStartDrawsOpenRowFooterAndBanner(t *testing.T) {
 func TestQuestionAnsweredRepushesWithEchoedLabels(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-qanswer", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, updateFrame(mainAgent, &conversationv1.AgentUpdate{
@@ -1189,7 +1189,7 @@ func TestQuestionAnsweredRepushesWithEchoedLabels(t *testing.T) {
 func TestASyncSubagentSpawnDrawsABubbleHeadAndItsOwnFeedServesSubFeedRows(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-subagent", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -1286,7 +1286,7 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			f := newOpened(t, harness.Opts{})
+			f := newCanonical(t)
 			f.submit("go", "k-detachsub", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 			tail := f.watchRootFeed()
 			footer := f.d.WatchFooter(f.ws)
@@ -1329,8 +1329,10 @@ func TestADetachedSubagentGetsDetachedSubagentAndItsOwnWatchAgentEagerly(t *test
 func TestAVendorStartedTurnHoldsAPromptAndItsEndStampsTheAnsweringResponse(t *testing.T) {
 	t.Parallel()
 	// Arrange: the vendor starts a turn; a prompt is sent while it runs.
-	f := newOpened(t, harness.Opts{})
-	const vendorTurn = "turn-vendor-started"
+	f := newCanonical(t)
+	// A turn id is unique across the daemon (the turns table's key), so the
+	// vendor's is the workspace's own, as a vendor's UUID is.
+	vendorTurn := "turn-vendor-started-" + f.ws.GetId()
 	tail := f.watchRootFeed()
 	holds := f.d.WatchHolds(f.ws)
 	f.shim.PushUserPrompt(mainAgent, &conversationv1.AgentPrompt{
@@ -1387,7 +1389,7 @@ func TestAPromptRacingAVendorStartedTurnEndsOnItsOwnTerminalAndHoldsTheNextBehin
 	t.Parallel()
 	// Arrange: the racing prompt is accepted, the vendor's own turn is
 	// announced behind its back, and a second prompt is sent while both run.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	const vendorTurn = "turn-vendor-raced"
 	tail := f.watchRootFeed()
 	holds := f.d.WatchHolds(f.ws)
@@ -1440,7 +1442,7 @@ func TestAPromptRacingAVendorStartedTurnEndsOnItsOwnTerminalAndHoldsTheNextBehin
 func TestAStampedTerminalEndsOnlyTheTurnItNames(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWarnings("daemon.sessionwatcher.terminal_turn_unknown")
 	turn := f.submit("go", "k-stamped", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT).GetSuccess().GetTurn().GetTurn().GetValue()
 	tail := f.watchRootFeed()
@@ -1462,7 +1464,7 @@ func TestAStampedTerminalEndsOnlyTheTurnItNames(t *testing.T) {
 func TestApiRequestFailedInvalidRequestRespellsAsARefusal(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-refusal", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 
@@ -1541,7 +1543,7 @@ func TestARateLimitedTerminalCarriesTheVendorsStatedWaitAndNoneWhenUnstated(t *t
 func TestQueryDiedDrawsTheTurnsTerminal(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn in flight when the query dies out from under it.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	// The query's death is logged from two places per route.go/turnended.go:
 	// the session watcher's own routing (daemon.sessionwatcher.query_died,
 	// ERROR) and the feed resolver's terminal draw (daemon.feed.query_died,
@@ -1615,7 +1617,7 @@ func TestAnMcpToolCallDrawsTheOrdinaryToolCardAndNoTopbarWarning(t *testing.T) {
 	t.Parallel()
 	// Arrange: no unmodeled_activity warning is declared; the sweep fails the
 	// test if one is recorded.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-mcp", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	topbar := f.d.WatchTopbar(f.ws)
@@ -1668,7 +1670,7 @@ func TestAPromptsImageIsDrawnAsAnImageRowRatherThanAnUnsupportedBlock(t *testing
 	// Arrange: a session watching its main agent, and a pasted image — which
 	// the shim carries on ImageBlock's url arm as a data url, the only arm any
 	// producer emits.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	feed := f.watchRootFeed()
 	const src = "data:image/png;base64,aGk="
 
@@ -1887,7 +1889,7 @@ func TestWatchFeedWithATokenWhosePinnedStartIsGoneIsRefusedAtTheTransport(t *tes
 func TestABackgroundedForegroundShellsCardIsRetiredAndRedrawnAsItsShellBubble(t *testing.T) {
 	t.Parallel()
 	// Arrange: a foreground shell, drawn running.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-bash-moved", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	f.shim.PushAgentFrame(mainAgent, activityFrame(mainAgent, &conversationv1.AgentActivity{
@@ -1931,7 +1933,7 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 	t.Parallel()
 	// Arrange: a detached run that has ENDED. Its watch is reaped at the
 	// terminal, so the next announcement of the same work opens a fresh one.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-shell-resettle", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	pushDetachedShell(f.shim, "work-resettle-1", "make")
@@ -1982,7 +1984,7 @@ func TestAReplayedDetachmentNeverRedrawsASettledShellLive(t *testing.T) {
 func TestDetachedShellDrawsHeadAndSpoolTailFromWatchBashTail(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-detachshell", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 	pushDetachedShell(f.shim, "work-shell-1", "tail -f build.log")
@@ -2045,7 +2047,7 @@ func olderThanOldestOf(page *frontendv1.FeedPage) *agentreplv1.GetFeedPageReques
 func TestABoardCallOnADaemonWithNoCheckoutDrawsTheBoardUnavailable(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("go", "k-board", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	tail := f.watchRootFeed()
 

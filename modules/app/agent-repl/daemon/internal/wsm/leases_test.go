@@ -418,3 +418,29 @@ func TestCloseDoesNotReleaseALeaseThisHandleAlreadyReleased(t *testing.T) {
 		t.Fatalf("Close acted on a lease already released: %v", log.Records())
 	}
 }
+
+// A LEASE ON A FORGOTTEN WORKSPACE IS ANSWERED ErrNotFound in the take's own
+// transaction, at DEBUG, and writes nothing: the insert never fails its
+// foreign key at ERROR.
+func TestAcquireLeaseOnAForgottenWorkspaceAnswersNotFound(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	ws := testWorkspace(t, s)
+	if _, err := s.Forget(context.Background(), ws.ID); err != nil {
+		t.Fatalf("Forget: %v", err)
+	}
+
+	// Act
+	_, err := s.AcquireLease(context.Background(), ws.ID, HolderRestart, PolicyHold)
+
+	// Assert
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("AcquireLease = %v, want ErrNotFound", err)
+	}
+	if loggedOperation(log, "daemon.wsm.acquire_lease", "error") || !loggedOperation(log, "daemon.wsm.acquire_lease", "debug") {
+		t.Fatalf("records = %v, want the answer at DEBUG and no ERROR", log.Records())
+	}
+	if _, held, err := s.Lease(context.Background(), ws.ID); err != nil || held {
+		t.Fatalf("Lease = (held %v, %v), want no lease written", held, err)
+	}
+}

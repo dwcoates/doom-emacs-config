@@ -3,6 +3,7 @@ package harness
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,8 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	conversationv1 "agentrepl/proto/conversation/v1"
+	frontendv1 "agentrepl/proto/frontend/v1"
 	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"connectrpc.com/connect"
@@ -516,5 +519,162 @@ func TestAViewOfADaemonWithNoGitWorldIsRefused(t *testing.T) {
 	// Assert
 	if completed || !strings.Contains(viewTB.Failures(), "views a daemon with no git world") {
 		t.Fatalf("completed=%v failures=%q, want the view refused", completed, viewTB.Failures())
+	}
+}
+
+func TestAViewsStreamsSettleAgainstTheView(t *testing.T) {
+	// Arrange
+	owner := newOwnerForViews(t, t)
+
+	// Act
+	v := owner.View(t)
+
+	// Assert: a stream the view opens finds the view to settle against
+	// (Stream.settle), as an owner's finds its owner.
+	if got, _ := v.ctx.Value(daemonKey{}).(*Daemon); got != v {
+		t.Fatalf("the view's context carries %p, want the view %p", got, v)
+	}
+}
+
+// retiringClient is registeringClient that also answers the retirement's
+// calls from scripts, recording each call as "<verb> <id>".
+type retiringClient struct {
+	registeringClient
+	refs    map[string]*workspacev1.WorkspaceRef
+	calls   *[]string
+	kill    func(id string) (*agentreplv1.KillWorkspaceResponse, error)
+	forgets map[string][]*agentreplv1.ForgetWorkspaceResponse
+	held    []string
+}
+
+func (c retiringClient) RegisterWorkspace(_ context.Context, req *connect.Request[agentreplv1.RegisterWorkspaceRequest]) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.RegisterWorkspaceResponse{
+		Result: &agentreplv1.RegisterWorkspaceResponse_Success{Success: &agentreplv1.RegisterWorkspaceSuccess{Workspace: c.refs[req.Msg.GetDir()]}},
+	}), nil
+}
+
+func (c retiringClient) KillWorkspace(_ context.Context, req *connect.Request[agentreplv1.KillWorkspaceRequest]) (*connect.Response[agentreplv1.KillWorkspaceResponse], error) {
+	id := req.Msg.GetWorkspace().GetId()
+	*c.calls = append(*c.calls, "kill "+id)
+	if c.kill != nil {
+		resp, err := c.kill(id)
+		if err != nil {
+			return nil, err
+		}
+		return connect.NewResponse(resp), nil
+	}
+	return connect.NewResponse(&agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Success{Success: &agentreplv1.KillWorkspaceSuccess{}}}), nil
+}
+
+func (c retiringClient) ForgetWorkspace(_ context.Context, req *connect.Request[agentreplv1.ForgetWorkspaceRequest]) (*connect.Response[agentreplv1.ForgetWorkspaceResponse], error) {
+	id := req.Msg.GetWorkspace().GetId()
+	*c.calls = append(*c.calls, "forget "+id)
+	if script := c.forgets[id]; len(script) > 0 {
+		c.forgets[id] = script[1:]
+		return connect.NewResponse(script[0]), nil
+	}
+	return connect.NewResponse(&agentreplv1.ForgetWorkspaceResponse{Result: &agentreplv1.ForgetWorkspaceResponse_Success{Success: &agentreplv1.ForgetWorkspaceSuccess{}}}), nil
+}
+
+func (c retiringClient) OpenFeed(_ context.Context, req *connect.Request[agentreplv1.OpenFeedRequest]) (*connect.Response[agentreplv1.OpenFeedResponse], error) {
+	*c.calls = append(*c.calls, "open_feed "+req.Msg.GetWorkspace().GetId())
+	held := &frontendv1.FeedHeld{}
+	for _, turn := range c.held {
+		held.Items = append(held.Items, &frontendv1.FeedHeldItem{Item: &frontendv1.FeedHeldItem_Prompt{Prompt: &frontendv1.HeldPrompt{Turn: &conversationv1.TurnId{Value: turn}}}})
+	}
+	return connect.NewResponse(&agentreplv1.OpenFeedResponse{Result: &agentreplv1.OpenFeedResponse_Success{Success: &agentreplv1.OpenFeedSuccess{Held: held}}}), nil
+}
+
+func (c retiringClient) UpdateHeldPrompt(_ context.Context, req *connect.Request[agentreplv1.UpdateHeldPromptRequest]) (*connect.Response[agentreplv1.UpdateHeldPromptResponse], error) {
+	*c.calls = append(*c.calls, "drop "+req.Msg.GetTurn().GetValue())
+	return connect.NewResponse(&agentreplv1.UpdateHeldPromptResponse{Result: &agentreplv1.UpdateHeldPromptResponse_Success{Success: &agentreplv1.UpdateHeldPromptSuccess{}}}), nil
+}
+
+func forgetError(e *agentreplv1.ForgetWorkspaceError) *agentreplv1.ForgetWorkspaceResponse {
+	return &agentreplv1.ForgetWorkspaceResponse{Result: &agentreplv1.ForgetWorkspaceResponse_Error{Error: e}}
+}
+
+func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
+	cases := []struct {
+		name      string
+		kill      func(id string) (*agentreplv1.KillWorkspaceResponse, error)
+		forgets   map[string][]*agentreplv1.ForgetWorkspaceResponse
+		held      []string
+		wantCalls []string
+		wantFail  string
+	}{
+		{
+			name:      "every workspace is killed and forgotten, latest first",
+			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1"},
+		},
+		{
+			name: "a workspace the test already removed is passed over",
+			kill: func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
+				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
+					Cause: &agentreplv1.KillWorkspaceError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.KillWorkspaceUnknownWorkspace{}}}}}, nil
+			},
+			wantCalls: []string{"kill w2", "kill w1"},
+		},
+		{
+			name: "a forget its held prompts block drops them and forgets again",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_Blocked{Blocked: &agentreplv1.ForgetWorkspaceBlocked{HeldPrompts: 1}}})}},
+			held:      []string{"t1"},
+			wantCalls: []string{"kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
+		},
+		{
+			name: "a refused kill fails the test and forgets nothing",
+			kill: func(id string) (*agentreplv1.KillWorkspaceResponse, error) {
+				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
+					Cause: &agentreplv1.KillWorkspaceError_HasOpenChildren{HasOpenChildren: &agentreplv1.WorkspaceHasOpenChildren{}}}}}, nil
+			},
+			wantCalls: []string{"kill w2", "kill w1"},
+			wantFail:  "KillWorkspace = error:{has_open_children",
+		},
+		{
+			name: "a kill that cannot be asked fails the test",
+			kill: func(string) (*agentreplv1.KillWorkspaceResponse, error) {
+				return nil, errors.New("connection refused")
+			},
+			wantCalls: []string{"kill w2", "kill w1"},
+			wantFail:  "KillWorkspace = error connection refused",
+		},
+		{
+			name: "a refused forget fails the test",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w1": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_NotClosed{NotClosed: &agentreplv1.ForgetWorkspaceNotClosed{}}})}},
+			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1"},
+			wantFail:  "ForgetWorkspace = error:{not_closed",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a view registers two workspaces.
+			owner := newOwnerForViews(t, t)
+			d1, d2 := t.TempDir(), t.TempDir()
+			var calls []string
+			owner.client = retiringClient{
+				refs:  map[string]*workspacev1.WorkspaceRef{d1: {Id: "w1", Dir: d1}, d2: {Id: "w2", Dir: d2}},
+				calls: &calls, kill: tc.kill, forgets: tc.forgets, held: tc.held,
+			}
+			tb := NewRecordingTB(t, "TestRetires")
+			view := owner.View(tb)
+			Register(t, view, d1)
+			Register(t, view, d2)
+
+			// Act: the view's test ends.
+			tb.RunCleanups()
+
+			// Assert
+			if !reflect.DeepEqual(calls, tc.wantCalls) {
+				t.Fatalf("calls = %v, want %v", calls, tc.wantCalls)
+			}
+			switch failures := tb.Failures(); {
+			case tc.wantFail == "" && failures != "":
+				t.Fatalf("failures = %q, want none", failures)
+			case tc.wantFail != "" && !strings.Contains(failures, tc.wantFail):
+				t.Fatalf("failures = %q, want one saying %q", failures, tc.wantFail)
+			}
+		})
 	}
 }

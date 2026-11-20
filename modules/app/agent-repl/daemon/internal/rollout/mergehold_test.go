@@ -194,3 +194,32 @@ func TestAStandDownRefusalIsNeverADeferralBehindALease(t *testing.T) {
 		})
 	}
 }
+
+// A WORKSPACE FORGOTTEN DURING ITS BOUNCE ends the bounce unregistered:
+// nothing is left to replace, the prelaunch is stopped, and nothing is
+// recorded at ERROR (2026-11-20 e2e QueryEofEndsTheTurnAsQueryDied).
+func TestABounceWhoseWorkspaceIsForgottenEndsUnregistered(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.onPrelaunch = func(ids.WorkspaceID) {
+		if _, err := h.db.Forget(context.Background(), ws); err != nil {
+			t.Errorf("Forget: %v", err)
+		}
+	}
+
+	// Act.
+	err := h.c.shimBounce(ReasonSkillsChanged, false, nil)(context.Background(), ws)
+
+	// Assert.
+	if bounce.OutcomeOf(err) != bounce.OutcomeUnregistered {
+		t.Fatalf("bounce = %v, want it unregistered", err)
+	}
+	if len(h.fleet.resumes) != 0 {
+		t.Fatalf("resumes = %v, want nothing replaced", h.fleet.resumes)
+	}
+	relaunch := records(h.log, opRelaunch)
+	if len(levelRecords(relaunch, "error")) != 0 || len(levelRecords(relaunch, "info")) == 0 {
+		t.Fatalf("relaunch records = %v, want the forgotten workspace stated at INFO and no ERROR", relaunch)
+	}
+}

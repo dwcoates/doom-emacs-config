@@ -621,7 +621,7 @@ func TestBringUpDeathLeavesTheRosterRowStartFailed(t *testing.T) {
 func TestUpdateTaskSetDoneTwiceAnswersNoChange(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	task := createTask(t, f, "done twice")
 	if _, err := f.d.Client().UpdateTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.UpdateTaskRequest{
 		Task:   task,
@@ -779,7 +779,7 @@ func TestUpdateTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	resp, err := f.d.Client().AssignWorkspaceTask(f.d.Ctx(), connect.NewRequest(&agentreplv1.AssignWorkspaceTaskRequest{
@@ -802,7 +802,7 @@ func TestAssignWorkspaceTaskWithABogusTaskRefAnswersUnknownTask(t *testing.T) {
 func TestUpdateTaskWithABlankTitleAnswersBlankTitle(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	task := createTask(t, f, "has a title")
 
 	// Act

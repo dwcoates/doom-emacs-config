@@ -55,7 +55,7 @@ func TestOpenDefaultOnAPlatformThatRaisesNothingOnlyHandsTheURLOver(t *testing.T
 	o, logger := newOpenerLogged(t, externalbrowser.Config{Platform: &platform, LocalStatePath: writeLocalState(t, dir, twoProfiles)})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com/page", "work@example.com")
+	err := o.Open(context.Background(), o.log, "https://example.com/page", "work@example.com")
 
 	// Assert.
 	if err != nil {
@@ -91,7 +91,7 @@ func TestEmptyFieldsTakeThePlatforms(t *testing.T) {
 	o := newOpener(t, externalbrowser.Config{Platform: &platform})
 
 	// Act.
-	err := o.Open(context.Background(), "https://example.com/page", "personal@example.com")
+	err := o.Open(context.Background(), o.log, "https://example.com/page", "personal@example.com")
 
 	// Assert.
 	if err != nil {

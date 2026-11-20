@@ -9,8 +9,6 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	frontendv1 "agentrepl/proto/frontend/v1"
-
-	"agent-repld/integration/harness"
 )
 
 // TestAHeldPromptMidDeliveryIsRefusedAsBeingDelivered is the being_delivered
@@ -23,7 +21,7 @@ func TestAHeldPromptMidDeliveryIsRefusedAsBeingDelivered(t *testing.T) {
 
 	// Arrange: two prompts held behind a running turn, and a shim that will
 	// not answer the next StartTurn.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	holds := f.d.WatchHolds(f.ws)
 	f.submit("the running work", "k-running", origin)
 	f.shim.ExpectStartTurn()
