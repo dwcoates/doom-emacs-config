@@ -26,6 +26,10 @@ type Usage struct {
 	Pid, Ppid int
 	// Start tells this process from an earlier one with its pid.
 	Start time.Time
+	// Mark is the value the process's environment gives the marking
+	// variable, which tells one marked tree from another (a test run's unit
+	// tag, cputime.UnitEnv).
+	Mark string
 	// Own is the CPU seconds the process used itself.
 	Own float64
 	// Children is the CPU seconds of every child it reaped, theirs and their
@@ -48,6 +52,7 @@ type markedKernel struct {
 type mark struct {
 	start  time.Time
 	marked bool
+	value  string
 }
 
 // Marked scans for the processes of one user whose environment names Name.
@@ -89,7 +94,7 @@ func (m *Marked) Scan() ([]Usage, error) {
 			continue
 		}
 		alive[pid] = true
-		marked, err := m.marked(pid, rec)
+		value, marked, err := m.marked(pid, rec)
 		if err != nil {
 			return nil, err
 		}
@@ -104,7 +109,7 @@ func (m *Marked) Scan() ([]Usage, error) {
 		if err != nil {
 			return nil, fmt.Errorf("read pid %d's CPU: %w", pid, err)
 		}
-		out = append(out, Usage{Pid: pid, Ppid: rec.Ppid, Start: rec.Start, Own: own, Children: children})
+		out = append(out, Usage{Pid: pid, Ppid: rec.Ppid, Start: rec.Start, Mark: value, Own: own, Children: children})
 	}
 	for pid := range m.marks {
 		if !alive[pid] {
@@ -114,30 +119,31 @@ func (m *Marked) Scan() ([]Usage, error) {
 	return out, nil
 }
 
-// marked answers whether the process carries the mark, reading its
-// environment only the first time this process (pid and start) is seen. A
+// marked answers whether the process carries the mark, and its value,
+// reading its environment only the first time this process (pid and start)
+// is seen. A
 // process whose environment cannot be read right now (exiting, mid-exec, a
 // zombie) is unmarked for this scan and read again by the next, unless it
 // was already read.
-func (m *Marked) marked(pid int, rec procRecord) (bool, error) {
+func (m *Marked) marked(pid int, rec procRecord) (string, bool, error) {
 	if known, ok := m.marks[pid]; ok && known.start.Equal(rec.Start) {
-		return known.marked, nil
+		return known.value, known.marked, nil
 	}
 	_, env, err := m.k.args(pid)
 	switch {
 	case err == nil:
 	case errors.Is(err, syscall.EINVAL), errors.Is(err, syscall.EPERM), errors.Is(err, syscall.ESRCH), errors.Is(err, syscall.EIO):
-		return false, nil
+		return "", false, nil
 	default:
-		return false, fmt.Errorf("read pid %d's environment: %w", pid, err)
+		return "", false, fmt.Errorf("read pid %d's environment: %w", pid, err)
 	}
-	marked := false
+	found := mark{start: rec.Start}
 	for _, kv := range env {
-		if strings.HasPrefix(kv, m.Name+"=") {
-			marked = true
+		if value, ok := strings.CutPrefix(kv, m.Name+"="); ok {
+			found.marked, found.value = true, value
 			break
 		}
 	}
-	m.marks[pid] = mark{start: rec.Start, marked: marked}
-	return marked, nil
+	m.marks[pid] = found
+	return found.value, found.marked, nil
 }

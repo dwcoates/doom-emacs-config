@@ -88,11 +88,47 @@ func TestMarkedScanAnswersThisUsersMarkedProcessesAndTheirCPU(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []Usage{
-		{Pid: 10, Ppid: 1, Start: start, Own: 1.5, Children: 2},
-		{Pid: 16, Ppid: 10, Start: start, Own: 0.25},
+		{Pid: 10, Ppid: 1, Start: start, Mark: "7", Own: 1.5, Children: 2},
+		{Pid: 16, Ppid: 10, Start: start, Mark: "", Own: 0.25},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Scan() =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestMarkedScanAnswersEachProcessesMarkValueFromItsOneRead(t *testing.T) {
+	// Arrange: two trees carry the mark with different values.
+	start := time.Date(2026, 11, 20, 9, 0, 0, 0, time.UTC)
+	f := &fakeMarked{
+		pids:    []int{10, 20},
+		records: map[int]procRecord{10: {UID: 501, Start: start}, 20: {UID: 501, Start: start}},
+		args: map[int][]byte{
+			10: procArgsBuf(1, "/bin/sh", "sh", "MARK=run1/unitA"),
+			20: procArgsBuf(1, "/bin/sh", "sh", "MARK=run1/unitB"),
+		},
+		cpu: map[int][2]float64{10: {1, 0}, 20: {2, 0}},
+	}
+	m := f.scanner()
+	if _, err := m.Scan(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act: the second scan answers the values it remembered.
+	got, err := m.Scan()
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	marks := map[int]string{}
+	for _, u := range got {
+		marks[u.Pid] = u.Mark
+	}
+	if want := map[int]string{10: "run1/unitA", 20: "run1/unitB"}; !reflect.DeepEqual(marks, want) {
+		t.Fatalf("marks = %v, want %v", marks, want)
+	}
+	if f.argsRead[10] != 1 || f.argsRead[20] != 1 {
+		t.Fatalf("environments read %v; want each once", f.argsRead)
 	}
 }
 

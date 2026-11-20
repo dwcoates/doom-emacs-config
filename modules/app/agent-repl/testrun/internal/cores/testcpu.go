@@ -49,28 +49,45 @@ type procKey struct {
 // seenProc is what the last read counted of a process.
 type seenProc struct {
 	ppid  int
+	mark  string
 	total float64
 }
 
 // Read answers the CPU seconds every marked process has used since the first
 // read.
 func (a *TestsCPU) Read() (float64, error) {
-	procs, err := a.Scan()
+	growth, err := a.ReadByMark()
 	if err != nil {
 		return 0, err
 	}
+	for _, g := range growth {
+		a.total += g
+	}
+	return a.total, nil
+}
+
+// ReadByMark answers the CPU seconds the marked processes used since the last
+// read, by each process's mark value (proctable.Usage.Mark), counted as Read
+// counts them: a reaped process's use is taken off its own mark when its
+// living marked parent now holds it. The first read only takes the baseline
+// and answers nothing.
+func (a *TestsCPU) ReadByMark() (map[string]float64, error) {
+	procs, err := a.Scan()
+	if err != nil {
+		return nil, err
+	}
 	now := make(map[procKey]seenProc, len(procs))
 	byPid := make(map[int]procKey, len(procs))
-	growth := 0.0
+	growth := map[string]float64{}
 	for _, p := range procs {
 		k := procKey{pid: p.Pid, start: p.Start.UnixNano()}
 		total := p.Own + p.Children
 		if prev, ok := a.seen[k]; ok {
-			growth += total - prev.total
+			growth[p.Mark] += total - prev.total
 		} else if a.primed {
-			growth += total
+			growth[p.Mark] += total
 		}
-		now[k] = seenProc{ppid: p.Ppid, total: total}
+		now[k] = seenProc{ppid: p.Ppid, mark: p.Mark, total: total}
 		byPid[p.Pid] = k
 	}
 	for k, gone := range a.seen {
@@ -78,10 +95,9 @@ func (a *TestsCPU) Read() (float64, error) {
 			continue
 		}
 		if _, parentAlive := byPid[gone.ppid]; parentAlive {
-			growth -= gone.total
+			growth[gone.mark] -= gone.total
 		}
 	}
 	a.seen, a.primed = now, true
-	a.total += growth
-	return a.total, nil
+	return growth, nil
 }
