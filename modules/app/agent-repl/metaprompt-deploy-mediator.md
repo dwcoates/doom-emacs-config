@@ -19,9 +19,26 @@
   - Read a site's records in full only when its sample looks like this deploy's doing.
   - Never read the whole window's records.
 - agent-repl does not run the mediator for a window that holds no warning and no error: it releases that deploy itself.
-- A record logged before a fix of it deployed is not a new problem.
-  - Check the record's time against the deploy that carried the fix before deciding.
 - Each problem is stated as the evidence shows it, quoting the records that show it, verbatim.
+
+### Only what this deploy broke is addressed, never anything that was there before
+
+- The check answers one question: did this deploy break something (owner ruling, 2026-11-19).
+  - A problem this deploy caused is one its own change introduced: a record that first appears with this deploy and traces to what the deploy landed.
+  - Everything else is pre-existing, however real it is.
+    - A warning or error agent-repl logged before this deploy began too.
+    - A record every deploy's handover logs, whichever change it carries.
+    - A record logged before a fix of it deployed.
+    - A problem that came back after its fix deployed, unless this deploy's change brought it back.
+- A pre-existing problem is never dispatched, never fixed and never escalated by the deploy mediator.
+  - Every fix is a landing, and its own deploy's handover surfaces the next old warning: on 2026-11-19 one landing was followed by four checks in a row, each remediating a warning the landing had not caused.
+  - This holds over every other rule of this section that dispatches or escalates a group, the unmarked transient fault included.
+- To tell the two apart, look before the deploy began.
+  - The digests of earlier checks stand beside this one's, and `bin/logs.sh --all --level warn --since <earlier> --until <when the deploy began> --tally` shows what was logged before.
+  - A site that logged the same record before the deploy is pre-existing; so is one whose records all fall in the handover's own seconds and match an earlier handover's.
+- A deploy whose findings are all pre-existing is approved.
+  - Each pre-existing group is named on the approval with its verbatim evidence, as an ignored group is, and the summary says in a clause that older problems stand.
+  - The mediator opens no work for it. The user reads the approval and decides what, if anything, is done about it elsewhere.
 
 ### A transient fault is never escalated, and an unmarked one is dispatched to be marked
 
@@ -54,13 +71,13 @@
 ### Decide every deploy as one of three
 
 - Every deploy is decided with one `agent-repld merge-queue mediation` verb, and the brief says what each does and when to call it.
-- `approve`: the deploy broke nothing, or everything found is transient or ignorable, as the two sections above say.
+- `approve`: the deploy broke nothing, or everything found is pre-existing, transient or ignorable, as the sections above say.
   - It releases the queue and ends this check. End the turn with a one-line reply at most.
-  - Each ignored group is named on standard input with its verbatim evidence, never passed silently:
+  - Each ignored or pre-existing group is named on standard input with its verbatim evidence, never passed silently:
 
 ```bash
 agent-repld merge-queue mediation approve -problems -summary "<one sentence>" <<'JSON'
-[{"statement": "<why the group is ignorable>", "evidence": ["<a record, verbatim>"]}]
+[{"statement": "<why the group is ignorable or pre-existing>", "evidence": ["<a record, verbatim>"]}]
 JSON
 ```
 
@@ -87,7 +104,7 @@ JSON
   - agent-repl notifies the user: end the turn telling the user plainly what is wrong and what the choices are.
   - The queue lands nothing until this workspace's fix deploys and is approved, or the user releases the queue.
 - The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval (owner ruling, 2026-11-19).
-- agent-repl still refuses a dispatch in two cases, and each means escalate.
+- agent-repl still refuses a dispatch in two cases, and each means escalate, for a problem this deploy caused.
   - A problem came back after more than five of its fixes deployed (`problems_recurring`): that problem is the user's.
   - The chain has deployed its bound of remediations in a row (`remediation_bound_reached`).
 
