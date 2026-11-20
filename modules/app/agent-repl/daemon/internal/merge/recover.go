@@ -438,27 +438,7 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	// already fast-forwarded to, which the commit object outlives), while the
 	// branch's worktree is where its rebase stands.
 	o.sweepTrees(ctx, ws, doc.Subject.TargetDir, lease.ID, true)
-	o.mu.Lock()
-	o.repoOf[ws] = repo
-	o.ledgerOf[ws] = lease.ID
-	o.resumes[ws] = doc
-	o.mu.Unlock()
-	// THE MERGE IS HELD from here until its resume runs (holdRound).
-	o.holdRound(ctx, repo, ws, lease.ID, true)
-	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
-	// always had, and the footer shows the step the merge stands on before the
-	// resumed run's first word.
-	label := branchLineOf(doc.Subject.Branch, doc.Subject.subject().targetLabel())
-	if doc.BackInLine {
-		// A MERGE BACK IN LINE FROM ITS REPAIR is drawn waiting, never at the
-		// repair its record last stood on (drawBackInLine); the queue's redraw
-		// gives it its place.
-		o.publishHead(ws, lease.ID, label, doc.QueuedMS, headWaiting, headRecover)
-		o.publish(repo, ws, MergeFacts{State: StateQueued, QueuedAt: time.UnixMilli(doc.QueuedMS), Step: footer.StepEnqueued})
-	} else {
-		o.publishHead(ws, lease.ID, label, doc.StartedMS, headMerging, headRecover)
-		o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
-	}
+	o.takeBackResume(ctx, repo, ws, lease.ID, doc)
 	// THE RUN LOG CARRIES IT TOO: a merge resumed is a fact about the
 	// restart, and the durable run log is where a boot sequence is read.
 	fields := dlog.Context{"workspace": string(ws), "repo": string(repo), "lease": string(lease.ID), "step": doc.Step,
@@ -476,6 +456,33 @@ func (o *orchestrator) recoverResumable(ctx context.Context, repo wsm.RepoKey, l
 	o.log(ctx, ws).Info(op, message, fields)
 	o.deps.Log.Global().Info(op, message, fields)
 	return nil
+}
+
+// takeBackResume stands DOC, the progress record of WS's merge under LEASE,
+// as this daemon's resume of it, and draws the merge as it stood: the one
+// take-back a record has (recoverResumable).
+func (o *orchestrator) takeBackResume(ctx context.Context, repo wsm.RepoKey, ws ids.WorkspaceID, lease ids.LeaseID, doc progressDoc) {
+	o.mu.Lock()
+	o.repoOf[ws] = repo
+	o.ledgerOf[ws] = lease
+	o.resumes[ws] = doc
+	o.mu.Unlock()
+	// THE MERGE IS HELD from here until its resume runs (holdRound).
+	o.holdRound(ctx, repo, ws, lease, true)
+	// THE SAME BUBBLE, AT ONCE: its head is redrawn live under the identity it
+	// always had, and the footer shows the step the merge stands on before the
+	// resumed run's first word.
+	label := branchLineOf(doc.Subject.Branch, doc.Subject.subject().targetLabel())
+	if doc.BackInLine {
+		// A MERGE BACK IN LINE FROM ITS REPAIR is drawn waiting, never at the
+		// repair its record last stood on (drawBackInLine); the queue's redraw
+		// gives it its place.
+		o.publishHead(ws, lease, label, doc.QueuedMS, headWaiting, headRecover)
+		o.publish(repo, ws, MergeFacts{State: StateQueued, QueuedAt: time.UnixMilli(doc.QueuedMS), Step: footer.StepEnqueued})
+		return
+	}
+	o.publishHead(ws, lease, label, doc.StartedMS, headMerging, headRecover)
+	o.publish(repo, ws, doc.footerFacts(o.deps.Now()))
 }
 
 // recoverRemediating takes back a merge remediating out of line (remediate.go)

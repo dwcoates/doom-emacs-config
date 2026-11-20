@@ -16,6 +16,7 @@ import (
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -1035,5 +1036,22 @@ func TestBothDisplacedPutBacksSubmitTheOneShape(t *testing.T) {
 				t.Errorf("%s spells the displaced-turn submission by hand", file)
 			}
 		})
+	}
+}
+
+// TestEveryTakeBackOfARecordGoesThroughTakeBackResume pins the shape every
+// take-back of a record shares: it is stood as a resume and drawn by the one
+// helper, so no take-back hand-rolls a divergent draw.
+func TestEveryTakeBackOfARecordGoesThroughTakeBackResume(t *testing.T) {
+	// Arrange + Act
+	calls := sourcescan.Sites(t, "o.takeBackResume(")
+	draws := sourcescan.Sites(t, "headWaiting, headRecover)")
+
+	// Assert
+	if !slices.Equal(calls, []string{"recover.go"}) {
+		t.Fatalf("takeBackResume is called at %v, want once, by the take-back in recover.go", calls)
+	}
+	if !slices.Equal(draws, []string{"recover.go"}) {
+		t.Fatalf("a taken-back merge is drawn waiting at %v, want only in takeBackResume", draws)
 	}
 }
