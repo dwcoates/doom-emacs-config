@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"syscall"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -493,3 +494,114 @@ func TestOnlyPipeStreamCarriesAStreamFromAnotherDaemon(t *testing.T) {
 		t.Fatalf("a server stream is opened at another daemon from %v, want only pipeStream in forward.go", sites)
 	}
 }
+
+// refusingAddress answers a loopback address nothing listens on: a listener
+// opened and closed, as an exiting daemon's private listener is.
+func refusingAddress(t *testing.T) string {
+	t.Helper()
+	closed := httptest.NewServer(http.NotFoundHandler())
+	u, err := url.Parse(closed.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed.Close()
+	return u.Host
+}
+
+func TestTargetGoneReadsARefusedConnection(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{name: "a refused connection, as Connect wraps it", err: connect.NewError(connect.CodeUnavailable, &url.Error{Op: "Post", URL: "http://127.0.0.1:1", Err: syscall.ECONNREFUSED}), want: true},
+		{name: "a target's own unavailable answer", err: connect.NewError(connect.CodeUnavailable, errors.New("the workspace is standing down"))},
+		{name: "a cancelled call", err: context.Canceled},
+		{name: "no error", err: nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := targetGone(tc.err); got != tc.want {
+				t.Fatalf("targetGone(%v) = %v, want %v", tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+// THE 2026-11-19 FAILURE, PINNED: an exiting daemon closes its listener
+// before its life lock is freed, so a call forwarded to it in that span is
+// refused. It is answered here, as a call for a daemon that no longer runs
+// is, and never fails at the client.
+func TestACallForwardedToADaemonThatNoLongerAcceptsIsAnsweredHere(t *testing.T) {
+	t.Run("a page call for an exiting daemon's attachment is answered page_gone", func(t *testing.T) {
+		// Arrange: the attachment's daemon still holds its life lock, and
+		// its listener is closed.
+		log := &recordingLogger{}
+		h := newHarness(t, func(d *Deps) { d.Log = &fakeSurfaces{global: log} })
+		gone := refusingAddress(t)
+		h.Instances = map[ids.InstanceID]string{"daemon-exiting": gone}
+		msg := footerSubscription("page-1", &agentreplv1.PageAttachment{Instance: "daemon-exiting", Sequence: 1})
+
+		// Act
+		resp, err := h.Unmarked.SubscribePage(context.Background(), connect.NewRequest(msg))
+
+		// Assert
+		if err != nil || resp.Msg.GetSuccess().GetPageGone() == nil {
+			t.Fatalf("SubscribePage = (%v, %v), want page_gone answered here", resp, err)
+		}
+		var recorded bool
+		for _, rec := range log.at("INFO") {
+			if rec.Operation == "daemon.server.forward" && rec.Context["rpc"] == "SubscribePage" && rec.Context["target"] == gone &&
+				rec.Message == "the daemon a call was forwarded to no longer accepts connections; the call is answered here" {
+				recorded = true
+			}
+		}
+		if !recorded {
+			t.Fatalf("the refused forward was not recorded; got %v", log.records)
+		}
+	})
+	t.Run("a call for a workspace whose serving daemon is exiting is answered here", func(t *testing.T) {
+		// Arrange
+		gone := refusingAddress(t)
+		here := newHarness(t, func(d *Deps) {
+			d.Ownership = &fakeOwnership{standing: workspace.StandingTransferringAway}
+			d.SuccessorAddress = func() string { return gone }
+		})
+		here.Verbs.api.status = &agentreplv1.WorkspaceStatus{Workspace: ref(), Name: "here"}
+
+		// Act
+		resp, err := here.Unmarked.GetWorkspaceStatus(context.Background(), connect.NewRequest(&agentreplv1.GetWorkspaceStatusRequest{Workspace: ref()}))
+
+		// Assert
+		if err != nil || resp.Msg.GetSuccess().GetStatus().GetName() != "here" {
+			t.Fatalf("GetWorkspaceStatus = (%v, %v), want it served here", resp, err)
+		}
+	})
+}
+
+func TestPipeStreamAnswersATargetThatNoLongerAcceptsAsGone(t *testing.T) {
+	// Arrange
+	const procedure = "/agentrepl.v1.AgentRepl/WatchHostWorkspace"
+	log := dlog.NewTestLogger()
+	s := &server{log: log, life: context.Background(), deps: Deps{Forward: h2cclient.Client()}}
+	gone := refusingAddress(t)
+	accepted := false
+
+	// Act
+	err := pipeStream[agentreplv1.WatchHostWorkspaceRequest, agentreplv1.WatchHostWorkspaceResponse](context.Background(), s, "WatchHostWorkspace", gone, procedure,
+		connect.NewRequest(&agentreplv1.WatchHostWorkspaceRequest{Workspace: ref()}), discardSink[agentreplv1.WatchHostWorkspaceResponse]{}, func() { accepted = true })
+
+	// Assert
+	if !errors.Is(err, errTargetGone) || accepted {
+		t.Fatalf("pipeStream = %v (accepted %v), want errTargetGone and nothing accepted", err, accepted)
+	}
+	if _, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "info", Operation: "daemon.server.forward",
+		Message: "the daemon a stream was forwarded to no longer accepts connections; the stream is served here"}); !ok {
+		t.Fatalf("records = %v, want the refused stream recorded", log.Records())
+	}
+}
+
+// discardSink is a stream sink that keeps nothing.
+type discardSink[Resp any] struct{}
+
+func (discardSink[Resp]) Send(*Resp) error { return nil }

@@ -67,6 +67,9 @@ func relayWatch[Req, Resp any](ctx context.Context, s *server, rpc, procedure, t
 			return ctx.Err()
 		}
 		return err
+	case errors.Is(err, errTargetGone):
+		// pipeStream recorded it; the subscription is run here (SubscribePage).
+		return err
 	case err != nil:
 		s.log.Info("daemon.server.relay", "the daemon a page subscription is relayed from ended it with an error", dlog.WithCause(fields, err))
 		return err
