@@ -2044,17 +2044,20 @@ describe("the vendor refusing a CONTROL call", () => {
 
 
 describe("SetSessionModel's cold gate", () => {
+  // On the "session-settings" group: every case here switches the model, which
+  // the group puts back when the case finishes.
   // A MODEL SWITCH IS A COLD CACHE, because the cache is per model. The refusal
   // is immediate and states its cost, rather than a warning after the user has
   // already paid for it.
   test("a switch above the caller's threshold is REFUSED with its cost", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     // A turn so the transcript has context to lose -- AND ABOVE THE COLD-GATE
     // FLOOR. The gate does not ask at or under 150,000 tokens (owner ruling), and an
     // ordinary turn reports far less than that, so `!cold-seed` is the seed
     // that puts a real cost on the switch.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!cold-seed" }));
 
     const response = await shim.clients.h1.setSessionModel(
       create(shimv1.SetSessionModelRequestSchema, {
@@ -2073,10 +2076,11 @@ describe("SetSessionModel's cold gate", () => {
 
   test("the same switch with a remediation SUCCEEDS", async () => {
     // The refusal is not a veto: it exists so the caller decides knowingly.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     // Above the cold-gate floor, so the first call is genuinely refused.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!cold-seed" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!cold-seed" }));
     setModelCause(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
@@ -2101,11 +2105,13 @@ describe("SetSessionModel's cold gate", () => {
     // The ack alone proves nothing about which model the session is on. The
     // turn-end push is the session's own authoritative statement, and it is
     // what a topbar renders.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await settingsSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t1, t2);
     const watch = watchSession(shim);
     await watch.until((frame) => sessionUpdate(frame).update.case === "contextUsage");
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!md" }));
     setModelAccepted(
       await shim.clients.h1.setSessionModel(
         create(shimv1.SetSessionModelRequestSchema, {
@@ -2116,7 +2122,7 @@ describe("SetSessionModel's cold gate", () => {
       ),
     );
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!md" }));
     const pushed = await watch.until((frame) => {
       const update = sessionUpdate(frame);
       return update.update.case === "contextUsage" && update.update.value.model === "fake-sonnet-5";
