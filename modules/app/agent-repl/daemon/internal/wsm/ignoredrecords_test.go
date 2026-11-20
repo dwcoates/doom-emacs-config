@@ -153,9 +153,7 @@ func TestAJoiningDaemonReadsTheIgnoredRecordKindsWhileItsIncumbentStillServes(t 
 	if step < 0 {
 		t.Fatal("no migration step is named deploy_ignored_records")
 	}
-	realSteps, realLayout := migrations, LayoutVersion
-	migrations, LayoutVersion = slices.Clone(realSteps[:step+1]), realSteps[step].To
-	t.Cleanup(func() { migrations, LayoutVersion = realSteps, realLayout })
+	withSteps(t, slices.Clone(migrations[:step+1])...)
 	path := fixtureAt(t, LayoutVersion-1)
 
 	// Act: join beside the incumbent, and read before any contract step runs.

@@ -295,42 +295,44 @@ func OpenJoining(ctx context.Context, path string, opts ...Option) (DB, error) {
 	return db, nil
 }
 
-// migrateAdditiveWhileJoining applies the additive steps that carry an older
-// file to this build's layout, and nothing else: no schema is created, no row
-// is reconciled, and the writing handle is closed before the answer.
+// migrateAdditiveWhileJoining applies every step of this build that is no
+// contract and has not run on the file, and nothing else: no schema is
+// created, no row is reconciled, and the writing handle is closed before the
+// answer. THE CONTRACT STEPS ARE SKIPPED AND OWED, wherever they stand among
+// the others (layoutstamp.go), so the file holds every shape this build reads
+// when the join answers.
 func migrateAdditiveWhileJoining(ctx context.Context, path string, opts []Option) error {
 	s, err := openStore(ctx, path, writingDSN(path, opts), false, opts)
 	if err != nil {
 		return err
 	}
 	defer s.db().Close()
-	version, err := s.layoutVersion(ctx)
+	stamp, err := s.layoutStamp(ctx)
 	if err != nil {
 		return err
 	}
 	switch {
-	case version == LayoutVersion:
+	case stamp.Version > LayoutVersion || stamp.AdditiveThrough > LayoutVersion:
+		return s.refuseLayout(stamp.Version, "a downgrade is not a migration")
+	case stamp.Version == LayoutVersion:
 		return nil
-	case version > LayoutVersion:
-		return s.refuseLayout(version, "a downgrade is not a migration")
 	}
-	plan, ok := planMigrations(version)
-	if !ok {
-		return s.refuseLayout(version, "no migration in this build leads from it to this build's layout")
+	if _, ok := planMigrations(stamp.Version); !ok {
+		return s.refuseLayout(stamp.Version, "no migration in this build leads from it to this build's layout")
 	}
-	additive, contracts, refusal := splitJoinable(plan)
+	join, owed, refusal := joinable(stamp.pending())
 	if refusal != "" {
-		return s.refuseLayout(version, refusal+"; the deploy restarts across it")
+		return s.refuseLayout(stamp.Version, refusal+"; the deploy restarts across it")
 	}
-	if len(contracts) > 0 {
-		s.log.Info("daemon.wsm.open", "joining on the additive steps; the contract steps wait until this daemon serves alone", dlog.Context{
-			"path": s.path, "file_layout": version, "additive": len(additive), "contracts": len(contracts),
+	if len(owed) > 0 {
+		s.log.Info("daemon.wsm.open", "joining on every step that is no contract; the contract steps are owed until this daemon serves alone", dlog.Context{
+			"path": s.path, "file_layout": stamp.Version, "additive_through": stamp.AdditiveThrough, "additive": len(join), "contracts": len(owed),
 		})
 	}
-	if len(additive) == 0 {
+	if len(join) == 0 {
 		return nil
 	}
-	return s.migrateSteps(ctx, version, additive, true)
+	return s.migrateSteps(ctx, stamp, join)
 }
 
 // usablePath refuses the paths this store cannot be: it must be reopen-durable,
@@ -389,18 +391,28 @@ func (s *store) ensureLayout(ctx context.Context) error {
 		s.log.Info("daemon.wsm.open", "created a fresh state database", dlog.Context{"path": s.path, "layout": LayoutVersion})
 		return nil
 	}
-	version, err := s.layoutVersion(ctx)
+	stamp, err := s.layoutStamp(ctx)
 	if err != nil {
 		return err
 	}
-	switch {
-	case version == LayoutVersion:
-		return nil
-	case version > LayoutVersion:
-		return s.refuseLayout(version, "a downgrade is not a migration")
-	default:
-		return s.migrateForward(ctx, version)
+	// THIS HANDLE IS THE FILE'S SOLE WRITER, so a file from before the
+	// stamp's second number is given it here: a migrated file and a created
+	// one carry the same layout table.
+	// A REFUSED FILE IS LEFT EXACTLY AS FOUND, so the downgrade is refused
+	// before the column is added.
+	if stamp.Version > LayoutVersion || stamp.AdditiveThrough > LayoutVersion {
+		return s.refuseLayout(stamp.Version, "a downgrade is not a migration")
 	}
+	if err := s.ensureLayoutStampColumn(ctx); err != nil {
+		return err
+	}
+	// NOTHING PENDING IS NOTHING TO MIGRATE, whatever version says: a build
+	// from before the stamp's second number, applying contracts beside a
+	// join of this one, can leave version behind steps that all ran.
+	if len(stamp.pending()) == 0 {
+		return nil
+	}
+	return s.migrateForward(ctx, stamp)
 }
 
 // checkLayout is the READ-ONLY open's layout gate. It refuses every mismatch,
@@ -410,38 +422,22 @@ func (s *store) ensureLayout(ctx context.Context) error {
 // migrated the file, so an older layout here means there is no writer to carry
 // it forward.
 func (s *store) checkLayout(ctx context.Context) error {
-	version, err := s.layoutVersion(ctx)
+	stamp, err := s.layoutStamp(ctx)
 	if err != nil {
 		return err
 	}
-	if version == LayoutVersion {
+	if stamp.Version > LayoutVersion || stamp.AdditiveThrough > LayoutVersion {
+		return s.refuseLayout(stamp.Version, "a downgrade is not a migration")
+	}
+	if stamp.Version == LayoutVersion {
 		return nil
 	}
-	if version > LayoutVersion {
-		return s.refuseLayout(version, "a downgrade is not a migration")
-	}
-	// A JOINED FILE WHOSE CONTRACT STEPS WAIT for this daemon to serve alone
-	// is this build's layout in every shape the build reads.
-	if pendingContracts(version) {
+	// A JOINED FILE THAT OWES ONLY CONTRACT STEPS holds every shape this
+	// build reads: a contract step only removes (MigrationContract).
+	if onlyContracts(stamp.pending()) {
 		return nil
 	}
-	return s.refuseLayout(version, "a read-only handle cannot migrate it forward")
-}
-
-// layoutVersion reads the file's stamped version. A file carrying no layout
-// row is undecodable, not merely foreign.
-func (s *store) layoutVersion(ctx context.Context) (int, error) {
-	var version int
-	err := s.q(ctx).QueryRowContext(ctx, `SELECT version FROM layout WHERE id = 1`).Scan(&version)
-	if errors.Is(err, sql.ErrNoRows) {
-		refusal := &DecodeError{Table: "layout", Row: "1", Err: errors.New("no layout row")}
-		s.log.Error("daemon.wsm.open", "state database carries no layout version", dlog.Context{"path": s.path, "error": refusal.Error()})
-		return 0, refusal
-	}
-	if err != nil {
-		return 0, fmt.Errorf("wsm: read layout version from %q: %w", s.path, err)
-	}
-	return version, nil
+	return s.refuseLayout(stamp.Version, "a read-only handle cannot migrate it forward")
 }
 
 // refuseLayout builds and records the refusal of a layout this build cannot
@@ -519,29 +515,33 @@ func (s *store) ReadOnly() bool {
 	return s.current.Load().readOnly
 }
 
-// ApplyContracts applies the contract steps a joining open left (splitJoinable),
-// once this daemon serves alone: its incumbent has exited, so no running
-// build reads what they remove. A file with none pending is left as it is.
-// It writes, so the handle must already be a writing one.
+// ApplyContracts applies the contract steps a joining open left owed
+// (joinable), in their order, once this daemon serves alone: its incumbent
+// has exited, so no running build reads what they remove. A file that owes
+// none is left as it is. It writes, so the handle must already be a writing
+// one.
 func (s *store) ApplyContracts(ctx context.Context) error {
 	const op = "daemon.wsm.contracts"
 	if s.ReadOnly() {
 		s.log.Error(op, "contract steps were asked of a read-only handle; nothing is applied", dlog.Context{"path": s.path})
 		return fmt.Errorf("wsm: apply contracts to %q: the handle is read-only", s.path)
 	}
-	version, err := s.layoutVersion(ctx)
+	stamp, err := s.layoutStamp(ctx)
 	if err != nil {
 		return err
 	}
-	if version == LayoutVersion {
-		s.log.Debug(op, "no contract step is pending", dlog.Context{"path": s.path, "layout": version})
+	if stamp.Version > LayoutVersion || stamp.AdditiveThrough > LayoutVersion {
+		return s.refuseLayout(stamp.Version, "a downgrade is not a migration")
+	}
+	owed := stamp.pending()
+	if len(owed) == 0 {
+		s.log.Debug(op, "no contract step is owed", dlog.Context{"path": s.path, "layout": stamp.Version})
 		return nil
 	}
-	if !pendingContracts(version) {
-		return s.refuseLayout(version, "the steps left to apply are not contract steps alone")
+	if !onlyContracts(owed) {
+		return s.refuseLayout(stamp.Version, "the steps left to apply are not contract steps alone")
 	}
-	plan, ok := planMigrations(version)
-	return s.migrateSteps(ctx, version, plan, ok)
+	return s.migrateSteps(ctx, stamp, owed)
 }
 
 // Promote turns a READ-ONLY handle into a writing one, IN PLACE.

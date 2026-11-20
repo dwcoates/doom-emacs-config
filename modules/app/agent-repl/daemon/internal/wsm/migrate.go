@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,14 +84,18 @@ const (
 	// is an additive step now and a MigrationContract step for what it
 	// retires (TestNoStepPastTheLastBreakingOneBreaks).
 	MigrationBreaking
-	// MigrationContract is a step that only removes or rewrites a shape no
-	// build still running reads: a dropped column, a rekeyed table the code
-	// already stopped reading. It runs only on a handle no predecessor shares
-	// -- a fresh boot's, or a successor's once the incumbent has exited
-	// (DB.ApplyContracts) -- so a handover never waits on it. Contract steps
-	// come last in a build's run of new steps: an additive step after an
-	// unapplied contract could not run while the incumbent serves, and is
-	// refused (splitJoinable).
+	// MigrationContract is a step that only REMOVES a shape or rows no build
+	// still running reads: a dropped table, column, index or trigger, deleted
+	// rows. It runs only on a handle no predecessor shares -- a fresh boot's,
+	// or a successor's once the incumbent has exited (DB.ApplyContracts) --
+	// so a handover never waits on it.
+	//
+	// A CONTRACT STEP ADDS AND REWRITES NOTHING, so it commutes with every
+	// later step that is no contract: a join applies those past the
+	// contracts it owes (layoutstamp.go), and the file then holds every shape
+	// the build reads whatever is still owed. A step that adds a shape, or
+	// repairs rows, is additive, however it is placed in the list
+	// (TestAContractStepOnlyRemoves).
 	MigrationContract
 )
 
@@ -318,10 +323,7 @@ var migrations = []migration{
 	{To: 167, Name: "remediation_escalation", Kind: MigrationAdditive, DDL: remediationEscalationDDL},
 	{To: 168, Name: "deploy_mediators", Kind: MigrationAdditive, DDL: deployMediatorsDDL},
 	{To: 169, Name: "retired_deploy_checks", Kind: MigrationContract, DDL: retiredDeployChecksDDL},
-	{To: 170, Name: "unheld_settled_rounds", Kind: MigrationContract, DDL: unheldSettledRoundsDDL},
-	// ADDITIVE, NEVER A CONTRACT: the build reads this table from its first
-	// deploy check, which runs while an older daemon may still serve, and a
-	// contract step waits for that daemon to end.
+	{To: 170, Name: "unheld_settled_rounds", Kind: MigrationAdditive, DDL: unheldSettledRoundsDDL},
 	{To: 171, Name: "deploy_ignored_records", Kind: MigrationAdditive, DDL: ignoredRecordsDDL},
 }
 
@@ -616,59 +618,47 @@ func planMigrations(from int) ([]migration, bool) {
 
 // ChainKind answers what the steps carrying a file stamped with from up to
 // this build's layout mean for the build that wrote it: breaking when any one
-// step is, additive when every one is. A file no chain reaches is refused
-// with the *LayoutError the open path would refuse it with.
+// step is, additive otherwise. A CONTRACT STEP NEVER MAKES A CHAIN BREAKING,
+// wherever it stands in it: the successor joins on every other step and
+// applies the contracts once it serves alone (layoutstamp.go), and the
+// incumbent asking may predate the contract kind, so it is never named to
+// it. A file no chain reaches is refused with the *LayoutError the open path
+// would refuse it with.
 func ChainKind(from int) (MigrationKind, error) {
 	plan, ok := planMigrations(from)
 	if !ok {
 		return migrationUnmarked, &LayoutError{File: from, Binary: LayoutVersion,
 			Reason: "no migration in this build leads from it to this build's layout"}
 	}
-	return planKind(plan), nil
-}
-
-// planKind is breaking when any step of plan is, additive otherwise.
-func planKind(plan []migration) MigrationKind {
-	if _, _, refusal := splitJoinable(plan); refusal != "" {
-		return MigrationBreaking
-	}
-	// A PLAN OF ADDITIVE STEPS AND TRAILING CONTRACTS IS ADDITIVE to the
-	// incumbent asking: its successor joins on the additive steps and runs
-	// the contracts once it serves alone. The incumbent may predate the
-	// contract kind, so it is never named to it.
-	return MigrationAdditive
-}
-
-// splitJoinable splits PLAN into the additive steps a joining successor
-// applies beside the incumbent and the trailing contract steps it applies
-// once the incumbent has exited, or answers why the plan cannot be joined: a
-// breaking step, or an additive step after a contract.
-func splitJoinable(plan []migration) (additive, contracts []migration, refusal string) {
 	for _, m := range plan {
+		if m.Kind != MigrationAdditive && m.Kind != MigrationContract {
+			return MigrationBreaking, nil
+		}
+	}
+	return MigrationAdditive, nil
+}
+
+// joinable splits the steps PENDING on a file into those a joining successor
+// applies beside the incumbent and the contract steps it owes until it
+// serves alone, or answers why the file cannot be joined: a breaking step.
+func joinable(pending []migration) (join, owed []migration, refusal string) {
+	for _, m := range pending {
 		switch m.Kind {
 		case MigrationAdditive:
-			if len(contracts) > 0 {
-				return nil, nil, fmt.Sprintf("additive step %d (%s) follows a contract step, so it cannot run while the incumbent still reads what the contract removes", m.To, m.Name)
-			}
-			additive = append(additive, m)
+			join = append(join, m)
 		case MigrationContract:
-			contracts = append(contracts, m)
+			owed = append(owed, m)
 		default:
 			return nil, nil, fmt.Sprintf("step %d (%s) is a breaking migration; it cannot run while the incumbent still writes the file", m.To, m.Name)
 		}
 	}
-	return additive, contracts, ""
+	return join, owed, ""
 }
 
-// pendingContracts reports whether every step this build would apply to a
-// file at layout FROM is a contract step: the layout a successor that joined
-// and has not yet served alone stands at.
-func pendingContracts(from int) bool {
-	plan, ok := planMigrations(from)
-	if !ok {
-		return false
-	}
-	for _, m := range plan {
+// onlyContracts reports whether every step of pending is a contract step:
+// what a file a successor joined, and has not yet served alone on, owes.
+func onlyContracts(pending []migration) bool {
+	for _, m := range pending {
 		if m.Kind != MigrationContract {
 			return false
 		}
@@ -676,46 +666,45 @@ func pendingContracts(from int) bool {
 	return true
 }
 
-// migrateForward carries an existing file from its stamped layout up to this
-// build's, one transaction per step, and records which steps ran.
+// migrateForward carries an existing file from its stamp up to this build's
+// layout, one transaction per step, and records which steps ran.
 //
 // The file is COPIED ASIDE first, so a migration that fails halfway through a
 // step leaves both the original file (rolled back, untouched) and a copy of it
 // as it stood before any step ran. Every refusal here names that copy.
-func (s *store) migrateForward(ctx context.Context, from int) error {
-	plan, ok := planMigrations(from)
-	return s.migrateSteps(ctx, from, plan, ok)
+func (s *store) migrateForward(ctx context.Context, from layoutStamp) error {
+	return s.migrateSteps(ctx, from, from.pending())
 }
 
-// migrateSteps applies PLAN, the steps from layout FROM (OK says a chain from
-// FROM exists at all), as migrateForward says.
-func (s *store) migrateSteps(ctx context.Context, from int, plan []migration, ok bool) error {
+// migrateSteps applies PLAN, steps pending on a file at FROM, as
+// migrateForward says. A file no chain of this build reaches is refused.
+func (s *store) migrateSteps(ctx context.Context, from layoutStamp, plan []migration) error {
 	const op = "daemon.wsm.open"
-	if !ok {
+	if _, ok := planMigrations(from.Version); !ok {
 		refusal := &LayoutError{
 			Path:   s.path,
-			File:   from,
+			File:   from.Version,
 			Binary: LayoutVersion,
 			Reason: "no migration in this build leads from it to this build's layout",
 		}
 		s.log.Error(op, "refused a state database this build cannot migrate", dlog.Context{
-			"path": s.path, "file_layout": from, "binary_layout": LayoutVersion, "error": refusal.Error(),
+			"path": s.path, "file_layout": from.Version, "binary_layout": LayoutVersion, "error": refusal.Error(),
 		})
 		return refusal
 	}
 	backup, err := s.copyAsideBeforeMigrating(ctx, from)
 	if err != nil {
 		s.log.Error(op, "the state database could not be copied aside before migrating", dlog.Context{
-			"path": s.path, "file_layout": from, "error": err.Error(),
+			"path": s.path, "file_layout": from.Version, "additive_through": from.AdditiveThrough, "error": err.Error(),
 		})
 		return err
 	}
 	applied := make([]string, 0, len(plan))
 	for _, m := range plan {
 		if err := s.applyMigration(ctx, m); err != nil {
-			refusal := &MigrationError{Path: s.path, From: from, To: m.To, Backup: backup, Err: err}
+			refusal := &MigrationError{Path: s.path, From: from.Version, To: m.To, Backup: backup, Err: err}
 			s.log.Error(op, "a state database migration was rolled back", dlog.Context{
-				"path": s.path, "file_layout": from, "step_layout": m.To,
+				"path": s.path, "file_layout": from.Version, "additive_through": from.AdditiveThrough, "step_layout": m.To,
 				"migration": m.Name, "backup": backup, "error": refusal.Error(),
 			})
 			return refusal
@@ -723,23 +712,33 @@ func (s *store) migrateSteps(ctx context.Context, from int, plan []migration, ok
 		applied = append(applied, fmt.Sprintf("%d:%s", m.To, m.Name))
 	}
 	s.log.Info(op, "migrated the state database forward", dlog.Context{
-		"path": s.path, "file_layout": from, "binary_layout": LayoutVersion,
+		"path": s.path, "file_layout": from.Version, "additive_through": from.AdditiveThrough, "binary_layout": LayoutVersion,
 		"migrations": strings.Join(applied, ","), "backup": backup,
 	})
 	return nil
 }
 
-// applyMigration runs one step's DDL and its version stamp inside ONE
-// transaction, so a step that fails partway leaves the file exactly as it was:
-// a half-applied step that still carried the OLD stamp would be re-applied on
-// the next boot, and one that carried the NEW stamp would hide missing tables
-// behind a version that claims they exist.
+// applyMigration runs one step's DDL and its stamp inside ONE transaction, so
+// a step that fails partway leaves the file exactly as it was: a half-applied
+// step that still carried the OLD stamp would be re-applied on the next boot,
+// and one that carried the NEW stamp would hide missing tables behind a
+// stamp that claims they exist. THE STAMP IS READ IN THAT TRANSACTION, and
+// the step runs only as the next of its kind on the file as it stands then
+// (layoutStamp.after), so a step is never run twice or out of its order.
 func (s *store) applyMigration(ctx context.Context, m migration) error {
 	tx, err := s.db().BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("wsm: begin migration to layout %d on %q: %w", m.To, s.path, err)
 	}
 	defer s.endTx(tx, "daemon.wsm.open", dlog.Context{"path": s.path, "step_layout": m.To, "migration": m.Name})
+	from, column, err := readLayoutStamp(ctx, tx, s.path)
+	if err != nil {
+		return err
+	}
+	to, err := from.after(m)
+	if err != nil {
+		return fmt.Errorf("wsm: apply migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
+	}
 	if m.DDL != "" {
 		if _, err := tx.ExecContext(ctx, m.DDL); err != nil {
 			return fmt.Errorf("wsm: apply migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
@@ -750,16 +749,8 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 			return fmt.Errorf("wsm: rewrite rows in migration %q to layout %d in %q: %w", m.Name, m.To, s.path, err)
 		}
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE layout SET version = ? WHERE id = 1`, m.To)
-	if err != nil {
-		return fmt.Errorf("wsm: stamp layout %d in %q: %w", m.To, s.path, err)
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("wsm: stamp layout %d in %q: rows affected: %w", m.To, s.path, err)
-	}
-	if rows != 1 {
-		return fmt.Errorf("wsm: stamp layout %d in %q touched %d rows, want exactly 1", m.To, s.path, rows)
+	if err := stampStep(ctx, tx, s.path, column, from, to, m); err != nil {
+		return err
 	}
 	if err := committed(ctx, tx.Commit()); err != nil {
 		return fmt.Errorf("wsm: commit migration to layout %d on %q: %w", m.To, s.path, err)
@@ -768,7 +759,10 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 }
 
 // copyAsideBeforeMigrating writes a consistent snapshot of the file as it
-// stands, named for the layout it carries, and answers where it went.
+// stands, named for the stamp it carries, and answers where it went. A FILE
+// THAT OWES CONTRACT STEPS IS NAMED FOR BOTH NUMBERS, so the copy a takeover
+// takes before applying them never passes for the copy the join took the
+// same day, which was of the file before the join's steps.
 //
 // `VACUUM INTO` is the copy rather than a byte-for-byte file copy because this
 // database runs in WAL mode: the committed state lives across the file AND its
@@ -779,12 +773,16 @@ func (s *store) applyMigration(ctx context.Context, m migration) error {
 // the source is unchanged between attempts (a failed migration rolls back), so
 // the standing copy already holds the same content, and the user's file is
 // never deleted by a retry.
-func (s *store) copyAsideBeforeMigrating(ctx context.Context, from int) (string, error) {
-	path := fmt.Sprintf("%s.layout%d.bak-%s", s.path, from, time.Now().UTC().Format("2006-01-02"))
+func (s *store) copyAsideBeforeMigrating(ctx context.Context, from layoutStamp) (string, error) {
+	layout := strconv.Itoa(from.Version)
+	if from.AdditiveThrough != from.Version {
+		layout += "a" + strconv.Itoa(from.AdditiveThrough)
+	}
+	path := fmt.Sprintf("%s.layout%s.bak-%s", s.path, layout, time.Now().UTC().Format("2006-01-02"))
 	switch _, err := os.Stat(path); {
 	case err == nil:
 		s.log.Warn("daemon.wsm.open", "a pre-migration copy from an earlier attempt already stands", dlog.Context{
-			"path": s.path, "backup": path, "file_layout": from,
+			"path": s.path, "backup": path, "file_layout": from.Version, "additive_through": from.AdditiveThrough,
 		})
 		return path, nil
 	case !errors.Is(err, os.ErrNotExist):

@@ -1832,9 +1832,13 @@ Every step in `internal/wsm/migrate.go` declares its `Kind`
 `wsm.MigrationBreaking`), and `TestEveryMigrationDeclaresItsKind` fails a step
 that does not. ADDITIVE means the build before the step keeps working against
 the migrated file: a new table, a new column with a default or NULL, a backfill
-of a value the old build never reads. CONTRACT means the step only removes or
-rewrites a shape no running build reads any more: a dropped column, a rekeyed
-table the code already stopped reading.
+of a value the old build never reads, a repair of stored rows. CONTRACT means
+the step only REMOVES a shape or rows no running build reads any more: a
+dropped table, column, index or trigger, deleted rows. A contract step adds
+and rewrites nothing (`TestAContractStepOnlyRemoves`): a step that adds a
+shape the build reads is additive wherever it stands in the list. On
+2026-11-19 a new table marked a contract was missing when the build first
+read it, and the deploy check that read it held the queue.
 
 NO NEW STEP IS BREAKING (owner ruling, 2026-11-15; `TestNoStepPastTheLastBreakingOneBreaks`).
 A breaking step forced a stop-then-start deploy that waited on every busy turn:
@@ -1844,10 +1848,15 @@ both and reads the new) and a contract step that drops the old. The joining
 successor applies the additive steps beside the incumbent and leaves the
 contract steps; its takeover applies them once the incumbent has exited
 (`wsm.DB.ApplyContracts`, `rollout` takeover), and a fresh boot applies them
-with the rest. Contract steps come last in a build's run of new steps: an
-additive step after an unapplied contract is refused at the join. So every
-deploy is a handover, and two daemons serve side by side for as long as a
-busy turn keeps a workspace on the old one.
+with the rest. AN ADDITIVE STEP MAY FOLLOW A CONTRACT STEP: the join applies
+every step that is no contract past the contracts it owes, so a joined file
+holds every shape the build reads (`TestAJoinedFileHoldsEveryShapeOfAFreshOne`).
+The file's stamp is two numbers for that (`internal/wsm/layoutstamp.go`):
+`layout.version`, through which every step has run, and
+`layout.additive_through`, through which every step that is no contract has
+run; the contract steps between them are owed. So every deploy is a handover,
+and two daemons serve side by side for as long as a busy turn keeps a
+workspace on the old one.
 
 The deploy asks the STAGED daemon binary its layout (`agent-repld
 -layout-version`, `deploy.BinaryLayout`), and when it differs from the running
@@ -1864,7 +1873,8 @@ ERROR: nothing is handed over or restarted on a guess.
   statements name their columns.
 - **Only the newest pre-migration copy is kept, and only for three days.**
   Every writing or joining open that succeeds removes every
-  `wsm.db.layout<N>.bak-<date>` copy but the newest, and the newest too once it
+  `wsm.db.layout<N>.bak-<date>` copy (`layout<N>a<M>` for a file that owed
+  contract steps) but the newest, and the newest too once it
   is `wsm.MigrationCopyRetention` old (`internal/wsm/migrationcopies.go`): an
   older copy predates a migration that already succeeded, and a stale one
   would throw away days of state. A refused open removes nothing, since its
