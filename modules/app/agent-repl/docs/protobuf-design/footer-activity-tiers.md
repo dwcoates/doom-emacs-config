@@ -953,7 +953,7 @@ unchanged.
     so an account reporting both draws both.
 - **What changed, in the systems:**
   - The shim states the spend; the daemon files and retires it with the
-    read's weekly windows and keeps it per account root (wsm layout 171).
+    read's weekly windows and keeps it per account root (wsm layout 175).
   - The webapp draws weekly, overage, then "$1,993.96 of $12,000 this month",
     in the strip and the tokens sheet alike.
 
