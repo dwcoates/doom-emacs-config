@@ -131,8 +131,8 @@ func mergeHeadRow(label string) *frontendv1.FeedRow {
 		Row: &frontendv1.FeedRow_Activity{Activity: &frontendv1.FeedTurnActivity{
 			Unit: &frontendv1.FeedTurnActivity_Merge{Merge: &frontendv1.FeedMerge{
 				Head: &frontendv1.FeedMergeHead{
-					Label: &frontendv1.FeedMergeLabel{Text: label},
-					Mode:  &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Sync{Sync: &frontendv1.FeedMergeModeSync{}}},
+					BranchLine: &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: label}},
+					Mode:       &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Sync{Sync: &frontendv1.FeedMergeModeSync{}}},
 				},
 			}},
 		}},
@@ -161,7 +161,7 @@ func liveTestsTab() *frontendv1.FeedMergeTab {
 
 // labelOf answers a merge head row's label.
 func labelOf(row *frontendv1.FeedRow) string {
-	return row.GetActivity().GetMerge().GetHead().GetLabel().GetText()
+	return row.GetActivity().GetMerge().GetHead().GetBranchLine().GetSource().GetText()
 }
 
 func TestUpsertDurableRecordsTheRowAsPublishedAtItsOrderKey(t *testing.T) {
@@ -406,6 +406,49 @@ func TestARedrawnMergeTabOfARetiredKindIsNotDrawn(t *testing.T) {
 	}
 	if hasRecordIn(log, "error", opDurable) || hasRecordIn(log, "warn", opDurable) {
 		t.Fatalf("records = %+v, want no warn or error for a retired tab", log.Records())
+	}
+}
+
+func TestARedrawnMergeHeadWithItsRetiredLabelIsDrawnWithItsBranchLine(t *testing.T) {
+	// Arrange: a merge head recorded before its branch line, carrying the
+	// whole line as the retired label (2), at the key a daemon recorded it at.
+	store := newFakeDurableRows()
+	first, _ := daemonOver(t, store)
+	row := mergeHeadRow("")
+	first.UpsertDurable(testWorkspace, rootFeed(), row)
+	recorded := store.rows[testWorkspace][row.GetId().GetValue()]
+	row = proto.Clone(row).(*frontendv1.FeedRow)
+	row.GetActivity().GetMerge().GetHead().BranchLine = nil
+	label, err := proto.Marshal(&frontendv1.FeedFixGateLabel{Text: "feature → master"})
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	head := row.GetActivity().GetMerge().GetHead().ProtoReflect()
+	head.SetUnknown(protowire.AppendBytes(protowire.AppendTag(nil, 2, protowire.BytesType), label))
+	raw, err := proto.Marshal(row)
+	if err != nil {
+		t.Fatalf("Marshal: %v", err)
+	}
+	if err := store.PutDurableFeedRow(context.Background(), wsm.DurableFeedRow{
+		Workspace: testWorkspace, RowID: recorded.RowID, Plane: recorded.Plane, OrderKey: recorded.OrderKey, Row: raw,
+	}); err != nil {
+		t.Fatalf("PutDurableFeedRow: %v", err)
+	}
+
+	// Act
+	r, log := daemonOver(t, store)
+	rows := feedRows(r, rootFeed())
+
+	// Assert: drawn with the line split into its source and target, and
+	// nothing refused.
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v (records %+v), want the head drawn", rows, log.Records())
+	}
+	if line := rows[0].GetActivity().GetMerge().GetHead().GetBranchLine(); line.GetSource().GetText() != "feature" || line.GetTarget().GetText() != "master" {
+		t.Fatalf("line = %+v, want the head drawn with its branch line", line)
+	}
+	if hasRecordIn(log, "error", opDurable) {
+		t.Fatalf("records = %+v, want no error for a head carrying its retired label", log.Records())
 	}
 }
 

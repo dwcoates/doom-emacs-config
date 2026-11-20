@@ -126,7 +126,7 @@ func (r *resolver) onMergeHead(ws ids.WorkspaceID, lease ids.LeaseID, row *front
 				s.merges.rows[lease] = drawn
 			}
 			drawn.entry = row.GetId()
-			drawn.label = merge.GetHead().GetLabel().GetText()
+			drawn.label = BranchLineText(merge.GetHead().GetBranchLine())
 			drawn.startedAtMs = merge.GetHead().GetRuntime().GetStartedAtMs()
 			drawn.orderKey = row.GetOrder().GetKey()
 		})
@@ -200,6 +200,17 @@ var (
 	settledLeaf protoreflect.FullName = (&frontendv1.FeedMergeTabSettled{}).ProtoReflect().Descriptor().FullName()
 	waitingLeaf protoreflect.FullName = (&frontendv1.FeedMergeTabWaitingOnUser{}).ProtoReflect().Descriptor().FullName()
 )
+
+// BranchLineText is a merge head's branch line as one string: the source, an
+// arrow, then the target ("fix-flaky → master"), or the source alone for a
+// line with no target. The ONE spelling of a branch line as text: the footer's
+// merge row and the merge orchestrator's queued banner both read it.
+func BranchLineText(line *frontendv1.FeedMergeBranchLine) string {
+	if line.GetTarget() == nil {
+		return line.GetSource().GetText()
+	}
+	return line.GetSource().GetText() + " → " + line.GetTarget().GetText()
+}
 
 // mergeTabWords is a top-level tab's label as words, with its round beyond the
 // first ("committing (2)"), the way the bubble's strip decorates it.

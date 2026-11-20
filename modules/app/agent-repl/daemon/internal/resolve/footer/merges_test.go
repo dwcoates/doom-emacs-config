@@ -20,9 +20,9 @@ func mergeHead(id, key, label string, startedMs int64, async bool, result any) *
 		mode = &frontendv1.FeedMergeMode{Mode: &frontendv1.FeedMergeMode_Async{Async: &frontendv1.FeedMergeModeAsync{}}}
 	}
 	merge := &frontendv1.FeedMerge{Head: &frontendv1.FeedMergeHead{
-		Label:   &frontendv1.FeedMergeLabel{Text: label},
-		Runtime: &frontendv1.FeedMergeRuntime{StartedAtMs: startedMs},
-		Mode:    mode,
+		BranchLine: testBranchLine(label),
+		Runtime:    &frontendv1.FeedMergeRuntime{StartedAtMs: startedMs},
+		Mode:       mode,
 	}}
 	switch r := result.(type) {
 	case *frontendv1.FeedMergeSuccess:
@@ -419,6 +419,39 @@ func TestEveryMergeTabKindCarriesAStateOneof(t *testing.T) {
 			// Assert
 			if !present {
 				t.Fatalf("tab kind %s has no state oneof", field.Name())
+			}
+		})
+	}
+}
+
+// testBranchLine is the head's branch line LABEL spells: "source → target",
+// or a source alone when LABEL has no arrow.
+func testBranchLine(label string) *frontendv1.FeedMergeBranchLine {
+	source, target, read := strings.Cut(label, " → ")
+	line := &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: source}}
+	if read {
+		line.Target = &frontendv1.FeedMergeBranchLineTarget{Text: target}
+	}
+	return line
+}
+
+func TestBranchLineTextSpellsTheLine(t *testing.T) {
+	tests := []struct {
+		name string
+		line *frontendv1.FeedMergeBranchLine
+		want string
+	}{
+		{name: "a source and a target", line: testBranchLine("fix → master"), want: "fix → master"},
+		{name: "a source alone", line: &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: "c0ffee"}}, want: "c0ffee"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := BranchLineText(tt.line)
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("BranchLineText = %q, want %q", got, tt.want)
 			}
 		})
 	}

@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	sharedlogging "agentrepl/logging"
+	"agentrepl/logging/childgroup"
 	"agentrepl/logging/recordlog"
 )
 
@@ -244,6 +246,80 @@ func TestAStoppedRunEndsStoppedWithItsGroupKilled(t *testing.T) {
 	got := h.await(done, "the stopped run's end")
 	if err != nil || last(got) == nil || !last(got).Stopped || last(got).ExitCode != -1 {
 		t.Fatalf("Stop = %v, end %+v; want a stopped run killed by a signal", err, last(got))
+	}
+}
+
+// stopMissingAMember has the stop's kill reach only the group's leader, as a
+// kill landing mid-fork misses the child the leader was forking; every later
+// kill is LATER's.
+func stopMissingAMember(h *harness, later func(pgid int) error) {
+	calls := 0
+	h.reg.killGroup = func(pgid int) error {
+		calls++
+		if calls == 1 {
+			return syscall.Kill(pgid, syscall.SIGKILL)
+		}
+		return later(pgid)
+	}
+}
+
+// stopAfterTheChildForked starts a run whose background child holds its
+// output open, waits for the child, and stops the run.
+func stopAfterTheChildForked(t *testing.T, h *harness) (string, <-chan []Event) {
+	t.Helper()
+	gate := fifo(t)
+	id := h.start("(read y < " + gate + ") & echo up; read x < " + gate)
+	upSeen := make(chan struct{})
+	done := make(chan []Event, 1)
+	go func() {
+		var got []Event
+		_ = h.reg.Watch(context.Background(), id, 0, func(e Event) error {
+			got = append(got, e)
+			if e.Text == "up" {
+				close(upSeen)
+			}
+			return nil
+		})
+		done <- got
+	}()
+	await(t, upSeen, "the run's first line")
+	if err := h.reg.Stop(id); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	return id, done
+}
+
+func TestAStoppedRunsMemberTheStopMissedIsKilledOnceItsLeaderExits(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	stopMissingAMember(h, childgroup.KillGroup)
+
+	// Act
+	_, done := stopAfterTheChildForked(t, h)
+
+	// Assert
+	got := h.await(done, "the stopped run's end")
+	if last(got) == nil || !last(got).Stopped || last(got).ExitCode != -1 {
+		t.Fatalf("end %+v; want a stopped run killed by a signal", last(got))
+	}
+}
+
+func TestAKillOnceTheLeaderExitedThatFailsIsAnError(t *testing.T) {
+	// Arrange: the second kill reaches the member but answers an error.
+	h := newHarness(t)
+	stopMissingAMember(h, func(pgid int) error {
+		_ = childgroup.KillGroup(pgid)
+		return errors.New("refused")
+	})
+
+	// Act
+	_, done := stopAfterTheChildForked(t, h)
+
+	// Assert
+	h.await(done, "the stopped run's end")
+	if !strings.Contains(h.log.String(), "a stopped run's group could not be killed once its leader exited") ||
+		!strings.Contains(h.log.String(), "refused") {
+		t.Fatalf("log = %s, want the failed kill recorded with its cause", h.log.String())
 	}
 }
 

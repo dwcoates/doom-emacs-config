@@ -195,7 +195,7 @@ func (o *orchestrator) branchSubject(ctx context.Context, r *run) (subject, erro
 // sourceLabel is what a merge in line lands, as its bubble's head names it
 // before the merge is admitted: the same line the running merge draws. Its
 // target is targetDirOf's, the one resolution of where a source lands.
-func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (string, error) {
+func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) (branchLine, error) {
 	var branch string
 	switch source.Kind {
 	case wsm.MergeSourceOwnBranch, wsm.MergeSourceWorkspace:
@@ -205,20 +205,20 @@ func (o *orchestrator) sourceLabel(ctx context.Context, ws ids.WorkspaceID, sour
 		}
 		job, err := o.layoutFor(ctx, owner)
 		if err != nil {
-			return "", err
+			return branchLine{}, err
 		}
 		branch, err = o.requestedBranch(ctx, ws, source, job.Layout.SourceDir)
 		if err != nil {
-			return "", err
+			return branchLine{}, err
 		}
 	case wsm.MergeSourceBranch:
 		branch = source.Branch
 	default:
-		return "", fmt.Errorf("merge: the undeclared source %s", source.Kind)
+		return branchLine{}, fmt.Errorf("merge: the undeclared source %s", source.Kind)
 	}
 	target, err := o.targetDirOf(ctx, ws, source)
 	if err != nil {
-		return "", err
+		return branchLine{}, err
 	}
-	return branchLabel(branch, target), nil
+	return branchLineOf(branch, target), nil
 }

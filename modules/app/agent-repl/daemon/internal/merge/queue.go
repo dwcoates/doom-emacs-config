@@ -1302,7 +1302,7 @@ func outOfLine(stored []wsm.MergeQueueEntry) []wsm.MergeQueueEntry {
 // bubbleLabel is a queued merge's head line, read off what it merges. A label
 // that cannot be read is recorded and the workspace's own id stands in: a
 // label must not stop the queue from being drawn.
-func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntry) string {
+func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntry) branchLine {
 	if r, running := o.runFor(entry.Workspace); running {
 		return r.label()
 	}
@@ -1314,11 +1314,11 @@ func (o *orchestrator) bubbleLabel(ctx context.Context, entry wsm.MergeQueueEntr
 		// caller gone), and the next publish reads the label again.
 		o.log(ctx, entry.Workspace).Info("daemon.merge.queue", "the read of a queued merge's bubble label ended with its context; the workspace's id stands in",
 			dlog.Context{"workspace": string(entry.Workspace), "cause": err.Error()})
-		return string(entry.Workspace)
+		return unreadLine(entry.Workspace)
 	case err != nil:
 		o.log(ctx, entry.Workspace).Error("daemon.merge.queue", "could not read what a queued merge lands for its bubble's label",
 			dlog.Context{"workspace": string(entry.Workspace), "error": err.Error()})
-		return string(entry.Workspace)
+		return unreadLine(entry.Workspace)
 	}
 	return label
 }

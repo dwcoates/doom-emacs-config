@@ -7,6 +7,7 @@
  * the same four verbs the same way, and so a row fixture is built once from the
  * generated schemas rather than a dozen times by hand.
  */
+import { branchLineInit } from "./branch-line.js";
 import type { EditorIngressEntry } from "../../src/held/editor-ingress.js";
 import { UserSaidSchema } from "../../../proto/gen/ts/conversation/v1/user_pb";
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
@@ -852,7 +853,7 @@ export function mergeRow(
           value: create(FeedMergeSchema, {
             head: {
               glyph: { icon: "merge" },
-              label: { text: label },
+              branchLine: branchLineInit(label),
               runtime: { startedAtMs: 0n },
               fold: { folded, decidedBy: { case: by, value: {} } },
               mode: { mode: { case: mode, value: {} } },

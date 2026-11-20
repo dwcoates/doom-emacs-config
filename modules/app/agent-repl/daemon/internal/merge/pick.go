@@ -49,7 +49,7 @@ type pick struct {
 	// startedMS is when the pick began: the head's clock and the pick tab's.
 	startedMS int64
 	// label is the bubble head's line.
-	label string
+	label branchLine
 	// instruction is the requesting agent's instruction.
 	instruction string
 	// aheadLanded names the merge this one was placed behind once it has

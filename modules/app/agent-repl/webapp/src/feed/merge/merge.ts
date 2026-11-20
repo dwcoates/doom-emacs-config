@@ -35,7 +35,7 @@
  * is the only thing standing between the reader and a merge they cannot see.
  */
 import { reservedLiveElapsedClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
-import { renderMergeCommitLink } from "../../link.js";
+import { renderExternalLink, renderMergeCommitLink } from "../../link.js";
 import { log } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { FEED_MERGE_HEAD_GLYPH } from "../../vocab.js";
@@ -52,7 +52,8 @@ import type {
   FeedMergeError,
   FeedMergeGlyph,
   FeedMergeHead,
-  FeedMergeLabel,
+  FeedMergeBranchLine,
+  FeedMergeBranchLineTarget,
   FeedMergeRuntime,
   FeedMergeSuccess,
   FeedMergeUpdate,
@@ -79,7 +80,7 @@ export function drawFeedMerge(msg: FeedMerge, rc: RowContext): HTMLElement {
 
   const el = document.createElement("div");
   el.className = "merge-head";
-  el.append(drawFeedMergeHead(head));
+  el.append(drawFeedMergeHead(head, rc));
   // THE HEAD'S RIGHT END: the landed commit, the workspace switch, then the
   // clock. One box, pushed right by the stylesheet, so they never split the
   // line's free space between them. Each arm closes the head with it, so the
@@ -167,11 +168,11 @@ export function drawMergeCommitText(commit: string): HTMLElement {
 }
 
 /** The constant props of the head: the kind glyph and the branch line. */
-export function drawFeedMergeHead(head: FeedMergeHead): HTMLElement {
+export function drawFeedMergeHead(head: FeedMergeHead, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "merge-head-props";
   el.append(drawFeedMergeGlyph(requireMessage(head.glyph, `${PATH}.head.glyph`)));
-  el.append(drawFeedMergeLabel(requireMessage(head.label, `${PATH}.head.label`)));
+  el.append(drawFeedMergeBranchLine(requireMessage(head.branchLine, `${PATH}.head.branchLine`), rc));
   return el;
 }
 
@@ -199,12 +200,36 @@ export function drawFeedMergeGlyph(glyph: FeedMergeGlyph): HTMLElement {
   return el;
 }
 
-/** The branch line, resolved by the daemon, drawn verbatim. */
-export function drawFeedMergeLabel(label: FeedMergeLabel): HTMLElement {
+/** The arrow the branch line draws between its source and its target. */
+export const BRANCH_LINE_ARROW = " → ";
+
+/**
+ * The branch line: the source, the arrow, then the target, each drawn
+ * verbatim. A line with no target (what the merge lands could not be read)
+ * draws its source alone, with no arrow.
+ */
+export function drawFeedMergeBranchLine(line: FeedMergeBranchLine, rc: RowContext): HTMLElement {
   const el = document.createElement("span");
   el.className = "merge-label";
-  el.textContent = label.text;
+  el.append(requireMessage(line.source, `${PATH}.head.branchLine.source`).text);
+  if (line.target === undefined) return el;
+  el.append(BRANCH_LINE_ARROW, drawFeedMergeBranchLineTarget(line.target, rc));
   return el;
+}
+
+/** The class a target that opens its pull request carries. */
+export const BRANCH_LINE_TARGET_LINK_CLASS = "merge-label-target";
+
+/**
+ * The target: plain text, or, for a merge that deploys through a pull
+ * request, a link that opens it through OpenExternal in the Chrome profile of
+ * the workspace's login (link.ts), never in the page.
+ */
+export function drawFeedMergeBranchLineTarget(target: FeedMergeBranchLineTarget, rc: RowContext): Node {
+  if (target.pullRequest === undefined) return document.createTextNode(target.text);
+  const link = renderExternalLink(rc.ctx, { text: target.text, url: target.pullRequest.url });
+  link.classList.add(BRANCH_LINE_TARGET_LINK_CLASS);
+  return link;
 }
 
 /**

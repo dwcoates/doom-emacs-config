@@ -83,6 +83,9 @@ func TestLinkVerbsRecordAndRepublish(t *testing.T) {
 			if want := []openOwnedTold{{WS: "w1", Open: false}}; !reflect.DeepEqual(f.sidebar.openOwned, want) {
 				t.Errorf("sidebar told %+v, want %+v alongside the topbar", f.sidebar.openOwned, want)
 			}
+			if !reflect.DeepEqual(f.merge.linksChanged, []ids.WorkspaceID{"w1"}) {
+				t.Errorf("merge heads restated for %v, want once for w1", f.merge.linksChanged)
+			}
 			r, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelInfo, Operation: opChangeLinks})
 			if !ok || r.Message != tt.wantLine || r.Context["workspace"] != "w1" {
 				t.Errorf("record = %+v, want an INFO %s saying %q and naming the workspace", r, opChangeLinks, tt.wantLine)
@@ -164,7 +167,7 @@ func TestLinkVerbsRefuse(t *testing.T) {
 			if got != nil {
 				t.Errorf("answered links = %+v, want none", got)
 			}
-			if !reflect.DeepEqual(f.db.links["w1"], []wsm.WorkspaceLink{docLink}) || len(f.topbarLinks) != 0 {
+			if !reflect.DeepEqual(f.db.links["w1"], []wsm.WorkspaceLink{docLink}) || len(f.topbarLinks) != 0 || len(f.merge.linksChanged) != 0 {
 				t.Errorf("links = %+v and published %+v, want the standing link untouched and nothing published", f.db.links["w1"], f.topbarLinks)
 			}
 			if tt.arm == ArmUnknownWorkspace {

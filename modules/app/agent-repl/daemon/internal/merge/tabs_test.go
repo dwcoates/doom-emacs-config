@@ -93,7 +93,7 @@ func TestHeadShipsNoFold(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange and act.
-			row := headRow(theWorkspace, "lease-1", "branch", 1, tt.result)
+			row := headRow(theWorkspace, "lease-1", branchLineOf("branch", "master"), "", 1, tt.result)
 
 			// Assert.
 			if fold := row.GetActivity().GetMerge().GetHead().GetFold(); fold != nil {
@@ -117,7 +117,7 @@ func TestALiveHeadDrawsItsStage(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange and act.
-			update := headRow(theWorkspace, "lease-1", "branch", 1, tt.stage).GetActivity().GetMerge().GetUpdate()
+			update := headRow(theWorkspace, "lease-1", branchLineOf("branch", "master"), "", 1, tt.stage).GetActivity().GetMerge().GetUpdate()
 
 			// Assert.
 			if update == nil {
@@ -153,7 +153,7 @@ func TestHeadRowRefusesAResultThatIsNoHeadArm(t *testing.T) {
 			}()
 
 			// Act.
-			headRow(theWorkspace, "lease-1", "branch", 1, tt.result)
+			headRow(theWorkspace, "lease-1", branchLineOf("branch", "master"), "", 1, tt.result)
 		})
 	}
 }
@@ -264,7 +264,7 @@ func TestALiveHeadDrawsItsQueuesPause(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act.
-			update := headRow(theWorkspace, "lease-1", "branch", 1, tt.head).GetActivity().GetMerge().GetUpdate()
+			update := headRow(theWorkspace, "lease-1", branchLineOf("branch", "master"), "", 1, tt.head).GetActivity().GetMerge().GetUpdate()
 
 			// Assert.
 			if got := update.GetPaused() != nil; got != tt.wantPaused {
@@ -433,14 +433,82 @@ func TestQueueOfferCarriesItsSentence(t *testing.T) {
 	}
 }
 
-// TestBranchLabelReadsAsTheMerge covers the head's branch line.
-func TestBranchLabelReadsAsTheMerge(t *testing.T) {
-	// Arrange: a source and a target.
-	got := branchLabel("ABC/fix-flaky", "master")
+// TestBranchLineReadsAsTheMerge covers the head's branch line as text: the
+// source, an arrow and the target, or the source alone when the target could
+// not be read.
+func TestBranchLineReadsAsTheMerge(t *testing.T) {
+	tests := []struct {
+		name string
+		line branchLine
+		want string
+	}{
+		{name: "a read line", line: branchLineOf("ABC/fix-flaky", "master"), want: "ABC/fix-flaky → master"},
+		{name: "an unread line", line: unreadLine(theWorkspace), want: string(theWorkspace)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.line.text()
 
-	// Act, Assert.
-	if got != "ABC/fix-flaky → master" {
-		t.Fatalf("the label is %q, want the source, an arrow and the target", got)
+			// Assert
+			if got != tt.want {
+				t.Fatalf("text = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBranchLineViewCarriesTheTargetsPullRequest covers the drawn line: the
+// source and target are elements of their own, and only the target carries
+// the pull request it opens.
+func TestBranchLineViewCarriesTheTargetsPullRequest(t *testing.T) {
+	const pr = "https://github.com/o/r/pull/7"
+	tests := []struct {
+		name       string
+		line       branchLine
+		pr         string
+		wantTarget string
+		wantPR     string
+	}{
+		{name: "a plain target", line: branchLineOf("feature", "master"), wantTarget: "master"},
+		{name: "a target opening its pull request", line: branchLineOf("feature", "/repo"), pr: pr, wantTarget: "/repo", wantPR: pr},
+		{name: "an unread line draws no target", line: unreadLine(theWorkspace)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			view := tt.line.view(tt.pr)
+
+			// Assert
+			if view.GetSource().GetText() != tt.line.source || view.GetTarget().GetText() != tt.wantTarget ||
+				(view.Target != nil) != (tt.wantTarget != "") || view.GetTarget().GetPullRequest().GetUrl() != tt.wantPR {
+				t.Fatalf("view = %+v, want source %q, target %q opening %q", view, tt.line.source, tt.wantTarget, tt.wantPR)
+			}
+		})
+	}
+}
+
+// TestBranchLineDefectsPanic covers the line's invariants: a read line names
+// its target, and a pull request is only ever the target's.
+func TestBranchLineDefectsPanic(t *testing.T) {
+	tests := []struct {
+		name string
+		act  func()
+	}{
+		{name: "a read line with no target", act: func() { branchLineOf("feature", "") }},
+		{name: "an unread line naming a pull request", act: func() { unreadLine(theWorkspace).view("https://github.com/o/r/pull/7") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Fatal("no panic, want the defect to fail hard")
+				}
+			}()
+
+			// Act
+			tt.act()
+		})
 	}
 }
 
@@ -498,7 +566,7 @@ func TestPublishHeadPinsALiveHeadAndSettlesAResolvedOne(t *testing.T) {
 			h := newHarness(t)
 
 			// Act.
-			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
+			h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, tt.result, headRun)
 
 			// Assert.
 			heads := h.feed.headPublications()
@@ -535,7 +603,7 @@ func TestAQueueRedrawReadBeforeTheMergeResolvedNeverRepinsItsHead(t *testing.T) 
 			return
 		}
 		resolved = true
-		h.o.publishHead(theWorkspace, ledger, "feature → master", 1, failedHead(), headRun)
+		h.o.publishHead(theWorkspace, ledger, branchLineOf("feature", "master"), 1, failedHead(), headRun)
 	}
 	before := len(h.feed.headPublications())
 
@@ -557,10 +625,10 @@ func TestAQueueRedrawReadBeforeTheMergeResolvedNeverRepinsItsHead(t *testing.T) 
 func TestAStaleLiveHeadIsRecordedWithTheCauseThatDrewIt(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, failedHead(), headRun)
+	h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, failedHead(), headRun)
 
 	// Act.
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, headMerging, headQueue)
+	h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, headMerging, headQueue)
 
 	// Assert.
 	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{
@@ -578,7 +646,7 @@ func TestEveryDrawnHeadIsRecordedWithTheCauseThatDrewIt(t *testing.T) {
 	h := newHarness(t)
 
 	// Act.
-	h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, headMerging, headRecover)
+	h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, headMerging, headRecover)
 
 	// Assert.
 	rec, found := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{
@@ -609,10 +677,10 @@ func TestTheHeadBookOrdersEveryPublication(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
-			h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.first, headRun)
+			h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, tt.first, headRun)
 
 			// Act.
-			h.o.publishHead(theWorkspace, tt.lease, "feature → master", 1, tt.then, headQueue)
+			h.o.publishHead(theWorkspace, tt.lease, branchLineOf("feature", "master"), 1, tt.then, headQueue)
 
 			// Assert.
 			heads := h.feed.headPublications()
@@ -645,7 +713,7 @@ func TestRestateHeadDrawsTheHeadAsItLastStood(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			if tt.drawn {
-				h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
+				h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, tt.result, headRun)
 			}
 
 			// Act.
@@ -682,7 +750,7 @@ func TestRestateLiveHeadRestatesOnlyALiveHead(t *testing.T) {
 			// Arrange.
 			h := newHarness(t)
 			if tt.drawn {
-				h.o.publishHead(theWorkspace, "lease-1", "feature → master", 1, tt.result, headRun)
+				h.o.publishHead(theWorkspace, "lease-1", branchLineOf("feature", "master"), 1, tt.result, headRun)
 			}
 			before := len(h.feed.headPublications())
 			marked := false

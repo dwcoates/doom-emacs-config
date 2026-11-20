@@ -2028,8 +2028,8 @@ func TestAQueuedMergesLabelThatCannotBeReadIsRecordedByWhyItFailed(t *testing.T)
 			label := h.o.bubbleLabel(ctx, entry)
 
 			// Assert
-			if label != string(theWorkspace) {
-				t.Fatalf("label = %q, want the workspace's id standing in", label)
+			if label != unreadLine(theWorkspace) {
+				t.Fatalf("label = %+v, want the workspace's id standing in", label)
 			}
 			recs := dlog.FilterRecords(h.logs.Records(), dlog.RecordQuery{Operation: "daemon.merge.queue"})
 			if len(recs) != 1 || recs[0].Level != tt.wantLevel || recs[0].Context["workspace"] != string(theWorkspace) {

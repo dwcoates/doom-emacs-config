@@ -21,6 +21,7 @@
  * A new arm landed in the contract therefore fails the suite loudly instead of
  * going quietly untested.
  */
+import { branchLineInit } from "../feed/branch-line.js";
 import { create, type DescMessage, type MessageInitShape } from "@bufbuild/protobuf";
 
 import { WorkspaceRefSchema, RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -1597,7 +1598,7 @@ export const mergeUnit = (result: MergeResult): ActivityUnit => ({
   value: {
     head: {
       glyph: { icon: "merge" },
-      label: { text: "merging ws-1" },
+      branchLine: branchLineInit("merging ws-1"),
       runtime: { startedAtMs: 1_000n },
       // R2: the INITIAL fold, the daemon's default: open, save a success
       // (owner ruling, 2026-10-08).

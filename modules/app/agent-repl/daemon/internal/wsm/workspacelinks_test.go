@@ -315,3 +315,58 @@ func TestOwnedPullRequestOpen(t *testing.T) {
 		})
 	}
 }
+
+func TestOwnedPullRequestLinksAreTheOwnedPullRequests(t *testing.T) {
+	key := PullRequestKey{Owner: "o", Repo: "r", Number: 1}
+	owned := WorkspaceLink{URL: key.String(), Owned: true, PullRequest: &key}
+	tests := []struct {
+		name  string
+		links []WorkspaceLink
+		want  []WorkspaceLink
+	}{
+		{name: "no links"},
+		{name: "a referenced pull request is not owned", links: []WorkspaceLink{{URL: key.String(), PullRequest: &key}}},
+		{name: "an owned link that is no pull request", links: []WorkspaceLink{{URL: "https://example.com", Owned: true}}},
+		{name: "an owned pull request", links: []WorkspaceLink{{URL: "https://example.com", Owned: true}, owned}, want: []WorkspaceLink{owned}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := OwnedPullRequestLinks(tt.links)
+
+			// Assert
+			if len(got) != len(tt.want) || (len(got) == 1 && got[0].URL != tt.want[0].URL) {
+				t.Fatalf("OwnedPullRequestLinks = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDeployablePullRequestsLeaveOutTheClosedUnmerged(t *testing.T) {
+	pr := func(n uint32, sub *PullRequestSubscription) WorkspaceLink {
+		key := PullRequestKey{Owner: "o", Repo: "r", Number: n}
+		return WorkspaceLink{URL: key.String(), Owned: true, PullRequest: &key, Follow: sub}
+	}
+	tests := []struct {
+		name  string
+		links []WorkspaceLink
+		want  []string
+	}{
+		{name: "an open one", links: []WorkspaceLink{pr(1, &PullRequestSubscription{})}, want: []string{"o/r#1"}},
+		{name: "a merged one", links: []WorkspaceLink{pr(1, &PullRequestSubscription{Ended: &PullRequestEnd{Merged: true}})}, want: []string{"o/r#1"}},
+		{name: "one no longer followed", links: []WorkspaceLink{pr(1, nil)}, want: []string{"o/r#1"}},
+		{name: "a closed unmerged one", links: []WorkspaceLink{pr(1, &PullRequestSubscription{Ended: &PullRequestEnd{}})}},
+		{name: "a referenced one", links: []WorkspaceLink{{URL: "o/r#2", PullRequest: &PullRequestKey{Owner: "o", Repo: "r", Number: 2}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := DeployablePullRequests(tt.links)
+
+			// Assert
+			if len(got) != len(tt.want) || (len(got) == 1 && got[0] != tt.want[0]) {
+				t.Fatalf("DeployablePullRequests = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

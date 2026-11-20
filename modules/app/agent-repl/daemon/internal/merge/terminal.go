@@ -1277,13 +1277,13 @@ func (o *orchestrator) endAbandonedBubble(ctx context.Context, ws ids.WorkspaceI
 // abandonedLabel is the head's branch line for a merge that never ran. The
 // label is read where it is available and the workspace's own id stands in
 // where it is not: an unreadable label must not stop the bubble from ending.
-func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) string {
+func (o *orchestrator) abandonedLabel(ctx context.Context, ws ids.WorkspaceID, source wsm.MergeSource) branchLine {
 	label, err := o.sourceLabel(ctx, ws, source)
 	if err != nil {
 		o.deps.Log.Global().Error("daemon.merge.abandoned",
 			"the abandoned merge's label could not be read; its id stands in",
 			dlog.Context{"workspace": string(ws), "error": err.Error()})
-		return string(ws)
+		return unreadLine(ws)
 	}
 	return label
 }

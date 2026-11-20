@@ -9167,6 +9167,14 @@ html.webhost-gate #feed [data-row-kind="coldGate"]:has(.cold-gate[data-state="st
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A target that opens its pull request (merge.ts) keeps the line's look; only
+   the cursor says it opens something. */
+.merge-label .merge-label-target {
+  color: inherit;
+  font: inherit;
+  text-decoration: inherit;
+  cursor: pointer;
+}
 .merge-clock,
 .merge-commit { color: var(--muted); font-variant-numeric: tabular-nums; }
 /* The head's clock reads at the badge's size (owner request, 2026-10-18). */

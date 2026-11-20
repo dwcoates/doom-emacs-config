@@ -721,7 +721,7 @@ func (o *orchestrator) queueRequestGated(ctx context.Context, ws ids.WorkspaceID
 		"workspace": string(ws), "repo": string(repo), "position": position})
 	// THE FIRST OF THE MERGE'S TWO BANNERS: it is in line. The second is its
 	// resolution (ended); nothing between raises one.
-	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry))
+	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry).text())
 	if err := o.republishQueue(ctx, repo); err != nil {
 		return 0, false, false, err
 	}

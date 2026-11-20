@@ -526,11 +526,16 @@ func (r *run) head(result any) {
 	r.o.publishHead(r.ws, r.lease.ID, r.label(), r.startedMS, result, headRun)
 }
 
-// label is the bubble's head line: what is merged, and where to.
-func (r *run) label() string {
+// label is the bubble's head line: what is merged, and where to. A run that
+// ends before it resolved its subject (an admission that failed) knows
+// neither, so its line is the workspace's own id (unreadLine).
+func (r *run) label() branchLine {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return branchLabel(r.subject.branch, r.subject.targetLabel())
+	if r.subject.targetLabel() == "" {
+		return unreadLine(r.ws)
+	}
+	return branchLineOf(r.subject.branch, r.subject.targetLabel())
 }
 
 // runAdmitted is one admitted merge, from its start to its end: the run, then
