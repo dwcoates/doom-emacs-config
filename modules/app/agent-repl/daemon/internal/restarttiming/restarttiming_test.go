@@ -29,6 +29,7 @@ func TestConstructorsLabelEachRestart(t *testing.T) {
 		{"shim restart", restarttiming.OfShimRestart(ws, restarttiming.ShimResume, "build_stale", restarttiming.OK, 4*time.Second), restarttiming.ShimRestart, "resume", "build_stale", restarttiming.OK, ws, 4},
 		{"transfer", restarttiming.OfTransfer(ws, restarttiming.TransferRun, restarttiming.OK, 250*time.Millisecond), restarttiming.Transfer, "run", "", restarttiming.OK, ws, 0.25},
 		{"editor start", restarttiming.OfEditorStart(restarttiming.EditorFirstTab, restarttiming.EditorRunning, 7*time.Second), restarttiming.EditorStart, "first_tab", "running", restarttiming.OK, "", 7},
+		{"reconnect wave", restarttiming.OfReconnectWave(restarttiming.ReconnectHost, restarttiming.WaveLast, restarttiming.ReconnectSuccessor, 6*time.Second), restarttiming.ReconnectWave, "host_last", "successor", restarttiming.OK, "", 6},
 		{"deploy build step", restarttiming.OfBuildStep("webapp", restarttiming.Failed, 9*time.Second), restarttiming.DeployBuildStep, "webapp", "", restarttiming.Failed, "", 9},
 		{"session start", restarttiming.OfSessionStart(ws, restarttiming.SessionVendor, restarttiming.SessionWake, restarttiming.Failed, 5*time.Second), restarttiming.SessionStart, "vendor", "wake", restarttiming.Failed, ws, 5},
 	}

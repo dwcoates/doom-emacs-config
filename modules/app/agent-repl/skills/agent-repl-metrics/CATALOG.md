@@ -83,6 +83,7 @@ for metrics that show where restart time goes and when it regressed):
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |
 | `handover_transfer` | `wait`, `run` | | the outgoing daemon, per workspace |
 | `workspace_reconnect` | `host`, `web` | `cold`, `successor`, `webapp_reload` | the daemon, per workspace: from a boot's start, a handover's manifest or a webview reload's push until the workspace's Emacs host or webview stream opens on it |
+| `reconnect_wave` | `host_first`, `host_last`, `host_spread`, `web_first`, `web_last`, `web_spread` | `cold`, `successor`, `webapp_reload` | the daemon (`restarttiming.Reconnects`, added 2026-11-20), once per restart's expected connections of one kind: the first back and the last back, each from the restart's start, and the spread from the first to the last, the span the sidebar's rows come back over. `successor`'s `host_last` is the slowest workspace's handoff to the successor. A wave one of whose workspaces a later restart expected again times only its first |
 
 Not built, each recorded with its reason:
 
