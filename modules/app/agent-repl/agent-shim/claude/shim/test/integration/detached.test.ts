@@ -21,9 +21,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
+import { canonicalSession, endsTurn, releaseShared, since, uniqueTurn } from "../integration-support/canonical.js";
 import { detachGate } from "../integration-support/detach-gate.js";
 import {
   activityId,
@@ -69,11 +70,16 @@ import {
   findSubagentLocatorByToolUseId,
   findSubagentMetaByToolUseId,
   readSpools,
-  readTranscript,
   spoolFilePath,
 } from "../integration-support/vendor.js";
 
+// THE CASES HERE SHARE SHIMS (agent-shim/claude/shim/AGENTS.md "Integration
+// cases share the canonical shim"): every case whose subject is its own turn's
+// detached work runs on the file's canonical session, on its own turns, runs
+// and units, reading only its own slice of the store, transcript and spools.
+// The cases that still spawn their own say why at the case.
 afterEach(cleanupShims);
+afterAll(releaseShared);
 
 type AgentStream = ReturnType<typeof openStream<shimv1.WatchAgentResponse>>;
 
@@ -130,15 +136,205 @@ function bashOf(frame: shimv1.WatchAgentResponse): conversationv1.AgentBash {
   return update.value.item.value;
 }
 
+describe("reconciliation at session start", () => {
+  test("a store-only unterminated item is re-adopted with the CREATED origin", async () => {
+    // A SHELL IS ITS OWN OS PROCESS: the replaced CLI process did not end it,
+    // so a revival re-adopts it, announced as `created` — the item's start plus
+    // its description — because a resume is not a detachment: nothing left a
+    // turn, the work simply already exists.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(first);
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    stream.close();
+    // THE SHIM DIES WITHOUT STANDING DOWN, which is the whole premise: an
+    // ORDERLY kill stops every live item and writes its terminal, leaving
+    // nothing to re-adopt. A crash stops nothing — the backgrounded shell keeps
+    // running, its spool keeps no `EXIT=` line, and the record keeps an open
+    // obligation for the revived session to reconcile.
+    first.child.kill("SIGKILL");
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    const revived = sessionStarted(
+      await second.clients.h1.startSession(resumeSession(started.vendorSessionId)),
+    );
+
+    const adopted = revived.liveWork.find((item) => item.work?.value === run);
+    if (adopted === undefined) {
+      throw new Error(
+        `the revived session did not announce ${run}; it announced ${JSON.stringify(
+          revived.liveWork.map((item) => item.work?.value),
+        )}`,
+      );
+    }
+    expect(adopted.origin.case).toBe("created");
+    if (adopted.origin.case === "created") {
+      expect(adopted.origin.value.workCreated?.work.case).toBe("bash");
+    }
+  });
+
+  test("a subagent the replaced CLI process ran is closed at revival, never re-adopted", async () => {
+    // A SUBAGENT RUNS INSIDE THE CLI PROCESS, so a revival (a new CLI process)
+    // provably ended it: the revived shim closes it and does not announce it.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(first);
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-detached-live" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    stream.close();
+    first.child.kill("SIGKILL");
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    const revived = sessionStarted(
+      await second.clients.h1.startSession(resumeSession(started.vendorSessionId)),
+    );
+    // An ORDERLY stand-down flushes every write the shim enqueued, so the
+    // reconciliation's closings have landed once it returns.
+    await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await second.exited;
+    const store = createStoreClient(first.dirs.storeSocket);
+    const live = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: started.vendorSessionId }),
+      }),
+    );
+
+    expect([
+      revived.liveWork.map((item) => item.work?.value).includes(run),
+      live.result.case === "success" ? live.result.value.liveDetachedRuns.map((run) => run.work?.value).includes(run) : undefined,
+    ]).toEqual([false, false]);
+  });
+
+  test("a spool-backed shell is left live at revival, its terminal the sidecar's", async () => {
+    // A SHELL IS ITS OWN OS PROCESS WRITING ITS OWN SPOOL: the replaced CLI
+    // process did not end it, so the revived shim writes no terminal for it.
+    const first = await spawnShim();
+    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    const stream = await openAgentStream(first);
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    const announced = await awaitAnnouncement(stream);
+    const run = announced.work?.value ?? "";
+    stream.close();
+    first.child.kill("SIGKILL");
+    await first.exited;
+
+    const second = await spawnShim({ reuse: first.dirs });
+    await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
+    // THE WRITER IS ONE ORDERED BUFFER: a turn's terminal landing means every
+    // row the reconciliation enqueued ahead of it has landed too.
+    const agent = openStream((options) => second.clients.h1.watchAgent(watchAgentRequest(), options));
+    await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
+    await agent.until((frame) => {
+      if (frame.frame.case !== "entry") return false;
+      const result = entryFrame(watchAgentEntry(frame))?.result;
+      return result?.case === "success" || result?.case === "failure";
+    });
+    agent.close();
+    const store = createStoreClient(first.dirs.storeSocket);
+    const live = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: started.vendorSessionId }),
+      }),
+    );
+
+    expect(live.result.case === "success" ? live.result.value.liveDetachedRuns.map((run) => run.work?.value) : []).toContain(run);
+  });
+
+  test("a session start never closes ANOTHER session's live work (2026-09-23)", async () => {
+    // THE DEFECT: one store serves every session on the host. Opening a second
+    // workspace reconciled the WHOLE record against its own vendor and wrote
+    // lost.swept_up terminals for five subagents another session was still
+    // running. Session A's work here is five live subagents and a shell run;
+    // session B starts with an in-process subagent of its own, whose closing is
+    // the proof its reconciliation actually ran.
+    const first = await spawnShim();
+    const b = sessionStarted(await first.clients.h1.startSession(freshSession()));
+    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
+    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await first.exited;
+    const store = createStoreClient(first.dirs.storeSocket);
+    const sessionA = "session-a-main";
+    const aSubagents = ["a-sub-1", "a-sub-2", "a-sub-3", "a-sub-4", "a-sub-5"];
+    for (const created of aSubagents) {
+      await seedSubagentSpawn(store, sidecarProducer(sessionA), { spawner: sessionA, created });
+    }
+    await seedDetachedAnnouncement(store, sidecarProducer(sessionA), {
+      work: "a-run",
+      agent: sessionA,
+      detachedFromId: "a-run",
+      outputPath: "/nonexistent/a-run.output",
+    });
+    await seedSubagentSpawn(store, sidecarProducer(b.vendorSessionId), {
+      spawner: b.vendorSessionId,
+      created: "b-orphan-sub",
+    });
+
+    // Session B starts while A's work is live.
+    const second = await spawnShim({ reuse: first.dirs });
+    sessionStarted(await second.clients.h1.startSession(resumeSession(b.vendorSessionId)));
+    // An ORDERLY stand-down flushes every write the shim ever enqueued, so
+    // after it nothing B's reconciliation wrote can still be in flight.
+    await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
+    await second.exited;
+
+    // Assert: nothing B's shim wrote names A's work...
+    const shimKeys = writtenKeys(
+      (first.store?.writeBatches() ?? [])
+        .filter((batch) => batch.accepted && !batch.request.producer.startsWith("claude-sidecar:"))
+        .map((batch) => batch.request),
+    );
+    expect(shimKeys.filter((key) => key.includes("a-sub-") || key.includes("a-run"))).toEqual([]);
+    // ...and A's work is still open in A's own lineage.
+    const live = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: sessionA }),
+      }),
+    );
+    const open = live.result.case === "success" ? live.result.value : undefined;
+    expect(open?.liveAgents.map((id) => id.value)).toEqual(aSubagents);
+    expect(open?.liveDetachedRuns.map((run) => run.work?.value)).toEqual(["a-run"]);
+    // ...while B's own in-process subagent, proof its reconciliation ran, is closed.
+    const bLive = await store.getLiveWork(
+      create(storev1.GetLiveWorkRequestSchema, {
+        session: create(conversationv1.AgentIdSchema, { value: b.vendorSessionId }),
+      }),
+    );
+    expect(bLive.result.case === "success" ? bLive.result.value.liveAgents.map((id) => id.value) : undefined).toEqual([]);
+  });
+
+  test("GetLiveWork is called exactly ONCE, at session start", async () => {
+    // It answers "what did the record see START and never see END", which is
+    // timeless and cannot go stale — so asking again would be the shim
+    // treating the record as a live view of the world.
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+
+    await shim.clients.h1.startTurn(turnFor({ turn: t1, text: "!bash-detach-live" }));
+
+    // AN OBSERVER OF THE CANONICAL SESSION'S START: this describe is the file's
+    // first, so the shared session has done nothing since it started.
+    const liveWorkReads = (shim.store?.reads() ?? []).filter((read) => read.rpc === "GetLiveWork");
+    expect(liveWorkReads.length).toBe(1);
+  });
+});
+
 describe("a detached shell's announcement", () => {
   test("!bash-detach announces detached_work with a readable output path", async () => {
     // The announcement is the consumer's open-a-stream obligation, and the
     // output path is how a surface offers the file when the stream is gone.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
+    const spoolsBefore = new Set(readSpools(shim.dirs, started.vendorSessionId).map((spool) => spool.taskId));
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream, true);
 
     expect(announced.work?.value).not.toBe("");
@@ -148,7 +344,7 @@ describe("a detached shell's announcement", () => {
     // path that named nothing would be a broken offer nobody noticed. The
     // spool is found by SCANNING (the vendor's task id never crosses the wire),
     // and the announced path must be that file.
-    const spools = readSpools(shim.dirs, started.vendorSessionId);
+    const spools = readSpools(shim.dirs, started.vendorSessionId).filter((spool) => !spoolsBefore.has(spool.taskId));
     expect(spools.length).toBeGreaterThan(0);
     expect(spools.map((spool) => spoolFilePath(shim.dirs, started.vendorSessionId, spool.taskId))).toContain(
       announced.output?.path,
@@ -157,11 +353,12 @@ describe("a detached shell's announcement", () => {
   });
 
   test("the announcement's origin is detached, naming the call it left", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
 
     expect(announced.origin.case).toBe("detached");
@@ -175,11 +372,13 @@ describe("a detached shell's announcement", () => {
   test("the DetachedWorkId IS the spawning call's activity id", async () => {
     // ONE HANDLE: the wire never carries the vendor's task id, so the work id
     // and the unit's own id are the same value and a consumer needs no mapping.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
 
     if (announced.origin.case !== "detached") throw new Error("expected the detached origin");
@@ -188,7 +387,7 @@ describe("a detached shell's announcement", () => {
     // their own they only say the shim was consistent with itself. The vendor's
     // transcript carries the spawning call's `tool_use` block id, and THAT is
     // the value the handle must be.
-    const toolUseIds = readTranscript(shim.dirs, started.vendorSessionId)
+    const toolUseIds = mine.transcript(started.vendorSessionId)
       .filter((record) => record.type === "assistant")
       .flatMap((record) => {
         const message = record.message as { content?: unknown } | undefined;
@@ -207,24 +406,27 @@ describe("a detached shell's announcement", () => {
   test("the announcement is a page line keyed detached:<work id>", async () => {
     // Landing 3: the announcement is its OWN row, so it cannot overwrite the
     // spawning call, and it replays on a repaint like any other page line.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
 
-    expect(writtenKeys(shim.store?.writes() ?? [])).toContain(
+    expect(writtenKeys(mine.writes())).toContain(
       `detached:${announced.work?.value ?? ""}`,
     );
     stream.close();
   });
 
   test("the announcement replays in a later WatchAgent page", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
     stream.close();
 
@@ -254,10 +456,11 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     // Every byte of detached shell output comes from the sidecar tailing the
     // vendor's spool — foreground output is observable nowhere while running —
     // so the rows are seeded here and the shim must serve them back in order.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     const originalInstant = 1_700_000_000_000;
@@ -301,10 +504,11 @@ describe("WatchBash serves the SIDECAR's rows", () => {
   test("the tail frames carry the rendered window, never the whole spool", async () => {
     // Output beyond what is rendered is not stored (owner ruling 2026-09-23):
     // a run's output is one snapshot superseded whole, never a delta sequence.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     await seedBashLifecycle(
@@ -346,8 +550,7 @@ describe("WatchBash serves the SIDECAR's rows", () => {
     // left as "some throw", because a store outage, a cancelled call and a
     // handle nobody minted all reach a caller as an exception and only the code
     // tells them apart.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const bash = openStream((options) =>
       shim.clients.h1.watchBash(
@@ -373,10 +576,11 @@ describe("WatchBash and the rows it relays", () => {
     // written a single row. The shim wrote the run's start ahead of the
     // announcement, so the first frame is owed immediately — never a silent
     // wait for a producer this process cannot see.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
 
@@ -397,10 +601,11 @@ describe("WatchBash and the rows it relays", () => {
   test("the sidecar's rows written after the shim's start follow it on the same stream", async () => {
     // THE PLANES SHARE ONE ROW PER FACT: the sidecar's tail and terminal land
     // on the run the shim's start opened, and are served after it.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     const bash = openStream((options) =>
@@ -437,10 +642,11 @@ describe("WatchBash and the rows it relays", () => {
     // The same obligation stated as an ordering: the stream is opened first and
     // the rows are written afterwards, so nothing here can be served from a
     // snapshot taken at the open.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
 
@@ -493,10 +699,11 @@ describe("WatchBash and the rows it relays", () => {
     // BEFORE the terminal row, never after it. A tail written afterwards is
     // durable in the record and reaches no watcher, which is asserted here so
     // the ordering is a stated rule rather than a surprise.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     const store = createStoreClient(shim.dirs.storeSocket);
@@ -550,11 +757,12 @@ describe("what the PRODUCER states about a shell run", () => {
     // A command's own verdict on itself is not a failure of the CALL. Drawing
     // `exit 3` as a failed tool would tell the user the shell broke, when what
     // happened is that a grep found nothing.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-fail" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-fail" }));
     const settled = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -590,11 +798,12 @@ describe("what the PRODUCER states about a shell run", () => {
     // the runtime — is asserted where its producer lives, on the converter, in
     // test/convert/tools/bash.test.ts: reaching it end to end needs the
     // sidecar's rows, which no integration harness runs.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-timeout" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-timeout" }));
     const announced = await awaitAnnouncement(stream);
     // Drive to the turn's end so every frame it will produce has been served.
     await stream.until((frame) => {
@@ -626,10 +835,12 @@ describe("what the PRODUCER states about a shell run", () => {
     // output and no shell status at all. Stating it as absent for the
     // foreground path is the honest shape — a synthesized `exited(0)` would be
     // the shim inventing a status nothing reported.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    const t2 = uniqueTurn();
+    endsTurn(shim, t2);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash" }));
     const foreground = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -654,7 +865,7 @@ describe("what the PRODUCER states about a shell run", () => {
 
     // The detached path, whose rows are the SIDECAR's and are seeded here as
     // everywhere else in this file.
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t2, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     await seedBashLifecycle(
@@ -721,7 +932,9 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
   /** Announce a `!bash-detach` run and wait for the shim to conclude it. */
   async function concludedRun(shim: Awaited<ReturnType<typeof spawnShim>>): Promise<string> {
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    const turn = uniqueTurn();
+    endsTurn(shim, turn);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn, text: "!bash-detach" }));
     const run = (await awaitAnnouncement(stream)).work?.value ?? "";
     stream.close();
     await concluded(shim, run);
@@ -730,6 +943,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   /** Every terminal row the SHIM wrote for RUN. */
   function shimTerminals(shim: Awaited<ReturnType<typeof spawnShim>>, run: string): storev1.StoreEntry[] {
+    // Keyed by the run, which is this case's own.
     return entriesKeyed(shim.store?.writes() ?? [], `bash:${run}:terminal`);
   }
 
@@ -752,8 +966,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("a concluded run the sidecar never tailed still has its start", async () => {
     // THE INCIDENT: nothing but the shim ever wrote a row for this run.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
     const run = await concludedRun(shim);
 
     // Act.
@@ -769,8 +982,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("the shim writes NO terminal for a concluded run: its end is the sidecar's", async () => {
     // Arrange.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     // Act.
     const run = await concludedRun(shim);
@@ -833,8 +1045,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("a concluded run stays live work until the sidecar writes its end", async () => {
     // Arrange: the vendor notified, and no sidecar has read the spool yet.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
     const run = await concludedRun(shim);
 
     // Act.
@@ -846,8 +1057,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("a run the sidecar ended is no longer re-announced as live work", async () => {
     // Arrange.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
     const run = await concludedRun(shim);
     await sidecarEnds(shim, started.vendorSessionId, run);
 
@@ -860,8 +1070,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("a sidecar row landing AFTER the run's terminal does not reopen the run", async () => {
     // Arrange: the run is ended, then the sidecar's tail lands late.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
     const run = await concludedRun(shim);
     await sidecarEnds(shim, started.vendorSessionId, run);
     await writeEntries(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), [
@@ -883,8 +1092,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("the run's stream is its start, then the sidecar's ONE terminal", async () => {
     // Arrange.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
     const run = await concludedRun(shim);
     await sidecarEnds(shim, started.vendorSessionId, run);
 
@@ -900,8 +1108,7 @@ describe("a detached shell's lifecycle: the shim writes its start, the sidecar i
 
   test("the sidecar's terminal carries the spool's evidence", async () => {
     // Arrange.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
     const run = await concludedRun(shim);
     await sidecarEnds(shim, started.vendorSessionId, run);
 
@@ -938,10 +1145,11 @@ describe("StopBash", () => {
   });
 
   test("the stopped run's own stream concludes with an interrupted arm", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach-live" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     // EVERY BYTE OF A DETACHED SHELL COMES FROM THE SIDECAR, which no
@@ -985,8 +1193,7 @@ describe("StopBash", () => {
   });
 
   test("an unknown work id is refused unknown_work", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const response = await shim.clients.h1.stopBash(
       create(shimv1.StopBashRequestSchema, { work: workId("nobody") }),
@@ -996,10 +1203,11 @@ describe("StopBash", () => {
   });
 
   test("a run that already ended is refused already_ended", async () => {
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-detach" }));
     const announced = await awaitAnnouncement(stream);
     const run = announced.work?.value ?? "";
     // The sidecar's rows, seeded as everywhere else in this file — and this
@@ -1039,11 +1247,12 @@ describe("subagents", () => {
   test("a synchronous subagent's frames arrive FLAT, carrying its own AgentId", async () => {
     // FRAMES ARE FLAT: `AgentFrame.agent_id` is the whole of attribution and a
     // subagent's work is never nested in its spawn.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!subagent" }));
     const spawned = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1129,11 +1338,12 @@ describe("subagents", () => {
   test("the subagent's AgentId IS the spawning call's activity id", async () => {
     // The one id both the stream and `meta.json` carry, which is what lets the
     // two planes agree without a mapping table.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!subagent" }));
     const spawned = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1171,11 +1381,12 @@ describe("subagents", () => {
   });
 
   test("a synchronous subagent's unit settles with its report", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!subagent" }));
     const settled = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1202,12 +1413,13 @@ describe("subagents", () => {
   });
 
   test("!subagent-detached announces detached work for the subagent", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
     await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t1", text: "!subagent-detached" }),
+      startTurnRequest({ turn: t1, text: "!subagent-detached" }),
     );
     const announced = await awaitAnnouncement(stream);
 
@@ -1226,11 +1438,12 @@ describe("subagents", () => {
     // backlog in merged batches now, so the agent's rows can all be durable
     // before this watch opens. The tail itself is proven by the main-book and
     // reader suites with rows written after the open.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
     await shim.clients.h1.startTurn(
-      startTurnRequest({ turn: "t1", text: "!subagent-detached" }),
+      startTurnRequest({ turn: t1, text: "!subagent-detached" }),
     );
     const announced = await awaitAnnouncement(stream);
     const created = announced.work?.value ?? "";
@@ -1618,10 +1831,11 @@ describe("DetachForeground", () => {
     // (`backgroundTasks(toolUseId)` marks the call, and the foreground result
     // reports `backgroundedByUser`), and DetachForeground confirms it so the
     // consumer's obligation is stated by the same verb either way.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!vendor-backgrounded" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!vendor-backgrounded" }));
     const running = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1691,10 +1905,11 @@ describe("DetachForeground", () => {
     // announced from its patch, and the sidecar has written nothing for it. The
     // shim wrote its start ahead of that announcement, so the first frame is
     // owed immediately.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!vendor-backgrounded" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!vendor-backgrounded" }));
     const running = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1733,10 +1948,11 @@ describe("DetachForeground", () => {
     // starts, so the call raced the settle and the table answered
     // `already_concluded` instead. `!bash-hold` parks the foreground call until
     // an interrupt, with no background work for it anywhere.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!bash-hold" }));
     const running = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1764,10 +1980,11 @@ describe("DetachForeground", () => {
   });
 
   test("a settled unit is refused already_concluded", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!read" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!read" }));
     const settled = await stream.until((frame) => {
       if (frame.frame.case !== "entry") return false;
       const agentFrame = entryFrame(watchAgentEntry(frame));
@@ -1805,8 +2022,7 @@ describe("DetachForeground", () => {
   });
 
   test("an unknown unit is refused unknown_unit", async () => {
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
 
     const response = await shim.clients.h1.detachForeground(
       create(shimv1.DetachForegroundRequestSchema, { unit: activityId("nobody") }),
@@ -1819,10 +2035,11 @@ describe("DetachForeground", () => {
     // A Read is not detachable IN KIND — the four detachable kinds are subagent,
     // bash, workflow and monitor — which is the distinction `not_in_foreground` does
     // not make.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
+    const { shim } = await canonicalSession();
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!hold" }));
+    await shim.clients.h1.startTurn(startTurnRequest({ turn: t1, text: "!hold" }));
     // The held turn's own response unit is live and of a kind nothing can
     // detach.
     const live = await stream.until((frame) => {
@@ -1851,190 +2068,6 @@ describe("DetachForeground", () => {
   });
 });
 
-describe("reconciliation at session start", () => {
-  test("a store-only unterminated item is re-adopted with the CREATED origin", async () => {
-    // A SHELL IS ITS OWN OS PROCESS: the replaced CLI process did not end it,
-    // so a revival re-adopts it, announced as `created` — the item's start plus
-    // its description — because a resume is not a detachment: nothing left a
-    // turn, the work simply already exists.
-    const first = await spawnShim();
-    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
-    const stream = await openAgentStream(first);
-    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    const announced = await awaitAnnouncement(stream);
-    const run = announced.work?.value ?? "";
-    stream.close();
-    // THE SHIM DIES WITHOUT STANDING DOWN, which is the whole premise: an
-    // ORDERLY kill stops every live item and writes its terminal, leaving
-    // nothing to re-adopt. A crash stops nothing — the backgrounded shell keeps
-    // running, its spool keeps no `EXIT=` line, and the record keeps an open
-    // obligation for the revived session to reconcile.
-    first.child.kill("SIGKILL");
-    await first.exited;
-
-    const second = await spawnShim({ reuse: first.dirs });
-    const revived = sessionStarted(
-      await second.clients.h1.startSession(resumeSession(started.vendorSessionId)),
-    );
-
-    const adopted = revived.liveWork.find((item) => item.work?.value === run);
-    if (adopted === undefined) {
-      throw new Error(
-        `the revived session did not announce ${run}; it announced ${JSON.stringify(
-          revived.liveWork.map((item) => item.work?.value),
-        )}`,
-      );
-    }
-    expect(adopted.origin.case).toBe("created");
-    if (adopted.origin.case === "created") {
-      expect(adopted.origin.value.workCreated?.work.case).toBe("bash");
-    }
-  });
-
-  test("a subagent the replaced CLI process ran is closed at revival, never re-adopted", async () => {
-    // A SUBAGENT RUNS INSIDE THE CLI PROCESS, so a revival (a new CLI process)
-    // provably ended it: the revived shim closes it and does not announce it.
-    const first = await spawnShim();
-    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
-    const stream = await openAgentStream(first);
-    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!subagent-detached-live" }));
-    const announced = await awaitAnnouncement(stream);
-    const run = announced.work?.value ?? "";
-    stream.close();
-    first.child.kill("SIGKILL");
-    await first.exited;
-
-    const second = await spawnShim({ reuse: first.dirs });
-    const revived = sessionStarted(
-      await second.clients.h1.startSession(resumeSession(started.vendorSessionId)),
-    );
-    // An ORDERLY stand-down flushes every write the shim enqueued, so the
-    // reconciliation's closings have landed once it returns.
-    await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
-    await second.exited;
-    const store = createStoreClient(first.dirs.storeSocket);
-    const live = await store.getLiveWork(
-      create(storev1.GetLiveWorkRequestSchema, {
-        session: create(conversationv1.AgentIdSchema, { value: started.vendorSessionId }),
-      }),
-    );
-
-    expect([
-      revived.liveWork.map((item) => item.work?.value).includes(run),
-      live.result.case === "success" ? live.result.value.liveDetachedRuns.map((run) => run.work?.value).includes(run) : undefined,
-    ]).toEqual([false, false]);
-  });
-
-  test("a spool-backed shell is left live at revival, its terminal the sidecar's", async () => {
-    // A SHELL IS ITS OWN OS PROCESS WRITING ITS OWN SPOOL: the replaced CLI
-    // process did not end it, so the revived shim writes no terminal for it.
-    const first = await spawnShim();
-    const started = sessionStarted(await first.clients.h1.startSession(freshSession()));
-    const stream = await openAgentStream(first);
-    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!bash-detach-live" }));
-    const announced = await awaitAnnouncement(stream);
-    const run = announced.work?.value ?? "";
-    stream.close();
-    first.child.kill("SIGKILL");
-    await first.exited;
-
-    const second = await spawnShim({ reuse: first.dirs });
-    await second.clients.h1.startSession(resumeSession(started.vendorSessionId));
-    // THE WRITER IS ONE ORDERED BUFFER: a turn's terminal landing means every
-    // row the reconciliation enqueued ahead of it has landed too.
-    const agent = openStream((options) => second.clients.h1.watchAgent(watchAgentRequest(), options));
-    await second.clients.h1.startTurn(startTurnRequest({ turn: "t2", text: "!md" }));
-    await agent.until((frame) => {
-      if (frame.frame.case !== "entry") return false;
-      const result = entryFrame(watchAgentEntry(frame))?.result;
-      return result?.case === "success" || result?.case === "failure";
-    });
-    agent.close();
-    const store = createStoreClient(first.dirs.storeSocket);
-    const live = await store.getLiveWork(
-      create(storev1.GetLiveWorkRequestSchema, {
-        session: create(conversationv1.AgentIdSchema, { value: started.vendorSessionId }),
-      }),
-    );
-
-    expect(live.result.case === "success" ? live.result.value.liveDetachedRuns.map((run) => run.work?.value) : []).toContain(run);
-  });
-
-  test("a session start never closes ANOTHER session's live work (2026-09-23)", async () => {
-    // THE DEFECT: one store serves every session on the host. Opening a second
-    // workspace reconciled the WHOLE record against its own vendor and wrote
-    // lost.swept_up terminals for five subagents another session was still
-    // running. Session A's work here is five live subagents and a shell run;
-    // session B starts with an in-process subagent of its own, whose closing is
-    // the proof its reconciliation actually ran.
-    const first = await spawnShim();
-    const b = sessionStarted(await first.clients.h1.startSession(freshSession()));
-    await first.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: "!md" }));
-    await first.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
-    await first.exited;
-    const store = createStoreClient(first.dirs.storeSocket);
-    const sessionA = "session-a-main";
-    const aSubagents = ["a-sub-1", "a-sub-2", "a-sub-3", "a-sub-4", "a-sub-5"];
-    for (const created of aSubagents) {
-      await seedSubagentSpawn(store, sidecarProducer(sessionA), { spawner: sessionA, created });
-    }
-    await seedDetachedAnnouncement(store, sidecarProducer(sessionA), {
-      work: "a-run",
-      agent: sessionA,
-      detachedFromId: "a-run",
-      outputPath: "/nonexistent/a-run.output",
-    });
-    await seedSubagentSpawn(store, sidecarProducer(b.vendorSessionId), {
-      spawner: b.vendorSessionId,
-      created: "b-orphan-sub",
-    });
-
-    // Session B starts while A's work is live.
-    const second = await spawnShim({ reuse: first.dirs });
-    sessionStarted(await second.clients.h1.startSession(resumeSession(b.vendorSessionId)));
-    // An ORDERLY stand-down flushes every write the shim ever enqueued, so
-    // after it nothing B's reconciliation wrote can still be in flight.
-    await second.clients.h1.killSession(create(shimv1.KillSessionRequestSchema, { force: true }));
-    await second.exited;
-
-    // Assert: nothing B's shim wrote names A's work...
-    const shimKeys = writtenKeys(
-      (first.store?.writeBatches() ?? [])
-        .filter((batch) => batch.accepted && !batch.request.producer.startsWith("claude-sidecar:"))
-        .map((batch) => batch.request),
-    );
-    expect(shimKeys.filter((key) => key.includes("a-sub-") || key.includes("a-run"))).toEqual([]);
-    // ...and A's work is still open in A's own lineage.
-    const live = await store.getLiveWork(
-      create(storev1.GetLiveWorkRequestSchema, {
-        session: create(conversationv1.AgentIdSchema, { value: sessionA }),
-      }),
-    );
-    const open = live.result.case === "success" ? live.result.value : undefined;
-    expect(open?.liveAgents.map((id) => id.value)).toEqual(aSubagents);
-    expect(open?.liveDetachedRuns.map((run) => run.work?.value)).toEqual(["a-run"]);
-    // ...while B's own in-process subagent, proof its reconciliation ran, is closed.
-    const bLive = await store.getLiveWork(
-      create(storev1.GetLiveWorkRequestSchema, {
-        session: create(conversationv1.AgentIdSchema, { value: b.vendorSessionId }),
-      }),
-    );
-    expect(bLive.result.case === "success" ? bLive.result.value.liveAgents.map((id) => id.value) : undefined).toEqual([]);
-  });
-
-  test("GetLiveWork is called exactly ONCE, at session start", async () => {
-    // It answers "what did the record see START and never see END", which is
-    // timeless and cannot go stale — so asking again would be the shim
-    // treating the record as a live view of the world.
-    const shim = await spawnShim();
-    await shim.clients.h1.startSession(freshSession());
-
-    await shim.clients.h1.startTurn(turnFor({ turn: "t1", text: "!bash-detach-live" }));
-
-    const liveWorkReads = (shim.store?.reads() ?? []).filter((read) => read.rpc === "GetLiveWork");
-    expect(liveWorkReads.length).toBe(1);
-  });
-});
 
 describe("a fan-wide cancel", () => {
   test("!cancel-all concludes every live item", async () => {
@@ -2050,11 +2083,13 @@ describe("a fan-wide cancel", () => {
     // shell run's is a LIFECYCLE row served by `WatchBash` — never a page line
     // — so looking for all three in one place would be looking in the wrong
     // one for the shell.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const { shim, started } = await canonicalSession();
+    const mine = since(shim, [started.vendorSessionId]);
+    const t1 = uniqueTurn();
+    endsTurn(shim, t1);
     const stream = await openAgentStream(shim);
 
-    await shim.clients.h1.startTurn(turnFor({ turn: "t1", text: "!cancel-all" }));
+    await shim.clients.h1.startTurn(turnFor({ turn: t1, text: "!cancel-all" }));
     // THE FAN IS EXACTLY THREE — two agents and a shell — and it is named as
     // three because that is what `!cancel-all` establishes. A `>= 3` would pass
     // on a scenario that announced four, which is a different fan than the one
@@ -2071,7 +2106,7 @@ describe("a fan-wide cancel", () => {
     expect(new Set(announcements).size).toBe(3);
 
     await shim.clients.h1.killTurn(
-      create(shimv1.KillTurnRequestSchema, { turn: turnId("t1"), force: true }),
+      create(shimv1.KillTurnRequestSchema, { turn: turnId(t1), force: true }),
     );
 
     // THE TWO AGENTS: `stopped_by_user`, on the spawning agent's own book.
@@ -2110,7 +2145,7 @@ describe("a fan-wide cancel", () => {
     }
 
     // AND THE SET EMPTIED. `agents_killed` is the vendor's record of that fact.
-    const records = readTranscript(shim.dirs, started.vendorSessionId);
+    const records = mine.transcript(started.vendorSessionId);
     expect(records.some((record) => record.subtype === "agents_killed")).toBe(true);
     stream.close();
   });
@@ -2130,6 +2165,8 @@ describe("a task notification this process cannot type", () => {
 
   /** A started shim whose store holds the shell run `UNIT` as the sidecar wrote it, ended or live. */
   async function shimHolding(exitCode: number | null): Promise<Awaited<ReturnType<typeof spawnShim>>> {
+    // ITS OWN SHIM, for now: every case of this describe seeds the one fixed
+    // run UNIT and reads the shim's whole log and read ledger for it.
     const shim = await spawnShim();
     const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
     await seedBashLifecycle(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), {
