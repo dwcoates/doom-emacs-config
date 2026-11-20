@@ -48,9 +48,15 @@ func openHost(t *testing.T, server *fakeServer, client agentreplv1connectClient,
 
 func openDaemon(t *testing.T, server *fakeServer, client agentreplv1connectClient) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], context.CancelFunc) {
 	t.Helper()
-	return openStream(t, server, streamDaemon, "", func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
+	stream, cancel := openStream(t, server, streamDaemon, "", func(ctx context.Context) (*connect.ServerStreamForClient[agentreplv1.WatchDaemonResponse], error) {
 		return client.WatchDaemon(ctx, connect.NewRequest(emacsWatchDaemon()))
 	})
+	// Every Emacs stream's first frame is its elisp verdict.
+	if !stream.Receive() || stream.Msg().GetElispCurrent() == nil {
+		cancel()
+		t.Fatalf("first frame = %v (err %v), want the elisp_current verdict", stream.Msg(), stream.Err())
+	}
+	return stream, cancel
 }
 
 func TestPushReachesTheKeyedWorkspaceStream(t *testing.T) {

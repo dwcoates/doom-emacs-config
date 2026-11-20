@@ -298,8 +298,41 @@ Every module in ABSENT is named by config.el but gets no file."
       (agent-repl-elisp-reload-handle '(:module-root "/ours/agent-repl/" :build "b1"))
       ;; Assert
       (should (equal agent-repl-test-eb--timers
-                     '((0 agent-repl--elisp-reload-run ("/ours/agent-repl/" "b1")))))
+                     '((0 agent-repl--elisp-reload-then ("/ours/agent-repl/" "b1" nil)))))
       (should (null agent-repl-test-eb--loaded)))))
+
+(ert-deftest agent-repl-test-eb-reload-carries-its-completion-to-the-timer ()
+  "A reload asked with ON-DONE hands it to the timer that runs the load."
+  (agent-repl-test-eb--with-harness
+    ;; Arrange
+    (let ((agent-repl--frontend-root "/ours/agent-repl/")
+          (on-done #'ignore))
+      ;; Act
+      (agent-repl-elisp-reload-handle '(:module-root "/ours/agent-repl/" :build "b1") on-done)
+      ;; Assert
+      (should (equal agent-repl-test-eb--timers
+                     `((0 agent-repl--elisp-reload-then ("/ours/agent-repl/" "b1" ,on-done))))))))
+
+(ert-deftest agent-repl-test-eb-reload-then-reports-the-load-to-on-done ()
+  "The completion is called with what the load answered."
+  ;; Arrange
+  (let (reported)
+    (cl-letf (((symbol-function 'agent-repl--elisp-reload-run) (lambda (_root _build) 'loaded)))
+      ;; Act
+      (agent-repl--elisp-reload-then "/r/" "b1" (lambda (ok) (setq reported (list ok)))))
+    ;; Assert
+    (should (equal reported '(loaded)))))
+
+(ert-deftest agent-repl-test-eb-reload-then-reports-a-signalling-load-as-failed ()
+  "A load that signals still calls the completion, with nil, and the signal propagates."
+  ;; Arrange
+  (let (reported)
+    (cl-letf (((symbol-function 'agent-repl--elisp-reload-run)
+               (lambda (_root _build) (error "boom"))))
+      ;; Act
+      (should-error (agent-repl--elisp-reload-then "/r/" "b1" (lambda (ok) (setq reported (list ok))))))
+    ;; Assert
+    (should (equal reported '(nil)))))
 
 ;;;; ---- The pushed reload: the load ----
 

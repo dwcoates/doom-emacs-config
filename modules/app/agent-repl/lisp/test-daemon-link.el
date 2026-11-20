@@ -16,7 +16,8 @@
 ;;
 ;; ACCEPTANCE IS EXPLICIT.  The stream stub keeps the ON-OPEN it was handed
 ;; and never calls it; a test calls `agent-repl-test-link--accept' to say
-;; the daemon accepted the subscription.  `agent-repl-test-link--connect'
+;; the daemon accepted the subscription: the headers arrive (ON-OPEN) and
+;; the stream's first frame is the `elisp_current' verdict.  `agent-repl-test-link--connect'
 ;; opens AND accepts, because a standing link is most tests' arrangement;
 ;; `agent-repl-test-link--stand' opens WITHOUT accepting, which is how the
 ;; refused-before-acceptance cases are set up.
@@ -50,6 +51,15 @@
 
 (defvar agent-repl-test-link--hooks nil
   "Hook firings, newest first: `(HOOK . ARGS)'.")
+
+(defvar agent-repl-test-link--elisp-build nil
+  "The elisp build the stubbed `agent-repl-elisp-build' answers.")
+
+(defvar agent-repl-test-link--reloads nil
+  "Captured reloads, newest first: `(RELOAD ON-DONE)'.
+The stub schedules nothing; a test finishes a reload by calling ON-DONE.
+A RELOAD naming the root \"/other/\" is refused, as elisp-build.el
+refuses another checkout's.")
 
 (defvar agent-repl-test-link--stream-counter 0
   "Monotonic id handed to each stubbed stream so tests can tell them apart.")
@@ -91,6 +101,9 @@
          (agent-repl-link--pending-successor nil)
          (agent-repl-link--pending-successor-stream nil)
          (agent-repl-link--serving-conns (make-hash-table :test #'equal))
+         (agent-repl-link--verdicts (make-hash-table :test #'eq))
+         (agent-repl-test-link--elisp-build "elisp-loaded")
+         (agent-repl-test-link--reloads nil)
          (agent-repl-link--reconnect-timer nil)
          (agent-repl-link--reconnect-interval nil)
          (agent-repl-link--quiet-until-ms nil)
@@ -109,7 +122,13 @@
          (agent-repl-link-handover-functions nil)
          (agent-repl-link-drain-functions nil)
          (agent-repl-link-promote-functions nil))
-     (cl-letf (((symbol-function 'agent-repl-connect-read-daemon-addr)
+     (cl-letf (((symbol-function 'agent-repl-elisp-build)
+                (lambda () agent-repl-test-link--elisp-build))
+               ((symbol-function 'agent-repl-elisp-reload-handle)
+                (lambda (reload &optional on-done)
+                  (push (list reload on-done) agent-repl-test-link--reloads)
+                  (not (equal (plist-get reload :module-root) "/other/"))))
+               ((symbol-function 'agent-repl-connect-read-daemon-addr)
                 (lambda ()
                   (setq agent-repl-test-link--addr-reads
                         (1+ agent-repl-test-link--addr-reads))
@@ -148,10 +167,30 @@ Returns the pending connection, or nil when the open itself failed."
   (agent-repl-link-connect))
 
 (defun agent-repl-test-link--accept (conn)
-  "Say the daemon ACCEPTED the `WatchDaemon' subscription standing on CONN."
+  "Say the daemon ACCEPTED the `WatchDaemon' subscription standing on CONN.
+Its headers arrive, then its `elisp_current' verdict."
   (let ((on-open (plist-get (agent-repl-test-link--stream-for conn) :on-open)))
     (should on-open)
-    (funcall on-open)))
+    (funcall on-open)
+    (agent-repl-test-link--push
+     conn (list :arm :elisp-current
+                :value (list :build agent-repl-test-link--elisp-build)))))
+
+(defun agent-repl-test-link--verdict-stale (conn &optional root)
+  "Deliver CONN\='s stale verdict: its headers, then a `reload_elisp' to \"fresh\".
+ROOT is the reload\='s module root, \"/ours/\" unless given."
+  (funcall (plist-get (agent-repl-test-link--stream-for conn) :on-open))
+  (agent-repl-test-link--push
+   conn (list :arm :reload-elisp
+              :value (list :module-root (or root "/ours/") :build "fresh"))))
+
+(defun agent-repl-test-link--finish-reload (&optional loaded)
+  "Finish the newest captured reload, leaving this Emacs at LOADED.
+LOADED defaults to the build the reload pushed."
+  (let* ((reload (car agent-repl-test-link--reloads))
+         (build (plist-get (car reload) :build)))
+    (setq agent-repl-test-link--elisp-build (or loaded build))
+    (funcall (cadr reload) t)))
 
 (defun agent-repl-test-link--connect (address)
   "Stand a link against ADDRESS, accept it, and return the primary connection.
@@ -1779,6 +1818,167 @@ as if it were understood."
     (agent-repl-link--reconnect-tick)
     ;; Assert
     (should (= (length agent-repl-test-link--streams) 1))))
+
+;;;; ---- Acceptance: the stream's elisp verdict ----
+
+(ert-deftest agent-repl-test-link-headers-alone-do-not-accept-the-link ()
+  "The response headers say a daemon listens, not that this elisp decodes it."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (funcall (plist-get (agent-repl-test-link--stream-for conn) :on-open))
+      ;; Assert
+      (should-not (agent-repl-link-up-p)))))
+
+(ert-deftest agent-repl-test-link-current-verdict-accepts-the-link ()
+  "An `elisp_current' verdict accepts the dial as the primary."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--accept conn)
+      ;; Assert
+      (should (eq (agent-repl-link-primary) conn))
+      (should (agent-repl-test-link--logged-p
+               :info "elisp.link.verdict-current address=\"127.0.0.1:9001\" build=\"elisp-loaded\"")))))
+
+(ert-deftest agent-repl-test-link-stale-verdict-does-not-accept-the-link ()
+  "A `reload_elisp' verdict leaves the link down, so no consumer reaches the daemon."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (add-hook 'agent-repl-link-up-functions (agent-repl-test-link--record-hook :up))
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--verdict-stale conn)
+      ;; Assert
+      (should-not (agent-repl-link-up-p))
+      (should (null (assq :up agent-repl-test-link--hooks))))))
+
+(ert-deftest agent-repl-test-link-stale-verdict-reloads-the-pushed-elisp ()
+  "The stale verdict's reload is handed to elisp-build.el, value intact."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      ;; Act
+      (agent-repl-test-link--verdict-stale conn)
+      ;; Assert
+      (should (equal (mapcar #'car agent-repl-test-link--reloads)
+                     '((:module-root "/ours/" :build "fresh"))))
+      (should (agent-repl-test-link--logged-p
+               :info "elisp.link.verdict-stale address=\"127.0.0.1:9001\" running=\"elisp-loaded\" fresh=\"fresh\"")))))
+
+(ert-deftest agent-repl-test-link-stale-streams-end-while-reloading-changes-nothing ()
+  "The daemon's end of a reloading dial neither drops the dial nor polls."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      ;; Act
+      (agent-repl-test-link--close conn '(:ended))
+      ;; Assert
+      (should (eq agent-repl-link--pending conn))
+      (should (null agent-repl-test-link--timers))
+      (should (agent-repl-test-link--logged-p :info "elisp.link.reloading-stream-closed")))))
+
+(ert-deftest agent-repl-test-link-reload-redials-the-primary ()
+  "Once the reload ran, the same address is dialed again and that dial is pending."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (agent-repl-test-link--close conn '(:ended))
+      ;; Act
+      (agent-repl-test-link--finish-reload)
+      ;; Assert
+      (should agent-repl-link--pending)
+      (should-not (eq agent-repl-link--pending conn))
+      (should (agent-repl-connect-connection-at-p agent-repl-link--pending "127.0.0.1:9001"))
+      (should (equal (length agent-repl-test-link--streams) 2)))))
+
+(ert-deftest agent-repl-test-link-redialed-primary-is-accepted-on-its-current-verdict ()
+  "The redial states the reloaded build, and its current verdict stands the link."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (agent-repl-test-link--finish-reload)
+      ;; Act
+      (agent-repl-test-link--accept-pending)
+      ;; Assert
+      (should (agent-repl-link-up-p))
+      (should-not (eq (agent-repl-link-primary) conn)))))
+
+(ert-deftest agent-repl-test-link-reload-left-stale-is-refused-loudly ()
+  "A reload that did not reach the pushed build is an ERROR, retried on the backoff."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      ;; Act
+      (agent-repl-test-link--finish-reload "partial")
+      ;; Assert
+      (should (agent-repl-test-link--logged-p
+               :error "elisp.link.reload-left-stale address=\"127.0.0.1:9001\" pushed=\"fresh\" loaded=\"partial\""))
+      (should (null agent-repl-link--pending))
+      (should (equal (length agent-repl-test-link--streams) 1))
+      (should (= (length agent-repl-test-link--timers) 1)))))
+
+(ert-deftest agent-repl-test-link-a-superseded-reload-dial-is-not-redialed ()
+  "A dial the link no longer holds when its reload finishes dials nothing."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn)
+      (agent-repl-link-teardown)
+      ;; Act
+      (agent-repl-test-link--finish-reload)
+      ;; Assert
+      (should (null agent-repl-link--pending))
+      (should (equal (length agent-repl-test-link--streams) 1))
+      (should (agent-repl-test-link--logged-p :info "elisp.link.reload-redial-superseded")))))
+
+(ert-deftest agent-repl-test-link-a-refused-reload-leaves-the-dial-to-the-daemons-end ()
+  "A reload elisp-build.el refuses is not waited on: the end is a refused dial."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--stand "127.0.0.1:9001")))
+      (agent-repl-test-link--verdict-stale conn "/other/")
+      ;; Act
+      (agent-repl-test-link--close conn '(:ended))
+      ;; Assert
+      (should (null agent-repl-link--pending))
+      (should (agent-repl-test-link--logged-p :warn "elisp.link.open-refused"))
+      (should (= (length agent-repl-test-link--timers) 1)))))
+
+(ert-deftest agent-repl-test-link-stale-successor-is-redialed-after-the-reload ()
+  "A successor's stale verdict reloads, and the successor is dialed again."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      (agent-repl-test-link--push
+       conn (list :arm :shutdown-announced
+                  :value (agent-repl-test-link--announcement :address "127.0.0.1:9100")))
+      (let ((stale agent-repl-link--pending-successor))
+        (agent-repl-test-link--verdict-stale stale)
+        ;; Act
+        (agent-repl-test-link--finish-reload)
+        (agent-repl-test-link--accept agent-repl-link--pending-successor)
+        ;; Assert
+        (should (agent-repl-link-successor))
+        (should-not (eq (agent-repl-link-successor) stale))
+        (should (agent-repl-connect-connection-at-p (agent-repl-link-successor) "127.0.0.1:9100"))))))
+
+(ert-deftest agent-repl-test-link-a-verdict-on-an-accepted-link-is-a-breach ()
+  "The daemon gives a stream one verdict: a second is an ERROR and signals."
+  (agent-repl-test-link--with-harness
+    ;; Arrange
+    (let ((conn (agent-repl-test-link--connect "127.0.0.1:9001")))
+      ;; Act / Assert
+      (should-error (agent-repl-test-link--push
+                     conn (list :arm :elisp-current :value '(:build "b"))))
+      (should (agent-repl-test-link--logged-p
+               :error "elisp.link.verdict-unexpected arm=elisp-current address=\"127.0.0.1:9001\"")))))
 
 ;;;; ---- Acceptance: the successor gate ----
 

@@ -40,17 +40,27 @@
 ;; polls nothing until that instant passes.
 ;;
 ;; ACCEPTANCE, NEVER A SPAWN.  A link is up when the daemon ACCEPTED its
-;; `WatchDaemon' subscription — the HTTP 200 header block, which the daemon
-;; flushes on accept — and not a moment earlier.  Spawning a curl against
-;; an address that names a corpse succeeds; only acceptance proves a daemon
-;; is there.  So `agent-repl-link--open' returns as soon as the transport
-;; exists, but the connection sits PENDING: the primary is marked up, the
-;; indicator refreshed and `agent-repl-link-up-functions' run only from
-;; connect.el's ON-OPEN.  A pending stream that dies goes straight to the
+;; `WatchDaemon' subscription, and not a moment earlier.  Spawning a curl
+;; against an address that names a corpse succeeds; only acceptance proves
+;; a daemon is there.  So `agent-repl-link--open' returns as soon as the
+;; transport exists, but the connection sits PENDING: the primary is marked
+;; up, the indicator refreshed and `agent-repl-link-up-functions' run only
+;; on acceptance.  A pending stream that dies goes straight to the
 ;; reconnect loop and fires NO down hooks, because it was never up.  The
 ;; successor is the same story: it becomes adoptable — `agent-repl-link-
 ;; successor' answers it, and the handover hooks run — only once ITS
 ;; `WatchDaemon' was accepted.
+;;
+;; THE ACCEPTANCE IS THE STREAM'S ELISP VERDICT, its first frame, never the
+;; response headers.  A daemon decides each Emacs stream as it connects:
+;; `elisp_current' says this Emacs runs the checkout's elisp, and accepts
+;; the link; `reload_elisp' says it runs older elisp, and the daemon ends
+;; the stream after it.  Emacs then reloads and dials the same role again,
+;; stating the build it loaded.  Until a verdict accepts a link, nothing
+;; opens a stream or makes a call to its daemon, so a daemon whose contract
+;; is newer than the loaded elisp is never decoded by that elisp: on
+;; 2026-11-20 a successor's roster was refused as a contract breach for 14
+;; minutes, because Emacs linked to it before it reloaded.
 ;;
 ;; NO SLEEPS ANYWHERE.  Every wait in this file is a timer, and every
 ;; timer's function is a named `defun' a test can call directly.
@@ -78,7 +88,8 @@
 (declare-function agent-repl-connect-failure-message "connect" (detail))
 (declare-function agent-repl-rpc-watch-daemon "rpc" (conn on-push on-close &optional on-open))
 (declare-function agent-repl-mutation-progress-handle "mutation-progress" (progress))
-(declare-function agent-repl-elisp-reload-handle "elisp-build" (reload))
+(declare-function agent-repl-elisp-reload-handle "elisp-build" (reload &optional on-done))
+(declare-function agent-repl-elisp-build "elisp-build" ())
 (declare-function agent-repl-webhost-reload-onto "webhost" (build))
 
 ;;;; ---- Customization ----
@@ -224,6 +235,14 @@ onto a daemon that has not proven it is listening.")
 
 (defvar agent-repl-link--pending-successor-stream nil
   "The unaccepted `WatchDaemon' stream on `agent-repl-link--pending-successor'.")
+
+(defvar agent-repl-link--verdicts (make-hash-table :test #'eq)
+  "Every `WatchDaemon' dial awaiting its elisp verdict: CONN to a plist.
+`:address' is the daemon dialed, `:accept' the function that accepts the
+link on an `elisp_current' verdict, `:redial' the one that dials the same
+role again after a `reload_elisp' verdict's reload, and `:reloading' is
+non-nil from that verdict until the redial.  An entry leaves the table on
+its verdict, on its stream's close, or at the redial.")
 
 (defvar agent-repl-link--serving-conns (make-hash-table :test #'equal)
   "Address -> connection to a daemon serving workspaces the link does not.
@@ -468,7 +487,7 @@ exited, its workspaces re-homed) is dropped here rather than reused."
 
 ;;;; ---- Connecting ----
 
-(defun agent-repl-link--open (address on-open)
+(defun agent-repl-link--open (address on-open redial)
   "Open a connection to ADDRESS and stand a `WatchDaemon' stream on it.
 Returns `(CONN . STREAM)' as soon as the TRANSPORT exists, or nil when
 either step fails — a failure here is an ordinary absent-daemon outcome
@@ -476,22 +495,31 @@ either step fails — a failure here is an ordinary absent-daemon outcome
 WARNED and answered with nil rather than signalled.
 
 A RETURN IS NOT AN ACCEPTANCE.  Spawning a curl at a dead address
-succeeds; only the daemon's HTTP 200 header block proves it is listening.
-ON-OPEN is called with no arguments from that instant and from nowhere
-else, so every caller here keys its link-stands work on it."
+succeeds, and even the daemon's HTTP 200 header block does not say the
+elisp this Emacs runs can decode it.  ON-OPEN is called with no arguments
+on the stream's `elisp_current' verdict and from nowhere else, so every
+caller here keys its link-stands work on it.  REDIAL, a function of no
+arguments, dials the same role again after a `reload_elisp' verdict's
+reload (`agent-repl-link--redial-after-reload')."
   (condition-case err
       (let ((conn (agent-repl-connect-open address)))
+        ;; Recorded BEFORE the stream exists, so no verdict can find it absent.
+        (puthash conn (list :address address :accept on-open :redial redial)
+                 agent-repl-link--verdicts)
         (condition-case stream-err
             (let ((stream (agent-repl-rpc-watch-daemon
                            conn
                            (lambda (push) (agent-repl-link--handle-push conn push))
                            (lambda (outcome) (agent-repl-link--handle-close conn outcome))
-                           on-open)))
+                           (lambda ()
+                             (agent-repl--log '(:agent-repl-central "the resident daemon link spans workspaces")
+                                              "elisp.link.awaiting-verdict address=%S" address)))))
               (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.open address=%S" address)
               (cons conn stream))
           (error
            (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.watch-daemon-failed address=%S error=%S"
                              address stream-err)
+           (remhash conn agent-repl-link--verdicts)
            (agent-repl-connect-close conn)
            nil)))
     (error
@@ -528,7 +556,8 @@ acceptance later writes.  Nothing is marked up here: `agent-repl-link-up-p'
 stays nil and no up hook runs until `agent-repl-link--accept-primary'."
   (let ((opened (agent-repl-link--open
                  address
-                 (lambda () (agent-repl-link--accept-primary address)))))
+                 (lambda () (agent-repl-link--accept-primary address))
+                 (lambda () (agent-repl-link--open-primary address reconnect-p)))))
     (if (null opened)
         (progn
           (agent-repl--warn '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.connect-failed address=%S" address)
@@ -599,6 +628,7 @@ ON-CLOSE runs with `(:cancelled)', which this file treats as normal."
           agent-repl-link--primary-ended nil
           agent-repl-link--shared-handover nil
           agent-repl-link-drain nil)
+    (clrhash agent-repl-link--verdicts)
     (dolist (conn conns) (agent-repl-connect-close conn)))
   (agent-repl-link--refresh-indicator))
 
@@ -750,9 +780,26 @@ graceful close and means nothing here; `(:ended)' is a producer-side end
 of a STANDING stream, which the contract calls a transport failure unless
 the stream\='s last frame was the planned ending
 \(`agent-repl-link--ending-conn'), when the link goes down at INFO; and
-`(:error DETAIL)' is one already."
-  (let ((kind (car outcome)))
-    (cond
+`(:error DETAIL)' is one already.
+
+A dial whose stale verdict is reloading is the exception: the daemon ends
+that stream after its `reload_elisp', and the redial after the reload
+replaces it (`agent-repl-link--redial-after-reload'), so its end changes
+nothing here."
+  (let ((kind (car outcome))
+        (verdict (gethash conn agent-repl-link--verdicts)))
+    (if (plist-get verdict :reloading)
+        (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                          "elisp.link.reloading-stream-closed address=%S outcome=%S"
+                          (plist-get verdict :address) outcome)
+      (remhash conn agent-repl-link--verdicts)
+      (agent-repl-link--handle-dial-close conn kind outcome))))
+
+(defun agent-repl-link--handle-dial-close (conn kind outcome)
+  "React to the `WatchDaemon' stream on CONN closing with OUTCOME of KIND.
+The body of `agent-repl-link--handle-close' for every stream it does not
+leave to a reload."
+  (cond
      ((eq conn agent-repl-link--pending)
       ;; A stream that died before it was ACCEPTED was never up, so there is
       ;; nothing to take down: no down hooks, straight back to the poll.
@@ -821,7 +868,7 @@ the stream\='s last frame was the planned ending
                         outcome))
      (agent-repl-link--shared-handover
       (agent-repl-link--shared-reconnect conn outcome))
-     (t (agent-repl-link--primary-ended-down conn outcome)))))
+     (t (agent-repl-link--primary-ended-down conn outcome))))
 
 (defun agent-repl-link--shared-reconnect (conn outcome)
   "Dial CONN\='s shared address as the successor: the incumbent stood down.
@@ -883,9 +930,13 @@ non-nil says the daemon announced the ending first; the hooks read it as
       ;; PRECEDES the workspace's existence; the correlation seat matches it to
       ;; the command that minted its op id.
       (:mutation-progress (agent-repl-mutation-progress-handle value))
-      ;; A deploy found this Emacs on older elisp.  elisp-build.el checks the
+      ;; This Emacs runs older elisp: the stream's verdict as it connected,
+      ;; or a deploy on a link already standing.  elisp-build.el checks the
       ;; root and schedules the load OUT of this process filter.
-      (:reload-elisp (agent-repl-elisp-reload-handle value))
+      (:reload-elisp (agent-repl-link--reload-elisp conn value))
+      ;; This Emacs runs the checkout's elisp: the stream's verdict, which
+      ;; accepts the link.
+      (:elisp-current (agent-repl-link--elisp-current conn value))
       ;; A deploy found the web view host on an older webapp: the host is
       ;; reloaded onto it, on the daemon it belongs on (webhost.el).
       (:reload-webhost (agent-repl-webhost-reload-onto (plist-get value :build)))
@@ -907,6 +958,90 @@ non-nil says the daemon announced the ending first; the hooks read it as
                          (agent-repl-connect-connection-address conn)))
       (_ (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.unknown-daemon-push arm=%S push=%S"
                             arm push)))))
+
+(defun agent-repl-link--elisp-current (conn current)
+  "Accept the link on CONN: its verdict CURRENT says this Emacs's elisp is current.
+CURRENT is a decoded `DaemonElispCurrent'.  The daemon gives each stream
+ONE verdict, its first frame, so a verdict on a stream not awaiting one is
+a contract breach: recorded at ERROR and signalled."
+  (let ((verdict (gethash conn agent-repl-link--verdicts)))
+    (when (or (null verdict) (plist-get verdict :reloading))
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
+                         "elisp.link.verdict-unexpected arm=elisp-current address=%S build=%S reloading=%S"
+                         (agent-repl-connect-connection-address conn)
+                         (plist-get current :build) (and (plist-get verdict :reloading) t))
+      (error "agent-repl: an elisp_current verdict reached a stream at %s not awaiting one"
+             (agent-repl-connect-connection-address conn)))
+    (remhash conn agent-repl-link--verdicts)
+    (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                      "elisp.link.verdict-current address=%S build=%S"
+                      (plist-get verdict :address) (plist-get current :build))
+    (funcall (plist-get verdict :accept))))
+
+(defun agent-repl-link--reload-elisp (conn reload)
+  "Carry out the `reload_elisp' RELOAD received on CONN.
+On a link already accepted it is a deploy\='s, and the elisp is reloaded
+in place.  On a dial awaiting its verdict it IS the verdict: the daemon
+ends the stream after it, so the elisp is reloaded and the same role is
+dialed again (`agent-repl-link--redial-after-reload').  A reload the
+elisp refuses (another checkout\='s root) leaves the dial to the daemon\='s
+end, which the reconnect loop takes as any refused dial."
+  (let ((verdict (gethash conn agent-repl-link--verdicts))
+        (build (plist-get reload :build)))
+    (cond
+     ((null verdict) (agent-repl-elisp-reload-handle reload))
+     ((plist-get verdict :reloading)
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
+                         "elisp.link.verdict-unexpected arm=reload-elisp address=%S build=%S reloading=t"
+                         (plist-get verdict :address) build)
+      (error "agent-repl: a second verdict reached the stream at %s"
+             (plist-get verdict :address)))
+     (t
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                        "elisp.link.verdict-stale address=%S running=%S fresh=%S"
+                        (plist-get verdict :address) (agent-repl-elisp-build) build)
+      (puthash conn (plist-put verdict :reloading t) agent-repl-link--verdicts)
+      (unless (agent-repl-elisp-reload-handle
+               reload (lambda (_loaded) (agent-repl-link--redial-after-reload conn build)))
+        (puthash conn (plist-put verdict :reloading nil) agent-repl-link--verdicts))))))
+
+(defun agent-repl-link--dial-held-p (conn)
+  "Return non-nil while CONN is the link\='s pending primary or successor dial."
+  (or (eq conn agent-repl-link--pending)
+      (eq conn agent-repl-link--pending-successor)))
+
+(defun agent-repl-link--redial-after-reload (conn build)
+  "Dial CONN\='s role again: the reload its stale verdict pushed, to BUILD, ran.
+CONN\='s stream is over, so its own close is not waited for.  A dial no
+longer held (a newer announcement superseded it, the link was torn down)
+is only closed.  A reload that did not leave this Emacs at BUILD is
+recorded at ERROR and the dial is refused as any other, so the reconnect
+loop\='s backoff, never a tight loop, retries it.  A redial that fails to
+stand is refused the same way."
+  (let ((verdict (gethash conn agent-repl-link--verdicts))
+        (loaded (agent-repl-elisp-build)))
+    (remhash conn agent-repl-link--verdicts)
+    (cond
+     ((not (agent-repl-link--dial-held-p conn))
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                        "elisp.link.reload-redial-superseded address=%S build=%S"
+                        (plist-get verdict :address) build)
+      (agent-repl-connect-close conn))
+     ((not (string= loaded build))
+      (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces")
+                         "elisp.link.reload-left-stale address=%S pushed=%S loaded=%S"
+                         (plist-get verdict :address) build loaded)
+      (agent-repl-link--handle-dial-close
+       conn :error (list :error "the elisp reload did not leave this Emacs at the pushed build")))
+     (t
+      (agent-repl--info '(:agent-repl-central "the resident daemon link spans workspaces")
+                        "elisp.link.reload-redial address=%S build=%S"
+                        (plist-get verdict :address) build)
+      (funcall (plist-get verdict :redial))
+      (if (agent-repl-link--dial-held-p conn)
+          (agent-repl-link--handle-dial-close
+           conn :error (list :error "the redial after the elisp reload did not stand"))
+        (agent-repl-connect-close conn))))))
 
 (defun agent-repl-link--faults-standing (standing)
   "Surface every fault in STANDING this Emacs has not surfaced before.
@@ -1038,7 +1173,8 @@ cancels its stream, which then matches no slot and is recorded stale."
   (let* (conn
          (opened (agent-repl-link--open
                   address
-                  (lambda () (agent-repl-link--accept-successor conn old address cause)))))
+                  (lambda () (agent-repl-link--accept-successor conn old address cause))
+                  (lambda () (agent-repl-link--dial-successor old address cause)))))
     (setq conn (car opened))
     (if (null opened)
         (agent-repl--error '(:agent-repl-central "the resident daemon link spans workspaces") "elisp.link.successor-attach-failed address=%S cause=%S"

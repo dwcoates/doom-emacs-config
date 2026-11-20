@@ -398,7 +398,16 @@ func (s *fakeServer) WatchDaemon(ctx context.Context, req *connect.Request[v1.Wa
 	if err := awaitAcceptanceGate(ctx, s, "WatchDaemon"); err != nil {
 		return err
 	}
-	return serveStream[v1.WatchDaemonResponse](ctx, s, streamDaemon, "", stream)
+	// AN EMACS STREAM'S FIRST FRAME IS ITS ELISP VERDICT, as the real
+	// daemon's is, and Emacs accepts the link on it alone. The fake has no
+	// checkout to compare with, so every Emacs is told its elisp is current.
+	var verdict *v1.WatchDaemonResponse
+	if emacs := req.Msg.GetEmacs(); emacs != nil {
+		verdict = &v1.WatchDaemonResponse{Push: &v1.WatchDaemonResponse_ElispCurrent{
+			ElispCurrent: &v1.DaemonElispCurrent{Build: emacs.GetElispBuild()},
+		}}
+	}
+	return serveStreamFrom[v1.WatchDaemonResponse](ctx, s, streamDaemon, "", verdict, stream)
 }
 
 func (s *fakeServer) AdoptHostWorkspace(ctx context.Context, req *connect.Request[v1.AdoptHostWorkspaceRequest]) (*connect.Response[v1.AdoptHostWorkspaceResponse], error) {
