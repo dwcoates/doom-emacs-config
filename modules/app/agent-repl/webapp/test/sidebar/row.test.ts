@@ -3374,7 +3374,7 @@ describe("appendRowKids", () => {
     const source = readFileSync(join(__dirname, "../../src/sidebar/row.ts"), "utf8");
 
     // Act
-    const handRolled = source.match(/kids\.className = "kids"/g) ?? [];
+    const handRolled = source.match(/kids\.className = /g) ?? [];
 
     // Assert
     expect(handRolled).toHaveLength(1);
