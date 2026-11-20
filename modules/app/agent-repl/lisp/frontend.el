@@ -88,6 +88,8 @@
 (declare-function agent-repl--read-known-workspace "agent-repl-keybindings" (prompt))
 (declare-function agent-repl-window--panel-window "agent-repl-window" (kind &optional ws frame))
 (declare-function agent-repl-window--side-window-p "agent-repl-window" (win))
+(declare-function agent-repl-window--deletable-p "agent-repl-window" (win))
+(declare-function agent-repl-window--unharden "agent-repl-window" (win))
 (declare-function agent-repl-window--harden "agent-repl-window" (win &rest recipe))
 (declare-function agent-repl-window--input-height "agent-repl-window" (&optional frame ws))
 (declare-function agent-repl-window--apply-height "agent-repl-window" (win lines &optional ws))
@@ -1020,7 +1022,7 @@ Splitting is deliberately preferred over lifting the dedication: the
 child of a split is undedicated and unhardened even when its parent is
 dedicated and size-fixed, so a host is obtained without ever clearing
 a dedication some other workspace's panel recipe set.  The stale-input
-reclaim in `agent-repl--frontend-display-webview' does un-dedicate, but
+reclaim in `agent-repl--frontend-display-webview' does unharden, but
 only ever the CALLING workspace's own input window."
   (or (seq-find (lambda (win)
                   (and (not (agent-repl-window--side-window-p win))
@@ -1058,17 +1060,20 @@ panels — the extra-windows-on-first-switch bug."
   (let* ((input-buf (agent-repl--ensure-input-buffer ws))
          (stale-input-win (get-buffer-window input-buf)))
     ;; A surviving input window from a previous webview mount (the
-    ;; webview died or was rebound) is dedicated, so it can neither
-    ;; host the webview nor be left to shadow the host search — remove
-    ;; it and rebuild the canonical layout from scratch. When it is
-    ;; the frame's ONLY window it cannot be deleted; reclaim it as the
-    ;; host by lifting its dedication instead.
+    ;; webview died or was rebound, or the workspace's saved layout kept
+    ;; only its composer) is dedicated, so it can neither host the
+    ;; webview nor be left to shadow the host search — remove it and
+    ;; rebuild the canonical layout from scratch.  When it cannot be
+    ;; deleted — the frame's sole window, or its MAIN window beside the
+    ;; sidebar (`agent-repl-window--deletable-p') — reclaim it as the host
+    ;; by lifting the composer's locks instead (`agent-repl-window--unharden').
     (when (window-live-p stale-input-win)
-      (agent-repl--log ws "display-webview: reclaiming-stale-input-window window=%s only-window=%s"
-                       stale-input-win (one-window-p))
-      (if (one-window-p)
-          (set-window-dedicated-p stale-input-win nil)
-        (delete-window stale-input-win)))
+      (let ((deletable (agent-repl-window--deletable-p stale-input-win)))
+        (agent-repl--info ws "elisp.frontend.display-webview-stale-input ws=%s window=%s outcome=%s"
+                          ws stale-input-win (if deletable "deleted" "reclaimed-as-host"))
+        (if deletable
+            (delete-window stale-input-win)
+          (agent-repl-window--unharden stale-input-win))))
     ;; Save the pre-panel layout before mounting: the gui hide/close
     ;; paths restore it, which is what removes BOTH gui windows
     ;; (deleting them directly is impossible once the input window is
