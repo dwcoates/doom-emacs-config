@@ -487,3 +487,29 @@ func (e *MergeOffQueueError) Error() string {
 // user arranges it by hand (a drag, the sidebar's menus), and no agent sorts
 // it into a subsection.
 var ErrMainWorkspaceNotSortable = errors.New("wsm: a repository's main workspace is never sorted by an agent; only the user arranges it")
+
+// ErrMergeNotWaiting refuses a move of a merge that stands in its queue but is
+// not WAITING: the merge running holds the repository's slot, and a merge
+// only requested or stepped aside for a repair is in nobody's line, so none
+// of them has a waiting place to move to (PlaceMerge).
+var ErrMergeNotWaiting = errors.New("wsm: the merge is not waiting in line")
+
+// ErrAnchorNotInLine refuses a move behind a merge that does not stand in
+// line on the moved merge's queue, waiting or running (PlaceMerge). Nothing
+// is moved.
+var ErrAnchorNotInLine = errors.New("wsm: the merge to go behind does not stand in line on this queue")
+
+// MergePlaceOutOfRangeError refuses a move to a numbered place past the last
+// place of the waiting line (PlaceMerge), carrying the line's length so the
+// refusal can name the last place. Nothing is moved.
+type MergePlaceOutOfRangeError struct {
+	// Index is the 0-based place asked for.
+	Index int
+	// Waiting is how many merges wait, the moved merge included.
+	Waiting int
+}
+
+// Error implements error.
+func (e *MergePlaceOutOfRangeError) Error() string {
+	return fmt.Sprintf("wsm: waiting place %d is past the last of the %d merges waiting", e.Index, e.Waiting)
+}

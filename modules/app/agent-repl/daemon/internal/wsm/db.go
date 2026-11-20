@@ -664,6 +664,10 @@ type DB interface {
 	// MoveMergeTo moves a waiting merge directly ahead of or behind another
 	// waiting merge on its queue, answering whether it moved.
 	MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, anchor WorkspaceID, side MergeSide) (bool, error)
+	// PlaceMerge moves a waiting merge to a place among the merges waiting on
+	// its queue -- front, back, behind a merge in line, or a numbered place --
+	// in one transaction, answering whether it moved.
+	PlaceMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place MergePlace) (bool, error)
 	// PrioritizeMerge moves a waiting merge to the front of the merges
 	// waiting in its queue, so it runs next, answering whether it moved.
 	PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error)

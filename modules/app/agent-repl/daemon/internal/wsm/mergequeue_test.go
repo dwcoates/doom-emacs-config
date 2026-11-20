@@ -3453,6 +3453,9 @@ func TestEveryWaitingReorderPassesOnlyWaitingMerges(t *testing.T) {
 		{name: "PrioritizeMerge", move: func(s *store, repo RepoKey, named map[string]WorkspaceID) (bool, error) {
 			return s.PrioritizeMerge(context.Background(), repo, named["m"])
 		}},
+		{name: "PlaceMerge", move: func(s *store, repo RepoKey, named map[string]WorkspaceID) (bool, error) {
+			return s.PlaceMerge(context.Background(), repo, named["m"], MergePlace{Kind: MergePlaceFront})
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -3472,5 +3475,236 @@ func TestEveryWaitingReorderPassesOnlyWaitingMerges(t *testing.T) {
 				t.Fatalf("queue = %v, want %v", got, want)
 			}
 		})
+	}
+}
+
+func TestPlaceMergePlacesTheMerge(t *testing.T) {
+	// Each case builds a queue, then places the merge named "m".
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		place     func(named map[string]WorkspaceID) MergePlace
+		wantOrder []string
+		wantMoved bool
+	}{
+		{
+			name:      "front passes every waiting merge, front merges included, but not the admitted one",
+			steps:     []moveStep{{"r", "admitted"}, {"f", "front"}, {"a", "queued"}, {"m", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceFront} },
+			wantOrder: []string{"r", "m", "f", "a"},
+			wantMoved: true,
+		},
+		{
+			name:      "back goes behind every waiting merge",
+			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}, {"b", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceBack} },
+			wantOrder: []string{"a", "b", "m"},
+			wantMoved: true,
+		},
+		{
+			name:  "behind a waiting merge ahead of it",
+			steps: []moveStep{{"a", "queued"}, {"x", "queued"}, {"b", "queued"}, {"m", "queued"}},
+			place: func(named map[string]WorkspaceID) MergePlace {
+				return MergePlace{Kind: MergePlaceBehind, Anchor: named["x"]}
+			},
+			wantOrder: []string{"a", "x", "m", "b"},
+			wantMoved: true,
+		},
+		{
+			name:  "behind a waiting merge behind it",
+			steps: []moveStep{{"m", "queued"}, {"a", "queued"}, {"x", "queued"}, {"b", "queued"}},
+			place: func(named map[string]WorkspaceID) MergePlace {
+				return MergePlace{Kind: MergePlaceBehind, Anchor: named["x"]}
+			},
+			wantOrder: []string{"a", "x", "m", "b"},
+			wantMoved: true,
+		},
+		{
+			name:  "behind the running merge is the head of the waiting line",
+			steps: []moveStep{{"x", "admitted"}, {"a", "queued"}, {"m", "queued"}},
+			place: func(named map[string]WorkspaceID) MergePlace {
+				return MergePlace{Kind: MergePlaceBehind, Anchor: named["x"]}
+			},
+			wantOrder: []string{"x", "m", "a"},
+			wantMoved: true,
+		},
+		{
+			name:  "behind itself stays put",
+			steps: []moveStep{{"a", "queued"}, {"m", "queued"}},
+			place: func(named map[string]WorkspaceID) MergePlace {
+				return MergePlace{Kind: MergePlaceBehind, Anchor: named["m"]}
+			},
+			wantOrder: []string{"a", "m"},
+			wantMoved: false,
+		},
+		{
+			name:      "index 0 is the head of the waiting line",
+			steps:     []moveStep{{"r", "admitted"}, {"a", "queued"}, {"b", "queued"}, {"m", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceIndex, Index: 0} },
+			wantOrder: []string{"r", "m", "a", "b"},
+			wantMoved: true,
+		},
+		{
+			name:      "a middle index",
+			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}, {"b", "queued"}, {"c", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceIndex, Index: 2} },
+			wantOrder: []string{"a", "b", "m", "c"},
+			wantMoved: true,
+		},
+		{
+			name:      "the last index",
+			steps:     []moveStep{{"m", "queued"}, {"a", "queued"}, {"b", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceIndex, Index: 2} },
+			wantOrder: []string{"a", "b", "m"},
+			wantMoved: true,
+		},
+		{
+			name:      "a merge already on its place stays put",
+			steps:     []moveStep{{"a", "queued"}, {"m", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceIndex, Index: 1} },
+			wantOrder: []string{"a", "m"},
+			wantMoved: false,
+		},
+		{
+			name:      "a request keeps its place",
+			steps:     []moveStep{{"a", "queued"}, {"p", "requested"}, {"m", "queued"}},
+			place:     func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceFront} },
+			wantOrder: []string{"m", "p", "a"},
+			wantMoved: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+
+			// Act
+			moved, err := s.PlaceMerge(context.Background(), repo, named["m"], tt.place(named))
+
+			// Assert
+			if err != nil {
+				t.Fatalf("PlaceMerge: %v", err)
+			}
+			if moved != tt.wantMoved {
+				t.Fatalf("moved = %v, want %v", moved, tt.wantMoved)
+			}
+			if got := lettersOf(t, s, repo, named); !slices.Equal(got, tt.wantOrder) {
+				t.Fatalf("queue = %v, want %v", got, tt.wantOrder)
+			}
+		})
+	}
+}
+
+func TestPlaceMergeGivesTheMovedMergeTheFrontMarkOfItsPlace(t *testing.T) {
+	tests := []struct {
+		name      string
+		steps     []moveStep
+		place     MergePlace
+		wantFront bool
+	}{
+		{name: "an ordinary merge put at the front becomes a front merge", steps: []moveStep{{"a", "queued"}, {"m", "queued"}}, place: MergePlace{Kind: MergePlaceFront}, wantFront: true},
+		{name: "a front merge put at the back of ordinary merges becomes ordinary", steps: []moveStep{{"m", "front"}, {"a", "queued"}}, place: MergePlace{Kind: MergePlaceBack}, wantFront: false},
+		{name: "an ordinary merge put directly behind a front merge becomes a front merge", steps: []moveStep{{"f", "front"}, {"g", "front"}, {"a", "queued"}, {"m", "queued"}}, place: MergePlace{Kind: MergePlaceIndex, Index: 1}, wantFront: true},
+		{name: "a front merge put directly behind an ordinary merge becomes ordinary", steps: []moveStep{{"m", "front"}, {"a", "queued"}, {"b", "queued"}}, place: MergePlace{Kind: MergePlaceIndex, Index: 1}, wantFront: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, _ := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, tt.steps)
+
+			// Act
+			if _, err := s.PlaceMerge(context.Background(), repo, named["m"], tt.place); err != nil {
+				t.Fatalf("PlaceMerge: %v", err)
+			}
+
+			// Assert
+			if got := frontMarkOf(t, s, repo, named["m"]); got != tt.wantFront {
+				t.Fatalf("m's front mark = %v, want %v", got, tt.wantFront)
+			}
+		})
+	}
+}
+
+func TestPlaceMergeRefusesAndMovesNothing(t *testing.T) {
+	// Each case refuses a move on the queue x (admitted), a, p (requested), m.
+	tests := []struct {
+		name   string
+		moving string
+		place  func(named map[string]WorkspaceID) MergePlace
+		want   func(err error) bool
+	}{
+		{name: "a workspace with no merge", moving: "stranger",
+			place: func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceFront} },
+			want:  func(err error) bool { return errors.Is(err, ErrNotFound) }},
+		{name: "the running merge", moving: "x",
+			place: func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceBack} },
+			want:  func(err error) bool { return errors.Is(err, ErrMergeNotWaiting) }},
+		{name: "a merge only requested", moving: "p",
+			place: func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceFront} },
+			want:  func(err error) bool { return errors.Is(err, ErrMergeNotWaiting) }},
+		{name: "behind a workspace with no merge", moving: "m",
+			place: func(named map[string]WorkspaceID) MergePlace {
+				return MergePlace{Kind: MergePlaceBehind, Anchor: named["stranger"]}
+			},
+			want: func(err error) bool { return errors.Is(err, ErrAnchorNotInLine) }},
+		{name: "behind a merge only requested", moving: "m",
+			place: func(named map[string]WorkspaceID) MergePlace {
+				return MergePlace{Kind: MergePlaceBehind, Anchor: named["p"]}
+			},
+			want: func(err error) bool { return errors.Is(err, ErrAnchorNotInLine) }},
+		{name: "an index past the last waiting place", moving: "m",
+			place: func(map[string]WorkspaceID) MergePlace { return MergePlace{Kind: MergePlaceIndex, Index: 2} },
+			want: func(err error) bool {
+				var outOfRange *MergePlaceOutOfRangeError
+				return errors.As(err, &outOfRange) && outOfRange.Index == 2 && outOfRange.Waiting == 2
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+			repo := RepoKey(t.TempDir())
+			named := buildMoveQueue(t, s, repo, []moveStep{{"x", "admitted"}, {"a", "queued"}, {"p", "requested"}, {"m", "queued"}})
+			named["stranger"] = testWorkspace(t, s).ID
+
+			// Act
+			moved, err := s.PlaceMerge(context.Background(), repo, named[tt.moving], tt.place(named))
+
+			// Assert
+			if moved || !tt.want(err) {
+				t.Fatalf("PlaceMerge = %v, %v; want the refusal", moved, err)
+			}
+			if loggedOperation(log, "daemon.wsm.place_merge", "error") {
+				t.Fatalf("a refusal was logged at error: %v", log.Records())
+			}
+			if got, want := lettersOf(t, s, repo, named), []string{"x", "a", "p", "m"}; !slices.Equal(got, want) {
+				t.Fatalf("queue = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
+func TestPlaceMergeRefusesAnUndeclaredPlaceAndMovesNothing(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	repo := RepoKey(t.TempDir())
+	named := buildMoveQueue(t, s, repo, []moveStep{{"a", "queued"}, {"m", "queued"}})
+
+	// Act
+	moved, err := s.PlaceMerge(context.Background(), repo, named["m"], MergePlace{})
+
+	// Assert
+	if err == nil || moved {
+		t.Fatalf("PlaceMerge(unset) = %v, %v; want a refusal", moved, err)
+	}
+	if !loggedOperation(log, "daemon.wsm.place_merge", "error") {
+		t.Fatalf("the refusal was not logged at error: %v", log.Records())
+	}
+	if got, want := lettersOf(t, s, repo, named), []string{"a", "m"}; !slices.Equal(got, want) {
+		t.Fatalf("queue = %v, want %v", got, want)
 	}
 }

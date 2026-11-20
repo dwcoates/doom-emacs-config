@@ -558,6 +558,102 @@ func waitingInLine(ctx context.Context, tx *sql.Tx, key RepoKey) ([]waitingRow, 
 	return out, rows.Err()
 }
 
+// PlaceMerge moves a merge WAITING in line to PLACE among the merges waiting
+// on its queue, in one transaction, answering whether it moved
+// (agentrepl.v1.UpdateMergeQueueMove).
+//
+// ONLY WAITING MERGES CHANGE PLACES (reorderWaiting): the admitted merge keeps
+// the slot, and behind it is the head of the waiting line.
+//
+// THE MOVED MERGE TAKES THE FRONT MARK OF ITS NEW PLACE: at the head of the
+// waiting line it is a front merge, and anywhere else it takes the mark of
+// the waiting merge directly ahead of it, so every front merge stays ahead of
+// every ordinary merge waiting.
+//
+// A workspace with no queue entry is refused with ErrNotFound, and one whose
+// entry is not waiting with ErrMergeNotWaiting. An anchor not in line on this
+// queue is ErrAnchorNotInLine, and an index past the last waiting place a
+// MergePlaceOutOfRangeError. Every refusal is decided inside the transaction
+// that would reorder, so it moves nothing.
+func (s *store) PlaceMerge(ctx context.Context, repo RepoKey, id WorkspaceID, place MergePlace) (bool, error) {
+	const op = "daemon.wsm.place_merge"
+	fields := dlog.Context{"repo": string(repo), "workspace": string(id), "place": place.Kind.String()}
+	if !place.Kind.valid() {
+		err := fmt.Errorf("wsm: undeclared merge place %d", int(place.Kind))
+		s.log.Error(op, "refused an undeclared merge place", withError(fields, err))
+		return false, err
+	}
+	key, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
+		return false, err
+	}
+	fields["repo"] = string(key)
+	var moved bool
+	err = s.writeQueue(ctx, op, fields, key, func(ctx context.Context, tx *sql.Tx) error {
+		_, state, err := entryPlace(ctx, tx, key, id)
+		if err != nil {
+			return err
+		}
+		if state != MergeQueued {
+			return fmt.Errorf("wsm: placing workspace %s in repo %q, which stands %s: %w", id, key, state, ErrMergeNotWaiting)
+		}
+		waiting, err := waitingInLine(ctx, tx, key)
+		if err != nil {
+			return err
+		}
+		target, err := waitingTarget(ctx, tx, key, waiting, id, place)
+		if err != nil {
+			return err
+		}
+		front := true
+		if target > 0 {
+			front = withoutWaiting(waiting, id)[target-1].front
+		}
+		moved, err = reorderWaiting(ctx, tx, key, waiting, id, target, front)
+		return err
+	})
+	if err != nil {
+		return false, err
+	}
+	return moved, nil
+}
+
+// waitingTarget answers the waiting place PLACE names for ID among WAITING,
+// refusing an anchor not in line and an index past the last place.
+func waitingTarget(ctx context.Context, tx *sql.Tx, key RepoKey, waiting []waitingRow, id WorkspaceID, place MergePlace) (int, error) {
+	switch place.Kind {
+	case MergePlaceFront:
+		return 0, nil
+	case MergePlaceBack:
+		return len(waiting) - 1, nil
+	case MergePlaceIndex:
+		if place.Index < 0 || place.Index >= len(waiting) {
+			return 0, &MergePlaceOutOfRangeError{Index: place.Index, Waiting: len(waiting)}
+		}
+		return place.Index, nil
+	case MergePlaceBehind:
+		if place.Anchor == id {
+			return waitingIndex(waiting, id), nil
+		}
+		_, state, err := entryPlace(ctx, tx, key, place.Anchor)
+		if errors.Is(err, ErrNotFound) {
+			return 0, fmt.Errorf("wsm: placing workspace %s behind %s in repo %q: %w", id, place.Anchor, key, ErrAnchorNotInLine)
+		}
+		if err != nil {
+			return 0, err
+		}
+		switch state {
+		case MergeAdmitted:
+			return 0, nil
+		case MergeQueued:
+			return waitingIndex(withoutWaiting(waiting, id), place.Anchor) + 1, nil
+		}
+		return 0, fmt.Errorf("wsm: placing workspace %s behind %s in repo %q, which stands %s: %w", id, place.Anchor, key, state, ErrAnchorNotInLine)
+	}
+	panic(fmt.Sprintf("wsm: merge place %s past validation has no target", place.Kind))
+}
+
 // waitingIndex answers the place ID holds among WAITING, counted from 0. The
 // caller read ID's state as waiting in the same transaction, so ID is there.
 func waitingIndex(waiting []waitingRow, id WorkspaceID) int {

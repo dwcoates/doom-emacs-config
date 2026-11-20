@@ -1373,6 +1373,54 @@ func (m MergeSide) valid() bool {
 	return m == MergeSideAheadOf || m == MergeSideBehind
 }
 
+// MergePlace is where a move puts a waiting merge among the merges waiting on
+// its queue (agentrepl.v1.UpdateMergeQueueMove.place). Kind says which place;
+// Anchor is read only for MergePlaceBehind and Index only for MergePlaceIndex.
+type MergePlace struct {
+	// Kind is which place.
+	Kind MergePlaceKind
+	// Anchor is the merge in line to go directly behind (MergePlaceBehind).
+	Anchor WorkspaceID
+	// Index is the 0-based waiting place (MergePlaceIndex).
+	Index int
+}
+
+// MergePlaceKind is which place a move puts a waiting merge on.
+type MergePlaceKind int
+
+// The places. The zero value is no place, so a place left unset is refused
+// rather than read as one of them.
+const (
+	// MergePlaceFront is the head of the waiting line.
+	MergePlaceFront MergePlaceKind = iota + 1
+	// MergePlaceBack is the back of the waiting line.
+	MergePlaceBack
+	// MergePlaceBehind is directly behind a merge in line, waiting or running.
+	MergePlaceBehind
+	// MergePlaceIndex is a numbered waiting place, counted from 0.
+	MergePlaceIndex
+)
+
+// String names the place in log records.
+func (k MergePlaceKind) String() string {
+	switch k {
+	case MergePlaceFront:
+		return "front"
+	case MergePlaceBack:
+		return "back"
+	case MergePlaceBehind:
+		return "behind"
+	case MergePlaceIndex:
+		return "index"
+	}
+	return fmt.Sprintf("MergePlaceKind(%d)", int(k))
+}
+
+// valid reports whether the kind is one of the declared places.
+func (k MergePlaceKind) valid() bool {
+	return k >= MergePlaceFront && k <= MergePlaceIndex
+}
+
 // MergeSourceKind is WHAT a merge lands: the requesting workspace's own
 // branch, another workspace's, or a branch that is no workspace.
 type MergeSourceKind int
