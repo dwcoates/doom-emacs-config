@@ -545,6 +545,14 @@ type retiringClient struct {
 	kill    func(id string) (*agentreplv1.KillWorkspaceResponse, error)
 	forgets map[string][]*agentreplv1.ForgetWorkspaceResponse
 	held    []string
+	// found answers FindWorkspaces.
+	found []*agentreplv1.FoundWorkspace
+}
+
+func (c retiringClient) FindWorkspaces(context.Context, *connect.Request[agentreplv1.FindWorkspacesRequest]) (*connect.Response[agentreplv1.FindWorkspacesResponse], error) {
+	*c.calls = append(*c.calls, "find")
+	return connect.NewResponse(&agentreplv1.FindWorkspacesResponse{Result: &agentreplv1.FindWorkspacesResponse_Success{Success: &agentreplv1.FindWorkspacesSuccess{
+		Extent: &agentreplv1.FindWorkspacesSuccess_Complete{Complete: &agentreplv1.FindWorkspacesSuccessComplete{Workspaces: c.found}}}}}), nil
 }
 
 func (c retiringClient) RegisterWorkspace(_ context.Context, req *connect.Request[agentreplv1.RegisterWorkspaceRequest]) (*connect.Response[agentreplv1.RegisterWorkspaceResponse], error) {
@@ -600,6 +608,7 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 		kill      func(id string) (*agentreplv1.KillWorkspaceResponse, error)
 		forgets   map[string][]*agentreplv1.ForgetWorkspaceResponse
 		held      []string
+		found     func(d1, d2 string) []*agentreplv1.FoundWorkspace
 		wantCalls []string
 		wantFail  string
 	}{
@@ -621,6 +630,25 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 				Cause: &agentreplv1.ForgetWorkspaceError_Blocked{Blocked: &agentreplv1.ForgetWorkspaceBlocked{HeldPrompts: 1}}})}},
 			held:      []string{"t1"},
 			wantCalls: []string{"kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
+		},
+		{
+			name: "a main worktree's repository mates are retired before it is forgotten",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w1": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_MainWorktree{MainWorktree: &agentreplv1.ForgetWorkspaceMainWorktree{OtherWorkspaces: 1}}})}},
+			found: func(d1, d2 string) []*agentreplv1.FoundWorkspace {
+				return []*agentreplv1.FoundWorkspace{
+					{Workspace: &workspacev1.WorkspaceRef{Id: "w1", Dir: d1}, Repository: &workspacev1.RepositoryRef{Dir: d1}},
+					{Workspace: &workspacev1.WorkspaceRef{Id: "m1"}, Repository: &workspacev1.RepositoryRef{Dir: d1}},
+					{Workspace: &workspacev1.WorkspaceRef{Id: "x1"}, Repository: &workspacev1.RepositoryRef{Dir: d2 + "-elsewhere"}},
+				}
+			},
+			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1", "find", "kill m1", "forget m1", "forget w1"},
+		},
+		{
+			name: "a workspace's closed children are retired before it is forgotten",
+			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
+				Cause: &agentreplv1.ForgetWorkspaceError_HasChildren{HasChildren: &agentreplv1.ForgetWorkspaceHasChildren{Children: []string{"c1"}}}})}},
+			wantCalls: []string{"kill w2", "forget w2", "kill c1", "forget c1", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a workspace's open children are retired before it",
@@ -672,6 +700,11 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 			owner.client = retiringClient{
 				refs:  map[string]*workspacev1.WorkspaceRef{d1: {Id: "w1", Dir: d1}, d2: {Id: "w2", Dir: d2}},
 				calls: &calls, kill: tc.kill, forgets: tc.forgets, held: tc.held,
+			}
+			if tc.found != nil {
+				client := owner.client.(retiringClient)
+				client.found = tc.found(d1, d2)
+				owner.client = client
 			}
 			tb := NewRecordingTB(t, "TestRetires")
 			view := owner.View(tb)

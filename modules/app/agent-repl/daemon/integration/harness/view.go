@@ -141,7 +141,10 @@ func (d *Daemon) retire(ws *workspacev1.WorkspaceRef, childrenFirst bool) {
 
 // forgetRetired forgets a killed workspace of the slice. A forget blocked by
 // held prompts (undelivered user intent the kill does not touch) drops them
-// and forgets again, once.
+// and forgets again, once; one whose closed children stand is forgotten after
+// them, once; a repository's main worktree that other workspaces
+// of its repository still stand beside (ones the case created through the
+// daemon) has them retired first, and is forgotten again, once.
 func (d *Daemon) forgetRetired(ws *workspacev1.WorkspaceRef, dropHeld bool) {
 	d.t.Helper()
 	forget, err := d.Client().ForgetWorkspace(d.ctx, connect.NewRequest(&agentreplv1.ForgetWorkspaceRequest{Workspace: ws}))
@@ -154,9 +157,54 @@ func (d *Daemon) forgetRetired(ws *workspacev1.WorkspaceRef, dropHeld bool) {
 	case dropHeld && forget.Msg.GetError().GetBlocked().GetHeldPrompts() > 0:
 		d.dropHeld(ws)
 		d.forgetRetired(ws, false)
+	case dropHeld && forget.Msg.GetError().GetHasChildren() != nil:
+		// A CLOSED CHILD is no open child, so the kill went through, but a
+		// forget would flatten its lineage: it is retired first.
+		for _, child := range forget.Msg.GetError().GetHasChildren().GetChildren() {
+			d.retire(&workspacev1.WorkspaceRef{Id: child}, true)
+		}
+		d.forgetRetired(ws, false)
+	case dropHeld && forget.Msg.GetError().GetMainWorktree() != nil:
+		for _, mate := range d.repositoryMates(ws) {
+			d.retire(mate, true)
+		}
+		d.forgetRetired(ws, false)
 	default:
 		d.t.Errorf("harness: retire %s from the shared daemon: ForgetWorkspace = %v, want a success", ws.GetDir(), forget.Msg)
 	}
+}
+
+// repositoryMates answers every other workspace registered under the
+// repository whose main worktree MAIN is (FindWorkspaces), by its directory's
+// canonical form.
+func (d *Daemon) repositoryMates(main *workspacev1.WorkspaceRef) []*workspacev1.WorkspaceRef {
+	d.t.Helper()
+	// EVERY WORKSPACE THE DAEMON HOLDS, in one answer: a partial one could
+	// omit a mate, which would leave the main worktree unforgettable.
+	limit := uint32(100000)
+	resp, err := d.Client().FindWorkspaces(d.ctx, connect.NewRequest(&agentreplv1.FindWorkspacesRequest{Limit: &limit}))
+	if err != nil || resp.Msg.GetSuccess().GetComplete() == nil {
+		d.t.Errorf("harness: retire %s from the shared daemon: FindWorkspaces = (%v, %v), want every workspace in one answer", main.GetDir(), resp, err)
+		return nil
+	}
+	found := resp.Msg.GetSuccess().GetComplete().GetWorkspaces()
+	repo := canonicalDir(main.GetDir())
+	var mates []*workspacev1.WorkspaceRef
+	for _, w := range found {
+		if w.GetWorkspace().GetId() != main.GetId() && canonicalDir(w.GetRepository().GetDir()) == repo {
+			mates = append(mates, w.GetWorkspace())
+		}
+	}
+	return mates
+}
+
+// canonicalDir is DIR with its symlinks resolved, or DIR as given when it no
+// longer resolves (a worktree already removed).
+func canonicalDir(dir string) string {
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		return resolved
+	}
+	return filepath.Clean(dir)
 }
 
 // dropHeld drops every prompt the workspace's held section holds.
