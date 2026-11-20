@@ -614,7 +614,7 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 	}{
 		{
 			name:      "every workspace is killed and forgotten, latest first",
-			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a workspace the test already removed is passed over",
@@ -622,14 +622,14 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
 					Cause: &agentreplv1.KillWorkspaceError_UnknownWorkspace{UnknownWorkspace: &agentreplv1.KillWorkspaceUnknownWorkspace{}}}}}, nil
 			},
-			wantCalls: []string{"kill w2", "kill w1"},
+			wantCalls: []string{"find", "kill w2", "kill w1"},
 		},
 		{
 			name: "a forget its held prompts block drops them and forgets again",
 			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
 				Cause: &agentreplv1.ForgetWorkspaceError_Blocked{Blocked: &agentreplv1.ForgetWorkspaceBlocked{HeldPrompts: 1}}})}},
 			held:      []string{"t1"},
-			wantCalls: []string{"kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "open_feed w2", "drop t1", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a main worktree's repository mates are retired before it is forgotten",
@@ -642,13 +642,13 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 					{Workspace: &workspacev1.WorkspaceRef{Id: "x1"}, Repository: &workspacev1.RepositoryRef{Dir: d2 + "-elsewhere"}},
 				}
 			},
-			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1", "find", "kill m1", "forget m1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill w1", "forget w1", "find", "kill m1", "forget m1", "forget w1"},
 		},
 		{
 			name: "a workspace's closed children are retired before it is forgotten",
 			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w2": {forgetError(&agentreplv1.ForgetWorkspaceError{
 				Cause: &agentreplv1.ForgetWorkspaceError_HasChildren{HasChildren: &agentreplv1.ForgetWorkspaceHasChildren{Children: []string{"c1"}}}})}},
-			wantCalls: []string{"kill w2", "forget w2", "kill c1", "forget c1", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill c1", "forget c1", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a workspace's open children are retired before it",
@@ -664,7 +664,7 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 					return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Success{Success: &agentreplv1.KillWorkspaceSuccess{}}}, nil
 				}
 			}(),
-			wantCalls: []string{"kill w2", "kill c1", "forget c1", "kill w2", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "kill c1", "forget c1", "kill w2", "forget w2", "kill w1", "forget w1"},
 		},
 		{
 			name: "a refused kill fails the test and forgets nothing",
@@ -672,7 +672,7 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 				return &agentreplv1.KillWorkspaceResponse{Result: &agentreplv1.KillWorkspaceResponse_Error{Error: &agentreplv1.KillWorkspaceError{
 					Cause: &agentreplv1.KillWorkspaceError_TransferringAway{TransferringAway: &agentreplv1.KillWorkspaceTransferringAway{}}}}}, nil
 			},
-			wantCalls: []string{"kill w2", "kill w1"},
+			wantCalls: []string{"find", "kill w2", "kill w1"},
 			wantFail:  "KillWorkspace = error:{transferring_away",
 		},
 		{
@@ -680,14 +680,14 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 			kill: func(string) (*agentreplv1.KillWorkspaceResponse, error) {
 				return nil, errors.New("connection refused")
 			},
-			wantCalls: []string{"kill w2", "kill w1"},
+			wantCalls: []string{"find", "kill w2", "kill w1"},
 			wantFail:  "KillWorkspace = error connection refused",
 		},
 		{
 			name: "a refused forget fails the test",
 			forgets: map[string][]*agentreplv1.ForgetWorkspaceResponse{"w1": {forgetError(&agentreplv1.ForgetWorkspaceError{
 				Cause: &agentreplv1.ForgetWorkspaceError_NotClosed{NotClosed: &agentreplv1.ForgetWorkspaceNotClosed{}}})}},
-			wantCalls: []string{"kill w2", "forget w2", "kill w1", "forget w1"},
+			wantCalls: []string{"find", "kill w2", "forget w2", "kill w1", "forget w1"},
 			wantFail:  "ForgetWorkspace = error:{not_closed",
 		},
 	}
