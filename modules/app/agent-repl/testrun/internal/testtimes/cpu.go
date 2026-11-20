@@ -10,9 +10,14 @@ import (
 type CPUSlice struct {
 	From, To time.Time
 	CPU      float64
+	// Started is how many processes of the tree the interval's read saw for
+	// the first time (cores.MarkGrowth.Started).
+	Started int
 }
 
-// AttributeCPU gives each of a unit's tests its share of the unit's CPU.
+// AttributeCPU gives each of a unit's tests its share of the unit's CPU, and
+// of the processes its tree started (Test.Processes), each slice's processes
+// split as its CPU is.
 //
 // UNIT is the CPU the unit's process and its reaped descendants used, as the
 // kernel's wait accounting reports it (run.Usage.CPU), and SLICES what the
@@ -53,7 +58,7 @@ func AttributeCPU(tests []Test, slices []CPUSlice, unit float64, start, end time
 		return nil
 	}
 	for i := range tests {
-		tests[i].CPU, tests[i].HasCPU = 0, true
+		tests[i].CPU, tests[i].Processes, tests[i].HasCPU = 0, 0, true
 	}
 	for _, s := range slices {
 		overlaps := make([]float64, len(tests))
@@ -68,6 +73,7 @@ func AttributeCPU(tests []Test, slices []CPUSlice, unit float64, start, end time
 		}
 		for i, o := range overlaps {
 			tests[i].CPU += s.CPU * o / sum
+			tests[i].Processes += float64(s.Started) * o / sum
 		}
 	}
 	return nil
@@ -96,9 +102,10 @@ func withRemainder(slices []CPUSlice, unit float64, start, end time.Time) []CPUS
 // bySeconds splits the slices' CPU across TESTS by each one's seconds, evenly
 // when none took any.
 func bySeconds(tests []Test, slices []CPUSlice) {
-	total, secs := 0.0, 0.0
+	total, started, secs := 0.0, 0.0, 0.0
 	for _, s := range slices {
 		total += s.CPU
+		started += float64(s.Started)
 	}
 	for _, t := range tests {
 		secs += t.Seconds
@@ -108,7 +115,7 @@ func bySeconds(tests []Test, slices []CPUSlice) {
 		if secs > 0 {
 			share = tests[i].Seconds / secs
 		}
-		tests[i].CPU, tests[i].HasCPU = total*share, true
+		tests[i].CPU, tests[i].Processes, tests[i].HasCPU = total*share, started*share, true
 	}
 }
 

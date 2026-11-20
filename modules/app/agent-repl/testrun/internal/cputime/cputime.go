@@ -31,9 +31,10 @@ const Every = 500 * time.Millisecond
 // Sampler reads every tagged unit's CPU at each tick, keeping each tag's
 // intervals until the runner takes them.
 type Sampler struct {
-	// Read answers the CPU each tag's processes used since the last read
-	// (cores.TestsCPU.ReadByMark over proctable.Marked of cores.UnitEnv).
-	Read  func() (map[string]float64, error)
+	// Read answers the CPU each tag's processes used since the last read, and
+	// how many each started (cores.TestsCPU.ReadGrowthByMark over
+	// proctable.Marked of cores.UnitEnv).
+	Read  func() (map[string]cores.MarkGrowth, error)
 	Now   func() time.Time
 	Ticks <-chan time.Time
 	Log   *run.Log
@@ -80,12 +81,12 @@ func (s *Sampler) read() {
 	}
 	if s.primed {
 		own := cores.UnitTag(s.Pid, "")
-		for tag, cpu := range growth {
+		for tag, g := range growth {
 			// Every run's units carry cores.UnitEnv; only this run's are kept.
-			if cpu == 0 || !strings.HasPrefix(tag, own) {
+			if (g.CPU == 0 && g.Started == 0) || !strings.HasPrefix(tag, own) {
 				continue
 			}
-			s.slices[tag] = append(s.slices[tag], testtimes.CPUSlice{From: s.last, To: now, CPU: cpu})
+			s.slices[tag] = append(s.slices[tag], testtimes.CPUSlice{From: s.last, To: now, CPU: g.CPU, Started: g.Started})
 		}
 	}
 	s.last, s.primed = now, true

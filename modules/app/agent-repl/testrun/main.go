@@ -497,7 +497,7 @@ func runIn(ctx context.Context, log *run.Log, args cli.Args, self, histPath, roo
 		}
 		cpuTicks := time.NewTicker(cputime.Every)
 		defer cpuTicks.Stop()
-		sampler := &cputime.Sampler{Read: (&cores.TestsCPU{Scan: tagged.Scan}).ReadByMark, Now: time.Now, Ticks: cpuTicks.C, Log: log, Pid: os.Getpid()}
+		sampler := &cputime.Sampler{Read: (&cores.TestsCPU{Scan: tagged.Scan}).ReadGrowthByMark, Now: time.Now, Ticks: cpuTicks.C, Log: log, Pid: os.Getpid()}
 		go sampler.Run(governorCtx)
 		unitCPU = sampler
 	}

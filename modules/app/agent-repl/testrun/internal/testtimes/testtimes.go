@@ -100,6 +100,9 @@ type Test struct {
 	// CPU is the CPU seconds AttributeCPU gave the test, when HasCPU.
 	CPU    float64
 	HasCPU bool
+	// Processes is the test's share of the processes its unit's tree started
+	// (AttributeCPU), when HasCPU.
+	Processes float64
 }
 
 // Suite is one suite's time in a run.
