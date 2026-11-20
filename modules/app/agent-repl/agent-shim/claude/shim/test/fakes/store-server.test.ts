@@ -48,7 +48,9 @@ const agentId = (value: string): conversationv1.AgentId =>
 function pageLineEntry(book: string, upsertKey: string, text: string): storev1.StoreEntry {
   return create(storev1.StoreEntrySchema, {
     plane: streamPlane(),
-    writeId: `w-${upsertKey}-${text}`,
+    // THE BOOK IS PART OF THE WRITE ID: two books written the same key and
+    // text are two writes, never one write's retry the store dedupes.
+    writeId: `w-${book}-${upsertKey}-${text}`,
     upsertKey,
     entry: {
       case: "agentUpdate",
@@ -274,7 +276,9 @@ async function open(
             : { case: "knownThrough", value: opening },
     }),
   );
-  if (response.result.case !== "success") throw new Error("fake store refused an open");
+  if (response.result.case !== "success") {
+    throw new Error(`fake store refused an open: ${JSON.stringify(response.result)}`);
+  }
   return response.result.value;
 }
 
