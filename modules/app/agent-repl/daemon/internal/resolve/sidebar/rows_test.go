@@ -2305,3 +2305,33 @@ func TestOpenOwnedPullRequestUnchangedPublishesNothing(t *testing.T) {
 		t.Fatalf("next delivery carried %q, want the change: the unchanged fact published a push", got)
 	}
 }
+
+func TestARowsRecordsGoToItsOwnWorkspacesSink(t *testing.T) {
+	// Arrange
+	r, surfaces := newResolver(t)
+	a, b := workspace("w-a", "a"), workspace("w-b", "b")
+
+	// Act: one render draws both rows.
+	r.SetRegistry(registry(a, b))
+
+	// Assert: each row's status record is in its own workspace's sink.
+	dirs := map[string]string{"w-a": a.Dir, "w-b": b.Dir}
+	seen := map[string]bool{}
+	for _, rec := range surfaces.Records() {
+		if rec.Operation != "daemon.sidebar.status_decision" {
+			continue
+		}
+		ws, _ := rec.Context["workspace_id"].(string)
+		want, ok := dirs[ws]
+		if !ok {
+			continue
+		}
+		seen[ws] = true
+		if rec.Context["workspace_dir"] != want {
+			t.Fatalf("%s's status record = %+v, want it in %s's own sink (workspace_dir %s)", ws, rec, ws, want)
+		}
+	}
+	if !seen["w-a"] || !seen["w-b"] {
+		t.Fatalf("status records seen for %v, want both rows'", seen)
+	}
+}

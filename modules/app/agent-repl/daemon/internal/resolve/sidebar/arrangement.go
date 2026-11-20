@@ -176,11 +176,11 @@ func (r *resolver) assertArrangement(reg Registry) {
 		sub, ok := subsections[*ws.Subsection]
 		if !ok {
 			r.failArrangement("a workspace names a subsection the registry does not carry",
-				dlog.Context{"workspace_id": string(ws.ID), "subsection": string(*ws.Subsection)})
+				dlog.Context{"row_workspace": string(ws.ID), "subsection": string(*ws.Subsection)})
 		}
 		if sub.Repo != family[ws.ID] {
 			r.failArrangement("a workspace sits in another repository's subsection",
-				dlog.Context{"workspace_id": string(ws.ID), "subsection": string(sub.ID), "repo_id": string(ws.Repo), "family_repo_id": string(family[ws.ID]), "subsection_repo_id": string(sub.Repo)})
+				dlog.Context{"row_workspace": string(ws.ID), "subsection": string(sub.ID), "repo_id": string(ws.Repo), "family_repo_id": string(family[ws.ID]), "subsection_repo_id": string(sub.Repo)})
 		}
 	}
 }

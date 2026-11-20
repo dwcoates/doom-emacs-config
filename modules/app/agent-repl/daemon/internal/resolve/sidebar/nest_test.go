@@ -149,6 +149,10 @@ func TestRosterRecordsACyclingParentChain(t *testing.T) {
 	for _, rec := range surfaces.Records() {
 		if rec.Level == "warn" && rec.Operation == "daemon.sidebar.nest" {
 			warned = true
+			// The row is named under its own key, never the reserved one.
+			if rec.Context["row_workspace"] == nil {
+				t.Fatalf("record context = %v, want the row named as row_workspace", rec.Context)
+			}
 		}
 	}
 	if !warned {

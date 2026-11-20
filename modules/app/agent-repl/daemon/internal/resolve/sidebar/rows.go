@@ -62,7 +62,9 @@ func (r *resolver) rowRepository(rec wsm.Workspace, log dlog.Logger) *frontendv1
 func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *frontendv1.RosterRow {
 	s := r.state.workspace(rec.ID)
 	session := rc.sessions[rec.ID]
-	rowLog := log.With(dlog.Context{"workspace_id": string(rec.ID)})
+	// THE ROW'S RECORDS ARE ITS WORKSPACE'S, in its own sink (logFor), never
+	// the sink of whichever workspace's change ran the render.
+	rowLog := r.logFor(rec.ID)
 
 	if s.restoreResult(rec) {
 		rowLog.Info("daemon.sidebar.result_restored",
