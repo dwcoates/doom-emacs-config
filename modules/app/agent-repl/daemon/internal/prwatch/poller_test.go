@@ -3,6 +3,7 @@ package prwatch
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -339,7 +340,7 @@ func TestAPullRequestIsFollowedThroughItsMergeQueue(t *testing.T) {
 		{name: "a merge group check failing and the removal", arrange: func(g *gql, r *rig) {
 			queuedPR(g, "AWAITING_CHECKS", "group1", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
 			r.tick()
-			r.gh.set(pathChecks("group1"), mustJSON(map[string]any{"check_runs": []map[string]any{{"id": 9, "name": "ci", "status": "completed", "conclusion": "failure"}}}))
+			r.gh.set(pathChecks("group1"), checkRuns(done(9, "ci", "failure")))
 			g.setFacts(prK.Number, factsJSON("main", nil, joined, remoteQueueEvent{ID: "r1", Removed: true, Reason: ptr("the merge group's checks failed"), At: t0.Add(1)}))
 		}, want: []string{"The pull request was removed from the merge queue: the merge group's checks failed."}},
 	}
@@ -370,14 +371,14 @@ func TestAPullRequestIsFollowedThroughItsMergeQueue(t *testing.T) {
 	}
 }
 
-func TestAMergeGroupsFinishedCheckIsToldOnce(t *testing.T) {
+func TestAMergeGroupsFailedRunIsToldOnce(t *testing.T) {
 	// Arrange
 	r := newRig(t)
 	g := r.withGQL()
 	joined := remoteQueueEvent{ID: "a1", At: t0}
 	queuedPR(g, "AWAITING_CHECKS", "group1", []remoteQueueEntry{entry(prK.Number, "AWAITING_CHECKS")}, joined)
 	r.subscribe(t, wsm.PullRequestEventMergeQueue)
-	r.gh.set(pathChecks("group1"), mustJSON(map[string]any{"check_runs": []map[string]any{{"id": 9, "name": "ci", "status": "completed", "conclusion": "failure"}}}))
+	r.gh.set(pathChecks("group1"), checkRuns(done(9, "ci", "failure")))
 
 	// Act
 	r.tick()
@@ -385,8 +386,8 @@ func TestAMergeGroupsFinishedCheckIsToldOnce(t *testing.T) {
 
 	// Assert
 	told := r.told()
-	if len(told) != 1 || !strings.Contains(told[0], "Merge group check `ci`: failed.") {
-		t.Fatalf("told = %v, want the merge group's check once", told)
+	if len(told) != 1 || !strings.Contains(told[0], "CI on the merge group failed: `ci` failed.") {
+		t.Fatalf("told = %v, want the merge group's run once", told)
 	}
 }
 
@@ -532,5 +533,99 @@ func TestAnEndThatCannotBeActedOnIsRecorded(t *testing.T) {
 	// Assert
 	if _, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "error", Operation: opPoll, Message: "could not act on the end of the workspace's pull request"}); !ok {
 		t.Fatalf("records = %+v, want the failure at error", r.log.Records())
+	}
+}
+
+// checkRuns is a commit's check-runs page holding RUNS.
+func checkRuns(runs ...remoteCheck) string {
+	var out []map[string]any
+	for _, c := range runs {
+		run := map[string]any{"id": c.ID, "name": c.Name, "status": "in_progress"}
+		if c.Completed {
+			run["status"], run["conclusion"] = "completed", c.Conclusion
+		}
+		out = append(out, run)
+	}
+	return mustJSON(map[string]any{"check_runs": out})
+}
+
+func TestTheHeadsWholeRunIsToldInOneSentence(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventChecks)
+	var runs []remoteCheck
+	for i := uint64(1); i <= 50; i++ {
+		runs = append(runs, done(i, fmt.Sprintf("check-%02d", i), "success"))
+	}
+	r.gh.set(pathChecks("head1"), checkRuns(runs...))
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	told := r.told()
+	if len(told) != 1 || !contains(told[0], "|CI on head head1 passed: all 50 checks succeeded.|") || contains(told[0], "check-01") {
+		t.Fatalf("told = %q, want one sentence for the whole run", told)
+	}
+}
+
+func TestAFailingGateCheckTheConfigNamesLeavesTheRunPassing(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
+	g.setConfig("head1", "pre_deploy: {}\npull_requests:\n  gate_checks: [review-or-self-certified]\n")
+	r.subscribe(t, wsm.PullRequestEventChecks)
+	r.gh.set(pathChecks("head1"), checkRuns(done(1, "unit", "success"), done(2, "review-or-self-certified", "failure")))
+
+	// Act
+	r.tick()
+
+	// Assert
+	if told := r.told(); len(told) != 1 || !contains(told[0], "CI on head head1 passed: its one check succeeded.") {
+		t.Fatalf("told = %q, want the run passed with the gate left out", told)
+	}
+}
+
+func TestACommitsConfigIsReadOnce(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventChecks)
+
+	// Act
+	r.tick()
+	r.tick()
+
+	// Assert
+	if n := r.gqlCalls("LifecycleConfigAt"); n != 1 {
+		t.Fatalf("%d config reads, want one for the one head", n)
+	}
+}
+
+func TestAnUnusableConfigFailsTheSubscription(t *testing.T) {
+	// Arrange
+	r := newRig(t)
+	r.subscribe(t, wsm.PullRequestEventChecks)
+	r.gh.set(pathPull(), pullJSON("open", false, false, "head2"))
+	g := r.withGQL()
+	g.setFacts(prK.Number, factsJSON("main", nil))
+	g.setConfig("head2", "pre_deploy: {}\npull_requests:\n  gate_check: [x]\n")
+	r.gh.set(pathChecks("head2"), checkRuns(done(1, "unit", "failure")))
+
+	// Act
+	r.tick()
+
+	// Assert
+	subs, _ := r.db.WorkspacePullRequestSubscriptions(context.Background(), r.ws)
+	if len(subs) != 1 || subs[0].Failing == nil || !contains(subs[0].Failing.Detail, "o/r@head2:.agent-repl/lifecycle.yaml") {
+		t.Fatalf("subscriptions = %+v, want one failing, naming the file", subs)
+	}
+	if told := r.told(); len(told) != 0 {
+		t.Fatalf("told = %v, want nothing while the config is unusable", told)
+	}
+	record, ok := dlog.FindRecord(r.log.Records(), dlog.RecordQuery{Level: "info", Operation: opPoll, Message: "the pull request could not be read; its subscriptions are failing, and no subscriber is told"})
+	if !ok || !contains(fmt.Sprint(record.Context["cause"]), "gate_check") {
+		t.Fatalf("records = %+v, want the failed read recorded with its cause", r.log.Records())
 	}
 }

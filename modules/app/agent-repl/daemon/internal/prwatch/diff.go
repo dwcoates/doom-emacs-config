@@ -32,12 +32,13 @@ type told struct {
 	// Reviews maps each submitted review's id to its state and a digest of
 	// its body.
 	Reviews map[string]string `json:"reviews"`
-	// Head is the commit Checks were told for; a new head starts its checks
-	// afresh.
+	// Head is the commit ChecksOutcome was read for; a new head starts its
+	// checks afresh.
 	Head string `json:"head"`
-	// Checks maps each check run's name to the latest finished run's id and
-	// conclusion.
-	Checks map[string]string `json:"checks"`
+	// ChecksOutcome is the head's whole CI run as last read: `passed`,
+	// `failed`, or empty while it is undecided (runOutcome). An outcome is
+	// told when it differs from this.
+	ChecksOutcome string `json:"checks_outcome,omitempty"`
 	// QueueEvents maps each merge-queue timeline event in the latest read's
 	// window to its kind (`added`, `removed`): an id it does not hold is an
 	// event not yet told. Empty, and left out of the encoding, for a
@@ -46,11 +47,12 @@ type told struct {
 	// Queue is the pull request's place in the queue as last told
 	// (`ahead/total/state`); empty while it is not in the queue.
 	Queue string `json:"queue,omitempty"`
-	// GroupHead is the merge group commit GroupChecks were told for; a new
-	// group starts its checks afresh.
+	// GroupHead is the merge group commit GroupChecksOutcome was read for; a
+	// new group starts its checks afresh.
 	GroupHead string `json:"group_head,omitempty"`
-	// GroupChecks is Checks' meaning, for the merge group commit.
-	GroupChecks map[string]string `json:"group_checks,omitempty"`
+	// GroupChecksOutcome is ChecksOutcome's meaning, for the merge group
+	// commit.
+	GroupChecksOutcome string `json:"group_checks_outcome,omitempty"`
 	// AnchorOnRead marks a subscription taken without a read
 	// (Watcher.FollowFromFirstRead): its first successful read anchors it,
 	// counting everything already on the pull request as told, as Anchor's
@@ -61,14 +63,14 @@ type told struct {
 // decodeTold reads a row's snapshot. Empty is a subscription never anchored:
 // nothing was told yet.
 func decodeTold(raw string) (told, bool, error) {
-	t := told{Comments: map[string]string{}, ReviewComments: map[string]string{}, Reviews: map[string]string{}, Checks: map[string]string{}}
+	t := told{Comments: map[string]string{}, ReviewComments: map[string]string{}, Reviews: map[string]string{}}
 	if raw == "" {
 		return t, false, nil
 	}
 	if err := json.Unmarshal([]byte(raw), &t); err != nil {
 		return t, false, fmt.Errorf("prwatch: the told snapshot is unreadable: %w", err)
 	}
-	for _, m := range []*map[string]string{&t.Comments, &t.ReviewComments, &t.Reviews, &t.Checks, &t.QueueEvents, &t.GroupChecks} {
+	for _, m := range []*map[string]string{&t.Comments, &t.ReviewComments, &t.Reviews, &t.QueueEvents} {
 		if *m == nil {
 			*m = map[string]string{}
 		}
@@ -189,20 +191,20 @@ func diff(snap snapshot, prev told, anchored bool) (told, []*agentreplv1.PullReq
 	}
 
 	var checks []*agentreplv1.PullRequestActivity
-	next.Head, next.Checks = prev.Head, prev.Checks
+	next.Head, next.ChecksOutcome = prev.Head, prev.ChecksOutcome
 	if snap.ChecksRead {
-		var finished []*agentreplv1.PullRequestActivityCheckFinished
-		next.Head, next.Checks, finished = diffChecks(prev.Head, prev.Checks, snap.PR.Head, snap.Checks)
-		for _, c := range finished {
-			checks = append(checks, &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_CheckFinished{CheckFinished: c}})
+		var concluded *agentreplv1.PullRequestActivityChecksConcluded
+		next.Head, next.ChecksOutcome, concluded = diffOutcome(prev.Head, prev.ChecksOutcome, snap.PR.Head, snap.Checks, snap.Gates)
+		if concluded != nil {
+			checks = append(checks, &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_ChecksConcluded{ChecksConcluded: concluded}})
 		}
 	}
 
 	var queued []*agentreplv1.PullRequestActivity
-	next.QueueEvents, next.Queue, next.GroupHead, next.GroupChecks = prev.QueueEvents, prev.Queue, prev.GroupHead, prev.GroupChecks
+	next.QueueEvents, next.Queue, next.GroupHead, next.GroupChecksOutcome = prev.QueueEvents, prev.Queue, prev.GroupHead, prev.GroupChecksOutcome
 	if q := snap.Queue; q != nil {
 		var timed []timedActivity
-		next.QueueEvents, next.Queue, next.GroupHead, next.GroupChecks, timed, queued = diffQueue(*q, snap.PR.Merged, prev)
+		next.QueueEvents, next.Queue, next.GroupHead, next.GroupChecksOutcome, timed, queued = diffQueue(*q, snap.PR.Merged, prev)
 		items = append(items, timed...)
 	}
 
@@ -248,13 +250,13 @@ func eventOf(a *agentreplv1.PullRequestActivity) wsm.PullRequestEvent {
 		}
 	case *agentreplv1.PullRequestActivity_StateChanged:
 		return wsm.PullRequestEventState
-	case *agentreplv1.PullRequestActivity_CheckFinished:
+	case *agentreplv1.PullRequestActivity_ChecksConcluded:
 		return wsm.PullRequestEventChecks
 	case *agentreplv1.PullRequestActivity_MergeQueueEntered,
 		*agentreplv1.PullRequestActivity_MergeQueueMoved,
 		*agentreplv1.PullRequestActivity_MergeQueueEntryStateChanged,
 		*agentreplv1.PullRequestActivity_MergeQueueRemoved,
-		*agentreplv1.PullRequestActivity_MergeGroupCheckFinished:
+		*agentreplv1.PullRequestActivity_MergeGroupChecksConcluded:
 		return wsm.PullRequestEventMergeQueue
 	}
 	panic(fmt.Sprintf("prwatch: activity %T has no event", a.GetActivity()))
@@ -409,12 +411,4 @@ func sortedNames(m map[string]remoteCheck) []string {
 	}
 	sort.Strings(names)
 	return names
-}
-
-func copyMap(m map[string]string) map[string]string {
-	out := make(map[string]string, len(m))
-	for k, v := range m {
-		out[k] = v
-	}
-	return out
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"agent-repld/internal/ghclient"
+	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/wsm"
 )
 
@@ -79,6 +80,9 @@ type snapshot struct {
 	// whether it was.
 	Checks     []remoteCheck
 	ChecksRead bool
+	// Gates is the repository's gate checks at the head commit, left out of
+	// its CI outcome; read with Checks.
+	Gates map[string]bool
 	// Queue is read only when a subscriber asks for the merge queue; nil
 	// when it was not.
 	Queue *prQueueSnapshot
@@ -98,10 +102,20 @@ type reader struct {
 	gh    ghclient.Client
 	mu    sync.Mutex
 	pages map[string]cachedPage
+	// gates holds each commit's gate checks as its lifecycle config names
+	// them, by gatesKey: a commit's file never changes, so each commit's is
+	// read once.
+	gates map[string]gatesRead
+}
+
+// gatesRead is one commit's gate checks, or why its config is unusable.
+type gatesRead struct {
+	names map[string]bool
+	err   error
 }
 
 func newReader(gh ghclient.Client) *reader {
-	return &reader{gh: gh, pages: map[string]cachedPage{}}
+	return &reader{gh: gh, pages: map[string]cachedPage{}, gates: map[string]gatesRead{}}
 }
 
 // read reads PR's lists, and its head commit's check runs when CHECKS. Any
@@ -127,6 +141,9 @@ func (r *reader) read(ctx context.Context, pr wsm.PullRequestKey, checks bool) (
 	}
 	if checks && snap.PR.Head != "" {
 		if snap.Checks, err = r.readChecks(ctx, fmt.Sprintf("%s/commits/%s/check-runs", base, snap.PR.Head)); err != nil {
+			return snap, err
+		}
+		if snap.Gates, err = r.gateChecks(ctx, pr.Owner, pr.Repo, snap.PR.Head); err != nil {
 			return snap, err
 		}
 		snap.ChecksRead = true
@@ -217,6 +234,77 @@ func (r *reader) readChecks(ctx context.Context, path string) ([]remoteCheck, er
 			return out, nil
 		}
 	}
+}
+
+// lifecycleConfigQuery reads one file as it stands at one commit. It is
+// GraphQL because a REST read of a file the commit does not hold is a 404,
+// which every repository without the file would answer on every new head.
+const lifecycleConfigQuery = `query LifecycleConfigAt($owner: String!, $repo: String!, $expression: String!) {
+  repository(owner: $owner, name: $repo) {
+    object(expression: $expression) {
+      __typename
+      ... on Blob { text isTruncated }
+    }
+  }
+}`
+
+// gateChecks answers the gate checks the repository's lifecycle config names
+// at commit SHA (repoconfig.v1.PullRequestFollowing.gate_checks): none when
+// the commit holds no config, and an error naming the file when it holds one
+// that is unusable. Each commit is read once, whatever it answered.
+func (r *reader) gateChecks(ctx context.Context, owner, repo, sha string) (map[string]bool, error) {
+	key := owner + "/" + repo + "@" + sha
+	r.mu.Lock()
+	known, ok := r.gates[key]
+	r.mu.Unlock()
+	if ok {
+		return known.names, known.err
+	}
+	resp, err := r.gh.GraphQL(ctx, lifecycleConfigQuery, map[string]any{"owner": owner, "repo": repo, "expression": sha + ":" + lifecycleconfig.Rel})
+	if err != nil {
+		// A failed call is no fact about the commit, so it is asked again.
+		return nil, err
+	}
+	read := decodeGates(resp, key+":"+lifecycleconfig.Rel)
+	r.mu.Lock()
+	r.gates[key] = read
+	r.mu.Unlock()
+	return read.names, read.err
+}
+
+// decodeGates reads a LifecycleConfigAt answer for the file at PATH.
+func decodeGates(resp ghclient.GraphQLResponse, path string) gatesRead {
+	var shaped struct {
+		Repository *struct {
+			Object *struct {
+				Typename    string  `json:"__typename"`
+				Text        *string `json:"text"`
+				IsTruncated bool    `json:"isTruncated"`
+			} `json:"object"`
+		} `json:"repository"`
+	}
+	if err := json.Unmarshal(resp.Data, &shaped); err != nil {
+		return gatesRead{err: fmt.Errorf("prwatch: decode the LifecycleConfigAt answer for %s: %w", path, err)}
+	}
+	switch o := shaped.Repository; {
+	case o == nil:
+		return gatesRead{err: nulledFailure(resp, "repository")}
+	case o.Object == nil:
+		return gatesRead{names: map[string]bool{}}
+	case o.Object.Typename != "Blob" || o.Object.Text == nil:
+		return gatesRead{err: fmt.Errorf("prwatch: %s is a %s, not a readable file", path, o.Object.Typename)}
+	case o.Object.IsTruncated:
+		return gatesRead{err: fmt.Errorf("prwatch: GitHub truncated %s, so it cannot be read whole", path)}
+	}
+	cfg, err := lifecycleconfig.Parse(path, []byte(*shaped.Repository.Object.Text))
+	if err != nil {
+		return gatesRead{err: err}
+	}
+	names := map[string]bool{}
+	for _, name := range cfg.GetPullRequests().GetGateChecks() {
+		names[name] = true
+	}
+	return gatesRead{names: names}
 }
 
 type userJSON struct {

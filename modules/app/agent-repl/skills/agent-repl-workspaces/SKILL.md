@@ -885,6 +885,19 @@ creating workspaces there with `-repository DIR`.
     `daemon.merge.queue_drained` with its log's path, and leaves the debt
     owed, so the queue's next emptying runs them all again. Each must bear
     running twice on the same state.
+- **`pull_requests: {gate_checks: [NAME, ...]}` names the repository's gate
+  checks**: check runs that fail until a person acts (an approval, a label),
+  such as a required-review gate. They are left out of every commit's CI
+  outcome, so a followed pull request still waiting on its reviewer is told
+  its CI passed.
+  - Unlike every other key, it is read from GitHub, from the file at the
+    pull request's head commit, never from a checkout.
+  - A followed pull request is told its head's CI run once per outcome, never
+    once per check run: `CI on head SHA failed: `lint` failed.` as soon as a
+    check fails, or `CI on head SHA passed: all 48 checks succeeded.` once
+    every one passed.
+  - A head whose file is unusable fails the subscription's read, naming the
+    file, until a commit fixes it.
 - A deploy hook asks the runtime to roll out what landed with
   `agent-repld runtime roll-out-landing -deploy "$AGENT_REPL_DEPLOY_LEDGER"`.
 - agent-repl's own config:

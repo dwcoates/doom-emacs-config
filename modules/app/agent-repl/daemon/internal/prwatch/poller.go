@@ -300,6 +300,11 @@ func (w *Watcher) readSnapshot(ctx context.Context, pr wsm.PullRequestKey, check
 			if q.GroupChecks, err = w.reader.readChecks(ctx, fmt.Sprintf("repos/%s/%s/commits/%s/check-runs", pr.Owner, pr.Repo, head)); err != nil {
 				return snap, err
 			}
+			// The merge group tests the pull request's head on its base, so
+			// the head's config names its gates.
+			if q.Gates, err = w.reader.gateChecks(ctx, pr.Owner, pr.Repo, snap.PR.Head); err != nil {
+				return snap, err
+			}
 		}
 	}
 	snap.Queue = q

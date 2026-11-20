@@ -9,45 +9,99 @@ import (
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 )
 
-func TestDiffChecksTellsEachFinishedRunOnce(t *testing.T) {
+func TestRunOutcomeJudgesTheWholeRun(t *testing.T) {
 	tests := []struct {
-		name       string
-		prevHead   string
-		prevChecks map[string]string
-		runs       []remoteCheck
-		wantChecks map[string]string
-		wantTold   []string
+		name        string
+		runs        []remoteCheck
+		gates       map[string]bool
+		wantOutcome string
+		wantFailed  []string
+		wantCounted int
 	}{
-		{name: "a finished run is told", prevHead: "h", prevChecks: map[string]string{}, runs: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}},
-			wantChecks: map[string]string{"test": "1:success"}, wantTold: []string{"test"}},
-		{name: "a run already told is not told again", prevHead: "h", prevChecks: map[string]string{"test": "1:success"}, runs: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}},
-			wantChecks: map[string]string{"test": "1:success"}},
-		{name: "finished runs wait for an unfinished sibling", prevHead: "h", prevChecks: map[string]string{}, runs: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}, {ID: 2, Name: "lint"}},
-			wantChecks: map[string]string{}},
-		{name: "a re-run in progress holds back a run already told", prevHead: "h", prevChecks: map[string]string{"test": "1:failure"}, runs: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "failure"}, {ID: 2, Name: "test"}},
-			wantChecks: map[string]string{"test": "1:failure"}},
-		{name: "every run told together once the set finishes", prevHead: "h", prevChecks: map[string]string{}, runs: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}, {ID: 2, Name: "lint", Completed: true, Conclusion: "failure"}},
-			wantChecks: map[string]string{"test": "1:success", "lint": "2:failure"}, wantTold: []string{"lint", "test"}},
-		{name: "an unfinished run waits", prevHead: "h", prevChecks: map[string]string{}, runs: []remoteCheck{{ID: 1, Name: "test"}}, wantChecks: map[string]string{}},
-		{name: "the latest run of a name counts", prevHead: "h", prevChecks: map[string]string{}, runs: []remoteCheck{{ID: 2, Name: "test", Completed: true, Conclusion: "failure"}, {ID: 1, Name: "test", Completed: true, Conclusion: "success"}},
-			wantChecks: map[string]string{"test": "2:failure"}, wantTold: []string{"test"}},
-		{name: "a new head starts afresh", prevHead: "old", prevChecks: map[string]string{"test": "1:success"}, runs: []remoteCheck{{ID: 1, Name: "test", Completed: true, Conclusion: "success"}},
-			wantChecks: map[string]string{"test": "1:success"}, wantTold: []string{"test"}},
+		{name: "no runs is undecided", wantOutcome: ""},
+		{name: "every run passing passes", runs: []remoteCheck{done(1, "a", "success"), done(2, "b", "neutral"), done(3, "c", "skipped")}, wantOutcome: outcomePassed, wantCounted: 3},
+		{name: "a run still going is undecided", runs: []remoteCheck{done(1, "a", "success"), {ID: 2, Name: "b"}}, wantOutcome: "", wantCounted: 2},
+		{name: "a failure decides the run while others still go", runs: []remoteCheck{{ID: 1, Name: "a"}, done(2, "b", "failure")}, wantOutcome: outcomeFailed, wantFailed: []string{"b"}, wantCounted: 2},
+		{name: "every conclusion but a pass fails", runs: []remoteCheck{done(1, "a", "cancelled"), done(2, "b", "timed_out"), done(3, "c", "action_required"), done(4, "d", "stale")},
+			wantOutcome: outcomeFailed, wantFailed: []string{"a", "b", "c", "d"}, wantCounted: 4},
+		{name: "the latest run of a name counts", runs: []remoteCheck{done(2, "a", "success"), done(1, "a", "failure")}, wantOutcome: outcomePassed, wantCounted: 1},
+		{name: "a re-run in progress takes back its failure", runs: []remoteCheck{done(1, "a", "failure"), {ID: 2, Name: "a"}}, wantOutcome: "", wantCounted: 1},
+		{name: "a gate check is not counted", runs: []remoteCheck{done(1, "a", "success"), done(2, "gate", "failure")}, gates: map[string]bool{"gate": true}, wantOutcome: outcomePassed, wantCounted: 1},
+		{name: "a run of only gate checks has no outcome", runs: []remoteCheck{done(1, "gate", "success")}, gates: map[string]bool{"gate": true}, wantOutcome: ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Act
-			head, checks, told := diffChecks(tt.prevHead, tt.prevChecks, "h", tt.runs)
+			outcome, failed, counted := runOutcome(tt.runs, tt.gates)
 
 			// Assert
 			var names []string
-			for _, c := range told {
-				names = append(names, c.GetName())
+			for _, c := range failed {
+				names = append(names, c.Name)
 			}
-			if head != "h" || !reflect.DeepEqual(checks, tt.wantChecks) || !reflect.DeepEqual(names, tt.wantTold) {
-				t.Fatalf("diffChecks = %s, %v, %v; want %v, %v", head, checks, names, tt.wantChecks, tt.wantTold)
+			if outcome != tt.wantOutcome || !reflect.DeepEqual(names, tt.wantFailed) || counted != tt.wantCounted {
+				t.Fatalf("runOutcome = %q, %v, %d; want %q, %v, %d", outcome, names, counted, tt.wantOutcome, tt.wantFailed, tt.wantCounted)
 			}
 		})
+	}
+}
+
+func TestDiffOutcomeTellsEachOutcomeOnce(t *testing.T) {
+	passed := []remoteCheck{done(1, "a", "success")}
+	failed := []remoteCheck{done(1, "a", "failure")}
+	tests := []struct {
+		name        string
+		prevHead    string
+		prev        string
+		runs        []remoteCheck
+		wantOutcome string
+		wantTold    string
+	}{
+		{name: "a first outcome is told", prevHead: "h", runs: passed, wantOutcome: outcomePassed, wantTold: outcomePassed},
+		{name: "an outcome already told is not told again", prevHead: "h", prev: outcomePassed, runs: passed, wantOutcome: outcomePassed},
+		{name: "a failure after a pass is told", prevHead: "h", prev: outcomePassed, runs: failed, wantOutcome: outcomeFailed, wantTold: outcomeFailed},
+		{name: "an undecided run is recorded undecided", prevHead: "h", prev: outcomeFailed, runs: []remoteCheck{{ID: 2, Name: "a"}}, wantOutcome: ""},
+		{name: "a new head starts undecided", prevHead: "old", prev: outcomePassed, runs: passed, wantOutcome: outcomePassed, wantTold: outcomePassed},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			head, outcome, concluded := diffOutcome(tt.prevHead, tt.prev, "h", tt.runs, nil)
+
+			// Assert
+			told := ""
+			switch {
+			case concluded.GetPassed() != nil:
+				told = outcomePassed
+			case concluded.GetFailed() != nil:
+				told = outcomeFailed
+			}
+			if head != "h" || outcome != tt.wantOutcome || told != tt.wantTold || (concluded != nil && concluded.GetCommitSha() != "h") {
+				t.Fatalf("diffOutcome = %s, %q, %v; want %q told %q", head, outcome, concluded, tt.wantOutcome, tt.wantTold)
+			}
+		})
+	}
+}
+
+func TestAFailedOutcomeNamesEachCheckThatDidNotPass(t *testing.T) {
+	// Act
+	_, _, concluded := diffOutcome("", "", "h", []remoteCheck{done(1, "b", "timed_out"), done(2, "a", "failure"), done(3, "c", "success")}, nil)
+
+	// Assert
+	want := &agentreplv1.PullRequestChecksFailed{FailedChecks: []*agentreplv1.PullRequestActivityCheckFinished{
+		{Name: "a", Conclusion: conclusionProto("failure")}, {Name: "b", Conclusion: conclusionProto("timed_out")}}}
+	if got := concluded.GetFailed(); !proto.Equal(got, want) {
+		t.Fatalf("failed = %v, want %v", got, want)
+	}
+}
+
+func TestAPassedOutcomeCountsTheChecksItJudged(t *testing.T) {
+	// Act
+	_, _, concluded := diffOutcome("", "", "h", []remoteCheck{done(1, "a", "success"), done(2, "b", "skipped"), done(3, "gate", "failure")}, map[string]bool{"gate": true})
+
+	// Assert
+	if got := concluded.GetPassed().GetCheckCount(); got != 2 {
+		t.Fatalf("check count = %d, want 2", got)
 	}
 }
 
@@ -91,7 +145,10 @@ func TestDiffQueueTellsThePullRequestsWayThroughItsQueue(t *testing.T) {
 			prev: told{}, wantArms: []string{"merge_queue_entered", "merge_queue_removed"}},
 		{name: "a merge group's finished check is told", q: prQueueSnapshot{Events: []remoteQueueEvent{added}, Entry: &remoteEntryFacts{State: "AWAITING_CHECKS", GroupHead: "g1"}, Position: &position{0, 1},
 			GroupChecks: []remoteCheck{{ID: 5, Name: "ci", Completed: true, Conclusion: "failure"}}},
-			prev: told{QueueEvents: map[string]string{"a1": "added"}, Queue: "0/1/AWAITING_CHECKS"}, wantArms: []string{"merge_group_check_finished"}, wantPlace: "0/1/AWAITING_CHECKS"},
+			prev: told{QueueEvents: map[string]string{"a1": "added"}, Queue: "0/1/AWAITING_CHECKS"}, wantArms: []string{"merge_group_checks_concluded"}, wantPlace: "0/1/AWAITING_CHECKS"},
+		{name: "a merge group's failing gate check is not counted", q: prQueueSnapshot{Events: []remoteQueueEvent{added}, Entry: &remoteEntryFacts{State: "AWAITING_CHECKS", GroupHead: "g1"}, Position: &position{0, 1},
+			GroupChecks: []remoteCheck{{ID: 5, Name: "gate", Completed: true, Conclusion: "failure"}, {ID: 6, Name: "ci"}}, Gates: map[string]bool{"gate": true}},
+			prev: told{QueueEvents: map[string]string{"a1": "added"}, Queue: "0/1/AWAITING_CHECKS"}, wantPlace: "0/1/AWAITING_CHECKS"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

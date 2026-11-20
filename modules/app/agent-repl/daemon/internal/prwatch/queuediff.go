@@ -2,7 +2,6 @@ package prwatch
 
 import (
 	"fmt"
-	"strconv"
 
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -21,40 +20,85 @@ type prQueueSnapshot struct {
 	// GroupChecks is the check runs of Entry's merge group commit; empty
 	// while the queue has made none.
 	GroupChecks []remoteCheck
+	// Gates is the repository's gate checks, left out of GroupChecks'
+	// outcome.
+	Gates map[string]bool
 }
 
-// diffChecks answers the check runs RUNS on HEAD finished that PREVCHECKS,
-// told for PREVHEAD, did not tell, and the head and checks after them. A new
-// head starts its checks afresh; of several runs of one name the latest
-// counts. Nothing is told while any of those latest runs is unfinished: the
-// set's finished runs are told together, once the whole set has finished.
-func diffChecks(prevHead string, prevChecks map[string]string, head string, runs []remoteCheck) (string, map[string]string, []*agentreplv1.PullRequestActivityCheckFinished) {
-	next := map[string]string{}
-	if head == prevHead {
-		next = copyMap(prevChecks)
-	}
+// Check outcomes, as told spells them.
+const (
+	outcomePassed = "passed"
+	outcomeFailed = "failed"
+)
+
+// runOutcome is the whole CI run RUNS make on one commit
+// (agentreplv1.PullRequestActivityChecksConcluded): of each name the latest
+// run, GATES left out. It is failed once any of those runs finished without
+// passing, passed once every one finished and passed, and empty while it is
+// undecided or has no runs. FAILED is the runs that did not pass, by name;
+// COUNTED is how many runs the outcome judged.
+func runOutcome(runs []remoteCheck, gates map[string]bool) (outcome string, failed []remoteCheck, counted int) {
 	latest := map[string]remoteCheck{}
 	for _, c := range runs {
+		if gates[c.Name] {
+			continue
+		}
 		if cur, ok := latest[c.Name]; !ok || c.ID > cur.ID {
 			latest[c.Name] = c
 		}
 	}
-	for _, c := range latest {
-		if !c.Completed {
-			return head, next, nil
-		}
-	}
-	var out []*agentreplv1.PullRequestActivityCheckFinished
+	pending := false
 	for _, name := range sortedNames(latest) {
 		c := latest[name]
-		value := strconv.FormatUint(c.ID, 10) + ":" + c.Conclusion
-		if next[name] == value {
-			continue
+		switch {
+		case !c.Completed:
+			pending = true
+		case !passes(c.Conclusion):
+			failed = append(failed, c)
 		}
-		next[name] = value
-		out = append(out, &agentreplv1.PullRequestActivityCheckFinished{Name: c.Name, Conclusion: conclusionProto(c.Conclusion)})
 	}
-	return head, next, out
+	switch {
+	case len(failed) > 0:
+		return outcomeFailed, failed, len(latest)
+	case pending || len(latest) == 0:
+		return "", nil, len(latest)
+	}
+	return outcomePassed, nil, len(latest)
+}
+
+// passes reports whether a finished run's conclusion counts as passing, as
+// GitHub counts it for a required check: success, neutral and skipped.
+func passes(conclusion string) bool {
+	switch conclusion {
+	case "success", "neutral", "skipped":
+		return true
+	}
+	return false
+}
+
+// diffOutcome answers the run RUNS make on HEAD, as told spells it, and its
+// conclusion when PREV, told for PREVHEAD, did not tell it. A new head starts
+// undecided. An undecided run is recorded as such, so the outcome it reaches
+// next is told whichever it is.
+func diffOutcome(prevHead, prev, head string, runs []remoteCheck, gates map[string]bool) (string, string, *agentreplv1.PullRequestActivityChecksConcluded) {
+	if head != prevHead {
+		prev = ""
+	}
+	outcome, failed, counted := runOutcome(runs, gates)
+	if outcome == "" || outcome == prev {
+		return head, outcome, nil
+	}
+	out := &agentreplv1.PullRequestActivityChecksConcluded{CommitSha: head}
+	if outcome == outcomePassed {
+		out.Outcome = &agentreplv1.PullRequestActivityChecksConcluded_Passed{Passed: &agentreplv1.PullRequestChecksPassed{CheckCount: uint32(counted)}}
+		return head, outcome, out
+	}
+	f := &agentreplv1.PullRequestChecksFailed{}
+	for _, c := range failed {
+		f.FailedChecks = append(f.FailedChecks, &agentreplv1.PullRequestActivityCheckFinished{Name: c.Name, Conclusion: conclusionProto(c.Conclusion)})
+	}
+	out.Outcome = &agentreplv1.PullRequestActivityChecksConcluded_Failed{Failed: f}
+	return head, outcome, out
 }
 
 // diffQueue answers what Q holds that PREV did not tell: the timed joinings
@@ -63,7 +107,7 @@ func diffChecks(prevHead string, prevChecks map[string]string, head string, runs
 //
 // A REMOVAL READ IN THE SAME READ AS THE MERGE IS NOT TOLD: the merge, told
 // as the state change, is how the pull request left the queue.
-func diffQueue(q prQueueSnapshot, merged bool, prev told) (events map[string]string, place, groupHead string, groupChecks map[string]string, timed []timedActivity, after []*agentreplv1.PullRequestActivity) {
+func diffQueue(q prQueueSnapshot, merged bool, prev told) (events map[string]string, place, groupHead, groupOutcome string, timed []timedActivity, after []*agentreplv1.PullRequestActivity) {
 	events = map[string]string{}
 	entered := false
 	for i, ev := range q.Events {
@@ -105,15 +149,15 @@ func diffQueue(q prQueueSnapshot, merged bool, prev told) (events map[string]str
 		}
 	}
 
-	groupHead, groupChecks = prev.GroupHead, prev.GroupChecks
+	groupHead, groupOutcome = prev.GroupHead, prev.GroupChecksOutcome
 	if q.Entry != nil && q.Entry.GroupHead != "" {
-		var finished []*agentreplv1.PullRequestActivityCheckFinished
-		groupHead, groupChecks, finished = diffChecks(prev.GroupHead, prev.GroupChecks, q.Entry.GroupHead, q.GroupChecks)
-		for _, c := range finished {
-			after = append(after, &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeGroupCheckFinished{MergeGroupCheckFinished: c}})
+		var concluded *agentreplv1.PullRequestActivityChecksConcluded
+		groupHead, groupOutcome, concluded = diffOutcome(prev.GroupHead, prev.GroupChecksOutcome, q.Entry.GroupHead, q.GroupChecks, q.Gates)
+		if concluded != nil {
+			after = append(after, &agentreplv1.PullRequestActivity{Activity: &agentreplv1.PullRequestActivity_MergeGroupChecksConcluded{MergeGroupChecksConcluded: concluded}})
 		}
 	}
-	return events, place, groupHead, groupChecks, timed, after
+	return events, place, groupHead, groupOutcome, timed, after
 }
 
 // place is a pull request's place in the queue, as told spells it.
