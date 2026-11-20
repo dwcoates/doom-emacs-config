@@ -356,6 +356,7 @@ func (s *server) ClientLog(
 			return nil, fail(s.log, rpc, fmt.Errorf("persist a webhost client record: %w", err))
 		}
 		s.observeWebhostStall(record)
+		s.observeWebhostCensus(record)
 		resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 		return connect.NewResponse(resp), nil
 	}
@@ -370,6 +371,7 @@ func (s *server) ClientLog(
 	if err := s.deps.Log.ClientLog(subject.Record.Dir, clientRecord(clientKind, record)); err != nil {
 		return nil, fail(subject.Log, rpc, fmt.Errorf("persist a client record: %w", err))
 	}
+	s.observePageCensus(subject.Log, subject.Record.ID, record)
 	resp.Result = &agentreplv1.ClientLogResponse_Success{Success: &agentreplv1.ClientLogSuccess{}}
 	return connect.NewResponse(resp), nil
 }

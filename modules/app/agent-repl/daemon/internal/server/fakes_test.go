@@ -54,6 +54,7 @@ import (
 	"agent-repld/internal/revision"
 	"agent-repld/internal/rollout"
 	"agent-repld/internal/runtimemetrics"
+	"agent-repld/internal/stallbeat"
 	"agent-repld/internal/storagesweep"
 	"agent-repld/internal/streamslot"
 	"agent-repld/internal/subagentmaker"
@@ -3102,6 +3103,25 @@ func (h *harness) withoutDep(strip func(*Deps)) Deps {
 type fakeStallBeat struct {
 	mu       sync.Mutex
 	observed []observedStall
+	census   []observedCensus
+}
+
+type observedCensus struct {
+	doc stallbeat.Document
+	at  time.Time
+	c   stallbeat.Census
+}
+
+func (f *fakeStallBeat) Census(doc stallbeat.Document, at time.Time, c stallbeat.Census) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.census = append(f.census, observedCensus{doc: doc, at: at, c: c})
+}
+
+func (f *fakeStallBeat) censuses() []observedCensus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]observedCensus(nil), f.census...)
 }
 
 type observedStall struct {

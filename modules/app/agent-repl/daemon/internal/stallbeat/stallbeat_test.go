@@ -3,10 +3,12 @@ package stallbeat
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/webfootprint"
 )
 
 // base is a moment on phase 0 of the cycle.
@@ -27,14 +29,58 @@ func onBeat(start time.Time, n int, off time.Duration) []time.Time {
 	return out
 }
 
+// fakeFootprint answers a fixed reading, or none.
+type fakeFootprint struct {
+	reading webfootprint.Reading
+	read    bool
+}
+
+func (f fakeFootprint) Latest() (webfootprint.Reading, bool) { return f.reading, f.read }
+
 func newDetector(t *testing.T) (*Detector, *dlog.TestLogger) {
 	t.Helper()
+	return newDetectorWith(t, fakeFootprint{})
+}
+
+func newDetectorWith(t *testing.T, footprint Footprint) (*Detector, *dlog.TestLogger) {
+	t.Helper()
 	log := dlog.NewTestLogger()
-	d, err := New(Deps{Log: log})
+	d, err := New(Deps{Log: log, Footprint: footprint})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
 	return d, log
+}
+
+// raiseBeat observes Beat stalls of DOCUMENT on one phase, the last at
+// lastBeat, and answers the error they raised.
+func raiseBeat(t *testing.T, d *Detector, log *dlog.TestLogger, document string) dlog.Record {
+	t.Helper()
+	for _, at := range onBeat(base, Beat, 0) {
+		d.Observe(document, at, 300)
+	}
+	raised := raisedErrors(log)
+	if len(raised) != 1 {
+		t.Fatalf("raised %d errors, want 1: %+v", len(raised), log.Records())
+	}
+	return raised[0]
+}
+
+// lastBeat is the moment raiseBeat's error is raised at.
+var lastBeat = base.Add(time.Duration(Beat-1) * Period)
+
+// documentNames answers the kind/name of every document an error names, in order.
+func documentNames(t *testing.T, r dlog.Record) []string {
+	t.Helper()
+	docs, ok := r.Context["documents"].([]map[string]any)
+	if !ok {
+		t.Fatalf("documents = %#v, want the named documents", r.Context["documents"])
+	}
+	var out []string
+	for _, doc := range docs {
+		out = append(out, fmt.Sprintf("%s/%s", doc["kind"], doc["name"]))
+	}
+	return out
 }
 
 func raisedErrors(log *dlog.TestLogger) []dlog.Record {
@@ -142,13 +188,179 @@ func TestObserveRecordsTheBeatsDiagnosis(t *testing.T) {
 	}
 }
 
-func TestNewRequiresALogger(t *testing.T) {
+func TestNewRequiresEveryCollaborator(t *testing.T) {
+	tests := []struct {
+		name string
+		deps Deps
+	}{
+		{name: "no logger", deps: Deps{Footprint: fakeFootprint{}}},
+		{name: "no footprint", deps: Deps{Log: dlog.NewTestLogger()}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			_, err := New(tt.deps)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("New with %s succeeded, want an error", tt.name)
+			}
+		})
+	}
+}
+
+func TestTheErrorNamesTheBeatingProcesssDocumentsLargestFirst(t *testing.T) {
+	tests := []struct {
+		name     string
+		document string
+		want     []string
+	}{
+		{name: "the host's process holds the host and every page", document: host,
+			want: []string{"page/ws-big", "webhost/host", "page/ws-small"}},
+		{name: "the sidebar's process holds the sidebar alone", document: sidebar,
+			want: []string{"webhost/sidebar"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d, log := newDetector(t)
+			three := int64(3)
+			d.Census(Document{Kind: KindPage, Name: "ws-small"}, lastBeat.Add(-time.Minute), Census{DomNodes: 900, FeedRows: 20, Animations: &three, Visibility: "hidden"})
+			d.Census(Document{Kind: KindWebhost, Name: "sidebar"}, lastBeat.Add(-30*time.Second), Census{DomNodes: 8911})
+			d.Census(Document{Kind: KindWebhost, Name: "host"}, lastBeat.Add(-30*time.Second), Census{DomNodes: 1200})
+			d.Census(Document{Kind: KindPage, Name: "ws-big"}, lastBeat.Add(-10*time.Second), Census{DomNodes: 41000, FeedRows: 1200, Animations: &three, Visibility: "visible"})
+
+			// Act
+			got := raiseBeat(t, d, log, tt.document)
+
+			// Assert
+			if names := documentNames(t, got); fmt.Sprint(names) != fmt.Sprint(tt.want) {
+				t.Fatalf("documents = %v, want %v", names, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheErrorStatesAPagesCensusWhole(t *testing.T) {
+	// Arrange
+	d, log := newDetector(t)
+	three := int64(3)
+	d.Census(Document{Kind: KindPage, Name: "ws-a"}, lastBeat.Add(-10*time.Second), Census{DomNodes: 900, FeedRows: 20, Animations: &three, Visibility: "hidden"})
+
 	// Act
-	_, err := New(Deps{})
+	got := raiseBeat(t, d, log, host)
 
 	// Assert
-	if err == nil {
-		t.Fatal("New with no logger succeeded, want an error")
+	doc := got.Context["documents"].([]map[string]any)[0]
+	want := map[string]any{"kind": "page", "name": "ws-a", "dom_nodes": int64(900), "feed_rows": int64(20), "animations": int64(3), "visibility": "hidden", "census_age_s": int64(10)}
+	if fmt.Sprint(doc) != fmt.Sprint(want) {
+		t.Fatalf("document = %v, want %v", doc, want)
+	}
+}
+
+func TestTheErrorLeavesOutWhatAWebhostCensusDoesNotCount(t *testing.T) {
+	// Arrange
+	d, log := newDetector(t)
+	d.Census(Document{Kind: KindWebhost, Name: "host"}, lastBeat, Census{DomNodes: 1200, FeedRows: 4})
+
+	// Act
+	got := raiseBeat(t, d, log, host)
+
+	// Assert
+	doc := got.Context["documents"].([]map[string]any)[0]
+	if _, ok := doc["animations"]; ok {
+		t.Fatalf("document = %v, want no animations for a webhost document", doc)
+	}
+	if _, ok := doc["visibility"]; ok {
+		t.Fatalf("document = %v, want no visibility for a webhost document", doc)
+	}
+}
+
+func TestTheErrorLeavesOutADocumentSilentForCensusFresh(t *testing.T) {
+	// Arrange
+	d, log := newDetector(t)
+	d.Census(Document{Kind: KindPage, Name: "ws-gone"}, lastBeat.Add(-CensusFresh), Census{DomNodes: 5000})
+	d.Census(Document{Kind: KindPage, Name: "ws-here"}, lastBeat.Add(-CensusFresh+time.Second), Census{DomNodes: 10})
+
+	// Act
+	got := raiseBeat(t, d, log, host)
+
+	// Assert
+	if names := documentNames(t, got); fmt.Sprint(names) != "[page/ws-here]" {
+		t.Fatalf("documents = %v, want only the census still standing", names)
+	}
+}
+
+func TestALaterCensusReplacesItsDocumentsEarlierOne(t *testing.T) {
+	// Arrange
+	d, log := newDetector(t)
+	doc := Document{Kind: KindPage, Name: "ws-a"}
+	d.Census(doc, lastBeat.Add(-time.Minute), Census{DomNodes: 100})
+	d.Census(doc, lastBeat.Add(-10*time.Second), Census{DomNodes: 700})
+
+	// Act
+	got := raiseBeat(t, d, log, host)
+
+	// Assert
+	docs := got.Context["documents"].([]map[string]any)
+	if len(docs) != 1 || docs[0]["dom_nodes"] != int64(700) {
+		t.Fatalf("documents = %v, want the one document at its later census", docs)
+	}
+}
+
+func TestTheErrorMessageNamesTheLargestDocument(t *testing.T) {
+	tests := []struct {
+		name string
+		docs bool
+		want string
+	}{
+		{name: "with documents", docs: true, want: "1 documents are loaded in it, the largest document is page ws-a at 900 elements"},
+		{name: "with none", want: "0 documents are loaded in it, no document has stated its size"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d, log := newDetector(t)
+			if tt.docs {
+				d.Census(Document{Kind: KindPage, Name: "ws-a"}, lastBeat, Census{DomNodes: 900})
+			}
+
+			// Act
+			got := raiseBeat(t, d, log, host)
+
+			// Assert
+			if !strings.Contains(got.Message, tt.want) {
+				t.Fatalf("message = %q, want it to contain %q", got.Message, tt.want)
+			}
+		})
+	}
+}
+
+func TestTheErrorStatesTheWebFootprint(t *testing.T) {
+	tests := []struct {
+		name      string
+		footprint fakeFootprint
+		want      map[string]any
+	}{
+		{name: "a sampled footprint", footprint: fakeFootprint{read: true, reading: webfootprint.Reading{At: lastBeat.Add(-20 * time.Second), Processes: 3, LargestBytes: 2 << 30}},
+			want: map[string]any{"largest_web_content_footprint_mb": int64(2048), "web_content_processes": 3, "footprint_age_s": int64(20)}},
+		{name: "no footprint sampled yet", footprint: fakeFootprint{}, want: map[string]any{"footprint_sampled": false}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			d, log := newDetectorWith(t, tt.footprint)
+
+			// Act
+			got := raiseBeat(t, d, log, host)
+
+			// Assert
+			for k, v := range tt.want {
+				if got.Context[k] != v {
+					t.Fatalf("context[%q] = %#v, want %#v (whole: %+v)", k, got.Context[k], v, got.Context)
+				}
+			}
+		})
 	}
 }
 

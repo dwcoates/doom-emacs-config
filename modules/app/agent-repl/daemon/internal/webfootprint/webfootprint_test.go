@@ -236,3 +236,54 @@ func TestNewRefusesAMissingCollaborator(t *testing.T) {
 		t.Fatalf("New accepted a sampler with no reader")
 	}
 }
+
+func TestLatestAnswersNothingBeforeTheFirstSample(t *testing.T) {
+	// Arrange
+	s, _ := newSampler(t, &fakeReader{})
+
+	// Act
+	_, ok := s.Latest()
+
+	// Assert
+	if ok {
+		t.Fatal("Latest answered a reading before any sample")
+	}
+}
+
+func TestLatestAnswersTheLastSamplesLargestFootprint(t *testing.T) {
+	// Arrange
+	s, _ := newSampler(t, &fakeReader{
+		ids:   map[int]procmetrics.Identity{1: webContent(1, time.Minute), 2: webContent(2, time.Minute)},
+		usage: map[int]procmetrics.Usage{1: {FootprintBytes: 1 << 20}, 2: {FootprintBytes: 10 << 30}},
+	})
+
+	// Act
+	s.Sample(context.Background())
+	got, ok := s.Latest()
+
+	// Assert
+	want := Reading{At: now, Processes: 2, LargestBytes: 10 << 30}
+	if !ok || got != want {
+		t.Fatalf("Latest = (%+v, %v), want (%+v, true)", got, ok, want)
+	}
+}
+
+func TestLatestKeepsTheEarlierReadingWhenASampleFails(t *testing.T) {
+	// Arrange
+	r := &fakeReader{
+		ids:   map[int]procmetrics.Identity{1: webContent(1, time.Minute)},
+		usage: map[int]procmetrics.Usage{1: {FootprintBytes: 1 << 20}},
+	}
+	s, _ := newSampler(t, r)
+	s.Sample(context.Background())
+	r.pidsErr = errors.New("sysctl refused")
+
+	// Act
+	s.Sample(context.Background())
+	got, ok := s.Latest()
+
+	// Assert
+	if !ok || got.LargestBytes != 1<<20 {
+		t.Fatalf("Latest = (%+v, %v), want the earlier reading kept", got, ok)
+	}
+}

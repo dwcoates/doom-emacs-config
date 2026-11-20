@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"sync"
 	"time"
 
 	"agent-repld/internal/clock"
@@ -45,6 +46,26 @@ type Deps struct {
 // Sampler samples the web content processes' footprints.
 type Sampler struct {
 	deps Deps
+
+	mu     sync.Mutex
+	latest Reading
+	read   bool
+}
+
+// Reading is one sample's measure: when it was read, how many web content
+// processes the host ran, and the largest one's footprint.
+type Reading struct {
+	At           time.Time
+	Processes    int
+	LargestBytes int64
+}
+
+// Latest answers the last sample that read every process, false before one
+// has (the stall beat states it beside the pages it names).
+func (s *Sampler) Latest() (Reading, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.latest, s.read
 }
 
 // New builds a sampler.
@@ -104,6 +125,13 @@ func (s *Sampler) Sample(context.Context) {
 	if len(procs) > 0 {
 		largest = procs[0].FootprintBytes >> 20
 	}
+	reading := Reading{At: s.deps.Clock.Now(), Processes: len(procs)}
+	if len(procs) > 0 {
+		reading.LargestBytes = procs[0].FootprintBytes
+	}
+	s.mu.Lock()
+	s.latest, s.read = reading, true
+	s.mu.Unlock()
 	s.deps.Log.Info(op, fmt.Sprintf("the largest web content process's footprint is %d MB", largest), dlog.Context{
 		"processes": listed, "largest_footprint_mb": largest,
 	})
