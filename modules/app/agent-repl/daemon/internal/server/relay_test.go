@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,27 @@ func TestAViewOfAWorkspaceServedElsewhereIsRelayedOntoThePage(t *testing.T) {
 	push := nextPageFrame(t, cancel, stream).GetPush()
 	if push.GetSubscription() != "footer-1" || footerMark(push.GetFooter().GetFooter()) != 42 {
 		t.Fatalf("the page was sent %v, want the serving daemon's footer on footer-1", push)
+	}
+}
+
+func TestAViewWhoseServingDaemonNoLongerAcceptsIsServedHere(t *testing.T) {
+	// Arrange: the serving row names a daemon whose listener is closed, and
+	// this daemon has not adopted the workspace yet.
+	here := servingElsewhereAt(t, refusingAddress(t))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	attachPageStream(t, here, ctx, "page-1")
+
+	// Act
+	_, err := here.Client.SubscribePage(ctx, connect.NewRequest(footerSubscription("page-1", nil)))
+
+	// Assert: the view's own body ran here and answered the handover's
+	// refusal, which the page waits out; the refused dial never reached it.
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "not_yet_adopted") {
+		t.Fatalf("SubscribePage = %v, want this daemon's own not_yet_adopted refusal", err)
+	}
+	if strings.Contains(err.Error(), "connection refused") {
+		t.Fatalf("SubscribePage = %v, want no dial failure passed to the page", err)
 	}
 }
 

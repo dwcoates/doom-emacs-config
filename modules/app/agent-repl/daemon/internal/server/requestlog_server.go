@@ -52,7 +52,13 @@ func serveUnary[Req, Resp any](
 		return nil, boundaryFailure(err)
 	} else if ok {
 		phase = "forward"
-		return forwardUnary[Req, Resp](ctx, s.server, rpc, target, req)
+		resp, err := forwardUnary[Req, Resp](ctx, s.server, rpc, target, req)
+		if !errors.Is(err, errTargetGone) {
+			return resp, err
+		}
+		// THE DAEMON IT WAS SENT TO IS GONE: the call is answered here, as
+		// one for a daemon that no longer runs is (targetGone).
+		phase = "boundary"
 	}
 	boundary, err := s.server.beginRequest(ctx, rpc, requestID, requestMessage(req))
 	if err != nil {
@@ -116,7 +122,11 @@ func serveStream[Req, Resp any](
 	if target, ok, err := s.server.forwardTarget(ctx, rpc, req.Header(), requestMessage(req)); err != nil {
 		return boundaryFailure(err)
 	} else if ok {
-		return forwardStream[Req, Resp](ctx, s.server, rpc, target, req, stream)
+		err := forwardStream[Req, Resp](ctx, s.server, rpc, target, req, stream)
+		if !errors.Is(err, errTargetGone) {
+			return err
+		}
+		// THE DAEMON IT WAS SENT TO IS GONE: the stream is served here.
 	}
 	boundary, err := s.server.beginRequest(ctx, rpc, req.Header().Get(requestIDHeader), requestMessage(req))
 	if err != nil {

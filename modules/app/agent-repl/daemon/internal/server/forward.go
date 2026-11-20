@@ -2,8 +2,10 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
+	"syscall"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/proto"
@@ -37,6 +39,27 @@ const AcceptedHeader = "Agent-Repl-Accepted"
 // private address, and its answer relayed. The target is the one the typed
 // redirects named: the successor a transferred workspace went to, or the
 // incumbent that still serves one this daemon has not adopted.
+
+// errTargetGone is what a forward or a relay answers when the daemon it
+// dialed no longer accepts connections (targetGone). The caller then answers
+// the call here, exactly as it does for a daemon that no longer runs.
+var errTargetGone = errors.New("server: the daemon the call was sent to no longer accepts connections")
+
+// targetGone reports whether ERR is the kernel refusing a connection to
+// another daemon's private address.
+//
+// A REFUSED CONNECTION IS THE DAEMON'S END, READ WHERE IT CANNOT BE STALE. A
+// daemon's private listener never reopens, so a refusal says for good that
+// the daemon accepts nothing more. Its life lock says less: an exiting daemon
+// closes its listener first and holds the lock until its process is gone, so
+// for that span the lock reads "runs" of a daemon no call can reach
+// (2026-11-19: a page's five subscriptions were forwarded to an incumbent 36
+// ms after it logged its exit, were refused, and the page filed
+// daemonUnreachable). No request byte left this daemon on a refused dial, so
+// answering the call here repeats nothing.
+func targetGone(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED)
+}
 
 // forwardTarget answers the private address of the daemon that serves the
 // call's workspace, when that is not this one. A call already forwarded is
@@ -176,6 +199,10 @@ func forwardRequest[Req any](req *connect.Request[Req]) *connect.Request[Req] {
 func forwardUnary[Req, Resp any](ctx context.Context, s *server, rpc, target string, req *connect.Request[Req]) (*connect.Response[Resp], error) {
 	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+req.Spec().Procedure)
 	resp, err := client.CallUnary(ctx, forwardRequest(req))
+	if targetGone(err) {
+		s.log.Info("daemon.server.forward", "the daemon a call was forwarded to no longer accepts connections; the call is answered here", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
+		return nil, errTargetGone
+	}
 	if err != nil {
 		s.log.Info("daemon.server.forward", "the daemon a call was forwarded to answered it with an error", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
 		return nil, err
@@ -200,7 +227,8 @@ func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target st
 
 // pipeStream opens the server-streaming rpc at PROCEDURE on the daemon at
 // TARGET with REQ and writes every message it sends into SINK, answering how
-// the target's stream ended: nil for a clean end, its error otherwise. It is
+// the target's stream ended: nil for a clean end, errTargetGone for a target
+// that no longer accepts connections, its error otherwise. It is
 // the one place a stream is carried from another daemon, for a forwarded
 // stream (forwardStream) and a relayed page subscription (relayWatch) alike.
 //
@@ -212,7 +240,14 @@ func forwardStream[Req, Resp any](ctx context.Context, s *server, rpc, target st
 // stands all the same, so the message is the acceptance.
 func pipeStream[Req, Resp any](ctx context.Context, s *server, rpc, target, procedure string, req *connect.Request[Req], sink streamSink[Resp], accepted func()) error {
 	client := connect.NewClient[Req, Resp](s.deps.Forward, "http://"+target+procedure)
+	gone := func(err error) error {
+		s.log.Info("daemon.server.forward", "the daemon a stream was forwarded to no longer accepts connections; the stream is served here", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
+		return errTargetGone
+	}
 	in, err := client.CallServerStream(ctx, req)
+	if targetGone(err) {
+		return gone(err)
+	}
 	if err != nil {
 		s.log.Info("daemon.server.forward", "the daemon a stream was forwarded to refused it", dlog.Context{"rpc": rpc, "target": target, "cause": err.Error()})
 		return err
@@ -230,6 +265,11 @@ func pipeStream[Req, Resp any](ctx context.Context, s *server, rpc, target, proc
 		if err := sink.Send(in.Msg()); err != nil {
 			return fmt.Errorf("relay %s from %s: %w", rpc, target, err)
 		}
+	}
+	// A DIAL IS REFUSED AT THE FIRST RECEIVE, before the target stated
+	// anything: nothing of the stream exists there or here.
+	if err := in.Err(); !stated && targetGone(err) {
+		return gone(err)
 	}
 	return in.Err()
 }

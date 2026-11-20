@@ -374,8 +374,16 @@ func (s *server) SubscribePage(
 			return nil, boundaryFailure(err)
 		}
 		if elsewhere {
-			relay := watch.Relay
-			watch.Run = func(ctx context.Context) error { return relay(ctx, target) }
+			relay, here := watch.Relay, watch.Run
+			// A TARGET THAT NO LONGER ACCEPTS CONNECTIONS SERVES NOTHING: the
+			// view is run here, as it is for a daemon that no longer runs
+			// (targetGone).
+			watch.Run = func(ctx context.Context) error {
+				if err := relay(ctx, target); !errors.Is(err, errTargetGone) {
+					return err
+				}
+				return here(ctx)
+			}
 			s.log.Debug(rpc, "a page subscription is relayed from the daemon that serves it", dlog.Context{
 				"page": page.id, "subscription": req.Msg.GetSubscription(), "watch": watch.Name, "target": target,
 			})
