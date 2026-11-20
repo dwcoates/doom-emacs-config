@@ -25,7 +25,7 @@ import (
 // lowers what the ceiling leaves.
 //
 // THE LIMITS FOLLOW THE HOST'S POWER (owner ruling, 2026-11-17). On AC power
-// in High Power Mode the tests may average 55% and the host reach 70%
+// in High Power Mode the tests may average 50% and the host reach 55%
 // (PoweredLimits); on battery, or in any other energy mode, the limits are
 // 35% and 50% (BaseLimits). A closed lid under persistent Wi-Fi keeps High
 // Power Mode on AC power, so it keeps the higher limits, and unplugging
@@ -104,9 +104,10 @@ var (
 	// 2026-11-13, which made it the tests' own share under a 50 ceiling).
 	BaseLimits = Limits{Target: 35, Ceiling: 50}
 	// PoweredLimits are the limits on AC power in High Power Mode (owner
-	// ruling, 2026-11-17), the ceiling 15 points above the target as in
-	// BaseLimits.
-	PoweredLimits = Limits{Target: 55, Ceiling: 70}
+	// rulings, 2026-11-17 and 2026-11-20: 55 and 70 made the owner's own work
+	// slow while a merge gate ran, so the ceiling sits 5 points above the
+	// target).
+	PoweredLimits = Limits{Target: 50, Ceiling: 55}
 )
 
 // TargetCores is the tests' target on a host of numCPU cores.

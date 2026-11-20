@@ -115,8 +115,8 @@ Example, run from `modules/app/agent-repl`:
 Owner ruling, 2026-11-13: the tests together average 35% of the host's
 cores, their own share that other load does not eat, and never bring the
 whole host above 50% (`cores.BaseLimits`). On AC power in High Power Mode
-they average 55% and the host reaches 70% (`cores.PoweredLimits`, owner
-ruling 2026-11-17), read at every second, so unplugging returns the base
+they average 50% and the host reaches 55% (`cores.PoweredLimits`, owner
+rulings 2026-11-17 and 2026-11-20), read at every second, so unplugging returns the base
 limits for the next unit admitted. The governor
 (`testrun/internal/cores`) measures the tests' CPU apart from the host (every
 process carrying `cores.NestedEnv`), averages the last 3 one-second reads, and

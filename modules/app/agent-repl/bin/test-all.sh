@@ -20,7 +20,7 @@
 # program this script builds and runs) turns every selected suite into units —
 # one Go package, one chunk of ERT files, one chunk of vitest files, one chunk
 # of e2e tests, one harness script — each pinned to ONE core, and runs them on
-# the host's core budget (at most 35% of its cores, 55% on AC power in High
+# the host's core budget (at most 35% of its cores, 50% on AC power in High
 # Power Mode, less while the rest of the host is busy, shared by every run on
 # the host),
 # longest chain first. How many chunks a suite is cut into

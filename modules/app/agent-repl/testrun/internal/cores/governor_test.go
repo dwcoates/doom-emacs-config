@@ -24,7 +24,7 @@ func TestTargetAndCeilingCores(t *testing.T) {
 		wantTarget, wantCeiling float64
 	}{
 		{name: "the base limits are 35% and 50% of sixteen cores", limits: BaseLimits, wantTarget: 5.6, wantCeiling: 8},
-		{name: "the powered limits are 55% and 70% of sixteen cores", limits: PoweredLimits, wantTarget: 8.8, wantCeiling: 11.2},
+		{name: "the powered limits are 50% and 55% of sixteen cores", limits: PoweredLimits, wantTarget: 8, wantCeiling: 8.8},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -129,7 +129,7 @@ func TestExpectedCores(t *testing.T) {
 
 func TestAdmits(t *testing.T) {
 	// Sixteen cores: the tests' target is 5.6, the host's ceiling 8, under
-	// the base limits; 8.8 and 11.2 under the powered ones.
+	// the base limits; 8 and 8.8 under the powered ones.
 	cases := []struct {
 		name   string
 		limits Limits
@@ -166,7 +166,7 @@ func TestAdmits(t *testing.T) {
 		{name: "the powered ceiling still bounds the host",
 			limits: PoweredLimits, load: Load{HostCores: 10, TestsCores: 2, Running: true}, cores: 2, want: false},
 		{name: "the first unit starts while the rest of the host is under the powered ceiling",
-			limits: PoweredLimits, load: Load{HostCores: 11}, cores: 6.1, want: true},
+			limits: PoweredLimits, load: Load{HostCores: 8.5}, cores: 6.1, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1120,7 +1120,7 @@ var (
 
 func TestGovernorHoldsTheTestsToTheLimitsTheHostsPowerAllows(t *testing.T) {
 	// Sixteen cores, the tests using 6 of them: over the base target of 5.6,
-	// under the powered one of 8.8.
+	// under the powered one of 8.
 	cases := []struct {
 		name        string
 		power       HostPower
@@ -1129,7 +1129,7 @@ func TestGovernorHoldsTheTestsToTheLimitsTheHostsPowerAllows(t *testing.T) {
 		wantPercent [2]int
 	}{
 		{name: "on the battery the base target holds the next unit back", power: onBattery, wantLimits: BaseLimits, wantPercent: [2]int{35, 50}},
-		{name: "on AC power in High Power Mode the powered target lets it start", power: pluggedIn, wantAdmit: true, wantLimits: PoweredLimits, wantPercent: [2]int{55, 70}},
+		{name: "on AC power in High Power Mode the powered target lets it start", power: pluggedIn, wantAdmit: true, wantLimits: PoweredLimits, wantPercent: [2]int{50, 55}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1198,7 +1198,7 @@ func TestGovernorSaysEachChangeOfItsLimitsOnce(t *testing.T) {
 		}
 	}
 	want := []string{
-		"CPU governor: the host runs on ac power in High Power Mode, so the tests average at most 55% (8.8 cores) and the host reaches at most 70% (11.2 cores)",
+		"CPU governor: the host runs on ac power in High Power Mode, so the tests average at most 50% (8.0 cores) and the host reaches at most 55% (8.8 cores)",
 		"CPU governor: the host runs on battery power in Low Power Mode, so the tests average at most 35% (5.6 cores) and the host reaches at most 50% (8.0 cores)",
 	}
 	if strings.Join(said, "\n") != strings.Join(want, "\n") {
@@ -1234,7 +1234,7 @@ func TestLimitsSaidNamesBothLimits(t *testing.T) {
 	got := LimitsSaid()
 
 	// Assert
-	want := "the tests to an average of 55% of the host and the host to 70% on AC power in High Power Mode, and to 35% and 50% otherwise"
+	want := "the tests to an average of 50% of the host and the host to 55% on AC power in High Power Mode, and to 35% and 50% otherwise"
 	if got != want {
 		t.Fatalf("LimitsSaid() = %q; want %q", got, want)
 	}
