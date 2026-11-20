@@ -264,11 +264,13 @@ mechanics (`integration/shareddaemon_test.go`).
   only for a case whose subject is the daemon's own lifecycle**: startup,
   restart, handover, crash, shutdown, or a boot-time option or environment
   (`harness.Opts` other than the default). Its fixture line says so.
-- **Not yet shared: a case asserting through the idle barrier**
-  (`ExpectNoPush`, `ExpectNoPushMatching`, `ExpectFileUnchanged`,
-  `Daemon.AwaitIdle`). The barrier waits for the WHOLE daemon to be idle, which
-  a shared daemon running other cases rarely is; those cases keep their own
-  daemon until the barrier is scoped to a workspace.
+- **A view's idle barrier is its own slice's** (`ExpectNoPush`,
+  `ExpectNoPushMatching`, `ExpectFileUnchanged`, `Daemon.AwaitIdle`): it names
+  the view's workspaces (`agentrepl.v1.AwaitIdleRequest.workspaces`) and waits
+  for their work and for work no workspace owns, never for another case's. Work
+  a workspace owns is begun on its tracker (`inflight.ForWorkspace`); a new
+  per-workspace goroutine begun on the daemon's tracker instead still works,
+  but makes every case's barrier wait for it.
 - Measured (2026-11-20, the same 146 cases): 68.3 CPU-s with a daemon per
   case, 47.4 CPU-s shared; summed unit wall rose from 11.6s to 18.7s, the
   accepted cost.

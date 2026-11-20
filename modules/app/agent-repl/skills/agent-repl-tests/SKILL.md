@@ -305,7 +305,7 @@ to every harness, fake and fixture a test uses, in every language.
 ### Sharing by suite
 
 - **Daemon integration (`daemon/integration`)**: a case takes the canonical daemon with `newCanonical(t)`, `newCanonicalRegistered(t)` or `canonicalView(t)`; its slice is its own repository and workspace, and an id it mints (a turn id, a URL a stub records) carries its workspace id, since a turn id is unique across the daemon.
-  - A case that changes daemon-wide state takes its group with `newInGroup(t, group)`; only a case whose subject is the daemon's own lifecycle starts a fresh daemon, and an idle-barrier assertion (`ExpectNoPush`, `ExpectFileUnchanged`) cannot share yet.
+  - A case that changes daemon-wide state takes its group with `newInGroup(t, group)`; only a case whose subject is the daemon's own lifecycle starts a fresh daemon; a view's idle barrier (`ExpectNoPush`, `ExpectFileUnchanged`) waits only for its own workspaces' work.
   - The rest: `daemon/AGENTS.md`, "The integration suite's canonical daemon".
 
 ### Finding and fixing a flake
