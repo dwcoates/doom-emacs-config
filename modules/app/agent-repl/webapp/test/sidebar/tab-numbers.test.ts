@@ -7,6 +7,7 @@ import {
   type RosterOpenRow,
   type RosterRepositoryView,
   RosterOpenRowRepositoryBlockSchema,
+  RosterOpenRowTabSchema,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
@@ -14,6 +15,7 @@ import {
   TAB_NUMBER_CLASS,
   drawTabNumberSlot,
   paintTabNumbers,
+  tabNumber,
   tabNumbers,
 } from "../../src/sidebar/tab-numbers.js";
 import { captureLogRecords } from "../log-capture.js";
@@ -149,6 +151,21 @@ describe("tabNumbers", () => {
 
     // Assert
     expect(read).toThrow(/workspace a has two open rows/);
+  });
+});
+
+describe("tabNumber", () => {
+  it("answers a numbered tab's number", () => {
+    expect(tabNumber(create(RosterOpenRowTabSchema, { tab: { case: "numbered", value: { number: 3 } } }), "t")).toBe(3);
+  });
+  it("answers nothing for a folded tab", () => {
+    expect(tabNumber(create(RosterOpenRowTabSchema, { tab: { case: "folded", value: {} } }), "t")).toBeUndefined();
+  });
+  it("refuses a missing tab", () => {
+    expect(() => tabNumber(undefined, "t")).toThrow(MalformedView);
+  });
+  it("refuses a tab with no arm", () => {
+    expect(() => tabNumber(create(RosterOpenRowTabSchema, {}), "t")).toThrow(MalformedView);
   });
 });
 
