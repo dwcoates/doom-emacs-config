@@ -1624,11 +1624,12 @@ The request itself is `agent-repl--step-workspace-to''s, with OP and TRIGGER."
    op trigger))
 
 (defun agent-repl--step-workspace-to (n target-fn op trigger)
-  "Request the DRAWN tab TARGET-FN picks for a step of N from the current workspace.
+  "Request the DRAWN tab TARGET-FN picks for a step of N from here.
 TARGET-FN is called with the workspace the step starts from and the drawn
 tab names, and answers the tab to land on or nil.  N is only recorded.
-OP names the gesture's records \(`elisp.commands.OP', `elisp.commands.OP-no-position') and TRIGGER is the
-switch request's (`agent-repl-host-request-switch').
+OP names the gesture's records \(`elisp.commands.OP',
+`elisp.commands.OP-no-position') and TRIGGER is the switch request's
+\(`agent-repl-host-request-switch').
 
 THE STEP STARTS FROM THE MOST RECENT REQUEST while one is unanswered
 \(`agent-repl-host-pending-selection'), not from the tab shown: the frame
@@ -1709,12 +1710,12 @@ else nil (`agent-repl-roster-family-of', `agent-repl--adjacent-drawn')."
    "aunt-walk" 'cycle))
 
 (defun agent-repl-switch-aunt-previous ()
-  "Switch to the previous sibling of this workspace's parent, else its own previous sibling."
+  "Switch to the parent's previous sibling, else this one's previous sibling."
   (interactive)
   (agent-repl--aunt-walk -1))
 
 (defun agent-repl-switch-aunt-next ()
-  "Switch to the next sibling of this workspace's parent, else its own next sibling."
+  "Switch to the parent's next sibling, else this one's next sibling."
   (interactive)
   (agent-repl--aunt-walk 1))
 
