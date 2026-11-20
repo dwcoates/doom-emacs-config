@@ -1394,7 +1394,10 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 #ws-sidebar .row {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
+  /* THE GAP IS A TOKEN so a part that stands closer to its neighbour than the
+     row's parts do (the name's glyph, below) can take it back exactly. */
+  --row-gap: 0.45rem;
+  gap: var(--row-gap);
   padding: var(--row-pad-y) 0.7rem var(--row-pad-y) calc(0.9rem + var(--row-indent));
   border-radius: 5px;
   cursor: pointer;
@@ -1781,16 +1784,30 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    count: slightly smaller, in the muted grey, never shrunk away by a long name. */
 #ws-sidebar .row .sb-child-count { font-size: 0.85em; color: var(--muted); flex: none; margin-left: 0.3em; }
 #ws-sidebar .row .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* A NAME'S GLYPH (src/name-glyph.ts) is drawn at the name's own font size,
-   never larger (owner request, 2026-11-18): the emoji takes the line's em and
-   no line height of its own, so a row or a heading wearing one is exactly as
-   tall as one without. It never shrinks away beside a long name, and it keeps
+/* A NAME'S GLYPH (src/name-glyph.ts) is drawn a little smaller than the
+   name's own font size (owner requests, 2026-11-18: never larger; 2026-11-20:
+   a bit smaller): the emoji takes 0.85 of the line's em and no line height of
+   its own, so a row or a heading wearing one is exactly as tall as one
+   without. It never shrinks away beside a long name, and it keeps
    the emoji's own colours, whatever ink the name beside it is drawn in. */
 .name-glyph {
-  font-size: 1em;
+  font-size: 0.85em;
   line-height: 1;
   flex: none;
-  margin-right: 0.3em;
+  /* ONE WORD SPACE stands between the glyph and the name (owner request,
+     2026-11-20). */
+  --name-glyph-space: 0.25em;
+  margin-right: var(--name-glyph-space);
+}
+/* IN A SIDEBAR ROW the row's own gap also stands between the glyph and the
+   name, which drew them 0.45rem further apart than a space: the glyph takes
+   the gap back, so the space alone is left. */
+#ws-sidebar .row > .name-glyph {
+  margin-right: calc(var(--name-glyph-space) - var(--row-gap));
+  /* AND IT IS SIZED FROM THE STATUS MARK beside it, a quarter larger (owner
+     request, 2026-11-20: only slightly bigger than the status indicators to
+     its left), never from the name's font. */
+  font-size: calc(var(--ws-mark-size) * 1.25);
 }
 /* WORKSPACE NAMES ARE GREYSCALE (owner request, 2026-10-29): the repository
    headers' ink while unviewed, the muted grey once viewed (below), and a cold

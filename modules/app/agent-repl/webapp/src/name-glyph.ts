@@ -8,8 +8,8 @@
  * The glyph is its own element BEFORE the name's, never part of the name's
  * text: the name stays the slug the rename, the search and the name's ink
  * read, and the name's tint and breath never touch the glyph. It is sized
- * by the stylesheet's `.name-glyph` at the name's own font size, so the emoji
- * is never drawn larger than the letters beside it.
+ * by the stylesheet's `.name-glyph` a little under the name's own font size,
+ * so the emoji is never drawn larger than the letters beside it.
  */
 
 /** The class every drawn name glyph carries, which the stylesheet sizes. */
