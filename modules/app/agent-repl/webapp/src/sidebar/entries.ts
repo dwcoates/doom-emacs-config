@@ -6,7 +6,14 @@
  * numbers, the drag's refs) walks it here, so none can read the two kinds
  * in some other order.
  */
-import type { RosterOpenRow, RosterOpenRows, RosterRepoSection, RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type {
+  RosterOpenRow,
+  RosterOpenRows,
+  RosterRepoSection,
+  RosterRepositoryView,
+  RosterSubsection,
+} from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { pathedFamilies } from "./row.js";
 
@@ -104,5 +111,30 @@ export function sectionOpenRows(u: RosterRepoSection, path: string): PathedOpenR
       : pathedOpenRows(requireMessage(entry.subsection.openRows, `${entry.path}.open_rows`), `${entry.path}.open_rows`).flatMap(
           ({ row, path: rowPath }) => flatten(row, rowPath),
         ),
+  );
+}
+
+/** One open row with its workspace's `WorkspaceRef.id`, and its message path. */
+export interface WorkspaceOpenRow extends PathedOpenRow {
+  id: string;
+}
+
+/**
+ * Every open row of the Open section U, each with its workspace's id, depth-first
+ * in drawn order (`sectionOpenRows`, section by section). THE ONE READ of an
+ * open row by its workspace: every painter that fills a row's slot from the
+ * push (the tab numbers, the recency gutters) keys it here. A row naming no
+ * workspace, or a workspace with two rows, is malformed.
+ */
+export function openRowWorkspaces(u: RosterRepositoryView, path: string): WorkspaceOpenRow[] {
+  const seen = new Set<string>();
+  return u.sections.flatMap((section, s) =>
+    sectionOpenRows(section, `${path}.sections[${s}]`).map(({ row, path: rowPath }) => {
+      const id = requireMessage(requireMessage(row.row, `${rowPath}.row`).workspace, `${rowPath}.row.workspace`).workspace?.id;
+      if (id === undefined) throw new MalformedView(`${rowPath}.row.workspace.workspace`, "an open row names no workspace");
+      if (seen.has(id)) throw new MalformedView(`${rowPath}.row.workspace`, `workspace ${id} has two open rows`);
+      seen.add(id);
+      return { id, row, path: rowPath };
+    }),
   );
 }

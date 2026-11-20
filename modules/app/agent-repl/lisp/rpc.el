@@ -89,6 +89,7 @@
 (declare-function agent-repl-wire-encode-answer-editor-evaluation-request "wire-host" (request))
 (declare-function agent-repl-wire-decode-answer-editor-evaluation-response "wire-host" (alist))
 (declare-function agent-repl-wire-encode-report-editor-focus-request "wire-host" (request))
+(declare-function agent-repl-wire-encode-report-recency-reach-request "wire-host" (value))
 (declare-function agent-repl-wire-encode-report-composer-entries-request "wire-verbs" (request))
 (declare-function agent-repl-wire-decode-report-composer-entries-response "wire-verbs" (json))
 (declare-function agent-repl-wire-encode-find-entry-neighbor-request "wire-verbs" (request))
@@ -98,6 +99,7 @@
 (declare-function agent-repl-wire-decode-get-workspace-status-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-report-latencies-response "wire-verbs" (alist))
 (declare-function agent-repl-wire-decode-report-editor-focus-response "wire-host" (alist))
+(declare-function agent-repl-wire-decode-report-recency-reach-response "wire-host" (value))
 (declare-function agent-repl-wire-editor-focus "wire-host" (focused))
 (declare-function agent-repl--emacs-focused-p "notifications" (&optional ws))
 (declare-function agent-repl-wire-decode-watch-daemon-response "wire-host" (alist))
@@ -386,6 +388,16 @@ daemon\='s to know.")
   "Start a zettel chat thread from its first question.
 The daemon names the thread after the question, brings its session up and
 submits the question; the thread arrives through the roster push.")
+
+(agent-repl-rpc--defverb agent-repl-rpc-report-recency-reach
+  "ReportRecencyReach"
+  agent-repl-wire-encode-report-recency-reach-request
+  agent-repl-wire-decode-report-recency-reach-response
+  "Tell the daemon how few presses of the recency walk reach each nearby tab.
+The report replaces the daemon's whole reach, which the sidebar draws as
+its open rows' gutters.  It belongs to Emacs's WatchDaemon stream: with
+none standing it is refused, and the stream that comes back is reported
+to again.  Idempotent.")
 
 (agent-repl-rpc--defverb agent-repl-rpc-report-editor-focus
   "ReportEditorFocus"

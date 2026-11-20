@@ -740,6 +740,13 @@ func (s *requestLoggingServer) ReportViewDwell(
 	return serveUnary(s, ctx, "ReportViewDwell", req, s.server.ReportViewDwell)
 }
 
+func (s *requestLoggingServer) ReportRecencyReach(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportRecencyReachRequest],
+) (*connect.Response[agentreplv1.ReportRecencyReachResponse], error) {
+	return serveUnary(s, ctx, "ReportRecencyReach", req, s.server.ReportRecencyReach)
+}
+
 func (s *requestLoggingServer) ReportEditorFocus(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ReportEditorFocusRequest],

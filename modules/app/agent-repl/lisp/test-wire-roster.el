@@ -1059,6 +1059,30 @@ message."
                                     :surfaced))
                    '(t nil)))))
 
+(ert-deftest agent-repl-test-wire-roster-open-row-decodes-its-recency-gutter ()
+  "A row the recency walk reaches decodes its chord and presses."
+  (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
+    (should (equal (plist-get (agent-repl-test-wire-roster--decode
+                               #'agent-repl-wire-decode-roster-open-row
+                               (concat (substring open 0 -1) ",\"recencyGutter\":{\"newer\":{\"presses\":2}}}"))
+                              :recency-gutter)
+                   '(:reach (:arm :newer :value (:presses 2)))))))
+
+(ert-deftest agent-repl-test-wire-roster-open-row-without-a-gutter-decodes-none ()
+  "A row the walk does not reach soon carries no gutter."
+  (should-not (plist-get (agent-repl-test-wire-roster--decode
+                          #'agent-repl-wire-decode-roster-open-row
+                          (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}"))
+                         :recency-gutter)))
+
+(ert-deftest agent-repl-test-wire-roster-a-gutter-on-no-arm-is-a-breach ()
+  "A gutter naming no chord is a breach, never a silent absence."
+  (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))
+    (should (equal (car (agent-repl-test-wire-roster--breach
+                         #'agent-repl-wire-decode-roster-open-row
+                         (concat (substring open 0 -1) ",\"recencyGutter\":{}}")))
+                   "RosterOpenRowRecencyGutter"))))
+
 (ert-deftest agent-repl-test-wire-roster-a-non-boolean-surfaced-mark-is-a-breach ()
   "The surfaced mark is a boolean; anything else is a breach."
   (let ((open (agent-repl-test-wire-roster--open-row "\"numbered\":{\"number\":3}")))

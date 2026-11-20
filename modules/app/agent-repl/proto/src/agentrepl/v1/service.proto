@@ -92,6 +92,7 @@ import "agentrepl/v1/endpoint_register_workspaces.proto";
 import "agentrepl/v1/endpoint_report_chat_sightings.proto";
 import "agentrepl/v1/endpoint_report_composer_entries.proto";
 import "agentrepl/v1/endpoint_report_editor_focus.proto";
+import "agentrepl/v1/endpoint_report_recency_reach.proto";
 import "agentrepl/v1/endpoint_report_latencies.proto";
 import "agentrepl/v1/endpoint_report_page_drawn.proto";
 import "agentrepl/v1/endpoint_report_page_residency.proto";
@@ -625,6 +626,11 @@ service AgentRepl {
   // banner on it, and a gain answers the newest held banner's workspace,
   // which Emacs selects. See endpoint_report_editor_focus.proto.
   rpc ReportEditorFocus(ReportEditorFocusRequest) returns (ReportEditorFocusResponse);
+
+  // How few presses of the recency walk (`s-[`, `s-]`) reach each nearby
+  // tab, which the sidebar draws as its rows' gutters; replaced whole. See
+  // endpoint_report_recency_reach.proto.
+  rpc ReportRecencyReach(ReportRecencyReachRequest) returns (ReportRecencyReachResponse);
 
   // The host-facing view of one workspace, per-workspace subscription. See
   // endpoint_watch_host_workspace.proto.

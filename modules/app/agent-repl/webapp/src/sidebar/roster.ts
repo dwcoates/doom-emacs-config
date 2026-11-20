@@ -120,6 +120,7 @@ import {
 } from "./row.js";
 import { countNoun } from "../count-noun.js";
 import { formatAge } from "../duration.js";
+import { paintRecencyGutters, recencyGutters } from "./recency-gutters.js";
 import { paintTabNumbers, tabNumbers } from "./tab-numbers.js";
 import { drawRosterOpenCount, openCountText } from "./open-count.js";
 
@@ -328,6 +329,8 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
       // EVERY PUSH RENUMBERS EVERY OPEN ROW, kept sections too: a tab opened
       // anywhere shifts the numbers of rows whose own wire did not change.
       paintTabNumbers(open.drawn.body, tabNumbers(repository, `${path}.repository`));
+      // Every switch moves every reach, so every push repaints every gutter too.
+      paintRecencyGutters(open.drawn.body, recencyGutters(repository, `${path}.repository`));
 
       hidden = keepOrDraw(
         hidden,

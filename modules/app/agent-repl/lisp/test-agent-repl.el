@@ -69,6 +69,7 @@
   (load (expand-file-name "test-mutation-progress.el" dir) nil t)
   (load (expand-file-name "test-notes.el" dir) nil t)
   (load (expand-file-name "test-profiling.el" dir) nil t)
+  (load (expand-file-name "test-recency-reach.el" dir) nil t)
   (load (expand-file-name "test-notifications.el" dir) nil t)
   (load (expand-file-name "test-open-progress.el" dir) nil t)
   (load (expand-file-name "test-page-unload.el" dir) nil t)

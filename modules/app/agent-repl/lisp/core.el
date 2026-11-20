@@ -204,6 +204,25 @@ ran."
                       (funcall report))))
     :sent))
 
+(declare-function agent-repl-link-newest "daemon-link")
+
+(defun agent-repl-serial-send-to-newest (serial report scope label send)
+  "Run SEND for SERIAL against the newest daemon, one report at a time.
+THE ONE DISPATCH of every daemon-wide report (the desktop focus, the
+recency walk's reach): such a report belongs to the daemon that serves
+next, `agent-repl-link-newest', never to one a handover is leaving.  SEND
+is called with CONN and DONE (`agent-repl-serial-send'); REPORT runs again
+when one is owed.  With no link there is nothing to tell, which is recorded
+under SCOPE as `elisp.LABEL skipped reason=no-link'; the link edge that
+answers the next daemon reports again.  An owed report is recorded as
+`elisp.LABEL owed reason=in-flight'."
+  (let ((conn (agent-repl-link-newest)))
+    (if (null conn)
+        (agent-repl--log scope "elisp.%s skipped reason=no-link" label)
+      (when (eq (agent-repl-serial-send serial report (lambda (done) (funcall send conn done)))
+                :owed)
+        (agent-repl--log scope "elisp.%s owed reason=in-flight" label)))))
+
 ;;;; ---- One-shot settle latch ----
 ;;
 ;; Every asynchronous operation in this module races several arrivals for

@@ -87,6 +87,7 @@ import { markReviving } from "./reviving.js";
 import { viewedMode } from "./viewed.js";
 import { applyViewDwell, drawRosterRowViewDwell } from "./view-dwell.js";
 import { rosterRowMark, type RosterStatusCase, type RowMarkers } from "./tones.js";
+import { drawRecencyGutterSlot } from "./recency-gutters.js";
 import { drawTabNumberSlot } from "./tab-numbers.js";
 import { toneClass } from "../vocab.js";
 import { applyNameTint, nameTint } from "./name-tint.js";
@@ -329,9 +330,11 @@ export function drawRosterRow(
   // Both bands' names are in the repository names' grey; a hidden row's is
   // struck through only at a cold gate.
   // AN OPEN ROW LEADS WITH ITS EMACS TAB NUMBER (owner request, 2026-10-17),
-  // filled in by the roster drawer once the push is drawn (`tab-numbers.ts`).
+  // filled in by the roster drawer once the push is drawn (`tab-numbers.ts`),
+  // and left of it the recency walk's gutter (`recency-gutters.ts`).
   let statusMark: HTMLElement | undefined;
   if (place === "grouping") {
+    line.appendChild(drawRecencyGutterSlot());
     line.appendChild(drawTabNumberSlot());
     statusMark = drawStatusMark(status.case, `${path}.status`, markers);
     line.appendChild(statusMark);

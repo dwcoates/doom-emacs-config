@@ -7172,3 +7172,35 @@ describe("the escalation's release", () => {
     expect([declarationsOf(release), declarationsOf(hover)].map((rule) => /text-decoration:\s*underline/.test(rule ?? ""))).toEqual([false, true]);
   });
 });
+
+describe("the recency gutter", () => {
+  it("paints `s-[` the canonical orange and `s-]` the canonical purple", () => {
+    expect([
+      declarationsOf('#ws-sidebar .sb-gutter[data-recency="older"]')?.trim(),
+      declarationsOf('#ws-sidebar .sb-gutter[data-recency="newer"]')?.trim(),
+    ]).toEqual(["--gutter-hue: var(--canonical-orange);", "--gutter-hue: var(--blocked);"]);
+  });
+
+  it("mutes the bar with every press after the first", () => {
+    // Arrange
+    const strength = (presses: number): number => {
+      const declarations =
+        presses === 1
+          ? declarationsOf("#ws-sidebar .sb-gutter")
+          : declarationsOf(`#ws-sidebar .sb-gutter[data-recency-presses="${presses}"]`);
+      return Number(/--gutter-strength:\s*(\d+)%/.exec(declarations ?? "")?.[1]);
+    };
+
+    // Act
+    const strengths = [1, 2, 3, 4, 5, 6].map(strength);
+
+    // Assert
+    expect(strengths[0]).toBe(100);
+    for (let i = 1; i < strengths.length; i++) expect(strengths[i]).toBeLessThan(strengths[i - 1]);
+  });
+
+  it("draws the bar only on a reached row's slot", () => {
+    expect(declarationsOf("#ws-sidebar .sb-gutter[data-recency]::before")).toContain("var(--gutter-hue) var(--gutter-strength)");
+    expect(declarationsOf("#ws-sidebar .sb-gutter")).not.toContain("background");
+  });
+});

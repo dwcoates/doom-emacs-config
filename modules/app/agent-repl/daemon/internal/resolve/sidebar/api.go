@@ -123,6 +123,16 @@ type Resolver interface {
 	// nil for both when none is shown. The fleet is the one caller, on every
 	// edge of the gate.
 	SetColdGate(ws ids.WorkspaceID, row *frontendv1.FeedId, gate *frontendv1.FeedColdGate)
+	// AttachRecencyReach stands an Emacs WatchDaemon stream's recency reach,
+	// empty until its first report, and answers the release the stream calls
+	// when it ends. A later stream supersedes an earlier one, so a stale
+	// stream's release leaves its successor's reach standing.
+	AttachRecencyReach() (release func())
+	// ReportRecencyReach replaces, WHOLE, the standing stream's recency reach
+	// (agentrepl.v1.ReportRecencyReach): each open row whose workspace it
+	// names carries that gutter (frontend.v1.RosterOpenRow.recency_gutter),
+	// and every other row none. ErrNoEmacsStream when no stream stands.
+	ReportRecencyReach(reach RecencyReach) error
 	// SetSelected records the user's selection, which also clears that
 	// workspace's attention marker.
 	SetSelected(ws ids.WorkspaceID)

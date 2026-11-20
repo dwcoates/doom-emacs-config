@@ -690,6 +690,10 @@ func (s *server) watchDaemon(
 		// unfocused.
 		release := s.deps.Focus.Attach(isFocused(emacs.GetFocus()))
 		defer release()
+		// EMACS'S RECENCY REACH LIVES AND DIES WITH THIS STREAM too: it
+		// stands empty from the stream's first instant, and the stream's end
+		// clears every row's gutter (endpoint_report_recency_reach.proto).
+		defer s.deps.Sidebar.AttachRecencyReach()()
 		// THE MEASURED EMACS IS THIS STREAM'S, for the same reason: the one
 		// connected, released when the stream ends. An Emacs whose elisp
 		// predates the field states no process and is not measured.

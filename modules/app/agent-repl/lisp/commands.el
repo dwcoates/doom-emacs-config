@@ -1581,26 +1581,34 @@ user hid is a stop of neither."
   (and (fboundp 'agent-repl-roster-navigable-tab-order)
        (agent-repl-roster-navigable-tab-order)))
 
-(defun agent-repl--cycle-target (all drawn current n)
-  "Return the DRAWN tab N steps from CURRENT along ALL, or nil.
+(defun agent-repl--ring-walk (all drawn current step)
+  "Return the DRAWN tabs one revolution of ALL meets from CURRENT, in order.
 ALL is every tab in walk order and DRAWN its drawn subset.  The walk
-starts at CURRENT's place in ALL, so a current workspace whose tab is
-hidden (its repository was collapsed) still steps to its drawn
-neighbours, and every hidden tab on the way is passed over.  Nil when
-CURRENT has no tab or nothing is drawn."
+starts at CURRENT's place in ALL and moves STEP (1 or -1) at a time,
+wrapping, until it is back at CURRENT, so a current workspace whose tab
+is hidden (its repository was collapsed) still meets its drawn
+neighbours, and every hidden tab on the way is passed over.  The Kth
+tab of the answer is where K presses of a step land, and CURRENT, when
+drawn, is the last.  Nil when CURRENT has no tab or nothing is drawn.
+THE ONE STEPPING of every ring walk: the chords' landing
+\(`agent-repl--cycle-target') and the gutter's presses
+\(`agent-repl--recency-reach') both read it."
   (let ((index (cl-position current all :test #'equal))
         (count (length all)))
     (when (and index drawn)
-      (let ((step (if (< n 0) -1 1))
-            (remaining (abs n))
-            (at index)
-            (seen 0))
-        (while (and (> remaining 0) (< seen (* count (abs n))))
-          (setq at (mod (+ at step) count)
-                seen (1+ seen))
-          (when (member (nth at all) drawn)
-            (setq remaining (1- remaining))))
-        (and (zerop remaining) (nth at all))))))
+      (cl-loop for k from 1 to count
+               for tab = (nth (mod (+ index (* k step)) count) all)
+               when (member tab drawn) collect tab))))
+
+(defun agent-repl--cycle-target (all drawn current n)
+  "Return the DRAWN tab N steps from CURRENT along ALL, or nil.
+The Nth tab the walk meets (`agent-repl--ring-walk'), wrapping past the
+end of a revolution.  Nil when CURRENT has no tab or nothing is drawn."
+  (let ((met (agent-repl--ring-walk all drawn current (if (< n 0) -1 1))))
+    (cond
+     ((zerop n) (and drawn (member current all) current))
+     ((null met) nil)
+     (t (nth (mod (1- (abs n)) (length met)) met)))))
 
 (defun agent-repl--step-workspace (n ring-fn op trigger)
   "Request the DRAWN tab N steps from the current workspace along a ring.

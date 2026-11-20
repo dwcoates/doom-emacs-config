@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/resolve/ladder"
 	"agent-repld/internal/semver"
 	"agent-repld/internal/shimclient"
+	"agent-repld/internal/streamslot"
 	"agent-repld/internal/wsm"
 )
 
@@ -480,6 +481,9 @@ type rosterState struct {
 	// a joining daemon has not adopted yet (SetIncumbentArms), replaced
 	// WHOLE; nil outside a handover's joining window.
 	incumbentArms map[ids.WorkspaceID]string
+	// recency is the connected Emacs's recency reach (AttachRecencyReach,
+	// ReportRecencyReach), scoped to its WatchDaemon stream.
+	recency streamslot.Slot[RecencyReach]
 }
 
 // stampedSelection is a select's stamp with the workspace it selected: the
