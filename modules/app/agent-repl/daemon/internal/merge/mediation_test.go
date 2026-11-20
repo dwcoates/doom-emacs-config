@@ -37,6 +37,7 @@ func checked(t *testing.T) *harness {
 	h.config.DeployChecks = &repoconfigv1.DeployChecks{RemediationsBeforeEscalation: theBound}
 	h.briefs[BriefDeployIntake] = []string{"deploy_started", "ending", "window_started", "repo_dir", "version", "gate_log", "digest"}
 	h.briefs[BriefDeployEscalation] = []string{"repo_dir", "deploy_started", "summary", "problems", "old_problems"}
+	h.briefs[BriefDeployCheckNotRun] = []string{"repo_dir", "deploy_started", "what", "cause"}
 	h.briefs[BriefDeployIntakeResumed] = []string{"deploy_started", "version"}
 	h.briefs[BriefDeployRemediationRestored] = []string{"repo_dir", "deploy_started", "problems"}
 	h.briefs[BriefRemediationGateFailed] = []string{"archive_path", "failing_tests", "attempt", "max_attempts"}
@@ -1117,7 +1118,7 @@ func TestAResumingBriefThatCannotBeComposedEscalatesTheCheck(t *testing.T) {
 			h.o.Mediate(context.Background())
 
 			// Assert
-			const what = "the undecided intake's resuming brief could not be composed"
+			const what = "the undecided mediator's resuming brief could not be composed"
 			if heldEscalation(t, h) == "" {
 				t.Fatalf("check %+v, want its escalation told", owedCheck(t, h))
 			}

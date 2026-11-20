@@ -100,7 +100,7 @@ func TestAGateLogDirectoryThatCannotBeReadEscalatesTheCheck(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	assertBriefFailureEscalated(t, h, "the intake's brief could not be composed", "")
+	assertBriefFailureEscalated(t, h, "the deploy check's brief could not be composed", "")
 }
 
 func TestTheIntakesBriefNamesTheLastGatesLog(t *testing.T) {

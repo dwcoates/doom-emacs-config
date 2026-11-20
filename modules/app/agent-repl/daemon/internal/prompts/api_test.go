@@ -764,3 +764,32 @@ func TestTheDeployEscalationBriefSaysItsFinishLandsDirectly(t *testing.T) {
 		t.Fatalf("deploy-escalation does not say %q", phrase)
 	}
 }
+
+// TestTheCheckNotRunBriefSaysNothingLookedAtTheDeploy pins the owner request
+// of 2026-11-20: a check that could not run is told as that, naming what
+// failed and its cause, never as a deploy escalated for something found.
+func TestTheCheckNotRunBriefSaysNothingLookedAtTheDeploy(t *testing.T) {
+	// Arrange
+	want := []string{
+		"agent-repl could not prepare the check of the deploy of `{{repo_dir}}` that began at {{deploy_started}}",
+		"nothing has looked at that deploy yet",
+		"This says nothing about whether the deploy broke anything.",
+		"- What failed: {{what}}",
+		"- The cause: {{cause}}",
+		"The decision is yours alone: you need no approval from the user.",
+		"`bin/logs.sh --all --level warn --since {{deploy_started}} --tally --sample 1`",
+		"`agent-repld merge-queue mediation approve -summary \"<one sentence>\"`",
+		"`agent-repld workspace finished here -version-part patch",
+	}
+
+	// Act
+	got, err := Load(repoPromptsDir, "deploy-check-not-run")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("deploy-check-not-run does not say %q", phrase)
+	}
+}

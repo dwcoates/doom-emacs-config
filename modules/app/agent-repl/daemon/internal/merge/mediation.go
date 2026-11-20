@@ -604,7 +604,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	}
 	brief, window, err := o.intakeBrief(ctx, q, m)
 	if err != nil {
-		o.briefFailed(ctx, q, m, "the intake's brief could not be composed", err, fields)
+		o.briefFailed(ctx, q, m, "the deploy check's brief could not be composed", err, fields)
 		return
 	}
 	// A WINDOW WITH NO WARNING AND NO ERROR NEEDS NO MEDIATOR (owner ruling,
@@ -641,7 +641,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		told := brief
 		if m.Resumed {
 			if told, err = o.resumeBrief(m); err != nil {
-				o.briefFailed(ctx, q, m, "the undecided intake's resuming brief could not be composed", err, fields)
+				o.briefFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
 				return
 			}
 		}
@@ -677,7 +677,7 @@ func (o *orchestrator) briefFailed(ctx context.Context, q checkedQueue, m wsm.Me
 		return
 	}
 	summary := fmt.Sprintf("the deploy check could not run: %s (%v); the queue waits for you", what, err)
-	o.holdEscalated(ctx, q, m, summary, nil, wsm.CheckWindow{}, m.Prompted(), fields)
+	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error()}}, wsm.CheckWindow{}, m.Prompted(), fields)
 }
 
 // releaseQuiet releases check M of queue Q, whose WINDOW holds no warning and
@@ -864,7 +864,7 @@ func (o *orchestrator) resumeBrief(m wsm.Mediation) (string, error) {
 func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, fields dlog.Context) {
 	brief, err := o.resumeBrief(m)
 	if err != nil {
-		o.briefFailed(ctx, q, m, "the undecided intake's resuming brief could not be composed", err, fields)
+		o.briefFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
 		return
 	}
 	turn := wsm.NewTurnID()
@@ -942,7 +942,12 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 		o.deps.Log.Global().Error(opMediation, "could not read the check the decision is on", withField(fields, "error", err.Error()))
 		return err
 	}
-	if owed == nil || !owed.Prompted() {
+	// AN ESCALATED CHECK WAS TOLD TO THE MEDIATOR BY ITS ESCALATION, whether
+	// or not the check's own brief ever reached it: a check whose brief
+	// could not be composed is escalated unprompted (briefFailed), and the
+	// mediator's approval of it was refused here as a check it was never
+	// told of (2026-11-20 17:25Z), holding the queue for the user.
+	if owed == nil || (!owed.Prompted() && !owed.Escalated()) {
 		o.deps.Log.Global().Warn(opMediation, "refused a decision while the mediator's queue owes no check it was told of", fields)
 		return refuse(ArmNoMediationOwed, ws, "no deploy owes a check you were told of")
 	}
@@ -1243,6 +1248,16 @@ func (o *orchestrator) takeOnProblems(ctx context.Context, repo wsm.RepoKey, pro
 type escalationBrief struct {
 	Summary  string          `json:"summary"`
 	Problems []DeployProblem `json:"problems"`
+	// NotRun is set when the check was escalated because it could not run
+	// (briefFailed), nil for an escalation of something found: the mediator
+	// is then told what failed, never that the deploy was found broken.
+	NotRun *checkNotRun `json:"not_run,omitempty"`
+}
+
+// checkNotRun is why a check could not run: WHAT failed, and its CAUSE.
+type checkNotRun struct {
+	What  string `json:"what"`
+	Cause string `json:"cause"`
 }
 
 // holdEscalated escalates check M of queue Q with SUMMARY and PROBLEMS,
@@ -1253,7 +1268,13 @@ type escalationBrief struct {
 // turn. The hold ends only when the mediator's own fix deploys
 // (wsm.OweMediation) or the user releases it.
 func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said bool, fields dlog.Context) {
-	encoded, err := json.Marshal(escalationBrief{Summary: summary, Problems: problems})
+	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, Problems: problems}, window, said, fields)
+}
+
+// holdBrief is holdEscalated for a whole BRIEF, which may say the check
+// could not run (escalationBrief.NotRun).
+func (o *orchestrator) holdBrief(ctx context.Context, q checkedQueue, m wsm.Mediation, brief escalationBrief, window wsm.CheckWindow, said bool, fields dlog.Context) {
+	encoded, err := json.Marshal(brief)
 	if err != nil {
 		panic(fmt.Sprintf("merge: an escalation's brief of strings did not encode: %v", err))
 	}
@@ -1268,7 +1289,7 @@ func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.
 	}
 	o.noteCheckWork(ctx, q.key, fields)
 	o.republishMediation(ctx, q.key)
-	o.tellEscalation(ctx, q, m, summary, problems, window, said, fields)
+	o.tellEscalation(ctx, q, m, brief, window, said, fields)
 }
 
 // tellEscalation tells the mediator and the user of escalated check M of
@@ -1276,14 +1297,14 @@ func (o *orchestrator) holdEscalated(ctx context.Context, q checkedQueue, m wsm.
 // and records the check told. A telling that fails leaves the check
 // escalated and untold, holding the queue, and the next pass tells it again
 // (intakeRound).
-func (o *orchestrator) tellEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said bool, fields dlog.Context) {
-	if _, err := o.escalate(ctx, q, m, summary, problems, window, said, fields); err != nil {
+func (o *orchestrator) tellEscalation(ctx context.Context, q checkedQueue, m wsm.Mediation, brief escalationBrief, window wsm.CheckWindow, said bool, fields dlog.Context) {
+	if _, err := o.escalate(ctx, q, m, brief, window, said, fields); err != nil {
 		// ESCALATE RECORDED WHY, at ERROR or, for a cut, at INFO: this
 		// records only that the check waits for the next pass.
 		o.deps.Log.Global().Info(opMediation, "the escalated check was not told to the mediator; the queue stays held, and the next pass tells it again", fields)
 		return
 	}
-	o.takeOnProblems(ctx, q.key, problems, escalatedKeys(window), "taken on with the escalation", fields)
+	o.takeOnProblems(ctx, q.key, brief.Problems, escalatedKeys(window), "taken on with the escalation", fields)
 	told, err := o.deps.DB.MarkEscalationTold(ctx, q.key, m.OwedAt)
 	if err != nil {
 		o.mediationFailed(ctx, fields, "the escalation was told but could not be recorded so; the queue stays held, and the next pass tells it again", err)
@@ -1309,7 +1330,7 @@ func (o *orchestrator) remakeHeldEscalation(ctx context.Context, q checkedQueue,
 		return
 	}
 	o.deps.Log.Global().Info(opMediation, "the escalated check was not told; it is told again", fields)
-	o.tellEscalation(ctx, q, m, brief.Summary, brief.Problems, window, false, fields)
+	o.tellEscalation(ctx, q, m, brief, window, false, fields)
 }
 
 // stopIntake ends intake WS's session once the turn that decided a check of
