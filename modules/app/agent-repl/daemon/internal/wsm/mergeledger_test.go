@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,6 +11,7 @@ import (
 	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 )
 
 func TestOpenMergeLedgerRecordsTheLease(t *testing.T) {
@@ -773,25 +772,14 @@ func TestSettleLiveRounds(t *testing.T) {
 // settling UPDATE could leave a round settled and held.
 func TestEveryWriteThatSettlesARoundGoesThroughSettleLiveRounds(t *testing.T) {
 	// Arrange
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	update := regexp.MustCompile(`(?s)UPDATE merge_tab_intervals SET (.*?)WHERE`)
+	update := regexp.MustCompile(`(?s)UPDATE merge_tab_intervals(?: AS \w+)? SET (.*?)WHERE`)
 
 	// Act
 	var settling []string
-	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") {
-			continue
-		}
-		src, err := os.ReadFile(f)
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, m := range update.FindAllSubmatch(src, -1) {
+	for _, f := range sourcescan.Production(t) {
+		for _, m := range update.FindAllSubmatch(f.Source, -1) {
 			if strings.Contains(string(m[1]), "ended_at") {
-				settling = append(settling, f+": "+strings.Join(strings.Fields(string(m[1])), " "))
+				settling = append(settling, f.Name+": "+strings.Join(strings.Fields(string(m[1])), " "))
 			}
 		}
 	}
