@@ -332,7 +332,10 @@
           },
           "errors": [
             "The API is overloaded."
-          ]
+          ],
+          "retryPromised": {
+            "attempt": 1
+          }
         },
         "agentId": {
           "value": "601de000-0000-4000-8000-000000000001"

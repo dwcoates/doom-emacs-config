@@ -986,7 +986,7 @@ describe("the stated schedule", () => {
     ]);
   });
 
-  it("states that none is due after an attempt the vendor refused", async () => {
+  it("states the promised retry abandoned after an attempt the vendor refused", async () => {
     // Arrange
     const h = harness();
     await failedTurnEnds(h, "turn-1");
@@ -995,8 +995,12 @@ describe("the stated schedule", () => {
     // Act
     await fire(h);
 
-    // Assert
-    expect(h.states.slice(1)).toEqual([{ attempting: true, attempt: 1, status: "API Error" }, undefined]);
+    // Assert: no retry is due, and the failure turn-1 was promised a retry for
+    // stands (conversation.v1.SessionVendorErrorRetryAbandoned).
+    expect(h.states.slice(1)).toEqual([
+      { attempting: true, attempt: 1, status: "API Error" },
+      { abandoned: true, failedTurn: "turn-1", cause: "the input stream is closed" },
+    ]);
   });
 
   it("states that none is due once the retry is delivered", async () => {
