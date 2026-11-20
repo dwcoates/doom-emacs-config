@@ -45,7 +45,6 @@ import {
   type RosterMergedSection,
   type RosterMergeQueueRepoGroup,
   type RosterMergeQueueSection,
-  type RosterOpenCount,
   type RosterOpenSection,
   type RosterRepoDivergence,
   type RosterRepoKey,
@@ -53,6 +52,7 @@ import {
   type RosterOpenRows,
   type RosterSectionCount,
   type RosterSectionHeader,
+  type RosterOpenHeader,
   type WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { RepositoryRef, WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -120,6 +120,7 @@ import {
 import { countNoun } from "../count-noun.js";
 import { formatAge } from "../duration.js";
 import { paintTabNumbers, tabNumbers } from "./tab-numbers.js";
+import { drawRosterOpenCount, openCountText } from "./open-count.js";
 
 /**
  * The whole roster, drawn through RAIL's one roster drawer (`createRosterDrawer`):
@@ -195,7 +196,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
   const dragScope = openScope(rail);
   const removeDrag = installArrangeDrag(dragScope.context, roster, drawnRefs(() => repos.values()));
   /** The open section, and the box its repository sections are placed in. */
-  let open: DrawnSection<{ open: RosterOpenSection; count: number }, Drawn & { body: HTMLElement }> | null = null;
+  let open: DrawnSection<{ open: RosterOpenSection; count: string }, Drawn & { body: HTMLElement }> | null = null;
   let hidden: DrawnSection<RosterHiddenSection> | null = null;
   let merged: DrawnSection<RosterMergedSection> | null = null;
   let mergeQueue: DrawnSection<RosterMergeQueueSection> | null = null;
@@ -230,9 +231,11 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
         u.current === undefined
           ? null
           : drawRosterCurrentWorkspace(u.current, `${path}.current`);
-      const openCount = drawRosterOpenCount(
-        requireMessage(repository.openCount, `${path}.repository.open_count`),
-        `${path}.repository.open_count`,
+      const openCount = openCountText(
+        drawRosterOpenCount(
+          requireMessage(repository.openCount, `${path}.repository.open_count`),
+          `${path}.repository.open_count`,
+        ),
       );
       const discarded: Array<DrawnSection<unknown>> = [];
 
@@ -464,10 +467,10 @@ function drawnRefs(sections: () => Iterable<DrawnSection<RosterRepoSection, Draw
   };
 }
 
-/** The open workspaces' drawn repository sections and the count of the rows they list. */
+/** The open workspaces' drawn repository sections and the count of the rows they list, as drawn (`openCountText`). */
 export interface DrawnGroupingView {
   body: HTMLElement;
-  openCount: number;
+  openCount: string;
 }
 
 /**
@@ -480,23 +483,18 @@ export function drawRosterCurrentWorkspace(u: RosterCurrentWorkspace, path: stri
   return requireMessage(u.workspace, `${path}.workspace`).id;
 }
 
-/** How many rows the open-workspaces section lists, exactly as the daemon resolved it. */
-export function drawRosterOpenCount(u: RosterOpenCount, path: string): number {
-  void path;
-  return u.workspaces;
-}
-
 /** The class of the open-workspaces section (`band-fit.ts` fits it), and of its count. */
 export { OPEN_SECTION_CLASS };
 export const OPEN_COUNT_CLASS = "sb-open-count";
 
 /**
  * The open-workspaces section: the "Open" heading over the repository
- * sections, drawn like the Hidden, Merge Queue and Recently Merged headings, with "(N)"
- * beside the label whether the section is folded or not (owner request,
- * 2026-10-13). N is the daemon's sum of the sections' counts, so it is what a
- * person counting the section's entries arrives at, a folded section's
- * entries included.
+ * sections, drawn like the Hidden, Merge Queue and Recently Merged headings,
+ * with "(U/N)" beside the label whether the section is folded or not (owner
+ * requests, 2026-10-13 and 2026-11-19). N is the daemon's sum of the
+ * sections' counts, so it is what a person counting the section's entries
+ * arrives at, a folded section's entries included, and U the sum of the
+ * rows no fold hides (`open-count.ts`).
  *
  * Its fold is the daemon's, like every section's.
  */
@@ -522,12 +520,12 @@ export function drawRosterOpenSection(
   return section;
 }
 
-function paintOpenCountText(count: HTMLElement, openCount: number): void {
-  count.textContent = `(${openCount})`;
+function paintOpenCountText(count: HTMLElement, openCount: string): void {
+  count.textContent = openCount;
 }
 
-/** Repaint the open SECTION's heading count to OPEN_COUNT, in place. */
-export function paintOpenCount(section: HTMLElement, openCount: number): void {
+/** Repaint the open SECTION's heading count to OPEN_COUNT, as drawn, in place. */
+export function paintOpenCount(section: HTMLElement, openCount: string): void {
   const count = section.querySelector<HTMLElement>(`.${OPEN_COUNT_CLASS}`);
   if (count === null) throw new Error("sidebar roster: the open section draws no heading count");
   paintOpenCountText(count, openCount);
@@ -638,15 +636,21 @@ function headerLabel(header: HTMLElement): HTMLElement {
 }
 
 /** What every headed section shares on the wire: its header and its fold. */
-export interface HeadedBoxWire {
-  header?: RosterSectionHeader;
+/**
+ * A headed section's header: a section's outside the Open section, or a
+ * repository section's inside it, whose count is an Open-section count.
+ */
+export type SectionHeader = RosterSectionHeader | RosterOpenHeader;
+
+export interface HeadedBoxWire<H extends SectionHeader = SectionHeader> {
+  header?: H;
   fold: RosterSectionFold;
   /** A band section's height (section-resize.ts); only the bands carry one. */
   height?: RosterSectionHeight;
 }
 
 /** How one kind of headed section is identified and decorated. */
-export interface HeadedBoxShape {
+export interface HeadedBoxShape<H extends SectionHeader = SectionHeader> {
   /** The page key its fold is held under (`view.ts`). */
   foldKey: string;
   /** The class naming the section's kind. */
@@ -665,7 +669,7 @@ export interface HeadedBoxShape {
    * wire, and ATTRIBUTE marks the undrawn box. Absent, the section always draws
    * (a repository with no rows still draws, so the grouping does not flicker).
    */
-  leftOut?: { when: (header: RosterSectionHeader, path: string) => boolean; attribute: string };
+  leftOut?: { when: (header: H, path: string) => boolean; attribute: string };
   /**
    * A band section below the Open section, whose height the daemon holds and
    * a drag of its rule sets (section-resize.ts): its wire carries `height`.
@@ -674,7 +678,7 @@ export interface HeadedBoxShape {
 }
 
 /** How a rows-bodied headed section is identified, decorated and drawn. */
-export interface HeadedSectionShape extends HeadedBoxShape {
+export interface HeadedSectionShape<H extends SectionHeader = SectionHeader> extends HeadedBoxShape<H> {
   /** Which kind of section the rows sit in (`RowPlace`); a grouping's unless said. */
   place?: RowPlace;
 }
@@ -689,11 +693,11 @@ export interface HeadedSectionShape extends HeadedBoxShape {
  * `drawHeadedBox`, which the merged band shares, so none can disagree with
  * another on how a header folds.
  */
-export function drawHeadedSection(
-  u: HeadedBoxWire,
+export function drawHeadedSection<H extends SectionHeader>(
+  u: HeadedBoxWire<H>,
   sc: SidebarContext,
   path: string,
-  shape: HeadedSectionShape,
+  shape: HeadedSectionShape<H>,
   rows: { rows: readonly RowFamily[] },
   rowsPath: string,
 ): HTMLElement {
@@ -710,11 +714,11 @@ export function drawHeadedSection(
  * section is still a contract breach, and skipping the checks would hide it
  * until the section next drew.
  */
-export function drawHeadedBox(
-  u: HeadedBoxWire,
+export function drawHeadedBox<H extends SectionHeader>(
+  u: HeadedBoxWire<H>,
   sc: SidebarContext,
   path: string,
-  shape: HeadedBoxShape,
+  shape: HeadedBoxShape<H>,
   body: () => HTMLElement,
 ): HTMLElement {
   const section = daemonFoldedBox(shape.foldKey, drawRosterSectionFold(u.fold, `${path}.fold`), sc);
@@ -1175,7 +1179,7 @@ export function drawRosterHiddenSection(
 
 /** The header repos and the Recently Merged section share: a label, the header itself folding. */
 export function drawRosterSectionHeader(
-  u: RosterSectionHeader,
+  u: SectionHeader,
   section: HTMLElement,
   gesture: FoldGesture,
   path: string,
@@ -1190,15 +1194,15 @@ export function drawRosterSectionHeader(
     if (u.count !== undefined) throw new MalformedView(`${path}.count`, "this section's header carries no count");
     return header;
   }
-  // THE FOLDED COUNT, "(N)", sits between the label and the add control the
-  // repo section appends after this header. The daemon resolves N (the rows
-  // the unfolded section shows, nested family rows included); the stylesheet
+  // THE FOLDED COUNT sits between the label and the add control the repo
+  // section appends after this header. The daemon resolves it (the rows the
+  // unfolded section shows, nested family rows included); the stylesheet
   // shows the count under the section's `.folded` only, and nothing here
   // counts or hides it.
   const count = document.createElement("span");
   count.className = "sb-count";
   count.setAttribute("data-section-count", "");
-  count.textContent = `(${drawRosterSectionCount(requireMessage(u.count, `${path}.count`), `${path}.count`)})`;
+  count.textContent = sectionCountText(u, path);
   header.appendChild(count);
   return header;
 }
@@ -1217,6 +1221,18 @@ export function drawFoldHeader(label: HTMLElement, section: HTMLElement, gesture
   header.appendChild(label);
   foldOnClick(header, section, gesture);
   return header;
+}
+
+/**
+ * The count U, the header at PATH, draws: an Open-section count as every
+ * count in the Open section is spelled, "(U/N)" (`open-count.ts`), and any
+ * other section's as "(N)".
+ */
+function sectionCountText(u: SectionHeader, path: string): string {
+  if (u.$typeName === "frontend.v1.RosterOpenHeader") {
+    return openCountText(drawRosterOpenCount(requireMessage(u.count, `${path}.count`), `${path}.count`));
+  }
+  return `(${drawRosterSectionCount(requireMessage(u.count, `${path}.count`), `${path}.count`)})`;
 }
 
 /** The section's workspace count, exactly as the daemon resolved it. */

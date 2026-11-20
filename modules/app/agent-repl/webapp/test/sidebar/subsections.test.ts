@@ -160,7 +160,26 @@ describe("a repository's subsections", () => {
       sub.querySelector(".sb-subsection-label")?.textContent,
       sub.querySelector(".sb-count")?.textContent,
       sub.querySelector(":scope > .rows > [data-roster-row='ws-1']") !== null,
-    ]).toEqual(["sub-1", "later", "(1)", true]);
+    ]).toEqual(["sub-1", "later", "(1/1)", true]);
+  });
+
+  it("draw their count as the rows no fold hides of every row", () => {
+    // Arrange
+    const sub = { id: "sub-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })], collapsed: true, unfolded: 0 };
+
+    // Act
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [sub] })] }), sidebarContext());
+
+    // Assert
+    expect(pane.querySelector(".sb-subsection .sb-count")?.textContent).toBe("(0/2)");
+  });
+
+  it("refuse a count with more unfolded rows than rows", () => {
+    // Arrange
+    const sub = { id: "sub-1", rows: [row({ id: "ws-1" })], unfolded: 2 };
+
+    // Act / Assert
+    expect(() => mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [sub] })] }), sidebarContext())).toThrow(MalformedView);
   });
 
   it("draw where the wire stands them, between two rows", () => {

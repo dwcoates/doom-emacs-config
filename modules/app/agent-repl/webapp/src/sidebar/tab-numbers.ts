@@ -14,7 +14,7 @@
  * empty slot, and the roster drawer fills every slot from the push once it is
  * drawn, kept sections included.
  */
-import type { RosterOpenRow, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import type { RosterOpenRow, RosterOpenRowTab, RosterRepositoryView } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { openKin, repoEntries } from "./entries.js";
 import { queryAll } from "../dom.js";
 import { log } from "../log.js";
@@ -40,18 +40,8 @@ export function tabNumbers(u: RosterRepositoryView, path: string): Map<string, n
     if (id === undefined) throw new MalformedView(`${rowPath}.row.workspace.workspace`, "an open row names no workspace");
     if (seen.has(id)) throw new MalformedView(`${rowPath}.row.workspace`, `workspace ${id} has two open rows`);
     seen.add(id);
-    const tab = requireCase(requireMessage(row.tab, `${rowPath}.tab`).tab, `${rowPath}.tab.tab`);
-    switch (tab.case) {
-      case "numbered":
-        numbers.set(id, tab.value.number);
-        break;
-      case "folded":
-        break;
-      default: {
-        const other: { case: string } = tab;
-        unreachableArm(`${rowPath}.tab.tab`, other.case);
-      }
-    }
+    const number = tabNumber(row.tab, `${rowPath}.tab`);
+    if (number !== undefined) numbers.set(id, number);
     for (const kin of openKin(row, rowPath)) visit(kin.row, kin.path);
   };
   u.sections.forEach((section, s) => {
@@ -65,6 +55,24 @@ export function tabNumbers(u: RosterRepositoryView, path: string): Map<string, n
     }
   });
   return numbers;
+}
+
+/**
+ * An open row's TAB (at PATH) as the daemon resolved it: its number, or
+ * undefined when a fold hides the row. A missing tab or arm is malformed.
+ */
+export function tabNumber(tab: RosterOpenRowTab | undefined, path: string): number | undefined {
+  const arm = requireCase(requireMessage(tab, path).tab, `${path}.tab`);
+  switch (arm.case) {
+    case "numbered":
+      return arm.value.number;
+    case "folded":
+      return undefined;
+    default: {
+      const other: { case: string } = arm;
+      return unreachableArm(`${path}.tab`, other.case);
+    }
+  }
 }
 
 /** The empty slot a row draws its number into. */

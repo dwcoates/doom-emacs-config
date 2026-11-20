@@ -49,22 +49,22 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 	tabs := tabsOf(repos)
 	out := &frontendv1.RosterRepositoryView{}
 	numbers := &tabNumberer{}
-	shown := 0
+	shown := &frontendv1.RosterOpenCount{}
 	for _, placed := range repos {
 		repoLog := log.With(dlog.Context{"repo_id": string(placed.repo.ID)})
 		section := &frontendv1.RosterRepoSection{
 			Key:        repoKey(placed.repo),
 			Divergence: repoDivergence(r.state.divergence[placed.repo.ID]),
 		}
-		count := 0
+		count := &frontendv1.RosterOpenCount{}
 		for _, region := range placed.regions {
 			regionLog := repoLog
 			if region.subsection != nil {
 				regionLog = repoLog.With(dlog.Context{"subsection": string(region.subsection.ID)})
 			}
 			rows := r.openRows(region.rows, region.folded(placed.repo), numbers, rc, regionLog)
-			regionCount := len(rosterwalk.FlattenOpen(rows.GetRows()))
-			count += regionCount
+			regionCount := openCount(rows.GetRows())
+			addOpenCount(count, regionCount)
 			if region.subsection == nil {
 				section.Entries = append(section.Entries, rosterwalk.RowEntries(rows.GetRows())...)
 				continue
@@ -73,20 +73,57 @@ func (r *resolver) repositoryView(rc rowContext, log dlog.Logger) *frontendv1.Ro
 				Kind: &frontendv1.RosterSubsection_Named{Named: &frontendv1.RosterSubsectionNamed{
 					Key: &frontendv1.RosterSubsectionKey{SubsectionId: string(region.subsection.ID)},
 				}},
-				Header:   sectionHeader(region.subsection.Name, regionCount),
+				Header:   openHeader(region.subsection.Name, regionCount),
 				OpenRows: rows,
 			}
 			setSubsectionFold(sub, region.subsection.Folded, holdsCurrent(tabs, current, wsm.SubsectionMembers(region.subsection.ID)))
 			section.Entries = append(section.Entries, &frontendv1.RosterRepoEntry{Entry: &frontendv1.RosterRepoEntry_Subsection{Subsection: sub}})
 		}
-		shown += count
-		section.Header = sectionHeader(placed.repo.Name, count)
+		addOpenCount(shown, count)
+		section.Header = openHeader(placed.repo.Name, count)
 		setRepoFold(section, placed.repo.Folded, holdsCurrent(tabs, current, wsm.RepositoryMembers(placed.repo.ID)))
 		out.Sections = append(out.Sections, section)
 	}
 	r.assertRepositoryInvariant(orphans, "daemon.sidebar.repository_view", "the repo grouping", log)
-	out.OpenCount = &frontendv1.RosterOpenCount{Workspaces: uint32(shown)}
+	out.OpenCount = shown
 	return out
+}
+
+// openCount counts ROWS, a rows region's top-level open rows, as every count
+// in the Open section does (frontendv1.RosterOpenCount): every row of their
+// walk, nested family rows included, and the ones among them no fold hides,
+// which are exactly the rows whose tab this walk numbered. A row without a
+// tab arm is a resolver that skipped its numbering, and panics.
+func openCount(rows []*frontendv1.RosterOpenRow) *frontendv1.RosterOpenCount {
+	count := &frontendv1.RosterOpenCount{}
+	for _, row := range rosterwalk.FlattenOpen(rows) {
+		count.Workspaces++
+		switch tab := row.GetTab().GetTab().(type) {
+		case *frontendv1.RosterOpenRowTab_Numbered:
+			count.Unfolded++
+		case *frontendv1.RosterOpenRowTab_Folded:
+		default:
+			panic(fmt.Sprintf("sidebar: open row %s carries no tab arm (%T)", row.GetRow().GetWorkspace().GetWorkspace().GetId(), tab))
+		}
+	}
+	return count
+}
+
+// addOpenCount adds PART, a region's or a repository's count, into TOTAL.
+func addOpenCount(total, part *frontendv1.RosterOpenCount) {
+	total.Workspaces += part.GetWorkspaces()
+	total.Unfolded += part.GetUnfolded()
+}
+
+// openHeader composes a repository section's or a subsection's header: its
+// label and its count, which its caller reads off the very rows the part
+// carries (openCount), so it can never disagree with them, and no client
+// counts rows for itself.
+func openHeader(label string, count *frontendv1.RosterOpenCount) *frontendv1.RosterOpenHeader {
+	return &frontendv1.RosterOpenHeader{
+		Label: &frontendv1.RosterLabel{Text: label},
+		Count: count,
+	}
 }
 
 // repoQueue is one repository's merge queue as the merge queue section draws
@@ -867,10 +904,10 @@ func setHiddenHeight(section *frontendv1.RosterHiddenSection, height wsm.Section
 	section.Height = &frontendv1.RosterHiddenSection_Fitted{Fitted: &frontendv1.RosterHiddenSectionFitted{}}
 }
 
-// sectionHeader composes a repository or Recently Merged header: its label and
-// the count a FOLDED section draws beside it, which its caller reads off the
-// very rows the section carries, so it can never disagree with them, and no client counts rows for
-// itself.
+// sectionHeader composes a header outside the Open section (the Backlog's):
+// its label and the count a FOLDED section draws beside it, which its caller
+// reads off the very rows the section carries, so it can never disagree with
+// them, and no client counts rows for itself.
 func sectionHeader(label string, count int) *frontendv1.RosterSectionHeader {
 	return &frontendv1.RosterSectionHeader{
 		Label: &frontendv1.RosterLabel{Text: label},

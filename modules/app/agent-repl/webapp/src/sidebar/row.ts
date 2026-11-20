@@ -63,6 +63,7 @@ import type {
   RosterOpenRowRepositoryBlock,
   RosterOpenRowRepositoryDivider,
   RosterOpenRowChildrenFold,
+  RosterOpenRowTab,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   SelectInEditorResponseSchema,
@@ -149,6 +150,8 @@ export interface RowFamily {
    * (frontend.v1.RosterOpenRow.surfaced).
    */
   surfaced?: boolean;
+  /** An open row's tab: its number, or folded (frontend.v1.RosterOpenRow.tab). */
+  tab?: RosterOpenRowTab;
 }
 
 /** A row's kin: its own children and its repository blocks, as `RowFamily` carries them. */
@@ -388,7 +391,7 @@ export function drawRosterRow(
   if (place === "grouping") renameOnDoubleClick(label, sc, workspace, name);
   line.appendChild(label);
   // A ROW WITH MANY CHILDREN SAYS HOW MANY, in grey after its name.
-  const childCount = place === "grouping" ? drawChildCount(kin) : undefined;
+  const childCount = place === "grouping" ? drawChildCount(kin, familyPath) : undefined;
   if (childCount !== undefined) line.appendChild(childCount);
 
   // PRESENCE, NEVER A SENTINEL: an absent marker or badge draws nothing at

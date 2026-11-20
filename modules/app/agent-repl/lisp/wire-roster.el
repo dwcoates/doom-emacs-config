@@ -75,6 +75,20 @@ How many workspaces the section holds; the webview draws it while folded."
      (list :workspaces (agent-repl-wire--decode-uint32
                         "RosterSectionCount" 'workspaces object)))))
 
+(defun agent-repl-wire-decode-roster-open-count (value)
+  "Decode VALUE as `RosterOpenCount', a plist `(:workspaces :unfolded)'.
+How many rows a part of the open-workspaces section lists, and how many
+of them no fold hides; the webview draws it.  Decoded because the codec
+refuses unknown fields."
+  (let ((object (agent-repl-wire--object "RosterOpenCount" value)))
+    (agent-repl-wire--check-keys "RosterOpenCount" object '(workspaces unfolded))
+    (agent-repl-wire--decoded
+     "RosterOpenCount"
+     (list :workspaces (agent-repl-wire--decode-uint32
+                        "RosterOpenCount" 'workspaces object)
+           :unfolded (agent-repl-wire--decode-uint32
+                      "RosterOpenCount" 'unfolded object)))))
+
 (defun agent-repl-wire-roster--decode-repository-name (message value)
   "Decode VALUE as MESSAGE, a repository message whose only field is `name'.
 Answers the plist `(:name NAME)'.  Every roster message that names a
@@ -1137,6 +1151,21 @@ Fold state is WEBVIEW-LOCAL and is no element of this view."
                    "RosterSectionHeader" 'count object
                    #'agent-repl-wire-decode-roster-section-header-count)))))
 
+(defun agent-repl-wire-decode-roster-open-header (value)
+  "Decode VALUE as `RosterOpenHeader', a plist `(:label :count)'.
+A repository section's or a subsection's header, whose count is an
+Open-section count (`RosterOpenCount')."
+  (let ((object (agent-repl-wire--object "RosterOpenHeader" value)))
+    (agent-repl-wire--check-keys "RosterOpenHeader" object '(label count))
+    (agent-repl-wire--decoded
+     "RosterOpenHeader"
+     (list :label (agent-repl-wire--decode-message
+                   "RosterOpenHeader" 'label object
+                   #'agent-repl-wire-decode-roster-label)
+           :count (agent-repl-wire--decode-message
+                   "RosterOpenHeader" 'count object
+                   #'agent-repl-wire-decode-roster-open-count)))))
+
 (defun agent-repl-wire-decode-roster-repo-key-repository (value)
   "Decode `RosterRepoKey''s `repository' field VALUE as a RepositoryRef."
   (agent-repl-wire-decode-repository-ref value))
@@ -1159,7 +1188,7 @@ back."
 
 (defun agent-repl-wire-decode-roster-repo-section-header (value)
   "Decode `RosterRepoSection''s `header' field VALUE."
-  (agent-repl-wire-decode-roster-section-header value))
+  (agent-repl-wire-decode-roster-open-header value))
 
 (defun agent-repl-wire-decode-roster-repo-section-collapsible (value)
   "Decode VALUE as the empty message `RosterRepoSectionCollapsible'."
@@ -1324,7 +1353,7 @@ reads of its fold."
                   '((named :named agent-repl-wire-decode-roster-subsection-named)))
            :header (agent-repl-wire--decode-message
                     "RosterSubsection" 'header object
-                    #'agent-repl-wire-decode-roster-section-header)
+                    #'agent-repl-wire-decode-roster-open-header)
            :open-rows (agent-repl-wire--decode-message
                        "RosterSubsection" 'openRows object
                        #'agent-repl-wire-decode-roster-open-rows)
@@ -1943,17 +1972,6 @@ codec refuses unknown fields."
 (defun agent-repl-wire-decode-roster-repository-view-sections (value)
   "Decode one element of `RosterRepositoryView''s repeated `sections'."
   (agent-repl-wire-decode-roster-repo-section value))
-
-(defun agent-repl-wire-decode-roster-open-count (value)
-  "Decode VALUE as `RosterOpenCount', a plist `(:workspaces)'.
-How many rows the open-workspaces section lists; the webview draws it.
-Decoded because the codec refuses unknown fields."
-  (let ((object (agent-repl-wire--object "RosterOpenCount" value)))
-    (agent-repl-wire--check-keys "RosterOpenCount" object '(workspaces))
-    (agent-repl-wire--decoded
-     "RosterOpenCount"
-     (list :workspaces (agent-repl-wire--decode-uint32
-                        "RosterOpenCount" 'workspaces object)))))
 
 (defun agent-repl-wire-decode-roster-repository-view (value)
   "Decode VALUE as `RosterRepositoryView', `(:sections LIST :open-count C)'.

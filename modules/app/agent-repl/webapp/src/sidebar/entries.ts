@@ -70,16 +70,23 @@ export function repoSectionRegions(u: RosterRepoSection, path: string): PathedOp
   ];
 }
 
+/** What a row's nested rows are read off: its own-repository children and its repository blocks. */
+export interface OpenKinOf<T> {
+  children?: readonly T[];
+  repositoryBlocks?: readonly { rows: readonly T[] }[];
+}
+
 /**
  * ROW's open kin at ROW_PATH, in drawn order: its own-repository children,
  * then each repository block's rows, block by block
  * (frontend.v1.RosterOpenRow.repository_blocks). THE ONE STATEMENT of a row's
- * nested rows every walker reads, so none misses a block's rows.
+ * nested rows every walker reads, so none misses a block's rows. ROW is an
+ * open row, or a drawn row's kin (`RowKin`).
  */
-export function openKin(row: RosterOpenRow, rowPath: string): PathedOpenRow[] {
+export function openKin<T = RosterOpenRow>(row: OpenKinOf<T>, rowPath: string): Array<{ row: T; path: string }> {
   return [
-    ...row.children.map((child, index) => ({ row: child, path: `${rowPath}.children[${index}]` })),
-    ...row.repositoryBlocks.flatMap((block, b) =>
+    ...(row.children ?? []).map((child, index) => ({ row: child, path: `${rowPath}.children[${index}]` })),
+    ...(row.repositoryBlocks ?? []).flatMap((block, b) =>
       block.rows.map((child, index) => ({ row: child, path: `${rowPath}.repositoryBlocks[${b}].rows[${index}]` })),
     ),
   ];

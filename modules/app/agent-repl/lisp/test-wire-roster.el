@@ -1193,7 +1193,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                           "\"header\":{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":2}},"
                           "\"expanded\":{\"collapsible\":{}}}"))
                  '(:key (:repository (:id "r1" :dir "/src"))
-                   :header (:label (:text "doom") :count (:workspaces 2))
+                   :header (:label (:text "doom") :count (:workspaces 2 :unfolded 0))
                    :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil)))
                    :divergence (:state (:arm :pending :value nil))
                    :entries nil))))
@@ -1236,7 +1236,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   :entry)
                  '(:arm :subsection
                    :value (:kind (:arm :named :value (:key (:subsection-id "s1")))
-                           :header (:label (:text "later") :count (:workspaces 0))
+                           :header (:label (:text "later") :count (:workspaces 0 :unfolded 0))
                            :open-rows (:rows nil)
                            :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil))))))))
 
@@ -1542,11 +1542,11 @@ A hand-rolled list decoder would skip the shared helper and fail here."
                   #'agent-repl-wire-decode-workspace-roster
                   agent-repl-test-wire-roster--roster-json)
                  '(:repository (:sections ((:key (:repository (:id "r1" :dir "/src"))
-                                            :header (:label (:text "doom") :count (:workspaces 2))
+                                            :header (:label (:text "doom") :count (:workspaces 2 :unfolded 0))
                                             :fold (:arm :expanded :value (:collapse (:arm :collapsible :value nil)))
                                             :divergence (:state (:arm :pending :value nil))
                                             :entries nil))
-                               :open-count (:workspaces 2))
+                               :open-count (:workspaces 2 :unfolded 0))
                    :open (:label (:text "Open") :fold (:arm :collapsed :value nil))
                    :hidden (:header (:label (:text "Hidden") :count (:workspaces 0))
                             :hidden-rows (:rows nil)
@@ -1959,7 +1959,7 @@ A hand-rolled list decoder would skip the shared helper and fail here."
   (should (equal (agent-repl-test-wire-roster--decode
                   #'agent-repl-wire-decode-roster-repository-view
                   "{\"sections\":[],\"openCount\":{\"workspaces\":2}}")
-                 '(:sections nil :open-count (:workspaces 2)))))
+                 '(:sections nil :open-count (:workspaces 2 :unfolded 0)))))
 
 (ert-deftest agent-repl-test-wire-roster-repository-view-refuses-an-unknown-field ()
   "An unknown key on the repository view is refused under its name."
@@ -2406,6 +2406,27 @@ its place and since it joined."
   (should (equal (agent-repl-test-wire-roster--breach
                   #'agent-repl-wire-decode-roster-repo-merge-queue "{\"rows\":[]}")
                  '("RosterRepoMergeQueue" rows "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-an-open-count-decodes-its-unfolded-rows ()
+  "An open count carries how many of its rows no fold hides."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-open-count
+                  "{\"workspaces\":5,\"unfolded\":3}")
+                 '(:workspaces 5 :unfolded 3))))
+
+(ert-deftest agent-repl-test-wire-roster-open-header-decodes-its-open-count ()
+  "A repository section's or subsection's header carries an open count."
+  (should (equal (agent-repl-test-wire-roster--decode
+                  #'agent-repl-wire-decode-roster-open-header
+                  "{\"label\":{\"text\":\"doom\"},\"count\":{\"workspaces\":4,\"unfolded\":1}}")
+                 '(:label (:text "doom") :count (:workspaces 4 :unfolded 1)))))
+
+(ert-deftest agent-repl-test-wire-roster-open-header-without-a-count-is-a-breach ()
+  "The open header's count is always set, so its absence is a contract breach."
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-open-header
+                  "{\"label\":{\"text\":\"doom\"}}")
+                 '("RosterOpenHeader" count "required message field is absent"))))
 
 (ert-deftest agent-repl-test-wire-roster-an-open-count-refuses-an-unknown-field ()
   "An unknown key on the open count is refused at the count."
