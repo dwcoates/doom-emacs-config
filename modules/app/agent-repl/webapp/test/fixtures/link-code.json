@@ -1,0 +1,112 @@
+[
+  {
+    "markdown": "i dont seem to have access to https://github.com/ChessCom/explanation-engine either. I can see https://github.com/ChessCom",
+    "spans": [
+      "ChessCom",
+      "explanation-engine"
+    ],
+    "hrefs": [
+      "https://github.com/ChessCom/explanation-engine",
+      "https://github.com/ChessCom"
+    ],
+    "codes": [],
+    "drawn": "i dont seem to have access to https://github.com/ChessCom/explanation-engine either. I can see https://github.com/ChessCom"
+  },
+  {
+    "markdown": "[`foo`](https://x.com/`y`)",
+    "hrefs": [
+      "https://x.com/y"
+    ],
+    "codes": [],
+    "drawn": "[foo](https://x.com/y)"
+  },
+  {
+    "markdown": "see https://x.com/`a` and run foo()",
+    "spans": [
+      "foo()"
+    ],
+    "hrefs": [
+      "https://x.com/a"
+    ],
+    "codes": [
+      "foo()"
+    ],
+    "drawn": "see https://x.com/a and run `foo()`"
+  },
+  {
+    "markdown": "<https://a.com/`b`>",
+    "hrefs": [
+      "https://a.com/b"
+    ],
+    "codes": [],
+    "drawn": "<https://a.com/b>"
+  },
+  {
+    "markdown": "www.x.com/`a`.",
+    "hrefs": [
+      "http://www.x.com/a"
+    ],
+    "codes": [],
+    "drawn": "www.x.com/a."
+  },
+  {
+    "markdown": "(see https://x.com/y)`foo`",
+    "hrefs": [
+      "https://x.com/y"
+    ],
+    "codes": [
+      "foo"
+    ],
+    "drawn": "(see https://x.com/y)`foo`"
+  },
+  {
+    "markdown": "[`t`][r]\n\n[r]: https://a.com/`b`",
+    "hrefs": [
+      "https://a.com/b"
+    ],
+    "codes": [],
+    "drawn": "[t][r]\n\n[r]: https://a.com/b"
+  },
+  {
+    "markdown": "https://x.com/a_(b) and a_(b)",
+    "spans": [
+      "a_(b)"
+    ],
+    "hrefs": [
+      "https://x.com/a_(b)"
+    ],
+    "codes": [
+      "a_(b)"
+    ],
+    "drawn": "https://x.com/a_(b) and `a_(b)`"
+  },
+  {
+    "markdown": "https://x.com/a, then foo()",
+    "spans": [
+      "foo()"
+    ],
+    "hrefs": [
+      "https://x.com/a"
+    ],
+    "codes": [
+      "foo()"
+    ],
+    "drawn": "https://x.com/a, then `foo()`"
+  },
+  {
+    "markdown": "[`*a*`](https://x.com)",
+    "hrefs": [
+      "https://x.com"
+    ],
+    "codes": [],
+    "drawn": "[\\*a\\*](https://x.com)"
+  },
+  {
+    "markdown": "[`~/a/b.el`](~/a/b.el)",
+    "hrefs": [
+      "~/a/b.el"
+    ],
+    "codes": [],
+    "drawn": "[~/a/b.el](~/a/b.el)"
+  }
+]

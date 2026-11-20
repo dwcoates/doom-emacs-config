@@ -1207,10 +1207,10 @@ type fakeFeed struct {
 	promptsRetired []ids.TurnID
 	// closed are the door's feed tells, in order.
 	closed []closedTell
-	// pullTarget is the pull request target LinkPulls links every
+	// pullTarget is the pull request target DrawLinks links every
 	// workspace's text into, nil for none.
 	pullTarget *pullrefs.Target
-	// linkedFor is the workspace of every LinkPulls call, in order.
+	// linkedFor is the workspace of every DrawLinks call, in order.
 	linkedFor []ids.WorkspaceID
 	// answeredAt is when the fixture's root feed last drew agent output, as
 	// the real resolver records it (AnsweredSince); zero for never.
@@ -1228,9 +1228,9 @@ func (f *fakeFeed) AnsweredSince(_ ids.WorkspaceID, at time.Time) bool {
 // RecentCodeSpans answers no spans: the fixture draws plain prompts.
 func (f *fakeFeed) RecentCodeSpans(ids.WorkspaceID) []string { return nil }
 
-// LinkPulls links PARSED's plain blocks into the fixture's pull request
+// DrawLinks links PARSED's plain blocks into the fixture's pull request
 // target, recording which workspace asked.
-func (f *fakeFeed) LinkPulls(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse) {
+func (f *fakeFeed) DrawLinks(ws ids.WorkspaceID, parsed *frontendv1.ParsedProse) {
 	f.linkedFor = append(f.linkedFor, ws)
 	for _, block := range parsed.GetBlocks() {
 		if plain := block.GetPlain(); plain != nil {

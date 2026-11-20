@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"agent-repld/internal/dirpath"
+	"agent-repld/internal/mdinline"
 	"agent-repld/internal/usersetup"
 )
 
@@ -103,97 +104,47 @@ func (t Target) PullURL(number string) string {
 // in order, which the caller learns (Known.Learn): a later bare reference to
 // the same number means the same pull request.
 //
-// A reference is linked only where it stands as a word of prose: never in a
-// fenced code block or a code span, never inside an existing link (its text or
-// its destination), and never glued to what precedes it (a url's fragment, an
-// entity). A text still
-// ARRIVING leaves a reference at its very end alone, because the next push
-// may add digits to it.
+// A reference is linked only where it stands as a word of prose
+// (mdinline.Text): never in a fenced code block or a code span, never inside
+// a link of any kind (its text, its destination, a bare URL, an autolink, a
+// reference definition), and never glued to what precedes it (an entity). A
+// text still ARRIVING leaves a reference at its very end alone, because the
+// next push may add digits to it.
 func Linkify(markdown string, links Links, arriving bool) (string, []Ref) {
 	var out strings.Builder
 	var named []Ref
 	out.Grow(len(markdown))
-	var fence string
-	lines := strings.SplitAfter(markdown, "\n")
+	doc := mdinline.Read(markdown)
 	offset := 0
-	for _, line := range lines {
-		start := offset
-		offset += len(line)
-		if marker := fenceMarker(line); fence == "" && marker != "" {
-			fence = marker
-			out.WriteString(line)
-			continue
-		} else if fence != "" {
-			if closesFence(line, fence) {
-				fence = ""
-			}
-			out.WriteString(line)
+	for _, line := range doc.Lines {
+		offset += len(line.Text)
+		if line.Kind != mdinline.Prose {
+			out.WriteString(line.Text)
 			continue
 		}
-		named = linkifyLine(&out, line, links, arriving && start+len(line) == len(markdown), named)
+		atEnd := arriving && offset == len(markdown)
+		for _, s := range doc.Spans(line.Text) {
+			if s.Kind != mdinline.Text {
+				out.WriteString(s.Raw)
+				continue
+			}
+			to := s.At + len(s.Raw)
+			named = linkifyText(&out, line.Text[:to], s.At, links, atEnd && to == len(line.Text), named)
+		}
 	}
 	return out.String(), named
 }
 
-// fenceMarker answers the backtick or tilde run LINE opens a fence with, or ""
-// when LINE opens none.
-func fenceMarker(line string) string {
-	trimmed := strings.TrimLeft(line, " ")
-	if len(line)-len(trimmed) > 3 {
-		return ""
-	}
-	for _, c := range []byte{'`', '~'} {
-		n := 0
-		for n < len(trimmed) && trimmed[n] == c {
-			n++
-		}
-		if n >= 3 {
-			return trimmed[:n]
-		}
-	}
-	return ""
-}
-
-// closesFence reports whether LINE closes the fence MARKER opened.
-func closesFence(line, marker string) bool {
-	trimmed := strings.TrimSpace(line)
-	if len(strings.TrimLeft(line, " "))+3 < len(line) || len(trimmed) < len(marker) {
-		return false
-	}
-	return strings.Trim(trimmed, marker[:1]) == ""
-}
-
-// linkifyLine writes LINE to OUT with its references linked, and answers
-// NAMED with the pull requests its `<repo>#<number>` references named
-// appended. ATEND says the line ends a text still arriving.
-//
-// The scan walks LINE once and copies three kinds of span verbatim before a
-// reference can be found in them: a code span, a link (its text and its
-// destination, see linkEnd), and any word that is not a reference. A reference
-// is linked only where the scan meets it at the start of a word.
-func linkifyLine(out *strings.Builder, line string, links Links, atEnd bool, named []Ref) []Ref {
-	i := 0
+// linkifyText writes LINE[FROM:], prose, to OUT with its references linked,
+// and answers NAMED with the pull requests its `<repo>#<number>` references
+// named appended. ATEND says LINE ends a text still arriving. A reference is
+// linked only where the scan meets it at the start of a word, and any other
+// word is copied whole.
+func linkifyText(out *strings.Builder, line string, from int, links Links, atEnd bool, named []Ref) []Ref {
+	i := from
 	for i < len(line) {
 		c := line[i]
 		switch {
-		case c == '`':
-			run := backtickRun(line, i)
-			if end := closingRun(line, i+run, run); end >= 0 {
-				out.WriteString(line[i : end+run])
-				i = end + run
-				continue
-			}
-			out.WriteString(line[i : i+run])
-			i += run
-		case c == '[':
-			end := linkEnd(line, i)
-			if end < 0 {
-				out.WriteByte(c)
-				i++
-				continue
-			}
-			out.WriteString(line[i:end])
-			i = end
 		case c == '#' && startsWord(line, i):
 			number, end, ok := pullNumber(line, i, atEnd)
 			ref, linked := links.bare(number)
@@ -248,7 +199,7 @@ func pullNumber(line string, hash int, atEnd bool) (number string, end int, ok b
 
 // startsWord reports whether position I begins a word of prose: the line's
 // start, after whitespace, or after an opening parenthesis. A parenthesis that
-// opens a link's destination never reaches here, because linkEnd consumes the
+// opens a link's destination never reaches here, because mdinline reads the
 // whole link.
 func startsWord(line string, i int) bool {
 	if i == 0 {
@@ -259,57 +210,6 @@ func startsWord(line string, i int) bool {
 		return true
 	}
 	return false
-}
-
-// linkEnd answers where the inline link opening with the `[` at I ends, or -1
-// when the `[` opens no link. A link is its text up to the matching `]`
-// (brackets nest, code spans hide theirs) followed at once by `(`, then its
-// destination up to the matching `)`. A destination still unclosed at the
-// line's end runs to it, so a link arriving mid-destination stays whole.
-func linkEnd(line string, i int) int {
-	depth := 0
-	j := i
-	for j < len(line) {
-		switch line[j] {
-		case '`':
-			run := backtickRun(line, j)
-			if end := closingRun(line, j+run, run); end >= 0 {
-				j = end + run
-			} else {
-				j += run
-			}
-			continue
-		case '\\':
-			j += 2
-			continue
-		case '[':
-			depth++
-		case ']':
-			depth--
-		}
-		j++
-		if depth == 0 {
-			break
-		}
-	}
-	if depth != 0 || j >= len(line) || line[j] != '(' {
-		return -1
-	}
-	parens := 0
-	for ; j < len(line); j++ {
-		switch line[j] {
-		case '\\':
-			j++
-		case '(':
-			parens++
-		case ')':
-			parens--
-			if parens == 0 {
-				return j + 1
-			}
-		}
-	}
-	return len(line)
 }
 
 // isRepoByte reports whether C may appear in a GitHub repository name.
@@ -336,30 +236,4 @@ func validRepoName(name string) bool {
 // is not a reference.
 func isWordByte(c byte) bool {
 	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-}
-
-// backtickRun is the length of the backtick run at I.
-func backtickRun(line string, i int) int {
-	n := 0
-	for i+n < len(line) && line[i+n] == '`' {
-		n++
-	}
-	return n
-}
-
-// closingRun is where the next backtick run of exactly N at or after FROM
-// begins, or -1 when the span is never closed.
-func closingRun(line string, from, n int) int {
-	for i := from; i < len(line); {
-		if line[i] != '`' {
-			i++
-			continue
-		}
-		run := backtickRun(line, i)
-		if run == n {
-			return i
-		}
-		i += run
-	}
-	return -1
 }
