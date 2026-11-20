@@ -176,6 +176,10 @@ Either kind:
   - `-model M` makes the merge's session resume on model M in the same step,
     so a cold conversation is read once on it, with no separate SetModel; M
     not in the login's catalog is refused `not_in_catalog`.
+  - A merge whose workspace is parked at its cold gate is requeued too: it
+    goes in line skipped, and the daemon answers the gate at once by a
+    compaction of the whole conversation with Haiku, keeping the prompts held
+    at the gate. The merge resumes at its place once the session is up.
   - Refusals: `unknown_merge`, `still_queued`, `branch_gone`,
     `already_landed`, `workspace_closed`, `placement_behind_not_in_line`,
     `not_in_catalog`.

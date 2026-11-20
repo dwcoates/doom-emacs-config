@@ -273,10 +273,13 @@ export type RequeueMergeError = Message<"agentrepl.v1.RequeueMergeError"> & {
     case: "notInCatalog";
   } | {
     /**
-     * The merge's workspace is parked at its cold gate. The gate takes a
-     * parked workspace's merge off its queue the moment it is raised, so a
-     * requeue would be evicted again at once; the user answers the gate
-     * first. The request stays off its queue.
+     * DEPRECATED (2026-11-20): never answered. It refused a requeue of a
+     * merge whose workspace is parked at its cold gate. Such a requeue now
+     * goes in line, skipped as every waiting merge at a cold gate is, and
+     * the daemon answers the gate at once by a compaction of the whole
+     * conversation with the gate's default summarizer; the merge resumes at
+     * its place once the session is up. The arm stays declared so a client
+     * built before the change still decodes it.
      *
      * @generated from field: agentrepl.v1.RequeueMergeColdGated cold_gated = 13;
      */

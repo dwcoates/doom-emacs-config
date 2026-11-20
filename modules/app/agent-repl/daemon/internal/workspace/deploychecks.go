@@ -190,7 +190,27 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 	if standing, err := v.deps.DB.Workspace(ctx, ws); err != nil || !standing.DeployMediator {
 		return err
 	}
-	_, log, err := v.owned(ctx, "AnswerDeployCheckColdGate", ws)
+	return v.answerColdGateByCompaction(ctx, "AnswerDeployCheckColdGate", ws, true,
+		"a cold gate stands on the standing deploy check; it is answered compact-and-resume at once")
+}
+
+// CompactRequeuedMergeColdGate implements Verbs: answers the cold gate that
+// stands on WS, whose merge was just requeued, by a compaction that keeps
+// the prompts held at the gate (owner request, 2026-11-20: a requeue at a
+// cold gate compacts and goes in line, where it was refused). The held
+// prompts are the user's to send: the merge runs first.
+func (v *verbs) CompactRequeuedMergeColdGate(ctx context.Context, ws wsm.WorkspaceID) error {
+	return v.answerColdGateByCompaction(ctx, "CompactRequeuedMergeColdGate", ws, false,
+		"a cold gate stands on the workspace of a requeued merge; it is answered by a compaction at once")
+}
+
+// answerColdGateByCompaction answers the cold gate standing on WS, for VERB,
+// by a compaction of the whole conversation with the gate's default
+// summarizer (Haiku, coldCompactMenu), recording WHY. RESUME sends the
+// prompts held at the gate once the session is up; otherwise they stay held.
+// A workspace with no gate standing is left as it is.
+func (v *verbs) answerColdGateByCompaction(ctx context.Context, verb string, ws wsm.WorkspaceID, resume bool, why string) error {
+	_, log, err := v.owned(ctx, verb, ws)
 	if err != nil {
 		return err
 	}
@@ -198,11 +218,13 @@ func (v *verbs) AnswerDeployCheckColdGate(ctx context.Context, ws wsm.WorkspaceI
 		return nil
 	}
 	summarizer := defaultSummarizer()
-	log.Info(opDeployChecks, "a cold gate stands on the standing deploy check; it is answered compact-and-resume at once", nil)
-	return v.AnswerColdGate(ctx, ws, &agentreplv1.AnswerColdGateRequest{
-		Choice: &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: &agentreplv1.AnswerColdGateCompact{
-			Model: summarizer.GetModel(), Scope: summarizer.GetScope()}},
-	})
+	compact := &agentreplv1.AnswerColdGateCompact{Model: summarizer.GetModel(), Scope: summarizer.GetScope()}
+	answer := &agentreplv1.AnswerColdGateRequest{Choice: &agentreplv1.AnswerColdGateRequest_Compact{Compact: compact}}
+	if resume {
+		answer.Choice = &agentreplv1.AnswerColdGateRequest_CompactAndResume{CompactAndResume: compact}
+	}
+	log.Info(opDeployChecks, why, dlog.Context{"resume": resume})
+	return v.AnswerColdGate(ctx, ws, answer)
 }
 
 // RefreshDeployCheck implements Verbs: brings standing fixer WS's worktree

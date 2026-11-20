@@ -3424,6 +3424,10 @@ type harness struct {
 	// coldGated marks the workspaces AtColdGate answers parked at their
 	// cold gates; none by default.
 	coldGated map[ids.WorkspaceID]bool
+	// gatesCompacted is every workspace whose cold gate CompactColdGate was
+	// asked to answer, in order, and compactGateErr what it answers.
+	gatesCompacted []ids.WorkspaceID
+	compactGateErr error
 	// detached is the detached-merge service: the fork and the handbacks.
 	detached *fakeDetached
 	// names is the async merge name check.
@@ -3957,6 +3961,12 @@ func (h *harness) deps() Deps {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			return h.coldGated[ws]
+		},
+		CompactColdGate: func(_ context.Context, ws ids.WorkspaceID) error {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.gatesCompacted = append(h.gatesCompacted, ws)
+			return h.compactGateErr
 		},
 		PauseAfterCapture: h.pauseAfterCapture,
 		PauseInTerminal:   h.pauseInTerminal,

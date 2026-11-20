@@ -547,5 +547,41 @@ func assertBriefFailureEscalated(t *testing.T, h *harness, what, cause string) {
 	}
 	if len(intakeTellings(h)) != 0 {
 		t.Fatalf("told the intake of the deploy %d times, want it never told", len(intakeTellings(h)))
+	} // THE MEDIATOR IS TOLD THE CHECK COULD NOT RUN, naming what failed and
+	// why, never that the deploy was escalated for something found.
+	notRun := submissionsTo(h, "ws-fixer", BriefDeployCheckNotRun+" ")
+	if len(notRun) != 1 || !strings.Contains(submittedText(notRun[0]), what) || !strings.Contains(submittedText(notRun[0]), cause) {
+		t.Fatalf("the mediator was sent %v, want one brief that the check could not run, naming %q and %q", h.queue.submissions, what, cause)
+	}
+	if len(escalationBriefs(h)) != 0 {
+		t.Fatalf("the mediator was sent %d escalation briefs, want none for a check that could not run", len(escalationBriefs(h)))
+	}
+}
+
+// TestTheMediatorApprovesACheckThatCouldNotRun pins that a check escalated
+// because its brief could not be composed, and so never told to the mediator
+// as a check, takes the mediator's approval: on 2026-11-20 that approval was
+// refused as a check the mediator was never told of, and the queue stayed
+// held for the user.
+func TestTheMediatorApprovesACheckThatCouldNotRun(t *testing.T) {
+	// Arrange
+	h := checked(t)
+	owe(t, h)
+	withMediator(t, h)
+	h.logRecords = func(time.Time, time.Time) ([]LogRecord, error) { return nil, errors.New("logs.sh exited 2") }
+	h.o.Mediate(context.Background())
+	if m := owedCheck(t, h); m == nil || !m.Escalated() || m.Prompted() {
+		t.Fatalf("check %+v, want it escalated and never prompted", m)
+	}
+
+	// Act
+	err := h.o.DecideMediation(context.Background(), "ws-fixer", Decision{Kind: MediationApprove, Summary: "it broke nothing"})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("DecideMediation = %v, want the approval accepted", err)
+	}
+	if m := owedCheck(t, h); m != nil {
+		t.Fatalf("check %+v, want it released", m)
 	}
 }

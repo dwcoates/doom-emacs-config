@@ -26,12 +26,19 @@ import (
 // escalation the daemon made for it.
 const BriefDeployEscalation = "deploy-escalation"
 
+// BriefDeployCheckNotRun is the brief that tells the mediator a check could
+// not run (briefFailed): what failed and why, and that nothing has looked at
+// the deploy. The escalation's own brief read as a finding about the deploy
+// (owner request, 2026-11-20).
+const BriefDeployCheckNotRun = "deploy-check-not-run"
+
 // escalate puts check M of queue Q before the user as SUMMARY with
 // PROBLEMS, in the queue's deploy mediator, answering it. SAID is whether
 // the mediator escalated in its own turn. Each failure is recorded at ERROR
 // and answered.
-func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, summary string, problems []DeployProblem, window wsm.CheckWindow, said bool, fields dlog.Context) (ids.WorkspaceID, error) {
+func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Mediation, told escalationBrief, window wsm.CheckWindow, said bool, fields dlog.Context) (ids.WorkspaceID, error) {
 	repoDir := q.repository.Dir
+	summary, problems := told.Summary, told.Problems
 	fields = withField(fields, "summary", summary)
 	// A TELLING THE DAEMON'S EXIT OR A HANDOVER CUT is no failure: the
 	// next daemon's pass tells it again (mediationFailed records it at INFO).
@@ -62,13 +69,7 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 		o.deps.Log.Global().Info(opMediation, "the mediator escalated in its own turn; it is shown and the user notified", withField(fields, "problems", len(problems)))
 		return escalation.ws, nil
 	}
-	brief, err := o.deps.Briefs(BriefDeployEscalation, map[string]string{
-		"repo_dir":       repoDir,
-		"deploy_started": m.OwedAt.UTC().Format(time.RFC3339),
-		"summary":        summary,
-		"problems":       renderEscalationProblems(problems),
-		"old_problems":   renderOldProblems(window),
-	})
+	brief, err := o.escalationBriefText(repoDir, m, told, window)
 	if err != nil {
 		return failed("the escalation's brief could not be composed; the mediator is not briefed and the user is not told", err)
 	}
@@ -78,6 +79,29 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	o.deps.Banners.Mediated(escalation.ws, summary)
 	o.deps.Log.Global().Info(opMediation, "the deploy is put before the user in the deploy mediator", withField(fields, "problems", len(problems)))
 	return escalation.ws, nil
+}
+
+// escalationBriefText is the brief that tells the mediator of escalated
+// check M of the repository at REPODIR: what failed, for a check that could
+// not run (BriefDeployCheckNotRun), and otherwise the summary and findings
+// it was escalated with beside WINDOW's older groups (BriefDeployEscalation).
+func (o *orchestrator) escalationBriefText(repoDir string, m wsm.Mediation, told escalationBrief, window wsm.CheckWindow) (string, error) {
+	started := m.OwedAt.UTC().Format(time.RFC3339)
+	if told.NotRun != nil {
+		return o.deps.Briefs(BriefDeployCheckNotRun, map[string]string{
+			"repo_dir":       repoDir,
+			"deploy_started": started,
+			"what":           told.NotRun.What,
+			"cause":          told.NotRun.Cause,
+		})
+	}
+	return o.deps.Briefs(BriefDeployEscalation, map[string]string{
+		"repo_dir":       repoDir,
+		"deploy_started": started,
+		"summary":        told.Summary,
+		"problems":       renderEscalationProblems(told.Problems),
+		"old_problems":   renderOldProblems(window),
+	})
 }
 
 // renderOldProblems is every group of WINDOW that is not NEW, as the

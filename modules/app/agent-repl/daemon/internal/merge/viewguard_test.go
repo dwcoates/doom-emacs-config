@@ -78,7 +78,9 @@ func TestALedgerIsMintedOnlyWhereAMergeTakesItsPlace(t *testing.T) {
 	got := callersOf(t, "o.mintLedger(")
 
 	// Assert
-	if strings.Join(got, ",") != "recover.go:ledgerOfEntry,request.go:queueRequestAt" {
+	// queueRequestGated is where a merge takes its place: queueRequestAt and
+	// a requeue (Requeue) both put a merge in line through it.
+	if strings.Join(got, ",") != "recover.go:ledgerOfEntry,request.go:queueRequestGated" {
 		t.Fatalf("functions minting a ledger = %v", got)
 	}
 }

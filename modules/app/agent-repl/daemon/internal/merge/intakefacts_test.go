@@ -149,7 +149,7 @@ func TestAWindowThatCannotBeReadEscalatesTheCheck(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	assertBriefFailureEscalated(t, h, "the intake's brief could not be composed", "logs.sh exited 2")
+	assertBriefFailureEscalated(t, h, "the deploy check's brief could not be composed", "logs.sh exited 2")
 }
 
 func TestDigestSitesGroupsTheWindowByLoggingSite(t *testing.T) {
@@ -255,7 +255,7 @@ func TestADigestThatCannotBeWrittenEscalatesTheCheck(t *testing.T) {
 	h.o.Mediate(context.Background())
 
 	// Assert
-	assertBriefFailureEscalated(t, h, "the intake's brief could not be composed", "")
+	assertBriefFailureEscalated(t, h, "the deploy check's brief could not be composed", "")
 }
 
 func TestAQuietWindowReleasesTheCheckWithoutTheMediator(t *testing.T) {
