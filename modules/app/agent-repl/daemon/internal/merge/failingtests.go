@@ -367,11 +367,13 @@ func readScriptUnit(s *failingSuite, suite roster.Suite, lines []string, module 
 // render writes the failing tests as the file the fixing agent reads.
 func (f failingTests) render(archive string) string {
 	var b strings.Builder
-	b.WriteString("# The failing tests of the merge queue's last test gate run.\n")
-	b.WriteString(fmt.Sprintf("# The whole run is archived at %s.\n", archive))
-	b.WriteString("# Run exactly these while fixing, through the daemon, with the command given\n")
-	b.WriteString("# for each group or the one that runs them all.\n")
-	b.WriteString("# After your turn the queue runs the selected suites again.\n")
+	// PLAIN TEXT, NO MARKDOWN HEADING (owner ruling, 2026-11-19): the brief
+	// carries this inline, and the feed drew a `#` line as a heading.
+	b.WriteString("The failing tests of the merge queue's last test gate run.\n")
+	b.WriteString(fmt.Sprintf("The whole run is archived at %s.\n", archive))
+	b.WriteString("Run exactly these while fixing, through the daemon, with the command given\n")
+	b.WriteString("for each group or the one that runs them all.\n")
+	b.WriteString("After your turn the queue runs the selected suites again.\n")
 	if len(f.suites) == 0 {
 		b.WriteString("\nNo failing test could be attributed to a suite: read the archive.\n")
 		return b.String()
@@ -390,7 +392,7 @@ func (f failingTests) render(archive string) string {
 		b.WriteString(fmt.Sprintf("\nrun all: %s %s\n", TestRunCommand, strings.Join(all, " ")))
 	}
 	for _, s := range f.suites {
-		b.WriteString(fmt.Sprintf("\n## %s\n", s.name))
+		b.WriteString(fmt.Sprintf("\nsuite %s:\n", s.name))
 		for _, g := range s.groups {
 			b.WriteString(fmt.Sprintf("\nrun: %s\n", g.command()))
 			for _, test := range g.shown {
