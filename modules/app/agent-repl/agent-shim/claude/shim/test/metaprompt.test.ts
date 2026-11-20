@@ -236,7 +236,12 @@ describe("this repository's committed metaprompt", () => {
     // Assert — owner ruling 2026-11-16: an old problem never taken on is
     // dispatched or escalated, never approved past, and never filed with a
     // named workspace.
-    expect(text).toContain("The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval");
+    // Owner ruling 2026-11-20: a dispatch is never refused for what the
+    // deploy holds either, so the two refusals that meant "escalate" are gone.
+    expect(text).toContain("The mediator alone decides every deploy: agent-repl never refuses an approval");
+    expect(text).toContain("never refuses a dispatch for what the deploy holds");
+    expect(text).not.toContain("problems_recurring");
+    expect(text).not.toContain("remediation_bound_reached");
     expect(text).toContain("Start from the digest, which holds one line and one sample record per logging site");
     expect(text).toContain("The brief names the deploy and what there is to investigate it with, and states nothing it found");
     expect(text).not.toContain("merge-queue-stall-triage");
