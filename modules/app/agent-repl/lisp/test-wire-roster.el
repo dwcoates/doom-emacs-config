@@ -72,6 +72,7 @@ status arm and whatever else the case is about."
                    :async-merging nil
                    :merge-paused nil
                    :merge-turn nil
+                   :open-owned-pull-request nil
                    :last-selected nil
                    :last-turn-ended nil
                    :last-turn-boundary nil
@@ -219,6 +220,25 @@ status arm and whatever else the case is about."
                   (agent-repl-test-wire-roster--row
                    "\"thinking\":{}" "\"mergeTurn\":{\"step\":{}}"))
                  '("RosterRowMergeTurn" step "unknown field"))))
+
+(ert-deftest agent-repl-test-wire-roster-row-decodes-the-open-owned-pull-request-marker ()
+  "A row carrying `openOwnedPullRequest\=' decodes it as PRESENT."
+  ;; Act
+  (let ((row (agent-repl-test-wire-roster--decode
+              #'agent-repl-wire-decode-roster-row
+              (agent-repl-test-wire-roster--row "\"ready\":{}" "\"openOwnedPullRequest\":{}"))))
+    ;; Assert
+    (should (eq (plist-get row :open-owned-pull-request) t))
+    (should (equal (plist-get row :status) '(:arm :ready :value nil)))))
+
+(ert-deftest agent-repl-test-wire-roster-row-open-owned-pull-request-marker-carries-no-payload ()
+  "`RosterRowOpenOwnedPullRequest\=' is EMPTY: a field in it is unknown."
+  ;; Act / Assert
+  (should (equal (agent-repl-test-wire-roster--breach
+                  #'agent-repl-wire-decode-roster-row
+                  (agent-repl-test-wire-roster--row
+                   "\"ready\":{}" "\"openOwnedPullRequest\":{\"url\":{}}"))
+                 '("RosterRowOpenOwnedPullRequest" url "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-roster-row-decodes-the-opening-marker ()
   "A row carrying `opening' decodes it as PRESENT, beside its status arm."

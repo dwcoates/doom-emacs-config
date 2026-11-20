@@ -114,10 +114,9 @@ JSON
 
   - agent-repl notifies the user: end the turn telling the user plainly what is wrong and what the choices are.
   - The queue lands nothing until this workspace's fix deploys and is approved, or the user releases the queue.
-- The mediator alone decides whether a deploy is approved: agent-repl never refuses an approval (owner ruling, 2026-11-19).
-- agent-repl still refuses a dispatch in two cases, and each means escalate, for a problem this deploy caused.
-  - A problem came back after more than five of its fixes deployed (`problems_recurring`): that problem is the user's.
-  - The chain has deployed its bound of remediations in a row (`remediation_bound_reached`).
+- The mediator alone decides every deploy: agent-repl never refuses an approval (owner ruling, 2026-11-19), and never refuses a dispatch for what the deploy holds (owner ruling, 2026-11-20).
+  - How many remediations the chain has deployed in a row, and how many times a problem came back after its fix, refuse nothing.
+  - A decision is refused only when it no longer applies: the check ended meanwhile, or the deploy is escalated already, whose fix lands through the finish.
 
 ### Fix a dispatch, and finish on your own
 

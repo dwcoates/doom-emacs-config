@@ -52,17 +52,21 @@ const (
 	// ArmNoEscalationHeld refuses a release of an escalation's hold when no
 	// escalation holds the queue.
 	ArmNoEscalationHeld = "no_escalation_held"
-	// ArmRemediationBoundReached refuses a dispatch once the chain deployed
-	// as many remediations in a row as its repository allows.
+	// ArmRemediationBoundReached is DEPRECATED and never answered
+	// (2026-11-20): it refused a dispatch once the chain deployed as many
+	// remediations in a row as its repository allowed. No dispatch is refused
+	// for what its deploy holds now (dispatch.go). It stays named because the
+	// protobuf still declares its arm.
 	ArmRemediationBoundReached = "remediation_bound_reached"
 	// ArmProblemsUnowned is DEPRECATED and never answered (2026-11-19): it
 	// refused an approval while the check's window held a group no one owned.
 	// The mediator alone decides an approval now. It stays named because the
 	// protobuf still declares its arm.
 	ArmProblemsUnowned = "problems_unowned"
-	// ArmProblemsRecurring refuses anything but an escalation while the
-	// check's window holds a group that came back after more than
-	// maxFixesBeforeEscalation of its fixes deployed.
+	// ArmProblemsRecurring is DEPRECATED and never answered (2026-11-20): it
+	// refused a dispatch while the check's window held a group that came back
+	// after more than five of its fixes deployed. It stays named because the
+	// protobuf still declares its arm.
 	ArmProblemsRecurring = "problems_recurring"
 )
 
@@ -196,9 +200,6 @@ func replacedOutcome(m wsm.ReplacedMediation) string {
 // checkedQueue is a registered repository whose deploys are checked.
 type checkedQueue struct {
 	registeredQueue
-	// bound is the most remediations a chain deploys in a row
-	// (repoconfig.v1.DeployChecks.remediations_before_escalation).
-	bound int
 }
 
 // checkedQueues answers every registered repository whose lifecycle config
@@ -221,8 +222,8 @@ func (o *orchestrator) checkedQueues(ctx context.Context, op string) ([]checkedQ
 				dlog.Context{"repository": q.repository.Dir, "error": err.Error()})
 			continue
 		}
-		if checks := cfg.GetDeployChecks(); checks != nil {
-			out = append(out, checkedQueue{registeredQueue: q, bound: int(checks.GetRemediationsBeforeEscalation())})
+		if cfg.GetDeployChecks() != nil {
+			out = append(out, checkedQueue{registeredQueue: q})
 		}
 	}
 	return out, nil
@@ -967,17 +968,9 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	if err != nil {
 		return err
 	}
-	// THE MEDIATOR ALONE DECIDES WHETHER A DEPLOY IS APPROVED (owner ruling,
-	// 2026-11-19): an approval is never judged against the window's records.
-	// A DISPATCH of a problem past its fixes is still refused (owner ruling,
-	// 2026-11-16): a fix that came back more than five times is the user's.
-	if recurring := recurringGroups(window); d.Kind == MediationDispatch && len(recurring) > 0 {
-		refusal := &RefusalError{Arm: ArmProblemsRecurring, Workspace: ws,
-			Reason: fmt.Sprintf("the window holds %d groups that came back after more than %d of their fixes deployed; escalate", len(recurring), maxFixesBeforeEscalation),
-			Fields: map[string]any{"groups": recurring}}
-		logRefusal(o.deps.Log.Global(), opMediation, "refused a dispatch while the window holds problems past their fixes", withField(fields, "recurring", recurring), refusal)
-		return refusal
-	}
+	// THE MEDIATOR ALONE DECIDES A DEPLOY (owner rulings, 2026-11-19 and
+	// 2026-11-20): neither an approval nor a dispatch is judged against the
+	// window's records.
 	if d.Kind == MediationDispatch {
 		return o.dispatch(ctx, q, m, ws, d, fields)
 	}
@@ -1161,30 +1154,6 @@ func (o *orchestrator) toldWindow(ctx context.Context, repo wsm.RepoKey, fields 
 		o.deps.Log.Global().Info(opMediation, "the check was told by a previous build, which recorded no window; its decision is judged against none", fields)
 	}
 	return window, nil
-}
-
-// maxFixesBeforeEscalation is how many fixes of one problem may deploy
-// before its recurrence is the user's (owner rulings, 2026-11-16 and
-// 2026-11-19, which raised it from two): a problem that comes back after
-// more than five is escalated, never dispatched again.
-const maxFixesBeforeEscalation = 5
-
-// pastItsFixes reports whether a group of CLASS whose problem's fixes
-// deployed FIXES times came back past what a remediation may try.
-func pastItsFixes(class wsm.WindowClass, fixes int) bool {
-	return class == wsm.WindowRecurred && fixes > maxFixesBeforeEscalation
-}
-
-// recurringGroups names every group of WINDOW that came back past its fixes
-// (pastItsFixes), as "OPERATION: MESSAGE (N fixes)", in its order.
-func recurringGroups(window wsm.CheckWindow) []string {
-	var out []string
-	for _, g := range window.Groups {
-		if pastItsFixes(g.Class, g.Fixes) {
-			out = append(out, fmt.Sprintf("%s: %s (%d fixes)", g.Operation, g.Message, g.Fixes))
-		}
-	}
-	return out
 }
 
 // problemStatements is each of PROBLEMS's statement, for a record.

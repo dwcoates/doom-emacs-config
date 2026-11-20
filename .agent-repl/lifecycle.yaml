@@ -39,11 +39,13 @@ queue_drained:
     timeout_seconds: 120
 # Every deploy holds the merge queue's head until it is checked
 # (repoconfig.v1.LifecycleConfig.deploy_checks;
-# docs/investigations/2026-11-14-deploy-intake-plan.md). Each chain of
-# deploys has a hidden intake (sonnet, low effort) that approves, escalates,
-# or dispatches what the deploy broke to a visible remediation workspace
-# (opus, low effort), whose finish gates, lands directly and deploys; an
-# escalation is a visible workspace (opus, medium effort). After
-# 4 remediations in a row the intake may only escalate.
+# docs/investigations/2026-11-14-deploy-intake-plan.md). The repository's
+# standing deploy mediator approves the deploy, escalates it, or dispatches
+# what the deploy broke to itself, and its finish gates, lands directly and
+# deploys. The section's presence turns the checks on.
+#
+# remediations_before_escalation is deprecated and never read (2026-11-20):
+# no dispatch is refused for how many remediations deployed in a row. It
+# stays set because a daemon built before that change requires it.
 deploy_checks:
   remediations_before_escalation: 4

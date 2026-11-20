@@ -1192,9 +1192,8 @@ type UpdateMergeQueueMediation_Approve struct {
 
 type UpdateMergeQueueMediation_Escalate struct {
 	// The deploy is put before the user: something is wrong that should be
-	// the user's to settle, or the chain reached its bound on remediations
-	// (repoconfig.v1.DeployChecks.remediations_before_escalation). The hold
-	// is released, the user is notified, and the chain ends.
+	// the user's to settle. The hold is released, the user is notified, and
+	// the chain ends.
 	Escalate *UpdateMergeQueueMediationEscalate `protobuf:"bytes,2,opt,name=escalate,proto3,oneof"`
 }
 
@@ -1797,8 +1796,11 @@ type UpdateMergeQueueError_NoMediationOwed struct {
 }
 
 type UpdateMergeQueueError_RemediationBoundReached struct {
-	// A dispatch once the chain has deployed as many remediations in a row as
-	// its repository allows: only an escalation is accepted now.
+	// DEPRECATED (2026-11-20): never answered. It refused a dispatch once the
+	// chain had deployed as many remediations in a row as its repository
+	// allowed. The deploy mediator alone now decides what it fixes, so no
+	// dispatch is refused for what its deploy holds. The arm stays declared
+	// so a client built before the change still decodes it.
 	RemediationBoundReached *UpdateMergeQueueRemediationBoundReached `protobuf:"bytes,18,opt,name=remediation_bound_reached,json=remediationBoundReached,proto3,oneof"`
 }
 
@@ -1812,9 +1814,10 @@ type UpdateMergeQueueError_ProblemsUnowned struct {
 }
 
 type UpdateMergeQueueError_ProblemsRecurring struct {
-	// A dispatch while the check's window holds a problem that came back
-	// after more than five of its fixes deployed: only an escalation is
-	// accepted. An approval is never refused for it.
+	// DEPRECATED (2026-11-20): never answered. It refused a dispatch while
+	// the check's window held a problem that came back after more than five
+	// of its fixes deployed, whether or not the dispatch cited that problem.
+	// The arm stays declared for the reason remediation_bound_reached does.
 	ProblemsRecurring *UpdateMergeQueueProblemsRecurring `protobuf:"bytes,20,opt,name=problems_recurring,json=problemsRecurring,proto3,oneof"`
 }
 
@@ -2377,7 +2380,8 @@ func (x *UpdateMergeQueueProblemsUnowned) GetGroups() []string {
 	return nil
 }
 
-// The recurring-problems refusal.
+// The recurring-problems refusal. DEPRECATED (2026-11-20): never answered;
+// see UpdateMergeQueueError.problems_recurring.
 type UpdateMergeQueueProblemsRecurring struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Each group that came back after more than five of its fixes deployed, as
@@ -2424,10 +2428,11 @@ func (x *UpdateMergeQueueProblemsRecurring) GetGroups() []string {
 	return nil
 }
 
-// The bound refusal.
+// The bound refusal. DEPRECATED (2026-11-20): never answered; see
+// UpdateMergeQueueError.remediation_bound_reached.
 type UpdateMergeQueueRemediationBoundReached struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// The repository's bound, which the chain has reached
+	// The repository's bound, which the chain had reached
 	// (repoconfig.v1.DeployChecks.remediations_before_escalation).
 	RemediationsBeforeEscalation uint32 `protobuf:"varint,1,opt,name=remediations_before_escalation,json=remediationsBeforeEscalation,proto3" json:"remediations_before_escalation,omitempty"`
 	unknownFields                protoimpl.UnknownFields

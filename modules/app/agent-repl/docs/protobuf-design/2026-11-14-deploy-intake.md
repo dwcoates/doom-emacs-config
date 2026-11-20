@@ -230,3 +230,15 @@ reload`) and the later `finishing` arm are superseded by
 `docs/protobuf-design/2026-11-16-zettel-deploy-check-labels.md`: the labels
 read `HOT-LOADING ZETTEL`, `ASSESSING ZETTEL HEALTH`, `FIXING ZETTEL ISSUES`
 and `TESTING ZETTEL FIXES`.
+
+## Dispatch refusals retired (2026-11-20)
+
+`UpdateMergeQueueError.remediation_bound_reached` (18) and
+`UpdateMergeQueueError.problems_recurring` (20) are deprecated and never
+answered, and `DeployChecks.remediations_before_escalation` is deprecated and
+never read (owner ruling, 2026-11-20): the deploy mediator alone decides what
+it fixes. The recurring refusal had refused the fix of a roster field Emacs
+could not decode, because the same window held handover records the dispatch
+never cited. The arms and the field stay declared, as `problems_unowned` (19)
+does, so a build from before the change still decodes them; their removal is
+a row of `org/todo.md`.

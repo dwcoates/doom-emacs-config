@@ -278,9 +278,9 @@ Either kind:
     with `merge-queue mediation ignore -operation OP [-message TEXT] -why TEXT`
     and `merge-queue mediation unignore -operation OP [-message TEXT]`; a
     check whose window holds no other warning or error runs no mediator.
-  - Refusals: `not_mediator` (not the workspace the check was told to), `no_mediation_owed` (a
-    fix is dispatched already), `remediation_bound_reached` (the chain's bound;
-    only an escalation is accepted).
+  - Refusals: `not_mediator` (not the workspace the check was told to) and
+    `no_mediation_owed` (a fix is dispatched already). A dispatch is never
+    refused for what the deploy holds.
   - An escalated check holds the queue until the escalation's fix deploys and
     is approved, or the user releases it: the sidebar's "release" beside
     "ZETTEL NEEDS YOU", or `merge-queue release-escalation -repository

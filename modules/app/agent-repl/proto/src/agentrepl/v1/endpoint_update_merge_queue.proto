@@ -216,9 +216,8 @@ message UpdateMergeQueueMediation {
     // advances, and the chain ends.
     UpdateMergeQueueMediationApprove approve = 1;
     // The deploy is put before the user: something is wrong that should be
-    // the user's to settle, or the chain reached its bound on remediations
-    // (repoconfig.v1.DeployChecks.remediations_before_escalation). The hold
-    // is released, the user is notified, and the chain ends.
+    // the user's to settle. The hold is released, the user is notified, and
+    // the chain ends.
     UpdateMergeQueueMediationEscalate escalate = 2;
     // Problems this deploy caused, handed to a remediation workspace to fix.
     // The hold stays, owned by that workspace until its fix's deploy is
@@ -319,8 +318,11 @@ message UpdateMergeQueueError {
     UpdateMergeQueueNotMediator not_mediator = 15;
     // A mediation decision while the intake's repository owes no check.
     UpdateMergeQueueNoMediationOwed no_mediation_owed = 16;
-    // A dispatch once the chain has deployed as many remediations in a row as
-    // its repository allows: only an escalation is accepted now.
+    // DEPRECATED (2026-11-20): never answered. It refused a dispatch once the
+    // chain had deployed as many remediations in a row as its repository
+    // allowed. The deploy mediator alone now decides what it fixes, so no
+    // dispatch is refused for what its deploy holds. The arm stays declared
+    // so a client built before the change still decodes it.
     UpdateMergeQueueRemediationBoundReached remediation_bound_reached = 18;
     // DEPRECATED (2026-11-19): never answered. It refused an approval while
     // the check's window held a warning or error no one owned. The deploy
@@ -328,9 +330,10 @@ message UpdateMergeQueueError {
     // is refused on what its window holds. The arm stays declared so a
     // client built before the change still decodes it.
     UpdateMergeQueueProblemsUnowned problems_unowned = 19;
-    // A dispatch while the check's window holds a problem that came back
-    // after more than five of its fixes deployed: only an escalation is
-    // accepted. An approval is never refused for it.
+    // DEPRECATED (2026-11-20): never answered. It refused a dispatch while
+    // the check's window held a problem that came back after more than five
+    // of its fixes deployed, whether or not the dispatch cited that problem.
+    // The arm stays declared for the reason remediation_bound_reached does.
     UpdateMergeQueueProblemsRecurring problems_recurring = 20;
     // A release of an escalation's hold while no escalation holds the
     // repository's queue. (Added 2026-11-17.)
@@ -378,15 +381,17 @@ message UpdateMergeQueueProblemsUnowned {
   // order.
   repeated string groups = 1;
 }
-// The recurring-problems refusal.
+// The recurring-problems refusal. DEPRECATED (2026-11-20): never answered;
+// see UpdateMergeQueueError.problems_recurring.
 message UpdateMergeQueueProblemsRecurring {
   // Each group that came back after more than five of its fixes deployed, as
   // "OPERATION: MESSAGE (FIXES fixes)", in the window's order.
   repeated string groups = 1;
 }
-// The bound refusal.
+// The bound refusal. DEPRECATED (2026-11-20): never answered; see
+// UpdateMergeQueueError.remediation_bound_reached.
 message UpdateMergeQueueRemediationBoundReached {
-  // The repository's bound, which the chain has reached
+  // The repository's bound, which the chain had reached
   // (repoconfig.v1.DeployChecks.remediations_before_escalation).
   uint32 remediations_before_escalation = 1;
 }

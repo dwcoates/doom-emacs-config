@@ -17,8 +17,15 @@ import (
 // mediator dispatches the problems a deploy caused to ITSELF, and fixes them
 // in the same turn: it knows every fix it made and what it ruled out. The
 // dispatch shows it in its repository's section while it fixes, and its
-// finish lands directly. The chain's bound on remediations in a row is
-// enforced here, so a mediator that miscounts cannot exceed it.
+// finish lands directly.
+//
+// A DISPATCH IS NEVER REFUSED FOR WHAT THE DEPLOY HOLDS (owner ruling,
+// 2026-11-20): the mediator alone decides what it fixes. The chain's bound on
+// remediations in a row and the bound on one problem's fixes each refused a
+// dispatch once, and the second refused the fix of a field Emacs could not
+// decode because the same window held handover records the dispatch never
+// cited (deploy of 2026-11-20 06:29Z). Only a dispatch for a check that no
+// longer stands is refused (ArmNoMediationOwed).
 
 // BriefDeployRemediationRestored is the prompt that stands for a
 // dispatch's work: the mediator's turn the dispatch is recorded on is
@@ -33,12 +40,6 @@ const BriefDeployRemediationRestored = "deploy-remediation-restored"
 // that ends with no finish under way escalates the check.
 func (o *orchestrator) dispatch(ctx context.Context, q checkedQueue, m wsm.Mediation, ws ids.WorkspaceID, d Decision, fields dlog.Context) error {
 	fields = withField(fields, "problems", len(d.Problems))
-	if m.ChainRedeploys >= q.bound {
-		o.deps.Log.Global().Warn(opMediation, "refused a dispatch past the chain's bound on remediations in a row; only an escalation is accepted", withField(withField(fields, "bound", q.bound), "in_a_row", m.ChainRedeploys))
-		err := refuse(ArmRemediationBoundReached, ws, "the chain deployed %d remediations in a row, its repository's bound; escalate instead", m.ChainRedeploys)
-		err.Fields = map[string]any{"remediations_before_escalation": uint32(q.bound)}
-		return err
-	}
 	brief, err := o.remediationBrief(q.repository.Dir, m, d)
 	if err != nil {
 		o.deps.Log.Global().Error(opMediation, "the dispatch's brief could not be composed; nothing is dispatched and the queue stays held for the mediator", withField(fields, "error", err.Error()))
