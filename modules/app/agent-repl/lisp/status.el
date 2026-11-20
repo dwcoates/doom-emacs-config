@@ -3528,6 +3528,21 @@ There is no matching notification on the RESTORE — see
   (agent-repl--force-tab-bar-redraw)
   (agent-repl-host-mark-viewed ws))
 
+(defun agent-repl--tab-view-on-link-followed (ws)
+  "Count WS viewed at once, because the reader followed a link in its page.
+FOLLOWING A LINK IS PROOF THE PAGE WAS READ, so it does at once what the
+view dwell does at its end (`agent-repl--tab-view-partial'), and drops the
+dwell pending for WS, which has nothing left to decide.  It holds whether
+or not WS is still the workspace shown: the link may have switched the
+frame away before the news arrived.  A workspace already demoted has
+nothing left to report, and says so.  Whether the report takes is the
+daemon's decision, as for the dwell's."
+  (if (agent-repl--tab-dwell-demoted-p ws)
+      (agent-repl--log ws "tab-view: link followed ws=%s already viewed" ws)
+    (when (equal ws (plist-get agent-repl--tab-dwell-pending :ws))
+      (agent-repl--tab-dwell-drop "link-followed"))
+    (agent-repl--tab-view-partial ws "link-followed")))
+
 (defun agent-repl--tab-view-restore-full (ws now)
   "Re-arm WS's dwell as of NOW, because the daemon cleared its viewed marker.
 

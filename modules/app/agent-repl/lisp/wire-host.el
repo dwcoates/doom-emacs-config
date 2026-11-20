@@ -679,6 +679,14 @@ The user clicked this workspace's row in a page's rail; the daemon
 relayed the click, so requesting the switch to it is all that is left."
   (agent-repl-wire--decode-empty "HostWorkspaceSelectRequested" value))
 
+;;;; ---- The link-followed push ----
+
+(defun agent-repl-wire-decode-host-workspace-link-followed (value)
+  "Decode VALUE as the empty message `HostWorkspaceLinkFollowed'.
+The reader followed a link in this workspace\='s page; the stream names
+the workspace, so counting it viewed is all that is left."
+  (agent-repl-wire--decode-empty "HostWorkspaceLinkFollowed" value))
+
 ;;;; ---- The load button push ----
 
 (defun agent-repl-wire-decode-host-workspace-load-page-requested (value)
@@ -1028,6 +1036,10 @@ VALUE is (:workspace REF :token TOKEN :outcome OUTCOME), all required."
   "Decode the `select_requested' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-select-requested value))
 
+(defun agent-repl-wire-decode-watch-host-workspace-response-link-followed (value)
+  "Decode the `link_followed' push arm VALUE."
+  (agent-repl-wire-decode-host-workspace-link-followed value))
+
 (defun agent-repl-wire-decode-watch-host-workspace-response-load-page-requested (value)
   "Decode the `load_page_requested' push arm VALUE."
   (agent-repl-wire-decode-host-workspace-load-page-requested value))
@@ -1120,6 +1132,8 @@ Returns a plist (:command STRING)."
                       agent-repl-wire-decode-watch-host-workspace-response-select-requested)
      (loadPageRequested :load-page-requested
                         agent-repl-wire-decode-watch-host-workspace-response-load-page-requested)
+     (linkFollowed :link-followed
+                   agent-repl-wire-decode-watch-host-workspace-response-link-followed)
      (composeEntry :compose-entry
                    agent-repl-wire-decode-watch-host-workspace-response-compose-entry)
      (chatTextHighlighted :chat-text-highlighted
@@ -1136,7 +1150,7 @@ Returns a plist (:command STRING)."
      "WatchHostWorkspaceResponse" object
      '(host transferred reloadWebapp openInEditor openCommitLog runInTerminal ending notificationClicked selection evaluate
        finalResponseClicked selectRequested loadPageRequested composeEntry chatTextHighlighted
-       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets))
+       transferWithdrawn responseTextHighlighted responseQuestion mentions mentionTargets linkFollowed))
     (agent-repl-wire--decoded
      "WatchHostWorkspaceResponse"
      (agent-repl-wire-decode-watch-host-workspace-response-push object))))

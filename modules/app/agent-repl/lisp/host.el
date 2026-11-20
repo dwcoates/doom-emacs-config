@@ -43,6 +43,8 @@
 ;; order config.el establishes and resolve each other's calls at call time,
 ;; so the declarations below exist for the byte-compiler alone.
 (declare-function agent-repl--input-buffer-name "core")
+(declare-function agent-repl--keep-visit "agent-repl-workspace" (name))
+(declare-function agent-repl--tab-view-on-link-followed "status" (ws))
 (declare-function agent-repl--input-selection-changed "input" (ws))
 (declare-function agent-repl-link-successor-pending-p "daemon-link")
 (declare-function agent-repl-link-successor-at "daemon-link")
@@ -1577,6 +1579,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:response-text-highlighted (agent-repl-host--reply-target-picked ws "response-text-highlighted"))
     (:select-requested (agent-repl-host--select-requested ws))
     (:load-page-requested (agent-repl-host--load-page-requested ws))
+    (:link-followed (agent-repl-host--link-followed ws))
     (:compose-entry (agent-repl-host--compose-entry ws value))
     (:response-question (agent-repl-host--response-question ws value))
     (:transferred (agent-repl-host--transferred ws value))
@@ -1756,6 +1759,21 @@ workspace Emacs holds.  An event, never replayed, so a reconnect never
 switches."
   (agent-repl--info ws "elisp.host.select-requested ws=%s" ws)
   (agent-repl-host-request-switch ws 'sidebar))
+
+;;;; ---- A link followed in a page ----
+
+(defun agent-repl-host--link-followed (ws)
+  "Count WS viewed: the reader followed a link in WS\='s page.
+The daemon tells WS\='s host stream of every link its page follows (an
+outward link, an editor link, a feed\='s jump to another workspace), and
+following one is proof the page was read.  So WS counts as viewed both
+ways the view dwell would have counted it: its visit enters the selection
+history however short it was (`agent-repl--keep-visit'), and its row goes
+PARTIAL (`agent-repl--tab-view-on-link-followed').  An event, never
+replayed, so a reconnect counts nothing."
+  (agent-repl--info ws "elisp.host.link-followed ws=%s" ws)
+  (agent-repl--keep-visit ws)
+  (agent-repl--tab-view-on-link-followed ws))
 
 ;;;; ---- The load button ----
 

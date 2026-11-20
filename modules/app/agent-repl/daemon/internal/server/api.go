@@ -961,6 +961,23 @@ func (s *server) pushSelectRequested(ws ids.WorkspaceID) int {
 	})
 }
 
+// pushLinkFollowed pushes link_followed onto WS's host stream: the reader
+// followed a link in WS's page (OpenExternal, OpenInEditor, or SelectInEditor's
+// followed_from), and Emacs counts WS viewed. It is pushed BEFORE the click's
+// own action, so a relay the action makes onto the same stream reaches Emacs
+// after it. RPC names the click's rpc for the record, which names how many
+// host streams heard it: none is a page whose editor holds no stream, and
+// nothing is owed then.
+func (s *server) pushLinkFollowed(log dlog.Logger, rpc string, ws ids.WorkspaceID) {
+	heard := s.hostEventStream(ws).Emit(&agentreplv1.WatchHostWorkspaceResponse{
+		Push: &agentreplv1.WatchHostWorkspaceResponse_LinkFollowed{
+			LinkFollowed: &agentreplv1.HostWorkspaceLinkFollowed{},
+		},
+	})
+	log.Info(rpc, "told the editor the reader followed a link in the workspace's page",
+		dlog.Context{"host_streams": heard})
+}
+
 // pushLoadPageRequested pushes load_page_requested onto the workspace's host
 // stream: the user clicked the load button the webhost draws for its
 // held-back page, and Emacs loads the page (LoadPageInEditor). It answers how

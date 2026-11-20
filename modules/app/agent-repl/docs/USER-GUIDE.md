@@ -985,6 +985,10 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - Stepping with them does not count as viewing, so the order holds still while you step through it.
   - Any other switch, a tab click, `M-1`, `s-{`, `SPC p p` or an agent's switch, counts as viewing the workspace it lands on.
   - That switch also counts the workspace you stopped stepping on as viewed, so `s-[` from the new workspace goes back to it.
+- **Following a link in a workspace's page counts that workspace as viewed at once.**
+  - A link opened in the browser, a file or log opened in Emacs, a run control, and a jump to another workspace from the feed all count.
+  - Its sidebar row and tab dim as they do after you have looked at a finished turn for a few seconds.
+  - It takes its place in the `s-[` order however briefly you were on it, so `s-[` from the workspace a jump landed on goes back to it.
 
 ## Reopening a merged workspace
 

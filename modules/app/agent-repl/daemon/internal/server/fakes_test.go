@@ -385,6 +385,9 @@ type fakeVerbs struct {
 	// api answers the agent API's verbs.
 	api agentAPI
 
+	// externalOpens records every url OpenExternal was handed, in order.
+	externalOpens []string
+
 	// coldGateAnswers records every AnswerColdGate request the handler handed
 	// the verb, in order.
 	coldGateAnswers []*agentreplv1.AnswerColdGateRequest
@@ -1359,6 +1362,12 @@ func (f *fakeMerge) Enqueue(_ context.Context, req merge.Request) (merge.Enqueue
 
 func (v *fakeVerbs) OpenInEditor(_ context.Context, _ ids.WorkspaceID, path string, _ *uint32) error {
 	v.editorOpens = append(v.editorOpens, "file:"+path)
+	return nil
+}
+
+// OpenExternal records the url the browser would have been handed.
+func (v *fakeVerbs) OpenExternal(_ context.Context, _ ids.WorkspaceID, link string) error {
+	v.externalOpens = append(v.externalOpens, link)
 	return nil
 }
 

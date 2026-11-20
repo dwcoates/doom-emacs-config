@@ -870,6 +870,48 @@ construction."
       ;; Assert
       (should (equal agent-repl-test--viewed-reports '("ws1"))))))
 
+(ert-deftest agent-repl-test-tab-view-on-link-followed-reports-the-workspace-viewed ()
+  "A link followed in a page reports its workspace viewed at once, with no dwell."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+      ;; Act
+      (agent-repl--tab-view-on-link-followed "ws1")
+      ;; Assert
+      (should (equal agent-repl-test--viewed-reports '("ws1"))))))
+
+(ert-deftest agent-repl-test-tab-view-on-link-followed-drops-the-workspaces-dwell ()
+  "The dwell pending for the workspace a link was followed in has nothing left to decide."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+      (agent-repl-test--pending-dwell "ws1" (current-time) 5)
+      ;; Act
+      (agent-repl--tab-view-on-link-followed "ws1")
+      ;; Assert
+      (should-not agent-repl--tab-dwell-pending))))
+
+(ert-deftest agent-repl-test-tab-view-on-link-followed-leaves-another-workspaces-dwell ()
+  "A link's news about a workspace left behind leaves the shown one's dwell running."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (cl-letf (((symbol-function 'agent-repl--force-tab-bar-redraw) #'ignore))
+      (agent-repl-test--pending-dwell "ws2" (current-time) 5)
+      ;; Act
+      (agent-repl--tab-view-on-link-followed "ws1")
+      ;; Assert
+      (should (equal (plist-get agent-repl--tab-dwell-pending :ws) "ws2")))))
+
+(ert-deftest agent-repl-test-tab-view-on-link-followed-reports-nothing-already-viewed ()
+  "A workspace whose row is already viewed is not reported again."
+  ;; Arrange
+  (agent-repl-test--with-dwell-state
+    (puthash "ws1" t agent-repl-test--row-viewed)
+    ;; Act
+    (agent-repl--tab-view-on-link-followed "ws1")
+    ;; Assert
+    (should-not agent-repl-test--viewed-reports)))
+
 (ert-deftest agent-repl-test-tab-dwell-status-change-rearms-the-dwell ()
   "A status change restarts the clock from the moment it arrives.
 The daemon drops a dwell reported on a non-turn-end row, so a turn that

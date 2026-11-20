@@ -193,6 +193,15 @@ workspaces created while it was shown, which the history puts before it
 another workspace and ended there (`agent-repl--move-visit-to'), or by the
 request that ends a recency walk (`agent-repl--end-recency-walk').")
 
+(defvar agent-repl--last-ended-visit nil
+  "The visit ended last, and whether it was recorded, or nil.
+A plist (:visit VISIT :recorded RECORDED), written by every
+`agent-repl--end-visit'.  A link followed in a page reaches Emacs on that
+page's host stream while the switch it makes may reach it on another, so
+the visit the link was followed in may already have ended, unrecorded for
+its short dwell, when the news arrives; this is what
+`agent-repl--keep-visit' records it from then.")
+
 (defvar agent-repl--recency-walk-landing nil
   "The workspace a recency-walk step moved the frame to, or nil.
 Set by `agent-repl-host-request-switch' for the `recency-walk' trigger
@@ -334,6 +343,11 @@ violations signal `user-error'."
     (when agent-repl--current-visit
       (setq agent-repl--current-visit
             (agent-repl--visit-renamed agent-repl--current-visit old-ws new-ws)))
+    (when agent-repl--last-ended-visit
+      (setq agent-repl--last-ended-visit
+            (list :visit (agent-repl--visit-renamed
+                          (plist-get agent-repl--last-ended-visit :visit) old-ws new-ws)
+                  :recorded (plist-get agent-repl--last-ended-visit :recorded))))
     new-ws))
 
 (defun agent-repl--ws-rewrite-source-back-refs
@@ -2724,8 +2738,10 @@ in it is the walk's position, so the landing leads nothing."
 (defun agent-repl--record-visit (log-ws visit reason)
   "Put VISIT's workspace in `agent-repl--workspace-history' as the newest visit.
 The ONE writer of a visit's place (`agent-repl--history-with-visit'), for
-the visit that lasted the dwell (`agent-repl--end-visit') and the one the
-user prompted in (`agent-repl--note-visit-prompted') alike.  LOG-WS is the
+the visit that lasted the dwell (`agent-repl--end-visit'), the one the
+user prompted in or followed a link in (`agent-repl--record-standing-visit'),
+and one a followed link counts after it ended (`agent-repl--keep-visit')
+alike.  LOG-WS is the
 record's sink; REASON names what made it a visit."
   (setq agent-repl--workspace-history
         (agent-repl--history-with-visit agent-repl--workspace-history visit))
@@ -2738,13 +2754,16 @@ A VISIT IS A SELECTION THAT LASTED `agent-repl-visit-dwell-seconds'.  One
 that did is put in `agent-repl--workspace-history' where
 `agent-repl--selection-history' already showed it; a shorter one is
 dropped, and the workspace keeps whatever place an earlier visit gave it.
-LOG-WS is the record's sink; REASON names what ended the visit.  No-op
-when no visit is running."
+Either way it becomes `agent-repl--last-ended-visit'.  LOG-WS is the
+record's sink; REASON names what ended the visit.  No-op when no visit is
+running."
   (when-let* ((visit agent-repl--current-visit))
-    (let ((name (plist-get visit :name))
-          (dwell (agent-repl--visit-dwell visit)))
-      (setq agent-repl--current-visit nil)
-      (if (>= dwell agent-repl-visit-dwell-seconds)
+    (let* ((name (plist-get visit :name))
+           (dwell (agent-repl--visit-dwell visit))
+           (recorded (>= dwell agent-repl-visit-dwell-seconds)))
+      (setq agent-repl--current-visit nil
+            agent-repl--last-ended-visit (list :visit visit :recorded recorded))
+      (if recorded
           (agent-repl--record-visit log-ws visit reason)
         (agent-repl--info log-ws
                           "elisp.workspace.visit-dropped ws=%s dwell=%.1fs min=%ds reason=%s"
@@ -2755,24 +2774,60 @@ when no visit is running."
 A PROMPT SENT DURING A SELECTION MAKES IT A VISIT, HOWEVER SHORT (owner
 request, 2026-11-18): writing to a workspace is looking at it, so it takes
 its place in `agent-repl--workspace-history' now rather than waiting out
-`agent-repl-visit-dwell-seconds'.  The visit keeps running, so its dwell
-keeps counting and its end records it again in the same place.  A recency
-walk standing on WS ends here: the user stopped on it to write, so it is
-no longer a step (`agent-repl--recency-walk-landing') and is stamped
-viewed, as any walk's end stamps its landing.  No-op when the visit standing
-is not WS's, or none stands: a prompt to a workspace the frame is not on is
-not a view of it."
+`agent-repl-visit-dwell-seconds' (`agent-repl--record-standing-visit').
+No-op when the visit standing is not WS's, or none stands: a prompt to a
+workspace the frame is not on is not a view of it."
+  (agent-repl--record-standing-visit ws "prompt"))
+
+(defun agent-repl--record-standing-visit (ws reason)
+  "Record the visit the frame stands in on WS at once, REASON naming why.
+The one early record of a visit, for every act that proves WS was looked
+at however briefly: a prompt (`agent-repl--note-visit-prompted') and a
+followed link (`agent-repl--keep-visit').  The visit keeps running, so its
+dwell keeps counting and its end records it again in the same place.  A
+recency walk standing on WS ends here: the user stopped on it, so it is no
+longer a step (`agent-repl--recency-walk-landing') and is stamped viewed,
+as any walk's end stamps its landing.  Answers non-nil when a visit on WS
+stood and was recorded, nil when the visit standing is not WS's or none
+stands."
   (let ((visit agent-repl--current-visit))
     (when (equal (plist-get visit :name) ws)
       (when (equal ws agent-repl--recency-walk-landing)
-        (agent-repl--clear-recency-walk ws "prompt"))
-      (agent-repl--record-visit ws visit "prompt"))))
+        (agent-repl--clear-recency-walk ws reason))
+      (agent-repl--record-visit ws visit reason)
+      t)))
+
+(defun agent-repl--keep-visit (name)
+  "Count the visit to NAME as a visit, because the reader followed a link in it.
+FOLLOWING A LINK IS PROOF THE PAGE WAS READ, so the visit enters the
+selection history `s-[' and `s-]' walk however short it was, as a prompt's
+does: the visit the frame stands in on NAME is recorded at once
+\(`agent-repl--record-standing-visit').  The news can arrive after the
+switch the link made (the link's page and the switch's target ride
+different host streams), so a visit to NAME that ENDED LAST, dropped for
+its short dwell, is recorded now, just behind the visit that followed it.
+Any other NAME had no visit for the link to keep, and that is recorded at
+INFO."
+  (let ((ended (plist-get agent-repl--last-ended-visit :visit)))
+    (cond
+     ((agent-repl--record-standing-visit name "link-followed"))
+     ((not (equal (plist-get ended :name) name))
+      (agent-repl--info name "elisp.workspace.visit-kept ws=%s visit=none current=%s last-ended=%s"
+                        name (or (plist-get agent-repl--current-visit :name) "none")
+                        (or (plist-get ended :name) "none")))
+     ((plist-get agent-repl--last-ended-visit :recorded)
+      (agent-repl--info name "elisp.workspace.visit-kept ws=%s visit=ended already-recorded=t" name))
+     (t
+      (agent-repl--record-visit name ended "link-followed-late")
+      (setq agent-repl--last-ended-visit (list :visit ended :recorded t))))))
 
 (defun agent-repl--visit-renamed (visit old new)
-  "Return VISIT with the workspace OLD renamed NEW wherever it names it."
-  (list :name (if (equal (plist-get visit :name) old) new (plist-get visit :name))
-        :began (plist-get visit :began)
-        :ahead (cl-substitute new old (plist-get visit :ahead) :test #'equal)))
+  "Return VISIT with the workspace OLD renamed NEW wherever it names it.
+Every other key of VISIT, :began among them, is carried as is."
+  (let ((renamed (copy-sequence visit)))
+    (when (equal (plist-get visit :name) old)
+      (setq renamed (plist-put renamed :name new)))
+    (plist-put renamed :ahead (cl-substitute new old (plist-get visit :ahead) :test #'equal))))
 
 (defun agent-repl--history-push-front (name)
   "Put NAME first in `agent-repl--workspace-history', dropping its prior place.
@@ -2817,12 +2872,12 @@ no walk is running."
         (agent-repl--end-visit log-ws reason)))))
 
 (defun agent-repl--clear-recency-walk (log-ws reason)
-  "Clear the running recency walk, stamping its landing viewed; return the landing.
+  "Clear the running recency walk, stamping its landing viewed; return it.
 The ONE end of a walk's landing (`agent-repl--recency-walk-landing'), for a
-switch that ends it (`agent-repl--end-recency-walk') and a prompt sent on
-it (`agent-repl--note-visit-prompted') alike: what each then does with the
-visit standing is its own.  LOG-WS is the record's sink; REASON names what
-ended the walk.  A walk must be running."
+switch that ends it (`agent-repl--end-recency-walk') and a prompt sent or
+a link followed on it (`agent-repl--record-standing-visit') alike: what
+each then does with the visit standing is its own.  LOG-WS is the
+record's sink; REASON names what ended the walk.  A walk must be running."
   (let ((landing agent-repl--recency-walk-landing))
     (unless landing
       (agent-repl--fatal log-ws "elisp.workspace.recency-walk-clear-without-walk reason=%s" reason))

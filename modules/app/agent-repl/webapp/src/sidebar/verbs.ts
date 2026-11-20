@@ -923,10 +923,21 @@ export function clearRefusal(control: HTMLElement): void {
  * rail and the page shown always move together. A page never sends
  * SelectWorkspace, whose select the frame only follows later. REVEAL, when
  * given, is a row of the workspace's root feed its page brings on screen and
- * opens (`SelectInEditorRequest.reveal`).
+ * opens (`SelectInEditorRequest.reveal`). FOLLOWED_FROM, when given, is the
+ * workspace whose feed link made the click, which its editor then counts
+ * viewed (`SelectInEditorRequest.followed_from`); a rail row and a thread are
+ * no workspace's page, and name none.
  */
-export function buildSelectInEditorRequest(workspace: WorkspaceRef, reveal?: FeedId): SelectInEditorRequest {
-  return create(SelectInEditorRequestSchema, reveal === undefined ? { workspace } : { workspace, reveal });
+export function buildSelectInEditorRequest(
+  workspace: WorkspaceRef,
+  reveal?: FeedId,
+  followedFrom?: WorkspaceRef,
+): SelectInEditorRequest {
+  return create(SelectInEditorRequestSchema, {
+    workspace,
+    ...(reveal === undefined ? {} : { reveal }),
+    ...(followedFrom === undefined ? {} : { followedFrom }),
+  });
 }
 
 /** OpenWorkspace: bring a registered-but-closed workspace back up. */

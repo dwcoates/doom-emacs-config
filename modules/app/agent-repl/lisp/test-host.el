@@ -2615,6 +2615,46 @@ answers `:unknown' and records the breach rather than opening."
     ;; Assert
     (should (agent-repl-test-host--logged-p :info "elisp.host.select-requested ws=ws-1"))))
 
+;;;; ---- A link followed in a page ----
+
+(ert-deftest agent-repl-test-host-link-followed-keeps-the-workspaces-visit ()
+  "A `link_followed' push keeps the visit of the workspace its stream carries."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((kept nil))
+      (cl-letf (((symbol-function 'agent-repl--keep-visit) (lambda (ws) (push ws kept)))
+                ((symbol-function 'agent-repl--tab-view-on-link-followed) #'ignore))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :link-followed :value nil)))
+      ;; Assert
+      (should (equal kept '("ws-1"))))))
+
+(ert-deftest agent-repl-test-host-link-followed-counts-the-workspace-viewed ()
+  "A `link_followed' push reports the workspace its stream carries viewed."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (let ((viewed nil))
+      (cl-letf (((symbol-function 'agent-repl--keep-visit) #'ignore)
+                ((symbol-function 'agent-repl--tab-view-on-link-followed) (lambda (ws) (push ws viewed))))
+        ;; Act
+        (agent-repl-test-host--push "ws-1" (list :arm :link-followed :value nil)))
+      ;; Assert
+      (should (equal viewed '("ws-1"))))))
+
+(ert-deftest agent-repl-test-host-link-followed-is-logged ()
+  "The link's news reaching Emacs leaves an INFO record naming the workspace."
+  (agent-repl-test-host--with-harness
+    ;; Arrange
+    (agent-repl-test-host--subscribe "ws-1")
+    (cl-letf (((symbol-function 'agent-repl--keep-visit) #'ignore)
+              ((symbol-function 'agent-repl--tab-view-on-link-followed) #'ignore))
+      ;; Act
+      (agent-repl-test-host--push "ws-1" (list :arm :link-followed :value nil)))
+    ;; Assert
+    (should (agent-repl-test-host--logged-p :info "elisp.host.link-followed ws=ws-1"))))
+
 ;;;; ---- The final-response click ----
 
 (ert-deftest agent-repl-test-host-final-response-click-focuses-this-workspaces-composer ()

@@ -75,6 +75,11 @@ describe("jumpToWorkspace", () => {
     expect(calls.map((c) => c.reveal)).toEqual([undefined]);
   });
 
+  it("names the page's own workspace as the one the jump was followed from", async () => {
+    const { calls } = await jump(SELECTED);
+    expect(calls.map((c) => c.followedFrom)).toEqual([WORKSPACE]);
+  });
+
   it("carries the row to reveal on the select", async () => {
     const s = scripted(SELECTED);
     const call = jumpToWorkspace(document.createElement("div"), s.rc.ctx, TARGET, SITE, create(FeedIdSchema, { value: "bubble-1" }));
