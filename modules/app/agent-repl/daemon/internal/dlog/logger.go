@@ -1,9 +1,16 @@
 package dlog
 
 import (
+	"fmt"
 	"os"
 	"strings"
+
+	"agentrepl/logging/logsite"
 )
+
+// callers resolves the function each log call is written in, skipping the
+// frames of this package (every Logger wrapper lives here).
+var callers = logsite.NewCallers("agent-repld/internal/dlog")
 
 // destination is one durable sink a logger writes to: a workspace sink or the
 // run log. Both are authoritative and synchronous. LEVEL is the record's, and
@@ -32,23 +39,28 @@ type logger struct {
 }
 
 // Debug implements Logger.
-func (l *logger) Debug(operation, message string, ctx Context) {
-	l.emit(LevelDebug, operation, message, ctx)
+func (l *logger) Debug(operation string, message template, ctx Context) {
+	l.emit(LevelDebug, operation, string(message), callers.Function(), ctx)
 }
 
 // Info implements Logger.
-func (l *logger) Info(operation, message string, ctx Context) {
-	l.emit(LevelInfo, operation, message, ctx)
+func (l *logger) Info(operation string, message template, ctx Context) {
+	l.emit(LevelInfo, operation, string(message), callers.Function(), ctx)
 }
 
 // Warn implements Logger.
-func (l *logger) Warn(operation, message string, ctx Context) {
-	l.emit(LevelWarn, operation, message, ctx)
+func (l *logger) Warn(operation string, message template, ctx Context) {
+	l.emit(LevelWarn, operation, string(message), callers.Function(), ctx)
 }
 
 // Error implements Logger.
-func (l *logger) Error(operation, message string, ctx Context) {
-	l.emit(LevelError, operation, message, ctx)
+func (l *logger) Error(operation string, message template, ctx Context) {
+	l.emit(LevelError, operation, string(message), callers.Function(), ctx)
+}
+
+// Log implements Logger.
+func (l *logger) Log(level, operation string, message logsite.Message, ctx Context) {
+	l.emit(level, operation, message.Template(), forwarded(message), ctx)
 }
 
 // With implements Logger.
@@ -56,15 +68,39 @@ func (l *logger) With(ctx Context) Logger {
 	return &logger{s: l.s, dest: l.dest, runtime: l.runtime, base: merge(l.base, ctx), workspaceID: l.workspaceID}
 }
 
-// emit renders one record and delivers it.
-func (l *logger) emit(level, operation, message string, ctx Context) {
+// emit renders one record of the call written as TEMPLATE in FUNCTION and
+// delivers it.
+func (l *logger) emit(level, operation, template, function string, ctx Context) {
 	if !l.s.admits(level) {
 		return
 	}
-	rec := newRecord(l.s.now(), l.runtime, level, operation, message, merge(l.base, ctx), l.s.pid)
+	merged := merge(l.base, ctx)
+	rec := newKeyedRecord(l.s.now(), l.runtime, level, operation, template, function, merged, l.s.pid)
+	text := rec.Message
 	l.deliver(rec)
 	l.s.count(l.runtime, level, operation)
-	l.tee(level, operation, message)
+	l.tee(level, operation, text)
+}
+
+// mustRender answers TEMPLATE rendered from the record's named values
+// FIELDS. A template naming a value the record does not hold, or one whose
+// braces do not parse, is a defect of the call that wrote it, which the
+// static scan test (logsite_scan_test.go) exists to catch: it panics.
+func mustRender(operation, template string, fields Context) string {
+	text, err := logsite.RenderFields(template, fields)
+	if err != nil {
+		panic(fmt.Sprintf("dlog: the record of operation %s cannot be rendered: %v", operation, err))
+	}
+	return text
+}
+
+// forwarded answers the function MESSAGE was written in. A Message no Msg
+// made names no call: it panics.
+func forwarded(message logsite.Message) string {
+	if message.IsZero() {
+		panic("dlog: a forwarded message must be made by logsite.Msg")
+	}
+	return message.Function()
 }
 
 // tee hands a workspace logger's Warn or Error record to the bound record tee,
@@ -110,9 +146,9 @@ func (l *logger) reportMirror(status mirrorStatus) {
 	if status.Failure != nil {
 		ctx["cause"] = status.Failure.Error()
 	}
-	rec := newRecord(l.s.now(), l.runtime, LevelWarn,
+	rec := newSiteRecord(l.s.now(), l.runtime, LevelWarn,
 		"daemon.dlog.terminal_mirror_degraded",
-		"the terminal mirror dropped records or failed to write; durable records are unaffected",
+		logsite.Msg("the terminal mirror dropped records or failed to write; durable records are unaffected"),
 		merge(l.base, ctx), l.s.pid)
 	line := rec.marshal()
 	if err := l.dest.write(rec.Level, line); err != nil {
@@ -136,9 +172,9 @@ func (s *surfaces) emergency(runtime string, cause error, line []byte) {
 	if len(line) > 0 {
 		ctx["unpersisted_record"] = strings.TrimSuffix(string(line), "\n")
 	}
-	rec := newRecord(s.now(), runtime, LevelError,
+	rec := newSiteRecord(s.now(), runtime, LevelError,
 		"daemon.dlog.sink_failure",
-		"the durable sink refused a record; it is echoed here because its own sink cannot carry the news",
+		logsite.Msg("the durable sink refused a record; it is echoed here because its own sink cannot carry the news"),
 		ctx, s.pid)
 	_, _ = os.Stderr.Write(rec.marshal())
 }

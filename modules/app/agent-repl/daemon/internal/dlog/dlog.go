@@ -6,29 +6,54 @@
 // See daemon/AGENTS.md "Logging" and docs/overhaul/daemon.md.
 package dlog
 
-import "os"
+import (
+	"os"
+
+	"agentrepl/logging/logsite"
+)
 
 // Context is one record's structured context: the resolved inputs, the branch
 // taken, and the cause. Values are JSON-encodable scalars, slices or maps.
 type Context map[string]any
 
 // Logger emits the daemon's canonical JSONL records. Every method takes the
-// operation name (of the form "daemon.<package>.<verb>"), a human-readable
-// message, and the record's structured context.
+// operation name (of the form "daemon.<package>.<verb>"), the message's
+// TEMPLATE, and the record's structured context.
+//
+// THE TEMPLATE MUST BE A STRING LITERAL (or a constant). Its parameter's type
+// is unexported, so a fmt.Sprintf result or a string variable does not
+// compile. The template is the call's SITE summary and part of its key (a
+// hash of the runtime, the calling function and the template), so a value
+// built at run time would make every record its own site and no window could
+// be compared with another. A dynamic value goes in the context under a name,
+// and the template names it as {name}: "timed out connecting to shim {shim}
+// after {elapsed}" with Context{"shim": id, "elapsed": d} renders the
+// message, and the values stay fields. A literal brace is written {{ or }}.
+// Rewording a template gives its site a new key, detaching it from its
+// history, so change one only when it is really necessary. The rule's home
+// is logging-contract.md "Log sites".
+//
+// A helper that logs a message its caller wrote takes a logsite.Message
+// (logsite.Msg("...") at the caller) and hands it to Log, so the record is
+// keyed by the caller.
 //
 // An implementation persists synchronously to its resolved durable sink and
 // mirrors to the shared terminal sink without blocking on it.
 type Logger interface {
 	// Debug records the ordinary path: function entry, and each branch that
 	// selects a different nontrivial block, call, state transition or outcome.
-	Debug(operation, message string, ctx Context)
+	Debug(operation string, message template, ctx Context)
 	// Info records a notable but unexceptional milestone.
-	Info(operation, message string, ctx Context)
+	Info(operation string, message template, ctx Context)
 	// Warn records a warning, including the unlanded-error-arm refusals whose
 	// operation is "daemon.refusal.unlanded_arm".
-	Warn(operation, message string, ctx Context)
+	Warn(operation string, message template, ctx Context)
 	// Error records a failure, exactly once, by the layer that owns it.
-	Error(operation, message string, ctx Context)
+	Error(operation string, message template, ctx Context)
+	// Log records MESSAGE at LEVEL (LevelDebug through LevelError), keyed by
+	// the function that made it with logsite.Msg: the path of a helper that
+	// logs its caller's message.
+	Log(level, operation string, message logsite.Message, ctx Context)
 	// With returns a Logger that stamps every record with these context keys in
 	// addition to the per-record ones. It is how a workspace-bound component
 	// carries its workspace and session identity.
@@ -198,8 +223,12 @@ type ClientRecord struct {
 	Level string
 	// Operation is the client's operation name, already namespaced.
 	Operation string
-	// Message is the human-readable line.
+	// Message is the human-readable line, the client's template rendered.
 	Message string
+	// Site is the key of the client's log call, and Template the call's
+	// unrendered message (logging-contract.md "Log sites"); the client
+	// derives both, and the ClientLog rpc refuses a record without them.
+	Site, Template string
 	// Context is the record's structured context.
 	Context Context
 	// Timestamp is the instant the CLIENT observed, in RFC 3339. It may carry
@@ -212,3 +241,9 @@ type ClientRecord struct {
 	// severity: a client may emit an informational record only while tracing.
 	Verbose bool
 }
+
+// template is a log call's message template: a string constant, never a
+// value built at run time. It is unexported so no other package can convert
+// a run-time string to it, while an untyped string constant converts
+// implicitly. See Logger.
+type template string

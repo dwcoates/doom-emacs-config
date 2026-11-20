@@ -218,3 +218,25 @@ func TestCallersAnswersTheSameFunctionFromItsCache(t *testing.T) {
 		t.Errorf("one call site resolved to %q, then %q", first, second)
 	}
 }
+
+func TestValidKeyAcceptsOnlyTwelveLowercaseHex(t *testing.T) {
+	tests := []struct {
+		name, key string
+		want      bool
+	}{
+		{name: "a derived key", key: Key("daemon", "p.F", "t"), want: true},
+		{name: "empty", key: "", want: false},
+		{name: "short", key: "abc123", want: false},
+		{name: "long", key: "0123456789abc", want: false},
+		{name: "uppercase", key: "0123456789AB", want: false},
+		{name: "not hex", key: "0123456789ag", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act and Assert
+			if got := ValidKey(tc.key); got != tc.want {
+				t.Errorf("ValidKey(%q) = %v, want %v", tc.key, got, tc.want)
+			}
+		})
+	}
+}

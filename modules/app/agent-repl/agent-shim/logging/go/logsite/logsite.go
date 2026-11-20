@@ -36,6 +36,21 @@ func Key(runtime, function, template string) string {
 	return hex.EncodeToString(sum[:])[:KeyLength]
 }
 
+// ValidKey reports whether KEY has a site key's form: KeyLength lowercase hex
+// characters.
+func ValidKey(key string) bool {
+	if len(key) != KeyLength {
+		return false
+	}
+	for i := 0; i < len(key); i++ {
+		c := key[i]
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // placeholderName is a placeholder's name: a lowercase identifier.
 var placeholderName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 

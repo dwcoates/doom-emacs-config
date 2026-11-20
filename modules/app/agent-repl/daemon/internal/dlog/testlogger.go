@@ -2,6 +2,9 @@ package dlog
 
 import (
 	"context"
+
+	"agentrepl/logging/logsite"
+
 	"crypto/md5"
 	"encoding/hex"
 	"fmt"
@@ -14,8 +17,12 @@ import (
 type Record struct {
 	Level     string
 	Operation string
-	Message   string
-	Context   Context
+	// Message is the record's rendered message; Template the call's
+	// unrendered one, and Site its key, as the real logger stamps them.
+	Message  string
+	Template string
+	Site     string
+	Context  Context
 }
 
 // RecordQuery names the record a test looks for. A field left empty matches
@@ -78,23 +85,28 @@ type TestLogger struct {
 func NewTestLogger() *TestLogger { return &TestLogger{} }
 
 // Debug implements Logger.
-func (l *TestLogger) Debug(operation, message string, ctx Context) {
-	l.append("debug", operation, message, ctx)
+func (l *TestLogger) Debug(operation string, message template, ctx Context) {
+	l.append("debug", operation, string(message), callers.Function(), ctx)
 }
 
 // Info implements Logger.
-func (l *TestLogger) Info(operation, message string, ctx Context) {
-	l.append("info", operation, message, ctx)
+func (l *TestLogger) Info(operation string, message template, ctx Context) {
+	l.append("info", operation, string(message), callers.Function(), ctx)
 }
 
 // Warn implements Logger.
-func (l *TestLogger) Warn(operation, message string, ctx Context) {
-	l.append("warn", operation, message, ctx)
+func (l *TestLogger) Warn(operation string, message template, ctx Context) {
+	l.append("warn", operation, string(message), callers.Function(), ctx)
 }
 
 // Error implements Logger.
-func (l *TestLogger) Error(operation, message string, ctx Context) {
-	l.append("error", operation, message, ctx)
+func (l *TestLogger) Error(operation string, message template, ctx Context) {
+	l.append("error", operation, string(message), callers.Function(), ctx)
+}
+
+// Log implements Logger.
+func (l *TestLogger) Log(level, operation string, message logsite.Message, ctx Context) {
+	l.append(level, operation, message.Template(), forwarded(message), ctx)
 }
 
 // With implements Logger, returning a logger that shares this one's capture
@@ -112,19 +124,27 @@ func (l *TestLogger) Records() []Record {
 	return out
 }
 
-func (l *TestLogger) append(level, operation, message string, ctx Context) {
+// append captures one record of the call written as TEMPLATE in FUNCTION,
+// rendered and keyed as the real logger renders and keys it: a template
+// naming a value the record does not hold panics here as it does there.
+func (l *TestLogger) append(level, operation, template, function string, ctx Context) string {
+	merged := merge(l.base, ctx)
+	text := mustRender(operation, template, merged)
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.records = append(l.records, Record{
 		Level:     level,
 		Operation: operation,
-		Message:   message,
-		Context:   merge(l.base, ctx),
+		Message:   text,
+		Template:  template,
+		Site:      logsite.Key(RuntimeDaemon, function, template),
+		Context:   merged,
 	})
 	if l.appended != nil {
 		close(l.appended)
 		l.appended = nil
 	}
+	return text
 }
 
 // Await answers the first captured record Q matches, waiting for one to be
@@ -182,22 +202,32 @@ type derivedTestLogger struct {
 	workspaceID string
 }
 
-func (l *derivedTestLogger) Debug(operation, message string, ctx Context) {
-	l.parent.append("debug", operation, message, merge(l.base, ctx))
+func (l *derivedTestLogger) Debug(operation string, message template, ctx Context) {
+	l.emit(LevelDebug, operation, string(message), callers.Function(), ctx)
 }
 
-func (l *derivedTestLogger) Info(operation, message string, ctx Context) {
-	l.parent.append("info", operation, message, merge(l.base, ctx))
+func (l *derivedTestLogger) Info(operation string, message template, ctx Context) {
+	l.emit(LevelInfo, operation, string(message), callers.Function(), ctx)
 }
 
-func (l *derivedTestLogger) Warn(operation, message string, ctx Context) {
-	l.parent.append("warn", operation, message, merge(l.base, ctx))
-	l.tee(LevelWarn, operation, message)
+func (l *derivedTestLogger) Warn(operation string, message template, ctx Context) {
+	l.emit(LevelWarn, operation, string(message), callers.Function(), ctx)
 }
 
-func (l *derivedTestLogger) Error(operation, message string, ctx Context) {
-	l.parent.append("error", operation, message, merge(l.base, ctx))
-	l.tee(LevelError, operation, message)
+func (l *derivedTestLogger) Error(operation string, message template, ctx Context) {
+	l.emit(LevelError, operation, string(message), callers.Function(), ctx)
+}
+
+func (l *derivedTestLogger) Log(level, operation string, message logsite.Message, ctx Context) {
+	l.emit(level, operation, message.Template(), forwarded(message), ctx)
+}
+
+// emit captures the record in the parent and tees a warn or error.
+func (l *derivedTestLogger) emit(level, operation, template, function string, ctx Context) {
+	text := l.parent.append(level, operation, template, function, merge(l.base, ctx))
+	if level == LevelWarn || level == LevelError {
+		l.tee(level, operation, text)
+	}
 }
 
 func (l *derivedTestLogger) With(ctx Context) Logger {

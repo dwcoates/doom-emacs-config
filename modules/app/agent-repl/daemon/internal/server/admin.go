@@ -411,6 +411,8 @@ func clientRecord(clientKind string, record *agentreplv1.ClientLogRecord) dlog.C
 		Level:      clientLevel(record),
 		Operation:  record.GetOperation(),
 		Message:    record.GetMessage(),
+		Site:       record.GetSite(),
+		Template:   record.GetTemplate(),
 		Context:    dlog.Context(record.GetContext().AsMap()),
 		Timestamp:  record.GetTimestamp(),
 		Verbose:    record.GetVerbose(),
