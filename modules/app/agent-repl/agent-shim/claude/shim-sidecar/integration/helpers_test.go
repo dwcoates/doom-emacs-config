@@ -894,6 +894,10 @@ func startSidecar(t *testing.T, opts sidecarOptions) *sidecarProc {
 		// sidecar reads.
 		"AGENT_REPL_LOCK_DIR="+liveLockDir(opts.StateDir),
 	)
+	// A PROFILING RUN PROFILES THE SIDECAR'S WHOLE LIFE into the test's own
+	// directory (testenv.ExitProfile).
+	profileEnv, _ := testenv.ExitProfile(t)
+	cmd.Env = append(cmd.Env, profileEnv...)
 	hasLogLevel, hasUntil := false, false
 	for _, value := range opts.ExtraEnv {
 		if strings.HasPrefix(value, "AGENT_REPL_LOG_LEVEL=") {

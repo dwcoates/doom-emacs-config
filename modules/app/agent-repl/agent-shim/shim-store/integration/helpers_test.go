@@ -276,7 +276,10 @@ func (s *storeProcess) launch() {
 		envSocket = s.socket
 	}
 	cmd := exec.Command(storeBinary, args...)
-	cmd.Env = storeEnv(envSocket, s.lockDir, s.opts.verbose)
+	// A PROFILING RUN PROFILES THE STORE'S WHOLE LIFE into the test's own
+	// directory (testenv.ExitProfile); each launch writes its own pid's file.
+	profileEnv, _ := testenv.ExitProfile(s.t)
+	cmd.Env = append(storeEnv(envSocket, s.lockDir, s.opts.verbose), profileEnv...)
 	cmd.Stdout = stderr
 	cmd.Stderr = stderr
 

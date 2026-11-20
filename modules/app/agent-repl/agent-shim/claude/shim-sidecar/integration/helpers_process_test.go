@@ -17,6 +17,7 @@ import (
 	conversationv1 "agentrepl/proto/conversation/v1"
 	storev1 "agentrepl/proto/store/v1"
 	"agentrepl/proto/store/v1/storev1connect"
+	"agentrepl/testrun/testenv"
 )
 
 // helpers_process_test.go — PROCESS-LEVEL helpers: launching the sidecar binary
@@ -62,7 +63,9 @@ func launchSidecar(t *testing.T, args []string, env ...string) *launchedSidecar 
 	lockDir := t.TempDir()
 	cmd := exec.Command(sidecarBin, args...)
 	cmd.Env = append(os.Environ(), "AGENT_REPL_FORBID_VENDOR_CALLS=1", "AGENT_REPL_LOCK_DIR="+lockDir)
-	cmd.Env = append(cmd.Env, env...)
+	// A PROFILING RUN PROFILES THE SIDECAR'S WHOLE LIFE (testenv.ExitProfile).
+	profileEnv, _ := testenv.ExitProfile(t)
+	cmd.Env = append(append(cmd.Env, profileEnv...), env...)
 	var stderr bytes.Buffer
 	cmd.Stdout = &stderr
 	cmd.Stderr = &stderr

@@ -9,11 +9,14 @@ package integration
 
 import (
 	"agentrepl/shim-store/internal/testclose"
+	"agentrepl/testrun/testenv"
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -287,5 +290,34 @@ func awaitOperationRecord(t *testing.T, store *storeProcess, operation string) {
 	}
 	if stalled != "" {
 		t.Fatalf("the store never logged a %q record: %s\nstderr:\n%s", operation, stalled, store.stderrText())
+	}
+}
+
+// TestAProfilingRunProfilesTheStoresWholeLife: under a profiling test run the
+// store profiles its whole life into the test's own directory
+// (testenv.ExitProfile) and writes the profile when SIGTERM stops it, saying
+// so in its log. Not parallel: the run's directory is the process's
+// environment.
+func TestAProfilingRunProfilesTheStoresWholeLife(t *testing.T) {
+	// Arrange.
+	root := t.TempDir()
+	t.Setenv(testenv.ProfileDir, root)
+	store := startStore(t, storeOptions{})
+	pid := store.cmd.Process.Pid
+
+	// Act.
+	store.stop()
+
+	// Assert.
+	profile := filepath.Join(root, testenv.ProfileName(t.Name()), fmt.Sprintf("store-%d.cpu.pprof", pid))
+	if info, err := os.Stat(profile); err != nil || info.Size() == 0 {
+		t.Fatalf("the store's whole-life profile %s: %v, want a written profile", profile, err)
+	}
+	stopped := false
+	for _, r := range store.logRecords() {
+		stopped = stopped || (r.Operation == "store.profiling.exit_stopped" && strings.Contains(r.Message, profile))
+	}
+	if !stopped {
+		t.Fatalf("the store's log has no store.profiling.exit_stopped record naming %s", profile)
 	}
 }
