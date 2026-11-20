@@ -4,16 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { create } from "@bufbuild/protobuf";
-import { createRouterTransport } from "@connectrpc/connect";
-import { AgentRepl } from "../../../../proto/gen/ts/agentrepl/v1/service_pb";
 import {
   OpenExternalResponseSchema,
   type OpenExternalRequest,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_open_external_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { createTicker } from "../../../src/clock.js";
-import { createAgentReplClient } from "../../../src/rpc/client.js";
-import { testAppContext } from "../../rpc/app-context.js";
+import { scriptedAppContext } from "../../rpc/app-context.js";
 import {
   type FeedMerge,
   FeedMergeSchema,
@@ -74,21 +70,15 @@ describe("drawFeedMerge: the branch line's target", () => {
   /** Draws MSG against a context whose OpenExternal records its requests. */
   function drawOpening(msg: FeedMerge): { el: HTMLElement; opened: OpenExternalRequest[] } {
     const opened: OpenExternalRequest[] = [];
-    const transport = createRouterTransport(({ service }) => {
-      service(AgentRepl, {
+    const ctx = scriptedAppContext(
+      {
         openExternal: (req) => {
           opened.push(req);
           return create(OpenExternalResponseSchema, { result: { case: "success", value: {} } });
         },
-      });
-    });
-    const ctx = testAppContext({
-      client: createAgentReplClient(transport),
-      workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }),
-      ticker: createTicker(1000),
-      failures: { report: () => {}, retract: () => {} },
-      composerEnabled: false,
-    });
+      },
+      { workspace: create(WorkspaceRefSchema, { id: "ws-1", dir: "/w" }), failures: { report: () => {}, retract: () => {} } },
+    );
     return { el: drawFeedMerge(msg, rowContext(ctx, mergeRow("m1"))), opened };
   }
 

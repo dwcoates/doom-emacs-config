@@ -1345,3 +1345,31 @@ func TestTheHarnessAwaitTurnEndAnswersAWaitCutBeforeItBegan(t *testing.T) {
 		})
 	}
 }
+
+// TestARunsLabelIsItsSubjectOrItsWorkspace covers the run's head line: its
+// resolved branch and target, or the workspace's own id while the run has
+// not resolved its subject (an admission that failed).
+func TestARunsLabelIsItsSubjectOrItsWorkspace(t *testing.T) {
+	tests := []struct {
+		name    string
+		subject subject
+		want    branchLine
+	}{
+		{name: "a resolved subject", subject: subject{branch: "feature", targetDir: "/repo"}, want: branchLineOf("feature", "/repo")},
+		{name: "an unresolved subject", want: unreadLine(theWorkspace)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			r := &run{ws: theWorkspace, subject: tt.subject}
+
+			// Act
+			got := r.label()
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("label = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}

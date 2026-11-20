@@ -424,13 +424,15 @@ func TestEveryMergeTabKindCarriesAStateOneof(t *testing.T) {
 	}
 }
 
-// testBranchLine is the head's branch line LABEL spells, "source → target".
+// testBranchLine is the head's branch line LABEL spells: "source → target",
+// or a source alone when LABEL has no arrow.
 func testBranchLine(label string) *frontendv1.FeedMergeBranchLine {
-	source, target, _ := strings.Cut(label, " → ")
-	return &frontendv1.FeedMergeBranchLine{
-		Source: &frontendv1.FeedMergeBranchLineSource{Text: source},
-		Target: &frontendv1.FeedMergeBranchLineTarget{Text: target},
+	source, target, read := strings.Cut(label, " → ")
+	line := &frontendv1.FeedMergeBranchLine{Source: &frontendv1.FeedMergeBranchLineSource{Text: source}}
+	if read {
+		line.Target = &frontendv1.FeedMergeBranchLineTarget{Text: target}
 	}
+	return line
 }
 
 func TestBranchLineTextSpellsTheLine(t *testing.T) {

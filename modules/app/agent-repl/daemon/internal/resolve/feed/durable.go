@@ -67,8 +67,8 @@ func (r *resolver) restoreDurable(s *wsState) {
 	drawn := 0
 	for _, stored := range rows {
 		fields := dlog.Context{"row": stored.RowID, "key": stored.OrderKey}
-		// A MERGE HEAD STORED WITH ITS RETIRED LABEL is read as layout 174
-		// will rewrite it, so a head the contract step has not yet reached
+		// A MERGE HEAD STORED WITH ITS RETIRED LABEL is read as layout 175
+		// will rewrite it, so a head the layout step has not yet reached
 		// is drawn rather than refused.
 		raw, _, err := wsm.CarryRetiredMergeHeadLabel(stored.Row)
 		if err != nil {

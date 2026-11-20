@@ -15,7 +15,7 @@ import (
 	"agent-repld/internal/dlog"
 )
 
-// LAYOUT 174 CARRIES THE STORED MERGE HEADS' RETIRED LABEL ONTO THEIR BRANCH
+// LAYOUT 175 CARRIES THE STORED MERGE HEADS' RETIRED LABEL ONTO THEIR BRANCH
 // LINE. A merge head drew its branch line as one string, `label` (2), until
 // the target became an element of its own that opens the pull request a merge
 // deploys (2026-11-19): FeedMergeHead reserves the field, and `branch_line`
@@ -24,10 +24,11 @@ import (
 // its arrow into the line's source and target; a label with no arrow is the
 // merging workspace's id standing in, and becomes a source alone.
 //
-// IT IS A CONTRACT STEP: the build before it reads `label` and refuses a head
-// carrying `branch_line`. Until it runs, this build carries a stored head's
-// label as it reads the row (CarryRetiredMergeHeadLabel), so no head is
-// refused in a handover's span.
+// IT IS ADDITIVE, as every row rewrite is (TestAContractStepOnlyRemoves). A
+// build before it that draws a rewritten head afresh, in a handover's span,
+// refuses it as carrying a field it cannot describe; this build carries a
+// stored head's label as it reads the row (CarryRetiredMergeHeadLabel), so it
+// draws every head whether or not the step has run.
 
 // The retired merge head field this step carries.
 const retiredMergeHeadLabelTag protowire.Number = 2 // FeedMergeHead.label -> branch_line
@@ -36,7 +37,7 @@ const retiredMergeHeadLabelTag protowire.Number = 2 // FeedMergeHead.label -> br
 // the source and the target.
 const retiredMergeLabelArrow = " → "
 
-// carryRetiredMergeHeadLabelRows is layout 174's row rewrite.
+// carryRetiredMergeHeadLabelRows is layout 175's row rewrite.
 func carryRetiredMergeHeadLabelRows(ctx context.Context, tx *sql.Tx, log dlog.Logger) error {
 	return rewriteDurableRows(ctx, tx, log, "carried the stored merge heads' retired labels onto their branch lines", CarryRetiredMergeHeadLabel)
 }
