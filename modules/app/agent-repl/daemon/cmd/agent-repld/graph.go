@@ -1072,13 +1072,16 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Chime: chime, ChimeErr: chimeErr,
 		Clicks: clicks, Workspaces: bannerWorkspaces{db: p.DB}, Log: log,
 	})
+	// One Haiku summarizer writes every banner's one-sentence body: a turn's
+	// final answer, and a pull-request comment.
+	bannerSummaries := desktopnotify.Summarizer{
+		Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir, Log: log,
+	}
 	turnBanners := desktopnotify.NewTurnBanners(desktopnotify.TurnDeps{
-		Endings: feedResolver,
-		Poster:  notifier,
-		Summaries: desktopnotify.Summarizer{
-			Headless: headlessClient, ConfigDirs: configDirs, PromptsDir: paths.PromptsDir, Log: log,
-		},
-		Log: log,
+		Endings:   feedResolver,
+		Poster:    notifier,
+		Summaries: bannerSummaries,
+		Log:       log,
 	})
 
 	// ---- the branch commit recounter ----
@@ -1576,7 +1579,10 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// Every owned pull request standing in a GitHub merge queue is drawn
 		// by the merge orchestrator as its owner's deploying place.
 		Deployments: mergeOrchestrator,
-		Log:         log,
+		// Every comment someone other than the user leaves on a followed
+		// pull request raises its workspace's desktop banner.
+		Comments: desktopnotify.NewCommentBanners(notifier, bannerSummaries),
+		Log:      log,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the pull-request watcher: %w", err)

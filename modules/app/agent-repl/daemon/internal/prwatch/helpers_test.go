@@ -216,7 +216,26 @@ type rig struct {
 	ws      ids.WorkspaceID
 	serves  bool
 	deploys *fakeDeployments
+	banners *fakeComments
 }
+
+// fakeComments records every comment banner raised.
+type fakeComments struct {
+	raised []raisedComment
+}
+
+// raisedComment is one comment banner: its workspace, author and markdown.
+type raisedComment struct {
+	ws               ids.WorkspaceID
+	author, markdown string
+}
+
+func (c *fakeComments) Commented(ws ids.WorkspaceID, author, comment string) {
+	c.raised = append(c.raised, raisedComment{ws, author, comment})
+}
+
+// viewerLogin is the account the rig's GitHub is read as.
+const viewerLogin = "me"
 
 // fakeDeployments records every whole set of GitHub deployments told.
 type fakeDeployments struct {
@@ -250,9 +269,9 @@ func newRig(t *testing.T) *rig {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}}
+	r := &rig{db: db, gh: newGH(), prompts: &fakePrompts{}, holds: &fakeHolds{}, clock: clocktest.New(t0), log: dlog.NewTestLogger(), ws: record.ID, serves: true, deploys: &fakeDeployments{}, banners: &fakeComments{}}
 	r.w, err = New(Deps{Store: db, GH: r.gh, Holds: r.holds, Notices: &briefprompttest.Meter{}, Briefs: briefs, MintKey: func(p string) (string, error) { return p + "-key", nil },
-		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Log: r.log,
+		Serves: func() bool { return r.serves }, Clock: r.clock, Every: DefaultEvery, Deployments: r.deploys, Comments: r.banners, Log: r.log,
 		Ended: func(_ context.Context, ws ids.WorkspaceID, merged bool) error {
 			r.ended = append(r.ended, endTold{ws: ws, merged: merged})
 			return r.endedErr
@@ -261,6 +280,7 @@ func newRig(t *testing.T) *rig {
 		t.Fatal(err)
 	}
 	r.gh.set(pathPull(), pullJSON("open", false, false, "head1"))
+	r.gh.set("user", `{"login":"`+viewerLogin+`"}`)
 	// Every subscription asking for every event reads the merge queue, so
 	// by default the pull request is in none; a test scripts more with
 	// withGQL.

@@ -1,10 +1,13 @@
 package prwatch
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/dlog"
 )
 
 // concluded is the head's CI run on H reaching the outcome RUNS make.
@@ -144,4 +147,43 @@ func TestAnOutcomeWithNoArmIsADefect(t *testing.T) {
 
 	// Act
 	outcomeWords(&agentreplv1.PullRequestActivityChecksConcluded{CommitSha: "h"})
+}
+
+func TestLoginWords(t *testing.T) {
+	cases := []struct {
+		name, login, want string
+	}{
+		{name: "a login", login: "alice", want: "@alice"},
+		{name: "no login", login: "", want: "an unknown account"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := loginWords(tc.login)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("loginWords(%q) = %q, want %q", tc.login, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNoticesAndBannersNameAnAuthorAlike pins that a notice's sentence and a
+// comment's banner name one author the same way, through loginWords.
+func TestNoticesAndBannersNameAnAuthorAlike(t *testing.T) {
+	for _, login := range []string{"alice", ""} {
+		// Arrange
+		r := newRig(t)
+		told := commentsTold(login)
+
+		// Act
+		sentence := activitySentence(told[0])
+		r.w.bannerComments(context.Background(), r.ws, told, dlog.Context{})
+
+		// Assert
+		if len(r.banners.raised) != 1 || !strings.HasPrefix(sentence, r.banners.raised[0].author+" ") {
+			t.Fatalf("sentence %q, banners %+v, want both to name %q alike", sentence, r.banners.raised, login)
+		}
+	}
 }

@@ -82,6 +82,9 @@ type Deps struct {
 	// Ended is told each workspace one of whose followed pull requests
 	// merged or closed, and whether it merged (workspace.Verbs.PullRequestEnded).
 	Ended func(ctx context.Context, ws ids.WorkspaceID, merged bool) error
+	// Comments is told each comment a subscriber is owed that someone other
+	// than the user wrote (comments.go), which raises its desktop banner.
+	Comments CommentSink
 	// Log is the global logger: a pull request is no workspace's.
 	Log dlog.Logger
 }
@@ -100,7 +103,7 @@ type Watcher struct {
 // New builds the watcher, refusing a missing collaborator.
 func New(deps Deps) (*Watcher, error) {
 	switch {
-	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Ended == nil, deps.Log == nil:
+	case deps.Store == nil, deps.GH == nil, deps.Holds == nil, deps.Briefs == nil, deps.MintKey == nil, deps.Serves == nil, deps.Clock == nil, deps.Deployments == nil, deps.Ended == nil, deps.Comments == nil, deps.Log == nil:
 		return nil, errors.New("prwatch: every collaborator is required")
 	case deps.Every <= 0:
 		return nil, fmt.Errorf("prwatch: the cadence must be positive, not %v", deps.Every)
@@ -351,6 +354,9 @@ func (w *Watcher) advance(ctx context.Context, sub wsm.PullRequestSubscription, 
 		Subscriber: sub.Subscriber, PullRequest: sub.PullRequest, From: sub.Told, To: to,
 		Owed: owed, Status: statusWords(statusProto(snap)), End: end, ReadAt: now})
 	fields["owed"], fields["ends"] = len(owed), end != nil
+	if err == nil && applied {
+		w.bannerComments(ctx, sub.Subscriber, told, fields)
+	}
 	switch {
 	case err != nil:
 		w.deps.Log.Error(opPoll, "could not advance the subscription; the next poll reads again", dlog.WithCause(fields, err))
