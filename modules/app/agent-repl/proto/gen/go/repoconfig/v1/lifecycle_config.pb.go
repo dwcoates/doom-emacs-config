@@ -254,10 +254,11 @@ func (x *LifecycleConfig) GetDeployChecks() *DeployChecks {
 // How a repository's deploys are checked.
 type DeployChecks struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// REQUIRED, at least 1. The most remediations a chain deploys in a row:
-	// once the deploy of the last of them is still broken, the intake may
-	// only escalate to the user, never dispatch again, so a fix whose approach
-	// is wrong is not retried without end.
+	// DEPRECATED (2026-11-20): never read. It bounded the remediations a chain
+	// deployed in a row, past which a dispatch was refused. The deploy mediator
+	// alone now decides what it fixes, so no dispatch is refused for what its
+	// deploy holds. The field stays declared, and a config may still set it,
+	// because a daemon built before the change requires it.
 	RemediationsBeforeEscalation uint32 `protobuf:"varint,1,opt,name=remediations_before_escalation,json=remediationsBeforeEscalation,proto3" json:"remediations_before_escalation,omitempty"`
 	unknownFields                protoimpl.UnknownFields
 	sizeCache                    protoimpl.SizeCache

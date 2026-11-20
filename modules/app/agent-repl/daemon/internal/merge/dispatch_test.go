@@ -109,24 +109,16 @@ func TestALaterDispatchEndsTheEarlierRemediationRedispatched(t *testing.T) {
 	}
 }
 
-func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
+// TestADispatchIsNeverRefusedForHowManyRemediationsDeployed pins the owner
+// ruling of 2026-11-20: a chain that deployed any number of remediations in a
+// row still dispatches, where it was once refused at the repository's bound.
+func TestADispatchIsNeverRefusedForHowManyRemediationsDeployed(t *testing.T) {
 	tests := []struct {
-		name      string
-		arrange   func(t *testing.T, h *harness)
-		wantArm   string
-		wantBound bool
+		name     string
+		deployed int
 	}{
-		{name: "a dispatch once the chain reached its bound", wantArm: ArmRemediationBoundReached, wantBound: true,
-			arrange: func(t *testing.T, h *harness) {
-				for i := 1; i <= theBound; i++ {
-					at := deployStarted.Add(time.Duration(i-1) * time.Minute)
-					if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, aFixerTurn); err != nil {
-						t.Fatal(err)
-					}
-					fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
-				}
-				withMediator(t, h)
-			}},
+		{name: "a chain at the bound that once refused it", deployed: theBound},
+		{name: "a chain past that bound", deployed: theBound + 2},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -134,26 +126,24 @@ func TestADispatchIsRefusedWhereItCannotBeHonored(t *testing.T) {
 			h := checked(t)
 			owe(t, h)
 			withMediator(t, h)
-			if tt.arrange != nil {
-				tt.arrange(t, h)
+			for i := 1; i <= tt.deployed; i++ {
+				at := deployStarted.Add(time.Duration(i-1) * time.Minute)
+				if _, err := h.db.DispatchMediation(context.Background(), mediationKey(h), at, at, aFixerTurn); err != nil {
+					t.Fatal(err)
+				}
+				fixDeploysAt(t, h, deployStarted.Add(time.Duration(i)*time.Minute))
 			}
+			withMediator(t, h)
 
 			// Act
 			err := dispatched(h, Decision{})
 
 			// Assert
-			var refused *RefusalError
-			if !errors.As(err, &refused) || refused.Arm != tt.wantArm {
-				t.Fatalf("dispatch = %v, want the %s refusal", err, tt.wantArm)
+			if err != nil {
+				t.Fatalf("dispatch = %v, want it accepted", err)
 			}
-			if tt.wantBound && refused.Fields["remediations_before_escalation"] != uint32(theBound) {
-				t.Fatalf("fields = %v, want the bound", refused.Fields)
-			}
-			if m := owedCheck(t, h); m == nil || m.Dispatched || len(h.checks.made) != 0 || len(h.queue.submissions) != 0 {
-				t.Fatalf("check %+v, made %v; want nothing dispatched", m, h.checks.made)
-			}
-			if _, ok := h.recordFor("warn", opMediation); !ok {
-				t.Fatal("no WARN record of the refused dispatch")
+			if m := owedCheck(t, h); m == nil || !m.Dispatched || m.ChainRedeploys != tt.deployed {
+				t.Fatalf("check %+v, want it dispatched after %d remediations in a row", m, tt.deployed)
 			}
 		})
 	}

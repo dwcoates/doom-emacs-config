@@ -572,9 +572,8 @@ export type UpdateMergeQueueMediation = Message<"agentrepl.v1.UpdateMergeQueueMe
   } | {
     /**
      * The deploy is put before the user: something is wrong that should be
-     * the user's to settle, or the chain reached its bound on remediations
-     * (repoconfig.v1.DeployChecks.remediations_before_escalation). The hold
-     * is released, the user is notified, and the chain ends.
+     * the user's to settle. The hold is released, the user is notified, and
+     * the chain ends.
      *
      * @generated from field: agentrepl.v1.UpdateMergeQueueMediationEscalate escalate = 2;
      */
@@ -856,8 +855,11 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
     case: "noMediationOwed";
   } | {
     /**
-     * A dispatch once the chain has deployed as many remediations in a row as
-     * its repository allows: only an escalation is accepted now.
+     * DEPRECATED (2026-11-20): never answered. It refused a dispatch once the
+     * chain had deployed as many remediations in a row as its repository
+     * allowed. The deploy mediator alone now decides what it fixes, so no
+     * dispatch is refused for what its deploy holds. The arm stays declared
+     * so a client built before the change still decodes it.
      *
      * @generated from field: agentrepl.v1.UpdateMergeQueueRemediationBoundReached remediation_bound_reached = 18;
      */
@@ -877,9 +879,10 @@ export type UpdateMergeQueueError = Message<"agentrepl.v1.UpdateMergeQueueError"
     case: "problemsUnowned";
   } | {
     /**
-     * A dispatch while the check's window holds a problem that came back
-     * after more than five of its fixes deployed: only an escalation is
-     * accepted. An approval is never refused for it.
+     * DEPRECATED (2026-11-20): never answered. It refused a dispatch while
+     * the check's window held a problem that came back after more than five
+     * of its fixes deployed, whether or not the dispatch cited that problem.
+     * The arm stays declared for the reason remediation_bound_reached does.
      *
      * @generated from field: agentrepl.v1.UpdateMergeQueueProblemsRecurring problems_recurring = 20;
      */
@@ -1126,7 +1129,8 @@ export const UpdateMergeQueueProblemsUnownedSchema: GenMessage<UpdateMergeQueueP
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 35);
 
 /**
- * The recurring-problems refusal.
+ * The recurring-problems refusal. DEPRECATED (2026-11-20): never answered;
+ * see UpdateMergeQueueError.problems_recurring.
  *
  * @generated from message agentrepl.v1.UpdateMergeQueueProblemsRecurring
  */
@@ -1148,13 +1152,14 @@ export const UpdateMergeQueueProblemsRecurringSchema: GenMessage<UpdateMergeQueu
   messageDesc(file_agentrepl_v1_endpoint_update_merge_queue, 36);
 
 /**
- * The bound refusal.
+ * The bound refusal. DEPRECATED (2026-11-20): never answered; see
+ * UpdateMergeQueueError.remediation_bound_reached.
  *
  * @generated from message agentrepl.v1.UpdateMergeQueueRemediationBoundReached
  */
 export type UpdateMergeQueueRemediationBoundReached = Message<"agentrepl.v1.UpdateMergeQueueRemediationBoundReached"> & {
   /**
-   * The repository's bound, which the chain has reached
+   * The repository's bound, which the chain had reached
    * (repoconfig.v1.DeployChecks.remediations_before_escalation).
    *
    * @generated from field: uint32 remediations_before_escalation = 1;
