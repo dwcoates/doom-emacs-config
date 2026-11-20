@@ -60,6 +60,12 @@ message UpdateMergeQueueRequest {
     // digest, so a window holding only such records runs no mediator. Only a
     // repository's deploy mediator may change them. (Added 2026-11-19.)
     UpdateMergeQueueIgnoredRecords ignored_records = 18;
+    // Move ONE workspace's waiting merge to ANY place among the merges
+    // waiting on its queue, in one atomic reorder: the head of the waiting
+    // line, its back, directly behind a named merge, or a numbered place.
+    // An agent's way to put a merge where it must run without one call per
+    // place passed. (Added 2026-11-20.)
+    UpdateMergeQueueMove move = 19;
   }
   // WHO ASKED. REQUIRED: the user (the editor, the webapp) or a workspace's
   // agent (`agent-repld`'s command line). Every action on a queue is recorded
@@ -205,6 +211,72 @@ message UpdateMergeQueueMoveTo {
   }
 }
 
+// ---- Move: a waiting merge put at any place in its queue, in one reorder ----
+
+// A MOVE puts one WAITING merge at a place among the merges waiting on its
+// queue, reordering the waiting line in one store transaction, so no other
+// change to the queue lands between the merge leaving its old place and
+// taking its new one. Only waiting merges change places: the merge running
+// holds the repository's slot and is never passed, and a merge only
+// requested, or stepped aside for a repair, is in nobody's line.
+//
+// THE MOVED MERGE TAKES THE FRONT MARK OF ITS NEW PLACE, so every front merge
+// still stands ahead of every ordinary merge waiting: at the head of the
+// waiting line it is a front merge, and anywhere else it takes the mark of
+// the waiting merge directly ahead of it.
+//
+// A merge already standing at the place asked for is answered with success
+// and left where it is. A workspace with no merge WAITING on any queue (none
+// at all, or one running, only requested or stepped aside) is
+// `no_such_queued_merge`; `behind` naming no merge in line on the moved
+// merge's queue is `placement_behind_not_in_line`; an `index` past the last
+// waiting place is `index_out_of_range`. A refused move changes nothing.
+message UpdateMergeQueueMove {
+  // Whose waiting merge to move: the workspace landing its own branch, or an
+  // async merge's merge workspace. The command line resolves the name
+  // `merge-queue status` lists the merge under to this ref.
+  workspace.v1.WorkspaceRef workspace = 1;
+  // WHERE IT GOES. THE ARM IS THE PLACE. Never unset.
+  oneof place {
+    // The head of the waiting line.
+    UpdateMergeQueueMoveFront front = 2;
+    // The back of the waiting line.
+    UpdateMergeQueueMoveBack back = 3;
+    // Directly behind a named merge in line.
+    UpdateMergeQueueMoveBehind behind = 4;
+    // A numbered place in the waiting line.
+    UpdateMergeQueueMoveIndex index = 5;
+  }
+}
+// The head of the waiting line: directly behind the merge running, ahead of
+// every other merge waiting, merges put at the front earlier included. The
+// merge runs next. It is a front merge from then on.
+message UpdateMergeQueueMoveFront {}
+// The back of the waiting line: behind every other merge waiting, front
+// merges included. It takes the front mark of the merge now directly ahead of
+// it, so a front merge moved behind ordinary merges becomes an ordinary one.
+message UpdateMergeQueueMoveBack {}
+// Directly behind a named merge standing in line on the same queue, waiting
+// or running. Behind the merge running is the head of the waiting line, the
+// place `front` names. Unlike agentrepl.v1.MergeQueuePlacementBehind, a move
+// sets up no wait: the moved merge never waits on the named merge landing,
+// and the named merge leaving the queue does not end it.
+message UpdateMergeQueueMoveBehind {
+  // REQUIRED. The merge's name as the queue lists it
+  // (agentrepl.v1.MergeQueueStatusEntry.name), supplied or resolved: a name
+  // given without the workspace prefix also names the merge whose resolved
+  // name carries it.
+  string merge = 1;
+}
+// A numbered place among the merges waiting on the queue, counted from the
+// head of the waiting line at 0: the merge running is not counted, so 0 is
+// the place `front` names, and the last place is one less than the number of
+// merges waiting, the moved merge included.
+message UpdateMergeQueueMoveIndex {
+  // The 0-based place the merge stands on once moved.
+  uint32 index = 1;
+}
+
 // A deploy intake's decision on the deploy its chain owes a check of. The
 // intake judges only what THIS deploy caused: a problem the deploy did not
 // cause never holds the queue, and the intake files it elsewhere (a one-shot
@@ -341,6 +413,12 @@ message UpdateMergeQueueError {
     // A give-up from a workspace running no repair turn of its merge (a
     // conflict resolution or a fixing attempt). (Added 2026-11-17.)
     UpdateMergeQueueNoRepairTurn no_repair_turn = 22;
+    // A move behind a merge that does not stand in line on the moved merge's
+    // queue. Nothing was moved. (Added 2026-11-20.)
+    MergeQueuePlacementBehindNotInLine placement_behind_not_in_line = 23;
+    // A move to a numbered place past the last place in the waiting line.
+    // Nothing was moved. (Added 2026-11-20.)
+    UpdateMergeQueueIndexOutOfRange index_out_of_range = 24;
     // A `move_up` or `move_down` that cannot move the merge: nothing is
     // moved, and the arm says what keeps it where it stands. A move that
     // moves nothing is never answered as a success. (Added 2026-11-21.)
@@ -368,6 +446,14 @@ message UpdateMergeQueueNotYetAdopted {
 message UpdateMergeQueueAlreadyPaused {}
 message UpdateMergeQueueNotPaused {}
 message UpdateMergeQueueNoSuchQueuedMerge {}
+// The index refusal: the place asked for, and how many merges wait, so the
+// caller knows the last place (`waiting` - 1) without reading the queue again.
+message UpdateMergeQueueIndexOutOfRange {
+  // The 0-based place asked for.
+  uint32 index = 1;
+  // How many merges were waiting on the queue, the moved merge included.
+  uint32 waiting = 2;
+}
 // The unknown-repository refusal. Empty on purpose (see the arm).
 message UpdateMergeQueueUnknownRepository {}
 // The not-the-intake refusal. No fields: the caller knows who it is.
