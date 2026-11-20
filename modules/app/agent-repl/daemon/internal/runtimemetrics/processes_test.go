@@ -11,6 +11,7 @@ import (
 	"agent-repld/internal/clock/clocktest"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/restarttiming"
 )
 
 // selfOnly is a kernel holding only the test process, as the daemon.
@@ -207,6 +208,39 @@ func TestSampleProcessesWithNothingToSampleWaitsForTheEnd(t *testing.T) {
 			}
 			if _, sampled := s.Latest(); sampled {
 				t.Fatalf("Latest answered a sample with nothing to sample")
+			}
+		})
+	}
+}
+
+func TestAWindowWithNoProcessCollectorMeasuresNothing(t *testing.T) {
+	open := func(t *testing.T) *Surface {
+		s, err := Open(dlog.NewTestLogger(), t.TempDir())
+		if err != nil {
+			t.Fatalf("Open: %v", err)
+		}
+		t.Cleanup(s.Close)
+		return s
+	}
+	tests := []struct {
+		name    string
+		surface func(t *testing.T) *Surface
+	}{
+		{name: "the off surface", surface: func(*testing.T) *Surface { return nil }},
+		{name: "no collector registered", surface: open},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s := tt.surface(t)
+
+			// Act
+			closeWindow := s.OpenWindow(restarttiming.DaemonBoot, "sessions_up", time.Minute, restarttiming.Watched{Process: restarttiming.ProcessDaemon})
+			closeWindow()
+
+			// Assert
+			if s != nil && strings.Contains(scrape(t, s), procmetrics.WindowCPUName) {
+				t.Fatal("a window was recorded with no process collector to measure it")
 			}
 		})
 	}

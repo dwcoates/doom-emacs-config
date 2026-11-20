@@ -247,6 +247,9 @@ type FleetDeps struct {
 	// Restarts records how long each step of a session's start took
 	// (restarttiming.SessionStart). Required.
 	Restarts restarttiming.Recorder
+	// Windows measures the workspace's shim while its session starts: its
+	// CPU and memory over the start (restarttiming.Windows). Required.
+	Windows restarttiming.Windows
 	// ShimLife records every shim start by its cause and every deliberate
 	// stand-down by its reason, each read off the context its caller stated
 	// it on (shimlife). Required.
@@ -628,6 +631,8 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		return nil, fmt.Errorf("workspace: the session fleet needs the cold gate's answer; a prompt typed on claude.ai into a parked workspace answers its gate pay through it")
 	case deps.Network == nil:
 		return nil, fmt.Errorf("workspace: the session fleet needs the network state; a bridge the network refused is asked again at its restoration by it")
+	case deps.Windows == nil:
+		return nil, fmt.Errorf("workspace: the session fleet needs the resource windows; each session start's shim is measured while it starts by them")
 	}
 	probe := deps.Probe
 	if probe == nil {
@@ -1487,7 +1492,10 @@ func (f *Fleet) timedStart(
 	began time.Time,
 ) (err error) {
 	parked := false
+	closeWindow := f.deps.Windows.OpenWindow(restarttiming.SessionStart, string(restarttiming.SessionTotal), sessionWindowBound,
+		restarttiming.Watched{Process: restarttiming.ProcessShim, Workspace: ws})
 	defer func() {
+		closeWindow()
 		// A START PARKED AT ITS COLD GATE IS NOT UP, and not failed either:
 		// its total is not a session start's.
 		if !parked {

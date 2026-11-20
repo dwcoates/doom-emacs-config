@@ -3,6 +3,7 @@ package merge
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/wsm"
@@ -60,6 +61,58 @@ func (o *orchestrator) releaseRepoLockIfIdle(ctx context.Context, repo wsm.RepoK
 	}
 }
 
+// takeHeadLocked makes R its repository's head, the one holder of the
+// testing slot, and starts its stay there. It is the ONE way a run takes the
+// head. Called with the orchestrator's mutex held.
+func (o *orchestrator) takeHeadLocked(r *run) {
+	o.running[r.repo] = r
+	r.headSince = o.deps.Now()
+}
+
+// vacateHeadLocked takes R off its repository's head, if it holds it, and
+// records its stay there by how it left (headExitLocked). It is the ONE way a
+// run leaves the head, so every stay is recorded once. Called with the
+// orchestrator's mutex held.
+func (o *orchestrator) vacateHeadLocked(r *run) {
+	if o.running[r.repo] != r {
+		return
+	}
+	delete(o.running, r.repo)
+	o.deps.Meter.ObserveMergeHead(r.headExitLocked(), o.deps.Now().Sub(r.headSince))
+	r.headSince = time.Time{}
+}
+
+// headExitLocked answers how R leaves its queue's head: by the suspension that
+// took it, or by the end its teardown recorded. A run leaving the head with
+// neither is a defect, failed hard. Called with the orchestrator's mutex held.
+func (r *run) headExitLocked() string {
+	switch {
+	case r.suspending:
+		if r.suspendedBy.headExit == "" {
+			panic(fmt.Sprintf("merge: %s left its queue's head under a suspension (%s) that names no head exit", r.ws, r.suspendedBy.by))
+		}
+		return r.suspendedBy.headExit
+	case r.endExit != "":
+		return r.endExit
+	}
+	panic(fmt.Sprintf("merge: %s left its queue's head with no suspension and no teardown", r.ws))
+}
+
+// headExitOf is how a run that ends with OUT leaves its queue's head: by its
+// failure, by nothing to merge, by the cause it was abandoned for, or landed,
+// as timeEnd reads it.
+func headExitOf(out outcome) string {
+	switch {
+	case out.failed != "":
+		return HeadExitFailed
+	case out.alreadyOn != "":
+		return HeadExitAlreadyOn
+	case out.abandoned != "":
+		return string(out.abandoned)
+	}
+	return HeadExitLanded
+}
+
 // releaseSlot takes r out of its repository's chain and slot, gives back the
 // repository's kernel lock when nothing of the repository runs any more, and
 // kicks the pump so the next merge is admitted or promoted. It is the ONE
@@ -83,9 +136,7 @@ func (o *orchestrator) releaseSlot(ctx context.Context, r *run) {
 	} else {
 		o.chains[r.repo] = chain
 	}
-	if o.running[r.repo] == r {
-		delete(o.running, r.repo)
-	}
+	o.vacateHeadLocked(r)
 	// EVERY MERGE BEHIND IT IS TOLD: its base is now the tip of the run ahead
 	// of it, or the target's, and it restacks onto that.
 	o.signalChainLocked(r.repo)

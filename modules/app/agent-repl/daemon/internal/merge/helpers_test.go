@@ -4587,6 +4587,10 @@ type fakeMeter struct {
 	got []string
 	// chainTook is each recorded mediation chain's duration, in order.
 	chainTook []time.Duration
+	// heads is each recorded stay at a queue's head, "<exit>", in order;
+	// headTook their durations.
+	heads    []string
+	headTook []time.Duration
 }
 
 func (f *fakeMeter) ObserveMergeStep(step string, took time.Duration) {
@@ -4642,6 +4646,20 @@ func (f *fakeMeter) ObserveMergeRounds(kind, outcome string, n int) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.got = append(f.got, fmt.Sprintf("rounds:%s:%s:%d", kind, outcome, n))
+}
+
+func (f *fakeMeter) ObserveMergeHead(exit string, took time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.heads = append(f.heads, exit)
+	f.headTook = append(f.headTook, took)
+}
+
+// headStays answers every recorded stay at a queue's head, by exit, in order.
+func (f *fakeMeter) headStays() ([]string, []time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.heads...), append([]time.Duration(nil), f.headTook...)
 }
 
 func (f *fakeMeter) CountQueueChange(change, cause string) {

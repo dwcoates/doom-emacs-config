@@ -55,6 +55,10 @@ const (
 	// EditorStart is one editor process's startup, each milestone timed by
 	// the editor from its own process start and reported to the daemon.
 	EditorStart Restart = "editor_start"
+	// DeployBuildStep is ONE step of a deploy's build, by the step it is:
+	// the protobufs, a build-frontend target (a service), or the Wi-Fi
+	// helper. A deploy's whole build is the deploy's own build phase.
+	DeployBuildStep Restart = "deploy_build"
 )
 
 // Outcome is how the timed restart or phase ended, the `outcome` label.
@@ -342,6 +346,12 @@ func OfEditorStart(m EditorMilestone, daemon EditorDaemon, d time.Duration) Obse
 	return observation(EditorStart, string(m), string(daemon), OK, "", d)
 }
 
+// OfBuildStep is one step of a deploy's build. step is the build step's
+// name, from the deploy builder's closed set (deploy.ScriptBuilder's steps).
+func OfBuildStep(step string, outcome Outcome, d time.Duration) Observation {
+	return observation(DeployBuildStep, step, "", outcome, "", d)
+}
+
 // Recorder records restart observations. runtimemetrics.Surface is the
 // production one; its off surface records nothing. Observe never blocks on
 // anything but its own short lock.
@@ -368,3 +378,46 @@ func NewBootTimer(recorder Recorder, mode BootMode, started time.Time, now func(
 func (b BootTimer) Reached(phase BootPhase) {
 	b.recorder.ObserveRestart(OfBoot(phase, b.mode, b.now().Sub(b.started)))
 }
+
+// The process groups agent-repl's processes are measured in, the `process`
+// label of every process series (procmetrics) and what a resource window
+// watches.
+const (
+	ProcessDaemon      = "daemon"
+	ProcessDaemonTools = "daemon_tools"
+	ProcessStore       = "store"
+	ProcessSidecar     = "sidecar"
+	ProcessShim        = "shim"
+	ProcessShimTools   = "shim_tools"
+	ProcessEmacs       = "emacs"
+	// The WebKit processes Emacs is responsible for, by role.
+	ProcessWebKitWebContent = "webkit_webcontent"
+	ProcessWebKitNetworking = "webkit_networking"
+	ProcessWebKitGPU        = "webkit_gpu"
+)
+
+// Watched is one process group a resource window watches: its `process`
+// (procmetrics' group names: daemon, store, sidecar, shim, emacs,
+// webkit_webcontent, ...) and, for a per-workspace group, its workspace.
+// An empty workspace watches the group in every workspace.
+type Watched struct {
+	Process   string
+	Workspace ids.WorkspaceID
+}
+
+// Windows measures what the watched processes use while a restart's phase
+// runs: their CPU and resident memory, sampled faster while any window is
+// open, and recorded once per window when it closes (procmetrics.Windows).
+// OpenWindow never blocks on a read; the close it answers does not either.
+// A window still open at its bound (two to three times the phase's measured
+// p99, stated at each caller) is closed unrecorded.
+type Windows interface {
+	OpenWindow(r Restart, phase string, bound time.Duration, watch ...Watched) (close func())
+}
+
+// NoWindows is the Windows that measures nothing: a daemon with no process
+// collector, and tests that do not measure resources.
+type NoWindows struct{}
+
+// OpenWindow implements Windows.
+func (NoWindows) OpenWindow(Restart, string, time.Duration, ...Watched) func() { return func() {} }

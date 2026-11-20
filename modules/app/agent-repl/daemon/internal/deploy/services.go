@@ -145,6 +145,11 @@ type Restarter struct {
 	// (restarttiming.ServiceRestart). REQUIRED; runtimemetrics.Surface is
 	// the production one.
 	Restarts restarttiming.Recorder
+	// ResourceWindows measures the restarted services while each restart
+	// runs: their CPU and memory as they come back
+	// (restarttiming.Windows). REQUIRED; runtimemetrics.Surface is the
+	// production one.
+	ResourceWindows restarttiming.Windows
 	// Define writes label's definition from its requirements entry, where
 	// Services.Definition finds it: a service added since this machine's
 	// install has none, and a deploy that ships it must bring it up.
@@ -167,10 +172,28 @@ type Restarter struct {
 	StoreHolder string
 }
 
-// timed runs restart and records how long it took as service's restart.
+// serviceWindowBounds bound each service restart's resource window: about
+// three times the p99 of its restart over the 7 days to 2026-11-20 (the
+// store's 12s, the sidecar's 6.4s).
+var serviceWindowBounds = map[restarttiming.Service]time.Duration{
+	restarttiming.Store:   30 * time.Second,
+	restarttiming.Sidecar: 20 * time.Second,
+}
+
+// serviceWatches are the processes each service restart brings back: the
+// store's restart takes the sidecar down and back with it.
+var serviceWatches = map[restarttiming.Service][]restarttiming.Watched{
+	restarttiming.Store:   {{Process: restarttiming.ProcessStore}, {Process: restarttiming.ProcessSidecar}},
+	restarttiming.Sidecar: {{Process: restarttiming.ProcessSidecar}},
+}
+
+// timed runs restart and records how long it took as service's restart,
+// measuring the services it brings back while it runs.
 func (r *Restarter) timed(service restarttiming.Service, restart func() error) error {
 	began := r.Clock.Now()
+	closeWindow := r.ResourceWindows.OpenWindow(restarttiming.ServiceRestart, string(service), serviceWindowBounds[service], serviceWatches[service]...)
 	err := restart()
+	closeWindow()
 	r.Restarts.ObserveRestart(restarttiming.OfService(service, restarttiming.OutcomeOf(err), r.Clock.Now().Sub(began)))
 	return err
 }

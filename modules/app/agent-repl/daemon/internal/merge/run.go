@@ -155,6 +155,12 @@ type run struct {
 	startedMS int64
 	// queuedMS is when the merge was queued: the queue tab's start.
 	queuedMS int64
+	// headSince is when the run last took its queue's head (takeHeadLocked),
+	// zero while it does not hold it. Guarded by the orchestrator's mutex.
+	headSince time.Time
+	// endExit is how a run that reached its teardown leaves its queue's head
+	// (headExitOf), set once by teardown. Guarded by the orchestrator's mutex.
+	endExit string
 	// displaced is the user turn this merge displaced, captured at admission
 	// with the text it carried.
 	displaced *Displaced

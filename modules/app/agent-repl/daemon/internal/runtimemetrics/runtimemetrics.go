@@ -13,10 +13,13 @@ import (
 	"fmt"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/inflight"
 	"agent-repld/internal/procmetrics"
+	"agent-repld/internal/restarttiming"
 
 	"agentrepl/logging/metrics"
 
@@ -47,6 +50,9 @@ type Surface struct {
 	// processes is the registered process collector, whose latest scrape the
 	// rail's memory popups read (Latest); nil until RegisterProcesses.
 	processes atomic.Pointer[procmetrics.Collector]
+	// windows measures the processes a restart's phase watches while it
+	// runs (OpenWindow), registered with the process collector.
+	windows atomic.Pointer[procmetrics.Windows]
 	// emacs is the Emacs whose WatchDaemon stream stands, which the process
 	// collector measures.
 	emacs *procmetrics.EmacsProcess
@@ -72,7 +78,7 @@ func Open(log dlog.Logger, root string) (*Surface, error) {
 	prompts := newPromptTelemetry()
 	srv, err := metrics.OpenRunning(metrics.ProgramDaemon, root, func(op string, err error) {
 		log.Error(Operation, "the metrics surface failed", dlog.Context{"step": op, "error": err.Error()})
-	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.remediations, mrg.remediationGates, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, cache.lateness, cache.lapses, cache.coldIdle, life.starts, life.standDowns, life.gateAnswers,
+	}, version, lat, rst, rpcs, records, mrg.steps, mrg.spans, mrg.mediations, mrg.remediations, mrg.remediationGates, mrg.chainRedeploys, mrg.chainSpans, mrg.inARow, mrg.rounds, mrg.roundCounts, mrg.heads, mrg.changes, mrg.noticeSizes, mrg.noticesSuppressed, cache.lateness, cache.lapses, cache.coldIdle, life.starts, life.standDowns, life.gateAnswers,
 		quiet.quiet, quiet.freezes, quiet.thaws, quiet.skipped, prompts.submitted)
 	if err != nil {
 		return nil, fmt.Errorf("runtimemetrics: %w", err)
@@ -153,8 +159,25 @@ func (s *Surface) RegisterProcesses(reader procmetrics.Reader, sockDir, diskPath
 	if err := s.srv.Registry().Register(c); err != nil {
 		return fmt.Errorf("runtimemetrics: register the process collector: %w", err)
 	}
+	windows := procmetrics.NewWindows(c, clock.System{})
+	for _, collector := range windows.Collectors() {
+		if err := s.srv.Registry().Register(collector); err != nil {
+			return fmt.Errorf("runtimemetrics: register the restart windows' series: %w", err)
+		}
+	}
 	s.processes.Store(c)
+	s.windows.Store(windows)
 	return nil
+}
+
+// OpenWindow implements restarttiming.Windows through the registered
+// process collector's windows. With none registered, and on the off surface,
+// the window measures nothing.
+func (s *Surface) OpenWindow(r restarttiming.Restart, phase string, bound time.Duration, watch ...restarttiming.Watched) func() {
+	if s == nil || s.windows.Load() == nil {
+		return func() {}
+	}
+	return s.windows.Load().OpenWindow(r, phase, bound, watch...)
 }
 
 // Latest answers the process collector's latest sample, false while none has
@@ -182,5 +205,12 @@ func (s *Surface) SampleProcesses(ctx context.Context, clk clock.Clock) error {
 		<-ctx.Done()
 		return ctx.Err()
 	}
-	return s.processes.Load().Run(ctx, clk)
+	windowsDone := make(chan struct{})
+	inflight.Go(func() {
+		defer close(windowsDone)
+		_ = s.windows.Load().Run(ctx)
+	})
+	err := s.processes.Load().Run(ctx, clk)
+	<-windowsDone
+	return err
 }

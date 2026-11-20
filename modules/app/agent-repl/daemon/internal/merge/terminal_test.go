@@ -2408,6 +2408,44 @@ func TestAFailedMergeTimesItsSpansAsFailed(t *testing.T) {
 	}
 }
 
+func TestALandedMergeRecordsItsStayAtTheHeadAsLanded(t *testing.T) {
+	// Arrange: a landing merge.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.landsCleanly("abc123def4567")
+	h.git.changed = []string{"modules/app/agent-repl/daemon/x.go"}
+	h.gatePasses("daemon")
+	enqueue(t, h)
+
+	// Act.
+	if err := h.admit(context.Background()); err != nil {
+		t.Fatalf("the merge failed: %v", err)
+	}
+
+	// Assert.
+	if exits, _ := h.meter.headStays(); !slices.Equal(exits, []string{HeadExitLanded}) {
+		t.Fatalf("head stays = %v, want one landed stay", exits)
+	}
+}
+
+func TestAFailedMergeRecordsItsStayAtTheHeadAsFailed(t *testing.T) {
+	// Arrange: a merge whose before-action fails.
+	h := newHarness(t)
+	h.emacsRepo()
+	h.configurePromptHooks([]string{"before"}, nil)
+	h.briefs["before"] = nil
+	h.turnCloses = []wsm.TurnClose{wsm.CloseFailed}
+	enqueue(t, h)
+
+	// Act.
+	_ = h.admit(context.Background())
+
+	// Assert.
+	if exits, _ := h.meter.headStays(); !slices.Equal(exits, []string{HeadExitFailed}) {
+		t.Fatalf("head stays = %v, want one failed stay", exits)
+	}
+}
+
 func TestAnAbandonmentTheDaemonsExitOvertookIsRefused(t *testing.T) {
 	// Arrange: the exit suspended the run after its abandonment, and it let
 	// go to the next boot.

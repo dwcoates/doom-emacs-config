@@ -907,7 +907,26 @@ type Meter interface {
 	// CountQueueChange records one change to a queue's line, by its
 	// QueueChangeKind spelling and, for a merge leaving, its cause.
 	CountQueueChange(change, cause string)
+	// ObserveMergeHead records one stay of a merge at its queue's head, from
+	// taking the head to leaving it, by how it left (the HeadExit values, or
+	// an AbandonCause's spelling for a merge abandoned at the head).
+	ObserveMergeHead(exit string, took time.Duration)
 }
+
+// How a merge leaves its queue's head, the merge head metric's `exit`. A
+// merge abandoned at the head leaves by its AbandonCause's spelling.
+const (
+	HeadExitLanded                   = OutcomeLanded
+	HeadExitAlreadyOn                = OutcomeAlreadyOn
+	HeadExitFailed                   = OutcomeFailed
+	HeadExitNeededFixes              = "needed_fixes"
+	HeadExitNeededConflictResolution = "needed_conflict_resolution"
+	HeadExitTransferred              = "transferred"
+	HeadExitPaused                   = "paused"
+	HeadExitRestarted                = "restarted"
+	HeadExitHandover                 = "handover"
+	HeadExitDaemonExit               = "daemon_exit"
+)
 
 // RoundCountKinds are the tab kinds a concluded merge's round counts are
 // recorded for, every one of them, 0 for a kind the merge never opened: how

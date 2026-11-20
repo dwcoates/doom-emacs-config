@@ -545,7 +545,7 @@ func lineOf(frontMS, behindMS int64) []wsm.MergeQueueEntry {
 func registerRunning(h *harness, r *run) {
 	h.o.mu.Lock()
 	defer h.o.mu.Unlock()
-	h.o.running[r.repo] = r
+	h.o.takeHeadLocked(r)
 	h.o.runsByWorkspace[r.ws] = r
 }
 

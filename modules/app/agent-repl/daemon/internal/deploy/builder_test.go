@@ -7,8 +7,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/restarttiming"
+	"agent-repld/internal/restarttiming/restarttimingtest"
 )
 
 func newScriptBuilder(t *testing.T, answers map[string]runAnswer) (*ScriptBuilder, *scriptedRunner, *dlog.TestLogger) {
@@ -21,6 +24,7 @@ func newScriptBuilder(t *testing.T, answers map[string]runAnswer) (*ScriptBuilde
 		Runner:     runner,
 		Clock:      newStepClock(),
 		Log:        log,
+		Restarts:   &restarttimingtest.Recorder{},
 	}, runner, log
 }
 
@@ -250,3 +254,84 @@ func TestWifiSourceHash(t *testing.T) {
 }
 
 func ptr(s string) *string { return &s }
+
+// timedRunner is a Runner whose every step takes the time its answer names,
+// on the builder's step clock, so a test reads each step's duration.
+type timedRunner struct {
+	inner *scriptedRunner
+	clock *stepClock
+	takes map[string]time.Duration
+}
+
+func (r *timedRunner) Run(ctx context.Context, dir string, argv []string) (string, int, error) {
+	<-r.clock.After(r.takes[strings.Join(argv, " ")])
+	return r.inner.Run(ctx, dir, argv)
+}
+
+func TestEveryBuildStepIsTimedUnderItsOwnName(t *testing.T) {
+	// Arrange
+	b, runner, _ := newScriptBuilder(t, map[string]runAnswer{})
+	clock := newStepClock()
+	b.Clock = clock
+	b.Runner = &timedRunner{inner: runner, clock: clock, takes: map[string]time.Duration{
+		"make -C /checkout/modules/app/agent-repl/proto all":                                  2 * time.Second,
+		"bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 webapp": 7 * time.Second,
+	}}
+
+	// Act
+	err := b.Build(context.Background(), "/staging/1")
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	got := b.Restarts.(*restarttimingtest.Recorder).Of(restarttiming.DeployBuildStep)
+	want := append([]string{"proto"}, Targets...)
+	if len(got) != len(want) {
+		t.Fatalf("build steps timed = %+v, want one per step %v", got, want)
+	}
+	seconds := map[string]float64{"proto": 2, "webapp": 7}
+	for i, o := range got {
+		if o.Phase() != want[i] || o.Outcome() != restarttiming.OK || o.Seconds() != seconds[want[i]] {
+			t.Fatalf("step %d timed %s %s %vs, want %s ok %vs", i, o.Phase(), o.Outcome(), o.Seconds(), want[i], seconds[want[i]])
+		}
+	}
+}
+
+func TestAFailedBuildStepIsTimedAsFailedAndNoLaterStepIsTimed(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer runAnswer
+	}{
+		{name: "a step that exits non-zero", answer: runAnswer{out: "vite: 2 errors", code: 2}},
+		{name: "a step that could not start", answer: runAnswer{err: errors.New("exec: bash: not found")}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			step := "bash /checkout/modules/app/agent-repl/bin/build-frontend.sh --out /staging/1 webapp"
+			b, _, log := newScriptBuilder(t, map[string]runAnswer{step: tc.answer})
+
+			// Act
+			err := b.Build(context.Background(), "/staging/1")
+
+			// Assert
+			if err == nil {
+				t.Fatal("Build succeeded, want the webapp step's failure")
+			}
+			got := b.Restarts.(*restarttimingtest.Recorder).Of(restarttiming.DeployBuildStep)
+			last := got[len(got)-1]
+			if last.Phase() != "webapp" || last.Outcome() != restarttiming.Failed {
+				t.Fatalf("last step timed %s %s, want webapp failed", last.Phase(), last.Outcome())
+			}
+			for _, o := range got[:len(got)-1] {
+				if o.Outcome() != restarttiming.OK {
+					t.Fatalf("step %s timed %s before the failure, want ok", o.Phase(), o.Outcome())
+				}
+			}
+			if !loggedTo(log, "error", "a build step failed") {
+				t.Fatalf("no error record for the failed step: %v", log.Records())
+			}
+		})
+	}
+}

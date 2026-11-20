@@ -19,6 +19,11 @@ type sessionTiming struct {
 	kind     restarttiming.SessionKind
 }
 
+// sessionWindowBound bounds a session start's resource window: about three
+// times the p99 of a session start's total over the 7 days to 2026-11-20
+// (32s).
+const sessionWindowBound = 90 * time.Second
+
 // timing answers the timing of ws's start of KIND.
 func (f *Fleet) timing(ws ids.WorkspaceID, kind restarttiming.SessionKind) sessionTiming {
 	return sessionTiming{recorder: f.deps.Restarts, now: f.now, ws: ws, kind: kind}

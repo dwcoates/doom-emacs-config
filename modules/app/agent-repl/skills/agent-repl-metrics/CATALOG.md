@@ -26,6 +26,7 @@ run, judgement call 12).
 | `agentrepl_host_on_battery` | gauge, 0 or 1 | | daemon (`procmetrics`) |
 | `agentrepl_vendor_bytes_sent_total`, `..._received_total` | counter | `workspace` | daemon, folded from shims; published by no shim yet (judgement call 6) |
 | `agentrepl_restart_seconds` | histogram | `restart`, `phase`, `cause`, `outcome` | daemon (`restarttiming`), timed where each restart starts and ends (below) |
+| `agentrepl_restart_window_cpu_cores`, `agentrepl_restart_window_resident_bytes` | histogram | `restart`, `phase`, `process`, `stat` | daemon (`procmetrics.Windows`, added 2026-11-20): what each watched process group used while a restart's phase ran, one observation per window per `stat`: `mean` and `max` (peak sample) of its CPU in cores and of its resident memory. The windows: `daemon_boot`/`sessions_up` (the daemon, from its process start until its sessions are up), `session_start`/`total` (the workspace's shim, per start; the label carries no workspace), `service_restart`/`store` (the store and the sidecar) and `/sidecar`, and `reconnect_wave`/`host` (Emacs, while its hosts come back) and `/web` (the WebKit groups, while the webviews load the webapp again, which is the page boot of a deploy). The watched processes are read every 500ms only while a window is open (1.4µs of CPU per process read, a 1.45ms classification of every host process every fourth read: about 0.08% of a core, measured 2026-11-20) and nothing otherwise; a window still open at its bound (about three times its phase's p99) is dropped unrecorded with an INFO record. Emacs's own launch (`editor_start`) and its pushed elisp reload are not windowed: both are reported after they end, so the daemon learns of them too late to watch them |
 | `agentrepl_workspace_restart_last_seconds` | gauge | `restart`, `phase`, `workspace` | daemon: each workspace's latest duration of a per-workspace restart phase |
 | `agentrepl_rpc_seconds` | histogram | `rpc`, `outcome` | daemon: every unary rpc from its arrival to its handler's return; `outcome` is `ok` or the Connect code |
 | `agentrepl_log_records_total` | counter | `runtime`, `level`, `operation` | daemon: every Warn and Error record it writes, its own and Emacs's and the webapp's (`dlog.Surfaces.BindRecordCounter`) |
@@ -41,6 +42,7 @@ run, judgement call 12).
 | `agentrepl_deploy_remediations_in_a_row` | gauge | | daemon (`merge`): the chain owed now, remediations deployed in a row since the queue last advanced; `0` when none is owed. Set by every intake round, and on the release |
 | `agentrepl_merge_round_seconds` | histogram | `round`, `outcome` | daemon (`merge`): each round of a merge's tab, by kind (`queue`, `pick`, `rebasing`, `conflicts`, `tests`, `fixes`, `committing`, and a deploy stage's kind) and ledger outcome (`succeeded`, `failed`, `restarted`, `escalated`, `abandoned`) |
 | `agentrepl_merge_rounds` | histogram | `round`, `outcome` | daemon (`merge`): per concluded merge, how many `rebasing`, `conflicts`, `tests` and `fixes` rounds it took (`0` for a kind it never opened), by how the merge ended (`landed`, `already_on`, `failed`) |
+| `agentrepl_merge_head_seconds` | histogram | `exit` | daemon (`merge`, added 2026-11-20): each stay of a merge at its queue's head (the one holder of the testing slot), from taking the head (admitted, promoted from behind the head, or resumed) to leaving it, by how it left: `landed`, `already_on`, `failed`, `needed_fixes` (stepped aside to fix its failing tests), `needed_conflict_resolution` (stepped aside to resolve its rebase's conflicts), `paused`, `restarted`, `transferred`, `handover`, `daemon_exit`, or the cause it was abandoned at the head for (`evicted`, `dequeued`, `workspace_closed`, `gave_up`, `cold_gate`, ...). A merge that steps aside and returns has one stay per time it held the head |
 | `agentrepl_merge_queue_changes_total` | counter | `change`, `cause` | daemon (`merge`): every change to a queue's line, by kind (`enqueued`, `requeued`, `started`, `landed`, `failed`, `dequeued`, `reordered`) and, for a merge leaving, the cause its removal recorded (`evicted`, `failed`, `restart failed`, ...); empty otherwise |
 | `agentrepl_workspace_notice_bytes` | histogram | `notice` | daemon: every message sent to a workspace, its text's size in UTF-8 bytes, by type: each daemon notice by the brief it was composed from (`derived-workspace-notice`, `workspace-sibling-notice`, `workspace-child-notice`, merge-queue, gather, pull-request, subscription and main-sync notices; briefprompt.Composer), and `agent_sent` for a prompt one workspace's agent sent another. Images add nothing. Its count per type is how many were sent |
 | `agentrepl_workspace_notices_suppressed_total` | counter | `notice` | daemon (`workspacenotice`): notices of a type the daemon is set not to send, by type: family notices (`workspace-sibling-notice`, `workspace-child-notice`) while `AGENT_REPL_SIBLING_NOTICES` is not `on` (the default) |
@@ -73,6 +75,7 @@ for metrics that show where restart time goes and when it regressed):
 |---|---|---|---|
 | `deploy` | `build`, `install`, `restart_services`, `decide`, `total` | | the deploying daemon |
 | `deploy` | `handover`, `total` of a deploy that moved the daemon | | the successor, from the instants the intent manifest carries (judgement call 10) |
+| `deploy_build` | each build step by name: `proto`, a build-frontend target (`shim`, `webapp`, `daemon`, `store`, `sidecar`, `zettel`, `tests`, `lock`), `wifi`, or `build` for a harness's one-command override; `outcome` `failed` for the step that stopped the build | | `deploy.ScriptBuilder`, per step (added 2026-11-20); the deploy's whole build is `deploy`'s `build` |
 | `daemon_boot` | `claim`, `reconciled`, `serving`, `sessions_up`, each from the process start | `cold`, `successor` | the booting daemon |
 | `service_restart` | `store` (its sidecar with it), `sidecar` | | `deploy.Restarter`, for a deploy and a boot alike |
 | `workspace_start` | `start`, `wake` | `boot`, `takeover` | the bring-up, per workspace |
@@ -81,6 +84,7 @@ for metrics that show where restart time goes and when it regressed):
 | `shim_restart` | `wait`, `prelaunch`, `stand_down`, `resume`, `run` | the relaunch reason (`build_stale`, `restart_verb`, `query_died`, `shim_log_hard_ceiling`) | the rollout's bounce engine, per workspace |
 | `handover_transfer` | `wait`, `run` | | the outgoing daemon, per workspace |
 | `workspace_reconnect` | `host`, `web` | `cold`, `successor`, `webapp_reload` | the daemon, per workspace: from a boot's start, a handover's manifest or a webview reload's push until the workspace's Emacs host or webview stream opens on it |
+| `reconnect_wave` | `host_first`, `host_last`, `host_spread`, `web_first`, `web_last`, `web_spread` | `cold`, `successor`, `webapp_reload` | the daemon (`restarttiming.Reconnects`, added 2026-11-20), once per restart's expected connections of one kind: the first back and the last back, each from the restart's start, and the spread from the first to the last, the span the sidebar's rows come back over. `successor`'s `host_last` is the slowest workspace's handoff to the successor. A wave one of whose workspaces a later restart expected again times only its first |
 
 Not built, each recorded with its reason:
 
@@ -88,6 +92,7 @@ Not built, each recorded with its reason:
   the webapp (`docs/protobuf-design/runtime-metrics.md`, entry 8) and
   `workspace_open` is measured by the daemon (judgement call 16).
 - Vendor bytes: no shim counts them (judgement call 6).
-- An elisp reload is not timed: Emacs keeps its streams across it, so
-  there is nothing to come back (judgement call 9). Emacs's own launch is
-  timed as `editor_start` (judgement call 17).
+- An elisp reload is not a restart: Emacs keeps its streams across it, so
+  there is nothing to come back (judgement call 9). How long a deploy's
+  pushed reload takes is the `elisp_reload` latency, and Emacs's own launch
+  is timed as `editor_start` (judgement call 17).

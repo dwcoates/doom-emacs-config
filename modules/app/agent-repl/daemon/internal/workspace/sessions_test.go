@@ -759,6 +759,7 @@ type fleetFixture struct {
 	store *fakeStoreHistory
 	// restarts records every restart observation the fleet makes.
 	restarts restarttimingtest.Recorder
+	windows  restarttimingtest.Windows
 	// shimLife records every shim start and stand-down the fleet counts.
 	shimLife fakeShimLife
 	// chatPrompt and chatPromptErr answer the fleet's ChatSystemPrompt.
@@ -1078,6 +1079,7 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 		},
 		Now:        func() time.Time { return f.now },
 		Restarts:   &f.restarts,
+		Windows:    &f.windows,
 		ShimLife:   &f.shimLife,
 		AdoptBound: f.adoptBound,
 		Clock:      f.clock,
@@ -1265,6 +1267,22 @@ func TestNewFleetRefusesMissingCollaborators(t *testing.T) {
 				NetworkChanged:   func() <-chan struct{} { return nil },
 				Standing:         func(context.Context, ids.WorkspaceID) (Standing, error) { return 0, nil },
 				PayColdGate:      func(context.Context, ids.WorkspaceID, *agentreplv1.AnswerColdGateRequest) error { return nil },
+			},
+		},
+		{
+			name: "no resource windows",
+			deps: FleetDeps{
+				DB: newFakeDB(), StoreHistory: &fakeStoreHistory{}, Instance: fixtureInstance, Accounts: &fakeAccounts{}, Supervisor: &fakeSupervisor{},
+				PersistedBook: func(string) (string, bool, error) { return "", false, nil },
+				SocketPath:    func(ids.WorkspaceID) string { return "" }, ShimBundle: &fakeBundle{build: "b"},
+				Log: dlog.NewTestSurfaces(), LockDir: "/run", BringUps: func(ids.WorkspaceID, bool) {},
+				SessionsUp: func(ids.WorkspaceID) {}, VendorStarts: func(ids.WorkspaceID, sidebar.VendorStart) {},
+				Steps: func(ids.WorkspaceID, opentabs.Step) {}, Restarts: &restarttimingtest.Recorder{}, ShimLife: &fakeShimLife{},
+				ChatSystemPrompt: func() (string, error) { return "", nil },
+				NetworkChanged:   func() <-chan struct{} { return nil },
+				Standing:         func(context.Context, ids.WorkspaceID) (Standing, error) { return 0, nil },
+				PayColdGate:      func(context.Context, ids.WorkspaceID, *agentreplv1.AnswerColdGateRequest) error { return nil },
+				Network:          newFakeNetwork(),
 			},
 		},
 		{
@@ -4359,6 +4377,46 @@ func TestStartTimesEachStepOfTheSessionsStart(t *testing.T) {
 			}
 			if got := sessionSteps(&f.restarts); fmt.Sprint(got) != fmt.Sprint(tt.want) {
 				t.Fatalf("steps = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEachSessionStartMeasuresItsWorkspacesShimForItsWholeStart(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(f *fleetFixture)
+		wantErr bool
+	}{
+		{name: "a start that comes up", arrange: func(*fleetFixture) {}},
+		{name: "a start the vendor refused", wantErr: true, arrange: func(f *fleetFixture) {
+			f.client.response = &shimv1.StartSessionResponse{
+				Result: &shimv1.StartSessionResponse_Failure{Failure: &shimv1.StartSessionFailure{
+					Cause:  &shimv1.StartSessionFailure_VendorStartFailed{VendorStartFailed: rejectedVendorStart()},
+					Detail: "the vendor binary is missing",
+				}},
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			f := newFleetFixture(t)
+			ws := f.workspace("w1")
+			tt.arrange(f)
+
+			// Act.
+			err := f.fleet.Start(context.Background(), ws.ID)
+
+			// Assert.
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Start() error = %v, want error %v", err, tt.wantErr)
+			}
+			got := f.windows.Windows()
+			want := restarttiming.Watched{Process: restarttiming.ProcessShim, Workspace: ws.ID}
+			if len(got) != 1 || got[0].Restart != restarttiming.SessionStart || got[0].Phase != "total" ||
+				len(got[0].Watch) != 1 || got[0].Watch[0] != want || !got[0].Closed || got[0].Bound != sessionWindowBound {
+				t.Fatalf("windows = %+v, want one closed session_start window over w1's shim", got)
 			}
 		})
 	}

@@ -461,6 +461,9 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 		r.abandonToRecovery(ctx, terminalOwed(out))
 		return
 	}
+	r.o.mu.Lock()
+	r.endExit = headExitOf(out)
+	r.o.mu.Unlock()
 	log := r.o.log(ctx, r.ws)
 
 	// No turn opened from here on is the merge's: the standing address is
@@ -513,9 +516,7 @@ func (r *run) teardown(ctx context.Context, out outcome, terminal func()) {
 	}
 	defer r.o.armRepairs(ctx, r.repo)
 	r.o.mu.Lock()
-	if r.o.running[r.repo] == r {
-		delete(r.o.running, r.repo)
-	}
+	r.o.vacateHeadLocked(r)
 	delete(r.o.runsByWorkspace, r.ws)
 	// A MERGE THAT ENDED OUT OF LINE -- a resolving rebase that gave up --
 	// leaves its repair slot with its entry, and the slot passes on.
@@ -803,9 +804,7 @@ func (r *run) releaseInProcess(ctx context.Context) {
 		r.releaseOccupancy()
 	}
 	r.o.mu.Lock()
-	if r.o.running[r.repo] == r {
-		delete(r.o.running, r.repo)
-	}
+	r.o.vacateHeadLocked(r)
 	delete(r.o.runsByWorkspace, r.ws)
 	delete(r.o.repoOf, r.ws)
 	delete(r.o.ledgerOf, r.ws)

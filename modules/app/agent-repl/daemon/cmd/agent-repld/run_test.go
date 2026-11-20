@@ -73,15 +73,18 @@ type testHooks struct {
 	served chan struct{}
 	// restarts keeps the boot phases the spine timed.
 	restarts *restarttimingtest.Recorder
+	// windows keeps the resource windows the spine opened.
+	windows *restarttimingtest.Windows
 }
 
 func newTestHooks() *testHooks {
-	th := &testHooks{served: make(chan struct{}, 1), restarts: &restarttimingtest.Recorder{}}
+	th := &testHooks{served: make(chan struct{}, 1), restarts: &restarttimingtest.Recorder{}, windows: &restarttimingtest.Windows{}}
 	started := time.Now()
 	th.hooks = hooks{
 		Started:  started,
 		Now:      func() time.Time { return started.Add(3 * time.Second) },
 		Restarts: th.restarts,
+		Windows:  th.windows,
 		// A TEST DECLARES NO HOLDER, so its daemon never installs one: it
 		// takes from the test's own holder (testHolder).
 		Holders: func(dlog.Logger) ([]holderensure.Holder, func(context.Context, string) error, error) {
@@ -1672,6 +1675,24 @@ func TestASecondDaemonBesideAServingIncumbentRefusesAtOnceAndSaysWhy(t *testing.
 
 // TestTheBootTimesTheClaimFromTheProcessStart pins that the spine times its
 // boot claim from the process's start, as a cold boot or a successor's.
+func TestTheBootMeasuresTheDaemonUntilItEnds(t *testing.T) {
+	// Arrange
+	root := shortRoot(t)
+	t.Setenv("AGENT_REPL_FORBID_VENDOR_CALLS", "1")
+	t.Setenv(wsm.EnvTestUnsyncedWrites, "1")
+	th := newTestHooks()
+
+	// Act
+	_ = run(context.Background(), options{stateDir: root, holder: testHolder(t)}, th.hooks)
+
+	// Assert
+	got := th.windows.Windows()
+	if len(got) == 0 || got[0].Restart != restarttiming.DaemonBoot || got[0].Phase != "sessions_up" || got[0].Bound != bootWindowBound ||
+		len(got[0].Watch) != 1 || got[0].Watch[0].Process != restarttiming.ProcessDaemon || !got[0].Closed {
+		t.Fatalf("windows = %+v, want the boot's daemon window first, closed once the boot ended", got)
+	}
+}
+
 func TestTheBootTimesTheClaimFromTheProcessStart(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1781,7 +1802,7 @@ func TestABootExpectsEveryOpenWorkspacesStreamsBack(t *testing.T) {
 	// Arrange
 	started := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	var rec restarttimingtest.Recorder
-	r := restarttiming.NewReconnects(&rec, func() time.Time { return started.Add(2 * time.Second) })
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return started.Add(2 * time.Second) })
 	db := fakeWorkspaceList{workspaces: []wsm.Workspace{
 		{ID: "open"}, {ID: "hidden", Hidden: true}, {ID: "closed", Closed: true},
 	}}
@@ -1805,7 +1826,7 @@ func TestABootExpectsEveryOpenWorkspacesStreamsBack(t *testing.T) {
 
 func TestABootThatCannotListItsWorkspacesSaysWhy(t *testing.T) {
 	// Arrange
-	r := restarttiming.NewReconnects(&restarttimingtest.Recorder{}, time.Now)
+	r := restarttiming.NewReconnects(&restarttimingtest.Recorder{}, restarttiming.NoWindows{}, time.Now)
 
 	// Act
 	err := expectBootReconnects(context.Background(), fakeWorkspaceList{err: errors.New("database is locked")}, r, time.Now())

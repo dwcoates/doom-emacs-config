@@ -1,6 +1,8 @@
 package restarttiming_test
 
 import (
+	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -13,7 +15,7 @@ func TestAnExpectedReconnectIsTimedOnceFromItsRestart(t *testing.T) {
 	began := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	now := began.Add(3 * time.Second)
 	var rec restarttimingtest.Recorder
-	r := restarttiming.NewReconnects(&rec, func() time.Time { return now })
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return now })
 	r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectWeb, "w1", "w2")
 
 	// Act
@@ -45,7 +47,7 @@ func TestAConnectionNothingExpectedIsNotTimed(t *testing.T) {
 			// Arrange
 			began := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 			var rec restarttimingtest.Recorder
-			r := restarttiming.NewReconnects(&rec, func() time.Time { return began.Add(time.Second) })
+			r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return began.Add(time.Second) })
 			tt.arrange(r, began)
 
 			// Act
@@ -64,7 +66,7 @@ func TestALaterExpectationReplacesAnEarlierOne(t *testing.T) {
 	boot := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	reload := boot.Add(time.Minute)
 	var rec restarttimingtest.Recorder
-	r := restarttiming.NewReconnects(&rec, func() time.Time { return reload.Add(2 * time.Second) })
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return reload.Add(2 * time.Second) })
 	r.Expect(restarttiming.ReconnectCold, boot, restarttiming.ReconnectWeb, "w1")
 	r.Expect(restarttiming.ReconnectWebappReload, reload, restarttiming.ReconnectWeb, "w1")
 
@@ -72,7 +74,7 @@ func TestALaterExpectationReplacesAnEarlierOne(t *testing.T) {
 	r.Connected("w1", restarttiming.ReconnectWeb)
 
 	// Assert
-	got := rec.Observations()
+	got := rec.Of(restarttiming.WorkspaceReconnect)
 	if len(got) != 1 || got[0].Cause() != "webapp_reload" || got[0].Seconds() != 2 {
 		t.Fatalf("reconnects = %+v, want the reload's, 2s", got)
 	}
@@ -82,14 +84,168 @@ func TestAStartAfterNowIsStatedAsZero(t *testing.T) {
 	// Arrange: a manifest stamped after this daemon's clock reads now.
 	now := time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC)
 	var rec restarttimingtest.Recorder
-	r := restarttiming.NewReconnects(&rec, func() time.Time { return now })
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return now })
 	r.Expect(restarttiming.ReconnectSuccessor, now.Add(time.Second), restarttiming.ReconnectHost, "w1")
 
 	// Act
 	r.Connected("w1", restarttiming.ReconnectHost)
 
 	// Assert
-	if got := rec.Observations(); len(got) != 1 || got[0].Seconds() != 0 {
+	if got := rec.Of(restarttiming.WorkspaceReconnect); len(got) != 1 || got[0].Seconds() != 0 {
 		t.Fatalf("reconnects = %+v, want one at zero", got)
+	}
+}
+
+// waveMarks answers the reconnect wave observations as "<phase> <cause> <seconds>".
+func waveMarks(rec *restarttimingtest.Recorder) []string {
+	var out []string
+	for _, o := range rec.Of(restarttiming.ReconnectWave) {
+		out = append(out, fmt.Sprintf("%s %s %v", o.Phase(), o.Cause(), o.Seconds()))
+	}
+	return out
+}
+
+func TestAWaveIsTimedAtItsFirstAndLastConnectionAndItsSpread(t *testing.T) {
+	// Arrange
+	began := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	now := began
+	var rec restarttimingtest.Recorder
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return now })
+	r.Expect(restarttiming.ReconnectSuccessor, began, restarttiming.ReconnectHost, "w1", "w2", "w3")
+
+	// Act
+	now = began.Add(2 * time.Second)
+	r.Connected("w2", restarttiming.ReconnectHost)
+	now = began.Add(5 * time.Second)
+	r.Connected("w1", restarttiming.ReconnectHost)
+	now = began.Add(9 * time.Second)
+	r.Connected("w3", restarttiming.ReconnectHost)
+
+	// Assert
+	want := []string{"host_first successor 2", "host_last successor 9", "host_spread successor 7"}
+	if got := waveMarks(&rec); !slices.Equal(got, want) {
+		t.Fatalf("wave = %v, want %v", got, want)
+	}
+}
+
+func TestAWaveWithAMemberStillOutTimesOnlyItsFirst(t *testing.T) {
+	// Arrange
+	began := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	var rec restarttimingtest.Recorder
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return began.Add(time.Second) })
+	r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectWeb, "w1", "w2")
+
+	// Act
+	r.Connected("w1", restarttiming.ReconnectWeb)
+
+	// Assert
+	if got := waveMarks(&rec); !slices.Equal(got, []string{"web_first cold 1"}) {
+		t.Fatalf("wave = %v, want only its first", got)
+	}
+}
+
+func TestAWaveAMemberOfWhichALaterRestartExpectedNeverTimesItsLast(t *testing.T) {
+	// Arrange: w2 of the boot's wave is expected again by a reload.
+	boot := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	reload := boot.Add(time.Minute)
+	now := boot.Add(time.Second)
+	var rec restarttimingtest.Recorder
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return now })
+	r.Expect(restarttiming.ReconnectCold, boot, restarttiming.ReconnectWeb, "w1", "w2")
+	r.Expect(restarttiming.ReconnectWebappReload, reload, restarttiming.ReconnectWeb, "w2")
+
+	// Act
+	r.Connected("w1", restarttiming.ReconnectWeb)
+	now = reload.Add(3 * time.Second)
+	r.Connected("w2", restarttiming.ReconnectWeb)
+
+	// Assert: the boot's wave lost w2, so only its first is timed; the
+	// reload's wave of one is whole.
+	want := []string{"web_first cold 1", "web_first webapp_reload 3", "web_last webapp_reload 3", "web_spread webapp_reload 0"}
+	if got := waveMarks(&rec); !slices.Equal(got, want) {
+		t.Fatalf("wave = %v, want %v", got, want)
+	}
+}
+
+func TestAWorkspaceNamedTwiceInOneExpectationIsOneMemberOfItsWave(t *testing.T) {
+	// Arrange
+	began := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	var rec restarttimingtest.Recorder
+	r := restarttiming.NewReconnects(&rec, restarttiming.NoWindows{}, func() time.Time { return began.Add(4 * time.Second) })
+	r.Expect(restarttiming.ReconnectCold, began, restarttiming.ReconnectHost, "w1", "w1")
+
+	// Act
+	r.Connected("w1", restarttiming.ReconnectHost)
+
+	// Assert
+	want := []string{"host_first cold 4", "host_last cold 4", "host_spread cold 0"}
+	if got := waveMarks(&rec); !slices.Equal(got, want) {
+		t.Fatalf("wave = %v, want %v", got, want)
+	}
+}
+
+func TestAWaveMeasuresTheProcessesItsPhaseBringsBackUntilItsLastReturns(t *testing.T) {
+	tests := []struct {
+		name      string
+		phase     restarttiming.ReconnectPhase
+		wantWatch []restarttiming.Watched
+		wantBound time.Duration
+	}{
+		{name: "Emacs's hosts", phase: restarttiming.ReconnectHost, wantBound: 180 * time.Second,
+			wantWatch: []restarttiming.Watched{{Process: restarttiming.ProcessEmacs}}},
+		{name: "the webviews", phase: restarttiming.ReconnectWeb, wantBound: 600 * time.Second,
+			wantWatch: []restarttiming.Watched{{Process: restarttiming.ProcessWebKitWebContent}, {Process: restarttiming.ProcessWebKitNetworking}, {Process: restarttiming.ProcessWebKitGPU}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			began := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+			var windows restarttimingtest.Windows
+			r := restarttiming.NewReconnects(&restarttimingtest.Recorder{}, &windows, func() time.Time { return began })
+			r.Expect(restarttiming.ReconnectSuccessor, began, tt.phase, "w1", "w2")
+			r.Connected("w1", tt.phase)
+			stillOpen := !windows.Windows()[0].Closed
+
+			// Act
+			r.Connected("w2", tt.phase)
+
+			// Assert
+			got := windows.Windows()
+			if !stillOpen || len(got) != 1 || got[0].Restart != restarttiming.ReconnectWave || got[0].Phase != string(tt.phase) ||
+				!slices.Equal(got[0].Watch, tt.wantWatch) || got[0].Bound != tt.wantBound || !got[0].Closed {
+				t.Fatalf("windows = %+v (open after the first: %v), want one %s window over %v, closed at the last", got, stillOpen, tt.phase, tt.wantWatch)
+			}
+		})
+	}
+}
+
+func TestABrokenWaveClosesItsWindow(t *testing.T) {
+	// Arrange
+	boot := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)
+	var windows restarttimingtest.Windows
+	r := restarttiming.NewReconnects(&restarttimingtest.Recorder{}, &windows, func() time.Time { return boot })
+	r.Expect(restarttiming.ReconnectCold, boot, restarttiming.ReconnectWeb, "w1", "w2")
+
+	// Act
+	r.Expect(restarttiming.ReconnectWebappReload, boot.Add(time.Minute), restarttiming.ReconnectWeb, "w2")
+
+	// Assert
+	got := windows.Windows()
+	if len(got) != 2 || !got[0].Closed || got[1].Closed {
+		t.Fatalf("windows = %+v, want the boot's wave's closed and the reload's open", got)
+	}
+}
+
+func TestAnExpectationOfNoWorkspaceOpensNoWindow(t *testing.T) {
+	// Arrange
+	var windows restarttimingtest.Windows
+	r := restarttiming.NewReconnects(&restarttimingtest.Recorder{}, &windows, time.Now)
+
+	// Act
+	r.Expect(restarttiming.ReconnectCold, time.Now(), restarttiming.ReconnectHost)
+
+	// Assert
+	if got := windows.Windows(); len(got) != 0 {
+		t.Fatalf("windows = %+v, want none for a wave of nobody", got)
 	}
 }

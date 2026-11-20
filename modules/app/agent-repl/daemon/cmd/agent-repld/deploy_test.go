@@ -171,7 +171,8 @@ func deployerParamsFor(t *testing.T, selfExe string) deployerParams {
 		Workspace:  func() []ids.WorkspaceID { return nil },
 		Getenv:     envOf(map[string]string{"AGENT_REPL_LOCK_DIR": t.TempDir()}),
 		Restarts:   &restarttimingtest.Recorder{},
-		Reconnects: restarttiming.NewReconnects(&restarttimingtest.Recorder{}, time.Now),
+		Windows:    restarttiming.NoWindows{},
+		Reconnects: restarttiming.NewReconnects(&restarttimingtest.Recorder{}, restarttiming.NoWindows{}, time.Now),
 	}
 }
 
