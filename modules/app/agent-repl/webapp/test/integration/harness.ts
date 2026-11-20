@@ -40,9 +40,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { transferableAbortController } from "node:util";
 import { Agent } from "undici";
-import { beforeAll, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, vi } from "vitest";
 import { frameQueue } from "../frame-queue.js";
-import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+import type { FeedId, FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 
 import { composerClosedFor } from "../../src/vocab.js";
 import { isControl } from "../../src/control.js";
@@ -51,7 +51,7 @@ import { createDaemonTransport } from "../../src/rpc/transport";
 import { createAgentReplClient } from "../../src/rpc/client";
 import { createAppContext, type AppContext } from "../../src/rpc/context";
 import { workspaceRef } from "../../src/rpc/workspace-ref";
-import { createTicker } from "../../src/clock";
+import { DEFAULT_TICK_MS, createTicker } from "../../src/clock";
 import {
   ForwardingLogger,
   bindLogContext,
@@ -79,8 +79,8 @@ import { mountNewsDigest } from "../../src/news-digest/news-digest";
 import type { SubmitPromptCommandPanel } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 
 import { resetPageState } from "../page-state";
-import { createFakeDaemon, FAKE_DAEMON_WEBAPP_BUILD, type FakeDaemon } from "./fake-daemon";
-import { WORKSPACE_ID, WORKSPACE_DIR } from "./fixtures";
+import { createFakeDaemon, FAKE_DAEMON_WEBAPP_BUILD, type FakeDaemon, type FeedKey } from "./fake-daemon";
+import { WORKSPACE_ID, WORKSPACE_DIR, feedId, removedRow, turnId } from "./fixtures";
 import { quietMarkupOf } from "./quiet-markup";
 
 /** Where the page's clock starts: just after the fixtures' own timestamps. */
@@ -440,6 +440,7 @@ export async function startAppAgainst(
 }
 
 export async function startHarness(options: HarnessOptions = {}): Promise<Harness> {
+  await displaceShared?.();
   const fake = createFakeDaemon();
   const { baseUrl, socketPath } = await fake.start();
   const app = await mountApp({ baseUrl, socketPath }, options, fake);
@@ -501,6 +502,166 @@ export function bootColdOnce(): void {
     const cold = await startHarness({ composer: true });
     await cold.stop();
   }, COLD_BOOT_TIMEOUT_MS);
+}
+
+/**
+ * ONE MOUNTED APP PER FILE, EACH CASE ON ITS OWN SLICE OF IT.
+ *
+ * The app mounted and settled is this suite's canonical process
+ * (webapp/AGENTS.md, "Integration cases share one mounted app"): booting it
+ * is ~45ms of a case's ~55ms in the gate, so a file whose cases are about
+ * what the feed draws mounts it ONCE, in a `beforeAll` (which pays the cold
+ * boot `bootColdOnce` pays for a fresh-mount file), and every case takes its
+ * own slice through `beginCase`. The page stays bound to the one fixture
+ * workspace, as a page is in production.
+ *
+ * The file's page and clock are reset before each file
+ * (test/setup-shared-integration.ts), so the mount lives exactly as long as
+ * its file.
+ */
+export interface SharedMount {
+  /**
+   * The file's mounted app, with this case's slice begun on first ask. A
+   * fresh mount since the last case displaced it (one document holds one
+   * page), so it is mounted again here.
+   */
+  (): Promise<Harness>;
+  /** Whether H is this shared mount, which only the file's afterAll stops. */
+  owns(h: Harness): boolean;
+}
+
+export function sharedMount(options: HarnessOptions = {}): SharedMount {
+  let shared: Harness | undefined;
+  let slice: CaseSlice | undefined;
+  let phase: TickerPhase | undefined;
+  const boot = async (): Promise<Harness> => {
+    const app = await startHarness(options);
+    await app.fake.awaitStream("watchFeed");
+    phase = tickerPhase(app);
+    shared = app;
+    displaceShared = async () => {
+      displaceShared = undefined;
+      shared = undefined;
+      await app.stop();
+    };
+    return app;
+  };
+  beforeAll(async () => {
+    resetPageState();
+    await boot();
+  }, COLD_BOOT_TIMEOUT_MS);
+  afterEach(async () => {
+    await slice?.end();
+    slice = undefined;
+  });
+  afterAll(async () => {
+    await displaceShared?.();
+  });
+  const mount = async (): Promise<Harness> => {
+    const app = shared ?? (await boot());
+    if (slice === undefined && phase !== undefined) slice = await beginCase(app, phase);
+    return app;
+  };
+  return Object.assign(mount, { owns: (h: Harness) => h === shared });
+}
+
+/** The page ticker's beat, as a shared mount's cases start on it. */
+interface TickerPhase {
+  /** Move to the start of a beat, then put the clock back at the epoch. */
+  startCase(): Promise<void>;
+}
+
+/**
+ * THE TICKER'S BEAT, KEPT FOR A SHARED MOUNT.
+ *
+ * The page ticker is one interval, started by its first subscriber
+ * (src/clock.ts), and every count-up on the page redraws on its beat. A fresh
+ * mount's cases start at the beat's start, so a case reading a count-up after
+ * `tick(5_000)` reads the fifth beat. A long-lived page's beat is wherever its
+ * mount left it, so each case first runs fake time to the next beat, then puts
+ * the clock back at the epoch; the fake clock shifts every timer with it, so
+ * the next beat is again one interval away, as on a fresh mount.
+ */
+function tickerPhase(app: Harness): TickerPhase {
+  let lastBeat = Date.now();
+  app.ctx.ticker.subscribe((nowMs) => {
+    lastBeat = nowMs;
+  });
+  return {
+    async startCase() {
+      const intoBeat = (Date.now() - lastBeat) % DEFAULT_TICK_MS;
+      if (intoBeat > 0) await vi.advanceTimersByTimeAsync(DEFAULT_TICK_MS - intoBeat);
+      const shift = HARNESS_EPOCH_MS - Date.now();
+      vi.setSystemTime(HARNESS_EPOCH_MS);
+      lastBeat += shift;
+    },
+  };
+}
+
+/**
+ * Stops the file's shared mount, when one stands, before a fresh mount takes
+ * the document: one document holds one page.
+ */
+let displaceShared: (() => Promise<void>) | undefined;
+
+/** What one case of a shared mount owns, and how its end returns it. */
+interface CaseSlice {
+  end(): Promise<void>;
+}
+
+// caseSerial names each case of a shared mount, so its turns are its own.
+let caseSerial = 0;
+
+/**
+ * THE CASE'S SLICE: its own turns, the rows it pushed, and a page clock and
+ * page state that start where a fresh mount's would.
+ *
+ * - Every row the case pushes is drawn under the case's OWN turn (the
+ *   fixture's turn id, suffixed with the case's serial), so no state the feed
+ *   keeps per turn crosses from one case to the next.
+ * - The page clock is put back at the fixtures' epoch, at the same point of
+ *   the page ticker's beat a fresh mount starts at (`tickerPhase`), so a
+ *   case's relative times and count-ups read as they would on a fresh mount.
+ * - The daemon's recorded calls are the case's own: they are cleared as the
+ *   case begins, so `fake.calls`, `fake.nextCall` and `fake.log` answer only
+ *   what the case caused.
+ * - At its end, every row it pushed is removed through the daemon's own
+ *   removal (`FeedRow.removed`, as production retires a row), so the next case
+ *   starts on an empty feed and every settle serializes only its own rows; and
+ *   the page-local preferences and own-turn claims are cleared, as `stop()`
+ *   clears them for a fresh mount.
+ */
+async function beginCase(app: Harness, phase: TickerPhase): Promise<CaseSlice> {
+  caseSerial += 1;
+  const suffix = `@case${caseSerial}`;
+  const pushed = new Map<string, { workspace: string; feed: FeedKey; id: string; turn: string }>();
+  const pushRow = app.fake.pushRow.bind(app.fake);
+  app.fake.pushRow = (workspace: string, feed: FeedKey, row: FeedRow): void => {
+    const turn = row.turn?.value;
+    if (turn !== undefined && turn !== "" && !turn.endsWith(suffix)) row.turn = turnId(`${turn}${suffix}`);
+    const id = row.id?.value ?? "";
+    const key = `${workspace}\u0000${feed}\u0000${id}`;
+    if (row.row.case === "removed") pushed.delete(key);
+    else pushed.set(key, { workspace, feed, id, turn: row.turn?.value ?? "" });
+    pushRow(workspace, feed, row);
+  };
+  app.fake.clearCalls();
+  await phase.startCase();
+  return {
+    async end() {
+      for (const own of pushed.values()) {
+        pushRow(own.workspace, own.feed, removedRow({ id: feedId(own.id), turn: turnId(own.turn) }));
+      }
+      app.fake.pushRow = pushRow;
+      await app.settle();
+      forgetOwnTurns();
+      try {
+        window.localStorage.clear();
+      } catch {
+        // A jsdom without storage is fine: there is then nothing to clear.
+      }
+    },
+  };
 }
 
 // pageSerial names each mounted app's page. A page id addresses ONE stream on

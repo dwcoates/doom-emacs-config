@@ -21,13 +21,13 @@ import { readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { HARNESS_EPOCH_MS, bootColdOnce, startHarness, type Harness } from "./harness";
+import { HARNESS_EPOCH_MS, bootColdOnce, sharedMount, startHarness, type Harness } from "./harness";
 import { log } from "../../src/log";
 import { TITLE_REVEALED_ATTRIBUTE } from "../../src/feed/title-reveal.js";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "../../src/feed/conversation-drawn.js";
 import { realSetImmediate } from "../real-clock";
 import { ROOT_FEED } from "./fake-daemon";
-import { PERMISSION_POSED_AT_MS, WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit } from "./fixtures";
+import { PERMISSION_POSED_AT_MS, WORKSPACE_ID, activityRow, feedId, toolCallRunningUnit, userPromptRow } from "./fixtures";
 
 let harness: Harness | undefined;
 let restoreFetch: (() => void) | undefined;
@@ -276,5 +276,86 @@ describe("the boot's drawn mark", () => {
 describe("the fixtures' instants", () => {
   it("poses the permission fixture's ask at the harness clock's first instant", () => {
     expect(PERMISSION_POSED_AT_MS).toBe(BigInt(HARNESS_EPOCH_MS));
+  });
+});
+
+/**
+ * ONE MOUNTED APP SHARED BY A FILE'S CASES, each on its own slice
+ * (`sharedMount`). THE CASES BELOW ARE A WALK, because what one case's end
+ * leaves is the next case's subject: each states what the case before it did.
+ * An early failure hides only the case right after it.
+ */
+describe("a shared mount", () => {
+  const shared = sharedMount();
+  let first: Harness | undefined;
+
+  it("draws a case's rows under the case's own turn", async () => {
+    // Arrange
+    first = await shared();
+    const row = userPromptRow("mine", { id: feedId("shared-row") });
+
+    // Act
+    first.fake.pushRow(WORKSPACE_ID, ROOT_FEED, row);
+    await first.settle();
+
+    // Assert: drawn, and under a turn no other case names.
+    expect([first.row("shared-row") !== null, row.turn?.value]).toEqual([true, expect.stringMatching(/^turn-1@case\d+$/)]);
+  });
+
+  it("starts the next case on an empty feed: the last case's rows were removed", async () => {
+    // Arrange / Act: the case before drew shared-row.
+    const app = await shared();
+
+    // Assert
+    expect([app, app.row("shared-row")]).toEqual([first, null]);
+  });
+
+  it("answers only the calls the case caused", async () => {
+    // Arrange / Act: the mount's boot subscribed its views before this case.
+    const app = await shared();
+
+    // Assert
+    expect(app.fake.calls("subscribePage")).toEqual([]);
+  });
+
+  it("moves the clock on within the case", async () => {
+    // Arrange
+    const app = await shared();
+
+    // Act
+    await app.tick(7_500);
+
+    // Assert
+    expect(Date.now()).toBeGreaterThanOrEqual(HARNESS_EPOCH_MS + 7_500);
+  });
+
+  it("starts the next case's clock back at the fixtures' epoch", async () => {
+    // Arrange / Act: the case before moved the clock 7.5s on.
+    await shared();
+
+    // Assert: within the one beat the case may begin into.
+    expect(Date.now() - HARNESS_EPOCH_MS).toBeGreaterThanOrEqual(0);
+    expect(Date.now() - HARNESS_EPOCH_MS).toBeLessThan(1_000);
+  });
+
+  it("gives way to a fresh mount, which takes the document", async () => {
+    // Arrange
+    await shared();
+
+    // Act
+    harness = await startHarness();
+
+    // Assert: the fresh page is the one drawn.
+    expect(harness).not.toBe(first);
+  });
+
+  it("mounts again for the next case after a fresh mount displaced it", async () => {
+    // Arrange / Act: the case before mounted fresh, and its afterEach stopped it.
+    const app = await shared();
+    app.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("again", { id: feedId("again-row") }));
+    await app.settle();
+
+    // Assert: a new shared mount, drawing.
+    expect([app === first, app.row("again-row") !== null]).toEqual([false, true]);
   });
 });
