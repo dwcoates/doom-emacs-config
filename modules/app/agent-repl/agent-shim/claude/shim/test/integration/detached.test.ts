@@ -21,10 +21,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { afterAll, afterEach, describe, expect, test } from "vitest";
+import { afterAll, afterEach, describe, expect, onTestFinished, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
-import { canonicalSession, endsTurn, groupSession, releaseShared, since, uniqueTurn } from "../integration-support/canonical.js";
+import { canonicalSession, endsTurn, groupSession, releaseShared, since, uniqueTurn, type CanonicalSession, type Since } from "../integration-support/canonical.js";
+import type { LogRecord } from "../integration-support/log.js";
 import { detachGate } from "../integration-support/detach-gate.js";
 import {
   activityId,
@@ -2163,109 +2164,142 @@ describe("a fan-wide cancel", () => {
  * cannot type it. The store's record can, by the spawning call's unit.
  */
 describe("a task notification this process cannot type", () => {
-  const TASK = "bujbjom65";
-  const UNIT = "toolu_018xxcFy2bK97h1Xrh1KqbE2";
   const REFUSED = "a task names no kind this shim knows; its announcement is malformed and is refused";
   const REREPORT = "a re-report of a concluded task; nothing to restate";
 
-  /** A started shim whose store holds the shell run `UNIT` as the sidecar wrote it, ended or live. */
-  async function shimHolding(exitCode: number | null): Promise<Awaited<ReturnType<typeof spawnShim>>> {
-    // ITS OWN SHIM, for now: every case of this describe seeds the one fixed
-    // run UNIT and reads the shim's whole log and read ledger for it.
-    const shim = await spawnShim();
-    const started = sessionStarted(await shim.clients.h1.startSession(freshSession()));
+  /** A task and its shell run's unit, new to the shared session: this case's slice. */
+  interface Task {
+    readonly task: string;
+    readonly unit: string;
+  }
+
+  let tasks = 0;
+
+  /** A task id and unit no other case of the file names. */
+  function newTask(): Task {
+    tasks += 1;
+    return { task: `bujbjom${String(tasks)}`, unit: `toolu_018xxcFy2bK97h1Xrh1Kq${String(tasks)}` };
+  }
+
+  /**
+   * The "task-notification" group's session. A re-reported live shell stays in
+   * the vendor's live set with no handle a case can stop it by, which a fan-wide
+   * cancel on the canonical session would find, so these cases share their own.
+   */
+  function notificationSession(): Promise<CanonicalSession> {
+    return groupSession("task-notification");
+  }
+
+  /** Seed the group session's store with TASK's shell run as the sidecar wrote it, ended or live. */
+  async function holding(exitCode: number | null, { unit }: Task): Promise<CanonicalSession> {
+    const session = await notificationSession();
+    const { shim, started } = session;
     await seedBashLifecycle(createStoreClient(shim.dirs.storeSocket), sidecarProducer(started.vendorSessionId), {
-      run: UNIT,
-      work: UNIT,
+      run: unit,
+      work: unit,
       command: "sleep 600",
       startedAtMs: 1_700_000_000_000,
       chunks: [],
       exitCode,
       topLevel: started.vendorSessionId,
     });
-    return shim;
+    return session;
   }
 
-  /** Re-report the shell, as the replacement query does. */
-  async function rereport(shim: Awaited<ReturnType<typeof spawnShim>>): Promise<void> {
-    await shim.clients.h1.startTurn(startTurnRequest({ turn: "t1", text: `!bash-rereported ${TASK} ${UNIT}` }));
+  /** Re-report TASK's shell, as the replacement query does, in a turn of the case's own. */
+  async function rereport(shim: Awaited<ReturnType<typeof spawnShim>>, { task, unit }: Task): Promise<void> {
+    const turn = uniqueTurn();
+    endsTurn(shim, turn);
+    await shim.clients.h1.startTurn(startTurnRequest({ turn, text: `!bash-rereported ${task} ${unit}` }));
+  }
+
+  /** What the one re-report of an ended run left, for its observers. */
+  interface Rereported extends Task {
+    readonly mine: Since;
+    readonly recorded: LogRecord;
+  }
+
+  let rereportedEnded: Promise<Rereported> | null = null;
+
+  /**
+   * ONE RE-REPORT, SEVERAL OBSERVERS: the first four cases each re-report a
+   * run the store holds as ended and read a different view of it, so the act
+   * runs once, on the group's session, under a task of its own.
+   */
+  function rereportOfEnded(): Promise<Rereported> {
+    rereportedEnded ??= (async () => {
+      const task = newTask();
+      const { shim } = await holding(0, task);
+      const mine = since(shim);
+      await rereport(shim, task);
+      const recorded = await mine.record((record) => record.message === REREPORT && record.context.task_id === task.task);
+      return { ...task, mine, recorded };
+    })();
+    return rereportedEnded;
   }
 
   test("a re-report of a run the store holds as ended is recorded at INFO", async () => {
-    // Arrange.
-    const shim = await shimHolding(0);
-
-    // Act.
-    await rereport(shim);
-    const recorded = await shim.log.record((record) => record.message === REREPORT);
+    // Arrange, Act: the one re-report.
+    const { recorded, task } = await rereportOfEnded();
 
     // Assert.
-    expect([recorded.level, recorded.context.task_id]).toEqual(["info", TASK]);
+    expect([recorded.level, recorded.context.task_id]).toEqual(["info", task]);
   });
 
   test("a re-report of a run the store holds as ended is not refused", async () => {
-    // Arrange.
-    const shim = await shimHolding(0);
+    // Arrange, Act: the one re-report.
+    const { mine } = await rereportOfEnded();
 
-    // Act.
-    await rereport(shim);
-    await shim.log.record((record) => record.message === REREPORT);
-
-    // Assert.
-    expect(shim.log.records().filter((record) => record.level === "error").map((record) => record.message)).toEqual([]);
+    // Assert: nothing at ERROR since the re-report began.
+    expect(mine.records().filter((record) => record.level === "error").map((record) => record.message)).toEqual([]);
   });
 
   test("a re-report of a run the store holds as ended writes nothing for the run", async () => {
-    // Arrange.
-    const shim = await shimHolding(0);
-
-    // Act.
-    await rereport(shim);
-    await shim.log.record((record) => record.message === REREPORT);
+    // Arrange, Act: the one re-report.
+    const { mine, unit } = await rereportOfEnded();
 
     // Assert.
-    const shimWrites = (shim.store?.writes() ?? []).filter((request) => request.producer.startsWith("claude-shim"));
+    const shimWrites = mine.writes().filter((request) => request.producer.startsWith("claude-shim"));
     const keys = shimWrites.flatMap((request) => request.batch?.entries.map((entry) => entry.upsertKey) ?? []);
-    expect(keys.filter((key) => key.includes(UNIT))).toEqual([]);
+    expect(keys.filter((key) => key.includes(unit))).toEqual([]);
   });
 
   test("the shim asks the store by the run's unit", async () => {
-    // Arrange.
-    const shim = await shimHolding(0);
-
-    // Act.
-    await rereport(shim);
-    await shim.log.record((record) => record.message === REREPORT);
+    // Arrange, Act: the one re-report.
+    const { mine, unit } = await rereportOfEnded();
 
     // Assert.
-    const asked = (shim.store?.reads() ?? [])
+    const asked = mine
+      .reads()
       .filter((read) => read.rpc === "GetDetachedWork")
       .map((read) => (read.request as storev1.GetDetachedWorkRequest).unit?.value);
-    expect(asked).toEqual([UNIT]);
+    expect(asked).toEqual([unit]);
   });
 
   test("a notification of a run the store holds as a live shell is announced as a shell", async () => {
     // Arrange.
-    const shim = await shimHolding(null);
+    const task = newTask();
+    const { shim } = await holding(null, task);
     const stream = await openAgentStream(shim);
 
     // Act.
-    await rereport(shim);
+    await rereport(shim, task);
     const announced = await awaitAnnouncement(stream, true);
     stream.close();
 
     // Assert.
-    expect([announced.work?.value, announced.kind?.kind.case]).toEqual([UNIT, "bash"]);
+    expect([announced.work?.value, announced.kind?.kind.case]).toEqual([task.unit, "bash"]);
   });
 
   test("a notification of a task neither this process nor the store knows is refused at ERROR", async () => {
     // Arrange.
-    const shim = await spawnShim();
-    sessionStarted(await shim.clients.h1.startSession(freshSession()));
+    const task = newTask();
+    const { shim } = await notificationSession();
+    const mine = since(shim);
 
     // Act.
-    await rereport(shim);
-    const refused = await shim.log.record((record) => record.message === REFUSED);
+    await rereport(shim, task);
+    const refused = await mine.record((record) => record.message === REFUSED);
 
     // Assert.
     expect([refused.level, refused.context.store_answer]).toEqual([
@@ -2275,13 +2309,17 @@ describe("a task notification this process cannot type", () => {
   });
 
   test("a store that cannot answer is recorded at ERROR", async () => {
-    // Arrange.
-    const shim = await shimHolding(0);
+    // Arrange: the refusal stands against the verb for the whole shared store,
+    // so the case lifts it when it finishes.
+    const task = newTask();
+    const { shim } = await holding(0, task);
+    const mine = since(shim);
     shim.store?.failReads("GetDetachedWork", "storage_failure", "sqlite: disk I/O error");
+    onTestFinished(() => shim.store?.failReads("GetDetachedWork", null));
 
     // Act.
-    await rereport(shim);
-    const failed = await shim.log.record(
+    await rereport(shim, task);
+    const failed = await mine.record(
       (record) => record.message === "the store could not state the kind of a task this process cannot type itself",
     );
 
