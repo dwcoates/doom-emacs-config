@@ -82,6 +82,31 @@ type wave struct {
 	pending int
 	first   time.Time
 	broken  bool
+	// closeWindow ends the wave's resource window (Windows), once every
+	// member came back or the wave broke.
+	closeWindow func()
+}
+
+// The resource windows a reconnect wave opens are bounded at about three
+// times the p99 of a workspace's reconnect over the 7 days to 2026-11-20:
+// 60s for an Emacs host stream, 233s for a webview stream.
+const (
+	hostWaveWindowBound = 180 * time.Second
+	webWaveWindowBound  = 600 * time.Second
+)
+
+// waveWatches are the processes a wave of each phase brings back: Emacs
+// registers its hosts again, and the webviews' WebKit processes load the
+// webapp again.
+var waveWatches = map[ReconnectPhase][]Watched{
+	ReconnectHost: {{Process: ProcessEmacs}},
+	ReconnectWeb:  {{Process: ProcessWebKitWebContent}, {Process: ProcessWebKitNetworking}, {Process: ProcessWebKitGPU}},
+}
+
+// waveWindowBounds are each phase's resource window bound.
+var waveWindowBounds = map[ReconnectPhase]time.Duration{
+	ReconnectHost: hostWaveWindowBound,
+	ReconnectWeb:  webWaveWindowBound,
 }
 
 type reconnectKey struct {
@@ -105,15 +130,17 @@ type expectation struct {
 // the largest agentrepl_workspace_restart_last_seconds of the restart.
 type Reconnects struct {
 	recorder Recorder
+	windows  Windows
 	now      func() time.Time
 
 	mu       sync.Mutex
 	expected map[reconnectKey]expectation
 }
 
-// NewReconnects answers a tracker recording through recorder on the clock now.
-func NewReconnects(recorder Recorder, now func() time.Time) *Reconnects {
-	return &Reconnects{recorder: recorder, now: now, expected: map[reconnectKey]expectation{}}
+// NewReconnects answers a tracker recording through recorder on the clock
+// now, measuring each wave's processes through windows.
+func NewReconnects(recorder Recorder, windows Windows, now func() time.Time) *Reconnects {
+	return &Reconnects{recorder: recorder, windows: windows, now: now, expected: map[reconnectKey]expectation{}}
 }
 
 // Expect states that each of workspaces' phase connection is to come back
@@ -133,9 +160,13 @@ func (r *Reconnects) Expect(cause ReconnectCause, began time.Time, phase Reconne
 		if ok {
 			earlier.wave.broken = true
 			earlier.wave.pending--
+			earlier.wave.closeWindow()
 		}
 		w.pending++
 		r.expected[key] = expectation{began: began, cause: cause, wave: w}
+	}
+	if w.pending > 0 {
+		w.closeWindow = r.windows.OpenWindow(ReconnectWave, string(phase), waveWindowBounds[phase], waveWatches[phase]...)
 	}
 }
 
@@ -170,6 +201,9 @@ func (r *Reconnects) waveConnected(w *wave, now time.Time) {
 	}
 	last := w.pending == 0 && !w.broken
 	r.mu.Unlock()
+	if last {
+		w.closeWindow()
+	}
 	if first {
 		r.recorder.ObserveRestart(OfReconnectWave(w.phase, WaveFirst, w.cause, max(now.Sub(w.began), 0)))
 	}

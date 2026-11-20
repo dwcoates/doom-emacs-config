@@ -141,6 +141,7 @@ func (l *fakeServiceManager) Definition(label string) string {
 // restarterHarness is one Restarter over a temp socket dir and plist dir.
 type restarterHarness struct {
 	restarts *restarttimingtest.Recorder
+	windows  restarttimingtest.Windows
 	r        *Restarter
 	services *fakeServiceManager
 	log      *dlog.TestLogger
@@ -264,19 +265,20 @@ func newRestarter(t *testing.T) *restarterHarness {
 		}
 	}
 	h.r = &Restarter{
-		CacheBin:     t.TempDir(),
-		ReportDir:    t.TempDir(),
-		Alive:        func(pid int) bool { return h.alive[pid] },
-		Services:     h.services,
-		StoreSocket:  h.sock,
-		StoreLog:     filepath.Join(t.TempDir(), "shim-store.err.log"),
-		Windows:      DefaultServiceWindows,
-		Clock:        h.clock,
-		Log:          log,
-		Restarts:     h.restarts,
-		ProcessExit:  h.processExit,
-		Define:       h.define,
-		EnsureHolder: h.ensureHolder,
+		CacheBin:        t.TempDir(),
+		ReportDir:       t.TempDir(),
+		Alive:           func(pid int) bool { return h.alive[pid] },
+		Services:        h.services,
+		StoreSocket:     h.sock,
+		StoreLog:        filepath.Join(t.TempDir(), "shim-store.err.log"),
+		Windows:         DefaultServiceWindows,
+		Clock:           h.clock,
+		Log:             log,
+		Restarts:        h.restarts,
+		ResourceWindows: &h.windows,
+		ProcessExit:     h.processExit,
+		Define:          h.define,
+		EnsureHolder:    h.ensureHolder,
 		HolderServing: func(context.Context, string) (bool, error) {
 			return !h.holderDown, h.probeErr
 		},
@@ -717,6 +719,49 @@ func TestEachServiceRestartIsTimedWithItsOutcome(t *testing.T) {
 			got := h.restarts.Of(restarttiming.ServiceRestart)
 			if len(got) != 1 || got[0].Phase() != tc.wantService || got[0].Outcome() != tc.wantOutcome {
 				t.Fatalf("service restarts = %+v, want one %s restart, %s", got, tc.wantService, tc.wantOutcome)
+			}
+		})
+	}
+}
+
+func TestEachServiceRestartMeasuresTheServicesItBringsBack(t *testing.T) {
+	cases := []struct {
+		name      string
+		arrange   func(t *testing.T, h *restarterHarness)
+		restart   func(h *restarterHarness) error
+		wantPhase string
+		wantWatch []restarttiming.Watched
+		wantBound time.Duration
+	}{
+		{
+			name:      "a store restart, which takes the sidecar with it",
+			arrange:   func(t *testing.T, h *restarterHarness) { h.services.onRestart = func() { h.bindSocket(t) } },
+			restart:   func(h *restarterHarness) error { return h.r.RestartStore(context.Background()) },
+			wantPhase: "store", wantBound: 30 * time.Second,
+			wantWatch: []restarttiming.Watched{{Process: restarttiming.ProcessStore}, {Process: restarttiming.ProcessSidecar}},
+		},
+		{
+			name:      "a sidecar restart that fails",
+			arrange:   func(_ *testing.T, h *restarterHarness) { h.services.restartErr = errors.New("kickstart refused") },
+			restart:   func(h *restarterHarness) error { return h.r.RestartSidecar(context.Background()) },
+			wantPhase: "sidecar", wantBound: 20 * time.Second,
+			wantWatch: []restarttiming.Watched{{Process: restarttiming.ProcessSidecar}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newRestarter(t)
+			tc.arrange(t, h)
+
+			// Act
+			_ = tc.restart(h)
+
+			// Assert
+			got := h.windows.Windows()
+			if len(got) != 1 || got[0].Restart != restarttiming.ServiceRestart || got[0].Phase != tc.wantPhase ||
+				!slices.Equal(got[0].Watch, tc.wantWatch) || got[0].Bound != tc.wantBound || !got[0].Closed {
+				t.Fatalf("windows = %+v, want one closed %s window over %v", got, tc.wantPhase, tc.wantWatch)
 			}
 		})
 	}

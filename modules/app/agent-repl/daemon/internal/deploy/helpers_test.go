@@ -740,7 +740,7 @@ func newHarness(t *testing.T, opts ...func(*Live)) *harness {
 		RunningLayout: runningLayout,
 		Deployed:      func() { h.deployed++ },
 		Restarts:      h.restarts,
-		Reconnects:    restarttiming.NewReconnects(h.restarts, time.Now),
+		Reconnects:    restarttiming.NewReconnects(h.restarts, restarttiming.NoWindows{}, time.Now),
 	})
 	if err != nil {
 		t.Fatalf("New: %v", err)

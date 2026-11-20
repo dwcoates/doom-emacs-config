@@ -380,7 +380,8 @@ func (b BootTimer) Reached(phase BootPhase) {
 }
 
 // The process groups agent-repl's processes are measured in, the `process`
-// label of every process series (procmetrics).
+// label of every process series (procmetrics) and what a resource window
+// watches.
 const (
 	ProcessDaemon      = "daemon"
 	ProcessDaemonTools = "daemon_tools"
@@ -394,3 +395,29 @@ const (
 	ProcessWebKitNetworking = "webkit_networking"
 	ProcessWebKitGPU        = "webkit_gpu"
 )
+
+// Watched is one process group a resource window watches: its `process`
+// (procmetrics' group names: daemon, store, sidecar, shim, emacs,
+// webkit_webcontent, ...) and, for a per-workspace group, its workspace.
+// An empty workspace watches the group in every workspace.
+type Watched struct {
+	Process   string
+	Workspace ids.WorkspaceID
+}
+
+// Windows measures what the watched processes use while a restart's phase
+// runs: their CPU and resident memory, sampled faster while any window is
+// open, and recorded once per window when it closes (procmetrics.Windows).
+// OpenWindow never blocks on a read; the close it answers does not either.
+// A window still open at its bound (two to three times the phase's measured
+// p99, stated at each caller) is closed unrecorded.
+type Windows interface {
+	OpenWindow(r Restart, phase string, bound time.Duration, watch ...Watched) (close func())
+}
+
+// NoWindows is the Windows that measures nothing: a daemon with no process
+// collector, and tests that do not measure resources.
+type NoWindows struct{}
+
+// OpenWindow implements Windows.
+func (NoWindows) OpenWindow(Restart, string, time.Duration, ...Watched) func() { return func() {} }

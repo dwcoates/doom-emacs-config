@@ -39,3 +39,19 @@ func TestOfAnswersOneRestartsObservations(t *testing.T) {
 		t.Fatalf("Of(daemon_boot) = %+v, want only the boot", got)
 	}
 }
+
+func TestWindowsKeepsEveryWindowAndMarksItClosed(t *testing.T) {
+	// Arrange
+	var w Windows
+	closeFirst := w.OpenWindow(restarttiming.DaemonBoot, "sessions_up", time.Minute, restarttiming.Watched{Process: restarttiming.ProcessDaemon})
+	w.OpenWindow(restarttiming.ServiceRestart, "store", time.Second)
+
+	// Act
+	closeFirst()
+
+	// Assert
+	got := w.Windows()
+	if len(got) != 2 || !got[0].Closed || got[1].Closed || got[0].Watch[0].Process != restarttiming.ProcessDaemon || got[1].Phase != "store" {
+		t.Fatalf("windows = %+v, want both in order, the first closed", got)
+	}
+}

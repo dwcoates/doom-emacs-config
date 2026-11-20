@@ -91,6 +91,8 @@ type deployerParams struct {
 	Deployed func()
 	// Restarts records how long each deploy phase and service restart took.
 	Restarts restarttiming.Recorder
+	// Windows measures the services a restart brings back while it runs.
+	Windows restarttiming.Windows
 	// Reconnects times each reloaded webview's return.
 	Reconnects *restarttiming.Reconnects
 }
@@ -203,19 +205,20 @@ func buildDeployer(ctx context.Context, p deployerParams) (*deploy.Deployer, *de
 	storeHolder, _ := holderensure.HolderOfSocket(holders, p.Store)
 	ensurer := &holderensure.Ensurer{Holders: holders, Probe: sockethold.Probe, Install: requirements.EnsureHolder, Log: log}
 	restarter := &deploy.Restarter{
-		Services:      services,
-		StoreSocket:   p.Store,
-		StoreLog:      where.storeLog,
-		Windows:       deploy.DefaultServiceWindows,
-		Clock:         rollout.SystemClock{},
-		Log:           log,
-		CacheBin:      where.cacheBin,
-		ReportDir:     where.reportDir,
-		Restarts:      p.Restarts,
-		Define:        requirements.Define,
-		EnsureHolder:  ensurer.EnsureID,
-		HolderServing: ensurer.ServingID,
-		StoreHolder:   storeHolder,
+		Services:        services,
+		StoreSocket:     p.Store,
+		StoreLog:        where.storeLog,
+		Windows:         deploy.DefaultServiceWindows,
+		Clock:           rollout.SystemClock{},
+		Log:             log,
+		CacheBin:        where.cacheBin,
+		ReportDir:       where.reportDir,
+		Restarts:        p.Restarts,
+		ResourceWindows: p.Windows,
+		Define:          requirements.Define,
+		EnsureHolder:    ensurer.EnsureID,
+		HolderServing:   ensurer.ServingID,
+		StoreHolder:     storeHolder,
 	}
 	deployer, err := deploy.New(deploy.Deps{
 		Restarts:   p.Restarts,

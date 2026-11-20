@@ -3235,7 +3235,7 @@ func (v *fakeVerbs) FoldChildren(_ context.Context, ws ids.WorkspaceID, folded b
 // use over ReconnectRecords and the wall clock.
 func (h *harness) reconnects() *restarttiming.Reconnects {
 	if h.Reconnects == nil {
-		h.Reconnects = restarttiming.NewReconnects(h.ReconnectRecords, time.Now)
+		h.Reconnects = restarttiming.NewReconnects(h.ReconnectRecords, restarttiming.NoWindows{}, time.Now)
 	}
 	return h.Reconnects
 }

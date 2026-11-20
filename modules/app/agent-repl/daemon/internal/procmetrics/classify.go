@@ -9,7 +9,8 @@ import (
 	"agent-repld/internal/restarttiming"
 )
 
-// The process label's values, spelled once in restarttiming.
+// The process label's values, spelled once in restarttiming, whose resource
+// windows name the groups they watch by them.
 const (
 	ProcessDaemon      = restarttiming.ProcessDaemon
 	ProcessDaemonTools = restarttiming.ProcessDaemonTools

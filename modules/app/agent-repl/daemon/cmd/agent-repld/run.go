@@ -110,6 +110,10 @@ type hooks struct {
 	// Restarts records the boot's phases; nil records them on the daemon's
 	// own metrics surface, which is what production does.
 	Restarts restarttiming.Recorder
+	// Windows measures the processes the boot's restarts watch while they
+	// run; nil measures them on the daemon's own metrics surface, which is
+	// what production does.
+	Windows restarttiming.Windows
 	// Holders answers the socket holders the checkout's requirements declare
 	// and the installer that brings one up (holderensure). REQUIRED.
 	// Production reads the checkout this binary was deployed from; a test
@@ -264,12 +268,21 @@ func run(ctx context.Context, opts options, h hooks) error {
 	if joining {
 		timedAs = restarttiming.BootSuccessor
 	}
-	bootTimer := restarttiming.NewBootTimer(bootRestarts, timedAs, h.Started, h.Now)
-	reconnects := restarttiming.NewReconnects(bootRestarts, h.Now)
 	if err := metricsSurface.RegisterProcesses(procmetrics.Kernel{}, layout.SockDir(), layout.Dir(), hostOnBattery); err != nil {
 		log.Error(runtimemetrics.Operation, "the process collector was refused", dlog.Context{"error": err.Error()})
 		return fmt.Errorf("agent-repld: %w", err)
 	}
+	var bootWindows restarttiming.Windows = metricsSurface
+	if h.Windows != nil {
+		bootWindows = h.Windows
+	}
+	bootTimer := restarttiming.NewBootTimer(bootRestarts, timedAs, h.Started, h.Now)
+	reconnects := restarttiming.NewReconnects(bootRestarts, bootWindows, h.Now)
+	// THE BOOT'S OWN RESOURCE WINDOW runs until its sessions are up, so the
+	// daemon's CPU and memory while it boots are measured apart from its
+	// steady state; a boot that ends sooner closes it on the way out.
+	closeBootWindow := bootWindows.OpenWindow(restarttiming.DaemonBoot, string(restarttiming.BootSessionsUp), bootWindowBound, restarttiming.Watched{Process: restarttiming.ProcessDaemon})
+	defer closeBootWindow()
 
 	// RUNTIME PROFILING is armed beside the surface: a session the collector
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
@@ -736,6 +749,7 @@ func run(ctx context.Context, opts options, h hooks) error {
 	loops.Go("bring_up", func() {
 		sequence.BringUp(serving, report.PendingBringUp)
 		bootTimer.Reached(restarttiming.BootSessionsUp)
+		closeBootWindow()
 		// A FRESH BOOT'S LANDING REPORTS ARE PAID ONCE ITS SESSIONS ARE UP:
 		// what this daemon runs carries every landing before it started.
 		if built.SettleBoot != nil {
@@ -841,6 +855,11 @@ func run(ctx context.Context, opts options, h hooks) error {
 // sqlite work measured in milliseconds. 90s is that with room over it, and it
 // is never paid on a healthy boot.
 const bootStallBound = 90 * time.Second
+
+// bootWindowBound bounds the boot's resource window: about three times the
+// p99 of a boot reaching sessions_up from its process start over the 7 days
+// to 2026-11-20 (107s).
+const bootWindowBound = 300 * time.Second
 
 // reconcile runs the boot reconciliation under a watchdog, so a step that never
 // returns ends the PROCESS instead of leaving it listening on a socket nothing

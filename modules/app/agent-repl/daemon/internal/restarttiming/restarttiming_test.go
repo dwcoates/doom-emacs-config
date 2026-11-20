@@ -99,3 +99,12 @@ func TestABootTimerTimesEachPhaseFromTheProcessStart(t *testing.T) {
 		t.Fatalf("observations = %+v, want claim at 2s and serving at 5s, both successor", got)
 	}
 }
+
+func TestNoWindowsMeasuresNothingAndClosesQuietly(t *testing.T) {
+	// Act
+	closeWindow := restarttiming.NoWindows{}.OpenWindow(restarttiming.DaemonBoot, "sessions_up", time.Minute)
+
+	// Assert: closing it twice is no fault.
+	closeWindow()
+	closeWindow()
+}

@@ -1045,6 +1045,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		ChatSystemPrompt: workspace.ChatSystemPrompt(paths.PromptsDir),
 		Log:              p.Surfaces,
 		Restarts:         p.Metrics,
+		Windows:          p.Metrics,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the session fleet: %w", err)
@@ -1386,6 +1387,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		Getenv:     os.Getenv,
 		Deployed:   deployedVersion.Kick,
 		Restarts:   p.Metrics,
+		Windows:    p.Metrics,
 		Reconnects: p.Reconnects,
 	})
 	if err != nil {
