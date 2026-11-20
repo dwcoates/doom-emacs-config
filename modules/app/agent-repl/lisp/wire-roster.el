@@ -1087,22 +1087,23 @@ repository's children of an open row, ROWS each an open row in drawn order."
                   "RosterOpenRowRepositoryBlock" 'rows object
                   #'agent-repl-wire-decode-roster-open-row)))))
 
-(defun agent-repl-wire--decode-roster-open-row-recency-presses (message-name value)
-  "Decode VALUE as MESSAGE-NAME, a recency gutter arm: `(:presses N)'.
-N is how many presses of the arm's chord land on the row's tab, from 1."
-  (let ((object (agent-repl-wire--object message-name value)))
-    (agent-repl-wire--check-keys message-name object '(presses))
-    (agent-repl-wire--decoded
-     message-name
-     (list :presses (agent-repl-wire--decode-uint32 message-name 'presses object)))))
-
 (defun agent-repl-wire-decode-roster-open-row-recency-gutter-older (value)
-  "Decode VALUE as `RosterOpenRowRecencyGutterOlder': `s-[' reaches the row."
-  (agent-repl-wire--decode-roster-open-row-recency-presses "RosterOpenRowRecencyGutterOlder" value))
+  "Decode VALUE as `RosterOpenRowRecencyGutterOlder', a plist `(:presses N)'.
+`s-[' lands on the row's tab in N presses, from 1."
+  (let ((object (agent-repl-wire--object "RosterOpenRowRecencyGutterOlder" value)))
+    (agent-repl-wire--check-keys "RosterOpenRowRecencyGutterOlder" object '(presses))
+    (agent-repl-wire--decoded
+     "RosterOpenRowRecencyGutterOlder"
+     (list :presses (agent-repl-wire--decode-uint32 "RosterOpenRowRecencyGutterOlder" 'presses object)))))
 
 (defun agent-repl-wire-decode-roster-open-row-recency-gutter-newer (value)
-  "Decode VALUE as `RosterOpenRowRecencyGutterNewer': `s-]' reaches the row."
-  (agent-repl-wire--decode-roster-open-row-recency-presses "RosterOpenRowRecencyGutterNewer" value))
+  "Decode VALUE as `RosterOpenRowRecencyGutterNewer', a plist `(:presses N)'.
+`s-]' lands on the row's tab in N presses, from 1."
+  (let ((object (agent-repl-wire--object "RosterOpenRowRecencyGutterNewer" value)))
+    (agent-repl-wire--check-keys "RosterOpenRowRecencyGutterNewer" object '(presses))
+    (agent-repl-wire--decoded
+     "RosterOpenRowRecencyGutterNewer"
+     (list :presses (agent-repl-wire--decode-uint32 "RosterOpenRowRecencyGutterNewer" 'presses object)))))
 
 (defun agent-repl-wire-decode-roster-open-row-recency-gutter (value)
   "Decode VALUE as `RosterOpenRowRecencyGutter', a plist `(:reach ONEOF)'.

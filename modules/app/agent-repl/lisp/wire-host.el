@@ -2063,8 +2063,7 @@ one is a contract breach, never a reload to attempt."
   "Encode VALUE as `RecencyReach': `(:workspace REF :direction D)'.
 D is `(:arm :older|:newer :value (:presses N))', the chord that reaches
 the workspace's tab in fewer presses and how many."
-  (unless (plist-member value :workspace)
-    (agent-repl-wire--fail "RecencyReach" 'workspace "required message field is absent"))
+  (agent-repl-wire--require-fields "RecencyReach" value '(:workspace))
   (agent-repl-wire--encoded
    "RecencyReach"
    (cons (cons 'workspace (agent-repl-wire-encode-workspace-ref (plist-get value :workspace)))
