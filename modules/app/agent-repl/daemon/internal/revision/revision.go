@@ -201,7 +201,7 @@ func (r *Reviser) Revise(ws ids.WorkspaceID, ask Ask) error {
 		"workspace": string(ws), "row": ask.Row.GetValue(), "words": len(ask.Words), "queued_ahead": ahead,
 	})
 	if !draining {
-		inflight.Go(func() { r.drain(ws) })
+		inflight.ForWorkspace(string(ws)).Go(func() { r.drain(ws) })
 	}
 	return nil
 }

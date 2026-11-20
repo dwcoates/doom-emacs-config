@@ -1263,7 +1263,7 @@ func TestSetPermissionModeWithAServedModeSendsSetSessionPermissionModeAndUpdates
 	// there is always an alternate to switch to -- the earlier t.Skip here
 	// was dead code that could never fire. `default` LEFT the set by the
 	// owner's 2026-09-14 ruling and `auto` leads it.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	first := awaitTopbar(t, f, topbar, "the initial permission-mode picker", func(v *frontendv1.TopbarView) bool {
 		return len(v.GetPermissionModePicker().GetOptions()) > 0

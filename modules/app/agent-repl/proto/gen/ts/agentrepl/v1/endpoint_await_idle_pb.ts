@@ -13,13 +13,15 @@
 
 import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { WorkspaceRef } from "../../workspace/v1/workspace_pb";
+import { file_workspace_v1_workspace } from "../../workspace/v1/workspace_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file agentrepl/v1/endpoint_await_idle.proto.
  */
 export const file_agentrepl_v1_endpoint_await_idle: GenFile = /*@__PURE__*/
-  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXdhaXRfaWRsZS5wcm90bxIMYWdlbnRyZXBsLnYxIiQKEEF3YWl0SWRsZVJlcXVlc3QSEAoIYm91bmRfbXMYASABKA0ifwoRQXdhaXRJZGxlUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5Bd2FpdElkbGVTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQXdhaXRJZGxlRXJyb3JIAEIICgZyZXN1bHQiRgoQQXdhaXRJZGxlU3VjY2VzcxIyCgdzdHJlYW1zGAEgAygLMiEuYWdlbnRyZXBsLnYxLlN0cmVhbUZyYW1lc1dyaXR0ZW4iOQoTU3RyZWFtRnJhbWVzV3JpdHRlbhISCgpzdHJlYW1fdGFnGAEgASgJEg4KBmZyYW1lcxgCIAEoBCKLAQoOQXdhaXRJZGxlRXJyb3ISOAoLbm90X3Rlc3RpbmcYASABKAsyIS5hZ2VudHJlcGwudjEuQXdhaXRJZGxlTm90VGVzdGluZ0gAEjYKCnN0aWxsX2J1c3kYAiABKAsyIC5hZ2VudHJlcGwudjEuQXdhaXRJZGxlU3RpbGxCdXN5SABCBwoFY2F1c2UiFQoTQXdhaXRJZGxlTm90VGVzdGluZyI2ChJBd2FpdElkbGVTdGlsbEJ1c3kSEQoJaW5fZmxpZ2h0GAEgASgEEg0KBXNpdGVzGAIgAygJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw");
+  fileDesc("CiZhZ2VudHJlcGwvdjEvZW5kcG9pbnRfYXdhaXRfaWRsZS5wcm90bxIMYWdlbnRyZXBsLnYxIlQKEEF3YWl0SWRsZVJlcXVlc3QSEAoIYm91bmRfbXMYASABKA0SLgoKd29ya3NwYWNlcxgCIAMoCzIaLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2VSZWYifwoRQXdhaXRJZGxlUmVzcG9uc2USMQoHc3VjY2VzcxgBIAEoCzIeLmFnZW50cmVwbC52MS5Bd2FpdElkbGVTdWNjZXNzSAASLQoFZXJyb3IYAiABKAsyHC5hZ2VudHJlcGwudjEuQXdhaXRJZGxlRXJyb3JIAEIICgZyZXN1bHQiRgoQQXdhaXRJZGxlU3VjY2VzcxIyCgdzdHJlYW1zGAEgAygLMiEuYWdlbnRyZXBsLnYxLlN0cmVhbUZyYW1lc1dyaXR0ZW4iOQoTU3RyZWFtRnJhbWVzV3JpdHRlbhISCgpzdHJlYW1fdGFnGAEgASgJEg4KBmZyYW1lcxgCIAEoBCKLAQoOQXdhaXRJZGxlRXJyb3ISOAoLbm90X3Rlc3RpbmcYASABKAsyIS5hZ2VudHJlcGwudjEuQXdhaXRJZGxlTm90VGVzdGluZ0gAEjYKCnN0aWxsX2J1c3kYAiABKAsyIC5hZ2VudHJlcGwudjEuQXdhaXRJZGxlU3RpbGxCdXN5SABCBwoFY2F1c2UiFQoTQXdhaXRJZGxlTm90VGVzdGluZyI2ChJBd2FpdElkbGVTdGlsbEJ1c3kSEQoJaW5fZmxpZ2h0GAEgASgEEg0KBXNpdGVzGAIgAygJQipaKGFnZW50cmVwbC9wcm90by9hZ2VudHJlcGwvdjE7YWdlbnRyZXBsdjFiBnByb3RvMw", [file_workspace_v1_workspace]);
 
 /**
  * "Are you done?", within a bound.
@@ -36,6 +38,18 @@ export type AwaitIdleRequest = Message<"agentrepl.v1.AwaitIdleRequest"> & {
    * @generated from field: uint32 bound_ms = 1;
    */
   boundMs: number;
+
+  /**
+   * THE WORKSPACES THE CALLER'S ACT CONCERNS, when any are named: the
+   * barrier then waits only for their work and for work no workspace owns,
+   * never for another workspace's. A test on a daemon other tests share names
+   * its own workspaces, since another case's work (a session revival, a
+   * reopen) can keep the whole daemon busy for longer than its bound. None
+   * named waits for everything in flight.
+   *
+   * @generated from field: repeated workspace.v1.WorkspaceRef workspaces = 2;
+   */
+  workspaces: WorkspaceRef[];
 };
 
 /**

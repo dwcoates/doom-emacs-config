@@ -26,7 +26,7 @@ import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpo
 import { AnswerPermissionResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_answer_permission_pb";
 import { UpdateHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_held_prompt_pb";
 
-import { bootColdOnce, chipFailureArms, startHarness, type Harness } from "./harness";
+import { bootColdOnce, chipFailureArms, sharedMount, startHarness, type Harness } from "./harness";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../src/rpc/refusal";
 import { ROOT_FEED, REFUSAL_FACTS, refusalArmsOf, type RpcName } from "./fake-daemon";
 import { userRefusalArms } from "../agent-only-arms.js";
@@ -58,8 +58,34 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP, composer on. A case that provokes a refusal at
+ * a control (`provoke`) takes its slice of it; a case that arranges the boot
+ * itself mounts its own.
+ */
+const shared = sharedMount({ composer: true, endCase: undoSiteChrome });
+
+/**
+ * Undo what a provoked site leaves on the page's chrome, through the page's
+ * own controls and pushes: a topbar menu a case opened is closed by its own
+ * cell again, and the roster is pushed empty, taking its rows and every
+ * refusal drawn at them away (the feed's rows go with the case's slice).
+ */
+async function undoSiteChrome(app: Harness): Promise<void> {
+  const menus: [string, string][] = [
+    ["[data-model-option]", ".topbar-model"],
+    ["[data-mode-option]", ".topbar-mode"],
+    ["[data-account-option]", ".topbar-account"],
+  ];
+  for (const [option, cell] of menus) {
+    if (app.$(option) !== null) await app.click(cell);
+  }
+  app.fake.setRoster(roster({ rows: [] }));
+  await app.settle();
+}
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 describe("SubmitPrompt refused while merging", () => {
@@ -757,9 +783,16 @@ const REFUSAL_SITES: RefusalSite[] = [
 ];
 
 /** Boot, script the refusal, put the app in reach of the control, and click. */
+/**
+ * The arms that move the page itself: `transferring_away` hands it to the
+ * successor daemon, and `not_yet_adopted` sends it back to adoption. A case
+ * provoking one is about the page's own lifecycle, so it boots a FRESH app.
+ */
+const PAGE_LIFECYCLE_ARMS: ReadonlySet<string> = new Set(["transferringAway", "notYetAdopted"]);
+
 async function provoke(testCase: RefusalSite, arm: string): Promise<Harness> {
-  const h = await startHarness({ composer: true });
-  await h.fake.awaitStream("watchFeed");
+  const h = PAGE_LIFECYCLE_ARMS.has(arm) ? await startHarness({ composer: true }) : await shared();
+  if (!shared.owns(h)) await h.fake.awaitStream("watchFeed");
   h.fake.refuse(testCase.rpc, arm);
   await testCase.arrange?.(h);
   await h.settle();
@@ -792,12 +825,40 @@ function drawnArms(rpc: string, arms: readonly string[]): string[] {
 }
 
 describe.each(REFUSAL_SITES)("$name's typed refusals", (testCase) => {
+  // THE CASES ON THE FILE'S SHARED MOUNT RUN FIRST, the ones provoking an arm
+  // that moves the page (PAGE_LIFECYCLE_ARMS, each on a fresh mount) last: a
+  // fresh mount displaces the shared one, which the next shared case mounts
+  // again, so grouping them costs each site one remount rather than one per
+  // fresh case. Each case is unchanged; only the order is.
+  const drawn = drawnArms(testCase.rpc, CROSS_CUTTING_ARMS);
+
   it("declares the four cross-cutting arms on its error", () => {
     // Assert: read off the descriptor, so a dropped arm fails here.
     expect(refusalArmsOf(testCase.rpc)).toEqual(expect.arrayContaining([...CROSS_CUTTING_ARMS]));
   });
 
-  it.each(drawnArms(testCase.rpc, CROSS_CUTTING_ARMS))("draws the %s arm at its call site", async (arm) => {
+  it.each(drawn.filter((arm) => !PAGE_LIFECYCLE_ARMS.has(arm)))("draws the %s arm at its call site", async (arm) => {
+    // Arrange / Act
+    harness = await provoke(testCase, arm);
+    // Assert
+    expect(harness.$(`${testCase.site} .refusal[data-arm="${arm}"]`)).not.toBeNull();
+  });
+
+  it("draws the registry dir the ref-mismatch arm carries", async () => {
+    // Arrange / Act
+    harness = await provoke(testCase, "workspaceRefMismatch");
+    // Assert
+    expect(harness.$(`${testCase.site} .refusal`)?.textContent).toContain(REFUSAL_FACTS.registryDir);
+  });
+
+  it("draws no refusal in the feed for a control outside it", async () => {
+    // Arrange / Act
+    harness = await provoke(testCase, "unknownWorkspace");
+    // Assert: exactly one refusal stands, and it is the one at the call site.
+    expect(harness.refusalArms()).toEqual(["unknownWorkspace"]);
+  });
+
+  it.each(drawn.filter((arm) => PAGE_LIFECYCLE_ARMS.has(arm)))("draws the %s arm at its call site", async (arm) => {
     // Arrange / Act
     harness = await provoke(testCase, arm);
     // Assert
@@ -811,25 +872,11 @@ describe.each(REFUSAL_SITES)("$name's typed refusals", (testCase) => {
     expect(harness.refusalArms()).toEqual([]);
   });
 
-  it("draws the registry dir the ref-mismatch arm carries", async () => {
-    // Arrange / Act
-    harness = await provoke(testCase, "workspaceRefMismatch");
-    // Assert
-    expect(harness.$(`${testCase.site} .refusal`)?.textContent).toContain(REFUSAL_FACTS.registryDir);
-  });
-
   it("draws the address the transferring-away arm carries", async () => {
     // Arrange / Act
     harness = await provoke(testCase, "transferringAway");
     // Assert
     expect(harness.$(`${testCase.site} .refusal`)?.textContent).toContain(REFUSAL_FACTS.address);
-  });
-
-  it("draws no refusal in the feed for a control outside it", async () => {
-    // Arrange / Act
-    harness = await provoke(testCase, "unknownWorkspace");
-    // Assert: exactly one refusal stands, and it is the one at the call site.
-    expect(harness.refusalArms()).toEqual(["unknownWorkspace"]);
   });
 });
 

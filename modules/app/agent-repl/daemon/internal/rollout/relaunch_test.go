@@ -333,6 +333,35 @@ func TestAResumeThatFailsHardRecordsTheWorkspacesOwnFault(t *testing.T) {
 	}
 }
 
+// A RESUME WHOSE NEW SHIM THIS DAEMON STOOD DOWN (a kill of the workspace
+// racing the bounce) ends the bounce unregistered: no fault, no ERROR, and
+// the hold released.
+func TestAResumeWhoseShimThisDaemonStoodDownEndsUnregistered(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws, _ := h.workspace(t)
+	h.fleet.resumeErr[ws] = fmt.Errorf("start session: %w", shimclient.ErrStandDownOrdered)
+
+	// Act
+	err := runRelaunch(t, h, ws, ReasonRestartVerb)
+	faults, faultErr := h.db.OpenFaults(context.Background(), wsm.FaultScope{Workspace: &ws, Kind: FaultRelaunchFailed})
+	_, held, leaseErr := h.db.Lease(context.Background(), ws)
+
+	// Assert
+	if bounce.OutcomeOf(err) != bounce.OutcomeUnregistered {
+		t.Fatalf("bounce = %v, want it unregistered", err)
+	}
+	if faultErr != nil || len(faults) != 0 {
+		t.Fatalf("relaunch faults = %v (%v), want none", faults, faultErr)
+	}
+	if leaseErr != nil || held {
+		t.Fatalf("lease held %v (%v), want the restart hold released", held, leaseErr)
+	}
+	if len(levelRecords(records(h.log, opRelaunch), "error")) != 0 {
+		t.Fatalf("relaunch records = %v, want no ERROR", records(h.log, opRelaunch))
+	}
+}
+
 func TestTheHoldIsReleasedAfterASuccessfulRelaunch(t *testing.T) {
 	// Arrange
 	h := newHarness(t)

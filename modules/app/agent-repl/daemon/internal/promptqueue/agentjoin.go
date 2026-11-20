@@ -52,7 +52,7 @@ func agentSentNeverClassified(log dlog.Logger, sub Submission, running ids.TurnI
 func (q *queue) startAgentJoin(ctx context.Context, sub Submission, running ids.TurnID, log dlog.Logger) {
 	epoch := q.contentEpoch(sub.WS, sub.Turn)
 	q.classifying.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(sub.WS)).Go(func() {
 		defer q.classifying.Done()
 		q.settleJoin(context.WithoutCancel(ctx), sub, running, epoch, q.agentSentVerdict(), joinAgentSent, log)
 	})

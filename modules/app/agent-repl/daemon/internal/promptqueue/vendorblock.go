@@ -48,7 +48,7 @@ func (q *queue) OnVendorServes(ws ids.WorkspaceID) {
 	}
 	q.releasing.Add(1)
 	q.mu.Unlock()
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		defer q.releasing.Done()
 		// A SESSION THAT IS NOT UP IS NOT SERVED by the vendor that stopped
 		// refusing it: the session's coming up releases the holds instead.

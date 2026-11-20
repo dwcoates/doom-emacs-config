@@ -38,10 +38,23 @@ func (s *server) AwaitIdle(
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(bound)*time.Millisecond)
 		defer cancel()
 	}
-	if err := tracker.AwaitIdle(ctx); err != nil {
-		inFlight, sites := tracker.InFlight(), tracker.InFlightSites()
+	// A BARRIER NAMING WORKSPACES waits for their work and for work no
+	// workspace owns (inflight.Tracker.AwaitIdleFor); one naming none waits
+	// for everything.
+	var workspaces []string
+	for _, ws := range req.Msg.GetWorkspaces() {
+		workspaces = append(workspaces, ws.GetId())
+	}
+	wait := tracker.AwaitIdle
+	report := func() (int, []string) { return tracker.InFlight(), tracker.InFlightSites() }
+	if len(workspaces) > 0 {
+		wait = func(ctx context.Context) error { return tracker.AwaitIdleFor(ctx, workspaces) }
+		report = func() (int, []string) { return tracker.InFlightFor(workspaces) }
+	}
+	if err := wait(ctx); err != nil {
+		inFlight, sites := report()
 		s.log.Info(opAwaitIdle, "the test barrier's caller gave up while work was still in flight", dlog.Context{
-			"in_flight": inFlight, "sites": sites, "cause": err.Error(),
+			"in_flight": inFlight, "sites": sites, "workspaces": workspaces, "cause": err.Error(),
 		})
 		return connect.NewResponse(&agentreplv1.AwaitIdleResponse{Result: &agentreplv1.AwaitIdleResponse_Error{
 			Error: &agentreplv1.AwaitIdleError{Cause: &agentreplv1.AwaitIdleError_StillBusy{

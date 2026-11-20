@@ -181,7 +181,7 @@ func TestEndingMoreThanBeganPanics(t *testing.T) {
 	}()
 
 	// Act
-	tr.end("anywhere")
+	tr.end("anywhere", false)
 }
 
 func TestInFlightSitesNameWhereWorkBegan(t *testing.T) {

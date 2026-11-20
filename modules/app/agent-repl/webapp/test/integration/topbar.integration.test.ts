@@ -26,7 +26,7 @@ import { SetPermissionModeResponseSchema } from "../../../proto/gen/ts/agentrepl
 
 import { pressurePercentColor } from "../../src/pressure-color.js";
 import { cascadedValue, installStylesheet } from "../stylesheet.js";
-import { bootColdOnce, chipFailureText, startHarness, type Harness } from "./harness";
+import { bootColdOnce, chipFailureText, sharedMount, startHarness, type Harness } from "./harness";
 import { MODEL_PLACEHOLDER, MODEL_TOOLTIP } from "../../src/topbar/model";
 import { EFFORT_TOOLTIP } from "../../src/topbar/effort";
 import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
@@ -50,13 +50,48 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP. A case about what a topbar view draws pushes its
+ * whole view onto it (`withTopbar`), as the daemon pushes every topbar change;
+ * a case that arranges more than the topbar before boot mounts its own.
+ */
+const shared = sharedMount({ endCase: closeTopbarMenus });
+
+/**
+ * Close what a case left open on the topbar, as a reader does: a menu by its
+ * own cell again, and a reveal by Escape (src/topbar/reveal.ts).
+ */
+async function closeTopbarMenus(app: Harness): Promise<void> {
+  const menus: [string, string][] = [
+    ["[data-model-option]", ".topbar-model"],
+    ["[data-mode-option]", ".topbar-mode"],
+    ["[data-account-option]", ".topbar-account"],
+  ];
+  for (const [option, cell] of menus) {
+    if (app.$(option) !== null) await app.click(cell);
+  }
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+  await app.settle();
+}
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
-/** Boot with one topbar view already scripted. */
-async function withTopbar(init: Parameters<typeof topbarView>[0]): Promise<Harness> {
+/**
+ * Boot a FRESH app with one topbar view scripted: for a case that changes the
+ * page's own modal state (the login) or leaves a failure on the whole page.
+ */
+async function withFreshTopbar(init: Parameters<typeof topbarView>[0]): Promise<Harness> {
   harness = await startHarness({ arrange: (fake) => fake.setTopbar(WORKSPACE_ID, topbarView(init)) });
+  return harness;
+}
+
+/** Push one topbar view onto the file's shared mount. */
+async function withTopbar(init: Parameters<typeof topbarView>[0]): Promise<Harness> {
+  harness = await shared();
+  harness.fake.setTopbar(WORKSPACE_ID, topbarView(init));
+  await harness.settle();
   return harness;
 }
 
@@ -313,8 +348,9 @@ describe("connectivity", () => {
   });
 
   it("refuses a tone the vocabulary does not declare", async () => {
+    // A FRESH MOUNT: the malformed frame this provokes leaves its failure on the whole page.
     // Arrange / Act
-    await withTopbar({ tone: "chartreuse" });
+    await withFreshTopbar({ tone: "chartreuse" });
     // Assert: an unknown tone is a malformed view, not a color to invent.
     expect(harness.failureArms()).toContain("frameUndecodable");
   });
@@ -420,8 +456,9 @@ describe("the model selector", () => {
   });
 
   it("reports a malformed view for an error with no cause", async () => {
+    // A FRESH MOUNT: the malformed frame this provokes leaves its failure on the whole page.
     // Arrange
-    await withTopbar({});
+    await withFreshTopbar({});
     harness.fake.answer(
       "setModel",
       create(SetModelResponseSchema, { result: { case: "error", value: {} } }),
@@ -639,8 +676,9 @@ describe("the permission-mode picker", () => {
   });
 
   it("reports a malformed view for an error with no cause", async () => {
+    // A FRESH MOUNT: the malformed frame this provokes leaves its failure on the whole page.
     // Arrange
-    await withTopbar({});
+    await withFreshTopbar({});
     harness.fake.answer(
       "setPermissionMode",
       create(SetPermissionModeResponseSchema, { result: { case: "error", value: {} } }),
@@ -919,6 +957,8 @@ describe("the degraded-window detail", () => {
 });
 
 describe("the login terminal", () => {
+  // A FRESH MOUNT PER CASE: the login is the page's own modal state, and a
+  // terminal's death leaves a client failure on the whole page.
   /**
    * Boot logged out and open the overlay THE WAY A READER NOW DOES.
    *
@@ -931,7 +971,7 @@ describe("the login terminal", () => {
    * so they take the one route that reaches it.
    */
   const openLogin = async (): Promise<void> => {
-    await withTopbar({ account: "loggedOut" });
+    await withFreshTopbar({ account: "loggedOut" });
     await harness.click(".topbar-account");
     await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
   };
@@ -945,7 +985,7 @@ describe("the login terminal", () => {
 
   it("calls no OpenLogin for the cell's own click", async () => {
     // Arrange: the cell opens the CHOICE; the pick is what calls anything.
-    await withTopbar({ account: "loggedOut" });
+    await withFreshTopbar({ account: "loggedOut" });
     // Act
     await harness.click(".topbar-account");
     // Assert
@@ -954,7 +994,7 @@ describe("the login terminal", () => {
 
   it("opens the options dropdown from the cell's own click", async () => {
     // Arrange
-    await withTopbar({ account: "loggedOut" });
+    await withFreshTopbar({ account: "loggedOut" });
     // Act
     await harness.click(".topbar-account");
     // Assert
@@ -970,7 +1010,7 @@ describe("the login terminal", () => {
 
   it("does not open the overlay for a root that holds a login", async () => {
     // Arrange: a picked root that IS logged in needs no login flow.
-    await withTopbar({ account: "loggedIn" });
+    await withFreshTopbar({ account: "loggedIn" });
     await harness.click(".topbar-account");
     // Act
     await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
@@ -980,7 +1020,7 @@ describe("the login terminal", () => {
 
   it("echoes the picked root's config dir verbatim", async () => {
     // Arrange
-    await withTopbar({
+    await withFreshTopbar({
       account: "loggedIn",
       accountOptions: [
         { configDir: ACCOUNT_CONFIG_DIR, email: "dev@example.test", current: true },
@@ -997,7 +1037,7 @@ describe("the login terminal", () => {
 
   it("opens the login flow for a picked root that holds none", async () => {
     // Arrange
-    await withTopbar({
+    await withFreshTopbar({
       account: "loggedIn",
       accountOptions: [
         { configDir: ACCOUNT_CONFIG_DIR, email: "dev@example.test", current: true },
@@ -1217,11 +1257,13 @@ describe("the warning strip's omission", () => {
 // ---------------------------------------------------------------------------
 
 describe("the login terminal's transport death", () => {
+  // A FRESH MOUNT PER CASE: the login is the page's own modal state, and a
+  // terminal's death leaves a client failure on the whole page.
   /** Boot logged out, open the overlay, and kill the pty stream mid-flight. */
   const killTerminal = async (): Promise<void> => {
     // The cell opens the options; picking the logged-out root is what opens
     // the login flow (owner ruling, 2026-09-13 — see the helper above).
-    await withTopbar({ account: "loggedOut" });
+    await withFreshTopbar({ account: "loggedOut" });
     await harness.click(".topbar-account");
     await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
     await harness.fake.awaitStream("watchLoginTerminal");
@@ -1254,7 +1296,7 @@ describe("the login terminal's transport death", () => {
 
   it("reports nothing for the pty's own closed frame", async () => {
     // Arrange
-    await withTopbar({ account: "loggedOut" });
+    await withFreshTopbar({ account: "loggedOut" });
     await harness.click(".topbar-account");
     await harness.click(`[data-account-option="${ACCOUNT_CONFIG_DIR}"]`);
     await harness.fake.awaitStream("watchLoginTerminal");

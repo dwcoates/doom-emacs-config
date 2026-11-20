@@ -16,6 +16,7 @@
 package agentreplv1
 
 import (
+	v1 "agentrepl/proto/workspace/v1"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
@@ -37,7 +38,14 @@ type AwaitIdleRequest struct {
 	// still_busy, naming what is. Kept inside the caller's own deadline, so a
 	// caller whose wait failed is told why rather than cut off. Zero waits
 	// until the request's own context ends.
-	BoundMs       uint32 `protobuf:"varint,1,opt,name=bound_ms,json=boundMs,proto3" json:"bound_ms,omitempty"`
+	BoundMs uint32 `protobuf:"varint,1,opt,name=bound_ms,json=boundMs,proto3" json:"bound_ms,omitempty"`
+	// THE WORKSPACES THE CALLER'S ACT CONCERNS, when any are named: the
+	// barrier then waits only for their work and for work no workspace owns,
+	// never for another workspace's. A test on a daemon other tests share names
+	// its own workspaces, since another case's work (a session revival, a
+	// reopen) can keep the whole daemon busy for longer than its bound. None
+	// named waits for everything in flight.
+	Workspaces    []*v1.WorkspaceRef `protobuf:"bytes,2,rep,name=workspaces,proto3" json:"workspaces,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -77,6 +85,13 @@ func (x *AwaitIdleRequest) GetBoundMs() uint32 {
 		return x.BoundMs
 	}
 	return 0
+}
+
+func (x *AwaitIdleRequest) GetWorkspaces() []*v1.WorkspaceRef {
+	if x != nil {
+		return x.Workspaces
+	}
+	return nil
 }
 
 // THE ARM IS THE OUTCOME.
@@ -449,9 +464,12 @@ var File_agentrepl_v1_endpoint_await_idle_proto protoreflect.FileDescriptor
 
 const file_agentrepl_v1_endpoint_await_idle_proto_rawDesc = "" +
 	"\n" +
-	"&agentrepl/v1/endpoint_await_idle.proto\x12\fagentrepl.v1\"-\n" +
+	"&agentrepl/v1/endpoint_await_idle.proto\x12\fagentrepl.v1\x1a\x1cworkspace/v1/workspace.proto\"i\n" +
 	"\x10AwaitIdleRequest\x12\x19\n" +
-	"\bbound_ms\x18\x01 \x01(\rR\aboundMs\"\x8f\x01\n" +
+	"\bbound_ms\x18\x01 \x01(\rR\aboundMs\x12:\n" +
+	"\n" +
+	"workspaces\x18\x02 \x03(\v2\x1a.workspace.v1.WorkspaceRefR\n" +
+	"workspaces\"\x8f\x01\n" +
 	"\x11AwaitIdleResponse\x12:\n" +
 	"\asuccess\x18\x01 \x01(\v2\x1e.agentrepl.v1.AwaitIdleSuccessH\x00R\asuccess\x124\n" +
 	"\x05error\x18\x02 \x01(\v2\x1c.agentrepl.v1.AwaitIdleErrorH\x00R\x05errorB\b\n" +
@@ -494,18 +512,20 @@ var file_agentrepl_v1_endpoint_await_idle_proto_goTypes = []any{
 	(*AwaitIdleError)(nil),      // 4: agentrepl.v1.AwaitIdleError
 	(*AwaitIdleNotTesting)(nil), // 5: agentrepl.v1.AwaitIdleNotTesting
 	(*AwaitIdleStillBusy)(nil),  // 6: agentrepl.v1.AwaitIdleStillBusy
+	(*v1.WorkspaceRef)(nil),     // 7: workspace.v1.WorkspaceRef
 }
 var file_agentrepl_v1_endpoint_await_idle_proto_depIdxs = []int32{
-	2, // 0: agentrepl.v1.AwaitIdleResponse.success:type_name -> agentrepl.v1.AwaitIdleSuccess
-	4, // 1: agentrepl.v1.AwaitIdleResponse.error:type_name -> agentrepl.v1.AwaitIdleError
-	3, // 2: agentrepl.v1.AwaitIdleSuccess.streams:type_name -> agentrepl.v1.StreamFramesWritten
-	5, // 3: agentrepl.v1.AwaitIdleError.not_testing:type_name -> agentrepl.v1.AwaitIdleNotTesting
-	6, // 4: agentrepl.v1.AwaitIdleError.still_busy:type_name -> agentrepl.v1.AwaitIdleStillBusy
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	7, // 0: agentrepl.v1.AwaitIdleRequest.workspaces:type_name -> workspace.v1.WorkspaceRef
+	2, // 1: agentrepl.v1.AwaitIdleResponse.success:type_name -> agentrepl.v1.AwaitIdleSuccess
+	4, // 2: agentrepl.v1.AwaitIdleResponse.error:type_name -> agentrepl.v1.AwaitIdleError
+	3, // 3: agentrepl.v1.AwaitIdleSuccess.streams:type_name -> agentrepl.v1.StreamFramesWritten
+	5, // 4: agentrepl.v1.AwaitIdleError.not_testing:type_name -> agentrepl.v1.AwaitIdleNotTesting
+	6, // 5: agentrepl.v1.AwaitIdleError.still_busy:type_name -> agentrepl.v1.AwaitIdleStillBusy
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_agentrepl_v1_endpoint_await_idle_proto_init() }

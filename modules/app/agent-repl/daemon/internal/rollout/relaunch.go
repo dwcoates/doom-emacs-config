@@ -330,6 +330,15 @@ func (c *controller) relaunchOnce(ctx context.Context, ws ids.WorkspaceID, reaso
 	if errors.Is(err, ErrResumeRestarted) {
 		return fresh, Resumed{}, err
 	}
+	if errors.Is(err, shimclient.ErrStandDownOrdered) {
+		// THIS DAEMON STOOD THE NEW SHIM DOWN UNDER THE RESUME: a kill or a
+		// close of the workspace raced the bounce (2026-11-20, integration
+		// TestQueryDiedDrawsTheTurnsTerminal on the canonical daemon), and the
+		// path that ordered it owns the workspace's outcome. Nothing is left
+		// to replace, so the bounce ends unregistered, never a failure.
+		c.log.Info(opRelaunch, "this daemon stood the new shim down under its resume; nothing is left to relaunch", dlog.WithCause(fields, err))
+		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: resume: the shim was stood down: %w", ws, bounce.ErrUnregistered)
+	}
 	if err != nil {
 		c.recordRelaunchFault(ctx, ws, err, fields)
 		return nil, Resumed{}, fmt.Errorf("rollout: relaunch %q: resume: %w", ws, err)

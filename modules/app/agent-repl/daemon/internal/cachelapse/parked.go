@@ -72,7 +72,7 @@ func (k *Keeper) beatParked(ctx context.Context, log dlog.Logger, ws ids.Workspa
 	log.Info(opDrive, "sent the parked conversation's keep-alive; its answer comes back on its own", dlog.Context{
 		"parked_vendor_session_id": parked.GetVendorSessionId(), "answer_bound": AnswerBound.String(),
 	})
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		// THE BOUND IS A KEEP-ALIVE'S ANSWER BOUND (AnswerBound, measured over
 		// 2,798 keep-alives): the parked beat is one keep-alive request.
 		beatCtx, cancel := context.WithTimeout(ctx, AnswerBound)

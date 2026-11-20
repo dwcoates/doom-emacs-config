@@ -12,7 +12,7 @@
 import type { GetFeedPageRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_get_feed_page_pb";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { bootColdOnce, startHarness, type Harness } from "./harness";
+import { bootColdOnce, sharedMount, startHarness, type Harness } from "./harness";
 import { installStylesheet } from "../stylesheet.js";
 import { ROOT_FEED } from "./fake-daemon";
 import {
@@ -35,15 +35,21 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP. A case about how pushed rows route takes its
+ * slice of it; a case that arranges the opening page before boot mounts its
+ * own.
+ */
+const shared = sharedMount();
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 describe("upsert by FeedId", () => {
   it("replaces a row in place when its id is pushed again", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("update", "half an answer"));
     await harness.settle();
     // Act
@@ -55,8 +61,7 @@ describe("upsert by FeedId", () => {
 
   it("does not duplicate the row on a re-push", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("update"));
     await harness.settle();
     // Act
@@ -68,8 +73,7 @@ describe("upsert by FeedId", () => {
 
   it("preserves ordering when an earlier row is re-pushed", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("first", { id: feedId("a") }));
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("second", { id: feedId("b") }));
     await harness.settle();
@@ -82,8 +86,7 @@ describe("upsert by FeedId", () => {
 
   it("draws late rows at their keys, not below the rows that arrived before them", async () => {
     // Arrange — a turn's answer and its end are already drawn.
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, userPromptRow("why", { id: feedId("prompt"), order: { key: "k1" } }));
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "because", { id: feedId("answer"), order: { key: "k5" } }));
     await harness.settle();
@@ -97,8 +100,7 @@ describe("upsert by FeedId", () => {
 
   it("refuses a pushed row without an order key as an undecodable frame", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     // Act
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "unplaced", { order: undefined }));
     await harness.settle();
@@ -111,8 +113,7 @@ describe("upsert by FeedId", () => {
 
   it("drops the old text when a row is replaced whole", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("update", "the draft"));
     await harness.settle();
     // Act
@@ -126,8 +127,7 @@ describe("upsert by FeedId", () => {
 describe("presentation nesting", () => {
   it("draws a row with a parent inside its container", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(subagentUnit("live"), { id: feedId("head") }));
     await harness.settle();
     // Act
@@ -143,8 +143,7 @@ describe("presentation nesting", () => {
 
   it("draws a row with no parent at the top level", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, activityRow(subagentUnit("live"), { id: feedId("head") }));
     // Act
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "loose", { id: feedId("loose") }));
@@ -529,8 +528,7 @@ describe("the merge bubble's parity with a subagent bubble", () => {
 describe("the final answer", () => {
   it("marks exactly the response row that turn_ended names as the answer", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "first", { id: feedId("r1") }));
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "final", { id: feedId("r2") }));
     await harness.settle();
@@ -547,8 +545,7 @@ describe("the final answer", () => {
 
   it("leaves the earlier response rows unmarked", async () => {
     // Arrange
-    harness = await startHarness();
-    await harness.fake.awaitStream("watchFeed");
+    harness = await shared();
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "first", { id: feedId("r1") }));
     harness.fake.pushRow(WORKSPACE_ID, ROOT_FEED, responseRow("success", "final", { id: feedId("r2") }));
     await harness.settle();

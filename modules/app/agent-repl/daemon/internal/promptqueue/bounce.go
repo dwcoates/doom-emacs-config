@@ -486,7 +486,7 @@ func (q *queue) OnDeparted(ws ids.WorkspaceID, departed Watcher, departure sessi
 	}
 	q.departing.Add(1)
 	q.mu.Unlock()
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		defer q.departing.Done()
 		q.decideDeparture(ws, departed, departure)
 	})
@@ -893,7 +893,7 @@ func (q *queue) startBounceLocked(d *delivery, log dlog.Logger) bool {
 		"reason": reason, "state": "draining", "before": false, "after": true,
 	})
 	q.bouncing.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(d.ws)).Go(func() {
 		defer q.bouncing.Done()
 		for stage := first; stage != nil; {
 			err := stage.req.Run(q.lifetime(), ws)

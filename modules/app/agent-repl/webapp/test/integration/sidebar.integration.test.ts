@@ -16,7 +16,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RosterRowSchema, RosterRowWhenSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 
-import { bootColdOnce, startHarness, type Harness } from "./harness";
+import { bootColdOnce, sharedMount, startHarness, type Harness } from "./harness";
 import { PREFS_KEY } from "../../src/sidebar/sidebar";
 import type { UpdateSidebarViewRequest } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import {
@@ -39,13 +39,37 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP. Each case pushes its whole roster onto it
+ * (`withRoster`), as the daemon pushes every roster change.
+ */
+const shared = sharedMount({ endCase: emptyRoster });
+
+/**
+ * Push the roster empty at a case's end, as the daemon pushes a roster with
+ * nothing open: the case's rows leave the rail, so the next case's rows are
+ * drawn new (a row's blink starts at its first draw) rather than updated.
+ */
+async function emptyRoster(app: Harness): Promise<void> {
+  app.fake.setRoster(roster({ rows: [] }));
+  await app.settle();
+}
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 /** Boot with one roster already scripted. */
-async function withRoster(init: Parameters<typeof roster>[0]): Promise<Harness> {
+/** Boot a FRESH app with one roster scripted: for a case about the boot itself. */
+async function withFreshRoster(init: Parameters<typeof roster>[0]): Promise<Harness> {
   harness = await startHarness({ arrange: (fake) => fake.setRoster(roster(init)) });
+  return harness;
+}
+
+async function withRoster(init: Parameters<typeof roster>[0]): Promise<Harness> {
+  harness = await shared();
+  harness.fake.setRoster(roster(init));
+  await harness.settle();
   return harness;
 }
 
@@ -552,6 +576,8 @@ describe("the restart", () => {
 // ---------------------------------------------------------------------------
 
 describe("the preferences a page once stored", () => {
+  // A FRESH MOUNT PER CASE: the subject is what the page's own boot reads
+  // from storage, which a mount booted before the case has already read.
   afterEach(() => {
     vi.restoreAllMocks();
     window.localStorage.removeItem(PREFS_KEY);
@@ -561,7 +587,7 @@ describe("the preferences a page once stored", () => {
     // Arrange
     window.localStorage.setItem(PREFS_KEY, JSON.stringify({ grouping: "task", folded: { "task:task-1": true } }));
     // Act
-    await withRoster({});
+    await withFreshRoster({});
     // Assert
     expect(window.localStorage.getItem(PREFS_KEY)).toBeNull();
   });
@@ -572,7 +598,7 @@ describe("the preferences a page once stored", () => {
       throw new Error("site data is disabled");
     });
     // Act
-    await withRoster({});
+    await withFreshRoster({});
     // Assert
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"]`)).not.toBeNull();
   });

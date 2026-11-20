@@ -16,6 +16,7 @@ import (
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	"agentrepl/proto/agentrepl/v1/agentreplv1connect"
+	workspacev1 "agentrepl/proto/workspace/v1"
 )
 
 // THE TEST BARRIER. A negative assertion -- "no push followed", "no StartTurn
@@ -117,7 +118,15 @@ func (d *Daemon) AwaitIdle() map[string]uint64 {
 	if client == nil {
 		client = d.dialJoining(wait)
 	}
-	return askIdle(d.t, wait, d.waitBound, client)
+	// A VIEW ASKS ABOUT ITS OWN WORKSPACES: the shared daemon runs other
+	// cases' work too, which this case's barrier has no reason to wait for.
+	var scope []*workspacev1.WorkspaceRef
+	if d.view {
+		d.mu.Lock()
+		scope = append(scope, d.slice...)
+		d.mu.Unlock()
+	}
+	return askIdle(d.t, wait, d.waitBound, client, scope...)
 }
 
 // dialJoining answers a client for a JOINING daemon, which advertises no
@@ -157,10 +166,10 @@ func AwaitIdleAt(t testing.TB, ctx context.Context, client agentreplv1connect.Ag
 // THE DAEMON'S BOUND IS INSIDE THIS WAIT'S, so a barrier that cannot settle
 // is answered still_busy, naming what is in flight, rather than cut off by
 // this side's deadline.
-func askIdle(t testing.TB, wait context.Context, bound time.Duration, client agentreplv1connect.AgentReplClient) map[string]uint64 {
+func askIdle(t testing.TB, wait context.Context, bound time.Duration, client agentreplv1connect.AgentReplClient, workspaces ...*workspacev1.WorkspaceRef) map[string]uint64 {
 	t.Helper()
 	inner := bound - bound/5
-	resp, err := client.AwaitIdle(wait, connect.NewRequest(&agentreplv1.AwaitIdleRequest{BoundMs: uint32(inner.Milliseconds())}))
+	resp, err := client.AwaitIdle(wait, connect.NewRequest(&agentreplv1.AwaitIdleRequest{BoundMs: uint32(inner.Milliseconds()), Workspaces: workspaces}))
 	if err != nil {
 		t.Fatalf("harness: the test barrier failed: %v", err)
 	}

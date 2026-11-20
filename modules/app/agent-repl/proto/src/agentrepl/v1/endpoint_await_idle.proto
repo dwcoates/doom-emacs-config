@@ -11,6 +11,8 @@ syntax = "proto3";
 
 package agentrepl.v1;
 
+import "workspace/v1/workspace.proto";
+
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
 // "Are you done?", within a bound.
@@ -20,6 +22,13 @@ message AwaitIdleRequest {
   // caller whose wait failed is told why rather than cut off. Zero waits
   // until the request's own context ends.
   uint32 bound_ms = 1;
+  // THE WORKSPACES THE CALLER'S ACT CONCERNS, when any are named: the
+  // barrier then waits only for their work and for work no workspace owns,
+  // never for another workspace's. A test on a daemon other tests share names
+  // its own workspaces, since another case's work (a session revival, a
+  // reopen) can keep the whole daemon busy for longer than its bound. None
+  // named waits for everything in flight.
+  repeated workspace.v1.WorkspaceRef workspaces = 2;
 }
 
 // THE ARM IS THE OUTCOME.

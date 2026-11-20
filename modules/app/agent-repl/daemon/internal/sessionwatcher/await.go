@@ -378,7 +378,7 @@ func (w *watcher) freeEdgeLocked(workEnded bool) {
 		"state": "busy", "before": true, "after": false, "work_ended": workEnded,
 	})
 	w.dispatching.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(w.ws)).Go(func() {
 		defer w.dispatching.Done()
 		w.sinks.Lifecycle.OnFree(w.ws, workEnded)
 	})

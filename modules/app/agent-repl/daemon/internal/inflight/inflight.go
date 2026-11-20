@@ -46,6 +46,19 @@ type Tracker struct {
 	// narrower wait (a child's) and the daemon-wide one (the parent's) see
 	// the same work.
 	parent *Tracker
+	// workspace names the workspace a child made by Workspace counts the
+	// work of; "" for any other tracker.
+	workspace string
+	// owned is how much of n, and ownedSites how much of each site, was
+	// begun through a workspace's child (Workspace): the work some workspace
+	// owns, which a wait scoped to other workspaces does not wait for.
+	owned      int
+	ownedSites map[string]int
+	// changed closes at every change of the count, and is replaced when a
+	// scoped wait asks again (AwaitIdleFor).
+	changed chan struct{}
+	// workspaces is each workspace's child, made once and kept.
+	workspaces map[string]*Tracker
 }
 
 // NewChild answers a tracker whose every piece of work is also counted on
@@ -81,6 +94,11 @@ func callSite(skip int) string {
 
 // begin counts one piece of work begun by the caller SKIP frames up.
 func (t *Tracker) begin(skip int) (end func()) {
+	return t.beginAs(skip+1, false)
+}
+
+// beginAs is begin, counting the work as some workspace's when OWNED.
+func (t *Tracker) beginAs(skip int, owned bool) (end func()) {
 	site := callSite(skip)
 	t.mu.Lock()
 	t.n++
@@ -88,15 +106,23 @@ func (t *Tracker) begin(skip int) (end func()) {
 		t.sites = map[string]int{}
 	}
 	t.sites[site]++
+	if owned {
+		t.owned++
+		if t.ownedSites == nil {
+			t.ownedSites = map[string]int{}
+		}
+		t.ownedSites[site]++
+	}
+	t.notifyLocked()
 	t.mu.Unlock()
 	var parentEnd func()
 	if t.parent != nil {
-		parentEnd = t.parent.begin(skip + 1)
+		parentEnd = t.parent.beginAs(skip+1, owned || t.workspace != "")
 	}
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			t.end(site)
+			t.end(site, owned)
 			if parentEnd != nil {
 				parentEnd()
 			}
@@ -104,14 +130,31 @@ func (t *Tracker) begin(skip int) (end func()) {
 	}
 }
 
+// notifyLocked wakes every scoped wait: the count changed. The caller holds
+// t.mu.
+func (t *Tracker) notifyLocked() {
+	if t.changed != nil {
+		close(t.changed)
+		t.changed = nil
+	}
+}
+
 // end uncounts one piece of work, waking every AwaitIdle once none is left.
-func (t *Tracker) end(site string) {
+func (t *Tracker) end(site string, owned bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.sites[site]--
 	if t.sites[site] == 0 {
 		delete(t.sites, site)
 	}
+	if owned {
+		t.owned--
+		t.ownedSites[site]--
+		if t.ownedSites[site] == 0 {
+			delete(t.ownedSites, site)
+		}
+	}
+	t.notifyLocked()
 	t.n--
 	if t.n < 0 {
 		panic(fmt.Sprintf("inflight: work ended %d more time(s) than it began", -t.n))
