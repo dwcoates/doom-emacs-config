@@ -13,6 +13,7 @@ import {
   ENTRY_PATH_CLASS,
   LABEL_LINK_CLASS,
   answeredNodeAt,
+  entryLines,
   entryTreeHtml,
   flashEntry,
   flashEntryOncePainted,
@@ -268,6 +269,39 @@ describe("answeredNodeAt", () => {
     const { prompt } = answeredFeed({ labels: ["3.1"], answers: [["3.1", "p1"]], prompt: "3.1 - yes" });
     // Act + Assert
     expect(() => answeredNodeAt(document.body, prompt, labelOf(prompt, "3.1"))).toThrow("carries no row id");
+  });
+});
+
+describe("entryLines", () => {
+  it("answers every line the row draws its entry answering the label on, and no other", () => {
+    // Arrange
+    const row = document.createElement("div");
+    for (const label of ["4.2", "4.2", "4.2.1", "5"]) {
+      const line = document.createElement("div");
+      line.className = ENTRY_CLASS;
+      line.setAttribute(ENTRY_ATTRIBUTE, label);
+      row.append(line);
+    }
+    // Act
+    const lines = entryLines(row, "4.2");
+    // Assert
+    expect(lines.map((line) => line.getAttribute(ENTRY_ATTRIBUTE))).toEqual(["4.2", "4.2"]);
+  });
+
+  it("answers no line for a label the row draws no entry for", () => {
+    // Arrange
+    const row = document.createElement("div");
+    // Act, Assert
+    expect(entryLines(row, "9.9")).toEqual([]);
+  });
+
+  it("is what flashEntry flashes, so the jump and the flash name the same lines", () => {
+    // Arrange
+    const row = drawnEntries("3.1 - a\n4.2 - **b**\n5.5.1 - c");
+    // Act
+    flashEntry(row, "4.2");
+    // Assert
+    expect(entryLines(row, "4.2").every((line) => line.classList.contains(ENTRY_FLASH_CLASS))).toBe(true);
   });
 });
 

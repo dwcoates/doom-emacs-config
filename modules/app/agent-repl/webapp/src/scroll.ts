@@ -526,6 +526,8 @@ export class TailFollow {
    */
   private placements: number[] = [];
   private placedAtMs: number | null = null;
+  /** The target a centering jump holds in the middle of the view (`centerOn`), null when none does. */
+  private centered: { cause: CenterCause; target: CenterTarget } | null = null;
   /**
    * The position the floor keeps the box able to stand at (`ScrollFloor`),
    * null when none stands: the held position while the reader's click holds
@@ -623,11 +625,11 @@ export class TailFollow {
    * row when the feed has drawn it (GEOMETRY null: nothing to center on). A
    * selection the reader's click made centers nothing (`selectionClicked`).
    */
-  selectionMoved(geometry: CenterGeometry | null): void {
+  selectionMoved(target: CenterTarget | null): void {
     this.supersedeClick("selectionMoved");
     this.selectionActive = true;
     this.release();
-    if (geometry !== null) this.shift("selectionMoved", centerDelta(geometry));
+    if (target !== null) this.centerOn("selectionMoved", target);
     this.takeAnchor();
   }
 
@@ -635,8 +637,8 @@ export class TailFollow {
    * The reader picked a detached-work item in the footer: stop following, and
    * CENTER the item's card in the viewport (`revealCenterDelta`).
    */
-  detachedWorkSelected(geometry: RevealGeometry): void {
-    this.revealBy("detachedWorkSelected", revealCenterDelta(geometry, this.box));
+  detachedWorkSelected(target: CenterTarget): void {
+    this.revealCentered("detachedWorkSelected", target);
   }
 
   /**
@@ -644,8 +646,8 @@ export class TailFollow {
    * gated-call link): stop following, and CENTER the entry exactly as the
    * detached-work selection does (`revealCenterDelta`).
    */
-  entryJumped(geometry: RevealGeometry): void {
-    this.revealBy("entryJumped", revealCenterDelta(geometry, this.box));
+  entryJumped(target: CenterTarget): void {
+    this.revealCentered("entryJumped", target);
   }
 
   /**
@@ -876,6 +878,13 @@ export class TailFollow {
    */
   onInput(kind: ReaderInput): void {
     this.touched = true;
+    if (this.centered !== null) {
+      log.debug("the reader's input ends a centered jump's hold", {
+        operation: "scroll.center-released",
+        context: { cause: this.centered.cause, by: kind },
+      });
+      this.centered = null;
+    }
     if (this.clickHeld) this.recordHoldEnded(kind);
     this.clickHeld = false;
     this.clickedRow = null;
@@ -1041,6 +1050,7 @@ export class TailFollow {
     this.box.scrollTop = this.box.scrollHeight;
     this.lastTop = this.box.scrollTop;
     this.placed(this.lastTop);
+    this.centered = null;
     this.following = true;
     this.cause = cause;
     this.anchor = null;
@@ -1055,9 +1065,68 @@ export class TailFollow {
   }
 
   /**
-   * THE ONE CENTERING REVEAL: stop following, move by the centering DELTA its
-   * caller computed under CAUSE, take the anchor there, and latch where the
-   * view lands if the latest entry is then in sight.
+   * A REVEAL THAT CENTERS TARGET under CAUSE: stop following, center it
+   * (`centerOn`), take the anchor there, and latch where the view lands if the
+   * latest entry is then in sight. A target with no box yet moves nothing now;
+   * the hold centers it once it is laid out.
+   */
+  private revealCentered(cause: CenterCause, target: CenterTarget): void {
+    this.supersedeClick(cause);
+    this.release();
+    this.centerOn(cause, target);
+    this.takeAnchor();
+    this.latchIfLatestVisible("reveal");
+  }
+
+  /**
+   * THE ONE CENTERING JUMP (owner rule, 2026-11-20): every jump to a named
+   * thing -- a row, a prompt's entry, a subtree of a response's tree -- puts
+   * that thing's OWN box in the vertical middle of the visible feed
+   * (`revealCenterDelta`), clamped at the feed's edges, and HOLDS it there
+   * until the reader's next input, a click, a park or another reveal. The hold
+   * is what makes the centering read the layout it lands on: TARGET is read
+   * again on every later size change and scroll event (`reanchor`), so a tree
+   * re-wrapping to the width its expansion gave it, or an entry painting after
+   * its prompt expanded, is centered as it is finally laid out rather than as
+   * it stood when the jump was asked for.
+   */
+  private centerOn(cause: CenterCause, target: CenterTarget): void {
+    this.centered = { cause, target };
+    this.recenter("jump");
+  }
+
+  /**
+   * Center the held target as it is laid out now, and drop the hold once the
+   * target has no box (its row retired, its tree folded away).
+   */
+  private recenter(trigger: AnchorTrigger | "jump"): void {
+    const held = this.centered;
+    if (held === null) return;
+    const geometry = held.target();
+    if (geometry === null) {
+      if (trigger !== "jump") this.centered = null;
+      log.debug("a centered jump's target has no box; nothing is centered", {
+        operation: "scroll.center-absent",
+        context: { cause: held.cause, trigger, held: trigger === "jump" },
+      });
+      return;
+    }
+    const delta = revealCenterDelta(geometry, this.box);
+    if (trigger !== "jump" && Math.abs(delta) < 1) return;
+    this.shift(held.cause, delta);
+    if (trigger !== "jump") {
+      log.debug("a centered jump's target moved; it is centered again", {
+        operation: "scroll.center-held",
+        context: { cause: held.cause, trigger, delta: Math.round(delta) },
+      });
+    }
+  }
+
+  /**
+   * A REVEAL BY A COMPUTED DELTA (the composer's, only as far as its subtree
+   * needs): stop following, move by DELTA under CAUSE, take the anchor there,
+   * and latch where the view lands if the latest entry is then in sight.
+   * Every jump that CENTERS goes through `revealCentered` instead.
    */
   private revealBy(
     cause: "detachedWorkSelected" | "entryJumped" | "composerEntryRevealed",
@@ -1122,6 +1191,13 @@ export class TailFollow {
    * it moved, and take the anchor afresh. A following reader holds none.
    */
   private reanchor(trigger: AnchorTrigger): void {
+    // A CENTERED JUMP HOLDS ITS TARGET instead of a row's top: the thing the
+    // reader jumped to stays in the middle of the view as the layout settles.
+    if (this.centered !== null && !this.following) {
+      this.recenter(trigger);
+      this.takeAnchor();
+      return;
+    }
     if (this.rows === null) return;
     if (this.following) {
       this.anchor = null;
@@ -1283,6 +1359,7 @@ export class TailFollow {
 
   /** Stop following: only a parking cause starts it again. */
   private release(): void {
+    this.centered = null;
     this.sync("release");
     this.following = false;
     this.cause = null;
@@ -1627,13 +1704,67 @@ export interface RevealGeometry {
  * scroll range the clamp needs. Positive is downward, matching `scrollTop`.
  */
 export function revealCenterDelta(g: RevealGeometry, box: ScrollPosition): number {
-  const offset = g.nodeHeight > g.boxHeight ? g.nodeTop - g.boxTop : midpointOffset(g);
-  return clampedDelta(box, offset);
+  return clampedDelta(box, centerOffset(spanOfView(g), spanOfNode(g)));
 }
 
-/** How far NODE's vertical midpoint sits below the viewport's. */
-function midpointOffset(g: RevealGeometry): number {
-  return g.nodeTop + g.nodeHeight / 2 - (g.boxTop + g.boxHeight / 2);
+/**
+ * How far a view must move to CENTER NODE in it, unclamped: THE ONE
+ * CENTERING ARITHMETIC, for the feed's box (`revealCenterDelta`) and for a
+ * bubble's own box a centered node sits in (node-reveal.ts) alike. A node
+ * that fits is placed with its vertical midpoint on the view's; one TALLER
+ * than the view lands with its own top at the view's top, so its head is
+ * what the reader sees. Positive is downward, matching `scrollTop`.
+ */
+export function centerOffset(view: VerticalSpan, node: VerticalSpan): number {
+  if (node.bottom - node.top > view.bottom - view.top) return node.top - view.top;
+  return (node.top + node.bottom) / 2 - (view.top + view.bottom) / 2;
+}
+
+/** The viewport G measures, as a span. */
+function spanOfView(g: RevealGeometry): VerticalSpan {
+  return { top: g.boxTop, bottom: g.boxTop + g.boxHeight };
+}
+
+/** The node G measures, as a span. */
+function spanOfNode(g: RevealGeometry): VerticalSpan {
+  return { top: g.nodeTop, bottom: g.nodeTop + g.nodeHeight };
+}
+
+/**
+ * Where a centering jump's target is laid out NOW against the feed's
+ * viewport, or null when it has no box: read when the jump lands and again on
+ * every pass its hold makes (`TailFollow.centerOn`), so each read measures
+ * the layout that pass sees. Made by `centerTarget`, the one measure.
+ */
+export type CenterTarget = () => RevealGeometry | null;
+
+/** The jumps that center their target (`TailFollow.centerOn`). */
+type CenterCause = "selectionMoved" | "detachedWorkSelected" | "entryJumped";
+
+/**
+ * THE ONE MEASURE OF A CENTERING JUMP'S TARGET: the thing SPAN reads (a row,
+ * a prompt's entry, a subtree's lines), against BOX's viewport, both read off
+ * the live layout every time the target is read.
+ */
+export function centerTarget(box: Pick<Element, "getBoundingClientRect">, span: () => VerticalSpan | null): CenterTarget {
+  return () => {
+    const node = span();
+    if (node === null) return null;
+    const view = box.getBoundingClientRect();
+    return { boxTop: view.top, boxHeight: view.height, nodeTop: node.top, nodeHeight: node.bottom - node.top };
+  };
+}
+
+/**
+ * The span ELEMENTS are laid out over, from the first's top to the last's
+ * bottom, in viewport coordinates; null when none is laid out (not drawn, or
+ * drawn folded away). An element of no height is not laid out. THE ONE
+ * MEASURE of a centering jump's target, whatever it names.
+ */
+export function elementsSpan(elements: readonly Element[]): VerticalSpan | null {
+  const rects = elements.map((el) => el.getBoundingClientRect()).filter((rect) => rect.height > 0);
+  if (rects.length === 0) return null;
+  return { top: Math.min(...rects.map((r) => r.top)), bottom: Math.max(...rects.map((r) => r.bottom)) };
 }
 
 /** The move by OFFSET, clamped so the box stays inside its scroll range. */
@@ -1689,50 +1820,6 @@ export function revealGeometry(box: Element, node: Element): RevealGeometry {
   const b = box.getBoundingClientRect();
   const n = node.getBoundingClientRect();
   return { boxTop: b.top, boxHeight: b.height, nodeTop: n.top, nodeHeight: n.height };
-}
-
-/**
- * The geometry a CENTER-SCROLL reads, in the box's OWN coordinate space, where
- * a row's `offsetTop` and the box's `scrollTop` are the same units, so their
- * difference is a scroll position with nothing to reconstruct.
- */
-export interface CenterGeometry {
-  /** The node's top, in the box's own scroll coordinates (`offsetTop`). */
-  nodeOffsetTop: number;
-  /** The node's full height (`offsetHeight`), however far past the fold it runs. */
-  nodeHeight: number;
-  /** The box's visible height (`clientHeight`). */
-  clientHeight: number;
-  /** The box's full scrollable height (`scrollHeight`). */
-  scrollHeight: number;
-  /** The box's current `scrollTop`. */
-  scrollTop: number;
-}
-
-/**
- * How far the box must move for NODE to sit CENTERED in the viewport, clamped
- * at the feed's own edges.
- *
- * This is the reply-to-a-past-response center-scroll, as an arithmetic. The
- * daemon names the selected final-response row; the webapp puts it in the
- * middle of the feed — UNLESS the row is near the feed's start or end, where
- * there is not room to center it and the best that fits is the edge:
- *
- * - a row with room on both sides is placed with its top `(clientHeight -
- *   nodeHeight) / 2` below the box's top, which puts its center on the box's
- *   center;
- * - a row so near the START that centering would scroll above the top is
- *   clamped at `scrollTop = 0` — the feed's first row cannot rise past the top;
- * - a row so near the END that centering would scroll past the last reachable
- *   position is clamped at `scrollHeight - clientHeight`.
- *
- * Positive is downward, matching `scrollTop` (`TailFollow.selectionMoved`).
- */
-export function centerDelta(g: CenterGeometry): number {
-  const idealTop = g.nodeOffsetTop - (g.clientHeight - g.nodeHeight) / 2;
-  const maxScrollTop = Math.max(0, g.scrollHeight - g.clientHeight);
-  const target = Math.min(Math.max(idealTop, 0), maxScrollTop);
-  return target - g.scrollTop;
 }
 
 /** True when the element both clips its content and scrolls it vertically. */

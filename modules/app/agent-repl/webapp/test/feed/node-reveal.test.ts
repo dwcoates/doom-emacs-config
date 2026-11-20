@@ -5,7 +5,7 @@
  */
 import { afterEach, describe, expect, it } from "vitest";
 import { BUBBLE_SCROLL_CLASS } from "../../src/feed/bubble-scroll.js";
-import { linesSpan, revealInBubbles } from "../../src/feed/node-reveal.js";
+import { revealInBubbles } from "../../src/feed/node-reveal.js";
 import { boxRect, settableScrollTop } from "../dom-rect.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 
@@ -44,41 +44,12 @@ function drawn(lines: HTMLElement[], wrap: (body: HTMLElement) => HTMLElement = 
   return lines;
 }
 
-describe("linesSpan", () => {
-  it("spans the laid-out lines from the first's top to the last's bottom", () => {
-    // Arrange
-    const lines = drawn([line(280, 20), line(300, 25)]);
-    // Act
-    const got = linesSpan(lines);
-    // Assert
-    expect(got).toEqual({ top: 280, bottom: 325 });
-  });
-
-  it("leaves out a line that is not laid out", () => {
-    // Arrange
-    const lines = drawn([line(280, 20), line(500, 0)]);
-    // Act
-    const got = linesSpan(lines);
-    // Assert
-    expect(got).toEqual({ top: 280, bottom: 300 });
-  });
-
-  it("is null when no line is laid out", () => {
-    // Arrange
-    const lines = drawn([line(280, 0)]);
-    // Act
-    const got = linesSpan(lines);
-    // Assert
-    expect(got).toBeNull();
-  });
-});
-
 describe("revealInBubbles", () => {
   it("answers lines in no bubble box as laid out", () => {
     // Arrange
     const lines = drawn([line(280, 20), line(300, 20)]);
     // Act
-    const got = revealInBubbles(lines, "the node 1.1");
+    const got = revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert
     expect(got).toEqual({ top: 280, bottom: 320 });
   });
@@ -87,7 +58,7 @@ describe("revealInBubbles", () => {
     // Arrange
     const lines = drawn([line(280, 0)], (body) => bubbleBox(0, 100, body));
     // Act
-    const got = revealInBubbles(lines, "the node 1.1");
+    const got = revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert
     expect(got).toBeNull();
   });
@@ -97,7 +68,7 @@ describe("revealInBubbles", () => {
     let box: HTMLElement | undefined;
     const lines = drawn([line(250, 20), line(270, 20)], (body) => (box = bubbleBox(100, 100, body)));
     // Act
-    const got = revealInBubbles(lines, "the node 1.1");
+    const got = revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert
     expect([box?.scrollTop, got]).toEqual([90, { top: 160, bottom: 200 }]);
   });
@@ -107,7 +78,7 @@ describe("revealInBubbles", () => {
     let box: HTMLElement | undefined;
     const lines = drawn([line(120, 20)], (body) => (box = bubbleBox(100, 100, body)));
     // Act
-    const got = revealInBubbles(lines, "the node 1.1");
+    const got = revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert
     expect([box?.scrollTop, got]).toEqual([0, { top: 120, bottom: 140 }]);
   });
@@ -117,7 +88,7 @@ describe("revealInBubbles", () => {
     let box: HTMLElement | undefined;
     const lines = drawn([line(300, 150)], (body) => (box = bubbleBox(100, 100, body)));
     // Act
-    const got = revealInBubbles(lines, "the node 1.1");
+    const got = revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert
     expect([box?.scrollTop, got]).toEqual([200, { top: 100, bottom: 200 }]);
   });
@@ -132,7 +103,7 @@ describe("revealInBubbles", () => {
       return outer;
     });
     // Act
-    const got = revealInBubbles(lines, "the node 1.1");
+    const got = revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert: the inner box moves the line to 190-200, then the outer box to its own bottom, 170-180.
     expect([inner?.scrollTop, outer?.scrollTop, got]).toEqual([40, 20, { top: 170, bottom: 180 }]);
   });
@@ -142,9 +113,50 @@ describe("revealInBubbles", () => {
     const capture = captureLogRecords("debug");
     const lines = drawn([line(250, 20)], (body) => bubbleBox(100, 100, body));
     // Act
-    revealInBubbles(lines, "the node 1.1");
+    revealInBubbles(lines, "the node 1.1", "nearest");
     // Assert
     const record = await forwardedRecord(capture, "feed.node-reveal.bubble-scrolled");
-    expect(record.context).toMatchObject({ what: "the node 1.1", from: 0, to: 70 });
+    expect(record.context).toMatchObject({ what: "the node 1.1", placement: "nearest", from: 0, to: 70 });
+  });
+
+  it("centers the lines in a bubble box that clips them, for a jump", () => {
+    // Arrange: the box shows 100-200, and the node's lines run 250-290.
+    let box: HTMLElement | undefined;
+    const lines = drawn([line(250, 20), line(270, 20)], (body) => (box = bubbleBox(100, 100, body)));
+    // Act
+    const got = revealInBubbles(lines, "the node 1.1", "center");
+    // Assert: midpoint 270 onto the box's 150.
+    expect([box?.scrollTop, got]).toEqual([120, { top: 130, bottom: 170 }]);
+  });
+
+  it("centers lines already in a bubble box's view, for a jump", () => {
+    // Arrange: the lines run 170-190 inside a box showing 100-200.
+    let box: HTMLElement | undefined;
+    const lines = drawn([line(170, 20)], (body) => (box = bubbleBox(100, 100, body)));
+    // Act
+    const got = revealInBubbles(lines, "the node 1.1", "center");
+    // Assert: midpoint 180 onto the box's 150.
+    expect([box?.scrollTop, got]).toEqual([30, { top: 140, bottom: 160 }]);
+  });
+
+  it("puts the head of lines taller than the box at its top, for a jump", () => {
+    // Arrange: the box shows 100-200, and the node's lines run 300-450.
+    let box: HTMLElement | undefined;
+    const lines = drawn([line(300, 150)], (body) => (box = bubbleBox(100, 100, body)));
+    // Act
+    const got = revealInBubbles(lines, "the node 1.1", "center");
+    // Assert
+    expect([box?.scrollTop, got]).toEqual([200, { top: 100, bottom: 200 }]);
+  });
+
+  it("records the placement it scrolled the bubble box for", async () => {
+    // Arrange
+    const capture = captureLogRecords("debug");
+    const lines = drawn([line(250, 20)], (body) => bubbleBox(100, 100, body));
+    // Act
+    revealInBubbles(lines, "the node 1.1", "center");
+    // Assert
+    const record = await forwardedRecord(capture, "feed.node-reveal.bubble-scrolled");
+    expect(record.context).toMatchObject({ what: "the node 1.1", placement: "center", from: 0, to: 110 });
   });
 });

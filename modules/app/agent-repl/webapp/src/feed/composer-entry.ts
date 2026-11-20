@@ -147,7 +147,7 @@ function sameNode(a: BoxedNode | undefined, b: BoxedNode | undefined): boolean {
  * laid out (its row not drawn, or drawn folded away).
  */
 export function composerBoxGeometry(doc: Document, box: HTMLElement): RevealGeometry | null {
-  const span = revealInBubbles(queryAll<HTMLElement>(doc.body, `.${COMPOSER_ENTRY_CLASS}`), "the subtree the composer answers");
+  const span = revealInBubbles(queryAll<HTMLElement>(doc.body, `.${COMPOSER_ENTRY_CLASS}`), "the subtree the composer answers", "nearest");
   if (span === null) return null;
   const view = box.getBoundingClientRect();
   return { boxTop: view.top, boxHeight: view.height, nodeTop: span.top, nodeHeight: span.bottom - span.top };
