@@ -10,6 +10,7 @@ import {
   ROSTER_ARM_CLASS,
   ROSTER_STATUS_CASES,
   armMotion,
+  armWorks,
   glyphName,
   rosterArmMark,
   rosterRowMark,
@@ -327,5 +328,30 @@ describe("a row's mark with its merge-paused marker", () => {
 
   it("refuses the marker on a failed merge", () => {
     expect(() => rosterRowMark("mergeFailed", PAUSED)).toThrow(MalformedView);
+  });
+});
+
+describe("armWorks", () => {
+  const WORKING = ["submitting", "thinking", "vendorSilent", "clearing", "compacting"];
+
+  it.each(ROSTER_STATUS_CASES.map((arm) => ({ arm, want: WORKING.includes(arm) })))("says $arm works: $want", ({ arm, want }) => {
+    // Arrange / Act
+    const works = armWorks(arm);
+
+    // Assert
+    expect(works).toBe(want);
+  });
+
+  // A working arm is one whose row's name breathes in the working red, which
+  // is what a folded subsection's name breathes in.
+  it.each(WORKING)("finds %s breathing in the vocabulary's red", (arm) => {
+    // Arrange
+    const typed = arm as RosterStatusCase;
+
+    // Act
+    const drawn = [armMotion(typed), rosterStatusColor(typed)];
+
+    // Assert
+    expect(drawn).toEqual(["breathes", "red"]);
   });
 });

@@ -6,7 +6,9 @@ import {
   RosterRepositoryViewSchema,
   type RosterRepoSection,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
+import { readFileSync } from "node:fs";
 import {
+  familyRows,
   openKin,
   openRowWorkspaces,
   repoEntries,
@@ -166,9 +168,8 @@ describe("openRowWorkspaces", () => {
     expect(read).toThrow(/an open row names no workspace/);
   });
 
-  it("is the read every slot painter keys rows by", async () => {
+  it("is the read every slot painter keys rows by", () => {
     // Arrange
-    const { readFileSync } = await import("node:fs");
     const source = (file: string): string => readFileSync(new URL(`../../src/sidebar/${file}`, import.meta.url), "utf8");
 
     // Act / Assert
@@ -176,5 +177,53 @@ describe("openRowWorkspaces", () => {
       expect(source(file)).toContain("openRowWorkspaces(");
       expect(source(file)).not.toContain("openKin(");
     }
+  });
+});
+
+describe("familyRows", () => {
+  /** P with child o (itself with grandchild g), then a repo-2 block of x. */
+  const family = () =>
+    withRepositoryBlocks(openRow(row({ id: "p", children: [row({ id: "o", children: [row({ id: "g" })] })] })), [
+      { repo: "repo-2", rows: [row({ id: "x" })] },
+    ]);
+
+  it("answers a row with no kin alone", () => {
+    // Arrange
+    const lone = openRow(row({ id: "p" }));
+
+    // Act
+    const rows = familyRows(lone, "r");
+
+    // Assert
+    expect(rows.map((at) => at.path)).toEqual(["r"]);
+  });
+
+  it("walks the family depth-first, each row before its kin", () => {
+    // Arrange / Act
+    const rows = familyRows(family(), "r");
+
+    // Assert
+    expect(ids(rows)).toEqual(["p", "o", "g", "x"]);
+  });
+
+  it("paths every nested row under its parent's path", () => {
+    // Arrange / Act
+    const rows = familyRows(family(), "r");
+
+    // Assert
+    expect(rows.map((at) => at.path)).toEqual(["r", "r.children[0]", "r.children[0].children[0]", "r.repositoryBlocks[0].rows[0]"]);
+  });
+
+  // THE ONE WALK: every reader of a family's nested rows takes familyRows,
+  // so no hand-rolled recursion over openKin can walk them differently.
+  it.each(["subsections.ts", "keyed-rows.ts", "tab-numbers.ts", "roster.ts", "row.ts"])("leaves %s no recursion of its own over openKin", (file) => {
+    // Arrange
+    const source = readFileSync(new URL(`../../src/sidebar/${file}`, import.meta.url), "utf8");
+
+    // Act
+    const walks = source.match(/openKin\(/g) ?? [];
+
+    // Assert
+    expect(walks).toEqual([]);
   });
 });

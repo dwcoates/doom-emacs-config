@@ -78,10 +78,13 @@ import {
   drawCreateSubsectionControl,
   drawRosterSubsection,
   installArrangeDrag,
+  paintSubsectionWork,
   REPOSITORY_ATTRIBUTE,
   requireDrawnBucket,
   stampBucket,
   SUBSECTION_CLASS,
+  SUBSECTION_HEAD_CLASS,
+  SUBSECTION_LABEL_CLASS,
   subsectionBucket,
   type ArrangeRefs,
 } from "./subsections.js";
@@ -271,7 +274,7 @@ export function createRosterDrawer(rail: RailContext): RosterDrawer {
               remarkKeyedRows(rows, rail.attention);
             });
             kept.wire = section;
-            paintRepoHoldsCurrent(kept.drawn.element, section, sectionPath);
+            paintRepoSection(kept.drawn.element, section, sectionPath);
             kept.scope.remark(rail.attention);
             nextRepos.set(key, kept);
             continue;
@@ -415,7 +418,7 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
   for (const section of [left, right]) {
     // WHETHER A SECTION HOLDS THE CURRENT WORKSPACE moves with every switch
     // between repositories, and the patch repaints it
-    // (`paintRepoHoldsCurrent`), so it is no reason to redraw the section.
+    // (`paintRepoSection`), so it is no reason to redraw the section.
     if (section.fold.case === "expanded") section.fold.value.collapse = { case: undefined };
     section.entries = section.entries.filter((entry) => entry.entry.case === "subsection");
     for (const entry of section.entries) {
@@ -430,12 +433,14 @@ function sameButRows(a: RosterRepoSection, b: RosterRepoSection): boolean {
 }
 
 /**
- * Say on a drawn repository section ELEMENT, and on each of its subsections,
- * whether the wire U says it holds the current workspace. A drawn section
+ * Paint on a drawn repository section ELEMENT what the wire U changes on the
+ * boxes a row patch keeps: on the section and each of its subsections,
+ * whether it holds the current workspace, and on each subsection's name the
+ * breath its working rows give it (`paintSubsectionWork`). A drawn section
  * whose subsections differ from U's is a broken invariant: a section whose
  * subsections changed is drawn anew, never patched.
  */
-export function paintRepoHoldsCurrent(element: HTMLElement, u: RosterRepoSection, path: string): void {
+export function paintRepoSection(element: HTMLElement, u: RosterRepoSection, path: string): void {
   paintHoldsCurrent(element, drawRosterHoldsCurrent(u.fold, `${path}.fold`));
   const drawn = queryAll<HTMLElement>(element, `.${SUBSECTION_CLASS}`);
   const wire = sectionSubsections(u, path);
@@ -445,6 +450,9 @@ export function paintRepoHoldsCurrent(element: HTMLElement, u: RosterRepoSection
   wire.forEach(({ subsection: sub, path: subPath }, index) => {
     requireDrawnBucket(drawn[index], subsectionBucket(sub, subPath), subPath);
     paintHoldsCurrent(drawn[index], drawRosterHoldsCurrent(sub.fold, `${subPath}.fold`));
+    const label = drawn[index].querySelector<HTMLElement>(`:scope > .${SUBSECTION_HEAD_CLASS} > .${SUBSECTION_LABEL_CLASS}`);
+    if (label === null) throw new Error(`invariant: ${subPath}: a drawn subsection has its name`);
+    paintSubsectionWork(label, sub, subPath);
   });
 }
 
@@ -607,7 +615,7 @@ export function drawRosterRepoSection(
     },
   );
   section.setAttribute(REPOSITORY_ATTRIBUTE, key.id);
-  paintRepoHoldsCurrent(section, u, path);
+  paintRepoSection(section, u, path);
   return section;
 }
 

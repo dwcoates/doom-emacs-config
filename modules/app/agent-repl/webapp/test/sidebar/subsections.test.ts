@@ -9,11 +9,18 @@ import { disposeWorkspaceRoster, drawWorkspaceRoster } from "../../src/sidebar/r
 import {
   bucketOf,
   familyTop,
+  paintSubsectionWork,
   sameBucket,
   showsNoRows,
   stampBucket,
   ZERO_COUNT_ATTRIBUTE,
+  workingTone,
+  WORKING_TONE_ATTRIBUTE,
 } from "../../src/sidebar/subsections.js";
+import { createRosterDrawer } from "../../src/sidebar/roster.js";
+import { NAME_INK_CLASS, NAME_INK_TEXT_ATTRIBUTE } from "../../src/sidebar/name-ink.js";
+import { openRow } from "../roster-families.js";
+import { RosterOpenRowsSchema, type RosterRow, type RosterSubsection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   SetWorkspaceOneShotResponseSchema,
   type SetWorkspaceOneShotRequest,
@@ -1354,5 +1361,189 @@ describe("a list's bucket", () => {
     [{ case: "named" as const, id: "a" }, { case: "none" as const }, false],
   ])("compares %j and %j: %s", (a, b, same) => {
     expect(sameBucket(a, b)).toBe(same);
+  });
+});
+
+describe("a folded subsection whose workspaces work", () => {
+  /** A row standing on ARM. */
+  const on = (id: string, arm: string, children: RosterRow[] = []) =>
+    row({ id, status: { case: arm, value: {} } as Parameters<typeof row>[0]["status"], children });
+  /** One repository holding subsection sub-1, folded when COLLAPSED, over ROWS. */
+  const sectionOver = (rows: RosterRow[], collapsed = true) =>
+    roster({ repos: [repoSection({ id: "repo-1", subsections: [{ id: "sub-1", label: "later", rows, collapsed }] })] });
+  /** The subsection sub-1 as drawn in ROOT. */
+  const subOf = (root: ParentNode) => root.querySelector("[data-subsection='sub-1'].sb-subsection") as HTMLElement;
+  const labelOf = (root: ParentNode) => subOf(root).querySelector(".sb-subsection-label") as HTMLElement;
+  /** The wire subsection sub-1 over ROWS. */
+  const wireOver = (rows: RosterRow[]): RosterSubsection => {
+    const entry = repoSection({ id: "repo-1", subsections: [{ id: "sub-1", label: "later", rows, collapsed: true }] }).entries[0].entry;
+    if (entry.case !== "subsection") throw new Error("harness: the entry is the subsection");
+    return entry.value;
+  };
+
+  describe("workingTone", () => {
+    it.each(["submitting", "thinking", "vendorSilent", "clearing", "compacting"])("answers the red tone for a row %s", (arm) => {
+      // Arrange
+      const rows = create(RosterOpenRowsSchema, { rows: [openRow(on("a", "ready")), openRow(on("b", arm))] });
+
+      // Act
+      const tone = workingTone(rows, "rows");
+
+      // Assert
+      expect(tone).toBe("tone-red");
+    });
+
+    it.each(["ready", "idleAsync", "merging", "permission", "init"])("answers none when the only row is %s", (arm) => {
+      // Arrange
+      const rows = create(RosterOpenRowsSchema, { rows: [openRow(on("a", arm))] });
+
+      // Act
+      const tone = workingTone(rows, "rows");
+
+      // Assert
+      expect(tone).toBeNull();
+    });
+
+    it("answers none for a subsection with no rows", () => {
+      // Arrange
+      const rows = create(RosterOpenRowsSchema, { rows: [] });
+
+      // Act
+      const tone = workingTone(rows, "rows");
+
+      // Assert
+      expect(tone).toBeNull();
+    });
+
+    it("finds a working child nested under a still parent", () => {
+      // Arrange
+      const rows = create(RosterOpenRowsSchema, { rows: [openRow(on("p", "ready", [on("c", "thinking")]))] });
+
+      // Act
+      const tone = workingTone(rows, "rows");
+
+      // Assert
+      expect(tone).toBe("tone-red");
+    });
+
+    it("finds a working row in a parent's repository block", () => {
+      // Arrange
+      const parent = withRepositoryBlocks(openRow(on("p", "ready")), [{ repo: "other", rows: [on("c", "compacting")] }]);
+      const rows = create(RosterOpenRowsSchema, { rows: [parent] });
+
+      // Act
+      const tone = workingTone(rows, "rows");
+
+      // Assert
+      expect(tone).toBe("tone-red");
+    });
+
+    it("refuses a row with no status", () => {
+      // Arrange
+      const bad = openRow(on("a", "ready"));
+      bad.row!.status = { case: undefined };
+      const rows = create(RosterOpenRowsSchema, { rows: [bad] });
+
+      // Act / Assert
+      expect(() => workingTone(rows, "rows")).toThrow(MalformedView);
+    });
+  });
+
+  describe("the drawn name", () => {
+    it("holds the name at the working tone and breathes it, its count untouched", () => {
+      // Arrange / Act
+      const drawn = drawWorkspaceRoster(sectionOver([on("a", "thinking")]), sidebarContext());
+
+      // Assert
+      const label = labelOf(drawn);
+      const count = subOf(drawn).querySelector(".sb-count") as HTMLElement;
+      expect([
+        ["tinted", "tone-red", "breathes"].every((c) => label.classList.contains(c)),
+        label.querySelector(`:scope > .${NAME_INK_CLASS}`)?.getAttribute(NAME_INK_TEXT_ATTRIBUTE),
+        label.textContent,
+        count.className,
+      ]).toEqual([true, "later", "later", "sb-count"]);
+    });
+
+    it("draws a still name when no workspace works", () => {
+      // Arrange / Act
+      const drawn = drawWorkspaceRoster(sectionOver([on("a", "ready")]), sidebarContext());
+
+      // Assert
+      const label = labelOf(drawn);
+      expect([label.className, label.children.length, label.hasAttribute(WORKING_TONE_ATTRIBUTE)]).toEqual(["sb-subsection-label", 0, false]);
+    });
+
+    // jsdom resolves no `-webkit-text-fill-color`, so the hidden own text is
+    // pinned by the stylesheet's shared rules (`styles.test.ts`).
+    it.each([
+      { collapsed: true, color: "var(--name-dark)" },
+      { collapsed: false, color: "var(--repo-head-expanded)" },
+    ])("styles a working subsection's name collapsed=$collapsed in $color", ({ collapsed, color }) => {
+      // Arrange
+      const drawn = drawWorkspaceRoster(sectionOver([on("a", "thinking")], collapsed), sidebarContext());
+
+      // Act / Assert
+      inRail(drawn, (rail) => {
+        const label = labelOf(rail);
+        expect([cascadedValue(label, "color"), cascadedValue(label, "--name-tone")]).toEqual([color, "var(--err)"]);
+      });
+    });
+  });
+
+  describe("paintSubsectionWork", () => {
+    it("stills a breathing name once no workspace works", () => {
+      // Arrange
+      const drawn = drawWorkspaceRoster(sectionOver([on("a", "thinking")]), sidebarContext());
+      const label = labelOf(drawn);
+
+      // Act
+      paintSubsectionWork(label, wireOver([on("a", "ready")]), "sub");
+
+      // Assert
+      expect([label.className, label.children.length, label.hasAttribute(WORKING_TONE_ATTRIBUTE)]).toEqual(["sb-subsection-label", 0, false]);
+    });
+
+    it("keeps the ink box of a name still breathing in the same tone", () => {
+      // Arrange
+      const drawn = drawWorkspaceRoster(sectionOver([on("a", "thinking")]), sidebarContext());
+      const label = labelOf(drawn);
+      const ink = label.querySelector(`.${NAME_INK_CLASS}`);
+
+      // Act
+      paintSubsectionWork(label, wireOver([on("a", "compacting")]), "sub");
+
+      // Assert
+      expect([label.querySelector(`.${NAME_INK_CLASS}`) === ink, label.children.length]).toEqual([true, 1]);
+    });
+
+    it("breathes a still name once a workspace works", () => {
+      // Arrange
+      const drawn = drawWorkspaceRoster(sectionOver([on("a", "ready")]), sidebarContext());
+      const label = labelOf(drawn);
+
+      // Act
+      paintSubsectionWork(label, wireOver([on("a", "submitting")]), "sub");
+
+      // Assert
+      expect([label.getAttribute(WORKING_TONE_ATTRIBUTE), label.children.length]).toEqual(["tone-red", 1]);
+    });
+  });
+
+  // A push that changed only rows keeps the section (`roster.ts`'s row
+  // patch), and the patch repaints the header's breath.
+  it.each([
+    { name: "breathes a kept header once its row starts working", from: "ready", to: "thinking", want: true },
+    { name: "stills a kept header once its row stops working", from: "thinking", to: "ready", want: false },
+  ])("$name", ({ from, to, want }) => {
+    // Arrange
+    const drawer = createRosterDrawer(sidebarContext());
+    const section = drawer.draw(sectionOver([on("a", from)])).querySelector(".repo-section");
+
+    // Act
+    const after = drawer.draw(sectionOver([on("a", to)]));
+
+    // Assert
+    expect([after.querySelector(".repo-section") === section, labelOf(after).classList.contains("breathes")]).toEqual([true, want]);
   });
 });

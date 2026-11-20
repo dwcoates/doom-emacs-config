@@ -7115,19 +7115,23 @@ bubble-body.bubble-body { display: block; }
    names the color a tinted name starts from (src/sidebar/name-tint.ts). A
    tone class on the NAME itself outranks the row's: a sync merge holds the
    name at the merge's purple whatever the row's arm. */
-#ws-sidebar .ws.tone-blue, #ws-sidebar .row .name.tone-blue { --name-tone: var(--init); }
-#ws-sidebar .ws.tone-purple, #ws-sidebar .row .name.tone-purple { --name-tone: var(--blocked); }
-#ws-sidebar .ws.tone-red, #ws-sidebar .row .name.tone-red { --name-tone: var(--err); }
-#ws-sidebar .ws.tone-turquoise, #ws-sidebar .row .name.tone-turquoise { --name-tone: var(--turquoise); }
-#ws-sidebar .ws.tone-yellow, #ws-sidebar .row .name.tone-yellow { --name-tone: var(--async); }
-#ws-sidebar .ws.tone-green, #ws-sidebar .row .name.tone-green { --name-tone: var(--ok); }
+#ws-sidebar .ws.tone-blue, #ws-sidebar .row .name.tone-blue, #ws-sidebar .sb-subsection-label.tone-blue { --name-tone: var(--init); }
+#ws-sidebar .ws.tone-purple, #ws-sidebar .row .name.tone-purple, #ws-sidebar .sb-subsection-label.tone-purple { --name-tone: var(--blocked); }
+#ws-sidebar .ws.tone-red, #ws-sidebar .row .name.tone-red, #ws-sidebar .sb-subsection-label.tone-red { --name-tone: var(--err); }
+#ws-sidebar .ws.tone-turquoise, #ws-sidebar .row .name.tone-turquoise, #ws-sidebar .sb-subsection-label.tone-turquoise { --name-tone: var(--turquoise); }
+#ws-sidebar .ws.tone-yellow, #ws-sidebar .row .name.tone-yellow, #ws-sidebar .sb-subsection-label.tone-yellow { --name-tone: var(--async); }
+#ws-sidebar .ws.tone-green, #ws-sidebar .row .name.tone-green, #ws-sidebar .sb-subsection-label.tone-green { --name-tone: var(--ok); }
 /* A TURN RUNNING HOLDS THE NAME AT ITS TONE, a turn ended FADES it from the
    tone to the name's resting grey after a static hold (src/sidebar/name-tint.ts
    sets `--name-fade` from proto/vocab/name-fade.json, hold plus fade, and the delay to minus the time since the turn ended). The
    resting grey is whichever `--name-rest` the name's own state declares
    above. A viewed name never fades: it draws at the viewed grey at once. A
-   breathing name's loop is declared after and wins. */
-#ws-sidebar .row .name.tinted {
+   breathing name's loop is declared after and wins. A FOLDED SUBSECTION'S
+   NAME is held and breathes the same way while one of its workspaces works
+   (src/sidebar/subsections.ts paintSubsectionWork), and only while it is
+   folded: its name carries the classes either way. */
+#ws-sidebar .row .name.tinted,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label.tinted {
   --name-rest: var(--name-tone);
   --name-dark: color-mix(in srgb, var(--name-tone) 74%, var(--bg));
   --name-bright: color-mix(in srgb, var(--name-tone) 86%, var(--fg));
@@ -7228,7 +7232,8 @@ bubble-body.bubble-body { display: block; }
 /* A COLORED NAME BREATHES BOTH WAYS (owner request, 2026-10-29): evenly darker
    and brighter about its tone, with a shallower swing than the grey names'
    brightening alone. */
-#ws-sidebar .row .name.tinted.breathes { color: var(--name-dark); }
+#ws-sidebar .row .name.tinted.breathes,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label.tinted.breathes { color: var(--name-dark); }
 /* THE INK BOX (src/sidebar/name-ink.ts): the name's animated copies, over the
    name's own box and in its font, each cut off with the same ellipsis, never
    catching the pointer. The name's own text, its ellipsis and its strike line
@@ -7237,12 +7242,14 @@ bubble-body.bubble-body { display: block; }
    themselves, since a decoration never reaches an absolutely positioned box. */
 #ws-sidebar .row .name.breathes,
 #ws-sidebar .row .name.reviving,
-#ws-sidebar .row .name.viewing {
+#ws-sidebar .row .name.viewing,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label.breathes {
   position: relative;
   -webkit-text-fill-color: transparent;
   text-decoration-color: transparent;
 }
-#ws-sidebar .row .name > .name-ink {
+#ws-sidebar .row .name > .name-ink,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label > .name-ink {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -7255,7 +7262,9 @@ bubble-body.bubble-body { display: block; }
   text-decoration-thickness: inherit;
 }
 #ws-sidebar .row .name > .name-ink::before,
-#ws-sidebar .row .name > .name-ink::after {
+#ws-sidebar .row .name > .name-ink::after,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label > .name-ink::before,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label > .name-ink::after {
   content: attr(data-name);
   position: absolute;
   top: 0;
@@ -7271,17 +7280,21 @@ bubble-body.bubble-body { display: block; }
   text-decoration-thickness: inherit;
   text-decoration-color: currentColor;
 }
-#ws-sidebar .row .name > .name-ink::after { display: none; }
-#ws-sidebar .row .name.breathes > .name-ink::before {
+#ws-sidebar .row .name > .name-ink::after,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label > .name-ink::after { display: none; }
+#ws-sidebar .row .name.breathes > .name-ink::before,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label.breathes > .name-ink::before {
   animation: ws-pulse-rest var(--ws-mark-cycle) ease-in-out infinite;
 }
-#ws-sidebar .row .name.breathes > .name-ink::after {
+#ws-sidebar .row .name.breathes > .name-ink::after,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label.breathes > .name-ink::after {
   display: block;
   color: var(--name-peak);
   mix-blend-mode: plus-lighter;
   animation: ws-pulse var(--ws-mark-cycle) ease-in-out infinite;
 }
-#ws-sidebar .row .name.tinted.breathes > .name-ink::after { color: var(--name-bright); }
+#ws-sidebar .row .name.tinted.breathes > .name-ink::after,
+#ws-sidebar .sb-subsection.folded > .sb-subsection-head > .sb-subsection-label.tinted.breathes > .name-ink::after { color: var(--name-bright); }
 /* THE NAME RECEDES OVER THE VIEW DWELL (owner request, 2026-11-19;
    src/sidebar/view-dwell.ts): the copy in the name's own colour, any
    ended-turn fade included, fades out as the copy in the viewed grey fades
