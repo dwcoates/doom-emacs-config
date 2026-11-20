@@ -6,8 +6,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"agentrepl/protohelpers/rosterwalk"
 	frontendv1 "agentrepl/proto/frontend/v1"
+	"agentrepl/protohelpers/rosterwalk"
 
 	"agent-repld/internal/ids"
 	"agent-repld/internal/resolve/sidebar"

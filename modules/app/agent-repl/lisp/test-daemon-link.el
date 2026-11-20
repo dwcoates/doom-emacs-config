@@ -581,16 +581,23 @@ gate is the point, so it is exercised here rather than bypassed."
       (should (and host roster (car asks) (cadr asks))))))
 
 (ert-deftest agent-repl-test-link-every-daemon-wide-call-asks-newest ()
-  "The latency and focus reports ask the one newest question, never the live daemon."
+  "The latency, focus and recency reach reports ask the one newest question, never the live daemon.
+The focus and recency reach reports ask it through their shared dispatch,
+`agent-repl-serial-send-to-newest', which must ask it itself."
   ;; Arrange
   (let ((latency (agent-repl-test-link--defun-form "latency-report.el" 'agent-repl-latency-report-flush))
-        (focus (agent-repl-test-link--defun-form "notifications.el" 'agent-repl--focus-report)))
+        (focus (agent-repl-test-link--defun-form "notifications.el" 'agent-repl--focus-report))
+        (reach (agent-repl-test-link--defun-form "recency-reach.el" 'agent-repl--recency-reach-report))
+        (dispatch (agent-repl-test-link--defun-form "core.el" 'agent-repl-serial-send-to-newest)))
     ;; Act
-    (let ((asked (mapcar #'flatten-tree (list latency focus))))
+    (let ((asks-newest (lambda (tree)
+                         (or (memq 'agent-repl-link-newest tree)
+                             (memq 'agent-repl-serial-send-to-newest tree)))))
       ;; Assert
-      (should (and latency focus))
-      (dolist (tree asked)
-        (should (memq 'agent-repl-link-newest tree))
+      (should (and latency focus reach dispatch))
+      (should (memq 'agent-repl-link-newest (flatten-tree dispatch)))
+      (dolist (tree (mapcar #'flatten-tree (list latency focus reach dispatch)))
+        (should (funcall asks-newest tree))
         (should-not (memq 'agent-repl-link-live tree))))))
 
 (ert-deftest agent-repl-test-link-planned-end-tells-the-down-hook-it-was-planned ()
