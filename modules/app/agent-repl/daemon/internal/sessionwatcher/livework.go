@@ -178,7 +178,7 @@ func (w *watcher) dropAgentWatchLocked(key string, entry *agentWatch) string {
 	if entry.stream != nil {
 		stream := entry.stream
 		entry.stream = nil
-		inflight.Go(func() { stream.Close() })
+		inflight.ForWorkspace(string(w.ws)).Go(func() { stream.Close() })
 	}
 	w.log.Debug("daemon.sessionwatcher.reap", "a subagent watch was reaped", dlog.Context{"agent_id": key, "watch": state})
 	return state
@@ -193,7 +193,7 @@ func (w *watcher) dropShellWatchLocked(key string, entry *shellWatch) string {
 	if entry.stream != nil {
 		stream := entry.stream
 		entry.stream = nil
-		inflight.Go(func() { stream.Close() })
+		inflight.ForWorkspace(string(w.ws)).Go(func() { stream.Close() })
 	}
 	w.log.Debug("daemon.sessionwatcher.reap", "a shell watch was reaped", dlog.Context{"work_id": key, "watch": state})
 	return state

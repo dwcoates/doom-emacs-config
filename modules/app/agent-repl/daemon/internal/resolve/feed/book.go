@@ -592,7 +592,7 @@ func (r *resolver) kickWaitingFeed(s *wsState, f *feedState, addr feedid.Feed, w
 	r.logger(s.id).Info("daemon.feed.history_kick", why,
 		dlog.Context{"feed": f.key, "agent": agent.GetValue()})
 	ws := s.id
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), historyKickBound)
 		defer cancel()
 		if _, err := r.loadPushed(ctx, ws, addr, true); err != nil {

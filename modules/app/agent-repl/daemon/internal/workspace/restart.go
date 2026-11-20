@@ -380,7 +380,7 @@ func (v *verbs) OnSignedIn(ws ids.WorkspaceID) {
 		return
 	}
 	v.signInRestarts.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		defer v.signInRestarts.Done()
 		if err := v.Restart(context.Background(), ws); err != nil {
 			log.Error(opRestart, "the start retried after a sign-in failed", dlog.Context{"cause": err.Error()})

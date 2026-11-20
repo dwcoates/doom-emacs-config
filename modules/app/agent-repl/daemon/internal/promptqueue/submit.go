@@ -504,7 +504,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 	}
 
 	q.reviving.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(ws)).Go(func() {
 		defer q.reviving.Done()
 		defer func() {
 			if cause == revivalRelaunch {

@@ -151,7 +151,7 @@ func (q *queue) judgedAgainst(ctx context.Context, sub Submission, ahead *aheadK
 func (q *queue) startJudge(ctx context.Context, sub Submission, running ids.TurnID, ahead aheadKind, aheadHeld wsm.HeldPrompt, log dlog.Logger) {
 	epoch := q.contentEpoch(sub.WS, sub.Turn)
 	q.classifying.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(sub.WS)).Go(func() {
 		defer q.classifying.Done()
 		if ahead == aheadQueued {
 			q.judgeQueued(context.WithoutCancel(ctx), sub, aheadHeld, epoch, log)

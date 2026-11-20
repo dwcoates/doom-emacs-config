@@ -7,6 +7,7 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+	workspacev1 "agentrepl/proto/workspace/v1"
 
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/inflight"
@@ -16,13 +17,20 @@ func TestAwaitIdle(t *testing.T) {
 	cases := []struct {
 		name        string
 		testBarrier bool
-		// busy leaves work in flight, and cancels the request's context.
-		busy    bool
+		// busy leaves work in flight, and cancels the request's context;
+		// busyIn, when set, begins it as that workspace's.
+		busy   bool
+		busyIn string
+		// scope names the workspaces the barrier asks about.
+		scope   []string
 		wantArm string
 	}{
 		{name: "a daemon no harness started refuses it", wantArm: "not_testing"},
 		{name: "an idle daemon answers with its streams", testBarrier: true, wantArm: "success"},
 		{name: "a caller that gives up while work is in flight is told so", testBarrier: true, busy: true, wantArm: "still_busy"},
+		{name: "a barrier scoped to a workspace answers past another workspace's work", testBarrier: true, busy: true, busyIn: "other", scope: []string{"mine"}, wantArm: "success"},
+		{name: "a barrier scoped to a workspace waits for its own work", testBarrier: true, busy: true, busyIn: "mine", scope: []string{"mine"}, wantArm: "still_busy"},
+		{name: "a barrier scoped to a workspace waits for work no workspace owns", testBarrier: true, busy: true, scope: []string{"mine"}, wantArm: "still_busy"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,12 +41,20 @@ func TestAwaitIdle(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			if tc.busy {
-				defer tracker.Begin()()
+				if tc.busyIn != "" {
+					defer tracker.Workspace(tc.busyIn).Begin()()
+				} else {
+					defer tracker.Begin()()
+				}
 				cancel()
+			}
+			req := &agentreplv1.AwaitIdleRequest{BoundMs: 5000}
+			for _, ws := range tc.scope {
+				req.Workspaces = append(req.Workspaces, &workspacev1.WorkspaceRef{Id: ws})
 			}
 
 			// Act
-			resp, err := s.AwaitIdle(ctx, connect.NewRequest(&agentreplv1.AwaitIdleRequest{BoundMs: 5000}))
+			resp, err := s.AwaitIdle(ctx, connect.NewRequest(req))
 
 			// Assert
 			if err != nil {

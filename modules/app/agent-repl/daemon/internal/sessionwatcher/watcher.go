@@ -1627,7 +1627,7 @@ func (w *watcher) armPacedReopenLocked() {
 		return
 	}
 	gen := w.gen
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(w.ws)).Go(func() {
 		select {
 		case <-w.ctx.Done():
 			return
@@ -1674,7 +1674,7 @@ func (w *watcher) reopenLocked(reason string) {
 	// The generation bump above is what makes the detached streams' goroutines
 	// stale, so nothing waits on the close completing.
 	streams := w.takeStreamsLocked()
-	inflight.Go(func() { closeStreams(streams) })
+	inflight.ForWorkspace(string(w.ws)).Go(func() { closeStreams(streams) })
 	w.log.Warn("daemon.sessionwatcher.reopen", "re-opening the session's watches", dlog.Context{
 		"reason": reason, "agents": len(w.agents), "shells": len(w.shells),
 	})
@@ -1819,7 +1819,7 @@ func (w *watcher) openSessionLocked() {
 		return
 	}
 	w.sessionOpening = t
-	inflight.Go(func() { w.openSession(t) })
+	inflight.ForWorkspace(string(w.ws)).Go(func() { w.openSession(t) })
 }
 
 // openSession makes one decided WatchSession open OFF mu and installs it.
@@ -1909,7 +1909,7 @@ func (w *watcher) openAgentStreamLocked(a *agentWatch) {
 		})
 	}
 	a.opening = t
-	inflight.Go(func() { w.openAgent(t, a, req) })
+	inflight.ForWorkspace(string(w.ws)).Go(func() { w.openAgent(t, a, req) })
 }
 
 // watchRequest is one watch's open: TARGET (nil for the main agent), opening
@@ -2002,7 +2002,7 @@ func (w *watcher) openShellStreamLocked(s *shellWatch) bool {
 		return false
 	}
 	s.opening = t
-	inflight.Go(func() { w.openShell(t, s) })
+	inflight.ForWorkspace(string(w.ws)).Go(func() { w.openShell(t, s) })
 	return true
 }
 
@@ -2645,7 +2645,7 @@ func (w *watcher) flushTurnEnds() {
 // stream goroutine, which flushes inline the moment it drops mu.
 func (w *watcher) flushTurnEndsAsync() {
 	w.dispatching.Add(1)
-	inflight.Go(func() {
+	inflight.ForWorkspace(string(w.ws)).Go(func() {
 		defer w.dispatching.Done()
 		w.flushTurnEnds()
 	})

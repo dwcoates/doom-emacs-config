@@ -678,3 +678,45 @@ func TestAViewRetiresItsWorkspacesWhenItsTestEnds(t *testing.T) {
 		})
 	}
 }
+
+// barrierClient is retiringClient that answers the barrier, recording each
+// request's workspaces.
+type barrierClient struct {
+	retiringClient
+	asked *[][]string
+}
+
+func (c barrierClient) AwaitIdle(_ context.Context, req *connect.Request[agentreplv1.AwaitIdleRequest]) (*connect.Response[agentreplv1.AwaitIdleResponse], error) {
+	var ids []string
+	for _, ws := range req.Msg.GetWorkspaces() {
+		ids = append(ids, ws.GetId())
+	}
+	*c.asked = append(*c.asked, ids)
+	return connect.NewResponse(&agentreplv1.AwaitIdleResponse{Result: &agentreplv1.AwaitIdleResponse_Success{Success: &agentreplv1.AwaitIdleSuccess{}}}), nil
+}
+
+func TestTheBarrierAsksAboutAViewsOwnWorkspacesOnly(t *testing.T) {
+	// Arrange: a view registered two workspaces.
+	owner := newOwnerForViews(t, t)
+	d1, d2 := t.TempDir(), t.TempDir()
+	var calls []string
+	var asked [][]string
+	owner.client = barrierClient{retiringClient: retiringClient{
+		refs:  map[string]*workspacev1.WorkspaceRef{d1: {Id: "w1", Dir: d1}, d2: {Id: "w2", Dir: d2}},
+		calls: &calls,
+	}, asked: &asked}
+	view := owner.View(NewRecordingTB(t, "TestBarrier"))
+	Register(t, view, d1)
+	Register(t, view, d2)
+
+	// Act
+	view.AwaitIdle()
+	owner.AwaitIdle()
+
+	// Assert: the view names its slice; the owner names nothing, so it waits
+	// for everything.
+	want := [][]string{{"w1", "w2"}, nil}
+	if !reflect.DeepEqual(asked, want) {
+		t.Fatalf("barrier scopes = %v, want %v", asked, want)
+	}
+}
