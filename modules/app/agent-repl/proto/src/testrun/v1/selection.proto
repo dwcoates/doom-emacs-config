@@ -56,6 +56,14 @@ message TestRunRequest {
   // planner refuses fails its dry run (2026-11-02: an atomic unit's refusal
   // passed every dry run and failed only the real one).
   bool plan_only = 6;
+  // Link every Go test binary and every program the run builds with its
+  // DWARF debug information. A run otherwise links them without it
+  // (-ldflags=-w), which costs about a fifth less link CPU; stack traces and
+  // a failure's file:line come from the binary's line table, which both keep,
+  // so only a debugger attached to a run's binary needs this. It is a
+  // temporary debugging measure, never a standing setting: it changes no
+  // verdict, so the run reuses and records passes as any other run does.
+  bool debug_info = 7;
 }
 
 // One target and the tests within it to run.
