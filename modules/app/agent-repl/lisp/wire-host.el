@@ -2746,6 +2746,105 @@ THE ARM IS THE REFUSAL, so an unset cause is a contract breach."
       '((success :success agent-repl-wire-decode-list-slash-commands-success)
         (error :error agent-repl-wire-decode-list-slash-commands-error))))))
 
+;;;; ---- ListSlackChannels ----
+
+(defun agent-repl-wire-encode-list-slack-channels-request (&optional _request)
+  "Encode the empty ListSlackChannelsRequest.
+The channels are the user's own, not a workspace's, so nothing is named."
+  (agent-repl-wire--encoded "ListSlackChannelsRequest" nil))
+
+(defun agent-repl-wire-decode-slack-channel-public (value)
+  "Decode VALUE as the empty message `SlackChannelPublic'."
+  (agent-repl-wire--decode-empty "SlackChannelPublic" value))
+
+(defun agent-repl-wire-decode-slack-channel-private (value)
+  "Decode VALUE as the empty message `SlackChannelPrivate'."
+  (agent-repl-wire--decode-empty "SlackChannelPrivate" value))
+
+(defun agent-repl-wire-decode-slack-channel (value)
+  "Decode VALUE as `SlackChannel', a plist (:id :name :visibility :purpose).
+NAME is the channel's name WITHOUT its `#'; VISIBILITY is the oneof plist
+whose arm is `:public-channel' or `:private-channel'; PURPOSE is nil when
+the channel states none."
+  (let* ((message "SlackChannel")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "SlackChannel" object
+                                 '(id name publicChannel privateChannel purpose))
+    (let ((name (agent-repl-wire--decode-string message 'name object)))
+      (when (string-empty-p name)
+        (agent-repl-wire--fail message 'name "a channel name is never empty"))
+      (agent-repl-wire--decoded
+       message
+       (list :id (agent-repl-wire--decode-string message 'id object)
+             :name name
+             :visibility (agent-repl-wire--decode-oneof
+                          message 'visibility object
+                          '((publicChannel :public-channel agent-repl-wire-decode-slack-channel-public)
+                            (privateChannel :private-channel agent-repl-wire-decode-slack-channel-private)))
+             :purpose (agent-repl-wire--decode-optional-string message 'purpose object))))))
+
+(defun agent-repl-wire-decode-list-slack-channels-listed (value)
+  "Decode VALUE as `ListSlackChannelsListed', a plist (:channels LIST)."
+  (let* ((message "ListSlackChannelsListed")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ListSlackChannelsListed" object '(channels))
+    (agent-repl-wire--decoded
+     message
+     (list :channels (agent-repl-wire--decode-repeated
+                      message 'channels object #'agent-repl-wire-decode-slack-channel)))))
+
+(defun agent-repl-wire-decode-list-slack-channels-pending (value)
+  "Decode VALUE as the empty message `ListSlackChannelsPending'.
+The daemon's first read of the channels has not answered yet."
+  (agent-repl-wire--decode-empty "ListSlackChannelsPending" value))
+
+(defun agent-repl-wire-decode-list-slack-channels-success (value)
+  "Decode VALUE as `ListSlackChannelsSuccess', the `listing' oneof plist.
+PENDING IS AN ANSWER: it arrives inside success, never as an error."
+  (let* ((message "ListSlackChannelsSuccess")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ListSlackChannelsSuccess" object '(listed pending))
+    (agent-repl-wire--decoded
+     message
+     (agent-repl-wire--decode-oneof
+      message 'listing object
+      '((listed :listed agent-repl-wire-decode-list-slack-channels-listed)
+        (pending :pending agent-repl-wire-decode-list-slack-channels-pending))))))
+
+(defun agent-repl-wire-decode-list-slack-channels-read-failed (value)
+  "Decode VALUE as `ListSlackChannelsReadFailed', a plist (:detail TEXT)."
+  (let* ((message "ListSlackChannelsReadFailed")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ListSlackChannelsReadFailed" object '(detail))
+    (agent-repl-wire--decoded
+     message
+     (list :detail (agent-repl-wire--decode-string message 'detail object)))))
+
+(defun agent-repl-wire-decode-list-slack-channels-error (value)
+  "Decode VALUE as `ListSlackChannelsError', a plist (:cause ONEOF).
+THE ARM IS THE CAUSE, so an unset cause is a contract breach."
+  (let* ((message "ListSlackChannelsError")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ListSlackChannelsError" object '(readFailed))
+    (agent-repl-wire--decoded
+     message
+     (list :cause
+           (agent-repl-wire--decode-oneof
+            message 'cause object
+            '((readFailed :read-failed agent-repl-wire-decode-list-slack-channels-read-failed)))))))
+
+(defun agent-repl-wire-decode-list-slack-channels-response (value)
+  "Decode VALUE as `ListSlackChannelsResponse'.  THE ARM IS THE OUTCOME."
+  (let* ((message "ListSlackChannelsResponse")
+         (object (agent-repl-wire--object message value)))
+    (agent-repl-wire--check-keys "ListSlackChannelsResponse" object '(success error))
+    (agent-repl-wire--decoded
+     message
+     (agent-repl-wire--decode-oneof
+      message 'result object
+      '((success :success agent-repl-wire-decode-list-slack-channels-success)
+        (error :error agent-repl-wire-decode-list-slack-channels-error))))))
+
 (provide 'wire-host)
 
 ;;; wire-host.el ends here

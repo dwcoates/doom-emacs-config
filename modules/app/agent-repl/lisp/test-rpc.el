@@ -173,7 +173,10 @@ would abort the very branch a test is asserting."
      agent-repl-wire-decode-session-health-response)
     ("ListSlashCommands" agent-repl-rpc-list-slash-commands
      agent-repl-wire-encode-list-slash-commands-request
-     agent-repl-wire-decode-list-slash-commands-response))
+     agent-repl-wire-decode-list-slash-commands-response)
+    ("ListSlackChannels" agent-repl-rpc-list-slack-channels
+     agent-repl-wire-encode-list-slack-channels-request
+     agent-repl-wire-decode-list-slack-channels-response))
   "Table of `(METHOD ASYNC-FN ENCODER DECODER)' for every unary rpc Emacs calls.
 This IS the surface `rpc.el' owes the rest of the elisp side; a verb
 missing here or there is a broken seam.")

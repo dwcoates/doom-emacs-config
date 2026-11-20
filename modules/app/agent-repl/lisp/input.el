@@ -130,6 +130,8 @@
 (declare-function agent-repl--command-completion-on-change "command-completion" (beg end len))
 (declare-function agent-repl--workspace-completion-on-change "workspace-completion" (beg end len))
 (declare-function agent-repl-workspace-completion-at-point "workspace-completion" ())
+(declare-function agent-repl-slack-channel-completion-at-point "slack-channel-completion" ())
+(declare-function agent-repl--slack-channel-completion-on-change "slack-channel-completion" (beg end len))
 (declare-function agent-repl-host-composer-gate "agent-repl-host" (ws))
 (declare-function agent-repl-host-standing-ask "agent-repl-host" (ws))
 (declare-function agent-repl-rpc-update-question-draft "agent-repl-rpc" (conn request &rest keys))
@@ -454,6 +456,10 @@ nothing, since the transient it raised lapses on its own."
   ;; and a known one is marked purple (command-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-command-completion-at-point nil t)
   (add-hook 'after-change-functions #'agent-repl--command-completion-on-change nil t)
+  ;; A WORD STARTING WITH `#' completes against the user's Slack channels,
+  ;; and a known one is marked purple (slack-channel-completion.el).
+  (add-hook 'completion-at-point-functions #'agent-repl-slack-channel-completion-at-point nil t)
+  (add-hook 'after-change-functions #'agent-repl--slack-channel-completion-on-change nil t)
   ;; A WORD THAT BEGINS AN OPEN WORKSPACE'S NAME completes to it, and a
   ;; whole one is marked purple like a known command (workspace-completion.el).
   (add-hook 'completion-at-point-functions #'agent-repl-workspace-completion-at-point nil t)

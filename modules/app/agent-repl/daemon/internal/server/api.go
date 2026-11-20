@@ -118,6 +118,9 @@ type Deps struct {
 	// SlashCommands backs ListSlashCommands: every workspace's standing
 	// slash-command catalog, as its session last stated it.
 	SlashCommands SlashCommandCatalogs
+	// SlackChannels backs ListSlackChannels: the user's work Slack channels,
+	// as the daemon last read them.
+	SlackChannels SlackChannels
 	// Mentions backs the host stream's `mentions` arm: each workspace's record
 	// of the names its own final responses mentioned (composermentions.go).
 	Mentions ComposerMentions
@@ -692,6 +695,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("a session-facts source")
 	case deps.SlashCommands == nil:
 		return nil, missing("the slash-command catalogs")
+	case deps.SlackChannels == nil:
+		return nil, missing("the Slack channels")
 	case deps.Mentions == nil:
 		return nil, missing("the composer mentions")
 	}

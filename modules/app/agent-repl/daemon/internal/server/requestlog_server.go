@@ -907,6 +907,13 @@ func (s *requestLoggingServer) RefreshNewsDigest(
 	return serveUnary(s, ctx, "RefreshNewsDigest", req, s.server.RefreshNewsDigest)
 }
 
+func (s *requestLoggingServer) ListSlackChannels(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ListSlackChannelsRequest],
+) (*connect.Response[agentreplv1.ListSlackChannelsResponse], error) {
+	return serveUnary(s, ctx, "ListSlackChannels", req, s.server.ListSlackChannels)
+}
+
 func (s *requestLoggingServer) ListSlashCommands(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ListSlashCommandsRequest],

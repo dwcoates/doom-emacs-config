@@ -362,6 +362,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; (command-completion.el and workspace-completion.el, below) answer by: a
 ;; completion offers itself only when its own table's styles match.
 (agent-repl--load-module "completion-match")
+;; WHY: sigil-word.el is the one shape of a composer word that opens with a
+;; sigil -- its bounds and the table completing the text after the sigil --
+;; shared by command-completion.el (`/') and slack-channel-completion.el
+;; (`#'), below.  It builds its table through completion-match.el, above.
+(agent-repl--load-module "sigil-word")
 ;; WHY: completion-order.el is the one order both composer completions offer
 ;; their candidates in: taken before, then mentioned by the composer's own
 ;; workspace (host.el's record), then the rest.
@@ -375,6 +380,11 @@ returning the SHA string (or the sentinel \"unknown\" when undetermined)."
 ;; rpc.el and resolves the workspace's ref and connection through host.el,
 ;; both loaded above.
 (agent-repl--load-module "command-completion")
+;; WHY: slack-channel-completion.el is the composer's `#' Slack-channel
+;; completion (`agent-repl-input-mode' installs its capf).  It asks the
+;; daemon through rpc.el and finds its word through sigil-word.el, both
+;; loaded above.
+(agent-repl--load-module "slack-channel-completion")
 ;; WHY: prompt-entries.el marks a prompt's entries in the composer
 ;; (panels.el enables it on every composer); it reads the module root from
 ;; core.el and logs through it, both loaded above.

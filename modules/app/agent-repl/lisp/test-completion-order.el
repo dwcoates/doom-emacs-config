@@ -77,6 +77,16 @@
     (should (equal (agent-repl-test-completion-order--sort 'command nil '("a" "b"))
                    '("a" "b")))))
 
+(ert-deftest agent-repl-test-completion-order-orders-a-taken-channel-first ()
+  "A Slack channel taken before is offered first, apart from the other kinds."
+  (agent-repl-test-completion-order--fresh
+    ;; Arrange
+    (agent-repl-completion-order-note-selected 'channel "random")
+    (agent-repl-completion-order-note-selected 'command "general")
+    ;; Act / Assert
+    (should (equal (agent-repl-test-completion-order--sort 'channel nil '("general" "random"))
+                   '("random" "general")))))
+
 (ert-deftest agent-repl-test-completion-order-keys-candidates-by-name ()
   "KEY maps a candidate to the name it is taken and mentioned under."
   (agent-repl-test-completion-order--fresh

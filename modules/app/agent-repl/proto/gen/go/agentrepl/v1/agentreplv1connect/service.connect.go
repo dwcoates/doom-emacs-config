@@ -341,6 +341,9 @@ const (
 	// AgentReplListSlashCommandsProcedure is the fully-qualified name of the AgentRepl's
 	// ListSlashCommands RPC.
 	AgentReplListSlashCommandsProcedure = "/agentrepl.v1.AgentRepl/ListSlashCommands"
+	// AgentReplListSlackChannelsProcedure is the fully-qualified name of the AgentRepl's
+	// ListSlackChannels RPC.
+	AgentReplListSlackChannelsProcedure = "/agentrepl.v1.AgentRepl/ListSlackChannels"
 	// AgentReplWatchWebWorkspaceProcedure is the fully-qualified name of the AgentRepl's
 	// WatchWebWorkspace RPC.
 	AgentReplWatchWebWorkspaceProcedure = "/agentrepl.v1.AgentRepl/WatchWebWorkspace"
@@ -567,6 +570,7 @@ var (
 	agentReplAdoptHostWorkspaceMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("AdoptHostWorkspace")
 	agentReplAcceptHandedWorkspaceMethodDescriptor             = agentReplServiceDescriptor.Methods().ByName("AcceptHandedWorkspace")
 	agentReplListSlashCommandsMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ListSlashCommands")
+	agentReplListSlackChannelsMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("ListSlackChannels")
 	agentReplWatchWebWorkspaceMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("WatchWebWorkspace")
 	agentReplOpenLoginMethodDescriptor                         = agentReplServiceDescriptor.Methods().ByName("OpenLogin")
 	agentReplWatchLoginTerminalMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("WatchLoginTerminal")
@@ -963,6 +967,9 @@ type AgentReplClient interface {
 	// Every slash command the workspace's agent runtime answers, for the
 	// composer's completion. See endpoint_list_slash_commands.proto.
 	ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error)
+	// Every Slack channel the user is a member of on their work Slack, for the
+	// composer's `#` completion. See endpoint_list_slack_channels.proto.
+	ListSlackChannels(context.Context, *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error)
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error)
@@ -1788,6 +1795,13 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 			connect.WithClientOptions(opts...),
 		),
+		listSlackChannels: connect.NewClient[v1.ListSlackChannelsRequest, v1.ListSlackChannelsResponse](
+			httpClient,
+			baseURL+AgentReplListSlackChannelsProcedure,
+			connect.WithSchema(agentReplListSlackChannelsMethodDescriptor),
+			connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+			connect.WithClientOptions(opts...),
+		),
 		watchWebWorkspace: connect.NewClient[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse](
 			httpClient,
 			baseURL+AgentReplWatchWebWorkspaceProcedure,
@@ -2151,6 +2165,7 @@ type agentReplClient struct {
 	adoptHostWorkspace                *connect.Client[v1.AdoptHostWorkspaceRequest, v1.AdoptHostWorkspaceResponse]
 	acceptHandedWorkspace             *connect.Client[v1.AcceptHandedWorkspaceRequest, v1.AcceptHandedWorkspaceResponse]
 	listSlashCommands                 *connect.Client[v1.ListSlashCommandsRequest, v1.ListSlashCommandsResponse]
+	listSlackChannels                 *connect.Client[v1.ListSlackChannelsRequest, v1.ListSlackChannelsResponse]
 	watchWebWorkspace                 *connect.Client[v1.WatchWebWorkspaceRequest, v1.WatchWebWorkspaceResponse]
 	openLogin                         *connect.Client[v1.OpenLoginRequest, v1.OpenLoginResponse]
 	watchLoginTerminal                *connect.Client[v1.WatchLoginTerminalRequest, v1.LoginTerminalOutput]
@@ -2748,6 +2763,11 @@ func (c *agentReplClient) ListSlashCommands(ctx context.Context, req *connect.Re
 	return c.listSlashCommands.CallUnary(ctx, req)
 }
 
+// ListSlackChannels calls agentrepl.v1.AgentRepl.ListSlackChannels.
+func (c *agentReplClient) ListSlackChannels(ctx context.Context, req *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error) {
+	return c.listSlackChannels.CallUnary(ctx, req)
+}
+
 // WatchWebWorkspace calls agentrepl.v1.AgentRepl.WatchWebWorkspace.
 func (c *agentReplClient) WatchWebWorkspace(ctx context.Context, req *connect.Request[v1.WatchWebWorkspaceRequest]) (*connect.ServerStreamForClient[v1.WatchWebWorkspaceResponse], error) {
 	return c.watchWebWorkspace.CallServerStream(ctx, req)
@@ -3302,6 +3322,9 @@ type AgentReplHandler interface {
 	// Every slash command the workspace's agent runtime answers, for the
 	// composer's completion. See endpoint_list_slash_commands.proto.
 	ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error)
+	// Every Slack channel the user is a member of on their work Slack, for the
+	// composer's `#` completion. See endpoint_list_slack_channels.proto.
+	ListSlackChannels(context.Context, *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error)
 	// The webview's standing daemon-link stream for one workspace. See
 	// endpoint_watch_web_workspace.proto.
 	WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error
@@ -4123,6 +4146,13 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
 		connect.WithHandlerOptions(opts...),
 	)
+	agentReplListSlackChannelsHandler := connect.NewUnaryHandler(
+		AgentReplListSlackChannelsProcedure,
+		svc.ListSlackChannels,
+		connect.WithSchema(agentReplListSlackChannelsMethodDescriptor),
+		connect.WithIdempotency(connect.IdempotencyNoSideEffects),
+		connect.WithHandlerOptions(opts...),
+	)
 	agentReplWatchWebWorkspaceHandler := connect.NewServerStreamHandler(
 		AgentReplWatchWebWorkspaceProcedure,
 		svc.WatchWebWorkspace,
@@ -4594,6 +4624,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAcceptHandedWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplListSlashCommandsProcedure:
 			agentReplListSlashCommandsHandler.ServeHTTP(w, r)
+		case AgentReplListSlackChannelsProcedure:
+			agentReplListSlackChannelsHandler.ServeHTTP(w, r)
 		case AgentReplWatchWebWorkspaceProcedure:
 			agentReplWatchWebWorkspaceHandler.ServeHTTP(w, r)
 		case AgentReplOpenLoginProcedure:
@@ -5125,6 +5157,10 @@ func (UnimplementedAgentReplHandler) AcceptHandedWorkspace(context.Context, *con
 
 func (UnimplementedAgentReplHandler) ListSlashCommands(context.Context, *connect.Request[v1.ListSlashCommandsRequest]) (*connect.Response[v1.ListSlashCommandsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListSlashCommands is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ListSlackChannels(context.Context, *connect.Request[v1.ListSlackChannelsRequest]) (*connect.Response[v1.ListSlackChannelsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ListSlackChannels is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) WatchWebWorkspace(context.Context, *connect.Request[v1.WatchWebWorkspaceRequest], *connect.ServerStream[v1.WatchWebWorkspaceResponse]) error {

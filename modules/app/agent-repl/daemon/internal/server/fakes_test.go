@@ -2310,6 +2310,8 @@ type harness struct {
 	ReconnectRecords *restarttimingtest.Recorder
 	// SlashCommands is the real catalog table, which a test feeds directly.
 	SlashCommands *commandcatalog.Catalogs
+	// SlackChannels answers ListSlackChannels with whatever a test sets.
+	SlackChannels *fakeSlackChannels
 	// Mentions is the composer mentions' record, one topic per workspace,
 	// which a test publishes to.
 	Mentions   *fakeMentions
@@ -2447,6 +2449,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
 		SlashCommands:    commandcatalog.New(),
+		SlackChannels:    &fakeSlackChannels{},
 		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
 		StallBeat:        &fakeStallBeat{},
 		Pages:            &fakeSupersededPages{},
@@ -2482,6 +2485,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Health:           h.Health,
 		SessionFacts:     h.Facts,
 		SlashCommands:    h.SlashCommands,
+		SlackChannels:    h.SlackChannels,
 		Mentions:         h.Mentions,
 		Login:            h.Login,
 		Ownership:        h.Ownership,
@@ -3416,4 +3420,21 @@ func (f *fakeMentions) Topic(ws ids.WorkspaceID) *publish.Topic[*agentreplv1.Hos
 		f.topics[ws] = topic
 	}
 	return topic
+}
+
+// fakeSlackChannels answers ListSlackChannels with the response a test set,
+// and pending when it set none.
+type fakeSlackChannels struct {
+	response *agentreplv1.ListSlackChannelsResponse
+}
+
+func (f *fakeSlackChannels) Response() *agentreplv1.ListSlackChannelsResponse {
+	if f.response == nil {
+		return &agentreplv1.ListSlackChannelsResponse{Result: &agentreplv1.ListSlackChannelsResponse_Success{
+			Success: &agentreplv1.ListSlackChannelsSuccess{Listing: &agentreplv1.ListSlackChannelsSuccess_Pending{
+				Pending: &agentreplv1.ListSlackChannelsPending{},
+			}},
+		}}
+	}
+	return f.response
 }
