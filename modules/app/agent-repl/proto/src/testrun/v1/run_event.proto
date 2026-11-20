@@ -150,6 +150,11 @@ message TestRunEnded {
     // none.
     TestRunEndedPlanned planned = 3;
   }
+  // A profiling run's (TestRunRequest.profile) profiles directory, beside
+  // the run's log: one subdirectory per unit that ran, named by its unit id,
+  // holding the unit's own CPU profiles and those of the production processes
+  // its tests started. Empty when the run did not profile.
+  string profile_dir = 4;
 }
 
 // A plan-only run planned every unit and ran none.

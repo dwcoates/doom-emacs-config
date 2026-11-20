@@ -64,6 +64,18 @@ message TestRunRequest {
   // temporary debugging measure, never a standing setting: it changes no
   // verdict, so the run reuses and records passes as any other run does.
   bool debug_info = 7;
+  // Profile every unit that runs: each Go test binary runs with
+  // `-test.cpuprofile`, each node process (vitest and everything it starts)
+  // with `--cpu-prof`, and every unit is told its own profiles directory
+  // (testenv.ProfileDir), where the harnesses point the production processes
+  // they start (the daemon, shims, store and sidecar write a CPU profile on
+  // exit, proto/vocab/profile-session.json `exit_profile_env`). The profiles
+  // land beside the run's log, one directory per unit, and the run's ended
+  // event names the directory (TestRunEnded.profile_dir). A reused unit does
+  // not run, so it writes no profile. Off by default. Refused with
+  // `coverage`, whose instrumentation is what a profile would then measure,
+  // and with `record`, whose timings the profiler's overhead would skew.
+  bool profile = 8;
 }
 
 // One target and the tests within it to run.
