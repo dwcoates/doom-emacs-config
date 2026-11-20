@@ -1543,6 +1543,12 @@ type MergeSource struct {
 	// workspace's origin (MergeOrigin.Hooks), and from there into its creation
 	// job, so the merge workspace's own request row carries none.
 	Hooks DeployHooks
+	// ProfileGate profiles the merge's test gate
+	// (agentrepl.v1.CreateWorkspaceAsyncMerge.profile_gate,
+	// agentrepl.v1.FinishWorkspaceRequest.profile_gate): the gate runs its
+	// tests with testrun's --profile. A detached request's hand-off carries it
+	// onto the merge workspace's own request, as it carries Version.
+	ProfileGate bool
 }
 
 // DetachedMergeID is one detached merge request's identity, minted when the

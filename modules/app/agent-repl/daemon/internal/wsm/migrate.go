@@ -353,6 +353,7 @@ var migrations = []migration{
 	// successor's boot delivers.
 	{To: 187, Name: "arrival_waits", Kind: MigrationAdditive, DDL: arrivalWaitsDDL, Rewrite: moveArrivalHolds},
 	{To: 188, Name: "workspaces_spawned_shim_start", Kind: MigrationAdditive, DDL: spawnedShimStartDDL},
+	{To: 189, Name: "merge_profile_gate", Kind: MigrationAdditive, DDL: mergeProfileGateDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
