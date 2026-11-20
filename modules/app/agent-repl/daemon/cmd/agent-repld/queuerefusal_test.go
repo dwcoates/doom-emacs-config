@@ -45,7 +45,9 @@ var queueRefusals = func() []describedRefusal {
 				refusalCase{name: "workspace_closed", err: armed(requeue, "workspace_closed", nil),
 					want: "ws was closed since it was named, and a merge request never outlives its workspace's close"},
 				refusalCase{name: "not_in_catalog", err: armed(requeue, "not_in_catalog", nil),
-					want: "-model names a model not in the catalog ws's login last served, or the login has served none"}),
+					want: "-model names a model not in the catalog ws's login last served, or the login has served none"},
+				refusalCase{name: "cold_gated", err: armed(requeue, "cold_gated", nil),
+					want: "ws is parked at its cold gate, which takes its merge off the queue; the user answers the gate before it can be requeued"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeRequeueRefusal("ws", e.(*agentreplv1.RequeueMergeError))
 			}},
@@ -65,8 +67,6 @@ var queueRefusals = func() []describedRefusal {
 				refusalCase{name: "unknown_repository", err: armed(update, "unknown_repository", nil), want: "the daemon has no repository by the one -repository named"},
 				refusalCase{name: "not_mediator", err: armed(update, "not_mediator", nil), want: "ws is no repository's deploy mediator, so it makes no mediation decision"},
 				refusalCase{name: "no_mediation_owed", err: armed(update, "no_mediation_owed", nil), want: "the mediator's repository owes no mediation now"},
-				refusalCase{name: "no_remediation_to_restore", err: armed(update, "no_remediation_to_restore", nil),
-					want: "the chain has no remediation workspace to restore yet; dispatch a fresh one instead"},
 				refusalCase{name: "remediation_bound_reached",
 					err:  armed(update, "remediation_bound_reached", &agentreplv1.UpdateMergeQueueRemediationBoundReached{RemediationsBeforeEscalation: 3}),
 					want: "the chain has deployed 3 remediations in a row, its repository's bound, so only an escalation is accepted now"},
@@ -75,7 +75,11 @@ var queueRefusals = func() []describedRefusal {
 					want: "the check's window holds problems no one owns, so it cannot be approved; dispatch or escalate them instead: a: b (new); c: d (unowned)"},
 				refusalCase{name: "problems_recurring",
 					err:  armed(update, "problems_recurring", &agentreplv1.UpdateMergeQueueProblemsRecurring{Groups: []string{"a: b (3 fixes)"}}),
-					want: "the check's window holds problems that came back after more than two of their fixes deployed, so only an escalation is accepted: a: b (3 fixes)"}),
+					want: "the check's window holds problems that came back after more than five of their fixes deployed, so only an escalation is accepted: a: b (3 fixes)"},
+				refusalCase{name: "no_escalation_held", err: armed(update, "no_escalation_held", nil),
+					want: "no escalation holds the repository's queue, so there is no hold to release"},
+				refusalCase{name: "no_repair_turn", err: armed(update, "no_repair_turn", nil),
+					want: "ws runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up"}),
 			describe: func(e proto.Message) (string, error) {
 				return describeUpdateQueueRefusal("ws", e.(*agentreplv1.UpdateMergeQueueError))
 			}},

@@ -58,6 +58,8 @@ func describeRequeueRefusal(ws string, e *agentreplv1.RequeueMergeError) (string
 		return fmt.Sprintf("%s was closed since it was named, and a merge request never outlives its workspace's close", ws), nil
 	case *agentreplv1.RequeueMergeError_NotInCatalog:
 		return fmt.Sprintf("-model names a model not in the catalog %s's login last served, or the login has served none", ws), nil
+	case *agentreplv1.RequeueMergeError_ColdGated:
+		return fmt.Sprintf("%s is parked at its cold gate, which takes its merge off the queue; the user answers the gate before it can be requeued", ws), nil
 	}
 	return "", undescribed("requeueing "+ws, e)
 }
@@ -104,8 +106,6 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 		return fmt.Sprintf("%s is no repository's deploy mediator, so it makes no mediation decision", ws), nil
 	case *agentreplv1.UpdateMergeQueueError_NoMediationOwed:
 		return "the mediator's repository owes no mediation now", nil
-	case *agentreplv1.UpdateMergeQueueError_NoRemediationToRestore:
-		return "the chain has no remediation workspace to restore yet; dispatch a fresh one instead", nil
 	case *agentreplv1.UpdateMergeQueueError_RemediationBoundReached:
 		return fmt.Sprintf("the chain has deployed %d remediations in a row, its repository's bound, so only an escalation is accepted now",
 			r.RemediationBoundReached.GetRemediationsBeforeEscalation()), nil
@@ -113,8 +113,12 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 		return fmt.Sprintf("the check's window holds problems no one owns, so it cannot be approved; dispatch or escalate them instead: %s",
 			strings.Join(r.ProblemsUnowned.GetGroups(), "; ")), nil
 	case *agentreplv1.UpdateMergeQueueError_ProblemsRecurring:
-		return fmt.Sprintf("the check's window holds problems that came back after more than two of their fixes deployed, so only an escalation is accepted: %s",
+		return fmt.Sprintf("the check's window holds problems that came back after more than five of their fixes deployed, so only an escalation is accepted: %s",
 			strings.Join(r.ProblemsRecurring.GetGroups(), "; ")), nil
+	case *agentreplv1.UpdateMergeQueueError_NoEscalationHeld:
+		return "no escalation holds the repository's queue, so there is no hold to release", nil
+	case *agentreplv1.UpdateMergeQueueError_NoRepairTurn:
+		return fmt.Sprintf("%s runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up", ws), nil
 	}
 	return "", undescribed("updating the merge queue", e)
 }

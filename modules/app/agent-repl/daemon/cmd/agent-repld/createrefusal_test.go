@@ -99,6 +99,9 @@ var createRefusals = func() []describedRefusal {
 		with("gather_unknown_workspace", map[string]any{"name": "g"}, "the repository holds no workspace g to gather"),
 		set("gather_not_gatherable", "gather_not_gatherable", &agentreplv1.CreateWorkspaceGatherNotGatherable{Workspace: ref("/w/g"), Detail: "closed"},
 			"the workspace at /w/g cannot be gathered (closed)"),
+		set("requested_by_deploy_mediator", "requested_by_deploy_mediator",
+			&agentreplv1.CreateWorkspaceRequestedByDeployMediator{Workspace: ref("/w/m"), Detail: "do the work in your own session"},
+			"the requester at /w/m is its repository's deploy mediator, which never creates a workspace: do the work in your own session"),
 	}
 	cases = append(cases, parentNotOpenCases(e, "create it again")...)
 	return []describedRefusal{{name: "create", empty: e, oneof: "cause", cases: cases,
