@@ -24,7 +24,7 @@ import { Code, ConnectError } from "@connectrpc/connect";
 import { afterAll, afterEach, describe, expect, test } from "vitest";
 import { conversationv1, shimv1, storev1 } from "../../src/proto.js";
 import { cleanupShims, spawnShim } from "../integration-support/harness.js";
-import { canonicalSession, endsTurn, releaseShared, since, uniqueTurn } from "../integration-support/canonical.js";
+import { canonicalSession, endsTurn, groupSession, releaseShared, since, uniqueTurn } from "../integration-support/canonical.js";
 import { detachGate } from "../integration-support/detach-gate.js";
 import {
   activityId,
@@ -2083,7 +2083,12 @@ describe("a fan-wide cancel", () => {
     // shell run's is a LIFECYCLE row served by `WatchBash` — never a page line
     // — so looking for all three in one place would be looking in the wrong
     // one for the shell.
-    const { shim, started } = await canonicalSession();
+    //
+    // THE LIVE SET IS THE SESSION'S, NOT THE CASE'S: `agents_killed` is
+    // written only when the whole set empties, which a sibling's task left
+    // live on the canonical session keeps from happening. So this case takes
+    // a group session of its own.
+    const { shim, started } = await groupSession("fan-wide-cancel");
     const mine = since(shim, [started.vendorSessionId]);
     const t1 = uniqueTurn();
     endsTurn(shim, t1);
