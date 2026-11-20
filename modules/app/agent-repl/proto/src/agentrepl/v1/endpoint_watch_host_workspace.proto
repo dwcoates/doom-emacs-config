@@ -17,6 +17,7 @@ import "agentrepl/v1/endpoint_session_health.proto";
 import "conversation/v1/turn.proto";
 import "conversation/v1/user.proto";
 import "frontend/v1/feed.proto";
+import "frontend/v1/workspace_mention.proto";
 
 option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
 
@@ -155,6 +156,13 @@ message WatchHostWorkspaceResponse {
     // hydrated after either side restarts. The daemon keeps the record durably,
     // so it outlives the newest page a boot replays.
     HostWorkspaceMentions mentions = 21;
+    // THE NAMES THIS WORKSPACE'S COMPOSER COMPLETES: the same mention targets
+    // this workspace's page links (frontend.v1.WorkspaceMentionTargets, the
+    // daemon's one resolve for this viewer), whole-replaced whenever the set
+    // changes. Emacs completes and marks exactly these names, so a name the
+    // composer offers is always a link in the feed. State, not an event: a
+    // late subscriber is sent the set in force first.
+    frontend.v1.WorkspaceMentionTargets mention_targets = 22;
   }
   // Retired: desktop notifications are posted by the daemon and never cross
   // this stream, and the tab blink is drawn from the roster's attention

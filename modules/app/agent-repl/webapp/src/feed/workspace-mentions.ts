@@ -1,25 +1,29 @@
 /**
- * workspace-mentions — A WORKSPACE'S NAME IN A RESPONSE'S TREE OR A PROMPT'S TEXT IS A LINK that
- * switches to that workspace (owner request, 2026-11-01).
+ * workspace-mentions — A WORKSPACE'S NAME IN A RESPONSE'S OR A PROMPT'S TEXT IS
+ * A LINK that switches to that workspace (owner requests, 2026-11-01 and
+ * 2026-11-19).
  *
  * THE DAEMON DECIDES WHICH NAMES ARE LINKS. The page subscribes to its
- * mention targets (`WatchWorkspaceMentions`, frontend.v1.WorkspaceMentionTargets):
- * the open workspaces the sidebar shows, less this page's own and less every
- * name two of them share. The page never decides on its own that a word names
- * a workspace; it only finds the served names in what it drew.
+ * mention targets (`WatchWorkspaceMentions`, frontend.v1.WorkspaceMentionTargets),
+ * the very set the daemon serves this workspace's composer as the names it
+ * completes, so a name the composer completes is always a link here. The
+ * page never decides on its own that a word names a workspace; it only finds
+ * the served names in what it drew.
  *
- * A MENTION IS A WHOLE OCCURRENCE of a served name in a tree's text: a code
- * span whose whole text is the name (agents write a workspace's name as
- * inline code, and the span's code markers are stripped when it is linked), or the name in plain text with no name character
- * (`NAME_CHAR`) on either side, so `alpha` never links inside `alpha-beta`.
- * Text already inside a link, a code span that is more than the name, the
- * tree's rails and its labels are never searched.
+ * A MENTION IS A WHOLE OCCURRENCE of a served name anywhere in a mention
+ * scope's text (`MENTION_TEXT_CLASS`: a response's prose, a prompt's text
+ * block, an agent prompt's peer name): a code span whose whole text is the
+ * name (agents write a workspace's name as inline code, and the span's code
+ * markers are stripped when it is linked), or the name in plain text with no
+ * name character (`NAME_CHAR`) on either side, so `alpha` never links inside
+ * `alpha-beta`. Text already inside a link, a code span that is more than the
+ * name, a code block, and a tree's rails and labels are never searched.
  *
- * LINKED ON EVERY PAINT AND ON EVERY PUSH. A response's prose links its trees
- * on each paint (`linkWorkspaceMentions`, a slot mark, so a repaint keeps the
- * links), and each push re-links every response tree already drawn, so a
- * workspace opened after a response was written gains its links and a closed
- * one loses them. Re-linking first unwraps every mention, so it is idempotent.
+ * LINKED ON EVERY PAINT AND ON EVERY PUSH. A scope is linked on each paint
+ * (`linkWorkspaceMentionsInText`, a slot mark, so a repaint keeps the links),
+ * and each push re-links every scope already drawn, so a workspace opened
+ * after a response was written gains its links and a closed one loses them.
+ * Re-linking first unwraps every mention, so it is idempotent.
  *
  * THE CLICK IS AN ORDINARY WORKSPACE SWITCH: `SelectInEditor`, through the
  * feed's one jump (feed/merge/jump.ts), delegated from the feed's scroll zone
@@ -43,16 +47,16 @@ import { guardMalformed } from "../rpc/guard.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
-import { TREE_CLASS, TREE_LABEL_CLASS, TREE_RAILS_CLASS } from "../metaprompt-tree.js";
+import { TREE_LABEL_CLASS, TREE_RAILS_CLASS } from "../metaprompt-tree.js";
 import { jumpToWorkspace, type JumpSite } from "./merge/jump.js";
 
 /** The class every mention wears. */
 export const WORKSPACE_MENTION_CLASS = "workspace-mention";
 
 /**
- * The class of a text slot searched WHOLE, as a response's trees are: a
- * prompt bubble's text block (owner request, 2026-11-02). Its words are
- * prose, not a tree, so there are no rails or labels to skip.
+ * The class of a MENTION SCOPE, a text slot searched whole: a response's
+ * prose, a prompt bubble's text block, an agent prompt's peer name. A tree
+ * drawn inside one keeps its rails and labels unsearched.
  */
 export const MENTION_TEXT_CLASS = "mention-text";
 
@@ -116,29 +120,29 @@ function mentionAnchor(doc: Document, workspace: WorkspaceRef, name: string, nod
   return anchor;
 }
 
-/** Whether NODE sits where a mention is never searched for, below TREE. */
-function unsearched(node: Node, tree: Element): boolean {
-  for (let at = node.parentElement; at !== null && at !== tree; at = at.parentElement) {
-    if (at.tagName === "A" || at.tagName === "CODE") return true;
+/** Whether NODE sits where a mention is never searched for, below SCOPE. */
+function unsearched(node: Node, scope: Element): boolean {
+  for (let at = node.parentElement; at !== null && at !== scope; at = at.parentElement) {
+    if (at.tagName === "A" || at.tagName === "CODE" || at.tagName === "PRE") return true;
     if (at.classList.contains(TREE_RAILS_CLASS) || at.classList.contains(TREE_LABEL_CLASS)) return true;
   }
   return false;
 }
 
-/** Take every mention in TREE back to the text it wrapped. */
-function unlinkTree(tree: Element): void {
-  const mentions = queryAll<HTMLElement>(tree, `.${WORKSPACE_MENTION_CLASS}`);
+/** Take every mention in SCOPE back to the text it wrapped. */
+function unlinkScope(scope: Element): void {
+  const mentions = queryAll<HTMLElement>(scope, `.${WORKSPACE_MENTION_CLASS}`);
   for (const mention of mentions) mention.replaceWith(...mention.childNodes);
   // The text a plain-text mention split is joined back into one node.
-  if (mentions.length > 0) tree.normalize();
+  if (mentions.length > 0) scope.normalize();
 }
 
-/** Link every mention of TARGETS in TREE; answers how many were linked. */
-function linkTree(tree: Element, targets: Targets): number {
-  const doc = tree.ownerDocument;
+/** Link every mention of TARGETS in SCOPE; answers how many were linked. */
+function linkScope(scope: Element, targets: Targets): number {
+  const doc = scope.ownerDocument;
   let linked = 0;
-  for (const code of queryAll<HTMLElement>(tree, "code")) {
-    if (unsearched(code, tree)) continue;
+  for (const code of queryAll<HTMLElement>(scope, "code")) {
+    if (unsearched(code, scope)) continue;
     const name = code.textContent ?? "";
     const workspace = targets.byName.get(name);
     if (workspace === undefined) continue;
@@ -149,9 +153,9 @@ function linkTree(tree: Element, targets: Targets): number {
   const pattern = targets.pattern;
   if (pattern === null) return linked;
   const texts: Text[] = [];
-  const walker = doc.createTreeWalker(tree, NodeFilter.SHOW_TEXT);
+  const walker = doc.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
-    if (!unsearched(node, tree)) texts.push(node as Text);
+    if (!unsearched(node, scope)) texts.push(node as Text);
   }
   for (const text of texts) {
     const value = text.data;
@@ -160,7 +164,7 @@ function linkTree(tree: Element, targets: Targets): number {
     for (const match of value.matchAll(pattern)) {
       const name = match[0];
       const workspace = targets.byName.get(name);
-      if (workspace === undefined) throw new Error(`linkTree: the pattern matched ${JSON.stringify(name)}, which is no target`);
+      if (workspace === undefined) throw new Error(`linkScope: the pattern matched ${JSON.stringify(name)}, which is no target`);
       if (match.index > from) parts.push(doc.createTextNode(value.slice(from, match.index)));
       parts.push(mentionAnchor(doc, workspace, name, [doc.createTextNode(name)]));
       from = match.index + name.length;
@@ -174,49 +178,40 @@ function linkTree(tree: Element, targets: Targets): number {
 }
 
 /**
- * Link every workspace mention in every tree drawn in ROOT to the workspace
- * it names, with the page's current targets: the mark a response's prose
- * runs on every paint. Mentions already drawn are re-linked from scratch.
- */
-export function linkWorkspaceMentions(root: ParentNode): void {
-  relink(root, current);
-}
-
-/**
- * Link every mention in the whole of ROOT, a prompt's rendered text: the mark
- * a prompt's text block runs on every paint. Mentions already drawn are
- * re-linked from scratch.
+ * Link every mention in the whole of ROOT, a mention scope's rendered text:
+ * the mark a response's prose and a prompt's text block run on every paint.
+ * Mentions already drawn are re-linked from scratch.
  */
 export function linkWorkspaceMentionsInText(root: Element): void {
-  unlinkTree(root);
-  linkTree(root, current);
+  unlinkScope(root);
+  linkScope(root, current);
 }
 
 /**
- * Re-link every tree and every whole-text slot (`MENTION_TEXT_CLASS`) in
- * ROOT, ROOT itself included when it is such a slot, with TARGETS; answers
- * how many mentions were linked.
+ * Re-link every mention scope (`MENTION_TEXT_CLASS`) in ROOT, ROOT itself
+ * included when it is one, with TARGETS; answers how many mentions were
+ * linked.
  */
 function relink(root: ParentNode, targets: Targets): number {
   let linked = 0;
-  const scopes = queryAll(root, `.${TREE_CLASS}, .${MENTION_TEXT_CLASS}`);
+  const scopes = queryAll(root, `.${MENTION_TEXT_CLASS}`);
   if (root instanceof Element && root.classList.contains(MENTION_TEXT_CLASS)) scopes.unshift(root);
   for (const scope of scopes) {
-    unlinkTree(scope);
-    linked += linkTree(scope, targets);
+    unlinkScope(scope);
+    linked += linkScope(scope, targets);
   }
   return linked;
 }
 
 /**
- * Take a push's TARGETS as the page's, and re-link every tree LIVE answers:
- * the response trees already drawn.
+ * Take a push's TARGETS as the page's, and re-link every scope LIVE answers:
+ * the mention scopes already drawn.
  */
 export function applyMentionTargets(targets: WorkspaceMentionTargets, live: () => Iterable<ParentNode>): void {
   current = readMentionTargets(targets);
   let linked = 0;
   for (const root of live()) linked += relink(root, current);
-  log.debug("the page's workspace mention targets changed; its response trees were re-linked", {
+  log.debug("the page's workspace mention targets changed; its drawn mention scopes were re-linked", {
     operation: "feed.workspace-mentions.applied",
     context: { targets: current.byName.size, linked },
   });
@@ -241,7 +236,7 @@ export function installWorkspaceMentionClicks(ctx: AppContext, root: HTMLElement
     event.stopPropagation();
     const id = mention.getAttribute(WORKSPACE_MENTION_ATTRIBUTE) ?? "";
     // A mention is only ever drawn from the current targets, and every push
-    // re-links the trees it changes, so a drawn mention always names one.
+    // re-links every drawn scope, so a drawn mention always names one.
     const workspace = current.byId.get(id);
     if (workspace === undefined) {
       log.error("a drawn workspace mention names no current target", {
@@ -261,7 +256,7 @@ export function installWorkspaceMentionClicks(ctx: AppContext, root: HTMLElement
 }
 
 /**
- * Watch this page's mention targets, re-linking LIVE's trees on every push.
+ * Watch this page's mention targets, re-linking LIVE's scopes on every push.
  * The page's own workspace is the viewer the daemon leaves out.
  */
 export function watchWorkspaceMentions(ctx: AppContext, live: () => Iterable<ParentNode>): StreamHandle {

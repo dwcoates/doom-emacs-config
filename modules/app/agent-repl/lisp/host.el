@@ -1571,6 +1571,7 @@ re-create bookkeeping for a workspace whose tab is gone (measured
     (:notification-clicked (agent-repl-host--notification-clicked ws))
     (:selection (agent-repl-host--apply-selection ws value))
     (:mentions (agent-repl-host--apply-mentions ws value))
+    (:mention-targets (agent-repl-host--apply-mention-targets ws value))
     (:final-response-clicked (agent-repl-host--reply-target-picked ws "final-response-clicked"))
     (:chat-text-highlighted (agent-repl-host--reply-target-picked ws "chat-text-highlighted"))
     (:response-text-highlighted (agent-repl-host--reply-target-picked ws "response-text-highlighted"))
@@ -1693,6 +1694,31 @@ mentioned nothing."
                ('command :commands)
                ('workspace :workspaces)
                (_ (error "agent-repl: unknown mention kind %S" kind)))))
+
+;;;; ---- The mention targets ----
+
+(defvar agent-repl-host-mention-targets-functions nil
+  "Functions called with WS after WS's mention targets changed.
+The composer re-marks WS's composer through it (workspace-completion.el).")
+
+(defun agent-repl-host--apply-mention-targets (ws targets)
+  "Record TARGETS as the workspace names WS's composer completes.
+TARGETS is the decoded `WorkspaceMentionTargets', a list of plists
+\(:name :workspace :repository), the same set the daemon serves WS's page
+as the names its feed links.  It is the host watch's `mention_targets'
+push: state, whole-replaced, and sent first on every subscription.  Runs
+`agent-repl-host-mention-targets-functions' with WS once recorded."
+  (agent-repl-host--put ws :mention-targets targets)
+  (agent-repl--log ws "elisp.host.mention-targets ws=%s targets=%d" ws (length targets))
+  (run-hook-with-args 'agent-repl-host-mention-targets-functions ws))
+
+(defun agent-repl-host-mention-targets (ws)
+  "Return the workspace names WS's composer completes, as target plists.
+Each is (:name NAME :workspace REF :repository REPOSITORY), REPOSITORY
+nil when the daemon stated none.  Nil before the host watch's first
+`mention_targets' push, and for a set with no targets: either way the
+composer completes no workspace name."
+  (plist-get (agent-repl-host--entry ws) :mention-targets))
 
 ;;;; ---- The reply target picked in the webview ----
 

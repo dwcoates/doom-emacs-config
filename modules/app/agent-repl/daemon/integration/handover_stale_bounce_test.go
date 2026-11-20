@@ -81,7 +81,7 @@ func TestAHandoverWithANewerShimBuildBouncesTheAdoptedShimCleanly(t *testing.T) 
 		t.Fatalf("OpenWorkspace on the cold daemon = (%v, %v), want the session live", resp, err)
 	}
 	host := cold.WatchHost(f.ws)
-	harness.AwaitNext(t, cold.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, cold.Ctx(), host, "the fresh host push")
 	daemonStream := cold.WatchDaemonStream()
 	// THE INCUMBENT HAS JUDGED ITS SHIM'S BUILD REPORT before the newer build
 	// is installed: the report arrives on its own after the session opens, and

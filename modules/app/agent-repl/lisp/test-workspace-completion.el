@@ -2,11 +2,12 @@
 
 ;;; Commentary:
 
-;; WHAT THIS GUARDS: that a word in the composer that begins a part of an
-;; open workspace's name completes to it, and only to open workspaces' names;
-;; that a slash word is left to the command completion; and that a word
-;; beginning no name falls through to the next completion function.  The
-;; roster's open names are stubbed, so no daemon or roster push is needed.
+;; WHAT THIS GUARDS: that a word in the composer that begins a part of a
+;; mention target's name completes to it, and only to the composer's own
+;; workspace's mention targets; that a slash word is left to the command
+;; completion; and that a word beginning no name falls through to the next
+;; completion function.  The host's mention targets are stubbed, so no daemon
+;; or host push is needed.
 
 ;;; Code:
 
@@ -16,16 +17,35 @@
 
 (require 'cl-lib)
 
+(defun agent-repl-test-workspace-completion--targets (workspaces)
+  "Return WORKSPACES as `agent-repl-host-mention-targets' answers them.
+Each of WORKSPACES is a name, in no stated repository, or (NAME REPOSITORY)."
+  (mapcar (lambda (ws)
+            (let ((name (if (consp ws) (car ws) ws)))
+              (list :name name
+                    :workspace (list :id (concat "id-" name) :dir (concat "/w/" name))
+                    :repository (and (consp ws) (cadr ws)))))
+          workspaces))
+
+(defmacro agent-repl-test-workspace-completion--serving (workspaces &rest body)
+  "Run BODY while \"ws-1\"'s mention targets are WORKSPACES, and no other's.
+WORKSPACES is evaluated on every read, so BODY may change it."
+  (declare (indent 1))
+  `(cl-letf (((symbol-function 'agent-repl-host-mention-targets)
+              (lambda (ws)
+                (and (equal ws "ws-1")
+                     (agent-repl-test-workspace-completion--targets ,workspaces)))))
+     ,@body))
+
 (defmacro agent-repl-test-workspace-completion--with (text workspaces &rest body)
   "Run BODY in a composer owned by \"ws-1\" holding TEXT, point at its end.
-WORKSPACES are open: each a name, open in no stated repository, or a
-\(NAME . REPOSITORIES) element as `agent-repl-roster-open-workspaces' answers."
+WORKSPACES are its mention targets, as `agent-repl-test-workspace-completion--targets'
+takes them."
   (declare (indent 2))
   `(with-temp-buffer
      (setq-local agent-repl--owning-workspace "ws-1")
      (insert ,text)
-     (cl-letf (((symbol-function 'agent-repl-roster-open-workspaces)
-                (lambda () (mapcar (lambda (ws) (if (consp ws) ws (list ws))) ,workspaces))))
+     (agent-repl-test-workspace-completion--serving ,workspaces
        ,@body)))
 
 (defun agent-repl-test-workspace-completion--annotations (capf)
@@ -141,14 +161,6 @@ WORKSPACES are open: each a name, open in no stated repository, or a
       (should (eq (face-attribute 'agent-repl-workspace-completion-repository :inherit)
                   'shadow)))))
 
-(ert-deftest agent-repl-test-workspace-completion-joins-a-name-open-in-several-repositories ()
-  "A name open in two repositories names both."
-  (agent-repl-test-workspace-completion--with "fix" '(("fix" "doom" "zettel"))
-    (should (equal (substring-no-properties
-                    (cdar (agent-repl-test-workspace-completion--annotations
-                           (agent-repl-workspace-completion-at-point))))
-                   "  doom, zettel"))))
-
 (ert-deftest agent-repl-test-workspace-completion-annotates-nothing-for-an-unstated-repository ()
   "A name whose repository the daemon did not state is annotated with nothing."
   (agent-repl-test-workspace-completion--with "fix" '("fix")
@@ -170,10 +182,11 @@ WORKSPACES are open: each a name, open in no stated repository, or a
   (agent-repl-test--composer-marked 'agent-repl-workspace-completion-known))
 
 (defmacro agent-repl-test-workspace-completion--marking (names &rest body)
-  "Run BODY in a buffer marking on change, with NAMES open."
+  "Run BODY in \"ws-1\"'s composer marking on change, NAMES its mention targets."
   (declare (indent 1))
   `(with-temp-buffer
-     (cl-letf (((symbol-function 'agent-repl-roster-open-workspace-names) (lambda () ,names)))
+     (setq-local agent-repl--owning-workspace "ws-1")
+     (agent-repl-test-workspace-completion--serving ,names
        (add-hook 'after-change-functions #'agent-repl--workspace-completion-on-change nil t)
        ,@body)))
 
@@ -273,39 +286,62 @@ WORKSPACES are open: each a name, open in no stated repository, or a
     (should-not (agent-repl-test-workspace-completion--marked))))
 
 (defmacro agent-repl-test-workspace-completion--composer (text names &rest body)
-  "Run BODY in the one composer, holding TEXT, while NAMES (a place) are open."
+  "Run BODY in \"ws-1\"'s one composer, holding TEXT, NAMES (a place) its targets."
   (declare (indent 2))
   `(with-temp-buffer
+     (setq-local agent-repl--owning-workspace "ws-1")
      (insert ,text)
      (let ((composer (current-buffer)))
-       (cl-letf (((symbol-function 'agent-repl-roster-open-workspace-names) (lambda () ,names))
-                 ((symbol-function 'agent-repl--input-composers) (lambda () (list composer))))
-         ,@body))))
+       (agent-repl-test-workspace-completion--serving ,names
+         (cl-letf (((symbol-function 'agent-repl--input-composers) (lambda () (list composer))))
+           ,@body)))))
 
-(ert-deftest agent-repl-test-workspace-completion-mark-composers-marks-a-newly-open-name ()
-  "A roster push that opens a workspace marks its name in every composer."
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-marks-a-new-target ()
+  "A mention targets push that adds a name marks it in the workspace's composer."
   (agent-repl-test-workspace-completion--composer "ask parser-fix" '("parser-fix")
     ;; Act
-    (agent-repl--workspace-completion-mark-composers nil)
+    (agent-repl--workspace-completion-mark-composers "ws-1")
     ;; Assert
     (should (equal (agent-repl-test-workspace-completion--marked) '("parser-fix")))))
 
-(ert-deftest agent-repl-test-workspace-completion-mark-composers-unmarks-a-closed-name ()
-  "A roster push that closes a workspace unmarks its name in every composer."
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-unmarks-a-dropped-target ()
+  "A mention targets push that drops a name unmarks it in the workspace's composer."
   (let ((names '("parser-fix")))
     (agent-repl-test-workspace-completion--composer "ask parser-fix" names
       ;; Arrange
-      (agent-repl--workspace-completion-mark-composers nil)
+      (agent-repl--workspace-completion-mark-composers "ws-1")
       (setq names '())
       ;; Act
-      (agent-repl--workspace-completion-mark-composers nil)
+      (agent-repl--workspace-completion-mark-composers "ws-1")
       ;; Assert
       (should-not (agent-repl-test-workspace-completion--marked)))))
 
-(ert-deftest agent-repl-test-workspace-completion-mark-composers-is-on-the-roster-hook ()
-  "The re-mark runs on every roster push."
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-leaves-another-workspaces-composer ()
+  "Another workspace's mention targets push leaves this composer's marks alone."
+  (let ((names '("parser-fix")))
+    (agent-repl-test-workspace-completion--composer "ask parser-fix" names
+      ;; Arrange
+      (agent-repl--workspace-completion-mark-composers "ws-1")
+      (setq names '())
+      ;; Act
+      (agent-repl--workspace-completion-mark-composers "ws-2")
+      ;; Assert
+      (should (equal (agent-repl-test-workspace-completion--marked) '("parser-fix"))))))
+
+(ert-deftest agent-repl-test-workspace-completion-mark-composers-is-on-the-mention-targets-hook ()
+  "The re-mark runs on every mention targets push."
   (should (memq #'agent-repl--workspace-completion-mark-composers
-                (default-value 'agent-repl-roster-update-functions))))
+                (default-value 'agent-repl-host-mention-targets-functions))))
+
+(ert-deftest agent-repl-test-workspace-completion-marks-nothing-outside-a-composer ()
+  "A buffer no workspace owns marks no name, whatever any workspace's targets are."
+  (with-temp-buffer
+    (agent-repl-test-workspace-completion--serving '("parser-fix")
+      (add-hook 'after-change-functions #'agent-repl--workspace-completion-on-change nil t)
+      ;; Act
+      (insert "ask parser-fix")
+      ;; Assert
+      (should-not (agent-repl-test-workspace-completion--marked)))))
 
 ;;;; ---- The order names are offered in ----
 
@@ -335,8 +371,8 @@ No name is taken before BODY runs."
   "A buffer no workspace owns is no composer, so it completes no name."
   (with-temp-buffer
     (insert "agent-")
-    (cl-letf (((symbol-function 'agent-repl-roster-open-workspaces)
-               (lambda () '(("agent-a")))))
+    (cl-letf (((symbol-function 'agent-repl-host-mention-targets)
+               (lambda (_ws) (agent-repl-test-workspace-completion--targets '("agent-a")))))
       ;; Act / Assert
       (should-not (agent-repl-workspace-completion-at-point)))))
 

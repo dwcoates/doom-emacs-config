@@ -477,6 +477,7 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
                       (list "{\"runInTerminal\":{\"command\":\"ls\"}}" :run-in-terminal)
                       (list "{\"selection\":{\"none\":{}}}" :selection)
                       (list "{\"mentions\":{\"commands\":[\"merge-queue\"]}}" :mentions)
+                      (list "{\"mentionTargets\":{}}" :mention-targets)
                       (list "{\"evaluate\":{\"token\":{\"value\":\"t-1\"},\"text\":\"(+ 1 2)\"}}" :evaluate)
                       (list "{\"finalResponseClicked\":{}}" :final-response-clicked)
                       (list "{\"selectRequested\":{}}" :select-requested)
@@ -536,6 +537,58 @@ A hand-rolled copy of either would drift from the shared shape and fail here."
   (should (equal (agent-repl-test-wire-host--breach
                   #'agent-repl-wire-decode-host-workspace-mentions "{\"skills\":[]}")
                  '("HostWorkspaceMentions" skills "unknown field"))))
+
+;;;; ---- The mention targets push ----
+
+(ert-deftest agent-repl-test-wire-host-mention-targets-decode-each-target ()
+  "The mention targets push decodes each target's name, workspace and repository, in order."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             (concat "{\"mentionTargets\":{\"targets\":["
+                                     "{\"name\":{\"text\":\"beta\"},\"workspace\":{\"id\":\"b\",\"dir\":\"/w/b\"},"
+                                     "\"repository\":{\"name\":\"doom\"}},"
+                                     "{\"name\":{\"text\":\"alpha\"},\"workspace\":{\"id\":\"a\",\"dir\":\"/w/a\"}}]}}"))
+                            :value)
+                 '((:name "beta" :workspace (:id "b" :dir "/w/b") :repository "doom")
+                   (:name "alpha" :workspace (:id "a" :dir "/w/a") :repository nil)))))
+
+(ert-deftest agent-repl-test-wire-host-mention-targets-absent-list-is-empty ()
+  "A set with no targets decodes to the empty list, protojson's omitted field."
+  (should (equal (plist-get (agent-repl-test-wire-host--decode
+                             #'agent-repl-wire-decode-watch-host-workspace-response
+                             "{\"mentionTargets\":{}}")
+                            :value)
+                 nil)))
+
+(ert-deftest agent-repl-test-wire-host-mention-targets-a-name-served-twice-is-a-breach ()
+  "A name the daemon serves twice is a contract breach: it serves distinct names only."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-mention-targets
+                  (concat "{\"targets\":["
+                          "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"}},"
+                          "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"2\",\"dir\":\"/w/2\"}}]}"))
+                 '("WorkspaceMentionTargets" targets "the name \"a\" is served twice"))))
+
+(ert-deftest agent-repl-test-wire-host-mention-target-without-a-name-is-a-breach ()
+  "A target naming nothing is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-mention-target
+                  "{\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"}}")
+                 '("WorkspaceMentionTarget" name "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-mention-target-without-a-workspace-is-a-breach ()
+  "A target naming no workspace is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-mention-target
+                  "{\"name\":{\"text\":\"a\"}}")
+                 '("WorkspaceMentionTarget" workspace "required message field is absent"))))
+
+(ert-deftest agent-repl-test-wire-host-mention-target-an-unknown-field-is-a-breach ()
+  "A field the target does not declare is a contract breach."
+  (should (equal (agent-repl-test-wire-host--breach
+                  #'agent-repl-wire-decode-workspace-mention-target
+                  "{\"name\":{\"text\":\"a\"},\"workspace\":{\"id\":\"1\",\"dir\":\"/w/1\"},\"standing\":{}}")
+                 '("WorkspaceMentionTarget" standing "unknown field"))))
 
 (ert-deftest agent-repl-test-wire-host-push-unset-is-a-breach ()
   "A push carrying no arm is a contract breach, not an empty update."
@@ -1826,7 +1879,7 @@ opens are OpenTabs streams."
                              "openInEditor" "openCommitLog" "runInTerminal" "ending" "notificationClicked" "selection"
                              "finalResponseClicked" "selectRequested" "loadPageRequested" "composeEntry"
                              "chatTextHighlighted" "transferWithdrawn" "responseTextHighlighted"
-                             "responseQuestion" "mentions")
+                             "responseQuestion" "mentions" "mentionTargets")
                        #'string<))))
 
 (ert-deftest agent-repl-test-wire-host-host-ending-decodes-to-its-arm ()

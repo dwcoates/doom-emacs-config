@@ -35,7 +35,7 @@ func TestASelectOnTheSuccessorReachesTheIncumbentsRosterMidHandover(t *testing.T
 	for _, f := range []*fixture{held, moved} {
 		host := d.WatchHost(f.ws)
 		webs[f.ws.GetId()] = d.WatchWeb(f.ws)
-		harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+		harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	}
 	if _, err := d.Client().SelectWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: held.ws})); err != nil {
 		t.Fatalf("SelectWorkspace(held) on the incumbent = error %v, want a success", err)

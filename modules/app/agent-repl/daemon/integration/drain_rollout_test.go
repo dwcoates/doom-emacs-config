@@ -615,7 +615,7 @@ func TestReloadWebappTriggerPushesWithNoAddress(t *testing.T) {
 	// is what Emacs listens on to reload the xwidget.
 	web := d.WatchWeb(f.ws)
 	defer web.Close()
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 
 	// Act
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleWebapp)
@@ -646,7 +646,7 @@ func TestHandoverTransfersAFreeWorkspaceThroughTheAdoptionRendezvous(t *testing.
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
 	web := d.WatchWeb(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	daemonStream := d.WatchDaemonStream()
 
 	// Act: land a commit on the daemon's own checkout to fire the self-merge
@@ -796,7 +796,7 @@ func TestRegistryReadsAcrossTheSuccessorsPromotionAreServed(t *testing.T) {
 		fixtures[i] = f
 		host := d.WatchHost(f.ws)
 		webs[i] = d.WatchWeb(f.ws)
-		harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+		harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	}
 	daemonStream := d.WatchDaemonStream()
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
@@ -914,7 +914,7 @@ func TestABusyWorkspaceIsTransferredMidTurnAndItsHeldIntakeDrainsInOrderOnTheSuc
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	if first := f.submit("first", "k-midwork-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); first.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt(first) = %v, want the turn accepted", first)
 	}
@@ -1001,7 +1001,7 @@ func TestARestartAskedOfAMovedWorkspaceIsForwardedToTheSuccessor(t *testing.T) {
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
 	web := d.WatchWeb(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	f.submit("long running work", "k-moved-restart", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	f.shim.ExpectStartTurn()
 	drainTriggerDeploy(t, d, selfRepo, harness.DeployStaleDaemon)
@@ -1047,7 +1047,7 @@ func TestAnEarlyAdoptionCallDuringATurnAdoptsTheWorkspaceWithoutEndingIt(t *test
 	f.shim.ExpectWatchSession()
 	watchesBefore := f.shim.Count(harness.RPCWatchSession)
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	if got := f.submit("still running", "k-adopt-early", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
 	}
@@ -1108,7 +1108,7 @@ func TestALateFactsRefusalIsOfferedAgainMidWork(t *testing.T) {
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	if got := f.submit("forever", "k-refused-1", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT); got.GetSuccess() == nil {
 		t.Fatalf("SubmitPrompt = %v, want the turn accepted", got)
 	}
@@ -1285,7 +1285,7 @@ func TestAdoptWebWorkspaceRefusesParticipantNotExpectedForAClientNotOpenAtAnnoun
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 
 	// THE DAEMON STREAM IS SUBSCRIBED BEFORE THE HANDOVER IS FIRED. The
 	// daemon-level push topic replays only its own process's latest value to

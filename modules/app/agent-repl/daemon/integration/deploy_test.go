@@ -82,7 +82,7 @@ func TestADeployPushesTheWebappReloadToAStaleWebview(t *testing.T) {
 	host := f.d.WatchHost(f.ws)
 	web := f.d.WatchWeb(f.ws)
 	defer web.Close()
-	harness.AwaitNext(t, f.d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, f.d.Ctx(), host, "the fresh host push")
 	f.d.StageDeployBuild(harness.DeployStaleWebapp)
 
 	// Act
@@ -205,7 +205,7 @@ func TestADeployHandoverShowsTheWaitingWorkspaceAndItsSuccessorSaysUpdated(t *te
 	f.shim.ExpectStartSession()
 	host := d.WatchHost(f.ws)
 	f.web = d.WatchWeb(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	footer := d.WatchFooter(f.ws)
 	openTurnOn(t, f, "k-deploy-progress")
 	daemonStream := d.WatchDaemonStream()
@@ -277,7 +277,7 @@ func TestADeployHandoverDrawsAMidWorkHoldoutsRowFromTheIncumbent(t *testing.T) {
 	f.shim.ExpectStartSession()
 	host := d.WatchHost(f.ws)
 	f.web = d.WatchWeb(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	openTurnOn(t, f, "k-holdout-mirror")
 	daemonStream := d.WatchDaemonStream()
 

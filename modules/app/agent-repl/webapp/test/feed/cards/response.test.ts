@@ -970,6 +970,31 @@ describe("the wrapped tree a settled response carries", () => {
     }
   });
 
+  it("links a workspace its prose mentions outside any tree, without its code markers", () => {
+    // Arrange — the page's targets name the workspace `first`.
+    applyMentionTargets(
+      create(WorkspaceMentionTargetsSchema, { targets: [{ name: { text: "first" }, workspace: { id: "ws-first", dir: "/w/first" } }] }),
+      () => [],
+    );
+    try {
+      const el = drawFeedResponse(
+        response({
+          finalAnswer: true,
+          result: { case: "success", value: { prose: { prose: plainProse("**Done:** `first` opened a pull request.") } } },
+        }),
+        rowContext(),
+      );
+      // Act
+      mount(el);
+      // Assert
+      const linked = [...el.querySelectorAll(`[${WORKSPACE_MENTION_ATTRIBUTE}]`)].map((m) => [m.textContent, m.getAttribute(WORKSPACE_MENTION_ATTRIBUTE)]);
+      expect(linked).toEqual([["first", "ws-first"]]);
+      expect(el.querySelector(`[${WORKSPACE_MENTION_ATTRIBUTE}] code, code`)).toBeNull();
+    } finally {
+      resetMentionTargets();
+    }
+  });
+
   it("links nothing in a response nothing answers", () => {
     // Arrange
     const el = drawFeedResponse(

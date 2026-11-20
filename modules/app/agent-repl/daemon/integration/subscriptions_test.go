@@ -280,7 +280,9 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 
 			switch k.Name {
 			case "WatchHostWorkspace":
-				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the host push a registered-but-unopened workspace opens with")
+				push := harness.AwaitView(t, d.Ctx(), s, k.Name+": the host push a registered-but-unopened workspace opens with", func(p proto.Message) bool {
+					return harness.HostView(p.(*agentreplv1.WatchHostWorkspaceResponse))
+				})
 				if push.(*agentreplv1.WatchHostWorkspaceResponse).GetHost().GetNone() == nil {
 					t.Fatalf("%s on a registered-but-unopened workspace = %v, want host.none (composed before every subscribe)", k.Name, push)
 				}
@@ -423,7 +425,7 @@ func TestWatchHostWorkspaceFlushesHeadersThenPushesHostNoneWhenRegisteredButNotO
 
 	// Assert: headers arrive, and the composed host.none push follows.
 	host.AwaitHeaders(t, f.d.Ctx(), "WatchHostWorkspace")
-	push := harness.AwaitNext(t, f.d.Ctx(), host, "the host.none push a registered-but-unopened workspace already has")
+	push := harness.AwaitHostView(t, f.d.Ctx(), host, "the host.none push a registered-but-unopened workspace already has")
 	if push.GetHost().GetNone() == nil {
 		t.Fatalf("WatchHostWorkspace on a registered-but-unopened workspace = %v, want host.none", push)
 	}
@@ -476,15 +478,17 @@ func TestHostStreamIdenticalRepublishedViewProducesNoSecondPush(t *testing.T) {
 	// Arrange
 	f := newOpened(t, harness.Opts{})
 	witness := f.d.WatchHost(f.ws)
-	harness.AwaitNext(t, f.d.Ctx(), witness, "the witness's initial host push")
+	harness.AwaitHostView(t, f.d.Ctx(), witness, "the witness's initial host push")
 
 	// Act: a second subscription re-triggers PublishHostWorkspace with an
 	// unchanged, hence identical, composed view.
 	second := f.d.WatchHost(f.ws)
-	harness.AwaitNext(t, f.d.Ctx(), second, "the second subscriber's own initial push")
+	harness.AwaitHostView(t, f.d.Ctx(), second, "the second subscriber's own initial push")
 
-	// Assert: the witness, already caught up, gets nothing further.
-	harness.ExpectNoPush(t, witness, "a re-published identical host view produces no second push")
+	// Assert: the witness, already caught up, gets no further host view. Its
+	// own mention targets, sent beside its first host view, are not a host
+	// view and are passed over.
+	harness.ExpectNoPushMatching(t, witness, "a re-published identical host view produces no second push", harness.HostView)
 }
 
 // ---------------------------------------------------------------------------

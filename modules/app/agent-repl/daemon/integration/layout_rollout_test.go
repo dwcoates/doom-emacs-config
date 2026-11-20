@@ -119,7 +119,7 @@ func TestAHandoverWhoseSuccessorDiesAtBootTransfersNothingAndKeepsServing(t *tes
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	daemonStream := d.WatchDaemonStream()
 	// The Emacs stream opens with the standing persistent-wifi state; its
 	// settled boot standing is taken here so the probe below sees only what
@@ -253,7 +253,7 @@ func TestAnAdditiveLayoutChangeIsHandedOverRatherThanRestarted(t *testing.T) {
 	f.shim.ExpectStartSession()
 	f.shim.ExpectWatchSession()
 	host := d.WatchHost(f.ws)
-	harness.AwaitNext(t, d.Ctx(), host, "the fresh host push")
+	harness.AwaitHostView(t, d.Ctx(), host, "the fresh host push")
 	daemonStream := d.WatchDaemonStream()
 
 	// Act
