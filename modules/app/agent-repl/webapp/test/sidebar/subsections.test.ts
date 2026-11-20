@@ -201,18 +201,39 @@ describe("a repository's subsections", () => {
       sub.querySelector(".sb-subsection-label")?.textContent,
       sub.querySelector(".sb-count")?.textContent,
       sub.querySelector(":scope > .rows > [data-roster-row='ws-1']") !== null,
-    ]).toEqual(["sub-1", "later", "(1/1)", true]);
+    ]).toEqual(["sub-1", "later", "(0/0/1)", true]);
   });
 
-  it("draw their count as the rows no fold hides of every row", () => {
+  it("draw their count as the working, the synchronously merging and every row, folded or not", () => {
     // Arrange
-    const sub = { id: "sub-1", rows: [row({ id: "ws-1" }), row({ id: "ws-2" })], collapsed: true, unfolded: 0 };
+    const rows = [
+      row({ id: "ws-1", status: { case: "thinking", value: {} } }),
+      row({ id: "ws-2", status: { case: "merging", value: {} } }),
+      row({ id: "ws-3" }),
+    ];
+    const sub = { id: "sub-1", rows, collapsed: true, unfolded: 0 };
 
     // Act
     const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [sub] })] }), sidebarContext());
 
     // Assert
-    expect(pane.querySelector(".sb-subsection .sb-count")?.textContent).toBe("(0/2)");
+    const count = pane.querySelector(".sb-subsection .sb-count") as HTMLElement;
+    expect([
+      count.textContent,
+      count.querySelector(".sb-count-working")?.className,
+      count.querySelector(".sb-count-merging")?.className,
+    ]).toEqual(["(1/1/3)", "sb-count-working tone-red", "sb-count-merging tone-purple"]);
+  });
+
+  it("count a nested child's work toward the subsection", () => {
+    // Arrange
+    const sub = { id: "sub-1", rows: [row({ id: "p", children: [row({ id: "c", status: { case: "thinking", value: {} } })] })] };
+
+    // Act
+    const pane = mount(roster({ repos: [repoSection({ id: "repo-1", subsections: [sub] })] }), sidebarContext());
+
+    // Assert
+    expect(pane.querySelector(".sb-subsection .sb-count-working")?.textContent).toBe("1");
   });
 
   it("refuse a count with more unfolded rows than rows", () => {

@@ -90,7 +90,7 @@ import {
   REPOSITORY_BLOCK_CLASS,
   REPOSITORY_DIVIDER_CLASS,
 } from "./row.js";
-import { drawRosterOpenCount, openCountText } from "./open-count.js";
+import { drawRosterOpenCount, showWorkspaceCountParenthetical, statusCountOf } from "./open-count.js";
 
 /** The class of one subsection. */
 export const SUBSECTION_CLASS = "sb-subsection";
@@ -203,9 +203,14 @@ export function drawRosterSubsection(
   label.className = SUBSECTION_LABEL_CLASS;
   label.textContent = name;
   paintSubsectionWork(label, u, path);
-  const shown = document.createElement("span");
-  shown.className = "sb-count";
-  shown.textContent = openCountText(count);
+  const shown = showWorkspaceCountParenthetical(
+    count.workspaces,
+    statusCountOf(
+      pathedOpenRows(requireMessage(u.openRows, `${path}.open_rows`), `${path}.open_rows`)
+        .flatMap(({ row, path: rowPath }) => familyRows(row, rowPath))
+        .map(({ row, path: rowPath }) => ({ row: row.row, path: `${rowPath}.row` })),
+    ),
+  );
   if (count.workspaces === 0) shown.setAttribute(ZERO_COUNT_ATTRIBUTE, "");
   if (bucket.case !== "named") throw new Error("invariant: a drawn subsection is a named one");
   const id = bucket.id;
