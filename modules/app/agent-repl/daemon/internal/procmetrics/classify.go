@@ -5,21 +5,23 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"agent-repld/internal/restarttiming"
 )
 
-// The process label's values.
+// The process label's values, spelled once in restarttiming.
 const (
-	ProcessDaemon      = "daemon"
-	ProcessDaemonTools = "daemon_tools"
-	ProcessStore       = "store"
-	ProcessSidecar     = "sidecar"
-	ProcessShim        = "shim"
-	ProcessShimTools   = "shim_tools"
-	ProcessEmacs       = "emacs"
+	ProcessDaemon      = restarttiming.ProcessDaemon
+	ProcessDaemonTools = restarttiming.ProcessDaemonTools
+	ProcessStore       = restarttiming.ProcessStore
+	ProcessSidecar     = restarttiming.ProcessSidecar
+	ProcessShim        = restarttiming.ProcessShim
+	ProcessShimTools   = restarttiming.ProcessShimTools
+	ProcessEmacs       = restarttiming.ProcessEmacs
 	// The WebKit processes Emacs is responsible for, by role.
-	ProcessWebKitWebContent = "webkit_webcontent"
-	ProcessWebKitNetworking = "webkit_networking"
-	ProcessWebKitGPU        = "webkit_gpu"
+	ProcessWebKitWebContent = restarttiming.ProcessWebKitWebContent
+	ProcessWebKitNetworking = restarttiming.ProcessWebKitNetworking
+	ProcessWebKitGPU        = restarttiming.ProcessWebKitGPU
 )
 
 // webkitRoles maps a WebKit process's role to its group. It is the closed

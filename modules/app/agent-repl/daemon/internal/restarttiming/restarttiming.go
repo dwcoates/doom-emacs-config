@@ -378,3 +378,19 @@ func NewBootTimer(recorder Recorder, mode BootMode, started time.Time, now func(
 func (b BootTimer) Reached(phase BootPhase) {
 	b.recorder.ObserveRestart(OfBoot(phase, b.mode, b.now().Sub(b.started)))
 }
+
+// The process groups agent-repl's processes are measured in, the `process`
+// label of every process series (procmetrics).
+const (
+	ProcessDaemon      = "daemon"
+	ProcessDaemonTools = "daemon_tools"
+	ProcessStore       = "store"
+	ProcessSidecar     = "sidecar"
+	ProcessShim        = "shim"
+	ProcessShimTools   = "shim_tools"
+	ProcessEmacs       = "emacs"
+	// The WebKit processes Emacs is responsible for, by role.
+	ProcessWebKitWebContent = "webkit_webcontent"
+	ProcessWebKitNetworking = "webkit_networking"
+	ProcessWebKitGPU        = "webkit_gpu"
+)
