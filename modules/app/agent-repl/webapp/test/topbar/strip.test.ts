@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { recorded } from "../events.js";
 import { create } from "@bufbuild/protobuf";
+import { drawNamePrefix } from "../../src/name-prefix.js";
 import {
   TopbarAccountSchema,
   TopbarConnectivitySchema,
@@ -28,7 +29,6 @@ import {
   OWNED_LINK_CLASS,
 } from "../../src/topbar/strip.js";
 import { drawLinkIcon } from "../../src/topbar/link-icon.js";
-import { drawNameGlyph } from "../../src/name-glyph.js";
 import styles from "../../src/styles.css?raw";
 import { withoutBlockComments } from "../source-text.js";
 import { cascadedValue, cascadedValueIn, installStylesheet } from "../stylesheet.js";
@@ -217,21 +217,22 @@ describe("drawHeadingLine", () => {
   });
 });
 
-describe("drawTopbarWorkspaceName's glyph", () => {
-  it("draws the name's glyph before the name, the tooltip the name alone", () => {
+describe("drawTopbarWorkspaceName's emoji-ack glyph", () => {
+  it("draws the glyph in the name's prefix, the tooltip the name alone", () => {
     // Act
-    const line = drawTopbarWorkspaceName(create(TopbarWorkspaceNameSchema, { text: "acked", glyph: { text: "👍" } }));
+    const u = create(TopbarWorkspaceNameSchema, { text: "acked", prefix: { emojiAck: { text: "👍" } } });
+    const line = drawTopbarWorkspaceName(u);
 
     // Assert
     expect([line.firstElementChild?.outerHTML, line.textContent, line.title]).toEqual([
-      drawNameGlyph({ text: "👍" }, "TopbarWorkspaceName.glyph").outerHTML,
+      drawNamePrefix(u.prefix, "TopbarWorkspaceName.prefix")?.outerHTML,
       "👍acked",
       "acked",
     ]);
   });
 
   it("draws no glyph for a name that wears none", () => {
-    expect(drawTopbarWorkspaceName(workspaceName("plain")).querySelector(".name-glyph")).toBeNull();
+    expect(drawTopbarWorkspaceName(workspaceName("plain")).querySelector(".name-emoji-ack")).toBeNull();
   });
 });
 
@@ -267,6 +268,28 @@ describe("drawTopbarWorkspaceName", () => {
 
   it("keeps the whole name in the tooltip, since the strip ellipsis-clips it", () => {
     expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).title).toBe("fix-reconnect");
+  });
+
+  it("draws the name's prefix before the name, through the one shared drawer", () => {
+    const u = create(TopbarWorkspaceNameSchema, {
+      text: "fix-reconnect",
+      prefix: { priority: { level: { case: "p2", value: {} } } },
+    });
+    const line = drawTopbarWorkspaceName(u);
+    expect(line.firstElementChild?.outerHTML).toBe(drawNamePrefix(u.prefix, "TopbarWorkspaceName.prefix")?.outerHTML);
+    expect(line.querySelector("[data-priority='p2']")).not.toBeNull();
+  });
+
+  it("keeps the prefix out of the tooltip", () => {
+    const u = create(TopbarWorkspaceNameSchema, {
+      text: "fix-reconnect",
+      prefix: { priority: { level: { case: "p1", value: {} } } },
+    });
+    expect(drawTopbarWorkspaceName(u).title).toBe("fix-reconnect");
+  });
+
+  it("draws no prefix for a name that wears none", () => {
+    expect(drawTopbarWorkspaceName(workspaceName("fix-reconnect")).querySelector(".name-prefix")).toBeNull();
   });
 });
 

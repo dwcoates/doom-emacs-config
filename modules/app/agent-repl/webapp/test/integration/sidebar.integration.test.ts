@@ -239,14 +239,16 @@ describe("row decoration", () => {
     expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"]`)?.dataset.current).toBe("true");
   });
 
-  it("draws the priority badge's label verbatim", async () => {
+  it("draws the priority icon before the name", async () => {
     // Arrange / Act
-    await withRoster({ rows: [rosterRow({ priority: "P1" })] });
+    await withRoster({ rows: [rosterRow({ priority: "p1" })] });
     // Assert
-    expect(harness.$(`[data-roster-row="${WORKSPACE_ID}"] [data-priority]`)?.textContent).toBe("P1");
+    const icon = harness.$(`[data-roster-row="${WORKSPACE_ID}"] .name-prefix [data-priority]`);
+    expect(icon?.getAttribute("data-priority")).toBe("p1");
+    expect(icon?.parentElement?.nextElementSibling?.classList.contains("name")).toBe(true);
   });
 
-  it("draws no priority badge when none is served", async () => {
+  it("draws no priority icon when none is served", async () => {
     // Arrange / Act
     await withRoster({ rows: [rosterRow({})] });
     // Assert
