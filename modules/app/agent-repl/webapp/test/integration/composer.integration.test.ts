@@ -24,7 +24,7 @@ import { SubmitPromptSuccessSchema } from "../../../proto/gen/ts/agentrepl/v1/en
 import { SubmitPromptCommandPanelSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { PromptOrigin } from "../../../proto/gen/ts/conversation/v1/prompt_origin_pb";
 
-import { bootColdOnce, startHarness, type Harness } from "./harness";
+import { bootColdOnce, sharedMount, startHarness, type Harness } from "./harness";
 import { ROOT_FEED } from "./fake-daemon";
 import {
   COMMAND_PANEL_ARMS,
@@ -47,8 +47,26 @@ let harness: Harness;
 
 bootColdOnce();
 
+/**
+ * THE FILE'S ONE MOUNTED APP, composer on. A case about what the composer
+ * sends and draws takes its slice of it; each case's end clears what it left
+ * in the composer (`clearComposer`). A case about the boot's composer flag, or
+ * one arranging the daemon before boot, mounts its own.
+ */
+const shared = sharedMount({ composer: true, endCase: clearComposer });
+
+/** Clear the draft a case left in the composer, as a reader does: through its input. */
+async function clearComposer(app: Harness): Promise<void> {
+  const input = app.$('[data-component="composer"] textarea') as HTMLTextAreaElement | null;
+  if (input !== null && input.value !== "") {
+    input.value = "";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+  await app.settle();
+}
+
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 /** The dev composer's input, typed and dispatched as a user would. */
@@ -102,14 +120,14 @@ describe("production runs composer-less", () => {
 describe("the dev composer", () => {
   it("draws when the dev flag is on", async () => {
     // Arrange / Act
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     // Assert
     expect(harness.$('[data-component="composer"]')?.hidden).toBe(false);
   });
 
   it("calls SubmitPrompt on send", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("do the thing");
     // Act
     await send();
@@ -119,7 +137,7 @@ describe("the dev composer", () => {
 
   it("sends the text as a UserSaid text block", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("do the thing");
     // Act
     await send();
@@ -133,7 +151,7 @@ describe("the dev composer", () => {
 
   it("clears the input on a successful send", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("do the thing");
     // Act
     await send();
@@ -143,7 +161,7 @@ describe("the dev composer", () => {
 
   it("sends nothing for an empty input", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     // Act
     await send();
     // Assert
@@ -154,7 +172,7 @@ describe("the dev composer", () => {
 describe("the required workspace", () => {
   it("carries the context's workspace on every submission", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("a prompt");
     // Act
     await send();
@@ -165,7 +183,7 @@ describe("the required workspace", () => {
 
   it("carries the workspace's dir, not just its id", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("a prompt");
     // Act
     await send();
@@ -199,7 +217,7 @@ describe("the required workspace", () => {
   it("is refused by the daemon when absent", async () => {
     // Arrange: prove the fake actually enforces it, so the assertions above
     // are not passing against a lenient stub.
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     const failed = await harness.ctx.client
       .submitPrompt({ idempotencyKey: "k", origin: WEBAPP_ORIGIN })
       .catch((e: unknown) => e);
@@ -211,7 +229,7 @@ describe("the required workspace", () => {
 describe("the required origin", () => {
   it("sends the webapp user-sent origin from the dev composer", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("a prompt");
     // Act
     await send();
@@ -244,7 +262,7 @@ describe("the required origin", () => {
 
   it("never sends the unspecified origin", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("a prompt");
     // Act
     await send();
@@ -255,7 +273,7 @@ describe("the required origin", () => {
 
   it("is refused by the daemon when unspecified", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     const failed = await harness.ctx.client
       .submitPrompt({ workspace: harness.ctx.workspace, idempotencyKey: "k" })
       .catch((e: unknown) => e);
@@ -267,7 +285,7 @@ describe("the required origin", () => {
 describe("the idempotency key", () => {
   it("mints a key for every submission", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("a prompt");
     // Act
     await send();
@@ -278,7 +296,7 @@ describe("the idempotency key", () => {
 
   it("mints a FRESH key per distinct submission", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("first");
     await send();
     // Act
@@ -292,7 +310,7 @@ describe("the idempotency key", () => {
   it("reuses the SAME key when the same submission is retried", async () => {
     // Arrange: the first attempt fails at the transport, so the text stands
     // and the retry is the same submission, not a new one.
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.failNext("submitPrompt", "the daemon dropped the call");
     await type("a prompt");
     await send();
@@ -305,7 +323,7 @@ describe("the idempotency key", () => {
 
   it("mints a new key after a successful send", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("first");
     await send();
     const [first] = harness.fake.calls<{ idempotencyKey: string }>("submitPrompt");
@@ -321,7 +339,7 @@ describe("the idempotency key", () => {
 describe("the minted turn", () => {
   it("matches the turn the feed row carries", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -347,7 +365,7 @@ describe("the minted turn", () => {
 
   it("marks the row as this client's own submission", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -373,7 +391,7 @@ describe("the minted turn", () => {
 
   it("does not claim a row from another submitter's turn", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await harness.fake.awaitStream("watchFeed");
     // Act
     harness.fake.pushRow(
@@ -457,7 +475,7 @@ describe("the bubble composer's gate", () => {
 
   it("sends no feed from the root composer", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await type("at the root");
     // Act
     await send();
@@ -470,7 +488,7 @@ describe("the bubble composer's gate", () => {
 describe("a command refusal answer", () => {
   it("clears the composer text", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -489,7 +507,7 @@ describe("a command refusal answer", () => {
 
   it("draws no composer refusal, since this is a success arm", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -526,7 +544,7 @@ describe("command panels", () => {
 
   /** Submit a slash command whose answer is the given panel. */
   const submitPanel = async (arm: (typeof COMMAND_PANEL_ARMS)[number]): Promise<void> => {
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -691,7 +709,7 @@ describe("command panels", () => {
 describe("submission does not derive state", () => {
   it("draws no optimistic prompt row before the daemon pushes one", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await harness.fake.awaitStream("watchFeed");
     await type("a prompt");
     // Act
@@ -702,7 +720,7 @@ describe("submission does not derive state", () => {
 
   it("draws the row once the daemon pushes it", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await harness.fake.awaitStream("watchFeed");
     await type("a prompt");
     await send();
@@ -715,7 +733,7 @@ describe("submission does not derive state", () => {
 
   it("draws a response row pushed after the submission", async () => {
     // Arrange
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     await harness.fake.awaitStream("watchFeed");
     await type("a prompt");
     await send();
@@ -743,7 +761,7 @@ describe("submission does not derive state", () => {
 describe("an ask-answered answer", () => {
   /** Submit words the daemon delivered as a standing ask's typed answer. */
   const submitAnswer = async (): Promise<void> => {
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -772,7 +790,7 @@ describe("an ask-answered answer", () => {
 describe("a response-revising answer", () => {
   /** Submit words the daemon took as a question about a highlighted response. */
   const submitRevising = async (): Promise<void> => {
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -801,7 +819,7 @@ describe("a response-revising answer", () => {
 describe("a question-sent answer", () => {
   /** Submit words the daemon handed, as a question about a card, to an intake workspace. */
   const submitQuestion = async (): Promise<void> => {
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -831,9 +849,14 @@ describe("a question-sent answer", () => {
 });
 
 describe("a command-acted answer", () => {
-  /** Submit a session-acting command whose answer mints no turn. */
-  const submitActed = async (): Promise<void> => {
-    harness = await startHarness({ composer: true });
+  /**
+   * Submit a session-acting command whose answer mints no turn, on the
+   * shared mount, or on a FRESH one (`fresh`) for a case asserting no panel
+   * stands: a panel an earlier case drew stays until the next panel replaces
+   * it, and nothing on the page removes it.
+   */
+  const submitActed = async (fresh = false): Promise<void> => {
+    harness = fresh ? await startHarness({ composer: true }) : await shared();
     harness.fake.answer(
       "submitPrompt",
       create(SubmitPromptResponseSchema, {
@@ -860,7 +883,7 @@ describe("a command-acted answer", () => {
 
   it("draws no panel", async () => {
     // Arrange / Act
-    await submitActed();
+    await submitActed(true);
     // Assert
     expect(harness.$("[data-panel]")).toBeNull();
   });
@@ -897,7 +920,7 @@ describe("a duplicate submission", () => {
    * has already accepted.
    */
   const retryDuplicate = async (): Promise<void> => {
-    harness = await startHarness({ composer: true });
+    harness = await shared();
     harness.fake.failNext("submitPrompt", "the daemon dropped the call");
     await type("a prompt");
     await send();

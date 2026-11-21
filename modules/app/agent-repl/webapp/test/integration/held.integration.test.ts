@@ -23,7 +23,7 @@ import { FoldHeldPromptResponseSchema } from "../../../proto/gen/ts/agentrepl/v1
 import { ClassifierRoute } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_classifier_prompt_pb";
 import { create } from "@bufbuild/protobuf";
 
-import { bootColdOnce, startHarness, type Harness } from "./harness";
+import { sharedMount, type Harness } from "./harness";
 import {
   HELD_TURN_ID,
   HOLD_BADGES,
@@ -40,15 +40,29 @@ import {
 
 let harness: Harness;
 
-bootColdOnce();
+
+/**
+ * THE FILE'S ONE MOUNTED APP. Each case pushes its whole held section onto it
+ * (`withTray`), as the daemon pushes every change to it, and each case's end
+ * pushes the section empty, as the daemon does once nothing is held.
+ */
+const shared = sharedMount({ endCase: emptyTray });
+
+/** Push the held section empty, taking the case's tray away. */
+async function emptyTray(app: Harness): Promise<void> {
+  app.fake.setHeld(WORKSPACE_ID, heldSection({ items: [] }));
+  await app.settle();
+}
 
 afterEach(async () => {
-  await harness?.stop();
+  if (harness !== undefined && !shared.owns(harness)) await harness.stop();
 });
 
 /** Boot with one tray already scripted. */
 async function withTray(init: Parameters<typeof heldSection>[0]): Promise<Harness> {
-  harness = await startHarness({ arrange: (fake) => fake.setHeld(WORKSPACE_ID, heldSection(init)) });
+  harness = await shared();
+  harness.fake.setHeld(WORKSPACE_ID, heldSection(init));
+  await harness.settle();
   return harness;
 }
 
