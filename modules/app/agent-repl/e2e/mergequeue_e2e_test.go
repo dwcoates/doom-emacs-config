@@ -278,10 +278,13 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	// is closed by the next boot (daemon.promptqueue.restore_holds). The
 	// resubmitted turn's end can hibernate the workspace just before the
 	// next kill, which leaves the hibernate lease for the next boot to
-	// release (daemon.boot.orphan_leases).
+	// release (daemon.boot.orphan_leases). A displaced turn parked on the
+	// fake's turn gate has written no transcript, so a revival after the
+	// kill brings the session up fresh and says so
+	// (daemon.workspace.bring_up).
 	mqExpectedBounceWarnings := []string{
 		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds",
-		"daemon.boot.orphan_leases",
+		"daemon.boot.orphan_leases", "daemon.workspace.bring_up",
 	}
 
 	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE
