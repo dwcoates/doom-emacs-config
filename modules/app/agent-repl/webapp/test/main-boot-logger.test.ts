@@ -41,7 +41,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 
+import { pageFocusLeft } from "../src/focus-left.js";
 import { resetLoggingForTests } from "../src/log.js";
+import { tearDownPage } from "../src/page-teardown.js";
 import { shellHTML } from "./shell-html.js";
 
 /**
@@ -175,6 +177,34 @@ describe("the boot's warm set", () => {
   });
 });
 
+/**
+ * TAKE THE LOGGER OUT, after ending the page the suites share.
+ *
+ * A file that ran earlier in this worker may have made the page's listeners
+ * (`pageFocusLeft`, `pagePresence`) through the module graph every file
+ * shares. Taking that graph's logger out while they still listen, then moving
+ * every later file to a fresh graph (`vi.resetModules`), left them on the
+ * window with no logger, and the next file's window blur threw through one
+ * (2026-11-21, a merge gate). Ending the page first disposes them.
+ */
+function takeTheLoggerOut(): void {
+  tearDownPage();
+  resetLoggingForTests();
+}
+
+describe("taking the logger out", () => {
+  it("ends the page first so no listener it made outlives the logger", () => {
+    // Arrange
+    const before = pageFocusLeft();
+
+    // Act
+    takeTheLoggerOut();
+
+    // Assert: the page's focus-left was disposed, and the next ask makes it anew.
+    expect(pageFocusLeft()).not.toBe(before);
+  });
+});
+
 describe("the webapp's boot against a real page", () => {
   let realFetch: typeof globalThis.fetch;
   let realQueueMicrotask: typeof globalThis.queueMicrotask;
@@ -184,7 +214,7 @@ describe("the webapp's boot against a real page", () => {
     realQueueMicrotask = globalThis.queueMicrotask;
     captureTheReRaise();
     // OUT, not replaced. A page has no logger; installing one is `boot`'s job.
-    resetLoggingForTests();
+    takeTheLoggerOut();
     document.body.innerHTML = shellHTML();
     // THE PAGE STATES ITS BUILD off its built entry tag (webapp-build.ts), which
     // the shell's own script tag stands for once built.
