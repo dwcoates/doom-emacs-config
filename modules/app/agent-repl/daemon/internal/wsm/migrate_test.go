@@ -717,6 +717,25 @@ func TestTheMigrationAddsTheMergeRolloutHoldTable(t *testing.T) {
 	}
 }
 
+func TestTheMigrationAddsTheArrivalWaitsTable(t *testing.T) {
+	// Arrange -- a file written before prompts delivered on arrival waited.
+	path := layout3Fixture(t)
+
+	// Act
+	handle, err := Open(context.Background(), path, WithUnsyncedWrites())
+	if err != nil {
+		t.Fatalf("Open on a layout-3 database: %v", err)
+	}
+	defer handle.Close()
+
+	// Assert
+	got := scalar[int](t, handle.(*store),
+		`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'arrival_waits'`)
+	if got != 1 {
+		t.Fatalf("arrival_waits exists %d times after the migration, want 1", got)
+	}
+}
+
 func TestTheMigrationAddsTheMergeQueueFrontColumn(t *testing.T) {
 	// Arrange -- a file written before a merge could ask for the front.
 	path := layout3Fixture(t)
