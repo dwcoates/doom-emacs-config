@@ -55,7 +55,11 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 		case wsm.PolicyRefuse, wsm.PolicyParked:
 			return q.refuseMerging(ctx, lease, sub, log)
 		case wsm.PolicyHold:
-			reason, why := arrivalLeaseWait(lease.Holder)
+			kind, _, err := q.holdForLease(ctx, lease, log)
+			if err != nil {
+				return Disposition{}, err
+			}
+			reason, why := arrivalWaitOfLeaseHold(kind)
 			return q.awaitArrival(ctx, sub, reason, why, log)
 		default:
 			log.Error(opArrival, "the lease carries a policy the queue does not know", dlog.Context{"lease": string(lease.ID), "holder": holderName(lease.Holder)})
@@ -136,20 +140,21 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 	return disposition, err
 }
 
-// arrivalLeaseWait names the wait a holding lease of HOLDER puts a prompt
-// delivered on arrival under: the same reading holdForLease gives a hold.
-func arrivalLeaseWait(holder wsm.LeaseHolder) (wsm.ArrivalWaitReason, string) {
-	switch holder {
-	case wsm.HolderDrain:
+// arrivalWaitOfLeaseHold names the wait a prompt delivered on arrival takes
+// under a holding lease, from the hold kind the lease projects
+// (holdForLease), so the holder is read in one place for both paths.
+func arrivalWaitOfLeaseHold(kind wsm.HoldKind) (wsm.ArrivalWaitReason, string) {
+	switch kind {
+	case wsm.HoldShutdown:
 		return wsm.WaitShutdown, "the daemon is draining to exit"
-	case wsm.HolderRestart:
+	case wsm.HoldBuildRefresh:
 		return wsm.WaitBounce, "the workspace's shim is being restarted"
-	case wsm.HolderHibernate:
+	case wsm.HoldReconnect:
 		return wsm.WaitSession, "the workspace is hibernating"
-	case wsm.HolderMerge:
+	case wsm.HoldMerge:
 		return wsm.WaitMerge, "a merge drives the workspace's session"
 	}
-	panic(fmt.Sprintf("promptqueue: a holding lease of undeclared holder %d", int(holder)))
+	panic(fmt.Sprintf("promptqueue: a lease projected hold kind %s, which names no arrival wait", kind))
 }
 
 // joinArrivalLocked sends SUB to join RUNNING after its current tool call. A

@@ -3,6 +3,7 @@ package promptqueue
 import (
 	"context"
 	"errors"
+	"go/ast"
 	"testing"
 
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -409,6 +410,7 @@ func TestAHoldingLeaseNamesTheArrivalsWait(t *testing.T) {
 		t.Run(tt.want.String(), func(t *testing.T) {
 			// Arrange
 			h := newHarness(t)
+			h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
 			h.lease(tt.holder, wsm.PolicyHold)
 
 			// Act
@@ -461,6 +463,7 @@ func TestARefusingLeaseRefusesAnArrival(t *testing.T) {
 func TestTheBootDeliversAnArrivalThatWaitedOutThePredecessorsExit(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
+	h.db.schedule = &wsm.DrainSchedule{SetAt: instant}
 	h.lease(wsm.HolderDrain, wsm.PolicyHold)
 	if _, err := h.q.Submit(context.Background(), notice("t1")); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -697,5 +700,35 @@ func TestAJoiningArrivalKeepsNoUsersPromptFromTheClassifier(t *testing.T) {
 	// Assert
 	if asked := h.judge.questions(); len(asked) != 1 || asked[0][0] != "the running work" {
 		t.Fatalf("judged = %v, want the user's prompt judged against the running turn", asked)
+	}
+}
+
+// THE LEASE'S HOLDER IS READ ONCE: the arrival path names its wait from the
+// hold kind holdForLease projects, so no other function switches on a holder.
+func TestOnlyHoldForLeaseReadsALeasesHolder(t *testing.T) {
+	// Arrange
+	fset, funcs := productionFuncs(t)
+
+	// Act
+	var found []string
+	for _, fn := range funcs {
+		if fn.Name.Name == "holdForLease" || fn.Name.Name == "holderName" || fn.Name.Name == "noteDrainRefusal" || fn.Name.Name == "exemptFromLease" {
+			continue
+		}
+		ast.Inspect(fn, func(n ast.Node) bool {
+			if clause, ok := n.(*ast.CaseClause); ok {
+				for _, e := range clause.List {
+					if sel, ok := e.(*ast.SelectorExpr); ok && sel.Sel.Name == "HolderMerge" {
+						found = append(found, fset.Position(sel.Pos()).String()+" in "+fn.Name.Name)
+					}
+				}
+			}
+			return true
+		})
+	}
+
+	// Assert
+	if len(found) > 0 {
+		t.Fatalf("these functions switch on a lease's holder instead of reading holdForLease's hold kind: %v", found)
 	}
 }
