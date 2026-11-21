@@ -4859,44 +4859,6 @@ func (d *fakeDB) SetChildrenFolded(_ context.Context, id ids.WorkspaceID, folded
 	return nil
 }
 
-// SurfaceHeldWork marks the fake workspace surfaced when a fold hides it (its
-// repository's, its subsection's, or an ancestor's children fold), answering
-// whether it did, as WSM does.
-func (d *fakeDB) SurfaceHeldWork(_ context.Context, id ids.WorkspaceID) (bool, error) {
-	ws, ok := d.workspaces[id]
-	if !ok || ws.Surfaced {
-		return false, nil
-	}
-	hidden := false
-	for _, repo := range d.repositories {
-		hidden = hidden || (repo.ID == ws.Repo && repo.Folded)
-	}
-	for _, sub := range d.subsections {
-		hidden = hidden || (ws.Subsection != nil && sub.ID == *ws.Subsection && sub.Folded)
-	}
-	for parent := ws.Parent; parent != nil; parent = d.workspaces[*parent].Parent {
-		hidden = hidden || d.workspaces[*parent].ChildrenFolded
-	}
-	if !hidden {
-		return false, nil
-	}
-	ws.Surfaced = true
-	d.workspaces[id] = ws
-	return true, nil
-}
-
-// EndSurfacing takes the fake workspace's mark off, answering whether it had
-// one, as WSM does.
-func (d *fakeDB) EndSurfacing(_ context.Context, id ids.WorkspaceID) (bool, error) {
-	ws, ok := d.workspaces[id]
-	if !ok || !ws.Surfaced {
-		return false, nil
-	}
-	ws.Surfaced = false
-	d.workspaces[id] = ws
-	return true, nil
-}
-
 // fakeNetwork is the network state a failed naming call is classified by. It
 // answers VERDICT to every classification and records the words it was asked
 // about; restore closes the restored latch.

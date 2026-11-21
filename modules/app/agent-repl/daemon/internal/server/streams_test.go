@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/workspace"
+	"agent-repld/internal/wsm"
 )
 
 // footerView is one complete footer view, distinguished by the clock's instant
@@ -1767,12 +1769,12 @@ func TestAMovingWorkspacesPageUnloadStatesNoHop(t *testing.T) {
 	}
 }
 
-// TestEmacsHoldingNoPageMendsABrokenWebHop is the owner's ruling
-// (2026-10-31): severed means actually severed. A page whose stream ended
-// unannounced reads as a broken hop until Emacs states it holds no page for
-// the workspace, which is the truth about the hop and is known with no turn.
-func TestEmacsHoldingNoPageMendsABrokenWebHop(t *testing.T) {
-	// Arrange: the page connected and went away with no report to this daemon.
+// TestANotVisibleWorkspacesClosedStreamsAreNoSeveredHop pins the stream
+// half of the persisted visibility: the editor closes a workspace's streams
+// when the roster stops showing it, so a page stream that went away from a
+// workspace that is not visible leaves its web hop awaited, not broken.
+func TestANotVisibleWorkspacesClosedStreamsAreNoSeveredHop(t *testing.T) {
+	// Arrange: the page connected, then the workspace stopped being visible.
 	h := newHarness(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1781,58 +1783,49 @@ func TestEmacsHoldingNoPageMendsABrokenWebHop(t *testing.T) {
 	webCtx, closePage := context.WithCancel(ctx)
 	openWebStream(t, h, webCtx)
 	h.Footer.AwaitEdge(t) // the web open
-	closePage()
-	h.Footer.AwaitEdge(t) // the hop breaks
+	h.Sidebar.setVisibility(testWorkspaceID, wsm.NotVisible)
 
 	// Act
-	reportResidency(t, h, residencyNotLoaded())
+	closePage()
 	edge := h.Footer.AwaitEdge(t)
 
 	// Assert
 	if !edge.Host || !edge.Web {
-		t.Fatalf("footer participant edge = %+v, want the web hop awaited once Emacs holds no page", edge)
+		t.Fatalf("footer participant edge = %+v, want the web hop awaited for a workspace that is not visible", edge)
 	}
 }
 
-// reportResidency sends Emacs's page residency, failing the test unless it
-// answers success.
-func reportResidency(t *testing.T, h *harness, residency *agentreplv1.PageResidency) {
-	t.Helper()
-	resp, err := h.Client.ReportPageResidency(context.Background(), connect.NewRequest(&agentreplv1.ReportPageResidencyRequest{
-		Workspace: ref(), Residency: residency,
-	}))
-	if err != nil || resp.Msg.GetSuccess() == nil {
-		t.Fatalf("ReportPageResidency = (%v, %v), want success", resp, err)
-	}
-}
-
-// TestEmacsHoldingALoadedPageLeavesABrokenWebHopBroken pins the other half:
-// a loaded page whose stream is gone is a real cut, which only a page
-// connecting again mends. The loaded statement publishes no edge, so the
-// first edge after it is the not-loaded statement's.
-func TestEmacsHoldingALoadedPageLeavesABrokenWebHopBroken(t *testing.T) {
-	// Arrange: the page connected and went away unannounced.
-	h := newHarness(t)
+// TestWatchWebWorkspaceRefusesAWorkspaceThatIsNotVisible pins the web
+// stream's gate: a page of a workspace the roster does not show is refused
+// not_visible, recorded once, and holds no participant.
+func TestWatchWebWorkspaceRefusesAWorkspaceThatIsNotVisible(t *testing.T) {
+	// Arrange
+	log := &recordingLogger{}
+	h := newHarness(t, func(deps *Deps) { deps.Log = &fakeSurfaces{global: log, workspace: log} })
+	h.Sidebar.setVisibility(testWorkspaceID, wsm.NotVisible)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	openHostStream(t, h, ctx)
-	h.Footer.AwaitEdge(t) // the host open
-	webCtx, closePage := context.WithCancel(ctx)
-	openWebStream(t, h, webCtx)
-	h.Footer.AwaitEdge(t) // the web open
-	closePage()
-	h.Footer.AwaitEdge(t) // the hop breaks
 
 	// Act
-	reportResidency(t, h, &agentreplv1.PageResidency{State: &agentreplv1.PageResidency_Loaded{Loaded: &agentreplv1.PageResidencyLoaded{
-		Release: &agentreplv1.PageResidencyRelease{When: &agentreplv1.PageResidencyRelease_Held{Held: &agentreplv1.PageResidencyReleaseHeld{}}},
-	}}})
-	reportResidency(t, h, residencyNotLoaded())
-	edge := h.Footer.AwaitEdge(t)
+	stream, err := h.Client.WatchWebWorkspace(ctx,
+		connect.NewRequest(&agentreplv1.WatchWebWorkspaceRequest{Workspace: ref(), WebappBuild: "webapp-test"}))
+	err = firstStreamErr(stream, err)
 
 	// Assert
-	if !edge.Web {
-		t.Fatalf("first edge after a loaded statement = %+v, want the not-loaded statement's: a loaded page published an edge", edge)
+	if connect.CodeOf(err) != connect.CodeFailedPrecondition || !strings.Contains(err.Error(), "not_visible") {
+		t.Fatalf("WatchWebWorkspace = %v, want failed_precondition not_visible", err)
+	}
+	refused := 0
+	for _, rec := range log.at("INFO") {
+		if rec.Operation == opTransportClosed && rec.Context["cause"] == "not_visible" {
+			refused++
+		}
+	}
+	if refused != 1 {
+		t.Fatalf("INFO records = %+v, want the refusal recorded once", log.at("INFO"))
+	}
+	if got := h.Footer.Participants(); len(got) != 0 {
+		t.Fatalf("participant edges = %+v, want none for a refused page", got)
 	}
 }
 

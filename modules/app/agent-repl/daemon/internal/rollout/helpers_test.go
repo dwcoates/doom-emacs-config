@@ -1575,6 +1575,10 @@ func (h *harness) workspace(t *testing.T) (ids.WorkspaceID, string) {
 	if err := h.db.ClaimServing(context.Background(), ws.ID, selfInstance); err != nil {
 		t.Fatalf("ClaimServing: %v", err)
 	}
+	// An ordinary open workspace is one the roster shows.
+	if err := h.db.SetVisibilities(context.Background(), map[wsm.WorkspaceID]wsm.Visibility{ws.ID: wsm.UnselectedVisible}); err != nil {
+		t.Fatalf("SetVisibilities: %v", err)
+	}
 	h.freeness.SetFree(ws.ID, true)
 	h.fleet.live[ws.ID] = newFakeShim(pid, h.order)
 	// The registry NORMALIZES the dir (macOS resolves /var to /private/var), and

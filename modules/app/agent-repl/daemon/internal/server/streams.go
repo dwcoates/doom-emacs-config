@@ -561,8 +561,7 @@ func (s *server) watchWebWorkspace(
 	// roster's live value, the one the editor loaded the page on, never by the
 	// store's copy written a moment after it.
 	if v := s.deps.Sidebar.Visibility(subject.Record.ID); !v.Visible() {
-		subject.Log.Info(rpc, "refused a web stream for a workspace that is not visible", dlog.Context{"visibility": v.String()})
-		return refuseStream(subject.Log, rpc, refusal{Arm: "not_visible", Reason: "the workspace is not visible, so no page of it is served"})
+		return refuseStream(subject.Log, rpc, refusal{Arm: "not_visible", Reason: "the workspace is " + v.String() + ", so no page of it is served"})
 	}
 	s.holdParticipant(subject.Record.ID, false, +1)
 	defer s.holdParticipant(subject.Record.ID, false, -1)
@@ -1048,8 +1047,7 @@ func (s *server) ReportPageUnloading(
 
 // awaitPage records that WS holds no page on purpose, so its web hop is
 // AWAITED rather than broken until a page connects again, and publishes the
-// hops: Emacs's announcement of an unload, or its statement that it holds no
-// page (ReportPageResidency). MESSAGE is the record's.
+// hops: Emacs's announcement of an unload. MESSAGE is the record's.
 func (s *server) awaitPage(ws ids.WorkspaceID, log dlog.Logger, message string) {
 	s.mu.Lock()
 	delete(s.webSeen, ws)

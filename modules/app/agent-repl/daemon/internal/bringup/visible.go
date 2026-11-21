@@ -46,9 +46,7 @@ type VisibilityReader interface {
 // (sidebar.Tabs), so a collapsed repository section, a collapsed subsection
 // and a parent's folded children withhold exactly the workspaces whose tabs
 // they fold, and what the daemon runs never disagrees with what the bar
-// draws. A workspace with no tab (closed, a thread) is folded by nothing. A
-// handover orders its transfers and decides its page loads by it too
-// (rollout.foldedRows).
+// draws. A workspace with no tab (closed, a thread) is folded by nothing.
 func Folds(ctx context.Context, repos RepositoryLister, log dlog.Logger) (map[ids.WorkspaceID]sidebar.Fold, error) {
 	arrangement, err := repos.ReadArrangement(ctx)
 	if err != nil {
@@ -127,9 +125,10 @@ func MergeQueued(ctx context.Context, repos RepositoryLister, ws wsm.Workspace) 
 }
 
 // OnlyVisible splits pending into the workspaces the daemon runs and the ones
-// it withholds (hidden, in a collapsed repository section or subsection, or a
-// hidden merge workspace whose merge left every queue), each in
-// pending's order. A fold or a queue that cannot be read is an error and splits nothing:
+// it withholds, each in pending's order, by wsm.Workspace.Runs: the persisted
+// visibility, widened by a queued merge, the deploy mediator and a fold's
+// spared one-shots. A boot or a redeploy reads the visibility the last daemon
+// persisted, so it starts nothing for a workspace that is not visible. A fold or a queue that cannot be read is an error and splits nothing:
 // starting a workspace that may be hidden would break the principle, and
 // starting none silently would leave visible ones session-less, so the
 // caller states the failure.

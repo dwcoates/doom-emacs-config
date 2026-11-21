@@ -53,7 +53,9 @@ func TestOnlyVisibleSplitsPending(t *testing.T) {
 		wantRun      bool
 		wantWithheld bool
 	}{
-		{name: "a drawn workspace runs", ws: wsm.Workspace{ID: "a", Repo: "open"}, wantRun: true},
+		{name: "a visible workspace runs", ws: wsm.Workspace{ID: "a", Repo: "open", Visibility: wsm.UnselectedVisible}, wantRun: true},
+		{name: "the selection runs", ws: wsm.Workspace{ID: "a", Repo: "open", Hidden: true, Visibility: wsm.Selected}, wantRun: true},
+		{name: "a workspace persisted not visible is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Visibility: wsm.NotVisible}, wantWithheld: true},
 		{name: "a hidden workspace is withheld", ws: wsm.Workspace{ID: "a", Repo: "open", Hidden: true}, wantWithheld: true},
 		{name: "a workspace in a collapsed section is withheld", ws: wsm.Workspace{ID: "a", Repo: "folded"}, wantWithheld: true},
 		{name: "a hidden merge workspace whose merge is queued runs", ws: wsm.Workspace{ID: "queued", Repo: "open", MergeOf: &wsm.MergeOrigin{}}, wantRun: true},
@@ -90,7 +92,7 @@ func TestOnlyVisibleReadsTheSubsectionFolds(t *testing.T) {
 		wantRun bool
 	}{
 		{name: "a workspace in a collapsed subsection is withheld", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded}},
-		{name: "a workspace in an expanded subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &open}, wantRun: true},
+		{name: "a visible workspace in an expanded subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &open, Visibility: wsm.UnselectedVisible}, wantRun: true},
 		{name: "a one-shot filed in a collapsed subsection runs", ws: wsm.Workspace{ID: "a", Repo: "r", Place: 1, Dir: "/worktrees/a", Subsection: &folded, OneShot: true}, wantRun: true},
 	}
 	for _, tc := range cases {
@@ -174,8 +176,8 @@ func TestVisibleReadsTheRecordAfresh(t *testing.T) {
 		ws   wsm.Workspace
 		want bool
 	}{
-		{name: "a drawn workspace is visible", ws: wsm.Workspace{ID: "a", Repo: "r"}, want: true},
-		{name: "a hidden workspace is not visible", ws: wsm.Workspace{ID: "a", Repo: "r", Hidden: true}, want: false},
+		{name: "a workspace persisted visible runs", ws: wsm.Workspace{ID: "a", Repo: "r", Visibility: wsm.UnselectedVisible}, want: true},
+		{name: "a workspace persisted not visible does not run", ws: wsm.Workspace{ID: "a", Repo: "r"}, want: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
