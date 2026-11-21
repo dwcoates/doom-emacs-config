@@ -126,10 +126,17 @@ func newInGroup(t *testing.T, group daemonGroup) *fixture {
 // the group's toggle as newInGroup does.
 func newRegisteredInGroup(t *testing.T, group daemonGroup) *fixture {
 	t.Helper()
-	d := groupOwner(t, group).View(t)
+	d := viewInGroup(t, group)
 	repo := harness.NewRepo(t)
 	ws := harness.Register(t, d, repo.Dir)
 	return &fixture{d: d, repo: repo, ws: ws, t: t}
+}
+
+// viewInGroup is t's view of GROUP's daemon, for a case that registers its
+// slice itself, holding the group's toggle as newInGroup does.
+func viewInGroup(t *testing.T, group daemonGroup) *harness.Daemon {
+	t.Helper()
+	return groupOwner(t, group).View(t)
 }
 
 // groupOwner answers GROUP's daemon, started at its first case, and takes the
