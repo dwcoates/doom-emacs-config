@@ -49,7 +49,7 @@ SELECT EXISTS (SELECT 1 FROM up WHERE depth > 0 AND children_folded = 1)
 // SurfaceHeldWork marks workspace ID as surfaced when a fold hides it,
 // answering whether it did. A workspace that starts a turn under a fold is
 // not unfolded into view: it alone is drawn inside the fold, until its turn
-// ends (EndSurfacing) or the user folds the section again (ClearSurfaced).
+// ends (EndSurfacing), however often the section is unfolded and folded.
 // A workspace no fold hides, or an unknown one, is left as it is.
 func (s *store) SurfaceHeldWork(ctx context.Context, id WorkspaceID) (bool, error) {
 	var surfaced bool
@@ -86,19 +86,4 @@ func (s *store) EndSurfacing(ctx context.Context, id WorkspaceID) (bool, error) 
 			return err
 		})
 	return ended, err
-}
-
-// ClearSurfaced takes the mark off every workspace of IDS: the user folded a
-// section over them, and a fold hides everything under it, a working
-// workspace included.
-func (s *store) ClearSurfaced(ctx context.Context, workspaces []WorkspaceID) error {
-	return s.write(ctx, "daemon.wsm.clear_surfaced", dlog.Context{"workspaces": len(workspaces)},
-		func(ctx context.Context, tx *sql.Tx) error {
-			for _, id := range workspaces {
-				if _, err := tx.ExecContext(ctx, `UPDATE workspaces SET surfaced = 0 WHERE surfaced = 1 AND id = ?`, id); err != nil {
-					return fmt.Errorf("wsm: clear the surfacing of %s: %w", id, err)
-				}
-			}
-			return nil
-		})
 }

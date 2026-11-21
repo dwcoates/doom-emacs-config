@@ -86,9 +86,6 @@ type DB interface {
 	// EndSurfacing takes a workspace's mark off at its turn's end, answering
 	// whether it carried one.
 	EndSurfacing(ctx context.Context, id WorkspaceID) (bool, error)
-	// ClearSurfaced takes the mark off every named workspace: a fold the
-	// user made hides them all.
-	ClearSurfaced(ctx context.Context, workspaces []WorkspaceID) error
 	// MarkClosed records that a workspace's editor state is torn down, when,
 	// and by whom; the first close's record stands (see the store's doc).
 	MarkClosed(ctx context.Context, id WorkspaceID, closure Closure) error

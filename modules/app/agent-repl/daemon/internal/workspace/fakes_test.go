@@ -98,9 +98,6 @@ type fakeDB struct {
 	userStamps []wsm.UserAttention
 	stampErr   error
 
-	// clearedSurfaced are the workspaces ClearSurfaced was asked to clear, in order.
-	clearedSurfaced []ids.WorkspaceID
-
 	// storedSummaries are the summaries WorkspaceSummaryOf answers;
 	// summaryErr fails that read.
 	storedSummaries map[ids.WorkspaceID]string
@@ -4863,18 +4860,6 @@ func (d *fakeDB) EndSurfacing(_ context.Context, id ids.WorkspaceID) (bool, erro
 	ws.Surfaced = false
 	d.workspaces[id] = ws
 	return true, nil
-}
-
-// ClearSurfaced takes the mark off every named fake workspace, as WSM does.
-func (d *fakeDB) ClearSurfaced(_ context.Context, workspaces []ids.WorkspaceID) error {
-	d.clearedSurfaced = append(d.clearedSurfaced, workspaces...)
-	for _, id := range workspaces {
-		if ws, ok := d.workspaces[id]; ok {
-			ws.Surfaced = false
-			d.workspaces[id] = ws
-		}
-	}
-	return nil
 }
 
 // fakeNetwork is the network state a failed naming call is classified by. It
