@@ -14,6 +14,7 @@ import { shellHTML } from "../shell-html.js";
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
 import css from "../../src/styles.css?raw";
+import { rulesOf } from "../stylesheet.js";
 
 /** MutationObserver delivers on a microtask; this lets it run. */
 async function settle(): Promise<void> {
@@ -85,8 +86,9 @@ describe("installGateDock on the feed's real shape", () => {
     bodiedFeed(feed, row);
     installed = installGateDock(feed, dock);
     await settle();
-    const hiding = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{\s*display:\s*none;\s*\}/g)]
-      .map((m) => m[1].trim())
+    const hiding = rulesOf(css)
+      .filter((rule) => /^\s*display:\s*none;\s*$/.test(rule.declarations))
+      .flatMap((rule) => rule.selectors)
       .filter((selector) => selector.includes(DOCKED_ROW_CLASS));
 
     // Act
