@@ -299,6 +299,10 @@ func (s *fakeServer) ReportLatencies(ctx context.Context, req *connect.Request[v
 	return handleUnary[v1.ReportLatenciesRequest, v1.ReportLatenciesResponse](ctx, s, "ReportLatencies", req.Msg)
 }
 
+func (s *fakeServer) ReportVendorSpend(ctx context.Context, req *connect.Request[v1.ReportVendorSpendRequest]) (*connect.Response[v1.ReportVendorSpendResponse], error) {
+	return handleUnary[v1.ReportVendorSpendRequest, v1.ReportVendorSpendResponse](ctx, s, "ReportVendorSpend", req.Msg)
+}
+
 func (s *fakeServer) UpdatePersistentWifiMode(ctx context.Context, req *connect.Request[v1.UpdatePersistentWifiModeRequest]) (*connect.Response[v1.UpdatePersistentWifiModeResponse], error) {
 	return handleUnary[v1.UpdatePersistentWifiModeRequest, v1.UpdatePersistentWifiModeResponse](ctx, s, "UpdatePersistentWifiMode", req.Msg)
 }

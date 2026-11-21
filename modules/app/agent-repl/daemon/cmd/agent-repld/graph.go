@@ -345,6 +345,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 	if err != nil {
 		return nil, fmt.Errorf("agent-repld: build the account resolver: %w", err)
 	}
+	// THE SPEND SERIES LABEL EACH ACCOUNT ROOT BY THIS RESOLVER, set before any
+	// session is watched (runtimemetrics.Surface.SetAccountLabeler).
+	p.Metrics.SetAccountLabeler(accounts.IsMultiRepo)
 	pullOwners, err := pullrefs.OwnersFromEnv(os.Getenv, paths.Home, p.Opts.multiRepoConfigDir)
 	if err != nil {
 		log.Error(opPullOwners, "the GitHub owners of the account roots could not be read", dlog.Context{"cause": err.Error()})
@@ -2035,6 +2038,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			StallBeat:         stallBeat,
 			Pages:             supersededPages,
 			Latencies:         p.Metrics,
+			VendorSpend:       p.Metrics,
 			RPCs:              p.Metrics,
 			Reconnects:        p.Reconnects,
 			HotReload:         hotReload,

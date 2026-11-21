@@ -647,6 +647,13 @@ func (s *requestLoggingServer) ReportLatencies(
 	return serveUnary(s, ctx, "ReportLatencies", req, s.server.ReportLatencies)
 }
 
+func (s *requestLoggingServer) ReportVendorSpend(
+	ctx context.Context,
+	req *connect.Request[agentreplv1.ReportVendorSpendRequest],
+) (*connect.Response[agentreplv1.ReportVendorSpendResponse], error) {
+	return serveUnary(s, ctx, "ReportVendorSpend", req, s.server.ReportVendorSpend)
+}
+
 func (s *requestLoggingServer) ClientLog(
 	ctx context.Context,
 	req *connect.Request[agentreplv1.ClientLogRequest],

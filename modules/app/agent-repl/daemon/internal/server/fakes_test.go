@@ -60,6 +60,7 @@ import (
 	"agent-repld/internal/streamslot"
 	"agent-repld/internal/subagentmaker"
 	"agent-repld/internal/testcases"
+	"agent-repld/internal/vendorspend"
 	"agent-repld/internal/workspace"
 	"agent-repld/internal/worktreereap"
 	"agent-repld/internal/wsm"
@@ -2558,7 +2559,9 @@ type harness struct {
 	HotReload *fakeHotReload
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
-	RPCs      *fakeRPCs
+	// VendorSpend is what ReportVendorSpend recorded.
+	VendorSpend *fakeVendorSpend
+	RPCs        *fakeRPCs
 	// Reconnects times the streams a test expects back.
 	Reconnects *restarttiming.Reconnects
 	// ReconnectRecords keeps what Reconnects timed.
@@ -2709,6 +2712,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		HiddenKeepalives: &fakeHiddenKeepalives{},
 		KeepLives:        &fakeKeepLives{},
 		Latencies:        &fakeLatencies{enabled: true},
+		VendorSpend:      &fakeVendorSpend{enabled: true},
 		RPCs:             &fakeRPCs{},
 		ReconnectRecords: &restarttimingtest.Recorder{},
 		NewsDigest:       &fakeNewsDigest{},
@@ -2808,6 +2812,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		ImageOrigin:       http.NotFoundHandler(),
 		ChessBoards:       h.ChessBoards,
 		Latencies:         h.Latencies,
+		VendorSpend:       h.VendorSpend,
 		RPCs:              h.RPCs,
 		Reconnects:        h.reconnects(),
 		HotReload:         h.HotReload,
@@ -3369,6 +3374,42 @@ type observedLatency struct {
 }
 
 // fakeLatencies is a metrics surface that records what it is given.
+// fakeVendorSpend records every vendor spend report it is handed, refusing
+// one the real fold would refuse, by vendorspend.Validate.
+type fakeVendorSpend struct {
+	mu       sync.Mutex
+	enabled  bool
+	reported []reportedSpend
+}
+
+// reportedSpend is one ReportVendorSpend the fake recorded.
+type reportedSpend struct {
+	ws        ids.WorkspaceID
+	configDir string
+	entries   int
+}
+
+func (f *fakeVendorSpend) Enabled() bool { return f.enabled }
+
+func (f *fakeVendorSpend) ObserveVendorSpend(ws ids.WorkspaceID, configDir string, entries []*conversationv1.VendorSpend) error {
+	for _, e := range entries {
+		if err := vendorspend.Validate(e); err != nil {
+			return err
+		}
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reported = append(f.reported, reportedSpend{ws: ws, configDir: configDir, entries: len(entries)})
+	return nil
+}
+
+// reports answers every report recorded.
+func (f *fakeVendorSpend) reports() []reportedSpend {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]reportedSpend(nil), f.reported...)
+}
+
 type fakeLatencies struct {
 	mu       sync.Mutex
 	enabled  bool

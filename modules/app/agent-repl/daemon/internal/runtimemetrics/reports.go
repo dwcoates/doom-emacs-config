@@ -87,6 +87,7 @@ func (s *Surface) FoldShimMeasurements(ws ids.WorkspaceID, m *shimv1.ShimMeasure
 		return
 	}
 	s.latencies.foldShim(ws, m)
+	s.spend.foldShim(ws, m)
 }
 
 // ForgetWorkspace deletes every series of ws: it left the registry.
@@ -95,6 +96,7 @@ func (s *Surface) ForgetWorkspace(ws ids.WorkspaceID) {
 		return
 	}
 	s.latencies.forget(ws)
+	s.spend.forget(ws)
 	s.restarts.forget(ws)
 }
 
