@@ -29,7 +29,10 @@ import (
 // (PoweredLimits); on battery, or in any other energy mode, the limits are
 // 35% and 50% (BaseLimits). A closed lid under persistent Wi-Fi keeps High
 // Power Mode on AC power, so it keeps the higher limits, and unplugging
-// returns the base ones whether the lid is open or closed. The governor reads
+// returns the base ones whether the lid is open or closed. With persistent
+// Wi-Fi's lid CLOSED on AC power (the machine at work with nobody at its
+// screen) the tests may average 70% and the host reach 90%
+// (ClosedLidLimits; owner ruling, 2026-11-21). The governor reads
 // the power at every read, so a change governs the next unit admitted; a unit
 // already running runs to its end.
 //
@@ -111,6 +114,10 @@ var (
 	// slow while a merge gate ran, so the ceiling sits 5 points above the
 	// target).
 	PoweredLimits = Limits{Target: 50, Ceiling: 55}
+	// ClosedLidLimits are the limits on AC power in High Power Mode with the
+	// lid closed and system sleep disabled, which is persistent Wi-Fi's closed
+	// lid (owner ruling, 2026-11-21).
+	ClosedLidLimits = Limits{Target: 70, Ceiling: 90}
 )
 
 // TargetCores is the tests' target on a host of numCPU cores.
@@ -121,9 +128,10 @@ func (l Limits) CeilingCores(numCPU int) float64 {
 	return float64(numCPU) * float64(l.Ceiling) / 100
 }
 
-// LimitsSaid names both limits for the log: the powered ones and the base.
+// LimitsSaid names every limits for the log: the closed-lid ones, the powered ones and the base.
 func LimitsSaid() string {
-	return fmt.Sprintf("the tests to an average of %d%% of the host and the host to %d%% on AC power in High Power Mode, and to %d%% and %d%% otherwise", PoweredLimits.Target, PoweredLimits.Ceiling, BaseLimits.Target, BaseLimits.Ceiling)
+	return fmt.Sprintf("the tests to an average of %d%% of the host and the host to %d%% on AC power in High Power Mode with the lid closed, to %d%% and %d%% on AC power in High Power Mode, and to %d%% and %d%% otherwise",
+		ClosedLidLimits.Target, ClosedLidLimits.Ceiling, PoweredLimits.Target, PoweredLimits.Ceiling, BaseLimits.Target, BaseLimits.Ceiling)
 }
 
 // HostPower is the power the host runs on, as the governor reads it.
@@ -133,11 +141,17 @@ type HostPower struct {
 	// EnergyMode is `pmset`'s powermode verbatim; empty when the host has
 	// none.
 	EnergyMode string
+	// LidClosedAwake is whether the lid is closed with system sleep disabled
+	// (persistent Wi-Fi's closed lid).
+	LidClosedAwake bool
 }
 
 // Limits answers the limits the host's power allows.
 func (p HostPower) Limits() Limits {
 	if p.Source == hostpower.PowerAC && p.EnergyMode == hostpower.EnergyModeHighPower {
+		if p.LidClosedAwake {
+			return ClosedLidLimits
+		}
 		return PoweredLimits
 	}
 	return BaseLimits
@@ -156,12 +170,16 @@ func (p HostPower) String() string {
 	default:
 		mode = "energy mode " + mode
 	}
+	if p.LidClosedAwake {
+		return fmt.Sprintf("%s power in %s with the lid closed", p.Source, mode)
+	}
 	return fmt.Sprintf("%s power in %s", p.Source, mode)
 }
 
-// ReadHostPower reads the source SOURCE says the host runs on and the
-// energy mode ENERGYMODE reads.
-func ReadHostPower(source hostpower.PowerSource, energyMode func() (string, error)) (HostPower, error) {
+// ReadHostPower reads the source SOURCE says the host runs on, the energy
+// mode ENERGYMODE reads and whether LIDCLOSEDAWAKE says the lid is closed with
+// sleep disabled.
+func ReadHostPower(source hostpower.PowerSource, energyMode func() (string, error), lidClosedAwake func() (bool, error)) (HostPower, error) {
 	power, err := source.Power()
 	if err != nil {
 		return HostPower{}, err
@@ -170,7 +188,11 @@ func ReadHostPower(source hostpower.PowerSource, energyMode func() (string, erro
 	if err != nil {
 		return HostPower{}, err
 	}
-	return HostPower{Source: power, EnergyMode: mode}, nil
+	lid, err := lidClosedAwake()
+	if err != nil {
+		return HostPower{}, err
+	}
+	return HostPower{Source: power, EnergyMode: mode, LidClosedAwake: lid}, nil
 }
 
 const (

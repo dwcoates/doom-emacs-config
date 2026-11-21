@@ -3455,6 +3455,7 @@ Every arm's message is all strings, so FIELDS is its whole schema.")
 
 (defconst agent-repl-wire-persistent-wifi-energy-mode-arms
   '((lowPower :low-power nil)
+    (highPowerHeld :high-power-held nil)
     (restored :restored ((powerMode :power-mode)))
     (unchanged :unchanged nil)
     (failed :failed ((detail :detail))))

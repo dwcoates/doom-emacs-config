@@ -253,13 +253,15 @@ the path as its FIRST line and again, with the exit status, as its LAST:
 ### One scheduled run: `bin/test-all.sh`
 
 `bin/test-all.sh` builds `testrun`, which turns the whole roster into one DAG
-and schedules it across the host's core budget: at most 50% of
+and schedules it across the host's core budget: at most 70% of
 `runtime.NumCPU()` seats, rounded down (`cores.Budget`, the highest target,
-`cores.PoweredLimits`), with each unit admitted by the CPU governor only while
+`cores.ClosedLidLimits`), with each unit admitted by the CPU governor only while
 the tests stay within their target and the host within its ceiling: 35% and
-50% (`cores.BaseLimits`), or 50% and 55% on AC power in High Power Mode
-(owner rulings 2026-10-20, 2026-10-23, 2026-10-30, 2026-11-13, 2026-11-17 and
-2026-11-20). The budget is
+50% (`cores.BaseLimits`), 50% and 55% on AC power in High Power Mode, or 70%
+and 90% on AC power in High Power Mode with the lid closed and sleep disabled,
+which is persistent wifi mode's closed lid (`cores.ClosedLidLimits`; owner
+rulings 2026-10-20, 2026-10-23, 2026-10-30, 2026-11-13, 2026-11-17, 2026-11-20
+and 2026-11-21). The budget is
 shared by every test run on the host (below), and the whole run is at
 background priority (`bin/background.sh`), so it always yields the CPU to
 the owner's live runtime, input handling and apps. A host too small to budget one whole core is refused. The planner chooses each suite's chunk count by simulating
@@ -433,9 +435,11 @@ memory; under it the merge queue's overlapping runs, 13 slots each on a
   together should average the target (`cores.BaseLimits`: 35%, 5.6 of 16
   cores), and the tests must never bring the whole host above the ceiling
   (50%, 8 cores). On AC power in High Power Mode the limits are
-  `cores.PoweredLimits`, 50% and 55% (owner rulings, 2026-11-17 and 2026-11-20): the governor
-  reads the host's power (`agentrepl/logging/hostpower`) at every read, so
-  unplugging, lid open or closed, returns the base limits for the next unit
+  `cores.PoweredLimits`, 50% and 55% (owner rulings, 2026-11-17 and 2026-11-20),
+  and with the lid also closed under persistent wifi mode (sleep disabled)
+  `cores.ClosedLidLimits`, 70% and 90% (owner ruling, 2026-11-21): the governor
+  reads the host's power, energy mode and lid (`agentrepl/logging/hostpower`)
+  at every read, so unplugging, lid open or closed, returns the base limits for the next unit
   admitted. `cores.Governor` reads every second the host's busy cores
   (`agentrepl/logging/hostcpu`) and the tests' own cores: every process
   carrying `cores.NestedEnv`, which each run sets on its units and every

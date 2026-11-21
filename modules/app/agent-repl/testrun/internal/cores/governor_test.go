@@ -26,6 +26,7 @@ func TestTargetAndCeilingCores(t *testing.T) {
 	}{
 		{name: "the base limits are 35% and 50% of sixteen cores", limits: BaseLimits, wantTarget: 5.6, wantCeiling: 8},
 		{name: "the powered limits are 50% and 55% of sixteen cores", limits: PoweredLimits, wantTarget: 8, wantCeiling: 8.8},
+		{name: "the closed-lid limits are 70% and 90% of sixteen cores", limits: ClosedLidLimits, wantTarget: 11.2, wantCeiling: 14.4},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -50,6 +51,9 @@ func TestHostPowerLimits(t *testing.T) {
 		{name: "AC power in Low Power Mode keeps the base limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeLowPower}, want: BaseLimits},
 		{name: "AC power in the automatic mode keeps the base limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: "0"}, want: BaseLimits},
 		{name: "AC power on a host with no energy mode keeps the base limits", power: HostPower{Source: hostpower.PowerAC}, want: BaseLimits},
+		{name: "AC power in High Power Mode with the lid closed allows the closed-lid limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower, LidClosedAwake: true}, want: ClosedLidLimits},
+		{name: "AC power in the automatic mode with the lid closed keeps the base limits", power: HostPower{Source: hostpower.PowerAC, EnergyMode: "0", LidClosedAwake: true}, want: BaseLimits},
+		{name: "the battery with the lid closed keeps the base limits", power: HostPower{Source: hostpower.PowerBattery, EnergyMode: hostpower.EnergyModeHighPower, LidClosedAwake: true}, want: BaseLimits},
 		{name: "the battery in High Power Mode keeps the base limits", power: HostPower{Source: hostpower.PowerBattery, EnergyMode: hostpower.EnergyModeHighPower}, want: BaseLimits},
 	}
 	for _, tc := range cases {
@@ -75,23 +79,29 @@ func (p powerSource) Power() (hostpower.Power, error) { return p.power, p.err }
 
 func TestReadHostPower(t *testing.T) {
 	noSource, noMode := errors.New("IOPSCopyPowerSourcesInfo answered nothing"), errors.New("pmset -g exited 1")
+	noLid := errors.New("ioreg exited 1")
 	cases := []struct {
 		name    string
 		source  powerSource
 		mode    string
 		modeErr error
+		lid     bool
+		lidErr  error
 		want    HostPower
 		wantErr error
 	}{
 		{name: "the source and the energy mode together", source: powerSource{power: hostpower.PowerAC}, mode: hostpower.EnergyModeHighPower,
 			want: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower}},
 		{name: "a source that cannot be read answers its error", source: powerSource{err: noSource}, mode: hostpower.EnergyModeHighPower, wantErr: noSource},
+		{name: "the lid closed with sleep disabled is carried", source: powerSource{power: hostpower.PowerAC}, mode: hostpower.EnergyModeHighPower, lid: true,
+			want: HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower, LidClosedAwake: true}},
+		{name: "a lid that cannot be read answers its error", source: powerSource{power: hostpower.PowerAC}, mode: hostpower.EnergyModeHighPower, lidErr: noLid, wantErr: noLid},
 		{name: "an energy mode that cannot be read answers its error", source: powerSource{power: hostpower.PowerAC}, modeErr: noMode, wantErr: noMode},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Act
-			got, err := ReadHostPower(tc.source, func() (string, error) { return tc.mode, tc.modeErr })
+			got, err := ReadHostPower(tc.source, func() (string, error) { return tc.mode, tc.modeErr }, func() (bool, error) { return tc.lid, tc.lidErr })
 
 			// Assert
 			if !errors.Is(err, tc.wantErr) || got != tc.want {
@@ -1265,6 +1275,8 @@ var (
 	// limits: a closed lid under persistent Wi-Fi keeps High Power Mode on AC
 	// power, so it reads the same.
 	pluggedIn = HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower}
+	// closedLid is persistent Wi-Fi's closed lid on AC power.
+	closedLid = HostPower{Source: hostpower.PowerAC, EnergyMode: hostpower.EnergyModeHighPower, LidClosedAwake: true}
 )
 
 func TestGovernorHoldsTheTestsToTheLimitsTheHostsPowerAllows(t *testing.T) {
@@ -1279,6 +1291,7 @@ func TestGovernorHoldsTheTestsToTheLimitsTheHostsPowerAllows(t *testing.T) {
 	}{
 		{name: "on the battery the base target holds the next unit back", power: onBattery, wantLimits: BaseLimits, wantPercent: [2]int{35, 50}},
 		{name: "on AC power in High Power Mode the powered target lets it start", power: pluggedIn, wantAdmit: true, wantLimits: PoweredLimits, wantPercent: [2]int{50, 55}},
+		{name: "with the lid closed on AC power the closed-lid target lets a larger load start", power: closedLid, wantAdmit: true, wantLimits: ClosedLidLimits, wantPercent: [2]int{70, 90}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1378,12 +1391,12 @@ func TestGovernorThatCannotReadThePowerHoldsEveryUnitBackAndSaysSoOnce(t *testin
 	}
 }
 
-func TestLimitsSaidNamesBothLimits(t *testing.T) {
+func TestLimitsSaidNamesEveryLimits(t *testing.T) {
 	// Act
 	got := LimitsSaid()
 
 	// Assert
-	want := "the tests to an average of 50% of the host and the host to 55% on AC power in High Power Mode, and to 35% and 50% otherwise"
+	want := "the tests to an average of 70% of the host and the host to 90% on AC power in High Power Mode with the lid closed, to 50% and 55% on AC power in High Power Mode, and to 35% and 50% otherwise"
 	if got != want {
 		t.Fatalf("LimitsSaid() = %q; want %q", got, want)
 	}

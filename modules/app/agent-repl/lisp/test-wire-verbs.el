@@ -6409,6 +6409,7 @@ instead diverges from it unseen."
 (ert-deftest agent-repl-test-wire-verbs-persistent-wifi-energy-mode-decodes-each-arm ()
   "Each energy mode outcome arm decodes arm for arm, the restored one with its mode."
   (dolist (case '(("{\"lowPower\":{}}" . (:arm :low-power :value nil))
+                  ("{\"highPowerHeld\":{}}" . (:arm :high-power-held :value nil))
                   ("{\"restored\":{\"powerMode\":\"2\"}}" . (:arm :restored :value (:power-mode "2")))
                   ("{\"unchanged\":{}}" . (:arm :unchanged :value nil))
                   ("{\"failed\":{\"detail\":\"x\"}}" . (:arm :failed :value (:detail "x")))))
