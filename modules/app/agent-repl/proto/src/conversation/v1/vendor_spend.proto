@@ -66,16 +66,14 @@ enum VendorCallCause {
   VENDOR_CALL_CAUSE_NETWORK_RESUME = 10;
   // The shim's own prompt retrying a turn a vendor error ended.
   VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY = 11;
-  // Claude Code's own cross-session message (SendMessage between sessions).
-  VENDOR_CALL_CAUSE_PEER_MESSAGE = 12;
   // A created workspace's task prompt.
-  VENDOR_CALL_CAUSE_WORKSPACE_TASK = 13;
+  VENDOR_CALL_CAUSE_WORKSPACE_TASK = 12;
   // Emacs's headless one-line summary of a sent prompt.
-  VENDOR_CALL_CAUSE_PROMPT_SUMMARY = 14;
+  VENDOR_CALL_CAUSE_PROMPT_SUMMARY = 13;
   // The daemon's headless questions (internal/headless): names, classifiers.
-  VENDOR_CALL_CAUSE_HEADLESS_QUESTION = 15;
+  VENDOR_CALL_CAUSE_HEADLESS_QUESTION = 14;
   // The shim's revision of a response (RevisePrompt's side query).
-  VENDOR_CALL_CAUSE_RESPONSE_REVISION = 16;
+  VENDOR_CALL_CAUSE_RESPONSE_REVISION = 15;
 }
 
 // Which agent made a vendor call.

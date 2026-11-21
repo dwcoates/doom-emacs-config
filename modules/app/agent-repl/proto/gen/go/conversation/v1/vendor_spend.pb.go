@@ -75,16 +75,14 @@ const (
 	VendorCallCause_VENDOR_CALL_CAUSE_NETWORK_RESUME VendorCallCause = 10
 	// The shim's own prompt retrying a turn a vendor error ended.
 	VendorCallCause_VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY VendorCallCause = 11
-	// Claude Code's own cross-session message (SendMessage between sessions).
-	VendorCallCause_VENDOR_CALL_CAUSE_PEER_MESSAGE VendorCallCause = 12
 	// A created workspace's task prompt.
-	VendorCallCause_VENDOR_CALL_CAUSE_WORKSPACE_TASK VendorCallCause = 13
+	VendorCallCause_VENDOR_CALL_CAUSE_WORKSPACE_TASK VendorCallCause = 12
 	// Emacs's headless one-line summary of a sent prompt.
-	VendorCallCause_VENDOR_CALL_CAUSE_PROMPT_SUMMARY VendorCallCause = 14
+	VendorCallCause_VENDOR_CALL_CAUSE_PROMPT_SUMMARY VendorCallCause = 13
 	// The daemon's headless questions (internal/headless): names, classifiers.
-	VendorCallCause_VENDOR_CALL_CAUSE_HEADLESS_QUESTION VendorCallCause = 15
+	VendorCallCause_VENDOR_CALL_CAUSE_HEADLESS_QUESTION VendorCallCause = 14
 	// The shim's revision of a response (RevisePrompt's side query).
-	VendorCallCause_VENDOR_CALL_CAUSE_RESPONSE_REVISION VendorCallCause = 16
+	VendorCallCause_VENDOR_CALL_CAUSE_RESPONSE_REVISION VendorCallCause = 15
 )
 
 // Enum value maps for VendorCallCause.
@@ -102,11 +100,10 @@ var (
 		9:  "VENDOR_CALL_CAUSE_VENDOR_STARTED",
 		10: "VENDOR_CALL_CAUSE_NETWORK_RESUME",
 		11: "VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY",
-		12: "VENDOR_CALL_CAUSE_PEER_MESSAGE",
-		13: "VENDOR_CALL_CAUSE_WORKSPACE_TASK",
-		14: "VENDOR_CALL_CAUSE_PROMPT_SUMMARY",
-		15: "VENDOR_CALL_CAUSE_HEADLESS_QUESTION",
-		16: "VENDOR_CALL_CAUSE_RESPONSE_REVISION",
+		12: "VENDOR_CALL_CAUSE_WORKSPACE_TASK",
+		13: "VENDOR_CALL_CAUSE_PROMPT_SUMMARY",
+		14: "VENDOR_CALL_CAUSE_HEADLESS_QUESTION",
+		15: "VENDOR_CALL_CAUSE_RESPONSE_REVISION",
 	}
 	VendorCallCause_value = map[string]int32{
 		"VENDOR_CALL_CAUSE_UNSPECIFIED":        0,
@@ -121,11 +118,10 @@ var (
 		"VENDOR_CALL_CAUSE_VENDOR_STARTED":     9,
 		"VENDOR_CALL_CAUSE_NETWORK_RESUME":     10,
 		"VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY": 11,
-		"VENDOR_CALL_CAUSE_PEER_MESSAGE":       12,
-		"VENDOR_CALL_CAUSE_WORKSPACE_TASK":     13,
-		"VENDOR_CALL_CAUSE_PROMPT_SUMMARY":     14,
-		"VENDOR_CALL_CAUSE_HEADLESS_QUESTION":  15,
-		"VENDOR_CALL_CAUSE_RESPONSE_REVISION":  16,
+		"VENDOR_CALL_CAUSE_WORKSPACE_TASK":     12,
+		"VENDOR_CALL_CAUSE_PROMPT_SUMMARY":     13,
+		"VENDOR_CALL_CAUSE_HEADLESS_QUESTION":  14,
+		"VENDOR_CALL_CAUSE_RESPONSE_REVISION":  15,
 	}
 )
 
@@ -617,7 +613,7 @@ const file_conversation_v1_vendor_spend_proto_rawDesc = "" +
 	"\x11context_le_tokens\x18\a \x01(\x04H\x00R\x0fcontextLeTokens\x88\x01\x01\x12\x14\n" +
 	"\x05calls\x18\b \x01(\x04R\x05calls\x125\n" +
 	"\x06tokens\x18\t \x01(\v2\x1d.conversation.v1.VendorTokensR\x06tokensB\x14\n" +
-	"\x12_context_le_tokens*\x80\x05\n" +
+	"\x12_context_le_tokens*\xdc\x04\n" +
 	"\x0fVendorCallCause\x12!\n" +
 	"\x1dVENDOR_CALL_CAUSE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aVENDOR_CALL_CAUSE_UNSTATED\x10\x01\x12!\n" +
@@ -631,12 +627,11 @@ const file_conversation_v1_vendor_spend_proto_rawDesc = "" +
 	" VENDOR_CALL_CAUSE_VENDOR_STARTED\x10\t\x12$\n" +
 	" VENDOR_CALL_CAUSE_NETWORK_RESUME\x10\n" +
 	"\x12(\n" +
-	"$VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY\x10\v\x12\"\n" +
-	"\x1eVENDOR_CALL_CAUSE_PEER_MESSAGE\x10\f\x12$\n" +
-	" VENDOR_CALL_CAUSE_WORKSPACE_TASK\x10\r\x12$\n" +
-	" VENDOR_CALL_CAUSE_PROMPT_SUMMARY\x10\x0e\x12'\n" +
-	"#VENDOR_CALL_CAUSE_HEADLESS_QUESTION\x10\x0f\x12'\n" +
-	"#VENDOR_CALL_CAUSE_RESPONSE_REVISION\x10\x10*\xb2\x01\n" +
+	"$VENDOR_CALL_CAUSE_VENDOR_ERROR_RETRY\x10\v\x12$\n" +
+	" VENDOR_CALL_CAUSE_WORKSPACE_TASK\x10\f\x12$\n" +
+	" VENDOR_CALL_CAUSE_PROMPT_SUMMARY\x10\r\x12'\n" +
+	"#VENDOR_CALL_CAUSE_HEADLESS_QUESTION\x10\x0e\x12'\n" +
+	"#VENDOR_CALL_CAUSE_RESPONSE_REVISION\x10\x0f*\xb2\x01\n" +
 	"\x0fVendorCallAgent\x12!\n" +
 	"\x1dVENDOR_CALL_AGENT_UNSPECIFIED\x10\x00\x12\x1a\n" +
 	"\x16VENDOR_CALL_AGENT_MAIN\x10\x01\x12\x1e\n" +
