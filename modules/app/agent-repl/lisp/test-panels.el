@@ -3693,8 +3693,7 @@ liveness gates the restore."
           (swapped nil))
       (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                 ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
-                ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ((symbol-function 'agent-repl-window--unharden) #'ignore)
                 ((symbol-function 'window-deletable-p) (lambda (_w) t))
                 ((symbol-function 'window-buffer) (lambda (_w) nil))
                 ((symbol-function 'delete-window) (lambda (w) (push w deleted)))
@@ -3712,8 +3711,7 @@ liveness gates the restore."
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
-                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'agent-repl-window--unharden) #'ignore)
                     ((symbol-function 'window-deletable-p) (lambda (_w) nil))
                     ((symbol-function 'window-buffer) (lambda (_w) nil))
                     ((symbol-function 'doom-fallback-buffer) (lambda () fallback))
@@ -3733,8 +3731,7 @@ liveness gates the restore."
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
-                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'agent-repl-window--unharden) #'ignore)
                     ((symbol-function 'window-deletable-p) (lambda (_w) nil))
                     ((symbol-function 'window-buffer) (lambda (_w) nil))
                     ((symbol-function 'doom-fallback-buffer) (lambda () default))
@@ -3748,8 +3745,7 @@ liveness gates the restore."
   "safe-delete-window signals when a window is undeletable and no fallback exists."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
-              ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-              ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+              ((symbol-function 'agent-repl-window--unharden) #'ignore)
               ((symbol-function 'window-deletable-p) (lambda (_w) nil))
               ((symbol-function 'window-buffer) (lambda (_w) nil))
               ;; No fallback buffer available — must fail loudly, not no-op.
