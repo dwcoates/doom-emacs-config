@@ -249,9 +249,9 @@ func (c *controller) cycleDown(ctx context.Context, ws ids.WorkspaceID, beat tim
 		log.Debug(op, "the workspace has no live session; nothing to stand down", fields)
 		return withheldSettled
 	}
-	if session.LastEngagementAt.After(beat) {
+	if ended, turned := record.TurnedSince(beat); turned {
 		log.Info(op, "a real turn ran since; the session is kept up",
-			dlog.Merge(fields, dlog.Context{"engaged_at": session.LastEngagementAt}))
+			dlog.Merge(fields, dlog.Context{"turn_ended_at": ended}))
 		return withheldSettled
 	}
 	switch gate := c.gate(ws); gate {

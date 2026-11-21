@@ -105,8 +105,10 @@ func TestACycleStandDownSkips(t *testing.T) {
 			h.closedAt(t, ws)
 			return ws
 		}},
-		{name: "a session a real turn engaged since the beat", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
-			return h.workspace(t, beatAfter.Add(time.Minute))
+		{name: "a session a real turn ran on since the beat", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.turnClosed(t, ws, beatAfter.Add(time.Minute))
+			return ws
 		}},
 		{name: "a workspace with no session", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
 			return h.bare(t)
@@ -253,10 +255,11 @@ func TestAVisitStandDownRecordsItsOwnReason(t *testing.T) {
 	}
 }
 
-func TestAVisitStandDownSkipsASessionATurnEngagedSinceThePick(t *testing.T) {
+func TestAVisitStandDownSkipsASessionATurnRanOnSinceThePick(t *testing.T) {
 	// Arrange
 	h := newHarness(t)
-	ws := h.workspace(t, beatAfter.Add(time.Minute))
+	ws := h.workspace(t, instant)
+	h.turnClosed(t, ws, beatAfter.Add(time.Minute))
 
 	// Act
 	h.c.VisitDown(ws, beatAfter)
@@ -264,6 +267,24 @@ func TestAVisitStandDownSkipsASessionATurnEngagedSinceThePick(t *testing.T) {
 	// Assert
 	if killed := h.stand.Killed(); len(killed) != 0 {
 		t.Fatalf("kills = %+v, want none after a prompt ran since the pick", killed)
+	}
+}
+
+// A BRING-UP'S OWN ENGAGEMENT STAMP IS NO TURN: a settings pick's revival
+// stamps the session's engagement after the pick (2026-11-20, 25 visits kept
+// up with no turn run), and the visit still ends.
+func TestAVisitStandDownStandsDownASessionOnlyItsBringUpEngaged(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, beatAfter.Add(2*time.Second))
+
+	// Act
+	h.c.VisitDown(ws, beatAfter)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 || killed[0].Life != shimlife.StandDownSettingsVisit {
+		t.Fatalf("kills = %+v, want the visit's stand-down despite the bring-up's stamp", killed)
 	}
 }
 
@@ -434,8 +455,10 @@ func TestAColdStandDownSkips(t *testing.T) {
 			}
 			return ws
 		}},
-		{name: "a session a real turn engaged since the cache went cold", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
-			return h.workspace(t, beatAfter.Add(time.Minute))
+		{name: "a session a real turn ran on since the cache went cold", arrange: func(t *testing.T, h *harness) ids.WorkspaceID {
+			ws := h.workspace(t, instant)
+			h.turnClosed(t, ws, beatAfter.Add(time.Minute))
+			return ws
 		}},
 	}
 	for _, tt := range tests {

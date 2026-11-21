@@ -690,6 +690,19 @@ func (h *harness) sessioned(t *testing.T, dir, repoDir string, engagedAt time.Ti
 	return ws.ID
 }
 
+// turnClosed records one real turn of WS, closed at ENDED: the turn clock a
+// stand-down reads (turnedSince).
+func (h *harness) turnClosed(t *testing.T, ws ids.WorkspaceID, ended time.Time) {
+	t.Helper()
+	turn := wsm.NewTurnID()
+	if err := h.db.PutTurn(context.Background(), wsm.Turn{ID: turn, Workspace: ws, Text: "go on", Origin: "webapp", StartedAt: ended.Add(-time.Second)}); err != nil {
+		t.Fatalf("PutTurn: %v", err)
+	}
+	if err := h.db.CloseTurn(context.Background(), turn, ended, wsm.CloseCompleted); err != nil {
+		t.Fatalf("CloseTurn: %v", err)
+	}
+}
+
 // bare registers one workspace with no session at all.
 func (h *harness) bare(t *testing.T) ids.WorkspaceID {
 	t.Helper()
