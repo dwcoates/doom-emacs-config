@@ -418,7 +418,11 @@ func testRevivalAfterHibernate(t *testing.T) {
 	w.ExpectWarningsFor(ws, "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.shimclient.exit")
+		"daemon.shimclient.exit",
+		// At a 50ms cutoff a second sweep can send its hibernate directive
+		// to a shim this daemon has just stood down, which answers EOF and
+		// defers the park (daemon.drain.sweep); the park then lands.
+		"daemon.drain.sweep")
 	host := w.WatchHost(ws)
 	defer host.Close()
 
@@ -532,7 +536,11 @@ func testRevivalRunsInTheSessionsModeNotTheSummarizers(t *testing.T) {
 	w.ExpectWarningsFor(ws, "daemon.health.open_fault",
 		"daemon.sessionwatcher.link_fault", "daemon.shimclient.redial",
 		"daemon.shimclient.kill_session", "daemon.workspace.bring_up",
-		"daemon.shimclient.exit")
+		"daemon.shimclient.exit",
+		// At a 50ms cutoff a second sweep can send its hibernate directive
+		// to a shim this daemon has just stood down, which answers EOF and
+		// defers the park (daemon.drain.sweep); the park then lands.
+		"daemon.drain.sweep")
 	host := w.WatchHost(ws)
 	defer host.Close()
 

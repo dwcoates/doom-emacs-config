@@ -275,12 +275,14 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	const displacedText = "keep going"
 	// A daemon killed mid-merge writes no stand-down manifest
 	// (daemon.rollout.reconcile), and a turn left in flight by a killed daemon
-	// is closed by the next boot (daemon.promptqueue.restore_holds), and a
-	// daemon killed after hibernating the workspace leaves the hibernate
-	// lease it holds for the next boot to release (daemon.boot.orphan_leases).
+	// is closed by the next boot (daemon.promptqueue.restore_holds). The
+	// resubmitted turn's end can hibernate the workspace just before the
+	// next kill, which leaves the hibernate lease for the next boot to
+	// release (daemon.boot.orphan_leases) and a revival that finds no
+	// transcript under that daemon's own account root (daemon.workspace.bring_up).
 	mqExpectedBounceWarnings := []string{
 		"daemon.rollout.reconcile", "daemon.promptqueue.restore_holds",
-		"daemon.boot.orphan_leases",
+		"daemon.boot.orphan_leases", "daemon.workspace.bring_up",
 	}
 
 	// Arrange. The displaced turn is PARKED ON THE FAKE'S TURN GATE
@@ -310,7 +312,12 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
 	repo.DeploysAsAgentRepl()
-	w := stack.ScenarioLifecycleWorld(t, harness.Opts{
+	// This step keeps its own store: its subject is what a crash leaves in
+	// the durable state (leases, displaced marks, the transcript a revival
+	// reads), and a store shared with the scenario's other steps made the
+	// replay it asserts depend on their rows and on a hibernation racing
+	// the kill.
+	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
 		DurableState: true,
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
@@ -319,7 +326,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 			// crash recover it rather than run it.
 			"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + filepath.Join(t.TempDir(), "capture.rendezvous"),
 		},
-	})
+	}})
 	w.ExpectWarnings(mqExpectedBounceWarnings...)
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-displaced")
