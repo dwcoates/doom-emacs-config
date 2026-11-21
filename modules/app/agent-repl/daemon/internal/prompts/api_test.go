@@ -498,10 +498,10 @@ func TestTheFixingAttemptBriefPrescribesRunningOnlyTheFailingTestsUntilTheyPass(
 	// Arrange.
 	want := []string{
 		"{{failing_tests}}",
-		"RUN ONLY THE FAILING TEST CASES, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
-		"the `agent-repld test run` command that runs only its failing cases through the daemon",
+		"RUN ONLY THE FAILING TEST CASES AND THIS WORKSPACE'S OWN, AND KEEP FIXING AND RERUNNING THEM UNTIL THEY PASS, BEFORE YOU END YOUR TURN",
+		"the `agent-repld test run` command that runs only its failing cases",
 		"never the whole suite, and never a test command by hand",
-		"Fix what fails, then rerun those same targeted cases, together with the tests this branch itself added or changed, named one by one. Repeat until every one of them passes.",
+		"Fix what fails, then run `agent-repld test run -rerun` again. Repeat until every case it runs passes.",
 		"Only then is the remediation resolved: commit and end your turn",
 		"The queue then runs the selected suites in full again",
 	}
@@ -542,8 +542,36 @@ func TestTheFixingAttemptBriefRunsTheTestsTheFailingTestsFileLists(t *testing.T)
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if phrase, missing := unsaid(got.Body, []string{"Run exactly the tests listed in {{failing_tests_file}}"}); missing {
+	if phrase, missing := unsaid(got.Body, []string{"Each group in {{failing_tests_file}} comes with the `agent-repld test run` command"}); missing {
 		t.Fatalf("merge-test-failure-resolve does not point the agent at the failing tests file: it does not say %q", phrase)
+	}
+}
+
+// THE FIXING LOOP RUNS THE WORKSPACE'S RECORD (`agent-repld test run
+// -rerun`): the failing cases and every case the workspace ran, which the
+// daemon knows, so the agent never works out by hand which tests are its
+// branch's.
+func TestTheFixingAttemptBriefRunsTheWorkspacesRecordedCases(t *testing.T) {
+	// Arrange.
+	want := []string{
+		"1. Run `agent-repld test run -rerun`.",
+		"every case this workspace has ever run and every case a merge gate failed on its branch",
+		"a case renamed, moved or deleted since it was recorded is dropped, named on stderr, and forgotten",
+		"2. Fix what fails, then run `agent-repld test run -rerun` again.",
+	}
+
+	// Act.
+	got, err := Load(repoPromptsDir, "merge-test-failure-resolve")
+
+	// Assert.
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if phrase, missing := unsaid(got.Body, want); missing {
+		t.Fatalf("merge-test-failure-resolve does not say %q", phrase)
+	}
+	if strings.Contains(got.Body, "named one by one") {
+		t.Fatalf("merge-test-failure-resolve still has the agent name its branch's tests by hand: %q", got.Body)
 	}
 }
 
