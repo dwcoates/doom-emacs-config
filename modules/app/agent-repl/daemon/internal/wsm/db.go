@@ -471,6 +471,13 @@ type DB interface {
 	// RecordUndeployedLanding records a landing as waiting for the deploy
 	// that carries it (undeployedlandings.go).
 	RecordUndeployedLanding(ctx context.Context, landing UndeployedLanding) error
+	// RecordMergeLanding records a landing onto a repository's main branch
+	// with the path it took, answering whether it was new
+	// (mergelandings.go).
+	RecordMergeLanding(ctx context.Context, landing MergeLanding) (bool, error)
+	// MergeLandingsIn answers a repository's landings in [since, until],
+	// oldest first, and the instant recording began.
+	MergeLandingsIn(ctx context.Context, repo RepoKey, since, until time.Time) ([]MergeLanding, time.Time, error)
 	// CoverUndeployedLandings marks every waiting landing covered by the
 	// deploy committing now, and answers how many it newly covered.
 	CoverUndeployedLandings(ctx context.Context) (int, error)

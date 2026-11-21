@@ -341,6 +341,8 @@ var migrations = []migration{
 	// IT IS ADDITIVE: see sessionContextBankDDL.
 	{To: 181, Name: "session_context_bank", Kind: MigrationAdditive, DDL: sessionContextBankDDL},
 	{To: 182, Name: "account_usage_monthly_spend", Kind: MigrationAdditive, DDL: accountUsageMonthlySpendDDL},
+	// IT IS ADDITIVE: two new tables the previous build never names.
+	{To: 183, Name: "merge_landings", Kind: MigrationAdditive, DDL: mergeLandingsDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
