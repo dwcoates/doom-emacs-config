@@ -268,8 +268,9 @@ func (d *Daemon) failsSweep(r LogRecord) bool {
 	if d.sweepIsTheSubject {
 		return false
 	}
-	_, claimed := d.claimed[r.WorkspaceDir]
-	if d.view && !d.claims[r.WorkspaceDir] || !d.view && claimed {
+	key := recordKey(r)
+	_, claimed := d.claimed[key]
+	if d.view && !d.claims[key] || !d.view && claimed {
 		return false
 	}
 	return !d.expects(r)

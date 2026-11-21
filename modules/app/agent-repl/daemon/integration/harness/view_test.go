@@ -899,3 +899,62 @@ func TestEveryWorkspaceTakesOnlyACompleteAnswer(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordKeyNamesTheWorkspaceByDirectoryThenID(t *testing.T) {
+	cases := []struct {
+		name   string
+		record LogRecord
+		want   string
+	}{
+		{name: "a directory wins", record: LogRecord{WorkspaceDir: "/r/a", WorkspaceID: "w1"}, want: "/r/a"},
+		{name: "an id alone is keyed as an id", record: LogRecord{WorkspaceID: "w1"}, want: "id:w1"},
+		{name: "neither is no workspace's", record: LogRecord{}, want: ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := recordKey(tc.record)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("recordKey = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegisterThroughAViewClaimsTheWorkspacesIDRecords(t *testing.T) {
+	cases := []struct {
+		name     string
+		record   LogRecord
+		viewOwns bool
+	}{
+		{name: "a record naming the registered id is the view's", record: LogRecord{Level: "warn", Operation: "daemon.banner", Message: "m", WorkspaceID: "w1"}, viewOwns: true},
+		{name: "a record naming another id is not", record: LogRecord{Level: "warn", Operation: "daemon.banner", Message: "m", WorkspaceID: "w2"}, viewOwns: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			owner := newOwnerForViews(t, t)
+			owner.client = registeringClient{ref: &workspacev1.WorkspaceRef{Id: "w1", Dir: t.TempDir()}}
+			view := owner.View(NewRecordingTB(t, "TestMine"))
+			Register(t, view, owner.client.(registeringClient).ref.GetDir())
+			appendRecords(t, owner, tc.record)
+
+			// Act
+			owns := view.Owns(tc.record)
+
+			// Assert
+			if owns != tc.viewOwns || !owner.Owns(tc.record) {
+				t.Fatalf("view.Owns = %v, owner.Owns = %v; want %v and true", owns, owner.Owns(tc.record), tc.viewOwns)
+			}
+			viewSwept, ownerSwept := len(view.UnexpectedWarnings()), len(owner.UnexpectedWarnings())
+			if wantView := map[bool]int{true: 1, false: 0}[tc.viewOwns]; viewSwept != wantView || ownerSwept != 1-wantView {
+				t.Fatalf("swept by view %d, by owner %d; want the record swept once, by its owner", viewSwept, ownerSwept)
+			}
+			if got := len(view.OwnRunLog()); got != map[bool]int{true: 1, false: 0}[tc.viewOwns] {
+				t.Fatalf("view.OwnRunLog holds %d records, want the view's own only", got)
+			}
+		})
+	}
+}

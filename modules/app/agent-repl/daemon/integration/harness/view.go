@@ -314,13 +314,58 @@ func (d *Daemon) Claim(dir string) {
 	}
 }
 
+// claimID makes the workspace with this id this view's too, for the records
+// that name a workspace by its id alone (recordKey). Register calls it beside
+// Claim.
+func (d *Daemon) claimID(id string) {
+	d.t.Helper()
+	key := idKey(id)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if owner, ok := d.claimed[key]; ok && owner != d.t.Name() {
+		d.t.Fatalf("harness: workspace %s is already claimed by %s; two tests never share a workspace", id, owner)
+	}
+	d.claimed[key] = d.t.Name()
+	d.claims[key] = true
+}
+
+// idKey is the claim key of a workspace named by its id alone.
+func idKey(id string) string { return "id:" + id }
+
+// recordKey is the claim key a record names its workspace by: its directory,
+// or its id when it names no directory (a central record stamped with the
+// workspace's id alone, such as a desktop banner's). A record naming neither
+// is no workspace's.
+func recordKey(r LogRecord) string {
+	switch {
+	case r.WorkspaceDir != "":
+		return r.WorkspaceDir
+	case r.WorkspaceID != "":
+		return idKey(r.WorkspaceID)
+	}
+	return ""
+}
+
+// Owns reports whether r is a record this Daemon answers for: a view's, one
+// naming a workspace it claimed; the owner's, every record. A case on a
+// shared daemon reads the run log through it, so another case's record never
+// satisfies its wait.
+func (d *Daemon) Owns(r LogRecord) bool {
+	if !d.view {
+		return true
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.claims[recordKey(r)]
+}
+
 // ExpectWarningsFor declares the operations whose WARN or ERROR records the
 // workspace ws is meant to produce. Unlike ExpectWarnings, it licenses them
 // for that workspace's records only, so a test with several workspaces states
 // which one each warning belongs to.
 func (d *Daemon) ExpectWarningsFor(ws *workspacev1.WorkspaceRef, operations ...string) {
 	d.t.Helper()
-	forms := dirForms(d.t, ws.GetDir())
+	forms := append(dirForms(d.t, ws.GetDir()), idKey(ws.GetId()))
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if d.expectedFor == nil {
@@ -392,8 +437,9 @@ func (d *Daemon) sweptRecords() []LogRecord {
 	defer d.mu.Unlock()
 	out := make([]LogRecord, 0, len(all))
 	for _, r := range all {
-		_, claimed := d.claimed[r.WorkspaceDir]
-		if d.view && d.claims[r.WorkspaceDir] || !d.view && !claimed {
+		key := recordKey(r)
+		_, claimed := d.claimed[key]
+		if d.view && d.claims[key] || !d.view && !claimed {
 			out = append(out, r)
 		}
 	}
@@ -403,7 +449,7 @@ func (d *Daemon) sweptRecords() []LogRecord {
 // expects reports whether r is a record this Daemon's declarations license.
 // The caller holds d.mu.
 func (d *Daemon) expects(r LogRecord) bool {
-	return d.expected[r.Operation] || d.expectedFor[r.WorkspaceDir][r.Operation]
+	return d.expected[r.Operation] || d.expectedFor[recordKey(r)][r.Operation]
 }
 
 // lateClaimedWarnings is every WARN or worse record a view claimed that was
@@ -421,7 +467,7 @@ func (d *Daemon) lateClaimedWarnings() []string {
 			continue
 		}
 		for _, c := range claims {
-			if !c.dirs[r.WorkspaceDir] || c.expected[r.Operation] {
+			if !c.dirs[recordKey(r)] || c.expected[r.Operation] {
 				continue
 			}
 			at, err := time.Parse(time.RFC3339Nano, r.Timestamp)
