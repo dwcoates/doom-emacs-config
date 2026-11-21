@@ -1253,6 +1253,37 @@ t_in_place_go_builds_pass_trimpath() {
     rm -rf "$root"
 }
 
+# Every go build goes through build-frontend.sh go_build: a `go build` written
+# anywhere else in the script would skip the flags every binary must carry.
+t_every_go_build_goes_through_go_build() {
+    local sites
+    sites="$(grep -n 'go build' "$SCRIPT_UNDER_TEST" | grep -v '^[0-9]*: *#' | grep -c 'go build "${args\[@\]}"')"
+    local all
+    all="$(grep -n 'go build' "$SCRIPT_UNDER_TEST" | grep -vc '^[0-9]*: *#')"
+    if [ "$sites" -eq 1 ] && [ "$all" -eq 1 ]; then
+        pass "go_build: the script's one go build command is go_build's"
+    else
+        fail "go_build: the script's one go build command is go_build's" \
+             "$(grep -n 'go build' "$SCRIPT_UNDER_TEST" | grep -v '^[0-9]*: *#')"
+    fi
+}
+
+# Each go build passes at most one -ldflags: a second one replaces the first,
+# so the daemon's checkout stamp would silently vanish beside another.
+t_every_go_build_passes_one_ldflags() {
+    local root; root="$(mktemp -d "${TMPDIR:-/tmp}/tmp.XXXXXXXXXX")"
+    make_tree "$root"; make_stubs "$root/stubs"
+    : > "$root/stub.log"
+    run_script "$root" daemon store sidecar lock >/dev/null
+    if [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ] &&
+           ! grep '^go build' "$root/stub.log" | awk '{ n = gsub(/ -ldflags /, "&"); if (n > 1) bad = 1 } END { exit !bad }'; then
+        pass "go_build: every go build passes at most one -ldflags"
+    else
+        fail "go_build: every go build passes at most one -ldflags" "stub.log: $(cat "$root/stub.log")"
+    fi
+    rm -rf "$root"
+}
+
 # checkout_stamp_symbol — the linker symbol the daemon's checkout package
 # declares for its stamp, read from the real source.
 checkout_stamp_symbol() {
@@ -2191,6 +2222,8 @@ build_group_revision_staleness() {
     t_in_place_go_builds_pass_buildvcs_false
     t_in_place_go_builds_pass_trimpath
     t_daemon_build_stamps_its_checkout
+    t_every_go_build_goes_through_go_build
+    t_every_go_build_passes_one_ldflags
 }
 
 build_group_healing() {

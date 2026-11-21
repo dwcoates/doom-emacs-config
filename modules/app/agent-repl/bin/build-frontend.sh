@@ -343,6 +343,16 @@ PROTO_TREE_STAMP="$PROTO_DIR/.source-tree"
 # built from by a link-time stamp instead (agent-repld/internal/checkout).
 GO_BUILD_FLAGS=(-buildvcs=false -trimpath)
 
+# go_build DIR ARTIFACT PACKAGE [LDFLAGS] — the one `go build` here: PACKAGE,
+# built from DIR into ARTIFACT with GO_BUILD_FLAGS, and LDFLAGS, when given, as
+# its one -ldflags argument.
+go_build() {
+    local dir="$1" artifact="$2" package="$3" ldflags="${4:-}"
+    local args=("${GO_BUILD_FLAGS[@]}")
+    [ -n "$ldflags" ] && args+=(-ldflags "$ldflags")
+    ( cd "$dir" && go build "${args[@]}" -o "$artifact" "$package" )
+}
+
 # Default set, in dependency-agnostic order. `gc` is never implicit: it is
 # either asked for, or triggered by a run that minted an entry.
 #
@@ -657,9 +667,8 @@ build_daemon() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] daemon: building..."
     mkdir -p "$DAEMON_BIN"
-    ( cd "$DAEMON_DIR" && go build "${GO_BUILD_FLAGS[@]}" \
-        -ldflags "-X agent-repld/internal/checkout.builtFrom=$ROOT" \
-        -o "$DAEMON_ARTIFACT" ./cmd/agent-repld )
+    go_build "$DAEMON_DIR" "$DAEMON_ARTIFACT" ./cmd/agent-repld \
+        "-X agent-repld/internal/checkout.builtFrom=$ROOT"
     snapshot_lifecycle_config
     write_built_sha "$DAEMON_SHA_STAMP" "$ROOT"
     stamp_source_tree daemon "$DAEMON_TREE_STAMP"
@@ -711,7 +720,7 @@ build_service() {
     require_bin go "install the Go toolchain"
     echo "[build-frontend] $name: building..."
     mkdir -p "$CACHE_BIN"
-    ( cd "$dir" && go build "${GO_BUILD_FLAGS[@]}" -o "$artifact" . )
+    go_build "$dir" "$artifact" .
     write_built_sha "$sha_stamp" "$ROOT"
     stamp_source_tree "$name" "$tree_stamp"
     echo "[build-frontend] $name: done"
