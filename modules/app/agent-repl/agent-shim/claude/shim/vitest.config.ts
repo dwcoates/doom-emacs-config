@@ -18,9 +18,7 @@ export default defineConfig({
     // a claim on the whole machine; measured on a 16-CPU host that is 2-5 GiB
     // for one run, and several concurrent runs took the box to a load average
     // of 253 and cost a whole Emacs layer run its evidence. This cap keeps one
-    // run's vitest from claiming the machine. minWorkers travels with it
-    // because vitest refuses a max below the default min.
-    minWorkers: 1,
+    // run's vitest from claiming the machine.
     maxWorkers: "50%",
     // The vendor guard keeps every test offline. The log setup installs a
     // deterministic inherited sink for canonical JSON logging assertions.
@@ -72,7 +70,6 @@ export default defineConfig({
       // whole type-only modules (src/proto.ts and its siblings) with 100% of
       // nothing, which istanbul drops for carrying no executable statement.
       provider: "istanbul",
-      all: true,
       include: ["src/**/*.ts"],
       exclude: [
         "src/**/*.d.ts",

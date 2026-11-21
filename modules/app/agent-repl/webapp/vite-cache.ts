@@ -43,3 +43,17 @@ import { fileURLToPath } from "node:url";
  * sandbox again, silently, so the property is asserted rather than trusted.
  */
 export const viteCacheDir = fileURLToPath(new URL(".vite-cache", import.meta.url));
+
+/**
+ * WHERE VITEST KEEPS ITS TRANSFORMED MODULES (`test.fsModuleCachePath`), for
+ * the same reason as `viteCacheDir`: vitest's default is
+ * `node_modules/.vitest-cache`, inside the shared, garbage-collected tree.
+ *
+ * The cache is what lets every vitest process of a run, and every later run in
+ * this worktree, reuse a module another process already transformed: each
+ * entry is keyed by the module's path and the hash of its text, so it is never
+ * read for a changed source. Measured 2026-11-20 on two 48-file batches: the
+ * second process and every warm run cost 11-20 CPU-seconds against 25-34 on
+ * vitest 2, which re-transformed every module in every process.
+ */
+export const vitestModuleCacheDir = fileURLToPath(new URL(".vite-cache/vitest-modules", import.meta.url));

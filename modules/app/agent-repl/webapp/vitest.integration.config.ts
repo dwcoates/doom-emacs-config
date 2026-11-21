@@ -3,7 +3,8 @@
 import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
-import { viteCacheDir } from "./vite-cache";
+import { viteCacheDir, vitestModuleCacheDir } from "./vite-cache";
+import { viteServer } from "./vite-fs";
 
 /**
  * The INTEGRATION suite's config, separate from the unit one.
@@ -24,8 +25,10 @@ export default defineConfig({
   // account, and test/vite-cache.test.ts for the check that keeps every
   // config in this package on it.
   cacheDir: viteCacheDir,
+  server: viteServer,
   resolve: { alias: protobufRuntimeAliases },
   test: {
+    fsModuleCachePath: vitestModuleCacheDir,
     environment: "jsdom",
     // The same logger bootstrap the unit run uses: production installs the
     // ClientLog-forwarding logger before any component draws, and `log`

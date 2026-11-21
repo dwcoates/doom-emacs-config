@@ -3,7 +3,8 @@
 import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
-import { viteCacheDir } from "./vite-cache";
+import { viteCacheDir, vitestModuleCacheDir } from "./vite-cache";
+import { viteServer } from "./vite-fs";
 
 /**
  * Vitest stubs CSS imports out to an empty module by default, which would
@@ -19,8 +20,10 @@ export default defineConfig({
   // account, and test/vite-cache.test.ts for the check that keeps every
   // config in this package on it.
   cacheDir: viteCacheDir,
+  server: viteServer,
   resolve: { alias: protobufRuntimeAliases },
   test: {
+    fsModuleCachePath: vitestModuleCacheDir,
     css: true,
     setupFiles: ["./test/setup.ts", "./test/setup-shared-worker.ts"],
     // The unit suite spent far more wall time standing a fresh jsdom up for
@@ -43,8 +46,6 @@ export default defineConfig({
     // This cap keeps one run's vitest from claiming the machine.
     // Half the CPUs measured at 5.3s against 5.2s for all sixteen: the suite
     // is not CPU-bound at this size, so the cap costs nothing to buy back.
-    // minWorkers travels with it: vitest refuses a max below the default min.
-    minWorkers: 1,
     maxWorkers: "50%",
 
     // The integration suite has its own config (vitest.integration.config.ts):
@@ -94,7 +95,6 @@ export default defineConfig({
       // as it does in the full suite. `bin/coverage-honesty.mjs`
       // (`npm run coverage:verify`) is the check that keeps it that way.
       provider: "istanbul",
-      all: true,
       include: ["src/**/*.ts", "src/**/*.tsx"],
       exclude: ["src/**/*.d.ts", "src/**/generated/**"],
       reporter: ["text", "json", "json-summary", "html"],

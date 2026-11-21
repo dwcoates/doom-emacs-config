@@ -52,14 +52,13 @@ const LAYER_DIR = resolve("test/webapp-layer");
 /** The reporter that prints PROGRESS_PREFIX for every finished test, and
  * COLLECTED_PREFIX once a run's file is collected. */
 const progressReporter = {
-  onCollected() {
+  onTestModuleCollected() {
     process.stdout.write(COLLECTED_PREFIX + "\n");
   },
-  onTaskUpdate(packs) {
-    for (const [, result] of packs) {
-      if (result?.state === "pass" || result?.state === "fail") {
-        process.stdout.write(PROGRESS_PREFIX + result.state + "\n");
-      }
+  onTestCaseResult(testCase) {
+    const state = testCase.result().state;
+    if (state === "passed" || state === "failed") {
+      process.stdout.write(PROGRESS_PREFIX + (state === "passed" ? "pass" : "fail") + "\n");
     }
   },
 };
@@ -78,7 +77,7 @@ const COVERAGE_DIR = process.env.AGENT_REPL_WEBAPP_LAYER_COVERAGE;
 // note; bin/coverage-honesty.mjs). A coverage run pays each area's module
 // evaluation again; the transforms stay warm.
 const coverage = COVERAGE_DIR
-  ? { isolate: true, coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: COVERAGE_DIR, all: false, clean: false } }
+  ? { isolate: true, coverage: { enabled: true, provider: "istanbul", reporter: ["json"], reportsDirectory: COVERAGE_DIR, clean: false } }
   : {};
 
 const vitest = await createVitest("test", {
@@ -105,7 +104,7 @@ async function keepCoverage(label, passed) {
   await rename(report, resolve(COVERAGE_DIR, `run-${coverageRuns}-${label}.json`));
   return [];
 }
-const project = vitest.getCoreWorkspaceProject();
+const project = vitest.getRootProject();
 
 /** Every failed test's name and first error, for the area's report. */
 function failuresOf(task, out = []) {
@@ -134,12 +133,9 @@ await vitest.start([warmupPath]);
 // the warm-up ran, but each area file's own transform otherwise lands in its
 // first test, inside the silence the Go side bounds (roster: 13.0s before its
 // first test finished, the layer alone, 2026-10-14). The layer runs in jsdom,
-// vite-node's "web" mode.
+// whose modules vite transforms in its "client" environment.
 const areaFiles = (await readdir(LAYER_DIR)).filter((name) => name.endsWith(".layer.test.ts"));
-await Promise.all(areaFiles.map((name) => {
-  const path = resolve(LAYER_DIR, name);
-  return vitest.vitenode.transformRequest(path, path, "web");
-}));
+await Promise.all(areaFiles.map((name) => project.vite.environments.client.transformRequest(resolve(LAYER_DIR, name))));
 const warmed = vitest.state.getFiles([warmupPath])[0];
 const warmFailures = warmed === undefined ? ["vitest ran no warm-up file"] : failuresOf(warmed);
 warmFailures.push(...(await keepCoverage("warmup.layer.test.ts", warmed?.result?.state === "pass")));

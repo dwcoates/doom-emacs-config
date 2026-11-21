@@ -146,7 +146,7 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run", "--config", s.IntegrationConfig,
-			"--maxWorkers=1", "--minWorkers=1",
+			"--maxWorkers=1",
 			"--reporter=default", "--reporter=" + reporter,
 		}
 		if l.Coverage {
@@ -156,7 +156,7 @@ func vitestIntegrationSplits(l Layout, s roster.Suite, dir string, batches []Fil
 				// shared across files reports nothing for the later ones
 				// (webapp/vitest.config.ts's coverage note).
 				"--isolate",
-				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json", "--coverage.all=false",
+				"--coverage.enabled", "--coverage.provider=istanbul", "--coverage.reporter=json",
 				"--coverage.reportsDirectory="+filepath.Join(cover.VitestIntegrationCoverage(l.Work, s.Name), tag),
 			)
 		}
@@ -207,7 +207,7 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 		itemsOut := filepath.Join(work, "items", tag+".json")
 		argv := []string{
 			"npx", "vitest", "run",
-			"--maxWorkers=1", "--minWorkers=1",
+			"--maxWorkers=1",
 			"--reporter=default", "--reporter=" + reporter,
 		}
 		if l.Coverage {
@@ -217,10 +217,13 @@ func vitestUnitsForBatches(l Layout, s roster.Suite, dir string, batches []FileB
 				"--reporter=blob",
 				"--outputFile.blob="+filepath.Join(blobs, tag+".json"),
 			)
-			// ONE chunk carries the config's `all: true` pass. The merge sums
-			// the counts, so every other chunk writes only its loaded files.
+			// ONE chunk writes the config's reports; every other chunk writes
+			// only the JSON the merge reads. Every chunk reports every file
+			// its config includes, the unloaded ones at zero (vitest has no
+			// option to report only the loaded ones), and the merge sums the
+			// counts, so each file's figures are the same.
 			if id != allChunk {
-				argv = append(argv, "--coverage.all=false", "--coverage.reporter=json")
+				argv = append(argv, "--coverage.reporter=json")
 			}
 		}
 		if len(names) > 0 {

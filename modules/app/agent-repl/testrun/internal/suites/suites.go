@@ -14,7 +14,7 @@
 //     and e2e waits missed their bounds in every full run (3 of 3) and in an
 //     e2e-only run; at two, 0 of 4. Two also keeps real parallelism in the
 //     systems under test, which a single P would hide from them;
-//   - vitest runs with --maxWorkers=1 --minWorkers=1;
+//   - vitest runs with --maxWorkers=1;
 //   - Emacs is single-threaded.
 //
 // The one exception is a Script suite the roster gives a width (Slots): its

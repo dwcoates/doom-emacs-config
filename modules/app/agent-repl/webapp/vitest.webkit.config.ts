@@ -3,7 +3,8 @@
 import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
-import { viteCacheDir } from "./vite-cache";
+import { viteCacheDir, vitestModuleCacheDir } from "./vite-cache";
+import { viteServer } from "./vite-fs";
 
 /**
  * The REAL-WEBKIT suite's config (`npm run test:webkit`), separate from the
@@ -18,13 +19,14 @@ import { viteCacheDir } from "./vite-cache";
  */
 export default defineConfig({
   cacheDir: viteCacheDir,
+  server: viteServer,
   resolve: { alias: protobufRuntimeAliases },
   test: {
+    fsModuleCachePath: vitestModuleCacheDir,
     environment: "node",
     include: ["test/webkit/**/*.webkit.test.ts"],
     // One file, one browser: nothing is gained by a second worker.
     maxWorkers: 1,
-    minWorkers: 1,
     // MEASURED, ~3x the healthy max (webapp/AGENTS.md "Wait/timeout bounds").
     // The whole browser run -- bundle, launch, the 120-step pass -- is the
     // `beforeAll`, observed at 29.4s at most; the tests only read its result.

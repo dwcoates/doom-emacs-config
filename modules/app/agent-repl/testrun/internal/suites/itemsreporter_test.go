@@ -12,7 +12,26 @@ import (
 )
 
 // testrun/vitest/items-reporter.mjs is driven here by node, its own runtime,
-// with vitest's onFinished argument shaped by hand: no vitest runs.
+// with vitest's onTestRunEnd argument shaped by hand: no vitest runs. Each
+// module is written as plain data ({moduleId, diagnostic, tests}) and lifted
+// into the shape vitest hands a reporter (a TestModule's diagnostic() and
+// children.allTests(), a TestCase's fullName, options, result() and
+// diagnostic()) by liftModules.
+
+// liftModules is the node prelude that shapes plain module data the way
+// vitest's reporter API presents it.
+const liftModules = `const lift = (ms) => ms.map((m) => ({
+  moduleId: m.moduleId,
+  diagnostic: () => ({prepareDuration: 0, environmentSetupDuration: 0, setupDuration: 0, collectDuration: 0, duration: 0, ...m.diagnostic}),
+  children: {*allTests() {
+    for (const t of m.tests ?? []) yield {
+      fullName: t.fullName,
+      options: {mode: t.mode ?? "run"},
+      result: () => ({state: t.state}),
+      diagnostic: () => (t.duration === undefined ? undefined : {duration: t.duration, startTime: t.startTime}),
+    };
+  }},
+}));`
 
 func runReporter(t *testing.T, files, target string, setTarget bool) (string, error) {
 	t.Helper()
@@ -26,7 +45,7 @@ func runReporterTo(t *testing.T, files, target string, setTarget bool, tests str
 	if err != nil {
 		t.Fatal(err)
 	}
-	script := "const { default: R } = await import(process.argv[1]); new R().onFinished(" + files + ");"
+	script := liftModules + "const { default: R } = await import(process.argv[1]); new R().onTestRunEnd(lift(" + files + "), [], \"passed\");"
 	cmd := exec.Command("node", "--input-type=module", "-e", script, reporter)
 	cmd.Env = os.Environ()
 	if setTarget {
@@ -43,8 +62,8 @@ func TestItemsReporterWritesEachFilesWholeCost(t *testing.T) {
 	// Arrange: every phase vitest times, and a file missing the optional ones.
 	target := filepath.Join(t.TempDir(), "items.json")
 	files := `[
-	  {filepath: "/p/a.test.ts", prepareDuration: 100, environmentLoad: 200, setupDuration: 300, collectDuration: 400, result: {duration: 500}},
-	  {filepath: "/p/b.test.ts", collectDuration: 250}
+	  {moduleId: "/p/a.test.ts", diagnostic: {prepareDuration: 100, environmentSetupDuration: 200, setupDuration: 300, collectDuration: 400, duration: 500}},
+	  {moduleId: "/p/b.test.ts", diagnostic: {collectDuration: 250}}
 	]`
 
 	// Act
@@ -71,15 +90,15 @@ func TestItemsReporterRefusesAMissingTarget(t *testing.T) {
 }
 
 func TestItemsReporterWritesEveryTestsTime(t *testing.T) {
-	// Arrange: a test at the top, one in nested suites, a failed one and a
-	// skipped one vitest never ran.
+	// Arrange: a test at the top, one in nested suites, a failed one, a
+	// skipped one vitest never ran and a todo.
 	target := filepath.Join(t.TempDir(), "items.json")
 	tests := filepath.Join(t.TempDir(), "tests.json")
-	files := `[{filepath: "/p/a.test.ts", tasks: [
-	  {type: "test", name: "top", result: {state: "pass", duration: 12, startTime: 1800000000250}},
-	  {type: "suite", name: "outer", tasks: [{type: "suite", name: "inner", tasks: [
-	    {type: "test", name: "deep", result: {state: "fail", duration: 1500, startTime: 1800000001000}}]}]},
-	  {type: "test", name: "later", mode: "skip"}
+	files := `[{moduleId: "/p/a.test.ts", tests: [
+	  {fullName: "top", state: "passed", duration: 12, startTime: 1800000000250},
+	  {fullName: "outer > inner > deep", state: "failed", duration: 1500, startTime: 1800000001000},
+	  {fullName: "later", state: "skipped", mode: "skip"},
+	  {fullName: "someday", state: "skipped", mode: "todo"}
 	]}]`
 
 	// Act
@@ -94,6 +113,7 @@ func TestItemsReporterWritesEveryTestsTime(t *testing.T) {
 		{Suite: "webapp", Name: "a.test.ts > top", Outcome: testtimes.Pass, Seconds: 0.012, Start: time.Unix(1_800_000_000, 250_000_000)},
 		{Suite: "webapp", Name: "a.test.ts > outer > inner > deep", Outcome: testtimes.Fail, Seconds: 1.5, Start: time.Unix(1_800_000_001, 0)},
 		{Suite: "webapp", Name: "a.test.ts > later", Outcome: testtimes.Skip, Seconds: 0},
+		{Suite: "webapp", Name: "a.test.ts > someday", Outcome: testtimes.Skip, Seconds: 0},
 	}
 	if err != nil || len(got) != len(want) {
 		t.Fatalf("ParseVitest = %+v, %v", got, err)
@@ -111,6 +131,19 @@ func TestItemsReporterRefusesAMissingTestsTarget(t *testing.T) {
 
 	// Assert
 	if err == nil || !strings.Contains(out, "AGENT_REPL_TESTRUN_TESTS names no output file") {
+		t.Fatalf("err = %v, out = %s", err, out)
+	}
+}
+
+func TestItemsReporterRefusesAnUnknownTestState(t *testing.T) {
+	// Arrange
+	files := `[{moduleId: "/p/a.test.ts", tests: [{fullName: "x", state: "exploded"}]}]`
+
+	// Act
+	out, err := runReporter(t, files, filepath.Join(t.TempDir(), "items.json"), true)
+
+	// Assert
+	if err == nil || !strings.Contains(out, "ended in the unknown state exploded") {
 		t.Fatalf("err = %v, out = %s", err, out)
 	}
 }

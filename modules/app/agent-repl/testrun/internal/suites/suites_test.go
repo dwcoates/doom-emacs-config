@@ -1208,7 +1208,7 @@ func TestVitestIntegrationSplitCoversEachChunkInACoverageRun(t *testing.T) {
 		want     []string
 	}{
 		{name: "a coverage run", coverage: true, want: []string{
-			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json --coverage.all=false",
+			"--isolate --coverage.enabled --coverage.provider=istanbul --coverage.reporter=json",
 			"--coverage.reportsDirectory=WORK/vitest/webapp-integration/coverage/webapp[integration]%test%integration%a.integration.test.ts#00",
 		}},
 		{name: "an ordinary run", coverage: false},
