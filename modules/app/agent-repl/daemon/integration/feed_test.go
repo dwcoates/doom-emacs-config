@@ -110,7 +110,7 @@ func TestAFeedTextScaleFrameIsNotARowOnTheFeedTail(t *testing.T) {
 func TestWatchFeedWithAnUnmintedTokenIsRefusedAtTheTransport(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 
 	// Act
 	stream, err := f.d.Client().WatchFeed(f.d.Ctx(), connect.NewRequest(&agentreplv1.WatchFeedRequest{

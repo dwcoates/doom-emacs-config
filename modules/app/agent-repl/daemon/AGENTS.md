@@ -265,9 +265,11 @@ mechanics (`integration/shareddaemon_test.go`).
   catalog its login last served; no case of it starts a session) and
   `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
   the daemon), `groupTabOrder` (tab numbers run across every repository,
-  and the arrangement lists them all) and `groupDesktopBanner` (a banner
+  and the arrangement lists them all), `groupDesktopBanner` (a banner
   turns on the one editor's focus, and a focus gain claims the newest held
-  banner of any workspace). A new
+  banner of any workspace), `groupLoginTerminal` (one login terminal per
+  account root), `groupDefaultModel` (the one login's default model) and
+  `groupEditorSession` (a new editor begins agent-repl's one session). A new
   precondition is a new `daemonGroup`
   constant, never a daemon for one case.
 - **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is

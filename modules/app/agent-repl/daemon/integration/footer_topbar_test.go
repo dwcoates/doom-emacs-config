@@ -800,7 +800,7 @@ func TestTopbarModelSelectorReflectsTheCatalogAndTheEffectiveModel(t *testing.T)
 func TestTopbarModelSelectorCarriesTheLoginsDefaultAndMakeDefaultMovesIt(t *testing.T) {
 	t.Parallel()
 	// Arrange: a personal login nobody chose a default for defaults to opus.
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupDefaultModel)
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the built-in default", func(v *frontendv1.TopbarView) bool {
 		return v.GetModelSelector().GetDefaultModel().GetName() == "opus"

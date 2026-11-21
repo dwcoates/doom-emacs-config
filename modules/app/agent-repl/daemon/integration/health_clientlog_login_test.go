@@ -569,7 +569,7 @@ func TestClientLogWithAnUnsetLevelAnswersInvalidArgumentNamingLevel(t *testing.T
 func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 
 	// Act
 	if _, err := f.d.Client().ClientLog(f.d.Ctx(), connect.NewRequest(&agentreplv1.ClientLogRequest{
@@ -601,7 +601,7 @@ func TestClientLogNeverAppearsInTheDaemonRunLog(t *testing.T) {
 func TestOpenLoginSpawnsThePtyAndReplaysItsScrollback(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newRegisteredInGroup(t, groupLoginTerminal)
 
 	// Act
 	resp, err := f.d.Client().OpenLogin(f.d.Ctx(), connect.NewRequest(&agentreplv1.OpenLoginRequest{Workspace: f.ws}))
@@ -638,7 +638,7 @@ func TestOpenLoginFromTwoWorkspacesOutsideTheMultiRepoRootSharesOnePty(t *testin
 	// $MULTI_REPO_ROOT, so both route to the same default account root
 	// (internal/login/manager.go keys its session map by CONFIG DIR, not by
 	// workspace -- login idempotence is PER ACCOUNT).
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupLoginTerminal)
 	repoA := harness.NewRepo(t)
 	wsA := harness.Register(t, d, repoA.Dir)
 	repoB := harness.NewRepo(t)
@@ -672,7 +672,7 @@ func TestOpenLoginUnderTwoDifferentAccountRootsSpawnsTwoDistinctPtys(t *testing.
 	// $MULTI_REPO_ROOT, the other outside it, so the two route to DIFFERENT
 	// account roots (the same routing the existing account tests exercise in
 	// session_lifecycle_test.go's TestAWorkspaceUnderTheMultiRepoRootSpawnsWithTheMultiRepoAccount).
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupLoginTerminal)
 	multiRepo := harness.NewRepoAt(t, filepath.Join(d.MultiRepoRoot, "under-the-multi-root"))
 	multiWS := harness.Register(t, d, multiRepo.Dir)
 	defaultRepo := harness.NewRepo(t)

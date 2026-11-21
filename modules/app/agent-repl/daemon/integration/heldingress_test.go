@@ -154,6 +154,8 @@ func TestADaemonStartIngestsHeldPromptsWrittenWhileNoDaemonServed(t *testing.T) 
 func TestAMalformedHeldPromptEntryIsQuarantinedWithAWarning(t *testing.T) {
 	t.Parallel()
 	// Arrange
+	// A daemon of its own: the held-prompt intake is the daemon's one
+	// directory, and its quarantine warning names no workspace.
 	f := newOpened(t, harness.Opts{})
 	f.d.ExpectWarnings("daemon.heldingress.quarantine")
 	dir := filepath.Join(f.d.StateDir, "held-prompts")

@@ -734,7 +734,7 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 	t.Parallel()
 	// Arrange: the create mints the workspace dir, so the dying shim is
 	// scripted through the profile EVERY spawn falls back to.
-	d := newDaemon(t, harness.Opts{})
+	d := newReportedCreateDaemon(t)
 	// THE FAILED CREATE IS THEN REPORTED, ASYNCHRONOUSLY, to the repository's
 	// main-worktree workspace: the report is queued, and its revival dies by
 	// the same default profile, which the queue says at ERROR. Awaited rather

@@ -115,6 +115,17 @@ const (
 	// reads: whether a banner shows turns on the one editor's focus, and a
 	// focus gain claims the newest banner held for any workspace.
 	groupDesktopBanner daemonGroup = "the desktop banner"
+	// groupLoginTerminal is the daemon whose login terminal a case opens:
+	// there is one per account root, and every case's workspace signs in as
+	// the same default account.
+	groupLoginTerminal daemonGroup = "the login terminal"
+	// groupDefaultModel is the daemon whose login's default model a case
+	// moves: every workspace signs in as the one login, and its topbar
+	// offers that login's default.
+	groupDefaultModel daemonGroup = "the login's default model"
+	// groupEditorSession is the daemon an Emacs stream connects to as a new
+	// editor: agent-repl's session is begun by the editor, one per daemon.
+	groupEditorSession daemonGroup = "the editor's session"
 )
 
 var (

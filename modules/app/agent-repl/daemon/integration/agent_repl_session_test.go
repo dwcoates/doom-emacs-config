@@ -20,7 +20,7 @@ func hasSession(v *frontendv1.TopbarView) bool {
 func TestANewEmacsBeginsAgentReplsSessionOnTheTopbar(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	f := newOpened(t, harness.Opts{})
+	f := newInGroup(t, groupEditorSession)
 	topbar := f.d.WatchTopbar(f.ws)
 	before := time.Now()
 

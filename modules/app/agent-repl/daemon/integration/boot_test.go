@@ -198,7 +198,7 @@ func TestPprofRefusesARoutableBind(t *testing.T) {
 func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	d.AwaitRunLogOperation("daemon.pprof.disabled")
 
 	// Act
@@ -271,7 +271,7 @@ func TestJSONCodecServesRegisterAndAPerWorkspaceVerb(t *testing.T) {
 func TestWorkspaceBoundWarnStaysOffTheRunLog(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newRegistered(t, harness.Opts{})
+	f := newCanonicalRegistered(t)
 	// The start under test is the restart's, whose failure is its own ERROR,
 	// and the dying bring-up's own records.
 	f.d.ExpectWarnings("daemon.workspace.restart")
@@ -1152,7 +1152,7 @@ func TestBootRecordsHowLongItWaitedForTheClaim(t *testing.T) {
 func TestATestDaemonRunsTheMockedGitItWasLinkedTo(t *testing.T) {
 	t.Parallel()
 	// Arrange, Act.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Assert: the boot record names the mocked git, never the host's.
 	boot := d.AwaitLogRecord(d.RunLogPath(), "the boot record", func(r harness.LogRecord) bool {

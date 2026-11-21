@@ -418,7 +418,7 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 func TestWatchDaemonFlushesHeadersBeforeAnyFrameWhenNoDrainWasEverScheduled(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 
 	// Act
 	s := d.WatchWebviewDaemonStream()
@@ -592,12 +592,13 @@ func transportClosedRPCs() []transportClosedRPC {
 // daemon.refusal.transport_closed, and never warned.
 func assertTransportClosed(t *testing.T, d *harness.Daemon, rpcName, wantCause string) {
 	t.Helper()
-	rec := d.AwaitRunLogOperation("daemon.refusal.transport_closed")
+	// THE RECORD IS FOUND BY ITS OWN RPC AND CAUSE: on a shared daemon the
+	// other rpcs' refusals, and other cases', are in the run log beside it.
+	rec := d.AwaitLogRecord(d.RunLogPath(), "the "+rpcName+" transport-closed record", func(r harness.LogRecord) bool {
+		return r.Operation == "daemon.refusal.transport_closed" && r.Context["rpc"] == rpcName && r.Context["cause"] == wantCause
+	})
 	if !strings.EqualFold(rec.Level, "info") {
 		t.Fatalf("the transport-closed record = level %q, want INFO", rec.Level)
-	}
-	if rec.Context["rpc"] != rpcName || rec.Context["cause"] != wantCause {
-		t.Fatalf("the transport-closed record's context = %v, want rpc %q and cause %q", rec.Context, rpcName, wantCause)
 	}
 }
 
@@ -610,7 +611,7 @@ func TestPerWorkspaceWatchOpensWithABogusWorkspaceAreTransportClosed(t *testing.
 		t.Run(rpc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			d := newDaemon(t, harness.Opts{})
+			d := canonicalView(t)
 			bogus := &workspacev1.WorkspaceRef{Id: "bogus-unregistered-workspace-id"}
 
 			// Act
@@ -635,7 +636,7 @@ func TestPerWorkspaceWatchOpensWithAMismatchedDirAreTransportClosed(t *testing.T
 		t.Run(rpc.name, func(t *testing.T) {
 			t.Parallel()
 			// Arrange
-			f := newRegistered(t, harness.Opts{})
+			f := newCanonicalRegistered(t)
 			mismatched := &workspacev1.WorkspaceRef{Id: f.ws.GetId(), Dir: f.ws.GetDir() + "-mismatched"}
 
 			// Act
