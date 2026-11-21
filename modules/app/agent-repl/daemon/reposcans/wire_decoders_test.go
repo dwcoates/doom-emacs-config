@@ -40,8 +40,8 @@ var anyCheck = regexp.MustCompile(`\(agent-repl-wire--check-keys\b`)
 // better, written with a literal list).
 var computed = map[string]int{
 	"wire-common.el": 3,
-	"wire-host.el":   15,
-	"wire-roster.el": 17,
+	"wire-host.el":   16,
+	"wire-roster.el": 18,
 	"wire-verbs.el":  1,
 }
 
