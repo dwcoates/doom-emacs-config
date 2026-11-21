@@ -61,17 +61,6 @@ export function formatBlocked(ms: bigint | number): string {
   return `${(n / 1000).toFixed(1)} s`;
 }
 
-/** The time left before UNIX_MS at NOW_MS: "in 42 min", "in 3 h 5 min", "soon". */
-export function formatUnloadIn(unixMs: bigint | number, nowMs: number): string {
-  const left = Number(unixMs) - nowMs;
-  if (left <= 60_000) return "soon";
-  const minutes = Math.round(left / 60_000);
-  if (minutes < 60) return `in ${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const rest = minutes % 60;
-  return rest === 0 ? `in ${hours} h` : `in ${hours} h ${rest} min`;
-}
-
 /** The version hover's lines, as (label, value) pairs in drawn order. */
 export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[string, string]> {
   const lines: Array<[string, string]> = [];
@@ -110,26 +99,18 @@ export function overviewLines(u: SidebarMemoryOverview, path: string): Array<[st
   return lines;
 }
 
-/** The page line of a workspace hover, read against NOW_MS. */
-export function pageLine(u: SidebarWorkspaceMemoryPage, nowMs: number, path: string): string {
+/**
+ * The page line of a workspace hover. A page is loaded exactly while its
+ * workspace is visible (frontend.v1.RosterRowVisibility), so a loaded page
+ * says only that.
+ */
+export function pageLine(u: SidebarWorkspaceMemoryPage, path: string): string {
   const state = requireCase(u.state, `${path}.state`);
   switch (state.case) {
     case "notLoaded":
       return "not loaded";
-    case "loaded": {
-      const release = requireMessage(state.value.release, `${path}.state.loaded.release`);
-      const when = requireCase(release.when, `${path}.state.loaded.release.when`);
-      switch (when.case) {
-        case "held":
-          return "loaded, held while working";
-        case "onLeave":
-          return "loaded, unloads when you leave";
-        case "at":
-          return `loaded, unloads ${formatUnloadIn(when.value.unixMs, nowMs)}`;
-        default:
-          return unreachableArm(`${path}.state.loaded.release.when`, String((when as { case: unknown }).case));
-      }
-    }
+    case "loaded":
+      return "loaded, held while visible";
     default:
       return unreachableArm(`${path}.state`, String((state as { case: unknown }).case));
   }
@@ -140,13 +121,13 @@ export function pageLine(u: SidebarWorkspaceMemoryPage, nowMs: number, path: str
  * Every one is a detail (detail-more.ts `FACT_HOMES`), drawn in the panel's
  * details popup; a line classified otherwise is refused.
  */
-export function workspaceLines(u: SidebarWorkspaceMemory, nowMs: number, path: string): Array<[string, string]> {
-  const lines = workspaceMemoryLines(u, nowMs, path);
+export function workspaceLines(u: SidebarWorkspaceMemory, path: string): Array<[string, string]> {
+  const lines = workspaceMemoryLines(u, path);
   for (const [label] of lines) requireFactHome(label, "details");
   return lines;
 }
 
-function workspaceMemoryLines(u: SidebarWorkspaceMemory, nowMs: number, path: string): Array<[string, string]> {
+function workspaceMemoryLines(u: SidebarWorkspaceMemory, path: string): Array<[string, string]> {
   const agent = requireCase(requireMessage(u.agent, `${path}.agent`).state, `${path}.agent.state`);
   const lines: Array<[string, string]> = [];
   switch (agent.case) {
@@ -159,7 +140,7 @@ function workspaceMemoryLines(u: SidebarWorkspaceMemory, nowMs: number, path: st
     default:
       return unreachableArm(`${path}.agent.state`, String((agent as { case: unknown }).case));
   }
-  if (u.page !== undefined) lines.push(["page", pageLine(u.page, nowMs, `${path}.page`)]);
+  lines.push(["page", pageLine(requireMessage(u.page, `${path}.page`), `${path}.page`)]);
   return lines;
 }
 
@@ -254,7 +235,7 @@ async function fetchWorkspace(
   switch (result.case) {
     case "success": {
       const memory = requireMessage(result.value.memory, "GetWorkspaceMemorySuccess.memory");
-      fillLines(block, workspaceLines(memory, ctx.ticker.now(), "GetWorkspaceMemorySuccess.memory"));
+      fillLines(block, workspaceLines(memory, "GetWorkspaceMemorySuccess.memory"));
       return;
     }
     case "error": {
