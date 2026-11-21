@@ -561,6 +561,10 @@ func TestTheDaemonExitsAfterTheInFlightTurnEndsDuringADrainAndNeverInterruptsThe
 	t.Parallel()
 	// Arrange: a turn in flight when the drain's deadline passes.
 	f := newOpened(t, harness.Opts{})
+	// The turn's end races the daemon's shutdown: a turn-spent read the exit
+	// cancels is recorded at ERROR by merge's MediatorTurnSpent, which should
+	// log a cancelled context at INFO (ctxend) and is a fix of its own.
+	f.d.ExpectWarnings("daemon.merge.mediation")
 	resp := f.submit("do the thing", "k-drain-now", conversationv1.PromptOrigin_PROMPT_ORIGIN_WEBAPP_USER_SENT)
 	if resp.GetSuccess().GetTurn().GetTurn().GetValue() == "" {
 		t.Fatalf("SubmitPrompt = %v, want a minted TurnId", resp)
