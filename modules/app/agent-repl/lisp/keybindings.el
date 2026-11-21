@@ -198,7 +198,8 @@ the module."
 ;; cannot disagree.  `s-0' and `M-s-)' are ours
 ;; too: they run `agent-repl-switch-to-last-workspace', the tab at the END of
 ;; the drawn bar, where Doom's `+workspace/switch-to-final' took persp-mode's
-;; last.  `M-0' jumps to the workspace that most recently STARTED a turn and
+;; last.  `M-0' jumps to the workspace that most recently STARTED a turn,
+;; `M-s-0' to the one of the shown workspace's repository that did, and
 ;; `M-)' to the one that most recently ENDED one.
 ;;
 ;; WHY A KEYMAP OF OUR OWN, and not a later `map!' over Doom's.  Doom's
@@ -238,6 +239,8 @@ the module."
   ;; `M-s-)'.  Command-0 keeps the end of the bar.
   (define-key map (kbd "M-0") 'agent-repl-switch-to-last-started-workspace)
   (define-key map (kbd "M-)") 'agent-repl-switch-to-last-finished-workspace)
+  ;; `M-s-0' is `M-0' within the shown workspace's repository.
+  (define-key map (kbd "M-s-0") 'agent-repl-switch-to-last-started-repository-workspace)
   (define-key map (kbd "M-s-)") 'agent-repl-switch-to-last-workspace)
   ;; DOOM'S OWN WORKSPACE NAVIGATION IS REMAPPED, wherever it is bound
   ;; (`SPC TAB [', `SPC TAB ]', `SPC TAB 1'..`9'): those commands switch the
@@ -261,7 +264,7 @@ the module."
 ;; after Emacs started never reached it.
 (defvar agent-repl-workspace-numerals-mode-map (make-sparse-keymap)
   "Keymap carrying `M-0\=' .. `M-9\=' and `s-0\=' .. `s-9\=', the bar chords.
-`M-1\=' .. `M-9\=' are slots, `M-0\=' and `M-)\=' the turn-recency jumps,
+`M-1\=' .. `M-9\=' are slots, `M-0\=', `M-s-0\=' and `M-)\=' the turn-recency jumps,
 `M-s-)\=' the last tab on the bar.
 Built from `agent-repl-switch-numeral-count', the modifiers in
 `agent-repl-switch-numeral-modifiers' and the commands `commands.el\='

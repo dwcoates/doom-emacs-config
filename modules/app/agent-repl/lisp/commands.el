@@ -116,7 +116,7 @@
 (declare-function agent-repl-name-prefix-string "agent-repl-status" (prefix &optional height frame))
 (declare-function agent-repl-verbs--roster-or-view "agent-repl-verbs" (roster))
 (declare-function agent-repl-roster-walk "agent-repl-roster" (roster))
-(declare-function agent-repl-roster-repository-of "agent-repl-roster" (id &optional roster))
+(declare-function agent-repl-roster-ws-repository "agent-repl-roster" (ws))
 (declare-function agent-repl-roster-row-status "agent-repl-roster" (row))
 (declare-function agent-repl-roster-row-instant-ms "agent-repl-roster" (row field))
 (declare-function agent-repl-roster-row-merged-at "agent-repl-roster" (row))
@@ -1031,12 +1031,10 @@ by the caller."
 ALIST is `agent-repl--switch-display-alist''s.  A MAIN WORKSPACE IS THE
 ONE WHOSE DIRECTORY IS ITS REPOSITORY'S (the daemon's `IsMainWorktree'),
 and the repository is the roster section holding WS
-\(`agent-repl-roster-repository-of').  Nil when WS is no workspace (a
+\(`agent-repl-roster-ws-repository').  Nil when WS is no workspace (a
 persp-mode placeholder), when no roster section holds it yet, or when
 ALIST does not offer that main workspace."
-  (let* ((ref (and ws (agent-repl--ws-get ws :ref)))
-         (repository (and ref (agent-repl-roster-repository-of (plist-get ref :id))))
-         (dir (plist-get repository :dir)))
+  (let ((dir (plist-get (agent-repl-roster-ws-repository ws) :dir)))
     (and dir
          (car (seq-find (lambda (cell) (equal (plist-get (cdr cell) :dir) dir))
                         alist)))))
@@ -1544,6 +1542,32 @@ counts as surely as one it watched.  Bound to `M-0\='.  See
   (agent-repl--jump-to-ranked-workspace
    #'agent-repl-roster-last-started-name #'agent-repl-roster-last-turn-started-ms
    "last-started" "No other workspace has started a turn"))
+
+(defun agent-repl--same-repository-names (ws names)
+  "Return the ones of NAMES in WS's repository, in NAMES' order.
+A workspace's repository is its roster section's key
+\(`agent-repl-roster-ws-repository'), compared by its daemon-minted id.
+Nil when WS names no repository: a placeholder or a workspace no section
+holds yet shares a repository with nothing."
+  (let ((id (plist-get (agent-repl-roster-ws-repository ws) :id)))
+    (and id
+         (seq-filter (lambda (name)
+                       (equal (plist-get (agent-repl-roster-ws-repository name) :id) id))
+                     names))))
+
+(defun agent-repl-switch-to-last-started-repository-workspace ()
+  "Switch to the workspace of THIS repository whose turn most recently STARTED.
+`agent-repl-switch-to-last-started-workspace' over only the workspaces
+sharing the shown one's repository (`agent-repl--same-repository-names').
+Bound to `M-s-0\='.  See `agent-repl--jump-to-ranked-workspace' for the
+candidates."
+  (interactive)
+  (let ((shown (agent-repl--ws-current-name)))
+    (agent-repl--jump-to-ranked-workspace
+     (lambda (names)
+       (agent-repl-roster-last-started-name (agent-repl--same-repository-names shown names)))
+     #'agent-repl-roster-last-turn-started-ms
+     "last-started-in-repository" "No other workspace in this repository has started a turn")))
 
 (defun agent-repl--drawn-tab-names ()
   "Return the workspace names the tab bar DRAWS, in the order it draws them.

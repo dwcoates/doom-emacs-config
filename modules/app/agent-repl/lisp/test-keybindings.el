@@ -255,6 +255,11 @@
   (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-0"))
               'agent-repl-switch-to-last-started-workspace)))
 
+(ert-deftest agent-repl-test-keybindings-meta-super-0-jumps-to-the-repositorys-last-started ()
+  "`M-s-0' jumps to the workspace of this repository that most recently started a turn."
+  (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-s-0"))
+              'agent-repl-switch-to-last-started-repository-workspace)))
+
 (ert-deftest agent-repl-test-keybindings-meta-close-paren-jumps-to-the-last-finished ()
   "`M-)' jumps to the workspace that most recently ended a turn."
   (should (eq (lookup-key agent-repl-workspace-numerals-mode-map (kbd "M-)"))
