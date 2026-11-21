@@ -103,6 +103,9 @@ type Workspace struct {
 	// again after owing none (keepaliveowing.go); nil when it never stopped.
 	// A beat due before it was never owed.
 	KeepaliveOwedFrom *time.Time
+	// SettingsVisitAt is when a settings pick started the workspace's shim,
+	// set while that visit stands (settingsvisit.go); nil otherwise.
+	SettingsVisitAt *time.Time
 	// KeepaliveRunBeats is how many keep-alives the daemon has sent the
 	// workspace, for either of its conversations, since its last turn closed
 	// (keepaliverun.go): 0 once a turn closes. Derived on read.
