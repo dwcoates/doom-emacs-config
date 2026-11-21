@@ -4207,7 +4207,7 @@ a move asked for waiting place I, counted from 0, of the W merges waiting."
           :waiting (agent-repl-wire--decode-uint32 message 'waiting json))))
 
 (defun agent-repl-wire-decode-update-merge-queue-error-placement-behind-not-in-line (json)
-  "Decode UpdateMergeQueueError's `placement_behind_not_in_line' cause arm from JSON."
+  "Decode UpdateMergeQueueError's `placement_behind_not_in_line' arm from JSON."
   (agent-repl-wire-decode-merge-queue-placement-behind-not-in-line json))
 
 (defun agent-repl-wire-decode-update-merge-queue-error-index-out-of-range (json)
