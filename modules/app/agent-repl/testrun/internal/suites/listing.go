@@ -43,8 +43,9 @@ func (Lister) GoTests(dir, tags string) ([]string, error) {
 
 // VitestNames answers the full names `vitest list` collects in each of
 // FILES (relative to DIR, the package), under CONFIG ("" is the default):
-// each a test's describe blocks and its own name joined by spaces, as a
-// `-t` pattern matches it. A file it collects nothing in is absent.
+// each a test's describe blocks and its own name joined by " > ", as vitest
+// matches a `-t` pattern against it (VitestNamePattern). A file it collects
+// nothing in is absent.
 func (Lister) VitestNames(module, dir, config string, files []string) (map[string][]string, error) {
 	if err := runEnsure(fmt.Sprintf("ensure the npm deps of %s", dir), filepath.Join(module, "bin", "ensure-deps.sh"), dir); err != nil {
 		return nil, err
@@ -98,8 +99,7 @@ func vitestListWorkers(dir string) ([]string, error) {
 }
 
 // parseVitestNames reads `vitest list --json`: each collected test's file
-// and name ("describe > test"), answered by file relative to DIR with the
-// name joined by spaces.
+// and full name ("describe > test"), answered by file relative to DIR.
 func parseVitestNames(dir string, out []byte) (map[string][]string, error) {
 	var entries []struct {
 		Name string `json:"name"`
@@ -117,7 +117,7 @@ func parseVitestNames(dir string, out []byte) (map[string][]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		names[filepath.ToSlash(rel)] = append(names[filepath.ToSlash(rel)], strings.ReplaceAll(e.Name, " > ", " "))
+		names[filepath.ToSlash(rel)] = append(names[filepath.ToSlash(rel)], e.Name)
 	}
 	return names, nil
 }

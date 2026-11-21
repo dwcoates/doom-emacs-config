@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
-	"strings"
 
 	testrunv1 "agentrepl/proto/testrun/v1"
 
@@ -234,9 +234,10 @@ func (p *pruning) locateVitest(f *testrunv1.TestSelectionVitestFile) (string, fu
 			return ""
 		}
 		want := f.GetNamed().GetFullNames()[0]
-		// A -t name matches a test's full name or a describe block's
-		// (suites.VitestNamePattern).
-		if slices.ContainsFunc(names, func(n string) bool { return n == want || strings.HasPrefix(n, want+" ") }) {
+		// THE RUN'S OWN PATTERN JUDGES THE NAME: a case is held when the
+		// `-t` pattern its run would pass matches a collected test.
+		pattern := regexp.MustCompile(suites.VitestNamePattern([]string{want}))
+		if slices.ContainsFunc(names, pattern.MatchString) {
 			return ""
 		}
 		return fmt.Sprintf("%s: it no longer defines %q", what, want)

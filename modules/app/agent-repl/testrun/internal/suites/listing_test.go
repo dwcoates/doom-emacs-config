@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestParseVitestNamesJoinsEachTestsPathAsItsPatternMatchesIt(t *testing.T) {
+func TestParseVitestNamesReadsEachTestsFullNameByFile(t *testing.T) {
 	// Arrange
 	out := []byte(`[{"name":"feed > draws a row","file":"/pkg/test/feed.test.ts"},{"name":"boots","file":"/pkg/test/boot.test.ts"}]`)
 
@@ -17,7 +17,7 @@ func TestParseVitestNamesJoinsEachTestsPathAsItsPatternMatchesIt(t *testing.T) {
 	got, err := parseVitestNames("/pkg", out)
 
 	// Assert
-	want := map[string][]string{"test/feed.test.ts": {"feed draws a row"}, "test/boot.test.ts": {"boots"}}
+	want := map[string][]string{"test/feed.test.ts": {"feed > draws a row"}, "test/boot.test.ts": {"boots"}}
 	if err != nil || !maps.EqualFunc(got, want, slices.Equal) {
 		t.Fatalf("parseVitestNames = %v, %v; want %v", got, err, want)
 	}

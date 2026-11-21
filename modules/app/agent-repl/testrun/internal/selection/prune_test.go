@@ -95,7 +95,7 @@ func aLister() *fakeLister {
 	return &fakeLister{
 		goTests: map[string][]string{"merge": {"TestLands", "TestFails"}},
 		vitest: map[string]map[string][]string{
-			"": {"test/feed.test.ts": {"feed draws a row", "feed scrolls"}},
+			"": {"test/feed.test.ts": {"feed > draws a row", "feed > scrolls"}},
 		},
 		ert:    map[string][]string{"test-wire.el": {"test-wire-decodes"}},
 		groups: map[string][]string{"readiness-harness": {"report", "summary"}},
@@ -120,6 +120,7 @@ func TestPruneKeepsOrDropsEachCase(t *testing.T) {
 		{name: "a Go package with no test left is dropped", sel: goAll(mod + "daemon/internal/empty"), wantDetail: "holds no test any more"},
 		{name: "a vitest test the file collects is kept", sel: vitestNamed(mod+"webapp/test/feed.test.ts", "feed draws a row")},
 		{name: "a vitest describe block the file collects is kept", sel: vitestNamed(mod+"webapp/test/feed.test.ts", "feed")},
+		{name: "a vitest test named as vitest joins its levels is kept", sel: vitestNamed(mod+"webapp/test/feed.test.ts", "feed > draws a row")},
 		{name: "a whole vitest file the suite collects is kept", sel: vitestAll(mod + "webapp/test/feed.test.ts")},
 		{name: "a renamed vitest test is dropped", sel: vitestNamed(mod+"webapp/test/feed.test.ts", "feed draws a column"), wantDetail: `no longer defines "feed draws a column"`},
 		{name: "a name that only prefixes a word of a test is dropped", sel: vitestNamed(mod+"webapp/test/feed.test.ts", "feed draw"), wantDetail: "no longer defines"},
@@ -204,7 +205,7 @@ func TestPruneFindsAVitestFileItsIntegrationConfigCollects(t *testing.T) {
 	// Arrange
 	l := pruneTree(t)
 	list := aLister()
-	list.vitest["vitest.integration.config.ts"] = map[string][]string{"test/uncollected.test.ts": {"integration boots"}}
+	list.vitest["vitest.integration.config.ts"] = map[string][]string{"test/uncollected.test.ts": {"integration > boots"}}
 	sel := vitestNamed(mod+"webapp/test/uncollected.test.ts", "integration boots")
 
 	// Act
