@@ -15,7 +15,11 @@
  * for every section it sized in ONE UpdateSidebarView (`changeViews`), whose
  * roster push draws it on every page. The Open section is never sized: it
  * fills what the bands leave, so a drag against it sizes the band below
- * alone, and a drag between two bands sizes both. Escape, or a pointer lost
+ * alone, and a drag between two bands sizes both. EITHER WAY THE DRAG MOVES
+ * ITS OWN RULE ALONE (owner report, 2026-11-21): the band below is given
+ * exactly the room the section above it gives up, at the section above's
+ * stops, so a drag against an Open section that shows every line cannot hand
+ * the band's room on to the band below it. Escape, or a pointer lost
  * mid-drag, puts back what the wire says. A double click on a rule fits the
  * sections beside it by their share again.
  */
@@ -118,14 +122,13 @@ export function nearestStop(stops: readonly number[], px: number): number {
 
 /**
  * The lines a drag DY px down (up when negative) gives the sections beside
- * a rule, from what the last fit measured of them. Against the Open section
- * (UPPER null) only the band below is sized: it gives up what the rule moves
- * down. Between two bands, the upper's new height snaps to its nearest stop
- * and the lower keeps the lines that fit in what the two stood in together.
+ * a rule, from what the last fit measured of them: the upper's new height
+ * snaps to its nearest stop, never past its last line, and the lower keeps
+ * the lines that fit in what the two stood in together. The Open section as
+ * UPPER is measured the same, though only the band below it is sized.
  */
-export function draggedLines(upper: FittedSection | null, lower: FittedSection, dy: number): { upper: number | null; lower: number } {
+export function draggedLines(upper: FittedSection, lower: FittedSection, dy: number): { upper: number; lower: number } {
   const lowerPx = lower.stops[lower.lines];
-  if (upper === null) return { upper: null, lower: nearestStop(lower.stops, lowerPx - dy) };
   const upperPx = upper.stops[upper.lines];
   const upperLines = nearestStop(upper.stops, upperPx + dy);
   const left = upperPx + lowerPx - upper.stops[upperLines];
@@ -227,17 +230,18 @@ export function installSectionResize(
     const { grip, pair } = pressed;
     event.preventDefault();
     const upperSized = !pair.upper.classList.contains(OPEN_SECTION_CLASS);
-    const upperFit = upperSized ? measuredSection(pair.upper, fitOf) : null;
+    const upperFit = measuredSection(pair.upper, fitOf);
     const lowerFit = measuredSection(pair.lower, fitOf);
     const startY = event.clientY;
-    const start = { upper: upperFit?.lines ?? null, lower: lowerFit.lines };
+    const sizedOf = (lines: { upper: number; lower: number }) => ({ upper: upperSized ? lines.upper : null, lower: lines.lower });
+    const start = sizedOf({ upper: upperFit.lines, lower: lowerFit.lines });
     let shown = start;
     const held: Array<{ key: string; token: number }> = [];
     grip.setPointerCapture(event.pointerId);
     doc.documentElement.classList.add(DRAGGING_CLASS, RESIZING_CLASS);
 
     const move = (e: PointerEvent): void => {
-      const next = draggedLines(upperFit, lowerFit, e.clientY - startY);
+      const next = sizedOf(draggedLines(upperFit, lowerFit, e.clientY - startY));
       if (next.upper === shown.upper && next.lower === shown.lower) return;
       shown = next;
       for (const piece of sizedPieces(pair, next, upperSized).pieces) held.push({ key: piece.key, token: sc.view.ask(piece.key, piece.value) });

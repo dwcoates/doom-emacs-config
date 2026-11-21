@@ -41,6 +41,9 @@ const ROW = 20;
 /** The stops of a section of N lines, ROW px each. */
 const stops = (n: number): number[] => Array.from({ length: n + 1 }, (_, k) => k * ROW);
 
+/** What the last fit measured of an Open section showing six of its ten lines. */
+const OPEN_FIT: FittedSection = { stops: stops(10), lines: 6 };
+
 const OK = create(UpdateSidebarViewResponseSchema, { result: { case: "success", value: {} } });
 const REFUSED = create(UpdateSidebarViewResponseSchema, {
   result: { case: "error", value: { cause: { case: "unknownRepository", value: {} } } },
@@ -215,9 +218,10 @@ describe("nearestStop", () => {
 
 describe("draggedLines", () => {
   it.each([
-    { name: "a band under the Open section grown by a rule dragged up", upper: null, lower: { stops: stops(6), lines: 2 }, dy: -41, want: { upper: null, lower: 4 } },
-    { name: "a band under the Open section shrunk to its header at most", upper: null, lower: { stops: stops(6), lines: 2 }, dy: 300, want: { upper: null, lower: 0 } },
-    { name: "a band grown no further than its lines", upper: null, lower: { stops: stops(3), lines: 1 }, dy: -300, want: { upper: null, lower: 3 } },
+    { name: "a band under the Open section grown by a rule dragged up", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(6), lines: 2 }, dy: -41, want: { upper: 4, lower: 4 } },
+    { name: "a band under the Open section shrunk by what the Open section can still show", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(6), lines: 4 }, dy: 300, want: { upper: 10, lower: 0 } },
+    { name: "a band kept as it stood under an Open section that shows every line", upper: { stops: stops(4), lines: 4 }, lower: { stops: stops(6), lines: 2 }, dy: 60, want: { upper: 4, lower: 2 } },
+    { name: "a band grown no further than its lines", upper: { stops: stops(10), lines: 6 }, lower: { stops: stops(3), lines: 1 }, dy: -300, want: { upper: 0, lower: 3 } },
     { name: "the room between two bands moved down", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(4), lines: 2 }, dy: 20, want: { upper: 4, lower: 1 } },
     { name: "the room between two bands moved up", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(8), lines: 2 }, dy: -40, want: { upper: 1, lower: 4 } },
     { name: "a lower band kept to the lines it holds", upper: { stops: stops(5), lines: 3 }, lower: { stops: stops(2), lines: 2 }, dy: -60, want: { upper: 0, lower: 2 } },
@@ -252,7 +256,7 @@ describe("installSectionResize", () => {
   it("paints the lines a drag under the Open section gives the band, and re-fits", () => {
     // Arrange
     const r = rail();
-    const { refit } = install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    const { refit } = install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 2 }]]));
     // Act
     drag(r.queue, 60, true);
     // Assert
@@ -262,7 +266,7 @@ describe("installSectionResize", () => {
   it("asks for the band's lines alone on release, the Open section never sized", async () => {
     // Arrange
     const r = rail();
-    install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 2 }]]));
     // Act
     drag(r.queue, 60);
     // Assert
@@ -297,7 +301,7 @@ describe("installSectionResize", () => {
   it("logs the drag it asks for", async () => {
     // Arrange
     const r = rail();
-    install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 2 }]]));
     const capture = captureLogRecords("info");
     // Act
     drag(r.queue, 60);
@@ -306,10 +310,26 @@ describe("installSectionResize", () => {
     expect(record.context).toMatchObject({ lower: "repo merge-queue-section", from: "null/2", to: "null/4" });
   });
 
+  it("asks nothing for a rule dragged down against an Open section that shows every line", () => {
+    // Arrange
+    const r = rail();
+    install(
+      r,
+      new Map([
+        [r.open, { stops: stops(4), lines: 4 }],
+        [r.queue, { stops: stops(6), lines: 2 }],
+      ]),
+    );
+    // Act
+    drag(r.queue, 160);
+    // Assert
+    expect([r.asked.length, r.queue.getAttribute(BAND_SIZED_ATTRIBUTE)]).toEqual([0, null]);
+  });
+
   it("asks nothing for a rule let go where it was pressed", () => {
     // Arrange
     const r = rail();
-    install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 2 }]]));
     // Act
     drag(r.queue, 102);
     // Assert
@@ -319,7 +339,7 @@ describe("installSectionResize", () => {
   it("clears the resize cursor when the grip is detached before release", () => {
     // Arrange
     const r = rail({ sized: { queue: 1 } });
-    install(r, new Map([[r.queue, { stops: stops(6), lines: 1 }]]));
+    install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 1 }]]));
     const g = drag(r.queue, 40, true);
     g.remove();
     // Act
@@ -331,7 +351,7 @@ describe("installSectionResize", () => {
   it("clears the resize cursor when the pointer is cancelled", () => {
     // Arrange
     const r = rail({ sized: { queue: 1 } });
-    install(r, new Map([[r.queue, { stops: stops(6), lines: 1 }]]));
+    install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 1 }]]));
     drag(r.queue, 40, true);
     // Act
     primaryPointer("pointercancel", document.body, 40);
@@ -342,7 +362,7 @@ describe("installSectionResize", () => {
   it("puts the wire's height back and asks nothing when Escape cancels the drag", () => {
     // Arrange
     const r = rail({ sized: { queue: 1 } });
-    const { refit } = install(r, new Map([[r.queue, { stops: stops(6), lines: 1 }]]));
+    const { refit } = install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 1 }]]));
     drag(r.queue, 40, true);
     // Act
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
@@ -358,7 +378,7 @@ describe("installSectionResize", () => {
   it("puts the wire's height back and re-fits when the daemon refuses", async () => {
     // Arrange
     const r = rail({}, () => REFUSED);
-    const { refits } = install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    const { refits } = install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 2 }]]));
     // Act
     drag(r.queue, 60);
     // Assert
@@ -404,7 +424,7 @@ describe("installSectionResize", () => {
   it("listens no more once uninstalled", () => {
     // Arrange
     const r = rail();
-    const { refit, remove } = install(r, new Map([[r.queue, { stops: stops(6), lines: 2 }]]));
+    const { refit, remove } = install(r, new Map([[r.open, OPEN_FIT], [r.queue, { stops: stops(6), lines: 2 }]]));
     remove();
     // Act
     drag(r.queue, 60);
