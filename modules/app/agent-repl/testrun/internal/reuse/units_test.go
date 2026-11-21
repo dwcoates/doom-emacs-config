@@ -8,6 +8,7 @@ import (
 
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/reusewhy"
+	"agentrepl/testrun/roster"
 )
 
 func TestATallyNamesEveryReasonInTheVocabularyTheDaemonReads(t *testing.T) {
@@ -83,6 +84,16 @@ func TestAnUnchangedEnvironmentLogsNoEnvironmentLine(t *testing.T) {
 	}
 }
 
+// installedWeb is webFixture with its packages installed as its lock names
+// them, so a run of its units records its passes (staleInstall).
+func installedWeb(t *testing.T, f fixture) roster.Suite {
+	t.Helper()
+	s := webFixture(t, f)
+	write(t, f.d.Repo, fixtureModule+"/web/package-lock.json", `{"packages": {}}`)
+	write(t, f.d.Repo, fixtureModule+"/web/node_modules/.package-lock.json", `{"packages": {}}`)
+	return s
+}
+
 // batchOf is the unit named name of v.
 func batchOf(t *testing.T, v SuiteVerdict, name string) UnitVerdict {
 	t.Helper()
@@ -98,7 +109,7 @@ func batchOf(t *testing.T, v SuiteVerdict, name string) UnitVerdict {
 func TestABatchRunsOnlyTheMembersWhoseOwnInputsChanged(t *testing.T) {
 	// Arrange: both files passed together, then b's source changed.
 	f := newFixture(t)
-	s := webFixture(t, f)
+	s := installedWeb(t, f)
 	f.record(t, Reusing, run.Passed, f.decide(t, Reusing, s, webBatchUnits()))
 	write(t, f.d.Repo, fixtureModule+"/web/src/b.ts", "export const b = 2")
 
@@ -135,7 +146,7 @@ func TestABatchRunsOnlyTheMembersWhoseOwnInputsChanged(t *testing.T) {
 func TestMovingAPassedFileToAnotherBatchRerunsNothing(t *testing.T) {
 	// Arrange: both files passed in one batch.
 	f := newFixture(t)
-	s := webFixture(t, f)
+	s := installedWeb(t, f)
 	f.record(t, Reusing, run.Passed, f.decide(t, Reusing, s, webBatchUnits()))
 
 	// Act: the same files, each in a batch of its own.
@@ -152,7 +163,7 @@ func TestMovingAPassedFileToAnotherBatchRerunsNothing(t *testing.T) {
 func TestAFailedBatchRecordsEachMemberItRanAsFailed(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	s := webFixture(t, f)
+	s := installedWeb(t, f)
 	f.record(t, Reusing, run.Failed, f.decide(t, Reusing, s, webBatchUnits()))
 
 	// Act
@@ -172,7 +183,7 @@ func TestAFailedBatchRecordsEachMemberItRanAsFailed(t *testing.T) {
 func TestAWhollyReusedBatchDoesNotRun(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	s := webFixture(t, f)
+	s := installedWeb(t, f)
 	f.record(t, Reusing, run.Passed, f.decide(t, Reusing, s, webBatchUnits()))
 
 	// Act
@@ -210,7 +221,7 @@ func TestDecideBatchRefusesAMemberWithNoInputSet(t *testing.T) {
 func TestReportSaysHowManyOfABatchsFilesRun(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
-	s := webFixture(t, f)
+	s := installedWeb(t, f)
 	f.record(t, Reusing, run.Passed, f.decide(t, Reusing, s, webBatchUnits()))
 	write(t, f.d.Repo, fixtureModule+"/web/src/b.ts", "export const b = 2")
 	log := &logLines{}
