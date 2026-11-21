@@ -232,7 +232,7 @@ func TestCreateWorkspaceOneShotCarriesTheDaemonsDirectiveNotTheRepositorys(t *te
 	// Arrange: the repository states a directive of its own, which the daemon
 	// no longer reads: the completion directive is the daemon's, and what
 	// finishing does is the repository's deploy config.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	directive := filepath.Join(repo.PolicyDir(), "oneshot-completion-directive.md")
 	harness.ReplacePrompt(t, directive, "<!-- used by: the daemon; placeholders: none -->\nfile a report in the ledger.\n")
@@ -268,7 +268,7 @@ func TestCreateWorkspaceOneShotRefusesARepositoryThatStatesNoPolicy(t *testing.T
 	// Arrange: a repository with no `.agent-repl/prompts` of its own. The
 	// daemon's corpus is the policy of the daemon's OWN repository and is
 	// never a fallback for this one (owner ruling, 2026-09-12).
-	d := newDaemon(t, harness.Opts{})
+	d := newReportedCreateDaemon(t)
 	repo := harness.NewRepo(t)
 	if err := os.RemoveAll(repo.PolicyDir()); err != nil {
 		t.Fatalf("remove the repository policy: %v", err)
@@ -341,7 +341,7 @@ func TestCreateWorkspaceOneShotTakesNoFinishActionOnCompletion(t *testing.T) {
 	t.Parallel()
 	// Arrange: the daemon performs no finish (owner ruling, 2026-09-12) — the
 	// agent carries the directive out itself.
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	resp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(&agentreplv1.CreateWorkspaceRequest{
@@ -567,6 +567,16 @@ func TestCloseWorkspaceBlockedByLiveDetachedWorkWithNoTurnOpenAnswersBlocked(t *
 // createRepositoryRef registers a fresh workspace under a repository and
 // reads back the daemon-minted RepositoryRef from the roster's repo section,
 // since CreateWorkspace needs the echo token and no direct mint RPC exists.
+// newReportedCreateDaemon is a daemon of its own for a case whose create
+// fails in a way the daemon reports to the repository's main worktree: the
+// report reopens that workspace and queues a brief to it after the case is
+// answered, on work no workspace owns, so a shared slice's retirement would
+// race it.
+func newReportedCreateDaemon(t *testing.T) *harness.Daemon {
+	t.Helper()
+	return newDaemon(t, harness.Opts{})
+}
+
 func createRepositoryRef(t *testing.T, d *harness.Daemon, repo *harness.Repo) *workspacev1.RepositoryRef {
 	t.Helper()
 	ws := harness.Register(t, d, repo.Dir)
@@ -776,8 +786,8 @@ func TestCreateWorkspaceWhoseShimWillNotComeUpAnswersTheSpawnFailedArm(t *testin
 func TestCreateWorkspaceChildStandsInBothStatuses(t *testing.T) {
 	t.Parallel()
 	// Arrange: a peer to be the parent.
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
-	d := newDaemon(t, harness.Opts{})
 	repository := createRepositoryRef(t, d, repo)
 	parentResp, err := d.Client().CreateWorkspace(d.Ctx(), connect.NewRequest(harness.Create(repository)))
 	if err != nil || parentResp.Msg.GetSuccess() == nil {
@@ -841,7 +851,7 @@ func TestCreateWorkspaceFromOriginIsCutFromOriginsPrimaryDespiteARaceOnAnotherRe
 	t.Parallel()
 	// Arrange: origin's main moved on, and another process's fetch is writing
 	// an unrelated remote-tracking ref (2026-11-05, explanation-engine).
-	d := newDaemon(t, harness.Opts{})
+	d := canonicalView(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	pushed := repo.AdvanceOrigin(harness.DefaultBranch)
@@ -866,7 +876,7 @@ func TestCreateWorkspaceFromOriginIsCutFromOriginsPrimaryDespiteARaceOnAnotherRe
 func TestCreateWorkspaceFromOriginWhoseFetchFailsAnswersOriginFetchFailed(t *testing.T) {
 	t.Parallel()
 	// Arrange: the remote cannot be read.
-	d := newDaemon(t, harness.Opts{})
+	d := newReportedCreateDaemon(t)
 	repo := harness.NewRepo(t)
 	repository := createRepositoryRef(t, d, repo)
 	repo.AdvanceOrigin(harness.DefaultBranch)

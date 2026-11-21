@@ -21,7 +21,7 @@ import (
 func TestRegisteringAWorkspaceDrawsOneRowWithStatusNone(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	roster := d.WatchRoster()
 	harness.AwaitNext(t, d.Ctx(), roster, "the empty roster")
 	repo := harness.NewRepo(t)
@@ -111,7 +111,7 @@ func swapWorkspaces(t *testing.T, d *harness.Daemon, ws, target *workspacev1.Wor
 func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
 	t.Parallel()
 	// Arrange: the bar is a, c, b.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -134,7 +134,7 @@ func TestSettingAPriorityMovesTheWorkspaceSecondToLast(t *testing.T) {
 func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
 	t.Parallel()
 	// Arrange: the bar is a, c, b; c closes and d lands while it is away.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -158,7 +158,7 @@ func TestReopeningAWorkspaceRestoresItsPlace(t *testing.T) {
 func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 	t.Parallel()
 	// Arrange: the bar is a, c, b.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -177,7 +177,7 @@ func TestSwapWorkspacesExchangesTheTwoPlaces(t *testing.T) {
 func TestMoveWorkspaceTakesTheTargetsTabAndShiftsTheTabsBetween(t *testing.T) {
 	t.Parallel()
 	// Arrange: the bar is a, c, b.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -247,7 +247,7 @@ func arrange(t *testing.T, d *harness.Daemon, req *agentreplv1.ArrangeSidebarReq
 func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *testing.T) {
 	t.Parallel()
 	// Arrange: the owner's example, a, b, c in one repository.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -283,7 +283,7 @@ func TestTheFirstWorkspaceFiledInANewSubsectionBecomesItsRepositorysLastTab(t *t
 func TestASubsectionMovedBeforeAWorkspaceTakesItsTabsThere(t *testing.T) {
 	t.Parallel()
 	// Arrange: the owner's example, a, b, c, then [foo: d] at the bottom.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	for _, name := range []string{"a", "b", "c", "d"} {
@@ -339,7 +339,7 @@ func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
 	// Arrange: a one-shot beside a registered workspace, which draws among
 	// the unsectioned rows like any other workspace (owner request,
 	// 2026-11-03).
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	a := harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -390,7 +390,7 @@ func TestAOneShotIsDrawnWhereItIsPlacedAndKeepsItsMark(t *testing.T) {
 func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 	t.Parallel()
 	// Arrange: a and b in one repository, b filed in a subsection.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	repo := harness.NewRepo(t)
 	roster := d.WatchRoster()
 	harness.Register(t, d, worktreeOf(t, repo, "a"))
@@ -437,7 +437,7 @@ func TestFoldingASubsectionFoldsItsWorkspacesTabs(t *testing.T) {
 func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
 	t.Parallel()
 	// Arrange: one workspace in each of two repositories.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	roster := d.WatchRoster()
 	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 	harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "two"))
@@ -460,7 +460,7 @@ func TestMovingARepositoryMovesAllItsTabs(t *testing.T) {
 func TestGetSidebarArrangementListsTheRepositoriesAndTheirWorkspaces(t *testing.T) {
 	t.Parallel()
 	// Arrange.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupTabOrder)
 	ws := harness.Register(t, d, worktreeOf(t, harness.NewRepo(t), "one"))
 
 	// Act.

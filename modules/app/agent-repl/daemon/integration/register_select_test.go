@@ -135,7 +135,7 @@ func TestReselectingAWorkspaceProducesNoDuplicatePush(t *testing.T) {
 func TestSwitchingWorkspacesIsOneRosterPush(t *testing.T) {
 	t.Parallel()
 	// Arrange: two opened workspaces, both ready, A selected.
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupSelection)
 	opened := func(repo *harness.Repo) *fixture {
 		f := &fixture{d: d, repo: repo, ws: harness.Register(t, d, repo.Dir), t: t}
 		f.open()

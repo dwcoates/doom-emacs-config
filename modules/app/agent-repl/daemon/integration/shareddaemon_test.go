@@ -107,6 +107,10 @@ const (
 	// keeps alive: SendHiddenKeepalives asks every hidden shim of the
 	// daemon, so one case's send reaches every other's.
 	groupHiddenKeepalives daemonGroup = "the hidden workspaces' keep-alives"
+	// groupTabOrder is the daemon whose sidebar a case arranges or reads
+	// whole: tab numbers run across every repository the daemon holds, and
+	// the arrangement lists every one of them.
+	groupTabOrder daemonGroup = "the sidebar's tab order"
 )
 
 var (

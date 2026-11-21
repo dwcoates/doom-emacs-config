@@ -249,9 +249,11 @@ mechanics (`integration/shareddaemon_test.go`).
   shared stub records (the browser launcher's).
 - **The view retires its slice when the case ends** (`retireSlice`,
   `integration/harness/view.go`): KillWorkspace, ForgetWorkspace, and any held
-  prompts a forget is blocked by dropped first, before the case's sweep. The
-  daemon therefore holds only the running cases' workspaces; one that kept
-  every finished case's cost more CPU than a daemon per case.
+  prompts a forget is blocked by dropped first, before the case's sweep, and
+  last the main worktree of every repository the slice is in, which
+  registering a linked worktree registers beside it, closed. The daemon
+  therefore holds only the running cases' workspaces and repositories; one
+  that kept every finished case's cost more CPU than a daemon per case.
 - **A case that changes state the whole daemon owns joins its group**:
   `newInGroup(t, group)` or `newRegisteredInGroup(t, group)`, one daemon per
   `daemonGroup`, its cases running one at a time. The groups are
@@ -262,13 +264,18 @@ mechanics (`integration/shareddaemon_test.go`).
   per daemon) and `groupUnservedCatalog` (a workspace with no shim draws the
   catalog its login last served; no case of it starts a session) and
   `groupHiddenKeepalives` (SendHiddenKeepalives asks every hidden shim of
-  the daemon). A new
+  the daemon) and `groupTabOrder` (tab numbers run across every repository,
+  and the arrangement lists them all). A new
   precondition is a new `daemonGroup`
   constant, never a daemon for one case.
 - **A fresh daemon (`newOpened`, `newRegistered`, `harness.StartDaemon`) is
   only for a case whose subject is the daemon's own lifecycle**: startup,
   restart, handover, crash, shutdown, or a boot-time option or environment
-  (`harness.Opts` other than the default). Its fixture line says so.
+  (`harness.Opts` other than the default). Its fixture line says so. The one
+  other reason is a create that fails in a way the daemon reports to the
+  repository's main worktree (`newReportedCreateDaemon`): the report reopens
+  that workspace after the case is answered, which a slice's retirement
+  would race.
 - **A view's idle barrier is its own slice's** (`ExpectNoPush`,
   `ExpectNoPushMatching`, `ExpectFileUnchanged`, `Daemon.AwaitIdle`): it names
   the view's workspaces (`agentrepl.v1.AwaitIdleRequest.workspaces`) and waits
