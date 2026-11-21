@@ -121,12 +121,17 @@ test code and in the production code its tests run. Off by default.
   - every Go test binary, through `-test.cpuprofile`;
   - every node process of a vitest unit, workers included, through `--cpu-prof`;
   - every daemon, shim, store and sidecar a test starts: each profiles its
-    whole life and writes the profile when it stops.
+    whole life and writes the profile when it stops;
+  - every ERT chunk, through the elisp CPU profiler, sampling the chunk's
+    loads and tests (`testrun/ert/driver.el`).
 - Where the profiles land: `<run log dir>/profiles/`, beside the run's log and
   its failure artifacts, pruned with them.
   - One directory per unit, named by its unit id (`:`, `/` and `#` become `_`).
     - `test.cpu.pprof` is a Go unit's own profile.
     - `CPU.*.cpuprofile` are a vitest unit's node processes.
+    - `ert.cpu.eprofile` is an ERT chunk's profile, and `ert.cpu.top.tsv` its
+      hottest functions by total and by self samples (samples, share, kind,
+      function), readable without Emacs.
   - Inside it, one directory per test that started production processes,
     named by the test the same way.
     - `daemon-<pid>.cpu.pprof`, `store-<pid>.cpu.pprof` and
@@ -154,6 +159,8 @@ test code and in the production code its tests run. Off by default.
     FILE` keeps one; `workspaces.tsv` says which test that workspace was.
   - node: load a `.cpuprofile` into Chrome DevTools (Performance, Load
     profile) for a flame chart.
+  - ERT: read `ert.cpu.top.tsv` directly; for the call tree,
+    `M-x profiler-find-profile` on `ert.cpu.eprofile`.
 
 ## Every test obeys the host CPU governor
 
