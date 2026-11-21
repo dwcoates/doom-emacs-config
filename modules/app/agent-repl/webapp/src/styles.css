@@ -1495,11 +1495,7 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
 }
 #ws-sidebar .sb-gutter[data-recency="older"] { --gutter-hue: var(--canonical-orange); }
 #ws-sidebar .sb-gutter[data-recency="newer"] { --gutter-hue: var(--blocked); }
-#ws-sidebar .sb-gutter[data-recency-presses="2"] { --gutter-strength: 78%; }
-#ws-sidebar .sb-gutter[data-recency-presses="3"] { --gutter-strength: 60%; }
-#ws-sidebar .sb-gutter[data-recency-presses="4"] { --gutter-strength: 46%; }
-#ws-sidebar .sb-gutter[data-recency-presses="5"] { --gutter-strength: 35%; }
-#ws-sidebar .sb-gutter[data-recency-presses="6"] { --gutter-strength: 27%; }
+#ws-sidebar .sb-gutter[data-recency-presses="2"] { --gutter-strength: 27%; }
 
 /* THE BANDS UNDER THE REPOSITORY SECTIONS -- Merge Queue, Recently Merged,
    then Hidden Workspaces (owner requests, 2026-10-27: the queues and merges

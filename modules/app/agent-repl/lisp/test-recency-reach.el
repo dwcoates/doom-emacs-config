@@ -27,16 +27,16 @@
     (should (equal (agent-repl--recency-reach ring ring "c")
                    '(("b" :older 1) ("a" :older 2) ("z" :newer 1))))))
 
-(ert-deftest agent-repl-test-recency-reach-keeps-the-six-nearest-each-way ()
-  "Each chord marks at most six tabs, the nearest."
-  ;; Arrange: fourteen other tabs, seven nearer each way, so one each way is left.
-  (let* ((ring (cons "current" (mapcar (lambda (i) (format "t%02d" i)) (number-sequence 1 14))))
+(ert-deftest agent-repl-test-recency-reach-keeps-the-two-nearest-each-way ()
+  "Each chord marks at most two tabs, the nearest."
+  ;; Arrange: six other tabs, three nearer each way, so one each way is left.
+  (let* ((ring (cons "current" (mapcar (lambda (i) (format "t%02d" i)) (number-sequence 1 6))))
          ;; Act.
          (reach (agent-repl--recency-reach ring ring "current")))
     ;; Assert.
     (should (equal (mapcar #'car reach)
-                   '("t01" "t02" "t03" "t04" "t05" "t06" "t14" "t13" "t12" "t11" "t10" "t09")))
-    (should (equal (mapcar #'caddr reach) '(1 2 3 4 5 6 1 2 3 4 5 6)))))
+                   '("t01" "t02" "t06" "t05")))
+    (should (equal (mapcar #'caddr reach) '(1 2 1 2)))))
 
 (ert-deftest agent-repl-test-recency-reach-counts-only-drawn-tabs ()
   "A folded tab is passed over, so it neither takes a press nor wears a gutter."

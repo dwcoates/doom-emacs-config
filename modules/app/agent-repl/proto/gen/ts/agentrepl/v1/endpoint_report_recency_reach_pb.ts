@@ -46,7 +46,7 @@ export const file_agentrepl_v1_endpoint_report_recency_reach: GenFile = /*@__PUR
 export type ReportRecencyReachRequest = Message<"agentrepl.v1.ReportRecencyReachRequest"> & {
   /**
    * Every tab the walk reaches soonest, in no particular order: at most the
-   * six nearest in each direction. A workspace appears at most once (a
+   * two nearest in each direction. A workspace appears at most once (a
    * second entry for one is Connect InvalidArgument). EMPTY = no tab has a
    * reach (a bar with no other tab).
    *

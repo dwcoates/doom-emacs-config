@@ -1022,8 +1022,8 @@ The top bar's phone chip, on the left after the account and just left of the wif
   - It takes its place in the `s-[` order however briefly you were on it, so `s-[` from the workspace a jump landed on goes back to it.
 - **A colored bar left of a sidebar row's tab number shows how few presses of `s-[` or `s-]` reach it.**
   - Orange means `s-[` reaches it in fewer presses, purple means `s-]` does.
-  - The bar is brightest at one press and fades with each press after it.
-  - At most the six nearest each way have a bar.
+  - The bar is brightest at one press and dimmer at two.
+  - At most the two nearest each way have a bar.
 
 ## Reopening a merged workspace
 

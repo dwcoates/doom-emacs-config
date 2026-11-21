@@ -6,7 +6,7 @@
 ;; the recency walk reaches in few presses wears a bar beside its sidebar
 ;; row: orange when `s-[' (older) reaches it sooner, purple when `s-]'
 ;; (newer) does, the full color at one press and more muted with each press
-;; after it.  At most the six nearest each way wear one.
+;; after it.  At most the two nearest each way wear one.
 ;;
 ;; EMACS OWNS THE WALK'S ORDER (its selection history, filtered by each
 ;; visit's dwell), so Emacs computes the reach and the daemon only draws it
@@ -41,7 +41,7 @@
 
 (defvar agent-repl-roster-update-functions)
 
-(defconst agent-repl-recency-reach-per-direction 6
+(defconst agent-repl-recency-reach-per-direction 2
   "How many tabs each chord's gutters mark: the nearest this many.")
 
 (defconst agent-repl--recency-reach-log-scope

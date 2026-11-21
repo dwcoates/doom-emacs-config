@@ -7248,7 +7248,7 @@ describe("the recency gutter", () => {
     };
 
     // Act
-    const strengths = [1, 2, 3, 4, 5, 6].map(strength);
+    const strengths = [1, 2].map(strength);
 
     // Assert
     expect(strengths[0]).toBe(100);
