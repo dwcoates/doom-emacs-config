@@ -560,7 +560,7 @@ var webappUnitInputs = func() map[string][]string {
 		"test/rpc/merge-queue-refusal.test.ts", "test/rpc/oneof.test.ts", "test/rpc/page-streams.test.ts",
 		"test/rpc/refusal.test.ts", "test/rpc/refuse.test.ts", "test/rpc/requester.test.ts",
 		"test/rpc/transport.test.ts", "test/selection.test.ts", "test/sidebar/arrange.test.ts",
-		"test/sidebar/children.test.ts", "test/sidebar/name-popup.test.ts", "test/sidebar/row-menu.test.ts",
+		"test/sidebar/children.test.ts", "test/sidebar/family.test.ts", "test/sidebar/name-popup.test.ts", "test/sidebar/row-menu.test.ts",
 		"test/sidebar/row.test.ts", "test/sidebar/section-fold.test.ts", "test/sidebar/verbs.test.ts",
 		"test/timers.test.ts", "test/topbar/chip-toggle.test.ts", "test/topbar/pick.test.ts",
 		"test/type-out.test.ts", "test/wall-latency.test.ts", "test/webkit-stylesheets.test.ts",

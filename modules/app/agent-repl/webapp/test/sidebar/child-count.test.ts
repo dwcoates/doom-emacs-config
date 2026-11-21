@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import { RosterOpenRowTabSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { CHILD_COUNT_CLASS, CHILD_COUNT_THRESHOLD, childCountOf, drawChildCount } from "../../src/sidebar/child-count.js";
-import type { RowFamily } from "../../src/sidebar/row.js";
+import type { RowFamily } from "../../src/sidebar/family.js";
 import { drawRosterFamily } from "../../src/sidebar/row.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { openKin } from "../../src/sidebar/entries.js";

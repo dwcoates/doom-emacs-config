@@ -113,10 +113,9 @@ import {
 import { MERGED_PAGE_CLASS, drawMergedMoreSpinner, mergedRowAtMs, type MergedGroupPages, type MergedPages } from "./merged-pages.js";
 import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { coldGatedOf, sameColdGated, type ColdGated } from "./cold-gate-name.js";
+import { pathedFamilies, type RowFamily } from "./family.js";
 import {
   drawRosterFamily,
-  type RowFamily,
-  pathedFamilies,
   mergedToday,
   tickPaint,
   type RowPlace,
