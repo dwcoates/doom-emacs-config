@@ -86,6 +86,9 @@ func TestEveryDescriberSaysTheBehindNotInLineArmOneWay(t *testing.T) {
 		{name: "requeue", describe: func() (string, error) {
 			return describeRequeueRefusal("ws", &agentreplv1.RequeueMergeError{Cause: &agentreplv1.RequeueMergeError_PlacementBehindNotInLine{PlacementBehindNotInLine: behind}})
 		}},
+		{name: "update", describe: func() (string, error) {
+			return describeUpdateQueueRefusal("ws", &agentreplv1.UpdateMergeQueueError{Cause: &agentreplv1.UpdateMergeQueueError_PlacementBehindNotInLine{PlacementBehindNotInLine: behind}})
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

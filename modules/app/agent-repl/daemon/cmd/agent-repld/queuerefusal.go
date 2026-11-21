@@ -143,6 +143,11 @@ func describeUpdateQueueRefusal(ws string, e *agentreplv1.UpdateMergeQueueError)
 		return "no escalation holds the repository's queue, so there is no hold to release", nil
 	case *agentreplv1.UpdateMergeQueueError_NoRepairTurn:
 		return fmt.Sprintf("%s runs no repair turn of its merge (a conflict resolution or a fixing attempt), so it has no merge to give up", ws), nil
+	case *agentreplv1.UpdateMergeQueueError_PlacementBehindNotInLine:
+		return sayBehindNotInLine(ws, r.PlacementBehindNotInLine), nil
+	case *agentreplv1.UpdateMergeQueueError_IndexOutOfRange:
+		return fmt.Sprintf("waiting place %d is past the last of the %d merges waiting on %s's queue, counted from 0",
+			r.IndexOutOfRange.GetIndex(), r.IndexOutOfRange.GetWaiting(), ws), nil
 	case *agentreplv1.UpdateMergeQueueError_MoveBlocked:
 		return describeMoveBlocked(ws, r.MoveBlocked)
 	}
