@@ -29,6 +29,9 @@ import Foundation
 struct Visible: Encodable {
     let ssid: String
     let rssi: Int
+    // channel is the strongest sighting's channel number; nil when CoreWLAN
+    // named none.
+    let channel: Int?
 }
 
 struct Answer: Encodable {
@@ -68,13 +71,15 @@ func scan(verb: String, authorization: String) -> Answer {
     var scanError: String?
     do {
         // THE STRONGEST FIRST, one entry per name: a network seen on two
-        // bands is one network to join.
-        var best: [String: Int] = [:]
+        // bands is one network to join, answered with its strongest
+        // sighting's channel.
+        var best: [String: Visible] = [:]
         for network in try iface.scanForNetworks(withName: nil) {
             guard let ssid = network.ssid, !ssid.isEmpty else { continue }
-            best[ssid] = max(best[ssid] ?? Int.min, network.rssiValue)
+            if let seen = best[ssid], seen.rssi >= network.rssiValue { continue }
+            best[ssid] = Visible(ssid: ssid, rssi: network.rssiValue, channel: network.wlanChannel?.channelNumber)
         }
-        visible = best.map { Visible(ssid: $0.key, rssi: $0.value) }.sorted { $0.rssi > $1.rssi }
+        visible = best.values.sorted { $0.rssi > $1.rssi }
     } catch {
         scanError = "the scan failed: \(error.localizedDescription)"
     }
