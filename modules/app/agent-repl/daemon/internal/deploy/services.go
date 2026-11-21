@@ -348,6 +348,12 @@ func (r *Restarter) RestartLauncher(ctx context.Context) error {
 // depends on its socket but the daemon's own calls, which fail loudly while
 // it is out.
 func (r *Restarter) RestartStandalone(ctx context.Context, s Standalone) error {
+	return r.restartStandalone(ctx, s)
+}
+
+// restartStandalone is RestartStandalone's restart of S on the service
+// manager.
+func (r *Restarter) restartStandalone(ctx context.Context, s Standalone) error {
 	fields := dlog.Context{s.Short: s.Label}
 	// A SERVICE THE MANAGER DOES NOT HOLD CANNOT BE KICKSTARTED (2026-11-16:
 	// the test service's first deploy failed with launchctl exit 113 and
