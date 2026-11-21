@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -237,5 +238,50 @@ func TestNewRefusesAMissingLogSiteTally(t *testing.T) {
 	// Assert
 	if err == nil || !strings.Contains(err.Error(), "the log site tally") {
 		t.Fatalf("New() error = %v, want it to name the log site tally", err)
+	}
+}
+
+func TestLogSitesMinimumRoundTripsEveryLevel(t *testing.T) {
+	for _, name := range []string{"debug", "info", "warn", "error"} {
+		t.Run(name, func(t *testing.T) {
+			// Act
+			m, ok := LogSitesMinimum(name)
+			back, backOK := LogSitesMinimumName(m)
+
+			// Assert
+			if !ok || !backOK || back != name {
+				t.Fatalf("LogSitesMinimum(%q) = (%v, %v), its name (%q, %v); want the level back", name, m, ok, back, backOK)
+			}
+		})
+	}
+}
+
+func TestLogSitesMinimumRefusesWhatNamesNoLevel(t *testing.T) {
+	// Act
+	m, ok := LogSitesMinimum("fatal")
+	name, nameOK := LogSitesMinimumName(&agentreplv1.ListLogSitesMinimumLevel{})
+
+	// Assert
+	if ok || m != nil || nameOK || name != "" {
+		t.Fatalf("an unknown name = (%v, %v), an unset arm = (%q, %v); want both refused", m, ok, name, nameOK)
+	}
+}
+
+// TestEveryMinimumLevelArmIsSpelledOnlyInTheOneTable fails a second
+// hand-kept mapping of the minimum level's arms in the server
+// (logscli_test.go holds the CLI to none).
+func TestEveryMinimumLevelArmIsSpelledOnlyInTheOneTable(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("listlogsites.go")
+	if err != nil {
+		t.Fatalf("read listlogsites.go: %v", err)
+	}
+
+	// Act
+	got := strings.Count(string(src), "ListLogSitesMinimumLevel_")
+
+	// Assert
+	if got != 4 {
+		t.Fatalf("listlogsites.go spells a minimum level arm %d times, want 4, each once in logSitesMinimums", got)
 	}
 }

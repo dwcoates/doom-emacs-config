@@ -86,18 +86,11 @@ func listLogSitesQuery(req *agentreplv1.ListLogSitesRequest, now time.Time) (tim
 	}
 	minimum := ""
 	if m := req.MinimumLevel; m != nil {
-		switch m.GetLevel().(type) {
-		case *agentreplv1.ListLogSitesMinimumLevel_Debug:
-			minimum = "debug"
-		case *agentreplv1.ListLogSitesMinimumLevel_Info:
-			minimum = "info"
-		case *agentreplv1.ListLogSitesMinimumLevel_Warn:
-			minimum = "warn"
-		case *agentreplv1.ListLogSitesMinimumLevel_Error:
-			minimum = "error"
-		default:
+		name, ok := LogSitesMinimumName(m)
+		if !ok {
 			return time.Time{}, time.Time{}, "", invalid("minimum_level", "names no level")
 		}
+		minimum = name
 	}
 	return since, until, minimum, nil
 }
@@ -156,4 +149,46 @@ func logSiteLevel(level string) (*agentreplv1.LogSiteLevel, error) {
 		return &agentreplv1.LogSiteLevel{Level: &agentreplv1.LogSiteLevel_Error{Error: &agentreplv1.ClientLogLevelError{}}}, nil
 	}
 	return nil, fmt.Errorf("log site level %q is no level the tally keeps", level)
+}
+
+// logSitesMinimums is every ListLogSitesMinimumLevel arm, by its level's
+// name: the one table both directions read.
+var logSitesMinimums = []struct {
+	name string
+	arm  func() *agentreplv1.ListLogSitesMinimumLevel
+	is   func(*agentreplv1.ListLogSitesMinimumLevel) bool
+}{
+	{"debug", func() *agentreplv1.ListLogSitesMinimumLevel {
+		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}}}
+	}, func(m *agentreplv1.ListLogSitesMinimumLevel) bool { return m.GetDebug() != nil }},
+	{"info", func() *agentreplv1.ListLogSitesMinimumLevel {
+		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Info{Info: &agentreplv1.ClientLogLevelInfo{}}}
+	}, func(m *agentreplv1.ListLogSitesMinimumLevel) bool { return m.GetInfo() != nil }},
+	{"warn", func() *agentreplv1.ListLogSitesMinimumLevel {
+		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}}}
+	}, func(m *agentreplv1.ListLogSitesMinimumLevel) bool { return m.GetWarn() != nil }},
+	{"error", func() *agentreplv1.ListLogSitesMinimumLevel {
+		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Error{Error: &agentreplv1.ClientLogLevelError{}}}
+	}, func(m *agentreplv1.ListLogSitesMinimumLevel) bool { return m.GetError() != nil }},
+}
+
+// LogSitesMinimum is the minimum level named NAME (debug, info, warn or
+// error), and false for any other name.
+func LogSitesMinimum(name string) (*agentreplv1.ListLogSitesMinimumLevel, bool) {
+	for _, l := range logSitesMinimums {
+		if l.name == name {
+			return l.arm(), true
+		}
+	}
+	return nil, false
+}
+
+// LogSitesMinimumName is M's level name, and false when M sets no arm.
+func LogSitesMinimumName(m *agentreplv1.ListLogSitesMinimumLevel) (string, bool) {
+	for _, l := range logSitesMinimums {
+		if l.is(m) {
+			return l.name, true
+		}
+	}
+	return "", false
 }

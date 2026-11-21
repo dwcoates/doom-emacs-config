@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -122,5 +123,23 @@ func TestLogsSitesReportsAFailedCall(t *testing.T) {
 	// Assert
 	if code != exitFailure || !strings.Contains(f.errOut.String(), "connection refused") {
 		t.Fatalf("exit = %d, stderr %q; want the failure reported", code, f.errOut.String())
+	}
+}
+
+// TestLogsSitesSpellsNoMinimumLevelArm fails a hand-kept mapping of the
+// minimum level beside the server's one table (server.LogSitesMinimum).
+func TestLogsSitesSpellsNoMinimumLevelArm(t *testing.T) {
+	// Arrange
+	src, err := os.ReadFile("logscli.go")
+	if err != nil {
+		t.Fatalf("read logscli.go: %v", err)
+	}
+
+	// Act
+	got := strings.Count(string(src), "ListLogSitesMinimumLevel_")
+
+	// Assert
+	if got != 0 || !strings.Contains(string(src), "server.LogSitesMinimum(") {
+		t.Fatalf("logscli.go spells a minimum level arm %d times, want none: it reads server.LogSitesMinimum", got)
 	}
 }

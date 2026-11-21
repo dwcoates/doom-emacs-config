@@ -6,6 +6,8 @@ import (
 	"connectrpc.com/connect"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
+
+	"agent-repld/internal/server"
 )
 
 // logsNoun is the agent API's noun over what the system logged.
@@ -45,7 +47,7 @@ func logsSites(c *cliCall, args []string) int {
 	}
 	req := &agentreplv1.ListLogSitesRequest{Window: window}
 	if *level != "" {
-		minimum, ok := logSitesMinimum(*level)
+		minimum, ok := server.LogSitesMinimum(*level)
 		if !ok {
 			return c.usageFailed("-level is debug, info, warn or error, not %q", *level)
 		}
@@ -61,19 +63,4 @@ func logsSites(c *cliCall, args []string) int {
 		}
 		return "", fmt.Errorf("the ListLogSites refusal %v has no sentence", r.GetError())
 	})
-}
-
-// logSitesMinimum is LEVEL as ListLogSites's minimum level.
-func logSitesMinimum(level string) (*agentreplv1.ListLogSitesMinimumLevel, bool) {
-	switch level {
-	case "debug":
-		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Debug{Debug: &agentreplv1.ClientLogLevelDebug{}}}, true
-	case "info":
-		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Info{Info: &agentreplv1.ClientLogLevelInfo{}}}, true
-	case "warn":
-		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Warn{Warn: &agentreplv1.ClientLogLevelWarn{}}}, true
-	case "error":
-		return &agentreplv1.ListLogSitesMinimumLevel{Level: &agentreplv1.ListLogSitesMinimumLevel_Error{Error: &agentreplv1.ClientLogLevelError{}}}, true
-	}
-	return nil, false
 }
