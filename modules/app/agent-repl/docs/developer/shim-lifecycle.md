@@ -69,7 +69,7 @@ A pick with no shim starts one, start cause `settings`:
   it back in force (`reapplyEffort`).
 
 The pick is recorded on the workspace's row (`wsm.Workspace.SettingsVisitAt`,
-layout 176), so the visit outlives a daemon handover. Once nobody is looking
+layout 177), so the visit outlives a daemon handover. Once nobody is looking
 at the workspace, the cache keeper stands the shim down again, reason
 `settings_visit` (`cachelapse.Keeper.own`, `drain.VisitDown`), under the
 keep-alive cycle's rules: never under a turn, never for the workspace in view,
@@ -93,7 +93,9 @@ one owner (`cachelapse/standdown.go`), logged under
 - `keepalive_cycle` while a keep-alive is owed;
 - `cache_lapse` while a hidden or closed workspace's lapse is armed;
 - `idle_sweep` when the session goes idle past the cutoff first;
-- `cold_park` otherwise, stood down at once.
+- `cold_park` otherwise, stood down once the session has been idle one
+  keep-alive interval since its last engagement (`StandDownGrace`); a cold
+  gate raised or a beat judged lapsed parks it at once.
 
 A session is left up, owned by none, while it is in view (`in_view`) or its
 remote control is on (`remote_control`). The owner is read from the row, so a

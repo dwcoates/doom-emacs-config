@@ -38,6 +38,15 @@ func visited(rec wsm.Workspace) wsm.Workspace {
 	return rec
 }
 
+// idle makes the harness session engaged two hours ago, past the cold
+// park's grace.
+func (h *harness) idle() *harness {
+	session := liveSession(theWorkspace)
+	session.LastEngagementAt = now.Add(-2 * time.Hour)
+	h.db.sessions[theWorkspace] = session
+	return h
+}
+
 // reconcile applies one reconcile edge to the harness workspace.
 func (h *harness) reconcile(why string) {
 	h.keeper.apply(context.Background(), edge{ws: theWorkspace, why: why})
@@ -56,7 +65,7 @@ func (h *harness) ownerRecords() []dlog.Record {
 
 func TestAHeldKeepaliveIdleSessionIsParkedWhenItsCacheIsCold(t *testing.T) {
 	// Arrange
-	h := newHarness(t, knownCold())
+	h := newHarness(t, knownCold()).idle()
 
 	// Act
 	h.reconcile("a session came up")
@@ -108,7 +117,7 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange
-			h := newHarness(t, visible())
+			h := newHarness(t, visible()).idle()
 			tt.arrange(h)
 
 			// Act
@@ -127,7 +136,7 @@ func TestEachOwnerIsGivenByWhyNoBeatIsOwed(t *testing.T) {
 
 func TestAnOwnerThatStandsIsRecordedAtInfoOnce(t *testing.T) {
 	// Arrange
-	h := newHarness(t, knownCold())
+	h := newHarness(t, knownCold()).idle()
 	h.reconcile("a session came up")
 
 	// Act
@@ -163,7 +172,7 @@ func TestAnAdoptedSessionKeepsItsOwnerAcrossAHandover(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Arrange: the predecessor owned the session, and handed it over;
 			// the successor shares only the store.
-			before := newHarness(t, tt.rec)
+			before := newHarness(t, tt.rec).idle()
 			before.reconcile("a session came up")
 			after := newHarness(t, tt.rec)
 			after.db = before.db
@@ -349,7 +358,7 @@ func TestTheExemptionsLeaveTheSessionUp(t *testing.T) {
 
 func TestAModeTurnedOffGivesTheSessionItsOwnerAgain(t *testing.T) {
 	// Arrange
-	h := newHarness(t, knownCold())
+	h := newHarness(t, knownCold()).idle()
 	h.db.remote = map[ids.WorkspaceID]bool{theWorkspace: true}
 	h.reconcile("a session came up")
 	h.db.remote[theWorkspace] = false
@@ -386,7 +395,7 @@ func TestARemoteControlModeThatCannotBeReadLeavesTheOwnerAsItWas(t *testing.T) {
 
 func TestASessionNoShimServesHasNoOwner(t *testing.T) {
 	// Arrange
-	h := newHarness(t, knownCold())
+	h := newHarness(t, knownCold()).idle()
 	h.reconcile("a session came up")
 	h.serving = false
 
@@ -402,5 +411,71 @@ func TestASessionNoShimServesHasNoOwner(t *testing.T) {
 	}
 	if len(h.coldDowns) != 1 {
 		t.Fatalf("cold parks = %+v, want only the live session's", h.coldDowns)
+	}
+}
+
+func TestTheColdParkWaitsOutTheGraceAfterAnEngagement(t *testing.T) {
+	// Arrange: a cold session engaged ten minutes ago, as a cold gate's
+	// answer or a new workspace's start leaves it.
+	h := newHarness(t, knownCold())
+	h.reconcile("a session came up")
+	if len(h.coldDowns) != 0 {
+		t.Fatalf("cold parks = %+v, want none inside the grace", h.coldDowns)
+	}
+	due := liveSession(theWorkspace).LastEngagementAt.Add(StandDownGrace)
+	if got := h.keeper.coldDue[theWorkspace]; !got.Equal(due) {
+		t.Fatalf("cold park armed at %v, want %v", got, due)
+	}
+	h.clock.Set(due)
+
+	// Act
+	h.keeper.coldParksDue(context.Background())
+
+	// Assert
+	if len(h.coldDowns) != 1 || !h.coldDowns[0].beat.Equal(due) {
+		t.Fatalf("cold parks = %+v, want one at %v", h.coldDowns, due)
+	}
+	if _, armed := h.keeper.coldDue[theWorkspace]; armed {
+		t.Fatal("a cold park taken stayed armed")
+	}
+}
+
+func TestATurnDuringTheGraceDisarmsTheColdPark(t *testing.T) {
+	// Arrange
+	h := newHarness(t, knownCold())
+	h.reconcile("a session came up")
+	rec := h.db.records[theWorkspace]
+	ended := now.Add(time.Minute)
+	rec.LastTurnEndedAt = &ended
+	h.db.records[theWorkspace] = rec
+	h.clock.Set(now.Add(2 * time.Minute))
+
+	// Act
+	h.reconcile("a turn's close was recorded")
+
+	// Assert
+	if _, armed := h.keeper.coldDue[theWorkspace]; armed {
+		t.Fatal("the cold park stayed armed after a turn warmed the cache")
+	}
+	if got := h.keeper.owners[theWorkspace].owner; got != ownerCycle {
+		t.Fatalf("owner = %q, want %s", got, ownerCycle)
+	}
+}
+
+func TestAColdParkWhoseEngagementCannotBeReadIsAnError(t *testing.T) {
+	// Arrange: the remote-control read passes, the session read fails.
+	h := newHarness(t, knownCold())
+	h.db.sessions = nil
+	h.db.sessionErr = errors.New("store unreachable")
+
+	// Act
+	h.keeper.ownCold(context.Background(), h.log.Global(), theWorkspace, "a test", time.Time{}, false)
+
+	// Assert
+	if len(h.coldDowns) != 0 {
+		t.Fatalf("cold parks = %+v, want none on an unread engagement", h.coldDowns)
+	}
+	if !h.found(dlog.RecordQuery{Level: "error", Operation: opOwner}) {
+		t.Fatal("the unread engagement was not recorded at error")
 	}
 }

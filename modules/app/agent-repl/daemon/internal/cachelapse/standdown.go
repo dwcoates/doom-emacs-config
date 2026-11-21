@@ -34,7 +34,7 @@ import (
 //     armed;
 //   - the idle sweep, when the session will be idle past its cutoff first;
 //   - the cold park, when no beat is owed for any other reason: stood down
-//     at once.
+//     once the session has been idle StandDownGrace (ownCold).
 //
 // A session is LEFT UP, and owned by none, while the user is looking at it
 // or its remote control is on; the edge that ends either reconciles it
@@ -80,8 +80,8 @@ type standing struct {
 }
 
 // own gives RECORD's session its one stand-down owner and asks the owner's
-// stand-down when the owner is the visit or the cold park, whose stand-down
-// is taken at once. OWED is a beat owed; NB and WHY are why none is owed
+// stand-down when the owner is the visit, or the cold park once its grace
+// is out. OWED is a beat owed; NB and WHY are why none is owed
 // otherwise. QUEUED is a merge standing in a queue.
 //
 // THE ASK IS MADE ON EVERY RECONCILE, not only when the owner changes: the
@@ -89,6 +89,10 @@ type standing struct {
 // must ask again. The drain coalesces repeated asks.
 func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace, queued, owed bool, nb noBeat, why string) {
 	ws := record.ID
+	// THE COLD PARK'S INSTANT IS ARMED ONLY WHILE IT OWNS THE SESSION:
+	// ownCold re-arms it from the row.
+	armed, wasArmed := k.coldDue[ws]
+	delete(k.coldDue, ws)
 	if _, served := k.deps.Shim(ws); !served {
 		k.endStoodDownVisit(ctx, log, record)
 		k.disown(log, ws)
@@ -129,8 +133,62 @@ func (k *Keeper) own(ctx context.Context, log dlog.Logger, record wsm.Workspace,
 	case nb == noBeatNoSession:
 		k.disown(log, ws)
 	default:
-		k.setStanding(log, ws, standing{owner: ownerCold}, why)
-		k.parkCold(ws, k.deps.Clock.Now(), why)
+		k.ownCold(ctx, log, ws, why, armed, wasArmed)
+	}
+}
+
+// ownCold gives WS's session to the cold park, which takes it once the
+// session has been idle StandDownGrace since its last engagement, and arms
+// that instant until then (coldParksDue).
+//
+// THE SAME GRACE AS THE KEEP-ALIVE CYCLE'S (owner ruling, 2026-10-26): the
+// user prompts with no shim start for about an interval after the work. A
+// session that came up cold for a reason -- a new workspace's first prompt
+// on its way, a cold gate's answer re-opening the session the user asked
+// for -- is not parked under it; one adopted after hours idle is parked at
+// once. The engagement is on the session's row, so a successor arms the same
+// instant. The parks the keeper takes the moment it learns the cache cold
+// (a gate raised, a beat judged lapsed) are not this one, and take no grace.
+// ARMED is the instant armed before this decision, when WASARMED, so its
+// wait is recorded at INFO only when it moves.
+func (k *Keeper) ownCold(ctx context.Context, log dlog.Logger, ws ids.WorkspaceID, why string, armed time.Time, wasArmed bool) {
+	session, found, err := k.deps.DB.Session(ctx, ws)
+	if err != nil {
+		if !leaving(ctx, log, opOwner, "reading the session's engagement", err) {
+			log.Error(opOwner, "could not read the session's engagement; its cold park is not armed", dlog.Context{"cause": err.Error()})
+		}
+		return
+	}
+	if !found {
+		k.disown(log, ws)
+		return
+	}
+	engaged := session.LastEngagementAt
+	if engaged.IsZero() {
+		engaged = session.StartedAt
+	}
+	due := engaged.Add(StandDownGrace)
+	k.setStanding(log, ws, standing{owner: ownerCold}, why)
+	if now := k.deps.Clock.Now(); now.Before(due) {
+		if !wasArmed || !armed.Equal(due) {
+			log.Info(opOwner, "the session was engaged less than an interval ago; its cold park waits", dlog.Context{"engaged_at": engaged, "due": due})
+		}
+		k.coldDue[ws] = due
+		return
+	}
+	k.parkCold(ws, k.deps.Clock.Now(), why)
+}
+
+// coldParksDue decides again every session whose cold park has come due:
+// a turn or an engagement since may have moved it.
+func (k *Keeper) coldParksDue(ctx context.Context) {
+	now := k.deps.Clock.Now()
+	for ws, at := range k.coldDue {
+		if now.Before(at) {
+			continue
+		}
+		delete(k.coldDue, ws)
+		k.schedule(ctx, ws, "its cold park came due")
 	}
 }
 

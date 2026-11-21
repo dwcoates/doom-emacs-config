@@ -301,6 +301,9 @@ type Keeper struct {
 	// as last recorded (standdown.go), so a change is recorded at INFO;
 	// owned by Run alone.
 	owners map[ids.WorkspaceID]standing
+	// coldDue is when each session the cold park owns has been idle
+	// StandDownGrace, armed until then (standdown.go); owned by Run alone.
+	coldDue map[ids.WorkspaceID]time.Time
 }
 
 // New builds a Keeper. A missing collaborator is a wiring defect.
@@ -359,6 +362,7 @@ func New(deps Deps) (*Keeper, error) {
 		parkedRetry:  map[ids.WorkspaceID]time.Time{},
 		noBeat:       map[ids.WorkspaceID]string{},
 		owners:       map[ids.WorkspaceID]standing{},
+		coldDue:      map[ids.WorkspaceID]time.Time{},
 	}, nil
 }
 
@@ -479,6 +483,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue()
+			k.coldParksDue(ctx)
 			k.stateNextKeepalives()
 			continue
 		}
@@ -499,6 +504,7 @@ func (k *Keeper) Run(ctx context.Context) error {
 			k.beatsDue(ctx)
 			k.restoresDue(ctx)
 			k.answersDue()
+			k.coldParksDue(ctx)
 			k.stateNextKeepalives()
 		}
 	}
@@ -543,7 +549,7 @@ func (k *Keeper) take() []edge {
 func (k *Keeper) earliest() (time.Time, bool) {
 	var next time.Time
 	armed := false
-	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy} {
+	for _, set := range []map[ids.WorkspaceID]time.Time{k.deadlines, k.beats, k.restores, k.answerBy, k.coldDue} {
 		for _, at := range set {
 			if !armed || at.Before(next) {
 				next, armed = at, true
@@ -671,6 +677,7 @@ func (k *Keeper) forget(ws ids.WorkspaceID) {
 	delete(k.freeSince, ws)
 	delete(k.parkedRetry, ws)
 	delete(k.owners, ws)
+	delete(k.coldDue, ws)
 }
 
 // mergeEnded stands RECORD's session down when it is a hidden merge workspace
