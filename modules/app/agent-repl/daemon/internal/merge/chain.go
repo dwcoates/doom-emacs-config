@@ -286,7 +286,26 @@ func (o *orchestrator) admitBehind(ctx context.Context, r *run) (speculativeAdmi
 	// THE LEASE GOES FIRST, THE ADMISSION AFTER: an admitted entry always has
 	// a run holding a lease, so nothing ever reads one as a merge another
 	// daemon drives while this one lets it go.
+	// A WORKSPACE ANOTHER HOLDER HOLDS (a drain, a hibernation, a park its
+	// merge's own enqueue asked for) is waited for, as the head's admission
+	// waits (admitFront): the merge stays unadmitted in line, and the lease's
+	// next change kicks the repository (LeaseChanged), which offers it the
+	// chain again. THE WAIT IS REGISTERED BEFORE THE LEASE IS ASKED FOR, so a
+	// holder that lets go between the refusal and the registration cannot
+	// leave the merge waiting for a change that already happened.
+	o.mu.Lock()
+	o.leaseWaits[ws] = r.repo
+	o.mu.Unlock()
 	lease, err := o.deps.DB.AcquireLeaseAs(ctx, ws, o.ledgerOfEntry(entry), wsm.HolderMerge, wsm.PolicyHold)
+	if other, held := heldByAnother(err); held {
+		log.Info(op, "the workspace of the merge behind the head is held by another lease; it is admitted once that lease changes",
+			dlog.Context{"workspace": string(ws), "repo": string(r.repo), "holder": other.Holder.String(), "lease": string(other.Lease)})
+		o.unstart(ctx, r, nil)
+		return speculativeAdmission{}, false
+	}
+	o.mu.Lock()
+	delete(o.leaseWaits, ws)
+	o.mu.Unlock()
 	if err != nil {
 		log.Error(op, "could not take the merge lease of the merge behind the head", dlog.Context{"workspace": string(ws), "error": err.Error()})
 		o.unstart(ctx, r, err)
