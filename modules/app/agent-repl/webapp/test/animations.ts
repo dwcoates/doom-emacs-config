@@ -10,28 +10,37 @@
  */
 
 /**
- * The marker the substituted `getComputedStyle` itself wears. It is on the
- * FUNCTION, not the window: a suite that installs a `getComputedStyle` of its
- * own (tree-layout.ts) replaces the substitution, and the next file's install
- * must see that and wrap whatever stands now.
+ * The substitution built over jsdom's own `getComputedStyle`, kept on the
+ * WINDOW (which outlives every file of an un-isolated run) so every file's
+ * install finds the same one.
  */
-const PSEUDO_AWARE = Symbol.for("agent-repl.test.pseudo-aware-computed-style");
+const SUBSTITUTED = Symbol.for("agent-repl.test.pseudo-aware-computed-style");
 
 /**
- * Install the substitution on the window unless the `getComputedStyle` there
- * now is already it. Called before every file, as the other substitutions
- * are; a node-environment file has no window to install on.
+ * Install the substitution on the window, replacing whatever `getComputedStyle`
+ * stands there now. Called before every file, as the other substitutions are;
+ * a node-environment file has no window to install on.
+ *
+ * IT NEVER WRAPS WHAT STANDS. A suite's own `getComputedStyle` (tree-layout.ts,
+ * a `vi.spyOn`) is that suite's to remove, and one a file left standing (a
+ * spy restored after the wrapper it spied on was uninstalled reinstates that
+ * wrapper) would be wrapped again by every later file's install, each layer
+ * calling the one beneath it: at 146 files in one process the stack overflowed
+ * (2026-11-20). Built once over jsdom's own function, the substitution is
+ * installed whole each file, and what a file left behind goes with it.
  */
 export function installPseudoElementStyle(): void {
   if (typeof window === "undefined") return;
-  const current: unknown = Reflect.get(window, "getComputedStyle");
-  if (typeof current !== "function") throw new Error("jsdom: the window has no getComputedStyle to substitute");
-  if (Reflect.get(current, PSEUDO_AWARE) === true) return;
-  const elementOnly = (current as typeof window.getComputedStyle).bind(window);
-  const aware = (element: Element, pseudo?: string | null): CSSStyleDeclaration =>
-    pseudo === undefined || pseudo === null || pseudo === "" ? elementOnly(element) : document.createElement("div").style;
-  Reflect.set(aware, PSEUDO_AWARE, true);
-  window.getComputedStyle = aware;
+  let substituted: unknown = Reflect.get(window, SUBSTITUTED);
+  if (substituted === undefined) {
+    const native: unknown = Reflect.get(window, "getComputedStyle");
+    if (typeof native !== "function") throw new Error("jsdom: the window has no getComputedStyle to substitute");
+    const elementOnly = (native as typeof window.getComputedStyle).bind(window);
+    substituted = (element: Element, pseudo?: string | null): CSSStyleDeclaration =>
+      pseudo === undefined || pseudo === null || pseudo === "" ? elementOnly(element) : document.createElement("div").style;
+    Reflect.set(window, SUBSTITUTED, substituted);
+  }
+  window.getComputedStyle = substituted as typeof window.getComputedStyle;
 }
 
 /**

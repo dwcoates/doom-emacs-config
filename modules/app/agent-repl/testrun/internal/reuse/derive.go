@@ -402,6 +402,46 @@ func addProgramGraphs(d Deps, set *InputSet, s roster.Suite, names []string) err
 	return nil
 }
 
+// memberBase is a batch member's input set before its own graph: what every
+// member of its batch reads (common) and what the roster declares the member
+// reads.
+func memberBase(d Deps, s roster.Suite, member string, common *InputSet) (*InputSet, error) {
+	own := NewInputSet()
+	own.AddAll(common)
+	if err := addInputs(d, own, s.Reuse.Units[member]); err != nil {
+		return nil, fmt.Errorf("reuse: %s's file %s: %w", s.Name, member, err)
+	}
+	return own, nil
+}
+
+// memberDesc is unitDesc for one member of a batch: never its batch's name,
+// its batch-mates or the suite's batch size (roster.Suite.Batch), so moving
+// a file between batches, or resizing the suite's batches, leaves its key as
+// it was.
+func memberDesc(s roster.Suite, member string, extra ...string) string {
+	s.Batch = nil
+	return unitDesc(s, "file:"+member, extra...)
+}
+
+// addVitestGraph adds to set the import closure of roots, and the directory
+// of every file in it (a resolver lists a file's directory to find it),
+// answering set. suite, batch and members name the failure.
+func addVitestGraph(graph *ImportGraph, set *InputSet, roots []string, suite, batch string, members []string) (*InputSet, error) {
+	files, err := graph.Closure(roots)
+	if err != nil {
+		return nil, fmt.Errorf("reuse: %s's batch %s (%s): %w", suite, batch, strings.Join(members, ", "), err)
+	}
+	for _, f := range files {
+		if err := set.AddFile(f); err != nil {
+			return nil, err
+		}
+		if err := set.AddDir(path.Dir(f)); err != nil {
+			return nil, err
+		}
+	}
+	return set, nil
+}
+
 // VITEST. Each batch of test files (suites.BatchFiles) is one unit, named by
 // its batch, confined as a whole: its inputs are every member's import graph,
 // with its config's and the config's setup files', the package's manifests,
@@ -472,7 +512,9 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		if !ok || unit.Never != "" {
 			continue
 		}
-		set, err := batchSet(d, s, name, unit.Members, runner)
+		// The batch's own declarations and the suite's: each member adds its
+		// own below.
+		set, err := batchSet(d, s, name, nil, runner)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -498,22 +540,25 @@ func deriveVitest(d Deps, s roster.Suite, u suites.Units, env *InputSet) ([]Unit
 		if err != nil {
 			return nil, nil, err
 		}
-		roots := []string{configRel}
+		// What every member reads beside its own graph: the set so far, and
+		// the config's and its setup files' graphs.
+		if _, err := addVitestGraph(graph, set, append([]string{configRel}, setup...), s.Name, name, unit.Members); err != nil {
+			return nil, nil, err
+		}
+		common := NewInputSet()
+		common.AddAll(set)
+		unit.MemberSets, unit.MemberDescs = map[string]*InputSet{}, map[string]string{}
 		for _, m := range unit.Members {
-			roots = append(roots, path.Join(pkgRel, m))
-		}
-		files, err := graph.Closure(append(roots, setup...))
-		if err != nil {
-			return nil, nil, fmt.Errorf("reuse: %s's batch %s (%s): %w", s.Name, name, strings.Join(unit.Members, ", "), err)
-		}
-		for _, f := range files {
-			if err := set.AddFile(f); err != nil {
+			own, err := memberBase(d, s, m, common)
+			if err != nil {
 				return nil, nil, err
 			}
-			// A resolver lists a file's directory to find it.
-			if err := set.AddDir(path.Dir(f)); err != nil {
+			if _, err := addVitestGraph(graph, own, []string{path.Join(pkgRel, m)}, s.Name, name, []string{m}); err != nil {
 				return nil, nil, err
 			}
+			set.AddAll(own)
+			unit.MemberSets[m] = own
+			unit.MemberDescs[m] = memberDesc(s, m, fmt.Sprintf("config=%q", config))
 		}
 		unit.Set = set
 		unit.Desc = batchDesc(s, name, unit.Members, fmt.Sprintf("config=%q", config))
@@ -611,7 +656,7 @@ func deriveERT(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error)
 		if unit.Never != "" {
 			continue
 		}
-		set, err := batchSet(d, s, name, unit.Members, runner)
+		set, err := batchSet(d, s, name, nil, runner)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -626,18 +671,31 @@ func deriveERT(d Deps, s roster.Suite, u suites.Units) ([]Unit, []string, error)
 		if err := AddGoPackages(set, d.Repo, fake); err != nil {
 			return nil, nil, err
 		}
-		own := append([]string(nil), loaded...)
+		for _, f := range loaded {
+			if err := set.AddFile(f); err != nil {
+				return nil, nil, err
+			}
+		}
+		common := NewInputSet()
+		common.AddAll(set)
+		unit.MemberSets, unit.MemberDescs = map[string]*InputSet{}, map[string]string{}
 		for _, m := range unit.Members {
+			own, err := memberBase(d, s, m, common)
+			if err != nil {
+				return nil, nil, err
+			}
 			loads, err := ERTFileLoads(d.Repo, lispRel, m)
 			if err != nil {
 				return nil, nil, err
 			}
-			own = append(own, loads...)
-		}
-		for _, f := range own {
-			if err := set.AddFile(f); err != nil {
-				return nil, nil, err
+			for _, f := range loads {
+				if err := own.AddFile(f); err != nil {
+					return nil, nil, err
+				}
 			}
+			set.AddAll(own)
+			unit.MemberSets[m] = own
+			unit.MemberDescs[m] = memberDesc(s, m)
 		}
 		unit.Set, unit.Desc = set, batchDesc(s, name, unit.Members)
 	}

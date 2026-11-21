@@ -70,7 +70,7 @@ func ertUnits(l Layout, s roster.Suite) (Units, error) {
 		return sp
 	}
 	chunk := func(id string, items []string) run.Spec { return named(id, items, nil) }
-	splits := batchSplits(s.Name, s.Name, BatchFiles(files, ERTArea, neverReused(s), PooledArea), chunk, named)
+	splits := batchSplits(s.Name, s.Name, BatchFiles(files, ERTArea, neverReused(s), PooledArea, s.Batching()), chunk, named)
 	for i := range splits {
 		splits[i].Deps = []string{build.ID}
 		// THE DRIVER SCOPES EACH FILE'S NAMES TO THAT FILE, so two named

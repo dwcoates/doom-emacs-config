@@ -46,12 +46,12 @@ describe("the jsdom capabilities", () => {
     el.remove();
   });
 
-  it("wraps a computed style a suite installed over the substitution", () => {
-    // Arrange: a suite's own getComputedStyle, as tree-layout.ts installs.
+  it("replaces a computed style a suite left standing with the substitution", () => {
+    // Arrange: a suite's own getComputedStyle, as tree-layout.ts installs, left standing.
     installJsdomCapabilities();
-    const real: unknown = Reflect.get(window, "getComputedStyle");
-    const suiteOwn = (element: Element): CSSStyleDeclaration => (real as typeof window.getComputedStyle)(element);
-    window.getComputedStyle = suiteOwn;
+    const substitution: unknown = Reflect.get(window, "getComputedStyle");
+    const real = substitution as typeof window.getComputedStyle;
+    window.getComputedStyle = (element: Element): CSSStyleDeclaration => real(element);
     const el = document.createElement("span");
     el.style.animationName = "spin";
     document.body.append(el);
@@ -60,8 +60,28 @@ describe("the jsdom capabilities", () => {
     installJsdomCapabilities();
     const read = getComputedStyle(el, "::before").animationName;
 
-    // Assert
-    expect(read).toBe("");
+    // Assert: the substitution itself stands again, answering no pseudo style.
+    expect([Reflect.get(window, "getComputedStyle") === substitution, read]).toEqual([true, ""]);
+    el.remove();
+  });
+
+  it("stacks nothing over what files leave standing, however many files run", () => {
+    // Arrange: 20000 files each leaving a wrapper over whatever stood, past
+    // the depth that overflowed the stack when installs wrapped what stood.
+    installJsdomCapabilities();
+    const el = document.createElement("span");
+    document.body.append(el);
+    for (let file = 0; file < 20000; file += 1) {
+      const beneath = window.getComputedStyle;
+      window.getComputedStyle = (element: Element, pseudo?: string | null): CSSStyleDeclaration => beneath(element, pseudo);
+      installJsdomCapabilities();
+    }
+
+    // Act: one read goes through whatever the installs left.
+    const read = (): string => getComputedStyle(el).display;
+
+    // Assert: a read of one frame's depth, no matter how many files ran.
+    expect(read).not.toThrow();
     el.remove();
   });
 

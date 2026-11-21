@@ -123,7 +123,13 @@ type Suite struct {
 	Name    string
 	Outcome string
 	Seconds float64
+	// Batching names the suite's own file batching (roster.Batching.Label),
+	// or Unbatched.
+	Batching string
 }
+
+// Unbatched is the batching label of a suite whose files are not batched.
+const Unbatched = "unbatched"
 
 // Unit is one unit's resource use in a run.
 type Unit struct {
@@ -150,6 +156,8 @@ type Run struct {
 type SuiteUnits struct {
 	Suite       string
 	Run, Reused int
+	// Batching is the suite's own, as Suite.Batching.
+	Batching string
 }
 
 // Report is everything one run pushes. Batching names the file batching the
@@ -403,7 +411,7 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 	batching := labelValue(report.Batching)
 	for _, s := range report.Suites {
 		fmt.Fprintf(&b, "%s{suite=\"%s\",outcome=\"%s\",trigger=\"%s\",batching=\"%s\"} %s %d\n",
-			SuiteSeriesName, labelValue(s.Name), s.Outcome, labelValue(trigger), batching, num(s.Seconds), ms)
+			SuiteSeriesName, labelValue(s.Name), s.Outcome, labelValue(trigger), labelValue(s.Batching), num(s.Seconds), ms)
 	}
 	if r := report.Run; r != nil {
 		for _, v := range []struct {
@@ -420,7 +428,7 @@ func Encode(report Report, trigger string, at time.Time) []byte {
 			n     int
 		}{{UnitsRun, su.Run}, {UnitsReused, su.Reused}} {
 			fmt.Fprintf(&b, "%s{suite=\"%s\",state=\"%s\",trigger=\"%s\",batching=\"%s\"} %d %d\n",
-				SuiteUnitsSeriesName, labelValue(su.Suite), v.state, labelValue(trigger), batching, v.n, ms)
+				SuiteUnitsSeriesName, labelValue(su.Suite), v.state, labelValue(trigger), labelValue(su.Batching), v.n, ms)
 		}
 	}
 	for _, u := range report.Units {

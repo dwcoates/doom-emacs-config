@@ -302,6 +302,16 @@ func TestCheck(t *testing.T) {
 		{"a never-reused unit without a reason", Suite{Name: "s", Reuse: &Reuse{Never: map[string]string{"u": ""}}}, `never reused without a reason`},
 		{"a unit both declared and never reused", Suite{Name: "s", Reuse: &Reuse{Units: map[string][]string{"u": {"x/"}}, Never: map[string]string{"u": "why"}}},
 			`both declares its unit "u"'s inputs and names it never reused`},
+		{"a vitest suite's own batching", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, Batch: &Batching{Max: 24, Min: 6}}, ""},
+		{"an ERT suite's own batching", Suite{Name: "s", Kind: ERT, Reuse: &Reuse{}, Batch: &Batching{Max: 1, Min: 1}}, ""},
+		{"a batching on a suite that is not batched", Suite{Name: "s", Kind: GoModule, Reuse: &Reuse{}, Batch: &Batching{Max: 24, Min: 6}},
+			"s declares a Batch, but only a vitest or ERT suite's files are batched"},
+		{"a batching whose max is below one", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, Batch: &Batching{Max: 0, Min: 1}},
+			"s declares Batch max 0 min 1"},
+		{"a batching whose min is below one", Suite{Name: "s", Kind: Vitest, Reuse: &Reuse{}, Batch: &Batching{Max: 4, Min: 0}},
+			"s declares Batch max 4 min 0"},
+		{"a batching whose min is above its max", Suite{Name: "s", Kind: ERT, Reuse: &Reuse{}, Batch: &Batching{Max: 4, Min: 5}},
+			"min no more than max"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -317,6 +327,29 @@ func TestCheck(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("err = %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestSuiteBatching(t *testing.T) {
+	tests := []struct {
+		name  string
+		suite Suite
+		want  Batching
+		label string
+	}{
+		{"a suite declaring none takes the default", Suite{Kind: Vitest}, DefaultBatching, "max48-min12"},
+		{"a suite declaring its own takes it", Suite{Kind: ERT, Batch: &Batching{Max: 20, Min: 5}}, Batching{Max: 20, Min: 5}, "max20-min5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Act
+			got := tt.suite.Batching()
+
+			// Assert
+			if got != tt.want || got.Label() != tt.label {
+				t.Fatalf("Batching() = %+v labeled %q, want %+v labeled %q", got, got.Label(), tt.want, tt.label)
 			}
 		})
 	}

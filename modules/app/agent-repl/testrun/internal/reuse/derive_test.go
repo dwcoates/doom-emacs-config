@@ -338,6 +338,50 @@ func TestDeriveVitestKeysABatchOnEveryMembersGraph(t *testing.T) {
 	}
 }
 
+func TestDeriveVitestKeysEachBatchMemberOnItsOwnGraphAlone(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	s := webFixture(t, f)
+
+	// Act
+	su, err := Derive(f.d, s, webBatchUnits(), true)
+
+	// Assert: each member reads its own graph and what the batch shares, and
+	// no batch-mate's; its facts name neither its batch nor its mates.
+	if err != nil {
+		t.Fatal(err)
+	}
+	both := unitsByName(su)["both"]
+	a, b := both.MemberSets["test/a.test.ts"], both.MemberSets["test/b.test.ts"]
+	if a == nil || b == nil {
+		t.Fatalf("member sets = %v, want one per member", both.MemberSets)
+	}
+	for _, tc := range []struct {
+		set  *InputSet
+		has  []string
+		lack []string
+	}{
+		{a, []string{"test/a.test.ts", "src/a.ts", "vitest.config.ts", "src/dom.ts"}, []string{"test/b.test.ts", "src/b.ts"}},
+		{b, []string{"test/b.test.ts", "src/b.ts", "vitest.config.ts", "src/dom.ts"}, []string{"test/a.test.ts", "src/a.ts"}},
+	} {
+		for _, p := range tc.has {
+			if !tc.set.Contains(fixtureModule + "/web/" + p) {
+				t.Errorf("a member's set does not place %s", p)
+			}
+		}
+		for _, p := range tc.lack {
+			if tc.set.Contains(fixtureModule + "/web/" + p) {
+				t.Errorf("a member's set places its batch-mate's %s", p)
+			}
+		}
+	}
+	for m, desc := range both.MemberDescs {
+		if strings.Contains(desc, "both") || strings.Contains(desc, "members=") {
+			t.Errorf("%s's facts %q name its batch", m, desc)
+		}
+	}
+}
+
 func TestDeriveVitestKeysEachFileOnItsOwnImportGraph(t *testing.T) {
 	// Arrange
 	f := newFixture(t)
@@ -481,6 +525,54 @@ func TestDeriveERTKeysABatchOnWhatEveryMemberLoads(t *testing.T) {
 		if !pooled.Set.Contains(fixtureModule + p) {
 			t.Errorf("the batch's set does not place %s", p)
 		}
+	}
+}
+
+func TestDeriveERTKeysEachBatchMemberOnWhatItAloneLoads(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	s := lispFixture(t, f)
+	u := lispUnits()
+	u.Splits = []suites.Split{{Group: "ert/pooled", Items: []string{"test-a.el", "test-b.el"}, Deps: []string{"ert:fakedaemon"}, Chunk: u.Splits[0].Chunk}}
+
+	// Act
+	su, err := Derive(f.d, s, u, true)
+
+	// Assert
+	if err != nil {
+		t.Fatal(err)
+	}
+	pooled := unitsByName(su)["pooled"]
+	a, b := pooled.MemberSets["test-a.el"], pooled.MemberSets["test-b.el"]
+	if a == nil || b == nil {
+		t.Fatalf("member sets = %v, want one per member", pooled.MemberSets)
+	}
+	if !a.Contains(fixtureModule+"/lisp/a-fixtures.el") || b.Contains(fixtureModule+"/lisp/a-fixtures.el") {
+		t.Fatal("test-a.el's own load belongs to its set alone")
+	}
+	if !b.Contains(fixtureModule+"/lisp/test-b.el") || a.Contains(fixtureModule+"/lisp/test-b.el") {
+		t.Fatal("test-b.el belongs to its own set alone")
+	}
+	if strings.Contains(pooled.MemberDescs["test-a.el"], "pooled") {
+		t.Fatalf("test-a.el's facts %q name its batch", pooled.MemberDescs["test-a.el"])
+	}
+}
+
+func TestAMembersFactsLeaveOutItsSuitesBatchSize(t *testing.T) {
+	// Arrange: one suite at the default batch size, and the same suite resized.
+	s := roster.Suite{Name: "web", Kind: roster.Vitest, Path: "web", Reuse: &roster.Reuse{}}
+	resized := s
+	resized.Batch = &roster.Batching{Max: 96, Min: 24}
+
+	// Act
+	before, after := memberDesc(s, "test/a.test.ts"), memberDesc(resized, "test/a.test.ts")
+
+	// Assert: the member's facts are the same, while the suite's own are not.
+	if before != after {
+		t.Fatalf("a member's facts moved with its suite's batch size:\n%s\n%s", before, after)
+	}
+	if unitDesc(s, "both") == unitDesc(resized, "both") {
+		t.Fatal("the suite's facts did not hold its batch size, so this test proves nothing")
 	}
 }
 

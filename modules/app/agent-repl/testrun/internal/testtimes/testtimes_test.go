@@ -280,27 +280,27 @@ func TestEncodeStampsEverySampleWithTheTriggerAndTheRunsEnd(t *testing.T) {
 			{Suite: "webapp", Name: "b", Outcome: Pass, Seconds: 2, CPU: 0.75, HasCPU: true, Processes: 1.5},
 			{Suite: "daemon", Name: "c", Outcome: Pass, Seconds: 1, LogRecords: 42, HasLogRecords: true},
 		},
-		Suites:     []Suite{{Name: "webapp", Outcome: Pass, Seconds: 12}},
+		Suites:     []Suite{{Name: "webapp", Outcome: Pass, Seconds: 12, Batching: "max30-min8"}},
 		Units:      []Unit{{Suite: "webapp", ID: "webapp#00", Outcome: Fail, Wall: 3, CPU: 2.5, MaxRSSBytes: 1048576, BlockReads: 7, BlockWrites: 9}},
 		Run:        &Run{Seconds: 95.5, PredictedSeconds: 80, Outcome: Fail},
-		SuiteUnits: []SuiteUnits{{Suite: "webapp", Run: 15, Reused: 2}},
-		Batching:   "max48-min12",
+		SuiteUnits: []SuiteUnits{{Suite: "webapp", Run: 15, Reused: 2, Batching: "max30-min8"}},
+		Batching:   "ert=max48-min12,webapp=max30-min8",
 	}, "merge_queue", at))
 
 	// Assert
 	unit := `{suite="webapp",unit="webapp#00",outcome="fail",trigger="merge_queue"}`
-	run := `{outcome="fail",trigger="merge_queue",batching="max48-min12"}`
+	run := `{outcome="fail",trigger="merge_queue",batching="ert=max48-min12,webapp=max30-min8"}`
 	want := `agentrepl_test_seconds{suite="webapp",test="a > says \"hi\"\\n",outcome="pass",trigger="merge_queue"} 0.5 1700000000123` + "\n" +
 		`agentrepl_test_seconds{suite="webapp",test="b",outcome="pass",trigger="merge_queue"} 2 1700000000123` + "\n" +
 		`agentrepl_test_cpu_seconds{suite="webapp",test="b",outcome="pass",trigger="merge_queue"} 0.75 1700000000123` + "\n" +
 		`agentrepl_test_processes_started{suite="webapp",test="b",outcome="pass",trigger="merge_queue"} 1.5 1700000000123` + "\n" +
 		`agentrepl_test_seconds{suite="daemon",test="c",outcome="pass",trigger="merge_queue"} 1 1700000000123` + "\n" +
 		`agentrepl_test_log_records{suite="daemon",test="c",outcome="pass",trigger="merge_queue"} 42 1700000000123` + "\n" +
-		`agentrepl_test_suite_seconds{suite="webapp",outcome="pass",trigger="merge_queue",batching="max48-min12"} 12 1700000000123` + "\n" +
+		`agentrepl_test_suite_seconds{suite="webapp",outcome="pass",trigger="merge_queue",batching="max30-min8"} 12 1700000000123` + "\n" +
 		`agentrepl_test_run_seconds` + run + ` 95.5 1700000000123` + "\n" +
 		`agentrepl_test_run_predicted_seconds` + run + ` 80 1700000000123` + "\n" +
-		`agentrepl_test_suite_units{suite="webapp",state="run",trigger="merge_queue",batching="max48-min12"} 15 1700000000123` + "\n" +
-		`agentrepl_test_suite_units{suite="webapp",state="reused",trigger="merge_queue",batching="max48-min12"} 2 1700000000123` + "\n" +
+		`agentrepl_test_suite_units{suite="webapp",state="run",trigger="merge_queue",batching="max30-min8"} 15 1700000000123` + "\n" +
+		`agentrepl_test_suite_units{suite="webapp",state="reused",trigger="merge_queue",batching="max30-min8"} 2 1700000000123` + "\n" +
 		`agentrepl_test_unit_wall_seconds` + unit + ` 3 1700000000123` + "\n" +
 		`agentrepl_test_unit_cpu_seconds` + unit + ` 2.5 1700000000123` + "\n" +
 		`agentrepl_test_unit_max_rss_bytes` + unit + ` 1048576 1700000000123` + "\n" +

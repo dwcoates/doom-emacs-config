@@ -289,7 +289,7 @@ describe("a shared mount", () => {
   const shared = sharedMount();
   let first: Harness | undefined;
 
-  it("draws a case's rows under the case's own turn", async () => {
+  it("draws a case's rows under the turns the case gave them", async () => {
     // Arrange
     first = await shared();
     const row = userPromptRow("mine", { id: feedId("shared-row") });
@@ -298,8 +298,8 @@ describe("a shared mount", () => {
     first.fake.pushRow(WORKSPACE_ID, ROOT_FEED, row);
     await first.settle();
 
-    // Assert: drawn, and under a turn no other case names.
-    expect([first.row("shared-row") !== null, row.turn?.value]).toEqual([true, expect.stringMatching(/^turn-1@case\d+$/)]);
+    // Assert: drawn, and still under the turn the case gave it.
+    expect([first.row("shared-row") !== null, row.turn?.value]).toEqual([true, "turn-1"]);
   });
 
   it("starts the next case on an empty feed: the last case's rows were removed", async () => {
@@ -308,6 +308,14 @@ describe("a shared mount", () => {
 
     // Assert
     expect([app, app.row("shared-row")]).toEqual([first, null]);
+  });
+
+  it("hands the case none of the panels an earlier case was handed", async () => {
+    // Arrange / Act
+    const app = await shared();
+
+    // Assert
+    expect(app.panels).toEqual([]);
   });
 
   it("answers only the calls the case caused", async () => {
