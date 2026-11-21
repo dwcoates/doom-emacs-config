@@ -85,11 +85,8 @@ type DirectLanding struct {
 // bypass mode made a queue-bypass landing, and any other caller a direct one.
 func (o *orchestrator) RecordDirectLanding(ctx context.Context, report DirectLanding) (wsm.LandingPath, error) {
 	fields := dlog.Context{"repository": string(report.Repository.ID), "dir": report.Repository.Dir, "branch": report.Branch, "head": report.Head, "caller": string(report.Caller)}
-	repository, key, err := o.scopedRepository(ctx, opRecordLanding, "a direct landing's record", report.Repository)
+	repository, key, err := o.readScopedRepository(ctx, opRecordLanding, "a direct landing's record", report.Repository)
 	if err != nil {
-		if _, refused := Refused(err); !refused {
-			o.deps.Log.Global().Error(opRecordLanding, "could not resolve the repository a direct landing names", dlog.WithCause(fields, err))
-		}
 		return "", err
 	}
 	landing := wsm.MergeLanding{Repo: key, Head: report.Head, Path: wsm.LandingDirect, Branch: report.Branch, Workspace: report.Caller, LandedAt: o.deps.Now()}
@@ -145,11 +142,8 @@ type LandingsWindow struct {
 // since <= landed at <= until, split into the queue's and every other.
 func (o *orchestrator) Landings(ctx context.Context, scope RepositoryScope, since, until time.Time) (LandingsWindow, error) {
 	const op = "daemon.merge.landings"
-	repository, key, err := o.scopedRepository(ctx, op, "a landings read", scope)
+	repository, key, err := o.readScopedRepository(ctx, op, "a landings read", scope)
 	if err != nil {
-		if _, refused := Refused(err); !refused {
-			o.deps.Log.Global().Error(op, "could not resolve the scoped repository's queue key", dlog.WithCause(dlog.Context{"repository": string(scope.ID), "dir": scope.Dir}, err))
-		}
 		return LandingsWindow{}, err
 	}
 	landings, began, err := o.deps.DB.MergeLandingsIn(ctx, key, since, until)

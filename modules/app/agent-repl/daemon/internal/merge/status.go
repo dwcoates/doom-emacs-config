@@ -27,10 +27,7 @@ func (o *orchestrator) Status(ctx context.Context, scope *RepositoryScope) ([]Qu
 	const op = "daemon.merge.status"
 	var queues []registeredQueue
 	if scope != nil {
-		repository, key, err := o.scopedRepository(ctx, op, "a merge queue status", *scope)
-		if _, refused := Refused(err); err != nil && !refused {
-			o.deps.Log.Global().Error(op, "could not resolve the scoped repository's queue key", dlog.WithCause(dlog.Context{"repository": string(scope.ID), "dir": scope.Dir}, err))
-		}
+		repository, key, err := o.readScopedRepository(ctx, op, "a merge queue status", *scope)
 		if err != nil {
 			return nil, err
 		}
