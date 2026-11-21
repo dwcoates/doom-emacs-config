@@ -134,9 +134,6 @@ const (
 	// joinReleased is the user's release of one held prompt (Release): it
 	// joins at once, beside any already waiting.
 	joinReleased
-	// joinAgentSent is an agent's prompt to this workspace (agentjoin.go): it
-	// joins at once, beside any already waiting, and is never judged.
-	joinAgentSent
 )
 
 // joinLocked sends SUB to join RUNNING, for CAUSE. The caller holds the
@@ -339,8 +336,6 @@ func (c joinCause) String() string {
 		return "flushed"
 	case joinReleased:
 		return "released"
-	case joinAgentSent:
-		return "agent_sent"
 	default:
 		return fmt.Sprintf("join_cause(%d)", int(c))
 	}

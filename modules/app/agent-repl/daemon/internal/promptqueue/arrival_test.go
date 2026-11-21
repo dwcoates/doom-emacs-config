@@ -732,3 +732,109 @@ func TestOnlyHoldForLeaseReadsALeasesHolder(t *testing.T) {
 		t.Fatalf("these functions switch on a lease's holder instead of reading holdForLease's hold kind: %v", found)
 	}
 }
+
+// ---- an agent's prompt -------------------------------------------------
+
+func TestAnAgentsPromptJoiningTheRunningTurnInterruptsNothing(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "urgent"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "the build is green")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if killed := h.sender.killed(); len(killed) != 0 || askedCount(h) != 0 {
+		t.Fatalf("killed = %v, asked %d times; want nothing interrupted and nothing judged", killed, askedCount(h))
+	}
+}
+
+func TestASecondAgentPromptJoinsBesideTheFirst(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "the build is green")); err != nil {
+		t.Fatalf("Submit(t1): %v", err)
+	}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t2", "and the lint is clean")); err != nil {
+		t.Fatalf("Submit(t2): %v", err)
+	}
+
+	// Assert
+	if joins := h.sender.joins; len(joins) != 2 || joins[0] != "t1" || joins[1] != "t2" {
+		t.Fatalf("joins = %v, want both agent prompts sent to join", joins)
+	}
+}
+
+func TestAnAgentsPromptBehindAHeldUsersPromptStillJoinsUnjudged(t *testing.T) {
+	// Arrange: a user's prompt waits held, ruled to queue.
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+	asked := askedCount(h)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), agentSubmission("t1", "the build is green")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if joins := h.sender.joins; len(joins) != 1 || joins[0] != "t1" || askedCount(h) != asked {
+		t.Fatalf("joins = %v, asked %d more times; want t1 joined unjudged", joins, askedCount(h)-asked)
+	}
+}
+
+func TestADeferredAgentPromptWaitsForTheRunningTurnsEndAndThenRuns(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	sub := agentSubmission("t1", "after this, run the tests")
+	sub.Delivery = wsm.DeliveryDeferred
+	if _, err := h.q.Submit(context.Background(), sub); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if len(h.sender.joins) != 0 {
+		t.Fatalf("joins = %v, want the deferred prompt not joined", h.sender.joins)
+	}
+	waitsUnder(t, h, "t1", wsm.WaitTurnEnd)
+
+	// Act
+	h.watcher.idle()
+	h.q.OnTurnEnded(theWorkspace, "running-turn", wsm.CloseCompleted)
+
+	// Assert
+	if !started(h, "t1") {
+		t.Fatalf("started = %v, want t1 run as its own turn", h.sender.started())
+	}
+	noHolds(t, h)
+	noWaits(t, h)
+}
+
+func TestAUsersPromptBehindARunningTurnIsStillClassified(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	running(t, h, "running-turn", "the running work")
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "an unrelated question")); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	h.q.waitForClassifications()
+
+	// Assert
+	if got := askedCount(h); got != 1 {
+		t.Fatalf("the judge was asked %d times, want the user's prompt classified once", got)
+	}
+}

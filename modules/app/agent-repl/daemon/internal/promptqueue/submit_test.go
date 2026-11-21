@@ -2086,6 +2086,9 @@ func TestAStandDownBeforeTheRevivalBeganDoesNotExcuseIt(t *testing.T) {
 	// Assert
 	if !logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
 		t.Fatalf("records = %+v, want the lying revival at ERROR", h.log.Records())
+	}
+}
+
 // EVERY MERGE REFUSAL IS refuseMerging's: the held path and the arrival path
 // refuse a submission under a refusing lease with the one answer.
 func TestEveryMergeRefusalIsRefuseMergings(t *testing.T) {

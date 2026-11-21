@@ -55,7 +55,6 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	var cut runningCut
 	underCut := false
 	var unjudged func(dlog.Logger, ids.TurnID)
-	joinAtOnce := false
 	ahead := aheadRunning
 	var aheadHeld wsm.HeldPrompt
 	if running != "" {
@@ -63,10 +62,6 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 			held.Classification = uninterruptibleVerdict(cut, q.deps.Now())
 		} else if verdict, why, ok := q.neverJudged(sub); ok {
 			unjudged = why
-			held.Classification = &verdict
-		} else if agentSent(sub) {
-			joinAtOnce = true
-			verdict := q.agentSentVerdict()
 			held.Classification = &verdict
 		} else if verdict, why, ok := q.judgedAgainst(ctx, sub, &ahead, &aheadHeld, log); ok {
 			unjudged = why
@@ -111,11 +106,6 @@ func (q *queue) hold(ctx context.Context, sub Submission, running ids.TurnID, le
 	if unjudged != nil {
 		unjudged(log, running)
 		q.reportHeld(ctx, sub, log)
-		return disposition, nil
-	}
-	if joinAtOnce {
-		agentSentNeverClassified(log, sub, running)
-		q.startAgentJoin(ctx, sub, running, log)
 		return disposition, nil
 	}
 	q.deps.Footer.OnSubmission(sub.WS, footer.Submission{Stage: footer.StageClassifying})
@@ -183,12 +173,6 @@ func (q *queue) classifyHeld(ctx context.Context, sub Submission, running ids.Tu
 	if verdict, why, ok := q.neverJudged(sub); ok {
 		why(log, running)
 		q.record(ctx, sub, verdict, log)
-		return
-	}
-	if agentSent(sub) {
-		agentSentNeverClassified(log, sub, running)
-		q.record(ctx, sub, q.agentSentVerdict(), log)
-		q.startAgentJoin(ctx, sub, running, log)
 		return
 	}
 	ahead := aheadRunning
@@ -355,13 +339,6 @@ func (q *queue) verdictFor(ctx context.Context, sub Submission, running ids.Turn
 	if verdict, why, ok := q.neverJudged(sub); ok {
 		why(log, running)
 		return verdict, classifier.RouteQueue
-	}
-
-	// AN AGENT'S PROMPT never reaches the model either: it joins the running
-	// turn (agentjoin.go).
-	if agentSent(sub) {
-		agentSentNeverClassified(log, sub, running)
-		return q.agentSentVerdict(), classifier.RouteAfterToolCall
 	}
 
 	// A RUNNING TURN WAITING OUT A FAILED API CALL is decided before the model

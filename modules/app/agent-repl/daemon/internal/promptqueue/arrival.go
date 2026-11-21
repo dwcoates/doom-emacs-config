@@ -131,6 +131,13 @@ func (q *queue) arriveLocked(ctx context.Context, d *delivery, sub Submission, l
 			q.logRepeatedStart(log, "arrival", sub.Turn)
 			return Disposition{Delivered: true}, nil
 		}
+		// AN AGENT THAT ASKED FOR A TURN OF ITS OWN (the deferred delivery)
+		// gets one: its prompt waits for the running turn's end, by name,
+		// rather than joining it. The daemon's own notices ride the deferred
+		// delivery by convention and join regardless.
+		if sub.SentBy != nil && sub.Delivery == wsm.DeliveryDeferred {
+			return q.awaitArrival(ctx, sub, wsm.WaitTurnEnd, "the sending agent asked for a turn of its own after the running one", log)
+		}
 		return q.joinArrivalLocked(ctx, d, sub, *running, sender, watcher, log)
 	}
 	disposition, err := q.deliver(ctx, d, sub, sender, watcher, log)
@@ -314,8 +321,10 @@ func (q *queue) driveArrivalsLocked(ctx context.Context, d *delivery, edge arriv
 		fields := dlog.Context{"turn": string(w.Turn), "reason": w.Reason.String(), "edge": edge.String()}
 		log.Info(opArrival, "the event a waiting prompt waits on came; it is delivered or waits again", fields)
 		sub := Submission{
+			// A DRIVEN WAIT HAS HAD ITS WAIT: whatever it waited on has
+			// ended, so it is delivered now, joining whatever turn runs.
 			WS: w.Workspace, Turn: w.Turn, Said: w.Said, Origin: promptorigin.Named(w.Origin), SentBy: w.SentBy,
-			Delivery: wsm.DeliveryDeferred, fromWait: true,
+			Delivery: wsm.DeliveryOrdinary, fromWait: true,
 		}
 		if _, err := q.arriveLocked(ctx, d, sub, log); err != nil {
 			// THE WAIT STANDS: nothing about it was ended, so the next event

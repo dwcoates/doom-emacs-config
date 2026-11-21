@@ -253,19 +253,19 @@ func TestTheQueueReadsSessionActsThroughHoldfold(t *testing.T) {
 // AN AGENT'S PROMPT IS NEVER HELD (arrival.go), so it never meets the user's
 // queued prompt: it joins the running turn, and the user's waits as it was.
 func TestAnAgentsPromptJoinsTheRunningTurnPastTheUsersQueuedPrompt(t *testing.T) {
-	// Arrange: the user's prompt is queued, and a classifier that would rule
-	// the agent's prompt to interrupt it stands.
+	// Arrange: the user's prompt is queued behind the running turn, and a
+	// classifier that would rule a prompt to interrupt it stands.
 	h := newHarness(t)
 	running(t, h, "running-turn", "the running work")
-	h.watcher.refuseJoins = true
-	if _, err := h.q.Submit(context.Background(), agentSubmission("older", "an earlier question")); err != nil {
+	h.judge.verdict = classifier.Verdict{Route: classifier.RouteQueue, Reason: "independent"}
+	if _, err := h.q.Submit(context.Background(), submission("older", "an earlier question")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
 	h.judge.verdict = classifier.Verdict{Route: classifier.RouteInterrupt, Reason: "it countermands the queued prompt"}
 
 	// Act
-	if _, err := h.q.Submit(context.Background(), submission("later", "do it the other way")); err != nil {
+	if _, err := h.q.Submit(context.Background(), agentSubmission("later", "do it the other way")); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	h.q.waitForClassifications()
