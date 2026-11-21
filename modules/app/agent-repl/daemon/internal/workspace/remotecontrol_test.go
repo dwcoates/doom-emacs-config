@@ -977,9 +977,7 @@ func requireTransitionRecord(t *testing.T, f *fleetFixture, message, transition,
 	if got := records[0].Context["transition"]; got != transition {
 		t.Errorf("transition = %v, want %q", got, transition)
 	}
-	if got := fmt.Sprint(records[0].Context["cause"]); !strings.Contains(got, cause) {
-		t.Errorf("cause = %q, want it to carry %q", got, cause)
-	}
+	assertCarries(t, "cause", fmt.Sprint(records[0].Context["cause"]), cause)
 }
 
 // TestEveryModeChangeSharesTheInForceTail pins the extraction: an explicit
