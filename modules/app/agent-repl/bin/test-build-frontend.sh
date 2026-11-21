@@ -1474,9 +1474,11 @@ t_launcher_stages_without_installing_and_installs_in_place() {
 
 t_out_writes_nothing_live() {
     local root live; root="$(new_staging_root)"
+    # 8 build lines: shim's npm build, the webapp's testrun build and seeded
+    # typecheck line and npm build, and the four Go builds.
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
     live="$(live_files "$root")"
-    if [ -z "$live" ] && [ "$(grep -c 'build' "$root/stub.log")" -eq 6 ]; then
+    if [ -z "$live" ] && [ "$(grep -c 'build' "$root/stub.log")" -eq 8 ]; then
         pass "staging: a staging run writes nothing into the live artifact locations"
     else
         fail "staging: a staging run writes nothing into the live artifact locations" \
@@ -1510,8 +1512,9 @@ t_out_builds_fresh_targets_unconditionally() {
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
     : > "$root/stub.log"
     run_script "$root" --out "$root/staging" shim webapp daemon store sidecar lock >/dev/null
+    # 5 go builds: the four services plus the webapp's testrun.
     if [ "$(grep -c '^npm run build' "$root/stub.log")" -eq 2 ] &&
-           [ "$(grep -c '^go build' "$root/stub.log")" -eq 4 ]; then
+           [ "$(grep -c '^go build' "$root/stub.log")" -eq 5 ]; then
         pass "staging: every selected target builds even when the live and staged ones are fresh"
     else
         fail "staging: every selected target builds even when the live and staged ones are fresh" \
