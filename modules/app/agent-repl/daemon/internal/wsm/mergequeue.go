@@ -22,6 +22,18 @@ func normalizeRepoKey(repo RepoKey) (RepoKey, error) {
 	return RepoKey(normalized), nil
 }
 
+// normalizedRepoKey is normalizeRepoKey for a store operation: a key that
+// cannot be normalized is recorded under OP with FIELDS at ERROR, once, and
+// answered.
+func (s *store) normalizedRepoKey(op string, repo RepoKey, fields dlog.Context) (RepoKey, error) {
+	normalized, err := normalizeRepoKey(repo)
+	if err != nil {
+		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
+		return "", err
+	}
+	return normalized, nil
+}
+
 // RequestMerge RECORDS a workspace's merge in its target repository's durable
 // queue, in the REQUESTED state: in nobody's line and reported to nobody. A
 // merge is recorded the moment it is asked for, so a daemon exit before the
@@ -77,9 +89,8 @@ func (s *store) RequestOneShotMerge(ctx context.Context, repo RepoKey, id Worksp
 // then the request row written and MARK (when non-nil) run in the same
 // transaction.
 func (s *store) requestMerge(ctx context.Context, op string, repo RepoKey, id WorkspaceID, source MergeSource, at time.Time, mark func(context.Context, *sql.Tx) error) error {
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "source": source.Kind.String(), "requested_at": at}
@@ -170,9 +181,8 @@ func insertRequest(ctx context.Context, tx *sql.Tx, key RepoKey, id WorkspaceID,
 // itself, and a queued merge is never in line without one.
 func (s *store) QueueMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) (int, error) {
 	const op = "daemon.wsm.queue_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return 0, err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "ledger": string(ledger)}
@@ -378,9 +388,8 @@ func (s *store) MoveMerge(ctx context.Context, repo RepoKey, id WorkspaceID, mov
 		s.log.Error(op, "refused an undeclared merge move", withError(fields, err))
 		return false, err
 	}
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return false, err
 	}
 	fields["repo"] = string(key)
@@ -434,9 +443,8 @@ func (s *store) MoveMergeTo(ctx context.Context, repo RepoKey, id WorkspaceID, a
 		s.log.Error(op, "refused an undeclared merge side", withError(fields, err))
 		return false, err
 	}
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return false, err
 	}
 	fields["repo"] = string(key)
@@ -580,9 +588,8 @@ func placedBeside(waiting []waitingRow, id, anchor WorkspaceID, side MergeSide) 
 func (s *store) PrioritizeMerge(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error) {
 	const op = "daemon.wsm.prioritize_merge"
 	fields := dlog.Context{"repo": string(repo), "workspace": string(id)}
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return false, err
 	}
 	fields["repo"] = string(key)
@@ -691,9 +698,8 @@ func nullableText(v string) any {
 // state (a remediating merge admitted) would silently pull it back into line.
 // ALSO runs in the same transaction once the entry is written.
 func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey, id WorkspaceID, from, state MergeQueueState, fields dlog.Context, also func(context.Context, *sql.Tx, RepoKey) error) error {
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return err
 	}
 	fields["repo"] = string(key)
@@ -737,10 +743,9 @@ func (s *store) setMergeQueueState(ctx context.Context, op string, repo RepoKey,
 // a refusal.
 func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID, aside MergeAside) (MergeSlot, error) {
 	const op = "daemon.wsm.step_aside_merge"
-	key, err := normalizeRepoKey(repo)
 	fields := dlog.Context{"repo": string(repo), "workspace": string(id), "aside": aside.String()}
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return MergeSlotNone, err
 	}
 	fields["repo"] = string(key)
@@ -803,9 +808,8 @@ func (s *store) StepAsideMerge(ctx context.Context, repo RepoKey, id WorkspaceID
 // that read it as waiting stood ahead of a merge already being worked on.
 func (s *store) ReturnRemediatedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, workedOn []WorkspaceID, resolved *ResolvedRebase) error {
 	const op = "daemon.wsm.return_remediated_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "resolved_rebase": resolved != nil}
@@ -894,9 +898,8 @@ func (s *store) AdmitMerge(ctx context.Context, repo RepoKey, id WorkspaceID) er
 // that is not admitted is refused: the caller lost track of the queue.
 func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID) error {
 	const op = "daemon.wsm.return_admitted_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "ledger": string(ledger)}
@@ -928,9 +931,8 @@ func (s *store) ReturnAdmittedMerge(ctx context.Context, repo RepoKey, id Worksp
 // workspace stays open under its name while its request stands.
 func (s *store) RemoveMergeQueueEntry(ctx context.Context, repo RepoKey, id WorkspaceID, cause string) error {
 	const op = "daemon.wsm.remove_merge_queue_entry"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "cause": cause}
@@ -1009,9 +1011,8 @@ func (s *store) logSettledWaits(op string, fields dlog.Context, settled int64) {
 // RemoveMergeQueueEntry.
 func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, cause string) error {
 	const op = "daemon.wsm.drop_admitted_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "cause": cause}
@@ -1047,9 +1048,8 @@ func (s *store) DropAdmittedMerge(ctx context.Context, repo RepoKey, id Workspac
 // changes nothing.
 func (s *store) RequeuePausedMerge(ctx context.Context, repo RepoKey, id WorkspaceID, lease LeaseID, ledger LeaseID) error {
 	const op = "daemon.wsm.requeue_paused_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "lease": string(lease), "ledger": string(ledger)}
@@ -1099,9 +1099,8 @@ func dropMergeLease(ctx context.Context, tx *sql.Tx, id WorkspaceID, lease Lease
 // MergeQueue loads one repository's queue in order, all-or-nothing.
 func (s *store) MergeQueue(ctx context.Context, repo RepoKey) ([]MergeQueueEntry, error) {
 	const op = "daemon.wsm.merge_queue"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return nil, err
 	}
 	var out []MergeQueueEntry
@@ -1234,9 +1233,8 @@ func (s *store) scanMergeQueue(ctx context.Context, tail string, args ...any) (m
 // act, by whoever asked for it, at its own instant.
 func (s *store) SetMergeQueuePaused(ctx context.Context, repo RepoKey, pause *MergeQueuePause) error {
 	const op = "daemon.wsm.set_merge_queue_paused"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "paused": pause != nil}
@@ -1288,9 +1286,8 @@ func (s *store) MergeQueuePaused(ctx context.Context, repo RepoKey) (bool, error
 // a zero At and an unrecorded pauser.
 func (s *store) MergeQueuePause(ctx context.Context, repo RepoKey) (*MergeQueuePause, error) {
 	const op = "daemon.wsm.merge_queue_pause"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return nil, err
 	}
 	var pause *MergeQueuePause

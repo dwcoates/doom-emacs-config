@@ -87,9 +87,8 @@ func (s *store) MergeWorkspaceFor(ctx context.Context, request DetachedMergeID) 
 // workspace (the hand-off is done).
 func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requester WorkspaceID, request DetachedMergeID, mergeWS WorkspaceID, branch, pick string, at time.Time) error {
 	const op = "daemon.wsm.hand_off_detached_merge"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(requester)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(requester)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "requester": string(requester), "request": string(request), "merge_workspace": string(mergeWS), "branch": branch}

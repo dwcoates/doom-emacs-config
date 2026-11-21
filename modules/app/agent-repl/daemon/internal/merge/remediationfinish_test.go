@@ -824,3 +824,30 @@ func TestAFinishServesWhatItsCheckHoldsItFor(t *testing.T) {
 		})
 	}
 }
+
+func TestARemediationWhoseLandingWentUnrecordedStillDeploysAndIsRecorded(t *testing.T) {
+	// Arrange: land-direct.sh landed the branch, but its report did not
+	// reach the daemon's record.
+	h := finishing(t)
+	h.git.mu.Lock()
+	h.hooks.exits["feature"] = landDirectUnrecorded
+	h.git.mu.Unlock()
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FinishRemediation: %v", err)
+	}
+	if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationDeploying || f.LandedHead != tipAfter {
+		t.Fatalf("finish %+v, want it deploying having landed %s", f, tipAfter)
+	}
+	if landings := landingsOf(t, h, mediationKey(h)); len(landings) != 1 || landings[0].Path != wsm.LandingDeployMediator || landings[0].Head != tipAfter {
+		t.Fatalf("landings %+v, want the mediator's landing of %s recorded by the finish", landings, tipAfter)
+	}
+	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opRemediationFinish,
+		Message: "the remediation's direct landing landed but its report was not recorded; the finish records it"}); !ok {
+		t.Fatalf("no ERROR naming the unrecorded report in %+v", h.logs.Records())
+	}
+}

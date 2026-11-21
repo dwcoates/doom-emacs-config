@@ -131,9 +131,8 @@ type DeployMediator struct {
 // DeployMediatorOf answers REPO's deploy mediator, and whether it has one.
 func (s *store) DeployMediatorOf(ctx context.Context, repo RepoKey) (DeployMediator, bool, error) {
 	const op = "daemon.wsm.deploy_mediator_of"
-	repo, err := normalizeRepoKey(repo)
+	repo, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return DeployMediator{}, false, err
 	}
 	var (
@@ -181,10 +180,9 @@ func (s *store) MediatorRepoOf(ctx context.Context, ws WorkspaceID) (RepoKey, bo
 // any mediator the queue had.
 func (s *store) RecordDeployMediator(ctx context.Context, repo RepoKey, ws WorkspaceID) error {
 	const op = "daemon.wsm.record_deploy_mediator"
-	repo, err := normalizeRepoKey(repo)
 	fields := dlog.Context{"repo": string(repo), "workspace": string(ws)}
+	repo, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return err
 	}
 	if repo == "" || ws == "" {
@@ -206,9 +204,8 @@ func (s *store) RecordDeployMediator(ctx context.Context, repo RepoKey, ws Works
 // recorded is briefed.
 func (s *store) MarkMediatorBriefed(ctx context.Context, repo RepoKey) error {
 	const op = "daemon.wsm.mark_mediator_briefed"
-	repo, err := normalizeRepoKey(repo)
+	repo, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return err
 	}
 	return s.write(ctx, op, dlog.Context{"repo": string(repo)}, func(ctx context.Context, tx *sql.Tx) error {
@@ -285,10 +282,9 @@ const (
 // deploy's check takes no ending of an older one.
 func (s *store) RecordMediationEnding(ctx context.Context, repo RepoKey, owed time.Time, ending DeployEnding) (bool, error) {
 	const op = "daemon.wsm.record_mediation_ending"
-	repo, err := normalizeRepoKey(repo)
 	fields := dlog.Context{"repo": string(repo), "owed_at": nanos(owed), "ending": string(ending)}
+	repo, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return false, err
 	}
 	switch ending {

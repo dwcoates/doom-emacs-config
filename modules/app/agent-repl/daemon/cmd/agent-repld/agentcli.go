@@ -216,6 +216,8 @@ var cliNouns = map[string]map[string]cliCommand{
 	},
 	mergeQueueNoun: {
 		"status":             {usage: "status [-repository here|DIR]", run: queueStatus},
+		"landings":           {usage: "landings -repository here|DIR -since WHEN [-until WHEN]", run: queueLandings},
+		"record-landing":     {usage: "record-landing -repository DIR -branch BRANCH -head COMMIT (land-direct.sh's report; the caller is the workspace whose worktree it runs in)", run: queueRecordLanding},
 		"dequeue":            {usage: "dequeue MERGE|here", run: queueDequeue},
 		"move-up":            {usage: "move-up MERGE|here", run: queueMove(true)},
 		"move-down":          {usage: "move-down MERGE|here", run: queueMove(false)},
@@ -1690,11 +1692,10 @@ func workspaceFind(c *cliCall, args []string) int {
 		if bound.value == "" {
 			continue
 		}
-		at, err := parseWhen(bound.value, c.deps.now())
-		if err != nil {
-			return c.usageFailed("-%s: %v", bound.flag, err)
+		ms, ok := c.whenFlag(bound.flag, bound.value)
+		if !ok {
+			return exitFailure
 		}
-		ms := at.UnixMilli()
 		*bound.into = &ms
 	}
 	if window.SinceMs != nil || window.UntilMs != nil {
@@ -1734,6 +1735,17 @@ func workspaceFind(c *cliCall, args []string) int {
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.FindWorkspacesResponse) (string, error) {
 		return describeFindRefusal(msg.GetError())
 	})
+}
+
+// whenFlag reads time flag -FLAG's VALUE (parseWhen) as epoch ms, a value
+// it cannot read failing the call as a usage error naming the flag.
+func (c *cliCall) whenFlag(flag, value string) (int64, bool) {
+	at, err := parseWhen(value, c.deps.now())
+	if err != nil {
+		c.usageFailed("-%s: %v", flag, err)
+		return 0, false
+	}
+	return at.UnixMilli(), true
 }
 
 // parseWhen reads a time flag: an age counted back from NOW (a Go duration
@@ -2286,6 +2298,88 @@ func queueStatus(c *cliCall, args []string) int {
 	resp, err := c.client.GetMergeQueueStatus(c.ctx, connect.NewRequest(&agentreplv1.GetMergeQueueStatusRequest{Repository: scope}))
 	return answerDescribed(c, resp, err, func(msg *agentreplv1.GetMergeQueueStatusResponse) (string, error) {
 		return describeQueueStatusRefusal(msg.GetError())
+	})
+}
+
+// queueLandings prints what landed on one repository's main branch in a
+// window (agentrepl.v1.ListMergeLandings): the merges through its queue, and
+// apart from them every landing made otherwise, each list with its count.
+func queueLandings(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	repository := fs.String("repository", "", "here, or a main checkout")
+	since := fs.String("since", "", "the window's start: an age (90m, 36h, 7d) or a date (2026-10-20, RFC 3339)")
+	until := fs.String("until", "", "the window's end, spelled as -since is; unset is now")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	if *repository == "" {
+		return c.usageFailed("-repository is required: here, or a main checkout")
+	}
+	if *since == "" {
+		return c.usageFailed("-since is required: an age (90m, 36h, 7d) or a date (2026-10-20, RFC 3339)")
+	}
+	from, ok := c.whenFlag("since", *since)
+	if !ok {
+		return exitFailure
+	}
+	req := &agentreplv1.ListMergeLandingsRequest{SinceMs: from}
+	if *until != "" {
+		to, ok := c.whenFlag("until", *until)
+		if !ok {
+			return exitFailure
+		}
+		req.UntilMs = &to
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	if req.Repository, ok = c.repository(*repository); !ok {
+		return exitFailure
+	}
+	resp, err := c.client.ListMergeLandings(c.ctx, connect.NewRequest(req))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.ListMergeLandingsResponse) (string, error) {
+		return describeLandingsRefusal(msg.GetError())
+	})
+}
+
+// queueRecordLanding reports a landing land-direct.sh made to the daemon,
+// which records it under the path its own state names
+// (agentrepl.v1.RecordDirectLanding). The caller is the workspace whose
+// worktree the command runs in, none outside every workspace's.
+func queueRecordLanding(c *cliCall, args []string) int {
+	fs, stateDir := c.flags()
+	repository := fs.String("repository", "", "the main checkout landed on")
+	branch := fs.String("branch", "", "the branch that landed")
+	head := fs.String("head", "", "the main branch's commit once it landed, in full")
+	positionals, ok := c.parse(fs, args)
+	if !ok {
+		return exitFailure
+	}
+	if len(positionals) != 0 {
+		return c.usageFailed("nothing is positional")
+	}
+	for _, required := range []struct{ flag, value string }{{"repository", *repository}, {"branch", *branch}, {"head", *head}} {
+		if required.value == "" {
+			return c.usageFailed("-%s is required", required.flag)
+		}
+	}
+	if !c.dial(*stateDir) {
+		return exitFailure
+	}
+	req := &agentreplv1.RecordDirectLandingRequest{Branch: *branch, LandedHead: *head}
+	if req.Repository, ok = c.repository(*repository); !ok {
+		return exitFailure
+	}
+	if req.Caller, ok = c.callerIfAny(); !ok {
+		return exitFailure
+	}
+	resp, err := c.client.RecordDirectLanding(c.ctx, connect.NewRequest(req))
+	return answerDescribed(c, resp, err, func(msg *agentreplv1.RecordDirectLandingResponse) (string, error) {
+		return describeRecordLandingRefusal(msg.GetError())
 	})
 }
 

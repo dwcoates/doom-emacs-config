@@ -2,6 +2,7 @@ package wsm
 
 import (
 	"agent-repld/internal/dlog"
+	"agent-repld/internal/sourcescan"
 	"context"
 	"database/sql"
 	"errors"
@@ -2909,5 +2910,86 @@ func TestRequeuePausedMergeRefusesAMergeNotAdmittedAndChangesNothing(t *testing.
 	// caller owns the error's account.
 	if _, ok := dlog.FindRecord(logs.Records(), dlog.RecordQuery{Operation: "daemon.wsm.requeue_paused_merge", Message: "the write named no such record"}); !ok {
 		t.Fatalf("no daemon.wsm.requeue_paused_merge record of the refusal: %+v", logs.Records())
+	}
+}
+
+func TestNormalizedRepoKeyAnswersANormalizableKeyWithoutARecord(t *testing.T) {
+	// Arrange
+	s, log := testStore(t)
+	dir := t.TempDir()
+	want, err := normalizeRepoKey(RepoKey(dir))
+	if err != nil {
+		t.Fatalf("normalizeRepoKey(%q): %v", dir, err)
+	}
+
+	// Act
+	got, err := s.normalizedRepoKey("daemon.wsm.test_op", RepoKey(dir), dlog.Context{"repo": dir})
+
+	// Assert
+	if err != nil {
+		t.Fatalf("normalizedRepoKey: %v", err)
+	}
+	if got != want {
+		t.Errorf("normalizedRepoKey = %q, want %q", got, want)
+	}
+	if errs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "error"}); len(errs) != 0 {
+		t.Errorf("error records = %+v, want none", errs)
+	}
+}
+
+func TestNormalizedRepoKeyRecordsAKeyThatCannotBeNormalizedOnce(t *testing.T) {
+	tests := []struct {
+		name   string
+		repo   RepoKey
+		op     string
+		fields dlog.Context
+	}{
+		{name: "empty key", repo: "", op: "daemon.wsm.empty_op", fields: dlog.Context{"repo": "", "workspace": "ws-1"}},
+		{name: "empty key with other fields", repo: "", op: "daemon.wsm.other_op", fields: dlog.Context{"repo": "", "problems": 3}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			s, log := testStore(t)
+
+			// Act
+			got, err := s.normalizedRepoKey(tt.op, tt.repo, tt.fields)
+
+			// Assert
+			if err == nil {
+				t.Fatalf("normalizedRepoKey(%q) = %q, want an error", tt.repo, got)
+			}
+			if got != "" {
+				t.Errorf("normalizedRepoKey key = %q, want empty", got)
+			}
+			errs := dlog.FilterRecords(log.Records(), dlog.RecordQuery{Level: "error"})
+			if len(errs) != 1 {
+				t.Fatalf("error records = %+v, want exactly one", errs)
+			}
+			rec := errs[0]
+			if rec.Operation != tt.op || rec.Message != "refused a merge queue key that cannot be normalized" {
+				t.Errorf("record = %s %q, want %s with the refusal message", rec.Operation, rec.Message, tt.op)
+			}
+			for k, v := range tt.fields {
+				if rec.Context[k] != v {
+					t.Errorf("record context[%q] = %v, want %v", k, rec.Context[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestRepoKeyRefusalIsRecordedOnlyByTheHelper fails on a hand-rolled site: the
+// refusal message exists once, inside normalizedRepoKey.
+func TestRepoKeyRefusalIsRecordedOnlyByTheHelper(t *testing.T) {
+	// Arrange
+	const message = "refused a merge queue key that cannot be normalized"
+
+	// Act
+	sites := sourcescan.Sites(t, message)
+
+	// Assert
+	if want := []string{"mergequeue.go"}; !slices.Equal(sites, want) {
+		t.Errorf("files recording %q = %v, want %v (only normalizedRepoKey records it)", message, sites, want)
 	}
 }

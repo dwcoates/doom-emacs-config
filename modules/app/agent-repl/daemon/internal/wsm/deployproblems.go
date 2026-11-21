@@ -115,9 +115,8 @@ type WindowGroup struct {
 // DeployProblems answers every problem REPO's deploy checks keep.
 func (s *store) DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProblem, error) {
 	const op = "daemon.wsm.deploy_problems"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return nil, err
 	}
 	var out []DeployProblem
@@ -148,10 +147,9 @@ func (s *store) DeployProblems(ctx context.Context, repo RepoKey) ([]DeployProbl
 // findings is refused and writes nothing.
 func (s *store) TakeOnDeployProblems(ctx context.Context, repo RepoKey, keys []ProblemKey, findings string, at time.Time) error {
 	const op = "daemon.wsm.take_on_deploy_problems"
-	key, err := normalizeRepoKey(repo)
 	fields := dlog.Context{"repo": string(repo), "problems": len(keys)}
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return err
 	}
 	if len(keys) == 0 || strings.TrimSpace(findings) == "" || at.IsZero() {
@@ -183,10 +181,9 @@ func (s *store) TakeOnDeployProblems(ctx context.Context, repo RepoKey, keys []P
 // mediator's fix deployed. It answers how many it marked.
 func (s *store) FixDeployProblems(ctx context.Context, repo RepoKey, at time.Time) (int, error) {
 	const op = "daemon.wsm.fix_deploy_problems"
-	key, err := normalizeRepoKey(repo)
 	fields := dlog.Context{"repo": string(repo)}
+	key, err := s.normalizedRepoKey(op, repo, fields)
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(fields, err))
 		return 0, err
 	}
 	if at.IsZero() {
@@ -211,9 +208,8 @@ func (s *store) FixDeployProblems(ctx context.Context, repo RepoKey, at time.Tim
 // the end of the last window an intake was told, false before any.
 func (s *store) CheckedThrough(ctx context.Context, repo RepoKey) (time.Time, bool, error) {
 	const op = "daemon.wsm.checked_through"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return time.Time{}, false, err
 	}
 	var through sql.NullInt64
@@ -259,9 +255,8 @@ func (s *store) RecordMediationWindow(ctx context.Context, repo RepoKey, owed ti
 // is a broken store, refused at ERROR.
 func (s *store) MediationWindowOf(ctx context.Context, repo RepoKey) (CheckWindow, bool, error) {
 	const op = "daemon.wsm.mediation_window_of"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return CheckWindow{}, false, err
 	}
 	var raw string

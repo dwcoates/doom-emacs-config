@@ -399,6 +399,18 @@ func (o *orchestrator) queueKeyOf(ctx context.Context, op, what string, scope Re
 	return key, err
 }
 
+// readScopedRepository is scopedRepository for a read that owns its
+// failure's record: a resolution that failed for any reason but a refusal
+// (the registry or the checkout would not read) is recorded under OP at
+// ERROR, naming the scope; a refusal was recorded by scopedRepository.
+func (o *orchestrator) readScopedRepository(ctx context.Context, op, what string, scope RepositoryScope) (wsm.Repository, wsm.RepoKey, error) {
+	repository, key, err := o.scopedRepository(ctx, op, what, scope)
+	if _, refused := Refused(err); err != nil && !refused {
+		o.deps.Log.Global().Error(op, "could not resolve the scoped repository's queue key", dlog.WithCause(dlog.Context{"repository": string(scope.ID), "dir": scope.Dir}, err))
+	}
+	return repository, key, err
+}
+
 // scopedRepository is queueKeyOf's resolution, answering the registered
 // repository SCOPE names as well as its queue key.
 func (o *orchestrator) scopedRepository(ctx context.Context, op, what string, scope RepositoryScope) (wsm.Repository, wsm.RepoKey, error) {

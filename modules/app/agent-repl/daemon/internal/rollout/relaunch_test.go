@@ -1986,3 +1986,49 @@ func TestShimOutcomeReadsTheRegistrysDecision(t *testing.T) {
 		})
 	}
 }
+
+func TestAnUnansweredStandDownWhoseShimLeftIsRecordedByWhyItsCallFailed(t *testing.T) {
+	tests := []struct {
+		name      string
+		callErr   error
+		wantLevel string
+		wantMsg   string
+	}{
+		{name: "a call cut by the stand-down this daemon ordered is the shim obeying, at INFO",
+			callErr: fmt.Errorf("%w: %w", shimclient.ErrStandDownOrdered, errFake), wantLevel: "info",
+			wantMsg: "the shim took the unforced stand-down and left before its answer arrived; the gate is passed"},
+		{name: "any other failed call is a fault, at WARN", callErr: errFake, wantLevel: "warn",
+			wantMsg: "the unforced stand-down call failed, but the shim left inside the window; the gate is passed"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws, _ := h.workspace(t)
+			old := h.fleet.live[ws]
+			old.killErr = tt.callErr
+			done := make(chan error, 1)
+
+			// Act
+			if _, err := h.c.BounceShim(context.Background(), ws, ReasonBuildStale, false, nil, func(err error) { done <- err }); err != nil {
+				t.Fatalf("BounceShim: %v", err)
+			}
+			h.clock.awaitArmed(t, standDownWindow)
+			old.Reap()
+
+			// Assert
+			if err := awaitBounce(t, h, done); err != nil {
+				t.Fatalf("done = %v, want the bounce finished past the gate", err)
+			}
+			found := false
+			for _, r := range records(h.log, opRelaunch) {
+				if r.Message == tt.wantMsg {
+					found = r.Level == tt.wantLevel
+				}
+			}
+			if !found {
+				t.Fatalf("records = %+v, want %q at %s", records(h.log, opRelaunch), tt.wantMsg, tt.wantLevel)
+			}
+		})
+	}
+}

@@ -106,6 +106,13 @@ func (a QueueOfferAnswer) String() string {
 
 // Orchestrator is the merge queue's whole surface.
 type Orchestrator interface {
+	// RecordDirectLanding records a landing land-direct.sh made on a
+	// repository's main branch, classified by the daemon's own state, and
+	// answers the path recorded (landings.go).
+	RecordDirectLanding(ctx context.Context, report DirectLanding) (wsm.LandingPath, error)
+	// Landings answers the scoped repository's landings in [since, until],
+	// the queue's apart from every other (landings.go).
+	Landings(ctx context.Context, scope RepositoryScope, since, until time.Time) (LandingsWindow, error)
 	// HoldTargetForSync holds the target of the repository holding DIR for
 	// a main sync (synchold.go): held only while no merge of the repository
 	// is in line or running, and admitting none until the answered release

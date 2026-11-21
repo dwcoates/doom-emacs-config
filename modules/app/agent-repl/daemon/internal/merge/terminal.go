@@ -114,6 +114,7 @@ func (r *run) concludedTerminal(ctx context.Context, log dlog.Logger, op string,
 		r.head(landedHead{success: r.success(endedMS, out), version: headVersion(out.version)})
 		r.concluded(MergeFacts{State: StateMerged})
 		r.stampClosed(ctx, log, op, landedCount(out))
+		r.recordQueueLanding(ctx, out)
 		deploy := r.landingDeploy(ctx, out)
 		if deploy == LandingDeployOwed {
 			r.recordUndeployed(ctx, log, out)

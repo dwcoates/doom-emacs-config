@@ -14,8 +14,10 @@
 #   it into REPO's main branch in its main worktree (one --no-ff merge
 #   commit), append LINE to the repository's remediation changelog (committed
 #   on main), tag main with the next version (PART is minor or patch; LINE is
-#   the tag's message) and print the new head and its version. PART is `none`
-#   only for a repository whose lifecycle config versions nothing.
+#   the tag's message), report the landing to the daemon, which records the
+#   path it took (lib-land-record.sh), and print the new head and its version.
+#   PART is `none` only for a repository whose lifecycle config versions
+#   nothing.
 #
 #   ONE BRANCH A LANDING: the suite passed on BRANCH's own tree, which is
 #   what its merge lands only while it is the one branch merged.
@@ -27,10 +29,14 @@
 #   3  PART does not match whether the repository is versioned
 #   4  the gate refused the branch (why is printed); nothing was merged
 #   2  usage or operational error
+#   5  landed, but the daemon did not record the landing
+#      (lib-land-record.sh); the command that records it is printed
 set -uo pipefail
 
 # shellcheck source=lib-land-gate.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib-land-gate.sh"
+# shellcheck source=lib-land-record.sh
+source "$(dirname "${BASH_SOURCE[0]}")/lib-land-record.sh"
 
 die() { echo "land-direct: $*" >&2; exit 2; }
 log() { echo "[land-direct] $*" >&2; }
@@ -91,6 +97,11 @@ else
   log "the repository keeps no remediation changelog; the line rides the version tag only"
 fi
 
+# THE LANDING'S RECORD (lib-land-record.sh), once main stands at the head
+# the landing ends on: the tag below moves no branch.
+record=0
+unrecorded=$(land_record "$main" "$branch") || record=$?
+
 version=""
 if [[ "$part" != none ]]; then
   previous=$(git -C "$main" tag --merged HEAD | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -t. -k1,1n -k2,2n -k3,3n | tail -1)
@@ -101,3 +112,7 @@ if [[ "$part" != none ]]; then
   log "tagged $target $version (from $previous)"
 fi
 echo "$(git -C "$main" rev-parse --short HEAD) ${version:-unversioned}"
+if (( record != 0 )); then
+  echo "land-direct: $unrecorded" >&2
+  exit "$LAND_RECORD_UNRECORDED"
+fi

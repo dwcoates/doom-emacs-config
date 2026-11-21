@@ -86,9 +86,8 @@ var errResolvedRebaseAside = errors.New("wsm: only a merge returning from resolv
 // ErrNotFound.
 func (s *store) ClearResolvedRebase(ctx context.Context, repo RepoKey, id WorkspaceID) (bool, error) {
 	const op = "daemon.wsm.clear_resolved_rebase"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return false, err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id)}

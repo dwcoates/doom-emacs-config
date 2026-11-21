@@ -154,7 +154,31 @@ Either kind:
 
 - `merge-queue status [-repository here|DIR]` reads every queue, or one. Each
   queue's `offQueue` lists the merges that left it without landing, with name,
-  branch, kind and cause.
+  branch, kind and cause, and its `size` counts the queue now: `inQueue`
+  (running, waiting and out of line together), `running`, `waiting`,
+  `outOfLine` and `offQueue`.
+- `merge-queue landings -repository here|DIR -since WHEN [-until WHEN]`
+  answers what landed on the repository's main branch in the window, from the
+  record the daemon writes at each landing naming its path. WHEN is an age
+  (`90m`, `36h`, `7d`), a date (`2026-11-20`, local midnight) or an RFC 3339
+  instant; an unset `-until` is now; both edges are inclusive.
+  - `throughQueue` lists, with its `count`, the merges the queue landed: a
+    finish, a one-shot's, an async merge.
+  - `otherwise` lists, with its `count`, every other landing, each with its
+    `path`: `queueBypass`, `deployMediator`, or `direct` (`land-direct.sh` run
+    by a caller holding neither role).
+  - `land-direct.sh` records each landing it makes itself, with
+    `merge-queue record-landing -repository DIR -branch BRANCH -head COMMIT`
+    from the caller's worktree. Run it by hand only as the one command the
+    script prints when it exits 5, a landing the daemon did not record.
+  - CRITICAL: "merged through the queue" is the `throughQueue` list ONLY.
+    Report the `otherwise` list separately, and NEVER fold it into the
+    queue's count.
+  - A `coverage` of `partial` means recording began after the window's start,
+    at `recordedSinceMs`: the lists hold only the landings since then. Say so
+    in the answer; NEVER count commits on the main branch to fill the gap.
+  - NEVER count `merge(<branch>): ...` commits or grep logs to answer how
+    many landed.
 - `merge-queue dequeue MERGE`, `merge-queue move-up MERGE` and
   `merge-queue move-down MERGE` take a merge off the queue or move it one
   place. MERGE is the name `merge-queue status` lists it under (an async

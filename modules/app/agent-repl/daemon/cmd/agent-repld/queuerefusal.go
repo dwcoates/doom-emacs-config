@@ -26,6 +26,30 @@ func describeQueueStatusRefusal(e *agentreplv1.GetMergeQueueStatusError) (string
 	return "", undescribed("reading the merge queues", e)
 }
 
+// describeLandingsRefusal says in one plain sentence why a repository's
+// landings were not read. Every ListMergeLandingsError arm has its own
+// sentence.
+func describeLandingsRefusal(e *agentreplv1.ListMergeLandingsError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.ListMergeLandingsError_UnknownRepository:
+		return noRepositoryFlag, nil
+	}
+	return "", undescribed("reading the landings", e)
+}
+
+// describeRecordLandingRefusal says in one plain sentence why a direct
+// landing was not recorded. Every RecordDirectLandingError arm has its own
+// sentence.
+func describeRecordLandingRefusal(e *agentreplv1.RecordDirectLandingError) (string, error) {
+	switch e.GetCause().(type) {
+	case *agentreplv1.RecordDirectLandingError_UnknownRepository:
+		return noRepositoryFlag, nil
+	case *agentreplv1.RecordDirectLandingError_UnknownCaller:
+		return "the workspace this command runs in was closed since it was located, so the landing cannot name it", nil
+	}
+	return "", undescribed("recording the landing", e)
+}
+
 // describeRequeueRefusal says in one plain sentence why the merge of WS was
 // not put back in line. Every RequeueMergeError arm has its own sentence.
 func describeRequeueRefusal(ws string, e *agentreplv1.RequeueMergeError) (string, error) {

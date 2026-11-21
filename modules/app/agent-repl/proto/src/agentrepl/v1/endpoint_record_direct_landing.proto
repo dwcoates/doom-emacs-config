@@ -1,0 +1,58 @@
+// endpoint_record_direct_landing.proto — RecordDirectLanding: land-direct.sh's
+// report of a landing it made on a repository's main branch, outside the
+// merge queue. AGENT API section.
+//
+// THE DAEMON CLASSIFIES THE PATH FROM ITS OWN STATE, never from the caller's
+// say: a branch the repository's deploy mediator stands on is the mediator's
+// landing whoever ran the script, a caller holding the repository's queue
+// bypass mode made a queue-bypass landing, and any other caller a direct one
+// (agentrepl.v1.MergeLandingOtherwisePath). A second report of the same head
+// keeps the first record, so the mediator's landing, which the daemon's own
+// finish also records, is counted once.
+
+syntax = "proto3";
+
+package agentrepl.v1;
+
+import "agentrepl/v1/merge_landing.proto";
+import "workspace/v1/workspace.proto";
+
+option go_package = "agentrepl/proto/agentrepl/v1;agentreplv1";
+
+message RecordDirectLandingRequest {
+  // The repository landed on. REQUIRED.
+  workspace.v1.RepositoryRef repository = 1;
+  // The branch that landed. REQUIRED, non-blank.
+  string branch = 2;
+  // The main branch's commit once the landing was done, in full. REQUIRED,
+  // non-blank.
+  string landed_head = 3;
+  // The workspace that ran the landing: the one whose worktree the script
+  // ran in. UNSET when it ran in no workspace's worktree.
+  optional workspace.v1.WorkspaceRef caller = 4;
+}
+
+// THE ARM IS THE OUTCOME.
+message RecordDirectLandingResponse {
+  oneof result {
+    RecordDirectLandingSuccess success = 1;
+    RecordDirectLandingError error = 2;
+  }
+}
+// The landing is recorded (or was already).
+message RecordDirectLandingSuccess {
+  // The path the daemon recorded it under.
+  MergeLandingOtherwisePath path = 1;
+}
+message RecordDirectLandingError {
+  oneof cause {
+    // `repository` names a RepositoryRef the daemon's registry does not hold.
+    RecordDirectLandingUnknownRepository unknown_repository = 1;
+    // `caller` names a workspace the daemon's registry does not hold.
+    RecordDirectLandingUnknownCaller unknown_caller = 2;
+  }
+}
+// Empty: the echoed ref is the only identity involved.
+message RecordDirectLandingUnknownRepository {}
+// Empty: the echoed ref is the only identity involved.
+message RecordDirectLandingUnknownCaller {}

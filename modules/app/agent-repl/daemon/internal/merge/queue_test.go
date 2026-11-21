@@ -18,6 +18,7 @@ import (
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
+	"agent-repld/internal/sourcescan"
 	"agent-repld/internal/wsm"
 )
 
@@ -3168,5 +3169,52 @@ func TestAMergeToResumeBehindAHeadTheRestartSentBackGoesBackToItsPlace(t *testin
 	h.o.mu.Unlock()
 	if still {
 		t.Fatal("the merge behind is still remembered as a resume")
+	}
+}
+
+func TestReadScopedRepositoryRecordsOnlyAFailureThatIsNoRefusal(t *testing.T) {
+	const message = "could not resolve the scoped repository's queue key"
+	tests := []struct {
+		name      string
+		arrange   func(h *harness)
+		scope     RepositoryScope
+		wantError bool
+	}{
+		{name: "a registered repository resolves with no record", scope: RepositoryScope{ID: theRepository}},
+		{name: "an unknown repository is a refusal recorded where it was refused", scope: RepositoryScope{ID: "repo-unknown"}},
+		{name: "a checkout that will not read is recorded at ERROR", scope: RepositoryScope{ID: theRepository}, wantError: true,
+			arrange: func(h *harness) { h.git.commonDirErr = errors.New("no such checkout") }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			h.register(theWorkspace, "the-workspace")
+			if tt.arrange != nil {
+				tt.arrange(h)
+			}
+
+			// Act
+			_, _, err := h.o.readScopedRepository(context.Background(), "daemon.merge.test_op", "a test read", tt.scope)
+
+			// Assert
+			rec, recorded := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.merge.test_op", Message: message})
+			if recorded != tt.wantError || (tt.wantError && (err == nil || rec.Context["repository"] != string(theRepository))) {
+				t.Fatalf("err %v, ERROR recorded %v (%+v); want recorded %v naming the scope", err, recorded, rec, tt.wantError)
+			}
+		})
+	}
+}
+
+func TestEveryScopedReadSharesReadScopedRepository(t *testing.T) {
+	// Arrange
+	const message = "could not resolve the scoped repository's queue key"
+
+	// Act
+	count := sourcescan.Count(t, message)
+
+	// Assert
+	if count != 1 {
+		t.Fatalf("%q is written %d times; want it only in readScopedRepository, so no scoped read records its failure by hand", message, count)
 	}
 }

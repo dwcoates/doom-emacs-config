@@ -264,9 +264,8 @@ func joinPaths(a, b []string) string {
 // its failed gate (2026-11-15, deploy-escalation-20261115-174608).
 func (s *store) EndRemediationFinishesOf(ctx context.Context, repo RepoKey) (int, error) {
 	const op = "daemon.wsm.end_remediation_finishes_of"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return 0, err
 	}
 	n := 0

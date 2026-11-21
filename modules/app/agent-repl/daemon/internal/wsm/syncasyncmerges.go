@@ -136,9 +136,8 @@ func (s *store) ReservedMergeNames(ctx context.Context) (map[string]WorkspaceID,
 // not begun is refused: the caller lost track of it.
 func (s *store) StartMergePick(ctx context.Context, repo RepoKey, id WorkspaceID, ledger LeaseID, turn TurnID, at time.Time) error {
 	const op = "daemon.wsm.start_merge_pick"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo), "workspace": string(id)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo), "workspace": string(id)}, err))
 		return err
 	}
 	fields := dlog.Context{"repo": string(key), "workspace": string(id), "ledger": string(ledger), "turn": string(turn), "started_at": at}

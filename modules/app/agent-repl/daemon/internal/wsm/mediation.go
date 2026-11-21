@@ -165,9 +165,8 @@ func (m Mediation) Prompted() bool { return m.PromptedAt != nil }
 // deploy and ended the chain while the remediation's fix stood unlanded).
 func (s *store) OweMediation(ctx context.Context, repo RepoKey, at time.Time, version string) (*ReplacedMediation, error) {
 	const op = "daemon.wsm.owe_mediation"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return nil, err
 	}
 	if at.IsZero() {
@@ -294,9 +293,8 @@ func scanMediation(repo string, row *sql.Row) (*Mediation, error) {
 // MediationOf answers the mediation REPO owes, nil when it owes none.
 func (s *store) MediationOf(ctx context.Context, repo RepoKey) (*Mediation, error) {
 	const op = "daemon.wsm.mediation_of"
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return nil, err
 	}
 	var out *Mediation
@@ -368,9 +366,8 @@ func (s *store) ReleaseMediation(ctx context.Context, repo RepoKey, owed time.Ti
 // leading ARGS before the key and the instant, answering whether a row
 // changed.
 func (s *store) mediationWrite(ctx context.Context, op string, repo RepoKey, owed time.Time, query string, args ...any) (bool, error) {
-	key, err := normalizeRepoKey(repo)
+	key, err := s.normalizedRepoKey(op, repo, dlog.Context{"repo": string(repo)})
 	if err != nil {
-		s.log.Error(op, "refused a merge queue key that cannot be normalized", withError(dlog.Context{"repo": string(repo)}, err))
 		return false, err
 	}
 	changed := false
