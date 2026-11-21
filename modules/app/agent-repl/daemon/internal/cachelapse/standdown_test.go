@@ -172,9 +172,7 @@ func TestAnAdoptedSessionKeepsItsOwnerAcrossAHandover(t *testing.T) {
 
 			// Act: the adoption's session coming up.
 			after.keeper.SessionUp(theWorkspace)
-			for _, e := range after.keeper.take() {
-				after.keeper.apply(context.Background(), e)
-			}
+			after.applyQueued()
 
 			// Assert
 			if got := after.keeper.owners[theWorkspace]; got != want {
@@ -192,9 +190,7 @@ func TestAnAPISettingsVisitIsStoodDownWithNoSwitchAway(t *testing.T) {
 	h.keeper.SettingsVisitStarted(theWorkspace, visitAt)
 
 	// Act: the revival's session comes up.
-	for _, e := range h.keeper.take() {
-		h.keeper.apply(context.Background(), e)
-	}
+	h.applyQueued()
 
 	// Assert
 	if len(h.visitDowns) == 0 || h.visitDowns[len(h.visitDowns)-1] != (cycleCall{ws: theWorkspace, beat: visitAt}) {
@@ -360,9 +356,7 @@ func TestAModeTurnedOffGivesTheSessionItsOwnerAgain(t *testing.T) {
 
 	// Act
 	h.keeper.RemoteControlChanged(theWorkspace)
-	for _, e := range h.keeper.take() {
-		h.keeper.apply(context.Background(), e)
-	}
+	h.applyQueued()
 
 	// Assert
 	if len(h.coldDowns) != 1 {

@@ -73,9 +73,7 @@ func TestTheSessionAnAnswerBringsUpOwesNoKeepalive(t *testing.T) {
 	}
 
 	// Act
-	for _, e := range h.keeper.take() {
-		h.keeper.apply(context.Background(), e)
-	}
+	h.applyQueued()
 	h.keeper.apply(context.Background(), edge{ws: theWorkspace, why: "a session came up"})
 	h.keeper.beatsDue(context.Background())
 
