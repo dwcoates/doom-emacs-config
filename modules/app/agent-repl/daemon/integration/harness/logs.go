@@ -21,6 +21,7 @@ import (
 
 	"agentrepl/logging"
 	workspacev1 "agentrepl/proto/workspace/v1"
+	"agentrepl/testrun/testenv"
 
 	"agent-repld/integration/grantedclock"
 
@@ -562,6 +563,20 @@ func (d *Daemon) UnproducedRequiredWarnings() []string {
 func (d *Daemon) assertNoUnproducedRequiredWarnings() {
 	if stale := d.UnproducedRequiredWarnings(); len(stale) > 0 {
 		d.t.Errorf("RequireWarnings declared %d operations that produced no warning record; trim the declaration: %v", len(stale), stale)
+	}
+}
+
+// countLogRecords tells a test run (testenv.LogRecordsOut) how many log
+// records this Daemon's sweep answers for: everything its test's daemon or
+// view wrote, read again only from where the sweep last read. Only a real
+// test is counted: the owner of a shared daemon (SuiteTB) answers for no one
+// test, and a stand-in (RecordingTB) names a test the run never ran.
+func (d *Daemon) countLogRecords() {
+	if _, real := d.t.(*testing.T); !real || os.Getenv(testenv.LogRecordsOut) == "" {
+		return
+	}
+	if err := testenv.CountLogRecords(os.Getenv, d.t.Name(), len(d.sweptRecords())); err != nil {
+		d.t.Errorf("harness: %v", err)
 	}
 }
 

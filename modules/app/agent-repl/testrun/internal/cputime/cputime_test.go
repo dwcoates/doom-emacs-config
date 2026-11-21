@@ -1,7 +1,6 @@
 package cputime
 
 import (
-	"agentrepl/testrun/internal/cores"
 	"bytes"
 	"context"
 	"errors"
@@ -10,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"agentrepl/testrun/internal/cores"
 	"agentrepl/testrun/internal/run"
 	"agentrepl/testrun/internal/testtimes"
 )
@@ -17,13 +17,13 @@ import (
 // reads scripts a sampler's reads: each read answers the next growth, or the
 // next error; the clock advances one second per read.
 type reads struct {
-	growth []map[string]float64
+	growth []map[string]cores.MarkGrowth
 	errs   []error
 	i      int
 	now    time.Time
 }
 
-func (r *reads) read() (map[string]float64, error) {
+func (r *reads) read() (map[string]cores.MarkGrowth, error) {
 	i := r.i
 	r.i++
 	r.now = r.now.Add(time.Second)
@@ -41,10 +41,10 @@ func TestSamplerKeepsEachOfThisRunsUnitsIntervals(t *testing.T) {
 	// Arrange: the first read is the baseline; another run's unit (8/x) is
 	// on the host too.
 	t0 := time.Unix(1_800_000_000, 0)
-	r := &reads{now: t0, growth: []map[string]float64{
-		{"7/a": 5},
-		{"7/a": 1, "7/b": 0.5, "8/x": 3},
-		{"7/a": 0.25, "7/b": 0},
+	r := &reads{now: t0, growth: []map[string]cores.MarkGrowth{
+		{"7/a": {CPU: 5}},
+		{"7/a": {CPU: 1}, "7/b": {CPU: 0.5}, "8/x": {CPU: 3}},
+		{"7/a": {CPU: 0.25}, "7/b": {CPU: 0}},
 	}}
 	s := newSampler(r, &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
 
@@ -76,7 +76,7 @@ func TestSamplerCountsAFailedReadsIntervalInTheNextAndLogsIt(t *testing.T) {
 	// Arrange
 	t0 := time.Unix(1_800_000_000, 0)
 	r := &reads{now: t0,
-		growth: []map[string]float64{{}, nil, {"7/a": 2}},
+		growth: []map[string]cores.MarkGrowth{{}, nil, {"7/a": {CPU: 2}}},
 		errs:   []error{nil, errors.New("proc_info answered EIO"), nil},
 	}
 	errOut := &bytes.Buffer{}
@@ -111,7 +111,7 @@ func TestSamplerTagsAUnitWithThisRunsPid(t *testing.T) {
 func TestSamplerRunReadsAtEveryTickUntilItsContextEnds(t *testing.T) {
 	// Arrange
 	t0 := time.Unix(1_800_000_000, 0)
-	r := &reads{now: t0, growth: []map[string]float64{{}, {"7/a": 1}, {"7/a": 1}}}
+	r := &reads{now: t0, growth: []map[string]cores.MarkGrowth{{}, {"7/a": {CPU: 1}}, {"7/a": {CPU: 1}}}}
 	ticks := make(chan time.Time)
 	s := newSampler(r, &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
 	s.Ticks = ticks
@@ -128,5 +128,31 @@ func TestSamplerRunReadsAtEveryTickUntilItsContextEnds(t *testing.T) {
 	// Assert
 	if got := s.Take("a"); len(got) != 2 {
 		t.Fatalf("Take(a) = %+v; want two intervals", got)
+	}
+}
+
+func TestSamplerKeepsTheProcessesEachIntervalStarted(t *testing.T) {
+	// Arrange: the second read saw two new processes of a; the third saw one
+	// more that had used no CPU yet.
+	t0 := time.Unix(1_800_000_000, 0)
+	r := &reads{now: t0, growth: []map[string]cores.MarkGrowth{
+		{},
+		{"7/a": {CPU: 1, Started: 2}},
+		{"7/a": {Started: 1}},
+	}}
+	s := newSampler(r, &run.Log{Out: &bytes.Buffer{}, Err: &bytes.Buffer{}})
+
+	// Act
+	for range r.growth {
+		s.read()
+	}
+
+	// Assert
+	want := []testtimes.CPUSlice{
+		{From: t0.Add(time.Second), To: t0.Add(2 * time.Second), CPU: 1, Started: 2},
+		{From: t0.Add(2 * time.Second), To: t0.Add(3 * time.Second), Started: 1},
+	}
+	if got := s.Take("a"); !reflect.DeepEqual(got, want) {
+		t.Fatalf("Take(a) = %+v; want %+v", got, want)
 	}
 }

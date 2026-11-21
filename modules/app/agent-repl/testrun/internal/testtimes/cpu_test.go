@@ -120,3 +120,72 @@ func TestAttributeCPUOfNoTestsIsNothing(t *testing.T) {
 		t.Fatalf("AttributeCPU(no tests) = %v; want nil", err)
 	}
 }
+
+// A SLICE'S PROCESSES ARE SPLIT AS ITS CPU IS: by how long each test ran in
+// it, or by seconds when no test says its start; the remainder slice carries
+// CPU alone.
+func TestAttributeCPUGivesEachTestItsShareOfTheProcessesStarted(t *testing.T) {
+	cases := []struct {
+		name   string
+		tests  []Test
+		slices []CPUSlice
+		unit   float64
+		end    float64
+		want   []float64
+	}{
+		{
+			name:   "tests one after another each take the processes of the slice they ran in",
+			tests:  []Test{{Name: "a", Start: at(0), Seconds: 1}, {Name: "b", Start: at(1), Seconds: 1}},
+			slices: []CPUSlice{{From: at(0), To: at(1), CPU: 1, Started: 3}, {From: at(1), To: at(2), CPU: 1, Started: 1}},
+			unit:   2, end: 2,
+			want: []float64{3, 1},
+		},
+		{
+			name:   "tests side by side share a slice's processes evenly",
+			tests:  []Test{{Name: "a", Start: at(0), Seconds: 1}, {Name: "b", Start: at(0), Seconds: 1}},
+			slices: []CPUSlice{{From: at(0), To: at(1), Started: 3}},
+			unit:   0, end: 1,
+			want: []float64{1.5, 1.5},
+		},
+		{
+			name:   "processes started where no test ran are nobody's",
+			tests:  []Test{{Name: "a", Start: at(1), Seconds: 1}},
+			slices: []CPUSlice{{From: at(0), To: at(1), Started: 4}, {From: at(1), To: at(2), Started: 1}},
+			unit:   0, end: 2,
+			want: []float64{1},
+		},
+		{
+			name:   "the unit's CPU beyond the slices starts no process",
+			tests:  []Test{{Name: "a", Start: at(0), Seconds: 2}},
+			slices: []CPUSlice{{From: at(0), To: at(1), CPU: 1, Started: 2}},
+			unit:   5, end: 2,
+			want: []float64{2},
+		},
+		{
+			name:   "tests that say no start split the processes by their seconds",
+			tests:  []Test{{Name: "a", Seconds: 1}, {Name: "b", Seconds: 3}},
+			slices: []CPUSlice{{From: at(0), To: at(4), CPU: 1, Started: 8}},
+			unit:   1, end: 4,
+			want: []float64{2, 6},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			tests := append([]Test(nil), tc.tests...)
+
+			// Act
+			err := AttributeCPU(tests, tc.slices, tc.unit, at(0), at(tc.end))
+
+			// Assert
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, w := range tc.want {
+				if !tests[i].HasCPU || math.Abs(tests[i].Processes-w) > 1e-9 {
+					t.Fatalf("test %s: processes %v (has %v); want %v", tests[i].Name, tests[i].Processes, tests[i].HasCPU, w)
+				}
+			}
+		})
+	}
+}

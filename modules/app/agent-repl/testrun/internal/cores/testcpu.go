@@ -72,20 +72,51 @@ func (a *TestsCPU) Read() (float64, error) {
 // living marked parent now holds it. The first read only takes the baseline
 // and answers nothing.
 func (a *TestsCPU) ReadByMark() (map[string]float64, error) {
+	growth, err := a.ReadGrowthByMark()
+	if err != nil {
+		return nil, err
+	}
+	cpu := make(map[string]float64, len(growth))
+	for mark, g := range growth {
+		cpu[mark] = g.CPU
+	}
+	return cpu, nil
+}
+
+// MarkGrowth is what one mark's processes did since the last read.
+type MarkGrowth struct {
+	// CPU is the CPU seconds they used, counted as ReadByMark counts it.
+	CPU float64
+	// Started is how many processes carrying the mark this read saw that the
+	// last did not. A process that started and was reaped between two reads
+	// is never seen, so it is not counted here (its CPU still is, through its
+	// parent).
+	Started int
+}
+
+// ReadGrowthByMark is ReadByMark with each mark's started processes beside
+// its CPU. The first read only takes the baseline and answers nothing.
+func (a *TestsCPU) ReadGrowthByMark() (map[string]MarkGrowth, error) {
 	procs, err := a.Scan()
 	if err != nil {
 		return nil, err
 	}
 	now := make(map[procKey]seenProc, len(procs))
 	byPid := make(map[int]procKey, len(procs))
-	growth := map[string]float64{}
+	growth := map[string]MarkGrowth{}
+	add := func(mark string, cpu float64, started int) {
+		g := growth[mark]
+		g.CPU += cpu
+		g.Started += started
+		growth[mark] = g
+	}
 	for _, p := range procs {
 		k := procKey{pid: p.Pid, start: p.Start.UnixNano()}
 		total := p.Own + p.Children
 		if prev, ok := a.seen[k]; ok {
-			growth[p.Mark] += total - prev.total
+			add(p.Mark, total-prev.total, 0)
 		} else if a.primed {
-			growth[p.Mark] += total
+			add(p.Mark, total, 1)
 		}
 		now[k] = seenProc{ppid: p.Ppid, mark: p.Mark, total: total}
 		byPid[p.Pid] = k
@@ -95,7 +126,7 @@ func (a *TestsCPU) ReadByMark() (map[string]float64, error) {
 			continue
 		}
 		if _, parentAlive := byPid[gone.ppid]; parentAlive {
-			growth[gone.mark] -= gone.total
+			add(gone.mark, -gone.total, 0)
 		}
 	}
 	a.seen, a.primed = now, true

@@ -200,3 +200,89 @@ func TestTestsCPUReadByMarkSurfacesAFailedScan(t *testing.T) {
 		t.Fatalf("ReadByMark() = %v; want the scan's failure", err)
 	}
 }
+
+func TestTestsCPUReadGrowthByMarkCountsEachMarksNewProcesses(t *testing.T) {
+	cases := []struct {
+		name  string
+		scans [][]proctable.Usage
+		want  []map[string]MarkGrowth
+	}{
+		{
+			name:  "the first read takes the baseline and counts nothing",
+			scans: [][]proctable.Usage{{marked("a", 10, 1, 5, 0)}},
+			want:  []map[string]MarkGrowth{{}},
+		},
+		{
+			name: "a process seen for the first time is one started under its mark",
+			scans: [][]proctable.Usage{
+				{marked("a", 10, 1, 1, 0)},
+				{marked("a", 10, 1, 1, 0), marked("a", 11, 10, 2, 0), marked("b", 20, 1, 0.5, 0)},
+			},
+			want: []map[string]MarkGrowth{{}, {"a": {CPU: 2, Started: 1}, "b": {CPU: 0.5, Started: 1}}},
+		},
+		{
+			name: "a process seen before is not started again",
+			scans: [][]proctable.Usage{
+				{marked("a", 10, 1, 1, 0)},
+				{marked("a", 10, 1, 1.5, 0)},
+			},
+			want: []map[string]MarkGrowth{{}, {"a": {CPU: 0.5, Started: 0}}},
+		},
+		{
+			name: "a pid reused by a later process starts a new one",
+			scans: [][]proctable.Usage{
+				{marked("a", 10, 1, 1, 0)},
+				{withStart(marked("a", 10, 1, 0.25, 0), 99)},
+			},
+			want: []map[string]MarkGrowth{{}, {"a": {CPU: 0.25, Started: 1}}},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			i := 0
+			a := &TestsCPU{Scan: func() ([]proctable.Usage, error) {
+				s := tc.scans[i]
+				i++
+				return s, nil
+			}}
+
+			for read, want := range tc.want {
+				// Act
+				got, err := a.ReadGrowthByMark()
+
+				// Assert
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(got) != len(want) {
+					t.Fatalf("read %d: ReadGrowthByMark() = %v; want %v", read, got, want)
+				}
+				for mark, w := range want {
+					if g := got[mark]; math.Abs(g.CPU-w.CPU) > 1e-9 || g.Started != w.Started {
+						t.Fatalf("read %d: ReadGrowthByMark() = %v; want %v", read, got, want)
+					}
+				}
+			}
+		})
+	}
+}
+
+// withStart is P started at unix second SEC: a later process given P's pid.
+func withStart(p proctable.Usage, sec int64) proctable.Usage {
+	p.Start = time.Unix(sec, 0)
+	return p
+}
+
+func TestTestsCPUReadGrowthByMarkSurfacesAFailedScan(t *testing.T) {
+	// Arrange
+	a := &TestsCPU{Scan: func() ([]proctable.Usage, error) { return nil, errors.New("proc_info answered EIO") }}
+
+	// Act
+	_, err := a.ReadGrowthByMark()
+
+	// Assert
+	if err == nil || !strings.Contains(err.Error(), "proc_info answered EIO") {
+		t.Fatalf("ReadGrowthByMark() = %v; want the scan's failure", err)
+	}
+}
