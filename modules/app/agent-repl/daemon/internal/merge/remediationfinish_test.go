@@ -851,3 +851,38 @@ func TestARemediationWhoseLandingWentUnrecordedStillDeploysAndIsRecorded(t *test
 		t.Fatalf("no ERROR naming the unrecorded report in %+v", h.logs.Records())
 	}
 }
+
+func TestARestartOfTheTestServiceLeavesARemediationsGateRunning(t *testing.T) {
+	// Arrange: the test service restarts while the remediation's full gate
+	// runs. The gate runs as the daemon's own child, never on the service, so
+	// the restart's hold takes nothing of it off.
+	h := finishing(t)
+	held := make(chan error, 1)
+	h.runner.mu.Lock()
+	h.runner.before = func() {
+		release, err := h.o.TakeTestRunsOff(context.Background())
+		if err == nil {
+			release(nil)
+		}
+		held <- err
+	}
+	h.runner.mu.Unlock()
+
+	// Act
+	err := h.o.FinishRemediation(context.Background(), "ws-fixer", aRemediationPatch)
+
+	// Assert
+	if holdErr := <-held; holdErr != nil {
+		t.Fatalf("TakeTestRunsOff = %v, want the restart held through", holdErr)
+	}
+	if err != nil {
+		t.Fatalf("FinishRemediation: %v", err)
+	}
+	if f := finishOf(t, h); f == nil || f.Step != wsm.RemediationDeploying || len(h.runner.argv) != 1 {
+		t.Fatalf("finish %+v after %d gate runs, want its one gate passed and the fix landed", f, len(h.runner.argv))
+	}
+	if rec, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opTestService,
+		Message: "the test service is restarting: every gate's run is taken off it, and no gate runs on it until it answers again"}); !ok || rec.Context["gates"] != 0 {
+		t.Fatalf("record = %+v (%v), want no gate taken off the service", rec, ok)
+	}
+}

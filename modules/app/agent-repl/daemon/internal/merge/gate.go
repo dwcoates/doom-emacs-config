@@ -322,7 +322,24 @@ func (g *gateRun) link() *frontendv1.FeedMergeTestLog {
 // not be written.
 func (g *gateRun) run(ctx context.Context, dir string, argv, selected []string) (GateResult, error) {
 	for {
-		measured, lost, err := g.runOnService(ctx, dir, argv)
+		// THE RUN IS ON THE TEST SERVICE ONLY WHILE NO RESTART OF IT HOLDS
+		// THE GATES (testservicehold.go): a restart cuts it, and the gate
+		// runs again from its start once the service answers.
+		watch, leave, err := g.enterTestService(ctx)
+		if err != nil {
+			return GateResult{}, err
+		}
+		measured, lost, err := g.runOnService(watch, dir, argv)
+		if err != nil && ctx.Err() == nil && errors.Is(context.Cause(watch), errTestServiceRestart) {
+			err := g.takenOff(ctx)
+			leave()
+			if err != nil {
+				return GateResult{}, err
+			}
+			g.reset()
+			continue
+		}
+		leave()
 		if err != nil {
 			return GateResult{}, err
 		}

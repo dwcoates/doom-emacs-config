@@ -357,6 +357,13 @@ type Orchestrator interface {
 	// ReviewQueues offers every repository with a merge queue to this
 	// daemon's pump, judged from its durable rows (rollout.MergeMover).
 	ReviewQueues(ctx context.Context) error
+	// TakeTestRunsOff takes every gate's run off the test service and holds
+	// every gate off it until the release it answers is called: the daemon's
+	// own restart of the service (deploy.Restarter) runs between the two and
+	// releases the gates once the service answers again, or with why it does
+	// not. A gate it held runs again from its start, spending no fixing
+	// attempt and pausing nothing (testservicehold.go).
+	TakeTestRunsOff(ctx context.Context) (func(answered error), error)
 	// SuspendForRestart brings a workspace's merge to a stopping point for a
 	// RestartWorkspace, exactly as a transfer does, and stops this daemon
 	// admitting any merge of it until ResumeAfterRestart. A merge that is
