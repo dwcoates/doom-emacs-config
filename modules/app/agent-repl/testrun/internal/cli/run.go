@@ -332,7 +332,7 @@ func Run(ctx context.Context, d Deps, a Args) int {
 		ev.PlannedOnly(len(p.Specs))
 		return 0
 	}
-	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, At: d.At, GoCache: d.GoCache, Log: log, Ended: ev.UnitEnded, CPU: d.CPU}
+	runner := &run.Runner{Slots: d.Slots, Cores: d.Cores, Exec: d.Exec, Clock: d.Clock, At: d.At, GoCache: d.GoCache, Log: log, Ended: ev.UnitEnded, CPU: d.CPU, Pid: d.Pid}
 	start := d.Clock.Now()
 	results, suiteResults, runErr := runner.Run(ctx, p.Specs)
 	end := d.Clock.Now()

@@ -28,7 +28,7 @@ type Usage struct {
 	Start time.Time
 	// Mark is the value the process's environment gives the marking
 	// variable, which tells one marked tree from another (a test run's unit
-	// tag, cputime.UnitEnv).
+	// tag, cores.UnitEnv).
 	Mark string
 	// Own is the CPU seconds the process used itself.
 	Own float64

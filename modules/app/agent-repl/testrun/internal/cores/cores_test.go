@@ -109,7 +109,7 @@ func TestCheck(t *testing.T) {
 func TestHoldTakesTheUnitsWidthAndGivesItBack(t *testing.T) {
 	// Arrange
 	log := &recLog{}
-	h := NewHost(t.TempDir(), 3, 19, log)
+	h := NewHost(t.TempDir(), 3, 19, 4242, log)
 
 	// Act
 	release, err := h.Hold("u1", 2, 1)
@@ -134,7 +134,7 @@ func TestHoldTakesTheUnitsWidthAndGivesItBack(t *testing.T) {
 
 func TestHoldStatesTheUnitOnTheLedgerUntilItGivesItsSeatsBack(t *testing.T) {
 	// Arrange
-	h := NewHost(t.TempDir(), 3, 12, &recLog{})
+	h := NewHost(t.TempDir(), 3, 12, 4242, &recLog{})
 	before := time.Now()
 
 	// Act
@@ -152,8 +152,9 @@ func TestHoldStatesTheUnitOnTheLedgerUntilItGivesItsSeatsBack(t *testing.T) {
 	after, err := readLedger(h.Pool.Dir)
 
 	// Assert
-	if len(held) != 1 || held[0].Unit != "u1" || held[0].Rank != 12 || held[0].Width != 2 || held[0].Cores != 1.4 || held[0].Started.Before(before) {
-		t.Fatalf("ledger while held = %+v; want u1 at rank 12, two wide, 1.4 cores, started", held)
+	if len(held) != 1 || held[0].Unit != "u1" || held[0].Rank != 12 || held[0].Width != 2 || held[0].Cores != 1.4 || held[0].Started.Before(before) ||
+		held[0].Tag != UnitTag(4242, "u1") {
+		t.Fatalf("ledger while held = %+v; want u1 at rank 12, two wide, 1.4 cores, started, tagged as run 4242's", held)
 	}
 	if err != nil || len(after) != 0 {
 		t.Fatalf("ledger after release = %+v, %v; want it empty", after, err)
@@ -163,7 +164,7 @@ func TestHoldStatesTheUnitOnTheLedgerUntilItGivesItsSeatsBack(t *testing.T) {
 func TestHoldStatesTheUnitWhileItWaits(t *testing.T) {
 	// Arrange: another unit holds the only seat.
 	log := &recLog{waits: make(chan struct{}, 1)}
-	h := NewHost(t.TempDir(), 1, 19, log)
+	h := NewHost(t.TempDir(), 1, 19, 4242, log)
 	other, err := h.Hold("other", 1, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +205,7 @@ func TestHoldStatesTheUnitWhileItWaits(t *testing.T) {
 
 func TestHoldThatFailsTakesTheUnitOffTheLedger(t *testing.T) {
 	// Arrange: a unit wider than the pool.
-	h := NewHost(t.TempDir(), 1, 19, &recLog{})
+	h := NewHost(t.TempDir(), 1, 19, 4242, &recLog{})
 
 	// Act
 	_, err := h.Hold("wide", 2, 4)
@@ -219,7 +220,7 @@ func TestHoldThatFailsTakesTheUnitOffTheLedger(t *testing.T) {
 func TestHoldWakesTheGovernorAtEachChange(t *testing.T) {
 	// Arrange: the governor's wake FIFO, read without blocking, so each
 	// read answers every wake written before it.
-	h := NewHost(t.TempDir(), 1, 19, &recLog{})
+	h := NewHost(t.TempDir(), 1, 19, 4242, &recLog{})
 	path := filepath.Join(h.Pool.Dir, WakeFile)
 	if err := syscall.Mkfifo(path, 0o644); err != nil {
 		t.Fatal(err)
@@ -261,7 +262,7 @@ func TestHoldWakesTheGovernorAtEachChange(t *testing.T) {
 func TestHoldWaitsForAnotherRunsSeatAndSaysSo(t *testing.T) {
 	// Arrange: another run's unit holds the host's only seat.
 	log := &recLog{waits: make(chan struct{}, 1)}
-	h := NewHost(t.TempDir(), 1, 19, log)
+	h := NewHost(t.TempDir(), 1, 19, 4242, log)
 	other, err := h.Hold("other", 1, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -303,7 +304,7 @@ func TestHoldWaitsForAnotherRunsSeatAndSaysSo(t *testing.T) {
 
 func TestHoldRefusesAUnitWiderThanTheHostsBudget(t *testing.T) {
 	// Arrange
-	h := NewHost(t.TempDir(), 2, 19, &recLog{})
+	h := NewHost(t.TempDir(), 2, 19, 4242, &recLog{})
 
 	// Act
 	release, err := h.Hold("wide", 3, 1)
@@ -350,7 +351,7 @@ func TestRank(t *testing.T) {
 // tests); what Host owns is passing the run's rank through to it.
 func TestHoldTakesSeatsAtTheRunsRank(t *testing.T) {
 	// Arrange: a rank the pool refuses, so only the rank reaching TakeN fails.
-	h := NewHost(t.TempDir(), 1, -1, &recLog{})
+	h := NewHost(t.TempDir(), 1, -1, 4242, &recLog{})
 
 	// Act
 	release, err := h.Hold("u1", 1, 1)

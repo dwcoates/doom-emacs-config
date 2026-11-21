@@ -133,8 +133,10 @@ type Host struct {
 	Pool seats.Pool
 	// Rank is this run's (Rank).
 	Rank int
-	Log  Logger
-	Now  func() time.Time
+	// Pid is this run's process, which names its units' tags (UnitTag).
+	Pid int
+	Log Logger
+	Now func() time.Time
 	// WaitingForCPU, when set, is told a unit begins to wait while the CPU
 	// governor holds units back, and CPUWaitEnded when it has its seats.
 	WaitingForCPU func(id string, state CPUState)
@@ -142,9 +144,10 @@ type Host struct {
 	ledger        *ledger
 }
 
-// NewHost is the host's core pool of budget seats under dir, taken at rank.
-func NewHost(dir string, budget, rank int, log Logger) Host {
-	return Host{Pool: seats.Pool{Dir: dir, Prefix: "core", N: budget, What: "core"}, Rank: rank, Log: log, Now: time.Now, ledger: &ledger{dir: dir}}
+// NewHost is the host's core pool of budget seats under dir, taken at rank
+// by the run whose process is pid.
+func NewHost(dir string, budget, rank, pid int, log Logger) Host {
+	return Host{Pool: seats.Pool{Dir: dir, Prefix: "core", N: budget, What: "core"}, Rank: rank, Pid: pid, Log: log, Now: time.Now, ledger: &ledger{dir: dir}}
 }
 
 // Hold takes width core seats for unit id, which is expected to use cores
@@ -154,7 +157,7 @@ func NewHost(dir string, budget, rank int, log Logger) Host {
 // (ledger.go), and every change wakes the governor. A wait says whether it is
 // for the CPU.
 func (h Host) Hold(id string, width int, cores float64) (func() error, error) {
-	rec := UnitRecord{Unit: id, Rank: h.Rank, Width: width, Cores: cores}
+	rec := UnitRecord{Unit: id, Rank: h.Rank, Width: width, Cores: cores, Tag: UnitTag(h.Pid, id)}
 	path, err := h.ledger.post(rec)
 	if err != nil {
 		return nil, fmt.Errorf("state unit %s on the core ledger: %w", id, err)

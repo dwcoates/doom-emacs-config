@@ -5,6 +5,7 @@
 package run
 
 import (
+	"agentrepl/testrun/internal/cores"
 	"bytes"
 	"context"
 	"fmt"
@@ -157,17 +158,19 @@ type Runner struct {
 	// nil for a unit that never started): a caller streaming the run's
 	// progress (events.Emitter).
 	Ended func(res Result, output []byte)
-	// CPU, when set, tags each unit's process tree and answers the CPU it
-	// used over time, which each of the unit's tests is given its share of
+	// CPU, when set, answers the CPU each unit's tree used over time, which
+	// each of the unit's tests is given its share of
 	// (testtimes.AttributeCPU). Nil measures no test's CPU.
 	CPU UnitCPU
+	// Pid is this run's process, whose units' trees the runner tags
+	// (cores.UnitEnvEntry): EVERY UNIT IS TAGGED, measured or not, since the
+	// CPU governor tells a just-started unit's use apart by its tag.
+	Pid int
 }
 
-// UnitCPU tags a unit's processes and answers what they used over time
+// UnitCPU answers what each unit's tagged processes used over time
 // (cputime.Sampler).
 type UnitCPU interface {
-	// Env is the environment entry that tags unit ID's process tree.
-	Env(id string) string
 	// Take answers unit ID's CPU intervals and forgets them.
 	Take(id string) []testtimes.CPUSlice
 }
@@ -310,9 +313,7 @@ func (r *Runner) Run(ctx context.Context, specs []Spec) ([]Result, []SuiteResult
 	}
 	start := func(s Spec, deadline time.Time) {
 		begin(s)
-		if r.CPU != nil {
-			s.Env = append(append([]string(nil), s.Env...), r.CPU.Env(s.ID))
-		}
+		s.Env = append(append([]string(nil), s.Env...), cores.UnitEnvEntry(r.Pid, s.ID))
 		out := &bytes.Buffer{}
 		p, err := r.Exec.Start(s, out)
 		if err != nil {

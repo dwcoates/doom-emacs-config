@@ -1,6 +1,7 @@
 package cputime
 
 import (
+	"agentrepl/testrun/internal/cores"
 	"bytes"
 	"context"
 	"errors"
@@ -100,10 +101,10 @@ func TestSamplerCountsAFailedReadsIntervalInTheNextAndLogsIt(t *testing.T) {
 	}
 }
 
-func TestSamplerEnvTagsAUnitWithThisRunsPid(t *testing.T) {
+func TestSamplerTagsAUnitWithThisRunsPid(t *testing.T) {
 	s := &Sampler{Pid: 42}
-	if got, want := s.Env("daemon:integration#00"), UnitEnv+"=42/daemon:integration#00"; got != want {
-		t.Fatalf("Env = %q, want %q", got, want)
+	if got, want := s.Tag("daemon:integration#00"), cores.UnitTag(42, "daemon:integration#00"); got != want {
+		t.Fatalf("Tag = %q, want the shared unit tag %q", got, want)
 	}
 }
 
