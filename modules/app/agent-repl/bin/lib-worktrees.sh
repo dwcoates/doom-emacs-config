@@ -19,19 +19,33 @@ worktree_list() {
     sed -n 's/^worktree //p' <<<"$listing"
 }
 
+# roots_main ROOTS: the main worktree of a worktree_list answer, read once and
+# kept by a caller that asks more than once (requirements.sh's run).
+roots_main() {
+    printf '%s\n' "${1%%$'\n'*}"
+}
+
+# roots_linked ROOTS: every linked worktree of a worktree_list answer, one a
+# line; nothing when the main worktree is the only one.
+roots_linked() {
+    case "$1" in
+        *$'\n'*) printf '%s\n' "${1#*$'\n'}" ;;
+    esac
+}
+
 # main_worktree DIR: the main worktree of DIR's repository.
 main_worktree() {
     local roots
     roots="$(worktree_list "$1")" || return 1
     [ -n "$roots" ] || return 1
-    sed -n 1p <<<"$roots"
+    roots_main "$roots"
 }
 
 # linked_worktrees DIR: every linked worktree of DIR's repository, one a line.
 linked_worktrees() {
     local roots
     roots="$(worktree_list "$1")" || return 1
-    sed 1d <<<"$roots"
+    roots_linked "$roots"
 }
 
 # branch_worktree DIR BRANCH: the worktree of DIR's repository that has BRANCH

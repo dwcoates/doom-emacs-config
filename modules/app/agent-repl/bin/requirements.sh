@@ -300,16 +300,14 @@ WORKTREE_ROOTS=""
 WORKTREES_READ=0
 module_main_worktree() {
   worktrees_read_or_die
-  printf '%s\n' "${WORKTREE_ROOTS%%$'\n'*}"
+  roots_main "$WORKTREE_ROOTS"
 }
 
 # module_linked_worktrees: every linked worktree of the module's repository, one
 # a line, from the list read once.
 module_linked_worktrees() {
   worktrees_read_or_die
-  case "$WORKTREE_ROOTS" in
-    *$'\n'*) printf '%s\n' "${WORKTREE_ROOTS#*$'\n'}" ;;
-  esac
+  roots_linked "$WORKTREE_ROOTS"
 }
 
 # worktrees_read_or_die: a question about the worktrees before the list was

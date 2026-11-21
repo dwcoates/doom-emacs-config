@@ -69,6 +69,25 @@ test_linked_worktrees_is_empty_with_none() {
   if [ -z "$got" ]; then pass "linked_worktrees is empty with no linked worktree"; else fail "no linked worktrees" "$got"; fi
 }
 
+test_roots_main_and_roots_linked_split_a_worktree_list() {
+  local bad=""
+  [ "$(roots_main "/m")" = /m ] || bad="$bad [main of one]"
+  [ -z "$(roots_linked "/m")" ] || bad="$bad [linked of one]"
+  [ "$(roots_main "/m"$'\n'"/a"$'\n'"/b")" = /m ] || bad="$bad [main of three]"
+  [ "$(roots_linked "/m"$'\n'"/a"$'\n'"/b")" = "/a"$'\n'"/b" ] || bad="$bad [linked of three]"
+  if [ -z "$bad" ]; then pass "roots_main and roots_linked split a worktree list into its main and its linked worktrees"; else fail "roots split:$bad"; fi
+}
+
+test_every_split_of_a_worktree_list_goes_through_roots_main_and_roots_linked() {
+  local req="$REPO_DIR/modules/app/agent-repl/bin/requirements.sh" bad=""
+  # requirements.sh keeps its run's list (WORKTREE_ROOTS) and splits it here,
+  # never by hand.
+  grep -q 'roots_main "\$WORKTREE_ROOTS"' "$req" || bad="$bad [requirements.sh main]"
+  grep -q 'roots_linked "\$WORKTREE_ROOTS"' "$req" || bad="$bad [requirements.sh linked]"
+  grep -qE 'WORKTREE_ROOTS(%%|#)' "$req" && bad="$bad [requirements.sh splits WORKTREE_ROOTS by hand]"
+  if [ -z "$bad" ]; then pass "every split of a kept worktree list goes through roots_main and roots_linked"; else fail "worktree list split by hand:$bad"; fi
+}
+
 test_branch_worktree_names_the_worktree_holding_the_branch() {
   local repo got
   repo="$(repo_with_linked 1)"
