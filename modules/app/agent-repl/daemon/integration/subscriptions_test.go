@@ -371,13 +371,20 @@ func TestFlushOnAcceptAcrossWatchKinds(t *testing.T) {
 					t.Fatalf("%s on a workspace with no session = model_selector %v, want absent", k.Name, view.GetModelSelector())
 				}
 			case "WatchDaemon":
-				// THE BOOT READS THE PERSISTENT-WIFI STANDING: cmd/agent-repld's
-				// Prime step refreshes it before anything is served, and an
-				// Emacs stream (which this one is) is told it as standing state,
-				// so even a daemon that never scheduled a drain opens with it.
+				// AN EMACS STREAM (which this one is) OPENS WITH ITS ELISP
+				// VERDICT, and the harness's Emacs runs the checkout's elisp,
+				// so the verdict is elisp_current. THE BOOT READS THE
+				// PERSISTENT-WIFI STANDING next: cmd/agent-repld's Prime step
+				// refreshes it before anything is served, and an Emacs stream is
+				// told it as standing state, so even a daemon that never
+				// scheduled a drain follows its verdict with it.
+				verdict := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the elisp verdict every Emacs stream opens with")
+				if verdict.(*agentreplv1.WatchDaemonResponse).GetElispCurrent() == nil {
+					t.Fatalf("%s first frame = %v, want elisp_current (the verdict comes first)", k.Name, verdict)
+				}
 				push := harness.AwaitNext(t, d.Ctx(), s, k.Name+": the persistent-wifi standing the boot read")
 				if push.(*agentreplv1.WatchDaemonResponse).GetPersistentWifi() == nil {
-					t.Fatalf("%s first frame = %v, want persistent_wifi (read before anything is served)", k.Name, push)
+					t.Fatalf("%s frame after the verdict = %v, want persistent_wifi (read before anything is served)", k.Name, push)
 				}
 			case "WatchWorkspaceRoster":
 				// The BOOT publishes the roster: cmd/agent-repld's Prime step

@@ -1736,13 +1736,14 @@ composer and vendor_info arms together."
   "The daemon stream's push arms are exactly what the frozen schema declares.
 `newsDigest' is a webview stream's alone: the daemon never sends it to an
 Emacs stream, so Emacs's decoder does not accept it and would report one
-as a contract breach.  The retired `startup' arm is gone: the editor's
-opens are OpenTabs streams."
+as a contract breach.  `elispCurrent' is an Emacs stream's verdict, its
+first frame.  The retired `startup' arm is gone: the editor's opens are
+OpenTabs streams."
   (should (equal (sort (agent-repl-test--generated-oneof-arms
                         "agentrepl/v1/endpoint_watch_daemon.pb.go" "WatchDaemonResponse")
                        #'string<)
                  (sort (list "shutdownAnnounced" "drainScheduled" "drainCancelled"
-                             "mutationProgress" "reloadElisp" "ending" "faultsStanding"
+                             "mutationProgress" "reloadElisp" "elispCurrent" "ending" "faultsStanding"
                              "persistentWifi" "newsDigest" "reloadWebhost" "newThreadRequested")
                        #'string<))))
 
