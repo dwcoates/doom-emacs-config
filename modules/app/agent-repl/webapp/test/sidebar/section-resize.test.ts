@@ -318,7 +318,7 @@ describe("installSectionResize", () => {
       upper_total: 10,
       lower_total: 6,
       pointer_px: -40,
-      moved_px: -40 + 0,
+      moved_px: -40,
       sized: MERGE_QUEUE_FOLD_KEY,
     });
   });
