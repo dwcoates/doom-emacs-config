@@ -25,8 +25,9 @@ import (
 //
 // WHO MAY NOT SHARE IT. A test that needs other WorldOpts takes the GROUP
 // World built with them (GroupWorld), shared the same way by every test that
-// needs those options. Only a test whose subject is a process's own lifecycle
-// (it stops, restarts, deploys or relaunches the daemon, store or sidecar)
+// needs those options. A test whose subject is the daemon's own lifecycle
+// takes a fresh daemon and sidecar on its scenario's lifecycle family's shared
+// store (ScenarioLifecycleWorld); only one that stops or restarts the store
 // keeps NewWorld. A test asserts only on its own workspaces, never on a view
 // spanning the daemon; the rule is AGENTS.md "Integration tests share one
 // canonical process, each case on its own slice".

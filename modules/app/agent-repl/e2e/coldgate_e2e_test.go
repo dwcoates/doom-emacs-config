@@ -250,7 +250,7 @@ func raiseColdGate(t *testing.T) *coldGate {
 
 	// Arrange: a workspace whose one real turn leaves a context above the
 	// cold-gate floor behind.
-	first := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	first := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	first.ExpectWarnings(coldGateWarnings...)
 	ws := first.NewWorkspace(t)
 

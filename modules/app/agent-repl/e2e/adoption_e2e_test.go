@@ -102,7 +102,7 @@ func testColdBootReadsReplayFromStore(t *testing.T) {
 	// sidecar's own cursor advance) before any bounce is simulated — the
 	// binding alternative to a hand-seeded storedAssistantEvent fixture
 	// (E2E-EVENT-INVENTORY.md ruling 3).
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	ws := w.NewWorkspace(t)
 
@@ -205,10 +205,10 @@ func adSelfRepoWorld(t *testing.T) (*harness.Repo, *stack.World) {
 	script.SetExitCode(0)
 	script.SetStdout("e2e: passed in 1s\n")
 	selfRepo.DeploysAsAgentRepl()
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{
 		DurableState: true,
 		Timeout:      stack.HandoverChainTimeout,
-	}})
+	})
 	return selfRepo, w
 }
 

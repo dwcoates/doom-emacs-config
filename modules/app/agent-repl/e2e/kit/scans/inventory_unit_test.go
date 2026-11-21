@@ -97,6 +97,11 @@ func TestWorldBuildingOutsideScenariosNamesEachOffender(t *testing.T) {
 			want: []string{"TestA (reaches GroupWorld)"},
 		},
 		{
+			name: "a test that takes a lifecycle World is named",
+			pkg:  e2ePackage{tests: map[string]string{"TestA": "a_test.go"}, refs: map[string][]string{"TestA": {"ScenarioLifecycleWorld"}}},
+			want: []string{"TestA (reaches ScenarioLifecycleWorld)"},
+		},
+		{
 			name: "a scenario that builds worlds is not an offender",
 			pkg: e2ePackage{tests: map[string]string{"TestS": "s_test.go"}, scenarios: map[string][]string{"TestS": {"testStep"}},
 				refs: map[string][]string{"TestS": {"NewWorld"}}},

@@ -11,7 +11,7 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
 
 ## Every world-building test is a step of a scenario
 
-- `scenarios_test.go` lists the suite's scenarios: the only top-level tests that build a world (`NewWorld`, `NewWorldWithSidecarStaleness`, `SharedWorld`, `GroupWorld`).
+- `scenarios_test.go` lists the suite's scenarios: the only top-level tests that build a world (`NewWorld`, `NewWorldWithSidecarStaleness`, `SharedWorld`, `GroupWorld`, `LifecycleWorld`, `ScenarioLifecycleWorld`).
 - A scenario's body is one `scenario(t, steps...)` call (`scenario_test.go`, over `kit/scenario`).
   - The scenario runs in parallel with the other scenarios.
   - Its steps run in order, each a function `testXxx(t *testing.T)` reported as the case `Scenario/Xxx`.
@@ -29,7 +29,11 @@ The module-wide rule "Tests NEVER run real git or a real vendor" applies here in
   - A warning it provokes is declared for its workspace, `w.ExpectWarningsFor(ws, ops...)`, after the workspace exists.
 - A step that needs other `WorldOpts` (a daemon option such as a keep-alive interval or an idle cutoff, a sidecar window, a real zettel) takes the group World for them, `stack.GroupWorld(t, "<group>", opts)`: one World per group per test process, shared by every step that asks for the group, built with the same options (an ask under others fails the step). The groups today are `keepalive` (`keepaliveWorld`) and `hibernation`.
 - A step whose state is the whole account's or the whole daemon's (the weekly allowance its rate limits move) takes a group World named for that state (`weekly-allowance`), so other steps' cases cannot move it.
-- Only a step whose subject is a process's own lifecycle (it deploys, relaunches, stops or restarts the daemon, store or sidecar, or cold-boots a successor), or whose precondition is its own alone (an environment value only it sets, such as detached bash's gate path), builds its own World with `stack.NewWorld`, and its doc comment says why.
+- A step whose subject is the DAEMON's own lifecycle (it deploys, relaunches, stops or cold-boots it) takes `stack.ScenarioLifecycleWorld(t, daemonOpts)`: a fresh daemon, account roots and sidecar of its own, with its own options, on its scenario's lifecycle family's one shared STORE (`kit/stack/lifecycle.go`). The store is not its subject, so it is built once per scenario; the steps of a scenario run in order, so a family's store never serves two of its steps at once.
+  - Each daemon's state root sits under the family's parent, so its lock dir is the family's: the store reports its build there once, and each step's sidecar reports there as it starts.
+  - The sidecar is never shared: it reads the shim identity records under ONE daemon's state root, so a sidecar of another root would book a rotated transcript under a second id.
+  - A cold boot or relaunch inside the step starts its successor through `w.SuccessorOpts(t)` as before.
+- Only a step that stops or restarts the STORE (its lifecycle is the subject, such as the store's shutdown record or a real store outage), or whose precondition is its own alone (a world option or environment value only it sets), builds its own World with `stack.NewWorld`, and its doc comment says why.
 - The shared and group Worlds' store and sidecar are shared: stopping or restarting them from a step fails it.
 - The rule is `modules/app/agent-repl/AGENTS.md`, "Integration tests share one canonical process, each case on its own slice".
 

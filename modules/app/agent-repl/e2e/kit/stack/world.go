@@ -216,6 +216,14 @@ func NewWorldWithSidecarStaleness(t testing.TB, opts WorldOpts, staleness Sideca
 // the test outright: that is a real defect this suite exists to catch.
 func NewWorld(t testing.TB, opts WorldOpts) *World {
 	t.Helper()
+	return newWorld(t, opts, nil)
+}
+
+// newWorld builds a World with OPTS: on its own store, or on FAMILY's shared
+// store (LifecycleWorld) when FAMILY is set, its daemon's state root then a
+// fresh one under the family's parent.
+func newWorld(t testing.TB, opts WorldOpts, family *lifecycleServices) *World {
+	t.Helper()
 	node := requireNode(t)
 	shimMain := requireShimBundle(t)
 	sidecarBin := requireSidecarBinary(t)
@@ -234,7 +242,12 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// The state root is minted HERE rather than by harness.StartDaemon
 	// because the store starts first and needs the logs directory already.
 	stateRoot := opts.DaemonOpts.StateDir
-	if stateRoot == "" {
+	switch {
+	case family != nil && stateRoot != "":
+		t.Fatalf("e2e: a lifecycle step's state root is its family's; this step names %q", stateRoot)
+	case family != nil:
+		stateRoot = family.nextStateRoot(t)
+	case stateRoot == "":
 		stateRoot = shortStateRoot(t)
 	}
 	logsDir := filepath.Join(stateRoot, "logs")
@@ -246,8 +259,14 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	// the sidecar write their build reports into it, and the daemon's deploy
 	// reads them from it.
 	lockDir := harness.LockDirFor(stateRoot)
-	storeDB := filepath.Join(t.TempDir(), "store.db")
-	store := startStore(t, shortSocketPath(t, "store"), storeDB, filepath.Join(logsDir, "store.log"), lockDir)
+	var store *Store
+	var storeDB string
+	if family != nil {
+		store, storeDB = family.store, family.storeDB
+	} else {
+		storeDB = filepath.Join(t.TempDir(), "store.db")
+		store = startStore(t, shortSocketPath(t, "store"), storeDB, filepath.Join(logsDir, "store.log"), lockDir)
+	}
 
 	// ONE spool root for the whole world. The fake SDK inside every shim
 	// this daemon spawns writes its task spools here (via
@@ -268,20 +287,12 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 		// after its own unserved zettel socket, so this one is the daemon's.
 		daemonOpts.ExtraEnv = append(append([]string{}, daemonOpts.ExtraEnv...), harness.ZettelSocketEnv+"="+zettel.Socket)
 	}
-	daemonOpts.ShimNode = node
-	daemonOpts.ShimMain = shimMain
-	daemonOpts.StoreSocket = store.Socket
-	daemonOpts.RealStore = true
-	daemonOpts.StateDir = stateRoot
 	// A root this world minted is fresh, so its state lives in memory unless
 	// the test asked for DurableState (harness.Opts.FreshStateDir).
-	daemonOpts.FreshStateDir = opts.DaemonOpts.StateDir == ""
-	daemonOpts.ExtraEnv = kit.WorldDaemonEnv(daemonOpts.ExtraEnv, spoolRoot, lockBin)
-	// THE REAL SERVICES ARE WHAT A DEPLOY JUDGES. They report their own
-	// builds into the daemon's lock dir (startStore/startSidecar are pointed
-	// at it), and the deploy's fake build stages copies of these very
-	// binaries, so a deploy that should touch no service restarts none.
-	daemonOpts.ServiceBinaries = harness.ServiceBinaries{Store: store.bin, Sidecar: sidecarBin}
+	daemonOpts = worldDaemonOpts(daemonOpts, worldDaemon{
+		node: node, shimMain: shimMain, store: store, sidecarBin: sidecarBin,
+		stateRoot: stateRoot, fresh: family != nil || opts.DaemonOpts.StateDir == "", spoolRoot: spoolRoot, lockBin: lockBin,
+	})
 
 	// REGISTERED BEFORE THE DAEMON EXISTS, SO IT RUNS LAST OF ALL. t.Cleanup
 	// unwinds last-registered-first, and the daemon registers its own
@@ -318,7 +329,12 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	w := &World{Daemon: d, Store: store, Sidecar: sidecar, Zettel: zettel}
 	// Every wait on the world's daemon ends the moment a service the world
 	// runs exits unasked: no wait could be satisfied without it.
-	store.latched, sidecar.latched = d, d
+	// A family's store outlives this world's daemon, so only a store of the
+	// world's own is latched to it for a restart.
+	if family == nil {
+		store.latched = d
+	}
+	sidecar.latched = d
 	latchExit(d, "the store", store.exit)
 	latchExit(d, "the sidecar", sidecar.exit)
 	if zettel != nil {
@@ -337,6 +353,38 @@ func NewWorld(t testing.TB, opts WorldOpts) *World {
 	t.Cleanup(func() { requireServicesOutlivedTheTest(t, store, sidecar, zettel) })
 
 	return w
+}
+
+// worldDaemon is what every world's daemon runs against: the real shim, the
+// real store and sidecar, its state root and the world's one spool root.
+type worldDaemon struct {
+	node, shimMain string
+	store          *Store
+	sidecarBin     string
+	stateRoot      string
+	// fresh is a state root the world minted, whose state lives in memory
+	// unless the test asked for DurableState.
+	fresh     bool
+	spoolRoot string
+	lockBin   string
+}
+
+// worldDaemonOpts are OPTS completed with what a world's daemon runs against
+// (NewWorld, LifecycleWorld).
+func worldDaemonOpts(opts harness.Opts, w worldDaemon) harness.Opts {
+	opts.ShimNode = w.node
+	opts.ShimMain = w.shimMain
+	opts.StoreSocket = w.store.Socket
+	opts.RealStore = true
+	opts.StateDir = w.stateRoot
+	opts.FreshStateDir = w.fresh
+	opts.ExtraEnv = kit.WorldDaemonEnv(opts.ExtraEnv, w.spoolRoot, w.lockBin)
+	// THE REAL SERVICES ARE WHAT A DEPLOY JUDGES. They report their own
+	// builds into the daemon's lock dir (startStore/startSidecar are pointed
+	// at it), and the deploy's fake build stages copies of these very
+	// binaries, so a deploy that should touch no service restarts none.
+	opts.ServiceBinaries = harness.ServiceBinaries{Store: w.store.bin, Sidecar: w.sidecarBin}
+	return opts
 }
 
 // NewWorkspace registers a fresh workspace on w's daemon, backed by a fresh

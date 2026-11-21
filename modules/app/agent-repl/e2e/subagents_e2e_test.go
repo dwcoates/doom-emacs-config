@@ -465,7 +465,7 @@ func uhNestedBookUsage(t *testing.T, w *stack.World, ws *workspacev1.WorkspaceRe
 // Seam: store -> cold-booted daemon, a replayed subagent's settled spawn naming its created agent
 func testSubagentBubbleFromAReplayIsStillAddressable(t *testing.T) {
 	// Arrange: a real spawn, driven to completion so the store holds it.
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	w.ExpectWarnings("daemon.rollout.reconcile")
 	ws := w.NewWorkspace(t)
 	stack.DriveScenarioToCompletion(t, w, ws, w.DefaultConfigDir, "subagent")
@@ -657,7 +657,7 @@ func testSubagentInterleavedResponsesStayOnTheirOwnFeeds(t *testing.T) {
 // Seam: store -> cold-booted daemon -> new shim, a detached subagent whose process died, not revived as live work
 func testADetachedSubagentWhoseProcessDiedIsNotLiveAfterAColdBoot(t *testing.T) {
 	// Arrange.
-	first := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{DurableState: true}})
+	first := stack.ScenarioLifecycleWorld(t, harness.Opts{DurableState: true})
 	first.ExpectWarnings("daemon.rollout.reconcile")
 	ws := first.NewWorkspace(t)
 	turn := stack.DriveScenarioToCompletion(t, first, ws, first.DefaultConfigDir, "subagent-detached-utterance")

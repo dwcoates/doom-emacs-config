@@ -307,7 +307,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 	gatePath := filepath.Join(t.TempDir(), "displaced-turn-gate")
 	repo, _ := mqCleanRepo(t)
 	repo.DeploysAsAgentRepl()
-	w := stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	w := stack.ScenarioLifecycleWorld(t, harness.Opts{
 		DurableState: true,
 		ExtraEnv: []string{
 			turnGatePathEnv + "=" + gatePath,
@@ -316,7 +316,7 @@ func testDisplacedTurnCapturedEndedThenResubmittedExactlyOnce(t *testing.T) {
 			// crash recover it rather than run it.
 			"AGENT_REPL_MERGE_PAUSE_AFTER_CAPTURE=" + filepath.Join(t.TempDir(), "capture.rendezvous"),
 		},
-	}})
+	})
 	w.ExpectWarnings(mqExpectedBounceWarnings...)
 	repoRef := mqRepositoryRef(t, w, repo)
 	child := mqCreateTopLevelChild(t, w, repoRef, "mq-displaced")
@@ -647,9 +647,9 @@ func mqSelfRepoWorld(t *testing.T, repo *harness.Repo) *stack.World {
 	// harness.MergeChainTimeout. Under a full gate the landing's deploy was
 	// still installing at +4.4s when the 5s DefaultTimeout cut it (2026-10-14).
 	repo.DeploysAsAgentRepl()
-	return stack.NewWorld(t, stack.WorldOpts{DaemonOpts: harness.Opts{
+	return stack.ScenarioLifecycleWorld(t, harness.Opts{
 		Timeout: harness.MergeChainTimeout,
-	}})
+	})
 }
 
 // testFailMarkerFailsAPreDeployHooksDeploy proves a pre-deploy hook whose turn

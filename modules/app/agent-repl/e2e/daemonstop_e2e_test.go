@@ -220,8 +220,12 @@ func testAStopAfterACompletedTurnLeavesOnTheStop(t *testing.T) {
 //
 // Seam: shim -> store, the page-only reads that leave no watch token behind
 func testACompletedTurnAndTeardownLeaveNoWatchTokenOutstanding(t *testing.T) {
-	// Arrange: a live session whose turn has run and ended.
-	w, ws := pmNewPermissionWorld(t)
+	// Arrange: a live session whose turn has run and ended, on a World of its
+	// own: the assertion stops the STORE to read its shutdown record, so the
+	// store's lifecycle is this step's subject too, and a lifecycle family's
+	// shared store refuses to be stopped.
+	w := stack.NewWorld(t, stack.WorldOpts{})
+	ws := pmNewPermissionWorkspace(t, w)
 	// THE STOP IS THE DAEMON'S OWN ORDERED STAND-DOWN, which writes no WARN or
 	// ERROR in any system (TestDaemonLifecycle/AStopAfterACompletedTurnLeavesOnTheStop runs
 	// the same stop and asserts exactly that), so nothing is declared.
