@@ -165,10 +165,21 @@ func visibilityOf(v wsm.Visibility) *frontendv1.RosterRowVisibility {
 
 // Visibility answers workspace WS's visibility as the last render derived it:
 // the value the roster just published, which the web stream's gate reads so
-// it never races the store's write of the same value. A workspace no render
-// has derived is NotVisible.
+// it never races the store's write of the same value. A workspace the
+// registry carries but no render has derived yet (a daemon that just booted or
+// joined) answers the visibility the store kept for it, the one fact there is
+// until the first render. A workspace the registry does not carry is
+// NotVisible.
 func (r *resolver) Visibility(ws ids.WorkspaceID) wsm.Visibility {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.state.visibility[ws]
+	if v, derived := r.state.visibility[ws]; derived {
+		return v
+	}
+	for _, rec := range r.state.reg.Workspaces {
+		if rec.ID == ws {
+			return rec.Visibility
+		}
+	}
+	return wsm.NotVisible
 }

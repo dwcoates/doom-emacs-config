@@ -313,3 +313,34 @@ func TestVisibilityAnswersTheLastRendersValue(t *testing.T) {
 			r.Visibility(theWS), r.Visibility("w2"), r.Visibility("w-gone"))
 	}
 }
+
+func TestVisibilityBeforeAnyRenderIsTheStoredOne(t *testing.T) {
+	cases := []struct {
+		name string
+		ws   ids.WorkspaceID
+		want wsm.Visibility
+	}{
+		{name: "a workspace stored selected", ws: "w-selected", want: wsm.Selected},
+		{name: "a workspace stored visible", ws: "w-visible", want: wsm.UnselectedVisible},
+		{name: "a workspace stored not visible", ws: "w-hidden", want: wsm.NotVisible},
+		{name: "a workspace the registry does not carry", ws: "w-unknown", want: wsm.NotVisible},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: a resolver that booted or joined and has not rendered.
+			r := sidebar.UnrenderedHolding(
+				wsm.Workspace{ID: "w-selected", Visibility: wsm.Selected},
+				wsm.Workspace{ID: "w-visible", Visibility: wsm.UnselectedVisible},
+				wsm.Workspace{ID: "w-hidden", Visibility: wsm.NotVisible},
+			)
+
+			// Act
+			got := r.Visibility(tc.ws)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Visibility(%s) = %v, want %v", tc.ws, got, tc.want)
+			}
+		})
+	}
+}

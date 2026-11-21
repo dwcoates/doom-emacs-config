@@ -1,5 +1,7 @@
 package sidebar
 
+import "agent-repld/internal/wsm"
+
 // SortMergedNewestFirst exposes sortMergedNewestFirst to the external test
 // package.
 var SortMergedNewestFirst = sortMergedNewestFirst
@@ -33,3 +35,12 @@ var OwnMergeDrawn = ownMergeDrawn
 
 // OpenCount exposes openCount, the one count every Open-section count is.
 var OpenCount = openCount
+
+// UnrenderedHolding answers a resolver whose registry carries WORKSPACES and
+// that has rendered nothing yet, as a daemon that just booted or joined is
+// until its first render.
+func UnrenderedHolding(workspaces ...wsm.Workspace) Resolver {
+	r := &resolver{state: newRosterState()}
+	r.state.reg.Workspaces = workspaces
+	return r
+}
