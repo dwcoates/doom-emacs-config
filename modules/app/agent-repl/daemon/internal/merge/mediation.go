@@ -603,7 +603,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	}
 	brief, window, err := o.intakeBrief(ctx, q, m)
 	if err != nil {
-		o.briefFailed(ctx, q, m, "the deploy check's brief could not be composed", err, fields)
+		o.roundFailed(ctx, q, m, "the deploy check's brief could not be composed", err, fields)
 		return
 	}
 	// A WINDOW WITH NO WARNING AND NO ERROR NEEDS NO MEDIATOR (owner ruling,
@@ -640,7 +640,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 		told := brief
 		if m.Resumed {
 			if told, err = o.resumeBrief(m); err != nil {
-				o.briefFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
+				o.roundFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
 				return
 			}
 		}
@@ -661,7 +661,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	}
 }
 
-// briefFailed settles a round of check M of queue Q whose brief could not be
+// roundFailed settles a round of check M of queue Q whose brief could not be
 // composed, WHAT failing with ERR: the check is escalated to the user, naming
 // the cause (owner ruling, 2026-11-19). NOTHING RUNS SUCH A ROUND AGAIN on
 // its own, so a check left owed and only logged held its queue under the
@@ -671,7 +671,7 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 // cut is no failure: the daemon that serves the queues next runs it again
 // (mediationFailed). A MEDIATOR ALREADY TOLD OF THE CHECK IS ONLY SHOWN, as
 // one that escalated in its own turn is (escalate): it may be mid-turn.
-func (o *orchestrator) briefFailed(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
+func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
 	if o.mediationFailed(ctx, fields, what+"; the check is escalated to the user", err) {
 		return
 	}
@@ -859,7 +859,7 @@ func (o *orchestrator) resumeBrief(m wsm.Mediation) (string, error) {
 func (o *orchestrator) resumeIntake(ctx context.Context, q checkedQueue, ws ids.WorkspaceID, m wsm.Mediation, fields dlog.Context) {
 	brief, err := o.resumeBrief(m)
 	if err != nil {
-		o.briefFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
+		o.roundFailed(ctx, q, m, "the undecided mediator's resuming brief could not be composed", err, fields)
 		return
 	}
 	turn := wsm.NewTurnID()
@@ -938,7 +938,7 @@ func (o *orchestrator) DecideMediation(ctx context.Context, ws ids.WorkspaceID, 
 	}
 	// AN ESCALATED CHECK WAS TOLD TO THE MEDIATOR BY ITS ESCALATION, whether
 	// or not the check's own brief ever reached it: a check whose brief
-	// could not be composed is escalated unprompted (briefFailed), and the
+	// could not be composed is escalated unprompted (roundFailed), and the
 	// mediator's approval of it was refused here as a check it was never
 	// told of (2026-11-20 17:25Z), holding the queue for the user.
 	if owed == nil || (!owed.Prompted() && !owed.Escalated()) {
@@ -1277,7 +1277,7 @@ type escalationBrief struct {
 	Summary  string          `json:"summary"`
 	Problems []DeployProblem `json:"problems"`
 	// NotRun is set when the check was escalated because it could not run
-	// (briefFailed), nil for an escalation of something found: the mediator
+	// (roundFailed), nil for an escalation of something found: the mediator
 	// is then told what failed, never that the deploy was found broken.
 	NotRun *checkNotRun `json:"not_run,omitempty"`
 }

@@ -27,7 +27,7 @@ import (
 const BriefDeployEscalation = "deploy-escalation"
 
 // BriefDeployCheckNotRun is the brief that tells the mediator a check could
-// not run (briefFailed): what failed and why, and that nothing has looked at
+// not run (roundFailed): what failed and why, and that nothing has looked at
 // the deploy. The escalation's own brief read as a finding about the deploy
 // (owner request, 2026-11-20).
 const BriefDeployCheckNotRun = "deploy-check-not-run"
