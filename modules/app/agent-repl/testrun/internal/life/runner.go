@@ -34,6 +34,8 @@ type Runner struct {
 	// commands is held shared by every command in flight through Unreaped,
 	// and exclusively by every reap of the session (ReapSession).
 	commands sync.RWMutex
+	// cut says why the run was cut, empty while it was not (Cut).
+	cut string
 }
 
 // WardenCommand is how the runner starts its warden: the program and its
@@ -172,23 +174,41 @@ func (r *Runner) Unreaped(fn func()) {
 	fn()
 }
 
-// CancelOnLifeline calls cancel and reaps the session the moment gone closes:
-// the sentinel is gone, so the run was cut.
+// CancelOnLifeline cuts the run the moment gone closes: the sentinel is gone.
 func (r *Runner) CancelOnLifeline(gone <-chan struct{}, cancel func()) {
 	go func() {
 		<-gone
-		r.markCut()
-		r.log.Infof("the sentinel is gone (the run was cut): the run is cancelled and its session %d reaped", r.Own.Session)
-		cancel()
-		// The error is logged by the reap; the release reaps again and keeps
-		// the disk if anything still remains.
-		_ = r.ReapSession()
+		r.Cut("the sentinel is gone", cancel)
 	}()
 }
 
-// markCut records the instant the run first saw its sentinel gone, and
-// answers it: the lifeline's watcher and Finish both see the cut, whichever
-// sees it first sets it.
+// Cut ends the run for why, a cause outside its suites: it records why and
+// the instant of the cut (markCut), calls cancel and reaps the session, so
+// every unit and whatever it left running dies now rather than at its bound.
+// Finish then fails the run, naming why. Only the first cut's why is kept.
+func (r *Runner) Cut(why string, cancel func()) {
+	r.mu.Lock()
+	if r.cut == "" {
+		r.cut = why
+	}
+	r.mu.Unlock()
+	r.markCut()
+	r.log.Infof("%s (the run was cut): the run is cancelled and its session %d reaped", why, r.Own.Session)
+	cancel()
+	// The error is logged by the reap; the release reaps again and keeps
+	// the disk if anything still remains.
+	_ = r.ReapSession()
+}
+
+// cutWhy answers why the run was cut, empty when it was not.
+func (r *Runner) cutWhy() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.cut
+}
+
+// markCut records the instant the run was first cut, and answers it: the
+// cut's watcher and Finish both see the cut, whichever sees it first sets it.
 func (r *Runner) markCut() time.Time {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -219,6 +239,11 @@ func (r *Runner) Finish(code int, gone <-chan struct{}, release func() error) in
 		r.log.Errorf("the run was cut (its sentinel is gone); it reaped its session %d and released its disk %.3fs after the cut", r.Own.Session, span.Seconds())
 		code = 1
 	default:
+		if why := r.cutWhy(); why != "" {
+			span := r.now().Sub(r.markCut())
+			r.log.Errorf("the run was cut (%s); it reaped its session %d and released its disk %.3fs after the cut", why, r.Own.Session, span.Seconds())
+			code = 1
+		}
 	}
 	if err := r.Done(); err != nil {
 		r.log.Errorf("%v", err)

@@ -218,7 +218,7 @@ func runnerCmd(argv []string) int {
 		log.Errorf("rank the run for the host's memory and cores: %v", err)
 		return runner.Finish(1, gone, func() error { return nil })
 	}
-	parent, prefix, release := runParent(ctx, log, module, runner, rank)
+	parent, prefix, release := runParent(ctx, cancel, log, module, runner, rank)
 	if ctx.Err() != nil {
 		// CUT BEFORE IT RAN: nothing is planned or run for a caller that is
 		// gone; Finish reaps, releases and says the run was cut.
@@ -287,8 +287,8 @@ func runRooted(ctx context.Context, log *run.Log, args cli.Args, self, histPath,
 // ramdisk.EnvShortBase, the base the harnesses that need short, socket-safe
 // roots make them in instead of /tmp. A leaked RAM disk or a disk manager that
 // does not answer puts the run on the disk and opens the one workspace that
-// investigates it.
-func runParent(ctx context.Context, log *run.Log, module string, runner *life.Runner, rank int) (string, []string, func() error) {
+// investigates it. A RAM disk that dies under the run cuts it (cancel).
+func runParent(ctx context.Context, cancel func(), log *run.Log, module string, runner *life.Runner, rank int) (string, []string, func() error) {
 	disk := func() error { return nil }
 	if runtime.GOOS != "darwin" {
 		return run.DefaultTmpParent, nil, disk
@@ -325,6 +325,15 @@ func runParent(ctx context.Context, log *run.Log, module string, runner *life.Ru
 		return run.DefaultTmpParent, nil, disk
 	}
 	if err != nil {
+		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
+		return run.DefaultTmpParent, nil, disk
+	}
+	// A DISK THAT DIES UNDER THE RUN CUTS IT AT ONCE (ramdisk.WatchLoss):
+	// every unit still running out of it can only fault from then on.
+	if err := v.WatchLoss(func() { runner.Cut(fmt.Sprintf("its RAM disk %s, mounted at %s, is gone", v.Device, v.Mount), cancel) }); err != nil {
+		if relErr := v.Release(); relErr != nil {
+			err = errors.Join(err, fmt.Errorf("release the RAM disk: %w", relErr))
+		}
 		log.Errorf("RAM DISK UNAVAILABLE, this run's root falls back to the disk at %s: %v", run.DefaultTmpParent, err)
 		return run.DefaultTmpParent, nil, disk
 	}
