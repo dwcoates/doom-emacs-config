@@ -33,15 +33,41 @@ func (w Withholding) String() string {
 // Withheld answers whether the tab bar withholds the workspace's tab, given
 // whether a collapsed section folds its tab (its repository's, or its
 // subsection's). A hidden workspace has no tab at all; a folded section's
-// open workspaces keep a folded one.
+// open workspaces keep a folded one, except the one a fold draws anyway
+// (DrawnInsideFold: surfaced, or the selection), whose tab the bar draws.
 func (ws Workspace) Withheld(folded bool) Withholding {
 	switch {
 	case ws.InHiddenSection():
 		return WithheldHidden
-	case folded:
+	case folded && !ws.DrawnInsideFold():
 		return WithheldCollapsed
 	default:
 		return Drawn
+	}
+}
+
+// Holds reports whether the editor holds the workspace open, with a
+// perspective, a composer and a host stream (frontend.v1.RosterRowHeld), given
+// whether a collapsed section folds its tab. THE ONE STATEMENT of what the
+// editor holds (owner ruling, 2026-11-21): the roster stamps it on every row,
+// the editor reconciles on it alone, and Runs is defined over it, so the
+// editor never holds a workspace the daemon does not run.
+//
+// A workspace is held while it is the selection or the tab bar draws it. A
+// closed workspace never is, even while it is the selection: the editor
+// tombstones every closed row. A thread and a hidden merge workspace
+// (MergeHidden) are drawn by no tab bar, so each is held only while it is the
+// selection.
+func (ws Workspace) Holds(folded bool) bool {
+	switch {
+	case ws.Closed:
+		return false
+	case ws.Current:
+		return true
+	case ws.IsThread(), ws.MergeHidden():
+		return false
+	default:
+		return ws.Withheld(folded) == Drawn
 	}
 }
 
@@ -128,8 +154,12 @@ func (ws Workspace) LetsCacheLapse() bool {
 // A one-shot is filed in subsections like any other workspace (owner request,
 // 2026-11-03), so a folded one-shot's unattended work would otherwise stop at
 // the next daemon start.
+//
+// EVERY WORKSPACE THE EDITOR HOLDS RUNS (Holds), so the two can never
+// disagree; the rest of this rule adds the workspaces that run while nobody
+// can see them.
 func (ws Workspace) Runs(folded, mergeQueued bool) bool {
-	if ws.Current || mergeQueued || ws.DeployMediator {
+	if ws.Holds(folded) || ws.Current || mergeQueued || ws.DeployMediator {
 		return true
 	}
 	if ws.MergeHidden() {

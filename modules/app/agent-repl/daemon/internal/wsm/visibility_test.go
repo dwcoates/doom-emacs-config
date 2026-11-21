@@ -25,6 +25,9 @@ func TestWithheld(t *testing.T) {
 		{name: "a reopened merged workspace the user hid is withheld hidden", ws: Workspace{Hidden: true, MergedAt: &merged}, want: WithheldHidden},
 		{name: "a settled merge ignores its hidden flag", ws: Workspace{Hidden: true, Closed: true, MergedAt: &merged}, want: Drawn},
 		{name: "a merged workspace follows its repository's fold", ws: Workspace{MergedAt: &merged}, repoFolded: true, want: WithheldCollapsed},
+		{name: "a surfaced workspace in a collapsed section is drawn", ws: Workspace{Surfaced: true}, repoFolded: true, want: Drawn},
+		{name: "the selection in a collapsed section is drawn", ws: Workspace{Current: true}, repoFolded: true, want: Drawn},
+		{name: "the selection the user hid is withheld hidden", ws: Workspace{Hidden: true, Current: true}, want: WithheldHidden},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -193,6 +196,77 @@ func TestTheHiddenSectionIsOneStatement(t *testing.T) {
 	}
 }
 
+func TestHolds(t *testing.T) {
+	merged := time.Unix(100, 0)
+	of := MergeOrigin{}
+	cases := []struct {
+		name       string
+		ws         Workspace
+		repoFolded bool
+		want       bool
+	}{
+		{name: "a drawn workspace is held", ws: Workspace{}, want: true},
+		{name: "a folded workspace is not held", ws: Workspace{}, repoFolded: true, want: false},
+		{name: "a hidden workspace is not held", ws: Workspace{Hidden: true}, want: false},
+		{name: "a surfaced workspace in a fold is held", ws: Workspace{Surfaced: true}, repoFolded: true, want: true},
+		{name: "a folded selection is held", ws: Workspace{Current: true}, repoFolded: true, want: true},
+		{name: "a hidden selection is held", ws: Workspace{Hidden: true, Current: true}, want: true},
+		{name: "a closed workspace is not held", ws: Workspace{Closed: true}, want: false},
+		{name: "a closed selection is not held", ws: Workspace{Closed: true, Current: true}, want: false},
+		{name: "a settled merge is not held", ws: Workspace{Closed: true, MergedAt: &merged}, want: false},
+		{name: "a hidden merge workspace is not held", ws: Workspace{MergeOf: &of}, want: false},
+		{name: "a selected hidden merge workspace is held", ws: Workspace{MergeOf: &of, Current: true}, want: true},
+		{name: "a revealed merge workspace is held", ws: Workspace{MergeOf: &of, MergeRevealed: true}, want: true},
+		{name: "a merge-queued one-shot in a fold is not held", ws: Workspace{OneShot: true}, repoFolded: true, want: false},
+		{name: "a deploy mediator nobody looks at is not held", ws: Workspace{Hidden: true, DeployMediator: true}, want: false},
+		{name: "a thread is not held", ws: Workspace{Kind: WorkspaceKindThread}, want: false},
+		{name: "the selected thread is held", ws: Workspace{Kind: WorkspaceKindThread, Current: true}, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange / Act
+			got := tc.ws.Holds(tc.repoFolded)
+
+			// Assert
+			if got != tc.want {
+				t.Fatalf("Holds = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestEveryHeldWorkspaceRuns pins the invariant Holds exists for: over every
+// combination of the facts both read, a workspace the editor holds is one the
+// daemon runs.
+func TestEveryHeldWorkspaceRuns(t *testing.T) {
+	of := MergeOrigin{}
+	merged := time.Unix(100, 0)
+	for mask := 0; mask < 1<<9; mask++ {
+		bit := func(i int) bool { return mask&(1<<i) != 0 }
+		ws := Workspace{Hidden: bit(0), Closed: bit(1), Current: bit(2), Surfaced: bit(3), OneShot: bit(4), DeployMediator: bit(5)}
+		if bit(6) {
+			ws.Kind = WorkspaceKindThread
+		}
+		if bit(7) {
+			ws.MergeOf = &of
+		}
+		if bit(8) {
+			ws.MergedAt = &merged
+		}
+		for _, folded := range []bool{false, true} {
+			for _, queued := range []bool{false, true} {
+				// Arrange / Act
+				holds, runs := ws.Holds(folded), ws.Runs(folded, queued)
+
+				// Assert
+				if holds && !runs {
+					t.Fatalf("workspace %+v folded=%v queued=%v is held but does not run", ws, folded, queued)
+				}
+			}
+		}
+	}
+}
+
 func TestRuns(t *testing.T) {
 	of := MergeOrigin{}
 	cases := []struct {
@@ -219,6 +293,8 @@ func TestRuns(t *testing.T) {
 		{name: "a hidden one-shot does not run, as only a fold spares", ws: Workspace{OneShot: true, Hidden: true}, want: false},
 		{name: "a hidden standing deploy check runs", ws: Workspace{Hidden: true, DeployMediator: true}, want: true},
 		{name: "a collapsed standing deploy check runs", ws: Workspace{DeployMediator: true}, repoFolded: true, want: true},
+		{name: "a surfaced workspace in a collapsed section runs", ws: Workspace{Surfaced: true}, repoFolded: true, want: true},
+		{name: "an unselected thread runs", ws: Workspace{Kind: WorkspaceKindThread}, want: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
