@@ -244,12 +244,62 @@ func PromptRow(origin conversationv1.PromptOrigin, header *frontendv1.FeedAgentP
 			Body:    &frontendv1.FeedAgentPromptBody{Blocks: agentBlocks(blocks)},
 		}}}
 	}
-	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: &frontendv1.FeedUserPrompt{
+	user := &frontendv1.FeedUserPrompt{
 		Author: &frontendv1.FeedUserPromptAuthor{Label: AuthorLabel(origin)},
 		Result: &frontendv1.FeedUserPrompt_Success{Success: &frontendv1.FeedUserPromptSuccess{
 			Body: &frontendv1.FeedUserPromptBody{Blocks: blocks},
 		}},
-	}}}
+	}
+	if subsystem, ok := DaemonSubsystem(origin); ok {
+		user.DaemonSender = &frontendv1.FeedUserPromptDaemonSender{Subsystem: subsystem}
+	}
+	return &frontendv1.FeedRow{Row: &frontendv1.FeedRow_UserPrompt{UserPrompt: user}}
+}
+
+// DaemonSubsystem names, in the reader's words, the daemon subsystem that sent
+// a prompt of ORIGIN, and reports whether the daemon sent it at all: a prompt a
+// person said, a workspace's agent sent, or the shim adopted answers false.
+// The bubble's header draws it as "Zettel <subsystem>"
+// (frontend.v1.FeedUserPromptDaemonSender). It is the one table of those
+// names, so the resolver's draw and the queue's mirror of an accepted prompt
+// head the same row the same way.
+func DaemonSubsystem(origin conversationv1.PromptOrigin) (string, bool) {
+	switch origin {
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_BEFORE_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_AFTER_ACTION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_DISPLACED_TURN_RESUME,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_REVERT,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_PICK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_COMPACT_AFTER,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_HANDBACK,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_QUEUE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_RETARGETED:
+		return "Merge Queue Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_HOOK:
+		return "Deployment Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_FINISH_HOOK:
+		return "Finish Hook", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE:
+		return "GitHub PR Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE:
+		return "GitHub Merge Queue Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_GITHUB_WORKFLOW_RUN_NOTICE:
+		return "GitHub Workflow Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_DERIVED_WORKSPACE_NOTICE,
+		conversationv1.PromptOrigin_PROMPT_ORIGIN_OWNER_NOTICE:
+		return "Workspace Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED:
+		return "Workspace Creator", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR:
+		return "Main Sync Monitor", true
+	case conversationv1.PromptOrigin_PROMPT_ORIGIN_SUBSECTION_PLACEMENT:
+		return "Sidebar Placement", true
+	}
+	return "", false
 }
 
 // MergeHandbackLabel is a merge handback's badge text: the FIRST LINE of the

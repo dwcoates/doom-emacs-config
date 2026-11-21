@@ -121,7 +121,7 @@ export function carriesCardQuestion(render: unknown): boolean {
 export function withCardQuestion<U>(render: CardRenderer<U>): CardRenderer<U> {
   const wrapped: CardRenderer<U> = (unit, rc) => {
     const card = render(unit, rc);
-    placeCardQuestion(card, requireRow(rc));
+    placeCardQuestion(card, requireRowId(rc));
     return card;
   };
   carrying.add(wrapped);
@@ -129,7 +129,7 @@ export function withCardQuestion<U>(render: CardRenderer<U>): CardRenderer<U> {
 }
 
 /** The id of the row RC draws; a row without one cannot be asked about. */
-function requireRow(rc: RowContext): string {
+export function requireRowId(rc: RowContext): string {
   const row = rc.row.id?.value ?? "";
   if (row === "") throw new Error("a card's row names no id, so its question control has nothing to ask about");
   return row;

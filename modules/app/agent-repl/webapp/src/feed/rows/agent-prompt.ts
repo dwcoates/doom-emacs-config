@@ -31,9 +31,10 @@ import type {
   FeedAgentPromptBlock,
   FeedAgentPromptBody,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+import { questionControl } from "../response-question.js";
 import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { reserveCopyRoom } from "../../bubble/copy-room.js";
-import { drawPeerArrow } from "./peer-arrow.js";
+import { drawPeerArrow, type PeerArrowDirection } from "./peer-arrow.js";
 import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
 
 const PATH = "FeedAgentPrompt";
@@ -42,7 +43,7 @@ const PATH = "FeedAgentPrompt";
  * The agent-addressed prompt bubble: the prompt bubble's chrome in the agent
  * variant, with the header where the user kind draws its author.
  */
-export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement): HTMLElement {
+export function drawFeedAgentPrompt(msg: FeedAgentPrompt, row: string, previous?: HTMLElement): HTMLElement {
   const address = requireMessage(msg.address, `${PATH}.address`);
   log.info("drawing an agent prompt row", {
     operation: "feed.draw-agent-prompt",
@@ -63,7 +64,7 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
       variant: "agent",
       hooks: ["user", "prompt-agent"],
       strip,
-      corner: [drawPromptCopyControl(body.blocks, `${PATH}.body.blocks`)],
+      corner: [questionControl(row), drawPromptCopyControl(body.blocks, `${PATH}.body.blocks`)],
       content,
       capLines: AGENT_PROMPT_CAP_LINES,
       more: BUBBLE_MORE_ELLIPSIS,
@@ -84,22 +85,35 @@ export function drawFeedAgentPrompt(msg: FeedAgentPrompt, previous?: HTMLElement
  * it is re-linked with every push of the page's mention targets.
  */
 export function drawFeedAgentPromptAddress(address: FeedAgentPromptAddress): HTMLElement {
-  const el = document.createElement("span");
-  el.className = "prompt-author prompt-address";
-  const name = document.createElement("span");
-  name.className = `peer-name ${MENTION_TEXT_CLASS}`;
-  name.textContent = requireMessage(address.name, `${PATH}.address.name`).text;
-  linkWorkspaceMentionsInText(name);
+  const text = requireMessage(address.name, `${PATH}.address.name`).text;
   switch (address.direction.case) {
     case "sent":
-      el.append(name, drawPeerArrow("out"));
-      return el;
+      return drawPromptAddressHeader(text, "out", true);
     case "received":
-      el.append(drawPeerArrow("in"), name);
-      return el;
+      return drawPromptAddressHeader(text, "in", true);
     default:
       return unreachableArm(`${PATH}.address.direction`, String(address.direction.case));
   }
+}
+
+/**
+ * THE ONE HEADER OF A PROMPT BUBBLE THAT NAMES THE OTHER END: the name beside
+ * the arrow on the side DIRECTION names, in the header's one font, size and
+ * place. An agent-to-agent prompt and a prompt the daemon itself sent
+ * (user-prompt.ts, "Zettel <subsystem>") both draw it here, so the two can
+ * never head a bubble differently. MENTION makes the name a workspace
+ * mention; a subsystem's name is not one.
+ */
+export function drawPromptAddressHeader(text: string, direction: PeerArrowDirection, mention: boolean): HTMLElement {
+  const el = document.createElement("span");
+  el.className = "prompt-author prompt-address";
+  const name = document.createElement("span");
+  name.className = mention ? `peer-name ${MENTION_TEXT_CLASS}` : "peer-name";
+  name.textContent = text;
+  if (mention) linkWorkspaceMentionsInText(name);
+  if (direction === "out") el.append(name, drawPeerArrow("out"));
+  else el.append(drawPeerArrow("in"), name);
+  return el;
 }
 
 /** The prompt's blocks, in composed order: the bubble's content. */

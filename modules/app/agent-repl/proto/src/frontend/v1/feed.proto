@@ -2819,6 +2819,20 @@ message FeedUserPrompt {
   // so nothing that reads `working` as "this turn has not ended" mistakes a
   // pause for an end. Never set while `working` is unset.
   bool awaiting_user = 5;
+  // SET WHEN THE DAEMON ITSELF SENT THIS PROMPT (a notice, a brief, a repair
+  // request) rather than a person: the daemon subsystem that sent it. The
+  // bubble is then headed exactly as an agent-to-agent prompt that came in is
+  // (a left arrow, then a name, in the same font, size and place), with the
+  // name "Zettel <subsystem>". UNSET for a prompt a person said.
+  optional FeedUserPromptDaemonSender daemon_sender = 6;
+}
+
+// The daemon subsystem that sent a user-prompt row.
+message FeedUserPromptDaemonSender {
+  // The subsystem's reader-friendly name, WITHOUT the "Zettel " prefix the
+  // header draws before it (e.g. "Deployment Monitor", "Merge Queue Monitor",
+  // "GitHub PR Monitor"). Never empty.
+  string subsystem = 1;
 }
 
 // One known slash command a user prompt names.

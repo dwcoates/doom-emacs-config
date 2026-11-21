@@ -52,23 +52,23 @@ function said(text: string, commands: string[]) {
 describe("drawFeedUserPrompt: the known commands", () => {
   it("marks a slash word naming a command the row lists", () => {
     // Arrange / Act
-    const el = drawFeedUserPrompt(said("/merge-queue own", ["merge-queue"]));
+    const el = drawFeedUserPrompt(said("/merge-queue own", ["merge-queue"]), "row-1");
     // Assert
     expect(el.querySelector(`.${KNOWN_COMMAND_CLASS}`)?.textContent).toBe("/merge-queue");
   });
 
   it("marks nothing when the row lists no command", () => {
     // Arrange / Act
-    const el = drawFeedUserPrompt(said("/merge-queue own", []));
+    const el = drawFeedUserPrompt(said("/merge-queue own", []), "row-1");
     // Assert
     expect(el.querySelector(`.${KNOWN_COMMAND_CLASS}`)).toBeNull();
   });
 
   it("marks a command the row gains when it is redrawn in place", () => {
     // Arrange
-    const before = drawFeedUserPrompt(said("/merge-queue own", []));
+    const before = drawFeedUserPrompt(said("/merge-queue own", []), "row-1");
     // Act
-    const after = drawFeedUserPrompt(said("/merge-queue own", ["merge-queue"]), before);
+    const after = drawFeedUserPrompt(said("/merge-queue own", ["merge-queue"]), "row-1", before);
     // Assert
     expect(after.querySelector(`.${KNOWN_COMMAND_CLASS}`)?.textContent).toBe("/merge-queue");
   });
@@ -77,7 +77,7 @@ describe("drawFeedUserPrompt: the known commands", () => {
     // Arrange
     const capture = captureLogRecords();
     // Act
-    drawFeedUserPrompt(said("/a /b", ["a", "b"]));
+    drawFeedUserPrompt(said("/a /b", ["a", "b"]), "row-1");
     // Assert
     const record = await forwardedRecord(capture, "feed.draw-user-prompt");
     expect(record.context).toEqual(expect.objectContaining({ commands: 2 }));
@@ -86,7 +86,7 @@ describe("drawFeedUserPrompt: the known commands", () => {
   it("colors a marked command with the known-command color", () => {
     // Arrange
     const restore = installStylesheet();
-    const el = drawFeedUserPrompt(said("/merge-queue", ["merge-queue"]));
+    const el = drawFeedUserPrompt(said("/merge-queue", ["merge-queue"]), "row-1");
     document.body.append(el);
     try {
       // Act
@@ -102,7 +102,7 @@ describe("drawFeedUserPrompt: the known commands", () => {
 
 describe("drawFeedUserPrompt: the bubble", () => {
   it("wears the one bubble's classes and the prompt hook the feed finds it by", () => {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), "row-1");
     expect(el.className).toBe("bubble md user");
   });
 
@@ -112,36 +112,34 @@ describe("drawFeedUserPrompt: the bubble", () => {
     ["at rest", false, false],
   ] as const)("draws a %s prompt with no wave marker and no inline animation", (_label, working, awaitingUser) => {
     // Arrange / Act
-    const el = drawFeedUserPrompt(prompt([], "You", working, [], awaitingUser));
+    const el = drawFeedUserPrompt(prompt([], "You", working, [], awaitingUser), "row-1");
 
     // Assert
     expect(isStill(el)).toBe(true);
   });
 
   it("draws no author label, however the daemon resolved it", () => {
-    const el = drawFeedUserPrompt(prompt([], "Explore"));
+    const el = drawFeedUserPrompt(prompt([], "Explore"), "row-1");
     expect(el.querySelector(".prompt-author")).toBeNull();
   });
 
   it("puts the blocks in the capped body, which the stylesheet already caps", () => {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), "row-1");
     expect(el.querySelector(".bubble-body")).not.toBeNull();
   });
 });
 
 describe("drawFeedUserPrompt: the body", () => {
   it("draws every block, in the composed order", () => {
-    const el = drawFeedUserPrompt(
-      prompt([
+    const el = drawFeedUserPrompt(prompt([
         { block: { case: "text", value: { prose: servedProse("one") } } },
         { block: { case: "image", value: { src: "/s.png", alt: "shot" } } },
-      ]),
-    );
+      ]), "row-1");
     expect(el.querySelectorAll(".bubble-body > *")).toHaveLength(2);
   });
 
   it("draws an empty body for a prompt with no blocks", () => {
-    expect(drawFeedUserPrompt(prompt([])).querySelector(".bubble-body")?.children).toHaveLength(0);
+    expect(drawFeedUserPrompt(prompt([]), "row-1").querySelector(".bubble-body")?.children).toHaveLength(0);
   });
 });
 
@@ -150,12 +148,12 @@ describe("drawFeedUserPrompt: refusals", () => {
     const msg = create(FeedUserPromptSchema, {
       result: { case: "success", value: { body: { blocks: [] } } },
     });
-    expect(() => drawFeedUserPrompt(msg)).toThrow(MalformedView);
+    expect(() => drawFeedUserPrompt(msg, "row-1")).toThrow(MalformedView);
   });
 
   it("refuses an unset result, one arm being one arm and not none", () => {
     const msg = create(FeedUserPromptSchema, { author: { label: "You" } });
-    expect(() => drawFeedUserPrompt(msg)).toThrow(MalformedView);
+    expect(() => drawFeedUserPrompt(msg, "row-1")).toThrow(MalformedView);
   });
 
   it("refuses a success with no body", () => {
@@ -163,7 +161,7 @@ describe("drawFeedUserPrompt: refusals", () => {
       author: { label: "You" },
       result: { case: "success", value: {} },
     });
-    expect(() => drawFeedUserPrompt(msg)).toThrow(MalformedView);
+    expect(() => drawFeedUserPrompt(msg, "row-1")).toThrow(MalformedView);
   });
 });
 
@@ -176,7 +174,7 @@ describe("drawFeedUserPrompt: an arm this build has no case for", () => {
     // Act
     let thrown: unknown;
     try {
-      drawFeedUserPrompt(msg);
+      drawFeedUserPrompt(msg, "row-1");
     } catch (err) {
       thrown = err;
     }
@@ -195,7 +193,7 @@ describe("drawFeedUserPrompt: the record of the row", () => {
     // ARRANGE
     const capture = captureLogRecords();
     // ACT
-    drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
+    drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), "row-1");
     // ASSERT
     const record = await forwardedRecord(capture, "feed.draw-user-prompt");
     expect(record.level.case).toBe("info");
@@ -204,17 +202,17 @@ describe("drawFeedUserPrompt: the record of the row", () => {
 
 describe("drawFeedUserPrompt: its spec", () => {
   it("is a prompt-role bubble", () => {
-    const el = drawFeedUserPrompt(prompt([]));
+    const el = drawFeedUserPrompt(prompt([]), "row-1");
     expect(el.getAttribute(BUBBLE_ROLE_ATTRIBUTE)).toBe("prompt");
   });
 
   it("is the user variant", () => {
-    const el = drawFeedUserPrompt(prompt([]));
+    const el = drawFeedUserPrompt(prompt([]), "row-1");
     expect(el.getAttribute(BUBBLE_VARIANT_ATTRIBUTE)).toBe("user");
   });
 
   it("folds at the user prompt cap, which has no line limit", () => {
-    const el = drawFeedUserPrompt(prompt([]));
+    const el = drawFeedUserPrompt(prompt([]), "row-1");
     expect(el.getAttribute(BUBBLE_CAP_ATTRIBUTE)).toBe(String(USER_PROMPT_CAP_LINES));
   });
 
@@ -223,7 +221,7 @@ describe("drawFeedUserPrompt: its spec", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const uninstall = installClickExpand(host, () => "");
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("go") } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("go") } } }]), "row-1");
     host.append(el);
     const box = el.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`);
     // Act
@@ -240,7 +238,7 @@ describe("drawFeedUserPrompt: the whole prompt, folded or open", () => {
   function withTallPrompt(check: (box: HTMLElement) => void): void {
     const restore = installStylesheet();
     const text = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n\n");
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }]), "row-1");
     document.body.append(el);
     try {
       check(el.querySelector<HTMLElement>(`:scope > .${BUBBLE_SCROLL_CLASS}`) as HTMLElement);
@@ -269,7 +267,7 @@ describe("drawFeedUserPrompt: a tree the person typed", () => {
 
   /** A prompt of one text block holding TEXT, attached under its own column. */
   function mounted(text: string): HTMLElement {
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }]));
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse(text) } } }]), "row-1");
     const column = document.createElement("div");
     column.append(el);
     document.body.append(column);
@@ -296,10 +294,10 @@ describe("drawFeedUserPrompt: a tree the person typed", () => {
 describe("drawFeedUserPrompt: a re-push", () => {
   it("updates the previous draw in place, keeping its scroll box", () => {
     // Arrange
-    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]));
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), "row-1");
     const box = first.querySelector(".bubble-scroll");
     // Act
-    const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), first);
+    const again = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), "row-1", first);
     // Assert
     expect([again, again.querySelector(".bubble-scroll")]).toEqual([first, box]);
   });
@@ -315,7 +313,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
 
   it("draws the quote in the body, ahead of the words", () => {
     // Act
-    const el = drawFeedUserPrompt(reply());
+    const el = drawFeedUserPrompt(reply(), "row-1");
     // Assert
     const body = el.querySelector(".bubble-body");
     expect([...(body?.children ?? [])].map((child) => child.classList.contains(QUOTE_PARTS_CLASS))).toEqual([true, false]);
@@ -331,7 +329,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
   it("hides the quote but its heading while the bubble is collapsed, leaving the words", () => {
     // Arrange
     const restore = installStylesheet();
-    const el = drawFeedUserPrompt(reply());
+    const el = drawFeedUserPrompt(reply(), "row-1");
     document.body.append(el);
     try {
       // Act
@@ -347,7 +345,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
   it("shows the whole quote once the bubble is expanded", () => {
     // Arrange
     const restore = installStylesheet();
-    const el = drawFeedUserPrompt(reply());
+    const el = drawFeedUserPrompt(reply(), "row-1");
     document.body.append(el);
     try {
       // Act
@@ -363,7 +361,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
   it("fills the quoted response's code block with the response bubble's grey", () => {
     // Arrange
     const restore = installStylesheet();
-    const el = drawFeedUserPrompt(reply());
+    const el = drawFeedUserPrompt(reply(), "row-1");
     document.body.append(el);
     try {
       // Act
@@ -382,7 +380,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
   it("leaves the person's own code blocks on the one code wash", () => {
     // Arrange
     const restore = installStylesheet();
-    const el = drawFeedUserPrompt(reply());
+    const el = drawFeedUserPrompt(reply(), "row-1");
     document.body.append(el);
     try {
       // Act
@@ -399,7 +397,7 @@ describe("drawFeedUserPrompt: a reply's quote", () => {
 describe("drawFeedUserPrompt: the copy control", () => {
   /** The prompt bubble drawn from BLOCKS, and its copy control. */
   function copyControlOf(blocks: unknown[]): { el: HTMLElement; control: HTMLElement } {
-    const el = drawFeedUserPrompt(prompt(blocks));
+    const el = drawFeedUserPrompt(prompt(blocks), "row-1");
     const control = el.querySelector<HTMLElement>(`.${BUBBLE_COPY_CLASS}`);
     if (control === null) throw new Error("the prompt drew no copy control");
     return { el, control };
@@ -448,9 +446,9 @@ describe("drawFeedUserPrompt: the copy control", () => {
 
   it("copies what the latest push says, after a redraw in place", () => {
     // Arrange
-    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("old") } } }]));
+    const first = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("old") } } }]), "row-1");
     // Act
-    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("new") } } }]), first);
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("new") } } }]), "row-1", first);
     // Assert
     const controls = el.querySelectorAll(`.${BUBBLE_COPY_CLASS}`);
     expect([controls.length, boundCopyText(controls[0]).text]).toEqual([1, "new"]);
@@ -526,5 +524,49 @@ describe("userPromptLook: the one source of the user prompt's look", () => {
       /\bdrawPromptCopyControl\(/.test(code.replace(/export function userPromptLook[\s\S]*?\n}\n/, "")),
       [...code.matchAll(/capLines:\s*(\w+)/g)].map((m) => m[1]).filter((cap) => cap !== "USER_PROMPT_CAP_LINES" && cap !== "AGENT_PROMPT_CAP_LINES" && cap !== "typeof"),
     ]).toEqual([true, false, []]);
+  });
+});
+
+describe("drawFeedUserPrompt: a prompt the daemon sent", () => {
+  const textBlock = [{ block: { case: "text", value: { prose: servedProse("a notice") } } }];
+
+  function daemonPrompt(subsystem?: string) {
+    const msg = prompt(textBlock, "Merge");
+    if (subsystem !== undefined) msg.daemonSender = { $typeName: "frontend.v1.FeedUserPromptDaemonSender", subsystem };
+    return msg;
+  }
+
+  it("heads the bubble with a left arrow then Zettel and the subsystem's name", () => {
+    // Act
+    const el = drawFeedUserPrompt(daemonPrompt("Deployment Monitor"), "row-1");
+    // Assert
+    const header = el.querySelector(".prompt-address");
+    expect([header?.firstElementChild?.getAttribute("data-direction"), header?.textContent]).toEqual([
+      "in",
+      "Zettel Deployment Monitor",
+    ]);
+  });
+
+  it("draws the subsystem's name as plain text, never a workspace mention", () => {
+    // Act
+    const el = drawFeedUserPrompt(daemonPrompt("Merge Queue Monitor"), "row-1");
+    // Assert
+    expect(el.querySelector(".prompt-address .peer-name")?.classList.contains("workspace-mention")).toBe(false);
+  });
+
+  it("draws no header for a prompt a person said", () => {
+    // Act
+    const el = drawFeedUserPrompt(daemonPrompt(), "row-1");
+    // Assert
+    expect(el.querySelector(".prompt-address")).toBeNull();
+  });
+});
+
+describe("drawFeedUserPrompt: the question control", () => {
+  it("carries the control for its row in the corner beside the copy control", () => {
+    // Act
+    const el = drawFeedUserPrompt(prompt([{ block: { case: "text", value: { prose: servedProse("hi") } } }]), "row-7");
+    // Assert
+    expect(el.querySelector(".question-control.bubble-question")?.getAttribute("data-asks-about")).toBe("row-7");
   });
 });

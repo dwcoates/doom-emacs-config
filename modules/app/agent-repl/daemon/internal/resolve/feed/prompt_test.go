@@ -95,6 +95,56 @@ func TestTheAuthorLabelComesFromTheOrigin(t *testing.T) {
 	}
 }
 
+func TestADaemonSentPromptNamesTheSubsystemThatSentIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+		want   string
+	}{
+		{"a merge test repair is the merge queue monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_TEST_REPAIR, "Merge Queue Monitor"},
+		{"a merge conflict repair is the merge queue monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_MERGE_CONFLICT_REPAIR, "Merge Queue Monitor"},
+		{"a deploy mediation brief is the deployment monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_DEPLOY_MEDIATION, "Deployment Monitor"},
+		{"a pull request notice is the GitHub PR monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_PULL_REQUEST_NOTICE, "GitHub PR Monitor"},
+		{"a workspace notice is the workspace monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_NOTICE, "Workspace Monitor"},
+		{"a failed workspace create is the workspace creator's", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATE_FAILED, "Workspace Creator"},
+		{"a main sync repair is the main sync monitor's", conversationv1.PromptOrigin_PROMPT_ORIGIN_MAIN_SYNC_REPAIR, "Main Sync Monitor"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			row := PromptRow(tc.origin, nil, SaidText("x"), nil)
+
+			// Assert.
+			got := row.GetUserPrompt().GetDaemonSender().GetSubsystem()
+			if got != tc.want {
+				t.Fatalf("daemon sender = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAPromptNoDaemonSubsystemSentHasNoDaemonSender(t *testing.T) {
+	tests := []struct {
+		name   string
+		origin conversationv1.PromptOrigin
+	}{
+		{"a person's prompt", conversationv1.PromptOrigin_PROMPT_ORIGIN_USER_SENT},
+		{"a workspace's initial brief", conversationv1.PromptOrigin_PROMPT_ORIGIN_WORKSPACE_CREATED},
+		{"a prompt typed on claude.ai", conversationv1.PromptOrigin_PROMPT_ORIGIN_REMOTE_CONTROL},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			row := PromptRow(tc.origin, nil, SaidText("x"), nil)
+
+			// Assert.
+			if got := row.GetUserPrompt().GetDaemonSender(); got != nil {
+				t.Fatalf("daemon sender = %v, want none", got)
+			}
+		})
+	}
+}
+
 // A RESUMPTION AFTER RESTART IS UNDER THE HOOD (owner ruling, 2026-10-12): it
 // replaces the earlier rule that it drew a row labelled "Resumed after
 // restart". Its turn runs and shows as status; no prompt row is drawn.
