@@ -1060,10 +1060,9 @@ func (f *Fleet) HandOver(ws ids.WorkspaceID) (bool, error) {
 	// expired) re-attached nothing and served it through a closed client.
 	f.mu.Lock()
 	if f.sessions[ws] == session {
-		delete(f.sessions, ws)
+		f.removeStoodDownLocked(ws)
 		delete(f.coldGates, ws)
 		delete(f.lastCold, ws)
-		f.movedLocked()
 	}
 	f.mu.Unlock()
 	f.logTransition(ws, "session_live", true, false,

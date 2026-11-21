@@ -115,8 +115,7 @@ func (f *Fleet) standDownAtGate(ctx context.Context, ws ids.WorkspaceID) {
 		log.Debug(opColdGate, "the gate holds no idle shim to stand down", dlog.Context{"held": held})
 		return
 	}
-	delete(f.sessions, ws)
-	f.movedLocked()
+	f.removeStoodDownLocked(ws)
 	f.mu.Unlock()
 	if err := f.teardown(shimlife.WithStandDown(ctx, shimlife.StandDownColdGate), ws, session, false, "the workspace stands at its cold gate, which runs no shim until it is answered"); err != nil {
 		log.Error(opColdGate, "the cold gate's shim could not be stood down", dlog.Context{"cause": err.Error()})

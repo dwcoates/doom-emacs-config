@@ -1943,3 +1943,77 @@ func TestSubmitRefusesAnOriginTheContractDoesNotDeclare(t *testing.T) {
 		t.Fatalf("records = %+v, want the undeclared origin recorded at error", h.log.Records())
 	}
 }
+
+// TestARevivedSessionStoodDownWhileTheRevivalRanIsNotAFailedRevival is the
+// 2026-11-20 race: a forget stood the revived session down, watcher and all,
+// between the bring-up's return and the revival's read of the client.
+func TestARevivedSessionStoodDownWhileTheRevivalRanIsNotAFailedRevival(t *testing.T) {
+	// Arrange: the revival brings the session up, and this daemon stands it
+	// down before the revival reads it back.
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.standDowns.Add(1) }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("a revival whose session this daemon stood down was recorded as a failed revival")
+	}
+	for _, rec := range h.log.Records() {
+		if rec.Level == "info" && rec.Message == "the revived session was stood down by this daemon while the revival ran; the stand-down decides what follows" {
+			if rec.Context["stand_downs_before"] != uint64(0) || rec.Context["stand_downs_after"] != uint64(1) {
+				t.Fatalf("context = %v, want the count before and after", rec.Context)
+			}
+			return
+		}
+	}
+	t.Fatalf("records = %+v, want the stand-down named at INFO", h.log.Records())
+}
+
+func TestARevivedSessionStoodDownWhileTheRevivalRanKeepsItsHolds(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.reviveHook = func() { h.standDowns.Add(1) }
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	standing, err := h.db.HeldPrompts(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("reading the standing holds: %v", err)
+	}
+	if len(standing) != 1 {
+		t.Fatalf("standing holds = %+v, want the prompt still held for the next bring-up", standing)
+	}
+}
+
+// TestAStandDownBeforeTheRevivalBeganDoesNotExcuseIt pins that the count is
+// read when the revival starts: a stand-down already counted then explains
+// nothing about this revival.
+func TestAStandDownBeforeTheRevivalBeganDoesNotExcuseIt(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	h.noSession = true
+	h.standDowns.Store(3)
+
+	// Act
+	if _, err := h.q.Submit(context.Background(), submission("t1", "wake up")); err != nil {
+		t.Fatalf("Submit = %v, want the submission held pending the revival", err)
+	}
+	h.waitRevivals()
+
+	// Assert
+	if !logged(h.log.Records(), "error", opSubmit, "the revival reported success but the workspace still has no session") {
+		t.Fatalf("records = %+v, want the lying revival at ERROR", h.log.Records())
+	}
+}

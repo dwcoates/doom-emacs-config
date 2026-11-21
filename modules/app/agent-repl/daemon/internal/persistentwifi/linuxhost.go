@@ -305,6 +305,12 @@ func (h *linuxHost) SetRadio(ctx context.Context, _ string, on bool) error {
 
 // Scan: `nmcli -t -f IN-USE,SSID,SIGNAL device wifi list --rescan yes`. Linux
 // names networks to any user, so the scan is always authorized.
+// BluetoothPower: Linux's host reads no Bluetooth power; Instant Hotspot, the
+// reason the failover records it, is macOS's.
+func (h *linuxHost) BluetoothPower(context.Context) (string, error) {
+	return "", errNoBluetoothReader
+}
+
 func (h *linuxHost) Scan(ctx context.Context) (wifiScan, error) {
 	out, err := run(ctx, h.runner, h.tools.Nmcli, "-t", "-f", "IN-USE,SSID,SIGNAL", "device", "wifi", "list", "--rescan", "yes")
 	if err != nil {

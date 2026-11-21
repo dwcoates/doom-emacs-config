@@ -417,3 +417,16 @@ func TestSpawnDetached(t *testing.T) {
 		})
 	}
 }
+
+func TestLinuxHostReadsNoBluetoothPower(t *testing.T) {
+	// Arrange.
+	h, _, _ := newLinuxHostFor(t)
+
+	// Act.
+	power, err := h.BluetoothPower(context.Background())
+
+	// Assert.
+	if power != "" || !errors.Is(err, errNoBluetoothReader) {
+		t.Fatalf("BluetoothPower() = (%q, %v), want errNoBluetoothReader", power, err)
+	}
+}

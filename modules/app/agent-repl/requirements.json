@@ -562,6 +562,15 @@
       "doc": "docs/USER-GUIDE.md#setup"
     },
     {
+      "id": "persistent-wifi-join-known",
+      "kind": "env",
+      "why": "turns persistent-wifi mode's first failover step, joining a saved network in range, on (true, the default when unset) or off (false, every attempt joining only the hotspot); any other value stops the daemon at startup",
+      "profile": "run",
+      "optional": true,
+      "name": "AGENT_REPL_PERSISTENT_WIFI_JOIN_KNOWN",
+      "doc": "docs/USER-GUIDE.md#setup"
+    },
+    {
       "id": "skill-agent-repl-profile",
       "kind": "skill_link",
       "why": "the /agent-repl-profile skill",

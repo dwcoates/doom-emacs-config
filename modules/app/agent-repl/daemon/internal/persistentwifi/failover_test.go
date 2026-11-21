@@ -667,3 +667,287 @@ func TestEachFailoverAttemptRecordsItsStart(t *testing.T) {
 		t.Fatalf("start records = %+v, want the first attempt at the loss", started)
 	}
 }
+
+// surveyRecords answers the failover's attempt surveys (surveyAttempt).
+func (h *harness) surveyRecords() []map[string]any {
+	return h.failoverRecords("info", "a Wi-Fi failover attempt's survey: the hotspot's sighting, Bluetooth, the lid, the display and the power")
+}
+
+// channel is a scan's channel number.
+func channel(n int) *int { return &n }
+
+func TestTheKnownStepTurnedOffGoesStraightToTheHotspot(t *testing.T) {
+	// Arrange: a saved network in sight that would join, the step off.
+	h := lostClosed(t)
+	h.c.cfg.KnownJoinOff = true
+	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
+	h.r.on(argJoinNamed("Home"), answer{})
+	h.sight(inSight("", "Home"))
+
+	// Act: two attempts.
+	h.tickAt(0)
+	h.tickAt(5 * time.Second)
+
+	// Assert.
+	if calls := h.joinCalls(); !slices.Equal(calls, []string{argJoin, argJoin}) {
+		t.Fatalf("join calls = %v, want only the hotspot, once per attempt", calls)
+	}
+	off := h.failoverRecords("info", "the Wi-Fi failover's known-network step is turned off by the setting; each attempt joins only the hotspot")
+	if len(off) != 1 || off[0]["env"] != EnvJoinKnown || off[0]["attempt"] != 1 {
+		t.Fatalf("turned-off records = %+v, want one per loss naming the setting", off)
+	}
+}
+
+func TestTheKnownStepTurnedOffIsRecordedOncePerLoss(t *testing.T) {
+	// Arrange: lost, joined, then lost again, the step off.
+	h := lostClosed(t)
+	h.c.cfg.KnownJoinOff = true
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
+		answer{out: summary(true, "Home")}, answer{out: summary(false, "")})
+
+	// Act.
+	h.tickAt(0)
+	h.tickAt(5 * time.Second)
+	h.tickAt(10 * time.Second)
+	h.tickAt(15 * time.Second)
+
+	// Assert.
+	off := h.failoverRecords("info", "the Wi-Fi failover's known-network step is turned off by the setting; each attempt joins only the hotspot")
+	if len(off) != 2 {
+		t.Fatalf("turned-off records = %d, want one per loss", len(off))
+	}
+}
+
+func TestEachAttemptsSurveyRecordsTheHotspotsSighting(t *testing.T) {
+	cases := []struct {
+		name string
+		scan wifiScan
+		want map[string]any
+		gone []string
+	}{
+		{name: "a hotspot in sight under its curly apostrophe, with its strength and channel",
+			scan: wifiScan{Authorization: "authorized", Visible: []visibleNetwork{
+				{SSID: "Cafe", RSSI: -50}, {SSID: "Test’s Phone", RSSI: -61, Channel: channel(149)}}},
+			want: map[string]any{"hotspot_sighting": "visible", "hotspot_ssid": "Test’s Phone", "hotspot_rssi": -61,
+				"hotspot_channel": 149, "scan": "read", "visible": 2}},
+		{name: "a hotspot out of sight",
+			scan: inSight("", "Cafe"),
+			want: map[string]any{"hotspot_sighting": "not_visible", "scan": "read", "visible": 1},
+			gone: []string{"hotspot_rssi", "hotspot_channel"}},
+		{name: "a scan that failed leaves the sighting unknown, naming why",
+			scan: wifiScan{Authorization: "authorized", Error: "the scan failed: busy"},
+			want: map[string]any{"hotspot_sighting": "unscanned", "scan": "failed",
+				"scan_cause": "the Wi-Fi helper's the scan failed: busy"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange: the hotspot configured with a straight apostrophe.
+			h := newHarnessFor(t, "Test's Phone").standing(pmsetIn(true, energyModeLowPower), summary(false, "")).withLid(lidClosed)
+			h.c.quiet, h.c.displayAsleep = true, true
+			h.r.on(argPreferred, answer{out: preferred()})
+			h.r.on("/t/networksetup -setairportnetwork en0 Test's Phone", answer{out: "Could not find network Test's Phone."})
+			h.sight(tc.scan)
+
+			// Act: two attempts with the same cause.
+			h.tickAt(0)
+			h.tickAt(5 * time.Second)
+
+			// Assert: one survey per attempt, never de-duplicated.
+			surveys := h.surveyRecords()
+			if len(surveys) != 2 {
+				t.Fatalf("survey records = %+v, want one per attempt", surveys)
+			}
+			for i, got := range surveys {
+				for k, v := range tc.want {
+					if got[k] != v {
+						t.Fatalf("survey %d[%s] = %v, want %v (record %+v)", i, k, got[k], v, got)
+					}
+				}
+				for _, k := range tc.gone {
+					if _, has := got[k]; has {
+						t.Fatalf("survey %d carries %s: %+v", i, k, got)
+					}
+				}
+				if got["attempt"] != i+1 || got["hotspot"] != "Test's Phone" || got["lid"] != "closed" || got["quiet"] != true ||
+					got["display_asleep"] != true || got["power_source"] != "battery" || got["energy_mode"] != energyModeLowPower {
+					t.Fatalf("survey %d = %+v, want the attempt, the hotspot, the lid, the display and the power", i, got)
+				}
+			}
+		})
+	}
+}
+
+func TestASurveyWithNoHotspotConfiguredSaysSo(t *testing.T) {
+	// Act.
+	got := hotspotSighting("", &wifiScan{})
+
+	// Assert.
+	if got["hotspot_sighting"] != "no_hotspot_configured" {
+		t.Fatalf("hotspotSighting = %+v, want the hotspot named unconfigured", got)
+	}
+}
+
+func TestEachAttemptsSurveyRecordsBluetooth(t *testing.T) {
+	cases := []struct {
+		name      string
+		answer    answer
+		hang      bool
+		wantPower string
+		wantCause string
+	}{
+		{name: "powered", answer: answer{out: bluetoothOn}, wantPower: "on"},
+		{name: "powered down", answer: answer{out: bluetoothOff}, wantPower: "off"},
+		{name: "a read that failed is unreadable with its cause", answer: answer{out: "denied", code: 1},
+			wantPower: "unreadable", wantCause: "/t/system_profiler exited 1: denied"},
+		{name: "an answer naming no state is unreadable with what it named",
+			answer:    answer{out: `{"SPBluetoothDataType":[{"controller_properties":{"controller_state":"attrib_odd"}}]}`},
+			wantPower: "unreadable", wantCause: `system_profiler named no Bluetooth power state: controller_state "attrib_odd"`},
+		{name: "a read that outlives its bound is cut and unreadable", hang: true,
+			wantPower: "unreadable", wantCause: "the Bluetooth read did not answer within 1ms (expected 640ms): context deadline exceeded"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange.
+			h := lostClosed(t)
+			if tc.hang {
+				h.c.bluetoothBound = time.Millisecond
+				h.r.hangPrefix(argBluetooth)
+			} else {
+				h.r.on(argBluetooth, tc.answer)
+			}
+
+			// Act.
+			h.tickAt(0)
+
+			// Assert: the attempt still went on to the hotspot.
+			surveys := h.surveyRecords()
+			if len(surveys) != 1 || surveys[0]["bluetooth_power"] != tc.wantPower {
+				t.Fatalf("survey records = %+v, want Bluetooth %s", surveys, tc.wantPower)
+			}
+			if cause, has := surveys[0]["bluetooth_power_cause"]; (tc.wantCause != "") != has || (has && cause != tc.wantCause) {
+				t.Fatalf("survey Bluetooth cause = %v, want %q", cause, tc.wantCause)
+			}
+			if h.r.count(argJoin) != 1 {
+				t.Fatalf("join calls = %v, want the hotspot tried after the survey", h.joinCalls())
+			}
+		})
+	}
+}
+
+func TestEveryHotspotJoinRecordsItsExactOutcome(t *testing.T) {
+	// Arrange: the hotspot will not join on the first attempt, then joins.
+	h := lostClosed(t)
+	h.r.on(argJoin, answer{out: "Could not find network Test Hotspot."}, answer{})
+	h.r.on(argSummary, answer{out: summary(false, "")}, answer{out: summary(false, "")},
+		answer{out: summary(false, "")}, answer{out: summary(true, hotspot)})
+
+	// Act.
+	h.tickAt(0)
+	h.tickAt(5 * time.Second)
+
+	// Assert.
+	tries := h.failoverRecords("info", "joined the hotspot, or tried to")
+	if len(tries) != 2 {
+		t.Fatalf("hotspot join records = %+v, want one per attempt", tries)
+	}
+	if tries[0]["outcome"] != "failed" || tries[0]["joined"] != false || tries[0]["error"] != "Could not find network Test Hotspot." ||
+		tries[0]["network"] != hotspot || tries[0]["attempt"] != 1 || tries[0]["took_bound"] != false {
+		t.Fatalf("failed join record = %+v, want the failure and its detail", tries[0])
+	}
+	if tries[1]["outcome"] != "joined" || tries[1]["joined"] != true || tries[1]["attempt"] != 2 {
+		t.Fatalf("joined record = %+v, want the join", tries[1])
+	}
+	if _, has := tries[1]["error"]; has {
+		t.Fatalf("joined record = %+v, want no error", tries[1])
+	}
+}
+
+func TestEveryHotspotJoinIsRecordedWhileItsCauseIsRecordedOnce(t *testing.T) {
+	// Arrange: the hotspot out of reach on three attempts.
+	h := lostClosed(t)
+
+	// Act.
+	h.tickAt(0)
+	h.tickAt(5 * time.Second)
+	h.tickAt(10 * time.Second)
+
+	// Assert.
+	if n := len(h.failoverRecords("info", "joined the hotspot, or tried to")); n != 3 {
+		t.Fatalf("hotspot join records = %d, want one per attempt", n)
+	}
+	if n := len(h.failoverRecords("info", "the hotspot could not be joined after Wi-Fi was lost; the failover is tried again on the retry schedule")); n != 1 {
+		t.Fatalf("cause records = %d, want the standing cause once", n)
+	}
+}
+
+func TestHotspotJoinRecordNamesAnOutcomeWithoutAJoin(t *testing.T) {
+	// Arrange.
+	outcome := &agentreplv1.UpdatePersistentWifiModeHotspot{Outcome: &agentreplv1.UpdatePersistentWifiModeHotspot_NoWifiInterface{
+		NoWifiInterface: &agentreplv1.UpdatePersistentWifiModeHotspotNoWifiInterface{}}}
+
+	// Act.
+	got := hotspotJoinRecord("", 3, hotspot, outcome, 0, false)
+
+	// Assert.
+	if got["outcome"] != "no_wifi_interface" || got["joined"] != false || got["error"] != "no_wifi_interface" || got["attempt"] != 3 {
+		t.Fatalf("hotspotJoinRecord = %+v, want the arm named as the outcome and the error", got)
+	}
+}
+
+func TestJoinRecord(t *testing.T) {
+	cases := []struct {
+		name  string
+		cause string
+		want  map[string]any
+	}{
+		{name: "a join", want: map[string]any{"device": "en0", "network": "Home", "took_ms": int64(1500), "took_bound": false, "joined": true}},
+		{name: "a failed join names its error", cause: "Could not find network Home.",
+			want: map[string]any{"device": "en0", "network": "Home", "took_ms": int64(1500), "took_bound": false, "joined": false,
+				"error": "Could not find network Home."}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act.
+			got := joinRecord("en0", "Home", 1500*time.Millisecond, false, tc.cause)
+
+			// Assert.
+			if len(got) != len(tc.want) {
+				t.Fatalf("joinRecord = %+v, want %+v", got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Fatalf("joinRecord[%s] = %v, want %v", k, got[k], v)
+				}
+			}
+		})
+	}
+}
+
+// TestBothJoinRecordsShareJoinRecordsShape pins that the saved-network and
+// hotspot join records are both built on joinRecord: a hand-rolled record
+// missing one of its keys fails here.
+func TestBothJoinRecordsShareJoinRecordsShape(t *testing.T) {
+	// Arrange: a saved network in sight that will not join, then the hotspot.
+	h := lostClosed(t)
+	h.r.on(argPreferred, answer{out: preferred("Home", hotspot)})
+	h.r.on(argJoinNamed("Home"), answer{out: "Could not find network Home."})
+	h.sight(inSight("", "Home"))
+
+	// Act.
+	h.tickAt(0)
+
+	// Assert.
+	known := h.failoverRecords("info", "joined a Wi-Fi network, or tried to")
+	spot := h.failoverRecords("info", "joined the hotspot, or tried to")
+	if len(known) != 1 || len(spot) != 1 {
+		t.Fatalf("join records = %+v and %+v, want one of each", known, spot)
+	}
+	for k := range joinRecord("en0", "x", 0, false, "cause") {
+		if _, has := known[0][k]; !has {
+			t.Fatalf("saved-network join record %+v lacks %s", known[0], k)
+		}
+		if _, has := spot[0][k]; !has {
+			t.Fatalf("hotspot join record %+v lacks %s", spot[0], k)
+		}
+	}
+}

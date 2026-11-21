@@ -314,8 +314,7 @@ func (f *Fleet) standDownBridge(ctx context.Context, log dlog.Logger, ws ids.Wor
 	f.mu.Lock()
 	entry, ok := f.sessions[ws]
 	if ok && entry.client == held.client {
-		delete(f.sessions, ws)
-		f.movedLocked()
+		f.removeStoodDownLocked(ws)
 	}
 	f.mu.Unlock()
 	if !ok || entry.client != held.client {

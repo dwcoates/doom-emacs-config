@@ -2,6 +2,7 @@ package persistentwifi
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -133,10 +134,134 @@ func (c *Controller) attemptFailover(attempt failoverAttempt, rd reading) {
 		c.failoverCancel = nil
 		c.mu.Unlock()
 	}()
-	if c.joinVisibleKnown(attempt, rd) != stepNotJoined {
+	scan, step := c.surveyAttempt(attempt, rd)
+	if step == stepAbandoned {
+		return
+	}
+	if c.knownStepOn(attempt) && c.joinVisibleKnown(attempt, rd, scan) != stepNotJoined {
 		return
 	}
 	c.joinHotspotStep(attempt, rd)
+}
+
+// knownStepOn reports whether the saved-network step runs: EnvJoinKnown
+// turns it off, which the loss's first attempt records once.
+func (c *Controller) knownStepOn(attempt failoverAttempt) bool {
+	if !c.cfg.KnownJoinOff {
+		return true
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.failover.knownOffNoted {
+		c.failover.knownOffNoted = true
+		c.log.Info(opFailover, "the Wi-Fi failover's known-network step is turned off by the setting; each attempt joins only the hotspot",
+			dlog.Context{"env": EnvJoinKnown, "attempt": attempt.number})
+	}
+	return false
+}
+
+// THE ATTEMPT'S SURVEY (owner request, 2026-11-20): every attempt, before
+// either step, scans once and records what stood around it, never
+// de-duplicated: whether the hotspot was in sight and how strong, Bluetooth's
+// power (Instant Hotspot finds the phone over it), the lid, the display and
+// the power. Seven days of hotspot joins failing with "Could not find
+// network" said nothing of whether the phone was broadcasting, since the
+// scans before them recorded only counts.
+
+// Expected time and bound of one Bluetooth read (`system_profiler
+// SPBluetoothDataType -json`). Measured 2026-11-20 19:20 on this host at load
+// average 249: five reads took 449ms to 639ms. The bound is 2.5 times the
+// worst.
+const (
+	bluetoothExpected = 640 * time.Millisecond
+	bluetoothBound    = 1600 * time.Millisecond
+)
+
+// surveyAttempt is the attempt's survey: one scan (nil when there is no
+// Wi-Fi interface or the scan failed, its cause recorded once as before) and
+// its record. It runs off the lock.
+func (c *Controller) surveyAttempt(attempt failoverAttempt, rd reading) (*wifiScan, failoverStep) {
+	ctx := attempt.ctx
+	fields := dlog.Context{"attempt": attempt.number, "device": rd.device}
+	var scan *wifiScan
+	if rd.device == "" {
+		fields["scan"] = "no_wifi_interface"
+	} else {
+		if !c.stillWanted(attempt, "scan") {
+			return nil, stepAbandoned
+		}
+		got, err := c.scanWifi(ctx)
+		if ctx.Err() != nil {
+			c.stillWanted(attempt, "scan")
+			return nil, stepAbandoned
+		}
+		c.mu.Lock()
+		if err != nil {
+			c.recordScanCauseLocked(err)
+			fields["scan"], fields["scan_cause"] = "failed", err.Error()
+		} else {
+			c.scanCause = ""
+			fields["scan"], fields["visible"] = "read", len(got.Visible)
+			scan = &got
+		}
+		c.mu.Unlock()
+	}
+	power, err := c.bluetoothPower(ctx)
+	if ctx.Err() != nil {
+		c.stillWanted(attempt, "bluetooth")
+		return nil, stepAbandoned
+	}
+	fields["bluetooth_power"] = power
+	if err != nil {
+		fields["bluetooth_power_cause"] = err.Error()
+	}
+	for k, v := range hotspotSighting(c.cfg.Hotspot, scan) {
+		fields[k] = v
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	fields["lid"], fields["quiet"], fields["display_asleep"] = c.lid.name(), c.quiet, c.displayAsleep
+	fields["display_cause"], fields["power_source"], fields["energy_mode"] = c.displayCause, c.powerSource.name(), rd.energy
+	c.log.Info(opFailover, "a Wi-Fi failover attempt's survey: the hotspot's sighting, Bluetooth, the lid, the display and the power", fields)
+	return scan, stepNotJoined
+}
+
+// bluetoothPower reads Bluetooth's power, bounded by bluetoothBound:
+// "on", "off", or "unreadable" with why.
+func (c *Controller) bluetoothPower(ctx context.Context) (string, error) {
+	bounded, cancel := context.WithTimeout(ctx, c.bluetoothBound)
+	defer cancel()
+	power, err := c.host.BluetoothPower(bounded)
+	switch {
+	case ctx.Err() != nil:
+		return "", ctx.Err()
+	case bounded.Err() != nil:
+		return "unreadable", fmt.Errorf("the Bluetooth read did not answer within %s (expected %s): %w", c.bluetoothBound, bluetoothExpected, bounded.Err())
+	case err != nil:
+		return "unreadable", err
+	}
+	return power, nil
+}
+
+// hotspotSighting is the survey's say on HOTSPOT in SCAN: "visible" with the
+// SSID as seen, its RSSI and channel; "not_visible"; or why it is unknown
+// ("unscanned": no scan was read; "no_hotspot_configured").
+func hotspotSighting(hotspot string, scan *wifiScan) dlog.Context {
+	switch {
+	case hotspot == "":
+		return dlog.Context{"hotspot_sighting": "no_hotspot_configured"}
+	case scan == nil:
+		return dlog.Context{"hotspot": hotspot, "hotspot_sighting": "unscanned"}
+	}
+	seen, ok := scan.sighting(hotspot)
+	if !ok {
+		return dlog.Context{"hotspot": hotspot, "hotspot_sighting": "not_visible"}
+	}
+	fields := dlog.Context{"hotspot": hotspot, "hotspot_sighting": "visible", "hotspot_ssid": seen.SSID, "hotspot_rssi": seen.RSSI}
+	if seen.Channel != nil {
+		fields["hotspot_channel"] = *seen.Channel
+	}
+	return fields
 }
 
 // stillWanted reports whether ATTEMPT may make its next join: the daemon has
@@ -170,36 +295,19 @@ func (c *Controller) abandonFailoverLocked() {
 // hotspot). macOS supplies each one's password from the keychain. A join ends
 // the failover. Each join attempt is recorded with the network's name and
 // its error (owner ruling, 2026-11-18: a record naming neither said nothing of
-// two visible networks' repeated failures). It runs off the lock
-// (attemptFailover).
-func (c *Controller) joinVisibleKnown(attempt failoverAttempt, rd reading) failoverStep {
-	ctx := attempt.ctx
-	if rd.device == "" {
-		// No interface: the hotspot step names the outcome.
+// two visible networks' repeated failures). SCAN is the attempt's survey's
+// (surveyAttempt); nil, no saved network can be seen, and the hotspot is
+// tried. It runs off the lock (attemptFailover).
+func (c *Controller) joinVisibleKnown(attempt failoverAttempt, rd reading, scan *wifiScan) failoverStep {
+	if rd.device == "" || scan == nil {
+		// No interface, or no scan: the hotspot step names the outcome.
 		return stepNotJoined
 	}
 	known, step := c.knownNetworks(attempt, rd)
 	if step != stepNotJoined || len(known) == 0 {
 		return step
 	}
-	if !c.stillWanted(attempt, "scan") {
-		return stepAbandoned
-	}
-	scan, err := c.scanWifi(ctx)
-	if ctx.Err() != nil {
-		c.stillWanted(attempt, "scan")
-		return stepAbandoned
-	}
-	if err != nil {
-		c.mu.Lock()
-		c.recordScanCauseLocked(err)
-		c.mu.Unlock()
-		return stepNotJoined
-	}
-	c.mu.Lock()
-	c.scanCause = ""
-	c.mu.Unlock()
-	visible := visibleKnown(known, scan)
+	visible := visibleKnown(known, *scan)
 	for i, name := range visible {
 		if !c.stillWanted(attempt, "known_join") {
 			return stepAbandoned
@@ -298,10 +406,11 @@ func (c *Controller) joinNamed(attempt failoverAttempt, rd reading, name string,
 		return false, stepAbandoned
 	}
 	ok := err == nil
-	record := dlog.Context{"device": rd.device, "network": name, "took_ms": took.Milliseconds(), "took_bound": bounded.Err() != nil, "joined": ok}
+	cause := ""
 	if err != nil {
-		record["error"] = err.Error()
+		cause = err.Error()
 	}
+	record := joinRecord(rd.device, name, took, bounded.Err() != nil, cause)
 	for k, v := range fields {
 		record[k] = v
 	}
@@ -317,6 +426,18 @@ func (c *Controller) joinNamed(attempt failoverAttempt, rd reading, name string,
 		return false, stepAbandoned
 	}
 	return after.state.GetJoined() != nil, stepNotJoined
+}
+
+// joinRecord is THE ONE record of a join a failover step made: the interface,
+// the network, how long the join took and whether its bound cut it, whether
+// it joined, and its error (CAUSE) when it did not. joinNamed and
+// joinHotspotStep each add their step's fields to it.
+func joinRecord(device, network string, took time.Duration, cut bool, cause string) dlog.Context {
+	record := dlog.Context{"device": device, "network": network, "took_ms": took.Milliseconds(), "took_bound": cut, "joined": cause == ""}
+	if cause != "" {
+		record["error"] = cause
+	}
+	return record
 }
 
 // joinHotspotStep is the failover's SECOND STEP: join the configured
@@ -340,11 +461,18 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 	c.log.Info(opFailover, "joining the hotspot after Wi-Fi was lost", dlog.Context{
 		"hotspot": c.cfg.Hotspot, "device": rd.device, "attempt": attempt.number,
 	})
-	outcome := c.joinHotspot(ctx, rd)
+	bounded, cancel := context.WithTimeout(ctx, joinBound)
+	defer cancel()
+	start := c.clock.Now()
+	outcome := c.joinHotspot(bounded, rd)
+	took := c.clock.Now().Sub(start)
 	if ctx.Err() != nil {
 		c.stillWanted(attempt, "hotspot_outcome")
 		return
 	}
+	// EVERY HOTSPOT JOIN'S EXACT OUTCOME IS RECORDED (owner request,
+	// 2026-11-20), whatever the de-duplicated cause record below says.
+	c.log.Info(opFailover, "joined the hotspot, or tried to", hotspotJoinRecord(rd.device, attempt.number, c.cfg.Hotspot, outcome, took, bounded.Err() != nil))
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if joined := outcome.GetJoined(); joined != nil {
@@ -381,6 +509,23 @@ func (c *Controller) joinHotspotStep(attempt failoverAttempt, rd reading) {
 			dlog.Context{"hotspot": c.cfg.Hotspot, "retry_every": every.String(),
 				"lost_for": failedAt.Sub(c.failover.lost).String(), "attempts": attempt.number})
 	}
+}
+
+// hotspotJoinRecord is the record of one hotspot join (joinRecord): the SSID
+// it named, the outcome's arm, and its detail when it failed.
+func hotspotJoinRecord(device string, attempt int, hotspot string, outcome *agentreplv1.UpdatePersistentWifiModeHotspot, took time.Duration, cut bool) dlog.Context {
+	network, cause := "", ""
+	switch {
+	case outcome.GetJoined() != nil:
+		network = outcome.GetJoined().GetNetworkName()
+	case outcome.GetFailed() != nil:
+		network, cause = outcome.GetFailed().GetNetworkName(), outcome.GetFailed().GetDetail()
+	default:
+		cause = hotspotArm(outcome)
+	}
+	record := joinRecord(device, network, took, cut, cause)
+	record["attempt"], record["hotspot"], record["outcome"] = attempt, hotspot, hotspotArm(outcome)
+	return record
 }
 
 // endFailoverLocked clears the failover once a step joined a network: its
@@ -491,6 +636,9 @@ type failoverSchedule struct {
 	every time.Duration
 	// attempts counts the attempts run since the loss.
 	attempts int
+	// knownOffNoted records that the loss's record of the saved-network step
+	// turned off (knownStepOn) was made.
+	knownOffNoted bool
 }
 
 // due answers whether a beat at now runs the failover's next step. The beat

@@ -461,6 +461,9 @@ type Fleet struct {
 	// startsUnderWay names the workspaces whose start is under way, from the gate's
 	// liveness check until the start returns. Guarded by mu. See Serving.
 	startsUnderWay map[ids.WorkspaceID]bool
+	// standDowns counts, per workspace, the sessions this daemon stood down
+	// out of the map (removeStoodDownLocked). Guarded by mu. See StandDowns.
+	standDowns map[ids.WorkspaceID]uint64
 	// watched is the LAST watcher this process started per workspace, kept
 	// after it closes: its pointers are what its successor resumes from, so a
 	// restart, a revival or a relaunch never replays history. See opening.go.
@@ -711,6 +714,7 @@ func NewFleet(deps FleetDeps) (*Fleet, error) {
 		remoteControlGates: map[ids.WorkspaceID]*sync.Mutex{},
 		startSlots:         startSlotsOf(deps.StartSlots),
 		startsUnderWay:     map[ids.WorkspaceID]bool{},
+		standDowns:         map[ids.WorkspaceID]uint64{},
 		watched:            map[ids.WorkspaceID]sessionwatcher.Watcher{},
 		carried:            map[ids.WorkspaceID]sessionwatcher.Pointers{},
 		selected:           map[ids.WorkspaceID]bool{},
@@ -3425,8 +3429,9 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 	f.mu.Lock()
 	session, ok := f.sessions[ws]
 	_, gated := f.coldGates[ws]
-	delete(f.sessions, ws)
-	f.movedLocked()
+	if ok {
+		f.removeStoodDownLocked(ws)
+	}
 	delete(f.coldGates, ws)
 	delete(f.lastCold, ws)
 	f.mu.Unlock()
@@ -3442,6 +3447,29 @@ func (f *Fleet) Stop(ctx context.Context, ws ids.WorkspaceID, force bool) error 
 		return nil
 	}
 	return f.teardown(ctx, ws, session, force, "the workspace's session was stopped")
+}
+
+// removeStoodDownLocked takes WS's session out of the map for a stand-down
+// this daemon ordered, and counts it (StandDowns) IN THE SAME CRITICAL
+// SECTION: whoever reads the session gone under mu reads the count that
+// explains it, with no window between the two. Every ordered removal goes
+// through it; a reaped shim's row (retireReaped) is a death, not a
+// stand-down, and is not counted. Caller holds f.mu for writing.
+func (f *Fleet) removeStoodDownLocked(ws ids.WorkspaceID) {
+	delete(f.sessions, ws)
+	f.standDowns[ws]++
+	f.movedLocked()
+}
+
+// StandDowns answers how many of WS's sessions this daemon has stood down
+// out of its map since it started. A revival reads it before and after its
+// bring-up: a count that moved means a stand-down this daemon ordered (a
+// kill, a forget, a cold gate, a handover) explains a session that is gone
+// once the bring-up returned.
+func (f *Fleet) StandDowns(ws ids.WorkspaceID) uint64 {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+	return f.standDowns[ws]
 }
 
 // teardown ends SESSION, already out of the fleet's map: the stand-down is

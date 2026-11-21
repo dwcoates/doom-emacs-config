@@ -29,6 +29,9 @@ type Host interface {
 	ReadLink(ctx context.Context, device string) (link, string, error)
 	// RadioPower reads whether device's radio is powered: "on" or "off".
 	RadioPower(ctx context.Context, device string) (string, error)
+	// BluetoothPower reads whether Bluetooth is powered: "on" or "off";
+	// errNoBluetoothReader when the host has no way to read it.
+	BluetoothPower(ctx context.Context) (string, error)
 	// PreferredNetworks lists the networks the machine has saved for device,
 	// in the order it joins them.
 	PreferredNetworks(ctx context.Context, device string) ([]string, error)
@@ -70,6 +73,9 @@ type Host interface {
 var (
 	errNoDisconnect = errors.New("persistentwifi: this host has no way to leave a network with the radio on")
 	errNoBrightness = errors.New("persistentwifi: this host has no tool to set the display's brightness")
+	// errNoBluetoothReader is a host with no way to read Bluetooth's power;
+	// a failover attempt's record names it unreadable.
+	errNoBluetoothReader = errors.New("persistentwifi: this host has no way to read Bluetooth's power")
 )
 
 // NewHost builds the Host cfg's platform drives, its tools run through runner.
