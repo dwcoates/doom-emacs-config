@@ -400,9 +400,31 @@ fired before. Change a template only when it is really necessary.
 
 The daemon tallies every record of every sink into (deploy, site, level,
 hour) rows in its store, crediting each record to the deploy serving when it
-was written. The retention pruner tallies a file before it removes it, so no
-record goes untallied however far apart deploys are. `ListLogSites` answers
-a window of time from those rows, not from the logs.
+was written. `ListLogSites` answers a window of time from those rows, not
+from the logs (`daemon/internal/logsites`, `daemon/internal/wsm/logsites.go`).
+
+- ONE PASS reads every JSONL log under the state root's `logs/` directory
+  and the cache root's `log/` directory from each file's own cursor, to the
+  end of its last whole line. A warnings twin (`*.warn.log`) and a
+  service's raw `.out.log` and `.err.log` are never read.
+- It runs before every removal of log files the daemon makes (the hourly
+  retention pass, a discarded workspace's logs), so every file the daemon
+  removes was read to its end; at each deploy's start; and before every
+  window is answered, so an answer is current to the moment it is asked.
+- A file's cursor is keyed by its device, inode and birth instant, so a
+  rotation's rename keeps it; a chunk's rows and the cursor's advance commit
+  together only while the cursor stands where the chunk was read, so two
+  daemons never count the same bytes.
+- A pass credits only records written before the instant it read the
+  deploys at; a later record waits for the next pass, so no record is
+  credited to a deploy that did not serve it.
+- A record that names no site (one written before its runtime keyed its
+  sites) is counted apart and credited to no site.
+- The files Emacs, the store and the sidecar remove themselves are read by
+  the hourly pass well before their three-day retention, and before their
+  cap rotation drops a generation: the busiest sink measured (`daemon.run.log`,
+  2026-11-21) took over twelve hours to roll through its five generations.
+- The store keeps the rows of the three most recent deploys.
 
 ## Operation queries
 

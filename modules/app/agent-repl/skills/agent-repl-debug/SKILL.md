@@ -90,6 +90,9 @@ For runtime investigations:
    running processes.
 3. Resolve the identity spine from workspace through session and process.
 4. Read canonical logs through the resolver rather than guessing paths.
+   - Which log sites fired across a window, and what is new since a deploy, is read with `agent-repld logs sites -since WHEN [-until WHEN] [-level warn]`.
+     - It answers from the daemon's per-deploy tally of every runtime's log sites (`logging-contract.md` "Log sites"), whether or not the log files still exist.
+     - Each site carries its template, its count, its first and last sighting, and its latest record.
 5. Query SQLite only when the question concerns resolved state or persisted
    conversation data.
 
