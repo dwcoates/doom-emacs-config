@@ -1015,3 +1015,33 @@ func TestGateEnvRefusesADaemonWithNoPath(t *testing.T) {
 	// Act
 	gateEnv("")
 }
+
+func TestServiceLogsDirIsWhereTheServicesWriteTheirLogs(t *testing.T) {
+	tests := []struct {
+		name  string
+		cache string
+		want  string
+	}{
+		{name: "the cache home's agent-repl log directory", cache: "/xdg", want: "/xdg/agent-repl/log"},
+		{name: "the home's .cache with no cache home set", want: "/home/u/.cache/agent-repl/log"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			getenv := func(name string) string {
+				if name == "XDG_CACHE_HOME" {
+					return tt.cache
+				}
+				return ""
+			}
+
+			// Act
+			got := serviceLogsDir(getenv, "/home/u")
+
+			// Assert
+			if got != tt.want {
+				t.Fatalf("serviceLogsDir = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

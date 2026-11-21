@@ -295,6 +295,10 @@ type Deps struct {
 	// mounted on chessboard.BundleRoute beneath the webapp's origin so the
 	// webapp imports the widget same-origin (chessboard.Boards). REQUIRED.
 	ChessWidgetBundle http.Handler
+	// LogSites answers the log sites that fired in a window
+	// (logsites.Tallier.Window), for ListLogSites. REQUIRED, like every
+	// dependency.
+	LogSites LogSites
 	// Log is the server's logger.
 	Log dlog.Surfaces
 }
@@ -716,6 +720,8 @@ func New(deps Deps) (Server, error) {
 		return nil, missing("the chess boards")
 	case deps.ChessWidgetBundle == nil:
 		return nil, missing("the chess widget bundle")
+	case deps.LogSites == nil:
+		return nil, missing("the log site tally")
 	case deps.Log == nil:
 		return nil, missing("log surfaces")
 	case deps.SessionFacts == nil:

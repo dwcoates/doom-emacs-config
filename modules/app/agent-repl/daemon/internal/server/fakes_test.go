@@ -2594,6 +2594,7 @@ type harness struct {
 	// HotReload records the web streams' builds the server tells the
 	// deploy's hot reload card.
 	HotReload *fakeHotReload
+	LogSites  *fakeLogSites
 	// Latencies records what ReportLatencies accepts.
 	Latencies *fakeLatencies
 	// VendorSpend is what ReportVendorSpend recorded.
@@ -2761,6 +2762,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		OpenWorld:        newFakeOpenWorld(),
 		ChessBoards:      &fakeChessSquares{},
 		HotReload:        &fakeHotReload{},
+		LogSites:         &fakeLogSites{},
 		SlashCommands:    commandcatalog.New(),
 		SlackChannels:    &fakeSlackChannels{},
 		Mentions:         &fakeMentions{topics: map[ids.WorkspaceID]*publish.Topic[*agentreplv1.HostWorkspaceMentions]{}},
@@ -2854,6 +2856,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Reconnects:        h.reconnects(),
 		HotReload:         h.HotReload,
 		ChessWidgetBundle: http.NotFoundHandler(),
+		LogSites:          h.LogSites,
 		Log:               h.Surfaces,
 	}
 	for _, apply := range opts {

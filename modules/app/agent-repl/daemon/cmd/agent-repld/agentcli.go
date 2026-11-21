@@ -41,7 +41,7 @@ import (
 	"agent-repld/internal/wsm"
 )
 
-// THE AGENT API'S COMMANDS: six nouns over the serving daemon's rpcs.
+// THE AGENT API'S COMMANDS: seven nouns over the serving daemon's rpcs.
 //
 //	agent-repld workspace    create | async-merge | prompt | set | finished | open | close | kill
 //	                         compact | status | list | subscribe | unsubscribe | gate
@@ -53,6 +53,7 @@ import (
 //	agent-repld runtime      deploy-hold | roll-out-landing | health | prune-storage
 //	                         reap-worktrees
 //	agent-repld test         run (testcli.go)
+//	agent-repld logs         sites (logscli.go)
 //
 // EVERY COMMAND IS ONE RPC (a `set` with several flags is one rpc per flag,
 // in order), and its answer is printed as protojson. The daemon decides
@@ -248,6 +249,9 @@ var cliNouns = map[string]map[string]cliCommand{
 	testNoun: {
 		"run":        {usage: "run [-workspace WS] [-worktree DIR] [-go DIR[=TestA,TestB/sub/path]]... [-vitest FILE[=FULL NAME]]... [-ert FILE[=test-a,test-b]]... [-harness SCRIPT[=group1,group2]]... [-suite NAME]... [-every-suite] [-coverage] [-record] [-remeasure] [-debug-info] [-runs N [-stop-at-first-failure]] [-no-reuse|-ungoverned|-cpu-load N -as-user]", run: testRun},
 		"redundancy": {usage: "redundancy go|vitest|report [-workspace WS] FLAGS (testrun redundancy's own flags)", run: testRedundancy},
+	},
+	logsNoun: {
+		"sites": {usage: "sites -since WHEN [-until WHEN] [-level debug|info|warn|error]", run: logsSites},
 	},
 	runtimeNoun: {
 		"deploy-hold":      {usage: "deploy-hold hold|release -repository here|DIR", run: runtimeDeployHold},

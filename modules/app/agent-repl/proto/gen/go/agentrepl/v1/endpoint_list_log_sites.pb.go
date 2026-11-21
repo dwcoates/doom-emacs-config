@@ -12,9 +12,11 @@
 // what fired, not how many ways its values varied.
 //
 // THE ANSWER IS READ FROM THE DAEMON'S STORE, NEVER FROM THE LOGS. The daemon
-// tallies every record of every sink into (deploy, site, level, hour) rows as
-// it is written and before any log file is pruned, so a window answers the
-// same whether or not its log files still exist. Each row is credited to the
+// tallies every record of every sink into (deploy, site, level, hour) rows by
+// a pass that reads each log file from its own cursor: before every removal
+// of log files, at each deploy's start, and before every window is answered.
+// So a window answers the same whether or not its log files still exist, and
+// is current to the moment it is asked. Each row is credited to the
 // deploy serving when its records were written. A window is therefore read at
 // HOUR granularity: an hour the window only partly covers is counted whole,
 // and the answer states the hours it covered (ListLogSitesSuccess.covered).
