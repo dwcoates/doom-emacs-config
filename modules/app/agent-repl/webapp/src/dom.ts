@@ -262,6 +262,11 @@ export interface PageMutationObserver {
   observe(target: Node, options: MutationObserverInit): void;
   /** Stop watching everything, as `MutationObserver.disconnect` does. */
   disconnect(): void;
+  /**
+   * The records queued but not yet delivered to the callback, taken off the
+   * queue, as `MutationObserver.takeRecords` does.
+   */
+  takeRecords(): MutationRecord[];
 }
 
 /**
@@ -331,6 +336,9 @@ export function pageMutationObserver(doc: Document, callback: MutationCallback):
       observer.disconnect();
       watched = [];
       unlisten();
+    },
+    takeRecords() {
+      return observer.takeRecords();
     },
   };
 }

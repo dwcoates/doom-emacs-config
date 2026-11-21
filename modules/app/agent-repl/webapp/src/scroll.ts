@@ -363,6 +363,17 @@ function findAnchor(rows: AnchorRows, hint: Element | null, viewTop: number): Fo
 /** What set an anchoring pass off: a size change, a scroll event, or a caller's own measure. */
 type AnchorTrigger = "resize" | "scroll" | "measured";
 
+/**
+ * Which of the owner's passes found an uncaused move: a scroll event, a size
+ * change, a follow after a render, a read of the follow, or one of its own
+ * moves. A move found outside a scroll event was made by the browser inside
+ * the task that found it, before any scroll event for it was dispatched.
+ */
+type SyncTrigger = "scroll" | "resize" | "follow" | "read" | "selectionEnded" | "shift" | "anchor" | "release";
+
+/** How many of the owner's own writes an uncaused move is compared against. */
+const PLACEMENTS_KEPT = 8;
+
 /** A row's name in a record: its FeedId where it carries one. */
 function rowName(row: Element): string {
   return feedRowId(row) ?? row.tagName.toLowerCase();
@@ -509,6 +520,13 @@ export class TailFollow {
   /** What the feed's content last changed, stated on every uncaused move (`witnessMoves`). */
   private witness: () => MoveWitnessReport | null = () => null;
   /**
+   * The positions this owner last wrote, newest first, at most
+   * `PLACEMENTS_KEPT`, and when it wrote the newest: an uncaused move says
+   * whether it took the box back to one of them (`returned_to`).
+   */
+  private placements: number[] = [];
+  private placedAtMs: number | null = null;
+  /**
    * The position the floor keeps the box able to stand at (`ScrollFloor`),
    * null when none stands: the held position while the reader's click holds
    * it, and afterwards whatever of it the reader has not scrolled back above.
@@ -542,7 +560,7 @@ export class TailFollow {
 
   /** Whether new content should pull the view. The one question, one answer. */
   isFollowing(): boolean {
-    this.sync();
+    this.sync("read");
     return this.following;
   }
 
@@ -591,7 +609,7 @@ export class TailFollow {
   selectionEnded(): void {
     this.selectionActive = false;
     this.heldOffReported = false;
-    this.sync();
+    this.sync("selectionEnded");
     log.debug("the selection ended where the reader is; the view stays", {
       operation: "scroll.selection-ended",
       context: { at: this.box.scrollTop },
@@ -826,7 +844,7 @@ export class TailFollow {
    * 2026-10-10).
    */
   follow(): void {
-    this.sync();
+    this.sync("follow");
     if (!this.following || this.cause === null) {
       this.latchIfLatestVisible("follow");
       return;
@@ -840,7 +858,7 @@ export class TailFollow {
    */
   onScroll(): void {
     this.holdFloor();
-    this.sync();
+    this.sync("scroll");
     if (this.strayed) {
       this.strayed = false;
       if (this.following && this.cause !== null) this.park(this.cause);
@@ -965,7 +983,7 @@ export class TailFollow {
     this.recordResize();
     this.holdFloor();
     this.recedeFloor();
-    this.sync();
+    this.sync("resize");
     this.reanchor("resize");
     this.follow();
     this.reportView();
@@ -1022,6 +1040,7 @@ export class TailFollow {
     const wasFollowing = this.following && this.cause === cause;
     this.box.scrollTop = this.box.scrollHeight;
     this.lastTop = this.box.scrollTop;
+    this.placed(this.lastTop);
     this.following = true;
     this.cause = cause;
     this.anchor = null;
@@ -1053,7 +1072,7 @@ export class TailFollow {
 
   /** Move the box BY delta without starting a follow. */
   private shift(cause: ScrollCause, delta: number): void {
-    this.sync();
+    this.sync("shift");
     const from = this.box.scrollTop;
     const to = from + delta;
     // An anchoring correction under a click hold must reach its target too.
@@ -1063,6 +1082,7 @@ export class TailFollow {
     if (this.clickHeld) this.setFloor(to);
     if (delta !== 0) this.box.scrollTop = to;
     this.lastTop = this.box.scrollTop;
+    this.placed(this.lastTop);
     if (this.clickHeld) this.heldTop = this.lastTop;
     recordMove(cause, from, this.lastTop, false);
   }
@@ -1129,7 +1149,7 @@ export class TailFollow {
    * did not take is carried into the next correction instead of accumulating.
    */
   private correct(cause: ScrollCause, trigger: AnchorTrigger, delta: number, row: Element): void {
-    this.sync();
+    this.sync("anchor");
     const from = this.box.scrollTop;
     const wanted = from + delta + this.anchorCarry;
     this.shift(cause, wanted - from);
@@ -1263,7 +1283,7 @@ export class TailFollow {
 
   /** Stop following: only a parking cause starts it again. */
   private release(): void {
-    this.sync();
+    this.sync("release");
     this.following = false;
     this.cause = null;
     this.strayed = false;
@@ -1280,7 +1300,27 @@ export class TailFollow {
    * the follow unless it went down to the tail; nothing here ever starts one
    * (the latest-visible latch is decided after it, by its callers).
    */
-  private sync(): void {
+  /** Note that this owner just wrote the box to TOP. */
+  private placed(top: number): void {
+    this.placements.unshift(top);
+    this.placements.length = Math.min(this.placements.length, PLACEMENTS_KEPT);
+    this.placedAtMs = performance.now();
+  }
+
+  /**
+   * How an uncaused move to TOP relates to this owner's own writes: how many
+   * placements ago the box was written to TOP (null when none of the kept ones
+   * was), and how long ago the newest write was.
+   */
+  private placementWitness(top: number): { returned_to: number | null; ms_since_write: number | null } {
+    const at = this.placements.indexOf(top);
+    return {
+      returned_to: at < 0 ? null : at,
+      ms_since_write: this.placedAtMs === null ? null : Math.round(performance.now() - this.placedAtMs),
+    };
+  }
+
+  private sync(by: SyncTrigger): void {
     const reachable = Math.max(0, this.box.scrollHeight - this.box.clientHeight);
     if (this.lastTop > reachable) this.lastTop = reachable;
     const top = this.box.scrollTop;
@@ -1297,6 +1337,8 @@ export class TailFollow {
           client_height: this.box.clientHeight,
           following: this.following,
           cause: this.cause ?? "none",
+          detected_by: by,
+          ...this.placementWitness(top),
           ...(this.witness() ?? { mutated: "none" }),
         },
       });
@@ -1336,6 +1378,8 @@ export interface MoveWitnessReport {
   ms_since_mutation: number;
   /** Frames the browser started between the change and this report, counted up to `WITNESS_FRAMES`. */
   frames_since_mutation: number;
+  /** Whether the change was still undelivered when reported: made in the task that found the move. */
+  undelivered: boolean;
 }
 
 /**
@@ -1364,12 +1408,16 @@ export class MoveWitness {
     private readonly nextFrame: (fn: () => void) => void,
   ) {}
 
-  /** A change to the content landed, touching TARGETS. */
-  mutated(targets: readonly Node[]): void {
+  /**
+   * A change to the content landed, touching TARGETS. UNDELIVERED says it was
+   * taken off the observer's queue by a report rather than delivered.
+   */
+  mutated(targets: readonly Node[], undelivered = false): void {
     const names = [...new Set(targets.map(nodeLabel))].slice(0, WITNESS_TARGETS);
     const change = {
       mutated: names,
       mutations: targets.length,
+      undelivered,
       at: this.now(),
       frames_since_mutation: 0,
     };
@@ -1381,8 +1429,14 @@ export class MoveWitness {
     this.nextFrame(count);
   }
 
-  /** The content's last change, or null when none has landed yet. */
-  report(): MoveWitnessReport | null {
+  /**
+   * The content's last change, or null when none has landed yet. PENDING are
+   * the targets of changes made but not yet delivered (the reporting task's
+   * own): when there are any, they are the last change, and the report says
+   * they were undelivered.
+   */
+  report(pending: readonly Node[] = []): MoveWitnessReport | null {
+    if (pending.length > 0) this.mutated(pending, true);
     const last = this.last;
     if (last === null) return null;
     const { at, ...rest } = last;
@@ -1459,7 +1513,10 @@ export function observeScrollBox(box: HTMLElement, tail: TailFollow): () => void
   const witness = new MoveWitness(() => performance.now(), nextFrame);
   const content = pageMutationObserver(box.ownerDocument, (records) => witness.mutated(records.map((r) => r.target)));
   content.observe(box, { subtree: true, childList: true, characterData: true, attributes: true });
-  tail.witnessMoves(() => witness.report());
+  // A move found inside a task that is still changing the content (a render's
+  // own follow) is reported with that change, not the one before it: the
+  // task's records are not delivered until it ends.
+  tail.witnessMoves(() => witness.report(content.takeRecords().map((r) => r.target)));
   tail.observe(
     () => box.addEventListener("scroll", onScroll, { passive: true }),
     () => {
