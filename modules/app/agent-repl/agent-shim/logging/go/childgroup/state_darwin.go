@@ -116,3 +116,18 @@ func Exiting(pid int) (bool, error) {
 	}
 	return st.Exited, nil
 }
+
+// StartStamp answers pid's process start time in microseconds since the
+// epoch, false when no process holds the pid. It is the kernel process
+// table's p_starttime, which answers for a process of any user.
+func StartStamp(pid int) (int64, bool, error) {
+	procs, err := unix.SysctlKinfoProcSlice("kern.proc.pid", pid)
+	if err != nil {
+		return 0, false, fmt.Errorf("sysctl kern.proc.pid %d: %w", pid, err)
+	}
+	if len(procs) == 0 {
+		return 0, false, nil
+	}
+	start := procs[0].Proc.P_starttime
+	return start.Sec*1e6 + int64(start.Usec), true, nil
+}
