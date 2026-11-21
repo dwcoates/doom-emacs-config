@@ -7,23 +7,81 @@
  * (owner rulings, 2026-10-06); `view.ts` holds only this page's asks still in
  * flight. A dropdown open mid-gesture (a row's menu or detail popover) is NOT
  * view state: it is transient to the page that opened it.
+ *
+ * IT DECLARES THE SERVICES IT HANDS OUT whose makers draw rows (the row hover,
+ * the fold fades, the arrange hold), so every drawer imports this module and
+ * this module imports none of them: no import cycle runs through the context
+ * (test/import-cycles.test.ts).
  */
 import type { DeploysFold } from "./deploys-fold.js";
 import type { DrawnStatusLog } from "../drawn-status.js";
 import type { MergedPages } from "./merged-pages.js";
 import type { DaemonContext } from "../rpc/context.js";
-import type { ArrangeHold } from "./arrange.js";
 import type { Dropdowns } from "./dropdowns.js";
-import type { RowHover } from "./row-hover.js";
 import type { RowMenus } from "./row-menu.js";
 import type { SelectionFade } from "./selection-fade.js";
-import type { FoldFade } from "./fold-fade.js";
 import type { DrawnView, SidebarView } from "./view.js";
+import type { DrawingHold } from "../hold.js";
+import type { RosterStreams } from "./roster-streams.js";
 
 /** The one thing a drawn row asks of the attention registry. */
 export interface AttentionMarks {
   /** ELEMENT carries the attention marker for workspace ID. */
   mark(id: string, element: HTMLElement): void;
+}
+
+/** The page's hold on its own roster drawing while an arrangement is dragged or asked for (`hold.ts`). */
+export type ArrangeHold = DrawingHold<RosterStreams>;
+/** The rail's fold fades. */
+export interface FoldFade {
+  /** ROW was just drawn for workspace ID, SURFACED or not: start, join or end its fade. */
+  apply(id: string, row: HTMLElement, surfaced: boolean): void;
+}
+/** One drawn copy of a row, as the current draw registered it. */
+export interface DrawnRow {
+  /** The row's box, which carries the `.open` class. */
+  ws: HTMLElement;
+  /** The row's line: the pointer's trigger, and keyboard focus inside it holds the panel open. */
+  line: HTMLElement;
+  /** The detail panel. */
+  detail: HTMLElement;
+}
+/** Which part of a row the pointer is over. */
+export type HoverPart = "line" | "duration" | "more" | "panel";
+/** The rail's row hover: which row's detail panel is open, from the pointer and the focus (row-hover.ts). */
+export interface RowHover {
+  /** The drawing under ROOT was thrown away: its row copies are gone, every other stays. */
+  forgetWithin(root: Node): void;
+  /** The current draw drew a copy of workspace ID's row. */
+  drawn(id: string, row: DrawnRow): void;
+  /** The pointer arrived on PART of workspace ID's row. */
+  enter(id: string, part: HoverPart): void;
+  /** The pointer left PART of workspace ID's row. */
+  leave(id: string, part: HoverPart): void;
+  /**
+   * Workspace ID's row opened its verb menu where its panel stands
+   * (row-menu.ts): the panel the pointer resting on the line was about to
+   * open stays shut, until the pointer arrives on the row again.
+   */
+  cancelOpening(id: string): void;
+  /** The keyboard focus arrived in workspace ID's row line. */
+  focusIn(id: string): void;
+  /** The focus left workspace ID's row line for NEXT. */
+  focusOut(id: string, next: EventTarget | null): void;
+  /** The pointer is over TARGET in the rail, or (null) has left it. */
+  pointerAt(target: EventTarget | null): void;
+  /** The rail lost the user, for WHY: close every open panel, and open none until `resume`. */
+  dismiss(why: string): void;
+  /** The user is back in the rail: open the panel of the row the pointer rests on, at once on its duration or "⋯", after the delay elsewhere on its line. */
+  resume(): void;
+  /**
+   * Hand every open panel's live copy to the popup mirror again (a redraw
+   * replaced its row, a scroll or a resize moved its line). Nothing without a
+   * mirror.
+   */
+  mirrorOpen(): void;
+  /** Cancel every timer: the rail is gone. */
+  dispose(): void;
 }
 
 /**

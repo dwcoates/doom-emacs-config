@@ -6,8 +6,8 @@ import {
   FOLD_FADE_MS,
   FOLD_FADING_CLASS,
   createFoldFade,
-  type FoldFade,
 } from "../../src/sidebar/fold-fade.js";
+import type { FoldFade } from "../../src/sidebar/context.js";
 import { SURFACED_ROW_CLASS } from "../../src/sidebar/row.js";
 import { captureLogRecords, forwardedRecord } from "../log-capture.js";
 import stylesheet from "../../src/styles.css?raw";
