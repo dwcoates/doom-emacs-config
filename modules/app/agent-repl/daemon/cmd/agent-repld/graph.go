@@ -874,7 +874,9 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		PublishRegistry: verbsRef.republishRoster("a hidden workspace's cache lapse moved"),
 		IdleCutoff:      idleCutoff,
 		Interval:        keepaliveInterval,
-		CycleDown:       func(ws ids.WorkspaceID, beat time.Time) { drainController.CycleDown(ws, beat) },
+		CycleDown: func(ws ids.WorkspaceID, beat time.Time, done func(drain.CycleOutcome)) {
+			drainController.CycleDownThen(ws, beat, done)
+		},
 		ColdDown:        func(ws ids.WorkspaceID, since time.Time) { drainController.ColdDown(ws, since) },
 		VisitDown:       func(ws ids.WorkspaceID, since time.Time) { drainController.VisitDown(ws, since) },
 		// A RESTORE IS THE FLEET'S OWN DETACHED START, which the session's
@@ -2008,6 +2010,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 			Banners:           notifier,
 			PersistentWifi:    wifi,
 			HiddenKeepalives:  cacheKeeper,
+			KeepLives:         cacheKeeper,
 			NewsDigest:        digest,
 			Storage:           storageSweep,
 			Worktrees:         reaper,

@@ -2370,6 +2370,8 @@ type harness struct {
 	PersistentWifi *fakePersistentWifi
 	// HiddenKeepalives is the cache keeper SendHiddenKeepalives delegates to.
 	HiddenKeepalives *fakeHiddenKeepalives
+	// KeepLives is the cache keeper KeepLiveWorkspace delegates to.
+	KeepLives *fakeKeepLives
 	// NewsDigest is the news digest the two rpcs delegate to.
 	NewsDigest *fakeNewsDigest
 	// Revisions records every revision a highlighted prompt asked for.
@@ -2527,6 +2529,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 
 		PersistentWifi:   &fakePersistentWifi{},
 		HiddenKeepalives: &fakeHiddenKeepalives{},
+		KeepLives:        &fakeKeepLives{},
 		Latencies:        &fakeLatencies{enabled: true},
 		RPCs:             &fakeRPCs{},
 		ReconnectRecords: &restarttimingtest.Recorder{},
@@ -2612,6 +2615,7 @@ func newHarness(t *testing.T, opts ...option) *harness {
 		Banners:           h.Banners,
 		PersistentWifi:    h.PersistentWifi,
 		HiddenKeepalives:  h.HiddenKeepalives,
+		KeepLives:         h.KeepLives,
 		NewsDigest:        h.NewsDigest,
 		Revisions:         h.Revisions,
 		Storage:           h.Storage,
@@ -2929,6 +2933,19 @@ type fakeHiddenKeepalives struct {
 func (f *fakeHiddenKeepalives) SendHiddenKeepalives(context.Context) *agentreplv1.SendHiddenKeepalivesResponse {
 	f.calls++
 	return f.response
+}
+
+// fakeKeepLives answers every keep-live with response, or err, and records
+// the workspaces it was asked to keep live.
+type fakeKeepLives struct {
+	asked    []ids.WorkspaceID
+	response *agentreplv1.KeepLiveWorkspaceResponse
+	err      error
+}
+
+func (f *fakeKeepLives) KeepLive(_ context.Context, ws ids.WorkspaceID) (*agentreplv1.KeepLiveWorkspaceResponse, error) {
+	f.asked = append(f.asked, ws)
+	return f.response, f.err
 }
 
 // fakePersistentWifi records every action and answers a scripted response.

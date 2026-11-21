@@ -251,6 +251,10 @@ func (c *cliClient) NotifyWorkspace(_ context.Context, req *connect.Request[agen
 	return connect.NewResponse(&agentreplv1.NotifyWorkspaceResponse{}), c.record(req.Msg)
 }
 
+func (c *cliClient) KeepLiveWorkspace(_ context.Context, req *connect.Request[agentreplv1.KeepLiveWorkspaceRequest]) (*connect.Response[agentreplv1.KeepLiveWorkspaceResponse], error) {
+	return connect.NewResponse(&agentreplv1.KeepLiveWorkspaceResponse{}), c.record(req.Msg)
+}
+
 func (c *cliClient) PassColdGate(_ context.Context, req *connect.Request[agentreplv1.PassColdGateRequest]) (*connect.Response[agentreplv1.PassColdGateResponse], error) {
 	return connect.NewResponse(&agentreplv1.PassColdGateResponse{}), c.record(req.Msg)
 }
@@ -1517,6 +1521,38 @@ func TestPassGatePassesTheGateAsTheCallingWorkspace(t *testing.T) {
 	req := only[*agentreplv1.PassColdGateRequest](t, f)
 	if code != exitSuccess || req.GetWorkspace().GetId() != "ws-peer" || req.GetRequester().GetWorkspace().GetId() != "ws-caller" {
 		t.Fatalf("exit %d, pass %v; want ws-peer's gate passed by ws-caller", code, req)
+	}
+}
+
+func TestKeepLiveSendsTheNamedWorkspace(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "keep-live", "peer")
+
+	// Assert
+	req := only[*agentreplv1.KeepLiveWorkspaceRequest](t, f)
+	if code != exitSuccess || req.GetWorkspace().GetId() != "ws-peer" {
+		t.Fatalf("exit %d, keep-live %v; want ws-peer kept live", code, req)
+	}
+}
+
+func TestKeepLiveRefusesAnExtraArgument(t *testing.T) {
+	// Arrange
+	f := newCLIFixture()
+
+	// Act
+	code := f.run(workspaceNoun, "keep-live", "peer", "now")
+
+	// Assert
+	for _, req := range f.client.requests {
+		if _, sent := req.(*agentreplv1.KeepLiveWorkspaceRequest); sent {
+			t.Fatalf("requests %v; want no keep-live sent", f.client.requests)
+		}
+	}
+	if code != exitFailure {
+		t.Fatalf("exit %d; want the usage refused", code)
 	}
 }
 
