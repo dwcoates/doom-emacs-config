@@ -1097,6 +1097,7 @@ Owner rulings, 2026-10-14 and 2026-11-20. An integration test tests the API cont
   - The daemon's: `daemon/AGENTS.md`, "The integration suite's canonical daemon".
   - The webapp's: `webapp/AGENTS.md`, "Integration cases share one mounted app".
   - The ERT integration suite's: this file's "ONE fake daemon serves a whole suite run".
+  - The e2e suite's: `e2e/AGENTS.md`, "Scenario steps share one World per precondition".
 - Why: the 2026-10-14 shared-setup audit (workspace `test-shared-setup`) measured an e2e test's `World` at about 2.7s of its 3.4s solo cost, while a fresh workspace in a running `World` costs 0.3-0.4s; the 2026-11-20 gate metrics (workspace `test-suite-duration-metrics`) put per-case daemons at 69% of the daemon suite's CPU.
 
 ### A fixture workspace directory is process-private and swept per scenario
