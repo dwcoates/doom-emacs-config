@@ -681,11 +681,18 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 // serves the queues next runs it again (mediationCut), so it is not
 // escalated.
 //
-// THE CHECK IS ESCALATED ONLY TO A MEDIATOR THAT STANDS: a check held past
-// its rollout names its mediator (owedFrom), so one that cannot be found or
-// made is left owed, recorded at ERROR, and the next pass makes it again.
+// THE CHECK IS ESCALATED ONLY TO A RECORDED MEDIATOR: a check held past its
+// rollout names its mediator (owedFrom), and the user's notice opens it
+// (notifyEscalated). A recorded one is enough, whether or not it can be
+// reopened or shown now: the user is notified through it, and the next pass
+// tells it. With none recorded one is made first; one that cannot be made is
+// left owed, recorded at ERROR, and the next pass makes it again.
 func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
 	if o.mediationCut(ctx, fields, what, err) {
+		return
+	}
+	if _, recorded, rerr := o.deps.DB.DeployMediatorOf(ctx, q.key); rerr == nil && recorded {
+		o.escalateNotRun(ctx, q, m, what, err, fields)
 		return
 	}
 	if _, merr := o.mediatorOf(ctx, q, fields); merr != nil {
@@ -693,6 +700,12 @@ func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Me
 			withField(withField(fields, "error", err.Error()), "mediator_error", merr.Error()))
 		return
 	}
+	o.escalateNotRun(ctx, q, m, what, err, fields)
+}
+
+// escalateNotRun records roundFailed's failure at ERROR and escalates check M
+// of queue Q as one that could not run, WHAT failing with ERR.
+func (o *orchestrator) escalateNotRun(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
 	o.deps.Log.Global().Error(opMediation, what+"; the check is escalated to the user", withField(fields, "error", err.Error()))
 	summary := fmt.Sprintf("the deploy check could not run: %s (%v); the queue waits for you", what, err)
 	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error()}}, wsm.CheckWindow{}, false, fields)

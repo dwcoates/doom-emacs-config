@@ -1671,3 +1671,34 @@ func TestARoundFailureTheDaemonsExitCutIsNotEscalated(t *testing.T) {
 		t.Fatalf("records = %v, want the cut round recorded at INFO", h.logs.Records())
 	}
 }
+
+// TestARoundFailureWithARecordedMediatorThatCannotBeReopenedNotifiesTheUser
+// pins that a recorded mediator is enough to escalate to: the user is
+// notified through it though it cannot be reopened now, and the check stays
+// escalated and untold for the next pass to tell it.
+func TestARoundFailureWithARecordedMediatorThatCannotBeReopenedNotifiesTheUser(t *testing.T) {
+	// Arrange: the recorded mediator was closed, and cannot be reopened.
+	h := checked(t)
+	owe(t, h)
+	mediatorIn(t, h, "ws-fixer", true)
+	h.checks.reopenErr = errors.New("worktree gone")
+
+	// Act
+	h.o.Mediate(context.Background())
+
+	// Assert
+	if got := heldEscalation(t, h); got != "" {
+		t.Fatalf("the escalation was told to %q, want it untold for the next pass", got)
+	}
+	if !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
+		t.Fatal("the user was not notified through the recorded mediator")
+	}
+	const what = "the deploy mediator could not be found, made or readied for the check"
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: what + "; the check is escalated to the user"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["error"]), "worktree gone") || record.Context["repo"] != string(mediationKey(h)) {
+		t.Fatalf("records = %v, want the failure at ERROR with its cause and repository", h.logs.Records())
+	}
+	if brief := owedCheck(t, h).EscalationBrief; !strings.Contains(brief, what) || !strings.Contains(brief, "worktree gone") {
+		t.Fatalf("the escalation says %q, want it to name what failed and its cause", brief)
+	}
+}
