@@ -534,7 +534,10 @@ type isSubmitPromptSuccess_Outcome interface {
 
 type SubmitPromptSuccess_Turn struct {
 	// It is a prompt: the daemon minted the turn (delivered now or held — a
-	// hold is visible in the held section, not an error here).
+	// hold is visible in the held section, not an error here). A prompt
+	// delivered on arrival (conversation.v1.PromptOrigin's header: a daemon
+	// notice, an agent-sent prompt) is never held: it went, or it waits
+	// under a named arrival wait that no section draws.
 	Turn *SubmitPromptTurn `protobuf:"bytes,1,opt,name=turn,proto3,oneof"`
 }
 

@@ -1485,7 +1485,7 @@ func (*PullRequestStateClosed) Descriptor() ([]byte, []int) {
 }
 
 // What the daemon tells one subscriber about one pull request, delivered as a
-// deferred prompt of origin
+// prompt of origin
 // conversation.v1.PromptOrigin.PROMPT_ORIGIN_PULL_REQUEST_NOTICE. A
 // subscriber holds at most one untold notice per pull request: a newer read
 // supersedes it with a notice listing everything since the subscriber was

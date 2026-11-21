@@ -217,7 +217,7 @@ export const GithubMergeQueueEntrySchema: GenMessage<GithubMergeQueueEntry> = /*
 
 /**
  * What the daemon tells one subscriber about one queue, delivered as a
- * deferred prompt of origin
+ * prompt of origin
  * conversation.v1.PromptOrigin.PROMPT_ORIGIN_GITHUB_MERGE_QUEUE_NOTICE. A
  * subscriber holds at most one untold notice per queue: a newer read
  * supersedes it with a notice listing everything since the subscriber was

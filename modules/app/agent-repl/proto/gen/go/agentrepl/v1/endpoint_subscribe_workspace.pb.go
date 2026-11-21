@@ -3,9 +3,10 @@
 //
 // FOR AGENTS, NOT PROGRAMS. An agent's call ends with its command, long before
 // the change it waits for, so a subscription is not a stream: the daemon holds
-// it and delivers each notice to the SUBSCRIBER's session as a deferred prompt
+// it and delivers each notice to the SUBSCRIBER's session as a prompt
 // of origin conversation.v1.PromptOrigin.PROMPT_ORIGIN_WORKSPACE_NOTICE, the
-// path a merge-queue notice takes: it waits behind a running turn, wakes an
+// path a merge-queue notice takes: delivered on arrival, it joins a running
+// turn after its current tool call (never held behind it), wakes an
 // idle agent, and the feed draws no row for it. Each notice names the change
 // and carries the followed workspace's status after it (WorkspaceStatus).
 //
