@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { viteCacheDir, vitestModuleCacheDir } from "../vite-cache";
-import { viteServer } from "../vite-fs";
+import { agentReplViteServer } from "../../bin/vite-server.mjs";
 import buildConfig from "../vite.config";
 import unitConfig from "../vitest.config";
 import integrationConfig from "../vitest.integration.config";
@@ -68,7 +68,7 @@ describe("the shared vitest module cache directory", () => {
 
 describe.each(configs)("$name", ({ config }) => {
   it("lets the server serve the agent-repl module, where the stubs and images live", () => {
-    expect(config.server).toBe(viteServer);
+    expect(config.server).toBe(agentReplViteServer);
   });
 });
 

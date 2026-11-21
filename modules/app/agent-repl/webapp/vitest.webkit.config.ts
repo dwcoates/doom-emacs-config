@@ -4,7 +4,7 @@ import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 import { viteCacheDir, vitestModuleCacheDir } from "./vite-cache";
-import { viteServer } from "./vite-fs";
+import { agentReplViteServer } from "../bin/vite-server.mjs";
 
 /**
  * The REAL-WEBKIT suite's config (`npm run test:webkit`), separate from the
@@ -19,7 +19,7 @@ import { viteServer } from "./vite-fs";
  */
 export default defineConfig({
   cacheDir: viteCacheDir,
-  server: viteServer,
+  server: agentReplViteServer,
   resolve: { alias: protobufRuntimeAliases },
   test: {
     fsModuleCachePath: vitestModuleCacheDir,

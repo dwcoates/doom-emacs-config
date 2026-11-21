@@ -2,19 +2,18 @@
 // run at background priority (see that script and require-background.mjs).
 import "../../../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
-import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
-import { fileURLToPath } from "node:url";
+import { agentReplViteServer } from "../../../bin/vite-server.mjs";
+import { protobufRuntimeAliases } from "./protobuf-runtime-aliases.js";
 
 // The generated protobuf TS stubs live at proto/gen/ts, outside this
 // package. Vite's dev-server fs guard blocks files outside the project
-// root by default; allow the agent-repl subtree so the relatively-imported
-// stubs load. Their bare `@bufbuild/protobuf` imports resolve to this
+// root by default, so the server serves the agent-repl module
+// (bin/vite-server.mjs) and the relatively-imported stubs load. Their bare `@bufbuild/protobuf` imports resolve to this
 // package's own copy through the runtime aliases (protobuf-runtime-aliases.ts).
-const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 export default defineConfig({
   resolve: { alias: protobufRuntimeAliases },
-  server: { fs: { allow: [agentReplRoot] } },
+  server: agentReplViteServer,
   test: {
     // WORKER COUNT IS CAPPED. Vitest defaults to one worker per CPU, which is
     // a claim on the whole machine; measured on a 16-CPU host that is 2-5 GiB

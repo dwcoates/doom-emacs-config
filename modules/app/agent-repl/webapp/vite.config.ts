@@ -2,7 +2,7 @@ import { defineConfig, type Plugin } from "vite";
 import { layerChunks, type ModuleGraph } from "./app-layers";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 import { viteCacheDir } from "./vite-cache";
-import { viteServer } from "./vite-fs";
+import { agentReplViteServer } from "../bin/vite-server.mjs";
 import { viteRegistryGuard } from "../proto/ts/registry-guard.mjs";
 
 /**
@@ -69,7 +69,7 @@ export default defineConfig({
   // account, and test/vite-cache.test.ts for the check that keeps every
   // config in this package on it.
   cacheDir: viteCacheDir,
-  server: viteServer,
+  server: agentReplViteServer,
   resolve: { alias: protobufRuntimeAliases },
   // protobuf-es re-walks every booted dependency's closure for each file it
   // boots; the guard cuts the page's proto boot from ~0.20s to ~0.13s of CPU

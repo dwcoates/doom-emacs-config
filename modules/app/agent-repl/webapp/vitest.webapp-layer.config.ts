@@ -4,7 +4,7 @@ import "../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
 import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 import { viteCacheDir, vitestModuleCacheDir } from "./vite-cache";
-import { viteServer } from "./vite-fs";
+import { agentReplViteServer } from "../bin/vite-server.mjs";
 
 /**
  * THE WEBAPP E2E LAYER — the real app against the REAL daemon.
@@ -35,7 +35,7 @@ export default defineConfig({
   // account, and test/vite-cache.test.ts for the check that keeps every
   // config in this package on it.
   cacheDir: viteCacheDir,
-  server: viteServer,
+  server: agentReplViteServer,
   resolve: { alias: protobufRuntimeAliases },
   test: {
     fsModuleCachePath: vitestModuleCacheDir,

@@ -25,16 +25,16 @@
 // run at background priority (see that script and require-background.mjs).
 import "../../../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
-import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
-import { fileURLToPath } from "node:url";
+import { agentReplViteServer } from "../../../bin/vite-server.mjs";
+import { protobufRuntimeAliases } from "./protobuf-runtime-aliases.js";
 
 // Same reason as the unit config: the generated protobuf stubs live outside
-// this package, and vite's fs guard blocks them without this allowance.
-const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
+// this package, and vite's fs guard blocks them unless the server serves the
+// agent-repl module (bin/vite-server.mjs).
 
 export default defineConfig({
   resolve: { alias: protobufRuntimeAliases },
-  server: { fs: { allow: [agentReplRoot] } },
+  server: agentReplViteServer,
   test: {
     include: ["test/integration/**/*.test.ts"],
     // EVERY TEMP FILE THIS RUN MAKES lives under one root the run owns and
