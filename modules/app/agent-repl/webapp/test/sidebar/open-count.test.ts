@@ -5,7 +5,6 @@ import { create } from "@bufbuild/protobuf";
 import { RosterOpenCountSchema, RosterOpenRowTabSchema, RosterRowSchema } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import {
   MERGING_COUNT_CLASS,
-  WORKING_COUNT_CLASS,
   WORKSPACE_COUNT_CLASS,
   drawRosterOpenCount,
   openCountText,
@@ -60,7 +59,7 @@ describe("tabUnfolded", () => {
 });
 
 describe("every count in the Open section", () => {
-  it("is spelled unfolded over total at the heading and repository, and working, merging, total at a subsection and a row", () => {
+  it("is spelled unfolded over total at the heading and repository, and merging, total at a subsection and a row", () => {
     // Arrange: the Open heading's count, a repository's, a subsection's and a row's child count.
     const kids = Array.from({ length: 6 }, (_, i) => row({ id: `kid-${i}` }));
     const wire = roster({
@@ -92,17 +91,17 @@ const rowOf = (arm: "thinking" | "merging" | "ready" | "mergeQueued" | "idleAsyn
 const pathed = (arms: Array<Parameters<typeof rowOf>[0]>) => arms.map((arm, i) => ({ row: rowOf(arm), path: `rows[${i}].row` }));
 
 describe("statusCountOf", () => {
-  it("counts the working rows", () => {
-    expect(statusCountOf(pathed(["thinking", "thinking", "ready"]))).toEqual({ working: 2, syncMerging: 0 });
+  it("counts a working row as not merging", () => {
+    expect(statusCountOf(pathed(["thinking", "thinking", "ready"]))).toEqual({ syncMerging: 0 });
   });
-  it("counts the synchronously merging rows apart from the working", () => {
-    expect(statusCountOf(pathed(["merging", "thinking", "ready"]))).toEqual({ working: 1, syncMerging: 1 });
+  it("counts the synchronously merging rows", () => {
+    expect(statusCountOf(pathed(["merging", "thinking", "ready"]))).toEqual({ syncMerging: 1 });
   });
   it("counts a queued merge and async work as neither", () => {
-    expect(statusCountOf(pathed(["mergeQueued", "idleAsync"]))).toEqual({ working: 0, syncMerging: 0 });
+    expect(statusCountOf(pathed(["mergeQueued", "idleAsync"]))).toEqual({ syncMerging: 0 });
   });
   it("counts no rows as none", () => {
-    expect(statusCountOf([])).toEqual({ working: 0, syncMerging: 0 });
+    expect(statusCountOf([])).toEqual({ syncMerging: 0 });
   });
   it("refuses a missing row", () => {
     expect(() => statusCountOf([{ row: undefined, path: "r" }])).toThrow(MalformedView);
@@ -114,28 +113,27 @@ describe("statusCountOf", () => {
 
 describe("showWorkspaceCountParenthetical", () => {
   it.each([
-    [{ working: 1, syncMerging: 0 }, "(1/2)", ["sb-count-working"]],
-    [{ working: 0, syncMerging: 1 }, "(1/2)", ["sb-count-merging"]],
-    [{ working: 0, syncMerging: 0 }, "(2)", []],
+    [{ syncMerging: 1 }, "(1/2)", ["sb-count-merging"]],
+    [{ syncMerging: 0 }, "(2)", []],
   ])("omits a zero number: %j", (status, text, classes) => {
     const drawn = showWorkspaceCountParenthetical(2, status);
     expect([drawn.textContent, [...drawn.querySelectorAll("span")].map((s) => s.classList[0])]).toEqual([text, classes]);
   });
 
-  it("spells working, merging and total in one parenthetical", () => {
-    expect(showWorkspaceCountParenthetical(9, { working: 2, syncMerging: 1 }).textContent).toBe("(2/1/9)");
+  it("spells merging and total in one parenthetical, with no working number", () => {
+    const drawn = showWorkspaceCountParenthetical(9, { syncMerging: 1 });
+    expect([drawn.textContent, drawn.querySelector(".sb-count-working")]).toEqual(["(1/9)", null]);
   });
-  it("inks the working number red and the merging number purple, leaving the rest to the host's ink", () => {
+  it("inks the merging number purple, leaving the rest to the host's ink", () => {
     // Act
-    const drawn = showWorkspaceCountParenthetical(3, { working: 1, syncMerging: 1 });
+    const drawn = showWorkspaceCountParenthetical(3, { syncMerging: 1 });
 
     // Assert
     expect([
       drawn.className,
-      drawn.querySelector(`.${WORKING_COUNT_CLASS}`)?.className,
       drawn.querySelector(`.${MERGING_COUNT_CLASS}`)?.className,
       drawn.querySelectorAll("[class*='tone-']").length,
-    ]).toEqual([WORKSPACE_COUNT_CLASS, `${WORKING_COUNT_CLASS} tone-red`, `${MERGING_COUNT_CLASS} tone-purple`, 2]);
+    ]).toEqual([WORKSPACE_COUNT_CLASS, `${MERGING_COUNT_CLASS} tone-purple`, 1]);
   });
   it("is the one shape a subsection and a row both draw", () => {
     // Arrange
@@ -159,7 +157,7 @@ describe("showWorkspaceCountParenthetical", () => {
     const shapes = [drawn.querySelector(".sb-subsection .sb-count"), drawn.querySelector(`.${CHILD_COUNT_CLASS}`)].map((count) =>
       Array.from(count?.children ?? []).map((child) => child.className.split(" ")[0]),
     );
-    expect(shapes[0]).toEqual([WORKING_COUNT_CLASS, MERGING_COUNT_CLASS]);
+    expect(shapes[0]).toEqual([MERGING_COUNT_CLASS]);
     expect(shapes[1]).toEqual(shapes[0]);
   });
 });
