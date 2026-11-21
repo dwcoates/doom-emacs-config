@@ -138,9 +138,6 @@ func otherwisePathOf(path wsm.LandingPath) *agentreplv1.MergeLandingOtherwisePat
 // validateListMergeLandingsRequest is ListMergeLandingsRequest's base
 // function.
 func validateListMergeLandingsRequest(req *agentreplv1.ListMergeLandingsRequest) *connect.Error {
-	if req.Repository == nil {
-		return invalid("repository", "name the repository whose landings are read")
-	}
 	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {
 		return err
 	}
@@ -156,9 +153,6 @@ func validateListMergeLandingsRequest(req *agentreplv1.ListMergeLandingsRequest)
 // validateRecordDirectLandingRequest is RecordDirectLandingRequest's base
 // function.
 func validateRecordDirectLandingRequest(req *agentreplv1.RecordDirectLandingRequest) *connect.Error {
-	if req.Repository == nil {
-		return invalid("repository", "name the repository landed on")
-	}
 	if err := validateRepositoryRef("repository", req.GetRepository()); err != nil {
 		return err
 	}
