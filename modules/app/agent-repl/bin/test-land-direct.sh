@@ -41,6 +41,10 @@ cat >"$FAKE_BIN/agent-repld" <<'EOF'
 # The stub full suite: records its working directory and arguments, moves the
 # branch when asked, and exits FAKE_SUITE_RC.
 printf '%s|%s\n' "$PWD" "$*" >>"$FAKE_SUITE_CALLS"
+# A landing's report (lib-land-record.sh) exits FAKE_RECORD_RC instead.
+if [ "${1:-}" = merge-queue ]; then
+  exit "${FAKE_RECORD_RC:-0}"
+fi
 if [ -n "${FAKE_SUITE_MOVES:-}" ]; then
   git -C "$FAKE_SUITE_REPO" update-ref "refs/heads/$FAKE_SUITE_MOVES" "$FAKE_SUITE_MOVE_TO"
 fi
@@ -52,6 +56,8 @@ export PATH="$FAKE_BIN:$PATH"
 
 # shellcheck source=lib-land-gate.sh
 . "$THIS_DIR/lib-land-gate.sh"
+# shellcheck source=lib-land-record.sh
+. "$THIS_DIR/lib-land-record.sh"
 
 # mkrepo — a fake repository with a versioned lifecycle config, `fresh`
 # checked out at master's head in REPO/fresh-wt, and `stale` checked out in
@@ -69,7 +75,7 @@ mkrepo() {
   THIRD="$(git -C "$REPO" rev-parse HEAD)"
   git -C "$REPO" worktree add -q -b fresh "$REPO/fresh-wt"
   export FAKE_SUITE_CALLS="$TMP/suite-calls.$RANDOM" FAKE_SUITE_REPO="$REPO" FAKE_GIT_LOG="$TMP/git-log.$RANDOM"
-  unset FAKE_SUITE_RC FAKE_SUITE_MOVES FAKE_SUITE_MOVE_TO
+  unset FAKE_SUITE_RC FAKE_SUITE_MOVES FAKE_SUITE_MOVE_TO FAKE_RECORD_RC
   : >"$FAKE_SUITE_CALLS"
   : >"$FAKE_GIT_LOG"
 }
@@ -222,6 +228,55 @@ test_the_script_gates_before_its_only_merge() {
     pass "land-direct.sh's one merge comes after its gate"
   else
     fail "land-direct.sh's one merge comes after its gate" "gate at: ${gate_line:-none}" "merges at: $merge_lines"
+  fi
+}
+
+# record BRANCH — run land_record on BRANCH's landing in REPO, from the
+# fresh worktree as a bypass holder's agent runs land-direct.sh. RUN_RC and
+# RUN_OUT hold its outcome.
+record() {
+  set +e
+  RUN_OUT="$(cd "$REPO/fresh-wt" && land_record "$REPO" "$1" 2>/dev/null)"
+  RUN_RC=$?
+  set -e
+}
+
+test_a_landing_is_reported_from_the_callers_worktree_at_main_s_head() {
+  mkrepo
+  record fresh
+  if [ "$RUN_RC" -eq 0 ] && [ "$(suite_calls)" = "$REPO/fresh-wt|merge-queue record-landing -repository $REPO -branch fresh -head $THIRD" ]; then
+    pass "a landing is reported to the daemon from the caller's worktree, naming the branch and main's head"
+  else
+    fail "a landing is reported to the daemon from the caller's worktree, naming the branch and main's head" "exit=$RUN_RC" "$RUN_OUT" "calls: $(suite_calls)"
+  fi
+}
+
+test_a_landing_the_daemon_did_not_record_is_answered_with_its_command() {
+  mkrepo
+  export FAKE_RECORD_RC=1
+  record fresh
+  if [ "$RUN_RC" -eq "$LAND_RECORD_UNRECORDED" ] && grep_in "$RUN_OUT" -qF "fresh landed as $THIRD, but the daemon did not record the landing" &&
+    grep_in "$RUN_OUT" -qF "agent-repld merge-queue record-landing -repository $REPO -branch fresh -head $THIRD"; then
+    pass "a landing the daemon did not record answers 5, naming the head and the command that records it"
+  else
+    fail "a landing the daemon did not record answers 5, naming the head and the command that records it" "exit=$RUN_RC" "$RUN_OUT"
+  fi
+}
+
+# The script reports its landing once, after its one merge and before its
+# tag, from the directory it was started in: a report before the merge, a
+# second report, or one after a cd fails here.
+test_the_script_reports_its_landing_once_after_its_merge() {
+  local merge_line record_lines tag_line
+  merge_line="$(grep -n 'merge --no-ff' "$SCRIPT" | cut -d: -f1)"
+  # shellcheck disable=SC2016 # the pattern names the script's own variables
+  record_lines="$(grep -n 'land_record "\$main" "\$branch"' "$SCRIPT" | cut -d: -f1)"
+  tag_line="$(grep -n 'tag -a' "$SCRIPT" | cut -d: -f1)"
+  if [ -n "$record_lines" ] && [ "$(wc -l <<<"$record_lines")" -eq 1 ] && [ "$record_lines" -gt "$merge_line" ] &&
+    [ "$record_lines" -lt "$tag_line" ] && ! grep -qE '^[^#]*\bcd ' "$SCRIPT"; then
+    pass "land-direct.sh reports its landing once, after its merge and before its tag, without changing directory"
+  else
+    fail "land-direct.sh reports its landing once, after its merge and before its tag, without changing directory" "merge at: $merge_line" "reports at: ${record_lines:-none}" "tag at: $tag_line"
   fi
 }
 
