@@ -44,12 +44,13 @@ func (v *verbs) FoldRepository(ctx context.Context, repo ids.RepoID, folded bool
 // repositoryFold is the fold of REPO's section as a foldTabsSpec.
 func (v *verbs) repositoryFold(ctx context.Context, log dlog.Logger, repo ids.RepoID, folded bool) foldTabsSpec {
 	return foldTabsSpec{
-		op:       opFoldRepository,
-		what:     "repository",
-		target:   string(repo),
-		folded:   folded,
-		landsOff: true,
-		write:    func() error { return v.deps.DB.SetRepositoryFolded(ctx, repo, folded) },
+		op:        opFoldRepository,
+		what:      "repository",
+		target:    string(repo),
+		attention: wsm.AttentionOpenedRepository,
+		folded:    folded,
+		landsOff:  true,
+		write:     func() error { return v.deps.DB.SetRepositoryFolded(ctx, repo, folded) },
 		unknown: func(err error) error {
 			if !errors.Is(err, wsm.ErrNotFound) {
 				return nil
@@ -77,12 +78,13 @@ func (v *verbs) FoldSubsection(ctx context.Context, sub ids.SubsectionID, folded
 // subsectionFold is the fold of SUB as a foldTabsSpec (repositoryFold).
 func (v *verbs) subsectionFold(ctx context.Context, log dlog.Logger, sub ids.SubsectionID, folded bool) foldTabsSpec {
 	return foldTabsSpec{
-		op:       opFoldSubsection,
-		what:     "subsection",
-		target:   string(sub),
-		folded:   folded,
-		landsOff: true,
-		write:    func() error { return v.deps.DB.SetSubsectionFolded(ctx, sub, folded) },
+		op:        opFoldSubsection,
+		what:      "subsection",
+		target:    string(sub),
+		attention: wsm.AttentionOpenedSubsection,
+		folded:    folded,
+		landsOff:  true,
+		write:     func() error { return v.deps.DB.SetSubsectionFolded(ctx, sub, folded) },
 		unknown: func(err error) error {
 			var unknown *wsm.UnknownSubsectionError
 			if !errors.As(err, &unknown) {
@@ -114,11 +116,12 @@ func (v *verbs) FoldChildren(ctx context.Context, ws ids.WorkspaceID, folded boo
 		}
 	}
 	return v.foldTabs(ctx, log, foldTabsSpec{
-		op:     opFoldChildren,
-		what:   "workspace's children",
-		target: string(ws),
-		folded: folded,
-		write:  func() error { return v.deps.DB.SetChildrenFolded(ctx, ws, folded) },
+		op:        opFoldChildren,
+		what:      "workspace's children",
+		target:    string(ws),
+		attention: wsm.AttentionOpenedChildren,
+		folded:    folded,
+		write:     func() error { return v.deps.DB.SetChildrenFolded(ctx, ws, folded) },
 		unknown: func(err error) error {
 			if !errors.Is(err, wsm.ErrNotFound) {
 				return nil
@@ -163,6 +166,10 @@ type foldTabsSpec struct {
 	// op is the operation every record carries; what names the target's kind
 	// in them, and target its id.
 	op, what, target string
+	// attention is the stamp an EXPAND of the fold leaves: the user opened
+	// it themselves, which the deploy's fold sweep spares for an hour
+	// (internal/foldsweep).
+	attention wsm.AttentionKind
 	// folded is the fold asked for.
 	folded bool
 	// write records the fold.
@@ -199,6 +206,12 @@ func (v *verbs) foldTabs(ctx context.Context, log dlog.Logger, spec foldTabsSpec
 	log.Info(spec.op, "recorded the "+spec.what+"'s fold", nil)
 	v.republishRegistry(ctx, log, spec.op)
 	if !spec.folded {
+		// EVERY EXPAND IS THE USER'S OWN: only the sidebar's rpcs reach a
+		// fold, and the sweep never expands.
+		if err := v.deps.DB.StampUserAttention(ctx, spec.attention, spec.target, v.now()); err != nil {
+			log.Error(spec.op, "could not stamp the user's open of the "+spec.what, dlog.Context{"cause": err.Error(), "attention": string(spec.attention)})
+			return fmt.Errorf("stamp the open of %s %q: %w", spec.what, spec.target, err)
+		}
 		return nil
 	}
 	hidden, spared, standingDown := []string{}, map[string]string{}, []string{}

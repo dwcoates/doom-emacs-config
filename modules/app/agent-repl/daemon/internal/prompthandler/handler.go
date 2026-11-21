@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -89,6 +90,9 @@ func newHandler(deps Deps) (*handler, error) {
 	if deps.MintTurn == nil {
 		deps.MintTurn = wsm.NewTurnID
 	}
+	if deps.Now == nil {
+		deps.Now = time.Now
+	}
 	deps.Log.Global().Debug(opNew, "the prompt handler is wired", nil)
 	return &handler{deps: deps, keys: newInflight()}, nil
 }
@@ -155,6 +159,18 @@ func (h *handler) submit(ctx context.Context, ws ids.WorkspaceID, said *conversa
 		return h.refuse(ws, got, log), nil
 	case RecognizedAct:
 		return h.act(ctx, ws, got, idempotencyKey, origin, log)
+	}
+
+	// A PROMPT THE USER GAVE THE WORKSPACE, held or sent, is stamped before the
+	// queue sees it: the deploy's fold sweep leaves what the user is working
+	// in unfolded (internal/foldsweep). A thread question is the user's too,
+	// and a typed answer to a standing ask. An agent's prompt, a daemon notice
+	// and a keep-alive are none of them.
+	if sentBy == nil && promptorigin.UserSent(origin) {
+		if err := h.deps.DB.StampUserAttention(ctx, wsm.AttentionPrompt, string(ws), h.deps.Now()); err != nil {
+			log.Error(opSubmit, "could not stamp the user's prompt; nothing was queued", dlog.WithCause(nil, err))
+			return Outcome{}, fmt.Errorf("stamp the user's prompt to workspace %s: %w", ws, err)
+		}
 	}
 
 	c, err := h.mintTurn(ctx, ws, idempotencyKey, log)

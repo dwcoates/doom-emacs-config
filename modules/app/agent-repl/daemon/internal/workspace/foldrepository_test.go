@@ -877,3 +877,96 @@ func TestSelectingIntoAFoldLeavesItCollapsedAndStandsNothingDown(t *testing.T) {
 		})
 	}
 }
+
+// expandCase is one fold an expand of which the user made.
+type expandCase struct {
+	name   string
+	kind   wsm.AttentionKind
+	target string
+	expand func(t *testing.T, f *fixture) error
+}
+
+func expandCases() []expandCase {
+	ctx := context.Background()
+	return []expandCase{
+		{
+			name: "a repository's section", kind: wsm.AttentionOpenedRepository, target: "repo-1",
+			expand: func(t *testing.T, f *fixture) error {
+				f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1", Folded: true})
+				return f.verbs.FoldRepository(ctx, "repo-1", false, testRequester)
+			},
+		},
+		{
+			name: "a subsection", kind: wsm.AttentionOpenedSubsection, target: "sub-1",
+			expand: func(t *testing.T, f *fixture) error {
+				f.db.subsections = append(f.db.subsections, wsm.Subsection{ID: "sub-1", Repo: "repo-1", Name: "later", Place: 1, Folded: true})
+				return f.verbs.FoldSubsection(ctx, "sub-1", false, testRequester)
+			},
+		},
+		{
+			name: "a workspace's children", kind: wsm.AttentionOpenedChildren, target: "p1",
+			expand: func(t *testing.T, f *fixture) error {
+				childFamily(t, f)
+				return f.verbs.FoldChildren(ctx, "p1", false, testRequester)
+			},
+		},
+	}
+}
+
+func TestAnExpandStampsTheUsersOpenOfThatFold(t *testing.T) {
+	for _, tt := range expandCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+
+			// Act
+			err := tt.expand(t, f)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("expand: %v", err)
+			}
+			if len(f.db.userStamps) != 1 || f.db.userStamps[0].Kind != tt.kind || f.db.userStamps[0].Target != tt.target {
+				t.Fatalf("stamps = %v, want one %s stamp on %s", f.db.userStamps, tt.kind, tt.target)
+			}
+		})
+	}
+}
+
+func TestACollapseStampsNoOpen(t *testing.T) {
+	// Arrange
+	f := newFixture(t)
+	f.db.repositories = append(f.db.repositories, wsm.Repository{ID: "repo-1"})
+
+	// Act
+	err := f.verbs.FoldRepository(context.Background(), "repo-1", true, testRequester)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("FoldRepository: %v", err)
+	}
+	if len(f.db.userStamps) != 0 {
+		t.Fatalf("stamps = %v, want none for a collapse", f.db.userStamps)
+	}
+}
+
+func TestAnExpandSurfacesAFailedOpenStamp(t *testing.T) {
+	for _, tt := range expandCases() {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newFixture(t)
+			f.db.stampErr = errors.New("disk I/O error")
+
+			// Act
+			err := tt.expand(t, f)
+
+			// Assert
+			if !errors.Is(err, f.db.stampErr) {
+				t.Fatalf("err = %v, want the failed stamp surfaced", err)
+			}
+			if _, ok := dlog.FindRecord(f.log.logger.Records(), dlog.RecordQuery{Level: dlog.LevelError}); !ok {
+				t.Fatal("the failed stamp was not recorded at error")
+			}
+		})
+	}
+}

@@ -93,6 +93,11 @@ type fakeDB struct {
 	// contextSummaries are the summaries each workspace's next prompt owes.
 	contextSummaries map[ids.WorkspaceID]string
 
+	// userStamps is every user-attention stamp written, in order;
+	// stampErr fails the write.
+	userStamps []wsm.UserAttention
+	stampErr   error
+
 	// clearedSurfaced are the workspaces ClearSurfaced was asked to clear, in order.
 	clearedSurfaced []ids.WorkspaceID
 
@@ -4770,6 +4775,15 @@ func (d *fakeDB) SetSubsectionFolded(_ context.Context, id ids.SubsectionID, fol
 		}
 	}
 	return &wsm.UnknownSubsectionError{ID: id}
+}
+
+// StampUserAttention records the stamp, or fails it when a test arranged so.
+func (d *fakeDB) StampUserAttention(_ context.Context, kind wsm.AttentionKind, target string, at time.Time) error {
+	if d.stampErr != nil {
+		return d.stampErr
+	}
+	d.userStamps = append(d.userStamps, wsm.UserAttention{Kind: kind, Target: target, At: at})
+	return nil
 }
 
 // SetChildrenFolded records the fold on the fake's workspace, as WSM does; an

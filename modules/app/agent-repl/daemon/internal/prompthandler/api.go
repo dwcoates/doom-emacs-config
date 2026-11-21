@@ -10,6 +10,7 @@ package prompthandler
 import (
 	"context"
 	"errors"
+	"time"
 
 	agentreplv1 "agentrepl/proto/agentrepl/v1"
 	conversationv1 "agentrepl/proto/conversation/v1"
@@ -210,6 +211,9 @@ type Deps struct {
 	// on, which is what retires a concluded merge's standing state
 	// (merge.Orchestrator.RetireConcluded). nil tells nobody.
 	MovedOn func(ctx context.Context, ws ids.WorkspaceID)
+	// Now supplies the instant a user's prompt is stamped at
+	// (wsm.AttentionPrompt). nil means time.Now.
+	Now func() time.Time
 	// Log is the handler's logger.
 	Log dlog.Surfaces
 }

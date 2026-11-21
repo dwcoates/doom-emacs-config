@@ -1,6 +1,7 @@
 package prompthandler
 
 import (
+	"time"
 	"context"
 	"errors"
 	"os"
@@ -22,6 +23,9 @@ import (
 
 // This file holds the prompt handler's fakes. Nothing here reaches a database,
 // a shim or the vendor: the queue is a recorder and the panels are scripted.
+
+// stampedAt is the instant the harness's handler stamps a user's prompt at.
+var stampedAt = time.Date(2026, 11, 21, 12, 0, 0, 0, time.UTC)
 
 // theWorkspace is the workspace every subject acts on.
 const theWorkspace ids.WorkspaceID = "ws-1"
@@ -60,6 +64,20 @@ type fakeDB struct {
 	standing *wsm.ClaimStanding
 	// workspaceErr fails the workspace resolution when set.
 	workspaceErr error
+	// stamps records every user-attention stamp; stampErr fails the stamp.
+	stamps   []wsm.UserAttention
+	stampErr error
+}
+
+// StampUserAttention records the stamp the handler wrote.
+func (d *fakeDB) StampUserAttention(_ context.Context, kind wsm.AttentionKind, target string, at time.Time) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stampErr != nil {
+		return d.stampErr
+	}
+	d.stamps = append(d.stamps, wsm.UserAttention{Kind: kind, Target: target, At: at})
+	return nil
 }
 
 // fakeClaim is one key's durable claim: the turn it binds and whether the
@@ -483,6 +501,7 @@ func newHarness(t *testing.T) *harness {
 			return h.panel, h.panelErr
 		},
 		MintTurn: func() ids.TurnID { return h.minted },
+		Now:      func() time.Time { return stampedAt },
 		MovedOn: func(_ context.Context, ws ids.WorkspaceID) {
 			h.movedMu.Lock()
 			h.movedOn = append(h.movedOn, ws)
