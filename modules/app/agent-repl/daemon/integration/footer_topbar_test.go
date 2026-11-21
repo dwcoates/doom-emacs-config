@@ -665,6 +665,9 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 		return v.GetStrip().GetStatus().GetIdle() != nil
 	})
 	watchesBefore := f.shim.Count(harness.RPCWatchSession)
+	// THE SEVERING LASTS UNTIL IT IS SEEN: the daemon redials at once, and a
+	// footer reader slower than the redial saw only the link restored.
+	f.shim.HoldSessionReopen()
 
 	// Act: sever the session stream.
 	f.shim.DropStream(harness.StreamSession)
@@ -677,6 +680,7 @@ func TestFooterLinkDeathFlipsToSeveredAndTheDaemonRedials(t *testing.T) {
 		row := rosterRow(r, f.ws.GetId())
 		return row != nil && row.GetSevered() != nil
 	})
+	f.shim.ReleaseSessionReopen()
 
 	// Assert: the daemon redials — a fresh WatchSession is opened without any
 	// client action.

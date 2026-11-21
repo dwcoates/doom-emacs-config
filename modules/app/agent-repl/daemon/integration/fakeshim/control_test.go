@@ -90,6 +90,16 @@ func TestParseCommandAcceptsWellFormedOps(t *testing.T) {
 			want: Command{Op: OpDropStream, Stream: StreamSession},
 		},
 		{
+			name: "hold_reopen names the session stream",
+			line: `{"op":"hold_reopen","stream":"session"}`,
+			want: Command{Op: OpHoldReopen, Stream: StreamSession},
+		},
+		{
+			name: "release_reopen names the session stream",
+			line: `{"op":"release_reopen","stream":"session"}`,
+			want: Command{Op: OpReleaseReopen, Stream: StreamSession},
+		},
+		{
 			name: "exit carries a status and evidence",
 			line: `{"op":"exit","code":9,"stderr":"died"}`,
 			want: Command{Op: OpExit, Code: 9, Stderr: "died"},
@@ -179,6 +189,7 @@ func TestParseCommandRejectsMalformedOps(t *testing.T) {
 		{name: "answer without a body", line: `{"op":"answer","rpc":"StartTurn"}`, wantSub: "payload or fail is required"},
 		{name: "expect an unknown verb", line: `{"op":"expect","rpc":"Teleport"}`, wantSub: "unknown rpc"},
 		{name: "drop an unknown stream", line: `{"op":"drop_stream","stream":"webapp"}`, wantSub: "unknown stream"},
+		{name: "hold another stream's reopen", line: `{"op":"hold_reopen","stream":"agent"}`, wantSub: "only the \"session\" stream is held"},
 		{name: "exit out of range", line: `{"op":"exit","code":900}`, wantSub: "out of range"},
 		{name: "silence_bash without work", line: `{"op":"silence_bash"}`, wantSub: "work is required"},
 		{name: "await_bash without work", line: `{"op":"await_bash"}`, wantSub: "work is required"},

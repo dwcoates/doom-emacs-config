@@ -37,6 +37,12 @@ const (
 	OpHang        = "hang"
 	OpUnhang      = "unhang"
 	OpDropStream  = "drop_stream"
+	// OpHoldReopen holds every later open of the session stream until
+	// OpReleaseReopen: a test that drops the stream sees the severed link for
+	// as long as it looks, rather than for the moment the daemon's redial
+	// takes. Only the session stream is held.
+	OpHoldReopen    = "hold_reopen"
+	OpReleaseReopen = "release_reopen"
 	OpInfo        = "info"
 	OpCount       = "count"
 	// OpSetLiveWork states the live membership later re-announcements carry;
@@ -223,6 +229,10 @@ func ParseCommand(line []byte) (Command, error) {
 		case StreamSession, StreamAgent, StreamBash:
 		default:
 			return Command{}, fmt.Errorf("%s: unknown stream %q", c.Op, c.Stream)
+		}
+	case OpHoldReopen, OpReleaseReopen:
+		if c.Stream != StreamSession {
+			return Command{}, fmt.Errorf("%s: only the %q stream is held, not %q", c.Op, StreamSession, c.Stream)
 		}
 	case OpSetLiveWork:
 		// An EMPTY payload is a well-formed SessionStarted naming nothing

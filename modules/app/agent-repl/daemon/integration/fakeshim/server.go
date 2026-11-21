@@ -221,6 +221,10 @@ type server struct {
 	openPermissions map[string]openPermission
 	hung            bool
 	unhang          chan struct{}
+	// reopenHeld holds every WatchSession open until reopenRelease closes
+	// (holdSessionReopen).
+	reopenHeld    bool
+	reopenRelease chan struct{}
 	// sessionKilled records an accepted KillSession: the process exits once
 	// its answer has been written.
 	sessionKilled bool
@@ -403,6 +407,45 @@ func (s *server) release() {
 	s.hung = false
 	close(s.unhang)
 	s.unhang = make(chan struct{})
+}
+
+// holdSessionReopen holds every later WatchSession open until
+// releaseSessionReopen.
+func (s *server) holdSessionReopen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.reopenHeld {
+		return
+	}
+	s.reopenHeld = true
+	s.reopenRelease = make(chan struct{})
+}
+
+func (s *server) releaseSessionReopen() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.reopenHeld {
+		return
+	}
+	s.reopenHeld = false
+	close(s.reopenRelease)
+}
+
+// awaitSessionReopen blocks a WatchSession open while reopens are held,
+// bounded by the caller's context.
+func (s *server) awaitSessionReopen(ctx context.Context) error {
+	s.mu.Lock()
+	held, ch := s.reopenHeld, s.reopenRelease
+	s.mu.Unlock()
+	if !held {
+		return nil
+	}
+	select {
+	case <-ch:
+		return nil
+	case <-ctx.Done():
+		return connect.NewError(connect.CodeDeadlineExceeded, ctx.Err())
+	}
 }
 
 // gate blocks while the fake is hung, bounded by the caller's context.
@@ -851,6 +894,9 @@ func (s *server) buildSHA() string {
 
 func (s *server) WatchSession(ctx context.Context, req *connect.Request[shimv1.WatchSessionRequest], stream *connect.ServerStream[shimv1.WatchSessionResponse]) error {
 	if err := s.enter(ctx, RPCWatchSession, req.Msg); err != nil {
+		return err
+	}
+	if err := s.awaitSessionReopen(ctx); err != nil {
 		return err
 	}
 	if s.profile.ExitOn == "watch_session" {
