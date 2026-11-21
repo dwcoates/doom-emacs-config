@@ -572,10 +572,17 @@ func (c *controller) awaitUnansweredStandDown(ctx context.Context, exited <-chan
 		dlog.WithCause(fields, callErr))
 	select {
 	case info := <-exited:
-		// THE CALL STILL FAILED, so it is a fault; the shim's exit is the
-		// evidence that it took the stand-down, and the gate is passed.
-		c.log.Warn(opRelaunch, "the unforced stand-down call failed, but the shim left inside the window; the gate is passed",
-			dlog.Merge(dlog.WithCause(fields, callErr), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal}))
+		exit := dlog.Merge(dlog.WithCause(fields, callErr), dlog.Context{"pid": info.PID, "exit_code": info.Code, "signal": info.Signal})
+		// A CALL THAT FAILED ONLY UNDER THE STAND-DOWN THIS DAEMON ORDERED
+		// (shimclient.ErrStandDownOrdered) is the shim doing what it was
+		// told: it took the stand-down and left before its answer arrived.
+		if errors.Is(callErr, shimclient.ErrStandDownOrdered) {
+			c.log.Info(opRelaunch, "the shim took the unforced stand-down and left before its answer arrived; the gate is passed", exit)
+			return nil
+		}
+		// ANY OTHER FAILED CALL IS A FAULT; the shim's exit is the evidence
+		// that it took the stand-down, and the gate is passed.
+		c.log.Warn(opRelaunch, "the unforced stand-down call failed, but the shim left inside the window; the gate is passed", exit)
 		return nil
 	case <-c.deps.Clock.After(c.deps.StandDownWindow):
 	case <-ctx.Done():
