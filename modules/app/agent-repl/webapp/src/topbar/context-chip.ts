@@ -28,6 +28,7 @@ import type {
   TopbarContextChip,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { log } from "../log.js";
+import { MalformedView } from "../rpc/malformed.js";
 import { msOf, requireMessage } from "../rpc/strict.js";
 import { pressurePercentColor, windowFillPercent } from "../pressure-color.js";
 import type { TopbarContext } from "./context.js";
@@ -66,7 +67,7 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
 
   // The wrap is the control; see `drawTopbarModelSelector` for the reasoning.
   asAnchor(wrap, "context");
-  const body = (): HTMLElement => drawTokenBreakdownView(breakdown);
+  const body = (): HTMLElement => drawContextDropdown(u, breakdown);
   tc.reveals.register("context", "context", body);
   wrap.addEventListener("click", () => {
     tc.reveals.toggle("context", "context", body);
@@ -81,6 +82,37 @@ export function drawTopbarContextChip(u: TopbarContextChip, tc: TopbarContext): 
  */
 export function contextFigureColor(windowFill: number): string {
   return pressurePercentColor(windowFillPercent(windowFill, "TopbarContextChip.window_fill"));
+}
+
+/** The label of the dropdown's first row: the daemon's session-wide figure. */
+export const SESSION_TOTAL_LABEL = "Total session context";
+
+/**
+ * The dropdown the chip opens: the TOTAL SESSION CONTEXT first, then the
+ * session's usage breakdown. The total is the chip's own figure summed across
+ * every context cut, stated by the daemon as text ("1.3m"), so it is drawn
+ * verbatim like the chip's and never formatted here.
+ */
+export function drawContextDropdown(u: TopbarContextChip, breakdown: TokenBreakdownView): HTMLElement {
+  // ALWAYS SET on the wire (a workspace that held nothing states "0"), so an
+  // empty figure is a producer bug, refused rather than drawn as a blank row.
+  if (u.sessionTotalText === "") {
+    throw new MalformedView("TopbarContextChip.session_total_text", "is empty");
+  }
+  const menu = drawTokenBreakdownView(breakdown);
+  const row = document.createElement("div");
+  row.className = "token-breakdown-row";
+  row.setAttribute("data-session-total", "");
+  row.setAttribute("data-emphasized", "true");
+  const label = document.createElement("span");
+  label.className = "token-breakdown-label";
+  label.textContent = SESSION_TOTAL_LABEL;
+  const figure = document.createElement("span");
+  figure.className = "token-breakdown-tokens";
+  figure.textContent = u.sessionTotalText;
+  row.append(label, figure);
+  menu.prepend(row);
+  return menu;
 }
 
 /** The menu: titled sections of rows, in the served order. */

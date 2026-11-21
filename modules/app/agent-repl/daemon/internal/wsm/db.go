@@ -932,7 +932,7 @@ type DB interface {
 	PutWorkspaceContextUsage(ctx context.Context, id WorkspaceID, usage *conversationv1.SessionContextUsage) error
 	// PutWorkspaceContextCut records that a cut discarded a workspace's last
 	// context reading.
-	PutWorkspaceContextCut(ctx context.Context, id WorkspaceID) error
+	PutWorkspaceContextCut(ctx context.Context, id WorkspaceID, banked int64) error
 	// PutComposerMentions records the names a workspace's final responses
 	// mentioned, each instant only moving forward (composermentions.go).
 	PutComposerMentions(ctx context.Context, mentions []ComposerMention) error

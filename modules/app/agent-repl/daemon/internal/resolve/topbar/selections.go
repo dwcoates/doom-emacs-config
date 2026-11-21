@@ -27,7 +27,7 @@ type SelectionStore interface {
 	PutWorkspaceEffort(ctx context.Context, id ids.WorkspaceID, level conversationv1.AgentEffortLevel) error
 	WorkspaceContextUsage(ctx context.Context, id ids.WorkspaceID) (wsm.ContextUsageRecord, bool, error)
 	PutWorkspaceContextUsage(ctx context.Context, id ids.WorkspaceID, usage *conversationv1.SessionContextUsage) error
-	PutWorkspaceContextCut(ctx context.Context, id ids.WorkspaceID) error
+	PutWorkspaceContextCut(ctx context.Context, id ids.WorkspaceID, banked int64) error
 	AccountModelCatalog(ctx context.Context, configDir string) (*conversationv1.ModelCatalog, bool, error)
 	PutAccountModelCatalog(ctx context.Context, configDir string, catalog *conversationv1.ModelCatalog) error
 }
@@ -154,10 +154,11 @@ func (r *resolver) rememberContextUsage(ws ids.WorkspaceID, usage *conversationv
 	})
 }
 
-// rememberContextCut keeps that a cut discarded WS's last context reading.
-func (r *resolver) rememberContextCut(ws ids.WorkspaceID) {
+// rememberContextCut keeps that a cut discarded WS's last context reading,
+// and BANKED as the context every cut so far has discarded, in one write.
+func (r *resolver) rememberContextCut(ws ids.WorkspaceID, banked int64) {
 	r.remember(ws, "context_cut", func(ctx context.Context, st SelectionStore) error {
-		return st.PutWorkspaceContextCut(ctx, ws)
+		return st.PutWorkspaceContextCut(ctx, ws, banked)
 	})
 }
 
@@ -179,11 +180,11 @@ func (r *resolver) seedContextUsage(ws ids.WorkspaceID) {
 		return
 	}
 	r.mutate(ws, "daemon.topbar.seed_context_usage", "the topbar took the remembered context reading",
-		dlog.Context{"cut": rec.Cut, "total_tokens": rec.Usage.GetTotalTokens(), "max_tokens": rec.Usage.GetMaxTokens()},
+		dlog.Context{"cut": rec.Cut, "total_tokens": rec.Usage.GetTotalTokens(), "max_tokens": rec.Usage.GetMaxTokens(), "banked_tokens": rec.BankedTokens},
 		func(s *wsState) {
 			if s.contextUsage != nil || s.contextCut {
 				return
 			}
-			s.contextUsage, s.contextCut = rec.Usage, rec.Cut
+			s.contextUsage, s.contextCut, s.bankedTokens = rec.Usage, rec.Cut, rec.BankedTokens
 		})
 }

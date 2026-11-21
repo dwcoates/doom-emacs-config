@@ -9,6 +9,7 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import {
+  drawContextDropdown,
   drawTokenBreakdownRow,
   drawTokenBreakdownView,
   drawTopbarContextChip,
@@ -28,11 +29,12 @@ const row = (init: Partial<{ label: string; tokens: number; sharePermille: numbe
     depth: init.depth ?? 0,
   });
 
-const chip = (text: string, sections: unknown[] = [], windowFill = 0) =>
+const chip = (text: string, sections: unknown[] = [], windowFill = 0, sessionTotal = "1.3m") =>
   create(TopbarContextChipSchema, {
     text,
     breakdown: create(TokenBreakdownViewSchema, { sections: sections as never }),
     windowFill,
+    sessionTotalText: sessionTotal,
   });
 
 describe("drawTopbarContextChip", () => {
@@ -116,6 +118,39 @@ describe("drawTopbarContextChip", () => {
     expect(() => drawTopbarContextChip(create(TopbarContextChipSchema, { text: "1k" }), tc)).toThrow(
       MalformedView,
     );
+  });
+});
+
+describe("the total session context row", () => {
+  const open = (drawn: ReturnType<typeof chip>) => {
+    const { host, tc } = topbarContext();
+    host.append(drawTopbarContextChip(drawn, tc));
+    host.querySelector(".topbar-context-figure")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    return openPanel(host);
+  };
+
+  it("is the dropdown's first row, labelled and carrying the daemon's text verbatim", () => {
+    // ARRANGE
+    const drawn = chip("500k", [{ heading: { text: "session" }, rows: [row({ label: "fresh input" })] }], 0, "1.3m");
+    // ACT
+    const first = open(drawn)?.querySelector(".token-breakdown")?.firstElementChild;
+    // ASSERT
+    expect(first?.hasAttribute("data-session-total")).toBe(true);
+    expect(first?.textContent).toBe("Total session context1.3m");
+  });
+
+  it("leaves the chip's own figure the current context", () => {
+    // ARRANGE
+    const { tc } = topbarContext();
+    // ACT / ASSERT
+    expect(drawTopbarContextChip(chip("500k", [], 0, "1.3m"), tc).textContent).toBe("500k");
+  });
+
+  it("refuses an empty total, which the proto says is always set", () => {
+    // ARRANGE
+    const drawn = chip("1k", [], 0, "");
+    // ACT / ASSERT
+    expect(() => drawContextDropdown(drawn, drawn.breakdown!)).toThrow(MalformedView);
   });
 });
 

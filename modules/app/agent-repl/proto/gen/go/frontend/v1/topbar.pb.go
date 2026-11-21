@@ -1917,9 +1917,17 @@ type TopbarContextChip struct {
 	// the footer's allowance percentages use, so a chip at 40% of its window
 	// wears the color a 40% allowance wears. Never outside [0, 1]; the daemon
 	// clamps.
-	WindowFill    float64 `protobuf:"fixed64,3,opt,name=window_fill,json=windowFill,proto3" json:"window_fill,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	WindowFill float64 `protobuf:"fixed64,3,opt,name=window_fill,json=windowFill,proto3" json:"window_fill,omitempty"`
+	// TOTAL SESSION CONTEXT, daemon-formatted ("1.3m"): the chip's own figure
+	// summed across every context cut the session has made. Each /clear or
+	// completed compaction BANKS the context it discards, so a session that
+	// held 800k, was cleared, and then held 500k states 1.3m here while `text`
+	// states the 500k. It never shrinks on a cut, is kept in wsm so a restart
+	// does not lose it, and is the first row of the dropdown the chip opens.
+	// ALWAYS SET: a workspace that has held no context states "0".
+	SessionTotalText string `protobuf:"bytes,4,opt,name=session_total_text,json=sessionTotalText,proto3" json:"session_total_text,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *TopbarContextChip) Reset() {
@@ -1971,6 +1979,13 @@ func (x *TopbarContextChip) GetWindowFill() float64 {
 		return x.WindowFill
 	}
 	return 0
+}
+
+func (x *TopbarContextChip) GetSessionTotalText() string {
+	if x != nil {
+		return x.SessionTotalText
+	}
+	return ""
 }
 
 // Which Claude account the session spends as, resolved by the daemon from
@@ -5078,12 +5093,13 @@ const file_frontend_v1_topbar_proto_rawDesc = "" +
 	"\aoptions\x18\x02 \x03(\v2'.frontend.v1.TopbarPermissionModeOptionR\aoptions\"S\n" +
 	"\x1aTopbarPermissionModeOption\x12\x12\n" +
 	"\x04mode\x18\x01 \x01(\tR\x04mode\x12!\n" +
-	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\"\x87\x01\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\"\xb5\x01\n" +
 	"\x11TopbarContextChip\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12=\n" +
 	"\tbreakdown\x18\x02 \x01(\v2\x1f.frontend.v1.TokenBreakdownViewR\tbreakdown\x12\x1f\n" +
 	"\vwindow_fill\x18\x03 \x01(\x01R\n" +
-	"windowFill\"\xc7\x02\n" +
+	"windowFill\x12,\n" +
+	"\x12session_total_text\x18\x04 \x01(\tR\x10sessionTotalText\"\xc7\x02\n" +
 	"\rTopbarAccount\x12A\n" +
 	"\tlogged_in\x18\x01 \x01(\v2\".frontend.v1.TopbarAccountLoggedInH\x00R\bloggedIn\x12D\n" +
 	"\n" +

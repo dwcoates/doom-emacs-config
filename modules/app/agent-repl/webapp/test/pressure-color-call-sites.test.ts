@@ -71,6 +71,7 @@ describe("the pressure color's call sites", () => {
       text: "420k",
       breakdown: create(TokenBreakdownViewSchema, { sections: [] }),
       windowFill: 0.42,
+      sessionTotalText: "1.3m",
     });
     // Act
     const footer = drawFooterPercent(0.42).style.color;

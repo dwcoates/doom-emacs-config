@@ -493,7 +493,15 @@ func (r *resolver) contextChip(s *wsState) *frontendv1.TopbarContextChip {
 		Text:       contextChipText(s),
 		Breakdown:  r.tokenBreakdown(s),
 		WindowFill: windowFill(s),
+		// TOTAL SESSION CONTEXT: what every cut banked plus the live context.
+		SessionTotalText: formatTokens(sessionTotalTokens(s)),
 	}
+}
+
+// sessionTotalTokens is the context the workspace's sessions have held across
+// every cut: the banked total plus the figure the chip states now.
+func sessionTotalTokens(s *wsState) int64 {
+	return s.bankedTokens + contextTokens(s)
 }
 
 // contextUnknownText is what the chip states when a context cut has discarded
@@ -1068,16 +1076,23 @@ func (r *resolver) OnContextCut(ws ids.WorkspaceID, agent *conversationv1.AgentI
 		return
 	}
 	arm, cutMade := contextCutArm(cut)
+	var banked int64
 	r.mutate(ws, "daemon.topbar.on_context_cut", "the topbar took a context cut",
 		dlog.Context{"arm": arm, "cut_made": cutMade}, func(s *wsState) {
 			if !cutMade {
 				return
 			}
+			// THE CUT BANKS WHAT IT DISCARDS: the reading it retires is the
+			// context the session held, and the total session context keeps
+			// it. A second cut with no fresh reading between holds no reading
+			// and banks nothing.
+			s.bankedTokens += s.contextUsage.GetTotalTokens()
+			banked = s.bankedTokens
 			s.contextUsage = nil
 			s.contextCut = true
 		})
 	if cutMade {
-		r.rememberContextCut(ws)
+		r.rememberContextCut(ws, banked)
 	}
 }
 
