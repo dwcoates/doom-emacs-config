@@ -588,6 +588,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		return nil, fmt.Errorf("agent-repld: build the sidebar resolver: %w", err)
 	}
 	statusChanged.bind(sidebarResolver)
+	topbarResolver.BindContextFill(sidebarResolver.SetContextFill)
 	// ONE BRING-UP, ONE CALL, BOTH SURFACES. The roster draws a bring-up as
 	// its availability and the footer as the bring-up window of a route never
 	// seen (ladder.AwaitingBringUp), which the roster then projects; telling

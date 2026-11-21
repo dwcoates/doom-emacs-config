@@ -3,6 +3,7 @@ package topbar
 import (
 	"testing"
 
+	"agent-repld/internal/ids"
 	conversationv1 "agentrepl/proto/conversation/v1"
 )
 
@@ -211,5 +212,48 @@ func TestContextTokensAreTheColdGatesCountWhileAGateStands(t *testing.T) {
 	// Assert.
 	if got != 100_000 {
 		t.Errorf("ContextTokens = %d, want the gate's 100000", got)
+	}
+}
+
+type contextFillCall struct {
+	ws     ids.WorkspaceID
+	tokens int64
+	fill   float64
+}
+
+func TestBindContextFillCatchesUpAWorkspaceTheStripAlreadyHolds(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 500_000})
+	var calls []contextFillCall
+
+	// Act.
+	h.r.BindContextFill(func(ws ids.WorkspaceID, tokens int64, fill float64) {
+		calls = append(calls, contextFillCall{ws, tokens, fill})
+	})
+
+	// Assert.
+	want := contextFillCall{testWS, 500_000, 0.5}
+	if len(calls) != 1 || calls[0] != want {
+		t.Fatalf("catch-up calls = %+v, want [%+v]", calls, want)
+	}
+}
+
+func TestBoundContextFillSinkHearsEveryFactTheStripTakes(t *testing.T) {
+	// Arrange.
+	h := newHarness(t)
+	var calls []contextFillCall
+	h.r.BindContextFill(func(ws ids.WorkspaceID, tokens int64, fill float64) {
+		calls = append(calls, contextFillCall{ws, tokens, fill})
+	})
+
+	// Act.
+	calls = nil
+	h.r.SetColdGate(testWS, ColdGate{Standing: true, ContextTokens: 400_000})
+
+	// Assert.
+	want := contextFillCall{testWS, 400_000, 0.4}
+	if len(calls) != 1 || calls[0] != want {
+		t.Fatalf("calls = %+v, want [%+v]", calls, want)
 	}
 }

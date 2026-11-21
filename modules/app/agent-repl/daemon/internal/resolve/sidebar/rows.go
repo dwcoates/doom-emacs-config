@@ -207,6 +207,11 @@ func (r *resolver) row(rec wsm.Workspace, rc rowContext, log dlog.Logger) *front
 	if s.openOwnedPullRequest {
 		out.OpenOwnedPullRequest = &frontendv1.RosterRowOpenOwnedPullRequest{}
 	}
+	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowContextHeat` states it:
+	// set while the context holds ContextHeatTokens or more.
+	if s.contextHeat != nil {
+		out.ContextHeat = &frontendv1.RosterRowContextHeat{WindowFill: *s.contextHeat}
+	}
 	// PRESENCE IS THE FACT, as `frontend.v1.RosterRowOpening` states it: set
 	// while an open of the workspace is in flight, when the status is
 	// `inactive` and the row takes no click.

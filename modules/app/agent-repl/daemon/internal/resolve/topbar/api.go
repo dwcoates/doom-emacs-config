@@ -256,6 +256,10 @@ type Resolver interface {
 	// workspace: the standing cold gate's count, else the last context usage
 	// the vendor reported, 0 when it reported none.
 	ContextTokens(ws ids.WorkspaceID) int64
+	// BindContextFill installs the sink told every workspace's context size
+	// and window fill after each fact the strip takes, in the order the facts
+	// were taken. The sidebar's duration ink reads it. Bound once, at wiring.
+	BindContextFill(sink ContextFillSink)
 	// SetAccount installs the account cell: the root in force and EVERY root
 	// the daemon knows beside it. An EMPTY email is the logged-out arm, which
 	// is a drawn warning rather than a blank label.
@@ -335,6 +339,11 @@ type ColdGate struct {
 type Option func(*options)
 
 // options are the resolver's knobs.
+// ContextFillSink is told a workspace's context size in tokens and its window
+// fill (0..1), exactly as the chip states them. It is called under the
+// resolver's lock so the facts arrive in order, and must not call back into it.
+type ContextFillSink func(ws ids.WorkspaceID, tokens int64, fill float64)
+
 type options struct {
 	clock      Clock
 	warningCap int

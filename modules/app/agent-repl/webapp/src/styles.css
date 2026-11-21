@@ -2003,6 +2003,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    2026-11-19): an open row whose workspace owns a pull request still open
    (frontend.v1.RosterRowOpenOwnedPullRequest) draws its when-column in the
    green the `ready` arm paints the rest of the row, at full strength. */
+#ws-sidebar .ws:not(.receded) > .row > .when[data-context-heat],
 #ws-sidebar .ws:not(.receded) > .row > .when[data-open-owned-pull-request] {
   color: var(--ok);
   opacity: 1;

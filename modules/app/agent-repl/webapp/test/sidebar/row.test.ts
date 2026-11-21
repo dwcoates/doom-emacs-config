@@ -55,6 +55,7 @@ import {
   drawRosterOpenRowRepositoryDivider,
 } from "../../src/sidebar/row.js";
 import { REVEAL_MARGIN_PX } from "../../src/topbar/clamp.js";
+import { contextFigureColor } from "../../src/topbar/context-chip.js";
 import { codeOf, functionBody } from "../source-text.js";
 import { GLYPH_IMAGES, NO_MARKERS, ROSTER_ARM_CLASS, ROSTER_STATUS_CASES, type RosterStatusCase } from "../../src/sidebar/tones.js";
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
@@ -3410,3 +3411,52 @@ describe("the open owned pull request's duration", () => {
     expect(drawn.querySelector(".when")!.hasAttribute("data-open-owned-pull-request")).toBe(false);
   });
 });
+
+describe("the context-heat ink on the duration", () => {
+  it("inks the duration with the topbar chip's color for the window fill", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", contextHeat: 0.55 }), sidebarContext(), "R");
+
+    // Assert.
+    expect([durationOf(drawn).hasAttribute("data-context-heat"), durationOf(drawn).style.color]).toEqual([
+      true,
+      expectedColor(contextFigureColor(0.55)),
+    ]);
+  });
+
+  it("leaves the duration's ordinary ink when the marker is absent", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1" }), sidebarContext(), "R");
+
+    // Assert.
+    expect([durationOf(drawn).hasAttribute("data-context-heat"), durationOf(drawn).style.color]).toEqual([false, ""]);
+  });
+
+  it("wins over the green an open pull request gives", () => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", contextHeat: 0.95, openOwnedPullRequest: true }), sidebarContext(), "R");
+
+    // Assert.
+    expect(durationOf(drawn).style.color).toBe(expectedColor(contextFigureColor(0.95)));
+  });
+
+  it.each(["merged", "hidden"] as const)("draws nothing for the marker in the %s band", (place) => {
+    // Arrange, Act.
+    const drawn = drawRosterRow(row({ id: "ws-1", contextHeat: 0.5 }), sidebarContext(), "R", place);
+
+    // Assert.
+    expect([drawn.querySelector<HTMLElement>(".when")!.hasAttribute("data-context-heat"), drawn.querySelector<HTMLElement>(".when")!.style.color]).toEqual([false, ""]);
+  });
+
+  it("refuses a fill outside [0, 1] rather than painting it", () => {
+    // Arrange, Act, Assert.
+    expect(() => drawRosterRow(row({ id: "ws-1", contextHeat: 1.5 }), sidebarContext(), "R")).toThrow();
+  });
+});
+
+/** A color as the DOM reports it after assignment, so equal colors compare equal. */
+function expectedColor(color: string): string {
+  const probe = document.createElement("span");
+  probe.style.color = color;
+  return probe.style.color;
+}

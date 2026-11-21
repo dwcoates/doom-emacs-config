@@ -67,3 +67,14 @@ func (r *resolver) ContextTokens(ws ids.WorkspaceID) int64 {
 	defer r.mu.Unlock()
 	return contextTokens(r.stateLocked(ws))
 }
+
+// BindContextFill implements Resolver: it installs the sink and states every
+// workspace's current figure to it, so a row drawn before the bind is caught up.
+func (r *resolver) BindContextFill(sink ContextFillSink) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.contextFill = sink
+	for ws, s := range r.states {
+		sink(ws, contextTokens(s), windowFill(s))
+	}
+}
