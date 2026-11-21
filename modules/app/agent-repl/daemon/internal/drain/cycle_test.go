@@ -640,3 +640,255 @@ func TestCycleDownThenWaitsWhileTheStandDownIsPending(t *testing.T) {
 		t.Fatalf("reports = %+v, want the one park once the session fell free", got)
 	}
 }
+
+// mergeQueuedDown asks for the park scoped to M.
+func (h *harness) mergeQueuedDown(ws ids.WorkspaceID, m queuedMerge) {
+	h.c.MergeQueuedDown(ws, m.repo, m.ledger)
+}
+
+func TestAMergeQueuedParkParksTheSessionForItsOwnReason(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	m := queuedAt(t, h, ws, instant)
+
+	// Act
+	h.mergeQueuedDown(ws, m)
+
+	// Assert
+	killed := h.stand.Killed()
+	if len(killed) != 1 || killed[0].WS != ws || killed[0].Force || killed[0].Life != shimlife.StandDownMergeQueued {
+		t.Fatalf("kills = %+v, want one graceful merge_queued stand-down", killed)
+	}
+	if term := h.terminal(t, ws); term == nil || term.Kind != wsm.TerminalParked || term.Detail != mergeQueuedReason.detail {
+		t.Fatalf("terminal = %+v, want the one park with the sync merge's detail", term)
+	}
+	rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opMergeQueued, Message: mergeQueuedReason.done})
+	if !ok {
+		t.Fatalf("records = %+v, want the park recorded at info", records(h.log, opMergeQueued))
+	}
+	if rec.Context["workspace"] != string(ws) || rec.Context["repo"] != string(m.repo) || rec.Context["merge_entry"] != string(m.ledger) {
+		t.Fatalf("record context = %v, want the workspace and the queue entry", rec.Context)
+	}
+	if h.cyclePending(ws) {
+		t.Fatal("a park taken stayed pending")
+	}
+}
+
+func TestAMergeQueuedParkIsTakenWhatever(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID)
+	}{
+		{name: "the workspace the user is looking at", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			if err := h.db.SetCurrent(context.Background(), ws, time.Unix(1_700_000_000, 0)); err != nil {
+				t.Fatalf("SetCurrent: %v", err)
+			}
+		}},
+		{name: "a closed workspace", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) { h.closedAt(t, ws) }},
+		{name: "a real turn ran since the ask was stamped", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID) {
+			h.turnClosed(t, ws, h.clock.Now().Add(time.Minute))
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			m := queuedAt(t, h, ws, instant)
+			tt.arrange(t, h, ws)
+
+			// Act
+			h.mergeQueuedDown(ws, m)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 1 || killed[0].Life != shimlife.StandDownMergeQueued {
+				t.Fatalf("kills = %+v, want the merge_queued park taken", killed)
+			}
+		})
+	}
+}
+
+func TestAMergeQueuedParkUnderATurnIsTakenWhenTheTurnEnds(t *testing.T) {
+	// Arrange: the user's own finish puts the merge in line with the turn
+	// still running; that turn's end is not engagement that keeps it up.
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	m := queuedAt(t, h, ws, instant)
+	h.freeness.SetFree(ws, false)
+	h.mergeQueuedDown(ws, m)
+	if killed := h.stand.Killed(); len(killed) != 0 {
+		t.Fatalf("kills = %+v, want none under the turn", killed)
+	}
+	if !h.cyclePending(ws) {
+		t.Fatal("the park under the turn was not kept pending")
+	}
+	h.turnClosed(t, ws, h.clock.Now().Add(time.Minute))
+	h.freeness.SetFree(ws, true)
+
+	// Act
+	h.c.RetryWithheld(ws)
+
+	// Assert
+	if killed := h.stand.Killed(); len(killed) != 1 || killed[0].Life != shimlife.StandDownMergeQueued {
+		t.Fatalf("kills = %+v, want the park taken on the turn's free edge", killed)
+	}
+	if h.cyclePending(ws) {
+		t.Fatal("a park taken stayed pending")
+	}
+}
+
+func TestAMergeQueuedParkIsNotTaken(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness, ws ids.WorkspaceID, m *queuedMerge)
+		message string
+	}{
+		{name: "in remote control", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID, _ *queuedMerge) {
+			if _, err := h.db.SetRemoteControlMode(context.Background(), ws, wsm.RemoteControlOn); err != nil {
+				t.Fatalf("SetRemoteControlMode: %v", err)
+			}
+		}, message: "remote control is on; the shim stays up for claude.ai"},
+		{name: "once the merge was admitted", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID, m *queuedMerge) {
+			if err := h.db.AdmitMerge(context.Background(), m.repo, ws); err != nil {
+				t.Fatalf("AdmitMerge: %v", err)
+			}
+		}, message: "the merge no longer waits in line; the park is not taken"},
+		{name: "once the merge left its queue", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID, m *queuedMerge) {
+			if err := h.db.RemoveMergeQueueEntry(context.Background(), m.repo, ws, "user_dequeue"); err != nil {
+				t.Fatalf("RemoveMergeQueueEntry: %v", err)
+			}
+		}, message: "the merge no longer waits in line; the park is not taken"},
+		{name: "for an ask naming an entry the line no longer holds", arrange: func(t *testing.T, h *harness, ws ids.WorkspaceID, m *queuedMerge) {
+			m.ledger = wsm.NewLeaseID()
+		}, message: "the merge no longer waits in line; the park is not taken"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			m := queuedAt(t, h, ws, instant)
+			tt.arrange(t, h, ws, &m)
+
+			// Act
+			h.mergeQueuedDown(ws, m)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none", killed)
+			}
+			if h.cyclePending(ws) {
+				t.Fatal("a park not taken stayed pending")
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "info", Operation: opMergeQueued, Message: tt.message})
+			if !ok {
+				t.Fatalf("records = %+v, want %q at info", records(h.log, opMergeQueued), tt.message)
+			}
+			if rec.Context["workspace"] != string(ws) || rec.Context["merge_entry"] != string(m.ledger) {
+				t.Fatalf("record context = %v, want the workspace and the queue entry", rec.Context)
+			}
+		})
+	}
+}
+
+// mergeParkErrDB fails the one read a sync merge's park makes that READ
+// names.
+type mergeParkErrDB struct {
+	wsm.DB
+	read string
+}
+
+func (d mergeParkErrDB) Workspace(ctx context.Context, id wsm.WorkspaceID) (wsm.Workspace, error) {
+	if d.read == "workspace" {
+		return wsm.Workspace{}, errFake
+	}
+	return d.DB.Workspace(ctx, id)
+}
+
+func (d mergeParkErrDB) RemoteControl(ctx context.Context, id wsm.WorkspaceID) (wsm.RemoteControl, error) {
+	if d.read == "remote" {
+		return wsm.RemoteControl{}, errFake
+	}
+	return d.DB.RemoteControl(ctx, id)
+}
+
+func (d mergeParkErrDB) Session(ctx context.Context, id wsm.WorkspaceID) (wsm.Session, bool, error) {
+	if d.read == "session" {
+		return wsm.Session{}, false, errFake
+	}
+	return d.DB.Session(ctx, id)
+}
+
+func (d mergeParkErrDB) MergeQueue(ctx context.Context, repo wsm.RepoKey) ([]wsm.MergeQueueEntry, error) {
+	if d.read == "queue" {
+		return nil, errFake
+	}
+	return d.DB.MergeQueue(ctx, repo)
+}
+
+func TestAMergeQueuedParkThatFailsIsDroppedAndRecorded(t *testing.T) {
+	tests := []struct {
+		name    string
+		read    string
+		hibern  bool
+		message string
+	}{
+		{name: "the workspace's record", read: "workspace", message: "could not read the workspace's record; its stand-down is dropped"},
+		{name: "the remote-control mode", read: "remote", message: "could not read the workspace's remote-control mode; its stand-down is dropped"},
+		{name: "the session", read: "session", message: "could not read the workspace's session; its stand-down is dropped"},
+		{name: "the merge queue", read: "queue", message: "could not read whether the workspace's merge still waits in line; its park is dropped"},
+		{name: "the hibernate directive", hibern: true, message: "the hibernate directive failed; deferring the park"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t)
+			ws := h.workspace(t, instant)
+			m := queuedAt(t, h, ws, instant)
+			h.c.deps.DB = mergeParkErrDB{DB: h.c.deps.DB, read: tt.read}
+			if tt.hibern {
+				h.stand.hibernateErr[ws] = errFake
+			}
+
+			// Act
+			h.mergeQueuedDown(ws, m)
+
+			// Assert
+			if killed := h.stand.Killed(); len(killed) != 0 {
+				t.Fatalf("kills = %+v, want none", killed)
+			}
+			if h.cyclePending(ws) {
+				t.Fatal("a dropped park stayed pending")
+			}
+			if term := h.terminal(t, ws); term != nil {
+				t.Fatalf("terminal = %+v, want none recorded", term)
+			}
+			rec, ok := dlog.FindRecord(h.log.Records(), dlog.RecordQuery{Level: "error", Operation: opMergeQueued, Message: tt.message})
+			if !ok {
+				t.Fatalf("records = %+v, want %q at error", records(h.log, opMergeQueued), tt.message)
+			}
+			if rec.Context["workspace"] != string(ws) || rec.Context["merge_entry"] != string(m.ledger) || rec.Context["repo"] != string(m.repo) ||
+				!strings.Contains(fmt.Sprint(rec.Context["cause"]), errFake.Error()) {
+				t.Fatalf("record context = %v, want the workspace, the queue entry and the cause", rec.Context)
+			}
+		})
+	}
+}
+
+func TestAMergeQueuedParkLeavesTheOrdinaryParkARestoreReads(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+	ws := h.workspace(t, instant)
+	m := queuedAt(t, h, ws, instant)
+
+	// Act
+	h.mergeQueuedDown(ws, m)
+
+	// Assert: the keeper restores a parked session before each beat it owes
+	// (wsm.Session.Parked), so the park must be the ordinary one.
+	session, found, err := h.db.Session(context.Background(), ws)
+	if err != nil || !found || !session.Parked() {
+		t.Fatalf("session = %+v (found %v, err %v), want the ordinary park", session, found, err)
+	}
+}

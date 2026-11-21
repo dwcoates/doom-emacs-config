@@ -1373,16 +1373,19 @@ func TestAnArmItCannotReadIsRecordedAsAnError(t *testing.T) {
 	}
 }
 
-// queuedAt puts ws's own-branch merge in line, requested at.
-func queuedAt(t *testing.T, h *harness, ws ids.WorkspaceID, at time.Time) {
+// queuedAt puts ws's own-branch merge in line, requested at, answering the
+// queue entry a sync merge's park is scoped to.
+func queuedAt(t *testing.T, h *harness, ws ids.WorkspaceID, at time.Time) queuedMerge {
 	t.Helper()
 	repo := wsm.RepoKey(t.TempDir())
 	if err := h.db.RequestMerge(context.Background(), repo, ws, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}, at); err != nil {
 		t.Fatalf("RequestMerge: %v", err)
 	}
-	if _, err := h.db.QueueMerge(context.Background(), repo, ws, wsm.NewLeaseID()); err != nil {
+	ledger := wsm.NewLeaseID()
+	if _, err := h.db.QueueMerge(context.Background(), repo, ws, ledger); err != nil {
 		t.Fatalf("QueueMerge: %v", err)
 	}
+	return queuedMerge{repo: repo, ledger: ledger}
 }
 
 func TestSweepKeepsAnIdleSessionWhoseMergeJoinedTheQueueInsideTheCutoff(t *testing.T) {
