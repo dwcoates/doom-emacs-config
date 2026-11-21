@@ -2352,10 +2352,10 @@ func TestTheWaitingMergesAreNumberedInTheOrderTheQueueReports(t *testing.T) {
 		{
 			name: "a merge admitted behind the head is numbered at its place in line",
 			line: []sidebar.QueueEntry{
-				{Workspace: "w1", Credited: "w1", Admitted: true},
-				{Workspace: "w3", Credited: "w3"},
-				{Workspace: "w2", Credited: "w2", Admitted: true},
-				{Workspace: "w4", Credited: "w4"},
+				{Workspace: "w1", Credited: "w1", Admitted: true, Clock: activeClock(1)},
+				{Workspace: "w3", Credited: "w3", Clock: waitingClock(1, 0)},
+				{Workspace: "w2", Credited: "w2", Admitted: true, Clock: waitingClock(1, 0)},
+				{Workspace: "w4", Credited: "w4", Clock: waitingClock(1, 0)},
 			},
 		},
 	}
