@@ -289,8 +289,48 @@ SERVICE_PLATFORM="$(platform)"
 # The repository's MAIN worktree. A skill link must never point into a linked
 # worktree, whose path dangles the moment it is pruned, so repo-relative skill
 # sources always resolve here, whichever worktree runs the script.
+#
+#
+# THE WORKTREE LIST IS READ ONCE PER RUN (resolve_worktrees, from
+# prepare_entries): a run's worktrees cannot change under it, and every link
+# check and every holder or service install asks for them, so reading git's
+# list per question cost a git call each (27 per install of the install
+# harness's synthetic repository, 2026-11-20).
+WORKTREE_ROOTS=""
+WORKTREES_READ=0
 module_main_worktree() {
-  main_worktree "$MODULE_DIR" || { err "main-worktree: git worktree list answered no worktree for $MODULE_DIR"; exit 2; }
+  worktrees_read_or_die
+  printf '%s\n' "${WORKTREE_ROOTS%%$'\n'*}"
+}
+
+# module_linked_worktrees: every linked worktree of the module's repository, one
+# a line, from the list read once.
+module_linked_worktrees() {
+  worktrees_read_or_die
+  case "$WORKTREE_ROOTS" in
+    *$'\n'*) printf '%s\n' "${WORKTREE_ROOTS#*$'\n'}" ;;
+  esac
+}
+
+# worktrees_read_or_die: a question about the worktrees before the list was
+# read is a bug in this script (resolve_worktrees reads it for every entry kind
+# that asks), so it fails hard rather than reading the list again.
+worktrees_read_or_die() {
+  [ "$WORKTREES_READ" = 1 ] || { err "worktrees: asked before resolve_worktrees read the list; an entry kind that asks is missing from resolve_worktrees"; exit 2; }
+}
+
+# resolve_worktrees: read the module repository's worktree list into
+# WORKTREE_ROOTS, in the script's own shell so every later subshell reads it,
+# when any loaded entry asks about worktrees: a link (its source is resolved in
+# the main worktree and refused inside a linked one), or a holder or service
+# (installed from the main checkout only). A run that needs none never asks git.
+resolve_worktrees() {
+  local needed
+  needed="$(printf '%s\n' "$ENTRIES" | jq -s 'any(.[]; (.kind | IN("skill_link", "command_link", "socket_holder", "service")) or ((.source | type) == "object" and .source.repo != null))')" || { err "worktrees: reading the loaded entries' kinds failed"; exit 2; }
+  [ "$needed" = true ] || return 0
+  WORKTREE_ROOTS="$(worktree_list "$MODULE_DIR")" || { err "worktrees: git worktree list failed for $MODULE_DIR"; exit 2; }
+  [ -n "$WORKTREE_ROOTS" ] || { err "worktrees: git worktree list answered no worktree for $MODULE_DIR"; exit 2; }
+  WORKTREES_READ=1
 }
 
 repo_top() { git -C "$MODULE_DIR" rev-parse --show-toplevel; }
@@ -325,6 +365,13 @@ $MODULE_DIR/$rel"
   # Keep the first declaration of each id; validate_entries proved the rest equal.
   ENTRIES="$(printf '%s\n' "$all" | jq -sc 'reduce .[] as $e ({seen: {}, out: []};
       if .seen[$e.id] then . else .seen[$e.id] = true | .out += [$e] end) | .out[]')"
+}
+
+# prepare_entries: what every verb that checks entries reads once per run, after
+# load_manifests: the worktree list and every entry's fields. list asks neither.
+prepare_entries() {
+  resolve_worktrees
+  index_fields
 }
 
 # The manifest contract, checked before anything runs.
@@ -395,7 +442,100 @@ validate_entries() {
 }
 
 # field ENTRY JQ-PATH: one field of an entry, empty when absent.
-field() { printf '%s\n' "$1" | jq -r "$2 // empty"; }
+#
+# EVERY LOADED ENTRY'S FIELDS ARE DECODED ONCE PER RUN (index_fields, from
+# prepare_entries), so a field of a loaded entry at a plain dotted path is
+# answered without a jq process: an install of the install harness's synthetic
+# repository spawned 114 jq processes, one per field asked (2026-11-20). Every
+# other question (an entry not loaded, a bracketed path, a field holding an
+# object or array or a line break) is jq's own, exactly as before, so the
+# answer never differs from jq's.
+field() {
+  local path="$2" i flat="" rest line type
+  if [[ $path =~ ^(\.[A-Za-z_][A-Za-z0-9_]*)+$ ]]; then
+    for i in "${!FIELD_JSON[@]}"; do
+      if [ "${FIELD_JSON[$i]}" = "$1" ]; then flat="${FIELD_FLAT[$i]}"; break; fi
+    done
+  fi
+  if [ -n "$flat" ]; then
+    case "$flat" in
+      *$'\n'"$path"$'\t'*)
+        rest="${flat#*$'\n'"$path"$'\t'}"
+        line="${rest%%$'\n'*}"
+        type="${line%%$'\t'*}"
+        case "$type" in
+          string|number|true) printf '%s\n' "${line#*$'\t'}"; return ;;
+          false|null) return ;;
+        esac ;;
+      *)
+        # Absent: jq answers empty when the nearest present ancestor is an
+        # object, and decides for itself (an error, for one) otherwise.
+        if field_absent_under_object "$flat" "$path"; then return; fi ;;
+    esac
+  fi
+  printf '%s\n' "$1" | jq -r "$path // empty"
+}
+
+# FIELD_JSON and FIELD_FLAT: each loaded entry, and its fields one a line as
+# "<dotted path>\t<type>\t<value>", led by a line break. A field whose value
+# holds a tab or a line break is typed "text", which field leaves to jq.
+FIELD_JSON=()
+FIELD_FLAT=()
+
+# index_fields: decode every loaded entry's fields once, with one jq process.
+# jq writes each entry as an ASCII record separator (\036), its compact JSON,
+# and its field lines; its output is read whole first, so a jq failure fails the
+# run before anything is indexed.
+index_fields() {
+  local out rest rec
+  FIELD_JSON=()
+  FIELD_FLAT=()
+  out="$(printf '%s\n' "$ENTRIES" | jq -j '
+    def key: if type == "number" then "[\(.)]" elif test("^[A-Za-z_][A-Za-z0-9_]*$") then ".\(.)" else ".[\(tojson)]" end;
+    . as $e | "\u001e" + tojson +
+      ([paths as $p | ($e | getpath($p)) as $v
+        | "\n" + ($p | map(key) | join("")) + "\t" +
+          (if ($v | type) == "string" then (if ($v | test("[\t\n\u001e]")) then "text\t" else "string\t" + $v end)
+           elif ($v | type) == "number" then "number\t" + ($v | tostring)
+           elif $v == true then "true\ttrue"
+           elif $v == false then "false\t"
+           elif $v == null then "null\t"
+           else ($v | type) + "\t" end)] | join(""))')" || { err "load: decoding the loaded entries' fields failed"; exit 2; }
+  rest="${out#$'\036'}"
+  while [ -n "$out" ]; do
+    rec="${rest%%$'\036'*}"
+    # Compact JSON holds no line break, and the field lines each begin with one.
+    FIELD_JSON+=("${rec%%$'\n'*}")
+    case "$rec" in
+      *$'\n'*) FIELD_FLAT+=($'\n'"${rec#*$'\n'}") ;;
+      *) FIELD_FLAT+=("") ;;
+    esac
+    case "$rest" in
+      *$'\036'*) rest="${rest#*$'\036'}" ;;
+      *) break ;;
+    esac
+  done
+  local loaded=0 line
+  while IFS= read -r line; do [ -z "$line" ] || loaded=$((loaded + 1)); done <<<"$ENTRIES"
+  [ "${#FIELD_JSON[@]}" -eq "$loaded" ] || { err "load: decoded the fields of ${#FIELD_JSON[@]} entries, but $loaded were loaded"; exit 2; }
+}
+
+# field_absent_under_object FLAT PATH: 0 when PATH is absent from FLAT and its
+# nearest present ancestor is an object (the entry itself at the top).
+field_absent_under_object() {
+  local flat="$1" path="$2" parent rest
+  parent="${path%.*}"
+  while [ -n "$parent" ]; do
+    case "$flat" in
+      *$'\n'"$parent"$'\t'*)
+        rest="${flat#*$'\n'"$parent"$'\t'}"
+        [ "${rest%%$'\t'*}" = object ]
+        return ;;
+    esac
+    parent="${parent%.*}"
+  done
+  return 0
+}
 
 # ---------------------------------------------------------------------------
 # Versions.
@@ -736,7 +876,7 @@ in_linked_worktree() {
     [ -n "$root" ] || continue
     root="$(physical "$root")"
     case "$path" in "$root"/*|"$root") return 0 ;; esac
-  done < <(linked_worktrees "$MODULE_DIR")
+  done < <(module_linked_worktrees)
   return 1
 }
 
@@ -770,7 +910,7 @@ check_skill_link() {
 # check_skill_link_in ENTRY DIR: the link checked in the one skills directory DIR.
 check_skill_link_in() {
   local e="$1" dir="$2" name src dest
-  if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
+  if [ "$(field "$e" .retired)" = true ]; then
     check_retired_skill_link "$e" "$dir"
     return
   fi
@@ -835,15 +975,23 @@ check_command_link() {
 }
 
 # hook_paths ENTRY: sets HOOK_SRC and HOOK_DEST for a git_hook entry.
+#
+# The repository's top and hooks directory are read once per run (HOOK_TOP,
+# HOOK_DIR): neither changes under a run, and a hook's check, install and
+# re-check each asked git again.
 HOOK_SRC=""
 HOOK_DEST=""
+HOOK_TOP=""
+HOOK_DIR=""
 hook_paths() {
-  local e="$1" top hooks
-  top="$(repo_top)"
-  hooks="$(git -C "$top" rev-parse --git-path hooks)"
-  case "$hooks" in /*) ;; *) hooks="$top/$hooks" ;; esac
-  HOOK_SRC="$top/$(field "$e" .source)"
-  HOOK_DEST="$hooks/$(field "$e" .hook)"
+  local e="$1"
+  if [ -z "$HOOK_TOP" ]; then
+    HOOK_TOP="$(repo_top)"
+    HOOK_DIR="$(git -C "$HOOK_TOP" rev-parse --git-path hooks)"
+    case "$HOOK_DIR" in /*) ;; *) HOOK_DIR="$HOOK_TOP/$HOOK_DIR" ;; esac
+  fi
+  HOOK_SRC="$HOOK_TOP/$(field "$e" .source)"
+  HOOK_DEST="$HOOK_DIR/$(field "$e" .hook)"
 }
 
 # is_managed_hook ENTRY FILE: 0 when FILE carries one of the entry's markers.
@@ -1489,7 +1637,7 @@ install_sudo_grant() { return 1; }
 install_skill_link() {
   local e="$1" src dir name
   name="$(field "$e" .name)"
-  if [ "$(printf '%s\n' "$e" | jq -r '.retired // false')" = true ]; then
+  if [ "$(field "$e" .retired)" = true ]; then
     src="$(link_source "$e")"
     while IFS= read -r dir; do
       # Only a link of ours comes out; a file or a foreign link is the user's.
@@ -1728,7 +1876,7 @@ REPORTS=""
 report() {
   local e="$1" id optional
   id="$(field "$e" .id)"
-  optional="$(printf '%s\n' "$e" | jq -r '.optional // false')"
+  optional="$(field "$e" .optional)"
   if [ "$JSON" -eq 1 ]; then
     REPORTS="$REPORTS$(printf '%s\n' "$e" | jq -c --arg s "$STATUS" --arg d "$DETAIL" --arg f "$FIX" \
       '{id, kind, system: ._system, profile, optional: (.optional // false), why, status: $s, detail: $d, fix: (if $s == "ok" then "" else $f end)}')
@@ -1746,7 +1894,7 @@ report() {
 
 # required_failed ENTRY: 0 when the entry is required and not ok.
 required_failed() {
-  [ "$STATUS" != ok ] && [ "$(printf '%s\n' "$1" | jq -r '.optional // false')" != true ]
+  [ "$STATUS" != ok ] && [ "$(field "$1" .optional)" != true ]
 }
 
 cmd_check() {
@@ -1939,12 +2087,12 @@ main() {
     check|install|uninstall|list|define-service|ensure-holder) resolve_package_manager ;;
   esac
   case "$verb" in
-    check) load_manifests; cmd_check ;;
-    install) [ "$JSON" -eq 0 ] || die_usage "--json is for check"; load_manifests; cmd_install ;;
-    uninstall) load_manifests; cmd_uninstall ;;
+    check) load_manifests; prepare_entries; cmd_check ;;
+    install) [ "$JSON" -eq 0 ] || die_usage "--json is for check"; load_manifests; prepare_entries; cmd_install ;;
+    uninstall) load_manifests; prepare_entries; cmd_uninstall ;;
     list) load_manifests; cmd_list ;;
-    define-service) load_manifests; cmd_define_service "$label" ;;
-    ensure-holder) load_manifests; cmd_ensure_holder "$label" ;;
+    define-service) load_manifests; prepare_entries; cmd_define_service "$label" ;;
+    ensure-holder) load_manifests; prepare_entries; cmd_ensure_holder "$label" ;;
     purge-legacy-hooks) command -v jq >/dev/null 2>&1 || { err "purge-hooks: jq is not installed; settings.json is never edited without it"; exit 2; }; purge_legacy_hook_entries ;;
     help|-h|--help) usage ;;
     *) die_usage "unknown verb: $verb" ;;

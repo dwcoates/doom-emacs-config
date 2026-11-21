@@ -56,6 +56,17 @@ case "$1" in
 esac'
   write_stub go ''
   write_stub build ''
+  # NO REAL GIT RUNS HERE (owner rule). A run that asks about worktrees reads
+  # the list once (resolve_worktrees); this git answers the case's module as
+  # the main worktree, and refuses every other question, so a case whose code
+  # asks git anything else stubs git itself.
+  write_stub git '
+if [ "$1" = -C ] && [ "$3" = worktree ] && [ "$4" = list ]; then
+  printf "worktree %s\nHEAD 0\nbranch refs/heads/master\n" "${STUB_DIR%/stubs}/module"
+  exit 0
+fi
+echo "stub git: unexpected git $*" >&2
+exit 1'
   write_stub launchctl '
 case "$1" in
   print) [ -f "$STUB_DIR/.loaded-${2##*/}" ] ;;
@@ -1653,7 +1664,8 @@ if [ "$3" = worktree ] && [ "$4" = list ]; then
   printf "worktree /main/checkout\nHEAD 0\nbranch refs/heads/master\n\nworktree %s\nHEAD 0\nbranch refs/heads/feature\n" "${STUB_DIR%/stubs}/module"
   exit 0
 fi
-exec /usr/bin/git "$@"'
+echo "stub git: unexpected git $*" >&2
+exit 1'
   run install
   if [ "$RC" -eq 1 ] && has "not installed from the linked worktree" && has "main checkout (/main/checkout) only" \
      && ! ran "build svc" && ! ran "launchctl"; then
@@ -1949,6 +1961,109 @@ test_every_npm_package_installs_through_ensure_deps() {
     else
         fail "every npm package installs through ensure-deps.sh" "$bad"
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Reading once per run: the worktree list, the hook directory, and every
+# entry's fields.
+# ---------------------------------------------------------------------------
+
+# SKILLS: two skill links sourced in the repository, so a check asks about
+# worktrees for each of them.
+SKILLS='{"id": "skill-a", "kind": "skill_link", "why": "w", "profile": "run", "name": "a", "source": {"repo": "skills/a"}}, {"id": "skill-b", "kind": "skill_link", "why": "w", "profile": "run", "name": "b", "source": {"repo": "skills/b"}}'
+
+test_a_run_reads_the_worktree_list_once() {
+  new_case
+  manifest "[$SKILLS]"
+  mkdir -p "$CASE/module/skills/a" "$CASE/module/skills/b" "$CASE/home/.claude/skills"
+  run check
+  local reads
+  reads="$(grep -c "^git -C .* worktree list" "$CASE/transcript" || true)"
+  if [ "$reads" -eq 1 ] && has "skill-a" && has "skill-b"; then
+    pass "a run asks git for the worktree list once, however many entries ask about worktrees"
+  else fail "worktree list read once" "reads=$reads rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_run_with_no_worktree_question_never_asks_git() {
+  new_case
+  manifest "[$PROGRAM]"
+  tool tool ""
+  run check
+  if [ "$RC" -eq 0 ] && ! ran "git "; then
+    pass "a run whose entries ask nothing about worktrees never asks git"
+  else fail "no worktree question" "rc=$RC" "$OUT" "$(cat "$CASE/transcript")"; fi
+}
+
+test_a_failed_worktree_list_fails_the_run() {
+  new_case
+  manifest "[$SKILLS]"
+  write_stub git 'exit 128'
+  run check
+  if [ "$RC" -eq 2 ] && has "worktrees: git worktree list failed for $CASE/module"; then
+    pass "a worktree list git cannot answer fails the run, naming the module"
+  else fail "failed worktree list" "rc=$RC" "$OUT"; fi
+}
+
+test_an_empty_worktree_list_fails_the_run() {
+  new_case
+  manifest "[$SKILLS]"
+  write_stub git 'exit 0'
+  run check
+  if [ "$RC" -eq 2 ] && has "worktrees: git worktree list answered no worktree for $CASE/module"; then
+    pass "an empty worktree list fails the run, naming the module"
+  else fail "empty worktree list" "rc=$RC" "$OUT"; fi
+}
+
+test_a_worktree_question_before_the_list_is_read_fails_hard() {
+  local out rc=0
+  out="$(REQUIREMENTS_SH_LIB=1 bash -c '. "$1"; module_main_worktree' _ "$RUNNER" 2>&1)" || rc=$?
+  if [ "$rc" -eq 2 ] && grep -qF "worktrees: asked before resolve_worktrees read the list" <<<"$out"; then
+    pass "asking about worktrees before the list is read fails hard"
+  else fail "worktree question before the read" "rc=$rc" "$out"; fi
+}
+
+test_a_run_reads_the_hook_directory_once() {
+  local out
+  out="$(REQUIREMENTS_SH_LIB=1 bash -c '
+    . "$1"
+    calls="$2"
+    git() { echo "git $*" >>"$calls"; case "$3" in rev-parse) [ "$4" = --show-toplevel ] && echo /repo || echo .git/hooks ;; esac; }
+    e="{\"id\": \"h\", \"kind\": \"git_hook\", \"hook\": \"pre-commit\", \"source\": \".githooks/pre-commit\"}"
+    hook_paths "$e"; hook_paths "$e"
+    printf "%s %s\n" "$HOOK_SRC" "$HOOK_DEST"' _ "$RUNNER" "$TMP/hook-git-calls" 2>&1)"
+  if [ "$out" = "/repo/.githooks/pre-commit /repo/.git/hooks/pre-commit" ] && [ "$(wc -l <"$TMP/hook-git-calls")" -eq 2 ]; then
+    pass "a run reads the repository's top and hooks directory once"
+  else fail "hook directory read once" "$out" "$(cat "$TMP/hook-git-calls" 2>&1)"; fi
+}
+
+test_field_answers_exactly_as_jq_does() {
+  local bad="" e p got want
+  # shellcheck source=/dev/null
+  REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  e='{"id":"x","name":"","n":1.5,"t":true,"f":false,"z":null,"lines":"a\nb","tabbed":"a\tb","source":{"repo":"r","deep":{"k":"v"}},"platforms":["darwin"],"odd key":{"a":"no"},"install":{"release":{"darwin-arm64":{"url":"u"}}}}'
+  # shellcheck disable=SC2034 # ENTRIES is the sourced runner's, read by index_fields.
+  ENTRIES="$e"
+  index_fields
+  for p in .id .name .n .t .f .z .lines .tabbed .source .source.repo .source.deep.k .source.missing .missing .missing.deeper .platforms '.install.release["darwin-arm64"].url' .odd; do
+    got="$(field "$e" "$p" 2>&1 || echo "rc=$?")"
+    want="$(printf '%s\n' "$e" | jq -r "$p // empty" 2>&1 || echo "rc=$?")"
+    [ "$got" = "$want" ] || bad="$bad [$p: got <$got> want <$want>]"
+  done
+  # A field under an array, and an entry that was never loaded, are jq's.
+  got="$(field "$e" .platforms.x 2>&1 || echo "rc=$?")"
+  want="$(printf '%s\n' "$e" | jq -r '.platforms.x // empty' 2>&1 || echo "rc=$?")"
+  [ "$got" = "$want" ] || bad="$bad [.platforms.x: got <$got> want <$want>]"
+  got="$(field '{"id": "unloaded"}' .id)"
+  [ "$got" = unloaded ] || bad="$bad [unloaded: got <$got>]"
+  if [ -z "$bad" ]; then pass "field answers exactly as jq does, for every shape of field"; else fail "field against jq:$bad"; fi
+}
+
+test_index_fields_fails_on_entries_it_cannot_decode() {
+  local out rc=0
+  out="$(REQUIREMENTS_SH_LIB=1 bash -c '. "$1"; ENTRIES="{\"id\":"; index_fields' _ "$RUNNER" 2>&1)" || rc=$?
+  if [ "$rc" -eq 2 ] && grep -qF "load: decoding the loaded entries' fields failed" <<<"$out"; then
+    pass "entries jq cannot decode fail the run while their fields are indexed"
+  else fail "undecodable entries" "rc=$rc" "$out"; fi
 }
 
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do
