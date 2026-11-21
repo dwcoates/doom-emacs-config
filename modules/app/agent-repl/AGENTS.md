@@ -2043,6 +2043,8 @@ manifest, and `bin/requirements.sh` is the one program that reads them.
   - A `configure` argument or a dependency names a machine's path or version as a placeholder, never a literal: `{home}`, `{gcc-major}` (Debian's `libgccjit-N-dev` must match the gcc that builds), `{brew}` or `{brew:FORMULA}`.
   - Linux builds the X11 GTK3 toolkit, which runs under XWayland too: pgtk's xwidgets show a blank first page (owner ruling 2026-11-09).
   - The fork carries upstream `4e855f90` (Emacs 31.1) backported, which lifts configure's WebKitGTK ceiling (`< 2.41.92`) that every current distribution is above, and turns off the offscreen view's hardware acceleration that made newer WebKitGTK abort.
+  - It carries upstream `d587ce8c` backported, so it builds against tree-sitter 0.26, which dropped `ts_language_version`, and upstream `6df1d33b`, so a web view keeps its first page load on WebKitGTK.
+  - Its own `src/xterm.c` change leaves a GLX error to the GDK trap of GTK or WebKitGTK that made the request: a trap popped without a sync let the error reach Emacs's handler, which killed Emacs on an X server without DRI3.
   - tree-sitter is linked statically (`TREE_SITTER_LIBS`), so a Homebrew upgrade of it cannot stop the app from starting.
   - A change to the fork's patches is a new commit there and a new `revision` here, in the same change.
   - The commit is pushed to the fork's `zettel-30.2` branch before the change that moves `revision` lands, because install fetches the pinned commit from the fork; a pin to a commit the fork lacks fails every install.
