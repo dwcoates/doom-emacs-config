@@ -47,8 +47,11 @@ func Command(dir, name string, args ...string) ([]byte, error) {
 // (the shim's own pinned devDependency, at the path c8) into its own
 // directory under reportRoot, and answers one summary line per directory. A
 // run whose e2e suite did not run under coverage holds none, and answers
-// none.
+// none, as does a run that wrote no cover root ("", CoverRoot).
 func ShimE2EReach(run Exec, c8, coverRoot, reportRoot string) ([]string, error) {
+	if coverRoot == "" {
+		return nil, nil
+	}
 	dirs, err := shimProfileDirs(coverRoot)
 	if err != nil {
 		return nil, err
