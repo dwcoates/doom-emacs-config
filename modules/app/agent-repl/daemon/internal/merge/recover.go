@@ -147,6 +147,7 @@ func (o *orchestrator) recoverEntry(ctx context.Context, repo wsm.RepoKey, entry
 	if entry.ColdGated {
 		o.recoverColdGated(ctx, repo, entry)
 	}
+	o.parkQueued(ctx, "daemon.merge.recover", repo, entry.Source, entry.Workspace, entry.Ledger)
 	// A PICK THE RESTART CUT SHORT AT THE HEAD is taken back where it stood;
 	// one that never began waits for its admission to begin it (admitFront).
 	if entry.Source.Pick != "" && entry.Source.PickStartedAt != nil {

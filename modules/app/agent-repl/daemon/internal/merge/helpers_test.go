@@ -3712,6 +3712,8 @@ type harness struct {
 	// coldGated marks the workspaces AtColdGate answers parked at their
 	// cold gates; none by default.
 	coldGated map[ids.WorkspaceID]bool
+	// parks is every park ParkQueued was asked for, in order.
+	parks []parkAsk
 	// gatesCompacted is every workspace whose cold gate CompactColdGate was
 	// asked to answer, in order, and compactGateErr what it answers.
 	gatesCompacted []ids.WorkspaceID
@@ -4249,6 +4251,11 @@ func (h *harness) deps() Deps {
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			return h.coldGated[ws]
+		},
+		ParkQueued: func(ws ids.WorkspaceID, repo wsm.RepoKey, ledger wsm.LeaseID) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.parks = append(h.parks, parkAsk{ws: ws, repo: repo, ledger: ledger})
 		},
 		CompactColdGate: func(_ context.Context, ws ids.WorkspaceID) error {
 			h.mu.Lock()
@@ -5291,4 +5298,20 @@ func (f *fakeDeployChecks) CloseSelf(_ context.Context, ws ids.WorkspaceID) (boo
 	defer f.mu.Unlock()
 	f.closed = append(f.closed, ws)
 	return false, f.closeErr
+}
+
+// parkAsk is one park ParkQueued was asked for.
+type parkAsk struct {
+	ws     ids.WorkspaceID
+	repo   wsm.RepoKey
+	ledger wsm.LeaseID
+}
+
+// parksAsked answers every park ParkQueued was asked for, and forgets them.
+func (h *harness) parksAsked() []parkAsk {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	parks := h.parks
+	h.parks = nil
+	return parks
 }

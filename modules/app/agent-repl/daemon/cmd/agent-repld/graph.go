@@ -1539,6 +1539,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		},
 		Freeness:          fleet,
 		AtColdGate:        fleet.AtColdGate,
+		ParkQueued:        drainController.MergeQueuedDown,
 		CompactColdGate:   verbsRef.compactRequeuedMergeColdGate,
 		PauseAfterCapture: capturePause(p.Surfaces.Global()),
 		PauseInTerminal:   terminalPause(ctx, p.Surfaces.Global()),

@@ -75,6 +75,9 @@ const (
 	// StandDownCacheCold is an idle session parked the moment its cache was
 	// known cold, so no keep-alive would ever stand it down.
 	StandDownCacheCold StandDownReason = "cache_cold"
+	// StandDownMergeQueued is a finished workspace parked the moment its own
+	// branch's merge was put in line, so it waits for the merge with no shim.
+	StandDownMergeQueued StandDownReason = "merge_queued"
 	// StandDownReplaced is a held shim replaced by a fresh one inside a start
 	// (it runs another account's root).
 	StandDownReplaced StandDownReason = "replaced"

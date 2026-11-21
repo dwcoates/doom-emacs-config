@@ -54,6 +54,13 @@
 // most MaxRestores at once, so an idle workspace's ~350MB is free between
 // beats. A hidden workspace beats no more and its cache lapses as above; a
 // closed one gets the one beat it was owed, then lapses.
+//
+// A FINISHED WORKSPACE WAITING ON ITS SYNC MERGE IS NOT STOOD DOWN HERE (owner
+// requirement, 2026-11-21). The merge orchestrator asks for its park the
+// moment the entry is put in line (drain.Controller.MergeQueuedDown), so it
+// never waits for the next beat's stand-down with its shim up. That park is
+// the ordinary one, so the Keeper still owes it every beat a queued workspace
+// is owed, and restores it before each like any parked session.
 package cachelapse
 
 import (

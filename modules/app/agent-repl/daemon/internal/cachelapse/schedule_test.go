@@ -795,6 +795,42 @@ func TestScheduleBeatsAWorkspaceWithAMergeQueued(t *testing.T) {
 	}
 }
 
+// A SYNC MERGE'S PARK KEEPS ITS BEATS: the drain parks a finished workspace
+// the moment its merge is in line (drain.Controller.MergeQueuedDown), and the
+// Keeper restores it before each beat its queued entry is still owed.
+func TestScheduleArmsTheRestoreOfAParkedWorkspaceWithAMergeQueued(t *testing.T) {
+	spentClose := closed()
+	spentClose.Closure = &wsm.Closure{At: now.Add(-time.Hour)}
+	tests := []struct {
+		name string
+		rec  wsm.Workspace
+	}{
+		{name: "the workspace in view", rec: visible()},
+		{name: "hidden, nobody looking at it", rec: hidden()},
+		{name: "closed, its last keep-alive spent", rec: spentClose},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange: parked while its merge waits in a queue.
+			h := newHarness(t, beatable(tt.rec, 10*time.Minute))
+			h.db.queued = []ids.WorkspaceID{theWorkspace}
+			h.db.sessions[theWorkspace] = parkedSession(theWorkspace)
+
+			// Act
+			h.keeper.schedule(context.Background(), theWorkspace, "test")
+
+			// Assert
+			beat, armed := h.keeper.beats[theWorkspace]
+			if want := now.Add(-10 * time.Minute).Add(KeepaliveInterval); !armed || !beat.Equal(want) {
+				t.Fatalf("beat = %v (armed %v), want %v", beat, armed, want)
+			}
+			if got, want := h.keeper.restores[theWorkspace], beat.Add(-RestoreLead); !got.Equal(want) {
+				t.Fatalf("restore = %v, want %v", got, want)
+			}
+		})
+	}
+}
+
 func TestScheduleHoldsAHiddenWorkspaceOnceItsMergeLeftTheQueue(t *testing.T) {
 	// Arrange: no entry of it stands in any queue.
 	h := newHarness(t, beatable(hidden(), 10*time.Minute))

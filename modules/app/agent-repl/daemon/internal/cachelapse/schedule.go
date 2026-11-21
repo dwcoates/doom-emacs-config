@@ -159,7 +159,10 @@ func (k *Keeper) beatPlanFor(ctx context.Context, log dlog.Logger, ws ids.Worksp
 	// and 2026-11-11): its entry can wait for hours, and the merge's prompts
 	// run on its session, so neither a hide nor a close lets its cache lapse
 	// while the entry stands, for QueuedIdleFactor idle cutoffs
-	// (bringup.IdleCutoff, read below).
+	// (bringup.IdleCutoff, read below). Warm is the cache, not the shim: a
+	// sync merge's workspace is parked the moment its entry is in line
+	// (drain.Controller.MergeQueuedDown), and its beats go on through the
+	// restore before each.
 	queuedAt, inQueue, err := bringup.MergeQueuedAt(ctx, k.deps.DB, record)
 	queued = inQueue
 	if err != nil {

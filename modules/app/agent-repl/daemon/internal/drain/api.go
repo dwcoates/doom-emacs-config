@@ -103,6 +103,12 @@ type Controller interface {
 	// under a turn, never for the workspace in view, never in remote
 	// control, and never once a real turn has run since. It returns at once.
 	ColdDown(ws ids.WorkspaceID, since time.Time)
+	// MergeQueuedDown parks a finished workspace's session the moment its own
+	// branch's merge is put in line in REPO under LEDGER (owner requirement,
+	// 2026-11-21; cycle.go): never under a turn or live detached work, never
+	// in remote control, and only while that entry still waits in line. The
+	// workspace in view is parked all the same. It returns at once.
+	MergeQueuedDown(ws ids.WorkspaceID, repo wsm.RepoKey, ledger wsm.LeaseID)
 }
 
 // Deps are the controller's collaborators.

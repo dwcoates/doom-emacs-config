@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -968,4 +969,78 @@ func TestAMergeJoiningTheChainIsAdmittedUnderTheLineLock(t *testing.T) {
 	}
 	joined[1].cancel(errors.New("the test is over"))
 	receiveWithin(t, (<-chan struct{})(joined[1].finished), "the chain member's run ending")
+}
+
+// chainWithAHeldMember stands a chain headed by ws-a with ws-b waiting behind
+// it, ws-b's workspace held by a hibernation (a park its merge's enqueue asked
+// for), and runs one extension of the chain.
+func chainWithAHeldMember(t *testing.T) (h *harness, park wsm.Lease) {
+	t.Helper()
+	behindEntry := queuedEntry("ws-b")
+	behindEntry.EnqueuedAt = time.UnixMilli(1)
+	behindEntry.Source = wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch}
+	h = resumeWorld(t, []wsm.MergeQueueEntry{admittedEntry("ws-a"), behindEntry})
+	standChain(t, h, []ids.WorkspaceID{"ws-a"}, "")
+	park, err := h.db.AcquireLease(context.Background(), "ws-b", wsm.HolderHibernate, wsm.PolicyHold)
+	if err != nil {
+		t.Fatalf("AcquireLease: %v", err)
+	}
+	return h, park
+}
+
+func TestAMergeBehindTheHeadWhoseWorkspaceAnotherHolderLeasesWaitsUnadmitted(t *testing.T) {
+	// Arrange.
+	h, _ := chainWithAHeldMember(t)
+
+	// Act.
+	h.o.extendOnce(context.Background(), h.repoKey())
+
+	// Assert: the entry still waits unadmitted, the wait is recorded as the
+	// state it is, and no ERROR stands.
+	entry, err := h.o.entryOf(context.Background(), h.repoKey(), "ws-b")
+	if err != nil || entry.State != wsm.MergeQueued {
+		t.Fatalf("ws-b = %+v, %v; want it still waiting, unadmitted", entry, err)
+	}
+	if !loggedLike(h, logLike{level: "info", op: "daemon.merge.start", text: "held by another lease", context: map[string]string{"holder": "hibernate"}}) {
+		t.Fatalf("no record of the wait: %+v", h.logs.Records())
+	}
+	for _, r := range h.logs.Records() {
+		if r.Level == "error" {
+			t.Fatalf("an ERROR was recorded for a wait that is no fault: %+v", r)
+		}
+	}
+}
+
+func TestTheLeaseChangeOfAMergeBehindTheHeadOffersItsQueueTheChainAgain(t *testing.T) {
+	// Arrange.
+	h, park := chainWithAHeldMember(t)
+	h.o.extendOnce(context.Background(), h.repoKey())
+	var kicked []wsm.RepoKey
+	h.o.onKick = func(repo wsm.RepoKey) { kicked = append(kicked, repo) }
+	if err := h.db.ReleaseLease(context.Background(), park.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	// Act.
+	h.o.LeaseChanged("ws-b")
+	h.o.extendOnce(context.Background(), h.repoKey())
+
+	// Assert: the queue was kicked once, and the next extension admits the merge,
+	// which no longer waits on a lease change.
+	if !reflect.DeepEqual(kicked, []wsm.RepoKey{h.repoKey()}) {
+		t.Fatalf("kicked = %v, want the queue once", kicked)
+	}
+	entry, err := h.o.entryOf(context.Background(), h.repoKey(), "ws-b")
+	if err != nil || entry.State != wsm.MergeAdmitted {
+		t.Fatalf("ws-b = %+v, %v; want it admitted once its workspace was free", entry, err)
+	}
+	h.o.mu.Lock()
+	_, waiting := h.o.leaseWaits["ws-b"]
+	joined := h.o.chains[h.repoKey()]
+	h.o.mu.Unlock()
+	if waiting {
+		t.Fatal("the admitted member still waits on a lease change")
+	}
+	joined[len(joined)-1].cancel(errors.New("the test is over"))
+	receiveWithin(t, (<-chan struct{})(joined[len(joined)-1].finished), "the chain member's run ending")
 }

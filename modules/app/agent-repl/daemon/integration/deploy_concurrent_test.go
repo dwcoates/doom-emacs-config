@@ -76,7 +76,10 @@ func TestConcurrentDeploysRunTheirDeployHooksTogetherAndPostDeployInQueueOrder(t
 	d.AwaitWorkspaceLogRecord(second.ws.GetDir(), "the second deploy waiting for its turn", func(r harness.LogRecord) bool {
 		return r.Operation == "daemon.merge.concurrent" && strings.Contains(r.Message, "it waits for the deploys ahead")
 	})
-	if got := second.shim.Count(harness.RPCStartTurn); got != 2 {
+	// The turns are counted off the workspace's log, not its shim: the daemon parked
+	// the second workspace's session while its deploy waited in line, and the deploy's
+	// first prompt revived it as a new shim that never saw the initial turn.
+	if got := d.WorkspaceLogOperationCount(second.ws.GetDir(), harness.OpTurnOpened); got != 2 {
 		t.Fatalf("the second deploy's turns = %d, want its initial and deploy hook turns alone while the first's deploy runs", got)
 	}
 

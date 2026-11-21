@@ -719,6 +719,7 @@ func (o *orchestrator) queueRequestGated(ctx context.Context, ws ids.WorkspaceID
 	}
 	o.log(ctx, ws).Info(op, "put a merge in line; it is reported from here", dlog.Context{
 		"workspace": string(ws), "repo": string(repo), "position": position})
+	o.parkQueued(ctx, op, repo, entry.Source, ws, ledger)
 	// THE FIRST OF THE MERGE'S TWO BANNERS: it is in line. The second is its
 	// resolution (ended); nothing between raises one.
 	o.deps.Banners.Queued(ws, o.bubbleLabel(ctx, entry).text())
@@ -954,4 +955,21 @@ func behindNotInLine(ws wsm.WorkspaceID, asked string, names []string) *RefusalE
 	refusal := refuse(ArmPlacementBehindNotInLine, ws, "no merge named %q stands in the queue to be placed behind (in line: %s)", asked, strings.Join(names, ", "))
 	refusal.Fields = map[string]any{"behind": asked}
 	return refusal
+}
+
+// parkQueued asks for the park of WS's session once its own branch's merge
+// stands in REPO's line under LEDGER (owner requirement, 2026-11-21). The
+// enqueue is the park's one owner: it is asked once per merge put in line,
+// here and when a boot or a takeover puts a waiting one back (recoverEntry),
+// and the drain takes it only while that entry still waits, never under a
+// turn (drain.Controller.MergeQueuedDown). Every other merge's session is
+// left as it stands, and so is a merge workspace's with a pick: the pick runs
+// on that session at the head of the line, before the merge is admitted.
+func (o *orchestrator) parkQueued(ctx context.Context, op string, repo wsm.RepoKey, source wsm.MergeSource, ws ids.WorkspaceID, ledger ids.LeaseID) {
+	if source.Kind != wsm.MergeSourceOwnBranch || source.Pick != "" {
+		return
+	}
+	o.log(ctx, ws).Info(op, "asked for the park of the workspace's session while its merge waits in line", dlog.Context{
+		"workspace": string(ws), "repo": string(repo), "merge_entry": string(ledger)})
+	o.deps.ParkQueued(ws, repo, ledger)
 }
