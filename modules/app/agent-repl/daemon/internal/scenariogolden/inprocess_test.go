@@ -2,8 +2,11 @@ package scenariogolden
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,6 +15,7 @@ import (
 	shimv1 "agentrepl/proto/shim/v1"
 
 	"agent-repld/integration/fakeshim/shimfacts"
+	"agent-repld/integration/fakestore"
 	"agent-repld/internal/clock"
 	"agent-repld/internal/dlog"
 	"agent-repld/internal/feedid"
@@ -64,11 +68,11 @@ func TestEveryScenarioGoldenProjectsToItsFeedGolden(t *testing.T) {
 			}
 			want := ReadFeedGolden(t, path)
 			if string(got) != string(want.Rows) {
-				t.Fatalf("the feed drawn for %s differs from its golden %s (rewrite with %s=1 if the change is intended):\ngot:\n%s\nwant:\n%s",
-					name, path, WriteEnv, got, want.Rows)
+				t.Fatalf("the feed drawn for %s differs from its golden %s (rewrite with %s=1 if the change is intended):\n%s",
+					name, path, WriteEnv, FirstDifference(string(want.Rows), string(got)))
 			}
-			if !equalStrings(warnings, want.Warnings) {
-				t.Fatalf("drawing %s recorded warnings %v, want its golden's %v", name, warnings, want.Warnings)
+			if wantHere := InProcessWarnings(want.Warnings); !equalStrings(warnings, wantHere) {
+				t.Fatalf("drawing %s recorded warnings %v, want its golden's warnings from the components run in process %v (of %v)", name, warnings, wantHere, want.Warnings)
 			}
 		})
 	}
@@ -100,6 +104,46 @@ type inProcess struct {
 	// agent's is under its own id).
 	agents map[string]*watchtest.Stream[*shimv1.WatchAgentResponse]
 	turns  int
+	// book is every entry served, by agent: the store's copy the feed reads
+	// its pages from, as the daemon reads the fake store's.
+	book *servedBook
+}
+
+// servedBook is the store's copy of every entry served, by agent, which the
+// feed reads its history pages from (feed.HistorySource), paged as the fake
+// store pages its kept copy (fakestore.Page).
+type servedBook struct {
+	mu      sync.Mutex
+	entries map[string][]*conversationv1.HistoryEntryAt
+}
+
+// keep files one served entry on AGENT's book.
+func (b *servedBook) keep(agent string, at *conversationv1.HistoryEntryAt) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.entries[agent] = append(b.entries[agent], at)
+}
+
+// ReadHistory implements feed.HistorySource: the newest page of TARGET's book
+// (the main agent's for none), or the page before AFTER.
+func (b *servedBook) ReadHistory(_ context.Context, _ ids.WorkspaceID, target *conversationv1.AgentId, after *conversationv1.HistoryPointer) (*conversationv1.HistoryPage, error) {
+	agent := target.GetValue()
+	if agent == "" {
+		agent = shimfacts.MainAgentID
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	page, ok := fakestore.Page(b.entries[agent], after, fakestore.DefaultPageSize)
+	if !ok {
+		return nil, fmt.Errorf("scenariogolden: %s's book never served the entry at %s", agent, after.GetValue())
+	}
+	return page, nil
+}
+
+// ReadInherited implements feed.HistorySource. A scenario is no fork, so it
+// has no inherited past to read; a read of one is refused.
+func (b *servedBook) ReadInherited(context.Context, ids.WorkspaceID, *conversationv1.AgentId, *conversationv1.HistoryPointer, int64) (*conversationv1.HistoryPage, error) {
+	return nil, errors.New("scenariogolden: a scenario is no fork and inherits no past")
 }
 
 func newInProcess(t *testing.T) *inProcess {
@@ -123,7 +167,9 @@ func newInProcess(t *testing.T) *inProcess {
 		t.Fatalf("build the image resolver: %v", err)
 	}
 	dir := t.TempDir()
+	book := &servedBook{entries: map[string][]*conversationv1.HistoryEntryAt{}}
 	resolver, err := feed.New(feed.Deps{
+		History:        book,
 		Log:            surf,
 		Instance:       "scenario-golden",
 		WorkspaceDir:   func(ids.WorkspaceID) (string, error) { return dir, nil },
@@ -136,8 +182,11 @@ func newInProcess(t *testing.T) *inProcess {
 	}
 	d := &inProcess{
 		ws: ids.WorkspaceID("ws-" + t.Name()), log: log, client: watchtest.NewClient(), feed: resolver,
-		agents: map[string]*watchtest.Stream[*shimv1.WatchAgentResponse]{},
+		agents: map[string]*watchtest.Stream[*shimv1.WatchAgentResponse]{}, book: book,
 	}
+	// A FRESH START'S BOOK IS EMPTY AS A FACT, as the fleet tells the feed at
+	// every fresh bring-up (workspace.sessions bring-up).
+	resolver.NoteFreshBook(d.ws)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	started := shimfacts.StartedSession("vendor-"+t.Name(), shimfacts.DefaultBuildSHA, shimfacts.DefaultModel)
@@ -162,12 +211,31 @@ func newInProcess(t *testing.T) *inProcess {
 	return d
 }
 
-// openAgent takes the watcher's open of AGENT's stream and serves it the
-// fresh book's empty floor page.
+// openAgent takes the watcher's open of AGENT's stream and serves it. The
+// main agent's watch names no target.
 func (d *inProcess) openAgent(t *testing.T, agent string) {
 	t.Helper()
-	open := d.client.NextAgentOpenFor(t, agent)
-	open.Stream.Send(t, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Page{Page: shimfacts.EmptyFloorPage()}})
+	target := agent
+	if agent == shimfacts.MainAgentID {
+		target = ""
+	}
+	d.serveOpen(t, d.client.NextAgentOpenFor(t, target))
+}
+
+// serveOpen answers one watch open with the opening page the fake shim
+// answers a fresh book's open with (shimfacts.OpeningPage), and keeps its
+// stream under its agent (the main agent's under its own id).
+func (d *inProcess) serveOpen(t *testing.T, open watchtest.AgentOpen) {
+	t.Helper()
+	page, err := shimfacts.OpeningPage(open.Req)
+	if err != nil {
+		t.Fatalf("answer the watch open %v: %v", open.Req, err)
+	}
+	open.Stream.Send(t, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Page{Page: page}})
+	agent := open.Req.GetTarget().GetValue()
+	if agent == "" {
+		agent = shimfacts.MainAgentID
+	}
 	d.agents[agent] = open.Stream
 }
 
@@ -204,45 +272,63 @@ func (d *inProcess) Records(t *testing.T) []Record {
 	return out
 }
 
-// AwaitRecords implements Driver.
+// AwaitRecords implements Driver. While it waits it serves every watch the
+// watcher opens (a subagent's, once its announcement routed) with the fresh
+// book's floor page, as the shim answers an open: the record the drive awaits
+// may be the open's own (daemon.sessionwatcher.history_page).
 func (d *inProcess) AwaitRecords(t *testing.T, what string, match func(Record) bool, n int) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), inProcessBound)
 	defer cancel()
 	q := dlog.RecordQuery{Match: func(r dlog.Record) bool { return match(Record{Operation: r.Operation, Context: r.Context}) }}
-	if _, err := d.log.AwaitCount(ctx, q, n); err != nil {
-		t.Fatalf("waiting for %d %s: %v", n, what, err)
+	done := make(chan error, 1)
+	go func() {
+		_, err := d.log.AwaitCount(ctx, q, n)
+		done <- err
+	}()
+	for {
+		select {
+		case open := <-d.client.AgentOpens:
+			d.serveOpen(t, open)
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("waiting for %d %s: %v", n, what, err)
+			}
+			return
+		}
 	}
 }
 
-// stream answers AGENT's watch stream, taking the watcher's open of it first
-// when the agent is new (a subagent the watcher opened a watch for).
+// stream answers AGENT's watch stream, which the watcher opened and the drive
+// awaited before serving it anything.
 func (d *inProcess) stream(t *testing.T, agent string) *watchtest.Stream[*shimv1.WatchAgentResponse] {
 	t.Helper()
-	if s, ok := d.agents[agent]; ok {
-		return s
+	s, ok := d.agents[agent]
+	if !ok {
+		t.Fatalf("no watch of %s is open; the drive serves an agent only after its watch opened", agent)
 	}
-	d.openAgent(t, agent)
-	return d.agents[agent]
+	return s
 }
 
-// entry is the store's served entry E at STAMP's pointer, turn and place.
-func entry(stamp Stamp, e *conversationv1.HistoryEntry) *shimv1.WatchAgentResponse {
-	return &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Entry{
-		Entry: shimfacts.ServedEntry(stamp.Pointer, stamp.Turn, stamp.PlaceMs, e),
-	}}
+// serve serves E on AGENT's stream at STAMP's pointer, turn and place, and
+// keeps it on the agent's book, as the fake shim does.
+func (d *inProcess) serve(t *testing.T, agent string, stamp Stamp, e *conversationv1.HistoryEntry) {
+	t.Helper()
+	at := shimfacts.ServedEntry(stamp.Pointer, stamp.Turn, stamp.PlaceMs, e)
+	d.book.keep(agent, at)
+	d.stream(t, agent).Send(t, &shimv1.WatchAgentResponse{Frame: &shimv1.WatchAgentResponse_Entry{Entry: at}})
 }
 
 // PushPrompt implements Driver.
 func (d *inProcess) PushPrompt(t *testing.T, agent string, stamp Stamp, prompt *conversationv1.AgentPrompt) {
 	t.Helper()
-	d.stream(t, agent).Send(t, entry(stamp, &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: prompt}}))
+	d.serve(t, agent, stamp, &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_UserPrompt{UserPrompt: prompt}})
 }
 
 // PushFrame implements Driver.
 func (d *inProcess) PushFrame(t *testing.T, agent string, stamp Stamp, frame *conversationv1.AgentFrame) {
 	t.Helper()
-	d.stream(t, agent).Send(t, entry(stamp, &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: frame}}))
+	d.serve(t, agent, stamp, &conversationv1.HistoryEntry{Entry: &conversationv1.HistoryEntry_AgentFrame{AgentFrame: frame}})
 }
 
 // PushSessionUpdate implements Driver.

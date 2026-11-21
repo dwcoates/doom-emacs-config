@@ -14,6 +14,7 @@ package scenariogolden
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -360,5 +361,43 @@ func WarningOperations(ops []string) []string {
 		}
 	}
 	sort.Strings(out)
+	return out
+}
+
+// FirstDifference names the first line where GOT departs from WANT, with a few
+// lines of each around it: a golden's rows are long, and a failure that
+// prints both whole loses the difference past a runner's output tail.
+func FirstDifference(want, got string) string {
+	w, g := strings.Split(want, "\n"), strings.Split(got, "\n")
+	i := 0
+	for i < len(w) && i < len(g) && w[i] == g[i] {
+		i++
+	}
+	window := func(lines []string) string {
+		from, to := max(i-3, 0), min(i+4, len(lines))
+		return strings.Join(lines[from:to], "\n")
+	}
+	return fmt.Sprintf("first difference at line %d (of %d wanted, %d got)\nwant:\n%s\ngot:\n%s", i+1, len(w), len(g), window(w), window(g))
+}
+
+// inProcessComponents are the operation prefixes of the components the
+// in-process projection runs: the session watcher, the feed resolver and the
+// sentinel stripper it draws prompts through.
+var inProcessComponents = []string{"daemon.sessionwatcher.", "daemon.feed.", "daemon.cmd.strip_sentinels"}
+
+// InProcessWarnings is the part of a golden's warning OPS the in-process
+// projection can record: those of the components it runs. A golden's other
+// warnings (a footer's, a topbar's) are the whole daemon's, which the
+// end-to-end check through a real daemon compares.
+func InProcessWarnings(ops []string) []string {
+	var out []string
+	for _, op := range ops {
+		for _, prefix := range inProcessComponents {
+			if strings.HasPrefix(op, prefix) {
+				out = append(out, op)
+				break
+			}
+		}
+	}
 	return out
 }

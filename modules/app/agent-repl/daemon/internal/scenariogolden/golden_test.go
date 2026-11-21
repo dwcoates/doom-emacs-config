@@ -97,3 +97,34 @@ func TestWarningOperations(t *testing.T) {
 		})
 	}
 }
+
+func TestFirstDifference(t *testing.T) {
+	tests := []struct {
+		name, want, got, line string
+	}{
+		{name: "a changed line is named", want: "a\nb\nc", got: "a\nx\nc", line: "line 2 (of 3 wanted, 3 got)"},
+		{name: "a missing tail is named where it starts", want: "a\nb", got: "a", line: "line 2 (of 2 wanted, 1 got)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Act
+			got := FirstDifference(tc.want, tc.got)
+
+			// Assert
+			if !strings.Contains(got, tc.line) {
+				t.Fatalf("FirstDifference = %q, want it to name %q", got, tc.line)
+			}
+		})
+	}
+}
+
+func TestInProcessWarnings(t *testing.T) {
+	// Act
+	got := InProcessWarnings([]string{"daemon.feed.compaction_failed", "daemon.footer.on_context_cut", "daemon.sessionwatcher.x", "daemon.cmd.strip_sentinels"})
+
+	// Assert: the footer's is the whole daemon's, never the projection's.
+	want := []string{"daemon.feed.compaction_failed", "daemon.sessionwatcher.x", "daemon.cmd.strip_sentinels"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("InProcessWarnings = %v, want %v", got, want)
+	}
+}
