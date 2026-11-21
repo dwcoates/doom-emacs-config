@@ -1,6 +1,6 @@
 ---
 name: agent-repl-tests
-description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, reviewing, assessing, auditing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, or the test runner and its CPU governor. Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
+description: 'Load BEFORE beginning any work on agent-repl tests: writing, changing, reviewing, assessing, auditing, running, speeding up, stabilizing or measuring a test anywhere under modules/app/agent-repl, a fixture or harness helper, a suite or roster entry, the test runner and its CPU governor, or profiling where the CPU of a test run goes (`-profile`). Keeps tests fast and cheap WITHOUT losing coverage, under the host CPU governor and the test performance standards; every run goes through `agent-repld test run`, naming only the tests the change added or changed. Holds the measured test-performance pitfalls and their fixes as a living list.'
 allowed-tools: Bash(~/.claude/skills/agent-repl-workspaces/agent-repld:*)
 ---
 
@@ -63,6 +63,7 @@ Options:
 -record                  append the run's timings to test_time.csv; -every-suite alone, on master, only when the user asks
 -runs N                  repeat the run N times, each its own run with its own log (every frame names its run); for a flaky test, repeat just that test
 -stop-at-first-failure   stop repeating at the first failing run
+-profile                 CPU-profile every unit that runs and the production processes its tests start (see "Profiling a run"); refused with -coverage and -record
 -remeasure               bound every selected unit as one never measured, so a unit that legitimately got slower passes and records its new peak; the runner otherwise kills each unit at five times its expected time (`run.BoundFactor`)
 -debug-info              link every Go test binary and program with its DWARF debug information, for a debugger; a TEMPORARY debugging measure only, never a standing setting: runs otherwise link without it (-ldflags=-w), which costs about a fifth less link CPU and keeps every stack trace and file:line
 -no-reuse -as-user       run every selected unit, reusing no earlier pass; ONLY when the user explicitly asks to measure or debug the tests themselves (owner ruling 2026-11-13); never part of ordinary work, and the daemon refuses it from a workspace
@@ -110,6 +111,56 @@ Example, run from `modules/app/agent-repl`:
 ~/.claude/skills/agent-repl-workspaces/agent-repld test redundancy go -module daemon -pkg ./internal/workspace -tests sessions_test.go -out /tmp/redundancy-sessions
 ~/.claude/skills/agent-repl-workspaces/agent-repld test redundancy vitest -package agent-shim/claude/shim -mutate 'src/**/*.ts,!src/fake/**' -out /tmp/redundancy-shim
 ```
+
+### Profiling a run: `-profile`
+
+`agent-repld test run -profile SELECTION...` shows where a run's CPU goes, in
+test code and in the production code its tests run. Off by default.
+
+- What it profiles:
+  - every Go test binary, through `-test.cpuprofile`;
+  - every node process of a vitest unit, workers included, through `--cpu-prof`;
+  - every daemon, shim, store and sidecar a test starts: each profiles its
+    whole life and writes the profile when it stops;
+  - every ERT chunk, through the elisp CPU profiler, sampling the chunk's
+    loads and tests (`testrun/ert/driver.el`).
+- Where the profiles land: `<run log dir>/profiles/`, beside the run's log and
+  its failure artifacts, pruned with them.
+  - One directory per unit, named by its unit id (`:`, `/` and `#` become `_`).
+    - `test.cpu.pprof` is a Go unit's own profile.
+    - `CPU.*.cpuprofile` are a vitest unit's node processes.
+    - `ert.cpu.eprofile` is an ERT chunk's profile, and `ert.cpu.top.tsv` its
+      hottest functions by total and by self samples (samples, share, kind,
+      function), readable without Emacs.
+  - Inside it, one directory per test that started production processes,
+    named by the test the same way.
+    - `daemon-<pid>.cpu.pprof`, `store-<pid>.cpu.pprof` and
+      `sidecar-<pid>.cpu.pprof` are the Go services.
+    - `shim-<pid>.cpuprofile` is each shim.
+    - `workspaces.tsv` maps each workspace id the test registered to the
+      test, one `<workspace id>\t<test>` line each.
+  - A shared test daemon (`harness.Suite()`) profiles into the directory
+    named `Suite`.
+- The run's `ended` event names the directory (`profileDir`), and the command
+  says it on stderr.
+- A reused unit does not run, so it writes no profile. Profiling a whole suite
+  with nothing reused is `-no-reuse -as-user`, the user's alone.
+- A merge gate profiles only when its merge asks:
+  `agent-repld workspace async-merge ... -profile-gate` or
+  `agent-repld workspace finished ... -profile-gate`. Its profiles land beside
+  the gate run's log, which the gate's archived output names.
+- Reading the profiles:
+  - Go: `go tool pprof -top FILE` for the hottest functions, `go tool pprof
+    -http=: FILE` to explore. Several files merge into one view: `go tool pprof
+    -top FILE1 FILE2...`.
+  - The daemon labels its per-workspace work by workspace id
+    (`daemon/AGENTS.md`, "Profiler labels"): `go tool pprof -tags FILE` lists
+    each workspace's share, and `go tool pprof -tagfocus workspace=<id> -top
+    FILE` keeps one; `workspaces.tsv` says which test that workspace was.
+  - node: load a `.cpuprofile` into Chrome DevTools (Performance, Load
+    profile) for a flame chart.
+  - ERT: read `ert.cpu.top.tsv` directly; for the call tree,
+    `M-x profiler-find-profile` on `ert.cpu.eprofile`.
 
 ## Every test obeys the host CPU governor
 
@@ -321,6 +372,9 @@ section holds the rest.
 - **shim** (`agent-shim/claude/shim`): a case takes the file's shim with `canonicalSession()` (`test/integration-support/canonical.ts`); a shim hosts ONE session, so a case's slice is its turns.
   - Mint ids with `uniqueTurn()`, hand every one to `endsTurn`, and read the store, log and transcript through `since(...)`; a shared precondition is a `groupShim`/`groupSession` key.
   - The rest: `agent-shim/claude/shim/AGENTS.md`, "Integration cases share the canonical shim".
+- **ERT integration (`lisp/test-integration-helpers.el`)**: a scenario takes the shared fake daemon through `agent-repl-itest--with-fake-daemon`; there is ONE fake daemon per batch Emacs process, started on the first scenario and reaped at exit, and `agent-repl-itest--begin-scenario` resets it on the way IN (two `/_fake/reset`s around the subscriber drain, the state root swept, the address re-published), so a case's slice is the whole fake for its own run, since ERT runs one test at a time.
+  - Newcomers get wrong: production's process-global tables (workspaces, host names, prompt queue, selection slot, timers, log targets) are let-bound per scenario inside the macro, so a new process-global table a feature adds must join that binding list or it leaks between scenarios; only a case whose subject is a daemon's own lifecycle (a bounce, a second daemon, a cold start) starts another, through `agent-repl-itest--with-second-daemon` or `agent-repl-itest--with-cold-start`.
+  - The rest: `modules/app/agent-repl/AGENTS.md`, "ONE fake daemon serves a whole suite run".
 
 ### Finding and fixing a flake
 

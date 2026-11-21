@@ -2743,6 +2743,27 @@ func TestFinishWorkspaceCarriesABehindPlacement(t *testing.T) {
 	}
 }
 
+func TestFinishWorkspaceCarriesWhetherItsGateProfiles(t *testing.T) {
+	for _, asked := range []bool{true, false} {
+		t.Run(map[bool]string{true: "asked", false: "not asked"}[asked], func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			req := ownFinish()
+			req.ProfileGate = asked
+
+			// Act.
+			if _, err := h.Client.FinishWorkspace(context.Background(), connect.NewRequest(req)); err != nil {
+				t.Fatalf("FinishWorkspace: %v", err)
+			}
+
+			// Assert.
+			if len(h.Merge.requests) != 1 || h.Merge.requests[0].Source.ProfileGate != asked {
+				t.Fatalf("requests = %+v, want one with ProfileGate %v", h.Merge.requests, asked)
+			}
+		})
+	}
+}
+
 func TestFinishWorkspaceRefusesABehindPlacementNamingNoMerge(t *testing.T) {
 	// Arrange.
 	h := newHarness(t)

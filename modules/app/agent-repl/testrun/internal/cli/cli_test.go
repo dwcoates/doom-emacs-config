@@ -24,6 +24,7 @@ import (
 	"agentrepl/testrun/internal/suites"
 	"agentrepl/testrun/internal/testtimes"
 	"agentrepl/testrun/roster"
+	"agentrepl/testrun/testenv"
 
 	"google.golang.org/protobuf/proto"
 
@@ -41,7 +42,7 @@ func TestParseArgs(t *testing.T) {
 		{name: "record and a suite list", argv: []string{"--module", "/m", "--record", "--record-out", "/r", "--suites", "ert,daemon"}, want: Args{Module: "/m", Record: true, RecordOut: "/r", Selected: []string{"ert", "daemon"}}},
 		{name: "coverage is explicit", argv: []string{"--module", "/m", "--coverage"}, want: Args{Module: "/m", Coverage: true}},
 		{name: "the = spelling", argv: []string{"--module", "/m", "--suites=e2e"}, want: Args{Module: "/m", Selected: []string{"e2e"}}},
-		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, --no-reuse, --suites <list>, --selection <path> or --events-fd <n>"},
+		{name: "an unknown argument", argv: []string{"--module", "/m", "--bogus"}, wantErr: "unknown argument '--bogus', expected --record, --record-out, --coverage, --no-reuse, --profile, --suites <list>, --selection <path> or --events-fd <n>"},
 		{name: "a selection is a targeted run", argv: []string{"--module", "/m", "--selection", "/s.pb"}, want: Args{Module: "/m", Selection: "/s.pb", Targeted: true}},
 		{name: "an events stream", argv: []string{"--module", "/m", "--events-fd", "4"}, want: Args{Module: "/m", EventsFD: 4}},
 		{name: "an events fd that is a standard stream", argv: []string{"--module", "/m", "--events-fd", "2"}, wantErr: "is not a file descriptor past stderr"},
@@ -57,6 +58,9 @@ func TestParseArgs(t *testing.T) {
 		{name: "--module without a value", argv: []string{"--module"}, wantErr: "--module needs a directory"},
 		{name: "no module", argv: []string{"--record"}, wantErr: "--module is required"},
 		{name: "record with coverage", argv: []string{"--module", "/m", "--record", "--coverage"}, wantErr: "--record and --coverage cannot be combined"},
+		{name: "profile is explicit", argv: []string{"--module", "/m", "--profile"}, want: Args{Module: "/m", Profile: true}},
+		{name: "profile with coverage", argv: []string{"--module", "/m", "--profile", "--coverage"}, wantErr: "profile and coverage cannot be combined"},
+		{name: "profile with record", argv: []string{"--module", "/m", "--profile", "--record", "--record-out", "/r"}, wantErr: "profile and record cannot be combined"},
 		{name: "record without record-out", argv: []string{"--module", "/m", "--record"}, wantErr: "--record needs --record-out"},
 		{name: "record-out offered to a run that may not record", argv: []string{"--module", "/m", "--record-out", "/r"}, want: Args{Module: "/m", RecordOut: "/r"}},
 		{name: "--record-out without a value", argv: []string{"--module", "/m", "--record", "--record-out"}, wantErr: "--record-out needs a path"},
@@ -375,6 +379,8 @@ type fakeExec struct {
 	ran   []string
 	// argv holds each started unit's argv, by unit ID.
 	argv map[string][]string
+	// env holds each started unit's own environment, by unit ID.
+	env map[string][]string
 }
 
 type fakeProc struct{ exit int }
@@ -390,6 +396,10 @@ func (e *fakeExec) Start(s run.Spec, out *bytes.Buffer) (run.Process, error) {
 		e.argv = map[string][]string{}
 	}
 	e.argv[s.ID] = s.Argv
+	if e.env == nil {
+		e.env = map[string][]string{}
+	}
+	e.env[s.ID] = s.Env
 	out.WriteString("output of " + s.ID + "\n")
 	return fakeProc{exit: e.exits[s.ID]}, nil
 }
@@ -1471,6 +1481,10 @@ func TestWithRequestLowersWholeSuites(t *testing.T) {
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, Remeasure: true}},
 		{name: "a remeasuring narrowed request stays targeted and remeasures", req: remeasured(harnessSelection()),
 			want: Args{Module: "/m", Selection: "/s.pb", Targeted: true, RecordOut: "/r", Remeasure: true}},
+		{name: "a profiling whole suite profiles", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("ert")}, Profile: true},
+			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"ert"}, Profile: true}},
+		{name: "a profiling narrowed request stays targeted and profiles", req: func() *testrunv1.TestRunRequest { r := harnessSelection(); r.Profile = true; return r }(),
+			want: Args{Module: "/m", Selection: "/s.pb", Targeted: true, RecordOut: "/r", Profile: true}},
 		{name: "a whole suite asked to reuse nothing reuses nothing", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{suiteSel("webapp")}, NoReuse: true},
 			want: Args{Module: "/m", RecordOut: "/r", Selected: []string{"webapp"}, NoReuse: true}},
 	}
@@ -1510,6 +1524,8 @@ func TestWithRequestRefuses(t *testing.T) {
 		{name: "a record of tests", recordOut: "/r", req: func() *testrunv1.TestRunRequest { r := harnessSelection(); r.Record = true; return r }(), want: "the request's one selection must be every_suite"},
 		{name: "record and coverage", recordOut: "/r", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{everySuiteSel()}, Record: true, Coverage: true}, want: "record and coverage cannot be combined"},
 		{name: "a record with nowhere to stage it", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{everySuiteSel()}, Record: true}, want: "record needs --record-out"},
+		{name: "a profile with coverage", recordOut: "/r", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{everySuiteSel()}, Profile: true, Coverage: true}, want: "profile and coverage cannot be combined"},
+		{name: "a profile with a record", recordOut: "/r", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{everySuiteSel()}, Profile: true, Record: true}, want: "profile and record cannot be combined"},
 		{name: "every suite beside another selection", recordOut: "/r", req: &testrunv1.TestRunRequest{Selections: []*testrunv1.TestSelection{everySuiteSel(), suiteSel("ert")}}, want: "the request's one selection"},
 	}
 	for _, tc := range cases {
@@ -1785,5 +1801,105 @@ func TestRunWhoseReuseDecisionFailsRunsNothing(t *testing.T) {
 	}
 	if len(h.exec.ran) != 0 {
 		t.Fatalf("units ran after the failed decision: %v", h.exec.ran)
+	}
+}
+
+func TestRunAProfilingRunGivesEveryUnitItsDirectoryAndNamesItWhenItEnds(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+	logs := t.TempDir()
+	h.deps.RunLog = filepath.Join(logs, "test-all.log")
+	wantDir := filepath.Join(logs, "profiles")
+
+	// Act
+	code := h.run(t, "--suites", "store", "--profile")
+
+	// Assert
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr:\n%s", code, h.errOut)
+	}
+	unitDir := filepath.Join(wantDir, "store")
+	if !slices.Contains(h.exec.env["store"], testenv.ProfileDir+"="+unitDir) {
+		t.Fatalf("the unit's env = %q, want %s=%s", h.exec.env["store"], testenv.ProfileDir, unitDir)
+	}
+	if info, err := os.Stat(unitDir); err != nil || !info.IsDir() {
+		t.Fatalf("the unit's profiles directory %s was not made: %v", unitDir, err)
+	}
+	evs := eventsOf(t, &stream)
+	if got := evs[len(evs)-1].GetEnded(); got.GetPassed() == nil || got.GetProfileDir() != wantDir {
+		t.Fatalf("ended = %v, want passed naming %s", got, wantDir)
+	}
+	if !strings.Contains(h.out.String(), "profile: every unit's profiles land in "+wantDir) {
+		t.Fatalf("stdout lacks the profiles directory:\n%s", h.out)
+	}
+}
+
+func TestRunARunThatDoesNotProfileLeavesItsUnitsAlone(t *testing.T) {
+	// Arrange
+	h := newHarness(t, nil, nil)
+	var stream bytes.Buffer
+	h.deps.Events = events.New(&stream, h.deps.Log)
+	h.deps.RunLog = filepath.Join(t.TempDir(), "run-1.log")
+
+	// Act
+	code := h.run(t, "--suites", "store")
+
+	// Assert
+	// The unit keeps whatever else the run gives it (its CPU tag,
+	// cputime.UnitEnv); only the profiling entries must be absent.
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, kv := range h.exec.env["store"] {
+		if strings.HasPrefix(kv, testenv.ProfileDir+"=") || strings.HasPrefix(kv, testenv.ExitProfileEnv+"=") {
+			t.Fatalf("env = %q; want no profiling environment", h.exec.env["store"])
+		}
+	}
+	if evs := eventsOf(t, &stream); evs[len(evs)-1].GetEnded().GetProfileDir() != "" {
+		t.Fatalf("ended = %v, want no profiles directory", evs[len(evs)-1].GetEnded())
+	}
+}
+
+func TestRunAProfilingRunThatCannotProfileAbortsBeforeItPlans(t *testing.T) {
+	blocked := func(t *testing.T) string {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "profiles"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return filepath.Join(dir, "test-all.log")
+	}
+	cases := []struct {
+		name       string
+		runLog     func(t *testing.T) string
+		wantDetail string
+	}{
+		{name: "a run with no log", runLog: func(*testing.T) string { return "" }, wantDetail: "the run cannot profile: profile: a profiling run puts its profiles beside its log, and this run has none"},
+		{name: "a profiles directory that cannot be made", runLog: blocked, wantDetail: "the run cannot profile: profile: create the profiles directory of unit store"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Arrange
+			h := newHarness(t, nil, nil)
+			var stream bytes.Buffer
+			h.deps.Events = events.New(&stream, h.deps.Log)
+			h.deps.RunLog = tc.runLog(t)
+
+			// Act
+			code := h.run(t, "--suites", "store", "--profile")
+
+			// Assert
+			evs := eventsOf(t, &stream)
+			if code != 1 || len(evs) != 1 || !strings.HasPrefix(evs[0].GetAborted().GetDetail(), tc.wantDetail) {
+				t.Fatalf("exit = %d, events = %v; want 1 and one aborted starting %q", code, evs, tc.wantDetail)
+			}
+			if !strings.Contains(h.errOut.String(), "ERROR: "+tc.wantDetail) {
+				t.Fatalf("stderr lacks the logged cause:\n%s", h.errOut)
+			}
+			if len(h.exec.ran) != 0 {
+				t.Fatalf("units ran after the abort: %v", h.exec.ran)
+			}
+		})
 	}
 }

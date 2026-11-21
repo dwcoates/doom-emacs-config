@@ -92,6 +92,7 @@ func testRun(c *cliCall, args []string) int {
 	fs.BoolVar(&sel.every, "every-suite", false, "the whole roster (the merge queue's gate; only with a stated reason)")
 	coverage := fs.Bool("coverage", false, "instrument the run and report coverage (whole suites only)")
 	record := fs.Bool("record", false, "append the run's timings to the history (-every-suite alone)")
+	profile := fs.Bool("profile", false, "profile every unit that runs and the production processes its tests start; the ended event names the profiles directory")
 	remeasure := fs.Bool("remeasure", false, "bound every unit as one never measured, so a unit that got slower passes and records its new peak")
 	debugInfo := fs.Bool("debug-info", false, "link test binaries and programs with their DWARF debug information, for a debugger (a temporary debugging measure)")
 	noReuse := fs.Bool("no-reuse", false, "run every selected unit, reusing no earlier pass (the user's alone: needs -as-user)")
@@ -146,7 +147,7 @@ func testRun(c *cliCall, args []string) int {
 	if err != nil {
 		return c.usageFailed("%v", err)
 	}
-	run.Coverage, run.Record, run.Remeasure, run.NoReuse, run.PlanOnly = *coverage, *record, *remeasure, *noReuse, c.planOnly
+	run.Coverage, run.Record, run.Remeasure, run.NoReuse, run.PlanOnly, run.Profile = *coverage, *record, *remeasure, *noReuse, c.planOnly, *profile
 	run.DebugInfo = *debugInfo
 	req := &agentreplv1.RunTestsRequest{Workspace: ref, Run: run, Runs: uint32(*runs), StopAtFirstFailure: *stop, Requester: requester, Ungoverned: *ungoverned}
 	if *worktree != "" {
@@ -185,6 +186,9 @@ func streamTestRun(c *cliCall, req *agentreplv1.RunTestsRequest) int {
 			return exitFailure
 		}
 		fmt.Fprintln(c.out, string(text))
+		if dir := frame.GetEvent().GetEnded().GetProfileDir(); dir != "" {
+			c.noted("the run's profiles are in %s, one directory per unit", dir)
+		}
 		if said := sayRunRefused(req.GetWorkspace().GetId(), frame.GetError()); said != "" {
 			c.failed("%s", said)
 		}

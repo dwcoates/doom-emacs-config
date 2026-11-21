@@ -15,7 +15,7 @@ import (
 
 // fullRequest is a request carrying every value a merge is asked for with,
 // so a test can see each one kept off the queue and brought back.
-var fullRequest = MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", Version: &VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges keep their requests"}}
+var fullRequest = MergeSource{Kind: MergeSourceOwnBranch, Branch: "feature", ProfileGate: true, Version: &VersionIncrement{Part: semver.Minor, ChangelogLine: "Merges keep their requests"}}
 
 // exits are the two store writes a merge leaves its queue through.
 var exits = []struct {
@@ -485,7 +485,7 @@ func TestTheMigrationEndsARecordBesideAQueueRow(t *testing.T) {
 			// Arrange: a layout-133 file whose one workspace holds a record
 			// off its queue.
 			path := fixtureAt(t, 133)
-			execRaw(t, path, `INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+requestColumns+`)
+			execRaw(t, path, `INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+adoptedRequestColumns+`)
 				VALUES (?, 'failed', 1, 0, 1, 0, 0, NULL, 'feature', NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, '[]', '[]', NULL, 0)`, string(fixtureWorkspaceID))
 			if tt.arrange != "" {
 				execRaw(t, path, tt.arrange)
@@ -512,7 +512,7 @@ func TestRequeueOffQueueMergeGivesAnAdoptedRequestTheVersionSupplied(t *testing.
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
 	repo := RepoKey(t.TempDir())
-	corrupt(t, s, `INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+requestColumns+`)
+	corrupt(t, s, `INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, `+adoptedRequestColumns+`)
 		VALUES (?, 'adopted', 1, 1, 1, 0, 0, NULL, 'feature', NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, '[]', '[]', NULL, 0)`, ws.ID)
 	version := &VersionIncrement{Part: semver.Patch, ChangelogLine: "Adopted merges land again"}
 

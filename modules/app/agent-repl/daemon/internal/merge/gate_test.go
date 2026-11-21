@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 
@@ -974,5 +975,37 @@ func TestAGateWhoseWorkspaceNameCannotBeReadRunsNothing(t *testing.T) {
 	}
 	if !loggedLike(h, logLike{level: "error", op: "daemon.merge.tests", text: "could not read a workspace's name", context: map[string]string{"workspace": string(theWorkspace)}}) {
 		t.Fatalf("no ERROR record names the unreadable workspace: %+v", h.logs.Records())
+	}
+}
+
+// A GATE PROFILES ONLY WHEN ITS MERGE ASKED (wsm.MergeSource.ProfileGate),
+// and says so.
+func TestAGateProfilesOnlyWhenItsMergeAsked(t *testing.T) {
+	for _, asked := range []bool{true, false} {
+		t.Run(map[bool]string{true: "a merge asking for its gate profiled", false: "an ordinary merge"}[asked], func(t *testing.T) {
+			// Arrange.
+			h := newHarness(t)
+			h.emacsRepo()
+			h.landsCleanly("abc123def4567")
+			h.gatePasses("daemon")
+			if err := h.request(t, wsm.MergeSource{Kind: wsm.MergeSourceOwnBranch, ProfileGate: asked}, RequestedByUser); err != nil {
+				t.Fatalf("request: %v", err)
+			}
+
+			// Act.
+			if err := h.admit(context.Background()); err != nil {
+				t.Fatalf("the merge failed: %v", err)
+			}
+
+			// Assert.
+			h.runner.mu.Lock()
+			defer h.runner.mu.Unlock()
+			if len(h.runner.argv) != 1 || slices.Contains(h.runner.argv[0], "--profile") != asked {
+				t.Fatalf("runner argv = %v, want --profile %v", h.runner.argv, asked)
+			}
+			if got := gateRecords(h, "the merge's test gate profiles its units"); (got == 1) != asked {
+				t.Fatalf("%d records of the profiled gate, want one exactly when asked", got)
+			}
+		})
 	}
 }

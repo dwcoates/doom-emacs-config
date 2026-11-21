@@ -2,11 +2,15 @@ package stack
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"agent-repld/integration/harness"
+
+	"agentrepl/testrun/testenv"
 )
 
 // exitedProcess is a processExit for a process that has already left.
@@ -115,5 +119,30 @@ func TestStopProcessMarksTheStopAskedSoTheLatchIgnoresIt(t *testing.T) {
 				t.Fatalf("asked = %v, want %v", got, tc.wantAsked)
 			}
 		})
+	}
+}
+
+// A PROFILING RUN PROFILES EVERY SERVICE A WORLD STARTS: startService hands
+// the service the test's whole-life profile directory (testenv.ExitProfile).
+// Not parallel: the run's directory is the process's environment.
+func TestStartServiceTellsAProfilingRunsServiceItsDirectory(t *testing.T) {
+	// Arrange
+	root := t.TempDir()
+	t.Setenv(testenv.ProfileDir, root)
+	out := filepath.Join(t.TempDir(), "told")
+
+	// Act
+	cmd := startService(t, "store", "start", "/bin/sh", []string{"-c", `printf %s "$` + testenv.ExitProfileEnv + `" > "$0"`, out}, t.TempDir())
+	if err := cmd.Wait(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Assert
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(root, testenv.ProfileName(t.Name())); string(got) != want {
+		t.Fatalf("the service was told %q, want the test's directory %q", got, want)
 	}
 }

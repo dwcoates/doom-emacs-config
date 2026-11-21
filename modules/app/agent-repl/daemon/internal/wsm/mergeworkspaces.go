@@ -103,9 +103,10 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 			waitsOn   sql.NullString
 			waitsName sql.NullString
 			waitsLeft sql.NullString
+			profile   bool
 		)
-		err := tx.QueryRowContext(ctx, `SELECT requester_id, front, behind, version_part, changelog_line, waits_on, waits_on_name, waits_on_left FROM async_merge_requests WHERE request_id = ? AND repo_key = ?`,
-			request, key).Scan(&owner, &front, &behind, &verPart, &verLine, &waitsOn, &waitsName, &waitsLeft)
+		err := tx.QueryRowContext(ctx, `SELECT requester_id, front, behind, version_part, changelog_line, waits_on, waits_on_name, waits_on_left, profile_gate FROM async_merge_requests WHERE request_id = ? AND repo_key = ?`,
+			request, key).Scan(&owner, &front, &behind, &verPart, &verLine, &waitsOn, &waitsName, &waitsLeft, &profile)
 		switch {
 		case errors.Is(err, sql.ErrNoRows):
 			return fmt.Errorf("wsm: hand-off of detached merge %s: no such request stands: %w", request, ErrNotFound)
@@ -122,10 +123,11 @@ func (s *store) HandOffDetachedMerge(ctx context.Context, repo RepoKey, requeste
 		if err != nil {
 			return fmt.Errorf("wsm: hand-off of detached merge %s: %w", request, err)
 		}
-		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE AND ITS
-		// VERSION INCREMENT: a detached merge asked for the front still goes
-		// to the front, and the version it asked for is applied where it lands.
-		if err := insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Behind: WorkspaceID(behind.String), Pick: pick, Version: version}, at); err != nil {
+		// THE MERGE WORKSPACE CARRIES THE REQUEST'S PLACE IN LINE, ITS
+		// VERSION INCREMENT AND ITS GATE'S PROFILING: a detached merge asked
+		// for the front still goes to the front, the version it asked for is
+		// applied where it lands, and the gate it asked profiled is.
+		if err := insertRequest(ctx, tx, key, mergeWS, MergeSource{Kind: MergeSourceOwnBranch, Branch: branch, Front: front, Behind: WorkspaceID(behind.String), Pick: pick, Version: version, ProfileGate: profile}, at); err != nil {
 			return err
 		}
 		// THE WAIT MOVES WITH THE REQUEST: the merge workspace waits on what

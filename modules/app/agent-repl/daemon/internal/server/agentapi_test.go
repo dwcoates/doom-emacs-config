@@ -1115,6 +1115,24 @@ func TestAnAsyncMergeCarriesABehindPlacement(t *testing.T) {
 	}
 }
 
+func TestAnAsyncMergeCarriesWhetherItsGateProfiles(t *testing.T) {
+	for _, asked := range []bool{true, false} {
+		t.Run(map[bool]string{true: "asked", false: "not asked"}[asked], func(t *testing.T) {
+			// Arrange
+			h, req := asyncHarness(t)
+			req.GetAsyncMerge().ProfileGate = asked
+
+			// Act
+			_, err := h.Client.CreateWorkspace(context.Background(), connect.NewRequest(req))
+
+			// Assert
+			if err != nil || len(h.Merge.requests) != 1 || h.Merge.requests[0].Source.ProfileGate != asked {
+				t.Fatalf("CreateWorkspace = %v, requests %+v; want ProfileGate %v", err, h.Merge.requests, asked)
+			}
+		})
+	}
+}
+
 func TestAnAsyncMergePlacedBehindAMergeNotInLineIsRefused(t *testing.T) {
 	// Arrange
 	h, req := asyncHarness(t)

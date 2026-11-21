@@ -1894,6 +1894,49 @@ func TestAsyncMergeSendsItsMakerTargetAndPlacement(t *testing.T) {
 	}
 }
 
+func TestAMergeOrAFinishAsksForItsGateProfiledOnlyWithTheFlag(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want bool
+		got  func(*testing.T, *cliFixture) bool
+	}{
+		{name: "an async merge asking", args: []string{"async-merge", "-branch", "b", "-maker-subagent", "a1", "-context-fork", "here", "-target", "primary", "-placement", "back", "-profile-gate"}, want: true,
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate()
+			}},
+		{name: "an async merge not asking", args: []string{"async-merge", "-branch", "b", "-maker-subagent", "a1", "-context-fork", "here", "-target", "primary", "-placement", "back"}, want: false,
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.CreateWorkspaceRequest](t, f).GetAsyncMerge().GetProfileGate()
+			}},
+		{name: "a finish asking", args: []string{"finished", "here", "-placement", "back", "-profile-gate"}, want: true,
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate()
+			}},
+		{name: "a finish not asking", args: []string{"finished", "here", "-placement", "back"}, want: false,
+			got: func(t *testing.T, f *cliFixture) bool {
+				return only[*agentreplv1.FinishWorkspaceRequest](t, f).GetProfileGate()
+			}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			f := newCLIFixture()
+
+			// Act
+			code := f.run(workspaceNoun, tt.args...)
+
+			// Assert
+			if code != exitSuccess {
+				t.Fatalf("exit %d, stderr %q", code, f.errOut.String())
+			}
+			if got := tt.got(t, f); got != tt.want {
+				t.Fatalf("profile_gate = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // listedRecords is a complete find answering two records: the caller's own,
 // drawn thinking in the open section with its summary, and a peer's drawn
 // done in the hidden section.

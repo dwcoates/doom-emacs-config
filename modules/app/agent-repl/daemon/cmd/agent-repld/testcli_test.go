@@ -304,6 +304,12 @@ func TestTestRunSendsItsOptions(t *testing.T) {
 			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetDebugInfo() }},
 		{name: "a run without -debug-info drops debug info", args: []string{"-go", "pkg=TestA"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return !r.GetRun().GetDebugInfo() }},
+		{name: "a profiling run", args: []string{"-go", "pkg=TestA", "-profile"},
+			check: func(r *agentreplv1.RunTestsRequest) bool {
+				return r.GetRun().GetProfile() && r.GetRequester().GetWorkspace() != nil
+			}},
+		{name: "a run that does not profile", args: []string{"-go", "pkg=TestA"},
+			check: func(r *agentreplv1.RunTestsRequest) bool { return !r.GetRun().GetProfile() }},
 		{name: "the user's fresh run reusing nothing", args: []string{"-suite", "webapp", "-no-reuse", "-as-user"},
 			check: func(r *agentreplv1.RunTestsRequest) bool { return r.GetRun().GetNoReuse() && !r.GetUngoverned() }},
 		{name: "the user's ungoverned run", args: []string{"-suite", "webapp", "-ungoverned", "-as-user"},
@@ -430,6 +436,20 @@ func TestTestRunSaysWhyARunWhoseUnitsPassedFailed(t *testing.T) {
 	// Assert
 	if code != exitTestsFailed || !strings.Contains(errOut, "the run failed: "+failure) {
 		t.Fatalf("exit %d, stderr %q; want exit %d naming the run's failure", code, errOut, exitTestsFailed)
+	}
+}
+
+func TestTestRunSaysWhereAProfilingRunsProfilesAre(t *testing.T) {
+	// Arrange
+	daemon := &testRunsDaemon{frames: []*agentreplv1.RunTestsResponse{eventFrame(&testrunv1.TestRunEvent{Event: &testrunv1.TestRunEvent_Ended{Ended: &testrunv1.TestRunEnded{
+		ProfileDir: "/logs/run-1.profiles", Outcome: &testrunv1.TestRunEnded_Passed{Passed: &testrunv1.TestRunEndedPassed{PassedUnits: 1}}}}})}}
+
+	// Act
+	code, out, errOut := runTestCLI(t, daemon, "run", "-go", "pkg=TestA", "-profile")
+
+	// Assert
+	if code != exitSuccess || !strings.Contains(errOut, "the run's profiles are in /logs/run-1.profiles") || !strings.Contains(out, `"profileDir":"/logs/run-1.profiles"`) {
+		t.Fatalf("exit %d, stdout %q, stderr %q; want the profiles directory in the frame and said", code, out, errOut)
 	}
 }
 

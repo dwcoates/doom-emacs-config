@@ -2,10 +2,13 @@ package integration
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"agentrepl/testrun/testenv"
 )
 
 // CRITIQUE 23 — the flags and their env vars, exercised on the REAL binary.
@@ -213,5 +216,39 @@ func TestALaunchedSidecarReportsItsBuildIntoItsOwnRunDirectory(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(proc.lockDir, "shim-claude-sidecar.build.json")); err != nil {
 		entries, _ := os.ReadDir(proc.lockDir)
 		t.Fatalf("no build report in the launch's own run directory: %v (it holds %v)", err, entries)
+	}
+}
+
+// TestAProfilingRunProfilesTheSidecarsWholeLife: under a profiling test run
+// the sidecar profiles its whole life into the test's own directory
+// (testenv.ExitProfile) and writes the profile when it stops, saying so in its
+// log. Not parallel: the run's directory is the process's environment.
+func TestAProfilingRunProfilesTheSidecarsWholeLife(t *testing.T) {
+	// Arrange.
+	ctx, cancel := testContext(t)
+	defer cancel()
+	root := t.TempDir()
+	t.Setenv(testenv.ProfileDir, root)
+	fake := startFakeStore(t)
+	proc := startSidecar(t, defaultSidecarOptions(t, fake.Socket, newVendorTree(t)))
+	pid := proc.cmd.Process.Pid
+	// The profile starts while the sidecar boots; a SIGTERM before then would
+	// meet no handler.
+	awaitCatchupEnd(ctx, t, proc.LogPath)
+
+	// Act.
+	proc.Stop()
+
+	// Assert.
+	profile := filepath.Join(root, testenv.ProfileName(t.Name()), fmt.Sprintf("sidecar-%d.cpu.pprof", pid))
+	if info, err := os.Stat(profile); err != nil || info.Size() == 0 {
+		t.Fatalf("the sidecar's whole-life profile %s: %v, want a written profile", profile, err)
+	}
+	stopped := false
+	for _, r := range readLog(t, proc.LogPath) {
+		stopped = stopped || (strings.HasSuffix(r.Operation, "profiling.exit_stopped") && strings.Contains(r.Message, profile))
+	}
+	if !stopped {
+		t.Fatalf("the sidecar's log has no profiling.exit_stopped record naming %s", profile)
 	}
 }

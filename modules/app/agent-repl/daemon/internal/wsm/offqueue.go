@@ -69,7 +69,12 @@ const requestColumnsDDL = `source_kind                INTEGER NOT NULL,
 // for with, and nothing of its place in line. Its placement (source_front,
 // source_behind, the wait) and a pick in flight (pick_started_at, pick_turn)
 // are the place's: the exit ended them, and a requeue names its own.
-const requestColumns = `source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_detach_name, source_pick, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker`
+const requestColumns = adoptedRequestColumns + `, source_profile_gate`
+
+// adoptedRequestColumns is the request's columns as layout 129 had them,
+// which its adoption step (adoptOffQueueMergesDML) writes: a step runs against
+// the layout it was written for, so it never names a later column.
+const adoptedRequestColumns = `source_kind, source_keep_open, source_workspace, source_branch, source_detach_id, source_detach_name, source_pick, source_compact_after, source_close_on_landing, source_cleanup_worktree, source_cleanup_dir, source_version_part, source_changelog_line, source_pre_deploy_hooks, source_post_deploy_hooks, source_detach_maker, source_detach_target_maker`
 
 // adoptOffQueueMergesDML adopts every merge workspace left open by an exit
 // from before requests outlived their place: open, a merge workspace
@@ -78,7 +83,7 @@ const requestColumns = `source_kind, source_keep_open, source_workspace, source_
 // finishes). Its request's values were never kept, so it is adopted as the
 // own-branch merge of its branch with none (adopted = 1).
 const adoptOffQueueMergesDML = `
-INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, ` + requestColumns + `)
+INSERT INTO off_queue_merges (workspace_id, cause, left_at, adopted, enqueued_at, ` + adoptedRequestColumns + `)
 SELECT w.id, '` + MergeLeftAdopted + `', CAST(strftime('%s', 'now') AS INTEGER) * 1000000000, 1, w.created_at,
        0, 0, NULL, w.branch, NULL, NULL, NULL, 0, NULL, 0, NULL, NULL, NULL, '[]', '[]', NULL, 0
   FROM workspaces w
@@ -265,6 +270,7 @@ type requestScan struct {
 	after    string
 	maker    sql.NullString
 	toMaker  bool
+	profile  bool
 	// The PLACE's columns a queue row carries beside its request: set by
 	// scanMergeQueue before source, and zero off the queue, where the exit
 	// ended them.
@@ -276,7 +282,7 @@ type requestScan struct {
 
 // targets are the scan destinations, in requestColumns order.
 func (r *requestScan) targets() []any {
-	return []any{&r.kind, &r.keepOpen, &r.sourceWS, &r.branch, &r.detach, &r.name, &r.pick, &r.compact, &r.closes, &r.cleanup, &r.cleanDir, &r.verPart, &r.verLine, &r.before, &r.after, &r.maker, &r.toMaker}
+	return []any{&r.kind, &r.keepOpen, &r.sourceWS, &r.branch, &r.detach, &r.name, &r.pick, &r.compact, &r.closes, &r.cleanup, &r.cleanDir, &r.verPart, &r.verLine, &r.before, &r.after, &r.maker, &r.toMaker, &r.profile}
 }
 
 // source builds the request's MergeSource with the place's columns (none off
@@ -287,7 +293,7 @@ func (r *requestScan) source(table, row string) (MergeSource, error) {
 		Kind: MergeSourceKind(r.kind), KeepOpen: r.keepOpen, Workspace: WorkspaceID(r.sourceWS.String), Branch: r.branch.String,
 		Detach: DetachedMergeID(r.detach.String), DetachName: r.name.String, Pick: r.pick.String, CompactAfter: r.compact,
 		CloseOnLanding: WorkspaceID(r.closes.String), CleanupWorktree: r.cleanup, CleanupDir: r.cleanDir.String,
-		DetachMaker: WorkspaceID(r.maker.String), DetachTargetMaker: r.toMaker,
+		DetachMaker: WorkspaceID(r.maker.String), DetachTargetMaker: r.toMaker, ProfileGate: r.profile,
 		Front: r.front, Behind: WorkspaceID(r.behind.String), PickStartedAt: optTime(r.picked), PickTurn: TurnID(r.pickTurn.String),
 	}
 	version, err := scanVersion(r.verPart, r.verLine)

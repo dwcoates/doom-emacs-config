@@ -142,12 +142,12 @@ func (s *store) RequestAsyncMerge(ctx context.Context, repo RepoKey, requester W
 			return err
 		}
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO async_merge_requests (request_id, repo_key, requester_id, seq, turn_id, requested_at, branch, name, maker, target_maker, pick, compact_after, close_on_landing, cleanup_worktree, cleanup_dir, front, behind, version_part, changelog_line, pre_deploy_hooks, post_deploy_hooks, waits_on, waits_on_name)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			`INSERT INTO async_merge_requests (request_id, repo_key, requester_id, seq, turn_id, requested_at, branch, name, maker, target_maker, pick, compact_after, close_on_landing, cleanup_worktree, cleanup_dir, front, behind, version_part, changelog_line, pre_deploy_hooks, post_deploy_hooks, waits_on, waits_on_name, profile_gate)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			source.Detach, key, requester, last.Int64+1, nullableText(string(turn)), nanos(at), source.Branch, source.DetachName, source.DetachMaker,
 			source.DetachTargetMaker, nullableText(source.Pick), source.CompactAfter, nullableText(string(source.CloseOnLanding)), source.CleanupWorktree,
 			nullableText(source.CleanupDir), source.Front, nullableText(string(source.Behind)), versionPart(source.Version), versionLine(source.Version),
-			before, after, nullableText(string(source.Behind)), nullableText(source.BehindName))
+			before, after, nullableText(string(source.Behind)), nullableText(source.BehindName), source.ProfileGate)
 		return err
 	})
 }
@@ -187,7 +187,7 @@ func (s *store) AllAsyncMergeRequests(ctx context.Context) ([]AsyncMergeRequest,
 
 // asyncMergeRequestColumns are the columns scanAsyncMergeRequests scans, in
 // its order.
-const asyncMergeRequestColumns = `request_id, repo_key, requester_id, turn_id, requested_at, branch, name, maker, target_maker, pick, compact_after, close_on_landing, cleanup_worktree, cleanup_dir, front, behind, version_part, changelog_line, pre_deploy_hooks, post_deploy_hooks, waits_on, waits_on_name, waits_on_left`
+const asyncMergeRequestColumns = `request_id, repo_key, requester_id, turn_id, requested_at, branch, name, maker, target_maker, pick, compact_after, close_on_landing, cleanup_worktree, cleanup_dir, front, behind, version_part, changelog_line, pre_deploy_hooks, post_deploy_hooks, waits_on, waits_on_name, waits_on_left, profile_gate`
 
 // scanAsyncMergeRequests is the one decoding path for async_merge_requests;
 // TAIL is the read's WHERE and ORDER BY.
@@ -219,7 +219,7 @@ func (s *store) scanAsyncMergeRequests(ctx context.Context, tail string, args ..
 		src := &req.Source
 		if err := rows.Scan(&id, &req.Repo, &req.Requester, &turn, &at, &src.Branch, &src.DetachName, &src.DetachMaker, &src.DetachTargetMaker, &pick,
 			&src.CompactAfter, &closes, &src.CleanupWorktree, &cleanDir, &src.Front, &behind, &verPart, &verLine, &before, &after,
-			&waitsOn, &waitsName, &waitsLeft); err != nil {
+			&waitsOn, &waitsName, &waitsLeft, &src.ProfileGate); err != nil {
 			return nil, err
 		}
 		row := id

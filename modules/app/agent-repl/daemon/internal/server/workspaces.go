@@ -1078,6 +1078,7 @@ func finishRequest(ws ids.WorkspaceID, req *agentreplv1.FinishWorkspaceRequest) 
 	out.Source.Front = req.GetPlacement().GetFront() != nil
 	out.PlaceBehind = placedBehind(req.GetPlacement())
 	out.Source.Version = versionIncrement(req.GetVersionIncrement())
+	out.Source.ProfileGate = req.GetProfileGate()
 	return out
 }
 

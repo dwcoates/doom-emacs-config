@@ -82,7 +82,19 @@ type TestRunRequest struct {
 	// so only a debugger attached to a run's binary needs this. It is a
 	// temporary debugging measure, never a standing setting: it changes no
 	// verdict, so the run reuses and records passes as any other run does.
-	DebugInfo     bool `protobuf:"varint,7,opt,name=debug_info,json=debugInfo,proto3" json:"debug_info,omitempty"`
+	DebugInfo bool `protobuf:"varint,7,opt,name=debug_info,json=debugInfo,proto3" json:"debug_info,omitempty"`
+	// Profile every unit that runs: each Go test binary runs with
+	// `-test.cpuprofile`, each node process (vitest and everything it starts)
+	// with `--cpu-prof`, and every unit is told its own profiles directory
+	// (testenv.ProfileDir), where the harnesses point the production processes
+	// they start (the daemon, shims, store and sidecar write a CPU profile on
+	// exit, proto/vocab/profile-session.json `exit_profile_env`). The profiles
+	// land beside the run's log, one directory per unit, and the run's ended
+	// event names the directory (TestRunEnded.profile_dir). A reused unit does
+	// not run, so it writes no profile. Off by default. Refused with
+	// `coverage`, whose instrumentation is what a profile would then measure,
+	// and with `record`, whose timings the profiler's overhead would skew.
+	Profile       bool `protobuf:"varint,8,opt,name=profile,proto3" json:"profile,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -162,6 +174,13 @@ func (x *TestRunRequest) GetPlanOnly() bool {
 func (x *TestRunRequest) GetDebugInfo() bool {
 	if x != nil {
 		return x.DebugInfo
+	}
+	return false
+}
+
+func (x *TestRunRequest) GetProfile() bool {
+	if x != nil {
+		return x.Profile
 	}
 	return false
 }
@@ -1363,7 +1382,7 @@ var File_testrun_v1_selection_proto protoreflect.FileDescriptor
 const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\n" +
 	"\x1atestrun/v1/selection.proto\x12\n" +
-	"testrun.v1\"\xf4\x01\n" +
+	"testrun.v1\"\x8e\x02\n" +
 	"\x0eTestRunRequest\x129\n" +
 	"\n" +
 	"selections\x18\x01 \x03(\v2\x19.testrun.v1.TestSelectionR\n" +
@@ -1374,7 +1393,8 @@ const file_testrun_v1_selection_proto_rawDesc = "" +
 	"\bno_reuse\x18\x05 \x01(\bR\anoReuse\x12\x1b\n" +
 	"\tplan_only\x18\x06 \x01(\bR\bplanOnly\x12\x1d\n" +
 	"\n" +
-	"debug_info\x18\a \x01(\bR\tdebugInfo\"\xa3\x03\n" +
+	"debug_info\x18\a \x01(\bR\tdebugInfo\x12\x18\n" +
+	"\aprofile\x18\b \x01(\bR\aprofile\"\xa3\x03\n" +
 	"\rTestSelection\x12C\n" +
 	"\n" +
 	"go_package\x18\x01 \x01(\v2\".testrun.v1.TestSelectionGoPackageH\x00R\tgoPackage\x12F\n" +

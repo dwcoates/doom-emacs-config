@@ -43,7 +43,7 @@ func TestTheEventsOfARunReadBackInOrder(t *testing.T) {
 	// Act
 	e.Planned([]run.Spec{{Unit: sched.Unit{ID: "u1", Suite: "s"}}}, "/tmp/run.log")
 	e.UnitEnded(result("u1", run.Passed, testtimes.Test{Name: "TestA", Outcome: testtimes.Pass, Seconds: 0.25}), nil)
-	e.Ended([]run.Result{result("u1", run.Passed)}, 0, nil)
+	e.Ended([]run.Result{result("u1", run.Passed)}, 0, nil, "")
 
 	// Assert
 	evs := readAll(t, &buf)
@@ -109,10 +109,17 @@ func TestEnded(t *testing.T) {
 		results     []run.Result
 		unplannable int
 		runFailures []string
+		profileDir  string
 		check       func(*testrunv1.TestRunEnded) bool
 	}{
 		{name: "passed units pass", results: []run.Result{result("a", run.Passed), result("b", run.Passed)}, check: func(e *testrunv1.TestRunEnded) bool {
-			return e.GetPassed().GetPassedUnits() == 2
+			return e.GetPassed().GetPassedUnits() == 2 && e.GetProfileDir() == ""
+		}},
+		{name: "a profiling run names its profiles directory", results: []run.Result{result("a", run.Passed)}, profileDir: "/logs/run.profiles", check: func(e *testrunv1.TestRunEnded) bool {
+			return e.GetPassed().GetPassedUnits() == 1 && e.GetProfileDir() == "/logs/run.profiles"
+		}},
+		{name: "a failed profiling run names its profiles directory too", results: []run.Result{result("a", run.Failed)}, profileDir: "/logs/run.profiles", check: func(e *testrunv1.TestRunEnded) bool {
+			return e.GetFailed().GetFailedUnits() == 1 && e.GetProfileDir() == "/logs/run.profiles"
 		}},
 		{name: "a failure and a cancellation fail", results: []run.Result{result("a", run.Failed), result("b", run.Cancelled), result("c", run.Passed)}, check: func(e *testrunv1.TestRunEnded) bool {
 			f := e.GetFailed()
@@ -134,7 +141,7 @@ func TestEnded(t *testing.T) {
 			e := New(&buf, &run.Log{Out: io.Discard, Err: io.Discard})
 
 			// Act
-			e.Ended(tc.results, tc.unplannable, tc.runFailures)
+			e.Ended(tc.results, tc.unplannable, tc.runFailures, tc.profileDir)
 
 			// Assert
 			if got := readAll(t, &buf)[0].GetEnded(); !tc.check(got) {

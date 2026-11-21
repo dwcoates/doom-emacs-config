@@ -22,6 +22,7 @@ import (
 	"agent-repld/internal/feedid"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/lockwatch"
+	"agent-repld/internal/proflabel"
 	"agent-repld/internal/shimclient"
 )
 
@@ -140,9 +141,13 @@ type bashOpen struct {
 // every other verb belongs to callers this package is not.
 type fakeClient struct {
 	sessionOpens chan *fakeStream[*shimv1.WatchSessionResponse]
-	agentOpens   chan agentOpen
-	bashOpens    chan bashOpen
-	links        chan shimclient.LinkState
+	// sessionLabel is the profiler label (internal/proflabel) the last
+	// WatchSession's context carried, and sessionLabeled whether it carried one.
+	sessionLabel   ids.WorkspaceID
+	sessionLabeled bool
+	agentOpens     chan agentOpen
+	bashOpens      chan bashOpen
+	links          chan shimclient.LinkState
 	// connections is what Connections answers; an adopted client starts
 	// connected once.
 	connections atomic.Uint64
@@ -304,6 +309,7 @@ func (c *fakeClient) WatchSession(ctx context.Context) (shimclient.Stream[*shimv
 	stream := newFakeStream[*shimv1.WatchSessionResponse]()
 	c.mu.Lock()
 	c.sessionCount++
+	c.sessionLabel, c.sessionLabeled = proflabel.Of(ctx)
 	c.mu.Unlock()
 	c.sessionOpens <- stream
 	return stream, nil

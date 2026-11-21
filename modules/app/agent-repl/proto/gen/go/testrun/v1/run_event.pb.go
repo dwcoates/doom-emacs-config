@@ -894,7 +894,12 @@ type TestRunEnded struct {
 	//	*TestRunEnded_Passed
 	//	*TestRunEnded_Failed
 	//	*TestRunEnded_Planned
-	Outcome       isTestRunEnded_Outcome `protobuf_oneof:"outcome"`
+	Outcome isTestRunEnded_Outcome `protobuf_oneof:"outcome"`
+	// A profiling run's (TestRunRequest.profile) profiles directory, beside
+	// the run's log: one subdirectory per unit that ran, named by its unit id,
+	// holding the unit's own CPU profiles and those of the production processes
+	// its tests started. Empty when the run did not profile.
+	ProfileDir    string `protobuf:"bytes,4,opt,name=profile_dir,json=profileDir,proto3" json:"profile_dir,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -961,6 +966,13 @@ func (x *TestRunEnded) GetPlanned() *TestRunEndedPlanned {
 		}
 	}
 	return nil
+}
+
+func (x *TestRunEnded) GetProfileDir() string {
+	if x != nil {
+		return x.ProfileDir
+	}
+	return ""
 }
 
 type isTestRunEnded_Outcome interface {
@@ -1438,11 +1450,13 @@ const file_testrun_v1_run_event_proto_rawDesc = "" +
 	"\aoutcome\"\x13\n" +
 	"\x11TestRunTestPassed\"\x13\n" +
 	"\x11TestRunTestFailed\"\x14\n" +
-	"\x12TestRunTestSkipped\"\xca\x01\n" +
+	"\x12TestRunTestSkipped\"\xeb\x01\n" +
 	"\fTestRunEnded\x128\n" +
 	"\x06passed\x18\x01 \x01(\v2\x1e.testrun.v1.TestRunEndedPassedH\x00R\x06passed\x128\n" +
 	"\x06failed\x18\x02 \x01(\v2\x1e.testrun.v1.TestRunEndedFailedH\x00R\x06failed\x12;\n" +
-	"\aplanned\x18\x03 \x01(\v2\x1f.testrun.v1.TestRunEndedPlannedH\x00R\aplannedB\t\n" +
+	"\aplanned\x18\x03 \x01(\v2\x1f.testrun.v1.TestRunEndedPlannedH\x00R\aplanned\x12\x1f\n" +
+	"\vprofile_dir\x18\x04 \x01(\tR\n" +
+	"profileDirB\t\n" +
 	"\aoutcome\":\n" +
 	"\x13TestRunEndedPlanned\x12#\n" +
 	"\rplanned_units\x18\x01 \x01(\x05R\fplannedUnits\"M\n" +

@@ -567,6 +567,7 @@ ending row, live and on replay.
 | `AGENT_REPL_OWNED=1` | contract | propagated into every shim so vendor hooks recognize our processes |
 | (shim spawn env) | contract | the daemon's OWN environment passed through, with CLAUDE_CONFIG_DIR, AGENT_REPL_OWNED, AGENT_REPL_STATE_DIR, SHIM_BUILD_SHA, AGENT_REPL_SESSION_ID (the HostSessionId, log correlation only), AGENT_REPL_WORKSPACE_DIR (the workspace `here` names from a nested foreign worktree) set/overridden; the store socket rides argv — never a curated allowlist |
 | `AGENT_REPL_STORE_SOCKET` | contract | the store socket (a flag beats it) |
+| `AGENT_REPL_EXIT_PROFILE_DIR` | test only | a directory the daemon profiles its WHOLE LIFE into: a CPU profile starts at boot and is written as `daemon-<pid>.cpu.pprof` when the daemon stops (`agentrepl/logging/profiling`, `StartExitProfile`; `daemon.profiling.exit_started` and `exit_stopped`). Every shim it spawns inherits it and writes `shim-<pid>.cpuprofile`. A daemon started with it arms no profiling session. A profiling test run sets it on every daemon a test starts (`integration/harness/profile.go`); see "Profiler labels" |
 | `MULTI_REPO_ROOT` | contract | a workspace whose main repo is under it uses the multi-repo account root |
 | `AGENT_REPL_TEMPORARY_REGISTRATION_TEST_ROOT` | test only | the ONE directory beneath which a test-run daemon may register directories inside a temporary root, which the registry otherwise refuses (owner ruling 2026-10-06, `internal/tempdirs`: `os.TempDir()`, `/tmp`, `/var/tmp`, `/var/folders`, canonicalized). It must lie strictly beneath a temporary root and not be one. It is honored ONLY with `AGENT_REPL_FORBID_VENDOR_CALLS` set; set without it, it is a BOOT REFUSAL. The integration harness names its run root and moves the daemon's `TMPDIR` to `<run root>/daemon-tmp`; unit-test binaries that open a real registry run through `tempdirstest.Main`. A test-run daemon that refuses a temporary folder with NO test root records ERROR `daemon.refusal.temporary_seam_missing`, so a launcher that forgot the seam fails its warning sweep instead of passing silently |
 | `AGENT_REPL_FAKE_SHIMS` | test only | forces every shim spawn into the shim's offline scripted SDK WITHOUT putting the whole stack in fake mode, so a suite can exercise a REAL vendor call site (the classifier's headless run) against a live session. It can only turn fake ON. It is NOT needed merely to get fake shims under the vendor guard -- the guard implies them |
@@ -2035,6 +2036,36 @@ a prompt off the turn it was minted as writes a turn succession
   on it is never answered.
 - A chain that returns to a turn it left is an invariant violation:
   `SucceedingTurn` refuses it and records it at ERROR.
+
+## Profiler labels (`internal/proflabel`)
+
+The daemon labels its per-workspace work with the Go profiler label
+`workspace`, valued by the workspace's id, so one CPU profile splits by
+workspace. In a shared test daemon each test owns its workspaces, so the
+profile splits by test.
+
+- Every rpc that names a workspace (`requestWorkspaceID`) runs its handler
+  under the label, in both shared request boundaries (`serveUnary`,
+  `serveStream`). A request for no workspace runs unlabeled.
+- Every session watcher runs under its workspace's label from
+  `sessionwatcher.Start`.
+- A goroutine inherits its creator's labels, so everything either starts is
+  labeled too. Work the daemon does on its own (its boot, the roster, the merge
+  queue's pump) carries no label.
+- Reading a profile:
+  - `go tool pprof -tags daemon-<pid>.cpu.pprof` lists the label's values and
+    their shares of the samples.
+  - `go tool pprof -tagfocus workspace=<id> -top daemon-<pid>.cpu.pprof` keeps
+    one workspace's samples.
+  - A profiling test run maps each workspace id to the test that registered it
+    in `workspaces.tsv` beside the daemon's profile
+    (`harness.ProfiledWorkspacesFile`).
+- Overhead: one `pprof.Do` per labeled call, measured at 77 to 111ns, 3
+  allocations and 104 bytes per call (2026-11-20, Go 1.24.6, Apple silicon,
+  Low Power Mode, `GOMAXPROCS=2`, three runs of a `testing.Benchmark` against
+  the same call unlabeled). A request's own handler time is milliseconds, so
+  the label costs under a thousandth of it, and nothing while no profile runs
+  but the label's allocation.
 
 ## Logging
 

@@ -73,6 +73,10 @@ message FinishWorkspaceRequest {
   // escalation's finish never joins the queue (FinishWorkspaceSuccess
   // .landing_directly), so it names none, and one it names is not read.
   MergeQueuePlacement placement = 4;
+  // Profile the deploy's test gate (testrun.v1.TestRunRequest.profile), as
+  // CreateWorkspaceAsyncMerge.profile_gate does. Off by default. A finish
+  // that lands directly runs no gate, so it is not read there.
+  bool profile_gate = 5;
 }
 
 // THE ARM IS THE OUTCOME.
