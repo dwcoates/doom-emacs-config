@@ -920,6 +920,7 @@ test_claude_config_roots_adds_the_work_accounts_root_only_when_named() {
   local bad="" got
   # shellcheck source=/dev/null
   REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  # shellcheck disable=SC2034 # read by skills_dirs through claude_config_roots
   DEFAULT_CONFIG_ROOT=/h/.claude
   got="$(MULTI_REPO_CONFIG_DIR=/h/.claude-work expand_placeholders "--roots={claude-config-roots}")"
   [ "$got" = "--roots=/h/.claude,/h/.claude-work" ] || bad="$bad [named: $got]"
@@ -934,6 +935,7 @@ test_skills_dirs_are_the_config_roots_skills_dirs() {
   local want got
   # shellcheck source=/dev/null
   REQUIREMENTS_SH_LIB=1 source "$RUNNER"
+  # shellcheck disable=SC2034 # read by skills_dirs through claude_config_roots
   DEFAULT_CONFIG_ROOT=/h/.claude
   got="$(MULTI_REPO_CONFIG_DIR=/h/.claude-work skills_dirs)"
   want="$(printf '/h/.claude/skills\n/h/.claude-work/skills')"
@@ -1920,6 +1922,33 @@ test_version_ge() {
 1.23.9 1.24 no
 EOF
   if [ -z "$bad" ]; then pass "version_ge compares part by part"; else fail "version_ge:$bad"; fi
+}
+
+# Walks the whole module for its package.json files, so it lives in the suite that
+# is never reused (test-build-frontend.sh runs confined to its declared inputs).
+# Every npm package of the module is in NODE_STORE_PACKAGES and its tests install
+# only through ensure-deps.sh: a package that installs by hand (as tree-sitter-tldr
+# once did with `npm ci --silent`) fails here.
+test_every_npm_package_installs_through_ensure_deps() {
+    local module packages pkg bad="" listed
+    module="$MODULE"
+    # shellcheck source=lib-node-store.sh
+    listed="$(. "$THIS_DIR/lib-node-store.sh" && printf '%s\n' "${NODE_STORE_PACKAGES[@]}" | sort)"
+    packages="$(find "$module" -name package.json -not -path '*/node_modules/*' -not -path "$module/e2e/*" \
+        | sed "s#^$module/##" | xargs -n1 dirname \
+        | while read -r pkg; do jq -e '.scripts.test' "$module/$pkg/package.json" >/dev/null && echo "$pkg"; done | sort)"
+    [ "$packages" = "$listed" ] || bad="$bad [NODE_STORE_PACKAGES is not every npm package with tests: listed=$(echo $listed) tested=$(echo $packages)]"
+    for pkg in $packages; do
+        grep -rqs 'ensure-deps\.sh' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh || bad="$bad [$pkg: no ensure-deps]"
+        if grep -Eqs '(^|[^-])npm[[:space:]]+(ci|install)' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh; then
+            bad="$bad [$pkg: installs by hand]"
+        fi
+    done
+    if [ -z "$bad" ]; then
+        pass "every npm package's tests install through ensure-deps.sh, and NODE_STORE_PACKAGES lists them all"
+    else
+        fail "every npm package installs through ensure-deps.sh" "$bad"
+    fi
 }
 
 for t in $(declare -F | awk '{print $3}' | grep '^test_'); do

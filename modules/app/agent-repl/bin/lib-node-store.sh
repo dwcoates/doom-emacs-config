@@ -49,6 +49,7 @@
 # (node_store_link), build-frontend.sh's `deps` target links them all, and the
 # store's gc protects each one's entries. Its test entry installs only through
 # bin/ensure-deps.sh (test-build-frontend.sh holds every package to both).
+# shellcheck disable=SC2034 # read by the scripts that source this library
 NODE_STORE_PACKAGES=(agent-shim/claude/shim webapp tree-sitter-tldr)
 
 # NODE_STORE_INSTALL_SECS — the bound on one npm install of a package

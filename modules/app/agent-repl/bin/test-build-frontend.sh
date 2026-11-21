@@ -1637,31 +1637,6 @@ t_a_store_install_past_its_bound_fails_and_links_nothing() {
     rm -rf "$root"
 }
 
-# Every npm package of the module is in NODE_STORE_PACKAGES and its tests
-# install only through ensure-deps.sh: a package that installs by hand (as
-# tree-sitter-tldr once did with `npm ci --silent`) fails here.
-t_every_npm_package_installs_through_ensure_deps() {
-    local module packages pkg bad="" listed
-    module="$(cd "$THIS_DIR/.." && pwd -P)"
-    # shellcheck source=lib-node-store.sh
-    listed="$(. "$THIS_DIR/lib-node-store.sh" && printf '%s\n' "${NODE_STORE_PACKAGES[@]}" | sort)"
-    packages="$(cd "$module" && find . -name package.json -not -path '*/node_modules/*' -not -path './e2e/*' \
-        | sed 's#^\./##' | xargs -n1 dirname \
-        | while read -r pkg; do jq -e '.scripts.test' "$pkg/package.json" >/dev/null && echo "$pkg"; done | sort)"
-    [ "$packages" = "$listed" ] || bad="$bad [NODE_STORE_PACKAGES is not every npm package with tests: listed=$(echo $listed) tested=$(echo $packages)]"
-    for pkg in $packages; do
-        grep -rqs 'ensure-deps\.sh' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh || bad="$bad [$pkg: no ensure-deps]"
-        if grep -Eqs '(^|[^-])npm[[:space:]]+(ci|install)' "$module/$pkg/package.json" "$module/$pkg"/test-*.sh; then
-            bad="$bad [$pkg: installs by hand]"
-        fi
-    done
-    if [ -z "$bad" ]; then
-        pass "every npm package's tests install through ensure-deps.sh, and NODE_STORE_PACKAGES lists them all"
-    else
-        fail "every npm package installs through ensure-deps.sh" "$bad"
-    fi
-}
-
 t_ensure_deps_installs_nothing_a_lock_holder_already_installed() {
     local root; root="$(ed_fixture)"
     # Arrange: another installer holds the package's install lock, alive.
@@ -2190,7 +2165,6 @@ build_group_dependencies() {
     t_ensure_deps_fails_loudly_when_the_store_install_fails
     t_ensure_deps_kills_an_install_past_its_bound
     t_a_store_install_past_its_bound_fails_and_links_nothing
-    t_every_npm_package_installs_through_ensure_deps
     t_ensure_deps_fails_when_the_install_fails
     t_ensure_deps_installs_nothing_a_lock_holder_already_installed
     t_ensure_deps_reinstalls_a_tree_an_install_was_cut_short_in
