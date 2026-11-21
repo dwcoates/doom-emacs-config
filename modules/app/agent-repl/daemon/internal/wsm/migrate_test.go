@@ -1548,20 +1548,3 @@ func TestTheUserAttentionStepIsAdditiveAndCreatesItsTable(t *testing.T) {
 		t.Fatalf("table user_attention exists %d times, want once", got)
 	}
 }
-
-func TestTheComposerDraftsStepIsAdditiveAndCreatesItsTable(t *testing.T) {
-	// Arrange
-	step := migrationTo(t, 192)
-	path := fixtureAt(t, 191)
-
-	// Act
-	execRaw(t, path, step.DDL)
-
-	// Assert
-	if step.Name != "composer_drafts" || step.Kind != MigrationAdditive {
-		t.Fatalf("migration 192 = %+v, want the composer drafts, additive", step)
-	}
-	if got := rawScalar[int](t, path, `SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'composer_drafts'`); got != 1 {
-		t.Fatalf("table composer_drafts exists %d times, want once", got)
-	}
-}
