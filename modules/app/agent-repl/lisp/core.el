@@ -3731,6 +3731,22 @@ Anything finer-grained is log chatter and belongs on `agent-repl--info'."
    ws "info" "normal" fmt args
    :message-mode (if (agent-repl--minibuffer-busy-p) 'quiet 'backend)))
 
+(defun agent-repl--call-recording-error (ws operation fn)
+  "Call FN; record an error it signals for WS under OPERATION, then re-signal it.
+A TIMER CALLBACK\='s ERROR NEVER REACHES THE LOG ON ITS OWN:
+`timer-event-handler' turns it into a *Messages* line nobody reads, which
+is how a switch whose activation died on \"Attempt to delete main window\"
+left only a composer on screen with nothing in the log to say why
+\(2026-11-20).  So an agent-repl timer entry point runs its body through
+here: the error is recorded through `agent-repl--error' as
+\"OPERATION-failed ws=WS cause=ERR\", and then signalled again unchanged,
+so the failure stays as loud as it was.  Answers FN\='s value."
+  (condition-case err
+      (funcall fn)
+    (error
+     (agent-repl--error ws "%s-failed ws=%s cause=%S" operation ws err)
+     (signal (car err) (cdr err)))))
+
 (defun agent-repl--fatal (ws fmt &rest args)
   "Record a fatal condition for WS and then SIGNAL it.
 WS is the workspace name for context (or nil).  FMT and ARGS are formatted

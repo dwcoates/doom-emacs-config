@@ -8193,3 +8193,35 @@ Answer every (LEVEL SCOPE FORMAT) the flush logged."
   "A frame that draws no fonts (batch, a terminal) answers nil."
   (cl-letf (((symbol-function 'internal-char-font) (lambda (_pos _ch) nil)))
     (should-not (agent-repl-name-glyph-height "👍"))))
+
+;;;; ---- Recording a timer callback's error ----
+
+(ert-deftest agent-repl-test-core-call-recording-error-answers-the-value ()
+  "A body that returns answers its value and records nothing."
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+      ;; Act / Assert
+      (should (eq (agent-repl--call-recording-error "ws1" "elisp.test.op" (lambda () 'done))
+                  'done))
+      (should-not errors))))
+
+(ert-deftest agent-repl-test-core-call-recording-error-re-signals ()
+  "A body's error is signalled again unchanged."
+  (cl-letf (((symbol-function 'agent-repl--error) #'ignore))
+    ;; Act / Assert
+    (should (equal (should-error (agent-repl--call-recording-error
+                                  "ws1" "elisp.test.op"
+                                  (lambda () (error "Attempt to delete main window"))))
+                   '(error "Attempt to delete main window")))))
+
+(ert-deftest agent-repl-test-core-call-recording-error-records-the-cause ()
+  "A body's error is recorded at ERROR with its operation, workspace and cause."
+  (let ((errors nil))
+    (cl-letf (((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+      ;; Act
+      (ignore-errors
+        (agent-repl--call-recording-error "ws1" "elisp.test.op"
+                                          (lambda () (error "Boom"))))
+      ;; Assert
+      (should (equal errors '("elisp.test.op-failed ws=ws1 cause=(error \"Boom\")"))))))
+

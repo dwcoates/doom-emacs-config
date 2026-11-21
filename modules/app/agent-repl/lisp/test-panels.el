@@ -387,6 +387,36 @@ layout."
       ;; Assert.
       (should (eq captured agent-repl--global-log-scope)))))
 
+;; A window-change pass whose reconcile signals is recorded in the log and
+;; signals still: its timer would otherwise leave only a *Messages* line.
+
+(ert-deftest agent-repl-test-panels-on-window-change-records-a-failed-reconcile ()
+  "A reconcile that signals is recorded at ERROR under the pass's scope."
+  (agent-repl-test--with-clean-state
+    (let ((errors nil))
+      (cl-letf (((symbol-function 'agent-repl--sync-panels) #'ignore)
+                ((symbol-function 'agent-repl-window--ensure-layout)
+                 (lambda () (error "Attempt to delete main window")))
+                ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+        ;; Act
+        (ignore-errors (agent-repl--on-window-change)))
+      ;; Assert
+      (should (seq-some (lambda (text)
+                          (string-prefix-p "elisp.panels.on-window-change-failed ws=" text))
+                        errors))
+      (should (seq-some (lambda (text) (string-search "Attempt to delete main window" text))
+                        errors)))))
+
+(ert-deftest agent-repl-test-panels-on-window-change-re-signals-a-failed-reconcile ()
+  "A reconcile that signals still signals out of the pass."
+  (agent-repl-test--with-clean-state
+    (cl-letf (((symbol-function 'agent-repl--sync-panels) #'ignore)
+              ((symbol-function 'agent-repl-window--ensure-layout)
+               (lambda () (error "Attempt to delete main window")))
+              ((symbol-function 'agent-repl--error) #'ignore))
+      ;; Act / Assert
+      (should-error (agent-repl--on-window-change)))))
+
 ;;;; ---- Tests: Defcustom defaults ----
 
 ;;;; ---- Tests: drain-pending-show-panels ----
@@ -1810,6 +1840,54 @@ answers a real but never-armed timer, so cancellation is observable;
       (agent-repl-test--fire-scheduled (car scheduled))
       ;; Assert.
       (should (equal ran '("ws-b"))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-records-a-failed-switch ()
+  "A switch pass that signals is recorded at ERROR naming its workspace."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      (let ((errors nil))
+        (cl-letf (((symbol-function 'agent-repl--on-workspace-switch)
+                   (lambda (&optional _ws) (error "Attempt to delete main window")))
+                  ((symbol-function 'agent-repl--ws-log-scope) #'identity)
+                  ((symbol-function 'agent-repl--error) (agent-repl-test--record-into errors)))
+          ;; Arrange
+          (agent-repl--schedule-switch-activation "ws-b")
+          ;; Act
+          (ignore-errors (agent-repl-test--fire-scheduled (car scheduled))))
+        ;; Assert
+        (should (equal errors
+                       '("elisp.panels.switch-activation-failed ws=ws-b cause=(error \"Attempt to delete main window\")")))))))
+
+(ert-deftest agent-repl-test-panels-switch-activation-re-signals-a-failed-switch ()
+  "A switch pass that signals still signals out of its timer callback."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      (cl-letf (((symbol-function 'agent-repl--on-workspace-switch)
+                 (lambda (&optional _ws) (error "Attempt to delete main window")))
+                ((symbol-function 'agent-repl--error) #'ignore))
+        ;; Arrange
+        (agent-repl--schedule-switch-activation "ws-b")
+        ;; Act / Assert
+        (should-error (agent-repl-test--fire-scheduled (car scheduled)))))))
+
+(ert-deftest agent-repl-test-panels-timer-entry-points-record-through-the-shared-helper ()
+  "The switch pass and the window-change pass both run through the one helper.
+A timer entry point with its own handler beside the helper would drift."
+  (agent-repl-test--with-clean-state
+    (agent-repl-test--with-switch-activations
+      (let ((operations nil))
+        (cl-letf (((symbol-function 'agent-repl--call-recording-error)
+                   (lambda (_ws operation fn) (push operation operations) (funcall fn)))
+                  ((symbol-function 'agent-repl--sync-panels) #'ignore)
+                  ((symbol-function 'agent-repl-window--ensure-layout) #'ignore)
+                  ((symbol-function 'agent-repl-window-focus-input-when-panels-alone) #'ignore))
+          ;; Act
+          (agent-repl--schedule-switch-activation "ws-b")
+          (agent-repl-test--fire-scheduled (car scheduled))
+          (agent-repl--on-window-change))
+        ;; Assert
+        (should (equal (nreverse operations)
+                       '("elisp.panels.switch-activation" "elisp.panels.on-window-change")))))))
 
 (ert-deftest agent-repl-test-panels-switch-activation-superseded-does-nothing ()
   "A pass a later activation superseded runs nothing, even if its timer fires.
@@ -3615,8 +3693,7 @@ liveness gates the restore."
           (swapped nil))
       (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                 ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
-                ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-                ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                ((symbol-function 'agent-repl-window--unharden) #'ignore)
                 ((symbol-function 'window-deletable-p) (lambda (_w) t))
                 ((symbol-function 'window-buffer) (lambda (_w) nil))
                 ((symbol-function 'delete-window) (lambda (w) (push w deleted)))
@@ -3634,8 +3711,7 @@ liveness gates the restore."
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
-                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'agent-repl-window--unharden) #'ignore)
                     ((symbol-function 'window-deletable-p) (lambda (_w) nil))
                     ((symbol-function 'window-buffer) (lambda (_w) nil))
                     ((symbol-function 'doom-fallback-buffer) (lambda () fallback))
@@ -3655,8 +3731,7 @@ liveness gates the restore."
       (unwind-protect
           (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
                     ((symbol-function 'window-minibuffer-p) (lambda (_w) nil))
-                    ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-                    ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+                    ((symbol-function 'agent-repl-window--unharden) #'ignore)
                     ((symbol-function 'window-deletable-p) (lambda (_w) nil))
                     ((symbol-function 'window-buffer) (lambda (_w) nil))
                     ((symbol-function 'doom-fallback-buffer) (lambda () default))
@@ -3670,8 +3745,7 @@ liveness gates the restore."
   "safe-delete-window signals when a window is undeletable and no fallback exists."
   (agent-repl-test--with-clean-state
     (cl-letf (((symbol-function 'window-live-p) (lambda (_w) t))
-              ((symbol-function 'set-window-parameter) (lambda (_w _p _v) nil))
-              ((symbol-function 'set-window-dedicated-p) (lambda (_w _v) nil))
+              ((symbol-function 'agent-repl-window--unharden) #'ignore)
               ((symbol-function 'window-deletable-p) (lambda (_w) nil))
               ((symbol-function 'window-buffer) (lambda (_w) nil))
               ;; No fallback buffer available — must fail loudly, not no-op.

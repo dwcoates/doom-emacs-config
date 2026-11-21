@@ -654,6 +654,103 @@ path removes or reclaims it instead of erroring \"Window is dedicated\"."
         (kill-buffer buf)
         (kill-buffer input-buf)))))
 
+;; THE SIDEBAR IS A SIDE WINDOW, so a workspace whose saved layout kept only
+;; its composer arrives with the composer as the frame's MAIN window, beside
+;; the sidebar.  The frame is not `one-window-p' then, and deleting the
+;; composer signalled "Attempt to delete main window", aborting the switch's
+;; activation with no webview on screen (2026-11-20).
+
+(defmacro agent-repl-test-frontend--with-stale-input (side &rest body)
+  "Run BODY with ws1's dedicated composer as the frame's only main window.
+SIDE non-nil also stands a left side window beside it, as the sidebar
+stands.  BODY sees `buf' (the webview slot), `input-buf', `input-win' and
+`logged', the INFO records newest first."
+  (declare (indent 1))
+  `(agent-repl-test--with-frontend-ws "ws1" '(:project-dir "/w")
+     (let* ((buf (generate-new-buffer "*fake-webview*"))
+            (input-buf (generate-new-buffer "*agent-panel-input-ws1*"))
+            (side-buf (generate-new-buffer " *fake-sidebar*"))
+            (logged nil)
+            (wconf (current-window-configuration)))
+       (unwind-protect
+           (progn
+             (delete-other-windows)
+             (when ,side
+               (display-buffer-in-side-window side-buf '((side . left) (slot . -1))))
+             (let ((input-win (selected-window)))
+               (set-window-buffer input-win input-buf)
+               (agent-repl-window--harden input-win :dedicate t :size-fix 'height
+                                          :delete-protect t :preserve-size 'height)
+               (cl-letf (((symbol-function 'agent-repl--panels-visible-p) (lambda () nil))
+                         ((symbol-function 'agent-repl--ensure-input-buffer)
+                          (lambda (_ws) input-buf))
+                         ((symbol-function 'agent-repl--info)
+                          (agent-repl-test--record-into logged)))
+                 ,@body)))
+         (dolist (win (window-list nil 'no-minibuffer))
+           (set-window-dedicated-p win nil))
+         (set-window-configuration wconf)
+         (kill-buffer buf)
+         (kill-buffer input-buf)
+         (kill-buffer side-buf)))))
+
+(ert-deftest agent-repl-test-frontend-display-reclaims-stale-input-beside-sidebar ()
+  "A composer that is the main window beside the sidebar is reclaimed, not deleted."
+  (agent-repl-test-frontend--with-stale-input t
+    ;; Act -- must not signal "Attempt to delete main window".
+    (agent-repl--frontend-display-webview "ws1" buf)
+    ;; Assert -- the webview took the composer's window, the composer is below.
+    (should (eq (window-buffer input-win) buf))
+    (should (get-buffer-window input-buf))))
+
+(ert-deftest agent-repl-test-frontend-display-reclaimed-host-is-unhardened ()
+  "The reclaimed composer window hosts the webview as a plain window."
+  (agent-repl-test-frontend--with-stale-input t
+    ;; Act
+    (agent-repl--frontend-display-webview "ws1" buf)
+    ;; Assert
+    (should-not (window-dedicated-p input-win))
+    (should-not (window-parameter input-win 'no-delete-other-windows))
+    (should-not (window-preserved-size input-win nil))))
+
+(ert-deftest agent-repl-test-frontend-display-records-stale-input-reclaimed ()
+  "The reclaim of an undeletable composer is recorded at INFO."
+  (agent-repl-test-frontend--with-stale-input t
+    ;; Act
+    (agent-repl--frontend-display-webview "ws1" buf)
+    ;; Assert
+    (should (seq-some (lambda (text)
+                        (string-match-p "\\`elisp\\.frontend\\.display-webview-stale-input ws=ws1 window=.* outcome=reclaimed-as-host\\'" text))
+                      logged))))
+
+(ert-deftest agent-repl-test-frontend-display-deletes-deletable-stale-input ()
+  "A composer beside another main window is deleted, and that is recorded."
+  (agent-repl-test-frontend--with-stale-input nil
+    ;; Arrange -- a second main window beside the composer.
+    (split-window input-win nil 'right)
+    ;; Act
+    (agent-repl--frontend-display-webview "ws1" buf)
+    ;; Assert
+    (should-not (window-live-p input-win))
+    (should (get-buffer-window buf))
+    (should (get-buffer-window input-buf))
+    (should (seq-some (lambda (text)
+                        (string-match-p "outcome=deleted\\'" text))
+                      logged))))
+
+(ert-deftest agent-repl-test-frontend-display-asks-the-shared-deletability ()
+  "The stale-composer reclaim asks `agent-repl-window--deletable-p'.
+A hand-rolled `one-window-p' in its place is the defect this guards."
+  (agent-repl-test-frontend--with-stale-input t
+    (let ((asked nil))
+      (cl-letf* ((real (symbol-function 'agent-repl-window--deletable-p))
+                 ((symbol-function 'agent-repl-window--deletable-p)
+                  (lambda (win) (push win asked) (funcall real win))))
+        ;; Act
+        (agent-repl--frontend-display-webview "ws1" buf))
+      ;; Assert
+      (should (memq input-win asked)))))
+
 (ert-deftest agent-repl-test-frontend-display-mounts-over-foreign-dedicated-input ()
   "Mounting succeeds when a FOREIGN workspace's dedicated input window is selected.
 The real crash: `agent-repl--maybe-autoselect-input' leaves the previous
