@@ -543,7 +543,7 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 	// that skipped it would let the durable-pid invariant pass every test
 	// about it without ever being written.
 	if spec.Spawned != nil {
-		spec.Spawned(s.client.pid)
+		spec.Spawned(fakeSpawn(s.client.pid))
 	}
 	// THE TEST'S OWN HOOK SURVIVES the supervisor's deregistration: a scenario
 	// that watches the socket go when the process does arms it before the
@@ -880,7 +880,9 @@ type fleetFixture struct {
 	// which is what tells a shim that is still starting from no shim at all.
 	// Nil means every recorded pid is dead, which is what every scenario that
 	// is not about the starting window wants.
-	shimAlive func(pid int) bool
+	shimAlive func(recorded ids.ProcessIdentity) bool
+	// shimAliveErr is the kernel refusing to answer about a recorded spawn.
+	shimAliveErr error
 	// openings is every Opening a watcher was started with, in order.
 	openings []sessionwatcher.Opening
 	// openAtAttach is every watcher start's Session.OpenAtAttach, in order.
@@ -1101,7 +1103,12 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			fired <- f.now
 			return fired
 		},
-		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		ShimAlive: func(recorded ids.ProcessIdentity) (bool, error) {
+			if f.shimAliveErr != nil {
+				return false, f.shimAliveErr
+			}
+			return f.shimAlive != nil && f.shimAlive(recorded), nil
+		},
 		ShimSocketChanges: func(context.Context, string) (<-chan error, func()) {
 			return f.socketChanges, func() {}
 		},
@@ -5079,4 +5086,9 @@ func TestAStandDownClosesTheShimsOwnVerdict(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeSpawn is the identity the fake supervisor hands Spec.Spawned for PID.
+func fakeSpawn(pid int) ids.ProcessIdentity {
+	return ids.ProcessIdentity{PID: pid, StartUnixMicros: 1795284061244774}
 }

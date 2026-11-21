@@ -362,7 +362,7 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		return nil, fmt.Errorf("workspace: prelaunch %q: %w", ws, err)
 	}
 	defer release()
-	client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
+	client, err := f.spawnRecorded(ctx, log, ws, shimclient.Spec{
 		WorkspaceID:  ws,
 		WorkspaceDir: record.Dir,
 		UDSPath:      uds,
@@ -379,8 +379,7 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		LogWarningsSink: sink.WarningsFile(),
 		ForbidVendor:    f.deps.ForbidVendor,
 		// THE PRELAUNCH IS A SPAWN LIKE ANY OTHER, and it spends the same
-		// Node startup unrecorded. See Spec.Spawned.
-		Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
+		// Node startup, recorded by spawnRecorded. See Spec.Spawned.
 	})
 	if err != nil {
 		log.Error(opFleetRollout, "the inert prelaunch did not come up", dlog.Context{

@@ -622,9 +622,9 @@ func TestCloseAndReopenOwnership(t *testing.T) {
 			if err := s.ClaimServing(ctx, ws.ID, claimed); err != nil {
 				t.Fatalf("ClaimServing: %v", err)
 			}
-			pid := 63777
-			if err := s.SetSpawnedShimPID(ctx, ws.ID, &pid); err != nil {
-				t.Fatalf("SetSpawnedShimPID: %v", err)
+			spawn := ProcessIdentity{PID: 63777, StartUnixMicros: 1795284061244774}
+			if err := s.SetSpawnedShim(ctx, ws.ID, &spawn); err != nil {
+				t.Fatalf("SetSpawnedShim: %v", err)
 			}
 
 			// Act
@@ -644,8 +644,8 @@ func TestCloseAndReopenOwnership(t *testing.T) {
 			if describeOwner(owner) != describeOwner(tt.wantOwner) {
 				t.Fatalf("serving owner = %s, want %s", describeOwner(owner), describeOwner(tt.wantOwner))
 			}
-			if (got.SpawnedShimPID != nil) != tt.wantPID {
-				t.Fatalf("spawned shim pid = %v, want present=%v", got.SpawnedShimPID, tt.wantPID)
+			if (got.SpawnedShim != nil) != tt.wantPID {
+				t.Fatalf("spawned shim = %v, want present=%v", got.SpawnedShim, tt.wantPID)
 			}
 		})
 	}
@@ -1430,19 +1430,22 @@ func TestForgetWritesNothingWhenTheWorkspaceIsUnknown(t *testing.T) {
 	}
 }
 
-// TestSetSpawnedShimPIDRecordsTheForksPidWithoutASession pins the fact the
-// whole starting-shim adoption rests on: the pid is durable for a workspace
-// that has NO session row at all, which is exactly the state a registered
-// workspace is in when its first shim is forked.
-func TestSetSpawnedShimPIDRecordsTheForksPidWithoutASession(t *testing.T) {
+// testSpawn is a recorded spawn's identity.
+var testSpawn = ProcessIdentity{PID: 4242, StartUnixMicros: 1795284061244774}
+
+// TestSetSpawnedShimRecordsTheForksIdentityWithoutASession pins the fact the
+// whole starting-shim adoption rests on: the spawn is durable, pid and start
+// stamp, for a workspace that has NO session row at all, which is exactly the
+// state a registered workspace is in when its first shim is forked.
+func TestSetSpawnedShimRecordsTheForksIdentityWithoutASession(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	pid := 4242
+	spawn := testSpawn
 
 	// Act
-	if err := s.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-		t.Fatalf("SetSpawnedShimPID: %v", err)
+	if err := s.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+		t.Fatalf("SetSpawnedShim: %v", err)
 	}
 	got, err := s.Workspace(context.Background(), ws.ID)
 
@@ -1450,26 +1453,26 @@ func TestSetSpawnedShimPIDRecordsTheForksPidWithoutASession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	if got.SpawnedShimPID == nil || *got.SpawnedShimPID != pid {
-		t.Fatalf("spawned shim pid = %v, want %d", got.SpawnedShimPID, pid)
+	if got.SpawnedShim == nil || *got.SpawnedShim != testSpawn {
+		t.Fatalf("spawned shim = %v, want %v", got.SpawnedShim, testSpawn)
 	}
 }
 
-// TestSetSpawnedShimPIDClearsTheRecordedSpawn pins the retraction a stopped
-// spawn performs: a pid left behind makes the next boot wait out its whole
+// TestSetSpawnedShimClearsTheRecordedSpawn pins the retraction a stopped
+// spawn performs: a record left behind makes the next boot wait out its whole
 // adoption bound for a process that is gone.
-func TestSetSpawnedShimPIDClearsTheRecordedSpawn(t *testing.T) {
+func TestSetSpawnedShimClearsTheRecordedSpawn(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
 	ws := testWorkspace(t, s)
-	pid := 4242
-	if err := s.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-		t.Fatalf("SetSpawnedShimPID: %v", err)
+	spawn := testSpawn
+	if err := s.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+		t.Fatalf("SetSpawnedShim: %v", err)
 	}
 
 	// Act
-	if err := s.SetSpawnedShimPID(context.Background(), ws.ID, nil); err != nil {
-		t.Fatalf("SetSpawnedShimPID(nil): %v", err)
+	if err := s.SetSpawnedShim(context.Background(), ws.ID, nil); err != nil {
+		t.Fatalf("SetSpawnedShim(nil): %v", err)
 	}
 	got, err := s.Workspace(context.Background(), ws.ID)
 
@@ -1477,41 +1480,120 @@ func TestSetSpawnedShimPIDClearsTheRecordedSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Workspace: %v", err)
 	}
-	if got.SpawnedShimPID != nil {
-		t.Fatalf("spawned shim pid = %d, want nil after the spawn was stood down", *got.SpawnedShimPID)
+	if got.SpawnedShim != nil {
+		t.Fatalf("spawned shim = %v, want nil after the spawn was stood down", *got.SpawnedShim)
 	}
 }
 
-// TestSetSpawnedShimPIDRefusesANonPositivePid pins the refusal: the value is
-// handed to kill(pid, 0), where 0 and negatives address process groups.
-func TestSetSpawnedShimPIDRefusesANonPositivePid(t *testing.T) {
+// TestSetSpawnedShimRefusesANonPositivePid pins the refusal: the value is
+// handed to the kernel, where 0 and negatives address process groups.
+func TestSetSpawnedShimRefusesANonPositivePid(t *testing.T) {
 	// Arrange
-	s, _ := testStore(t)
+	s, log := testStore(t)
 	ws := testWorkspace(t, s)
-	zero := 0
+	zero := ProcessIdentity{PID: 0, StartUnixMicros: 1}
 
 	// Act
-	err := s.SetSpawnedShimPID(context.Background(), ws.ID, &zero)
+	err := s.SetSpawnedShim(context.Background(), ws.ID, &zero)
 
 	// Assert
 	if err == nil {
-		t.Fatalf("SetSpawnedShimPID accepted a non-positive pid")
+		t.Fatalf("SetSpawnedShim accepted a non-positive pid")
+	}
+	if !hasRecord(log, "error", "daemon.wsm.set_spawned_shim", "refused a non-positive spawned shim pid") {
+		t.Fatalf("no refusal record; records: %v", log.Records())
+	}
+	got, readErr := s.Workspace(context.Background(), ws.ID)
+	if readErr != nil || got.SpawnedShim != nil {
+		t.Fatalf("spawned shim = %v (%v), want none written", got.SpawnedShim, readErr)
 	}
 }
 
-// TestSetSpawnedShimPIDRefusesAnUnknownWorkspace pins that a write matching no
+// TestSetSpawnedShimRefusesAnUnknownWorkspace pins that a write matching no
 // row is a refusal rather than a silent success.
-func TestSetSpawnedShimPIDRefusesAnUnknownWorkspace(t *testing.T) {
+func TestSetSpawnedShimRefusesAnUnknownWorkspace(t *testing.T) {
 	// Arrange
 	s, _ := testStore(t)
-	pid := 4242
+	spawn := testSpawn
 
 	// Act
-	err := s.SetSpawnedShimPID(context.Background(), WorkspaceID("no-such-workspace"), &pid)
+	err := s.SetSpawnedShim(context.Background(), WorkspaceID("no-such-workspace"), &spawn)
 
 	// Assert
 	if !errors.Is(err, ErrNotFound) {
-		t.Fatalf("SetSpawnedShimPID on an unknown workspace = %v, want ErrNotFound", err)
+		t.Fatalf("SetSpawnedShim on an unknown workspace = %v, want ErrNotFound", err)
+	}
+}
+
+// TestRetireSpawnedShim pins the retirement at the shim's announcement: the
+// record is cleared only while it still names the announcing spawn, so a
+// record another spawn wrote since is that spawn's and stands.
+func TestRetireSpawnedShim(t *testing.T) {
+	other := ProcessIdentity{PID: testSpawn.PID, StartUnixMicros: testSpawn.StartUnixMicros + 1}
+	tests := []struct {
+		name        string
+		recorded    *ProcessIdentity
+		retire      ProcessIdentity
+		wantRetired bool
+		wantLeft    *ProcessIdentity
+	}{
+		{name: "the announcing spawn's own record is retired", recorded: &testSpawn, retire: testSpawn,
+			wantRetired: true, wantLeft: nil},
+		{name: "a record of the same pid with another stamp stands", recorded: &other, retire: testSpawn,
+			wantRetired: false, wantLeft: &other},
+		{name: "no record retires nothing", recorded: nil, retire: testSpawn,
+			wantRetired: false, wantLeft: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			ctx := context.Background()
+			s, _ := testStore(t)
+			ws := testWorkspace(t, s)
+			if err := s.SetSpawnedShim(ctx, ws.ID, tt.recorded); err != nil {
+				t.Fatalf("SetSpawnedShim: %v", err)
+			}
+
+			// Act
+			retired, err := s.RetireSpawnedShim(ctx, ws.ID, tt.retire)
+
+			// Assert
+			if err != nil {
+				t.Fatalf("RetireSpawnedShim: %v", err)
+			}
+			if retired != tt.wantRetired {
+				t.Fatalf("retired = %v, want %v", retired, tt.wantRetired)
+			}
+			got, err := s.Workspace(ctx, ws.ID)
+			if err != nil {
+				t.Fatalf("Workspace: %v", err)
+			}
+			if (got.SpawnedShim == nil) != (tt.wantLeft == nil) || (got.SpawnedShim != nil && *got.SpawnedShim != *tt.wantLeft) {
+				t.Fatalf("spawned shim left = %v, want %v", got.SpawnedShim, tt.wantLeft)
+			}
+		})
+	}
+}
+
+// TestWorkspaceReadsAPidWithNoStartStampAsNoSpawn pins the read of a record a
+// build that kept no stamp wrote: its pid names no process this build can
+// tell from a reused pid, so it is no spawn (2026-11-21: such a pid named a
+// root daemon and the workspace waited on it forever).
+func TestWorkspaceReadsAPidWithNoStartStampAsNoSpawn(t *testing.T) {
+	// Arrange
+	s, _ := testStore(t)
+	ws := testWorkspace(t, s)
+	corrupt(t, s, `UPDATE workspaces SET spawned_shim_pid = 57583, spawned_shim_start = NULL WHERE id = ?`, ws.ID)
+
+	// Act
+	got, err := s.Workspace(context.Background(), ws.ID)
+
+	// Assert
+	if err != nil {
+		t.Fatalf("Workspace: %v", err)
+	}
+	if got.SpawnedShim != nil {
+		t.Fatalf("spawned shim = %v, want none for a pid with no start stamp", *got.SpawnedShim)
 	}
 }
 

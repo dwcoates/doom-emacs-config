@@ -1156,7 +1156,7 @@ func TestTheSpawnGateOpensOnlyOnceThePidIsRecorded(t *testing.T) {
 	f, uds := startFakeShim(t, dir)
 	spec, sink := newTestSpec(t, dir, uds, helperIdle)
 	var reportedBeforeRecorded error
-	spec.Spawned = func(int) {
+	spec.Spawned = func(ids.ProcessIdentity) {
 		if err := sink.r.SetReadDeadline(time.Now()); err != nil {
 			reportedBeforeRecorded = err
 			return

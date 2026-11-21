@@ -17,6 +17,7 @@ import (
 	"agent-repld/internal/envc"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/inflight"
+	"agent-repld/internal/startingshim"
 )
 
 // The spawn environment's own names, beside envc's four contracts. They are
@@ -437,8 +438,18 @@ func (s *supervisor) Spawn(ctx context.Context, spec Spec) (Client, error) {
 	// THE PID IS HANDED OUT BEFORE ANYTHING BLOCKS. The bring-up below is
 	// where this call spends its ~110ms of Node startup, and a daemon that
 	// dies inside it has left a shim nothing durable names. See Spec.Spawned.
+	//
+	// THE IDENTITY IS READ WHILE THE CHILD IS UNREAPED: no reaper runs before
+	// openGate, so the pid cannot have passed to another process yet, and the
+	// stamp read is this shim's own.
 	if spec.Spawned != nil {
-		spec.Spawned(cmd.Process.Pid)
+		if spawn, err := startingshim.Identify(cmd.Process.Pid); err != nil {
+			log.Error("daemon.shimclient.spawn", "could not read the spawned shim's identity; the spawn is recorded nowhere, so a successor cannot tell this shim from none", dlog.Context{
+				"pid": cmd.Process.Pid, "uds": spec.UDSPath, "error": err.Error(),
+			})
+		} else {
+			spec.Spawned(spawn)
+		}
 	}
 	openGate(log, opener, cmd.Process.Pid)
 	inflight.Standing(func() { c.reap() })

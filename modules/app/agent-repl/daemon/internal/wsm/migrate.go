@@ -352,6 +352,7 @@ var migrations = []migration{
 	// delivered on arrival moved into it (moveArrivalHolds), which the
 	// successor's boot delivers.
 	{To: 187, Name: "arrival_waits", Kind: MigrationAdditive, DDL: arrivalWaitsDDL, Rewrite: moveArrivalHolds},
+	{To: 188, Name: "workspaces_spawned_shim_start", Kind: MigrationAdditive, DDL: spawnedShimStartDDL},
 }
 
 // mergeQueueLookupIndexesDDL keys the two lookups every workspace read makes
@@ -560,6 +561,16 @@ ALTER TABLE workspaces ADD COLUMN last_activity_at INTEGER;
 // cleared value means.
 const spawnedShimPidDDL = `
 ALTER TABLE workspaces ADD COLUMN spawned_shim_pid INTEGER;
+`
+
+// spawnedShimStartDDL adds the kernel start stamp of the recorded spawn, so
+// the pid beside it names that one process and never whichever process the
+// kernel hands the number to after it exits (2026-11-21: a recorded shim pid
+// named AppleCredentialManagerDaemon, and the workspace waited on it forever).
+// A pid written before this column, or by a build that writes none, has no
+// stamp and is read as no spawn (wsm.Workspace.SpawnedShim).
+const spawnedShimStartDDL = `
+ALTER TABLE workspaces ADD COLUMN spawned_shim_start INTEGER;
 `
 
 // sessionsSelectedConfigDirDDL adds the root the USER CHOSE for a workspace.

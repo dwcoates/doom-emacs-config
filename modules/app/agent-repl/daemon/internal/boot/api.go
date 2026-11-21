@@ -331,9 +331,9 @@ type Deps struct {
 	// itself on its socket; nil means startingshim.SystemClock. It is a field
 	// so a test of that wait drives time rather than sleeping through it.
 	Clock startingshim.Clock
-	// ShimAlive reports whether a recorded spawned pid names a live process;
-	// nil means startingshim.Alive, which is kill(pid, 0).
-	ShimAlive func(pid int) bool
+	// ShimAlive reports whether a recorded spawn's process still runs; nil
+	// means startingshim.Alive, which compares the pid's kernel start stamp.
+	ShimAlive func(recorded ids.ProcessIdentity) (bool, error)
 	// ShimSocketChanges follows a shim socket's directory while a recorded
 	// spawn is awaited, and ShimExit waits for that spawn's exit; nil is the
 	// kernel's own report (startingshim.Waiter).

@@ -273,9 +273,9 @@ type FleetDeps struct {
 	// itself on its socket. Nil means startingshim.SystemClock; it is a field
 	// so a test of that wait drives time rather than sleeping through it.
 	Clock startingshim.Clock
-	// ShimAlive reports whether a recorded spawned pid names a live process.
-	// Nil means startingshim.Alive, which is kill(pid, 0).
-	ShimAlive func(pid int) bool
+	// ShimAlive reports whether a recorded spawn's process still runs. Nil
+	// means startingshim.Alive, which compares the pid's kernel start stamp.
+	ShimAlive func(recorded ids.ProcessIdentity) (bool, error)
 	// ShimSocketChanges follows a shim socket's directory while a recorded
 	// spawn is awaited, and ShimExit waits for that spawn's exit; nil is the
 	// kernel's own report (startingshim.Waiter).
@@ -2372,7 +2372,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			f.noteStartFailed(ctx, log, ws, err)
 			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
 		}
-		client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
+		client, err := f.spawnRecorded(ctx, log, ws, shimclient.Spec{
 			WorkspaceID:     ws,
 			WorkspaceDir:    dir,
 			UDSPath:         udsPath,
@@ -2386,10 +2386,10 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			LogSink:         sink.File(),
 			LogWarningsSink: sink.WarningsFile(),
 			ForbidVendor:    f.deps.ForbidVendor,
-			// THE PID IS DURABLE FROM THE FORK. Spawn blocks until the shim
-			// has bound and answered; a daemon killed inside that window
-			// leaves a shim its successor cannot tell from no shim at all.
-			Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
+			// THE SPAWN IS DURABLE FROM THE FORK (spawnRecorded). Spawn blocks
+			// until the shim has bound and answered; a daemon killed inside
+			// that window leaves a shim its successor cannot tell from no
+			// shim at all.
 		})
 		release()
 		if errors.Is(err, shimclient.ErrStandingDown) {

@@ -414,13 +414,16 @@ type fakeDB struct {
 	// after a close.
 	dbOpened int
 
-	// spawnedPIDs records every SetSpawnedShimPID in order, nil for a clear,
-	// so a test can pin that the fork's pid was made durable and that a failed
-	// start retracted it. The workspace row is updated with it, which is what
-	// the starting-survivor probe reads back.
-	spawnedPIDs []*int
-	// spawnedPIDErr fails the write, which the fake's own map cannot.
-	spawnedPIDErr error
+	// spawnWrites records every SetSpawnedShim and RetireSpawnedShim in
+	// order ("recorded <pid>", "cleared", "retired <pid>"), so a test can pin
+	// that the fork's spawn was made durable and when it was retired. The
+	// workspace row is updated with it, which is what the starting-survivor
+	// probe reads back.
+	spawnWrites []string
+	// spawnedErr fails SetSpawnedShim, and retireErr RetireSpawnedShim,
+	// which the fake's own map cannot.
+	spawnedErr error
+	retireErr  error
 
 	// claims records every ClaimServing in order, and claimErr fails the
 	// write, which the fake's own slice cannot.
@@ -510,18 +513,36 @@ func (d *fakeDB) Serving(_ context.Context, id ids.WorkspaceID) (*ids.InstanceID
 	return nil, nil
 }
 
-func (d *fakeDB) SetSpawnedShimPID(_ context.Context, id ids.WorkspaceID, pid *int) error {
-	if d.spawnedPIDErr != nil {
-		return d.spawnedPIDErr
+func (d *fakeDB) SetSpawnedShim(_ context.Context, id ids.WorkspaceID, spawn *ids.ProcessIdentity) error {
+	if d.spawnedErr != nil {
+		return d.spawnedErr
 	}
-	d.spawnedPIDs = append(d.spawnedPIDs, pid)
 	ws, ok := d.workspaces[id]
 	if !ok {
 		return errors.New("no such workspace")
 	}
-	ws.SpawnedShimPID = pid
+	if spawn == nil {
+		d.spawnWrites = append(d.spawnWrites, "cleared")
+	} else {
+		d.spawnWrites = append(d.spawnWrites, fmt.Sprintf("recorded %d", spawn.PID))
+	}
+	ws.SpawnedShim = spawn
 	d.workspaces[id] = ws
 	return nil
+}
+
+func (d *fakeDB) RetireSpawnedShim(_ context.Context, id ids.WorkspaceID, spawn ids.ProcessIdentity) (bool, error) {
+	if d.retireErr != nil {
+		return false, d.retireErr
+	}
+	ws, ok := d.workspaces[id]
+	if !ok || ws.SpawnedShim == nil || *ws.SpawnedShim != spawn {
+		return false, nil
+	}
+	d.spawnWrites = append(d.spawnWrites, fmt.Sprintf("retired %d", spawn.PID))
+	ws.SpawnedShim = nil
+	d.workspaces[id] = ws
+	return true, nil
 }
 
 func (d *fakeDB) OpenFault(_ context.Context, f wsm.Fault) (ids.FaultID, error) {
