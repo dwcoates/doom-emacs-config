@@ -612,21 +612,22 @@ func TestAnUndeclaredOffQueueCausePanics(t *testing.T) {
 // name, with its value: the table TestEveryExitCauseKeepsOrEndsItsRequest
 // classifies.
 var exitCauses = map[string]string{
-	"CauseUserDrop":           string(CauseUserDrop),
-	"CauseUserDequeue":        string(CauseUserDequeue),
-	"CauseWorkspaceClosed":    string(CauseWorkspaceClosed),
-	"CauseDaemonShutdown":     string(CauseDaemonShutdown),
-	"CauseAheadDidNotLand":    string(CauseAheadDidNotLand),
-	"CauseAgentGaveUp":        string(CauseAgentGaveUp),
-	"causeMerged":             causeMerged,
-	"causeFailed":             causeFailed,
-	"causeRestartFailed":      causeRestartFailed,
-	"causeRestartResume":      causeRestartResume,
-	"causePickFailed":         causePickFailed,
-	"causeDetachedForkFailed": causeDetachedForkFailed,
-	"causeFinishFailed":       causeFinishFailed,
-	"CauseColdGate":           string(CauseColdGate),
-	"CauseHiddenAtColdGate":   string(CauseHiddenAtColdGate),
+	"CauseUserDrop":             string(CauseUserDrop),
+	"CauseUserDequeue":          string(CauseUserDequeue),
+	"CauseWorkspaceClosed":      string(CauseWorkspaceClosed),
+	"CauseDaemonShutdown":       string(CauseDaemonShutdown),
+	"CauseAheadDidNotLand":      string(CauseAheadDidNotLand),
+	"CauseAgentGaveUp":          string(CauseAgentGaveUp),
+	"causeMerged":               causeMerged,
+	"causeFailed":               causeFailed,
+	"causeRestartFailed":        causeRestartFailed,
+	"causeRestartResume":        causeRestartResume,
+	"causePickFailed":           causePickFailed,
+	"causeDetachedForkFailed":   causeDetachedForkFailed,
+	"causeFinishFailed":         causeFinishFailed,
+	"CauseColdGate":             string(CauseColdGate),
+	"CauseHiddenAtColdGate":     string(CauseHiddenAtColdGate),
+	"CauseColdGateAnswerFailed": string(CauseColdGateAnswerFailed),
 }
 
 // notQueueExits are the causes that never take a queue row off: an async
