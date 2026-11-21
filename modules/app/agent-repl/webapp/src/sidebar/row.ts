@@ -28,7 +28,7 @@
 import { addRowMemory, showRowMemory } from "./memory.js";
 import { createControl } from "../control.js";
 import { renameOnDoubleClick } from "./rename.js";
-import { wireChildrenFold } from "./children-fold.js";
+import { swallowChildlessMarkClick, wireChildrenFold } from "./children-fold.js";
 import { drawChildCount } from "./child-count.js";
 import { pathedFamilies, type RowFamily, type RowKin } from "./family.js";
 import type {
@@ -419,6 +419,9 @@ export function drawRosterRow(
   // hides the whole `.kids` box, so a block's rows fold with the rest.
   if (childrenFold !== undefined && statusMark !== undefined) {
     wireChildrenFold(ws, statusMark, sc, workspace, childrenFold, `${familyPath}.childrenFold`);
+  } else if (statusMark !== undefined) {
+    // A row with no children has nothing to fold, and the mark never selects.
+    swallowChildlessMarkClick(statusMark);
   }
   return ws;
 }
