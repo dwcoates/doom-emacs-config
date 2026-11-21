@@ -888,6 +888,71 @@ alone.  Returns the composer window when it took the keyboard, else nil."
       (agent-repl--info ws "elisp.input.focus-for-reply ws=%s outcome=focused window=%S" ws win)
       win)))
 
+;;;; ---- A highlight in a response sets the draft aside ----
+;;
+;; WORDS HIGHLIGHTED IN A RESPONSE make the next prompt about them, so the
+;; composer is cleared for that prompt: what it held is saved to history as
+;; the discard saves it (`agent-repl--input-set-aside') and kept here.  The
+;; next composer send the daemon accepts puts it back
+;; (`agent-repl--input-accepted'), and the history item the set-aside added
+;; is taken out of the ring, since the draft is in the composer again.  A
+;; highlight while a draft is already set aside leaves the composer alone:
+;; what it holds is the reply being written to the highlight.
+
+(defvar-local agent-repl--input-highlight-draft nil
+  "The draft a highlight set aside, as `agent-repl--input-set-aside' answered it.
+Nil when no draft is set aside.")
+
+(defun agent-repl-input-text-highlighted (ws)
+  "Set WS's composer draft aside: the reader highlighted words in a response.
+A workspace with no composer has nothing to set aside, and a draft already
+set aside is kept (see the commentary above).  Every outcome is recorded
+at INFO."
+  (let ((buf (agent-repl--input-buffer ws)))
+    (cond
+     ((null buf)
+      (agent-repl--info ws "elisp.input.text-highlighted ws=%s outcome=no-composer" ws))
+     ((buffer-local-value 'agent-repl--input-highlight-draft buf)
+      (agent-repl--info ws "elisp.input.text-highlighted ws=%s outcome=draft-already-aside" ws))
+     (t
+      (with-current-buffer buf
+        (setq agent-repl--input-highlight-draft (agent-repl--input-set-aside ws))
+        (agent-repl--info ws "elisp.input.text-highlighted ws=%s outcome=%s draft-len=%d entry=%s"
+                          ws (if agent-repl--input-highlight-draft 'set-aside 'empty)
+                          (length (plist-get agent-repl--input-highlight-draft :text))
+                          (and (plist-get agent-repl--input-highlight-draft :entry) t)))))))
+
+(defun agent-repl--input-restore-highlight-draft (ws)
+  "Put WS's draft a highlight set aside back in its composer, after a send.
+Run when the daemon accepts a prompt sent from the composer.  The history
+item the set-aside added is removed from the ring and the ring persisted.
+A composer the reader has typed into since the send keeps its words: the
+draft is let go, still in history.  Answers `restored', `composer-busy',
+or nil when nothing was set aside or WS has no composer."
+  (let* ((buf (agent-repl--input-buffer ws))
+         (draft (and buf (buffer-local-value 'agent-repl--input-highlight-draft buf))))
+    (when draft
+      (with-current-buffer buf
+        (setq agent-repl--input-highlight-draft nil)
+        (if (not (string-empty-p (buffer-string)))
+            (progn
+              (agent-repl--info ws "elisp.input.highlight-draft ws=%s outcome=composer-busy composer-len=%d"
+                                ws (buffer-size))
+              'composer-busy)
+          (insert (plist-get draft :text))
+          (dolist (win (get-buffer-window-list buf nil t))
+            (set-window-point win (point-max)))
+          (let ((entry (plist-get draft :entry)))
+            (when entry
+              (setq agent-repl--input-history (delq entry agent-repl--input-history))
+              (when (eq agent-repl--history-discard-entry entry)
+                (setq agent-repl--history-discard-entry nil))
+              (agent-repl--history-reset)
+              (agent-repl--history-save ws))
+            (agent-repl--info ws "elisp.input.highlight-draft ws=%s outcome=restored draft-len=%d entry-removed=%s"
+                              ws (buffer-size) (and entry t)))
+          'restored)))))
+
 ;;;; ---- A question about a final response ----
 ;;
 ;; A FINAL RESPONSE'S QUESTION-MARK CONTROL in the webview toggles the
@@ -923,6 +988,24 @@ Kept with its text properties, so an image in the draft comes back too.")
   (let ((buf (agent-repl--input-buffer ws)))
     (and buf (buffer-local-value 'agent-repl--input-question-standing buf))))
 
+(defun agent-repl--input-set-aside (ws)
+  "Set the current composer's contents aside for WS, and answer what was set.
+THE ONE SET-ASIDE a composer makes when something else takes it over: the
+contents are saved to WS's history as the discard saves them
+\(`agent-repl--input-save-to-history' with DISCARD, so the up arrow brings
+them back) and erased.  Answers nil over a blank composer, else the plist
+\(:text TEXT :entry ENTRY): TEXT is the contents with their text
+properties, so an image comes back too, and ENTRY is the very history item
+the save added, or nil when it added none (the words were already the
+ring's head)."
+  (let ((draft (unless (string-blank-p (buffer-string)) (buffer-string))))
+    (agent-repl--input-save-to-history ws t)
+    (erase-buffer)
+    (when draft
+      (list :text draft
+            :entry (and (eq (car agent-repl--input-history) agent-repl--history-discard-entry)
+                        (car agent-repl--input-history))))))
+
 (defun agent-repl-input-response-question (ws change)
   "Follow CHANGE of WS's question about a final response in its composer.
 CHANGE is the host push's arm: `:asked', `:moved', `:withdrawn' or `:taken'
@@ -937,11 +1020,9 @@ is a broken decoder, and is fatal."
       (with-current-buffer buf
         (pcase change
           (:asked
-           (let ((draft (unless (string-blank-p (buffer-string)) (buffer-string))))
-             (agent-repl--input-save-to-history ws t)
-             (erase-buffer)
-             (setq agent-repl--input-question-draft draft
-                   agent-repl--input-question-standing t)))
+           (setq agent-repl--input-question-draft
+                 (plist-get (agent-repl--input-set-aside ws) :text)
+                 agent-repl--input-question-standing t))
           (:moved
            (setq agent-repl--input-question-standing t))
           (:withdrawn
@@ -2002,7 +2083,9 @@ images with it), pushed it to history, reset the position and saved the
 ring at dispatch time (owner ruling: a from-buffer
 submit clears and records on return regardless of the ack).  Re-doing any
 of it here would double-push history or error on the already-empty
-composer, so the accept path for a from-buffer submission is purely a log.
+composer, so the accept path for a from-buffer submission only logs and
+puts back a draft a highlight set aside
+\(`agent-repl--input-restore-highlight-draft').
 
 For a NON-from-buffer accept -- a canned command send
 (`agent-repl-update-pr\=' and every other explicit-TEXT site), a
@@ -2016,8 +2099,10 @@ history POSITION is left where it was, because a surviving draft keeps its
 navigation state.  The draft's images stay in it too: a caller-composed
 prompt never carried them."
   (if from-buffer
-      (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d from-buffer=t (optimistic clear already applied at dispatch)"
-                       ws arm (length raw))
+      (progn
+        (agent-repl--log ws "elisp.input.accepted ws=%s arm=%S raw-len=%d from-buffer=t (optimistic clear already applied at dispatch)"
+                         ws arm (length raw))
+        (agent-repl--input-restore-highlight-draft ws))
     (let ((buf (agent-repl--input-buffer ws)))
       (when buf
         (with-current-buffer buf

@@ -105,6 +105,7 @@
 
 (declare-function agent-repl--notification-activate "notifications" (ws))
 (declare-function agent-repl-input-focus-for-reply "input" (ws))
+(declare-function agent-repl-input-text-highlighted "input" (ws))
 (declare-function agent-repl-input-compose-entry "input" (ws label))
 (declare-function agent-repl-input-response-question "input" (ws change))
 
@@ -1781,9 +1782,13 @@ click (`final-response-clicked'), words highlighted in a chat answer
 \(`chat-text-highlighted') or in a final response
 \(`response-text-highlighted').  Each way the next prompt answers the pick
 and the keyboard is still in the webview, so the composer takes it in
-insert state (`agent-repl-input-focus-for-reply').  Both are events,
-never replayed, so a reconnect never moves the keyboard."
+insert state (`agent-repl-input-focus-for-reply').  A highlight first
+sets the composer's draft aside for the prompt about it
+\(`agent-repl-input-text-highlighted').  All are events, never replayed,
+so a reconnect never moves the keyboard or clears the composer."
   (agent-repl--info ws "elisp.host.%s ws=%s" event ws)
+  (when (member event '("chat-text-highlighted" "response-text-highlighted"))
+    (agent-repl-input-text-highlighted ws))
   (agent-repl-input-focus-for-reply ws))
 
 (defun agent-repl-host--response-question (ws change)
