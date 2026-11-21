@@ -41,6 +41,18 @@ type SubsectionID string
 // FaultID identifies one recorded fault.
 type FaultID string
 
+// ProcessIdentity names ONE process across pid reuse: its pid and the
+// kernel's start stamp for it (procmetrics.Identity.StartUnixMicros). A pid
+// alone names whichever process holds the number now, and the kernel hands a
+// freed number to the next process it starts: a pid recorded for a shim read
+// back hours later once named an unrelated root daemon (2026-11-21). The
+// stamp is compared for equality only; a process the same pid names with any
+// other stamp is not the one recorded.
+type ProcessIdentity struct {
+	PID             int
+	StartUnixMicros int64
+}
+
 // Optional spells an optional id for a record or a log field: the id, or
 // empty for none.
 func Optional[ID ~string](id *ID) string {

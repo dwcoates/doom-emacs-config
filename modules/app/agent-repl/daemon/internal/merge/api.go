@@ -244,6 +244,12 @@ type Orchestrator interface {
 	// returns at once; the edges of every gate are applied in the order they
 	// were told.
 	ColdGateRaised(ws ids.WorkspaceID)
+	// ColdGateStoodAfterFailedAnswer is told WS's cold gate stood again
+	// because an answer to it was refused or its re-open failed. Its merge is
+	// kept at its place as at any raise, and THE QUEUE NEVER ANSWERS THE GATE
+	// AGAIN: answered again, it failed again and stood again every 10s
+	// (2026-11-21). The gate stands for the user, said at ERROR.
+	ColdGateStoodAfterFailedAnswer(ws ids.WorkspaceID)
 	// ColdGateRetired is told WS's recorded cold gate was retired (a session
 	// came up): its merge resumes at its place in line.
 	ColdGateRetired(ws ids.WorkspaceID)

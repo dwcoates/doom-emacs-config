@@ -50,7 +50,6 @@ import (
 	"agent-repld/internal/heldingress"
 	"agent-repld/internal/ids"
 	"agent-repld/internal/imageorigin"
-	"agent-repld/internal/inflight"
 	"agent-repld/internal/lifecycleconfig"
 	"agent-repld/internal/lockwatch"
 	"agent-repld/internal/login"
@@ -1018,24 +1017,19 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		// A PROMPT TYPED ON claude.ai INTO A PARKED WORKSPACE answers its
 		// cold gate through the verb the editor's answer takes.
 		PayColdGate: verbsRef.answerColdGate,
-		ColdGateRaised: func(ws ids.WorkspaceID, judged bool) {
-			cacheKeeper.ColdGateRaised(ws, judged)
-			// A GATE A SHIM JUDGED JUST NOW IS NEWS to the workspace's
-			// followers; one raised again from its record is not.
-			if judged {
-				edges.ColdGated(ws)
-			}
-			if queue := coldGates; queue != nil {
-				queue.ColdGateRaised(ws)
-			}
-			// A GATE ON A STANDING DEPLOY CHECK IS ANSWERED AT ONCE, off the
-			// raise (owner ruling, 2026-11-17): no deploy check waits on one.
-			inflight.Go(func() {
-				if err := verbsRef.answerDeployCheckColdGate(context.Background(), ws); err != nil {
-					log.Error("daemon.workspace.deploy_checks", "the cold gate on a standing deploy check could not be answered", dlog.Context{"workspace": string(ws), "cause": err.Error()})
+		ColdGateRaised: coldGateRaiseSinks{
+			cache:     cacheKeeper.ColdGateRaised,
+			followers: edges.ColdGated,
+			queue: func() coldGateQueue {
+				if coldGates == nil {
+					return nil
 				}
-			})
-		},
+				return coldGates
+			},
+			answerDeployCheck: verbsRef.answerDeployCheckColdGate,
+			detach:            detachInflight,
+			log:               log,
+		}.raised,
 		ColdGateRetired: func(ws ids.WorkspaceID) {
 			if queue := coldGates; queue != nil {
 				queue.ColdGateRetired(ws)

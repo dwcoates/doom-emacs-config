@@ -2188,11 +2188,11 @@ func TestABootWaitsForAShimItsPredecessorSpawned(t *testing.T) {
 			h = newHarness(t, func(deps *Deps, harn *harness) {
 				h = harn
 				deps.Clock = &bootStepClock{now: instant}
-				deps.ShimAlive = func(pid int) bool {
-					if pid != recordedPID {
-						t.Fatalf("liveness asked about pid %d, want the recorded %d", pid, recordedPID)
+				deps.ShimAlive = func(recorded ids.ProcessIdentity) (bool, error) {
+					if recorded != recordedSpawn(recordedPID) {
+						t.Fatalf("liveness asked about %v, want the recorded %v", recorded, recordedSpawn(recordedPID))
 					}
-					return tt.alive
+					return tt.alive, nil
 				}
 				deps.AdoptBound = 200 * time.Millisecond
 			})
@@ -2207,9 +2207,9 @@ func TestABootWaitsForAShimItsPredecessorSpawned(t *testing.T) {
 				h.seq = seq
 			}
 			if tt.recordPID {
-				pid := recordedPID
-				if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-					t.Fatalf("SetSpawnedShimPID: %v", err)
+				spawn := recordedSpawn(recordedPID)
+				if err := h.db.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+					t.Fatalf("SetSpawnedShim: %v", err)
 				}
 			}
 
@@ -2243,7 +2243,7 @@ func TestAnAnnouncedStartingShimIsAdoptedAsTheInertSurvivorItIs(t *testing.T) {
 	h = newHarness(t, func(deps *Deps, harn *harness) {
 		h = harn
 		deps.Clock = &bootStepClock{now: instant}
-		deps.ShimAlive = func(int) bool { return true }
+		deps.ShimAlive = func(ids.ProcessIdentity) (bool, error) { return true, nil }
 		deps.AdoptBound = 200 * time.Millisecond
 	})
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
@@ -2254,9 +2254,9 @@ func TestAnAnnouncedStartingShimIsAdoptedAsTheInertSurvivorItIs(t *testing.T) {
 		t.Fatalf("boot.New: %v", err)
 	}
 	h.seq = seq
-	pid := recordedPID
-	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-		t.Fatalf("SetSpawnedShimPID: %v", err)
+	spawn := recordedSpawn(recordedPID)
+	if err := h.db.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+		t.Fatalf("SetSpawnedShim: %v", err)
 	}
 
 	// Act.
@@ -2288,7 +2288,7 @@ func TestAnInertSurvivorsHoldsAreSettledAfterItsCarriedGateStands(t *testing.T) 
 	h = newHarness(t, func(deps *Deps, harn *harness) {
 		h = harn
 		deps.Clock = &bootStepClock{now: instant}
-		deps.ShimAlive = func(int) bool { return true }
+		deps.ShimAlive = func(ids.ProcessIdentity) (bool, error) { return true, nil }
 		deps.AdoptBound = 200 * time.Millisecond
 	})
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
@@ -2299,9 +2299,9 @@ func TestAnInertSurvivorsHoldsAreSettledAfterItsCarriedGateStands(t *testing.T) 
 		t.Fatalf("boot.New: %v", err)
 	}
 	h.seq = seq
-	pid := recordedPID
-	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-		t.Fatalf("SetSpawnedShimPID: %v", err)
+	spawn := recordedSpawn(recordedPID)
+	if err := h.db.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+		t.Fatalf("SetSpawnedShim: %v", err)
 	}
 	settledAtTakeUp := -1
 	h.rollout.onTakeUp = func() {
@@ -2333,13 +2333,13 @@ func TestAStartingShimThatNeverAnnouncesItselfIsRecordedAtError(t *testing.T) {
 	h = newHarness(t, func(deps *Deps, harn *harness) {
 		h = harn
 		deps.Clock = &bootStepClock{now: instant}
-		deps.ShimAlive = func(int) bool { return true }
+		deps.ShimAlive = func(ids.ProcessIdentity) (bool, error) { return true, nil }
 		deps.AdoptBound = 200 * time.Millisecond
 	})
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
-	pid := 4242
-	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-		t.Fatalf("SetSpawnedShimPID: %v", err)
+	spawn := recordedSpawn(4242)
+	if err := h.db.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+		t.Fatalf("SetSpawnedShim: %v", err)
 	}
 
 	// Act.
@@ -2362,7 +2362,7 @@ func TestAWaitedStartingShimIsAnnouncedAtInfo(t *testing.T) {
 	h = newHarness(t, func(deps *Deps, harn *harness) {
 		h = harn
 		deps.Clock = &bootStepClock{now: instant}
-		deps.ShimAlive = func(int) bool { return true }
+		deps.ShimAlive = func(ids.ProcessIdentity) (bool, error) { return true, nil }
 		deps.AdoptBound = 200 * time.Millisecond
 	})
 	ws := h.register(t, t.TempDir(), sessionlock.StateFree)
@@ -2372,9 +2372,9 @@ func TestAWaitedStartingShimIsAnnouncedAtInfo(t *testing.T) {
 		t.Fatalf("boot.New: %v", err)
 	}
 	h.seq = seq
-	pid := 4242
-	if err := h.db.SetSpawnedShimPID(context.Background(), ws.ID, &pid); err != nil {
-		t.Fatalf("SetSpawnedShimPID: %v", err)
+	spawn := recordedSpawn(4242)
+	if err := h.db.SetSpawnedShim(context.Background(), ws.ID, &spawn); err != nil {
+		t.Fatalf("SetSpawnedShim: %v", err)
 	}
 
 	// Act.
@@ -3021,4 +3021,9 @@ func TestNewRefusesASequenceWithNoOwedNukeFinisher(t *testing.T) {
 	if err == nil {
 		t.Fatalf("New accepted a sequence that cannot finish the owed nukes")
 	}
+}
+
+// recordedSpawn is the identity a spawn records for PID.
+func recordedSpawn(pid int) ids.ProcessIdentity {
+	return ids.ProcessIdentity{PID: pid, StartUnixMicros: 1795284061244774}
 }

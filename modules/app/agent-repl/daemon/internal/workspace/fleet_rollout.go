@@ -362,7 +362,7 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		return nil, fmt.Errorf("workspace: prelaunch %q: %w", ws, err)
 	}
 	defer release()
-	client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
+	client, err := f.spawnRecorded(ctx, log, ws, shimclient.Spec{
 		WorkspaceID:  ws,
 		WorkspaceDir: record.Dir,
 		UDSPath:      uds,
@@ -379,8 +379,7 @@ func (f *Fleet) Prelaunch(ctx context.Context, ws ids.WorkspaceID) (shimclient.C
 		LogWarningsSink: sink.WarningsFile(),
 		ForbidVendor:    f.deps.ForbidVendor,
 		// THE PRELAUNCH IS A SPAWN LIKE ANY OTHER, and it spends the same
-		// Node startup unrecorded. See Spec.Spawned.
-		Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
+		// Node startup, recorded by spawnRecorded. See Spec.Spawned.
 	})
 	if err != nil {
 		log.Error(opFleetRollout, "the inert prelaunch did not come up", dlog.Context{
@@ -1286,7 +1285,7 @@ func (f *Fleet) standCarriedColdGate(ws ids.WorkspaceID, vendorSessionID string,
 	f.deps.Sinks.Footer.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Topbar.OnLink(ws, shimclient.LinkConnected)
 	f.deps.Sinks.Sidebar.OnLink(ws, shimclient.LinkConnected)
-	f.raiseColdGate(ws, vendorSessionID, cold, configDir, false)
+	f.raiseColdGate(ws, vendorSessionID, cold, configDir, RaiseStanding)
 	f.publishHost(ws)
 }
 
@@ -1343,7 +1342,7 @@ func (f *Fleet) RaiseColdGate(_ context.Context, ws ids.WorkspaceID, cold *conve
 	}
 	// The relaunched shim was spawned under spawnRootFor (Prelaunch), so the
 	// gate serves that account's menu.
-	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session), true)
+	f.raiseColdGate(ws, session.VendorSessionID, cold, spawnRootFor(f.deps.Accounts, record.Dir, session), RaiseJudged)
 	f.bridgeGateInRemoteControl(context.Background(), ws)
 	return nil
 }

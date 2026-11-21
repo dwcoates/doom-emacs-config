@@ -666,3 +666,41 @@ func TestACompactionThatFailsIsAnErrorAndLeavesTheMergeMarkedAndSkipped(t *testi
 		t.Fatalf("the failure was recorded as %+v, want an ERROR naming the workspace, the queue and the cause", rec)
 	}
 }
+
+func TestAGateStoodAgainAfterAFailedAnswerIsNeverAnsweredAgainByTheQueue(t *testing.T) {
+	// Arrange: the queue answered the raise once, and the answer's re-open
+	// failed, which stood the gate again.
+	h := twoInLine(t)
+	h.o.ColdGateRaised(theWorkspace)
+
+	// Act
+	h.o.ColdGateStoodAfterFailedAnswer(theWorkspace)
+
+	// Assert
+	if !slices.Equal(h.gatesCompacted, []ids.WorkspaceID{theWorkspace}) {
+		t.Fatalf("gates compacted = %v, want the one answer to the first raise and none after it failed", h.gatesCompacted)
+	}
+	if !entryIn(t, h, theWorkspace).ColdGated {
+		t.Fatal("the merge was unmarked though its gate stands")
+	}
+	rec, ok := coldGateRecord(h, "error", "an answer to the cold gate of a queued merge's workspace failed and the gate stands again; the queue does not answer it again, and the merge stays skipped until the user answers it")
+	if !ok || rec.Context["workspace"] != string(theWorkspace) || rec.Context["repo"] == nil {
+		t.Fatalf("the standing gate was recorded as %+v, want an ERROR naming the workspace and the queue", rec)
+	}
+}
+
+func TestAGateStoodAgainOnAWorkspaceWithNoQueuedMergeIsNeitherAnsweredNorAnError(t *testing.T) {
+	// Arrange
+	h := newHarness(t)
+
+	// Act
+	h.o.ColdGateStoodAfterFailedAnswer(theWorkspace)
+
+	// Assert
+	if len(h.gatesCompacted) != 0 {
+		t.Fatalf("gates compacted = %v, want none", h.gatesCompacted)
+	}
+	if rec, ok := coldGateRecord(h, "error", "an answer to the cold gate of a queued merge's workspace failed and the gate stands again; the queue does not answer it again, and the merge stays skipped until the user answers it"); ok {
+		t.Fatalf("an ERROR %+v was recorded for a workspace with no merge", rec)
+	}
+}

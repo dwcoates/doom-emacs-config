@@ -69,7 +69,8 @@ type Spec struct {
 	// CORRELATION only; session facts still travel exclusively in
 	// StartSession. Empty omits it.
 	SessionID string
-	// Spawned is called with the child's pid the INSTANT the fork returns,
+	// Spawned is called with the child's identity (its pid and kernel start
+	// stamp, startingshim.Identify) the INSTANT the fork returns,
 	// synchronously, before the bring-up this Spawn then blocks on.
 	//
 	// IT IS THE ONLY MOMENT THAT WILL DO. Spawn does not return at the fork:
@@ -79,12 +80,13 @@ type Spec struct {
 	// bound to nothing and is recorded nowhere. Its successor then reads "lock
 	// free, socket absent", spawns a second shim onto the one session socket,
 	// and that shim refuses the bind and dies. The callback is where the pid
-	// is made DURABLE (wsm.SetSpawnedShimPID) so the successor can tell a
-	// starting shim from no shim at all.
+	// is made DURABLE (wsm.SetSpawnedShim) so the successor can tell a
+	// starting shim from no shim at all, and the stamp is what tells it that
+	// shim from whatever process the kernel hands the pid to after it exits.
 	//
 	// It must not block on anything but a local write: the supervisor calls it
 	// on the spawn's own goroutine, between the fork and the bring-up.
-	Spawned func(pid int)
+	Spawned func(spawn ids.ProcessIdentity)
 }
 
 // Supervisor brings shim processes up and adopts surviving ones.

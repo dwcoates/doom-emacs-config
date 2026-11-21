@@ -273,9 +273,9 @@ type FleetDeps struct {
 	// itself on its socket. Nil means startingshim.SystemClock; it is a field
 	// so a test of that wait drives time rather than sleeping through it.
 	Clock startingshim.Clock
-	// ShimAlive reports whether a recorded spawned pid names a live process.
-	// Nil means startingshim.Alive, which is kill(pid, 0).
-	ShimAlive func(pid int) bool
+	// ShimAlive reports whether a recorded spawn's process still runs. Nil
+	// means startingshim.Alive, which compares the pid's kernel start stamp.
+	ShimAlive func(recorded ids.ProcessIdentity) (bool, error)
 	// ShimSocketChanges follows a shim socket's directory while a recorded
 	// spawn is awaited, and ShimExit waits for that spawn's exit; nil is the
 	// kernel's own report (startingshim.Waiter).
@@ -313,10 +313,10 @@ type FleetDeps struct {
 	// ColdGateRaised is told that a workspace's session parked at its cold
 	// gate, so a merge it has in the queue keeps its place there, skipped
 	// (owner ruling, 2026-11-11, reversing the 2026-10-13 ejection). Nil
-	// tells nobody. JUDGED is a gate a shim judged just now, as opposed to
-	// one raised again (from its record, after a failed answer, carried over
-	// a handover).
-	ColdGateRaised func(ws ids.WorkspaceID, judged bool)
+	// tells nobody. RAISE is why the gate stands: a shim judged it just now,
+	// it was raised again from its record or carried over a handover, or an
+	// answer to it failed (ColdGateRaise).
+	ColdGateRaised func(ws ids.WorkspaceID, raise ColdGateRaise)
 	// ColdGateRetired is told that a workspace's recorded cold gate was
 	// retired (retireRecordedGate): a session came up, or the workspace was
 	// pointed at another conversation. Nil tells nobody.
@@ -959,7 +959,7 @@ func (f *Fleet) ReraiseColdGate(ws ids.WorkspaceID, vendorSessionID string) bool
 	if cold == nil || !stood {
 		return false
 	}
-	f.raiseColdGate(ws, vendorSessionID, cold, held.configDir, false)
+	f.raiseColdGate(ws, vendorSessionID, cold, held.configDir, RaiseAfterFailedAnswer)
 	// THE GATE RUNS NO SHIM AGAIN: the one the failed answer spawned, or found
 	// still held, is stood down, unless the workspace is in remote control and
 	// it holds the gate's bridge again (parkedbridge.go).
@@ -2372,7 +2372,7 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			f.noteStartFailed(ctx, log, ws, err)
 			return nil, pathNone, refuse(log, "OpenWorkspace", ArmSpawnFailed, err.Error(), false)
 		}
-		client, err := f.deps.Supervisor.Spawn(ctx, shimclient.Spec{
+		client, err := f.spawnRecorded(ctx, log, ws, shimclient.Spec{
 			WorkspaceID:     ws,
 			WorkspaceDir:    dir,
 			UDSPath:         udsPath,
@@ -2386,10 +2386,10 @@ func (f *Fleet) bringUpClient(ctx context.Context, log dlog.Logger, ws ids.Works
 			LogSink:         sink.File(),
 			LogWarningsSink: sink.WarningsFile(),
 			ForbidVendor:    f.deps.ForbidVendor,
-			// THE PID IS DURABLE FROM THE FORK. Spawn blocks until the shim
-			// has bound and answered; a daemon killed inside that window
-			// leaves a shim its successor cannot tell from no shim at all.
-			Spawned: func(pid int) { f.recordSpawnedShimPID(ctx, log, ws, pid) },
+			// THE SPAWN IS DURABLE FROM THE FORK (spawnRecorded). Spawn blocks
+			// until the shim has bound and answered; a daemon killed inside
+			// that window leaves a shim its successor cannot tell from no
+			// shim at all.
 		})
 		release()
 		if errors.Is(err, shimclient.ErrStandingDown) {
@@ -2948,7 +2948,7 @@ func (f *Fleet) askToStartSession(ctx context.Context, log dlog.Logger, ws ids.W
 					return f.askToStartSession(ctx, log, ws, client, src, session, configDir)
 				}
 			}
-			f.raiseColdGate(ws, src.VendorSessionID, cold, configDir, true)
+			f.raiseColdGate(ws, src.VendorSessionID, cold, configDir, RaiseJudged)
 			f.recordGate(ctx, log, ws, wsm.ColdGateRecord{VendorSessionID: src.VendorSessionID, Cold: cold, ConfigDir: configDir})
 			// AN ANSWER, NOT A FAILURE -- as this function's own doc says. The
 			// gate is a designed product state: the shim states the cost of
@@ -3108,7 +3108,7 @@ func unknownSessionRefusal(log dlog.Logger, vendorSessionID, detail string) *Ref
 // The compact menu is the summarizers the session could be compacted by (see
 // coldCompactMenu). Every scope but the unspecified one is offered, because an
 // unspecified scope is not a choice.
-func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string, judged bool) {
+func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *conversationv1.SessionCold, configDir string, raise ColdGateRaise) {
 	// EVERY ACCOUNT IS OFFERED COMPACTION (owner ruling 2026-10-06, reversing
 	// the 2026-09-30 work-account exclusion): the work account's gate offers
 	// compact too.
@@ -3136,7 +3136,7 @@ func (f *Fleet) raiseColdGate(ws ids.WorkspaceID, vendorSessionID string, cold *
 	f.logTransition(ws, "cold_gate_standing", stood, true,
 		dlog.Context{"vendor_session_id": vendorSessionID, "compaction_offered": compact != nil})
 	if f.deps.ColdGateRaised != nil {
-		f.deps.ColdGateRaised(ws, judged)
+		f.deps.ColdGateRaised(ws, raise)
 	}
 
 	f.publishColdGateRow(ws)

@@ -13,9 +13,10 @@
 // first daemon killed 60ms after its spawn, the successor spawning at T+80ms,
 // the survivor binding at T+110ms and the newcomer dying at T+190ms.
 //
-// The missing fact is durable in the registry: wsm.Workspace.SpawnedShimPID is
-// written at the instant the fork returns. This package reads it, asks the
-// kernel whether that process is alive, and -- when it is -- waits, bounded,
+// The missing fact is durable in the registry: wsm.Workspace.SpawnedShim is
+// written at the instant the fork returns, as the child's pid AND its kernel
+// start stamp, and retired once the shim announces itself. This package reads
+// it, asks the kernel whether that very process is alive, and -- when it is -- waits, bounded,
 // for the socket to appear. A survivor that announces itself is then taken
 // through the ORDINARY inert-survivor adoption; a pid that is dead or absent
 // leaves the caller on its ordinary spawn path.
@@ -23,12 +24,12 @@ package startingshim
 
 import (
 	"context"
-	"errors"
+	"fmt"
 	"path/filepath"
-	"syscall"
 	"time"
 
 	"agent-repld/internal/clock"
+	"agent-repld/internal/ids"
 	"agent-repld/internal/kernelevent"
 	"agent-repld/internal/shimsocket"
 )
@@ -75,16 +76,50 @@ func (o Outcome) String() string {
 	}
 }
 
-// Alive reports whether pid names a process this daemon can signal. It is
-// kill(pid, 0): ESRCH is the one answer that means gone, and EPERM means the
-// process is there and owned by somebody else -- alive either way, and never
-// read as absent.
-func Alive(pid int) bool {
+// Identify reads the identity of the process PID names now: the record a
+// spawn makes of its child at the fork. The child is this daemon's own and
+// unreaped, so its pid cannot have been handed to another process yet.
+func Identify(pid int) (ids.ProcessIdentity, error) {
 	if pid <= 0 {
-		return false
+		return ids.ProcessIdentity{}, fmt.Errorf("startingshim: pid %d names no one process", pid)
 	}
-	err := syscall.Kill(pid, 0)
-	return !errors.Is(err, syscall.ESRCH)
+	stamp, found, err := startStamp(pid)
+	if err != nil {
+		return ids.ProcessIdentity{}, err
+	}
+	if !found {
+		return ids.ProcessIdentity{}, fmt.Errorf("startingshim: pid %d names no process", pid)
+	}
+	return ids.ProcessIdentity{PID: pid, StartUnixMicros: stamp}, nil
+}
+
+// Alive reports whether RECORDED still names a running process: its pid
+// names a live process AND that process's kernel start stamp is the one
+// recorded.
+//
+// THE PID ALONE IS NOT THE PROCESS. kill(pid, 0) answers for whichever
+// process holds the number now, and reads a process of another user as alive
+// (EPERM): a shim's pid recorded at 19:33 named AppleCredentialManagerDaemon,
+// started at 05:02 the next day, and the workspace waited out its adoption
+// bound for it every 10s (2026-11-21). A process whose stamp differs started
+// after the recorded one, so the recorded one is gone.
+//
+// An error is a stamp the kernel would not answer for a pid that exists; the
+// caller leaves the workspace undetermined, as for any unreadable fact.
+func Alive(recorded ids.ProcessIdentity) (bool, error) {
+	return aliveBy(startStamp, recorded)
+}
+
+// aliveBy is Alive over the kernel read STAMP.
+func aliveBy(stamp func(pid int) (int64, bool, error), recorded ids.ProcessIdentity) (bool, error) {
+	if recorded.PID <= 0 {
+		return false, nil
+	}
+	now, found, err := stamp(recorded.PID)
+	if err != nil {
+		return false, err
+	}
+	return found && now == recorded.StartUnixMicros, nil
 }
 
 // Waiter waits for a recorded spawn to announce itself on its socket.
@@ -99,9 +134,9 @@ func Alive(pid int) bool {
 // one resolution cannot disagree with the probe the same caller then reports
 // -- and so a test drives the kernel's answers directly.
 type Waiter struct {
-	// Alive reports whether the recorded pid names a live process. Nil means
-	// this package's own kill(pid, 0).
-	Alive func(pid int) bool
+	// Alive reports whether the recorded spawn's process still runs. Nil
+	// means this package's own Alive.
+	Alive func(recorded ids.ProcessIdentity) (bool, error)
 	// Probe is the socket probe, handed to shimsocket.NewestLive so every
 	// generation on disk is considered.
 	Probe func(string) (shimsocket.State, error)
@@ -112,6 +147,16 @@ type Waiter struct {
 	// Exit waits for the recorded process's exit; nil means
 	// kernelevent.WaitExit.
 	Exit func(ctx context.Context, pid int) error
+}
+
+// Running answers whether RECORDED's process still runs, by the injected
+// Alive or this package's own. It is the one liveness question every caller
+// asks before it waits, so the answer it logs is the answer Await acts on.
+func (w Waiter) Running(recorded ids.ProcessIdentity) (bool, error) {
+	if w.Alive == nil {
+		return Alive(recorded)
+	}
+	return w.Alive(recorded)
 }
 
 // Await answers what became of the spawn recorded for a workspace whose lock
@@ -125,15 +170,15 @@ type Waiter struct {
 // abandoned, and answering OutcomeSpawnDead would send it off to spawn a
 // second shim on its way out; it answers undetermined, which spawns nothing.
 // Neither is a watch that fails: the process may still bind at any instant.
-func (w Waiter) Await(ctx context.Context, recorded *int, base string, bound time.Duration) (string, Outcome) {
+func (w Waiter) Await(ctx context.Context, recorded *ids.ProcessIdentity, base string, bound time.Duration) (string, Outcome) {
 	if recorded == nil {
 		return base, OutcomeNoSpawn
 	}
-	alive := w.Alive
-	if alive == nil {
-		alive = Alive
+	running, err := w.Running(*recorded)
+	if err != nil {
+		return base, OutcomeUndetermined
 	}
-	if !alive(*recorded) {
+	if !running {
 		return base, OutcomeSpawnDead
 	}
 	clock := w.Clock
@@ -156,7 +201,7 @@ func (w Waiter) Await(ctx context.Context, recorded *int, base string, bound tim
 	defer stop()
 	exited := make(chan error, 1)
 	// inflight: joined: the function that starts it waits for it.
-	go func() { exited <- exit(waitCtx, *recorded) }()
+	go func() { exited <- exit(waitCtx, recorded.PID) }()
 	expired := clock.After(bound)
 	for {
 		if path, state, _ := shimsocket.NewestLive(w.Probe, base); state == shimsocket.StateLive {

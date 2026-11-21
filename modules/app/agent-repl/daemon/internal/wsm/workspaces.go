@@ -52,7 +52,7 @@ func normalizeDir(dir string) (string, error) {
 // the row, so it cannot drift from the closes it summarizes: CloseTurn's one
 // write of closed_at is the only edge, and turns_by_workspace keeps the MAX an
 // index range.
-const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, ` +
+const workspaceColumns = `id, repo_id, dir, name, branch, parent_branch, parent_id, closed, attention, priority, task_id, last_selected_at, last_activity_at, merged_at, spawned_shim_pid, spawned_shim_start, created_at, result_end, result_read, hidden, hidden_at, merge_of, merge_request_id, merge_fork_head, merge_compact_after, merge_close_on_landing, merge_cleanup_worktree, merge_cleanup_dir, landed_head, landed_at, commit_count, place, merge_revealed, cache_lapses_at, cache_lapse_gated_tokens, closure_at, closure_by, status_changed_at, is_current, ` + rootSubsectionColumn + `, context_from, requested_by, close_when_turn_ends, awaiting_correspondence, kind, last_keepalive_at, cache_cold_turn_at, cold_gate_backlogged_at, conversation_bound_at, nuke_owed_at, keepalive_owed_none_at, keepalive_owed_from, settings_visit_at, ` +
 	`EXISTS (SELECT 1 FROM creation_jobs WHERE creation_jobs.workspace_id = workspaces.id AND creation_jobs.one_shot = 1), ` +
 	`(EXISTS (SELECT 1 FROM merge_queue WHERE merge_queue.workspace_id = workspaces.id) ` +
 	`OR EXISTS (SELECT 1 FROM workspaces AS merge_ws JOIN merge_queue ON merge_queue.workspace_id = merge_ws.id WHERE merge_ws.merge_of = workspaces.id)), ` +
@@ -130,8 +130,9 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		owedFrom      sql.NullInt64
 		visitAt       sql.NullInt64
 		landsInto     sql.NullString
+		spawnedStart  sql.NullInt64
 	)
-	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced, &ws.DeployMediator, &ws.EmojiAck); err != nil {
+	if err := row.Scan(&ws.ID, &ws.Repo, &ws.Dir, &ws.Name, &ws.Branch, &ws.ParentBranch, &parent, &ws.Closed, &ws.Attention, &priority, &task, &selected, &activity, &merged, &spawned, &spawnedStart, &created, &end, &read, &ws.Hidden, &hiddenAt, &mergeOf, &request, &forkHead, &compact, &closes, &cleanup, &cleanDir, &landHead, &landAt, &commits, &ws.Place, &ws.MergeRevealed, &lapsesAt, &gated, &closedAt, &closedBy, &statusChanged, &ws.Current, &subsection, &contextFrom, &requestedBy, &selfClose, &awaiting, &kind, &lastKeepalive, &cacheCold, &backlogged, &boundAt, &nukeOwed, &owedNone, &owedFrom, &visitAt, &ws.OneShot, &ws.MergePending, &ended, &started, &asked, &mergeTurn, &landsInto, &ws.ChildrenFolded, &ws.KeepaliveRunBeats, &ws.Surfaced, &ws.DeployMediator, &ws.EmojiAck); err != nil {
 		return Workspace{}, err
 	}
 	switch WorkspaceKind(kind) {
@@ -173,8 +174,14 @@ func scanWorkspace(row interface{ Scan(...any) error }) (Workspace, error) {
 		if spawned.Int64 <= 0 {
 			return Workspace{}, &DecodeError{Table: "workspaces", Row: string(ws.ID), Field: "spawned_shim_pid", Err: errors.New("a recorded spawned shim pid is positive")}
 		}
-		pid := int(spawned.Int64)
-		ws.SpawnedShimPID = &pid
+		// A PID WITH NO START STAMP was recorded by a build that kept none,
+		// and names no process this build can tell from a reused pid: it is
+		// read as no spawn, exactly as the stamped spawn of a process that
+		// has gone is. Read as standing, it once held a workspace at its
+		// adoption bound for an unrelated root daemon every 10s (2026-11-21).
+		if spawnedStart.Valid {
+			ws.SpawnedShim = &ProcessIdentity{PID: int(spawned.Int64), StartUnixMicros: spawnedStart.Int64}
+		}
 	}
 	if parent.Valid {
 		id := WorkspaceID(parent.String)
@@ -831,7 +838,7 @@ func markClosedInTx(ctx context.Context, tx *sql.Tx, id WorkspaceID, closure Clo
 	// `restamp` is evaluated against the row as it stood BEFORE this
 	// update: SQLite reads every right-hand side off the old row.
 	const restamp = `(closed = 0 OR (? = 'user' AND closure_by IS NOT 'user'))`
-	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, close_when_turn_ends = NULL, awaiting_correspondence = NULL, `+
+	res, err := tx.ExecContext(ctx, `UPDATE workspaces SET closed = 1, serving_instance = NULL, spawned_shim_pid = NULL, spawned_shim_start = NULL, close_when_turn_ends = NULL, awaiting_correspondence = NULL, `+
 		`closure_at = CASE WHEN `+restamp+` THEN ? ELSE closure_at END, `+
 		`closure_by = CASE WHEN `+restamp+` THEN ? ELSE closure_by END WHERE id = ?`,
 		string(closure.By), nanos(closure.At), string(closure.By), string(closure.By), id)
@@ -970,8 +977,8 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 	})
 }
 
-// SetSpawnedShimPID records, or clears with nil, the pid of a shim a daemon
-// SPAWNED for this workspace.
+// SetSpawnedShim records, or clears with nil, the identity of a shim a daemon
+// SPAWNED for this workspace: its pid and its kernel start stamp.
 //
 // IT IS WRITTEN AT THE FORK, not at a started session, and that is the whole
 // point of it. A shim's socket is bound by Node several tens of milliseconds
@@ -982,25 +989,51 @@ func (s *store) Reopen(ctx context.Context, id WorkspaceID, serving InstanceID) 
 // socket, which the shim itself then refuses at bind and dies. Measured
 // 2026-09-13: shim spawned at T+0, daemon killed at T+60ms, successor booted
 // at T+65ms and spawned its own at T+80ms, the first bound at T+110ms and the
-// second died at T+190ms. This column is that missing trace.
+// second died at T+190ms. These columns are that missing trace, and the spawn
+// retires them once the shim announces itself (RetireSpawnedShim).
 //
 // A NON-POSITIVE PID IS REFUSED at the write, the same way Session.ShimPID is:
-// the value exists to be handed to kill(pid, 0), where 0 and negatives address
-// process groups rather than the one process meant.
-func (s *store) SetSpawnedShimPID(ctx context.Context, id WorkspaceID, pid *int) error {
-	const op = "daemon.wsm.set_spawned_shim_pid"
+// the value is handed to the kernel, where 0 and negatives address process
+// groups rather than the one process meant.
+func (s *store) SetSpawnedShim(ctx context.Context, id WorkspaceID, spawn *ProcessIdentity) error {
+	const op = "daemon.wsm.set_spawned_shim"
 	fields := dlog.Context{"workspace": string(id)}
-	var stored any
-	if pid != nil {
-		if *pid <= 0 {
-			err := fmt.Errorf("wsm: workspace %s: a recorded spawned shim pid is positive, got %d", id, *pid)
+	var pid, start any
+	if spawn != nil {
+		if spawn.PID <= 0 {
+			err := fmt.Errorf("wsm: workspace %s: a recorded spawned shim pid is positive, got %d", id, spawn.PID)
 			s.log.Error(op, "refused a non-positive spawned shim pid", withError(fields, err))
 			return err
 		}
-		fields["shim_pid"] = *pid
-		stored = int64(*pid)
+		fields["shim_pid"] = spawn.PID
+		fields["shim_start_unix_micros"] = spawn.StartUnixMicros
+		pid, start = int64(spawn.PID), spawn.StartUnixMicros
 	}
-	return s.setWorkspaceField(ctx, op, "spawned_shim_pid", id, stored, fields)
+	return s.setWorkspaceColumns(ctx, op, id, fields,
+		workspaceColumn{name: "spawned_shim_pid", value: pid},
+		workspaceColumn{name: "spawned_shim_start", value: start})
+}
+
+// RetireSpawnedShim clears the spawn recorded for this workspace when it is
+// still SPAWN, answering whether it was. The spawn calls it once its shim has
+// announced itself: from then on the shim's live socket is its trace, and a
+// record left standing would outlive the shim and name whatever process the
+// kernel hands its pid to next. A record another spawn has written since is
+// that spawn's, and is left as it stands.
+func (s *store) RetireSpawnedShim(ctx context.Context, id WorkspaceID, spawn ProcessIdentity) (bool, error) {
+	const op = "daemon.wsm.retire_spawned_shim"
+	fields := dlog.Context{"workspace": string(id), "shim_pid": spawn.PID, "shim_start_unix_micros": spawn.StartUnixMicros}
+	retired := false
+	err := s.write(ctx, op, fields, func(ctx context.Context, tx *sql.Tx) error {
+		res, err := tx.ExecContext(ctx, `UPDATE workspaces SET spawned_shim_pid = NULL, spawned_shim_start = NULL `+
+			`WHERE id = ? AND spawned_shim_pid = ? AND spawned_shim_start = ?`, id, int64(spawn.PID), spawn.StartUnixMicros)
+		if err != nil {
+			return err
+		}
+		retired, err = touchedRow(res)
+		return err
+	})
+	return retired, err
 }
 
 // SetAttention sets or clears the roster's attention marker.

@@ -543,7 +543,7 @@ func (s *fakeSupervisor) Spawn(_ context.Context, spec shimclient.Spec) (shimcli
 	// that skipped it would let the durable-pid invariant pass every test
 	// about it without ever being written.
 	if spec.Spawned != nil {
-		spec.Spawned(s.client.pid)
+		spec.Spawned(fakeSpawn(s.client.pid))
 	}
 	// THE TEST'S OWN HOOK SURVIVES the supervisor's deregistration: a scenario
 	// that watches the socket go when the process does arms it before the
@@ -880,7 +880,9 @@ type fleetFixture struct {
 	// which is what tells a shim that is still starting from no shim at all.
 	// Nil means every recorded pid is dead, which is what every scenario that
 	// is not about the starting window wants.
-	shimAlive func(pid int) bool
+	shimAlive func(recorded ids.ProcessIdentity) bool
+	// shimAliveErr is the kernel refusing to answer about a recorded spawn.
+	shimAliveErr error
 	// openings is every Opening a watcher was started with, in order.
 	openings []sessionwatcher.Opening
 	// openAtAttach is every watcher start's Session.OpenAtAttach, in order.
@@ -1101,7 +1103,12 @@ func newFleetFixtureBoundedAt(t *testing.T, adoptBound time.Duration) *fleetFixt
 			fired <- f.now
 			return fired
 		},
-		ShimAlive: func(pid int) bool { return f.shimAlive != nil && f.shimAlive(pid) },
+		ShimAlive: func(recorded ids.ProcessIdentity) (bool, error) {
+			if f.shimAliveErr != nil {
+				return false, f.shimAliveErr
+			}
+			return f.shimAlive != nil && f.shimAlive(recorded), nil
+		},
 		ShimSocketChanges: func(context.Context, string) (<-chan error, func()) {
 			return f.socketChanges, func() {}
 		},
@@ -3365,19 +3372,19 @@ func TestStandingColdGateFollowsTheGatesLife(t *testing.T) {
 	}{
 		{"no gate raised is not standing", func(*fleetFixture, ids.WorkspaceID) {}, false},
 		{"a raised gate stands with its cold facts", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 		}, true},
 		{"a taken gate is not standing", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 		}, false},
 		{"a gate stood again after a failed re-open stands", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 			f.fleet.ReraiseColdGate(ws, "vendor-1")
 		}, true},
 		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			_ = f.fleet.Stop(context.Background(), ws, true)
 		}, false},
 	}
@@ -3447,12 +3454,12 @@ func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
 		want bool
 	}{
 		{"a gate stood again after a failed re-open is shown", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 			f.fleet.ReraiseColdGate(ws, "vendor-1")
 		}, true},
 		{"a stopped workspace's gate is gone", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			_ = f.fleet.Stop(context.Background(), ws, true)
 		}, false},
 	}
@@ -3475,7 +3482,7 @@ func TestColdGateShownFollowsTheGatesLife(t *testing.T) {
 
 func TestTheGateDockFollowsTheShownGate(t *testing.T) {
 	raise := func(f *fleetFixture, ws ids.WorkspaceID) {
-		f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+		f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 	}
 	tests := []struct {
 		name       string
@@ -3533,18 +3540,18 @@ func TestEveryEdgeOfTheShownGateRepublishesTheHostView(t *testing.T) {
 		act     func(f *fleetFixture, ws ids.WorkspaceID)
 	}{
 		{"answering the gate", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
 			f.fleet.TakeColdGate(ws, "vendor-1")
 		}},
 		{"standing it again", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			f.fleet.TakeColdGate(ws, "vendor-1")
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
 			f.fleet.ReraiseColdGate(ws, "vendor-1")
 		}},
 		{"stopping a gated workspace with no session", func(f *fleetFixture, ws ids.WorkspaceID) {
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 		}, func(f *fleetFixture, ws ids.WorkspaceID) {
 			_ = f.fleet.Stop(context.Background(), ws, true)
 		}},
@@ -3594,7 +3601,7 @@ func TestDetachedFleetWorkSharesOneDrain(t *testing.T) {
 			f.fleet.remember(ws, &live{client: f.client})
 			// A re-open answers a RAISED gate: its cold facts name the read
 			// the pay records (recordColdAnswer).
-			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			f.fleet.ResumeColdDetached(ws, ColdResume{VendorSessionID: "vendor-1", Remediation: payRemediation()},
 				func(_ context.Context, err error) { settled <- err })
 		}},
@@ -3631,7 +3638,7 @@ func TestATakenColdGateRefusesNoPromptButIsCarried(t *testing.T) {
 	// sent after it was refused by the answered gate's name.
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-answering")
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 	f.fleet.TakeColdGate(ws.ID, "vendor-1")
 
 	// Act.
@@ -3661,7 +3668,7 @@ func TestEndColdGateRetiresOnlyTheTakenGateItNames(t *testing.T) {
 			// Arrange.
 			f := newFleetFixture(t)
 			ws := f.workspace("ws-end")
-			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 			if tt.take {
 				f.fleet.TakeColdGate(ws.ID, "vendor-1")
 			}
@@ -4064,10 +4071,10 @@ func TestARaisedColdGateTellsTheQueueTheSessionWentCold(t *testing.T) {
 	f := newFleetFixture(t)
 	ws := f.workspace("ws-cold-queued")
 	var told []ids.WorkspaceID
-	f.fleet.deps.ColdGateRaised = func(w ids.WorkspaceID, _ bool) { told = append(told, w) }
+	f.fleet.deps.ColdGateRaised = func(w ids.WorkspaceID, _ ColdGateRaise) { told = append(told, w) }
 
 	// Act.
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 
 	// Assert.
 	if len(told) != 1 || told[0] != ws.ID {
@@ -4151,7 +4158,7 @@ func TestAGateRaisedOverHeldPromptsOffersCompactAndResumeAtOnce(t *testing.T) {
 	f.fleet.SetColdGateHeld(ws.ID, 2)
 
 	// Act.
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 
 	// Assert.
 	if got := lastGateStanding(t, f).GetCompactAndResume().GetHeldPrompts(); got != 2 {
@@ -4164,7 +4171,7 @@ func TestTheLastHeldPromptLeavingRepublishesTheGateWithoutCompactAndResume(t *te
 	f := newFleetFixture(t)
 	ws := f.workspace("w1")
 	f.fleet.SetColdGateHeld(ws.ID, 1)
-	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+	f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 
 	// Act.
 	f.fleet.SetColdGateHeld(ws.ID, 0)
@@ -4299,7 +4306,7 @@ func TestARaisedGateOffersHaikuFirstThenSonnetAsTheSummarizer(t *testing.T) {
 			ws := f.workspace("w1")
 
 			// Act.
-			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", true)
+			f.fleet.raiseColdGate(ws.ID, "vendor-1", coldResponse().GetFailure().GetCold(), "/config", RaiseJudged)
 
 			// Assert.
 			want := []string{headless.ModelHaiku, headless.ModelSonnet}
@@ -5079,4 +5086,9 @@ func TestAStandDownClosesTheShimsOwnVerdict(t *testing.T) {
 			}
 		})
 	}
+}
+
+// fakeSpawn is the identity the fake supervisor hands Spec.Spawned for PID.
+func fakeSpawn(pid int) ids.ProcessIdentity {
+	return ids.ProcessIdentity{PID: pid, StartUnixMicros: 1795284061244774}
 }

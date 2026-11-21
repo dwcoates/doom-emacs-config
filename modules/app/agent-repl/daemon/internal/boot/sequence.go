@@ -318,15 +318,15 @@ func (s *sequence) releaseClosedServing(ctx context.Context, log dlog.Logger, wo
 			})
 			return fmt.Errorf("boot: read the serving ownership of closed workspace %s: %w", ws.ID, err)
 		}
-		if owner == nil && ws.SpawnedShimPID == nil {
+		if owner == nil && ws.SpawnedShim == nil {
 			continue
 		}
 		fields := dlog.Context{dlog.KeyWorkspaceID: string(ws.ID), "owner": ""}
 		if owner != nil {
 			fields["owner"] = string(*owner)
 		}
-		if ws.SpawnedShimPID != nil {
-			fields["spawned_shim_pid"] = *ws.SpawnedShimPID
+		if ws.SpawnedShim != nil {
+			fields["spawned_shim_pid"] = ws.SpawnedShim.PID
 		}
 		log.Error(op, "a closed workspace was still recorded as served; its serving ownership is released", fields)
 		if err := s.deps.DB.MarkClosed(ctx, ws.ID, wsm.Closure{At: s.now(), By: wsm.CloseByDaemon}); err != nil {
@@ -1057,13 +1057,21 @@ func (s *sequence) BringUp(ctx context.Context, pending []wsm.Workspace) BringUp
 // race. Such a workspace is neither adopted nor orphan-closed, no shim is
 // spawned onto it, the boot goes on and the daemon serves.
 func (s *sequence) awaitStartingSurvivor(ctx context.Context, log dlog.Logger, ws wsm.Workspace, socketPath string) (bool, string, bool) {
-	if ws.SpawnedShimPID == nil {
+	if ws.SpawnedShim == nil {
 		return false, "", false
 	}
-	pid := *ws.SpawnedShimPID
-	if !s.shimAlive(pid) {
+	spawn := *ws.SpawnedShim
+	pid := spawn.PID
+	running, err := s.starting.Running(spawn)
+	if err != nil {
+		log.Error("daemon.boot.adopt", "could not read whether the recorded spawn's process still runs; the workspace is left undetermined and the daemon serves", dlog.Context{
+			"workspace_id": string(ws.ID), "shim_pid": pid, "shim_start_unix_micros": spawn.StartUnixMicros, "error": err.Error(),
+		})
+		return false, "", true
+	}
+	if !running {
 		log.Debug("daemon.boot.adopt", "the recorded spawn's process is gone; nothing survives to wait for", dlog.Context{
-			"workspace_id": string(ws.ID), "shim_pid": pid,
+			"workspace_id": string(ws.ID), "shim_pid": pid, "shim_start_unix_micros": spawn.StartUnixMicros,
 		})
 		return false, "", false
 	}
@@ -1072,7 +1080,7 @@ func (s *sequence) awaitStartingSurvivor(ctx context.Context, log dlog.Logger, w
 			"workspace_id": string(ws.ID), "shim_pid": pid,
 			"socket_path": socketPath, "bound_ms": s.adoptBound.Milliseconds(),
 		})
-	path, outcome := s.starting.Await(ctx, &pid, socketPath, s.adoptBound)
+	path, outcome := s.starting.Await(ctx, &spawn, socketPath, s.adoptBound)
 	switch outcome {
 	case startingshim.OutcomeAnnounced:
 		log.Info("daemon.boot.adopt", "the starting shim announced itself; adopting it as the inert survivor it is", dlog.Context{
@@ -1092,14 +1100,6 @@ func (s *sequence) awaitStartingSurvivor(ctx context.Context, log dlog.Logger, w
 			})
 		return false, "", true
 	}
-}
-
-// shimAlive answers the injected liveness probe, or the kernel's.
-func (s *sequence) shimAlive(pid int) bool {
-	if s.deps.ShimAlive != nil {
-		return s.deps.ShimAlive(pid)
-	}
-	return startingshim.Alive(pid)
 }
 
 // leaveNotUp keeps the PENDING workspaces whose shim was up when the last

@@ -363,7 +363,7 @@ func (c *controller) park(ctx context.Context, log dlog.Logger, ws ids.Workspace
 	// daemon waits for a shim that is still starting instead of spawning a
 	// second one; a parked workspace's shim is gone, and a pid left behind
 	// would make the next boot wait out its whole adoption bound for it.
-	if err := c.deps.DB.SetSpawnedShimPID(ctx, ws, nil); err != nil {
+	if err := c.deps.DB.SetSpawnedShim(ctx, ws, nil); err != nil {
 		log.Error(why.op, "could not clear the parked workspace's recorded spawn pid", dlog.WithCause(fields, err))
 		return parkFailed
 	}
