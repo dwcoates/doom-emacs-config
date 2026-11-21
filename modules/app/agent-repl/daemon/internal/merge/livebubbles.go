@@ -5,7 +5,6 @@ import (
 
 	frontendv1 "agentrepl/proto/frontend/v1"
 
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"agent-repld/internal/dlog"
@@ -74,7 +73,7 @@ func (o *orchestrator) storedLiveHeads(ctx context.Context, scope []ids.Workspac
 	}
 	out := map[ids.LeaseID]ids.WorkspaceID{}
 	for _, stored := range rows {
-		row, err := decodeStoredRow(stored)
+		row, err := decodeStored(stored)
 		if err != nil {
 			return nil, err
 		}
@@ -95,20 +94,6 @@ func mergeHeadLedger(id string) (ids.LeaseID, bool) {
 		return "", false
 	}
 	return ids.LeaseID(ref.Row.ID), true
-}
-
-// decodeStoredRow decodes one durable row, carrying a merge head's retired
-// label as the feed's own restore does.
-func decodeStoredRow(stored wsm.DurableFeedRow) (*frontendv1.FeedRow, error) {
-	raw, _, err := wsm.CarryRetiredMergeHeadLabel(stored.Row)
-	if err != nil {
-		return nil, err
-	}
-	row := &frontendv1.FeedRow{}
-	if err := proto.Unmarshal(raw, row); err != nil {
-		return nil, err
-	}
-	return row, nil
 }
 
 // headRowIsLive reports whether ROW is a merge head drawn in flight
@@ -182,7 +167,7 @@ func (o *orchestrator) endOffQueue(ctx context.Context, ledger ids.LeaseID, feed
 	var head *frontendv1.FeedRow
 	var tabs []*frontendv1.FeedRow
 	for _, stored := range rows {
-		row, err := decodeStoredRow(stored)
+		row, err := decodeStored(stored)
 		if err != nil {
 			o.deps.Log.Global().Error(opLiveBubbles, "a live bubble whose merge is in no queue has a row that cannot be read; it is not ended", dlog.WithCause(withField(fields, "row", stored.RowID), err))
 			return err
@@ -287,4 +272,10 @@ func runningBadge(field protoreflect.FieldDescriptor) bool {
 		return true
 	}
 	return false
+}
+
+// decodeStored decodes one durable row (wsm.DecodeDurableFeedRow).
+func decodeStored(stored wsm.DurableFeedRow) (*frontendv1.FeedRow, error) {
+	row, _, err := wsm.DecodeDurableFeedRow(stored.Row)
+	return row, err
 }

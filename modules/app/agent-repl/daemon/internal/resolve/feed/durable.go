@@ -70,14 +70,8 @@ func (r *resolver) restoreDurable(s *wsState) {
 		// A MERGE HEAD STORED WITH ITS RETIRED LABEL is read as layout 175
 		// will rewrite it, so a head the layout step has not yet reached
 		// is drawn rather than refused.
-		raw, _, err := wsm.CarryRetiredMergeHeadLabel(stored.Row)
+		row, raw, err := wsm.DecodeDurableFeedRow(stored.Row)
 		if err != nil {
-			fields["cause"] = err.Error()
-			log.Error(opDurable, "a durable row could not be decoded and is drawn nowhere", fields)
-			continue
-		}
-		row := &frontendv1.FeedRow{}
-		if err := proto.Unmarshal(raw, row); err != nil {
 			fields["cause"] = err.Error()
 			log.Error(opDurable, "a durable row could not be decoded and is drawn nowhere", fields)
 			continue
