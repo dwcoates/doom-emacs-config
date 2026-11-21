@@ -83,22 +83,30 @@ export function statusCountOf(rows: Iterable<{ row: RosterRow | undefined; path:
   return count;
 }
 
+/** One colored number of the parenthetical, in the tone of ARM. */
+function countNumber(className: string, arm: string, value: number): HTMLElement {
+  const number = document.createElement("span");
+  number.className = `${className} ${rosterArmMark(arm).toneClass}`;
+  number.textContent = String(value);
+  return number;
+}
+
 /**
  * THE ONE WORKSPACE-COUNT PARENTHETICAL, drawn beside a subsection's name
  * (its member workspaces) and a workspace's name (its children): the
  * working workspaces in the working red, the synchronously merging ones in
- * the merge purple, and the TOTAL, with the parentheses and slashes,
+ * the merge purple, and the TOTAL, each colored number shown only when it is
+ * non-zero, with the parentheses and slashes,
  * inheriting the host's ink, so a fold greys them as it greys the name.
  */
 export function showWorkspaceCountParenthetical(total: number, status: StatusCount): HTMLElement {
   const element = document.createElement("span");
   element.className = WORKSPACE_COUNT_CLASS;
-  const working = document.createElement("span");
-  working.className = `${WORKING_COUNT_CLASS} ${rosterArmMark(WORKING_TONE_ARM).toneClass}`;
-  working.textContent = String(status.working);
-  const merging = document.createElement("span");
-  merging.className = `${MERGING_COUNT_CLASS} ${rosterArmMark(SYNC_MERGE_ARM).toneClass}`;
-  merging.textContent = String(status.syncMerging);
-  element.append("(", working, "/", merging, `/${total})`);
+  const parts: HTMLElement[] = [];
+  if (status.working > 0) parts.push(countNumber(WORKING_COUNT_CLASS, WORKING_TONE_ARM, status.working));
+  if (status.syncMerging > 0) parts.push(countNumber(MERGING_COUNT_CLASS, SYNC_MERGE_ARM, status.syncMerging));
+  element.append("(");
+  for (const part of parts) element.append(part, "/");
+  element.append(`${total})`);
   return element;
 }

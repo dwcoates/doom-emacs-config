@@ -201,7 +201,7 @@ describe("a repository's subsections", () => {
       sub.querySelector(".sb-subsection-label")?.textContent,
       sub.querySelector(".sb-count")?.textContent,
       sub.querySelector(":scope > .rows > [data-roster-row='ws-1']") !== null,
-    ]).toEqual(["sub-1", "later", "(0/0/1)", true]);
+    ]).toEqual(["sub-1", "later", "(1)", true]);
   });
 
   it("draw their count as the working, the synchronously merging and every row, folded or not", () => {

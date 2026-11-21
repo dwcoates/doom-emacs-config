@@ -73,7 +73,7 @@ describe("drawChildCount", () => {
 
 describe("a drawn row", () => {
   it("wears the count with more than five children", () => {
-    expect(drawnCount(7)?.textContent).toBe("(0/0/7)");
+    expect(drawnCount(7)?.textContent).toBe("(7)");
   });
   it("wears no count with five children", () => {
     expect(drawnCount(5)).toBeNull();

@@ -84,7 +84,7 @@ describe("every count in the Open section", () => {
       drawn.querySelector(".repo-section > .repo-head [data-section-count]")?.textContent,
       drawn.querySelector(".sb-subsection .sb-count")?.textContent,
       drawn.querySelector(`.${CHILD_COUNT_CLASS}`)?.textContent,
-    ]).toEqual(["(8/9)", "(8/9)", "(0/0/2)", "(0/0/6)"]);
+    ]).toEqual(["(8/9)", "(8/9)", "(2)", "(6)"]);
   });
 });
 
@@ -113,6 +113,15 @@ describe("statusCountOf", () => {
 });
 
 describe("showWorkspaceCountParenthetical", () => {
+  it.each([
+    [{ working: 1, syncMerging: 0 }, "(1/2)", ["sb-count-working"]],
+    [{ working: 0, syncMerging: 1 }, "(1/2)", ["sb-count-merging"]],
+    [{ working: 0, syncMerging: 0 }, "(2)", []],
+  ])("omits a zero number: %j", (status, text, classes) => {
+    const drawn = showWorkspaceCountParenthetical(2, status);
+    expect([drawn.textContent, [...drawn.querySelectorAll("span")].map((s) => s.classList[0])]).toEqual([text, classes]);
+  });
+
   it("spells working, merging and total in one parenthetical", () => {
     expect(showWorkspaceCountParenthetical(9, { working: 2, syncMerging: 1 }).textContent).toBe("(2/1/9)");
   });
@@ -130,9 +139,17 @@ describe("showWorkspaceCountParenthetical", () => {
   });
   it("is the one shape a subsection and a row both draw", () => {
     // Arrange
-    const kids = Array.from({ length: 6 }, (_, i) => row({ id: `kid-${i}` }));
+    const working = { case: "thinking", value: {} } as Parameters<typeof row>[0]["status"];
+    const merging = { case: "merging", value: {} } as Parameters<typeof row>[0]["status"];
+    const kids = [row({ id: "kid-w", status: working }), row({ id: "kid-m", status: merging }), ...Array.from({ length: 4 }, (_, i) => row({ id: `kid-${i}` }))];
     const wire = roster({
-      repos: [repoSection({ id: "repo-1", rows: [row({ id: "p", children: kids })], subsections: [{ id: "sub-1", rows: [row({ id: "s-1" })] }] })],
+      repos: [
+        repoSection({
+          id: "repo-1",
+          rows: [row({ id: "p", children: kids })],
+          subsections: [{ id: "sub-1", rows: [row({ id: "s-w", status: working }), row({ id: "s-m", status: merging })] }],
+        }),
+      ],
     });
 
     // Act
