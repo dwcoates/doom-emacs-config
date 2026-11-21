@@ -31,7 +31,7 @@ import (
 func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupShutdownSchedule)
 	stream := d.WatchDaemonStream()
 	if _, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{
 		Action: &agentreplv1.UpdateShutdownScheduleRequest_Schedule{Schedule: &agentreplv1.UpdateShutdownScheduleSchedule{
@@ -61,7 +61,7 @@ func TestUpdateShutdownScheduleCancelPushesDrainCancelled(t *testing.T) {
 func TestUpdateShutdownScheduleWithABlankOperatorNoteIsRefused(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	d := newDaemon(t, harness.Opts{})
+	d := viewInGroup(t, groupShutdownSchedule)
 
 	// Act
 	_, err := d.Client().UpdateShutdownSchedule(d.Ctx(), connect.NewRequest(&agentreplv1.UpdateShutdownScheduleRequest{

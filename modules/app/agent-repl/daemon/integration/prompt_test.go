@@ -1131,7 +1131,7 @@ func TestBareModelIsRefusedOrAbsorbedWithoutChangingTheModel(t *testing.T) {
 func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing.T) {
 	t.Parallel()
 	// Arrange: a turn in flight.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.submit("start the work", "k-running", origin)
 	f.shim.ExpectStartTurn()
 
@@ -1170,7 +1170,7 @@ func TestAModelChangeSubmittedWhileATurnRunsResolvesAtTheTurnBoundary(t *testing
 func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnModelChanged(t *testing.T) {
 	t.Parallel()
 	// Arrange
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the initial model", func(v *frontendv1.TopbarView) bool {
 		return v.GetModelSelector().GetSelected().GetModel().GetName() != ""
@@ -1227,7 +1227,7 @@ func TestSetModelWithACatalogTokenSendsSetSessionModelAndUpdatesTheTopbarOnlyOnM
 func TestAModelSwitchSurvivesAWorkspaceRestart(t *testing.T) {
 	t.Parallel()
 	// Arrange: a live session switched to sonnet.
-	f := newOpened(t, harness.Opts{})
+	f := newCanonical(t)
 	f.d.ExpectWorkspaceRestartWarnings()
 	topbar := f.d.WatchTopbar(f.ws)
 	awaitTopbar(t, f, topbar, "the initial model", func(v *frontendv1.TopbarView) bool {
