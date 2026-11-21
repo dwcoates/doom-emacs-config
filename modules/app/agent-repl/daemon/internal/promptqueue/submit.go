@@ -519,6 +519,7 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 				"state": "reviving", "before": before, "after": false,
 			})
 		}()
+		stoodDown := q.deps.StandDowns(ws)
 		revived, err := q.revive(ctx, ws, cause, log)
 		if err != nil {
 			// THE BRING-UP FAILED, and feed_held.proto settles what that
@@ -565,6 +566,18 @@ func (q *queue) reviveInBackground(ctx context.Context, ws ids.WorkspaceID, caus
 					fields = dlog.Context{"ordered": departure.Ordered, "cause": string(departure.Cause)}
 				}
 				log.Info(opSubmit, "the revived session came up and has since departed; its departure decides what follows", fields)
+				return
+			}
+			// A SESSION THIS DAEMON STOOD DOWN WHILE THE REVIVAL RAN is not a
+			// revival that lied either: a kill or a forget took it out of the
+			// fleet, watcher and all (2026-11-20: a forget stood the revived
+			// session down 4ms after it came up, and this read as ERROR). The
+			// fleet counts the removal under the same lock that removes the
+			// session, so a session read gone is never read uncounted. Its
+			// holds stand for whatever brings a session up next.
+			if now := q.deps.StandDowns(ws); now != stoodDown {
+				log.Info(opSubmit, "the revived session was stood down by this daemon while the revival ran; the stand-down decides what follows",
+					dlog.Context{"stand_downs_before": stoodDown, "stand_downs_after": now})
 				return
 			}
 			log.Error(opSubmit, "the revival reported success but the workspace still has no session", nil)

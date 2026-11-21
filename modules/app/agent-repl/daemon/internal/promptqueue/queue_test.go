@@ -64,6 +64,7 @@ func TestNewRefusesEachMissingCollaborator(t *testing.T) {
 		{"client resolver", func(d *Deps) { d.Client = nil }},
 		{"watcher resolver", func(d *Deps) { d.Watcher = nil }},
 		{"image resolver", func(d *Deps) { d.ResolveImage = nil }},
+		{"stand-down count", func(d *Deps) { d.StandDowns = nil }},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

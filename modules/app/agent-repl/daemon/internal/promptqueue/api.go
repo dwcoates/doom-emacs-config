@@ -588,6 +588,12 @@ type Deps struct {
 	// A shim known to hold no session runs no turn and holds no live work, so
 	// it never holds a bounce (inFlight).
 	SessionAbsent func(ws ids.WorkspaceID) bool
+	// StandDowns answers how many of a workspace's sessions this daemon has
+	// stood down (workspace.Fleet.StandDowns). A revival reads it before and
+	// after its bring-up: a count that moved means a stand-down this daemon
+	// ordered meanwhile (a kill, a forget) explains a session that is gone,
+	// rather than a revival that lied. REQUIRED.
+	StandDowns func(ws ids.WorkspaceID) uint64
 	// ColdGate answers the STANDING cold gate's own account for a workspace,
 	// false when no gate stands. A gate is a refusal with a name of its own,
 	// and this is what lets the queue give it rather than reporting a missing

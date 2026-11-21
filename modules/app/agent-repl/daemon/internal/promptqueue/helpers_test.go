@@ -1834,6 +1834,9 @@ func (n *noteRecorder) count() int {
 type harness struct {
 	// standingDown is the supervisor's stand-down latch the queue reads.
 	standingDown atomic.Bool
+	// standDowns is the fleet's count of the workspace's ordered stand-downs
+	// (Deps.StandDowns).
+	standDowns atomic.Uint64
 	// statErr is what reading any workspace directory answers.
 	statErr error
 	q       *queue
@@ -1963,6 +1966,7 @@ func newHarness(t *testing.T) *harness {
 		SessionStarted:  func(ids.WorkspaceID) bool { return !h.noSession && !h.notStarted },
 		SessionAbsent:   func(ids.WorkspaceID) bool { return h.sessionAbsent },
 		StandingDown:    h.standingDown.Load,
+		StandDowns:      func(ids.WorkspaceID) uint64 { return h.standDowns.Load() },
 		ColdGate: func(ids.WorkspaceID) (string, bool) {
 			return h.coldGate, h.coldGate != ""
 		},

@@ -1134,6 +1134,7 @@ func buildGraph(ctx context.Context, p process) (*graph, error) {
 		SessionStarted: fleet.Serving,
 		SessionAbsent:  fleet.SessionAbsent,
 		StandingDown:   supervisor.StandingDown,
+		StandDowns:     fleet.StandDowns,
 		// AN OPEN WAITS FOR THE CUT TURN ITS BRING-UP RESUMES (opentabs).
 		Resumptions: func(ws ids.WorkspaceID, report promptqueue.ResumeReport) {
 			opens.Resumption(ws, opentabs.Resume{Kind: resumeKind(report.Kind), Text: report.Text})
