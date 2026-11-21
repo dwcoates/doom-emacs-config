@@ -133,6 +133,11 @@ type fakeDB struct {
 	hasTurnsErr   error
 	drainReadErr  error
 	drainClearErr error
+	// landingErr fails every landing record (RecordMergeLanding), and
+	// bypassHolders is each workspace holding a repository's queue bypass
+	// mode.
+	landingErr    error
+	bypassHolders map[ids.WorkspaceID]ids.RepoID
 	// undeployed are the landings recorded as waiting for their deploy, and
 	// undeployedErr fails the next record.
 	undeployed    []wsm.UndeployedLanding
@@ -418,6 +423,27 @@ func (f *fakeDB) MediationOf(ctx context.Context, repo wsm.RepoKey) (*wsm.Mediat
 		return nil, err
 	}
 	return f.checks.MediationOf(ctx, repo)
+}
+
+func (f *fakeDB) RecordMergeLanding(ctx context.Context, landing wsm.MergeLanding) (bool, error) {
+	f.mu.Lock()
+	err := f.landingErr
+	f.mu.Unlock()
+	if err != nil {
+		return false, err
+	}
+	return f.checks.RecordMergeLanding(ctx, landing)
+}
+
+func (f *fakeDB) MergeLandingsIn(ctx context.Context, repo wsm.RepoKey, since, until time.Time) ([]wsm.MergeLanding, time.Time, error) {
+	return f.checks.MergeLandingsIn(ctx, repo, since, until)
+}
+
+func (f *fakeDB) QueueBypass(_ context.Context, id ids.WorkspaceID) (wsm.QueueBypass, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	repo, holds := f.bypassHolders[id]
+	return wsm.QueueBypass{Holds: holds, RepoID: repo}, nil
 }
 
 func (f *fakeDB) DeployMediatorOf(ctx context.Context, repo wsm.RepoKey) (wsm.DeployMediator, bool, error) {

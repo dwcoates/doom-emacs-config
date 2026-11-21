@@ -545,6 +545,11 @@ func (o *orchestrator) remediationLand(ctx context.Context, f wsm.RemediationFin
 	if err != nil || !moved {
 		return finishMoved(err, moved, f, wsm.RemediationDeploying)
 	}
+	// THE LANDING'S RECORD (landings.go); a failed write was recorded there,
+	// and the landing deploys all the same.
+	_ = o.recordLanding(ctx, wsm.MergeLanding{
+		Repo: f.Repo, Head: after, Path: wsm.LandingDeployMediator, Branch: record.Branch,
+		Workspace: f.Workspace, WorkspaceName: record.Name, LandedAt: o.deps.Now()})
 	o.deps.Meter.ObserveRemediationGateRounds(RemediationGateLanded, f.GateRounds)
 	o.endMediatorRun(f.Repo, finishPhase(f), finishRunEnd(f))
 	o.deps.Log.Global().Info(opRemediationFinish, "the remediation landed directly on the main branch; it deploys", withField(withField(fields, "head", after), "paths", len(paths)))
