@@ -25,6 +25,7 @@
 // run at background priority (see that script and require-background.mjs).
 import "../../../bin/require-background.mjs";
 import { defineConfig } from "vitest/config";
+import { protobufRuntimeAliases } from "./protobuf-runtime-aliases";
 import { fileURLToPath } from "node:url";
 
 // Same reason as the unit config: the generated protobuf stubs live outside
@@ -32,6 +33,7 @@ import { fileURLToPath } from "node:url";
 const agentReplRoot = fileURLToPath(new URL("../../../", import.meta.url));
 
 export default defineConfig({
+  resolve: { alias: protobufRuntimeAliases },
   server: { fs: { allow: [agentReplRoot] } },
   test: {
     include: ["test/integration/**/*.test.ts"],
