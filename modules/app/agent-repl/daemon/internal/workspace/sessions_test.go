@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
 	"go/token"
 	"io"
 	"os"
@@ -5000,23 +4999,12 @@ func TestStandDownsCountsAColdGatesShimStoodDown(t *testing.T) {
 // then read the stand-down as a revival that lied.
 func TestEveryOrderedRemovalGoesThroughRemoveStoodDownLocked(t *testing.T) {
 	// Arrange.
-	files, err := filepath.Glob("*.go")
-	if err != nil {
-		t.Fatal(err)
-	}
-	fset := token.NewFileSet()
 	allowed := map[string]bool{"removeStoodDownLocked": true, "retireReaped": true}
 	var offenders []string
 
 	// Act.
-	for _, name := range files {
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		file, err := parser.ParseFile(fset, name, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", name, err)
-		}
+	sourcescan.EachSourceIn(t, ".", false, func(fset *token.FileSet, file *ast.File) {
+		name := filepath.Base(fset.Position(file.Pos()).Filename)
 		for _, decl := range file.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok || fn.Body == nil || allowed[fn.Name.Name] {
@@ -5036,7 +5024,7 @@ func TestEveryOrderedRemovalGoesThroughRemoveStoodDownLocked(t *testing.T) {
 				return true
 			})
 		}
-	}
+	})
 
 	// Assert.
 	if len(offenders) != 0 {
