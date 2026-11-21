@@ -34,9 +34,10 @@ func sidecarPprofLogger() (*logging.Bound, *bytes.Buffer) {
 }
 
 type sidecarPprofRecord struct {
-	Operation string `json:"operation"`
-	Level     string `json:"level"`
-	Message   string `json:"message"`
+	Operation string         `json:"operation"`
+	Level     string         `json:"level"`
+	Message   string         `json:"message"`
+	Context   map[string]any `json:"context"`
 }
 
 func decodeSidecarPprofRecords(t *testing.T, durable *bytes.Buffer) []sidecarPprofRecord {

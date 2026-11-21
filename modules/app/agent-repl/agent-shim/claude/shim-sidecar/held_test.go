@@ -133,7 +133,7 @@ func TestAnAgedUnownedSpoolIsStatedOnce(t *testing.T) {
 	h.sc.rescan()
 
 	// Assert.
-	if got := strings.Count(h.logText(), "spool unclaimed after"); got != 1 {
+	if got := strings.Count(h.logText(), `"message":"spool unclaimed after`); got != 1 {
 		t.Fatalf("the lapse was stated %d times, want once", got)
 	}
 }

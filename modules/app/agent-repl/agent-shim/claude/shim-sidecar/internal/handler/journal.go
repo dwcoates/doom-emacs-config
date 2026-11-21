@@ -25,7 +25,7 @@ type WorkflowJournalHandler struct {
 
 // NewWorkflowJournalHandler builds a handler with its own converter.
 func NewWorkflowJournalHandler(log *logging.Bound) *WorkflowJournalHandler {
-	log.With(logging.Context{Operation: "journal-handler-new"}).LogVerbose("constructing workflow journal handler")
+	log.With(logging.Context{Operation: "journal-handler-new"}).LogVerbose("constructing workflow journal handler", nil)
 	return &WorkflowJournalHandler{conv: convert.New(log), log: log}
 }
 
@@ -47,14 +47,14 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 	// built to find real modelling gaps, so polluting it hides them.
 	perAgent := isWorkflowAgentTranscript(ctx.Path)
 	h.log.With(handleCtx("journal-handle", ctx)).
-		LogVerbose("handling frames=%d run_id=%q per_agent=%t", len(frames), runID, perAgent)
+		LogVerbose("handling frames={frames_length} run_id=\"{run_id}\" per_agent={per_agent}", logging.Values{"frames_length": len(frames), "run_id": runID, "per_agent": perAgent})
 
 	var out []*storev1.StoreEntry
 	for _, frame := range frames {
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
 			h.log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
-				Log("parse failure; the line is classified as unparsed residue and not stored, so the bytes to investigate are this file at this offset: %v", frame.ParseErr)
+				Log("parse failure; the line is classified as unparsed residue and not stored, so the bytes to investigate are this file at this offset: {parse_cause}", logging.Values{"parse_cause": frame.ParseErr.Error()})
 			unparsed := convert.UnparsedEntry(at, frame.Raw, frame.ParseErr)
 			logResidue(h.log, ctx, frame.Offset, []*storev1.StoreEntry{unparsed})
 			out = append(out, unparsed)
@@ -65,7 +65,7 @@ func (h *WorkflowJournalHandler) Handle(frames []tail.Frame, ctx *Context) []*st
 		out = append(out, converted...)
 	}
 	h.log.With(handleCtx("journal-handle", ctx)).
-		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
+		LogVerbose("handled frames={frames_length} entries={out_length}", logging.Values{"frames_length": len(frames), "out_length": len(out)})
 	return out
 }
 

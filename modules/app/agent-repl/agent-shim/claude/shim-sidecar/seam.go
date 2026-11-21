@@ -154,14 +154,14 @@ func (s *sidecar) plumbTranscriptFact(kind tail.Kind, fact transcriptFact, adopt
 	if !adopt() {
 		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
 			log.With(logging.Context{Operation: fact.operation}).LogVerbose(
-				"the %s converter reports no %s; %s", kind, fact.noun, fact.onlyWhy)
+				"the {kind} converter reports no {fact_noun}; {fact_only_why}", logging.Values{"kind": kind.String(), "fact_noun": fact.noun, "fact_only_why": fact.onlyWhy})
 			return
 		}
 		log.With(logging.Context{Operation: fact.operation, Level: "error"}).Log(
-			"the %s converter reports no %s (it implements no %s): %s", kind, fact.noun, fact.method, fact.consequence)
+			"the {kind} converter reports no {fact_noun} (it implements no {fact_method}): {fact_consequence}", logging.Values{"kind": kind.String(), "fact_noun": fact.noun, "fact_method": fact.method, "fact_consequence": fact.consequence})
 		return
 	}
-	log.With(logging.Context{Operation: fact.operation}).LogVerbose("%s plumbed for kind=%s", fact.noun, kind)
+	log.With(logging.Context{Operation: fact.operation}).LogVerbose("{fact_noun} plumbed for kind={kind}", logging.Values{"fact_noun": fact.noun, "kind": kind.String()})
 }
 
 // plumbTaskStops hands the converter the reader's task-stop callback.
@@ -239,11 +239,11 @@ func (s *sidecar) plumbTerminals(kind tail.Kind, built tail.Handler, log *loggin
 	sink, ok := built.(terminalReadSink)
 	if !ok {
 		log.With(logging.Context{Operation: "plumb-terminal-observer"}).LogVerbose(
-			"the %s converter reports no run terminals; only a detached run has one to read", kind)
+			"the {kind} converter reports no run terminals; only a detached run has one to read", logging.Values{"kind": kind.String()})
 		return
 	}
 	sink.SetTerminalObserver(s.RunSettled)
-	log.With(logging.Context{Operation: "plumb-terminal-observer"}).LogVerbose("terminal observations plumbed for kind=%s", kind)
+	log.With(logging.Context{Operation: "plumb-terminal-observer"}).LogVerbose("terminal observations plumbed for kind={kind}", logging.Values{"kind": kind.String()})
 }
 
 // plumbObserver hands the converter the reader's spawn-observation callback.
@@ -258,18 +258,18 @@ func (s *sidecar) plumbObserver(kind tail.Kind, built tail.Handler, log *logging
 	if !ok {
 		if kind != tail.KindSessionTranscript && kind != tail.KindAgentTranscript {
 			log.With(logging.Context{Operation: "plumb-observer"}).LogVerbose(
-				"the %s converter reports no spawn observations; only a transcript carries the tool results a launch is stated in", kind)
+				"the {kind} converter reports no spawn observations; only a transcript carries the tool results a launch is stated in", logging.Values{"kind": kind.String()})
 			return
 		}
 		// The reader cannot learn which call spawned a task from any other
 		// source, so a converter that reports none leaves every spool unclaimed
 		// until its bounded wait expires and its bytes go to residue.
 		log.With(logging.Context{Operation: "plumb-observer", Level: "error"}).Log(
-			"the %s converter reports no spawn observations (it implements no SetTaskObserver): every spool it could have claimed stays unowned until its hold expires", kind)
+			"the {kind} converter reports no spawn observations (it implements no SetTaskObserver): every spool it could have claimed stays unowned until its hold expires", logging.Values{"kind": kind.String()})
 		return
 	}
 	sink.SetTaskObserver(s.TaskSpawned)
-	log.With(logging.Context{Operation: "plumb-observer"}).LogVerbose("spawn observations plumbed for kind=%s", kind)
+	log.With(logging.Context{Operation: "plumb-observer"}).LogVerbose("spawn observations plumbed for kind={kind}", logging.Values{"kind": kind.String()})
 }
 
 // lostEntries turns the LOST policy's conclusions into the runs' terminals.
@@ -309,7 +309,7 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 			defer func(path string) {
 				delete(s.watchers, path)
 				s.log.With(logging.Context{Operation: "lost-terminal-tailer-dropped", Path: path}).
-					LogVerbose("the vanished file's tailer is dropped now that its terminal has been stated")
+					LogVerbose("the vanished file's tailer is dropped now that its terminal has been stated", nil)
 			}(lost.Path)
 		}
 		// A RUN THE STORE ALREADY HOLDS A TERMINAL FOR IS NEVER RESTATED LOST.
@@ -317,7 +317,7 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 		// escaped that settle; the LOST write would supersede the real terminal.
 		if _, concluded := s.concluded[lost.TaskID]; concluded && lost.TaskID != "" {
 			bound.With(logging.Context{Operation: "lost-terminal-refused", Level: "error"}).Log(
-				"LOST refused: the run already concluded (task notification or stop) and a LOST terminal would supersede it (reason=%s)", lost.Reason)
+				"LOST refused: the run already concluded (task notification or stop) and a LOST terminal would supersede it (reason={lost_reason})", logging.Values{"lost_reason": string(lost.Reason)})
 			s.settleRun(lost.Path)
 			continue
 		}
@@ -329,27 +329,26 @@ func (s *sidecar) lostEntries(conclusions []stale.Lost) []*storev1.StoreEntry {
 			// this is decided BEFORE the watcher lookup: a conclusion reaching
 			// here for one is stated as what it is, never as a run whose
 			// converter went missing, and never invents a run that never existed.
-			bound.With(logging.Context{Operation: "lost-terminal-residue"}).Log("the LOST file was residue and named no run, so there is no unit to settle (reason=%s)", lost.Reason)
+			bound.With(logging.Context{Operation: "lost-terminal-residue"}).Log("the LOST file was residue and named no run, so there is no unit to settle (reason={lost_reason})", logging.Values{"lost_reason": string(lost.Reason)})
 			continue
 		}
 		w, watched := s.watchers[lost.Path]
 		if !watched {
 			bound.With(logging.Context{Operation: "lost-terminal-unwatched", Level: "warn"}).Log(
-				"no terminal for the LOST run: its file is no longer watched, so no converter is left to spell one (reason=%s)", lost.Reason)
+				"no terminal for the LOST run: its file is no longer watched, so no converter is left to spell one (reason={lost_reason})", logging.Values{"lost_reason": string(lost.Reason)})
 			continue
 		}
 		sink, ok := w.tailer.Handler().(lostTerminalSink)
 		if !ok {
 			bound.With(logging.Context{Operation: "lost-terminal-unsupported", Level: "error"}).Log(
-				"no terminal for the LOST run: the %s converter implements no LostTerminal, so the run stays open in every reader downstream (reason=%s)",
-				lost.Kind, lost.Reason)
+				"no terminal for the LOST run: the {lost_kind} converter implements no LostTerminal, so the run stays open in every reader downstream (reason={lost_reason})", logging.Values{"lost_kind": lost.Kind.String(), "lost_reason": string(lost.Reason)})
 			continue
 		}
 		entries := sink.LostTerminal(lost.TaskID, lost.RunActivityID, lost.OwnerAgentID, string(lost.Reason), lost.Catchup)
 		// THE REASON RIDES A DEDICATED KEY. It is the arm now set on the wire,
 		// and a record that only interpolated it into a sentence could not be
 		// filtered or joined against the terminal it explains.
-		bound.Log("LOST terminal minted reason=%s entries=%d", lost.Reason, len(entries))
+		bound.Log("LOST terminal minted reason={lost_reason} entries={entries_length}", logging.Values{"lost_reason": string(lost.Reason), "entries_length": len(entries)})
 		out = append(out, entries...)
 	}
 	return out

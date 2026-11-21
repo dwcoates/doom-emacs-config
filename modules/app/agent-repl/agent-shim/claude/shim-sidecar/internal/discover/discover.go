@@ -69,6 +69,7 @@ import (
 	"syscall"
 	"time"
 
+	"agentrepl/logging/logsite"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 	"agentrepl/shim-claude-sidecar/internal/tail"
 )
@@ -230,7 +231,7 @@ func New(configRoots []string, spoolRoot string, log *logging.Bound) *Discoverer
 		resolved = append(resolved, Normalize(root))
 	}
 	log.With(logging.Context{Operation: "discover-new"}).
-		LogVerbose("constructing discoverer config_roots=%v spool_root=%q", resolved, Normalize(spoolRoot))
+		LogVerbose("constructing discoverer config_roots={resolved} spool_root=\"{normalize}\"", logging.Values{"resolved": resolved, "normalize": Normalize(spoolRoot)})
 	return &Discoverer{
 		configRoots: resolved,
 		spoolRoot:   Normalize(spoolRoot),
@@ -263,7 +264,7 @@ func (d *Discoverer) SpoolRoot() string { return d.spoolRoot }
 // sidecar's only discovery path, run on RescanInterval.
 func (d *Discoverer) Scan() []Target {
 	d.log.With(logging.Context{Operation: "discover-scan"}).
-		LogVerbose("scan start config_roots=%d spool_root=%q", len(d.configRoots), d.spoolRoot)
+		LogVerbose("scan start config_roots={config_roots_length} spool_root=\"{spool_root}\"", logging.Values{"config_roots_length": len(d.configRoots), "spool_root": d.spoolRoot})
 	var out []Target
 	seen := map[string]bool{}
 	add := func(t Target, ok bool) {
@@ -307,7 +308,7 @@ func (d *Discoverer) Scan() []Target {
 		add(d.Classify(match))
 	}
 	d.reportHolds()
-	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets=%d", len(out))
+	d.log.With(logging.Context{Operation: "discover-scan"}).LogVerbose("scan complete targets={out_length}", logging.Values{"out_length": len(out)})
 	return out
 }
 
@@ -348,16 +349,16 @@ func (d *Discoverer) Classify(path string) (Target, bool) {
 	path = Normalize(path)
 	if target, ok := d.classifyConfig(path); ok {
 		d.log.With(logging.Context{Operation: "discover-classify", Path: path, TaskID: target.TaskID, AgentID: target.AgentID}).
-			LogVerbose("classified config target kind=%s meta_missing=%t", target.Kind, target.MetaMissing)
+			LogVerbose("classified config target kind={target_kind} meta_missing={meta_missing}", logging.Values{"target_kind": target.Kind.String(), "meta_missing": target.MetaMissing})
 		return target, true
 	}
 	target, ok := d.classifySpool(path)
 	if ok {
 		d.log.With(logging.Context{Operation: "discover-classify", Path: path, TaskID: target.TaskID}).
-			LogVerbose("classified spool target kind=%s raw=%t", target.Kind, target.Raw)
+			LogVerbose("classified spool target kind={target_kind} raw={raw}", logging.Values{"target_kind": target.Kind.String(), "raw": target.Raw})
 	} else {
 		d.log.With(logging.Context{Operation: "discover-classify", Path: path}).
-			LogVerbose("path matches none of the four watched shapes")
+			LogVerbose("path matches none of the four watched shapes", nil)
 	}
 	return target, ok
 }
@@ -442,7 +443,7 @@ func (d *Discoverer) withMeta(target Target) Target {
 	target.MetaPath = strings.TrimSuffix(target.Path, ".jsonl") + ".meta.json"
 	if _, err := os.Stat(target.MetaPath); err != nil {
 		return d.holdTranscript(target, holdMetaAbsent, "warn",
-			"transcript held: its required meta file %s is not on disk yet, so the agent has no identity (its spawning call is stated only there); it is re-checked every rescan and never dropped", target.MetaPath)
+			logsite.Msg("transcript held: its required meta file {meta_path} is not on disk yet, so the agent has no identity (its spawning call is stated only there); it is re-checked every rescan and never dropped"), logging.Values{"meta_path": target.MetaPath})
 	}
 	meta, err := ReadMeta(target.MetaPath)
 	if err != nil {
@@ -465,14 +466,14 @@ func (d *Discoverer) withMeta(target Target) Target {
 		// the change.
 		if transientReadFailure(err) {
 			return d.holdTranscript(target, holdMetaReadDeferred, "warn",
-				"transcript held: the READ of its meta file was refused for a resource the system had none of, so the agent has no identity for now; the identical read is retried every rescan and clears on its own: %v", err)
+				logsite.Msg("transcript held: the READ of its meta file was refused for a resource the system had none of, so the agent has no identity for now; the identical read is retried every rescan and clears on its own: {cause}"), logging.Values{"cause": err.Error()})
 		}
 		// A meta file that is THERE but unreadable is held exactly as a missing
 		// one is: the agent has no identity either way, and naming it by its
 		// filename would mint a second book for one agent. Loud, because unlike
 		// a missing file this one will not fix itself.
 		return d.holdTranscript(target, holdMetaUnreadable, "error",
-			"transcript held: its meta file could not be read, so the agent has no identity and its records cannot be attributed: %v", err)
+			logsite.Msg("transcript held: its meta file could not be read, so the agent has no identity and its records cannot be attributed: {cause}"), logging.Values{"cause": err.Error()})
 	}
 	if meta.Shape == ShapeWorkflow {
 		// A WORKFLOW AGENT IS ATTRIBUTED TO ITS WORKFLOW. The vendor writes no
@@ -490,30 +491,29 @@ func (d *Discoverer) withMeta(target Target) Target {
 			call, err := spawningCall(target.Path)
 			if err != nil {
 				return d.holdTranscript(target, holdMetaNamesNoCall, "error",
-					"transcript held: %s states no toolUseId, this transcript is not under a workflow run, and the parent transcript names no single spawning call for it: %v", target.MetaPath, err)
+					logsite.Msg("transcript held: {meta_path} states no toolUseId, this transcript is not under a workflow run, and the parent transcript names no single spawning call for it: {cause}"), logging.Values{"meta_path": target.MetaPath, "cause": err.Error()})
 			}
 			meta.Shape, meta.ToolUseID = ShapeSubagent, call
 			target.Meta = meta
 			target.AgentID = call
-			d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
+			d.releaseTranscript(target, logsite.Msg("the held transcript's meta file appeared at {meta_path}; it is ingestible now, attributed to its spawning call"), logging.Values{"meta_path": target.MetaPath})
 			d.log.With(logging.Context{
 				Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID,
-			}).LogVerbose("subagent attributed to its spawning call %s, read from the parent transcript because its meta names none", call)
+			}).LogVerbose("subagent attributed to its spawning call {call}, read from the parent transcript because its meta names none", logging.Values{"call": call})
 			return target
 		}
 		target.Meta = meta
-		d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
+		d.releaseTranscript(target, logsite.Msg("the held transcript's meta file appeared at {meta_path}; it is ingestible now as a workflow agent"), logging.Values{"meta_path": target.MetaPath})
 		d.log.With(logging.Context{
 			Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID,
-		}).LogVerbose("workflow agent attributed to its run %s in session %s (agent_type=%s, no spawning call exists for a workflow agent)",
-			target.RunID, target.SessionID, meta.AgentType)
+		}).LogVerbose("workflow agent attributed to its run {target_run_id} in session {target_session_id} (agent_type={meta_agent_type}, no spawning call exists for a workflow agent)", logging.Values{"target_run_id": target.RunID, "target_session_id": target.SessionID, "meta_agent_type": meta.AgentType})
 		return target
 	}
 	// THE AGENT'S IDENTITY IS THE SPAWNING CALL, per the cross-plane minting
 	// rule: the same id the stream plane names this agent by.
 	target.Meta = meta
 	target.AgentID = meta.ToolUseID
-	d.releaseTranscript(target, "the held transcript's meta file appeared at %s; it is ingestible now", target.MetaPath)
+	d.releaseTranscript(target, logsite.Msg("the held transcript's meta file appeared at {meta_path}; it is ingestible now"), logging.Values{"meta_path": target.MetaPath})
 	return target
 }
 
@@ -540,7 +540,7 @@ func transientReadFailure(err error) bool {
 // The level argument is how loud a FIRST statement of this reason is; repeats
 // are always verbose, and carry the running count so a reader can tell "seen
 // once" from "seen five thousand times" without five thousand records.
-func (d *Discoverer) holdTranscript(target Target, reason, level, format string, args ...any) Target {
+func (d *Discoverer) holdTranscript(target Target, reason, level string, message logsite.Message, values logging.Values) Target {
 	target.MetaMissing = true
 	bound := d.log.With(logging.Context{
 		Operation: "discover-meta", Path: target.Path, TaskID: target.VendorAgentID, Reason: reason,
@@ -549,7 +549,7 @@ func (d *Discoverer) holdTranscript(target Target, reason, level, format string,
 	if held && existing.reason == reason {
 		existing.repeats++
 		bound.With(logging.Context{Repeat: logging.Repeat(existing.repeats)}).
-			LogVerbose("transcript still held for the same reason since %s", existing.since.Format(time.RFC3339))
+			LogVerbose("transcript still held for the same reason since {since}", logging.Values{"since": existing.since.Format(time.RFC3339)})
 		return target
 	}
 	if held {
@@ -557,16 +557,16 @@ func (d *Discoverer) holdTranscript(target Target, reason, level, format string,
 		// a meta that appeared but does not parse is not the meta that had not
 		// appeared yet.
 		bound.With(logging.Context{Level: "warn"}).
-			Log("the held transcript's hold reason changed from %s to %s after %d repeat(s)", existing.reason, reason, existing.repeats)
+			Log("the held transcript's hold reason changed from {existing_reason} to {reason} after {existing_repeats} repeat(s)", logging.Values{"existing_reason": existing.reason, "reason": reason, "existing_repeats": existing.repeats})
 	}
 	d.holds[target.Path] = &hold{reason: reason, since: d.now()}
-	bound.With(logging.Context{Level: level}).Log(format, args...)
+	bound.With(logging.Context{Level: level}).LogMessage(message, values)
 	return target
 }
 
 // releaseTranscript states, at info and exactly once, that a held transcript
 // became ingestible. A transcript that was never held states nothing.
-func (d *Discoverer) releaseTranscript(target Target, format string, args ...any) {
+func (d *Discoverer) releaseTranscript(target Target, message logsite.Message, values logging.Values) {
 	existing, held := d.holds[target.Path]
 	if !held {
 		return
@@ -575,7 +575,7 @@ func (d *Discoverer) releaseTranscript(target Target, format string, args ...any
 	d.log.With(logging.Context{
 		Operation: "discover-meta", Path: target.Path, AgentID: target.AgentID,
 		Reason: existing.reason, Repeat: logging.Repeat(existing.repeats),
-	}).Log(format, args...)
+	}).LogMessage(message, values)
 }
 
 // reportHolds states the STANDING hold set periodically, so a set that never
@@ -604,7 +604,7 @@ func (d *Discoverer) reportHolds() {
 	}
 	sort.Strings(kinds)
 	d.log.With(logging.Context{Operation: "discover-holds", Path: oldestPath}).
-		Log("%d transcript(s) held (%s); oldest since %s", len(d.holds), strings.Join(kinds, " "), oldest.Format(time.RFC3339))
+		Log("{holds_length} transcript(s) held ({kinds}); oldest since {oldest_since}", logging.Values{"holds_length": len(d.holds), "kinds": strings.Join(kinds, " "), "oldest_since": oldest.Format(time.RFC3339)})
 }
 
 func (d *Discoverer) classifySpool(path string) (Target, bool) {
@@ -652,12 +652,12 @@ func (d *Discoverer) classifySpool(path string) (Target, bool) {
 		// kind is a mapping this reader is missing.
 		bound := d.log.With(logging.Context{Operation: "classify-spool", Path: path, TaskID: taskID})
 		if d.statedUnclassifiable[path] {
-			bound.LogVerbose("spool task id still has no a/b/w kind prefix; the defect was already stated for this path")
+			bound.LogVerbose("spool task id still has no a/b/w kind prefix; the defect was already stated for this path", nil)
 			break
 		}
 		d.statedUnclassifiable[path] = true
 		bound.With(logging.Context{Level: "error"}).
-			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so nothing renders it and it is not read; a new vendor task kind needs a mapping")
+			Log("spool task id has no a/b/w kind prefix: its conversion cannot be selected, so nothing renders it and it is not read; a new vendor task kind needs a mapping", nil)
 	}
 	return target, true
 }

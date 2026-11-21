@@ -139,7 +139,7 @@ func logResidue(log *logging.Bound, ctx *Context, offset int64, entries []*store
 			UpsertKey: entry.GetUpsertKey(), WriteID: entry.GetWriteId(),
 			Reason: convert.ResidueLabel(entry),
 		}
-		log.With(ctxFields).LogVerbose("record classified as an unserved item: %s", convert.Describe(entry))
+		log.With(ctxFields).LogVerbose("record classified as an unserved item: {describe}", logging.Values{"describe": convert.Describe(entry)})
 	}
 }
 

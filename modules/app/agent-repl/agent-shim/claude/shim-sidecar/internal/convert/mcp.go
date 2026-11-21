@@ -40,7 +40,7 @@ func mcpTool(name string, block map[string]any) *conversationv1.AgentMcpTool {
 // mcpToolCall announces an MCP server's tool.
 func (c *Converter) mcpToolCall(tool *conversationv1.AgentMcpTool, id string, index int, input map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	c.log.With(at.ctxFor("mcp-tool-call")).With(logging.Context{ActivityID: id, UpsertKey: ActivityKey(id)}).
-		LogVerbose("MCP tool call name=%q addressed=%t announced", tool.GetName(), tool.GetAddress() != nil)
+		LogVerbose("MCP tool call name=\"{tool_name}\" addressed={tool_addressed} announced", logging.Values{"tool_name": tool.GetName(), "tool_addressed": tool.GetAddress() != nil})
 	return c.activityEntry(at, env, agent, id, index, &conversationv1.AgentActivity{
 		ActivityId: activityID(id),
 		Item: &conversationv1.AgentActivity_McpToolCall{McpToolCall: &conversationv1.AgentMcpToolCall{
@@ -82,6 +82,6 @@ func (c *Converter) settleMcpToolCall(call openCall, block map[string]any, faile
 	}
 	activity.ActivityId = activityID(call.activityID)
 	c.log.With(at.ctxFor("mcp-tool-return")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
-		LogVerbose("MCP tool name=%q settled failed=%t", call.name, failed)
+		LogVerbose("MCP tool name=\"{call_name}\" settled failed={failed}", logging.Values{"call_name": call.name, "failed": failed})
 	return c.settledEntry(at, agent, call.activityID, activity)
 }

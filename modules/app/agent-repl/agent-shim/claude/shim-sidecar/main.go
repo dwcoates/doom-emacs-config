@@ -429,14 +429,14 @@ func run(options Options, logPath string) (err error) {
 // into a normal exit.
 func logProcessExit(logf *logging.Bound, err *error) {
 	if r := recover(); r != nil {
-		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: panic: %v", r)
+		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: panic: {r}", logging.Values{"r": fmt.Sprintf("%v", r)})
 		panic(r)
 	}
 	if *err != nil {
-		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: %v", *err)
+		logf.With(logging.Context{Operation: "exit", Level: "error"}).Log("sidecar exiting: {cause}", logging.Values{"cause": (*err).Error()})
 		return
 	}
-	logf.With(logging.Context{Operation: "exit"}).Log("sidecar exiting cleanly")
+	logf.With(logging.Context{Operation: "exit"}).Log("sidecar exiting cleanly", nil)
 }
 
 // openLogger creates the sidecar's only persistent diagnostic sink. Failures
@@ -499,15 +499,14 @@ func reportLogExpiry(logf *logging.Bound, logPath string) func(sharedlogging.Exp
 	return func(result sharedlogging.ExpireResult, err error) {
 		if err != nil {
 			logf.With(logging.Context{Operation: "sidecar.log.retention_failed", Level: "error", Path: logPath}).
-				Log("the sidecar's log could not be aged by the %s retention: %v", sharedlogging.DefaultRetention, err)
+				Log("the sidecar's log could not be aged by the {default_retention} retention: {cause}", logging.Values{"default_retention": sharedlogging.DefaultRetention.String(), "cause": err.Error()})
 			return
 		}
 		if !result.Changed() {
 			return
 		}
 		logf.With(logging.Context{Operation: "sidecar.log.retention", Path: logPath}).
-			Log("aged the sidecar's log by the %s retention: rolled_current=%t removed=%d %v",
-				sharedlogging.DefaultRetention, result.RolledCurrent, len(result.Removed), result.Removed)
+			Log("aged the sidecar's log by the {default_retention} retention: rolled_current={rolled_current} removed={removed_length} {removed}", logging.Values{"default_retention": sharedlogging.DefaultRetention.String(), "rolled_current": result.RolledCurrent, "removed_length": len(result.Removed), "removed": result.Removed})
 	}
 }
 
@@ -527,8 +526,7 @@ func reportLogExpiry(logf *logging.Bound, logPath string) func(sharedlogging.Exp
 func refReplacedObserver(logf *logging.Bound) func(dir, oldID, newID string) {
 	return func(dir, oldID, newID string) {
 		logf.With(logging.Context{Operation: "workspace-ref-replaced"}).Log(
-			"the daemon roster now registers %s as workspace %s; the cached ref %s it replaced is no longer attributable",
-			dir, newID, oldID)
+			"the daemon roster now registers {dir} as workspace {new_id}; the cached ref {old_id} it replaced is no longer attributable", logging.Values{"dir": dir, "new_id": newID, "old_id": oldID})
 	}
 }
 
@@ -543,7 +541,8 @@ func refReplacedObserver(logf *logging.Bound) func(dir, oldID, newID string) {
 func locateFailedObserver(logf *logging.Bound) func(dir, address string, err error) {
 	return func(dir, address string, err error) {
 		logf.With(logging.Context{Operation: "workspace-locate-failed", Level: "error", RPC: "LocateWorkspace", Path: dir}).Log(
-			"the daemon at %s could not locate the workspace at %s, so its record is forwarded unattributed: %v", address, dir, err)
+			"the daemon at {address} could not locate the workspace at {dir}, so its record is forwarded unattributed: {cause}",
+			logging.Values{"address": address, "dir": dir, "cause": fmt.Sprint(err)})
 	}
 }
 
@@ -554,7 +553,7 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 	// still profilable.
 	pprofSurface, err := openPprofSurface(options.PprofAddr, logf)
 	if err != nil {
-		logf.With(logging.Context{Operation: "pprof.open", Level: "error"}).Log("opening pprof surface failed: %v", err)
+		logf.With(logging.Context{Operation: "pprof.open", Level: "error"}).Log("opening pprof surface failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	defer closePprofSurface(pprofSurface, logf)
@@ -569,7 +568,7 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 	// opens (bin/profile-agent-repl.sh) starts it on SIGWINCH without a restart.
 	stopProfiling, err := startRuntimeProfiling(logf, os.Getenv, os.UserHomeDir)
 	if err != nil {
-		logf.With(logging.Context{Operation: "profiling.arm", Level: "error"}).Log("arming the runtime profiler failed: %v", err)
+		logf.With(logging.Context{Operation: "profiling.arm", Level: "error"}).Log("arming the runtime profiler failed: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	defer stopProfiling()
@@ -584,10 +583,9 @@ func runWithLogger(options Options, logf *logging.Bound, stop <-chan os.Signal) 
 	// would print `/tmp` above thousands of records under `/private/tmp` and
 	// break the one join this record exists to make.
 	logf.With(logging.Context{Operation: "start"}).Log(
-		"sidecar starting config_roots=%v spool_root=%s state_dir=%s lock_dir=%s poll_interval=%s rescan_interval=%s lost_windows=%+v",
-		sc.disc.ConfigRoots(), sc.disc.SpoolRoot(), options.StateDir, options.LockDir, options.PollInterval, options.RescanInterval, sc.tracker.Windows())
+		"sidecar starting config_roots={config_roots} spool_root={spool_root} state_dir={state_dir} lock_dir={lock_dir} poll_interval={poll_interval} rescan_interval={rescan_interval} lost_windows={tracker_windows}", logging.Values{"config_roots": sc.disc.ConfigRoots(), "spool_root": sc.disc.SpoolRoot(), "state_dir": options.StateDir, "lock_dir": options.LockDir, "poll_interval": options.PollInterval.String(), "rescan_interval": options.RescanInterval.String(), "tracker_windows": fmt.Sprintf("%+v", sc.tracker.Windows())})
 	if err := sc.Run(stop); err != nil {
-		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: %v", err)
+		logf.With(logging.Context{Operation: "run", Level: "error"}).Log("sidecar stopped with error: {cause}", logging.Values{"cause": err.Error()})
 		return err
 	}
 	return nil

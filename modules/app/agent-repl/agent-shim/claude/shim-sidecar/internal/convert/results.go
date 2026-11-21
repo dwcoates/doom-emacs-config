@@ -648,13 +648,13 @@ func (c *Converter) webSearchSuccess(call openCall, result map[string]any, at At
 		group := obj(raw)
 		if group == nil {
 			c.log.With(at.ctxWarn("web-search")).With(logging.Context{ActivityID: call.activityID}).
-				Log("a web search result entry was neither a narration line nor a hit group; it is dropped")
+				Log("a web search result entry was neither a narration line nor a hit group; it is dropped", nil)
 			continue
 		}
 		hits, ok := group["content"]
 		if !ok {
 			c.log.With(at.ctxWarn("web-search")).With(logging.Context{ActivityID: call.activityID}).
-				Log("a web search hit group carried no content array; it is dropped")
+				Log("a web search hit group carried no content array; it is dropped", nil)
 			continue
 		}
 		for _, hit := range list(hits) {
@@ -665,7 +665,7 @@ func (c *Converter) webSearchSuccess(call openCall, result map[string]any, at At
 				// row built around an empty href is a dead row drawn as a
 				// live one.
 				c.log.With(at.ctxWarn("web-search")).With(logging.Context{ActivityID: call.activityID}).
-					Log("a web search hit named no url; it is dropped rather than drawn as a dead link")
+					Log("a web search hit named no url; it is dropped rather than drawn as a dead link", nil)
 				continue
 			}
 			success.Results = append(success.Results, &conversationv1.AgentWebSearchResult{

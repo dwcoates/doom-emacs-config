@@ -33,7 +33,7 @@ type SessionTranscriptHandler struct {
 
 // NewSessionTranscriptHandler builds a handler with its own converter.
 func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
-	log.With(logging.Context{Operation: "transcript-handler-new"}).LogVerbose("constructing session transcript handler")
+	log.With(logging.Context{Operation: "transcript-handler-new"}).LogVerbose("constructing session transcript handler", nil)
 	obs := &seamObserver{}
 	conv := convert.New(log)
 	conv.SetObserver(obs)
@@ -44,7 +44,7 @@ func NewSessionTranscriptHandler(log *logging.Bound) *SessionTranscriptHandler {
 func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.obs.bind(ctx)
 	h.log.With(handleCtx("transcript-handle", ctx)).
-		LogVerbose("handling frames=%d records_observed=%d", len(frames), ctx.RecordsObserved)
+		LogVerbose("handling frames={frames_length} records_observed={records_observed}", logging.Values{"frames_length": len(frames), "records_observed": ctx.RecordsObserved})
 
 	// A compaction boundary whose summary the batch does not hold is
 	// UNSETTLED: the summary may not be written yet. holdCount defers it and
@@ -56,13 +56,12 @@ func (h *SessionTranscriptHandler) Handle(frames []tail.Frame, ctx *Context) []*
 	if len(frames) != originalCount {
 		h.log.With(handleCtx("hold", ctx)).
 			With(logging.Context{Offset: logging.Off(ctx.HeldOffset)}).
-			Log("deferred the compaction boundary awaiting its summary, with the frames after it: frames=%d processed=%d held_deliveries=%d",
-				originalCount, len(frames), ctx.HeldDeliveries)
+			Log("deferred the compaction boundary awaiting its summary, with the frames after it: frames={original_count} processed={frames_length} held_deliveries={held_deliveries}", logging.Values{"original_count": originalCount, "frames_length": len(frames), "held_deliveries": ctx.HeldDeliveries})
 	}
 
 	out := convertFrames(h.conv, h.log, frames, ctx)
 	h.log.With(handleCtx("transcript-handle", ctx)).
-		LogVerbose("handled frames=%d entries=%d", len(frames), len(out))
+		LogVerbose("handled frames={frames_length} entries={out_length}", logging.Values{"frames_length": len(frames), "out_length": len(out)})
 	return out
 }
 
@@ -76,8 +75,7 @@ func (h *SessionTranscriptHandler) Prime(prefix io.Reader, ctx *Context) error {
 		return err
 	}
 	h.log.With(handleCtx("keepalive-seed", ctx)).LogVerbose(
-		"classified the %d line(s) before the first delivered frame for the keep-alive rule: %d keep-alive record(s) under %d keep-alive prompt(s)",
-		seed.Lines, seed.KeepaliveRecords, seed.KeepalivePrompts)
+		"classified the {seed_lines} line(s) before the first delivered frame for the keep-alive rule: {seed_keepalive_records} keep-alive record(s) under {seed_keepalive_prompts} keep-alive prompt(s)", logging.Values{"seed_lines": seed.Lines, "seed_keepalive_records": seed.KeepaliveRecords, "seed_keepalive_prompts": seed.KeepalivePrompts})
 	return nil
 }
 
@@ -90,7 +88,7 @@ func convertFrames(conv *convert.Converter, log *logging.Bound, frames []tail.Fr
 		at := attribute(ctx, frame.Offset)
 		if frame.ParseErr != nil {
 			log.With(handleWarn("parse", ctx)).With(logging.Context{Offset: logging.Off(frame.Offset)}).
-				Log("parse failure; the line is classified as unparsed residue and not stored, so the bytes to investigate are this file at this offset: %v", frame.ParseErr)
+				Log("parse failure; the line is classified as unparsed residue and not stored, so the bytes to investigate are this file at this offset: {parse_cause}", logging.Values{"parse_cause": frame.ParseErr.Error()})
 			unparsed := convert.UnparsedEntry(at, frame.Raw, frame.ParseErr)
 			logResidue(log, ctx, frame.Offset, []*storev1.StoreEntry{unparsed})
 			out = append(out, unparsed)
@@ -152,7 +150,7 @@ func (h *SessionTranscriptHandler) holdCount(frames []tail.Frame, ctx *Context) 
 		// this boundary supersedes it whenever it arrives, however many
 		// deliveries later (convert.attachCompactSummary).
 		h.log.With(handleCtx("hold", ctx)).With(logging.Context{Offset: logging.Off(boundary.Offset)}).
-			Log("the held compaction boundary was held for %d delivery and no summary followed; converting it with the placeholder, which a later summary descending from it supersedes", heldFor)
+			Log("the held compaction boundary was held for {held_for} delivery and no summary followed; converting it with the placeholder, which a later summary descending from it supersedes", logging.Values{"held_for": heldFor})
 		return n
 	}
 	if heldOffset == boundary.Offset {

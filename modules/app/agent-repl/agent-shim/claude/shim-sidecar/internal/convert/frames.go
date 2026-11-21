@@ -61,7 +61,7 @@ func (c *Converter) landFrame(at Attribution, agent, upsertKey, discriminator st
 		// A frame must name its agent: the store reads the book from the frame
 		// and never invents one. A frame with no agent is residue, loudly.
 		c.log.With(at.ctxError("attribution")).With(logging.Context{UpsertKey: upsertKey}).
-			Log("frame names no agent; the record has no book and is stored as unknown residue")
+			Log("frame names no agent; the record has no book and is stored as unknown residue", nil)
 		return UnknownEntry(at, "unattributed_frame", "agent_id", map[string]any{
 			"upsert_key": upsertKey,
 			"path":       at.Path,
@@ -78,7 +78,7 @@ func (c *Converter) landFrame(at Attribution, agent, upsertKey, discriminator st
 func (c *Converter) landPrompt(at Attribution, agent, upsertKey, discriminator string, prompt *conversationv1.AgentPrompt) *storev1.StoreEntry {
 	if agent == "" {
 		c.log.With(at.ctxError("attribution")).With(logging.Context{UpsertKey: upsertKey}).
-			Log("prompt names no recipient; the record has no book and is stored as unknown residue")
+			Log("prompt names no recipient; the record has no book and is stored as unknown residue", nil)
 		return UnknownEntry(at, "unattributed_prompt", "agent_id", map[string]any{
 			"upsert_key": upsertKey,
 			"path":       at.Path,
@@ -96,7 +96,7 @@ func (c *Converter) landPrompt(at Attribution, agent, upsertKey, discriminator s
 func (c *Converter) landPeerMessage(at Attribution, agent, upsertKey, discriminator string, peer *conversationv1.PeerMessage) *storev1.StoreEntry {
 	if agent == "" {
 		c.log.With(at.ctxError("attribution")).With(logging.Context{UpsertKey: upsertKey}).
-			Log("peer message names no recipient; the record has no book and is stored as unknown residue")
+			Log("peer message names no recipient; the record has no book and is stored as unknown residue", nil)
 		return UnknownEntry(at, "unattributed_peer", "agent_id", map[string]any{
 			"upsert_key": upsertKey,
 			"path":       at.Path,

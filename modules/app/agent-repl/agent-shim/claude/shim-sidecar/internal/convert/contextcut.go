@@ -45,10 +45,10 @@ func (c *Converter) contextCleared(record map[string]any, at Attribution, env en
 		// a key the other plane cannot reach, so the divider may be drawn
 		// twice, and that is said out loud rather than discovered in the feed.
 		c.log.With(at.ctxWarn("context-cleared")).With(logging.Context{UpsertKey: SessionKey("context_cut", identity)}).
-			Log("context clear: the transcript names no session, so the cut is keyed on its own record uuid and the stream plane's write cannot collapse onto it")
+			Log("context clear: the transcript names no session, so the cut is keyed on its own record uuid and the stream plane's write cannot collapse onto it", nil)
 	}
 	c.log.With(at.ctxFor("context-cleared")).With(logging.Context{UpsertKey: SessionKey("context_cut", identity)}).
-		Log("context clear: history discarded outright, with no token delta the vendor stated")
+		Log("context clear: history discarded outright, with no token delta the vendor stated", nil)
 	return c.contextCutEntry(at, identity, agent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Cleared{Cleared: &conversationv1.ContextCleared{}},
 	})
@@ -118,12 +118,11 @@ func (c *Converter) contextCompacted(record map[string]any, at Attribution, env 
 		c.pendingCut = &pendingCompaction{boundaryUUID: env.uuid, agent: agent, compacted: compacted,
 			descendants: newLineage(env.uuid)}
 		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
-			Log("compact boundary's summary is not in its batch; the cut is drawn with the stated placeholder %q, and the summary descending from this boundary supersedes it when it arrives (records after it in the batch: %d)", NoSummaryWritten, len(following))
+			Log("compact boundary's summary is not in its batch; the cut is drawn with the stated placeholder \"{no_summary_written}\", and the summary descending from this boundary supersedes it when it arrives (records after it in the batch: {following_length})", logging.Values{"no_summary_written": NoSummaryWritten, "following_length": len(following)})
 	} else {
 		c.pendingCut = nil
 		c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", env.uuid)}).
-			Log("compaction trigger=%q tokens %d->%d coalesced with its summary (%d characters)",
-				str(metadata["trigger"]), compacted.GetTokens().GetTokensBefore(), compacted.GetTokens().GetTokensAfter(), len(summary))
+			Log("compaction trigger=\"{trigger}\" tokens {tokens_before}->{tokens_after} coalesced with its summary ({summary_length} characters)", logging.Values{"trigger": str(metadata["trigger"]), "tokens_before": compacted.GetTokens().GetTokensBefore(), "tokens_after": compacted.GetTokens().GetTokensAfter(), "summary_length": len(summary)})
 	}
 
 	// A COMPACTION IS ONE VENDOR RECORD ON BOTH PLANES — the stream's
@@ -228,7 +227,7 @@ func (c *Converter) attachCompactSummary(record map[string]any, at Attribution) 
 	compacted := proto.Clone(pending.compacted).(*conversationv1.ContextCompacted)
 	compacted.Summary = &conversationv1.AgentResponseProse{Markdown: summary}
 	c.log.With(at.ctxFor("context-compacted")).With(logging.Context{UpsertKey: SessionKey("context_cut", pending.boundaryUUID)}).
-		Log("the compact boundary's summary arrived on a later line (%d characters); it supersedes the placeholder on the cut's own key", len(summary))
+		Log("the compact boundary's summary arrived on a later line ({summary_length} characters); it supersedes the placeholder on the cut's own key", logging.Values{"summary_length": len(summary)})
 	return c.contextCutEntry(at, pending.boundaryUUID, pending.agent, &conversationv1.ContextCut{
 		Cut: &conversationv1.ContextCut_Compacted{Compacted: compacted},
 	})

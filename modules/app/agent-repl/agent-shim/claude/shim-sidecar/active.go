@@ -140,7 +140,7 @@ func (s *sidecar) goDormant(target discover.Target) {
 	if _, known := s.dormant[target.Path]; !known {
 		s.log.With(logging.Context{
 			Operation: "watch-dormant", Path: target.Path, TaskID: target.TaskID, VendorSessionID: target.SessionID,
-		}).LogVerbose("not watched: no active workspace's conversation owns this file; it is read from its cursor if one becomes active")
+		}).LogVerbose("not watched: no active workspace's conversation owns this file; it is read from its cursor if one becomes active", nil)
 	}
 	s.dormant[target.Path] = target
 }
@@ -202,8 +202,7 @@ func (s *sidecar) applyActive(now time.Time, recordsMoved bool) {
 		return
 	}
 	s.log.With(logging.Context{Operation: "watched-set"}).Log(
-		"the watched set changed: %d workspace conversation(s) active (%d started, %d ended), %d draining; %d file(s) watched (%d admitted from dormant, %d dropped as drained), %d discovered file(s) dormant",
-		len(s.active), started, ended, len(s.draining), len(s.watchers), admitted, dropped, len(s.dormant))
+		"the watched set changed: {active_length} workspace conversation(s) active ({started} started, {ended} ended), {draining_length} draining; {watchers_length} file(s) watched ({admitted} admitted from dormant, {dropped} dropped as drained), {dormant_length} discovered file(s) dormant", logging.Values{"active_length": len(s.active), "started": started, "ended": ended, "draining_length": len(s.draining), "watchers_length": len(s.watchers), "admitted": admitted, "dropped": dropped, "dormant_length": len(s.dormant)})
 }
 
 // probeActive answers every conversation whose workspace lock a live shim
@@ -235,7 +234,7 @@ func (s *sidecar) probeActive() map[string]string {
 		if _, failed := s.lockFailures[path]; failed {
 			delete(s.lockFailures, path)
 			s.log.With(logging.Context{Operation: "workspace-lock-probe", Path: path}).Log(
-				"workspace %s's lock answers again (held=%t)", key, held[path])
+				"workspace {key}'s lock answers again (held={held_entry})", logging.Values{"key": key, "held_entry": held[path]})
 		}
 		if held[path] {
 			next[original] = key
@@ -250,11 +249,11 @@ func (s *sidecar) stateLockFailure(path, key string, err error) {
 	detail := err.Error()
 	bound := s.log.With(logging.Context{Operation: "workspace-lock-probe", Path: path, Level: "warn"})
 	if s.lockFailures[path] == detail {
-		bound.With(logging.Context{Level: "debug"}).LogVerbose("workspace %s's lock still cannot be probed; it is still treated as held: %v", key, err)
+		bound.With(logging.Context{Level: "debug"}).LogVerbose("workspace {key}'s lock still cannot be probed; it is still treated as held: {cause}", logging.Values{"key": key, "cause": err.Error()})
 		return
 	}
 	s.lockFailures[path] = detail
-	bound.Log("workspace %s's lock cannot be probed, so its conversation is treated as ACTIVE and its files stay watched: %v", key, err)
+	bound.Log("workspace {key}'s lock cannot be probed, so its conversation is treated as ACTIVE and its files stay watched: {cause}", logging.Values{"key": key, "cause": err.Error()})
 }
 
 // admitDormant offers every dormant file that now belongs to an active or
@@ -275,7 +274,7 @@ func (s *sidecar) admitDormant(now time.Time) (int, bool) {
 	for _, target := range ready {
 		s.log.With(logging.Context{
 			Operation: "watch-admit", Path: target.Path, TaskID: target.TaskID, VendorSessionID: target.SessionID,
-		}).LogVerbose("its workspace's conversation is active; it is read from the cursor the store holds")
+		}).LogVerbose("its workspace's conversation is active; it is read from the cursor the store holds", nil)
 	}
 	return s.watchTargets(ready, now)
 }
@@ -369,11 +368,11 @@ func (s *sidecar) stateDrainFailure(path string, err error) {
 	detail := err.Error()
 	bound := s.log.With(logging.Context{Operation: "watch-drop", Path: path, Level: "warn"})
 	if s.drainFailures[path] == detail {
-		bound.With(logging.Context{Level: "debug"}).LogVerbose("still cannot tell whether this file has drained; it stays watched: %v", err)
+		bound.With(logging.Context{Level: "debug"}).LogVerbose("still cannot tell whether this file has drained; it stays watched: {cause}", logging.Values{"cause": err.Error()})
 		return
 	}
 	s.drainFailures[path] = detail
-	bound.Log("cannot tell whether this file of an ended workspace has drained, so it stays watched: %v", err)
+	bound.Log("cannot tell whether this file of an ended workspace has drained, so it stays watched: {cause}", logging.Values{"cause": err.Error()})
 }
 
 // drop stops watching one drained file and keeps it dormant, so a later
@@ -388,7 +387,7 @@ func (s *sidecar) drop(path string, w *watched) {
 	s.log.With(logging.Context{
 		Operation: "watch-drop", Path: path, TaskID: w.target.TaskID, FileID: w.tailer.FileID(),
 		Offset: logging.Off(w.tailer.Offset()),
-	}).LogVerbose("dropped: its workspace's session ended and nothing more is owed from it (%s)", w.target.Kind)
+	}).LogVerbose("dropped: its workspace's session ended and nothing more is owed from it ({kind})", logging.Values{"kind": w.target.Kind.String()})
 }
 
 // pruneDormant forgets every dormant file a full scan no longer found. It is

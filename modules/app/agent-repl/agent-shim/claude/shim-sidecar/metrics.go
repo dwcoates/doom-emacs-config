@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agentrepl/logging/logsite"
 	"agentrepl/logging/metrics"
 	"agentrepl/shim-claude-sidecar/internal/logging"
 )
@@ -21,12 +22,12 @@ func closeMetricsSurface(surface *metrics.Server, logf *logging.Bound) {
 // metricsRecord is the sidecar's canonical logger as the metrics surface
 // records through it; a debug record is verbose.
 func metricsRecord(logf *logging.Bound) metrics.Record {
-	return func(level, message string) {
+	return func(level string, message logsite.Message, values map[string]any) {
 		bound := logf.With(logging.Context{Operation: "metrics", Level: level})
 		if level == "debug" {
-			bound.LogVerbose("%s", message)
+			bound.LogVerboseMessage(message, logging.Values(values))
 			return
 		}
-		bound.Log("%s", message)
+		bound.LogMessage(message, logging.Values(values))
 	}
 }

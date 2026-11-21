@@ -102,7 +102,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		// while its own detached row was still ticking beside it.
 		if bashMovedToBackground(result) {
 			c.log.With(at.ctxFor("bash")).With(logging.Context{ActivityID: call.activityID}).
-				LogVerbose("the command MOVED rather than ended; its detached-work frames settle it, not this receipt")
+				LogVerbose("the command MOVED rather than ended; its detached-work frames settle it, not this receipt", nil)
 			return nil
 		}
 		exit := bashExitCode(result, block, failed)
@@ -138,7 +138,7 @@ func (c *Converter) settledItem(kind toolKind, call openCall, result, block map[
 		call.retainedAllowedTools = skillAllowedTools(result)
 		c.rememberSkillCall(call)
 		c.log.With(at.ctxFor("skill")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
-			LogVerbose("skill call acknowledged; the unit settles when its document lands")
+			LogVerbose("skill call acknowledged; the unit settles when its document lands", nil)
 		return nil
 	case kindSendMessage:
 		if failed {
@@ -338,6 +338,6 @@ func (c *Converter) settleUnmodeled(call openCall, block map[string]any, failed 
 	}
 	activity.ActivityId = activityID(call.activityID)
 	c.log.With(at.ctxFor("unmodeled-return")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
-		LogVerbose("unmodeled tool name=%q settled failed=%t", call.name, failed)
+		LogVerbose("unmodeled tool name=\"{call_name}\" settled failed={failed}", logging.Values{"call_name": call.name, "failed": failed})
 	return c.settledEntry(at, agent, call.activityID, activity)
 }

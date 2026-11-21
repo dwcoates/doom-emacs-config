@@ -25,6 +25,8 @@ package convert
 import (
 	"path"
 	"strings"
+
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 // taskNotificationTag brackets the fields a task-notification carries.
@@ -69,7 +71,7 @@ func (c *Converter) noteForeignSpawn(record map[string]any, at Attribution) {
 	}
 	c.foreignSpawns[taskID] = owner
 	c.log.With(at.ctxFor("foreign-spawn")).
-		LogVerbose("task %s was launched by session %s, whose transcript is a different file; a stop for it here has no launch to join", taskID, owner)
+		LogVerbose("task {task_id} was launched by session {owner}, whose transcript is a different file; a stop for it here has no launch to join", logging.Values{"task_id": taskID, "owner": owner})
 }
 
 // taskNotificationText returns the task-notification body a record carries, or

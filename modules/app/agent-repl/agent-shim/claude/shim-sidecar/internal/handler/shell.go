@@ -96,17 +96,17 @@ type ShellOutputHandler struct {
 
 // NewShellOutputHandler builds a handler.
 func NewShellOutputHandler(log *logging.Bound) *ShellOutputHandler {
-	log.With(logging.Context{Operation: "shell-handler-new"}).LogVerbose("constructing shell output handler")
+	log.With(logging.Context{Operation: "shell-handler-new"}).LogVerbose("constructing shell output handler", nil)
 	return &ShellOutputHandler{RunOutput: NewRunOutput(log), log: log}
 }
 
 // Handle implements tail.Handler.
 func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev1.StoreEntry {
 	h.log.With(handleCtx("shell-handle", ctx)).
-		LogVerbose("handling frames=%d bytes_observed=%d", len(frames), ctx.BytesObserved)
+		LogVerbose("handling frames={frames_length} bytes_observed={bytes_observed}", logging.Values{"frames_length": len(frames), "bytes_observed": ctx.BytesObserved})
 	if len(frames) == 0 {
 		h.log.With(handleCtx("shell-handle", ctx)).
-			LogVerbose("no frames to convert")
+			LogVerbose("no frames to convert", nil)
 		return nil
 	}
 	// THE RUN IS THE SPAWNING CALL, NEVER THE VENDOR TASK ID. A detached command
@@ -121,7 +121,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		// to accumulate. They are NEVER silently discarded: they land as residue
 		// naming the spool, which is what the aged-unowned-spool policy requires.
 		h.log.With(handleErr("shell-handle", ctx)).
-			Log("shell spool reached the handler with no spawning-call identity; its bytes have no run to append to and are stored as residue")
+			Log("shell spool reached the handler with no spawning-call identity; its bytes have no run to append to and are stored as residue", nil)
 		at := attribute(ctx, frames[0].Offset)
 		h.RememberCoords(ctx)
 		var raw bytes.Buffer
@@ -158,7 +158,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 		// this batch writes no tail and the next one reseeds from the file. The
 		// batch's bytes are not lost: they are in the prefix that reseed reads.
 		h.log.With(handleErr("shell-tail", ctx)).With(logging.Context{ActivityID: run, Offset: logging.Off(frames[0].Offset)}).
-			Log("the run's tail could not be rebuilt from its spool; no tail row is written for this batch and the next batch reseeds: %v", err)
+			Log("the run's tail could not be rebuilt from its spool; no tail row is written for this batch and the next batch reseeds: {cause}", logging.Values{"cause": err.Error()})
 	} else {
 		text, bytesOmitted, linesOmitted := h.Rendered()
 		entries = append(entries, h.Conv().BashTail(attribute(ctx, through), run, text, bytesOmitted, linesOmitted))
@@ -167,7 +167,7 @@ func (h *ShellOutputHandler) Handle(frames []tail.Frame, ctx *Context) []*storev
 	end, ok := trailingTerminator(frames[0].Raw, atLineStart)
 	if !ok {
 		h.log.With(handleCtx("shell-handle", ctx)).
-			LogVerbose("no terminal exit marker in batch entries=%d", len(entries))
+			LogVerbose("no terminal exit marker in batch entries={entries_length}", logging.Values{"entries_length": len(entries)})
 		return entries
 	}
 	// The terminal states the RUN's output, not this batch's: a spool whose

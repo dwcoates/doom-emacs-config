@@ -84,7 +84,7 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 	notice := readTaskNotice(text)
 	bound := c.log.With(at.ctxFor("task-notification")).With(logging.Context{TaskID: notice.taskID, ActivityID: notice.toolUseID})
 	residue := func(why string) []*storev1.StoreEntry {
-		bound.LogVerbose("task notification (status=%q) withheld as vendor_specific, never a prompt: %s", notice.status, why)
+		bound.LogVerbose("task notification (status=\"{notice_status}\") withheld as vendor_specific, never a prompt: {why}", logging.Values{"notice_status": notice.status, "why": why})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserTaskNotification, record)}
 	}
 	restarted := false
@@ -161,6 +161,6 @@ func (c *Converter) taskNotification(record map[string]any, text string, at Attr
 		c.observer.TaskConcluded(notice.taskID)
 	}
 	bound.With(logging.Context{UpsertKey: ActivityKey(notice.toolUseID)}).
-		Log("task notification (status=%q, restarted=%t) settles its backgrounded spawn, as the stream plane's task_notification does", notice.status, restarted)
+		Log("task notification (status=\"{notice_status}\", restarted={restarted}) settles its backgrounded spawn, as the stream plane's task_notification does", logging.Values{"notice_status": notice.status, "restarted": restarted})
 	return []*storev1.StoreEntry{c.settledEntry(at, agent, notice.toolUseID, activity)}
 }

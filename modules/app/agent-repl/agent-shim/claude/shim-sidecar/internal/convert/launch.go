@@ -56,11 +56,11 @@ func (c *Converter) reportLaunch(call openCall, result map[string]any, at Attrib
 		// and a spool that later appears will be ingested as residue rather than
 		// attached to an invented owner.
 		c.log.With(at.ctxWarn("launch")).With(logging.Context{ActivityID: call.activityID}).
-			Log("detached launch carries no task identity; its spool cannot be attributed to this call")
+			Log("detached launch carries no task identity; its spool cannot be attributed to this call", nil)
 		return
 	}
 	c.log.With(at.ctxFor("launch")).With(logging.Context{TaskID: taskID, ActivityID: call.activityID, BookAgentID: call.agentID}).
-		Log("detached launch observed with output path %q", output)
+		Log("detached launch observed with output path \"{output}\"", logging.Values{"output": output})
 	// Remembered for THIS file's own conversions: a TaskStop result names only
 	// the task, and the run it cancels is the call recorded here.
 	c.spawnedRuns[taskID] = call.activityID

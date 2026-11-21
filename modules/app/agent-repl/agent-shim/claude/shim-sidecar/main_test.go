@@ -225,7 +225,7 @@ func TestOpenLoggerCreatesItsDirectory(t *testing.T) {
 		t.Fatalf("openLogger: %v", err)
 	}
 	defer closeLog()
-	logf.With(logging.Context{Operation: "test"}).Log("hello")
+	logf.With(logging.Context{Operation: "test"}).Log("hello", nil)
 
 	// Assert.
 	raw, err := os.ReadFile(path)
@@ -690,7 +690,7 @@ func TestOpenLoggerWritesNothingToTheTerminal(t *testing.T) {
 	defer closeLog()
 
 	// Act.
-	logf.With(logging.Context{Operation: "start"}).Log("sidecar starting")
+	logf.With(logging.Context{Operation: "start"}).Log("sidecar starting", nil)
 
 	// Assert.
 	if terminal.Len() != 0 {
@@ -777,7 +777,7 @@ func TestOpenLoggerStartsALeftoverDebugLevelAtInfo(t *testing.T) {
 	}
 
 	// Act.
-	logf.With(logging.Context{Operation: "tail"}).LogVerbose("dropped")
+	logf.With(logging.Context{Operation: "tail"}).LogVerbose("dropped", nil)
 	closeLog()
 
 	// Assert.
@@ -858,8 +858,8 @@ func TestOpenLoggerWritesAWarningOnlyToTheWarningsFile(t *testing.T) {
 	}
 
 	// Act.
-	logf.With(logging.Context{Operation: "test-warning", Level: "warn"}).Log("a warning")
-	logf.With(logging.Context{Operation: "test-info"}).Log("an info record")
+	logf.With(logging.Context{Operation: "test-warning", Level: "warn"}).Log("a warning", nil)
+	logf.With(logging.Context{Operation: "test-info"}).Log("an info record", nil)
 	closeLog()
 
 	// Assert.

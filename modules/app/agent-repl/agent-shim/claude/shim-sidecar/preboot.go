@@ -93,7 +93,7 @@ func (s *sidecar) holdPreBoot(taskID, run, owner, output string, backgrounded bo
 		}
 		if !errors.Is(err, fs.ErrNotExist) {
 			bound.With(logging.Context{Level: "warn"}).Log(
-				"whether this pre-boot shell's spool exists could not be established, so it is not concluded LOST now: %v", err)
+				"whether this pre-boot shell's spool exists could not be established, so it is not concluded LOST now: {cause}", logging.Values{"cause": err.Error()})
 			return
 		}
 	}
@@ -102,7 +102,7 @@ func (s *sidecar) holdPreBoot(taskID, run, owner, output string, backgrounded bo
 		scansAt: s.fullScans,
 		launch:  launch,
 	}
-	bound.LogVerbose("held: this shell was launched before the machine's boot and its named spool is gone; it is concluded LOST once a full scan finds no spool for it either")
+	bound.LogVerbose("held: this shell was launched before the machine's boot and its named spool is gone; it is concluded LOST once a full scan finds no spool for it either", nil)
 }
 
 // concludePreBoot concludes every held pre-boot shell a full scan has since
@@ -119,7 +119,7 @@ func (s *sidecar) concludePreBoot() {
 		if spooled[run] {
 			delete(s.preBoot, run)
 			s.log.With(logging.Context{Operation: "preboot-run", TaskID: hold.work.TaskID, ActivityID: run}).
-				LogVerbose("released: discovery found this pre-boot shell's spool, so its reader concludes it")
+				LogVerbose("released: discovery found this pre-boot shell's spool, so its reader concludes it", nil)
 			continue
 		}
 		if s.fullScans > hold.scansAt && (hold.launch.Transcript == "" || !s.unseenBytes(hold.launch.Transcript)) {
@@ -166,8 +166,7 @@ func (s *sidecar) concludePreBootBatch(runs []string) bool {
 	if err != nil {
 		if !s.interrupted(err) {
 			s.log.With(logging.Context{Operation: "preboot-run", Level: "error", Repeat: logging.Repeat(len(runs))}).Log(
-				"%d pre-boot shell(s) stay held: the store could not say whether their runs already settled, and a LOST over a settled run would supersede its real terminal; the next sweep asks again: %v",
-				len(runs), err)
+				"{runs_length} pre-boot shell(s) stay held: the store could not say whether their runs already settled, and a LOST over a settled run would supersede its real terminal; the next sweep asks again: {cause}", logging.Values{"runs_length": len(runs), "cause": err.Error()})
 		}
 		s.noteStoreErr("run-settlements", err)
 		return false
@@ -205,7 +204,7 @@ func (s *sidecar) concludePreBootBatch(runs []string) bool {
 		if err != nil {
 			if !s.interrupted(err) {
 				s.log.With(logging.Context{Operation: "preboot-run", Level: "error", Repeat: logging.Repeat(len(minted))}).Log(
-					"%d pre-boot shell LOST terminal(s) were not committed; they stay held for the next sweep: %v", len(minted), err)
+					"{minted_length} pre-boot shell LOST terminal(s) were not committed; they stay held for the next sweep: {cause}", logging.Values{"minted_length": len(minted), "cause": err.Error()})
 			}
 			return false
 		}
@@ -215,7 +214,7 @@ func (s *sidecar) concludePreBootBatch(runs []string) bool {
 		}
 	}
 	s.log.With(logging.Context{Operation: "preboot-run"}).Log(
-		"pre-boot shells concluded: %d LOST terminal(s) written, %d already ended on record", len(minted), settled)
+		"pre-boot shells concluded: {minted_length} LOST terminal(s) written, {settled} already ended on record", logging.Values{"minted_length": len(minted), "settled": settled})
 	return true
 }
 
@@ -240,7 +239,7 @@ func (s *sidecar) askRecordForPreBoot() {
 	if err != nil {
 		if !s.interrupted(err) {
 			s.log.With(logging.Context{Operation: "preboot-run", Level: "error"}).Log(
-				"the record could not name the live shells from before the boot (%d); they stay open until the next sweep asks again: %v", boot, err)
+				"the record could not name the live shells from before the boot ({boot}); they stay open until the next sweep asks again: {cause}", logging.Values{"boot": boot, "cause": err.Error()})
 		}
 		s.noteStoreErr("live-shell-runs", err)
 		return
@@ -253,7 +252,7 @@ func (s *sidecar) askRecordForPreBoot() {
 			// The store answers no run without its origin unit; one here broke
 			// that, and nothing could key its terminal.
 			s.log.With(logging.Context{Operation: "preboot-run", Level: "error", TaskID: r.GetDetached().GetWork().GetValue()}).
-				Log("the record named a live pre-boot shell with no spawning call; no terminal can be keyed to it")
+				Log("the record named a live pre-boot shell with no spawning call; no terminal can be keyed to it", nil)
 			continue
 		}
 		if _, already := s.preBoot[run]; already {
@@ -267,7 +266,7 @@ func (s *sidecar) askRecordForPreBoot() {
 		held++
 	}
 	s.log.With(logging.Context{Operation: "preboot-run"}).Log(
-		"the record names %d live shell(s) announced before the boot; %d newly held to be concluded LOST once a full scan finds no spool for them", len(runs), held)
+		"the record names {runs_length} live shell(s) announced before the boot; {held} newly held to be concluded LOST once a full scan finds no spool for them", logging.Values{"runs_length": len(runs), "held": held})
 }
 
 // launchLog is the log the run's LOST terminal is stated on: the transcript the
@@ -291,5 +290,5 @@ func (s *sidecar) releasePreBoot(taskID, run string) {
 	}
 	delete(s.preBoot, run)
 	s.log.With(logging.Context{Operation: "preboot-run", TaskID: taskID, ActivityID: run}).
-		LogVerbose("released: a spool for this pre-boot shell is now watched, so its reader concludes it")
+		LogVerbose("released: a spool for this pre-boot shell is now watched, so its reader concludes it", nil)
 }

@@ -203,14 +203,14 @@ func (h *AgentTranscriptHandler) LostTerminal(taskID, runActivityID, ownerAgentI
 	run := runActivityID
 	if run == "" {
 		h.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, AgentID: ownerAgentID}).
-			Log("no terminal minted for a LOST subagent: no spawning-call activity id was supplied, so the settle would name no unit (reason=%s)", reason)
+			Log("no terminal minted for a LOST subagent: no spawning-call activity id was supplied, so the settle would name no unit (reason={reason})", logging.Values{"reason": reason})
 		return nil
 	}
 	if ownerAgentID == "" {
 		// The spawn unit is a line in the PARENT's book, and a page line with no
 		// book is residue. Refused loudly rather than mis-filed.
 		h.log.With(logging.Context{Operation: "lost-terminal", Level: "error", TaskID: taskID, ActivityID: run}).
-			Log("no terminal minted for a LOST subagent: no owning agent was supplied, so the spawn unit's settle would name no book (reason=%s)", reason)
+			Log("no terminal minted for a LOST subagent: no owning agent was supplied, so the spawn unit's settle would name no book (reason={reason})", logging.Values{"reason": reason})
 		return nil
 	}
 	at := h.terminalAttribution(taskID, ownerAgentID, run)
@@ -236,7 +236,7 @@ func (h *AgentTranscriptHandler) terminalAttribution(taskID, ownerAgentID, run s
 		h.log.With(logging.Context{
 			Operation: "terminal-attribution", TaskID: taskID,
 			AgentID: ownerAgentID, ActivityID: run, Path: h.coords.Path,
-		}).LogVerbose("this handler read no batch of the subagent's spool, so its terminal is identified by the run")
+		}).LogVerbose("this handler read no batch of the subagent's spool, so its terminal is identified by the run", nil)
 		return convert.Attribution{
 			VendorSessionID: ownerAgentID,
 			MainAgentID:     main,

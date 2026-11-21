@@ -26,11 +26,11 @@ func (c *Converter) JournalRecord(record map[string]any, at Attribution, runID s
 	switch kind {
 	case "started", "result":
 		c.log.With(at.ctxFor("journal-record")).With(logging.Context{BookAgentID: str(record["agentId"])}).
-			LogVerbose("workflow journal %s record for run=%s held as residue (workflow is kicked this wave)", kind, runID)
+			LogVerbose("workflow journal {kind} record for run={run_id} held as residue (workflow is kicked this wave)", logging.Values{"kind": kind, "run_id": runID})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "workflow_journal/"+kind, record)}
 	default:
 		c.log.With(at.ctxWarn("journal-record")).
-			Log("workflow journal record type=%q is not one of the two journal shapes; stored as unknown residue", kind)
+			Log("workflow journal record type=\"{kind}\" is not one of the two journal shapes; stored as unknown residue", logging.Values{"kind": kind})
 		return []*storev1.StoreEntry{UnknownEntry(at, kind, "type", record)}
 	}
 }
@@ -57,6 +57,6 @@ const workflowAgentTranscriptKind = "workflow/agent_transcript"
 func (c *Converter) WorkflowAgentRecord(record map[string]any, at Attribution) []*storev1.StoreEntry {
 	at.RecordUUID = str(record["uuid"])
 	c.log.With(at.ctxFor("workflow-agent-record")).
-		LogVerbose("workflow per-agent transcript record type=%q held as declared residue (workflow is kicked this wave)", str(record["type"]))
+		LogVerbose("workflow per-agent transcript record type=\"{record_type}\" held as declared residue (workflow is kicked this wave)", logging.Values{"record_type": str(record["type"])})
 	return []*storev1.StoreEntry{VendorSpecificEntry(at, workflowAgentTranscriptKind, record)}
 }

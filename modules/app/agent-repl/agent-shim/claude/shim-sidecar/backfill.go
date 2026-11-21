@@ -113,21 +113,20 @@ func (s *sidecar) consumeBackfillRequest(path string) int {
 			entered, already := s.enterBackfill(sessions)
 			if removeErr := os.Remove(path); removeErr != nil {
 				bound.With(logging.Context{Level: "error"}).Log(
-					"the backfill request was applied but could not be removed, so it will be applied again next tick: %v", removeErr)
+					"the backfill request was applied but could not be removed, so it will be applied again next tick: {remove_cause}", logging.Values{"remove_cause": removeErr.Error()})
 			}
-			bound.Log("backfilling %d conversation(s) named by %d session id(s); %d were already watched",
-				entered, len(sessions), already)
+			bound.Log("backfilling {entered} conversation(s) named by {sessions_length} session id(s); {already} were already watched", logging.Values{"entered": entered, "sessions_length": len(sessions), "already": already})
 			return entered
 		}
 	}
 	rejected := path + ".rejected"
 	if renameErr := os.Rename(path, rejected); renameErr != nil {
 		bound.With(logging.Context{Level: "error"}).Log(
-			"the backfill request is unusable (%v) and could not be set aside: %v", err, renameErr)
+			"the backfill request is unusable ({cause}) and could not be set aside: {rename_cause}", logging.Values{"cause": err.Error(), "rename_cause": renameErr.Error()})
 		return 0
 	}
 	bound.With(logging.Context{Level: "error"}).Log(
-		"the backfill request is unusable and was set aside as %s: %v", filepath.Base(rejected), err)
+		"the backfill request is unusable and was set aside as {base}: {cause}", logging.Values{"base": filepath.Base(rejected), "cause": err.Error()})
 	return 0
 }
 
@@ -142,7 +141,7 @@ func (s *sidecar) enterBackfill(sessions []string) (entered, already int) {
 		}
 		s.draining[original] = drainingConversation{scansAtEnd: s.fullScans}
 		s.log.With(logging.Context{Operation: "backfill-request", VendorSessionID: session}).LogVerbose(
-			"conversation %s is read once from the store's cursor and dropped when drained", original)
+			"conversation {original} is read once from the store's cursor and dropped when drained", logging.Values{"original": original})
 		entered++
 	}
 	return entered, already
@@ -154,11 +153,11 @@ func (s *sidecar) stateBackfillDirFailure(dir string, err error) {
 	detail := err.Error()
 	bound := s.log.With(logging.Context{Operation: "backfill-request", Path: dir, Level: "error"})
 	if s.backfillFailure == detail {
-		bound.With(logging.Context{Level: "debug"}).LogVerbose("the backfill request directory still cannot be read: %v", err)
+		bound.With(logging.Context{Level: "debug"}).LogVerbose("the backfill request directory still cannot be read: {cause}", logging.Values{"cause": err.Error()})
 		return
 	}
 	s.backfillFailure = detail
-	bound.Log("the backfill request directory cannot be read, so no backfill request is applied: %v", err)
+	bound.Log("the backfill request directory cannot be read, so no backfill request is applied: {cause}", logging.Values{"cause": err.Error()})
 }
 
 func hasAnySuffix(name string, suffixes []string) bool {

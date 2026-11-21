@@ -74,7 +74,7 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 		ctx = &Context{Path: path}
 	}
 	ctx.Path = path
-	log.With(logging.Context{Operation: "tailer-new", Path: path}).LogVerbose("constructing tailer codec=%T handler=%T", codec, h)
+	log.With(logging.Context{Operation: "tailer-new", Path: path}).LogVerbose("constructing tailer codec={codec} handler={handler}", logging.Values{"codec": fmt.Sprintf("%T", codec), "handler": fmt.Sprintf("%T", h)})
 	return &Tailer{path: path, codec: codec, handler: h, ctx: ctx, log: log, maxRead: MaxBatchBytes, maxFrames: MaxBatchFrames}
 }
 
@@ -83,7 +83,7 @@ func New(path string, codec Codec, h Handler, ctx *Context, log *logging.Bound) 
 // from 0 (progress counts are advisory, not durable).
 func (t *Tailer) Restore(c *storev1.CursorState) {
 	if c == nil {
-		t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("no recovered cursor supplied")
+		t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path}).LogVerbose("no recovered cursor supplied", nil)
 		return
 	}
 	t.fileID = c.GetFileId()
@@ -91,7 +91,7 @@ func (t *Tailer) Restore(c *storev1.CursorState) {
 	t.carry = append([]byte(nil), c.GetCarry()...)
 	t.ctx.FileID = t.fileID
 	t.log.With(logging.Context{Operation: "tailer-restore", Path: t.path, FileID: t.fileID, Offset: logging.Off(t.offset)}).
-		LogVerbose("restored cursor carry_bytes=%d", len(t.carry))
+		LogVerbose("restored cursor carry_bytes={carry_length}", logging.Values{"carry_length": len(t.carry)})
 }
 
 // PollResult is one batch: the records to write plus the cursor advance to
@@ -145,13 +145,13 @@ func (t *Tailer) Poll() (PollResult, error) {
 	switch {
 	case t.fileID != "" && fileID != t.fileID:
 		t.log.With(logging.Context{Operation: "rotation", Path: t.path, FileID: fileID, Offset: logging.Off(0)}).
-			Log("file_id %s -> %s, resetting cursor to 0", t.fileID, fileID)
+			Log("file_id {previous_file_id} -> {file_id}, resetting cursor to 0", logging.Values{"previous_file_id": t.fileID, "file_id": fileID})
 		offset, carry, records = 0, nil, 0
 	case size < offset:
 		// Unlike a rotation, a truncation destroys bytes IN PLACE: anything
 		// appended past the committed offset before it is unrecoverable, and
 		// everything re-read from 0 leans on store dedup not to duplicate.
-		t.log.With(logging.Context{Operation: "truncation", Path: t.path, FileID: fileID, Level: "warn"}).Log("size %d < offset %d, resetting cursor to 0; bytes past the committed offset are unrecoverable", size, offset)
+		t.log.With(logging.Context{Operation: "truncation", Path: t.path, FileID: fileID, Level: "warn"}).Log("size {size} < offset {offset}, resetting cursor to 0; bytes past the committed offset are unrecoverable", logging.Values{"size": size, "offset": offset})
 		offset, carry, records = 0, nil, 0
 	}
 
@@ -166,7 +166,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 		t.ctx.FileID = fileID
 		if result.Changed {
 			t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: fileID, Offset: logging.Off(offset)}).
-				LogVerbose("poll no-new-bytes size=%d cursor_changed=%t", size, result.Changed)
+				LogVerbose("poll no-new-bytes size={size} cursor_changed={changed}", logging.Values{"size": size, "changed": result.Changed})
 		}
 		return result, nil
 	}
@@ -191,14 +191,14 @@ func (t *Tailer) Poll() (PollResult, error) {
 		// is skipped and the carry — every byte of which follows the kept
 		// frames — is re-read rather than carried.
 		t.log.With(logging.Context{Operation: "tailer-bound", Path: t.path, FileID: fileID, Offset: logging.Off(frames[t.maxFrames].Offset)}).
-			LogVerbose("batch bounded at %d of %d decoded frame(s); the rest are read by the next poll", t.maxFrames, len(frames))
+			LogVerbose("batch bounded at {max_frames} of {frames_length} decoded frame(s); the rest are read by the next poll", logging.Values{"max_frames": t.maxFrames, "frames_length": len(frames)})
 		newOffset = frames[t.maxFrames].Offset
 		newCarry = nil
 		frames = frames[:t.maxFrames]
 		bounded = true
 	} else if bounded {
 		t.log.With(logging.Context{Operation: "tailer-bound", Path: t.path, FileID: fileID, Offset: logging.Off(newOffset)}).
-			LogVerbose("batch bounded at %d byte(s) with %d unread past it; the rest are read by the next poll", toRead, size-newOffset)
+			LogVerbose("batch bounded at {to_read} byte(s) with {unread} unread past it; the rest are read by the next poll", logging.Values{"to_read": toRead, "unread": size - newOffset})
 	}
 	for _, f := range frames {
 		if f.Obj != nil {
@@ -244,8 +244,7 @@ func (t *Tailer) Poll() (PollResult, error) {
 		Retired: retired,
 	}
 	t.log.With(logging.Context{Operation: "tailer-poll", Path: t.path, FileID: fileID, Offset: logging.Off(result.Next.GetOffset())}).
-		LogVerbose("poll decoded frames=%d entries=%d read_bytes=%d carry_bytes=%d held_deliveries=%d changed=%t more=%t",
-			len(frames), len(entries), toRead, len(result.Next.GetCarry()), t.ctx.HeldDeliveries, result.Changed, result.More)
+		LogVerbose("poll decoded frames={frames_length} entries={entries_length} read_bytes={to_read} carry_bytes={next_carry_length} held_deliveries={held_deliveries} changed={changed} more={more}", logging.Values{"frames_length": len(frames), "entries_length": len(entries), "to_read": toRead, "next_carry_length": len(result.Next.GetCarry()), "held_deliveries": t.ctx.HeldDeliveries, "changed": result.Changed, "more": result.More})
 	return result, nil
 }
 
@@ -276,7 +275,7 @@ func (t *Tailer) applyHold(frames []Frame, forced bool, offset, newOffset int64,
 	held := t.ctx.HeldOffset
 	if held < offset || held >= newOffset {
 		t.log.With(logging.Context{Operation: "hold-out-of-batch", Path: t.path, Level: "error", Offset: logging.Off(held)}).Log(
-			"handler held offset %d outside this batch's [%d,%d); the batch is rejected as a producer defect", held, offset, newOffset)
+			"handler held offset {held} outside this batch's [{batch_start},{new_offset}); the batch is rejected as a producer defect", logging.Values{"held": held, "batch_start": offset, "new_offset": newOffset})
 		t.ctx.HeldOffset, t.ctx.HeldDeliveries, t.ctx.HoldForced = 0, 0, false
 		return 0, nil, 0, fmt.Errorf("%w: held=%d batch=[%d,%d)", ErrHoldOutOfBatch, held, offset, newOffset)
 	}
@@ -285,7 +284,7 @@ func (t *Tailer) applyHold(frames []Frame, forced bool, offset, newOffset int64,
 		// is the whole reason the hold is safe, so it is enforced here rather
 		// than trusted to the handler.
 		t.log.With(logging.Context{Operation: "hold-exhausted", Path: t.path, Level: "warn", Offset: logging.Off(held)}).Log(
-			"handler held offset %d again on its forced redelivery; the hold is refused and the cursor advances to %d", held, newOffset)
+			"handler held offset {held} again on its forced redelivery; the hold is refused and the cursor advances to {new_offset}", logging.Values{"held": held, "new_offset": newOffset})
 		t.ctx.HeldOffset, t.ctx.HeldDeliveries, t.ctx.HoldForced = 0, 0, false
 		return newOffset, newCarry, records, nil
 	}
@@ -298,14 +297,14 @@ func (t *Tailer) applyHold(frames []Frame, forced bool, offset, newOffset int64,
 	// for what has actually been converted.
 	t.ctx.RecordsObserved, t.ctx.BytesObserved = records, held
 	t.log.With(logging.Context{Operation: "tailer-hold", Path: t.path, Offset: logging.Off(held)}).Log(
-		"held deliveries=%d rewinding cursor from=%d to=%d; the next delivery is forced", t.ctx.HeldDeliveries, newOffset, held)
+		"held deliveries={held_deliveries} rewinding cursor from={new_offset} to={held}; the next delivery is forced", logging.Values{"held_deliveries": t.ctx.HeldDeliveries, "new_offset": newOffset, "held": held})
 	return held, nil, records, nil
 }
 
 // Commit advances the committed cursor to a polled result (call only after the
 // store has durably accepted the batch).
 func (t *Tailer) Commit(r PollResult) {
-	t.log.With(logging.Context{Operation: "tailer-commit", Path: t.path}).LogVerbose("commit requested next_present=%t records=%d", r.Next != nil, r.Records)
+	t.log.With(logging.Context{Operation: "tailer-commit", Path: t.path}).LogVerbose("commit requested next_present={has_next} records={records}", logging.Values{"has_next": r.Next != nil, "records": r.Records})
 	if r.Next != nil {
 		t.fileID = r.Next.GetFileId()
 		t.offset = r.Next.GetOffset()
@@ -313,7 +312,7 @@ func (t *Tailer) Commit(r PollResult) {
 	}
 	t.records = r.Records
 	t.log.With(logging.Context{Operation: "tailer-commit", Path: t.path, FileID: t.fileID, Offset: logging.Off(t.offset)}).
-		LogVerbose("cursor committed carry_bytes=%d", len(t.carry))
+		LogVerbose("cursor committed carry_bytes={carry_length}", logging.Values{"carry_length": len(t.carry)})
 }
 
 // prime hands a Primer handler the file's bytes before `start`, the offset of
@@ -338,7 +337,7 @@ func (t *Tailer) prime(start int64) error {
 	}
 	t.primed = true
 	t.log.With(logging.Context{Operation: "tailer-prime", Path: t.path, FileID: t.fileID, Offset: logging.Off(start)}).
-		LogVerbose("handed the handler the %d byte(s) before the first delivered frame", start)
+		LogVerbose("handed the handler the {start} byte(s) before the first delivered frame", logging.Values{"start": start})
 	return nil
 }
 

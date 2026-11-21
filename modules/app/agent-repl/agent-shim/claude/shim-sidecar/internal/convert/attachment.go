@@ -21,7 +21,7 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 	attachment := obj(record["attachment"])
 	if attachment == nil {
 		c.log.With(at.ctxWarn("convert-line")).
-			Log("attachment line carries no %q object; stored as unknown residue", "attachment")
+			Log("attachment line carries no \"attachment\" object; stored as unknown residue", nil)
 		return []*storev1.StoreEntry{UnknownEntry(at, "", "attachment", record)}
 	}
 	env := readEnvelope(record)
@@ -47,7 +47,7 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 			return c.taskNotification(record, prompt, at, env, agent)
 		}
 		c.log.With(at.ctxFor("withhold")).
-			LogVerbose("attachment/queued_command carrying no task notification withheld as vendor_specific")
+			LogVerbose("attachment/queued_command carrying no task notification withheld as vendor_specific", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/queued_command", record)}
 	default:
 		// Context-cut exclusions and CLI machinery: understood, and deliberately
@@ -55,7 +55,7 @@ func (c *Converter) attachmentLine(record map[string]any, at Attribution) []*sto
 		// lands here too: no footer line warns that the context is nearly full
 		// (owner ruling, 2026-10-06), and the real CLI never writes one.
 		c.log.With(at.ctxFor("withhold")).
-			LogVerbose("attachment/%s withheld as vendor_specific", kind)
+			LogVerbose("attachment/{kind} withheld as vendor_specific", logging.Values{"kind": kind})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/"+kind, record)}
 	}
 }
@@ -98,11 +98,11 @@ func (c *Converter) hookAttachment(kind string, record, attachment map[string]an
 	log := c.log.With(at.ctxFor("hook")).With(logging.Context{UpsertKey: ResidueKey(at)})
 	switch kind {
 	case "hook_blocking_error":
-		log.LogVerbose("hook %q BLOCKED the gated call; the stream plane serves the row and the record is kept whole as an unserved item", name)
+		log.LogVerbose("hook \"{name}\" BLOCKED the gated call; the stream plane serves the row and the record is kept whole as an unserved item", logging.Values{"name": name})
 	case "hook_non_blocking_error":
-		log.LogVerbose("hook %q failed without blocking; the stream plane serves the row and the record is kept whole as an unserved item", name)
+		log.LogVerbose("hook \"{name}\" failed without blocking; the stream plane serves the row and the record is kept whole as an unserved item", logging.Values{"name": name})
 	default:
-		log.LogVerbose("hook attachment kind=%s kept whole as an unserved item; the stream plane serves the row", kind)
+		log.LogVerbose("hook attachment kind={kind} kept whole as an unserved item; the stream plane serves the row", logging.Values{"kind": kind})
 	}
 	return VendorSpecificEntry(at, "attachment/"+kind, record)
 }
@@ -143,7 +143,7 @@ func (c *Converter) diagnosticsAttachment(attachment map[string]any, at Attribut
 		// it would be a real defect deserving a warn, which is why the
 		// distinction lives in lastChangeUnit and not in the severity here.
 		c.log.With(at.ctxFor("diagnostics")).
-			LogVerbose("IDE diagnostics follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess")
+			LogVerbose("IDE diagnostics follow no write or edit this reader observed; stored as vendor_specific rather than attached by guess", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, "attachment/diagnostics", attachment)}
 	}
 
@@ -174,7 +174,7 @@ func (c *Converter) diagnosticsAttachment(attachment map[string]any, at Attribut
 
 	unit := c.lastChangeUnit
 	c.log.With(at.ctxFor("diagnostics")).With(logging.Context{ActivityID: unit, UpsertKey: ActivityKey(unit)}).
-		Log("IDE diagnostics joined by adjacency to the last change unit (%d file(s))", len(report.Files))
+		Log("IDE diagnostics joined by adjacency to the last change unit ({report_files_length} file(s))", logging.Values{"report_files_length": len(report.Files)})
 
 	// The report rides the CHANGE's own unit as a further frame of it. Which
 	// change kind it was decides the arm, so the remembered value carries it.
@@ -220,7 +220,7 @@ func (c *Converter) injectedMemory(attachment map[string]any, at Attribution, en
 	unitID := ContextInjectedUnitID("memory", agent, env.uuid)
 
 	c.log.With(at.ctxFor("context-injected")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
-		LogVerbose("memory file %q injected", path)
+		LogVerbose("memory file \"{memory_path}\" injected", logging.Values{"memory_path": path})
 
 	activity := item(&conversationv1.AgentActivity_ContextInjected{ContextInjected: &conversationv1.AgentContextInjected{
 		Injected: &conversationv1.AgentContextInjected_Memory{Memory: &conversationv1.AgentInjectedMemory{
@@ -263,7 +263,7 @@ func (c *Converter) injectedSkills(kind string, attachment map[string]any, at At
 	}
 
 	c.log.With(at.ctxFor("context-injected")).With(logging.Context{ActivityID: unitID, UpsertKey: ActivityKey(unitID)}).
-		LogVerbose("attachment/%s injected %d skill(s)", kind, len(injected.Skills))
+		LogVerbose("attachment/{kind} injected {injected_skills_length} skill(s)", logging.Values{"kind": kind, "injected_skills_length": len(injected.Skills)})
 
 	activity := item(&conversationv1.AgentActivity_ContextInjected{ContextInjected: &conversationv1.AgentContextInjected{
 		Injected: &conversationv1.AgentContextInjected_Skills{Skills: injected},

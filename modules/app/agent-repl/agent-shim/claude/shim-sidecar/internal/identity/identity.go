@@ -223,8 +223,7 @@ func (i *Index) refresh(clearMisses bool) {
 	}
 
 	i.log.With(logging.Context{Operation: "identity-refresh"}).LogVerbose(
-		"read the shim's identity records under %s: %d minted identit(ies), %d vendor-session link(s)",
-		i.stateDir, len(i.originals), len(i.links))
+		"read the shim's identity records under {state_dir}: {originals_length} minted identit(ies), {links_length} vendor-session link(s)", logging.Values{"state_dir": i.stateDir, "originals_length": len(i.originals), "links_length": len(i.links)})
 }
 
 // RefreshIfMoved re-reads every record, keeping the remembered misses as
@@ -363,7 +362,7 @@ func (i *Index) RecheckLinks() {
 		return
 	}
 	i.log.With(logging.Context{Operation: "identity-recheck", Repeat: logging.Repeat(len(i.unlinked))}).LogVerbose(
-		"the shim's link directories changed since the last check; %d remembered miss(es) are dropped so the next lookup asks the disk again", len(i.unlinked))
+		"the shim's link directories changed since the last check; {unlinked_length} remembered miss(es) are dropped so the next lookup asks the disk again", logging.Values{"unlinked_length": len(i.unlinked)})
 	i.unlinked = map[string]bool{}
 }
 
@@ -446,7 +445,7 @@ func (i *Index) glob(pattern string) []string {
 	matches, err := filepath.Glob(pattern)
 	if err != nil {
 		i.log.With(logging.Context{Operation: "identity-refresh", Level: "error", Path: pattern}).Log(
-			"the identity-record pattern is malformed, so no record matching it can be read: %v", err)
+			"the identity-record pattern is malformed, so no record matching it can be read: {cause}", logging.Values{"cause": err.Error()})
 		return nil
 	}
 	return matches
@@ -461,7 +460,7 @@ func (i *Index) malformed(path, what string) {
 	}
 	i.warned[path] = true
 	i.log.With(logging.Context{Operation: "identity-record", Level: "warn", Path: path}).Log(
-		"ignoring an identity record: %s", what)
+		"ignoring an identity record: {what}", logging.Values{"what": what})
 }
 
 // readJSON reads one identity record. An ABSENT file is silent — the shim may

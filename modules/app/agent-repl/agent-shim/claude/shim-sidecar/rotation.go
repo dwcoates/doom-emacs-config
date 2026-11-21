@@ -182,7 +182,7 @@ func (s *sidecar) awaitsRotationLink(target discover.Target) bool {
 			delete(s.rotationHeld, path)
 			s.log.With(logging.Context{
 				Operation: "rotation-hold", Path: path, VendorSessionID: target.SessionID,
-			}).Log("released from the rotation hold (%s); it is read from its start", why)
+			}).Log("released from the rotation hold ({why}); it is read from its start", logging.Values{"why": why})
 		}
 		return false
 	}
@@ -190,19 +190,19 @@ func (s *sidecar) awaitsRotationLink(target discover.Target) bool {
 		s.rotationHeld[path] = target
 		s.log.With(logging.Context{
 			Operation: "rotation-hold", Path: path, VendorSessionID: target.SessionID,
-		}).LogVerbose("still held: %s", why)
+		}).LogVerbose("still held: {why}", logging.Values{"why": why})
 		return true
 	}
 	s.rotationHeld[path] = target
 	if readErr != nil {
 		s.log.With(logging.Context{
 			Operation: "rotation-hold", Path: path, VendorSessionID: target.SessionID, Level: "warn",
-		}).Log("held unread: %s, so whether it continues a cleared conversation is unknown; it is examined again on every poll: %v", why, readErr)
+		}).Log("held unread: {why}, so whether it continues a cleared conversation is unknown; it is examined again on every poll: {read_cause}", logging.Values{"why": why, "read_cause": readErr.Error()})
 		return true
 	}
 	s.log.With(logging.Context{
 		Operation: "rotation-hold", Path: path, VendorSessionID: target.SessionID,
-	}).Log("held unread: %s; no identity record names this transcript yet, and a record converted under its own id would split the conversation across two books for good", why)
+	}).Log("held unread: {why}; no identity record names this transcript yet, and a record converted under its own id would split the conversation across two books for good", logging.Values{"why": why})
 	return true
 }
 

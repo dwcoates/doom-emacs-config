@@ -49,6 +49,7 @@ import (
 	"strings"
 
 	storev1 "agentrepl/proto/store/v1"
+	"agentrepl/shim-claude-sidecar/internal/logging"
 )
 
 // The vendor_specific kinds this file withholds under. Each is a DECLARED
@@ -106,7 +107,7 @@ func (c *Converter) notTypedByPerson(record, message map[string]any, at Attribut
 	}
 	if env.originKind != "" && env.originKind != originHuman {
 		c.log.With(at.ctxFor("not-typed")).
-			LogVerbose("user record's origin.kind=%q names a source that is not a person and no arm models it; classified as unknown residue, never a prompt", env.originKind)
+			LogVerbose("user record's origin.kind=\"{origin_kind}\" names a source that is not a person and no arm models it; classified as unknown residue, never a prompt", logging.Values{"origin_kind": env.originKind})
 		return []*storev1.StoreEntry{UnknownEntry(at, env.originKind, "origin.kind", record)}, true
 	}
 	if !sole {
@@ -118,15 +119,15 @@ func (c *Converter) notTypedByPerson(record, message map[string]any, at Attribut
 	switch {
 	case isLocalCommandOutput(text):
 		c.log.With(at.ctxFor("not-typed")).
-			LogVerbose("a local command's printed output withheld as vendor_specific (the stream plane files local_command_output the same way)")
+			LogVerbose("a local command's printed output withheld as vendor_specific (the stream plane files local_command_output the same way)", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserLocalCommandOutput, record)}, true
 	case isInterruptMarker(text):
 		c.log.With(at.ctxFor("not-typed")).
-			LogVerbose("the interrupt marker withheld as vendor_specific (a stop is the turn terminal's to state, never something the person said)")
+			LogVerbose("the interrupt marker withheld as vendor_specific (a stop is the turn terminal's to state, never something the person said)", nil)
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserInterrupt, record)}, true
 	case typedSessionCommand(text):
 		c.log.With(at.ctxFor("not-typed")).
-			LogVerbose("a session command typed bare (%q) withheld as vendor_specific (the CLI answers it itself; a context cut is its boundary's own row)", strings.TrimSpace(text))
+			LogVerbose("a session command typed bare (\"{bare_command}\") withheld as vendor_specific (the CLI answers it itself; a context cut is its boundary's own row)", logging.Values{"bare_command": strings.TrimSpace(text)})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserSlashCommand, record)}, true
 	default:
 		return nil, false
@@ -148,7 +149,7 @@ func (c *Converter) commandEnvelope(record map[string]any, text string, at Attri
 	caveated := c.localCommandCaveat != "" && str(record["parentUuid"]) == c.localCommandCaveat
 	if caveated || isSessionCommand(name, args) {
 		c.log.With(at.ctxFor("not-typed")).
-			LogVerbose("slash command %s withheld as vendor_specific: the CLI answers it itself (caveated=%t)", name, caveated)
+			LogVerbose("slash command {name} withheld as vendor_specific: the CLI answers it itself (caveated={caveated})", logging.Values{"name": name, "caveated": caveated})
 		return []*storev1.StoreEntry{VendorSpecificEntry(at, kindUserSlashCommand, record)}, true
 	}
 	typed := name
@@ -156,7 +157,7 @@ func (c *Converter) commandEnvelope(record map[string]any, text string, at Attri
 		typed += " " + args
 	}
 	c.log.With(at.ctxFor("not-typed")).
-		LogVerbose("slash command %s is a prompt command (no local-command caveat, not a session command); served as the text the person typed", name)
+		LogVerbose("slash command {name} is a prompt command (no local-command caveat, not a session command); served as the text the person typed", logging.Values{"name": name})
 	typedMessage := map[string]any{"role": str(obj(record["message"])["role"]), "content": typed}
 	return []*storev1.StoreEntry{c.humanPrompt(record, typedMessage, at, env, agent)}, true
 }

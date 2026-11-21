@@ -181,7 +181,7 @@ func (d *Discoverer) ScanChanged() []ChangedDir {
 		out = append(out, ChangedDir{Dir: item.dir, Targets: targets})
 	}
 	d.log.With(logging.Context{Operation: "discover-change"}).LogVerbose(
-		"change probe: %d candidate director(ies) stat'd, %d changed, %d target(s) re-enumerated", stats, changed, found)
+		"change probe: {stats} candidate director(ies) stat'd, {changed} changed, {found} target(s) re-enumerated", logging.Values{"stats": stats, "changed": changed, "found": found})
 	return out
 }
 
@@ -205,12 +205,12 @@ func (d *Discoverer) stateProbeFailure(dir string, err error) {
 	detail := err.Error()
 	bound := d.log.With(logging.Context{Operation: "discover-change", Path: dir})
 	if d.probeFailures[dir] == detail {
-		bound.LogVerbose("the change probe still cannot read this directory for the same reason: %v", err)
+		bound.LogVerbose("the change probe still cannot read this directory for the same reason: {cause}", logging.Values{"cause": err.Error()})
 		return
 	}
 	d.probeFailures[dir] = detail
 	bound.With(logging.Context{Level: "warn"}).Log(
-		"the change probe could not read this directory, so a file created under it is found only by the next full rescan rather than on the next poll: %v", err)
+		"the change probe could not read this directory, so a file created under it is found only by the next full rescan rather than on the next poll: {cause}", logging.Values{"cause": err.Error()})
 }
 
 // registerProjectsRoot seeds the candidate set with one config root's projects

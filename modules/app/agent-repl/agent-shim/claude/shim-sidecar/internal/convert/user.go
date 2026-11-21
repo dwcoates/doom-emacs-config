@@ -52,7 +52,7 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 			return append(out, attached)
 		}
 		c.log.With(at.ctxFor("compact-summary")).
-			LogVerbose("compaction summary folded into its boundary")
+			LogVerbose("compaction summary folded into its boundary", nil)
 		return out
 	case c.isClearCommand(message):
 		return append(out, c.contextCleared(record, at, env, agent))
@@ -71,7 +71,7 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// row, so this copy is withheld exactly as an SDK prompt is, and never
 		// drawn as another session's message too.
 		c.log.With(at.ctxFor("user-prompt")).
-			LogVerbose("file-plane peer record withheld as vendor_specific (R15: agent-repl's own peer message from %q, entrypoint=%q, is daemon-minted and drawn live)", env.peerSender, str(record["entrypoint"]))
+			LogVerbose("file-plane peer record withheld as vendor_specific (R15: agent-repl's own peer message from \"{peer_sender}\", entrypoint=\"{entrypoint}\", is daemon-minted and drawn live)", logging.Values{"peer_sender": env.peerSender, "entrypoint": str(record["entrypoint"])})
 		return append(out, VendorSpecificEntry(at, "user_prompt", record))
 	case env.originKind == "peer":
 		// A MESSAGE FROM ANOTHER CLAUDE — an inter-session peer message or a
@@ -88,7 +88,7 @@ func (c *Converter) userLine(record map[string]any, at Attribution) []*storev1.S
 		// the CLI answers itself (bookkeeping.go).
 		c.noteLocalCommandCaveat(record, env)
 		c.log.With(at.ctxFor("withhold")).
-			LogVerbose("harness-injected user record withheld as vendor_specific")
+			LogVerbose("harness-injected user record withheld as vendor_specific", nil)
 		return append(out, VendorSpecificEntry(at, "user/meta", record))
 	default:
 		// NOT EVERY PROMPT-SHAPED RECORD IS SOMETHING A PERSON TYPED: the
@@ -163,12 +163,12 @@ func isOwnPeerInjection(record map[string]any) bool {
 func (c *Converter) humanPrompt(record, message map[string]any, at Attribution, env envelope, agent string) *storev1.StoreEntry {
 	if entrypoint := str(record["entrypoint"]); isSDKEntrypoint(entrypoint) {
 		c.log.With(at.ctxFor("user-prompt")).
-			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: agent-repl's own SDK prompt (entrypoint=%q) is daemon-minted and drawn live)", entrypoint)
+			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: agent-repl's own SDK prompt (entrypoint=\"{entrypoint}\") is daemon-minted and drawn live)", logging.Values{"entrypoint": entrypoint})
 		return VendorSpecificEntry(at, "user_prompt", record)
 	}
 	if boolean(record["isSidechain"]) {
 		c.log.With(at.ctxFor("user-prompt")).
-			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: a sidechain's opening commission is an agent-addressed prompt the daemon draws at both ends)")
+			LogVerbose("file-plane user prompt withheld as vendor_specific (R15: a sidechain's opening commission is an agent-addressed prompt the daemon draws at both ends)", nil)
 		return VendorSpecificEntry(at, "user_prompt", record)
 	}
 	return c.externalPrompt(record, message, at, env, agent)
@@ -211,10 +211,10 @@ func (c *Converter) externalPrompt(record, message map[string]any, at Attributio
 	}
 	if joined {
 		c.log.With(at.ctxFor("prompt-resend")).With(logging.Context{UpsertKey: PromptKey(turn)}).
-			Log("an edited or re-sent prompt shares an unanswered version's parent; it supersedes that version's row instead of drawing a second one")
+			Log("an edited or re-sent prompt shares an unanswered version's parent; it supersedes that version's row instead of drawing a second one", nil)
 	} else {
 		c.log.With(at.ctxFor("user-prompt")).With(logging.Context{UpsertKey: PromptKey(turn)}).
-			LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=%q, not agent-repl's own SDK entrypoint)", str(record["entrypoint"]))
+			LogVerbose("adopted external prompt emitted as a page line on a uuid-derived identity (entrypoint=\"{entrypoint}\", not agent-repl's own SDK entrypoint)", logging.Values{"entrypoint": str(record["entrypoint"])})
 	}
 	return c.landPrompt(at, agent, PromptKey(turn), "agent_prompt", prompt)
 }
@@ -258,7 +258,7 @@ func (c *Converter) peerMessage(record, message map[string]any, at Attribution, 
 		peer.Kind = &conversationv1.PeerMessage_InterSession{InterSession: interSessionOf(env)}
 	}
 	c.log.With(at.ctxFor("peer-message")).With(logging.Context{UpsertKey: PeerKey(env.uuid)}).
-		LogVerbose("a peer message (origin.kind=peer, sender=%q, handback=%t) emitted as a page line on the record uuid", env.peerSender, env.peerHandback)
+		LogVerbose("a peer message (origin.kind=peer, sender=\"{peer_sender}\", handback={peer_handback}) emitted as a page line on the record uuid", logging.Values{"peer_sender": env.peerSender, "peer_handback": env.peerHandback})
 	return c.landPeerMessage(at, agent, PeerKey(env.uuid), "peer_message", peer)
 }
 
@@ -371,7 +371,7 @@ func (c *Converter) skillDocument(record map[string]any, at Attribution, env env
 
 	markdown := firstText(obj(record["message"]))
 	c.log.With(at.ctxFor("skill-document")).With(logging.Context{ActivityID: call.activityID, UpsertKey: ActivityKey(call.activityID)}).
-		LogVerbose("skill document (%d characters) settles its invocation", len(markdown))
+		LogVerbose("skill document ({markdown_length} characters) settles its invocation", logging.Values{"markdown_length": len(markdown)})
 
 	activity := c.skillSettled(call, markdown, env.timestampMs)
 	activity.ActivityId = activityID(call.activityID)

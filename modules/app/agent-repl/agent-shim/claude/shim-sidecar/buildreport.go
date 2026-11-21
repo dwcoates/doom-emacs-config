@@ -41,24 +41,21 @@ func reportBuild(logf *logging.Bound, deps buildReportDeps) {
 	r, err := deps.self()
 	if err != nil {
 		logf.With(logging.Context{Operation: "buildreport-self-failed", Level: "error"}).Log(
-			"shim-claude-sidecar could not determine its own build to report at boot service=%s: %v",
-			buildreport.ServiceSidecar, err)
+			"shim-claude-sidecar could not determine its own build to report at boot service={service}: {cause}", logging.Values{"service": buildreport.ServiceSidecar, "cause": err.Error()})
 		return
 	}
 	dir, err := deps.resolveDir(deps.getenv)
 	if err != nil {
 		logf.With(logging.Context{Operation: "buildreport-dir-failed", Level: "error"}).Log(
-			"shim-claude-sidecar could not resolve its build report directory service=%s: %v",
-			buildreport.ServiceSidecar, err)
+			"shim-claude-sidecar could not resolve its build report directory service={service}: {cause}", logging.Values{"service": buildreport.ServiceSidecar, "cause": err.Error()})
 		return
 	}
 	path := buildreport.Path(dir, buildreport.ServiceSidecar)
 	if err := deps.write(dir, buildreport.ServiceSidecar, r); err != nil {
 		logf.With(logging.Context{Operation: "buildreport-write-failed", Level: "error", Path: path}).Log(
-			"shim-claude-sidecar failed to write its build report service=%s dir=%s: %v",
-			buildreport.ServiceSidecar, dir, err)
+			"shim-claude-sidecar failed to write its build report service={service} dir={dir}: {cause}", logging.Values{"service": buildreport.ServiceSidecar, "dir": dir, "cause": err.Error()})
 		return
 	}
 	logf.With(logging.Context{Operation: "buildreport", Path: path}).Log(
-		"shim-claude-sidecar reported its build build=%s path=%s", r.Build, path)
+		"shim-claude-sidecar reported its build build={build} path={path}", logging.Values{"build": r.Build, "path": path})
 }

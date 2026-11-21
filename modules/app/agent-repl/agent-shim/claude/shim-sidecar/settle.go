@@ -49,7 +49,7 @@ func (s *sidecar) trackDetached(target discover.Target, now time.Time) {
 		// The run settled earlier in this process and its watcher was rebuilt
 		// (a vanished file that came back, say). It is never tracked again.
 		s.log.With(logging.Context{Operation: "lost-policy", Path: target.Path, TaskID: target.TaskID}).
-			LogVerbose("this run already settled in this process; its rebuilt watcher does not track it again")
+			LogVerbose("this run already settled in this process; its rebuilt watcher does not track it again", nil)
 		return
 	}
 	work := stale.Work{
@@ -138,12 +138,11 @@ func (s *sidecar) resolvePendingTracking(now time.Time) {
 	if err != nil {
 		if s.interrupted(err) {
 			s.log.With(logging.Context{Operation: "run-settlements", Repeat: logging.Repeat(len(paths))}).
-				LogVerbose("shutdown interrupted the settlement read; %d detached run(s) stay untracked and the next boot asks again", len(paths))
+				LogVerbose("shutdown interrupted the settlement read; {paths_length} detached run(s) stay untracked and the next boot asks again", logging.Values{"paths_length": len(paths)})
 			return
 		}
 		s.log.With(logging.Context{Operation: "run-settlements", Level: "error", Repeat: logging.Repeat(len(paths))}).Log(
-			"%d detached run(s) are not tracked: the store could not say whether they already settled, and tracking a settled run would conclude a finished run LOST; the next cycle asks again: %v",
-			len(paths), err)
+			"{paths_length} detached run(s) are not tracked: the store could not say whether they already settled, and tracking a settled run would conclude a finished run LOST; the next cycle asks again: {cause}", logging.Values{"paths_length": len(paths), "cause": err.Error()})
 		return
 	}
 	for _, path := range paths {
@@ -189,8 +188,7 @@ func (s *sidecar) concludeLost(what string, conclusions []stale.Lost) {
 		if err != nil {
 			if !s.interrupted(err) {
 				s.log.With(logging.Context{Operation: "lost-terminal", Level: "error", Repeat: logging.Repeat(len(conclusions))}).Log(
-					"%d %s conclusion(s) minted no LOST terminal: the store could not say whether their runs already settled, and a LOST over a settled run would supersede its real terminal; production is suspended and the next cycle re-derives them: %v",
-					len(conclusions), what, err)
+					"{conclusions_length} {what} conclusion(s) minted no LOST terminal: the store could not say whether their runs already settled, and a LOST over a settled run would supersede its real terminal; production is suspended and the next cycle re-derives them: {cause}", logging.Values{"conclusions_length": len(conclusions), "what": what, "cause": err.Error()})
 			}
 			s.noteStoreErr("run-settlements", err)
 			return
@@ -208,7 +206,7 @@ func (s *sidecar) concludeLost(what string, conclusions []stale.Lost) {
 		s.log.With(logging.Context{
 			Operation: "lost-terminal-settled", Path: lost.Path, TaskID: lost.TaskID,
 			AgentID: lost.OwnerAgentID, ActivityID: lost.RunActivityID, Reason: string(lost.Reason),
-		}).Log("no LOST terminal for this run: the record already holds it as ended (ended_at_ms=%d), so it settled rather than went unseen (reason=%s)", ms, lost.Reason)
+		}).Log("no LOST terminal for this run: the record already holds it as ended (ended_at_ms={ms}), so it settled rather than went unseen (reason={lost_reason})", logging.Values{"ms": ms, "lost_reason": string(lost.Reason)})
 	}
 	if !s.emit(what, s.lostEntries(minting)) {
 		return
