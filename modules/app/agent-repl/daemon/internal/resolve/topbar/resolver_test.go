@@ -1617,10 +1617,10 @@ func TestAOneRootMachineStillOffersThatOneOption(t *testing.T) {
 	}
 }
 
-// TestAFactForAnUnboundWorkspaceFailsHard pins that the resolver asserts
-// rather than serves a view for a workspace it never bound: the violation is
-// recorded at ERROR, then the resolver panics.
-func TestAFactForAnUnboundWorkspaceFailsHard(t *testing.T) {
+// TestAFactForAnUnboundWorkspaceIsRecordedNotACrash pins the owner's ruling
+// of 2026-11-21: a fact for a workspace the resolver never bound is recorded
+// at ERROR and served on the global sink; it never crashes the daemon.
+func TestAFactForAnUnboundWorkspaceIsRecordedNotACrash(t *testing.T) {
 	// Arrange
 	log := dlog.NewTestSurfaces()
 	r, err := New(testColors(), log)
@@ -1636,8 +1636,8 @@ func TestAFactForAnUnboundWorkspaceFailsHard(t *testing.T) {
 	}()
 
 	// Assert
-	if recovered == nil {
-		t.Fatal("SetParked on an unbound workspace did not panic")
+	if recovered != nil {
+		t.Fatalf("SetParked on an unbound workspace panicked: %v", recovered)
 	}
 	n := 0
 	for _, rec := range log.Records() {
@@ -1648,8 +1648,11 @@ func TestAFactForAnUnboundWorkspaceFailsHard(t *testing.T) {
 	if n != 1 {
 		t.Fatalf("unbound-workspace ERROR records = %d, want 1", n)
 	}
-	if rec := log.Records()[len(log.Records())-1]; rec.Context["invariant_violation"] == nil || rec.Context["workspace_id"] != "ws-unbound" {
-		t.Fatalf("record = %+v, want the invariant violation named for ws-unbound", rec)
+	for _, rec := range log.Records() {
+		if rec.Operation == "daemon.topbar.unbound_workspace" &&
+			(rec.Context["invariant_violation"] == nil || rec.Context["workspace_id"] != "ws-unbound") {
+			t.Fatalf("record = %+v, want the invariant violation named for ws-unbound", rec)
+		}
 	}
 }
 

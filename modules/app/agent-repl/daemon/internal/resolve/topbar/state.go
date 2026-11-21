@@ -133,6 +133,10 @@ type windowRecord struct {
 // wsState is one workspace's whole topbar accumulation. In-memory only: a
 // resolver aggregates, it never stores.
 type wsState struct {
+	// unboundRecorded records that a frame for this never-bound workspace was
+	// already recorded at ERROR, so the violation is stated once per
+	// workspace rather than at every lookup of its logger.
+	unboundRecorded bool
 	// quietStale records that a fact moved while the quiet gate stood, so
 	// leaving it publishes this strip once (followQuiet).
 	quietStale bool
