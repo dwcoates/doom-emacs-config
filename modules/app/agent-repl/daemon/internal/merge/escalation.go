@@ -51,9 +51,17 @@ func (o *orchestrator) escalate(ctx context.Context, q checkedQueue, m wsm.Media
 	// and its effort is set, and setting the effort waits on the very turn
 	// that waits on this escalation (2026-11-18, a hang until the call was
 	// cancelled).
+	//
+	// A CHECK THAT COULD NOT RUN IS TOLD TO THE MEDIATOR AS IT STANDS, shown
+	// and never readied: readying it (its worktree refreshed, its effort set)
+	// may be the very step whose failure it is told of, and a telling that
+	// readied it again would fail the same way at every pass, leaving the
+	// mediator told nothing (owner ruling, 2026-11-21: the mediator receives
+	// every failure of a check's round). Its brief is queued behind any turn
+	// it runs, so it is told whether or not it was told of the check before.
 	var escalation standing
 	var err error
-	if said {
+	if said || told.NotRun != nil {
 		escalation, err = o.showMediator(ctx, q, fields)
 	} else {
 		escalation, err = o.readyMediator(ctx, q, fields)

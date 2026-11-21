@@ -609,3 +609,54 @@ func TestAnApprovalOfACheckThatCouldNotRunFailsWhenItsWindowCannotBeRecorded(t *
 		t.Fatalf("records = %v, want the failure at ERROR with its cause", h.logs.Records())
 	}
 }
+
+// TestACheckThatCouldNotRunIsToldToTheMediatorAsItStands pins the owner's
+// 2026-11-21 ruling: every failed round tells the mediator what failed and
+// why, verbatim. It is shown and never readied for it, since readying it may
+// be the very step that failed, and it is told whether or not it was told of
+// the check before: the brief is queued behind any turn it runs.
+func TestACheckThatCouldNotRunIsToldToTheMediatorAsItStands(t *testing.T) {
+	tests := []struct {
+		name    string
+		arrange func(t *testing.T, h *harness)
+	}{
+		{name: "a mediator whose worktree cannot be refreshed", arrange: func(t *testing.T, h *harness) {
+			h.checks.refreshErr = errors.New("git gone")
+		}},
+		{name: "a mediator whose effort cannot be set", arrange: func(t *testing.T, h *harness) {
+			h.checks.effortErr = errors.New("the selector served [AGENT_EFFORT_LEVEL_MEDIUM] and never offered AGENT_EFFORT_LEVEL_LOW")
+		}},
+		{name: "a mediator told of the check already", arrange: func(t *testing.T, h *harness) {
+			told(t, h, deployStarted, "turn-told")
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange
+			h := checked(t)
+			owe(t, h)
+			withMediator(t, h)
+			tt.arrange(t, h)
+			const what, cause = "the deploy mediator could not be found, made or readied for the check", "the shim said no"
+			m := owedCheck(t, h)
+
+			// Act
+			h.o.roundFailed(context.Background(), queueOf(t, h), *m, what, errors.New(cause), dlog.Context{"repo": string(mediationKey(h))})
+
+			// Assert
+			if got := heldEscalation(t, h); got != "ws-fixer" {
+				t.Fatalf("the check waits on escalation %q, want it told to the mediator", got)
+			}
+			notRun := submissionsTo(h, "ws-fixer", BriefDeployCheckNotRun+" ")
+			if len(notRun) != 1 || !strings.Contains(submittedText(notRun[0]), what) || !strings.Contains(submittedText(notRun[0]), cause) {
+				t.Fatalf("the mediator was sent %v, want one brief that the check could not run naming %q and %q", h.queue.submissions, what, cause)
+			}
+			if !slices.Contains(h.checks.resumed, "ws-fixer") || !h.bannerRaisedFor(desktopnotify.KindDeployMediated, "ws-fixer") {
+				t.Fatalf("resumed %v; want the mediator shown and the user notified with a click opening it", h.checks.resumed)
+			}
+			if len(h.checks.refreshed) != 0 || len(h.checks.efforts) != 0 {
+				t.Fatalf("refreshed %v, efforts %v; want the mediator told as it stands", h.checks.refreshed, h.checks.efforts)
+			}
+		})
+	}
+}

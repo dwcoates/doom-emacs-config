@@ -661,22 +661,41 @@ func (o *orchestrator) intakeRound(ctx context.Context, q checkedQueue, m wsm.Me
 	}
 }
 
-// roundFailed settles a round of check M of queue Q whose brief could not be
-// composed, WHAT failing with ERR: the check is escalated to the user, naming
-// the cause (owner ruling, 2026-11-19). NOTHING RUNS SUCH A ROUND AGAIN on
-// its own, so a check left owed and only logged held its queue under the
-// rollout's label until the next deploy (2026-11-19: the brief read a table
-// its build's migration had not yet created, and the queue was held for
-// forty minutes with nothing shown). A round the daemon's exit or a handover
-// cut is no failure: the daemon that serves the queues next runs it again
-// (mediationFailed). A MEDIATOR ALREADY TOLD OF THE CHECK IS ONLY SHOWN, as
-// one that escalated in its own turn is (escalate): it may be mid-turn.
+// roundFailed settles a round of check M of queue Q that failed short of
+// telling the mediator what it owes, WHAT failing with ERR: the check is
+// escalated to the user, naming the cause, and the mediator is told the
+// check could not run, WHAT and ERR verbatim, so it can diagnose and fix it
+// (owner rulings, 2026-11-19 and 2026-11-21). It is THE ONE PATH every such
+// failure takes, so after any round the check is told, escalated, or its
+// round was cut.
+//
+// NOTHING RUNS SUCH A ROUND AGAIN on its own: Mediate runs only at a boot, at
+// a deploy's end and from the fixer watch. A check left owed and only logged
+// held its queue under the rollout's label until the next deploy (2026-11-19:
+// the brief read a table its build's migration had not yet created, held
+// forty minutes; 2026-11-21 12:56:28: the mediator's effort met a shim the
+// rollout had stood down, held fifty-three minutes, the mediator told
+// nothing and its approval refused).
+//
+// A ROUND THE DAEMON'S EXIT OR A HANDOVER CUT IS NO FAILURE: the daemon that
+// serves the queues next runs it again (mediationCut), so it is not
+// escalated.
+//
+// THE CHECK IS ESCALATED ONLY TO A MEDIATOR THAT STANDS: a check held past
+// its rollout names its mediator (owedFrom), so one that cannot be found or
+// made is left owed, recorded at ERROR, and the next pass makes it again.
 func (o *orchestrator) roundFailed(ctx context.Context, q checkedQueue, m wsm.Mediation, what string, err error, fields dlog.Context) {
-	if o.mediationFailed(ctx, fields, what+"; the check is escalated to the user", err) {
+	if o.mediationCut(ctx, fields, what, err) {
 		return
 	}
+	if _, merr := o.mediatorOf(ctx, q, fields); merr != nil {
+		o.deps.Log.Global().Error(opMediation, what+"; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it",
+			withField(withField(fields, "error", err.Error()), "mediator_error", merr.Error()))
+		return
+	}
+	o.deps.Log.Global().Error(opMediation, what+"; the check is escalated to the user", withField(fields, "error", err.Error()))
 	summary := fmt.Sprintf("the deploy check could not run: %s (%v); the queue waits for you", what, err)
-	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error()}}, wsm.CheckWindow{}, m.Prompted(), fields)
+	o.holdBrief(ctx, q, m, escalationBrief{Summary: summary, NotRun: &checkNotRun{What: what, Cause: err.Error()}}, wsm.CheckWindow{}, false, fields)
 }
 
 // releaseQuiet releases check M of queue Q, whose WINDOW holds no warning and

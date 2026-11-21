@@ -1108,10 +1108,14 @@ func TestAResumingBriefThatCannotBeComposedEscalatesTheCheck(t *testing.T) {
 			if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation, Message: what + "; the check is escalated to the user"}); !ok {
 				t.Fatalf("records = %v, want the failed brief at ERROR", h.logs.Records())
 			}
-			// THE MEDIATOR WAS TOLD OF THE CHECK ALREADY, so it is only
-			// shown: it may be mid-turn, and is sent no further brief.
+			// THE MEDIATOR IS TOLD WHAT FAILED though it was told of the
+			// check already (owner ruling, 2026-11-21): the brief is queued
+			// behind any turn it runs, and no resuming brief is sent.
+			if notRun := submissionsTo(h, "ws-fixer", BriefDeployCheckNotRun+" "); len(notRun) != 1 || !strings.Contains(submittedText(notRun[0]), what) {
+				t.Fatalf("submitted %v, want one brief that the check could not run naming %q", h.queue.submissions, what)
+			}
 			if len(escalationBriefs(h)) != 0 || len(resumingBriefs(h)) != 0 {
-				t.Fatalf("submitted %d escalation and %d resuming briefs, want the told mediator only shown", len(escalationBriefs(h)), len(resumingBriefs(h)))
+				t.Fatalf("submitted %d escalation and %d resuming briefs, want neither", len(escalationBriefs(h)), len(resumingBriefs(h)))
 			}
 		})
 	}
@@ -1480,5 +1484,33 @@ func TestAnIntakeTurnTheUserInterruptedIsNeitherResumedNorEscalated(t *testing.T
 	if _, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "info", Operation: opMediation,
 		Message: "the user interrupted the intake's turn; the check is left to the user's turns with the mediator, and no brief is sent"}); !ok {
 		t.Fatalf("records = %v, want the interrupt recorded", h.logs.Records())
+	}
+}
+
+// TestARoundFailureWithNoMediatorToEscalateToLeavesTheCheckOwed pins that a
+// failed round escalates only to a mediator that stands: a check held past
+// its rollout names its mediator (owedFrom), so one that cannot be made is
+// left owed, recorded at ERROR with both causes, for the next pass.
+func TestARoundFailureWithNoMediatorToEscalateToLeavesTheCheckOwed(t *testing.T) {
+	// Arrange: no mediator stands, and none can be made.
+	h := checked(t)
+	owe(t, h)
+	h.checks.createErr = errors.New("worktree gone")
+	const what = "the deploy check's brief could not be composed"
+
+	// Act
+	h.o.roundFailed(context.Background(), queueOf(t, h), *owedCheck(t, h), what, errors.New("logs.sh exited 2"), dlog.Context{"repo": string(mediationKey(h))})
+
+	// Assert
+	if m := owedCheck(t, h); m == nil || m.Escalated() || m.Prompted() {
+		t.Fatalf("check %+v, want it owed, unescalated and untold", m)
+	}
+	record, ok := dlog.FindRecord(h.logs.Records(), dlog.RecordQuery{Level: "error", Operation: opMediation,
+		Message: what + "; no deploy mediator could be found or made to escalate the check to, and the queue stays held for it"})
+	if !ok || !strings.Contains(fmt.Sprint(record.Context["error"]), "logs.sh exited 2") || !strings.Contains(fmt.Sprint(record.Context["mediator_error"]), "worktree gone") {
+		t.Fatalf("records = %v, want the failure at ERROR with both causes", h.logs.Records())
+	}
+	if _, err := h.o.owedMediation(context.Background(), mediationKey(h)); err != nil {
+		t.Fatalf("owedMediation = %v, want the queue's status still readable", err)
 	}
 }
