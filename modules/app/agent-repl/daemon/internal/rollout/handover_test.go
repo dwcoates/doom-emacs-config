@@ -2306,7 +2306,9 @@ func persistVisibility(t *testing.T, h *harness, ws ids.WorkspaceID, v wsm.Visib
 
 // notVisible persists WS as not visible, as the roster does for a row a fold
 // keeps out of sight.
-func notVisible(t *testing.T, h *harness, ws ids.WorkspaceID) { persistVisibility(t, h, ws, wsm.NotVisible) }
+func notVisible(t *testing.T, h *harness, ws ids.WorkspaceID) {
+	persistVisibility(t, h, ws, wsm.NotVisible)
+}
 
 func TestFoldedRows(t *testing.T) {
 	tests := []struct {

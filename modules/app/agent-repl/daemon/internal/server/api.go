@@ -201,8 +201,7 @@ type Deps struct {
 	// Sidebar backs WatchWorkspaceRoster, the one editor-global stream.
 	Sidebar sidebar.Resolver
 	// Memory backs the rail's two memory popups (GetMemoryOverview,
-	// GetWorkspaceMemory) and keeps the page residency Emacs reports
-	// (ReportPageResidency).
+	// GetWorkspaceMemory).
 	Memory MemoryPopups
 	// Chat backs the chat verbs and WatchChat (internal/chat).
 	Chat Chat
@@ -972,7 +971,8 @@ func (s *server) pushReloadWebapp(ws ids.WorkspaceID, build *string) {
 
 // NotificationClicked pushes notification_clicked onto every Emacs daemon
 // stream: the user clicked the workspace's desktop banner, and Emacs raises its
-// frame and switches to the workspace, held or not (frontend.v1.RosterRowHeld).
+// frame and switches to the workspace, visible or not
+// (frontend.v1.RosterRowVisibility).
 // It is the desktop notifier's ClickSink. A workspace the registry cannot read
 // is recorded at ERROR and pushes nothing: the click names no workspace Emacs
 // could switch to.

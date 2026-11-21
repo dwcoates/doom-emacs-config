@@ -117,7 +117,7 @@ func openTree(reg Registry, log dlog.Logger) ([]openRepo, map[ids.RepoID][]wsm.W
 		if placed[ws.ID] {
 			// THE SELECTION IS REG.CURRENT's, whatever the row's own flag says
 			// (the resolver takes a switch between registry installs), and it
-			// is what a fold draws inside itself (DrawnInsideFold).
+			// is what a fold draws inside itself (wsm.Visibility).
 			ws.Current = reg.Current != nil && *reg.Current == ws.ID
 			members = append(members, ws)
 		}

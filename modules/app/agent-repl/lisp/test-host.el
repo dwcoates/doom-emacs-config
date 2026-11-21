@@ -6244,7 +6244,7 @@ OLD and SUCCESSOR are bound to the two daemons\\=' connections."
 
 (ert-deftest agent-repl-test-host-call-gate-holds-a-call-while-its-adopt-is-unanswered ()
   "THE DEFECT: calls about a workspace reached the successor before its adopt was answered.
-The 2026-11-13 14:42 deploy lost ReportPageResidency, ReportPageUnloading,
+The 2026-11-13 14:42 deploy lost ReportPageUnloading,
 MarkWorkspaceViewed and SelectWorkspace that way, each refused
 `not_yet_adopted'."
   (agent-repl-test-host--mid-adopt
@@ -6267,7 +6267,7 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
                  (lambda (&rest _) (push :sit-for waited) t)))
         ;; Act
         (agent-repl-test-host--gate successor "SelectWorkspace")
-        (agent-repl-test-host--gate successor "ReportPageResidency"))
+        (agent-repl-test-host--gate successor "ReportViewDwell"))
       ;; Assert
       (should (null waited))
       (should (= 2 (length (plist-get (agent-repl-host--entry "ws-1") :held-calls)))))))
@@ -6276,14 +6276,14 @@ MarkWorkspaceViewed and SelectWorkspace that way, each refused
   "The adopt's success sends every held call, oldest first, to the successor."
   (agent-repl-test-host--mid-adopt
     ;; Arrange
-    (agent-repl-test-host--gate successor "ReportPageResidency")
+    (agent-repl-test-host--gate successor "ReportViewDwell")
     (agent-repl-test-host--gate successor "ReportPageUnloading")
     (agent-repl-test-host--gate successor "SelectWorkspace")
     ;; Act
     (agent-repl-test-host--answer-held (list :arm :success :value nil))
     ;; Assert
     (should (equal agent-repl-test-host--gated
-                   (list (list "ReportPageResidency" :sent successor)
+                   (list (list "ReportViewDwell" :sent successor)
                          (list "ReportPageUnloading" :sent successor)
                          (list "SelectWorkspace" :sent successor))))
     (should (agent-repl-test-host--logged-p :info "elisp.host.held-calls-sent ws=ws-1 count=3 outcome=adopted"))))
