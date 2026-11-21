@@ -1929,6 +1929,85 @@ func TestAUnaryCallTheShimsDeathCutIsNotAFault(t *testing.T) {
 	}
 }
 
+// TestAUnaryCallThatCannotDialItsShimIsUnreachable pins ErrShimUnreachable:
+// a call whose dial of the shim's socket failed is typed as one no shim saw,
+// still recorded at ERROR, while an unavailable the shim itself answered is
+// not (2026-11-21 12:56:28: a dial to a socket the shim's replacement had
+// removed was told apart from a refusal only by its message).
+func TestAUnaryCallThatCannotDialItsShimIsUnreachable(t *testing.T) {
+	tests := []struct {
+		name            string
+		client          func(t *testing.T) Client
+		wantUnreachable bool
+	}{
+		{name: "no socket at the path", wantUnreachable: true, client: func(t *testing.T) Client {
+			return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"), defaultBackoff, nil, nil)
+		}},
+		{name: "a socket nobody listens on", wantUnreachable: true, client: func(t *testing.T) Client {
+			path := filepath.Join(shortDir(t), "stale.sock")
+			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: path, Net: "unix"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			listener.SetUnlinkOnClose(false)
+			if err := listener.Close(); err != nil {
+				t.Fatal(err)
+			}
+			return newClient(dlog.NewTestLogger(), ids.WorkspaceID("ws-1"), path, defaultBackoff, nil, nil)
+		}},
+		{name: "a shim that answered unavailable", client: func(t *testing.T) Client {
+			dir := shortDir(t)
+			f, uds := startFakeShim(t, dir)
+			f.rollBackSessionErr = connect.NewError(connect.CodeUnavailable, errors.New("the store is unreachable"))
+			return adoptReady(t, f, dir, uds)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Arrange.
+			c := tt.client(t)
+
+			// Act.
+			_, err := c.RollBackSession(context.Background(), validRollBackSessionRequest())
+
+			// Assert.
+			if err == nil {
+				t.Fatal("RollBackSession() error = nil, want the failed call")
+			}
+			if got := errors.Is(err, ErrShimUnreachable); got != tt.wantUnreachable {
+				t.Fatalf("errors.Is(err, ErrShimUnreachable) = %v, want %v: %v", got, tt.wantUnreachable, err)
+			}
+			if errors.Is(err, ErrStandDownOrdered) || errors.Is(err, ErrShimDied) {
+				t.Fatalf("err = %v, want neither a stand-down nor a death", err)
+			}
+		})
+	}
+}
+
+// TestAnUnreachableShimCallStaysAnError pins the level: an unreachable shim
+// is a fault of the client's shim, recorded at ERROR naming it unreachable,
+// once.
+func TestAnUnreachableShimCallStaysAnError(t *testing.T) {
+	// Arrange.
+	log := dlog.NewTestLogger()
+	c := newClient(log, ids.WorkspaceID("ws-1"), filepath.Join(shortDir(t), "absent.sock"), defaultBackoff, nil, nil)
+
+	// Act.
+	_, err := c.RollBackSession(context.Background(), validRollBackSessionRequest())
+
+	// Assert.
+	if !errors.Is(err, ErrShimUnreachable) {
+		t.Fatalf("err = %v, want it unreachable", err)
+	}
+	record, ok := dlog.FindRecord(log.Records(), dlog.RecordQuery{Level: "error", Operation: "daemon.shimclient.roll_back_session"})
+	if !ok || record.Context["unreachable"] != true {
+		t.Fatalf("records = %+v, want the failed call at ERROR naming it unreachable", log.Records())
+	}
+	if hasRecordAt(log, "info", "daemon.shimclient.roll_back_session") {
+		t.Fatalf("the failed call was ALSO recorded at info: %+v", log.Records())
+	}
+}
+
 // TestALivenessBreakOnASpawnedShimIsReadAgainstItsProcess pins the monitor's
 // read of a broken liveness stream on a shim this daemon spawned: a SIGKILL's
 // EOF outruns the reap but never the process reading exiting, so an exiting
