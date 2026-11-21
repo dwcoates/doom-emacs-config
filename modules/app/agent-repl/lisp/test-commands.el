@@ -1164,11 +1164,11 @@ Binds `switched' to the requested target and `asked' to the names ranked."
 ;;;; ---- The repository-scoped last-started jump ----
 
 (defmacro agent-repl-test-commands--with-repositories (repos &rest body)
-  "Run BODY with `agent-repl-roster-repository-for-ws' answering REPOS.
+  "Run BODY with `agent-repl-roster-ws-repository' answering REPOS.
 REPOS is an alist of workspace name to repository id; a name absent from
 it is in no section."
   (declare (indent 1))
-  `(cl-letf (((symbol-function 'agent-repl-roster-repository-for-ws)
+  `(cl-letf (((symbol-function 'agent-repl-roster-ws-repository)
               (lambda (ws) (let ((id (cdr (assoc ws ,repos))))
                              (and id (list :id id :dir (concat "/r/" id)))))))
      ,@body))

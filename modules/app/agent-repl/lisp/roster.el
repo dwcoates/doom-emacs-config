@@ -528,7 +528,7 @@ when Emacs holds no roster at all."
         (setq found (plist-get (plist-get section :key) :repository))))
     found))
 
-(defun agent-repl-roster-repository-for-ws (ws)
+(defun agent-repl-roster-ws-repository (ws)
   "Return the `RepositoryRef' of the section holding workspace WS, or nil.
 WS's daemon ref names the row, and `agent-repl-roster-repository-of'
 the section holding it: the ONE lookup every \"this workspace's
