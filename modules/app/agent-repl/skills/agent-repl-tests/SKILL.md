@@ -192,8 +192,10 @@ for "waiting for CPU" (the run's events carry `waiting_for_cpu` and
   - A refused read does not always say "operation not permitted": a listing of an undeclared directory comes back EMPTY (`filepath.Glob` drops the refusal), so a scan that globs a directory fails on finding nothing. Its declaration is the directory (a `/`-suffixed subtree).
   - A unit whose reads cannot be enumerated goes in `Reuse.Never` with why: it runs unconfined and is never recorded.
   - A targeted run (`-go DIR=Test`, `-vitest FILE=name`) is never confined, so only an untargeted run of the unit proves a declaration; run one after adding a read.
-- vitest and ERT files run in BATCHES, one process per batch (`testrun/internal/suites/batch.go`): files of one area (a vitest file's most imported `src/` directory, an ERT file's module family), at most `BatchMax` per batch, small areas pooled. A batch is one unit, confined to its files' inputs together.
+- vitest and ERT files run in BATCHES, one process per batch (`testrun/internal/suites/batch.go`): files of one area (a vitest file's most imported `src/` directory, an ERT file's module family), at most the suite's own `Batch.Max` per batch, areas under its `Batch.Min` pooled (`roster.Suite.Batch`, default 48 and 12). A batch is one unit, confined to its files' inputs together.
   - A file its suite never reuses (`Reuse.Never`) is a batch of its own.
+  - A suite's batch size is tuned by bisecting toward the best batch count: change its `Batch`, then compare the suite's average CPU seconds per merge-gate run over about 10 real merges before and after (`agentrepl_test_unit_cpu_seconds` through `/agent-repl-metrics`). A full run's CPU and the CPU rerun after a one-file change are the starting estimate; real merges decide.
+  - Measured 2026-11-20 (one full run each, loaded host): webapp 364 CPU-s at 48/12 against 428 at 96/24, and the rerun after a one-file change 17 against 32 CPU-s; at 192/48 one process of 146 files overflowed its stack, a per-file leak larger batches expose.
 - How keys, profiles and records work is `modules/app/agent-repl/AGENTS.md`, "A run reuses an earlier pass of each unit's exact inputs".
 
 ## Test performance standards (owner rulings, 2026-11-12 and 2026-11-13)
@@ -310,7 +312,7 @@ section holds the rest.
 - **Daemon integration (`daemon/integration`)**: a case takes the canonical daemon with `newCanonical(t)`, `newCanonicalRegistered(t)` or `canonicalView(t)`; its slice is its own repository and workspace, and an id it mints (a turn id, a URL a stub records) carries its workspace id, since a turn id is unique across the daemon.
   - A case that changes daemon-wide state takes its group with `newInGroup(t, group)`; only a case whose subject is the daemon's own lifecycle starts a fresh daemon; a view's idle barrier (`ExpectNoPush`, `ExpectFileUnchanged`) waits only for its own workspaces' work.
   - The rest: `daemon/AGENTS.md`, "The integration suite's canonical daemon".
-- **webapp integration** (`webapp/test/integration/`): `const shared = sharedMount(options)` at a file's top, then `harness = await shared()` in a case; a case's slice is its own turn (its rows, removed at its end) and its own fake-daemon script and calls.
+- **webapp integration** (`webapp/test/integration/`): `const shared = sharedMount(options)` at a file's top, then `harness = await shared()` in a case; a case's slice is its own turn (its rows, removed at its end), its own fake-daemon script and calls, and its handed panels.
   - The mount is per FILE, not per worker, because the setup resets the page before each file; chrome (footer, topbar, rail) is pushed onto it, and what a case opens through a control is undone by the file's `endCase`.
   - The rest: `webapp/AGENTS.md`, "Integration cases share one mounted app".
 - **shim** (`agent-shim/claude/shim`): a case takes the file's shim with `canonicalSession()` (`test/integration-support/canonical.ts`); a shim hosts ONE session, so a case's slice is its turns.
