@@ -1221,9 +1221,9 @@ body {
    fold away with the repository (their list is the section's .rows). An
    empty subsection draws its header alone, and a row dragged onto that
    header lands in it (src/drag.ts). A subsection's top-level rows are NOT
-   indented under its header (owner request, 2026-11-19): they start at the
-   repository's own rows' indent, and only their children indent, one
-   generation step each (see "THE ROW INDENT" below). */
+   indented under its header (owner request, 2026-11-19) was superseded (owner request,
+   2026-11-21): they nest one generation step in, beside a family guide, as
+   a parent's children do (see "THE ROW INDENT" below). */
 #ws-sidebar .sb-subsection-head {
   /* THE SIDEBAR DRAWS NO FOLD TRIANGLE (owner request, 2026-10-31;
      src/sidebar/section-fold.ts foldOnClick): a click anywhere on the header
@@ -1403,14 +1403,20 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    every .ws inherits and each nesting adds one step to, through
    --row-indent-parent (a property may not read itself). */
 #ws-sidebar { --row-indent: 0rem; }
+/* ONE GENERATION STEP: how much further in a nested row's mark and name
+   stand than its parent's, a child's under its parent and a subsection's
+   top-level row under its header alike. */
+#ws-sidebar { --row-indent-step: 1.2rem; }
+/* THE GAP BETWEEN A ROW'S PARTS IS A TOKEN so a part that stands closer to
+   its neighbour than the row's parts do (the name's glyph, below) can take it
+   back exactly, and so the family guide can find the status mark (THE MARK'S
+   CENTER, below). */
+#ws-sidebar { --row-gap: 0.45rem; }
 /* A ROW'S FILL IS SUBTLY ROUNDED (owner request, 2026-10-25), the selected
    row's and a hovered row's alike. */
 #ws-sidebar .row {
   display: flex;
   align-items: center;
-  /* THE GAP IS A TOKEN so a part that stands closer to its neighbour than the
-     row's parts do (the name's glyph, below) can take it back exactly. */
-  --row-gap: 0.45rem;
   gap: var(--row-gap);
   padding: var(--row-pad-y) var(--row-pad-right) var(--row-pad-y) calc(0.9rem + var(--row-indent));
   border-radius: 5px;
@@ -1438,6 +1444,14 @@ html.dragging * { -webkit-user-select: none; user-select: none; }
    MARK"), never off a per-state rule. */
 #ws-sidebar { --ws-mark-width: 9px; --ws-mark-size: 9px; }
 #ws-sidebar .st { flex: 0 0 auto; width: var(--ws-mark-width); height: var(--ws-mark-size); border-radius: 50%; }
+/* THE MARK'S CENTER: how far in from a row's left edge, at no indent, the
+   middle of its status mark stands, built from the row's own parts left of
+   the mark -- its left padding, the tab number's box and margins (THE EMACS
+   TAB NUMBER, below), and the row's gap; the recency gutter's slot takes no
+   width. A row at an indent stands its mark that indent further in. */
+#ws-sidebar {
+  --ws-mark-center: calc(0.9rem - 0.4rem + var(--tab-number-w) + 0.1rem + var(--row-gap) + var(--ws-mark-width) / 2);
+}
 
 /* THE EMACS TAB NUMBER (owner request, 2026-10-17): an open row leads with
    the numeral its tab carries on the Emacs tab bar (src/sidebar/tab-numbers.ts),
@@ -1998,17 +2012,22 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
    for a chevron to show the dropdown on hover." The row opens its own panel
    once the pointer has rested on its line for a second; `row-hover.ts` owns
    the gesture. */
-/* A generation is one --row-indent step, and the family guide is drawn
-   where the generation's box once began, 1.55rem in from its parent's
-   indent. */
-#ws-sidebar .kids { --row-indent-parent: var(--row-indent); position: relative; }
+/* A generation is one --row-indent-step, and the family guide is drawn
+   straight down from the middle of its parent's status mark (owner request,
+   2026-11-21). A SUBSECTION'S TOP-LEVEL ROWS NEST UNDER ITS HEADER AS
+   CHILDREN UNDER THEIR PARENT (owner request, 2026-11-21, superseding the
+   unindented rows of 2026-11-19): one generation step in, beside the same
+   guide, drawn where a top-level row's mark stands. */
+#ws-sidebar .kids,
+#ws-sidebar .sb-subsection > .rows { --row-indent-parent: var(--row-indent); position: relative; }
 /* A row whose children are folded draws none of them, its repository blocks
    included; the status mark of a row that has children is the control that
    folds them (children-fold.ts). */
 #ws-sidebar .ws.folded > .kids:not(:has(.surfaced)) { display: none; }
 #ws-sidebar .row > .st[data-children-fold] { cursor: pointer; }
 #ws-sidebar .kids > .ws,
-#ws-sidebar .kids > .sb-repo-block > .ws { --row-indent: calc(var(--row-indent-parent) + 1.2rem); }
+#ws-sidebar .kids > .sb-repo-block > .ws,
+#ws-sidebar .sb-subsection > .rows > .ws { --row-indent: calc(var(--row-indent-parent) + var(--row-indent-step)); }
 /* A REPOSITORY BLOCK IN A FAMILY (owner ruling, 2026-11-09;
    frontend.v1.RosterOpenRow.repository_blocks): a parent's children of one
    other repository, drawn after its own-repository children under ONE
@@ -2023,7 +2042,7 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  margin: 0.15rem calc(0.7rem + var(--when-col-w)) 0.05rem calc(0.9rem + var(--row-indent-parent) + 1.2rem);
+  margin: 0.15rem calc(0.7rem + var(--when-col-w)) 0.05rem calc(0.9rem + var(--row-indent-parent) + var(--row-indent-step));
   color: var(--muted);
   font-size: 0.68rem;
 }
@@ -2036,12 +2055,13 @@ html.sb-resizing, html.sb-resizing * { cursor: row-resize !important; }
 #ws-sidebar .kids > .sb-repo-block > .sb-repo-divider::before { flex: 0 0 0.65rem; }
 #ws-sidebar .kids > .sb-repo-block > .sb-repo-divider::after { flex: 1 1 0; min-width: 0.65rem; }
 #ws-sidebar .kids > .sb-repo-block > .sb-repo-divider > .sb-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#ws-sidebar .kids::before {
+#ws-sidebar .kids::before,
+#ws-sidebar .sb-subsection > .rows::before {
   content: "";
   position: absolute;
   top: 0;
   bottom: 0;
-  left: calc(var(--row-indent-parent) + 1.55rem);
+  left: calc(var(--row-indent-parent) + var(--ws-mark-center) - 0.5px);
   border-left: 1px solid var(--border);
   pointer-events: none;
 }
