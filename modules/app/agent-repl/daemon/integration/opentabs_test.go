@@ -211,7 +211,7 @@ func TestCollapsingARepositoryNeverStandsDownAWorkspaceUnderItsTurn(t *testing.T
 func TestANewEmacsStreamStartsNoWorkspace(t *testing.T) {
 	t.Parallel()
 	// Arrange: a registered workspace nothing has opened, its roster drawn.
-	d := viewInGroup(t, groupEditorSession)
+	d := viewInGroup(t, groupEditorStream)
 	ws := harness.Register(t, d, harness.NewRepo(t).Dir)
 	roster := d.WatchRoster()
 	awaitRoster(t, d, roster, "the registered workspace's row", func(r *frontendv1.RosterPush) bool {

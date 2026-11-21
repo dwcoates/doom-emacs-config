@@ -43,8 +43,8 @@ const (
 	// takes. Only the session stream is held.
 	OpHoldReopen    = "hold_reopen"
 	OpReleaseReopen = "release_reopen"
-	OpInfo        = "info"
-	OpCount       = "count"
+	OpInfo          = "info"
+	OpCount         = "count"
 	// OpSetLiveWork states the live membership later re-announcements carry;
 	// its payload is a SessionStarted whose live_work is taken.
 	OpSetLiveWork = "set_live_work"

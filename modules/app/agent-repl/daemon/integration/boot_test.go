@@ -197,8 +197,10 @@ func TestPprofRefusesARoutableBind(t *testing.T) {
 
 func TestRunLogIsJSONLPerTheLoggingContract(t *testing.T) {
 	t.Parallel()
-	// Arrange
-	d := canonicalView(t)
+	// Arrange: a daemon of its own, because the contract read here is a
+	// fresh boot's whole run log, which the shared daemon's other cases'
+	// requests would fill.
+	d := newDaemon(t, harness.Opts{})
 	d.AwaitRunLogOperation("daemon.pprof.disabled")
 
 	// Act
