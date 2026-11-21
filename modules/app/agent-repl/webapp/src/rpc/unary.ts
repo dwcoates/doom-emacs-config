@@ -21,7 +21,7 @@
  */
 import { Code, ConnectError } from "@connectrpc/connect";
 import type { DescMessage, Message } from "@bufbuild/protobuf";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { successorOf, workspaceMoved } from "./moved.js";
 import { outageAnnounced, type FailureSink } from "../failure/sink.js";
 import { clearClientFailures, reportClientFailure } from "./link.js";
@@ -29,6 +29,8 @@ import { MalformedView } from "./malformed.js";
 import { assertNoUnknownFields, requireCase } from "./strict.js";
 import type { AgentReplClient } from "./client.js";
 import { abandonedAtPageEnd, pageEnded } from "../page-teardown.js";
+
+const log = createLogger("webapp.rpc.unary");
 
 /** The slice of the context a unary call needs; the whole AppContext fits. */
 export interface UnaryContext {
@@ -65,13 +67,13 @@ export async function callUnary<Res extends Message>(
     // released it. A deploy handover is expected and the successor page
     // carries on, so the refusal is INFO; the caller renders its own refusal.
     const refused = new ConnectError(QUIESCED_MESSAGE, Code.Unavailable);
-    log.info(`${name} was not sent: ${QUIESCED_MESSAGE}`, {
+    log.info("{name} was not sent: {quiesced_message}", {
       operation: "rpc.unary-quiesced",
       context: { rpc: name },
-    });
+    }, { name, quiesced_message: QUIESCED_MESSAGE });
     throw refused;
   }
-  log.debug(`calling ${name}`, { operation: "rpc.unary-call", context: { rpc: name } });
+  log.debug("calling {name}", { operation: "rpc.unary-call", context: { rpc: name } }, { name });
   let response: Res;
   try {
     response = await fn(ctx.client);
@@ -89,10 +91,10 @@ export async function callUnary<Res extends Message>(
     // the caller still renders its refusal.
     const successor = successorOf(connectError);
     if (successor !== undefined) {
-      log.info(`${name} was refused: the workspace was handed to ${successor}`, {
+      log.info("{name} was refused: the workspace was handed to {successor}", {
         operation: "rpc.unary-handed-away",
         context: { ...context, address: successor },
-      });
+      }, { name, successor });
       workspaceMoved(successor);
       throw connectError;
     }
@@ -100,15 +102,15 @@ export async function callUnary<Res extends Message>(
     // is the announcement coming true (outageAnnounced): INFO, and the caller
     // still renders its refusal.
     if (outageAnnounced(ctx.failures)) {
-      log.info(`${name} failed at the transport inside the daemon's announced outage: ${connectError.message}`, {
+      log.info("{name} failed at the transport inside the daemon's announced outage: {message}", {
         operation: "rpc.unary-failed-announced",
         context,
-      });
+      }, { name, message: connectError.message });
     } else {
-      log.error(`${name} failed at the transport: ${connectError.message}`, {
+      log.error("{name} failed at the transport: {message}", {
         operation: "rpc.unary-transport-failure",
         context,
-      });
+      }, { name, message: connectError.message });
     }
     // THE FOOTER IS TOLD, and this is the one thing the old shape did not do:
     // a verb that never reached the daemon left a `.refusal` span the next
@@ -121,10 +123,10 @@ export async function callUnary<Res extends Message>(
   clearClientFailures();
   assertNoUnknownFields(schema, response);
   const arm = outcomeArm(schema, response, name);
-  log.debug(`${name} answered ${arm}`, {
+  log.debug("{name} answered {arm}", {
     operation: "rpc.unary-answered",
     context: { rpc: name, outcome: arm },
-  });
+  }, { name, arm });
   return response;
 }
 

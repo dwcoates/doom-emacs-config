@@ -60,7 +60,7 @@ import { formatTickedAge } from "../../duration.js";
 import { onCompactionProgress } from "../../footer/progress.js";
 import { formatTokens } from "../../format.js";
 import { coldGateFigureColor } from "../../pressure-color.js";
-import { log } from "../../log.js";
+import { createLogger, type LogMessage } from "../../log.js";
 import {
   AnswerColdGateResponseSchema,
   type AnswerColdGateReopenFailed,
@@ -103,6 +103,8 @@ import type { RowContext } from "../renderers.js";
 import { tickWhileShown } from "../ticking.js";
 import { stampedAge } from "./stamped-age.js";
 import { buildAnswerColdGateRequest, type ColdGateChoice } from "./requests.js";
+
+const log = createLogger("webapp.feed.asks.cold-gate");
 
 const PATH = "FeedColdGate";
 
@@ -485,10 +487,10 @@ function drawActions(
       const open = submenu.el.hidden || submenu.mode() !== mode;
       submenu.setMode(mode);
       submenu.el.hidden = !open;
-      log.debug(`the reader ${open ? "opened" : "closed"} the compact submenu`, {
+      log.debug("the reader {action} the compact submenu", {
         operation: "feed.asks.cold-gate.submenu-toggled",
         context: { open, mode },
-      });
+      }, { action: open ? "opened" : "closed" });
     });
     return button;
   };
@@ -653,7 +655,7 @@ async function answer(
   // A GATE THE WEBHOST DRAWS is in another document than its page's digest:
   // the webhost hears this and closes the shown page's (host/gate.ts).
   actions.dispatchEvent(new CustomEvent(GATE_ANSWERING_EVENT, { bubbles: true }));
-  log.info(`answering a cold gate with ${choice.kind}`, {
+  log.info("answering a cold gate with {kind}", {
     operation: "feed.asks.cold-gate.answer",
     context: {
       row: id.value,
@@ -661,7 +663,7 @@ async function answer(
       model: "model" in choice ? choice.model.name : undefined,
       scope: "scope" in choice ? choice.scope : undefined,
     },
-  });
+  }, { kind: choice.kind });
   // THE FEEDBACK FOR THE WAIT. The buttons go inert the moment the call leaves
   // (`whileInFlight`), and a compaction behind a `compact` answer can hold them
   // there for a minute; without this the card would say nothing at all for that
@@ -696,7 +698,7 @@ async function answer(
 function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly Control[]): Promise<void> {
   return workspaceVerbFromGate(rc, actions, buttons, {
     verb: "hide",
-    message: "hiding the workspace from a cold gate",
+    message: log.message("hiding the workspace from a cold gate"),
     rpc: "SetWorkspaceHidden",
     call: (client) => client.setWorkspaceHidden(buildSetWorkspaceHiddenRequest(rc.ctx.workspace, true)),
     schema: SetWorkspaceHiddenResponseSchema,
@@ -711,7 +713,7 @@ function hideWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly C
 function killWorkspace(rc: RowContext, actions: HTMLElement, buttons: readonly Control[]): Promise<void> {
   return workspaceVerbFromGate(rc, actions, buttons, {
     verb: "kill",
-    message: "killing the workspace from a cold gate",
+    message: log.message("killing the workspace from a cold gate"),
     rpc: "KillWorkspace",
     // NO op_id: the synchronous form, which answers `success` or `error` and
     // never `accepted`.
@@ -732,7 +734,7 @@ export async function workspaceVerbFromGate<Res extends GateResponse>(
   buttons: readonly Control[],
   spec: {
     verb: "hide" | "kill";
-    message: string;
+    message: LogMessage;
     rpc: string;
     call: (client: AgentReplClient) => Promise<Res>;
     schema: DescMessage;
@@ -740,7 +742,7 @@ export async function workspaceVerbFromGate<Res extends GateResponse>(
     own: SentenceTable;
   },
 ): Promise<void> {
-  log.info(spec.message, {
+  log.log("info", spec.message, {
     operation: `feed.asks.cold-gate.${spec.verb}`,
     context: { workspace: rc.ctx.workspace.id },
   });

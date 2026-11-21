@@ -13,12 +13,14 @@
  * the scroll box), wears the one has-more fade, and its body is a markdown
  * slot the one body pipeline paints, so a tree in it wraps at the bubble's cap.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { markdownSlot } from "../../bubble/body.js";
 import { drawBubble } from "../../bubble/draw.js";
 import { requireMessage } from "../../rpc/strict.js";
 import type { FeedPeerMessage, FeedPeerMessageFrom } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { drawPeerArrow } from "./peer-arrow.js";
+
+const log = createLogger("webapp.feed.rows.peer-message");
 
 /** The class the peer bubble's hooks know it by. */
 export const PEER_BUBBLE_CLASS = "peer";

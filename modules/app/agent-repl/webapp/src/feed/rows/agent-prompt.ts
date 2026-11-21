@@ -22,7 +22,7 @@
  * mapping is one base function per message; sharing the BODY vocabulary is what
  * keeps the two from drifting, and that sharing is `blocks.ts`.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { AGENT_PROMPT_CAP_LINES, BUBBLE_MORE_ELLIPSIS, drawBubble } from "../../bubble/draw.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
@@ -36,6 +36,8 @@ import { drawPromptBlockArm, drawPromptCopyControl } from "./blocks.js";
 import { reserveCopyRoom } from "../../bubble/copy-room.js";
 import { drawPeerArrow, type PeerArrowDirection } from "./peer-arrow.js";
 import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
+
+const log = createLogger("webapp.feed.rows.agent-prompt");
 
 const PATH = "FeedAgentPrompt";
 

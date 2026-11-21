@@ -53,7 +53,7 @@
  */
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { daemonUnreachable, frameUndecodable, frameUndrawable, outageAnnounced, type FailureSink } from "../failure/sink.js";
 import { clearClientFailure, clearClientFailures, reportClientFailure } from "./link.js";
 import { MalformedView, UnknownPushArm, isMalformedView, isUnknownPushArm } from "./malformed.js";
@@ -63,6 +63,8 @@ import type { AgentReplClient } from "./client.js";
 import { pageEnded } from "../page-teardown.js";
 import { PlannedReopen } from "./planned-reopen.js";
 import { errorCause } from "../error-cause.js";
+
+const log = createLogger("webapp.rpc.streams");
 
 /** How a stream's run finished. `cancelled` is the only legitimate one. */
 export type StreamEnd =
@@ -196,10 +198,10 @@ export function watchStream<Res extends Message>(
   /** Resolves the current backoff wait early when the stream is cancelled. */
   let wakeFromBackoff: (() => void) | null = null;
 
-  log.debug(`opening the ${opts.name} stream`, {
+  log.debug("opening the {name} stream", {
     operation: "rpc.stream-open",
     context: { rpc: opts.name },
-  });
+  }, { name: opts.name });
 
   /** Filled in below; the quiet subscription cancels through the handle. */
   let cancelSelf = (): void => undefined;
@@ -208,10 +210,10 @@ export function watchStream<Res extends Message>(
   const unsubscribeFromQuiesce = ctx.onQuiesced(() => {
     if (cancelled) return;
     quiesceRequested = true;
-    log.info(`${opts.name} is stopping: the workspace moved to another daemon`, {
+    log.info("{name} is stopping: the workspace moved to another daemon", {
       operation: "rpc.stream-quiesced",
       context: { rpc: opts.name },
-    });
+    }, { name: opts.name });
     cancelSelf();
   });
   // THE DAEMON MOVED: this run is talking to a daemon nobody names any more,
@@ -220,10 +222,10 @@ export function watchStream<Res extends Message>(
   const unsubscribeFromMove = ctx.onDaemonMoved(() => {
     if (cancelled) return;
     daemonMoved = true;
-    log.info(`${opts.name} is reopening: the daemon it dials moved`, {
+    log.info("{name} is reopening: the daemon it dials moved", {
       operation: "rpc.stream-daemon-moved",
       context: { rpc: opts.name },
-    });
+    }, { name: opts.name });
     controller.abort();
     wakeFromBackoff?.();
   });
@@ -242,10 +244,10 @@ export function watchStream<Res extends Message>(
       if (unreachableFiled) ctx.noteLinkRestored?.();
       if (opts.plannedEnding?.(response)) {
         endingSeen = true;
-        log.info(`the ${opts.name} stream's daemon is standing down in a planned exit`, {
+        log.info("the {name} stream's daemon is standing down in a planned exit", {
           operation: "rpc.stream-planned-ending",
           context: { rpc: opts.name },
-        });
+        }, { name: opts.name });
         return;
       }
       opts.onPush(response);
@@ -275,10 +277,10 @@ export function watchStream<Res extends Message>(
     // re-arm the backoff, or a link that flaps every few minutes would creep
     // to the ceiling and stay there.
     if (unreachableFiled) {
-      log.info(`${opts.name} is receiving again; retracting the unreachable failure`, {
+      log.info("{name} is receiving again; retracting the unreachable failure", {
         operation: "rpc.stream-recovered",
         context: { rpc: opts.name },
-      });
+      }, { name: opts.name });
       ctx.failures.retract("daemonUnreachable");
       // The link is reading again, which disproves every client verdict; the
       // footer goes back to whatever the daemon is pushing.
@@ -291,19 +293,19 @@ export function watchStream<Res extends Message>(
 
   const reportForwardSkew = (err: UnknownPushArm): void => {
     log.info(
-      `a ${opts.name} push carried a newer arm '${err.arm}' this build cannot draw; skipping it quietly (forward-compat skew)`,
+      "a {name} push carried a newer arm '{arm}' this build cannot draw; skipping it quietly (forward-compat skew)",
       {
         operation: "rpc.stream-frame-forward-skew",
-        context: { rpc: opts.name, path: err.path, arm: err.arm },
-      },
+        context: { rpc: opts.name, path: err.path },
+      }, { name: opts.name, arm: err.arm },
     );
   };
 
   const reportUndecodable = (err: MalformedView): void => {
-    log.error(`a ${opts.name} push could not be read and was skipped: ${err.detail}`, {
+    log.error("a {name} push could not be read and was skipped: {detail}", {
       operation: "rpc.stream-frame-undecodable",
       context: { rpc: opts.name, path: err.path, cause: err.detail },
-    });
+    }, { name: opts.name, detail: err.detail });
     ctx.failures.report(
       frameUndecodable(err.detail, `${opts.schema.typeName} at ${err.path}`.slice(0, FRAME_HEAD_LIMIT)),
     );
@@ -311,10 +313,10 @@ export function watchStream<Res extends Message>(
 
   const reportUndrawable = (err: unknown): void => {
     const cause = errorCause(err);
-    log.error(`a ${opts.name} push was read and this page could not draw it; drawing the stream afresh`, {
+    log.error("a {name} push was read and this page could not draw it; drawing the stream afresh", {
       operation: "rpc.stream-frame-undrawable",
       context: { rpc: opts.name, cause, stack: err instanceof Error ? (err.stack ?? "") : "", backoff_ms: backoffMs },
-    });
+    }, { name: opts.name });
     ctx.failures.report(frameUndrawable(opts.name, cause));
   };
 
@@ -326,15 +328,15 @@ export function watchStream<Res extends Message>(
     // and its card still held back by the window. Past the window it is an
     // error again.
     if (outageAnnounced(ctx.failures)) {
-      log.info(`the ${opts.name} stream ended inside the daemon's announced outage; reopening`, {
+      log.info("the {name} stream ended inside the daemon's announced outage; reopening", {
         operation: "rpc.stream-ended-announced",
         context,
-      });
+      }, { name: opts.name });
     } else {
-      log.error(`the ${opts.name} stream ended without being cancelled; reopening`, {
+      log.error("the {name} stream ended without being cancelled; reopening", {
         operation: "rpc.stream-transport-failure",
         context,
-      });
+      }, { name: opts.name });
     }
     ctx.failures.report(daemonUnreachable(closeCode, closeReason));
     // AFTER the failure, so the footer's line names this stream rather than
@@ -402,10 +404,10 @@ export function watchStream<Res extends Message>(
       // adoption under its own budget, so the wait is bounded by that.
       const successor = end.kind === "transport_failure" ? successorOf(end.error) : undefined;
       if (successor !== undefined) {
-        log.info(`the ${opts.name} stream closed because the workspace moved to ${successor}; waiting for the page to move`, {
+        log.info("the {name} stream closed because the workspace moved to {successor}; waiting for the page to move", {
           operation: "rpc.stream-ended-moved",
           context: { rpc: opts.name, address: successor },
-        });
+        }, { name: opts.name, successor });
         workspaceMoved(successor);
         if (!daemonMoved) {
           await new Promise<void>((resolve) => {
@@ -416,10 +418,10 @@ export function watchStream<Res extends Message>(
           });
         }
         if (cancelled) return;
-        log.info(`the ${opts.name} stream is reopening where the workspace moved`, {
+        log.info("the {name} stream is reopening where the workspace moved", {
           operation: "rpc.stream-moved-reopen",
           context: { rpc: opts.name },
-        });
+        }, { name: opts.name });
         backoffMs = initialMs;
         continue;
       }
@@ -427,20 +429,20 @@ export function watchStream<Res extends Message>(
       // ended it, to dial the daemon now named. Nothing is filed and it
       // reopens at once.
       if (daemonMoved) {
-        log.info(`the ${opts.name} stream ended at its daemon's move; reopening at the daemon now named`, {
+        log.info("the {name} stream ended at its daemon's move; reopening at the daemon now named", {
           operation: "rpc.stream-ended-daemon-moved",
           context: { rpc: opts.name, end: end.kind },
-        });
+        }, { name: opts.name });
         backoffMs = initialMs;
         continue;
       }
       // ITS OWNER ASKED FOR IT (`reopen()`): the run ended because it was told
       // to, so nothing is filed and it reopens at once.
       if (reopenAsked) {
-        log.info(`the ${opts.name} stream ended at its owner's request; reopening`, {
+        log.info("the {name} stream ended at its owner's request; reopening", {
           operation: "rpc.stream-ended-reopen-asked",
           context: { rpc: opts.name, end: end.kind },
-        });
+        }, { name: opts.name });
         backoffMs = initialMs;
         continue;
       }
@@ -448,10 +450,10 @@ export function watchStream<Res extends Message>(
       // is over, or the daemon serving a relayed view ended it cleanly.
       // Nothing failed, so nothing is filed and the stream reopens at once.
       if (end.kind === "transport_failure" && end.error instanceof PlannedReopen) {
-        log.info(`the ${opts.name} stream ended as planned (${end.error.message}); reopening`, {
+        log.info("the {name} stream ended as planned ({message}); reopening", {
           operation: "rpc.stream-ended-planned-reopen",
           context: { rpc: opts.name, reason: end.error.message },
-        });
+        }, { name: opts.name, message: end.error.message });
         backoffMs = initialMs;
         continue;
       }
@@ -460,10 +462,10 @@ export function watchStream<Res extends Message>(
       // once and finds whichever daemon serves now. An ERROR after the frame
       // is still the failure below: only a clean conclusion was announced.
       if (endingSeen && end.kind === "producer_ended") {
-        log.info(`the ${opts.name} stream ended as the daemon planned; reopening`, {
+        log.info("the {name} stream ended as the daemon planned; reopening", {
           operation: "rpc.stream-ended-planned",
           context: { rpc: opts.name },
-        });
+        }, { name: opts.name });
         backoffMs = initialMs;
         continue;
       }
@@ -487,10 +489,10 @@ export function watchStream<Res extends Message>(
     cancel(): void {
       if (cancelled) return;
       cancelled = true;
-      log.debug(`cancelling the ${opts.name} stream`, {
+      log.debug("cancelling the {name} stream", {
         operation: "rpc.stream-cancel",
         context: { rpc: opts.name },
-      });
+      }, { name: opts.name });
       unsubscribeFromQuiesce();
       unsubscribeFromMove();
       controller.abort();
@@ -499,10 +501,10 @@ export function watchStream<Res extends Message>(
     reopen(): void {
       if (cancelled) return;
       reopenAsked = true;
-      log.info(`${opts.name} is reopening at its owner's request`, {
+      log.info("{name} is reopening at its owner's request", {
         operation: "rpc.stream-reopen-asked",
         context: { rpc: opts.name },
-      });
+      }, { name: opts.name });
       controller.abort();
       wakeFromBackoff?.();
     },

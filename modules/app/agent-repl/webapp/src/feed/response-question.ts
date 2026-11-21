@@ -33,11 +33,13 @@ import {
 import type { FeedResponseQuestion } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { RowContext } from "./cards/context.js";
 import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { perDocument } from "../per-document.js";
 import type { AppContext } from "../rpc/context.js";
 import { controlCall } from "../rpc/control-call.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+
+const log = createLogger("webapp.feed.response-question");
 
 /** The class every question control wears. */
 export const QUESTION_CONTROL_CLASS = "question-control";

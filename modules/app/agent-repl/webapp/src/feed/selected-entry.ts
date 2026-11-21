@@ -17,8 +17,10 @@
  * width-capped card is therefore marked where it is drawn, not at the feed's
  * far left edge.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { feedRowId } from "./row-id.js";
+
+const log = createLogger("webapp.feed.selected-entry");
 
 /** The class the selected entry's CARD wears; the stylesheet rings a card and greys a bubble's fill. */
 export const SELECTED_ENTRY_CLASS = "entry-selected";

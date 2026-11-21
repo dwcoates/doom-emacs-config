@@ -34,9 +34,11 @@
  * module and fails on any scroll write found outside this one.
  */
 import { ancestorMatching, nodeLabel, pageMutationObserver, pageResizeObserver } from "./dom.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { nextFrame } from "./frame.js";
 import { feedRowId, feedRowOf } from "./feed/row-id.js";
+
+const log = createLogger("webapp.scroll");
 
 /** Slack within which the view's bottom still counts as standing at the tail. */
 const PIN_PX = 40;
@@ -1229,10 +1231,10 @@ export class TailFollow {
     }
     const delta = now - held.at;
     if (delta !== measured) {
-      log.debug(`a ${cause} measured ${measured.toString()}px; the anchor moved ${delta.toString()}px, and the view follows the anchor`, {
+      log.debug("a {cause} measured {measured}px; the anchor moved {delta}px, and the view follows the anchor", {
         operation: "scroll.anchor-measure-differs",
-        context: { cause, measured, delta, anchor: rowName(held.row) },
-      });
+        context: { anchor: rowName(held.row) },
+      }, { cause, measured, delta });
     }
     if (delta !== 0) this.correct(cause, "measured", delta, held.row);
     this.takeAnchor();
@@ -1284,10 +1286,10 @@ export class TailFollow {
     const carry = wanted - this.box.scrollTop;
     // More than a pixel short is the box's clamp at an edge, not rounding.
     this.anchorCarry = Math.abs(carry) < 1 ? carry : 0;
-    log.debug(`the rows above the reader moved ${delta.toString()}px; the view moved with them`, {
+    log.debug("the rows above the reader moved {delta}px; the view moved with them", {
       operation: "scroll.anchor-corrected",
-      context: { cause, trigger, delta, anchor: rowName(row), from, to: this.box.scrollTop },
-    });
+      context: { cause, trigger, anchor: rowName(row), from, to: this.box.scrollTop },
+    }, { delta });
   }
 
   /**
@@ -1608,10 +1610,10 @@ export class MoveWitness {
 
 /** One implicit move of the feed, recorded with the cause that made it. */
 function recordMove(cause: ScrollCause, from: number, to: number, follow: boolean): void {
-  log.info(`the feed moved for ${cause}`, {
+  log.info("the feed moved for {cause}", {
     operation: "scroll.feed-moved",
-    context: { cause, from, to, follow },
-  });
+    context: { from, to, follow },
+  }, { cause });
 }
 
 /**

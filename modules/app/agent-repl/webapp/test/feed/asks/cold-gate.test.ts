@@ -56,6 +56,10 @@ import { recordingFailures } from "../../failure-sink.js";
 // Imported at collection, not inside a test, so the transform never counts
 // against a test's timeout.
 import css from "../../../src/styles.css?raw";
+import { createLogger } from "../../../src/log.js";
+import { spyLog } from "../../log-spy.js";
+
+const log = createLogger("webapp.test.feed.asks.cold-gate");
 
 type InitState = MessageInitShape<typeof FeedColdGateSchema>["state"];
 
@@ -1386,8 +1390,7 @@ describe("the hide workspace button", () => {
 
   it("logs the hide with the workspace it hides", async () => {
     // Arrange
-    const { log } = await import("../../../src/log.js");
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     // Act
     hideButton(el)?.click();
@@ -1515,8 +1518,7 @@ describe("the kill workspace button", () => {
 
   it("logs the kill with the workspace it kills", async () => {
     // Arrange
-    const { log } = await import("../../../src/log.js");
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     const el = drawFeedColdGate(gate(standing()), askHarness().rc);
     // Act
     killButton(el)?.click();
@@ -1544,7 +1546,7 @@ describe("workspaceVerbFromGate", () => {
   function killSpec(answer: ReturnType<typeof create<typeof KillWorkspaceResponseSchema>>) {
     return {
       verb: "kill" as const,
-      message: "acting on the workspace",
+      message: log.message("acting on the workspace"),
       rpc: "KillWorkspace",
       call: async () => answer,
       schema: KillWorkspaceResponseSchema,
@@ -1554,8 +1556,7 @@ describe("workspaceVerbFromGate", () => {
 
   it.each(["hide", "kill"] as const)("logs a %s under the verb's own operation with the workspace", async (verb) => {
     // Arrange
-    const { log } = await import("../../../src/log.js");
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     const { actions, buttons } = gateRow();
     const spec = { ...killSpec(create(KillWorkspaceResponseSchema, { result: { case: "success", value: {} } })), verb };
     // Act
@@ -1581,8 +1582,7 @@ describe("workspaceVerbFromGate", () => {
 
   it("reports an unreadable answer under the verb's malformed-refusal operation", async () => {
     // Arrange
-    const { log } = await import("../../../src/log.js");
-    const error = vi.spyOn(log, "error");
+    const error = spyLog("error");
     const { actions, buttons } = gateRow();
     // Act
     await workspaceVerbFromGate(
@@ -1600,8 +1600,7 @@ describe("workspaceVerbFromGate", () => {
 
   it("is the one path both workspace buttons take, so both log the shared shape", async () => {
     // Arrange
-    const { log } = await import("../../../src/log.js");
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     // Act
     for (const hook of ["data-cold-gate-hide", "data-cold-gate-kill"]) {
       const el = drawFeedColdGate(gate(standing()), askHarness().rc);

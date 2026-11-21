@@ -18,12 +18,14 @@
 import type { DescMessage, Message } from "@bufbuild/protobuf";
 import { ConnectError } from "@connectrpc/connect";
 import { controlPlaneFailed } from "../failure/sink.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 import type { AppContext } from "./context.js";
 import { callFailure, refusalOf, type Cause, type SentenceTable } from "./refuse.js";
 import { requireCase, unreachableArm } from "./strict.js";
 import { callUnary } from "./unary.js";
+
+const log = createLogger("webapp.rpc.control-call");
 
 /** A response's result oneof, as protobuf-es hands it over. */
 export type ControlResult<Success> =
@@ -75,10 +77,10 @@ export async function controlCall<Res extends Message, Success>(
       return result.value;
     case "error": {
       const said = refusalOf(result.value.cause, call.refusals, `${call.rpc}Error.cause`);
-      log.error(`the daemon refused to ${call.what}: ${said.text}`, {
+      log.error("the daemon refused to {what}: {text}", {
         operation: call.refusedOperation,
         context: { ...call.context, arm: said.arm },
-      });
+      }, { what: call.what, text: said.text });
       ctx.failures.report(controlPlaneFailed(call.what, said.text));
       return undefined;
     }

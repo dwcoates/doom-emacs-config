@@ -41,7 +41,7 @@ import type {
 import { createControl } from "../control.js";
 import { installProseLinkRouting, renderExternalLink } from "../link.js";
 import { renderMarkdown, setInlineMarkdown } from "../markdown.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -53,6 +53,8 @@ import {
 } from "../rpc/refuse.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+
+const log = createLogger("webapp.news-digest.news-digest");
 
 /** What the mount answers with. */
 export interface NewsDigestHandle {

@@ -23,8 +23,10 @@
  * `:where(ar-button)`, which every author rule outranks. A source scan
  * (test/control.test.ts) fails any module that builds a `<button>` itself.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { queryAll } from "./dom.js";
+
+const log = createLogger("webapp.control");
 
 /** The control's tag: a type selector, as `button` was. */
 export const CONTROL_TAG = "ar-button";

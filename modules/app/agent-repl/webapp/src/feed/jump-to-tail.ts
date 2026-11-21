@@ -15,8 +15,10 @@
  * after every scroll event and every resize pass.
  */
 import { createControl } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { tailGap, type ScrollPosition, type TailFollow } from "../scroll.js";
+
+const log = createLogger("webapp.feed.jump-to-tail");
 
 /** The class the control wears. */
 export const JUMP_TO_TAIL_CLASS = "feed-jump-to-tail";

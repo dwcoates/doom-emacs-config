@@ -19,9 +19,11 @@
  * outlive the row it described.
  */
 import { createControl, type Control } from "../../control.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { BUBBLE_UNCAPPED, drawBubble } from "../../bubble/draw.js";
 import type { RowContext } from "../renderers.js";
+
+const log = createLogger("webapp.feed.cards.controls");
 
 /** The attribute a fold's toggle carries its state on. */
 export const FOLD_STATE_ATTRIBUTE = "data-folded";
@@ -71,10 +73,10 @@ export function foldSection(spec: {
 
   toggle.addEventListener("click", () => {
     const next = toggle.getAttribute(FOLD_STATE_ATTRIBUTE) !== "true";
-    log.debug(`the reader ${next ? "folded" : "unfolded"} a card section`, {
+    log.debug("the reader {action} a card section", {
       operation: "feed.cards.fold-toggled",
       context: { fold: spec.name, folded: next },
-    });
+    }, { action: next ? "folded" : "unfolded" });
     apply(next);
   });
 

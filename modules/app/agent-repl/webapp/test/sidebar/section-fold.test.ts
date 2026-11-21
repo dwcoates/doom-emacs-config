@@ -20,7 +20,7 @@ import {
   sectionFold,
   trackDaemonFold,
 } from "../../src/sidebar/section-fold.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { MalformedView } from "../../src/rpc/malformed.js";
 import { codeOf } from "../source-text.js";
 import { createFocusLeft } from "../../src/focus-left.js";
@@ -162,7 +162,7 @@ describe("sectionFold's record of a fold it asks", () => {
     const control = document.createElement("span");
     section.appendChild(control);
     document.body.appendChild(section);
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
 
     // Act
     sectionFold(sc, "repo:r1", { case: "repository", value: { id: "r1", dir: "/r1" } })(section, control);
@@ -206,7 +206,7 @@ describe("sectionFold on a section holding the current workspace", () => {
     // Arrange
     const { sc } = recording();
     const { section, control } = holding(false);
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
 
     // Act
     sectionFold(sc, "repo:r1", { case: "repository", value: { id: "r1", dir: "/r1" } })(section, control);

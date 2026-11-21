@@ -38,11 +38,13 @@
  * an outage that overran its announcement is news again.
  */
 import type { FailureKind } from "../../../proto/gen/ts/frontend/v1/failure_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
 import { reportClientFailure } from "../rpc/link.js";
 import { requireCase } from "../rpc/strict.js";
 import { isClientFailureArm, type ClientFailureArm, type FailureSink } from "./sink.js";
+
+const log = createLogger("webapp.failure.local");
 
 export {
   bootFailed,
@@ -186,10 +188,10 @@ export function createLocalFailures(): LocalFailures {
         // The daemon never mints one of these, and a frontend never mints the
         // daemon's. Refusing loudly is the whole point of splitting the
         // vocabulary by producer.
-        log.error(`the warning chip was handed the non-client failure arm '${arm}'`, {
+        log.error("the warning chip was handed the non-client failure arm '{arm}'", {
           operation: "warning-chip.foreign-arm",
-          context: { arm },
-        });
+          context: {},
+        }, { arm });
         return;
       }
       const until = suppressedUntil.get(arm);
@@ -197,18 +199,15 @@ export function createLocalFailures(): LocalFailures {
         // LOGGED, NOT LISTED. The failure is real and the record of it must
         // survive; what is withheld is the alarm, for the window the daemon
         // itself named.
-        log.info(`the ${arm} failure is suppressed for an announced outage`, {
+        log.info("the {arm} failure is suppressed for an announced outage", {
           operation: "warning-chip.suppressed",
-          context: { arm, until_ms: until },
-        });
+          context: { until_ms: until },
+        }, { arm });
         return;
       }
       const replacing = entries.has(arm);
-      const write = replacing ? log.debug : log.error;
-      write(`${replacing ? "replacing" : "filing"} the ${arm} failure in the warning chip`, {
-        operation: replacing ? "warning-chip.replace" : "warning-chip.report",
-        context: { arm },
-      });
+      if (replacing) log.debug("replacing the {arm} failure in the warning chip", { operation: "warning-chip.replace" }, { arm });
+      else log.error("filing the {arm} failure in the warning chip", { operation: "warning-chip.report" }, { arm });
       entries.set(arm, { arm, headline: ARM_HEADLINE[arm], evidence: evidenceRows(kind) });
       changed();
       // THE CHIP LISTS IT; THE FOOTER HEARS ABOUT IT TOO (the audit's N2 row
@@ -235,10 +234,10 @@ export function createLocalFailures(): LocalFailures {
     },
 
     suppress(arm: ClientFailureArm, untilMs: number): void {
-      log.info(`suppressing the ${arm} failure until an announced instant`, {
+      log.info("suppressing the {arm} failure until an announced instant", {
         operation: "warning-chip.suppress",
-        context: { arm, until_ms: untilMs },
-      });
+        context: { until_ms: untilMs },
+      }, { arm });
       suppressedUntil.set(arm, untilMs);
       // An entry already standing for this arm belongs to the moments BEFORE
       // the announcement was read; the window it is now inside says it is
@@ -254,10 +253,10 @@ export function createLocalFailures(): LocalFailures {
       // (2026-10-22). The window ends at the instant the daemon announced, and
       // an outage that overruns it is news again.
       if (!entries.delete(arm)) return;
-      log.info(`retracting the ${arm} failure from the warning chip`, {
+      log.info("retracting the {arm} failure from the warning chip", {
         operation: "warning-chip.retract",
-        context: { arm },
-      });
+        context: {},
+      }, { arm });
       changed();
     },
 

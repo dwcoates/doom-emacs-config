@@ -27,7 +27,9 @@
 import renderColors from "../../proto/vocab/render-colors.json";
 import paintClasses from "../../proto/vocab/paint-classes.json";
 import { MalformedView } from "./rpc/malformed.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.vocab");
 
 /** The six colors, plus the explicit absence of one. */
 export type Color = "none" | "blue" | "purple" | "red" | "turquoise" | "yellow" | "green";
@@ -381,11 +383,11 @@ export const PAINT_CLASS_NAMES: readonly string[] = [...PAINT_SYNTAX, ...PAINT_A
 export function paintClass(name: string): string | null {
   if (name === "") return null;
   if (PAINT_CLASS_NAMES.includes(name)) return `paint-${name}`;
-  log.warn(`paint class '${name}' is not in the shared inventory; drawing the span unstyled`, {
+  log.warn("paint class '{name}' is not in the shared inventory; drawing the span unstyled", {
     operation: "vocab.unknown-paint-class",
     context: { paint_class: name },
     dedupKey: `vocab.paint-class:${name}`,
-  });
+  }, { name });
   return null;
 }
 

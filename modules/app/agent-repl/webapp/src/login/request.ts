@@ -9,7 +9,9 @@
  * overlay's own `open`. One overlay, one request, whichever control asked.
  */
 import { createControl } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.login.request");
 
 /** The page-level event a control raises to ask for the login flow. */
 export const LOGIN_REQUESTED_EVENT = "login-requested";

@@ -22,7 +22,7 @@
  * thing about the daemon.
  */
 import { create } from "@bufbuild/protobuf";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { isMalformedView } from "../../rpc/malformed.js";
 import { crossCuttingSentence } from "../../rpc/refuse.js";
 import { SELECT_WORKSPACE_EXPECTED_ARMS } from "../../rpc/refusal.js";
@@ -44,6 +44,8 @@ import type { AppContext } from "../../rpc/context.js";
 import { childrenMatching } from "../../dom.js";
 import { noteSelectRoute } from "../../sidebar/row.js";
 import { buildSelectInEditorRequest, openWorkspaceRefusal } from "../../sidebar/verbs.js";
+
+const log = createLogger("webapp.feed.merge.jump");
 
 /** Where one kind of jump is recorded and how its refusal is drawn. */
 export interface JumpSite {
@@ -71,10 +73,10 @@ export async function jumpToWorkspace(
   reveal?: FeedId,
 ): Promise<void> {
   for (const stale of childrenMatching(host, `.${site.refusalClass}`)) stale.remove();
-  log.info(`selecting a workspace from ${site.describe}`, {
+  log.info("selecting a workspace from {describe}", {
     operation: site.operation,
     context: { workspace: workspace.id, reveal: reveal?.value ?? "none" },
-  });
+  }, { describe: site.describe });
   let response: SelectInEditorResponse;
   try {
     response = await callUnary(
@@ -98,10 +100,10 @@ export async function jumpToWorkspace(
       const expected = SELECT_WORKSPACE_EXPECTED_ARMS[cause.case];
       if (expected !== undefined) {
         // An expected answer, not a refusal: nothing is drawn at the element.
-        log.info(`SelectInEditor was answered ${cause.case}: ${expected}`, {
+        log.info("SelectInEditor was answered {case}: {expected}", {
           operation: `${site.operation}-expected-answer`,
           context: { arm: cause.case, workspace: workspace.id },
-        });
+        }, { case: cause.case, expected });
         return;
       }
       const sentence =
@@ -125,10 +127,10 @@ export async function openAndJumpToWorkspace(
   site: JumpSite,
 ): Promise<void> {
   for (const stale of childrenMatching(host, `.${site.refusalClass}`)) stale.remove();
-  log.info(`opening a workspace from ${site.describe}`, {
+  log.info("opening a workspace from {describe}", {
     operation: `${site.operation}-open`,
     context: { workspace: workspace.id },
-  });
+  }, { describe: site.describe });
   let response: OpenWorkspaceResponse;
   try {
     response = await callUnary(
@@ -167,10 +169,10 @@ function refuse(
   arm: string,
   sentence: string,
 ): void {
-  log.warn(`${rpc} was refused: ${sentence}`, {
+  log.warn("{rpc} was refused: {sentence}", {
     operation: `${site.operation}-refused`,
-    context: { rpc, arm, workspace: workspace.id },
-  });
+    context: { arm, workspace: workspace.id },
+  }, { rpc, sentence });
   host.append(drawRefusal(site, arm, sentence));
 }
 
@@ -180,10 +182,10 @@ function refuse(
  */
 function refuseTransport(host: HTMLElement, site: JumpSite, rpc: string, workspace: WorkspaceRef, err: unknown): void {
   if (isMalformedView(err)) throw err;
-  log.error(`${rpc} failed at the transport: ${String(err)}`, {
+  log.error("{rpc} failed at the transport: {err}", {
     operation: `${site.operation}-failed`,
-    context: { rpc, workspace: workspace.id, cause: err },
-  });
+    context: { workspace: workspace.id, cause: err },
+  }, { rpc, err: String(err) });
   host.append(drawRefusal(site, "transport", "the daemon could not be reached"));
 }
 

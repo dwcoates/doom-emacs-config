@@ -13,7 +13,9 @@
  * record per transition, keyed per drawn object, with the previous status
  * beside the new one. A redraw that draws the same status says nothing.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.drawn-status");
 
 /** Where the drawn status came from. */
 export type DrawnStatusSource = "daemon" | "client_verdict";
@@ -52,18 +54,18 @@ export function createDrawnStatusLog(surface: string, operation: string): DrawnS
       const previous = last.get(key);
       if (previous !== undefined && signature(previous) === signature(drawn)) return;
       last.set(key, drawn);
-      log.info(`the ${surface} now draws ${drawn.arm}`, {
+      log.info("the {surface} now draws {arm}", {
         operation,
         context: {
           key,
-          arm: drawn.arm,
+          
           substatus: drawn.substatus,
           source: drawn.source,
           previous_arm: previous?.arm,
           previous_substatus: previous?.substatus,
           previous_source: previous?.source,
         },
-      });
+      }, { surface, arm: drawn.arm });
     },
   };
 }

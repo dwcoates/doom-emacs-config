@@ -14,13 +14,15 @@
 import { SearchChatsResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_search_chats_pb.js";
 import type { Snippet } from "../../../proto/gen/ts/zettel/v1/endpoint_search_threads_pb.js";
 import { childrenMatching, queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { noteRefusedArm } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { Timers } from "../timers.js";
 import { SEARCH_MISS_CLASS } from "./search.js";
+
+const log = createLogger("webapp.sidebar.chat-search");
 
 /** How long the typing must pause before the query is asked. */
 export const CHAT_SEARCH_PAUSE_MS = 250;

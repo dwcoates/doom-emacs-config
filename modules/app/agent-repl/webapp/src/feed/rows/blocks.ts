@@ -15,7 +15,7 @@
  */
 import { collapsedThumbnail } from "../../bubble/collapsed-thumbnail.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { MENTION_TEXT_CLASS, linkWorkspaceMentionsInText } from "../workspace-mentions.js";
 import { markdownSlot, proseCharacters, proseSource, type SlotMark } from "../../bubble/body.js";
 import { BUBBLE_QUOTE_CLASS, QUOTE_MARKER_CLASS, QUOTE_PARTS_CLASS } from "../../bubble/quote.js";
@@ -28,6 +28,8 @@ import type {
   FeedTextBlock,
   FeedUnsupportedBlock,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+
+const log = createLogger("webapp.feed.rows.blocks");
 
 /**
  * The shape both prompt kinds' block oneofs have. They are separate generated
@@ -134,10 +136,10 @@ export function drawFeedImageBlock(block: FeedImageBlock, classes: FeedImageClas
  * what tells a maintainer which block to model next.
  */
 export function drawFeedUnsupportedBlock(block: FeedUnsupportedBlock): HTMLElement {
-  log.warn(`a prompt carries an unsupported block kind '${block.kind}'`, {
+  log.warn("a prompt carries an unsupported block kind '{kind}'", {
     operation: "feed.draw-unsupported-block",
-    context: { kind: block.kind },
-  });
+    context: {},
+  }, { kind: block.kind });
   const el = document.createElement("div");
   el.className = "prompt-block prompt-block-unsupported";
   el.textContent = `unsupported block: ${block.kind}`;

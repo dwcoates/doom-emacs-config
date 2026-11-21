@@ -18,7 +18,9 @@
  * past the instant) draws the enduring line and schedules nothing.
  */
 import type { Ticker } from "../clock.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.footer.expiry");
 
 /**
  * The longest delay `setTimeout` honours (2^31 - 1 ms, about 24.8 days). A

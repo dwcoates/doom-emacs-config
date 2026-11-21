@@ -16,10 +16,12 @@ import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY } from "./context.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS } from "./section-classes.js";
 import { queryAll } from "../dom.js";
 import type { FocusLeft } from "../focus-left.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { changeView } from "./view-change.js";
 import { FOLD_CONTROL_ATTRIBUTE, foldViewKey, paintFoldControl, paintSectionFold } from "./view.js";
+
+const log = createLogger("webapp.sidebar.section-fold");
 
 /**
  * What a section header's fold gesture does, handed the section and the

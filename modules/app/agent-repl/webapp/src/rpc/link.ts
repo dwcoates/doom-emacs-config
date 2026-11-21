@@ -28,8 +28,10 @@
  * logs, that log is forwarded through the same sink, and the forward fails
  * again. Dropping an identical repeat is what makes that loop terminate.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
+
+const log = createLogger("webapp.rpc.link");
 
 /**
  * Every site that can report, spelled once.
@@ -112,10 +114,10 @@ export function reportClientFailure(kind: ClientFailureKind, context: string): v
     return;
   }
   standing = { kind, substatus: KIND_SUBSTATUS[kind], activity: context };
-  log.info(`the webapp cannot complete a call to the daemon: ${context}`, {
+  log.info("the webapp cannot complete a call to the daemon: {context}", {
     operation: "rpc.client-failure",
     context: { kind, detail: context },
-  });
+  }, { context });
   publish();
 }
 
@@ -129,10 +131,10 @@ export function reportClientFailure(kind: ClientFailureKind, context: string): v
  */
 export function clearClientFailures(): void {
   if (standing === null) return;
-  log.info(`the daemon answered again; dropping the ${standing.kind} client verdict`, {
+  log.info("the daemon answered again; dropping the {kind} client verdict", {
     operation: "rpc.client-failure-cleared",
-    context: { kind: standing.kind },
-  });
+    context: {},
+  }, { kind: standing.kind });
   standing = null;
   publish();
 }

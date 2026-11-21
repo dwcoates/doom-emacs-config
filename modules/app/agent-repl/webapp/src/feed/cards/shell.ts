@@ -29,7 +29,7 @@
  * ordinary call-site refusal beside the button.
  */
 import { reservedLiveElapsedClock, reservedQuietClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type {
   FeedShell,
   FeedShellCommand,
@@ -52,6 +52,8 @@ import { foldTitle } from "../title-fold.js";
 import { drawDetachedWorkId } from "../work-id.js";
 import { drawStopControl, type StopSite } from "../stop-control.js";
 import { decorativeElement } from "../../dom.js";
+
+const log = createLogger("webapp.feed.cards.shell");
 
 const PATH = "FeedShell";
 
@@ -295,7 +297,7 @@ const SHELL_STOP: StopSite = {
   prefix: "shell-stop",
   operation: "feed.cards.shell.stop",
   refusedOperation: "feed.cards.shell.stop-refused",
-  describe: "stopping a detached shell",
+  describe: log.message("stopping a detached shell"),
   malformedOperation: "feed.cards.shell.malformed-refusal",
   request: buildInterruptDetachedRequest,
 };

@@ -21,11 +21,13 @@ import {
   CloseFeedImageRequestSchema,
   CloseFeedImageResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_close_feed_image_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { controlCall } from "../rpc/control-call.js";
 import { FEED_IMAGE_CLASS } from "./rows/blocks.js";
+
+const log = createLogger("webapp.feed.feed-image");
 
 
 /** What the chip's `request` evidence names each call as. */

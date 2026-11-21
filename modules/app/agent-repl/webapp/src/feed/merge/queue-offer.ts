@@ -23,7 +23,7 @@ import {
   AnswerMergeQueueOfferResponseSchema,
   type AnswerMergeQueueOfferError,
 } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_answer_merge_queue_offer_pb";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type { AppContext } from "../../rpc/context.js";
 import { callUnary } from "../../rpc/unary.js";
 import { isMalformedView } from "../../rpc/malformed.js";
@@ -31,6 +31,8 @@ import { guardMalformed } from "../../rpc/guard.js";
 import { clearRefusalsAfter, crossCuttingSentence, drawRefusalAfter } from "../../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { BubbleOverlay, OverlayControls } from "../bubble.js";
+
+const log = createLogger("webapp.feed.merge.queue-offer");
 
 const PATH = "FeedMerge.queue_offer";
 
@@ -124,10 +126,10 @@ async function answer(
   const actions = button.parentElement;
   clearRefusalsAfter(actions, REFUSAL_KIND);
   controls.dismiss();
-  log.info(`answering the merge-queue question: ${decision}`, {
+  log.info("answering the merge-queue question: {decision}", {
     operation: "merge.queue-offer.answer",
-    context: { decision },
-  });
+    context: {},
+  }, { decision });
   await whileControlsDisabled(actions, async () => {
     try {
       const response = await callUnary(
@@ -146,10 +148,10 @@ async function answer(
       const say = crossCuttingSentence("AnswerMergeQueueOffer", cause) ?? answerMergeQueueOfferRefusal(cause);
       drawRefusalAfter(actions, REFUSAL_KIND, cause.case, say);
       controls.restore();
-      log.warn(`AnswerMergeQueueOffer refused a ${decision}`, {
+      log.warn("AnswerMergeQueueOffer refused a {decision}", {
         operation: "merge.queue-offer.refused",
-        context: { decision, arm: cause.case, sentence: say },
-      });
+        context: { arm: cause.case, sentence: say },
+      }, { decision });
     } catch (err) {
       // A MALFORMED VIEW IS NOT A TRANSPORT FAILURE: the daemon answered, and
       // this renderer could not read the answer. It travels up loudly rather
@@ -157,10 +159,10 @@ async function answer(
       if (isMalformedView(err)) throw err;
       drawRefusalAfter(actions, REFUSAL_KIND, "error", "the daemon could not be reached");
       controls.restore();
-      log.error(`AnswerMergeQueueOffer failed for a ${decision}: ${String(err)}`, {
+      log.error("AnswerMergeQueueOffer failed for a {decision}: {err}", {
         operation: "merge.queue-offer.failed",
-        context: { decision, cause: err },
-      });
+        context: { cause: err },
+      }, { decision, err: String(err) });
     }
   });
 }

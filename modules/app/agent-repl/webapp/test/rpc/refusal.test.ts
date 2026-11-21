@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { create } from "@bufbuild/protobuf";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   CloseWorkspaceErrorSchema,
   CloseWorkspaceTransferringAwaySchema,
@@ -11,7 +11,7 @@ import {
 import { OpenInEditorErrorSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_open_in_editor_pb";
 import { oneofArms } from "../arms.js";
 import { isMalformedView } from "../../src/rpc/malformed.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { CROSS_CUTTING_REFUSAL_ARMS, noteRefusedArm, refusalSentence } from "../../src/rpc/refusal.js";
 
 describe("CROSS_CUTTING_REFUSAL_ARMS", () => {
@@ -109,7 +109,7 @@ describe("noteRefusedArm", () => {
 
   it("records a refusal at INFO under the site's operation", () => {
     // Arrange
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
 
     // Act
     noteRefusedArm("SelectWorkspace", "sidebar.app-refused", { case: "error", value: { cause: { case: "unknownWorkspace" } } });
@@ -124,7 +124,7 @@ describe("noteRefusedArm", () => {
 
   it("records nothing for a success", () => {
     // Arrange
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
 
     // Act
     noteRefusedArm("SelectChatText", "chat.gesture-refused", { case: "success", value: {} });

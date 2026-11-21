@@ -5,9 +5,11 @@ import { readFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { log } from "../src/log.js";
+import { createLogger } from "../src/log.js";
 import { captureLogRecords, forwardedRecord, forwardedRecords, recordFor } from "./log-capture.js";
 import { filesUnder } from "./files-under.js";
+
+const log = createLogger("webapp.test.log-capture");
 
 describe("captureLogRecords", () => {
   it("captures what this file's log module forwards", async () => {
@@ -39,7 +41,7 @@ describe("captureLogRecords", () => {
     const capture = captureLogRecords("info", fresh);
 
     // Act
-    fresh.log.info("fresh", { operation: "log-capture.test.fresh" });
+    fresh.createLogger("webapp.test.log-capture.fresh").info("fresh", { operation: "log-capture.test.fresh" });
 
     // Assert
     expect((await forwardedRecord(capture, "log-capture.test.fresh")).message).toBe("fresh");

@@ -44,7 +44,7 @@ import {
 import type { WorkspaceMentionTarget, WorkspaceMentionTargets } from "../../../proto/gen/ts/frontend/v1/workspace_mention_pb";
 import { WorkspaceRefSchema, type WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { escapeRegExp } from "../regexp.js";
 import { claimsClick } from "../link.js";
 import type { AppContext } from "../rpc/context.js";
@@ -54,6 +54,8 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
 import { TREE_LABEL_CLASS, TREE_RAILS_CLASS } from "../metaprompt-tree.js";
 import { jumpToWorkspace, openAndJumpToWorkspace, type JumpSite } from "./merge/jump.js";
+
+const log = createLogger("webapp.feed.workspace-mentions");
 
 /** The class every mention wears. */
 export const WORKSPACE_MENTION_CLASS = "workspace-mention";

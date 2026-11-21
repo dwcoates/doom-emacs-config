@@ -70,7 +70,7 @@ import type { DrainReason } from "../../../proto/gen/ts/agentrepl/v1/drain_reaso
 import { controlPlaneFailed } from "../failure/sink.js";
 import type { NewsDigestHandle } from "../news-digest/news-digest.js";
 import { formatElapsed } from "../duration.js";
-import { bindLogContext, log } from "../log.js";
+import { bindLogContext, createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView, MalformedView } from "../rpc/malformed.js";
 import { registerWorkspaceMoved } from "../rpc/moved.js";
@@ -80,6 +80,8 @@ import type { PromptEcho } from "../prompt-echo.js";
 import { watchStream } from "../rpc/streams.js";
 import { callUnary } from "../rpc/unary.js";
 import { readWebappBuild } from "../webapp-build.js";
+
+const log = createLogger("webapp.lifecycle.lifecycle");
 
 /** What every mount answers with. */
 export interface Handle {
@@ -180,17 +182,17 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
   };
   const onMoved = (address: string): void => {
     if (moving) {
-      log.debug(`the workspace moved to ${address}; this page is already moving`, {
+      log.debug("the workspace moved to {address}; this page is already moving", {
         operation: "lifecycle.transferred-again",
-        context: { address },
-      });
+        context: {},
+      }, { address });
       return;
     }
     moving = true;
-    log.info(`the workspace moved to ${address}; adopting it in place`, {
+    log.info("the workspace moved to {address}; adopting it in place", {
       operation: "lifecycle.transferred",
-      context: { address },
-    });
+      context: {},
+    }, { address });
     void adoptInPlace(ctx, webappBuild).then(
       (outcome) => {
         moving = false;
@@ -198,7 +200,7 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
           ctx.rehome();
           return;
         }
-        log.info(`the daemon serving this workspace runs another webapp; going quiet until the host reloads`, {
+        log.info("the daemon serving this workspace runs another webapp; going quiet until the host reloads", {
           operation: "lifecycle.transferred-other-build",
           context: { address },
         });
@@ -208,10 +210,10 @@ export function startLifecycle(ctx: AppContext, deps: LifecycleDeps): Handle {
         // `adoptAtBoot` recorded and reported the refusal it threw; a page
         // whose workspace could not be adopted cannot honestly show it.
         moving = false;
-        log.error(`this page could not adopt its workspace in place: ${String(err)}`, {
+        log.error("this page could not adopt its workspace in place: {cause}", {
           operation: "lifecycle.adopt-in-place-failed",
           context: { address },
-        });
+        }, { cause: String(err) });
         goQuiet(address);
       },
     );
@@ -757,24 +759,24 @@ export async function adoptAtBoot(
       return { outcome: "deferred", page: outcome.page };
     }
     if (outcome.kind === "terminal") {
-      log.error(`this page cannot be adopted: ${outcome.detail}`, {
+      log.error("this page cannot be adopted: {detail}", {
         operation: "lifecycle.adopt-refused",
         context: { arm: outcome.arm },
-      });
+      }, { detail: outcome.detail });
       ctx.failures.report(controlPlaneFailed("adopt web workspace", outcome.detail));
       throw new AdoptionFailed(outcome.arm, outcome.detail);
     }
     // RETRY: the successor is still finishing its rendezvous.
     if (ctx.ticker.now() - startedAt >= budgetMs) {
       const detail = `the daemon was still adopting after ${formatElapsed(budgetMs)}`;
-      log.error(detail, { operation: "lifecycle.adopt-gave-up", context: { arm: outcome.arm } });
+      log.error("the daemon was still adopting after {budget}", { operation: "lifecycle.adopt-gave-up", context: { arm: outcome.arm } }, { budget: formatElapsed(budgetMs) });
       ctx.failures.report(controlPlaneFailed("adopt web workspace", detail));
       throw new AdoptionFailed(outcome.arm, detail);
     }
-    log.info(`the daemon is still adopting this workspace; retrying in ${waitMs} ms`, {
+    log.info("the daemon is still adopting this workspace; retrying in {wait_ms} ms", {
       operation: "lifecycle.adopt-retry",
       context: { arm: outcome.arm, backoff_ms: waitMs },
-    });
+    }, { wait_ms: waitMs });
     await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
     waitMs = Math.min(waitMs * 2, maxMs);
   }

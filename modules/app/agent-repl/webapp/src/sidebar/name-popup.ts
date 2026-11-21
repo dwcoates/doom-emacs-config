@@ -5,8 +5,10 @@
 
 import { createControl } from "../control.js";
 import { windowOf } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { SidebarContext } from "./context.js";
+
+const log = createLogger("webapp.sidebar.name-popup");
 
 /** The class of the popup that asks for a name. */
 export const NAME_POPUP_CLASS = "sb-subsection-popup";
@@ -66,7 +68,7 @@ export function openNamePopup(sc: SidebarContext, anchor: HTMLElement, spec: Nam
     if (!popup.contains(event.target as Node)) close("a press outside it");
   };
   const close = (why: string): void => {
-    log.debug(`closing the ${subject} name popup`, { operation: `sidebar.${subject}.popup-close`, context: { why } });
+    log.debug("closing the {subject} name popup", { operation: `sidebar.${subject}.popup-close`, context: { why } }, { subject });
     popup.remove();
     win.document.removeEventListener("pointerdown", outside, true);
     sc.dropdowns.released(popup);
@@ -74,7 +76,7 @@ export function openNamePopup(sc: SidebarContext, anchor: HTMLElement, spec: Nam
   const send = (): void => {
     const name = input.value.trim();
     if (name === "") return;
-    log.info(`naming a sidebar ${subject}`, { operation: `sidebar.${subject}.name`, context: { length: name.length } });
+    log.info("naming a sidebar {subject}", { operation: `sidebar.${subject}.name`, context: { length: name.length } }, { subject });
     void spec.send(name, submit).then((ok) => {
       if (ok) close("the name was sent");
     });
@@ -91,10 +93,10 @@ export function openNamePopup(sc: SidebarContext, anchor: HTMLElement, spec: Nam
   // Registered before it is drawn, so the popup it replaces is closed (and
   // stops listening) first.
   sc.dropdowns.opened({ kind: "subsection-popup", element: popup, openers: [anchor], close });
-  log.debug(`opening the ${subject} name popup`, {
+  log.debug("opening the {subject} name popup", {
     operation: `sidebar.${subject}.popup-open`,
     context: { submit: spec.submitLabel },
-  });
+  }, { subject });
   sc.arrange.layer.appendChild(popup);
   input.focus();
   return popup;

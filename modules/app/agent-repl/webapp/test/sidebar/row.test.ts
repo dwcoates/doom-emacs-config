@@ -77,6 +77,9 @@ import { SELECTION_NUMBER_RISE, SELECTION_NUMBER_RISE_MS, createSelectionFade } 
 import stylesheet from "../../src/styles.css?raw";
 import { cascadedValue, inRail, rulesOf } from "../stylesheet.js";
 import { boxRect } from "../dom-rect.js";
+import { createLogger } from "../../src/log.js";
+
+const log = createLogger("webapp.test.sidebar.row");
 
 /** The markup the DOM holds once glyph NAME's shared picture is drawn into a mark. */
 function drawnPicture(name: string): string {
@@ -1384,7 +1387,7 @@ describe("returnFromBand", () => {
     return {
       label: "Test",
       operation: "sidebar.row.test-band",
-      message: "returning a workspace from a test band",
+      message: log.message("returning a workspace from a test band"),
       bringBack: (_line, _sc, workspace) => {
         calls.push(`back:${workspace.id}`);
         return Promise.resolve(answer);

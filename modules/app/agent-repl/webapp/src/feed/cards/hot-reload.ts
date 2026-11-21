@@ -26,7 +26,7 @@ import { armButtonRole } from "../../control.js";
 import { labelledControl } from "../../control.js";
 import { decorativeElement } from "../../dom.js";
 import { liveElapsedClock, settledElapsedClock } from "../../elapsed-clock.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
@@ -37,6 +37,8 @@ import type {
   FeedHotReloadService,
   FeedHotReloadState,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
+
+const log = createLogger("webapp.feed.cards.hot-reload");
 
 const PATH = "FeedHotReload";
 

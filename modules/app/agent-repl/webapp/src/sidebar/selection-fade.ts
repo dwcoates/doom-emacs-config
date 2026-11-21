@@ -32,8 +32,10 @@
  * the animation's duration property, which the stylesheet's animation reads.
  */
 import { drawnRowsOf } from "./drawn-rows.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeOneShot } from "../animation-delays.js";
+
+const log = createLogger("webapp.sidebar.selection-fade");
 
 /** How long the highlighted row's number takes to rise into white, in milliseconds. */
 export const SELECTION_NUMBER_RISE_MS = 500;

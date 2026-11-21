@@ -9,9 +9,11 @@
  * recorded what a draw cost or how big the rail was when it did. A draw that costs a frame or more is recorded at INFO with the rail's
  * size; a cheaper one at DEBUG, so an ordinary push adds nothing at `info`.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { nextFrame } from "../frame.js";
 import { queryAll } from "../dom.js";
+
+const log = createLogger("webapp.sidebar.draw-timing");
 
 /** A draw at or past one frame's budget is recorded at INFO. */
 export const ROSTER_DRAW_SLOW_MS = 16;
@@ -59,17 +61,15 @@ export function timeRosterDraw(rail: ParentNode, placement: string, draw: (mark:
     const settled = env.now();
     const drawMs = Math.round(drawn - started);
     const totalMs = Math.round(settled - started);
+    // draw_ms and total_ms are the message's named values, recorded under those names.
     const context = {
       placement,
-      draw_ms: drawMs,
       ...phases,
       frame_ms: Math.round(settled - drawn),
-      total_ms: totalMs,
       rows: queryAll(rail, ".row").length,
       rail_nodes: queryAll(rail, "*").length,
     };
-    const message = `drew the workspace roster in ${drawMs}ms, ${totalMs}ms to the next frame`;
-    if (totalMs >= ROSTER_DRAW_SLOW_MS) log.info(message, { operation: "sidebar.roster-draw", context });
-    else log.debug(message, { operation: "sidebar.roster-draw", context });
+    const message = log.message("drew the workspace roster in {draw_ms}ms, {total_ms}ms to the next frame", { draw_ms: drawMs, total_ms: totalMs });
+    log.log(totalMs >= ROSTER_DRAW_SLOW_MS ? "info" : "debug", message, { operation: "sidebar.roster-draw", context });
   });
 }

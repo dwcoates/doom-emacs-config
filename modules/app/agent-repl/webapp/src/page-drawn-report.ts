@@ -19,10 +19,12 @@ import {
   ReportPageDrawnResponseSchema,
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_page_drawn_pb";
 import { CONVERSATION_DRAWN_ATTRIBUTE } from "./feed/conversation-drawn.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import type { AppContext } from "./rpc/context.js";
 import { callUnary } from "./rpc/unary.js";
 import { pageMutationObserver } from "./dom.js";
+
+const log = createLogger("webapp.page-drawn-report");
 
 /** The installed report; `dispose` stops watching. */
 export interface PageDrawnReport {
@@ -67,19 +69,19 @@ export function installPageDrawnReport(ctx: AppContext, doc: Document): PageDraw
         });
         return;
       }
-      log.error(`the daemon refused this page's drawn report: ${String(refusal)}`, {
+      log.error("the daemon refused this page's drawn report: {refusal}", {
         operation: "page.drawn-report-refused",
-        context: { cause, refusal: String(refusal) },
-      });
+        context: { cause },
+      }, { refusal });
     } catch (err) {
       // callUnary owns the failure's record, at the level its cause deserves
       // (error for a transport failure, info for a quiesced handover or an
       // announced outage); this record only notes the retry on the next attach.
       reportedThisAttach = false;
-      log.info(`the drawn report did not reach the daemon; the next attach reports again: ${String(err)}`, {
+      log.info("the drawn report did not reach the daemon; the next attach reports again: {err}", {
         operation: "page.drawn-report-unsent",
         context: { cause },
-      });
+      }, { err: String(err) });
     }
   };
 

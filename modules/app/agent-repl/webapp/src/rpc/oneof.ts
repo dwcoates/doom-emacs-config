@@ -11,7 +11,9 @@
  * empty list would quietly draw nothing for every arm.
  */
 import type { DescMessage } from "@bufbuild/protobuf";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.rpc.oneof");
 
 /** The generated (lowerCamel) names of SCHEMA's ONEOF arms, in declaration order. */
 export function oneofArms(schema: DescMessage, oneof: string): readonly string[] {

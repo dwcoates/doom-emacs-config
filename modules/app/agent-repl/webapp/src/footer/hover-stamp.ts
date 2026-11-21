@@ -20,9 +20,11 @@
  */
 import type { Ticker } from "../clock.js";
 import type { HoverStamp } from "../feed/hover-stamp.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { formatDurationCeil, formatTickedElapsed } from "../duration.js";
 import { footerClockSpan } from "./clock-span.js";
+
+const log = createLogger("webapp.footer.hover-stamp");
 
 /** The tier the hover line's cell wears, beside the daemon's three. */
 export const HOVER_STAMP_TIER = "hover";

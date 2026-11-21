@@ -29,8 +29,10 @@
  */
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { placeChildren } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createKeyedStore } from "./keyed-store.js";
+
+const log = createLogger("webapp.feed.response-run");
 
 /** The class the run's one bubble wears. */
 export const RESPONSE_RUN_CLASS = "response-run";

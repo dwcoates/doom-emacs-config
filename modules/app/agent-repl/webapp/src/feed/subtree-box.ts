@@ -27,7 +27,7 @@
  */
 import { queryAll } from "../dom.js";
 import { FEED_ROW_SELECTOR, feedRowId } from "./row-id.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import {
   TREE_CLASS,
   TREE_LABEL_AT_ATTRIBUTE,
@@ -37,6 +37,8 @@ import {
   cssLength,
   type TreeMeasure,
 } from "../metaprompt-tree.js";
+
+const log = createLogger("webapp.feed.subtree-box");
 
 /** One kind of box: the class its lines wear and the properties naming its edges, as CSS lengths. */
 export interface SubtreeBox {

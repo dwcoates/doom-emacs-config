@@ -11,8 +11,10 @@
  * page's readers hear it.
  */
 import { createListeners } from "./listeners.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { perDocument } from "./per-document.js";
+
+const log = createLogger("webapp.webhost-pressed");
 
 /** The page's webhost-press signal, as its readers see it. */
 export interface WebhostPresses {

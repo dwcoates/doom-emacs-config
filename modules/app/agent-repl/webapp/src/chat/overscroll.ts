@@ -8,8 +8,10 @@
  * the elastic edge the platform draws for a scroll view. The pull moves
  * paint only (a transform), so the scroll position never leaves its bounds.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { WINDOW_TIMERS, type Timers } from "../timers.js";
+
+const log = createLogger("webapp.chat.overscroll");
 
 /** How long the wheel must be quiet before the pull springs back. */
 export const OVERSCROLL_RELEASE_MS = 120;

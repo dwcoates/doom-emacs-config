@@ -26,7 +26,9 @@
 import { FOLDED_CLASS } from "./folded-class.js";
 import { queryAll } from "../dom.js";
 import type { FocusLeft } from "../focus-left.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.sidebar.deploys-fold");
 
 /** The class of one repository's group, in the Merge Queue and Recently Merged sections alike. */
 export const DEPLOYS_GROUP_CLASS = "merged-group";

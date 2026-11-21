@@ -31,9 +31,11 @@
  */
 import { stopTicking } from "../feed/ticking.js";
 import type { FocusLeft } from "../focus-left.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { clampReveal, type Rect } from "./clamp.js";
 import { viewportOf } from "../placement.js";
+
+const log = createLogger("webapp.topbar.reveal");
 
 /** What a reveal draws, built fresh from the current view each time. */
 export type RevealBody = () => HTMLElement;
@@ -97,10 +99,10 @@ export function mountRevealLayer(
 
   const close = (): void => {
     if (openName === null) return;
-    log.debug(`closing the ${openName} reveal`, {
+    log.debug("closing the {open_name} reveal", {
       operation: "topbar.reveal-close",
       context: { reveal: openName },
-    });
+    }, { open_name: openName });
     openName = null;
     clear();
   };
@@ -120,10 +122,10 @@ export function mountRevealLayer(
       // The control this reveal belongs to is gone from the new view. Closing
       // is the honest outcome: a menu floating under a strip that no longer
       // has the button it came from is a menu about nothing.
-      log.info(`the ${name} reveal closed: its anchor is no longer drawn`, {
+      log.info("the {name} reveal closed: its anchor is no longer drawn", {
         operation: "topbar.reveal-anchor-gone",
         context: { reveal: name, anchor: entry.anchorName },
-      });
+      }, { name });
       close();
       return;
     }
@@ -178,10 +180,10 @@ export function mountRevealLayer(
     },
 
     open(name, anchorName, body): void {
-      log.debug(`opening the ${name} reveal`, {
+      log.debug("opening the {name} reveal", {
         operation: "topbar.reveal-open",
         context: { reveal: name },
-      });
+      }, { name });
       entries.set(name, { anchorName, body });
       render(name);
     },
@@ -192,10 +194,10 @@ export function mountRevealLayer(
         return;
       }
       entries.set(name, { anchorName, body });
-      log.debug(`opening the ${name} reveal`, {
+      log.debug("opening the {name} reveal on a toggle", {
         operation: "topbar.reveal-open",
         context: { reveal: name },
-      });
+      }, { name });
       render(name);
     },
 

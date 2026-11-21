@@ -18,7 +18,7 @@
  *    that superseded the turn, drawn as the active prompt, is its whole
  *    account. Its row still exists.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type {
   FeedId,
@@ -30,6 +30,8 @@ import type {
 import { drawOutcomeMarker } from "../marker.js";
 import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
+
+const log = createLogger("webapp.feed.rows.turn-ended");
 
 const PATH = "FeedTurnEnded";
 
@@ -53,10 +55,10 @@ const FINAL_ANSWER_ATTRIBUTE = "data-final-answer";
 /** The terminal row. */
 export function drawFeedTurnEnded(msg: FeedTurnEnded, rc: RowContext): HTMLElement {
   const outcome = requireCase(msg.outcome, `${PATH}.outcome`);
-  log.info(`drawing a turn_ended row as ${outcome.case}`, {
+  log.info("drawing a turn_ended row as {case}", {
     operation: "feed.draw-turn-ended",
     context: { outcome: outcome.case },
-  });
+  }, { case: outcome.case });
   // REQUIRED on every row, drawn or not: where the footer clock stopped.
   msOf(msg.endedAtMs, `${PATH}.ended_at_ms`);
   const el = ((): HTMLElement => {
@@ -168,10 +170,10 @@ export function drawFeedTurnEndedErrored(
       `${PATH}.errored.marker`,
     ),
   );
-  log.info(`drew the turn error arm ${error.case} as its outcome marker`, {
+  log.info("drew the turn error arm {case} as its outcome marker", {
     operation: "feed.draw-turn-error",
     context: { arm: error.case },
-  });
+  }, { case: error.case });
   return el;
 }
 

@@ -42,7 +42,7 @@ import {
   SelectResponseTextRequestSchema,
   SelectResponseTextResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_response_text_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { controlCall } from "../rpc/control-call.js";
 import { createListeners, type Listeners } from "../listeners.js";
@@ -52,6 +52,8 @@ import { pageWebhostPresses, type WebhostPresses } from "../webhost-pressed.js";
 import { RESPONSE_PROSE_CLASS } from "./cards/response.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
 import { FINAL_RESPONSE_CLASS } from "./rows/turn-ended.js";
+
+const log = createLogger("webapp.feed.response-highlight");
 
 /** SelectResponseText's own refusal arm, in the reader's words. */
 const SELECT_RESPONSE_TEXT_REFUSALS = {
@@ -109,10 +111,10 @@ async function selectResponseText(ctx: AppContext, state: HighlightState, what: 
     context: { state: state?.case ?? "unset" },
   });
   if (success === undefined) return;
-  log.debug(`the daemon took the response highlight (${what})`, {
+  log.debug("the daemon took the response highlight ({what})", {
     operation: "feed.response-highlight.answered",
     context: { state: state?.case ?? "unset" },
-  });
+  }, { what });
 }
 
 /** The name the held words are painted under: `::highlight(response-highlight)` (styles.css). */

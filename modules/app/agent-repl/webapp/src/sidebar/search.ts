@@ -23,9 +23,11 @@
  */
 import { createControl, type Control } from "../control.js";
 import { childrenMatching, queryAll, SVG_NS } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { escapeRegExp } from "../regexp.js";
 import { REPOSITORY_BLOCK_CLASS } from "./row.js";
+
+const log = createLogger("webapp.sidebar.search");
 
 /** The class a row the query does not match wears. */
 export const SEARCH_MISS_CLASS = "sb-search-miss";

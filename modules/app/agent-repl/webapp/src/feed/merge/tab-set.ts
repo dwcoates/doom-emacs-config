@@ -28,7 +28,7 @@
  * a scroll).
  */
 import { equals } from "@bufbuild/protobuf";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { placeChildren } from "../../dom.js";
 import type { Ticker } from "../../clock.js";
 import { FeedRowSchema } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
@@ -39,6 +39,8 @@ import {
   updateFeedMergeTab,
   type MergeTab,
 } from "./tab-strip.js";
+
+const log = createLogger("webapp.feed.merge.tab-set");
 
 /** One selected tab's content, which follows its tab's later pushes itself. */
 export interface TabPanel {

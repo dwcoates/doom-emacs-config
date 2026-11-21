@@ -24,8 +24,10 @@
  * at error, so the failure is on record even though nothing here can recover
  * from it.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { queryAll } from "./dom.js";
+
+const log = createLogger("webapp.webapp-build");
 
 /** The same shape `write_webapp_build_id` reads out of the built `index.html`. */
 const ENTRY_SCRIPT_SRC_PATTERN = /^\/assets\/index-([A-Za-z0-9_-]+)\.js$/;

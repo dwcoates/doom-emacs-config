@@ -29,11 +29,13 @@ import { readFileSync } from "node:fs";
 import { afterAll, beforeAll, expect, it } from "vitest";
 
 import type { MountedApp } from "../integration/harness";
-import { log } from "../../src/log";
+import { createLogger } from "../../src/log";
 import { BOOT_BUDGET_MS, TURN_TEST_MS, awaitDrawn, bootLayer, rows, settleUntil, submit, textOf } from "./drive";
 import { realDaemon, workspaceLogPath } from "./real-daemon";
 import { warningsSink } from "../../../agent-shim/logging/ts/warnings.js";
 import { realNow } from "../real-clock";
+
+const log = createLogger("webapp.test.webapp-layer.client-log");
 
 /**
  * The operation the planted record carries.

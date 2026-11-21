@@ -20,7 +20,9 @@
  */
 import type { Presence } from "../presence.js";
 import { guardMalformed, type GuardContext } from "../rpc/guard.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.feed.unshown-trim");
 
 /** What the trim needs: when the host shows the page, and how to trim it. */
 export interface UnshownTrimEnv {

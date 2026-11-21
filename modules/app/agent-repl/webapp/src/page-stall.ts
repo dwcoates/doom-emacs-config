@@ -16,9 +16,11 @@
  * WebKit suspended the view. It is recorded at info and reported as nothing.
  */
 import { ReportedLatencyKind } from "../../proto/gen/ts/agentrepl/v1/endpoint_report_latencies_pb";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import type { Presence } from "./presence.js";
 import type { RecordLatency } from "./wall-latency.js";
+
+const log = createLogger("webapp.page-stall");
 
 /** Milliseconds between two runs of the sampler. */
 export const PAGE_STALL_INTERVAL_MS = 100;

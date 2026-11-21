@@ -24,7 +24,7 @@ import type {
   TopbarEffortSelectorSupported,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { AgentEffortLevel } from "../../../proto/gen/ts/conversation/v1/api_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TopbarContext } from "./context.js";
@@ -32,6 +32,8 @@ import { drawNoSessionCell, NO_SESSION_DASH } from "./no-session.js";
 import { createControl, type Control } from "../control.js";
 import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
+
+const log = createLogger("webapp.topbar.effort");
 
 /**
  * The selector's hover (owner, 2026-10-01; design record 2026-10-02 decision
@@ -170,10 +172,10 @@ export async function pickEffort(
   button: Control,
   row: Control,
 ): Promise<void> {
-  log.info(`the reader picked the effort level ${option.displayName}`, {
+  log.info("the reader picked the effort level {display_name}", {
     operation: "topbar.effort-picked",
     context: { level: AgentEffortLevel[option.level] },
-  });
+  }, { display_name: option.displayName });
   await sendPick(
     {
       rpc: "SetEffort",

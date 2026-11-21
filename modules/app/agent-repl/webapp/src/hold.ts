@@ -15,7 +15,9 @@
  * drawn: a drag rearranged the page's own DOM, and a drawing the daemon did
  * not take (a refusal, a cancelled drag) must not outlive the hold.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.hold");
 
 /** The page's hold on one drawing while it is dragged or asked about. */
 export interface DrawingHold<T> {

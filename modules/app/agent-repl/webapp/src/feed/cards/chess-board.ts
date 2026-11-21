@@ -28,7 +28,7 @@ import type {
   FeedChessBoardReady,
 } from "../../../../proto/gen/ts/frontend/v1/chess_board_pb";
 import { InspectChessBoardSquareResponseSchema } from "../../../../proto/gen/ts/agentrepl/v1/endpoint_inspect_chess_board_square_pb";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type { AppContext } from "../../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { callUnary } from "../../rpc/unary.js";
@@ -40,6 +40,8 @@ import {
   type ChessWidgetHandle,
 } from "./chess-widget-loader.js";
 import { agenticBubble } from "./controls.js";
+
+const log = createLogger("webapp.feed.cards.chess-board");
 
 const PATH = "FeedChessBoard";
 
@@ -181,10 +183,10 @@ function mountWidget(spec: MountSpec): void {
     },
     (err: unknown) => {
       showStatus(spec.status, WIDGET_LOAD_FAILED_TEXT);
-      log.error(`the chess widget bundle could not be loaded: ${String(err)}`, {
+      log.error("the chess widget bundle could not be loaded: {err}", {
         operation: "feed.cards.chess-board.load-failed",
         context: { script: spec.scriptUrl, cause: err },
-      });
+      }, { err: String(err) });
     },
   );
 }
@@ -218,10 +220,10 @@ async function inspectSquare(spec: MountSpec, displayed: bigint, square: number)
       return { kind: "answer", bytes: result.value.getSquareEventsResponse };
     }
     const cause = requireCase(result.value.cause, "InspectChessBoardSquareError.cause");
-    log.info(`a square click got no answer: ${cause.case}`, {
+    log.info("a square click got no answer: {case}", {
       operation: "feed.cards.chess-board.square-refused",
       context: { square, arm: cause.case, detail: cause.value.detail },
-    });
+    }, { case: cause.case });
     switch (cause.case) {
       case "backendUnreachable":
       case "sessionGone":
@@ -230,10 +232,10 @@ async function inspectSquare(spec: MountSpec, displayed: bigint, square: number)
         return unreachableArm("InspectChessBoardSquareError.cause", (cause as { case: string }).case);
     }
   } catch (err) {
-    log.error(`InspectChessBoardSquare failed: ${String(err)}`, {
+    log.error("InspectChessBoardSquare failed: {err}", {
       operation: "feed.cards.chess-board.square-failed",
       context: { square, cause: err },
-    });
+    }, { err: String(err) });
     return { kind: "refused", text: SQUARE_REFUSALS.transport };
   }
 }

@@ -18,7 +18,9 @@
  * a span with no click and no reveal — a picker that opened an empty list
  * would only invite the click that proves it is empty.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.topbar.no-session");
 
 /** The character the empty slot draws. An em dash, not a hyphen. */
 export const NO_SESSION_DASH = "—";

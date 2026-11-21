@@ -28,11 +28,13 @@ import type {
   FeedHookHeadline,
   FeedHookOutput,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { RowContext } from "./context.js";
 import { foldTitle } from "../title-fold.js";
 import { decorativeElement } from "../../dom.js";
+
+const log = createLogger("webapp.feed.cards.hook");
 
 /**
  * The hook card.

@@ -46,7 +46,7 @@ import { ASK_WAITING_WORD } from "./ask-words.js";
 import { drawChoiceNumeral } from "./choice-number.js";
 import { createControl, type Control } from "../../control.js";
 import { create } from "@bufbuild/protobuf";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { setInlineMarkdown } from "../../markdown.js";
 import {
   UpdateQuestionDraftResponseSchema,
@@ -78,6 +78,8 @@ import { armName } from "../renderers.js";
 import type { RowContext } from "../renderers.js";
 import { drawFeedTab, drawFeedTabline, drawFeedTabStrip } from "../tabs.js";
 import { buildUpdateQuestionDraftRequest, type QuestionDraftEdit } from "./requests.js";
+
+const log = createLogger("webapp.feed.asks.question");
 
 const PATH = "FeedQuestion";
 
@@ -503,10 +505,10 @@ async function send(
 ): Promise<void> {
   const id = requireMessage(rc.row.id, "FeedRow.id");
   clearRefusals(status);
-  log.info(`editing a question draft with ${change.kind}`, {
+  log.info("editing a question draft with {kind}", {
     operation: "feed.asks.question.edit",
     context: { row: id.value, edit: change.kind },
-  });
+  }, { kind: change.kind });
   const answered = await whileInFlight(controls, () =>
     callUnary(
       rc.ctx,

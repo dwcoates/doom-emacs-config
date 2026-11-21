@@ -186,7 +186,7 @@ async function runBoot(rec: BootRecord): Promise<void> {
   // import in this file belongs to the pre-reset registry and would never see
   // the logger the boot installs.
   const logging = await import("../src/log.js");
-  const freshLog = logging.log;
+  const freshLog = logging.createLogger("webapp.test.main");
   // test/setup.ts installed a logger into the PRE-RESET module instance, and
   // the canonical `log` methods throw without one -- the fresh graph gets the same quiet default
   // so the boot's own first `shell.resolve` record has somewhere to go. The

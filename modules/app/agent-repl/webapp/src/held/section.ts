@@ -50,7 +50,7 @@
 import { create } from "@bufbuild/protobuf";
 import { FeedHeldSchema, type FeedHeld, type FeedHeldItem } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import type { WatchFeedHeldFold } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_feed_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
@@ -64,6 +64,8 @@ import { installClickExpand } from "../expand.js";
 import { refreshHasMore } from "../feed/bubble-more.js";
 import { stopTicking } from "../feed/ticking.js";
 import { flashFoldedInto, showFolding } from "./fold-motion.js";
+
+const log = createLogger("webapp.held.section");
 
 /** What the section is handed by the feed that owns it. */
 export interface HeldSectionDeps {

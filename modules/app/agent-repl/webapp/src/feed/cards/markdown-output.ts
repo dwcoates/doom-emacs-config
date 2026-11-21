@@ -21,8 +21,10 @@
  *     **bold** or a [link](target)). A bare "-" line, a lone asterisk, a
  *     path with underscores, none of these is enough.
  */
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { renderMarkdown } from "../../markdown.js";
+
+const log = createLogger("webapp.feed.cards.markdown-output");
 
 /** An ATX heading line. */
 const HEADING = /^#{1,6} \S/m;

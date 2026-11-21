@@ -40,7 +40,23 @@ import {
 } from "../../proto/gen/ts/agentrepl/v1/endpoint_client_log_pb";
 import { ClientLogThrottle, type ClientLogThrottleOptions } from "./clientlog-throttle.js";
 import { logTimestamp } from "../../agent-shim/logging/ts/timestamp.js";
-import { expiryContext, expiryMessage, LevelWindow, type LevelExpiry } from "../../agent-shim/logging/ts/level-window.js";
+import {
+  expiryContext,
+  LevelWindow,
+  selectionContext,
+  selectionNote,
+  WINDOW_SECONDS,
+  type LevelExpiry,
+  type LevelSelection,
+} from "../../agent-shim/logging/ts/level-window.js";
+import {
+  renderSite,
+  renderTemplate,
+  SiteTable,
+  type Literal,
+  type LogSite,
+  type LogValuesArg,
+} from "../../agent-shim/logging/ts/logsite.js";
 
 /** The four arms of `ClientLogRecord.level`. */
 export type ClientLogLevel = "debug" | "info" | "warn" | "error";
@@ -78,6 +94,11 @@ export interface WebappLogRecord {
   level: ClientLogLevel;
   verbosity: ClientLogVerbosity;
   operation: string;
+  /** The call's site key (logsite.ts `siteKey`). */
+  site: string;
+  /** The call's unrendered template, the site's summary. */
+  template: string;
+  /** TEMPLATE rendered from the call's named values. */
   message: string;
   context: Record<string, unknown>;
   connection_id?: string;
@@ -119,6 +140,15 @@ export const HELD_DROPPED_OPERATION = "webapp.client-log-held-dropped";
 
 /** The operation of every level window record: a startup decision and a window that ended. */
 export const LEVEL_WINDOW_OPERATION = "webapp.log.level-window";
+
+/** The runtime every webapp site key is derived under. */
+export const WEBAPP_LOG_RUNTIME = "webapp";
+
+/** The sites this module's own records are written at. */
+const LOGGING_SITES = new SiteTable(WEBAPP_LOG_RUNTIME, "webapp.log");
+
+/** No named values: what a template without placeholders is rendered from. */
+const NO_VALUES: Readonly<Record<string, unknown>> = Object.freeze({});
 
 /** Parse the page-delivered `AGENT_REPL_LOG_LEVEL` value. */
 export function parseClientLogLevel(value: string | null): ClientLogLevel {
@@ -163,13 +193,9 @@ export class ForwardingLogger {
         buildClientLogRecord(
           buildRecord(
             "warn",
-            `client log forwarding dropped ${dropped} record(s) over its ${bufferBound}-record buffer bound`,
-            {
-              ...boundContext,
-              operation: "webapp.client-log-throttle-dropped",
-              dropped,
-              buffer_bound: bufferBound,
-            },
+            LOGGING_SITES.site("client log forwarding dropped {dropped} record(s) over its {buffer_bound}-record buffer bound"),
+            { dropped, buffer_bound: bufferBound },
+            { ...boundContext, operation: "webapp.client-log-throttle-dropped" },
             "normal",
           ),
         ),
@@ -265,8 +291,9 @@ export class ForwardingLogger {
         buildClientLogRecord(
           buildRecord(
             "warn",
-            `client log forwarding dropped ${String(dropped)} record(s) held over its ${String(CLIENT_LOG_HELD_BOUND)}-record bound while the daemon was out of reach`,
-            { ...boundContext, operation: HELD_DROPPED_OPERATION, dropped, held_bound: CLIENT_LOG_HELD_BOUND },
+            LOGGING_SITES.site("client log forwarding dropped {dropped} record(s) held over its {held_bound}-record bound while the daemon was out of reach"),
+            { dropped, held_bound: CLIENT_LOG_HELD_BOUND },
+            { ...boundContext, operation: HELD_DROPPED_OPERATION },
             "normal",
           ),
         ),
@@ -339,6 +366,8 @@ export function buildClientLogRecord(record: WebappLogRecord): ClientLogRecord {
   return create(ClientLogRecordSchema, {
     level: { case: LEVEL_ARM[record.level], value: {} },
     operation: record.operation,
+    site: record.site,
+    template: record.template,
     message: record.message,
     context: context as JsonObject,
     timestamp: record.timestamp,
@@ -447,11 +476,13 @@ function jsonSafe(value: unknown, seen = new WeakSet<object>()): unknown {
 
 function buildRecord(
   level: ClientLogLevel,
-  message: string,
+  site: LogSite,
+  values: Readonly<Record<string, unknown>>,
   context: Record<string, unknown>,
   verbosity: WebappLogRecord["verbosity"],
 ): WebappLogRecord {
   const canonicalLevel = requireLevel(level);
+  const message = renderSite(site, values);
   const fields = context;
   const operation = requireString(fields, "operation");
   const hasWorkspaceRouting = fields.workspace_dir !== undefined || fields.workspace_id !== undefined;
@@ -467,8 +498,17 @@ function buildRecord(
   const reserved = new Set(["operation", "workspace_dir", "workspace_id", "connection_id", "agent_repl_session_id", "claude_session_id", "request_id"]);
   const evidence: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) if (!reserved.has(key) && value !== undefined) evidence[key] = jsonSafe(value);
+  // Each named value is recorded under its placeholder's name. A name the
+  // context already states would leave the record two answers for one key.
+  for (const [name, value] of Object.entries(values)) {
+    if (reserved.has(name) || Object.hasOwn(fields, name)) {
+      throw new Error(`webapp log template ${JSON.stringify(site.template)} names {${name}}, which the record's context already states`);
+    }
+    evidence[name] = jsonSafe(value);
+  }
   const record: WebappLogRecord = {
-    timestamp: logTimestamp(), runtime: "webapp", level: canonicalLevel, verbosity, operation, message,
+    timestamp: logTimestamp(), runtime: "webapp", level: canonicalLevel, verbosity, operation,
+    site: site.key, template: site.template, message,
     context: evidence, ...routing,
   };
   // An identity is stamped only when the caller HAS one. An empty string is
@@ -483,14 +523,24 @@ function buildRecord(
   return record;
 }
 
-function emit(level: ClientLogLevel, message: string, options: LogOptions): void {
+function emit(
+  level: ClientLogLevel,
+  sites: SiteTable,
+  template: string,
+  values: Readonly<Record<string, unknown>>,
+  options: LogOptions,
+): void {
+  // Parsed and keyed once per site (SiteTable), rendered once per record.
+  const site = sites.site(template);
+  const observer = callObservers.get(level);
+  if (observer !== undefined) {
+    const named = Object.keys(values).length === 0 ? options : { ...options, context: { ...options.context, ...values } };
+    observer(renderSite(site, values), named);
+  }
   if (active === null) throw new Error("the webapp logger is not installed");
   const { allowed, ended } = active.admits(level);
-  if (ended !== null) emit("info", expiryMessage(ended), { operation: LEVEL_WINDOW_OPERATION, context: expiryContext(ended) });
+  if (ended !== null) noteLevelExpiry(ended);
   if (!allowed) return;
-  if (options.dedupKey !== undefined) {
-    if (dedupLast.get(options.dedupKey) === message) return;
-  }
   const localContext = options.context ?? {};
   for (const identity of ["workspace_dir", "workspace_id", "connection_id", "agent_repl_session_id", "claude_session_id"] as const) {
     if (boundContext[identity] !== undefined && localContext[identity] !== undefined && boundContext[identity] !== localContext[identity]) {
@@ -498,21 +548,127 @@ function emit(level: ClientLogLevel, message: string, options: LogOptions): void
     }
   }
   if (localContext.operation !== undefined) throw new Error("webapp log context must not override operation");
-  const record = buildRecord(level, message, { ...boundContext, ...localContext, operation: options.operation }, options.verbosity ?? "normal");
+  const record = buildRecord(level, site, values, { ...boundContext, ...localContext, operation: options.operation }, options.verbosity ?? "normal");
+  if (options.dedupKey !== undefined) {
+    if (dedupLast.get(options.dedupKey) === record.message) return;
+  }
   active.write(buildClientLogRecord(record), JSON.stringify(jsonSafe(record)), !options.localOnly);
   // A failed write must not arm dedup and silently suppress a later attempt.
-  if (options.dedupKey !== undefined) dedupLast.set(options.dedupKey, message);
+  if (options.dedupKey !== undefined) dedupLast.set(options.dedupKey, record.message);
 }
 
-export type LogMethod = (message: string, options: LogOptions) => void;
+/** Write one of this module's own records, at a "webapp.log" site. */
+function internal<T extends string>(level: ClientLogLevel, options: LogOptions, template: Literal<T>, ...values: LogValuesArg<T>): void {
+  emit(level, LOGGING_SITES, template, values[0] ?? NO_VALUES, options);
+}
 
-/** The canonical app-wide logger: one method for each severity. */
-export const log = {
-  debug: (message, options) => emit("debug", message, options),
-  info: (message, options) => emit("info", message, options),
-  warn: (message, options) => emit("warn", message, options),
-  error: (message, options) => emit("error", message, options),
-} as const satisfies Record<ClientLogLevel, LogMethod>;
+/** Record that a level window ended, as the shared level window's `expiryMessage` words it. */
+function noteLevelExpiry(ended: LevelExpiry): void {
+  internal(
+    "info",
+    { operation: LEVEL_WINDOW_OPERATION, context: expiryContext(ended) },
+    "log level {from} window ended at {until_text}; reverted to info",
+    { from: ended.from, until_text: new Date(ended.untilMs).toISOString() },
+  );
+}
+
+/**
+ * Record a startup level decision that did not hold the level asked for, as
+ * the shared level window's `selectionNote` words it, one site per outcome; a
+ * default or an honored window records nothing.
+ */
+export function logLevelSelection(selection: LevelSelection): void {
+  if (selectionNote(selection) === null) return;
+  const options: LogOptions = { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(selection) };
+  // Quoted, as `selectionNote` quotes it: the value came from the page address.
+  const requested = JSON.stringify(selection.requested ?? "");
+  const until = selection.requestedUntil ?? "";
+  switch (selection.outcome) {
+    case "no_expiry":
+      internal("info", options, "log level {requested} ignored without AGENT_REPL_LOG_LEVEL_UNTIL; starting at info", { requested });
+      return;
+    case "expired":
+      internal("info", options, "log level {requested} ignored: its window ended at {until_text}; starting at info", { requested, until_text: until });
+      return;
+    case "beyond_window":
+      internal("info", options, "log level {requested} ignored: its window ends at {until_text}, more than {window_seconds}s away; starting at info", { requested, until_text: until, window_seconds: WINDOW_SECONDS });
+      return;
+    case "default":
+    case "honored":
+      return;
+  }
+}
+
+/**
+ * One log method: TEMPLATE, then the record's OPTIONS (its operation and
+ * context evidence), then the template's named values.
+ *
+ * TEMPLATE MUST BE A STRING LITERAL, and the compiler refuses anything else:
+ * the template is the site's summary and part of its key (the logger's scope,
+ * the template and the runtime, hashed), so a message built at run time would
+ * make every record its own site, and rewording a template gives its site a
+ * new key. A dynamic value goes in VALUES under a name the template writes as
+ * `{name}` (a literal brace is `{{` or `}}`); a missing or an extra value is a
+ * type error. Each value is rendered into the message and recorded in the
+ * record's context under its name. See logging-contract.md "Log sites".
+ */
+export type WebappLogMethod = <T extends string>(template: Literal<T>, options: LogOptions, ...values: LogValuesArg<T>) => void;
+
+/**
+ * A log message a helper writes ON ITS CALLER'S BEHALF: the caller's literal
+ * template and its named values, made with the CALLER's logger
+ * (`WebappLogger.message`) where the caller writes it. So the template is
+ * still a literal at a call the static scan reads, and the record is keyed by
+ * the caller's scope, never by the helper's, whichever logger writes it
+ * (`WebappLogger.log`) and at whichever level.
+ */
+export interface LogMessage {
+  readonly template: string;
+  readonly values: Readonly<Record<string, unknown>>;
+  /** The sites of the scope the message was written in. */
+  readonly sites: SiteTable;
+}
+
+/** MESSAGE's template rendered from its values: the text its record's message carries. */
+export function renderMessage(message: LogMessage): string {
+  return renderTemplate(message.template, message.values);
+}
+
+/** A module's logger: one method per severity, keyed under its scope. */
+export interface WebappLogger {
+  readonly debug: WebappLogMethod;
+  readonly info: WebappLogMethod;
+  readonly warn: WebappLogMethod;
+  readonly error: WebappLogMethod;
+  /** The message written as TEMPLATE in this logger's scope, for a helper to write (LogMessage). */
+  message<T extends string>(template: Literal<T>, ...values: LogValuesArg<T>): LogMessage;
+  /** Write MESSAGE at LEVEL with OPTIONS, keyed under the scope it was written in. */
+  log(level: ClientLogLevel, message: LogMessage, options: LogOptions): void;
+}
+
+/**
+ * The logger of SCOPE, over the app-wide forwarding logger (`setLogger`).
+ *
+ * SCOPE IS A STRING LITERAL, one per logger in the whole webapp (a test holds
+ * them unique): it stands in for the function a Go call is keyed by, since a
+ * minified bundle has no caller to read at run time, so it is part of every
+ * site key the logger's calls derive. Renaming it re-keys every one of them.
+ */
+export function createLogger<S extends string>(scope: Literal<S>): WebappLogger {
+  const sites = new SiteTable(WEBAPP_LOG_RUNTIME, scope);
+  const method =
+    (level: ClientLogLevel): WebappLogMethod =>
+    (template, options, ...values) =>
+      emit(level, sites, template, values[0] ?? NO_VALUES, options);
+  return {
+    debug: method("debug"),
+    info: method("info"),
+    warn: method("warn"),
+    error: method("error"),
+    message: (template, ...values) => ({ template, values: values[0] ?? NO_VALUES, sites }),
+    log: (level, message, options) => emit(level, message.sites, message.template, message.values, options),
+  };
+}
 
 /**
  * Per-key dedup for hot paths (per-push render guards, per-tick pollers): a
@@ -527,9 +683,20 @@ export function clearLogDedup(key: string): void {
   dedupLast.delete(key);
 }
 
-/** Test hook: drop the installed logger, bound identities and all dedup state. */
+/** A test's observer of one level's log calls: the rendered message, and the options with the named values in the context. */
+type LogCallObserver = (message: string, options: LogOptions) => void;
+const callObservers = new Map<ClientLogLevel, LogCallObserver>();
+
+/** Test hook (test/log-spy.ts): observe every call at LEVEL, whatever its scope; null stops. */
+export function observeLogCallsForTests(level: ClientLogLevel, observer: LogCallObserver | null): void {
+  if (observer === null) callObservers.delete(level);
+  else callObservers.set(level, observer);
+}
+
+/** Test hook: drop the installed logger, bound identities, call observers and all dedup state. */
 export function resetLoggingForTests(): void {
   active = null;
+  callObservers.clear();
   boundContext = { connection_id: "test-connection" };
   dedupLast.clear();
 }

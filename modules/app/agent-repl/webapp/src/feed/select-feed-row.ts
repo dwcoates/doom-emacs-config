@@ -20,10 +20,12 @@ import {
   SelectFeedRowRequestSchema,
   SelectFeedRowResponseSchema,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_select_feed_row_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { controlCall } from "../rpc/control-call.js";
 import { requireCase } from "../rpc/strict.js";
+
+const log = createLogger("webapp.feed.select-feed-row");
 
 /** SelectFeedRow's own refusal arm, in the reader's words. */
 const SELECT_FEED_ROW_REFUSALS = {
@@ -53,8 +55,8 @@ export async function selectFeedRow(ctx: AppContext, move: FeedRowMove, what: st
   });
   if (success === undefined) return;
   const outcome = requireCase(success.outcome, "SelectFeedRowSuccess.outcome");
-  log.debug(`the daemon applied the selection move (${what}); its push changes the feed`, {
+  log.debug("the daemon applied the selection move ({what}); its push changes the feed", {
     operation: "feed.select-feed-row-answered",
     context: { move: move.case ?? "unset", outcome: outcome.case },
-  });
+  }, { what });
 }

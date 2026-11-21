@@ -17,11 +17,13 @@
 import type { FeedImageOverlay } from "../../../proto/gen/ts/frontend/v1/feed_image_overlay_pb";
 import { closeFeedImage } from "../feed/feed-image.js";
 import { drawFeedImageBlock, type FeedImageClasses } from "../feed/rows/blocks.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { followBox } from "../overlay/follow-box.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
+
+const log = createLogger("webapp.image-overlay.image-overlay");
 
 /** The id of the overlay's mount point (shell.ts `imageOverlay`). */
 export const IMAGE_OVERLAY_HOST_ID = "image-overlay";
@@ -58,7 +60,7 @@ export function mountImageOverlay(host: HTMLElement, ctx: AppContext, deps: Imag
 
   const close = (cause: string): void => {
     if (host.hidden) return;
-    log.info(`the image overlay closes on ${cause}`, { operation: "image-overlay.close", context: { cause } });
+    log.info("the image overlay closes on {cause}", { operation: "image-overlay.close", context: {} }, { cause });
     void guardMalformed(ctx, "image-overlay.close", closeFeedImage(ctx));
   };
   const onClick = (event: MouseEvent): void => {

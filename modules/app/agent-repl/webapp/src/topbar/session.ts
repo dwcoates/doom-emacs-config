@@ -24,10 +24,12 @@
 import type { TopbarAgentReplSession } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import { formatTickedAge } from "../duration.js";
 import { tickWhileShown } from "../feed/ticking.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { msOf, requireCase, unreachableArm } from "../rpc/strict.js";
 import type { TopbarContext } from "./context.js";
 import { asAnchor } from "./strip.js";
+
+const log = createLogger("webapp.topbar.session");
 
 /** The reveal's name, and its anchor's. */
 export const SESSION_REVEAL = "agent-repl-session";

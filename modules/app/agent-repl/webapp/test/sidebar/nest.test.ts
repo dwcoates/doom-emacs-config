@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   SetWorkspaceParentErrorSchema,
@@ -9,7 +9,7 @@ import {
 import { WorkspaceRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { buildNestRequest, sendNest, setWorkspaceParentRefusal } from "../../src/sidebar/nest.js";
 import { createArrangeHold } from "../../src/sidebar/arrange.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { refusalSentence } from "../../src/rpc/refusal.js";
 import { oneofArms } from "../arms.js";
 import { appContext, roster, sidebarContext } from "./harness.js";
@@ -92,7 +92,7 @@ describe("sending a nesting", () => {
   });
 
   it("records the nesting it sends, naming both workspaces", async () => {
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     const { sc } = nestContext({ result: { case: "success", value: { rosterRevision: 7n } } });
     await sendNest(sc, sc.arrange.status, CHILD, PARENT);
     expect(info.mock.calls.find(([, fields]) => fields?.operation === "sidebar.nest.send")?.[1]?.context).toEqual({
@@ -109,7 +109,7 @@ describe("sending a nesting", () => {
   });
 
   it("records a refusal through the verbs' log, naming both workspaces and the arm", async () => {
-    const warn = vi.spyOn(log, "warn");
+    const warn = spyLog("warn");
     const { sc } = nestContext({ result: { case: "error", value: { cause: { case: "cycle", value: {} } } } });
     await sendNest(sc, sc.arrange.status, CHILD, PARENT);
     expect(warn.mock.calls.find(([, fields]) => fields?.operation === "sidebar.verbs.refused")?.[1]?.context).toMatchObject({

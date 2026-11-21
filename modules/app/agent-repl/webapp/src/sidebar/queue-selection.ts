@@ -25,12 +25,14 @@
  * comes back to where the reader had it.
  */
 import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import { regionLines } from "./band-fit.js";
 import { MERGE_QUEUE_SECTION_CLASS } from "./section-classes.js";
 import { MERGE_QUEUE_SUBJECT_CLASS } from "./merge-queue-view.js";
 import { scrollerOf, scrollLineAmong } from "./selection-scroll.js";
+
+const log = createLogger("webapp.sidebar.queue-selection");
 
 /** The class a highlighted queue line wears, as a highlighted row does. */
 export const QUEUE_CURRENT_CLASS = "current";

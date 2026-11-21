@@ -19,10 +19,12 @@
  * mark went because the fold opened is drawn as any open row is.
  */
 import { drawnRowsOf } from "./drawn-rows.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeOneShot } from "../animation-delays.js";
 import { SURFACED_ROW_CLASS } from "./row.js";
 import type { FoldFade } from "./context.js";
+
+const log = createLogger("webapp.sidebar.fold-fade");
 
 /** How long a row a fold stops drawing takes to fade away, in milliseconds. */
 export const FOLD_FADE_MS = 5000;

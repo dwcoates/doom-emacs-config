@@ -35,13 +35,15 @@ import {
 import type { HeldPrompt } from "../../../proto/gen/ts/frontend/v1/feed_held_pb";
 import { labelledControl, type Control } from "../control.js";
 import { controlPlaneFailed } from "../failure/sink.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { callFailure, refusalOf, type SentenceTable } from "../rpc/refuse.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
+
+const log = createLogger("webapp.held.classifier-update");
 
 /**
  * The control's label on the card's actions row: "Meta" (owner request,
@@ -264,10 +266,10 @@ async function submit(ctx: AppContext, turn: string, example: ClassifierExample,
         const said = refusalOf(result.value.cause, UPDATE_CLASSIFIER_REFUSALS, "UpdateClassifierPromptError.cause");
         // A typed refusal is an ANSWER, recorded at INFO; the daemon records
         // its failures at ERROR where they happen.
-        log.info(`UpdateClassifierPrompt refused: ${said.text}`, {
+        log.info("UpdateClassifierPrompt refused: {text}", {
           operation: "held.classifier-update.refused",
           context: { turn, arm: said.arm, sentence: said.text },
-        });
+        }, { text: said.text });
         failed(ctx, parts, said.arm, said.text);
         return;
       }
@@ -281,10 +283,10 @@ async function submit(ctx: AppContext, turn: string, example: ClassifierExample,
     // this renderer could not read it, so it travels up loudly.
     if (isMalformedView(err) || !(err instanceof ConnectError)) throw err;
     const failure = callFailure(err);
-    log.error(`UpdateClassifierPrompt failed: ${failure.text}`, {
+    log.error("UpdateClassifierPrompt failed: {text}", {
       operation: "held.classifier-update.failed",
       context: { turn, arm: failure.arm, cause: err },
-    });
+    }, { text: failure.text });
     failed(ctx, parts, failure.arm, failure.text);
   } finally {
     setBusy(parts, false);

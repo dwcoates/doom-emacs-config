@@ -56,7 +56,7 @@ import { WatchTopbarResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/en
 import type { TopbarView } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
 import type { LocalFailureView } from "../failure/local.js";
 import { stopTicking } from "../feed/ticking.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireMessage } from "../rpc/strict.js";
 import { watchStream, type StreamHandle } from "../rpc/streams.js";
@@ -84,6 +84,8 @@ import {
   bindLocalHeadingWarnings,
   reportAppearedDeployFailures,
 } from "./warnings.js";
+
+const log = createLogger("webapp.topbar.topbar");
 
 /** What every mount answers with. */
 export interface Handle {

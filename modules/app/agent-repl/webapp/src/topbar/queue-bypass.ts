@@ -32,7 +32,7 @@ import type {
   TopbarQueueBypassContextOption,
   TopbarQueueBypassOff,
 } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { SentenceTable } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { sendChipToggle } from "./chip-toggle.js";
@@ -40,6 +40,8 @@ import type { TopbarContext } from "./context.js";
 import { drawDiscGlyph, type DiscGlyph } from "./disc-glyph.js";
 import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
+
+const log = createLogger("webapp.topbar.queue-bypass");
 
 /** The reveal's name, and the anchor the chip carries. */
 export const QUEUE_BYPASS_REVEAL = "queue-bypass";
@@ -178,10 +180,10 @@ export async function pickQueueBypassContext(
   button: Control,
   row: Control,
 ): Promise<void> {
-  log.info(`the reader took queue bypass mode with ${option.displayName}`, {
+  log.info("the reader took queue bypass mode with {display_name}", {
     operation: "topbar.queue-bypass-picked",
     context: { context: queueBypassContextToken(option) },
-  });
+  }, { display_name: option.displayName });
   await sendPick(
     {
       rpc: "UpdateQueueBypassMode",

@@ -39,7 +39,7 @@
 import type { FeedRow } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { CLICK_THROUGH_SELECTOR } from "../expand.js";
 import { isInterimResponse } from "./cards/response.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { selectedText } from "../selection.js";
@@ -50,6 +50,8 @@ import { ENTRY_ATTRIBUTE, ENTRY_CLASS, ENTRY_LABEL_CLASS } from "./entry-tree.js
 import { TREE_CLASS, TREE_LABEL_ATTRIBUTE, TREE_LINE_CLASS, TREE_NODE_ATTRIBUTE } from "../metaprompt-tree.js";
 import { boxesOverLine, lengthInLine, nodeBoxedAt, xInLine, type LengthResolver } from "./subtree-box.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
+
+const log = createLogger("webapp.feed.bubble-selection");
 
 /** The attribute a root-feed row wears while the selection owns its bubble's expansion. */
 export const SELECTION_GOVERNED_ATTRIBUTE = "data-selection-governed";

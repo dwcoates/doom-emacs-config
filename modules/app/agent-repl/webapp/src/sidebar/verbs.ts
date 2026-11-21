@@ -75,7 +75,7 @@ import {
 import { WorkspacePrioritySchema } from "../../../proto/gen/ts/agentrepl/v1/workspace_priority_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { WorkspaceRef } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { userRequester } from "../rpc/requester.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -88,6 +88,8 @@ import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary, type UnaryContext } from "../rpc/unary.js";
 import type { SidebarContext } from "./context.js";
 import { childrenMatching } from "../dom.js";
+
+const log = createLogger("webapp.sidebar.verbs");
 
 /** The verbs a row's menu offers, exactly as `data-verb` spells them. */
 export type Verb =
@@ -526,19 +528,19 @@ export async function runVerb<Res extends VerbResponse>(
     // it either, the handover's own affordances say what is happening and the
     // control is simply ready again.
     if (standsAsHandover(cause.case, spec.sc.ctx)) {
-      log.info(`${spec.rpc} waits on a handover: no daemon serves the workspace yet`, {
+      log.info("{rpc} waits on a handover: no daemon serves the workspace yet", {
         operation: "sidebar.verbs.handover",
-        context: { ...spec.context, rpc: spec.rpc, arm: cause.case, retried_at_incumbent: served !== null },
-      });
+        context: { ...spec.context, arm: cause.case, retried_at_incumbent: served !== null },
+      }, { rpc: spec.rpc });
       setDisabled(control, false);
       return false;
     }
     const expected = spec.expectedArms?.[cause.case];
     if (expected !== undefined) {
-      log.info(`${spec.rpc} was answered ${cause.case}`, {
+      log.info("{rpc} was answered {case}", {
         operation: "sidebar.verbs.expected_answer",
-        context: { ...spec.context, rpc: spec.rpc, arm: cause.case, sentence: expected },
-      });
+        context: { ...spec.context, arm: cause.case, sentence: expected },
+      }, { rpc: spec.rpc, case: cause.case });
       setDisabled(control, false);
       return false;
     }
@@ -546,10 +548,10 @@ export async function runVerb<Res extends VerbResponse>(
       crossCuttingSentence(spec.rpc, cause) ??
       spec.refusalText?.(cause) ??
       unreachableArm(`${spec.rpc}Error.cause`, cause.case);
-    log.warn(`${spec.rpc} was refused`, {
+    log.warn("{rpc} was refused", {
       operation: "sidebar.verbs.refused",
-      context: { ...spec.context, rpc: spec.rpc, arm: cause.case, sentence: say },
-    });
+      context: { ...spec.context, arm: cause.case, sentence: say },
+    }, { rpc: spec.rpc });
     drawRefusal(control, cause.case, say, refusalDetail(cause));
     setDisabled(control, false);
     return false;
@@ -559,10 +561,10 @@ export async function runVerb<Res extends VerbResponse>(
     // sent something this build cannot read, and it travels up loudly rather
     // than being drawn as "could not be reached", which would be a lie.
     if (isMalformedView(err)) throw err;
-    log.error(`${spec.rpc} failed at the transport: ${String(err)}`, {
+    log.error("{rpc} failed at the transport: {err}", {
       operation: "sidebar.verbs.failed",
-      context: { ...spec.context, rpc: spec.rpc, cause: err },
-    });
+      context: { ...spec.context, cause: err },
+    }, { rpc: spec.rpc, err: String(err) });
     drawRefusal(control, "transport", "the daemon could not be reached");
     setDisabled(control, false);
     return false;
@@ -863,10 +865,10 @@ export function servedElsewhere<Res extends VerbResponse>(
   if (address === null) return null;
   const served = contextAt(spec.sc.ctx, address);
   if (served === null) return null;
-  log.info(`${spec.rpc} goes to the daemon that serves the workspace`, {
+  log.info("{rpc} goes to the daemon that serves the workspace", {
     operation: "sidebar.verbs.served-elsewhere",
-    context: { rpc: spec.rpc, arm: cause.case, address },
-  });
+    context: { arm: cause.case, address },
+  }, { rpc: spec.rpc });
   return served;
 }
 

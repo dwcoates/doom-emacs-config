@@ -39,7 +39,7 @@ import {
 import type { RailContext, SidebarContext } from "../../src/sidebar/context.js";
 import { frameQueue } from "../frame-queue.js";
 import { queryAll } from "../../src/dom.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import {
   UpdateSidebarViewResponseSchema,
   type UpdateSidebarViewRequest,
@@ -365,11 +365,11 @@ describe("the new-subsection popup", () => {
 
   it("logs the rail's why when the rail dismisses it", () => {
     const { sc } = opened();
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     sc.dropdowns.dismissAll("the selection moved");
     expect(debug).toHaveBeenCalledWith("closing the subsection name popup", {
       operation: "sidebar.subsection.popup-close",
-      context: { why: "the selection moved" },
+      context: { why: "the selection moved", subject: "subsection" },
     });
   });
 
@@ -382,7 +382,7 @@ describe("the new-subsection popup", () => {
   it("is let go of by the rail once it closed on its own", () => {
     const { sc, input } = opened();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     sc.dropdowns.dismissAll("the page lost focus");
     expect(debug).not.toHaveBeenCalled();
   });
@@ -390,7 +390,7 @@ describe("the new-subsection popup", () => {
   it("replaces an open one, which stops listening", () => {
     const { sc } = opened();
     (document.querySelector("[data-subsection-create='repo-1']") as HTMLElement).click();
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     expect([
       sc.arrange.layer.querySelectorAll("[data-subsection-popup]").length,
@@ -400,18 +400,18 @@ describe("the new-subsection popup", () => {
 
   it("logs why it closed", () => {
     const { input } = opened();
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(debug).toHaveBeenCalledWith("closing the subsection name popup", {
       operation: "sidebar.subsection.popup-close",
-      context: { why: "Escape" },
+      context: { why: "Escape", subject: "subsection" },
     });
   });
 
   it("stops listening once closed", () => {
     const { input } = opened();
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     expect(debug.mock.calls.filter(([message]) => message === "closing the subsection name popup")).toEqual([]);
   });

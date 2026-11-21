@@ -29,8 +29,10 @@ import { drawFeedMerge } from "./merge/merge.js";
 import { mergeBubbleBody } from "./merge/merge-body.js";
 import { drawFeedDetachedSubagent, drawFeedSubagent } from "./rows/subagent.js";
 import { withCardQuestion } from "./response-question.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { RowRenderers } from "./renderers.js";
+
+const log = createLogger("webapp.feed.row-renderers");
 
 /**
  * THE REGISTRY: every row renderer this build has, assembled once.

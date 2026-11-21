@@ -79,7 +79,7 @@ import { sameLocalDate } from "../clock.js";
 import { liveElapsedReading, settledElapsedClock } from "../elapsed-clock.js";
 import { heatColor } from "../heat.js";
 import { cacheLapseHeat, cacheLapseText } from "./cache-lapse.js";
-import { log } from "../log.js";
+import { createLogger, type LogMessage } from "../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { MalformedView } from "../rpc/malformed.js";
 import type { SidebarContext } from "./context.js";
@@ -121,6 +121,8 @@ import {
   type VerbTarget,
 } from "./verbs.js";
 import { childrenMatching, queryAll } from "../dom.js";
+
+const log = createLogger("webapp.sidebar.row");
 
 /** Draw FAMILY, a row of one list and its family, at PATH (`drawRosterRow`). */
 export function drawRosterFamily(family: RowFamily, sc: SidebarContext, path: string, place: RowPlace = "grouping"): HTMLElement {
@@ -1186,10 +1188,10 @@ export function noteSelectRoute(response: SelectInEditorResponse, workspace: Wor
   switch (route.case) {
     case "relayed":
     case "selected":
-      log.debug(`the rail's click was ${route.case === "relayed" ? "relayed to the editor" : "selected by the daemon"}`, {
+      log.debug("the rail's click was {route_text}", {
         operation: "sidebar.row.select-route",
         context: { workspace: workspace.id, route: route.case },
-      });
+      }, { route_text: route.case === "relayed" ? "relayed to the editor" : "selected by the daemon" });
       return;
     default: {
       const other: { case: string } = route;
@@ -1220,7 +1222,7 @@ export interface BandReturn {
   /** The click's log operation. */
   operation: string;
   /** The click's info record. */
-  message: string;
+  message: LogMessage;
   /** The verb that brings the workspace back; answers whether it did. */
   bringBack: (line: HTMLElement, sc: SidebarContext, workspace: WorkspaceRef) => Promise<boolean>;
   /**
@@ -1236,7 +1238,7 @@ export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readon
     {
       label: "Show",
       operation: "sidebar.row.show",
-      message: "showing a hidden workspace from the rail",
+      message: log.message("showing a hidden workspace from the rail"),
       resetsDeploysFolds: false,
       bringBack: (line, sc, workspace) =>
         runVerb(line, {
@@ -1252,14 +1254,14 @@ export const BAND_RETURNS: Readonly<Record<Exclude<RowPlace, "grouping">, readon
     {
       label: "Reopen",
       operation: "sidebar.row.reopen",
-      message: "reopening a merged workspace from the rail",
+      message: log.message("reopening a merged workspace from the rail"),
       resetsDeploysFolds: true,
       bringBack: (line, sc, workspace) => runOpenWorkspace(line, sc, buildOpenWorkspaceRequest(workspace)),
     },
     {
       label: "Reopen and revert the merge",
       operation: "sidebar.row.revert-merge",
-      message: "reopening a merged workspace to revert its merge from the rail",
+      message: log.message("reopening a merged workspace to revert its merge from the rail"),
       resetsDeploysFolds: true,
       bringBack: (line, sc, workspace) => runOpenWorkspace(line, sc, buildRevertMergeRequest(workspace)),
     },
@@ -1330,7 +1332,7 @@ export async function returnFromBand(
   sc: SidebarContext,
   workspace: WorkspaceRef,
 ): Promise<void> {
-  log.info(band.message, {
+  log.log("info", band.message, {
     operation: band.operation,
     context: { workspace: workspace.id },
   });

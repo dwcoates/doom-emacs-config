@@ -106,7 +106,7 @@
 import { FOLDED_CLASS } from "./folded-class.js";
 import { sameLocalDate, type Ticker } from "../clock.js";
 import { computedPx, queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import {
   MERGE_QUEUE_CONTROL_CLASS,
@@ -119,6 +119,8 @@ import {
 import { DEPLOYS_FLOOR, DEPLOYS_GROUP_CLASS } from "./deploys-fold.js";
 import { mergedToday } from "./row.js";
 import { OPEN_SECTION_CLASS, HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS } from "./section-classes.js";
+
+const log = createLogger("webapp.sidebar.band-fit");
 
 
 /** The class of the Open section's rows region: the box its repository sections are placed in. */

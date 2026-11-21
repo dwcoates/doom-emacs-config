@@ -29,7 +29,7 @@ import type {
   FeedCommandRefusedReason,
 } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import type { RowContext } from "../feed/cards/context.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -37,6 +37,8 @@ import { crossCuttingSentence } from "../rpc/refuse.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import { queryAll } from "../dom.js";
+
+const log = createLogger("webapp.panels.refused");
 
 /** The refusal card. */
 export function drawFeedCommandRefused(u: FeedCommandRefused, rc: RowContext): HTMLElement {
@@ -158,10 +160,10 @@ async function requestSupport(
       note.setAttribute("data-support-note", "");
       note.textContent = "support workspace created";
       row.appendChild(note);
-      log.info(`RequestCommandSupport created a workspace for ${command}`, {
+      log.info("RequestCommandSupport created a workspace for {command}", {
         operation: "panels.command-refused.support-created",
-        context: { command },
-      });
+        context: {},
+      }, { command });
       // The button stays disabled: the ask landed, and a second one would open
       // a second workspace for the same gap.
       return;
@@ -172,20 +174,20 @@ async function requestSupport(
     );
     const say = crossCuttingSentence("RequestCommandSupport", cause) ?? requestCommandSupportRefusal(cause);
     drawRefusal(row, cause.case, say);
-    log.warn(`RequestCommandSupport refused ${command}`, {
+    log.warn("RequestCommandSupport refused {command}", {
       operation: "panels.command-refused.support-refused",
-      context: { command, arm: cause.case, sentence: say },
-    });
+      context: { arm: cause.case, sentence: say },
+    }, { command });
     button.disabled = false;
   } catch (err) {
     // A malformed view is the daemon's answer being unreadable, not the daemon
     // being unreachable; it travels up rather than being mislabelled.
     if (isMalformedView(err)) throw err;
     drawRefusal(row, "error", "the daemon could not be reached");
-    log.error(`RequestCommandSupport failed for ${command}: ${String(err)}`, {
+    log.error("RequestCommandSupport failed for {command}: {err}", {
       operation: "panels.command-refused.support-failed",
-      context: { command, cause: err },
-    });
+      context: { cause: err },
+    }, { command, err: String(err) });
     button.disabled = false;
   }
 }

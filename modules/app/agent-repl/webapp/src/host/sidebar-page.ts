@@ -24,7 +24,7 @@ import { bootFailed } from "../failure/sink.js";
 import { focusLeftReason, focusMovedCause, pageFocusLeft, type FocusLeftSource } from "../focus-left.js";
 import { pageQuiet } from "../quiet.js";
 import { installDaemonLatencyReport, type LatencyReporter } from "../latency-report.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { DaemonContext } from "../rpc/context.js";
 import { isDaemonOrigin } from "../rpc/daemon-origin.js";
 import { mountWebhostSidebar } from "../sidebar/sidebar.js";
@@ -35,6 +35,8 @@ import { createPopupMirror, openPopupChannel, type PopupChannel } from "./sideba
 import { startWebhostDocument, type WebhostDocumentDeps, type WebhostRuntime } from "./document.js";
 import "./sidebar-page.css";
 import { errorCause } from "../error-cause.js";
+
+const log = createLogger("webapp.host.sidebar-page");
 
 /** The id the rail's element wears: the page's own, so one stylesheet draws both. */
 export const SIDEBAR_ID = "ws-sidebar";
@@ -148,10 +150,10 @@ export function startSidebarPage(doc: Document, win: Window, deps: StartSidebarP
     markShown = (id) => rail.markShown(id);
   } catch (err) {
     const cause = errorCause(err);
-    log.error(`the sidebar failed to start: ${cause}`, {
+    log.error("the sidebar failed to start: {cause}", {
       operation: "sidebar-page.start-failed",
-      context: { cause },
-    });
+      context: {},
+    }, { cause });
     started.failures.report(bootFailed(cause));
   }
 

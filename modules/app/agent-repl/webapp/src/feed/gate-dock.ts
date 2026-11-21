@@ -15,8 +15,10 @@
  *
  * Only a ROOT-feed gate docks: a sub-feed's rows belong to their bubble.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { installCardDock, type CardDock } from "./card-dock.js";
+
+const log = createLogger("webapp.feed.gate-dock");
 
 /**
  * The class a page's root wears while the webhost draws its gate

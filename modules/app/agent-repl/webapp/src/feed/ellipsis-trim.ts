@@ -26,7 +26,9 @@
  * whose fold is open) wears no trim at all.
  */
 import { computedPx } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.feed.ellipsis-trim");
 
 /** The custom property the stylesheet draws as the clamp's narrowing border. */
 export const ELLIPSIS_TRIM_PROPERTY = "--ellipsis-trim";

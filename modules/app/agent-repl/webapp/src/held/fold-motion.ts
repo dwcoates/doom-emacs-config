@@ -17,9 +17,11 @@
  * unshown-page pause (host/unshown-animations.ts) holds it while the page is
  * hidden, so a fold made while the reader looked away is still seen.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { stopTicking } from "../feed/ticking.js";
 import { HELD_BADGE_CLASS } from "./held-prompt.js";
+
+const log = createLogger("webapp.held.fold-motion");
 
 /** How long a folded card stays up, its badge reading "folding above", before it is gone. */
 export const FOLD_LEAVE_MS = 1600;

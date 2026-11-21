@@ -24,7 +24,9 @@
  * already read arrives PARTIAL on the very push that changes its status, and
  * drawing it FULL there would claim an unread result that is not.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.sidebar.viewed");
 
 /** The two modes, in the tab-bar's own words. */
 export type ViewedMode = "full" | "partial";

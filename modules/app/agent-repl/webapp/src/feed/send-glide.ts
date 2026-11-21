@@ -20,8 +20,10 @@
  *
  * Under `prefers-reduced-motion` the bubble simply appears, as before.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { prefersReducedMotion } from "../reduced-motion.js";
+
+const log = createLogger("webapp.feed.send-glide");
 
 /** How long the bubble takes to glide into place. Quick: it is a send, not a show. */
 export const SEND_GLIDE_MS = 180;

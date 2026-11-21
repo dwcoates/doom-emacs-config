@@ -48,7 +48,7 @@
 import { create } from "@bufbuild/protobuf";
 import { FeedIdSchema } from "../../proto/gen/ts/frontend/v1/feed_pb";
 import { armButtonRole } from "./control.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import {
   OpenExternalResponseSchema,
   type OpenExternalError,
@@ -77,6 +77,8 @@ import {
 import { requireCase, requireMessage, unreachableArm } from "./rpc/strict.js";
 import { callUnary } from "./rpc/unary.js";
 import { feedRowId, feedRowOf } from "./feed/row-id.js";
+
+const log = createLogger("webapp.link");
 
 /** Only these two schemes are a hyperlink; everything else is text. */
 const LINKABLE_SCHEME = /^https?:\/\//i;
@@ -112,7 +114,7 @@ export interface EditorLinkSpec {
 export function renderExternalLink(ctx: AppContext, spec: ExternalLinkSpec): HTMLElement {
   const label = spec.text === "" ? spec.url : spec.text;
   if (!LINKABLE_SCHEME.test(spec.url)) {
-    log.info(`refusing to link a non-http(s) destination; drawing it as text`, {
+    log.info("refusing to link a non-http(s) destination; drawing it as text", {
       operation: "link.unlinkable-scheme",
       context: { url: spec.url },
     });
@@ -444,7 +446,7 @@ function routeProseLinkClick(ctx: AppContext, event: MouseEvent): void {
   // Neither web nor local file. Markdown restricts anchors to http/https, so
   // this is unreachable from rendered prose; it is logged rather than silently
   // cancelled so a scheme that ever does slip through is visible, not dead.
-  log.warn(`ignoring a prose link with an unroutable scheme`, {
+  log.warn("ignoring a prose link with an unroutable scheme", {
     operation: "link.prose-unroutable-scheme",
     context: { href },
   });
@@ -509,10 +511,10 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
       (result.value).cause,
       EXTERNAL_SENTENCES,
     );
-    log.warn(`OpenExternal refused ${url}`, {
+    log.warn("OpenExternal refused {url}", {
       operation: "link.open-external-refused",
-      context: { url, arm },
-    });
+      context: { arm },
+    }, { url });
   } catch (err) {
     // A link that went nowhere must say so: the user just clicked expecting a
     // browser window, and silence would read as a dead rail.
@@ -520,10 +522,10 @@ async function openExternal(ctx: AppContext, anchor: HTMLElement, url: string): 
       return;
     }
     drawTransportRefusal(refusalHost(anchor));
-    log.error(`OpenExternal failed for ${url}: ${String(err)}`, {
+    log.error("OpenExternal failed for {url}: {err}", {
       operation: "link.open-external-failed",
-      context: { url, cause: err },
-    });
+      context: { cause: err },
+    }, { url, err: String(err) });
   }
 }
 
@@ -566,19 +568,19 @@ async function openInEditor(ctx: AppContext, anchor: HTMLElement, target: Editor
       (result.value).cause,
       EDITOR_SENTENCES,
     );
-    log.warn(`OpenInEditor refused a ${target.case} target`, {
+    log.warn("OpenInEditor refused a {case} target", {
       operation: "link.open-in-editor-refused",
       context: { ...context, arm },
-    });
+    }, { case: target.case });
   } catch (err) {
     if (drawMalformedRefusal(ctx, refusalHost(anchor), "link.open-in-editor-unreadable", err)) {
       return;
     }
     drawTransportRefusal(refusalHost(anchor));
-    log.error(`OpenInEditor failed for a ${target.case} target: ${String(err)}`, {
+    log.error("OpenInEditor failed for a {case} target: {err}", {
       operation: "link.open-in-editor-failed",
       context: { ...context, cause: err },
-    });
+    }, { case: target.case, err: String(err) });
   }
 }
 

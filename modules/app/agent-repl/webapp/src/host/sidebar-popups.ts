@@ -66,11 +66,13 @@
  */
 import { pageMutationObserver, queryAll } from "../dom.js";
 import { createListeners } from "../listeners.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { scrollKept } from "../scroll.js";
 import type { Rect } from "../topbar/clamp.js";
 import { placeBeside, viewportOf } from "../placement.js";
 import { detailsEntry, placeDetailsPanel, wireDetailsEntry } from "../sidebar/detail-more.js";
+
+const log = createLogger("webapp.host.sidebar-popups");
 
 /** The channel both documents open, on the host origin. */
 export const SIDEBAR_POPUPS_CHANNEL = "agent-repl.sidebar-popups";

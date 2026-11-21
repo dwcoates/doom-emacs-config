@@ -17,7 +17,7 @@ import type { DaemonContext } from "../rpc/context.js";
 import { callUnary } from "../rpc/unary.js";
 import { refusalSentence } from "../rpc/refusal.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { nextFrame } from "../frame.js";
 import { clampReveal } from "../topbar/clamp.js";
 import { applyPlacement, viewportOf } from "../placement.js";
@@ -34,6 +34,8 @@ import { detailsPanel, requireFactHome, syncDetailsEntry } from "./detail-more.j
 import { contextAt, handoverAddress, isHandoverArm } from "./handover.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
+
+const log = createLogger("webapp.sidebar.memory");
 
 /** How many ticks of the shared one-second clock pass between a popup's asks. */
 export const REFRESH_TICKS = 2;

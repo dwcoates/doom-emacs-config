@@ -45,13 +45,15 @@ import type { RepositoryRef } from "../../../proto/gen/ts/workspace/v1/workspace
 import { queryAll } from "../dom.js";
 import { errorCause } from "../error-cause.js";
 import { drawWalkControl, setWalkLoading } from "../feed/walk-control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import { callUnary, type UnaryContext } from "../rpc/unary.js";
 import { RECENTLY_MERGED_GROUP_SELECTOR, deploysGroupRepository } from "./deploys-fold.js";
 import { FOLDED_CLASS } from "./folded-class.js";
 import type { MergedGroupPages, MergedPages, MergedVerdict } from "./context.js";
 import { drawRosterRowWhenMerged } from "./row.js";
+
+const log = createLogger("webapp.sidebar.merged-pages");
 
 /** How many merged rows one page holds: the daemon's fixed page size. */
 export const MERGED_PAGE_SIZE = 10;
@@ -256,19 +258,18 @@ export function createMergedPages(deps: MergedPagesDeps): MergedPages {
 
   const failed = (group: Group, page: number, ticket: number, kind: string, cause: string): void => {
     if (!wanted(group, page, ticket)) return;
-    log.error(`a Recently Merged page could not be loaded; every page is let go and the band shows its count: ${cause}`, {
+    log.error("a Recently Merged page could not be loaded; every page is let go and the band shows its count: {cause}", {
       operation: "sidebar.merged-pages.fetch-failed",
       context: {
         repository: group.repository.id,
         page,
         kind,
-        cause,
         asked_for: String(requireInFlight(group, page).askedFor),
         summary_token: token === null ? null : String(token),
         held: hold !== null,
         bound_ms: MERGED_PAGE_TIMEOUT_MS,
       },
-    });
+    }, { cause });
     latched = token;
     if (hold !== null) hold.released = true;
     releaseAll("a page could not be loaded");

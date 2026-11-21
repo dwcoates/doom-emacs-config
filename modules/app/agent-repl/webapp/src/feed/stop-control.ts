@@ -26,7 +26,7 @@
  * (`drawMalformedRefusal`) and no word is invented at the control.
  */
 import { createControl, type Control } from "../control.js";
-import { log } from "../log.js";
+import { createLogger, type LogMessage } from "../log.js";
 import { callUnary } from "../rpc/unary.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import {
@@ -44,6 +44,8 @@ import type { RowContext } from "./renderers.js";
 import { stopTicking, tick } from "./ticking.js";
 import { queryAll } from "../dom.js";
 
+const log = createLogger("webapp.feed.stop-control");
+
 /** How long a stop's own answer stays on the control before it clears. */
 export const INTERRUPT_OUTCOME_MS = 4000;
 
@@ -55,8 +57,8 @@ export interface StopSite {
   readonly operation: string;
   /** The operation a refusal's record carries. */
   readonly refusedOperation: string;
-  /** What a click does, as the click's record says it. */
-  readonly describe: string;
+  /** What a click does, as the click's record says it, written in the site's own module. */
+  readonly describe: LogMessage;
   /** The operation an unreadable answer's record carries. */
   readonly malformedOperation: string;
   /** The `Interrupt` request that stops TARGET in WORKSPACE. */
@@ -83,7 +85,7 @@ export function drawStopControl(rc: RowContext, site: StopSite, target: FeedId):
 /** Issue the stop and draw whatever came back beside the control. */
 async function stop(rc: RowContext, site: StopSite, target: FeedId, wrap: HTMLElement, button: Control): Promise<void> {
   clearOutcome(wrap, site);
-  log.info(site.describe, {
+  log.log("info", site.describe, {
     operation: site.operation,
     context: { row: target.value },
   });

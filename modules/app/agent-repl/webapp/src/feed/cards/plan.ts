@@ -29,7 +29,7 @@ import type {
   FeedPlanProse,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderEditorLink } from "../../link.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { markdownSlot, proseCharacters } from "../../bubble/body.js";
 import type { AppContext } from "../../rpc/context.js";
 import { requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
@@ -38,6 +38,8 @@ import type { RowContext } from "../renderers.js";
 import { drawOutcomeMarker } from "../marker.js";
 import { agenticBubble } from "./controls.js";
 import { decorativeElement } from "../../dom.js";
+
+const log = createLogger("webapp.feed.cards.plan");
 
 const PATH = "FeedPlan";
 

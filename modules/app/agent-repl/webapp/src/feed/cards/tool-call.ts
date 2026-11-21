@@ -61,7 +61,7 @@ import { formatTickedAge } from "../../duration.js";
 import { drawFeedImageBlock } from "../rows/blocks.js";
 import { drawFeedShellExit } from "./shell.js";
 import { renderExternalLink } from "../../link.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { paintSpanClass } from "./paint.js";
 import { drawClassicDiff, parseUnifiedDiff, type ClassicDiffKind, type ClassicDiffLine } from "./diff-view.js";
@@ -70,6 +70,8 @@ import { stopTicking, tick, TICKING_ATTRIBUTE } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import type { RowContext } from "./context.js";
 import { queryAll, decorativeElement } from "../../dom.js";
+
+const log = createLogger("webapp.feed.cards.tool-call");
 
 /**
  * How many diagnostics rows draw before the rest go behind a toggle.

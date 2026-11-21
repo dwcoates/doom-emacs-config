@@ -17,7 +17,7 @@ import {
   sendHeld,
   successRevision,
 } from "../../src/sidebar/arrange.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { appContext, roster, sidebarContext } from "./harness.js";
 import { codeOf } from "../source-text.js";
 
@@ -38,7 +38,7 @@ describe("the arrangement hold", () => {
   });
 
   it("records its letting go as the sidebar's arrangement hold", () => {
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     const hold = createArrangeHold(() => undefined);
     hold.offer(at(1));
     hold.drag();

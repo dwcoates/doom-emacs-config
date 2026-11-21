@@ -52,12 +52,14 @@ import type { Control } from "../control.js";
 import type { Ticker } from "../clock.js";
 import { drawFeedTab, drawFeedTabline, drawFeedTabStrip, setFeedTablineClock } from "./tabs.js";
 import { drawToolCardClock } from "./cards/tool-head.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeChildren } from "../dom.js";
 import { createKeyedStore } from "./keyed-store.js";
 import { isMalformedView } from "../rpc/malformed.js";
 import type { FeedRow, FeedToolCardClock } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { feedRowId, feedRowOf } from "./row-id.js";
+
+const log = createLogger("webapp.feed.tool-group");
 
 /** The class the group container wears; it draws no bubble of its own. */
 export const FEED_GROUP_CLASS = "feed-group";

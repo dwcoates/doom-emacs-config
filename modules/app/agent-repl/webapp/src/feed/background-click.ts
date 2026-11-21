@@ -14,10 +14,12 @@
  *
  * A REFUSED OR FAILED CLEAR is filed and logged by `selectFeedRow`.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { selectFeedRow } from "./select-feed-row.js";
+
+const log = createLogger("webapp.feed.background-click");
 
 /** The class every root row's full-width wrapper wears (feed-view.ts). */
 const ROW_WRAPPER_CLASS = "feed-item";

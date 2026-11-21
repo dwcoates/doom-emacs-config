@@ -27,7 +27,7 @@
  * something the daemon deliberately refused to state.
  */
 import { reservedLiveElapsedClock, reservedQuietClock, reservedSettledElapsedClock } from "../../elapsed-clock.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import { msOf, requireCase, requireMessage, unreachableArm } from "../../rpc/strict.js";
 import { feedSubagentDotColor } from "../../vocab.js";
 import { drawWorkDot } from "../work-dot.js";
@@ -48,6 +48,8 @@ import type { RowContext } from "../renderers.js";
 import { stopTicking } from "../ticking.js";
 import { foldTitle } from "../title-fold.js";
 import { drawDetachedWorkId } from "../work-id.js";
+
+const log = createLogger("webapp.feed.rows.subagent");
 
 const PATH = "FeedSubagent";
 
@@ -133,10 +135,10 @@ export function drawFeedSubagentModel(model: FeedSubagentModel): HTMLElement {
 /** The head line. */
 export function drawFeedSubagent(msg: FeedSubagent, rc: RowContext): HTMLElement {
   const state = requireCase(msg.state, `${PATH}.state`);
-  log.info(`drawing a subagent head as ${state.case}`, {
+  log.info("drawing a subagent head as {case}", {
     operation: "feed.draw-subagent",
     context: { arm: state.case, detached: isDetachedRow(rc) },
-  });
+  }, { case: state.case });
 
   const el = document.createElement("div");
   el.className = "subagent-head";
@@ -268,7 +270,7 @@ const SUBAGENT_STOP: StopSite = {
   prefix: "subagent-stop",
   operation: "feed.subagent-stop",
   refusedOperation: "feed.subagent-stop-refused",
-  describe: "stopping a detached subagent",
+  describe: log.message("stopping a detached subagent"),
   malformedOperation: "feed.subagent-stop-malformed",
   request: buildInterruptDetachedRequest,
 };

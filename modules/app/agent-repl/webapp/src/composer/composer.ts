@@ -43,7 +43,7 @@ import type {
   SubmitPromptRequest,
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { rememberOwnTurn } from "./own-turns.js";
 import type { AppContext } from "../rpc/context.js";
 import { guardMalformed } from "../rpc/guard.js";
@@ -54,6 +54,8 @@ import { callUnary } from "../rpc/unary.js";
 import { DROPPED_EVENT, type HeldPromptDroppedDetail } from "../held/held-prompt.js";
 import { queryAll } from "../dom.js";
 import { createListeners } from "../listeners.js";
+
+const log = createLogger("webapp.composer.composer");
 
 /** What every mount answers with. */
 export interface Handle {
@@ -88,10 +90,10 @@ export function createComposerGate(): ComposerGate {
     set(next: ComposerGateState, nextReason?: string): void {
       state = next;
       reason = nextReason;
-      log.debug(`the composer gate is ${next}`, {
+      log.debug("the composer gate is {next}", {
         operation: "composer.gate",
         context: { state: next, reason: nextReason },
-      });
+      }, { next });
       listeners.notify(state, reason);
     },
     subscribe(fn: (state: ComposerGateState, reason?: string) => void): () => void {
@@ -284,10 +286,10 @@ export function mountComposer(
           // and answered it with a feed row of its own, so the box is done with
           // these words. The card is the feed's, never this component's.
           accepted();
-          log.info(`SubmitPrompt reported ${outcome.value.command} unsupported`, {
+          log.info("SubmitPrompt reported {command} unsupported", {
             operation: "composer.command-refused",
-            context: { command: outcome.value.command },
-          });
+            context: {},
+          }, { command: outcome.value.command });
           return;
         case "commandActed":
           // A RECOGNIZED ACT WITH NO TURN. The answer is empty on purpose: the
@@ -341,10 +343,10 @@ export function mountComposer(
       // not an unreachable daemon; it travels up rather than being mislabelled.
       if (isMalformedView(err)) throw err;
       drawSubmitRefusal(root, "transport", TRANSPORT_TEXT);
-      log.error(`SubmitPrompt failed at the transport: ${String(err)}`, {
+      log.error("SubmitPrompt failed at the transport: {err}", {
         operation: "composer.transport-failure",
         context: { cause: err },
-      });
+      }, { err: String(err) });
     }
   }
 

@@ -45,10 +45,12 @@
  * and one moved after keeps its end. All of it runs in one task, so no frame
  * shows the frozen phase.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { Presence } from "../presence.js";
 import { pageMutationObserver, queryAll } from "../dom.js";
 import { animatedParts, nth, writeDelays } from "../animation-delays.js";
+
+const log = createLogger("webapp.host.unshown-animations");
 
 /** The root attribute the stylesheet pauses every animation under. */
 export const PAGE_UNSHOWN_ATTRIBUTE = "data-page-unshown";

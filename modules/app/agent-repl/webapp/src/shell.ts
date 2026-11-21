@@ -13,7 +13,9 @@
  * id it cannot find and the boot fails where the fault is.
  */
 
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.shell");
 
 /** Every element the boot mounts a component on. */
 export interface ShellElements {
@@ -88,10 +90,10 @@ export function shellElements(doc: Document): ShellElements {
       // The one branch that selects a materially different outcome, and the
       // boot's first possible failure: logged where the fault is, by name,
       // before the throw carries it up to the pre-overlay emergency path.
-      log.error(`the page shell is missing #${id}`, {
+      log.error("the page shell is missing #{id}", {
         operation: "shell.missing-mount-point",
-        context: { id, key },
-      });
+        context: { key },
+      }, { id });
       throw new Error(`the page shell is missing #${id}`);
     }
     resolved[key] = element;

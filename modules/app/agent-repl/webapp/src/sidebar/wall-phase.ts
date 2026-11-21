@@ -40,7 +40,7 @@
  * again — the first frame is the first moment WebKit is running the
  * animations it suspended, so a seek there cannot be undone by the resume.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createPresence, pagePresence, type Presence } from "../presence.js";
 import { nextFrame } from "../frame.js";
 import { queryAll } from "../dom.js";
@@ -52,6 +52,8 @@ import {
   type AnimationPart,
   type PartAnimations,
 } from "../animation-delays.js";
+
+const log = createLogger("webapp.sidebar.wall-phase");
 
 /** The slice of a Web Animation the seek reads and moves. */
 export interface PhasedAnimation {

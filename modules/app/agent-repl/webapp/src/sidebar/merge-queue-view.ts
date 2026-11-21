@@ -54,7 +54,7 @@ import type {
 import { formatAge, formatElapsed } from "../duration.js";
 import { settledElapsedClock } from "../elapsed-clock.js";
 import { roundSuffix, STATE_GLYPHS } from "../feed/merge/tab-strip.js";
-import { log } from "../log.js";
+import { createLogger, type LogMessage } from "../log.js";
 import { MERGE_GLYPH } from "../merge-glyph.js";
 import { guardMalformed } from "../rpc/guard.js";
 import { discardMergeRefusal, requeueMergeRefusal, updateMergeQueueRefusal } from "../rpc/merge-queue-refusal.js";
@@ -70,6 +70,8 @@ import { sendHeld } from "./arrange.js";
 import { fireVerb } from "./verbs.js";
 import { markColdGatedName, type ColdGated } from "./cold-gate-name.js";
 import { decorativeElement } from "../dom.js";
+
+const log = createLogger("webapp.sidebar.merge-queue-view");
 
 /**
  * The attribute a queue group carries while its queue is paused: `pause`, or
@@ -791,10 +793,10 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
   line.append(label);
   line.appendChild(
     coldGated.has(requeue.id)
-      ? drawOffQueueControl("↺", "requeue", COLD_GATED_REQUEUE_TITLE, { operation: "sidebar.merge-queue.cold-gate-select", doing: "selecting the workspace of a merge off its queue that stands at its cold gate, in place of requeueing it" }, requeue, (control) =>
+      ? drawOffQueueControl("↺", "requeue", COLD_GATED_REQUEUE_TITLE, { operation: "sidebar.merge-queue.cold-gate-select", doing: log.message("selecting the workspace of a merge off its queue that stands at its cold gate, in place of requeueing it") }, requeue, (control) =>
           guardMalformed(sc.ctx, "sidebar.merge-queue.cold-gate-select", selectWorkspace(control, sc, requeue)),
         )
-      : drawOffQueueControl("↺", "requeue", "put this merge back in line, at the back", { operation: "sidebar.merge-queue.requeue", doing: "requeueing a merge off its queue from the sidebar" }, requeue, (control) =>
+      : drawOffQueueControl("↺", "requeue", "put this merge back in line, at the back", { operation: "sidebar.merge-queue.requeue", doing: log.message("requeueing a merge off its queue from the sidebar") }, requeue, (control) =>
           fireVerb(control, {
             sc,
             rpc: "RequeueMerge",
@@ -811,7 +813,7 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
         ),
   );
   line.appendChild(
-    drawOffQueueControl("✕", "discard", "discard this merge's request", { operation: "sidebar.merge-queue.discard", doing: "discarding a merge off its queue from the sidebar" }, discard, (control) =>
+    drawOffQueueControl("✕", "discard", "discard this merge's request", { operation: "sidebar.merge-queue.discard", doing: log.message("discarding a merge off its queue from the sidebar") }, discard, (control) =>
       fireVerb(control, {
         sc,
         rpc: "DiscardMerge",
@@ -827,7 +829,7 @@ export function drawRosterMergeQueueOffQueue(u: RosterMergeQueueOffQueue, sc: Si
 /** What an off-queue control's click records, before it acts. */
 interface OffQueueRecord {
   operation: string;
-  doing: string;
+  doing: LogMessage;
 }
 
 /**
@@ -847,7 +849,7 @@ function drawOffQueueControl(
     hook: ["data-verb", verb],
     label: glyph,
     onClick: (control) => {
-      log.info(record.doing, { operation: record.operation, context: { workspace: merge.id } });
+      log.log("info", record.doing, { operation: record.operation, context: { workspace: merge.id } });
       void act(control);
     },
   });

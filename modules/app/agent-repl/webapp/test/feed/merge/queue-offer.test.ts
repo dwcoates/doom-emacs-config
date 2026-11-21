@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { type Control } from "../../../src/control.js";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { create } from "@bufbuild/protobuf";
 import {
   AnswerMergeQueueOfferErrorSchema,
@@ -19,7 +19,7 @@ import {
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { WorkspaceRefSchema } from "../../../../proto/gen/ts/workspace/v1/workspace_pb";
 import type { FailureSink } from "../../../src/failure/sink.js";
-import { log } from "../../../src/log.js";
+import { spyLog } from "../../log-spy.js";
 import type { AppContext } from "../../../src/rpc/context.js";
 import { scriptedAppContext } from "../../rpc/app-context.js";
 import { MalformedView } from "../../../src/rpc/malformed.js";
@@ -149,7 +149,7 @@ describe("answering the question", () => {
   });
 
   it("logs a refusal as a warning naming the decision and the arm", async () => {
-    const warn = vi.spyOn(log, "warn");
+    const warn = spyLog("warn");
     const el = drawMergeQueueOffer(offer(), context(errorResponse), recordingControls());
     click(el, "cancel");
     await settle();
@@ -214,7 +214,7 @@ describe("the daemon could not be reached", () => {
   });
 
   it("logs the failure as an error naming the decision", async () => {
-    const error = vi.spyOn(log, "error");
+    const error = spyLog("error");
     const el = drawMergeQueueOffer(offer(), context(unreachable), recordingControls());
     click(el, "prioritize");
     await settle();

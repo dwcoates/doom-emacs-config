@@ -28,10 +28,12 @@ import type { Ticker } from "../clock.js";
 import type { FailureSink } from "../failure/sink.js";
 import type { PageSeen } from "../page-seen.js";
 import { createListeners } from "../listeners.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AgentReplClient } from "./client.js";
 import type { DaemonOrigin } from "./daemon-origin.js";
 import { startPageStreams, type PageStreams, type PageStreamContext, type WebhostPageInit } from "./page-streams.js";
+
+const log = createLogger("webapp.rpc.context");
 
 /**
  * What talking to the daemon takes, with no workspace in it: the client, the

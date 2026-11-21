@@ -16,7 +16,9 @@
  * RESTARTING an animation (making it fresh) is one attribute the stylesheet
  * reads as `animation-name: none` on the element and both its pseudo-elements.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
+
+const log = createLogger("webapp.animation-delays");
 
 /**
  * Place a ONE-SHOT animation on ELEMENT: its length LENGTH-MS in
@@ -147,10 +149,10 @@ export function cssTimeMs(value: string): number {
       ? Number(value.slice(0, -1)) * 1000
       : NaN;
   if (!Number.isFinite(ms)) {
-    log.error(`a computed animation time is no CSS time (${value})`, {
+    log.error("a computed animation time is no CSS time ({value})", {
       operation: "animation-delays.bad-time",
-      context: { value },
-    });
+      context: {},
+    }, { value });
     throw new Error(`animation-delays: a computed animation time is no CSS time (${value})`);
   }
   return ms;

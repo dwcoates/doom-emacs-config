@@ -43,7 +43,7 @@ import {
 import { SetModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_model_pb";
 import { SetDefaultModelResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_default_model_pb";
 import type { TopbarModelSelector } from "../../../proto/gen/ts/frontend/v1/topbar_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase, requireMessage, unreachableArm } from "../rpc/strict.js";
 import type { TopbarContext } from "./context.js";
 import type { SentenceTable } from "../rpc/refuse.js";
@@ -51,6 +51,8 @@ import { drawNoSessionCell } from "./no-session.js";
 import { sendPick } from "./pick.js";
 import { asAnchor } from "./strip.js";
 import { queryAll } from "../dom.js";
+
+const log = createLogger("webapp.topbar.model");
 
 /**
  * The selector's hover (owner, 2026-10-01; design record 2026-10-02 decision
@@ -99,10 +101,10 @@ export function offerableOptions(options: readonly ModelOption[]): ModelOption[]
     // be refused as not in the catalog. The marker check alone missed the empty
     // spelling, which drew as a nameless, pickable row.
     if (model.name !== marker && model.name.trim() !== "") return true;
-    log.warn(`the daemon served a row that names no model (${JSON.stringify(model.name)}); skipping it`, {
+    log.warn("the daemon served a row that names no model ({name}); skipping it", {
       operation: "topbar.model-synthetic-option",
       context: { index },
-    });
+    }, { name: JSON.stringify(model.name) });
     return false;
   });
 }
@@ -390,10 +392,10 @@ export async function makeDefaultModel(
   control: Control,
 ): Promise<void> {
   const model = requireMessage(option.model, "ModelOption.model");
-  log.info(`the reader made ${model.name} the login's default model`, {
+  log.info("the reader made {name} the login's default model", {
     operation: "topbar.model-made-default",
     context: { model: model.name },
-  });
+  }, { name: model.name });
   await sendPick(
     {
       rpc: "SetDefaultModel",
@@ -471,10 +473,10 @@ export async function pickModel(
   row: Control,
 ): Promise<void> {
   const model = requireMessage(option.model, "ModelOption.model");
-  log.info(`the reader picked the model ${model.name}`, {
+  log.info("the reader picked the model {name}", {
     operation: "topbar.model-picked",
     context: { model: model.name },
-  });
+  }, { name: model.name });
   await sendPick(
     {
       rpc: "SetModel",

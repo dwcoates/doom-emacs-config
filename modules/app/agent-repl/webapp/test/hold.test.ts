@@ -1,7 +1,7 @@
 // The shared drawing hold. See src/hold.ts.
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createDrawingHold, type DrawingHold } from "../src/hold.js";
-import { log } from "../src/log.js";
+import { spyLog } from "./log-spy.js";
 
 /** A push carrying nothing but REVISION. */
 interface Pushed {
@@ -109,7 +109,7 @@ describe("the drawing hold", () => {
   });
 
   it("records why it let go", () => {
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     const { hold } = recordedHold();
     hold.offer(at(1));
     hold.drag();
@@ -142,7 +142,7 @@ describe("a drawing whose pushes carry no revision", () => {
   });
 
   it("records no revision when it lets go", () => {
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     const { hold } = unrevisioned();
     hold.offer("a");
     hold.drag();

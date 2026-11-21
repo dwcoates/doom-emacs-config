@@ -17,11 +17,13 @@
  */
 import { LoadPageInEditorResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_load_page_in_editor_pb";
 import { createControl } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase } from "../rpc/strict.js";
 import { callUnary } from "../rpc/unary.js";
 import type { DaemonContext } from "../rpc/context.js";
 import type { HeldBackPage } from "./host.js";
+
+const log = createLogger("webapp.host.load-button");
 
 /** The id of the webhost's load button's element. */
 export const WEBHOST_LOAD_ID = "webhost-load";

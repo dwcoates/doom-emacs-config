@@ -35,11 +35,13 @@ import type {
   FeedFindingsSummary,
 } from "../../../../proto/gen/ts/frontend/v1/feed_pb";
 import { renderEditorLink } from "../../link.js";
-import { log } from "../../log.js";
+import { createLogger } from "../../log.js";
 import type { AppContext } from "../../rpc/context.js";
 import { requireMessage, unreachableArm } from "../../rpc/strict.js";
 import type { RowContext } from "../renderers.js";
 import { agenticBubble, foldSection } from "./controls.js";
+
+const log = createLogger("webapp.feed.cards.findings");
 
 const PATH = "FeedFindings";
 

@@ -45,7 +45,7 @@ import {
 } from "../../../proto/gen/ts/agentrepl/v1/endpoint_submit_prompt_pb";
 import { submitPromptRefusal } from "../composer/composer.js";
 import { formatDurationCeil } from "../duration.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { drawSignInAction } from "../login/request.js";
 import { callUnary } from "../rpc/unary.js";
 import { isMalformedView } from "../rpc/malformed.js";
@@ -55,6 +55,8 @@ import type { AppContext } from "../rpc/context.js";
 import { createControl } from "../control.js";
 import { feedOutcomeMarkerColor, feedOutcomeMarkerGlyph, toneClass } from "../vocab.js";
 import { stopTicking, tickWhileShown } from "./ticking.js";
+
+const log = createLogger("webapp.feed.marker");
 
 /** The root class every outcome marker carries. */
 export const OUTCOME_MARKER_CLASS = "outcome-marker";
@@ -374,9 +376,9 @@ async function submitResend(
     if (isMalformedView(err)) throw err;
     const failure = callFailure(err);
     host.append(refusal(failure.arm, failure.text));
-    log.error(`a resend from an outcome marker failed: ${String(err)}`, {
+    log.error("a resend from an outcome marker failed: {err}", {
       operation: "feed.outcome-marker-resend-failed",
       context: { cause: err },
-    });
+    }, { err: String(err) });
   }
 }

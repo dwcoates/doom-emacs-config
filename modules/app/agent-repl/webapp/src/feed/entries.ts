@@ -21,13 +21,15 @@
  */
 import type { FeedResponseAnswer } from "../../../proto/gen/ts/frontend/v1/feed_pb";
 import { queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { TREE_LABEL_ATTRIBUTE, TREE_LABEL_CLASS, TREE_NODE_ATTRIBUTE } from "../metaprompt-tree.js";
 import { requireMessage } from "../rpc/strict.js";
 import { MARKDOWN_SLOT_ATTRIBUTE, whenSlotPainted } from "../bubble/body.js";
 import { ENTRY_ATTRIBUTE, ENTRY_CLASS, ENTRY_PATH_CLASS } from "./entry-tree.js";
 import { feedRowId, feedRowOf } from "./row-id.js";
 import { inSubtree } from "./subtree-box.js";
+
+const log = createLogger("webapp.feed.entries");
 
 /** The class an entry wears while it flashes, revealed by a linked label. */
 export const ENTRY_FLASH_CLASS = "mp-entry-flash";

@@ -18,7 +18,7 @@
  */
 import type { Handle } from "../failure/local.js";
 import { createControl } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeChildren, queryAll } from "../dom.js";
 import { stopTicking } from "./ticking.js";
 import {
@@ -63,6 +63,8 @@ import type {
 import type { FeedChessBoard } from "../../../proto/gen/ts/frontend/v1/chess_board_pb";
 import type { RowArrival, RowContext } from "./cards/context.js";
 import { FEED_ROW_SELECTOR } from "./row-id.js";
+
+const log = createLogger("webapp.feed.renderers");
 
 export type { Handle };
 // THE ONE ROW CONTEXT is declared in cards/context.ts; the feed core's
@@ -365,10 +367,10 @@ export function arrangeSubfeedRows(
   // been placed.
   let moved = placeChildren(host, top);
   for (const [slot, children] of nests) moved += placeChildren(slot, children);
-  log.debug(`arranged ${String(rows.length)} rows, moving ${String(moved)}`, {
+  log.debug("arranged {length} rows, moving {moved}", {
     operation: "feed.arrange",
-    context: { rows: rows.length, moved },
-  });
+    context: { rows: rows.length },
+  }, { length: rows.length, moved });
   // A group not placed this pass (its run broke, or its rows left the feed) is
   // disposed — after `replaceChildren`, so a member re-placed elsewhere is safely
   // out of the old group before it is torn down.

@@ -39,9 +39,11 @@
  * narrowed away by the search is followed on the first draw that lays it out.
  */
 import { computedPx, queryAll } from "../dom.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { nearestEdgeOffset, selectionRowScroll, type VerticalSpan } from "../scroll.js";
 import { REGION_SELECTOR } from "./band-fit.js";
+
+const log = createLogger("webapp.sidebar.selection-scroll");
 
 /** What became of following a selection into view. */
 export type FollowOutcome =

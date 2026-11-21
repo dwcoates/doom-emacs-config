@@ -11,8 +11,10 @@
  * then. Only the latest is kept: a second ask before the bind supersedes the
  * first, as a second click would.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { FeedId } from "../../../proto/gen/ts/frontend/v1/feed_pb";
+
+const log = createLogger("webapp.lifecycle.reveal-relay");
 
 /** Reveals one row of the page's feed, answering whether it was revealed. */
 export type RevealFn = (row: FeedId) => Promise<boolean>;

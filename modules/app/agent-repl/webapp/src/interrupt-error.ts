@@ -32,10 +32,12 @@
  * plain refusal it is and the call site logs the oddity.
  */
 import { InterruptErrorSchema, type InterruptError } from "../../proto/gen/ts/agentrepl/v1/endpoint_interrupt_pb";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { crossCuttingSentence } from "./rpc/refuse.js";
 import { unreachableArm } from "./rpc/strict.js";
 import { oneofArms } from "./rpc/oneof.js";
+
+const log = createLogger("webapp.interrupt-error");
 
 /**
  * Every `InterruptError.kind` arm, in the generated spelling, read off the
@@ -95,8 +97,8 @@ export function logInterruptRefusal(
   sentence: string,
   operation: string,
 ): void {
-  log.warn(`the stop was refused: ${kind.case}`, {
+  log.warn("the stop was refused: {case}", {
     operation,
     context: { arm: kind.case, sentence },
-  });
+  }, { case: kind.case });
 }

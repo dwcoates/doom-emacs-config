@@ -20,7 +20,9 @@
  * answers). A click on the scrim or on the close control closes it too.
  */
 import { createControl } from "../control.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
+
+const log = createLogger("webapp.bubble.overlay");
 
 /** The attribute the page's root wears while an overlay stands. */
 export const BUBBLE_OVERLAY_ATTRIBUTE = "data-bubble-overlay";
@@ -55,7 +57,7 @@ export function mountBubbleOverlay(doc: Document, feedScroll: HTMLElement): Bubb
     host.hidden = true;
     host.replaceChildren();
     doc.documentElement.removeAttribute(BUBBLE_OVERLAY_ATTRIBUTE);
-    log.info(`the bubble overlay closes on ${cause}`, { operation: "bubble-overlay.close", context: { cause } });
+    log.info("the bubble overlay closes on {cause}", { operation: "bubble-overlay.close", context: {} }, { cause });
     return true;
   };
 

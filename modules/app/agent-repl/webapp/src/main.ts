@@ -69,8 +69,8 @@ import { installLinkHoverPopup } from "./link-hover.js";
 import { MENTION_TEXT_CLASS, installWorkspaceMentionClicks, watchWorkspaceMentions } from "./feed/workspace-mentions.js";
 import { bootFailed } from "./failure/sink.js";
 import { createLocalFailures, type LocalFailures } from "./failure/local.js";
-import { LEVEL_WINDOW_OPERATION, log } from "./log.js";
-import { LevelWindow, selectionContext, selectionNote, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
+import { createLogger, logLevelSelection, renderMessage, type LogMessage } from "./log.js";
+import { LevelWindow, selectLevel } from "../../agent-shim/logging/ts/level-window.js";
 import { installPagePresenceLog } from "./page-presence.js";
 import { installPageCensus } from "./page-census.js";
 import { pageAfter } from "./every.js";
@@ -102,6 +102,8 @@ import { shellElements } from "./shell.js";
 import { composerClosedFor, installColorValues } from "./vocab.js";
 import { childrenMatching, queryAll } from "./dom.js";
 import { errorCause } from "./error-cause.js";
+
+const log = createLogger("webapp.main");
 
 export async function boot(): Promise<void> {
   let failures: LocalFailures | null = null;
@@ -158,8 +160,7 @@ export async function boot(): Promise<void> {
     // transport makes is aborted then, and nothing it asked for answers into
     // a page that is gone.
     endPageAtPagehide(window);
-    const levelNote = selectionNote(levelSelection);
-    if (levelNote !== null) log.info(levelNote, { operation: LEVEL_WINDOW_OPERATION, context: selectionContext(levelSelection) });
+    logLevelSelection(levelSelection);
 
     // AND THE SHELL IS RESOLVED INSIDE THE TRY, not above it, because it
     // logs and therefore has to come after the sink. Its failure now goes
@@ -502,14 +503,14 @@ function mountThreadBody(shell: ReturnType<typeof shellElements>, ctx: AppContex
     workspaceSelected: () => {
       landChatAtEnd(shell.feedScroll, "workspaceSelected");
     },
-    revealRow: (id) => noFeedRow(id, "main.thread-reveal-row", "the daemon asked a chat thread to reveal a feed row"),
+    revealRow: (id) => noFeedRow(id, "main.thread-reveal-row", log.message("the daemon asked a chat thread to reveal a feed row")),
   };
 }
 
 /** Refuse an ask for feed row ID on a chat thread's page, which has none. */
-function noFeedRow(id: FeedId, operation: string, said: string): Promise<boolean> {
-  log.error(said, { operation, context: { id: id.value } });
-  return Promise.reject(new Error(`a chat thread has no feed row ${id.value}: ${said}`));
+function noFeedRow(id: FeedId, operation: string, said: LogMessage): Promise<boolean> {
+  log.log("error", said, { operation, context: { id: id.value } });
+  return Promise.reject(new Error(`a chat thread has no feed row ${id.value}: ${renderMessage(said)}`));
 }
 
 /**
@@ -525,10 +526,10 @@ function reportBootFailure(err: unknown, failures: LocalFailures | null): void {
   const cause = errorCause(err);
   if (failures !== null) {
     failures.report(bootFailed(cause));
-    log.error(`the webapp failed to boot: ${cause}`, {
+    log.error("the webapp failed to boot: {cause}", {
       operation: "main.boot-failed",
-      context: { cause },
-    });
+      context: {},
+    }, { cause });
     return;
   }
   // PRE-LOGGER BOOTSTRAP FAILURE: the documented exception to "no direct

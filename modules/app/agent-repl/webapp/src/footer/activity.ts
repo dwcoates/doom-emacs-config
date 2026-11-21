@@ -111,7 +111,7 @@ import type {
 import { formatAge, formatCountdown, formatTickedElapsed } from "../duration.js";
 import type { Ticker } from "../clock.js";
 import { tick } from "../feed/ticking.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import {
   msOf,
@@ -128,6 +128,8 @@ import { pressurePercentColor } from "../pressure-color.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { activityDatumClass } from "./tones.js";
 import { pluralNoun } from "../count-noun.js";
+
+const log = createLogger("webapp.footer.activity");
 
 /**
  * What a clocked piece of the cell needs: the ticker its figure rides.
@@ -284,10 +286,10 @@ export function drawFooterStatusActivity(
   const drawn = drawTier(activityTier(activity, path), deps, path);
   cell.setAttribute("data-tier", drawn.tier);
   cell.setAttribute("data-arm", drawn.arm);
-  log.debug(`drawing the ${drawn.tier} activity line: ${drawn.arm}`, {
+  log.debug("drawing the {tier} activity line: {arm}", {
     operation: "footer.strip.activity",
-    context: { tier: drawn.tier, arm: drawn.arm },
-  });
+    context: {},
+  }, { tier: drawn.tier, arm: drawn.arm });
   cell.appendChild(drawn.line);
   if (drawn.age !== null) cell.appendChild(drawn.age);
   // THE WHOLE LINE AS THE CELL'S HOVER. The cell is the strip's one elastic
@@ -376,7 +378,7 @@ function drawUnpinned(
     const nowMs = deps.ctx.ticker.now();
     if (nowMs < expiresAtMs) {
       log.debug(
-        `the transient ${kind.case} is live; drawing it until it lapses`,
+        "the transient {case} is live; drawing it until it lapses",
         {
           operation: "footer.strip.transient-live",
           context: {
@@ -384,7 +386,7 @@ function drawUnpinned(
             expires_at_ms: expiresAtMs,
             now_ms: nowMs,
           },
-        },
+        }, { case: kind.case },
       );
       deps.expiry.schedule(expiresAtMs);
       return {
@@ -395,11 +397,11 @@ function drawUnpinned(
       };
     }
     log.debug(
-      `the transient ${kind.case} has lapsed; drawing the enduring line`,
+      "the transient {case} has lapsed; drawing the enduring line",
       {
         operation: "footer.strip.transient-lapsed",
         context: { kind: kind.case, expires_at_ms: expiresAtMs, now_ms: nowMs },
-      },
+      }, { case: kind.case },
     );
   }
   return {
@@ -1549,7 +1551,7 @@ function markAllowanceVerdict(
   if (u.newsworthy) span.setAttribute("data-newsworthy", "true");
   if (u.newsworthy) span.classList.add("footer-allowance-newsworthy");
   log.debug(
-    `drawing the ${label} allowance as ${status?.case ?? "unverdicted"}`,
+    "drawing the {label} allowance as {status_text}",
     {
       operation: "footer.strip.allowance",
       context: {
@@ -1557,7 +1559,7 @@ function markAllowanceVerdict(
         status: status?.case,
         newsworthy: u.newsworthy,
       },
-    },
+    }, { label, status_text: status?.case ?? "unverdicted" },
   );
 }
 

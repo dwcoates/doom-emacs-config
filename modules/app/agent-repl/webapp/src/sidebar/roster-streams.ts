@@ -33,9 +33,11 @@ import type {
   WorkspaceRoster,
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { WatchWorkspaceRosterResponse } from "../../../proto/gen/ts/agentrepl/v1/endpoint_watch_workspace_roster_pb";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { MalformedView } from "../rpc/malformed.js";
 import { requireCase, requireMessage, unreachablePushArm } from "../rpc/strict.js";
+
+const log = createLogger("webapp.sidebar.roster-streams");
 
 /** Every stream of the roster as of one push: what the client holds and draws. */
 export interface RosterStreams {

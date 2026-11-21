@@ -24,10 +24,12 @@
  * went with the old drawing, so `placeOpen` lets go of its copy over the feed
  * rather than leave a menu standing whose controls are gone.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { placeBeside, viewportOf } from "../placement.js";
 import type { PopupMirror } from "../host/sidebar-popups.js";
 import type { Dropdowns } from "./dropdowns.js";
+
+const log = createLogger("webapp.sidebar.row-menu");
 
 /** The key a row's menu is mirrored under (host/sidebar-popups.ts), apart from its panel's. */
 export function rowMenuKey(id: string): string {

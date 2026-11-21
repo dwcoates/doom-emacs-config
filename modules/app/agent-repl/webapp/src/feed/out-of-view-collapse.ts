@@ -31,9 +31,11 @@
  * returning to the tail closes every expanded entry at once), so no entry is
  * ever collapsed twice.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createLeftViewWatch } from "./left-view.js";
 import { feedRowId } from "./row-id.js";
+
+const log = createLogger("webapp.feed.out-of-view-collapse");
 
 /** The act that opened a watched entry (see the module comment). */
 export type OutOfViewCause = "jump" | "ownClick";

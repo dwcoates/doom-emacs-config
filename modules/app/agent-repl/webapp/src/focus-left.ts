@@ -22,9 +22,11 @@
  *     page stands.
  */
 import { createListeners } from "./listeners.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { perDocument } from "./per-document.js";
 import { pagePresence, type Presence } from "./presence.js";
+
+const log = createLogger("webapp.focus-left");
 
 /** Told why the focus left the page. */
 type FocusLeftListener = (why: string) => void;

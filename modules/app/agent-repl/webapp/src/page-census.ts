@@ -18,10 +18,12 @@
  * lessons), so a census that asked would leak what it counted. A script's own
  * `animate()` runs on no style and is not counted.
  */
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { pageSize } from "./page-size.js";
 import { every, pageAfter, type After } from "./every.js";
 import { animatedParts } from "./animation-delays.js";
+
+const log = createLogger("webapp.page-census");
 
 /** How often a page states its size. */
 export const CENSUS_EVERY_MS = 60_000;
@@ -77,11 +79,11 @@ export function installPageCensus(doc: Document, after: After = pageAfter): () =
     const size = pageSize(doc);
     const animations = animationCensus(doc);
     log.info(
-      `the page holds ${size.dom_nodes} elements, ${size.feed_rows} feed rows and ${animations.animations} animations`,
+      "the page holds {dom_nodes} elements, {feed_rows} feed rows and {animations} animations",
       {
         operation: "page.census",
         context: { ...size, ...animations, visibility: doc.visibilityState },
-      },
+      }, { dom_nodes: size.dom_nodes, feed_rows: size.feed_rows, animations: animations.animations },
     );
   });
 }

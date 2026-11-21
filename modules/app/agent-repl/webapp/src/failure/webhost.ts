@@ -14,10 +14,12 @@
  * lists the page's row once, the way a repeat report of one arm replaces its
  * row (failure/local.ts).
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { createListeners } from "../listeners.js";
 import type { WebhostFailure } from "../host/protocol.js";
 import type { LocalFailure, LocalFailureView } from "./local.js";
+
+const log = createLogger("webapp.failure.webhost");
 
 /** The webhost's failures as the page last heard them. */
 export interface WebhostFailureView extends LocalFailureView {

@@ -25,13 +25,15 @@
  *   delivery is not throttled. A beat across a time the webhost was hidden
  *   proves nothing, so it is never reported.
  */
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { pageSize, type PageSize } from "../page-size.js";
 import { CENSUS_EVERY_MS } from "../page-census.js";
 import { every, pageAfter, type After } from "../every.js";
 import { workerHeartbeat, type Heartbeat } from "./stall-heartbeat.js";
 import { FRAME_SHOWN_ATTRIBUTE, FRAME_WORKSPACE_ATTRIBUTE } from "./host.js";
 import { queryAll } from "../dom.js";
+
+const log = createLogger("webapp.host.load-census");
 
 export { CENSUS_EVERY_MS };
 
@@ -104,18 +106,18 @@ export function installLoadCensus(
     const voided = hiddenSinceProbe || env.doc.visibilityState !== "visible";
     hiddenSinceProbe = false;
     if (voided || !oldestOfBlock || late < STALL_THRESHOLD_MS) return;
-    log.info(`the web process's main thread was blocked ${late}ms`, {
+    log.info("the web process's main thread was blocked {late}ms", {
       operation: "webhost.stall",
       context: { blocked_ms: late, ...summarize(env.doc) },
-    });
+    }, { late });
   });
 
   const stopCensus = every(after, CENSUS_EVERY_MS, () => {
-    const summary = summarize(env.doc);
-    log.info(`the webhost holds ${summary.pages} pages; its own document holds ${summary.host.dom_nodes} elements`, {
+    const { pages, ...summary } = summarize(env.doc);
+    log.info("the webhost holds {pages} pages; its own document holds {dom_nodes} elements", {
       operation: "webhost.census",
       context: { ...summary },
-    });
+    }, { pages, dom_nodes: summary.host.dom_nodes });
   });
 
   return {

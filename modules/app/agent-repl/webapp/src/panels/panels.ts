@@ -44,11 +44,13 @@ import type {
   TodosPanelView,
 } from "../../../proto/gen/ts/frontend/v1/todos_panel_pb";
 import type { RowContext } from "../feed/cards/context.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import type { AppContext } from "../rpc/context.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { contextPercentColor, contextSectionColor } from "./context-colors.js";
 import { decorativeElement, queryAll } from "../dom.js";
+
+const log = createLogger("webapp.panels.panels");
 
 /**
  * The panel a submission answered with, drawn.
@@ -543,10 +545,10 @@ export function drawContextSection(
 
   details.addEventListener("toggle", () => {
     caret.textContent = details.open ? "▾" : "▸";
-    log.debug(`the context section ${u.label} is ${details.open ? "open" : "closed"}`, {
+    log.debug("the context section {label} is {state}", {
       operation: "panels.context.section-toggle",
       context: { path, open: details.open },
-    });
+    }, { label: u.label, state: details.open ? "open" : "closed" });
   });
   return details;
 }

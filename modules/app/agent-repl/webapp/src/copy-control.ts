@@ -14,9 +14,11 @@
  * `textContent`, a drag-select across it) is unchanged by it.
  */
 import { writeClipboardText } from "./copy.js";
-import { log } from "./log.js";
+import { createLogger } from "./log.js";
 import { unreachableArm } from "./rpc/strict.js";
 import { createKeyedTimers } from "./timers.js";
+
+const log = createLogger("webapp.copy-control");
 
 /** The class every copy control wears. */
 export const COPY_CONTROL_CLASS = "copy-control";

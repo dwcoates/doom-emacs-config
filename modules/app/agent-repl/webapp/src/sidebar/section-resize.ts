@@ -33,7 +33,7 @@ import { FOLDED_CLASS } from "./folded-class.js";
 import type { MessageInitShape } from "@bufbuild/protobuf";
 import type { SidebarViewSectionSizeSchema, UpdateSidebarViewRequestSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_update_sidebar_view_pb";
 import { DRAGGING_CLASS } from "../drag.js";
-import { log } from "../log.js";
+import { createLogger } from "../log.js";
 import { requireCase, unreachableArm } from "../rpc/strict.js";
 import { BAND_SIZED_ATTRIBUTE, bandSize, fittedSection, type FittedSection } from "./band-fit.js";
 import { HIDDEN_SECTION_CLASS, MERGED_SECTION_CLASS, MERGE_QUEUE_SECTION_CLASS, OPEN_SECTION_CLASS } from "./section-classes.js";
@@ -41,6 +41,8 @@ import { HIDDEN_FOLD_KEY, MERGED_FOLD_KEY, MERGE_QUEUE_FOLD_KEY, type SidebarCon
 import { changeViews, type ViewPiece } from "./view-change.js";
 import { heightViewKey } from "./view.js";
 import { decorativeElement } from "../dom.js";
+
+const log = createLogger("webapp.sidebar.section-resize");
 
 /** The class of the grip drawn over a band section's rule. */
 export const RESIZE_HANDLE_CLASS = "sb-band-resize";

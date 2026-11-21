@@ -4,7 +4,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NAME_POPUP_CLASS, openNamePopup, type NamePopupSpec } from "../../src/sidebar/name-popup.js";
-import { log } from "../../src/log.js";
+import { spyLog } from "../log-spy.js";
 import { sidebarContext } from "./harness.js";
 
 /** Every context a test opened a popup in, whose popups end with the test. */
@@ -82,25 +82,25 @@ describe("openNamePopup", () => {
   });
 
   it("closes on Escape and on a press outside it, recording why under its subject", () => {
-    const debug = vi.spyOn(log, "debug");
+    const debug = spyLog("debug");
     const first = opened("workspace");
     first.input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     const second = opened("workspace");
     document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
     expect([first.popup.isConnected, second.popup.isConnected]).toEqual([false, false]);
     expect(debug.mock.calls.filter(([, fields]) => fields?.operation === "sidebar.workspace.popup-close").map(([, fields]) => fields?.context)).toEqual([
-      { why: "Escape" },
-      { why: "a press outside it" },
+      { why: "Escape", subject: "workspace" },
+      { why: "a press outside it", subject: "workspace" },
     ]);
   });
 
   it("records the name it sends under its subject", async () => {
-    const info = vi.spyOn(log, "info");
+    const info = spyLog("info");
     const { input } = opened("workspace");
     input.value = "abc";
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     await settled();
-    expect(info).toHaveBeenCalledWith("naming a sidebar workspace", { operation: "sidebar.workspace.name", context: { length: 3 } });
+    expect(info).toHaveBeenCalledWith("naming a sidebar workspace", { operation: "sidebar.workspace.name", context: { length: 3, subject: "workspace" } });
   });
 });
 
