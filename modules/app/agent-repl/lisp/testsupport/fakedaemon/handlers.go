@@ -583,6 +583,14 @@ func (s *fakeServer) ParkWorkspace(ctx context.Context, req *connect.Request[v1.
 	return handleUnary[v1.ParkWorkspaceRequest, v1.ParkWorkspaceResponse](ctx, s, "ParkWorkspace", req.Msg)
 }
 
+func (s *fakeServer) ListMergeLandings(ctx context.Context, req *connect.Request[v1.ListMergeLandingsRequest]) (*connect.Response[v1.ListMergeLandingsResponse], error) {
+	return handleUnary[v1.ListMergeLandingsRequest, v1.ListMergeLandingsResponse](ctx, s, "ListMergeLandings", req.Msg)
+}
+
+func (s *fakeServer) RecordDirectLanding(ctx context.Context, req *connect.Request[v1.RecordDirectLandingRequest]) (*connect.Response[v1.RecordDirectLandingResponse], error) {
+	return handleUnary[v1.RecordDirectLandingRequest, v1.RecordDirectLandingResponse](ctx, s, "RecordDirectLanding", req.Msg)
+}
+
 func (s *fakeServer) GetMergeQueueStatus(ctx context.Context, req *connect.Request[v1.GetMergeQueueStatusRequest]) (*connect.Response[v1.GetMergeQueueStatusResponse], error) {
 	return handleUnary[v1.GetMergeQueueStatusRequest, v1.GetMergeQueueStatusResponse](ctx, s, "GetMergeQueueStatus", req.Msg)
 }
