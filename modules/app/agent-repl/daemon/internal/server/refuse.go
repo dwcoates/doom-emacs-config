@@ -318,6 +318,14 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 	if !setNestedArms(armMessage, fields) {
 		return false
 	}
+	setArmFields(armMessage, fields)
+	errMessage.Set(armField, protoreflect.ValueOfMessage(armMessage))
+	return true
+}
+
+// setArmFields fills whichever of ARMMESSAGE's own fields the refusal
+// supplied, keyed by their proto names.
+func setArmFields(armMessage protoreflect.Message, fields map[string]any) {
 	for i := 0; i < armMessage.Descriptor().Fields().Len(); i++ {
 		field := armMessage.Descriptor().Fields().Get(i)
 		value, ok := fields[string(field.Name())]
@@ -367,8 +375,6 @@ func setArm(errMessage protoreflect.Message, arm string, fields map[string]any) 
 			}
 		}
 	}
-	errMessage.Set(armField, protoreflect.ValueOfMessage(armMessage))
-	return true
 }
 
 // setListField fills one REPEATED arm field from the refusal's value. Only the
