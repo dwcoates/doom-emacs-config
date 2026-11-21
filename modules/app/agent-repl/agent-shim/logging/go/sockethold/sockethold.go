@@ -37,6 +37,29 @@ const (
 	StatusRefused byte = '0'
 )
 
+// Verb names one request a holder answers. THE VERBS AND THE STATUS BYTES ARE
+// DEFINED HERE ALONE: the holder (Serve) and every client (Take, Probe,
+// Return, Subscribe) read them from this package, and nothing else spells
+// them.
+type Verb string
+
+const (
+	// VerbTake asks for a held socket's listener; its request line is the
+	// socket's bare name.
+	VerbTake Verb = "take"
+	// VerbProbe asks whether a holder serves; its request line is empty.
+	VerbProbe Verb = "probe"
+	// VerbReturn hands back a connection, its fd attached; its request line
+	// is the verb, a space, and the socket's name.
+	VerbReturn Verb = "return"
+	// VerbAccept opens a socket's accept stream; its request line is the
+	// verb, a space, and the socket's name.
+	VerbAccept Verb = "accept"
+)
+
+// prefix is the start of a named verb's request line: the verb and a space.
+func (v Verb) prefix() string { return string(v) + " " }
+
 // ErrRefused marks a request the holder answered with a refusal: it holds no
 // socket of that name.
 var ErrRefused = errors.New("sockethold: the holder refused the request")
@@ -146,10 +169,10 @@ type Grant struct {
 	Name string
 	// Probe reports a probe (Probe), which asks for no socket.
 	Probe bool
-	// Verb is what was asked of Name: "" for its listener (Take), "return"
-	// for a connection handed back (Return), "accept" for an accept stream
-	// (Subscribe), recorded once the stream ends.
-	Verb string
+	// Verb is what was asked: VerbTake for Name's listener, VerbProbe,
+	// VerbReturn for a connection handed back, VerbAccept for an accept
+	// stream (recorded once the stream ends).
+	Verb Verb
 	// Err is why the request was not granted; nil when it was.
 	Err error
 }
@@ -196,7 +219,7 @@ func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File
 	// request's is closed with it.
 	var carried *os.File
 	for i, fd := range fds {
-		if i == 0 && strings.HasPrefix(line, verbReturn) {
+		if i == 0 && strings.HasPrefix(line, VerbReturn.prefix()) {
 			carried = os.NewFile(uintptr(fd), "returned")
 			continue
 		}
@@ -216,12 +239,12 @@ func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File
 	switch {
 	case line == "":
 		if _, err := conn.Write([]byte{StatusOK}); err != nil {
-			return Grant{Probe: true, Err: fmt.Errorf("answer the probe: %w", err)}
+			return Grant{Probe: true, Verb: VerbProbe, Err: fmt.Errorf("answer the probe: %w", err)}
 		}
-		return Grant{Probe: true}
-	case strings.HasPrefix(line, verbReturn):
-		name := strings.TrimPrefix(line, verbReturn)
-		g := Grant{Name: name, Verb: "return"}
+		return Grant{Probe: true, Verb: VerbProbe}
+	case strings.HasPrefix(line, VerbReturn.prefix()):
+		name := strings.TrimPrefix(line, VerbReturn.prefix())
+		g := Grant{Name: name, Verb: VerbReturn}
 		if _, ok := sockets[name]; !ok {
 			if carried != nil {
 				carried.Close()
@@ -236,9 +259,9 @@ func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File
 			g.Err = fmt.Errorf("answer the return: %w", err)
 		}
 		return g
-	case strings.HasPrefix(line, verbAccept):
-		name := strings.TrimPrefix(line, verbAccept)
-		g := Grant{Name: name, Verb: "accept"}
+	case strings.HasPrefix(line, VerbAccept.prefix()):
+		name := strings.TrimPrefix(line, VerbAccept.prefix())
+		g := Grant{Name: name, Verb: VerbAccept}
 		if _, ok := sockets[name]; !ok {
 			return refuse(g, fmt.Sprintf("this holder holds no socket named %q", name))
 		}
@@ -247,12 +270,12 @@ func answer(ctx context.Context, conn *net.UnixConn, sockets map[string]*os.File
 	}
 	file, ok := sockets[line]
 	if !ok {
-		return refuse(Grant{Name: line}, fmt.Sprintf("this holder holds no socket named %q", line))
+		return refuse(Grant{Name: line, Verb: VerbTake}, fmt.Sprintf("this holder holds no socket named %q", line))
 	}
 	if _, _, err := conn.WriteMsgUnix([]byte{StatusOK}, syscall.UnixRights(int(file.Fd())), nil); err != nil {
-		return Grant{Name: line, Err: fmt.Errorf("send the socket: %w", err)}
+		return Grant{Name: line, Verb: VerbTake, Err: fmt.Errorf("send the socket: %w", err)}
 	}
-	return Grant{Name: line}
+	return Grant{Name: line, Verb: VerbTake}
 }
 
 // readRequest reads CONN's one request line and every fd it carried.

@@ -33,11 +33,6 @@ import (
 //     client half-closes (Returned.Stop), when the holder ends the stream. A
 //     newer stream for NAME ends the older one.
 
-const (
-	verbReturn = "return "
-	verbAccept = "accept "
-)
-
 // Return hands the connection FILE, accepted on the held socket NAME and
 // never read, to the holder serving CONTROL, for the server accepting on NAME
 // next. CTX bounds the exchange. The caller still closes FILE: the holder
@@ -51,7 +46,7 @@ func Return(ctx context.Context, control, name string, file *os.File) error {
 		return err
 	}
 	defer uc.Close()
-	if _, _, err := uc.WriteMsgUnix([]byte(verbReturn+name+"\n"), syscall.UnixRights(int(file.Fd())), nil); err != nil {
+	if _, _, err := uc.WriteMsgUnix([]byte(VerbReturn.prefix()+name+"\n"), syscall.UnixRights(int(file.Fd())), nil); err != nil {
 		return fmt.Errorf("sockethold: hand %s a connection of %q: %w", control, name, err)
 	}
 	reader := bufio.NewReader(uc)
@@ -86,7 +81,7 @@ func Subscribe(ctx context.Context, control, name string) (*Returned, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := uc.Write([]byte(verbAccept + name + "\n")); err != nil {
+	if _, err := uc.Write([]byte(VerbAccept.prefix() + name + "\n")); err != nil {
 		uc.Close()
 		return nil, fmt.Errorf("sockethold: open %s's accept stream of %q: %w", control, name, err)
 	}

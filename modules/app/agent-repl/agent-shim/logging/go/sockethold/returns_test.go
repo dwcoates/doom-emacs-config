@@ -182,3 +182,30 @@ func TestAReturnOrStreamOfASocketNotHeldIsRefused(t *testing.T) {
 		})
 	}
 }
+
+func TestTheProtocolsSpellingsArePinned(t *testing.T) {
+	// The wire spellings are what every holder and client already speak: a
+	// holder of one build answers a client of another, so none may move.
+	cases := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{name: "take", got: string(VerbTake), want: "take"},
+		{name: "probe", got: string(VerbProbe), want: "probe"},
+		{name: "return", got: string(VerbReturn), want: "return"},
+		{name: "accept", got: string(VerbAccept), want: "accept"},
+		{name: "a return's request prefix", got: VerbReturn.prefix(), want: "return "},
+		{name: "an accept's request prefix", got: VerbAccept.prefix(), want: "accept "},
+		{name: "the granted status", got: string(StatusOK), want: "1"},
+		{name: "the refused status", got: string(StatusRefused), want: "0"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Assert
+			if tc.got != tc.want {
+				t.Fatalf("%s = %q, want %q", tc.name, tc.got, tc.want)
+			}
+		})
+	}
+}
