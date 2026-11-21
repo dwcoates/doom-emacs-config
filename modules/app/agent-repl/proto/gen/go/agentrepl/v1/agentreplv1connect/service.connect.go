@@ -55,6 +55,9 @@ const (
 	// AgentReplReportComposerEntriesProcedure is the fully-qualified name of the AgentRepl's
 	// ReportComposerEntries RPC.
 	AgentReplReportComposerEntriesProcedure = "/agentrepl.v1.AgentRepl/ReportComposerEntries"
+	// AgentReplReportComposerDraftProcedure is the fully-qualified name of the AgentRepl's
+	// ReportComposerDraft RPC.
+	AgentReplReportComposerDraftProcedure = "/agentrepl.v1.AgentRepl/ReportComposerDraft"
 	// AgentReplFindEntryNeighborProcedure is the fully-qualified name of the AgentRepl's
 	// FindEntryNeighbor RPC.
 	AgentReplFindEntryNeighborProcedure = "/agentrepl.v1.AgentRepl/FindEntryNeighbor"
@@ -502,6 +505,7 @@ var (
 	agentReplSelectResponseTextMethodDescriptor                 = agentReplServiceDescriptor.Methods().ByName("SelectResponseText")
 	agentReplAskAboutResponseMethodDescriptor                   = agentReplServiceDescriptor.Methods().ByName("AskAboutResponse")
 	agentReplReportComposerEntriesMethodDescriptor              = agentReplServiceDescriptor.Methods().ByName("ReportComposerEntries")
+	agentReplReportComposerDraftMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("ReportComposerDraft")
 	agentReplFindEntryNeighborMethodDescriptor                  = agentReplServiceDescriptor.Methods().ByName("FindEntryNeighbor")
 	agentReplFoldMergeBubbleMethodDescriptor                    = agentReplServiceDescriptor.Methods().ByName("FoldMergeBubble")
 	agentReplAdjustFeedTextScaleMethodDescriptor                = agentReplServiceDescriptor.Methods().ByName("AdjustFeedTextScale")
@@ -686,6 +690,10 @@ type AgentReplClient interface {
 	// is on: the daemon pushes the node it answers to the webapp, and the labels
 	// that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
 	ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error)
+	// The text a workspace's composer held when the editor closed the
+	// workspace, which the daemon keeps and hands back on the next open. See
+	// endpoint_report_composer_draft.proto.
+	ReportComposerDraft(context.Context, *connect.Request[v1.ReportComposerDraftRequest]) (*connect.Response[v1.ReportComposerDraftResponse], error)
 	// The label a line opened beside an entry line answers: the entry's next
 	// or previous node in the tree it targets. See
 	// endpoint_find_entry_neighbor.proto.
@@ -1243,6 +1251,12 @@ func NewAgentReplClient(httpClient connect.HTTPClient, baseURL string, opts ...c
 			httpClient,
 			baseURL+AgentReplReportComposerEntriesProcedure,
 			connect.WithSchema(agentReplReportComposerEntriesMethodDescriptor),
+			connect.WithClientOptions(opts...),
+		),
+		reportComposerDraft: connect.NewClient[v1.ReportComposerDraftRequest, v1.ReportComposerDraftResponse](
+			httpClient,
+			baseURL+AgentReplReportComposerDraftProcedure,
+			connect.WithSchema(agentReplReportComposerDraftMethodDescriptor),
 			connect.WithClientOptions(opts...),
 		),
 		findEntryNeighbor: connect.NewClient[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse](
@@ -2239,6 +2253,7 @@ type agentReplClient struct {
 	selectResponseText                 *connect.Client[v1.SelectResponseTextRequest, v1.SelectResponseTextResponse]
 	askAboutResponse                   *connect.Client[v1.AskAboutResponseRequest, v1.AskAboutResponseResponse]
 	reportComposerEntries              *connect.Client[v1.ReportComposerEntriesRequest, v1.ReportComposerEntriesResponse]
+	reportComposerDraft                *connect.Client[v1.ReportComposerDraftRequest, v1.ReportComposerDraftResponse]
 	findEntryNeighbor                  *connect.Client[v1.FindEntryNeighborRequest, v1.FindEntryNeighborResponse]
 	foldMergeBubble                    *connect.Client[v1.FoldMergeBubbleRequest, v1.FoldMergeBubbleResponse]
 	adjustFeedTextScale                *connect.Client[v1.AdjustFeedTextScaleRequest, v1.AdjustFeedTextScaleResponse]
@@ -2424,6 +2439,11 @@ func (c *agentReplClient) AskAboutResponse(ctx context.Context, req *connect.Req
 // ReportComposerEntries calls agentrepl.v1.AgentRepl.ReportComposerEntries.
 func (c *agentReplClient) ReportComposerEntries(ctx context.Context, req *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error) {
 	return c.reportComposerEntries.CallUnary(ctx, req)
+}
+
+// ReportComposerDraft calls agentrepl.v1.AgentRepl.ReportComposerDraft.
+func (c *agentReplClient) ReportComposerDraft(ctx context.Context, req *connect.Request[v1.ReportComposerDraftRequest]) (*connect.Response[v1.ReportComposerDraftResponse], error) {
+	return c.reportComposerDraft.CallUnary(ctx, req)
 }
 
 // FindEntryNeighbor calls agentrepl.v1.AgentRepl.FindEntryNeighbor.
@@ -3249,6 +3269,10 @@ type AgentReplHandler interface {
 	// is on: the daemon pushes the node it answers to the webapp, and the labels
 	// that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
 	ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error)
+	// The text a workspace's composer held when the editor closed the
+	// workspace, which the daemon keeps and hands back on the next open. See
+	// endpoint_report_composer_draft.proto.
+	ReportComposerDraft(context.Context, *connect.Request[v1.ReportComposerDraftRequest]) (*connect.Response[v1.ReportComposerDraftResponse], error)
 	// The label a line opened beside an entry line answers: the entry's next
 	// or previous node in the tree it targets. See
 	// endpoint_find_entry_neighbor.proto.
@@ -3802,6 +3826,12 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 		AgentReplReportComposerEntriesProcedure,
 		svc.ReportComposerEntries,
 		connect.WithSchema(agentReplReportComposerEntriesMethodDescriptor),
+		connect.WithHandlerOptions(opts...),
+	)
+	agentReplReportComposerDraftHandler := connect.NewUnaryHandler(
+		AgentReplReportComposerDraftProcedure,
+		svc.ReportComposerDraft,
+		connect.WithSchema(agentReplReportComposerDraftMethodDescriptor),
 		connect.WithHandlerOptions(opts...),
 	)
 	agentReplFindEntryNeighborHandler := connect.NewUnaryHandler(
@@ -4800,6 +4830,8 @@ func NewAgentReplHandler(svc AgentReplHandler, opts ...connect.HandlerOption) (s
 			agentReplAskAboutResponseHandler.ServeHTTP(w, r)
 		case AgentReplReportComposerEntriesProcedure:
 			agentReplReportComposerEntriesHandler.ServeHTTP(w, r)
+		case AgentReplReportComposerDraftProcedure:
+			agentReplReportComposerDraftHandler.ServeHTTP(w, r)
 		case AgentReplFindEntryNeighborProcedure:
 			agentReplFindEntryNeighborHandler.ServeHTTP(w, r)
 		case AgentReplFoldMergeBubbleProcedure:
@@ -5147,6 +5179,10 @@ func (UnimplementedAgentReplHandler) AskAboutResponse(context.Context, *connect.
 
 func (UnimplementedAgentReplHandler) ReportComposerEntries(context.Context, *connect.Request[v1.ReportComposerEntriesRequest]) (*connect.Response[v1.ReportComposerEntriesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportComposerEntries is not implemented"))
+}
+
+func (UnimplementedAgentReplHandler) ReportComposerDraft(context.Context, *connect.Request[v1.ReportComposerDraftRequest]) (*connect.Response[v1.ReportComposerDraftResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("agentrepl.v1.AgentRepl.ReportComposerDraft is not implemented"))
 }
 
 func (UnimplementedAgentReplHandler) FindEntryNeighbor(context.Context, *connect.Request[v1.FindEntryNeighborRequest]) (*connect.Response[v1.FindEntryNeighborResponse], error) {

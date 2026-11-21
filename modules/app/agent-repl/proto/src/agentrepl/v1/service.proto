@@ -98,6 +98,7 @@ import "agentrepl/v1/endpoint_register_repository.proto";
 import "agentrepl/v1/endpoint_register_workspace.proto";
 import "agentrepl/v1/endpoint_register_workspaces.proto";
 import "agentrepl/v1/endpoint_report_chat_sightings.proto";
+import "agentrepl/v1/endpoint_report_composer_draft.proto";
 import "agentrepl/v1/endpoint_report_composer_entries.proto";
 import "agentrepl/v1/endpoint_report_editor_focus.proto";
 import "agentrepl/v1/endpoint_report_recency_reach.proto";
@@ -204,6 +205,11 @@ service AgentRepl {
   // is on: the daemon pushes the node it answers to the webapp, and the labels
   // that answer nothing to Emacs. See endpoint_report_composer_entries.proto.
   rpc ReportComposerEntries(ReportComposerEntriesRequest) returns (ReportComposerEntriesResponse);
+
+  // The text a workspace's composer held when the editor closed the
+  // workspace, which the daemon keeps and hands back on the next open. See
+  // endpoint_report_composer_draft.proto.
+  rpc ReportComposerDraft(ReportComposerDraftRequest) returns (ReportComposerDraftResponse);
 
   // The label a line opened beside an entry line answers: the entry's next
   // or previous node in the tree it targets. See

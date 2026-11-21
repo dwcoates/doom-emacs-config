@@ -11,7 +11,6 @@ package agentrepl.v1;
 
 import "workspace/v1/workspace.proto";
 import "agentrepl/v1/daemon_stream_ending.proto";
-import "agentrepl/v1/editor_evaluation.proto";
 import "agentrepl/v1/endpoint_open_in_editor.proto";
 import "agentrepl/v1/endpoint_session_health.proto";
 import "conversation/v1/turn.proto";
@@ -56,13 +55,6 @@ message WatchHostWorkspaceResponse {
     // last frame; the client reattaches to the live daemon without treating
     // the end as a fault. See the message.
     DaemonStreamEnding ending = 6;
-    // THE USER CLICKED THIS WORKSPACE'S DESKTOP BANNER: raise Emacs's frame
-    // and select this workspace's tab. The daemon posts every desktop
-    // notification and reads the click back from the banner itself, so the
-    // selection it asks for is the only part of a notification Emacs acts on.
-    // An event, not state: never replayed to a late subscriber, because a
-    // click belongs to the moment it was made.
-    HostWorkspaceNotificationClicked notification_clicked = 7;
     // THE FEED'S SELECTION, whole-replaced on every change: Emacs's copy of
     // what the webapp draws as selected, for the composer's escape handling.
     // State, not an event: a late subscriber is sent the selection in force
@@ -73,13 +65,6 @@ message WatchHostWorkspaceResponse {
     // OpenInEditor's `commit_log` target: open the branch's log with point on
     // the commit. A fact, not a command, exactly as `open_in_editor` is.
     OpenInEditorCommitLog open_commit_log = 9;
-    // EVALUATE THIS ELISP for an agent (EvaluateInEditor), with this
-    // workspace's buffer current, inside the editor's one error-catching
-    // handler, and answer with AnswerEditorEvaluation carrying the token. A
-    // request, unlike every other arm: the agent's call waits on the answer.
-    // An event, never replayed to a late subscriber: an evaluation not
-    // answered in time has already been answered `timed_out`.
-    HostEvaluate evaluate = 10;
     // THE READER CLICKED A FINAL RESPONSE IN THE WEBVIEW, selecting it: the
     // next prompt replies to it, so Emacs puts the keyboard in this
     // workspace's composer, in insert state, ready to type that reply. Sent
@@ -89,13 +74,6 @@ message WatchHostWorkspaceResponse {
     // never replayed to a late subscriber, because a click belongs to the
     // moment it was made; the selection itself rides `selection`.
     HostWorkspaceFinalResponseClicked final_response_clicked = 11;
-    // THE USER CLICKED THIS WORKSPACE'S ROW IN A PAGE'S RAIL (SelectInEditor):
-    // switch to this workspace exactly as a key switches to it, the frame
-    // moving at once and the selection requested of the daemon. The editor
-    // makes the switch, never the daemon, which is what makes a click as fast
-    // as a key. An event, not state: never replayed to a late subscriber,
-    // because a click belongs to the moment it was made.
-    HostWorkspaceSelectRequested select_requested = 12;
     // THE READER CLICKED A NODE OF A RESPONSE'S TREE IN THE WEBVIEW
     // (SelectFeedRow's `branch` move), selecting the response: Emacs opens a
     // blank entry answering the node at the end of the composer (`LABEL - `),
@@ -184,6 +162,12 @@ message WatchHostWorkspaceResponse {
   // (SelectFeedRow's `entry` move), which is the webview's alone.
   reserved 13;
   reserved "prompt_entry_clicked";
+  // Retired (owner ruling, 2026-11-21): a banner click (7), an agent's
+  // evaluation (10) and a rail click (12) ride the editor's daemon stream
+  // (agentrepl.v1.WatchDaemonResponse), because each can name a workspace the
+  // editor holds no host stream for (frontend.v1.RosterRowHeld).
+  reserved 7, 10, 12;
+  reserved "notification_clicked", "evaluate", "select_requested";
 }
 
 // The relayed click's target, verbatim from the request.
@@ -192,14 +176,6 @@ message HostOpenInEditor {
   string path = 1;
   // The 1-indexed line. UNSET = the file's top (or a directory).
   optional uint32 line = 2;
-}
-
-// One evaluation to perform.
-message HostEvaluate {
-  // The token to echo back in AnswerEditorEvaluation.
-  EditorEvaluationToken token = 1;
-  // The elisp to read and evaluate, verbatim from the agent's request.
-  string text = 2;
 }
 
 // The stream it rides names the workspace. A handover touches no page (owner
@@ -223,11 +199,6 @@ message HostWorkspaceReloadWebapp {
   // shim was replaced).
   optional string webapp_build = 1;
 }
-
-// The user clicked this workspace's desktop banner. Empty: the stream it
-// rides names the workspace, and selecting that workspace's tab is the whole
-// of Emacs's obligation.
-message HostWorkspaceNotificationClicked {}
 
 // The reader clicked a final response in this workspace's webview, which
 // selected it. Empty: the stream it rides names the workspace, and the
@@ -288,10 +259,6 @@ message HostWorkspaceResponseQuestionWithdrawn {}
 // the whole of Emacs's obligation.
 message HostWorkspaceResponseQuestionTaken {}
 
-// The user clicked this workspace's row in a page's rail. Empty: the stream
-// it rides names the workspace, and requesting the switch to it is the whole
-// of Emacs's obligation.
-message HostWorkspaceSelectRequested {}
 // The reader followed a link in this workspace's page. Empty: the stream it
 // rides names the workspace, and counting the workspace viewed is the whole
 // of Emacs's obligation.
@@ -370,6 +337,19 @@ message HostWorkspace {
   // workspace exists, and the editor records it once however often it is
   // restated.
   optional conversation.v1.UserSaid initial_prompt = 8;
+  // THE COMPOSER DRAFT THE DAEMON KEEPS for this workspace
+  // (ReportComposerDraft): the text its composer held when the editor last
+  // closed the workspace. ABSENT when none is kept. STATE, not an event: on
+  // every push while it is kept. The editor puts it into the composer when
+  // the composer is empty, then reports it cleared; a composer that already
+  // holds text is left alone, so restating it never doubles a draft.
+  optional HostComposerDraft composer_draft = 9;
+}
+
+// The composer draft the daemon keeps (HostWorkspace.composer_draft).
+message HostComposerDraft {
+  // The composer's whole text, verbatim, as it was reported. Never empty.
+  string text = 1;
 }
 
 // What the daemon reads of the composer's reported entries.

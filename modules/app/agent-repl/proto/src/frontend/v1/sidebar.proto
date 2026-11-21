@@ -296,6 +296,12 @@ message RosterThreadRow {
   // The thread's branches, drawn under its row. Set on the CURRENT thread's
   // row once the daemon holds its graph; UNSET on every other row.
   optional RosterThreadOutline outline = 6;
+  // The editor holds the thread open, as frontend.v1.RosterRowHeld states it
+  // for a workspace's row. A thread is drawn by no tab bar, so it is held
+  // exactly while it is the selection (the thread the Chat app shows), and
+  // closed in the editor once the user leaves it. The rail draws nothing for
+  // it.
+  optional RosterThreadHeld held = 7;
 }
 
 // A THREAD'S BRANCHES AROUND ITS SHOWN PATH (owner ruling, 2026-10-25:
@@ -431,6 +437,10 @@ message RosterThreadSummary {
 
 // The thread is the selected one. Empty: presence is the fact.
 message RosterThreadCurrent {}
+
+// The editor holds the thread open (RosterThreadRow.held). Empty: presence is
+// the fact.
+message RosterThreadHeld {}
 
 // One workspace's standing cold gate, as the webhost's gate dock draws it.
 message RosterColdGate {
@@ -868,6 +878,26 @@ message RosterRowOneShot {
 // so a workspace with a pull request awaiting review stands apart. The bands
 // (Recently Merged, Hidden) draw nothing for it.
 message RosterRowOpenOwnedPullRequest {}
+
+// The HELD marker: the editor holds this workspace open, with a perspective,
+// a composer and a host stream (WatchHostWorkspace). Empty: presence is the
+// fact.
+//
+// THE DAEMON DECIDES IT (wsm.Workspace.Holds), and the editor never works it
+// out for itself: the same definition decides which workspaces run, so what
+// the editor holds and what the daemon runs cannot disagree. PRESENT exactly
+// while the workspace is the selection, or the tab bar draws it (an open
+// workspace whose section is unfolded, or one drawn inside a fold, surfaced
+// or current); ABSENT for a folded or hidden workspace the user is not
+// looking at, and for every closed or merged row, the selection included.
+//
+// THE EDITOR'S OBLIGATION: open the workspace when the marker appears, and
+// close it in the editor alone when the marker goes (the daemon keeps the
+// workspace, its session and its composer draft, ReportComposerDraft). An
+// event aimed at a workspace the editor does not hold rides the editor's
+// daemon stream (WatchDaemonResponse), never the host stream it lacks. The
+// sidebar draws nothing for the marker.
+message RosterRowHeld {}
 
 // The ASYNC-MERGING marker: the workspace's OWN BRANCH is merging async, in a
 // hidden merge workspace forked from it. Empty: presence is the fact.
@@ -2433,6 +2463,11 @@ message RosterRow {
   // owns a pull request that is still open, absent otherwise. See
   // RosterRowOpenOwnedPullRequest, which carries the marker's whole contract.
   optional RosterRowOpenOwnedPullRequest open_owned_pull_request = 76;
+
+  // The row's HELD marker: present exactly while the editor holds the
+  // workspace open, absent otherwise. See RosterRowHeld, which carries the
+  // marker's whole contract.
+  optional RosterRowHeld held = 77;
 
   // The row's display name.
   RosterRowName name = 2;
