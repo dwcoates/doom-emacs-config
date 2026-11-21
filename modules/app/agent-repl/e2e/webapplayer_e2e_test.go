@@ -208,6 +208,15 @@ func testWebappLayerRestartHandover(t *testing.T) {
 
 	ws := w.NewWorkspace(t)
 
+	// THE PAGE ON SCREEN IS THE SELECTION, as Emacs shows only the selected
+	// workspace's page: selected, the workspace stays visible through the
+	// deploy's fold sweep (which never folds over the selection), so the
+	// successor serves its page (wsm.Visibility).
+	if resp, err := w.Client().SelectWorkspace(w.Ctx(),
+		connect.NewRequest(&agentreplv1.SelectWorkspaceRequest{Workspace: ws})); err != nil || resp.Msg.GetSuccess() == nil {
+		t.Fatalf("SelectWorkspace = (%v, %v), want success", resp, err)
+	}
+
 	// THE HOST PARTICIPANT, WHICH EMACS WOULD BE (see wlDriveArea): the
 	// footer's connectivity truth is the PAIR of participants, and this hop is
 	// also the host half of the adoption rendezvous below.
