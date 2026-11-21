@@ -1,6 +1,7 @@
 package main
 
 import (
+	"agent-repld/integration/fakeshim/shimfacts"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -124,22 +125,10 @@ type agentFrame struct {
 	retired *conversationv1.HistoryEntryAt
 }
 
-// stamp is the entry's turn stamp, or nil for an unstamped entry.
-func (f agentFrame) stamp() *conversationv1.TurnId {
-	if f.turn == "" {
-		return nil
-	}
-	return &conversationv1.TurnId{Value: f.turn}
-}
-
-// place applies the pushed entry's recorded place, when one was stated.
-func (f agentFrame) place(at *conversationv1.HistoryEntryAt) *conversationv1.HistoryEntryAt {
-	if f.placeMs > 0 {
-		at.Place = &conversationv1.HistoryEntryAt_RecordedPlace{
-			RecordedPlace: &conversationv1.ConversationPlace{AtMs: f.placeMs},
-		}
-	}
-	return at
+// served renders the pushed entry as the store serves it on a watch
+// (shimfacts.ServedEntry).
+func (f agentFrame) served() *conversationv1.HistoryEntryAt {
+	return shimfacts.ServedEntry(f.pointer, f.turn, f.placeMs, f.entry())
 }
 
 // entry renders the pushed arm as the history entry WatchAgent delivers.
@@ -599,18 +588,7 @@ func (s *server) startSession(ctx context.Context, req *connect.Request[shimv1.S
 	}
 	resp := &shimv1.StartSessionResponse{
 		Result: &shimv1.StartSessionResponse_Success{Success: &shimv1.StartSessionSuccess{
-			Session: &conversationv1.SessionStarted{
-				VendorSessionId: vendorID,
-				Runtime:         &conversationv1.SessionRuntime{ShimBuildSha: s.buildSHA(), SdkVersion: SDKVersion},
-				EffectiveModel:  &conversationv1.AgentModel{Name: startedModel(req.Msg)},
-				// THE REAL SHIM'S UNSTATED MODE, which is `auto` (owner
-				// ruling 2026-09-14) and no longer the vendor's `default`.
-				PermissionMode: &conversationv1.AgentPermissionMode{
-					Mode: &conversationv1.AgentPermissionMode_Auto{Auto: &conversationv1.AgentPermissionModeAuto{}},
-				},
-				ModelCatalog: DefaultCatalog(),
-				LiveWork:     s.liveWork(),
-			},
+			Session: startedWithLiveWork(shimfacts.StartedSession(vendorID, s.buildSHA(), startedModel(req.Msg)), s.liveWork()),
 		}},
 	}
 	s.noteVendorSession(resp)
@@ -982,11 +960,7 @@ func (s *server) WatchAgent(ctx context.Context, req *connect.Request[shimv1.Wat
 				continue
 			}
 			if err := stream.Send(&shimv1.WatchAgentResponse{
-				Frame: &shimv1.WatchAgentResponse_Entry{Entry: f.place(&conversationv1.HistoryEntryAt{
-					At:    &conversationv1.HistoryPointer{Value: f.pointer},
-					Entry: f.entry(),
-					Turn:  f.stamp(),
-				})},
+				Frame: &shimv1.WatchAgentResponse_Entry{Entry: f.served()},
 			}); err != nil {
 				return err
 			}
@@ -1804,4 +1778,10 @@ func startedModel(req *shimv1.StartSessionRequest) string {
 		return DefaultModel
 	}
 	return named
+}
+
+// startedWithLiveWork is STARTED stating LIVE as the session's live work.
+func startedWithLiveWork(started *conversationv1.SessionStarted, live []*conversationv1.AgentDetachedWork) *conversationv1.SessionStarted {
+	started.LiveWork = live
+	return started
 }

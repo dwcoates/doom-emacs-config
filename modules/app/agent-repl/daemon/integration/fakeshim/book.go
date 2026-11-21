@@ -136,11 +136,7 @@ func (b *book) record(f agentFrame) agentFrame {
 		b.minted[agent]++
 		f.pointer = pointerAt(agent, b.minted[agent])
 	}
-	b.entries[agent] = append(b.entries[agent], f.place(&conversationv1.HistoryEntryAt{
-		At:    &conversationv1.HistoryPointer{Value: f.pointer},
-		Entry: f.entry(),
-		Turn:  f.stamp(),
-	}))
+	b.entries[agent] = append(b.entries[agent], f.served())
 	b.keepLocked(agent)
 	b.noteAskLocked(f.frame)
 	return f
