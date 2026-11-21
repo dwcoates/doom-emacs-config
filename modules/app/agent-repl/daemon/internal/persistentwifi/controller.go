@@ -119,6 +119,9 @@ type Controller struct {
 	failover failoverSchedule
 	// scanBound bounds each scan (scanBound, the constant; a test shortens it).
 	scanBound time.Duration
+	// bluetoothBound bounds each Bluetooth read (bluetoothBound, the
+	// constant; a test shortens it).
+	bluetoothBound time.Duration
 	// scanCause is why the last Wi-Fi scan named no networks; empty while
 	// scans name them (recordStandingCause).
 	scanCause string
@@ -178,7 +181,7 @@ func New(d Deps) (*Controller, error) {
 		onChange: d.OnChange, log: d.Log,
 		lidWatch: d.Lid, sourceWatch: d.PowerSource, legacy: d.LegacyLidDims, freezer: d.Freezer,
 		views: d.Views, telemetry: d.Telemetry, energyStore: d.EnergyRecord,
-		scanBound: scanBound,
+		scanBound: scanBound, bluetoothBound: bluetoothBound,
 	}
 	d.Freezer.OnChange(c.frozenChanged)
 	return c, nil

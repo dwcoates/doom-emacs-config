@@ -565,6 +565,10 @@ while [ $# -gt 0 ]; do
 done
 exit 1
 `,
+	// Bluetooth's power, which each failover attempt records: on.
+	"system_profiler": `#!/bin/sh
+printf '{"SPBluetoothDataType":[{"controller_properties":{"controller_state":"attrib_on"}}]}'
+`,
 	// The display's level, read with no argument and set with one; it starts
 	// at FakeBrightness.
 	"mac-brightness": `#!/bin/sh

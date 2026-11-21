@@ -235,6 +235,11 @@ const (
 	// radioPowered and radioUnpowered are its answers.
 	radioPowered   = "Wi-Fi Power (en0): On\n"
 	radioUnpowered = "Wi-Fi Power (en0): Off\n"
+	// argBluetooth reads Bluetooth's power for a failover attempt's survey.
+	argBluetooth = "/t/system_profiler SPBluetoothDataType -json"
+	// bluetoothOn and bluetoothOff are its answers.
+	bluetoothOn  = `{"SPBluetoothDataType":[{"controller_properties":{"controller_state":"attrib_on"}}]}`
+	bluetoothOff = `{"SPBluetoothDataType":[{"controller_properties":{"controller_state":"attrib_off"}}]}`
 	// argDisplaySleep puts the display to sleep for the quiet state.
 	argDisplaySleep = "/t/pmset displaysleepnow"
 	// argDisplayWake wakes it.

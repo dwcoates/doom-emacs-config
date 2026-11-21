@@ -49,12 +49,18 @@ type wifiScan struct {
 	StandingMs *int64 `json:"standing_ms"`
 	// Error is why the scan itself failed, when it did.
 	Error string `json:"error"`
+	// WaitLost is `open -W`'s failure to wait on a helper that had already
+	// answered and exited (darwinHost.Scan); empty when the wait held.
+	WaitLost string `json:"-"`
 }
 
 // visibleNetwork is one network a scan saw.
 type visibleNetwork struct {
 	SSID string `json:"ssid"`
 	RSSI int    `json:"rssi"`
+	// Channel is the strongest sighting's channel; nil when the helper
+	// named none.
+	Channel *int `json:"channel"`
 }
 
 // authorized reports whether the scan could name networks.
@@ -62,12 +68,19 @@ func (s wifiScan) authorized() bool { return s.Authorization == "authorized" }
 
 // sees reports whether the scan saw a network named NAME.
 func (s wifiScan) sees(name string) bool {
+	_, ok := s.sighting(name)
+	return ok
+}
+
+// sighting answers the scan's network named NAME (sameNetwork), and whether
+// the scan saw one.
+func (s wifiScan) sighting(name string) (visibleNetwork, bool) {
 	for _, v := range s.Visible {
 		if sameNetwork(v.SSID, name) {
-			return true
+			return v, true
 		}
 	}
-	return false
+	return visibleNetwork{}, false
 }
 
 // errScanUnauthorized is a scan whose helper is not allowed Location
@@ -246,6 +259,9 @@ func scanContext(scan wifiScan, took time.Duration) dlog.Context {
 	ctx := dlog.Context{"visible": len(scan.Visible), "joined_named": scan.Current != "", "took_ms": took.Milliseconds()}
 	if scan.StandingMs != nil {
 		ctx["standing_ms"] = *scan.StandingMs
+	}
+	if scan.WaitLost != "" {
+		ctx["launch_wait_lost"] = scan.WaitLost
 	}
 	return ctx
 }

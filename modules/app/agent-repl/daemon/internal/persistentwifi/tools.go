@@ -16,8 +16,8 @@
 // both on a fixed cadence and after every change, and publishes the standing
 // on one topic that the daemon-level stream and the topbar both take. While
 // the mode is on, every re-read that finds no network joined starts the Wi-Fi
-// failover (failover.go): the radio is cycled so macOS rejoins a network it
-// knows, and the hotspot is joined when none comes back.
+// failover (failover.go): a saved network in sight is joined, else the
+// hotspot; the radio is never cycled.
 //
 // EVERY HOST TOOL RUNS THROUGH ONE INJECTED RUNNER, by absolute path, so a
 // unit test scripts every answer and no test ever touches the real machine's
@@ -45,6 +45,12 @@ const EnvToolsDir = "AGENT_REPL_PERSISTENT_WIFI_TOOLS_DIR"
 // pointing at the user guide. Either apostrophe spelling joins, because the
 // join resolves the name against the saved networks (savedHotspot).
 const EnvHotspot = "AGENT_REPL_PERSISTENT_WIFI_HOTSPOT"
+
+// EnvJoinKnown turns the Wi-Fi failover's first step (joinVisibleKnown, a
+// saved network in sight) on or off: "true" or "false", unset is "true". Off,
+// every attempt goes straight to the hotspot (owner request, 2026-11-20: to
+// see the lid-closed hotspot join on its own). Any other value is refused.
+const EnvJoinKnown = "AGENT_REPL_PERSISTENT_WIFI_JOIN_KNOWN"
 
 // Tools are the absolute paths of every host tool the package runs.
 type Tools struct {
@@ -79,6 +85,9 @@ type Tools struct {
 	// attributes its Location Services permission to the helper and not to
 	// the daemon.
 	Open string
+	// SystemProfiler reads Bluetooth's power for each failover attempt's
+	// record: Instant Hotspot finds the phone over Bluetooth.
+	SystemProfiler string
 	// WifiApp is agent-repl's Wi-Fi helper app (wifi-helper/), the one
 	// reader of the joined network's name and the visible networks' names:
 	// macOS names Wi-Fi networks only to an app allowed Location Services.
@@ -99,6 +108,8 @@ func DefaultTools() Tools {
 		Ps:           "/bin/ps",
 		Pkill:        "/usr/bin/pkill",
 		Open:         "/usr/bin/open",
+		// The path is the one macOS ships.
+		SystemProfiler: "/usr/sbin/system_profiler",
 	}
 }
 
@@ -121,17 +132,18 @@ func ToolsIn(dir string) Tools {
 	d := DefaultTools()
 	in := func(path string) string { return filepath.Join(dir, filepath.Base(path)) }
 	return Tools{
-		Sudo:         in(d.Sudo),
-		Pmset:        in(d.Pmset),
-		Ipconfig:     in(d.Ipconfig),
-		Networksetup: in(d.Networksetup),
-		WifiUtil:     in(d.WifiUtil),
-		Caffeinate:   in(d.Caffeinate),
-		Brightness:   in(d.Brightness),
-		Ps:           in(d.Ps),
-		Pkill:        in(d.Pkill),
-		Open:         in(d.Open),
-		WifiApp:      filepath.Join(dir, WifiAppName),
+		Sudo:           in(d.Sudo),
+		Pmset:          in(d.Pmset),
+		Ipconfig:       in(d.Ipconfig),
+		Networksetup:   in(d.Networksetup),
+		WifiUtil:       in(d.WifiUtil),
+		Caffeinate:     in(d.Caffeinate),
+		Brightness:     in(d.Brightness),
+		Ps:             in(d.Ps),
+		Pkill:          in(d.Pkill),
+		Open:           in(d.Open),
+		SystemProfiler: in(d.SystemProfiler),
+		WifiApp:        filepath.Join(dir, WifiAppName),
 	}
 }
 
@@ -145,6 +157,9 @@ type Config struct {
 	// Linux are Linux's tools.
 	Linux   LinuxTools
 	Hotspot string
+	// KnownJoinOff is EnvJoinKnown set to "false": the failover skips its
+	// saved-network step. The zero value is the default, the step on.
+	KnownJoinOff bool
 	// FreezeApps are the applications the quiet state freezes
 	// (appfreeze.AppsFromEnv). A fake host freezes none unless the variable
 	// names some: its process table is a fake tool's.
@@ -226,5 +241,23 @@ func configFromEnv(goos string, getenv func(string) string) (Config, error) {
 		}
 		cfg.Hotspot = hotspot
 	}
+	off, err := knownJoinOff(getenv(EnvJoinKnown))
+	if err != nil {
+		return Config{}, err
+	}
+	cfg.KnownJoinOff = off
 	return cfg, nil
+}
+
+// knownJoinOff reads EnvJoinKnown's VALUE: unset and "true" leave the
+// saved-network step on, "false" turns it off, and anything else is refused
+// rather than read as either.
+func knownJoinOff(value string) (bool, error) {
+	switch value {
+	case "", "true":
+		return false, nil
+	case "false":
+		return true, nil
+	}
+	return false, fmt.Errorf("persistentwifi: %s=%q is neither true nor false", EnvJoinKnown, value)
 }
