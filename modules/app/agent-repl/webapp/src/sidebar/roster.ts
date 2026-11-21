@@ -73,6 +73,8 @@ import {
   MERGE_QUEUE_FOLD_KEY,
   OPEN_FOLD_KEY,
   repoFoldKey,
+  type MergedGroupPages,
+  type MergedPages,
   type RailContext,
   type SidebarContext,
 } from "./context.js";
@@ -110,7 +112,7 @@ import {
   DEPLOYS_SECTION_ATTRIBUTE,
   type DeploysGroupSection,
 } from "./deploys-fold.js";
-import { MERGED_PAGE_CLASS, drawMergedMoreSpinner, mergedRowAtMs, type MergedGroupPages, type MergedPages } from "./merged-pages.js";
+import { MERGED_PAGE_CLASS, drawMergedMoreSpinner, mergedRowAtMs } from "./merged-pages.js";
 import { drawEscalationRelease, drawQueuedGroupHead, drawQueueMediationLabel, drawRosterMergeQueue, queueCount, queueHoverText, queueLine } from "./merge-queue-view.js";
 import { coldGatedOf, sameColdGated, type ColdGated } from "./cold-gate-name.js";
 import { pathedFamilies, type RowFamily } from "./family.js";

@@ -37,8 +37,8 @@ import {
   drawMergedMoreSpinner,
   inView,
   mergedRowAtMs,
-  type MergedPages,
 } from "../../src/sidebar/merged-pages.js";
+import type { MergedPages } from "../../src/sidebar/context.js";
 import { captureLogRecords, forwardedRecord, forwardedRecords } from "../log-capture.js";
 import { SINK, appContext, mergedBand, mergedGroup, mergedPageAnswer, mergedRowsOf, row } from "./harness.js";
 

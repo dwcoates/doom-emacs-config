@@ -22,7 +22,8 @@ import {
 } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import { SetWorkspaceHiddenResponseSchema } from "../../../proto/gen/ts/agentrepl/v1/endpoint_set_workspace_hidden_pb";
 import { MalformedView } from "../../src/rpc/malformed.js";
-import { MERGED_MORE_CLASS, MERGED_PAGE_CLASS, MERGED_PAGE_SIZE, type MergedPages } from "../../src/sidebar/merged-pages.js";
+import type { MergedPages } from "../../src/sidebar/context.js";
+import { MERGED_MORE_CLASS, MERGED_PAGE_CLASS, MERGED_PAGE_SIZE } from "../../src/sidebar/merged-pages.js";
 import { DEPLOYS_SECTION_ATTRIBUTE } from "../../src/sidebar/deploys-fold.js";
 import { RepositoryRefSchema } from "../../../proto/gen/ts/workspace/v1/workspace_pb";
 import { repoFoldKey } from "../../src/sidebar/context.js";

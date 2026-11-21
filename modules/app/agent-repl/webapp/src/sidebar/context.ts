@@ -15,7 +15,7 @@
  */
 import type { DeploysFold } from "./deploys-fold.js";
 import type { DrawnStatusLog } from "../drawn-status.js";
-import type { MergedPages } from "./merged-pages.js";
+import type { RosterMergedRepoGroup, RosterMergedRow, RosterMergedSection } from "../../../proto/gen/ts/frontend/v1/sidebar_pb";
 import type { DaemonContext } from "../rpc/context.js";
 import type { Dropdowns } from "./dropdowns.js";
 import type { RowMenus } from "./row-menu.js";
@@ -28,6 +28,40 @@ import type { RosterStreams } from "./roster-streams.js";
 export interface AttentionMarks {
   /** ELEMENT carries the attention marker for workspace ID. */
   mark(id: string, element: HTMLElement): void;
+}
+
+/** What one group's loaded pages draw. */
+export interface MergedGroupPages {
+  /** Each loaded page's rows, page 0 first. */
+  readonly pages: ReadonlyArray<readonly RosterMergedRow[]>;
+  /** More pages exist: the last answer was `more`, or page 0 is still being fetched. */
+  readonly more: boolean;
+  /** How many rows are loaded, every page together. */
+  readonly rows: number;
+}
+
+/** Whether a push may be drawn now (`agree`). */
+export type MergedVerdict = "draw" | "hold";
+
+/** The page's one holder of the Recently Merged band's loaded pages (`merged-pages.ts`). */
+export interface MergedPages {
+  /**
+   * The rail is about to draw SECTION (null: the band is not drawn, Chat is
+   * shown): load or let go of pages to match, and answer whether the push may
+   * be drawn now (every loaded page carries SECTION's token) or is held until
+   * its pages agree. PATH names SECTION for a refusal.
+   */
+  agree(section: RosterMergedSection | null, path: string): MergedVerdict;
+  /** The pages loaded for GROUP. */
+  loaded(group: RosterMergedRepoGroup, path: string): MergedGroupPages;
+  /** A number that moves whenever any loaded page changes, so a drawing knows to redraw its pages. */
+  version(): number;
+  /** Look at where each group's end and pages stand in the band's viewport, loading or letting go to match. */
+  check(): void;
+  /** A group was folded or opened by hand: load or let go to match, and fetch again after a failure. */
+  foldsChanged(): void;
+  /** The rail is going away: drop every page, and every answer still on its way. */
+  dispose(): void;
 }
 
 /** The page's hold on its own roster drawing while an arrangement is dragged or asked for (`hold.ts`). */

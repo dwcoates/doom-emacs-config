@@ -6,7 +6,7 @@
  * suite builds its own idea of what a roster looks like.
  */
 import { createDeploysFold, type DeploysFold } from "../../src/sidebar/deploys-fold.js";
-import type { MergedGroupPages, MergedPages } from "../../src/sidebar/merged-pages.js";
+import type { MergedGroupPages, MergedPages } from "../../src/sidebar/context.js";
 import { MERGED_PAGE_SIZE } from "../../src/sidebar/merged-pages.js";
 import type { RosterStreamName, RosterStreams } from "../../src/sidebar/roster-streams.js";
 import { clone, create, type MessageInitShape } from "@bufbuild/protobuf";
